@@ -32,6 +32,7 @@ import { type ConfigFileMove, configChangedPayload } from './config/state-change
 import { configFrameShown } from './config/bus-frame.ts';
 import { CORE_IDS, type PluginId } from '../contract/ids.ts';
 import { beforeListen } from './before-listen.ts';
+import { type BootPhases, createBootPhases } from './boot-phases.ts';
 import { type HomeLockLease, StateHomeLockedError } from './state/home-lock.ts';
 import {
   Carriers,
@@ -400,13 +401,14 @@ function deadlineFrom(clock: Clock): Deadline {
 export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const { adapters, home } = options;
   const trace: string[] = [];
+  const phases = createBootPhases(() => adapters.clock.nowMs(), trace);
   // 2. Home: refuse a home that is not ours before creating anything, but decide for real under the lifetime lock —
   // this reading is stale the moment another daemon sets up the same home (today's `storage-factory.ts` order).
-  trace.push('home');
+  phases.mark('home');
   const preliminary = decideHome(home, await probeHome(adapters.fs, home));
   if (preliminary.kind === 'refuse') return { kind: 'refused', sentence: preliminary.sentence, trace };
   if (preliminary.kind === 'create') await adapters.fs.mkdirp(home, 0o700);
-  trace.push('lock');
+  phases.mark('lock');
   let lease: HomeLockLease;
   try {
     lease = await adapters.homeLock(home);
@@ -418,7 +420,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const cleanup: (() => void | Promise<void>)[] = [];
   let running = false;
   try {
-    const outcome = await bootLocked(options, trace, lease, release => cleanup.push(release));
+    const outcome = await bootLocked(options, trace, phases, lease, release => cleanup.push(release));
     running = outcome.kind === 'running';
     return outcome;
   } finally {
@@ -438,6 +440,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
 async function bootLocked(
   options: HostOptions,
   trace: string[],
+  phases: BootPhases,
   lease: HomeLockLease,
   own: (release: () => void | Promise<void>) => void,
 ): Promise<BootOutcome> {
@@ -457,7 +460,7 @@ async function bootLocked(
         : 'logs/ was open to other users and is now 0700',
     );
   const deadline = deadlineFrom(clock);
-  trace.push('identity');
+  phases.mark('identity');
   const identityOutcome = await loadIdentity(adapters.fs, home);
   if (identityOutcome.kind === 'damaged') return { kind: 'refused', sentence: identityOutcome.sentence, trace };
   const identity = identityOutcome.identity;
@@ -483,7 +486,7 @@ async function bootLocked(
   /** Every plugin's declared private places, composed once: the one list the fence of EVERY root reads (§7.7). */
   const privateFiles = composePrivateFiles(manifests);
   // Config: every declared file of every known plugin, so a plugin turned on later finds its file checked.
-  trace.push('config');
+  phases.mark('config');
   // Gate's judge is read live: Admission is bound after build, and an absent or throwing one holds the edit.
   const judgeAdmission: { current?: Admission } = {};
   const config = adapters.config(
@@ -516,7 +519,7 @@ async function bootLocked(
   const configWriter = config.writer?.();
 
   // 1. Check the enabled graph.
-  trace.push('check');
+  phases.mark('check');
   const yamlEnabled = (id: string): boolean =>
     isCore(id) || (options.enabled?.(id) ?? pluginsYaml?.plugins[id] !== 'off');
   const planWith = (on: (id: string) => boolean) => {
@@ -669,7 +672,7 @@ async function bootLocked(
   for (const manifest of order) {
     const record = records.get(manifest.id) as PluginRecord;
     if (manifest.id === 'kernel') continue;
-    trace.push(`state:${manifest.id}`);
+    phases.mark(`state:${manifest.id}`);
     const state = adapters.state(manifest, privatePin);
     record.state = state;
     own(() => state.close());
@@ -977,7 +980,7 @@ async function bootLocked(
     }
     const record = records.get(manifest.id) as PluginRecord;
     if (record.status === 'failed') continue;
-    trace.push(`build:${manifest.id}`);
+    phases.mark(`build:${manifest.id}`);
     const implementation = implementations.get(manifest.id);
     if (implementation === undefined || implementation.skeleton === true || implementation.build === undefined) {
       record.status = 'skeleton';
@@ -1068,7 +1071,7 @@ async function bootLocked(
   }
 
   // 5. Bind the kernel-bound ports and optional handles; freeze the snapshot.
-  trace.push('bind');
+  phases.mark('bind');
   const boundValue = <T>(token: PortToken<T>): T | undefined => {
     const provider = providerHalf(token as PortToken<unknown>);
     if (provider === undefined || !isCore(provider.record.manifest.id) || provider.record.status !== 'serving')
@@ -1088,7 +1091,7 @@ async function bootLocked(
   // Gate's config judge is read live as well.
   Object.defineProperty(judgeAdmission, 'current', { get: () => boundValue(AdmissionPort) });
   phase = 'bound';
-  trace.push('snapshot');
+  phases.mark('snapshot');
   const started = order.filter(manifest => {
     const status = records.get(manifest.id)?.status;
     return status === 'serving' || status === 'skeleton' || status === 'damaged';
@@ -1102,7 +1105,7 @@ async function bootLocked(
   );
 
   // 6. Mount behind admission, by specificity.
-  trace.push('mount');
+  phases.mark('mount');
   const owners = new Map<string, Owner>();
   const ownerOf = (manifest: Manifest): Owner => {
     const existing = owners.get(manifest.id);
@@ -1451,12 +1454,12 @@ async function bootLocked(
     const record = records.get(id);
     const run = record?.half?.beforeListen;
     if (record?.status !== 'serving' || run === undefined) continue;
-    trace.push(`beforeListen:${id}`);
+    phases.mark(`beforeListen:${id}`);
     await beforeListen(() => run(ctx), id, clock, log);
   }
 
   // 7. Listen: the local listener and every carrier.
-  trace.push('listen');
+  phases.mark('listen');
   const listening: Listening[] = [];
   if (options.listen !== undefined) {
     const listener = await options.listen(running);
@@ -1481,14 +1484,14 @@ async function bootLocked(
       if (carriers.has(key)) continue;
       const controller = new AbortController();
       carriers.set(key, controller);
-      trace.push(`carrier:${key}`);
+      phases.mark(`carrier:${key}`);
       void carrier.start(sessionLayer, controller.signal).catch(() => log.warn('a carrier stopped', { carrier: key }));
     }
   };
   carriersChanged();
 
   // 8. Start jobs in start order.
-  trace.push('jobs');
+  phases.mark('jobs');
   jobs.start();
   phase = 'started';
   events.publish(PluginsChanged, { generation: 1 });
@@ -1522,6 +1525,8 @@ async function bootLocked(
     })();
     return stopping;
   };
+  // Where the boot time went: phase names and milliseconds only (see `boot-phases.ts`), before the line that says it is done.
+  log.info(phases.line(new Set(manifests.map(manifest => manifest.id))));
   // The first line of every run: a log that stays empty on a healthy boot cannot be told from one nothing writes to.
   log.info('the daemon is serving', { version: options.version });
   return { kind: 'running', host: running };
