@@ -443,6 +443,12 @@ const ROWS: readonly Row[] = [
     listing: withKey,
   },
   {
+    name: '13 a code card, the pinned key is one Ferretry makes no codes for',
+    grant: { ...tickedCode, factor: totpKey.id as never },
+    seen: { facts: codePage, fields: CODE_FIELDS },
+    listing: { accounts: [account({ factors: [{ ...totpKey, automatic: false }] as AccountSummary['factors'] })] },
+  },
+  {
     name: '13 a code card, pinned key',
     grant: { ...tickedCode, factor: totpKey.id as never },
     seen: { facts: codePage, fields: CODE_FIELDS },
