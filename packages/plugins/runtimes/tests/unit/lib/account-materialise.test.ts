@@ -3,6 +3,7 @@ import should from 'should';
 import { AGENT_BASE_INSTRUCTION, CLAUDE_QUESTION_HOOKS, tomlString } from '../../../daemon/lib/account/fixed-layer.ts';
 import { EMPTY_RUNTIME_IDS, type RuntimeIds } from '../../../daemon/lib/account/ids.ts';
 import {
+  assertNoSecretInOverlay,
   FIXED_SETTINGS_FILE,
   FleetMaterialiseError,
   MATERIALISED_RECORD_FILE,
@@ -783,6 +784,162 @@ describe('materialiseFleet', () => {
     });
   });
 
+  // B190: Claude Code's `env` settings beat the process environment, and a repo's own
+  // `.claude/settings.local.json` beats nothing but a `--settings` file. A login's variables were process
+  // environment only, so a repo that blanked ANTHROPIC_BASE_URL started a runtime signed out.
+  describe('a login’s environment pinned against the repo’s settings (B190)', () => {
+    /**
+     * Claude Code's documented order for one `env` variable: managed > command line (`--settings`) >
+     * project local > shared project > user, and a settings value replaces the shell's.
+     */
+    const effectiveEnv = (layers: {
+      readonly process: Record<string, string>;
+      readonly user?: Record<string, string>;
+      readonly project?: Record<string, string>;
+      readonly local?: Record<string, string>;
+      readonly flag?: Record<string, string>;
+    }): Record<string, string> => ({
+      ...layers.process,
+      ...layers.user,
+      ...layers.project,
+      ...layers.local,
+      ...layers.flag,
+    });
+
+    const wrapperExports = (wrapper: string): Record<string, string> =>
+      Object.fromEntries(
+        [...wrapper.matchAll(/^export ([A-Z0-9_]+)='([^']*)'$/gm)].map(match => [match[1], match[2]] as const),
+      );
+
+    const loge = (
+      agent: boolean,
+      env: Record<string, string> = {
+        ANTHROPIC_BASE_URL: 'https://loge.example/anthropic',
+        ANTHROPIC_AUTH_TOKEN: 'loge-internal',
+      },
+    ): AccountModel =>
+      modelOf({
+        credentials: {
+          loge: {
+            harness: 'claude',
+            store: 'environment',
+            env,
+            claude: { env: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k3' } },
+          },
+        },
+        runtimes: { 'claude-loge': { credential: 'loge', profile: 'default', ...(agent ? { agent: true } : {}) } },
+      });
+
+    const fixedOf = (result: FleetModelApplyPlan, home: string): { env?: Record<string, string> } =>
+      JSON.parse((only(result, `${home}/.fy/${FIXED_SETTINGS_FILE}`) as { content: string }).content);
+
+    it('should keep a repo that blanks the provider keys from signing an agent runtime out', () => {
+      // Act
+      const result = plan(loge(true));
+      const wrapper = wrapperOf(result, 'claude-loge');
+
+      // Assert — merged the way Claude Code does, with the repo blanking the keys.
+      const effective = effectiveEnv({
+        process: wrapperExports(wrapper),
+        local: { ANTHROPIC_BASE_URL: '', ANTHROPIC_AUTH_TOKEN: '' },
+        flag: fixedOf(result, HOME_A).env ?? {},
+      });
+      should(effective.ANTHROPIC_BASE_URL).equal('https://loge.example/anthropic');
+      should(effective.ANTHROPIC_AUTH_TOKEN).equal('loge-internal');
+      should(effective.ANTHROPIC_DEFAULT_OPUS_MODEL).equal('kimi-k3');
+    });
+
+    it('should give an interactive Claude runtime the same pins through --settings', () => {
+      // Act
+      const result = plan(loge(false));
+      const wrapper = wrapperOf(result, 'claude-loge');
+
+      // Assert
+      should(wrapper).containEql(`'--settings' '${HOME_A}/.fy/${FIXED_SETTINGS_FILE}'`);
+      should(fixedOf(result, HOME_A)).eql({
+        env: {
+          ANTHROPIC_AUTH_TOKEN: 'loge-internal',
+          ANTHROPIC_BASE_URL: 'https://loge.example/anthropic',
+          ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k3',
+        },
+      });
+      should(
+        result.operations.find(operation => operation.path === `${HOME_A}/.fy` && operation.kind === 'prune-directory'),
+      ).eql({ kind: 'prune-directory', path: `${HOME_A}/.fy`, keep: ['materialised.json', 'fixed.json'] });
+    });
+
+    it('should never write a secret reference into fixed.json, and still pin the rest', () => {
+      // Act
+      const result = plan(
+        loge(true, {
+          ANTHROPIC_BASE_URL: 'https://loge.example/anthropic',
+          ANTHROPIC_AUTH_TOKEN: '${secret:LOGE_KEY}',
+          ANTHROPIC_CUSTOM_HEADERS: 'x-key: ${secret:LOGE_KEY}',
+        }),
+      );
+
+      // Assert — the secret stays process environment, where the wrapper resolves it.
+      const text = (only(result, `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`) as { content: string }).content;
+      should(text).not.containEql('${secret:');
+      const fixed = JSON.parse(text) as { env: Record<string, string> };
+      should(fixed.env).not.have.property('ANTHROPIC_AUTH_TOKEN');
+      should(fixed.env).not.have.property('ANTHROPIC_CUSTOM_HEADERS');
+      should(fixed.env.ANTHROPIC_BASE_URL).equal('https://loge.example/anthropic');
+      should(result.manifest.accounts[0]?.secretEnv).containEql({ ANTHROPIC_AUTH_TOKEN: '${secret:LOGE_KEY}' });
+      should(JSON.stringify(wrapperOf(result, 'claude-loge'))).containEql('ANTHROPIC_AUTH_TOKEN');
+    });
+
+    it('should refuse an overlay that carries a secret reference', () => {
+      // Act / Assert
+      const refused = failure(() => assertNoSecretInOverlay({ env: { ANTHROPIC_AUTH_TOKEN: '${secret:LOGE_KEY}' } }));
+      should(refused.problems[0]?.message).containEql('secret');
+      should(() => assertNoSecretInOverlay({ env: { ANTHROPIC_BASE_URL: 'https://loge.example' } })).not.throw();
+    });
+
+    it('should pin nothing for a host login, which has no variables of its own', () => {
+      // Act
+      const result = plan(modelOf());
+
+      // Assert
+      should(at(result, `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`)).have.length(0);
+      should(wrapperOf(result, 'claude-default')).not.containEql("'--settings'");
+    });
+
+    it('should pin nothing for Codex', () => {
+      // Act
+      const result = plan(
+        modelOf({
+          credentials: {
+            'codex-work': { harness: 'codex', store: 'environment', env: { OPENAI_BASE_URL: 'https://x.example/v1' } },
+          },
+          runtimes: { 'codex-default': { credential: 'codex-work', profile: 'default' } },
+        }),
+      );
+
+      // Assert
+      should(at(result, `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`)).have.length(0);
+    });
+
+    it('should report a problem rather than pin when the profile already passes --settings', () => {
+      // Arrange
+      const model = modelOf({
+        components: {
+          ...COMPONENTS,
+          settings: { own: { harness: 'claude', flags: ['--settings', '/home/person/own.json'] } },
+        },
+        credentials: {
+          loge: { harness: 'claude', store: 'environment', env: { ANTHROPIC_BASE_URL: 'https://loge.example' } },
+        },
+        profiles: { default: { layers: [...DEFAULT_LAYERS, 'settings/own'] } },
+        runtimes: { 'claude-loge': { credential: 'loge', profile: 'default' } },
+      });
+
+      // Act / Assert
+      const refused = failure(() => plan(model));
+      should(refused.problems[0]).match({ runtime: 'claude-loge' });
+      should(refused.problems[0]?.message).containEql('--settings');
+    });
+  });
   describe('profiles a runtime cannot use', () => {
     it('should make a runtime whose profile has nothing for its harness unlaunchable (P5)', () => {
       // Arrange

@@ -73,13 +73,14 @@ import {
   CODEX_CREDENTIAL_FILE,
   codexCredentialLink,
   credentialLaunchArguments,
+  type CredentialStoreResolution,
   credentialLaunchEnvironment,
   resolveCredentialStore,
 } from './credentials.ts';
 import { type BudgetHolds, binaryNameOf, runtimeDisable } from './disabled-runtime.ts';
 import { applyFixedLayer, type FixedLayer, fixedLayerFor } from './fixed-layer.ts';
 import { assignRuntimeIds, type RuntimeIds, runtimeIdsPath, serializeRuntimeIds } from './ids.ts';
-import { HARNESS_DISPLAY_NAMES, resolveProfile } from './layering.ts';
+import { type FlagContribution, HARNESS_DISPLAY_NAMES, resolveProfile } from './layering.ts';
 import type { AccountModel } from './schema.ts';
 import { runtimeHarness } from './scope.ts';
 
@@ -93,8 +94,60 @@ export const RUNTIME_STATE_DIRECTORY = '.fy';
 /** What the previous apply put in a config directory, so the next can tell its leftovers from the person's. */
 export const MATERIALISED_RECORD_FILE = 'materialised.json';
 
-/** The `--settings` overlay a Claude agent runtime launches with when the fixed layer needs one. */
+/**
+ * The `--settings` overlay a Claude runtime launches with: the fixed layer's, for an agent runtime, and
+ * the login's non-secret environment, for any Claude runtime on an environment login (B190).
+ */
 export const FIXED_SETTINGS_FILE = 'fixed.json';
+
+/** The marker of a secret reference, which must never reach a settings file or an argv. */
+const SECRET_REFERENCE_MARKER = '${secret:';
+
+/**
+ * THE SECRET RULE (B190). The overlay is a file on disk, and the daemon copies it INLINE into
+ * `--settings '<json>'` when a launch names fast mode or a compaction point, so its text shows in `ps`
+ * and in the session's saved command. A value that names `${secret:…}` therefore never goes in: it stays
+ * process environment, which the wrapper resolves from the store at exec.
+ *
+ * The first enforcement: only the variables whose value names no secret are pinned.
+ */
+function pinnableLoginEnvironment(env: Readonly<Record<string, string>>): Record<string, string> {
+  return Object.fromEntries(Object.entries(env).filter(([, value]) => secretReferencesIn(value).length === 0));
+}
+
+/**
+ * The second enforcement of the secret rule: an overlay whose text names a secret reference is refused,
+ * never quietly trimmed, because a reference that got this far means a path no one meant to open.
+ */
+export function assertNoSecretInOverlay(overlay: SettingsObject): void {
+  if (!JSON.stringify(overlay).includes(SECRET_REFERENCE_MARKER)) return;
+  throw new FleetMaterialiseError([
+    {
+      message:
+        'a settings overlay names a secret reference, and a secret never goes into a settings file or a command line (docs/secrets.md)',
+    },
+  ]);
+}
+
+/**
+ * The login's non-secret environment, as the `env` of the `--settings` overlay of a Claude runtime. Claude
+ * Code lets a `--settings` value beat the same key in a repo's `.claude/settings.local.json`, while a
+ * variable only in the process environment loses to it — so a repo that blanks ANTHROPIC_BASE_URL would
+ * start the runtime signed out. Only an environment login has variables of its own; the profile's
+ * environment and Ferretry's own variables stay process environment.
+ */
+function loginEnvironmentPins(
+  harness: HarnessKind,
+  store: CredentialStoreResolution,
+  derivedEnv: Readonly<Record<string, string>>,
+): Record<string, string> {
+  if (harness !== 'claude' || store.store !== 'environment') return {};
+  return pinnableLoginEnvironment({ ...credentialLaunchEnvironment(store), ...derivedEnv });
+}
+
+/** Whether the profile's own flags already pass `--settings` (Claude Code honours only one). */
+const passesSettingsFlag = (flags: readonly FlagContribution[]): boolean =>
+  flags.some(({ flag }) => flag === '--settings' || flag.startsWith('--settings='));
 
 /** The folder the fixed layer is computed for while planning; the wrapper fills in the real one. */
 const LAUNCH_FOLDER_PLACEHOLDER = '/ferretry-launch-folder';
@@ -428,6 +481,28 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         : renderCodexModelCatalog(codexModels, derived.default);
     const codexCatalogPath = joinPath(joinPath(home, RUNTIME_STATE_DIRECTORY), CODEX_MODEL_CATALOG_FILE);
 
+    // B190: the login's non-secret variables are pinned in the `--settings` overlay too, since a repo's
+    // own settings beat the process environment but not that file. Any Claude runtime gets them, an
+    // interactive one through an overlay of its own — unless the profile already passes `--settings`.
+    let pins = loginEnvironmentPins(harness, store, derived.env);
+    if (Object.keys(pins).length > 0 && !runtime.agent && passesSettingsFlag(resolved.flags)) {
+      problems.push({
+        runtime: name,
+        message:
+          "its profile already passes --settings, and Claude Code honours only one, so the login's environment cannot be pinned against a repository's own settings; drop that flag, or make the runtime an agent",
+      });
+      pins = {};
+    }
+    const baseOverlay = fixed?.claudeSettingsOverlay;
+    const overlay: SettingsObject | undefined =
+      Object.keys(pins).length === 0
+        ? baseOverlay
+        : {
+            ...baseOverlay,
+            env: { ...(baseOverlay?.env as Record<string, string> | undefined), ...pins },
+          };
+    if (overlay !== undefined) assertNoSecretInOverlay(overlay);
+
     operations.push(
       ...configDirectoryOperations({
         home,
@@ -437,14 +512,14 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         absent: adapted.absent,
         settings: adapted.settings,
         claudeJson: adapted.claudeJson,
-        overlay: fixed?.claudeSettingsOverlay,
+        overlay,
         credentialLink: codexCredentialLink(home, store),
         layout,
       }),
     );
 
     const fixedSettingsArgs =
-      fixed?.claudeSettingsOverlay === undefined
+      overlay === undefined
         ? []
         : ['--settings', joinPath(joinPath(home, RUNTIME_STATE_DIRECTORY), FIXED_SETTINGS_FILE)];
     const { models, modelCatalog, defaultModel } = publishedModels(derived);
@@ -463,7 +538,9 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         args: [
           ...credentialLaunchArguments(store, defaultModel !== null),
           ...(codexCatalog === undefined ? [] : codexCatalogArguments(codexCatalogPath)),
-          ...(launch === undefined ? resolved.flags.map(flag => flag.flag) : [...launch.args, ...fixedSettingsArgs]),
+          ...(launch === undefined
+            ? [...resolved.flags.map(flag => flag.flag), ...fixedSettingsArgs]
+            : [...launch.args, ...fixedSettingsArgs]),
         ],
         defaultModel: defaultModel ?? undefined,
         seedFirstRun: runtime.agent && harness === 'claude',

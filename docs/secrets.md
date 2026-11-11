@@ -334,6 +334,32 @@ There is one narrow exception, for a ferret's launch environment only. A variabl
 lands while a ferret is starting does not stop that ferret. It names nothing a plain reference could not.
 Anywhere else, or inside a longer value, it is plain text.
 
+### A login's variables and a repository's own Claude settings
+
+A Claude runtime on an environment login pins that login's **non-secret** variables (`ANTHROPIC_BASE_URL`,
+the catalog's `ANTHROPIC_DEFAULT_*_MODEL`, a literal `ANTHROPIC_AUTH_TOKEN`) under `env` in its
+`--settings` file (`<home>/.fy/fixed.json`). Claude Code lets that file beat a repository's
+`.claude/settings.local.json`, which the process environment does not, so a repo that blanks a provider
+variable can no longer start the runtime signed out.
+
+**A value that names `${secret:…}` never goes into that file, any settings file, or a command line.** It stays
+process environment, which the wrapper resolves from the store when it execs. Why a command line counts: when
+a launch names fast mode or a compaction point, the daemon copies `fixed.json` **inline** into
+`--settings '<json>'`, and that argv shows in `ps` and in the session's saved command. The rule is enforced
+twice in code: only values with no reference are pinned, and an overlay whose text contains one is refused when
+the fleet is planned, never quietly trimmed. A **literal** credential written in a login's YAML (an internal
+gateway's `ANTHROPIC_AUTH_TOKEN`) is pinned: it is already plain text in the configuration, and so it may show
+in `ps` when fast mode or a compaction point is set. A real key belongs in the secret store.
+
+What pinning cannot cover is a secret-backed variable that a repository itself sets under `env`. The start of
+a Claude runtime is **refused** when its launch folder (or the git root) holds a `.claude/settings.json` or
+`settings.local.json` that sets one of that runtime's secret-backed variables, naming the file and the variable.
+
+- **GAP (B190, `b190-api-key-helper`):** nothing keeps such a repository from doing it; the start is only
+  refused. An `apiKeyHelper` fallback in `fixed.json` that prints a Ferretry-owned process variable would, and
+  waits for a contract test against the installed Claude Code. Until Ferrets calls the check
+  (`assertFolderLeavesLoginAlone`) at a Claude start, the refusal is not yet enforced either.
+
 `config/daemon.json` may carry a `secretEnvironment` block of reusable recipes:
 
 ```json
