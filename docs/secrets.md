@@ -363,6 +363,32 @@ published fleet — a start's account, the launch's bindings, the runtime names 
 (`packages/daemon/src/lib/fleet/publication.ts`). A second apply landing between the judgment and the
 pane's exec is still fail-closed: the new wrapper carries its own guard for every secret-backed variable.
 
+### A ferret's launch carries its login's environment
+
+A ferret started on a login launches with that login's environment, and an agent still never holds a credential:
+
+- **Where it comes from.** Ferrets asks the `logins:<kind>` provider that holds the login (`LoginKind.holds`) for the
+  login file's `env` (`LoginKind.env`). Literal settings stay literal and a `${secret:NAME}` stays a **reference** until
+  the Vault's `childEnvironment` resolves it into that one child; a secret the Vault does not hold refuses the start
+  (`login_unavailable`). `LoginKind.env` already drops a value that looks like a raw secret.
+- **What it never sets.** `HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `FY_*` are dropped from a login's env. Its values go in
+  **before** the launch parts, so MCP, shell and profile env, and the `FY_*` switches, keep precedence.
+- **The Claude sign-in.** A Ferretry-kept `anthropic` login also gets exactly one variable Ferretry sets itself
+  (`LoginKind.launchEnvironment`, not the login file's `env`): `CLAUDE_SECURESTORAGE_CONFIG_DIR=<state/logins/credentials/<id>>`.
+  It goes in **after** the parts, so nothing overrides it, and the real `HOME` is kept (macOS finds the login keychain
+  through it; there the variable selects a keychain item hashed from the same directory, on Linux a file). A login with
+  no usable sign-in refuses the start instead of launching a signed-out pane. A host-kept login is not readable in this
+  build and is refused the same way. Codex's `auth.json` is a link in its home, not a variable, and is not done here.
+- **The Claude overlay pin (B190).** Claude applies a settings file's `env` over the process environment, so a cloned
+  repository's `.claude/settings.local.json` could blank `ANTHROPIC_BASE_URL`. The harness therefore writes the login's
+  **literal** provider values into the `env` of `launch-settings.json` in the agent home (`--settings`, which outranks the
+  repository's files). That file is plain text, so what it may hold is narrow: never a `${secret:…}` / `${secret?:…}` reference,
+  never `$NAME` / `${NAME}` (a settings file does not expand them), never `FY_*`, `HOME`, `CLAUDE_CONFIG_DIR` or the
+  secure-storage variable, and a key only when no env part sets it to something else. The fixed layer wins over a pin, and
+  building an overlay that would hold `${secret` throws.
+- **Residual.** Secret-backed keys (an `ANTHROPIC_AUTH_TOKEN` held as `${secret:NAME}`) are pinned nowhere, so they exist only in the
+  child's environment and a repository's settings file can still blank one. That is the cost of never putting a secret in a file.
+
 ### The stored-login rule is a declared heuristic
 
 A login's `env` (a `logins/<id>.yaml` file, a `login.add` or `login.env` change, the paste screen) is judged by ONE
