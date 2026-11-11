@@ -323,6 +323,70 @@ console.log(JSON.stringify({ text }));
     expect(report.kept).toContainEqual({ what: 'queued messages (folded)', count: 2 });
   });
 
+  describe('a delivered v4 input keeps claiming the same drain under v5’s key', () => {
+    // v4 named a Claude drain without a uuid `<transcript path>#<start>#<end>` (observed-input.ts); v5 names the same
+    // unchanged drain `queued-prompt:<start>` (the Claude harness's entry id). One delivered input confirms at most one
+    // send, so a claim kept under the v4 spelling would let a second identical, still-pending send be confirmed by it.
+    const V4_PATH = '/v4/home/runtimes/claude/projects/-work/conv-1.jsonl';
+    const evidence = (key: string, extra: Record<string, unknown> = {}) => ({
+      key,
+      harness: 'claude',
+      kind: 'queued_command',
+      proof: 'native-queue-drain',
+      observedAt: AT,
+      shapeVersion: 1,
+      matchedTurn: 1,
+      tier: 'exact-text',
+      ...extra,
+    });
+    const converted = async (rows: readonly unknown[]) => {
+      await f.session('f1');
+      await raw('state/sessions/f1/channel/sends.jsonl', jsonl(rows));
+      await conversationStep.run(f.ctx());
+      return (await lines(v5SendsFile('f1'))).map(line => V5SendLineSchema.parse(line));
+    };
+
+    test('a delivered row and a pending row: the claim is the key v5 will emit, the pending send stays pending', async () => {
+      const written = await converted([
+        send('first', 'delivered', { evidence: evidence(`${V4_PATH}#283#476`), fateAt: AT }),
+        send('second', 'accepted', { acceptedAt: '2026-11-11T00:00:02.000Z', at: '2026-11-11T00:00:02.000Z' }),
+      ]);
+      expect(written.map(line => [line.sendId, line.fate])).toEqual([
+        ['first', 'delivered'],
+        ['second', 'accepted'],
+      ]);
+      expect(written[0]?.evidence?.key).toBe('queued-prompt:283');
+      expect(written[0]?.evidence).toMatchObject({ proof: 'native-queue-drain', matchedTurn: 1, tier: 'exact-text' });
+      expect(written[1]).not.toHaveProperty('evidence');
+    });
+
+    test('a path with # in it converts by its trailing byte span', async () => {
+      const written = await converted([
+        send('a', 'delivered', { evidence: evidence('/home/a#b/c.jsonl#12#99') }),
+        send('b', 'delivered', { evidence: evidence('/home/a#b/c.jsonl#99#200') }),
+      ]);
+      expect(written.map(line => line.evidence?.key)).toEqual(['queued-prompt:12', 'queued-prompt:99']);
+    });
+
+    test('a uuid key converts unchanged', async () => {
+      const key = '5f0c2f8e-1a5d-4c53-9a39-0e1d4b1d9c11';
+      const written = await converted([send('a', 'delivered', { evidence: evidence(key) })]);
+      expect(written[0]?.evidence?.key).toBe(key);
+    });
+
+    test('a key that is not a Claude drain’s byte span is kept as it was, never cleared', async () => {
+      const codex = `${V4_PATH}#12#99`;
+      const written = await converted([
+        send('a', 'delivered', {
+          evidence: evidence(codex, { harness: 'codex', kind: 'response_item', proof: 'normal-user-record' }),
+        }),
+        send('b', 'delivered', { evidence: evidence('not-a-span#x#y') }),
+        send('c', 'delivered', { evidence: evidence(`${V4_PATH}#99#12`) }),
+      ]);
+      expect(written.map(line => line.evidence?.key)).toEqual([codex, 'not-a-span#x#y', `${V4_PATH}#99#12`]);
+    });
+  });
+
   test('the send ledger keeps every line in v5’s words: ferret_ended, no payload pointer, no v4 timers', async () => {
     await f.session('f1');
     const payload = join(f.from, 'state/sessions/f1/channel/queued-s2.md');

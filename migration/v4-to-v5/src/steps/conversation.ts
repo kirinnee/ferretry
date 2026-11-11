@@ -265,6 +265,26 @@ export const V5OutboxLineSchema = z.strictObject({
 // ── v4 → v5 mappings (pure) ─────────────────────────────────────────────────────────────────────────────────────
 
 /**
+ * The delivered input a v4 send claimed, named the way v5 will name the SAME input. One delivered input confirms at most
+ * one send, and the claim is a string compared for equality, so a claim kept under v4's spelling would not claim the
+ * drain in v5 and a second identical, still-pending send could be confirmed by it.
+ *
+ * A Claude native-queue drain without a uuid was `<transcript path>#<start>#<end>` in v4 (`observed-input.ts`, the byte
+ * span of its line in the file) and is `queued-prompt:<start>` in v5 (the Claude harness's entry id: the same absolute
+ * offset). Anything else is kept AS IT WAS, never cleared: a uuid names the same record in both versions, and a key that
+ * is not provably a Claude byte span (a Codex key, a malformed span) stays a claim that nothing else can falsely match.
+ */
+function v5Evidence(evidence: V4Send['evidence'] & {}): V4Send['evidence'] {
+  if (evidence.harness !== 'claude' || evidence.proof !== 'native-queue-drain') return evidence;
+  const span = /^.+#(\d+)#(\d+)$/u.exec(evidence.key);
+  if (span === null) return evidence;
+  const start = Number(span[1]);
+  const end = Number(span[2]);
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end <= start) return evidence;
+  return { ...evidence, key: `queued-prompt:${start}` };
+}
+
+/**
  * A v4 ledger line in v5's words. `session_ended` is `ferret_ended`. Dropped: `payloadFile` (an absolute path to the
  * v4 `channel/queued-<id>.md`, which v5 never reads back and has no declared place for; the message is in `message`
  * and what was typed in `matchText`), and `opportunityAt`, `unaccountedDeadline`, `hardDeadline`, `timeoutFrozenAt`
@@ -278,11 +298,13 @@ export function v5SendLine(line: V4Send): unknown {
     hardDeadline: _hard,
     timeoutFrozenAt: _frozen,
     unaccountedReason,
+    evidence,
     ...rest
   } = line;
   return {
     format: 1,
     ...rest,
+    ...(evidence === undefined ? {} : { evidence: v5Evidence(evidence) }),
     ...(unaccountedReason === undefined
       ? {}
       : { unaccountedReason: unaccountedReason === 'session_ended' ? 'ferret_ended' : unaccountedReason }),

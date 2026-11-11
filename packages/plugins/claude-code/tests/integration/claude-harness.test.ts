@@ -942,6 +942,16 @@ describe('ClaudeHarness', () => {
         expect(second['HELD PROMPT']).toBe(first['HELD PROMPT']);
       });
 
+      test('a drain without a uuid is named `queued-prompt:<byte offset of its line>`, the key the v4 converter rewrites a claim to', async () => {
+        const { harness, writeHome } = build();
+        await harness.start(spec(), runner({}), {} as never);
+        const prefix = `${JSON.stringify({ type: 'system', pad: 'p'.repeat(200) })}\n`;
+        await writeHome('projects/-work/conv-1.jsonl', prefix + drain('ONE DRAIN'));
+        const entry = (await harness.transcript.read(FERRET)).find(each => each.text === 'ONE DRAIN');
+        // the one-time home conversion turns v4's `<path>#<start>#<end>` into this exact spelling.
+        expect(entry?.id).toBe(`queued-prompt:${Buffer.byteLength(prefix)}`);
+      });
+
       test('two identical drains stay two records', async () => {
         const { harness, writeHome } = build();
         await harness.start(spec(), runner({}), {} as never);
