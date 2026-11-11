@@ -383,6 +383,14 @@ describe('NHC-3 the start check proves the daemon reaches no credential, and ref
       const done = await credentialCheck({ ...realWorld(home, inspect), callerEnv: hostile });
       expect(done.ok).toBe(false);
       expect(done.problems.join('\n')).toContain(sentence.replace(/ \(.*\)$/u, ''));
+      // A home prepared before zdot/ existed needs the OWNER's clean + prepare; every other miss is cured by stop + start.
+      if (sentence === 'zdot/ is not a 0700 folder') {
+        expect(done.problems.join('\n')).toContain('prepared by an older preview.sh');
+        expect(done.problems.join('\n')).toContain('preview.sh prepare --owner; stop and start alone will not fix it');
+      } else {
+        expect(done.problems.join('\n')).toContain('Run preview.sh stop, then start again.');
+        expect(done.problems.join('\n')).not.toContain('older preview.sh');
+      }
     }
   });
 

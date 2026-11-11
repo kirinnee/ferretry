@@ -147,7 +147,10 @@ export async function credentialCheck(input: CredentialCheckInput): Promise<Star
     (zdot.names ?? []).some(name => name !== HOME_SHELL_RC && !SHELL_STATE_NAMES.some(pattern => pattern.test(name)))
   )
     folderProblems.push(
-      `${NO_CREDS_ENV.zdot}/ is not a 0700 folder holding one empty 0600 ${HOME_SHELL_RC} and nothing but a shell's own state files`,
+      `${NO_CREDS_ENV.zdot}/ is not a 0700 folder holding one empty 0600 ${HOME_SHELL_RC} and nothing but a shell's own state files` +
+        (zdot === undefined
+          ? ` (it is missing: this preview home was prepared by an older preview.sh, so its fy5 and terminals.yaml do not keep the shells' files out of the HOME)`
+          : ''),
     );
   const gh = await inspect(join(base, NO_CREDS_ENV.gh));
   if (gh === undefined || gh.kind !== 'dir' || gh.mode !== 0o700 || gh.entries !== 0)
@@ -157,7 +160,10 @@ export async function credentialCheck(input: CredentialCheckInput): Promise<Star
     folderProblems.push(`${NO_CREDS_ENV.gitConfig} is not an empty 0600 file`);
   if (folderProblems.length > 0)
     problems.push(
-      `refusing to go on: under ${base}: ${folderProblems.join('; ')}. Run preview.sh stop, then start again.`,
+      `refusing to go on: under ${base}: ${folderProblems.join('; ')}. ` +
+        (zdot === undefined
+          ? 'The OWNER runs preview.sh stop, preview.sh clean, then preview.sh prepare --owner; stop and start alone will not fix it.'
+          : 'Run preview.sh stop, then start again.'),
     );
   else passed.push('the daemon HOME, gh config folder and git global config are empty and private');
 
