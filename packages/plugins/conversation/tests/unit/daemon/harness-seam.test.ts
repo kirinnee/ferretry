@@ -25,14 +25,18 @@ import { definePlugin, implementDaemon, type Needer } from '@ferretry/kernel/man
 import { ferret as asFerret, fixedClock, owner, testHost, type TestCaller } from '@ferretry/kernel/testing';
 import type { Instant } from '@ferretry/std';
 import { err, ok, type Result } from '@ferretry/std';
-import { CONVERSATION_STATE, ConversationPort, parsePeerEnvelope } from '../../../contract/index.ts';
+import {
+  CONVERSATION_STATE,
+  ConversationPort,
+  parseMessageAttachments,
+  parsePeerEnvelope,
+} from '../../../contract/index.ts';
 import { conversationDaemon } from '../../../daemon/index.ts';
 import {
   type HarnessGate,
   HARNESS_OPEN,
   INTERRUPT_UNAVAILABLE,
   NOT_READY_SENTENCES,
-  SEND_EXTRAS_UNAVAILABLE,
   SEND_UNAVAILABLE,
   STRANDED_SENTENCE,
   UNCONFIRMED_SENTENCE,
@@ -78,7 +82,12 @@ const SEND_ROUTE = 'POST /v1/ferrets/:ferretId/send';
  * The banner a message from the lead (`kamila`, session `lead`) is typed under, spelled out by hand rather than built
  * with the protocol's writer, so a change to what is typed fails here.
  */
-const banner = (kind: 'message' | 'reply' | 'question', label?: 'action' | 'blocker', name = LEAD_NAME, id = 'lead') =>
+const banner = (
+  kind: 'message' | 'reply' | 'question',
+  label?: 'action' | 'blocker' | 'fyi',
+  name = LEAD_NAME,
+  id = 'lead',
+) =>
   `[${label === undefined ? kind : `${kind} · ${label}`} from ferret ${name} (session ${id}) — not from the owner] To reply: fy send ${name} "<reply>"\n`;
 
 /** A structured question the ferret asked (the live `PreToolUse` payload of `asked.test.ts`). */
@@ -113,6 +122,9 @@ class HarnessFerrets extends FakeFerrets {
   script: Script = {};
   /** Set when `harness()` itself refuses, as Ferrets' mayTouch rule does. */
   refuseOpen: ApiError | undefined;
+  /** Every batch of files handed to the ferret (`deliverFiles`), and whether the write fails or the seam offers none. */
+  readonly filesHanded: { readonly name: string; readonly contents: Uint8Array }[][] = [];
+  files: 'writes' | 'fails' | 'absent' = 'writes';
 
   async harness(ferret: FerretId, caller?: FerretId): Promise<FerretHarness | undefined> {
     this.opens.push({ ferret, caller });
@@ -145,6 +157,15 @@ class HarnessFerrets extends FakeFerrets {
         this.composerKeys.push(`submit:${text}`);
         return await (this.script.submitComposer?.(text, strict) ?? Promise.resolve(ok('submitted' as const)));
       },
+      ...(this.files === 'absent'
+        ? {}
+        : {
+            deliverFiles: async (files: readonly { readonly name: string; readonly contents: Uint8Array }[]) => {
+              if (this.files === 'fails') throw new Error('FIXTURE_SECRET /state/ferrets/f1/attachments is read-only');
+              this.filesHanded.push([...files]);
+              return files.map(file => `/state/ferrets/${ferret}/attachments/${file.name}`);
+            },
+          }),
       stopActive: async () => {
         this.stopsActive += 1;
         return await (this.script.stopActive?.() ?? Promise.resolve(ok(undefined)));
@@ -1170,55 +1191,131 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
   });
 });
 
-describe('a send carrying files or an fyi hold is refused 503, never answered sent', () => {
-  const post = async (
-    host: Awaited<ReturnType<typeof conversation>>['host'],
-    extra: Record<string, unknown>,
-    as: TestCaller = owner(),
-  ) => await send(host, 'req-x', 'f1', { message: 'hello there', ...extra }, as);
+describe('a send carrying files or an fyi label types, and a file reaches the agent only by its own folder', () => {
+  const upload = async (
+    api: Awaited<ReturnType<typeof conversation>>['api'],
+    filename: string,
+    body: string,
+    mime = 'image/png',
+  ): Promise<string> => {
+    const added = await api().addAttachment(F1, { filename, mime, base64: Buffer.from(body).toString('base64') });
+    if (!added.ok) throw new Error('the fixture upload failed');
+    return added.value.id;
+  };
 
-  // A label is a ferret's: the route does not honour the owner's, so only the port (below) can carry an fyi.
-  test.each([['attachmentIds', { attachmentIds: ['file-1'] }]] as const)(
-    'the route refuses %s: 503, nothing opened, typed or recorded',
-    async (_name, extra) => {
-      const { host, ferrets, api } = await conversation();
+  // A label is a ferret's: the route does not honour the owner's, so the real route is called AS a ferret.
+  test('fy send --kind fyi through the real route is typed at once under its FYI banner, not refused 503', async () => {
+    const { host, ferrets, api } = await conversation(undefined, OPEN, {}, { sendStanding: ferretStanding(CALLER) });
 
-      const response = await post(host, extra);
+    const response = await send(host, 'req-fyi', 'f1', { message: 'psst', label: 'fyi', now: false });
 
-      expect([response.status, response.json<{ code: string }>().code]).toEqual([
-        503,
-        'conversation_terminal_unavailable',
-      ]);
-      expect(response.json<{ error: string }>().error).toBe(SEND_EXTRAS_UNAVAILABLE);
-      expect(ferrets.opens).toEqual([]);
-      expect(ferrets.delivered).toEqual([]);
-      expect((await api().sends(F1)).sends).toEqual([]);
-      await host.stop();
-    },
-  );
+    expect(response.status).toBe(200);
+    expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'fyi')}psst` }]);
+    expect((await api().sends(F1)).sends.map(row => [row.sendId, row.fate, row.senderKind])).toEqual([
+      ['req-fyi', 'accepted', 'agent'],
+    ]);
+    await host.stop();
+  });
 
-  test.each<[string, { attachmentIds?: string[]; label?: 'fyi'; now?: boolean; replyExpected?: boolean }]>([
-    ['attachmentIds', { attachmentIds: ['file-1'] }],
-    ['label', { label: 'fyi' }],
-  ])('the port refuses %s the same way', async (_name, extra) => {
+  test('an fyi through the port is typed the same way', async () => {
     const { host, ferrets, api } = await conversation();
 
-    const sent = await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'psst', sendId: 's-1', ...extra });
+    const sent = await api().send(
+      F1,
+      { kind: 'ferret', ferret: CALLER },
+      { message: 'psst', sendId: 's-1', label: 'fyi' },
+    );
 
-    expect(sent).toMatchObject({
-      ok: false,
-      error: { code: 'conversation_terminal_unavailable', message: SEND_EXTRAS_UNAVAILABLE },
+    expect(sent).toMatchObject({ ok: true, value: { sendId: 's-1' } });
+    expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'fyi')}psst` }]);
+    await host.stop();
+  });
+
+  test('an app-shaped send hands each file to the ferret, then types the message with the delivered paths listed', async () => {
+    const { host, ferrets, api } = await conversation();
+    const id = await upload(api, '../Screen Shot 1.png', 'FIXTURE-PNG-BYTES');
+
+    const response = await send(host, 'req-img', 'f1', { message: 'see the picture', attachmentIds: [id] });
+
+    expect(response.status).toBe(200);
+    const name = `${id.replace(/^att_/u, '').slice(0, 8)}-Screen-Shot-1.png`;
+    expect(ferrets.filesHanded).toHaveLength(1);
+    expect(ferrets.filesHanded[0]?.map(file => file.name)).toEqual([name]);
+    expect(new TextDecoder().decode(ferrets.filesHanded[0]?.[0]?.contents)).toBe('FIXTURE-PNG-BYTES');
+    const path = `/state/ferrets/f1/attachments/${name}`;
+    expect(ferrets.delivered).toEqual([
+      { text: `see the picture\n\nAttached files — open them from these paths:\n- ${path} (image/png)` },
+    ]);
+    // The app reads the list back out of the typed text.
+    expect(parseMessageAttachments(ferrets.delivered[0]?.text ?? '')).toEqual({
+      message: 'see the picture',
+      files: [{ path, mime: 'image/png' }],
     });
+    await host.stop();
+  });
+
+  test('two files of one name are two paths, and the same file named twice is one', async () => {
+    const { host, ferrets, api } = await conversation();
+    const first = await upload(api, 'a.png', 'FIXTURE-ONE');
+    const second = await upload(api, 'a.png', 'FIXTURE-TWO');
+
+    await api().send(F1, { kind: 'owner' }, { message: 'two', sendId: 's-two', attachmentIds: [first, second, first] });
+
+    const names = ferrets.filesHanded[0]?.map(file => file.name) ?? [];
+    expect(names).toHaveLength(2);
+    expect(new Set(names).size).toBe(2);
+    await host.stop();
+  });
+
+  test('a file that is not this ferret’s refuses the send 400, with nothing handed over, typed or kept', async () => {
+    const { host, ferrets, api } = await conversation();
+
+    const response = await send(host, 'req-bad', 'f1', { message: 'hello', attachmentIds: ['att_' + '0'.repeat(64)] });
+
+    expect(response.status).toBe(400);
+    expect(response.json<{ error: string }>().error).toMatch(/^an attached file could not be handed to the agent: /);
+    expect(ferrets.filesHanded).toEqual([]);
     expect(ferrets.delivered).toEqual([]);
     expect((await api().sends(F1)).sends).toEqual([]);
+    await host.stop();
+  });
+
+  test('a file that cannot be written refuses the send the same way and quotes no path', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.files = 'fails';
+    const { host, api } = await conversation(ferrets);
+    const id = await upload(api, 'a.png', 'FIXTURE-PNG');
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'hello', sendId: 's-1', attachmentIds: [id] });
+
+    expect(sent).toMatchObject({ ok: false, error: { code: 'invalid' } });
+    expect(JSON.stringify(sent)).not.toContain('FIXTURE_SECRET');
+    expect(ferrets.delivered).toEqual([]);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    await host.stop();
+  });
+
+  test('a Ferrets that cannot write session files refuses a send that names a file, and still types a plain one', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.files = 'absent';
+    const { host, api } = await conversation(ferrets);
+    const id = await upload(api, 'a.png', 'FIXTURE-PNG');
+
+    const refused = await api().send(F1, { kind: 'owner' }, { message: 'hello', sendId: 's-1', attachmentIds: [id] });
+    const plain = await api().send(F1, { kind: 'owner' }, { message: 'hello', sendId: 's-2' });
+
+    expect(refused).toMatchObject({ ok: false, error: { code: 'invalid' } });
+    expect(plain).toMatchObject({ ok: true });
+    expect(ferrets.delivered).toEqual([{ text: 'hello' }]);
     await host.stop();
   });
 
   test('an empty attachment list carries nothing, so it goes', async () => {
     const { host, ferrets } = await conversation();
 
-    expect((await post(host, { attachmentIds: [] })).status).toBe(200);
-    expect(ferrets.delivered).toHaveLength(1);
+    expect((await send(host, 'req-x', 'f1', { message: 'hello there', attachmentIds: [] })).status).toBe(200);
+    expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    expect(ferrets.filesHanded).toEqual([]);
     await host.stop();
   });
 });

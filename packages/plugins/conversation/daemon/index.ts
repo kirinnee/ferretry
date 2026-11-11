@@ -68,19 +68,21 @@ export const conversationDaemon = (gate: HarnessGate) =>
     // The PDF unlock thread: `fyd --check` starts and stops it, so a binary that did not carry it is seen at once.
     workers: { 'pdf-decrypt': PDF_WORKER_URL },
     build: ctx => {
-      const a = buildConversationA({
-        kernel: ctx.kernel,
-        ferrets: ctx.needs.ferrets,
-        asks: ctx.needs.asks,
-        hooks: ctx.hooks,
-        gate,
-      });
       const b = buildReading({
         kernel: ctx.kernel,
         ferrets: ctx.needs.ferrets,
         asks: ctx.needs.asks,
         onKept: (ferret, link) => ctx.kernel.events.publish(LinkKept, { ferret, link }),
         workSources: () => ctx.hooks.contributions(SearchSources).map(contribution => contribution.item),
+      });
+      const a = buildConversationA({
+        kernel: ctx.kernel,
+        ferrets: ctx.needs.ferrets,
+        asks: ctx.needs.asks,
+        hooks: ctx.hooks,
+        gate,
+        // The stored originals a send hands to the agent (part b owns the store).
+        attachments: { download: (ferret, id) => b.download(ferret, id) },
       });
       ctx.kernel.lifecycle.onStop(() => {
         a.stop();

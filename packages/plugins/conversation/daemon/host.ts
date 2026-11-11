@@ -79,12 +79,13 @@ import {
   INTERRUPT_UNAVAILABLE,
   MaybeTyped,
   PaneBusy,
-  SEND_EXTRAS_UNAVAILABLE,
+  SEND_PATH_UNWIRED,
   SEND_UNAVAILABLE,
   terminalSeam,
   Unconfirmed,
 } from './harness-seam.ts';
 import { startupParkedPending } from './delivery/lib/service.ts';
+import { type DeliveredAttachment, deliveredFilename, messageWithAttachments } from './attachments/lib/delivery.ts';
 import { harnessSendTerminal } from './send-terminal.ts';
 import { KeyedSerialExecutor } from './seams/keyed-serial-executor.ts';
 import { type MountRoute, routeTable, socketTable } from './seams/api.ts';
@@ -123,6 +124,7 @@ const refusalCode = (error: unknown): string => {
   return (
     (
       {
+        invalid: 'invalid',
         not_found: 'not_found',
         refused: 'send_refused',
         pending: 'session_launching',
@@ -187,9 +189,21 @@ const statusOf = (ferret: FerretSummary): SessionStatus => {
   }
 };
 
+/** The stored original of one attachment of a ferret, its digest re-checked (part b's store). */
+export interface AttachmentSource {
+  download(
+    ferret: string,
+    id: string,
+  ): Promise<{
+    readonly attachment: { readonly id: string; readonly filename: string; readonly mime: string };
+    readonly bytes: Uint8Array;
+  }>;
+}
+
 /**
- * What a send can carry that the harness seam does not type yet. `label` is read only for `fyi`, the one label that
- * changes WHEN a message goes (held to the turn's end); `action` and `blocker` type at once, as the seam does.
+ * What a send can carry beyond its text. `attachmentIds` are handed to the agent as files ({@link deliverAttachments}).
+ * `label` is typed under its banner whatever it is: `fyi` too, as v4 did with its queue off (holding an fyi to the
+ * receiver's turn end waits on the queue deliverer, which this host does not wire).
  */
 interface UnwiredSend {
   readonly attachmentIds?: readonly string[] | undefined;
@@ -266,6 +280,8 @@ export function buildConversationA(deps: {
   readonly hooks: Pick<HookInvoker, 'observe' | 'transform'>;
   /** Which of the harness seam's two actions are live (see {@link HarnessGate}). */
   readonly gate: HarnessGate;
+  /** The stored originals a send may name (part b's store). Absent: a send that names a file is refused. */
+  readonly attachments?: AttachmentSource;
 }): ConversationAHalf {
   const { kernel, ferrets, asks, hooks, gate } = deps;
   const clock: ClockPort = { now: () => kernel.clock.now() };
@@ -379,7 +395,7 @@ export function buildConversationA(deps: {
    * only a TYPING send needs — the turn documents, the revive and the declared wait — so those ports refuse; the
    * service's `send` and `reattempt` are not called from here (a send is `typeMessage`, below).
    */
-  const unwiredTyping = (): never => pending(SEND_EXTRAS_UNAVAILABLE);
+  const unwiredTyping = (): never => pending(SEND_PATH_UNWIRED);
   /** The ferret's turn documents and the files Ferrets writes for it; none when Ferrets offers none (or refuses the look). */
   const turnsOf = async (ferret: SessionId) => await ferrets.turns?.(ferret).catch(() => undefined);
   /**
@@ -531,17 +547,56 @@ export function buildConversationA(deps: {
   };
   /**
    * Whether a send may be typed at all, before its text is prepared, opened or kept (a repeat of a kept id is answered
-   * without it). A closed gate refuses it. And refuses what the harness seam does not type yet: files or an fyi message
-   * (held to the turn's end) would be dropped, and the send answered `sent` all the same. A send-now is refused while the
-   * interrupt gate is closed, as it presses a stop key. A field is refused only when it asks for something: the CLI always sends `now: false`
-   * and a label (`action` by default), and those type exactly as the seam types.
+   * without it). A closed gate refuses it. A send-now is refused while the interrupt gate is closed, as it presses a stop
+   * key. Files and every label type: files are handed to the agent first ({@link deliverAttachments}), and an `fyi` is
+   * typed at once under its banner like any other label.
    */
   const mayGo = (request: UnwiredSend): void => {
     if (!gate.send) pending(SEND_UNAVAILABLE);
     // A send-now presses a stop key: with the interrupt gate closed (a stop could quit the agent) it presses nothing, so
     // it types nothing either.
     if (request.now === true && !gate.interrupt) pending(INTERRUPT_UNAVAILABLE);
-    if ((request.attachmentIds?.length ?? 0) > 0 || request.label === 'fyi') pending(SEND_EXTRAS_UNAVAILABLE);
+  };
+  /** Said when a send names a file this daemon has no store for. */
+  const NO_ATTACHMENTS = 'this daemon cannot take attachments with a send: the plugin that owns them is off';
+  /**
+   * THE FILE HAND-OFF (v4 `deliverAttachments`). Each named stored original is read back through the store (which
+   * re-checks its digest against the manifest, and finds only THIS ferret's) and written, by the ferret's harness seam,
+   * into the ferret's OWN session `attachments/` folder (`0700`; `0600` per file): the one place an agent reads a file it
+   * is sent without asking. The name is the file's own reduced to plain characters, behind eight characters of its
+   * digest, so two different files of one name never overwrite each other and the same file twice is one path. Answers
+   * the paths and types the message then lists. A file that is not this ferret's, or cannot be handed over, refuses the
+   * whole send (400 `invalid`) BEFORE anything is typed, because "see the screenshot" with no screenshot is the worse
+   * outcome. Nothing of the file but its path and type reaches the pane or the log.
+   */
+  const deliverAttachments = async (
+    ferret: SessionId,
+    ids: readonly string[] | undefined,
+  ): Promise<readonly DeliveredAttachment[]> => {
+    const wanted = [...new Set(ids ?? [])];
+    if (wanted.length === 0) return [];
+    const refuse = (why: string): never => {
+      throw new SessionSendError('invalid', `an attached file could not be handed to the agent: ${why}`);
+    };
+    const source = deps.attachments;
+    if (source === undefined) return refuse(NO_ATTACHMENTS);
+    const files: { name: string; contents: Uint8Array; mime: string }[] = [];
+    for (const id of wanted) {
+      const found = await source.download(ferret, id).catch((error: unknown) => {
+        return refuse(error instanceof Error ? error.message : 'it could not be read');
+      });
+      files.push({
+        name: `${found.attachment.id.replace(/^att_/u, '').slice(0, 8)}-${deliveredFilename(found.attachment.filename)}`,
+        contents: found.bytes,
+        mime: found.attachment.mime,
+      });
+    }
+    const harness = await ferrets.harness?.(ferret).catch(() => undefined);
+    if (harness?.deliverFiles === undefined) return refuse("this ferret's files cannot be written from here");
+    const paths = await harness
+      .deliverFiles(files.map(({ name, contents }) => ({ name, contents })))
+      .catch(() => refuse('they could not be written'));
+    return files.map((file, at) => ({ path: paths[at] as string, mime: file.mime }));
   };
   /**
    * THE TEXT THE AGENT READS (today's `payload()`): the message, trimmed, and — when a FERRET sent it — the protocol's
@@ -1076,7 +1131,11 @@ export function buildConversationA(deps: {
           if (kept !== undefined) return kept;
           // Asked before the text is prepared: a refused send runs no `message.before-send` transform.
           mayGo(request);
-          return await typeMessage(parseSessionId(id), { ...request, message: await prepared(id, request.message) });
+          const delivered = await deliverAttachments(parseSessionId(id), request.attachmentIds);
+          return await typeMessage(parseSessionId(id), {
+            ...request,
+            message: messageWithAttachments(await prepared(id, request.message), delivered),
+          });
         },
         interrupt: async (id: string) => await interruptFerret(id),
         sends: records,
@@ -1118,10 +1177,11 @@ export function buildConversationA(deps: {
         if (kept !== undefined) return ok(kept);
         // Asked before an id is minted or the text is prepared: a refused send runs no transform and spends nothing.
         mayGo(request);
+        const delivered = await deliverAttachments(ferret, request.attachmentIds);
         return ok(
           await typeMessage(ferret, {
             sendId: request.sendId ?? String(kernel.ids.mint('send')),
-            message: await prepared(ferret, request.message),
+            message: messageWithAttachments(await prepared(ferret, request.message), delivered),
             ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
             ...(request.label === undefined ? {} : { label: request.label }),
             ...(request.now === undefined ? {} : { now: request.now }),

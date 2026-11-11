@@ -5,7 +5,6 @@ import {
   HARNESS_OPEN,
   INTERRUPT_UNAVAILABLE,
   NOT_READY_SENTENCES,
-  SEND_EXTRAS_UNAVAILABLE,
   SEND_UNAVAILABLE,
   STRANDED_SENTENCE,
   UNCONFIRMED_SENTENCE,
@@ -87,13 +86,12 @@ describe('the harness gate is OPEN, and the mapping it opened on cannot drift fr
   });
 
   test('the closed-gate sentences say WHAT is unavailable and WHY, and name no internals', () => {
-    for (const sentence of [SEND_UNAVAILABLE, INTERRUPT_UNAVAILABLE, SEND_EXTRAS_UNAVAILABLE]) {
+    for (const sentence of [SEND_UNAVAILABLE, INTERRUPT_UNAVAILABLE]) {
       expect(sentence).toMatch(/not available yet/);
       expect(sentence).toMatch(/because|so a|so the|could|would/);
       expect(sentence).not.toMatch(INTERNALS);
     }
     expect(SEND_UNAVAILABLE).toMatch(/busy.*dialog.*draft/);
     expect(INTERRUPT_UNAVAILABLE).toMatch(/quit the agent/);
-    expect(SEND_EXTRAS_UNAVAILABLE).toMatch(/fyi/);
   });
 });

@@ -89,6 +89,17 @@ export interface ReadingHalf {
   readonly routes: Readonly<Record<string, RouteHandler>>;
   readonly tools: { readonly search_work: ToolHandler };
   readonly api: ReadingApi;
+  /**
+   * A stored original of THIS ferret, its digest re-checked: what a send hands to the agent. Rejects with an
+   * {@link AttachmentError} for an id that is not this ferret's, a missing or altered original, or an unknown ferret.
+   */
+  download(
+    ferret: string,
+    id: string,
+  ): Promise<{
+    readonly attachment: { readonly id: string; readonly filename: string; readonly mime: string };
+    readonly bytes: Uint8Array;
+  }>;
   /** A ferret stopped or is gone: its attachment plaintext is zeroed and forgotten. */
   release(ferret: string): void;
   /** The daemon is stopping: nothing more is scheduled. */
@@ -228,6 +239,7 @@ export function buildReading(deps: {
     },
     tools: search.tools,
     api,
+    download: async (ferret, id) => await attachments.scoped.download(ferret, id),
     release: ferret => attachments.release(ferret),
     stop: () => cancelWarm(),
   };

@@ -344,10 +344,25 @@ export interface FerretHarness {
    */
   stopActive?(): Promise<Result<RunnerPaneObservation | undefined, HarnessRefusal>>;
   /**
+   * Additive (send path, attachments): hands files to THIS ferret by writing them into its own session folder's
+   * `attachments/` folder (made `0700`; each file `0600`, published through a temporary name), the one place an agent
+   * may read them without being asked (`FERRET_READABLE_FOLDERS`). Answers the absolute path of each file, in order. A
+   * `name` is a bare file name: one that names a path writes NOTHING (the whole call is refused first). It is a file
+   * write into the ferret's own folder, not a key on its pane, so it neither types nor presses anything. Rejects when
+   * the folder cannot be named or a file cannot be written; absent when this daemon cannot write session files.
+   */
+  deliverFiles?(files: readonly HarnessFile[]): Promise<readonly string[]>;
+  /**
    * The seam's own ferret's transcript through its harness, already masked (rejects with 503 while the harness is off).
    * It is bound to that ferret and names no other.
    */
   readonly transcript: BoundTranscriptReader;
+}
+
+/** One file {@link FerretHarness.deliverFiles} hands to a ferret: a bare file name and its bytes. */
+export interface HarnessFile {
+  readonly name: string;
+  readonly contents: Uint8Array;
 }
 
 /**

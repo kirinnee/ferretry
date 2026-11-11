@@ -17,6 +17,7 @@ import type {
   FerretTurns,
   FerretPrompt,
   HarnessDeliveryFailure,
+  HarnessFile,
   HarnessInterrupted,
   HarnessQueueOptions,
   HarnessRefusal,
@@ -1279,6 +1280,8 @@ export class FerretsService implements FerretsApi {
         throw new ApiError(503, 'the harness that wrote this conversation is off', 'plugin_unavailable');
       return harness.transcript;
     };
+    const attachmentsFolder = this.ports.session?.attachmentsFolder?.bind(this.ports.session);
+    const attach = this.ports.session?.attach?.bind(this.ports.session);
     return {
       deliver: async (delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessDeliveryFailure>> => {
         const found = pane();
@@ -1401,6 +1404,17 @@ export class FerretsService implements FerretsApi {
           throw error;
         }
       },
+      // A file write into THIS ferret's own `attachments/` folder (never a pane key, so no act): the name is checked bare
+      // by the writer before any file is written, and the paths answered are the folder's own.
+      ...(attachmentsFolder === undefined || attach === undefined
+        ? {}
+        : {
+            deliverFiles: async (files: readonly HarnessFile[]): Promise<readonly string[]> => {
+              const folder = await attachmentsFolder(ferret);
+              await attach(ferret, files);
+              return files.map(file => posix.join(folder, file.name));
+            },
+          }),
       // Bound to the ferret this seam was opened for: there is no target to name, so it cannot read another ferret's.
       transcript: {
         read: async (after, limit) => await reader().read(ferret, after, limit),
