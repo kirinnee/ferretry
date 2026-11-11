@@ -2,7 +2,7 @@ import { err, ok, type Result } from '@ferretry/std';
 import { isAbsolute } from 'node:path';
 import type { CheckedDirectory, DirectoryRefusal, PathsPort } from '../contract/ports.ts';
 import type { HostFs } from './adapters/node-fs.ts';
-import { absolute, fencedByName, fencedReal, fenceOf, hopsThroughFence, isAbsent } from './fence-guard.ts';
+import { fencedReal, fenceOf, walkPhysically } from './fence-guard.ts';
 import type { TruncationWatcher } from './fence-index.ts';
 import { mayReadOverride } from './which.ts';
 
@@ -33,9 +33,11 @@ export async function checkDirectory(
 /**
  * `kernel.paths.stateHomeHolding`: the state home `absolutePath` is in, judged exactly as every owner root is (S40–S47).
  * Not a lexical stand-in: the fence is built from the disk (`fenceOf`, which THROWS when the home cannot be identified,
- * so the caller refuses), then the path is tried as named, on every link hop (a link that lives in the home and leads
- * out is a hop through the fence), by real path, and by identity up to `/`. The answer is the home's configured name,
- * or `undefined` when the path is outside the fence or is not there (a start in a missing folder is refused later,
+ * so the caller refuses), then the path is RESOLVED, link by link and `..` by `..` from where each really leads, and
+ * never normalized first: a link that lives in the home and leads out is a hop through the fence, and the place the walk
+ * ends at is judged by name and by identity up to `/`. The answer is the home's configured name, or `undefined` when
+ * the path is outside the fence. A path that is not all there is judged at the deepest folder that is (a start in a
+ * missing folder is refused later,
  * as a folder). Read-only; a relative path is refused with a throw.
  */
 export async function stateHomeHolding(
@@ -45,14 +47,15 @@ export async function stateHomeHolding(
   absolutePath: string,
 ): Promise<string | undefined> {
   const fence = await fenceOf(fs, home, privateFiles.files, privateFiles.recheckMs, privateFiles.watch);
-  const named = absolute(absolutePath.trim(), 'the path');
-  if (fencedByName(fence, named) || (await hopsThroughFence(fs, fence, named))) return fence.named;
-  const real = await fs.realpath(named).catch((error: unknown) => {
-    if (isAbsent(error)) return undefined;
-    throw error;
-  });
-  if (real === undefined) return undefined;
-  return (await fencedReal(fs, fence, real)) ? fence.named : undefined;
+  const requested = absolutePath.trim();
+  if (!isAbsolute(requested)) throw new TypeError(`the path must be an absolute path: ${absolutePath}`);
+  // The path is NEVER normalized: a `..` is taken from where the links before it really lead (a lexical `..` would
+  // erase a link hop, or swap in a folder the path never reaches). The walk follows every link, judging each one
+  // that lives in the fence where it is, and ends at the real place (or the deepest real folder when the rest is
+  // not there); that place is then judged by name and by identity up to `/`.
+  const walk = await walkPhysically(fs, fence, requested);
+  if (walk.hop) return fence.named;
+  return (await fencedReal(fs, fence, walk.at)) ? fence.named : undefined;
 }
 
 /**

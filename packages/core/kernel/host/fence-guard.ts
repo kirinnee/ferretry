@@ -270,7 +270,7 @@ function keysOf(snapshot: PrivateSnapshot): SnapshotKeys {
 const HOME_FOLDERS: readonly string[] = ['state', 'config'];
 
 /** A fence's absent entry: nothing there, or nothing a folder could be under. Anything else is a doubt. */
-export const isAbsent = (error: unknown): boolean => {
+const isAbsent = (error: unknown): boolean => {
   const code = (error as { code?: string }).code;
   return code === 'ENOENT' || code === 'ENOTDIR';
 };
@@ -516,32 +516,51 @@ export async function privatelyHeld(fs: HostFs, guard: PrivateGuard, real: strin
 /** The most link hops one path may take, as the kernel allows. */
 const MAX_HOPS = 40;
 
+/** Where {@link walkPhysically} ended, and whether it passed through a link that lives in the fence. */
+export interface PhysicalWalk {
+  /** A symbolic link that lives inside the fence was followed (or more than {@link MAX_HOPS} links were). */
+  readonly hop: boolean;
+  /**
+   * The real place the walk reached: every link followed and every `..` taken from where the walk really was, never
+   * from the text. When part of the path is not there it is the deepest folder that is (the missing tail is left off).
+   */
+  readonly at: string;
+}
+
 /**
- * Today's `hopInsideHome`: whether `path`'s resolution passes through a symbolic link that LIVES inside the fence —
- * a link in the home that leads back out — each link judged where it is before it is followed. The home's own
- * configured name (a symlinked home) is not such a link.
+ * Today's `hopInsideHome`, walking `path` ONE SEGMENT AT A TIME as the kernel does: whether its resolution passes
+ * through a symbolic link that LIVES inside the fence — a link in the home that leads back out — each link judged
+ * where it is before it is followed, and where it ends. A `..` is taken from the real place the walk is at, so it is
+ * NEVER erased lexically before the links before it are resolved (`link-to-home/out/../x` is not `link-to-home/x`).
+ * The home's own configured name (a symlinked home) is not such a link. `path` must be absolute and is NOT normalized.
  */
-export async function hopsThroughFence(fs: HostFs, fence: Fence, path: string): Promise<boolean> {
+export async function walkPhysically(fs: HostFs, fence: Fence, path: string): Promise<PhysicalWalk> {
+  if (!isAbsolute(path)) throw new TypeError(`the path must be an absolute path: ${path}`);
   const segments = (text: string): string[] => text.split(sep).filter(part => part !== '' && part !== '.');
-  const pending = segments(absolute(path, 'the path'));
+  const pending = segments(path);
   let current: string = sep;
   for (let hops = 0; pending.length > 0; ) {
     const segment = pending.shift() as string;
     const next = segment === '..' ? dirname(current) : join(current, segment);
     const entry = await fs.identity(next);
     if (entry?.kind !== 'link') {
-      if (entry === undefined) return false;
+      if (entry === undefined) return { hop: false, at: current };
       current = next;
       continue;
     }
-    if (next !== fence.named && (await fencedReal(fs, fence, next))) return true;
+    if (next !== fence.named && (await fencedReal(fs, fence, next))) return { hop: true, at: next };
     hops += 1;
-    if (hops > MAX_HOPS) return true;
+    if (hops > MAX_HOPS) return { hop: true, at: next };
     const target = await fs.readlink(next);
     pending.unshift(...segments(target));
     if (isAbsolute(target)) current = sep;
   }
-  return false;
+  return { hop: false, at: current };
+}
+
+/** Whether `path`'s resolution passes through a link that lives inside the fence ({@link walkPhysically}). */
+export async function hopsThroughFence(fs: HostFs, fence: Fence, path: string): Promise<boolean> {
+  return (await walkPhysically(fs, fence, path)).hop;
 }
 
 /** Where today's guard allows a file with more than one name, once proven immutable. */
