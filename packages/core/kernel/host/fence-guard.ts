@@ -516,6 +516,16 @@ export async function privatelyHeld(fs: HostFs, guard: PrivateGuard, real: strin
 /** The most link hops one path may take, as the kernel allows. */
 const MAX_HOPS = 40;
 
+/** What one step of {@link walkPhysically} saw, kept so {@link walkUnchanged} can prove the step still holds. */
+interface WalkStep {
+  /** The place that was looked at (never followed). */
+  readonly path: string;
+  /** What was there, `undefined` for nothing. */
+  readonly seen: FileIdentity | undefined;
+  /** The text of the link, when it was one. */
+  readonly text?: string;
+}
+
 /** Where {@link walkPhysically} ended, and whether it passed through a link that lives in the fence. */
 export interface PhysicalWalk {
   /** A symbolic link that lives inside the fence was followed (or more than {@link MAX_HOPS} links were). */
@@ -525,7 +535,14 @@ export interface PhysicalWalk {
    * from the text. When part of the path is not there it is the deepest folder that is (the missing tail is left off).
    */
   readonly at: string;
+  /** Every segment was found: nothing was left off, so `at` is where the whole path leads. */
+  readonly complete: boolean;
+  /** Everything the walk looked at, in order, for {@link walkUnchanged}. */
+  readonly trail: readonly WalkStep[];
 }
+
+const sameEntry = (a: FileIdentity | undefined, b: FileIdentity | undefined): boolean =>
+  a === undefined || b === undefined ? a === b : a.kind === b.kind && identityKey(a) === identityKey(b);
 
 /**
  * Today's `hopInsideHome`, walking `path` ONE SEGMENT AT A TIME as the kernel does: whether its resolution passes
@@ -533,29 +550,56 @@ export interface PhysicalWalk {
  * where it is before it is followed, and where it ends. A `..` is taken from the real place the walk is at, so it is
  * NEVER erased lexically before the links before it are resolved (`link-to-home/out/../x` is not `link-to-home/x`).
  * The home's own configured name (a symlinked home) is not such a link. `path` must be absolute and is NOT normalized.
+ *
+ * The walk is made of separate path-based looks, so it cannot prove the disk stood still while it ran: it keeps what
+ * each look saw (`trail`) and {@link walkUnchanged} asks the disk again.
  */
 export async function walkPhysically(fs: HostFs, fence: Fence, path: string): Promise<PhysicalWalk> {
   if (!isAbsolute(path)) throw new TypeError(`the path must be an absolute path: ${path}`);
   const segments = (text: string): string[] => text.split(sep).filter(part => part !== '' && part !== '.');
   const pending = segments(path);
+  const trail: WalkStep[] = [];
   let current: string = sep;
   for (let hops = 0; pending.length > 0; ) {
     const segment = pending.shift() as string;
     const next = segment === '..' ? dirname(current) : join(current, segment);
     const entry = await fs.identity(next);
     if (entry?.kind !== 'link') {
-      if (entry === undefined) return { hop: false, at: current };
+      trail.push({ path: next, seen: entry });
+      if (entry === undefined) return { hop: false, at: current, complete: false, trail };
       current = next;
       continue;
     }
-    if (next !== fence.named && (await fencedReal(fs, fence, next))) return { hop: true, at: next };
+    if (next !== fence.named && (await fencedReal(fs, fence, next)))
+      return { hop: true, at: next, complete: false, trail };
     hops += 1;
-    if (hops > MAX_HOPS) return { hop: true, at: next };
+    if (hops > MAX_HOPS) return { hop: true, at: next, complete: false, trail };
     const target = await fs.readlink(next);
+    trail.push({ path: next, seen: entry, text: target });
     pending.unshift(...segments(target));
     if (isAbsolute(target)) current = sep;
   }
-  return { hop: false, at: current };
+  return { hop: false, at: current, complete: true, trail };
+}
+
+/**
+ * Whether every look of `walk` still answers the same: each place has the same identity and each link the same text.
+ * A place replaced, renamed over or re-pointed since the walk looked is not the place the walk's end was reached
+ * through. Asked after the walk's end is judged, so a change during the judging shows too.
+ */
+export async function walkUnchanged(fs: HostFs, walk: PhysicalWalk): Promise<boolean> {
+  for (const step of walk.trail) {
+    const now = await fs.identity(step.path);
+    if (!sameEntry(step.seen, now)) return false;
+    if (step.text !== undefined && (await fs.readlink(step.path)) !== step.text) return false;
+  }
+  return true;
+}
+
+/** Whether `a` and `b` are the same object on the disk (a look at each, neither followed). */
+export async function sameObject(fs: HostFs, a: string, b: string): Promise<boolean> {
+  const [first, second] = [await fs.identity(a), await fs.identity(b)];
+  return first !== undefined && second !== undefined && sameEntry(first, second);
 }
 
 /** Whether `path`'s resolution passes through a link that lives inside the fence ({@link walkPhysically}). */

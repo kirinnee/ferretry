@@ -151,7 +151,7 @@ import type { DoctorFinding } from '../contract/kernel.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { SocketAccept, SocketDownstream, SocketHandler } from '../contract/socket.ts';
 import type { DoctorRun, DaemonImplementation, HookInvoker, ToolHandler, ToolResult } from '../manifest/implement.ts';
-import { privacyRefusals } from '../manifest/privacy.ts';
+import { composePrivateFiles, privacyRefusals } from '../manifest/privacy.ts';
 import { reachFaults } from '../manifest/reach.ts';
 import type { HookTake, Manifest, Needer, ToolDecl } from '../manifest/types.ts';
 import { type ActRecord, TestMintedIds, testActRunner } from './act.ts';
@@ -475,6 +475,8 @@ async function start(world: World): Promise<TestHost> {
   // production refuses at boot.
   const unsound = privacyRefusals(manifests);
   if (unsound.length > 0) throw new TypeError(unsound.join('\n'));
+  // The composed private places of the loaded plugins, as production composes them (a real-disk state home is judged by them).
+  const privateFiles = composePrivateFiles(manifests);
   // The real host refuses a plugin whose reach declarations it does not honour; a suite learns it the same way.
   const fault = reachFaults(manifests)[0];
   if (fault !== undefined) throw new Error(`testHost: ${fault.plugin} ${fault.sentence}`);
@@ -2044,7 +2046,8 @@ async function start(world: World): Promise<TestHost> {
                 return await stateHomeHolding(
                   nodeFs(() => 'x'),
                   options.stateHome,
-                  { files: [], recheckMs: 0 },
+                  // The same composed private places production passes (host.ts), so an alias of one is held here too.
+                  { files: privateFiles, recheckMs: 0 },
                   absolutePath,
                 );
               },
