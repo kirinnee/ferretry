@@ -1,3 +1,9 @@
+## [4.291.8](https://github.com/kirinnee/ferretry/compare/v4.291.7...v4.291.8) (2026-11-11)
+
+### Fixes
+
+* **fleet:** make launcher guards parse under every POSIX shell ([#1585](https://github.com/kirinnee/ferretry/issues/1585)) ([b7c4566](https://github.com/kirinnee/ferretry/commit/b7c45665b849a7e852433a0d2f1c02bd88a61a86))
+
 ## [4.291.7](https://github.com/kirinnee/ferretry/compare/v4.291.6...v4.291.7) (2026-11-11)
 
 ### Fixes

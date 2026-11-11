@@ -1,3 +1,9 @@
+## [4.291.7](https://github.com/kirinnee/ferretry/compare/v4.291.6...v4.291.7) (2026-11-11)
+
+### Fixes
+
+* **daemon:** stop board reads thrashing the session document cache ([#1584](https://github.com/kirinnee/ferretry/issues/1584)) ([f9108fb](https://github.com/kirinnee/ferretry/commit/f9108fbf467b5dc3c6204d439028dfd6e180fd5b))
+
 ## [4.291.6](https://github.com/kirinnee/ferretry/compare/v4.291.5...v4.291.6) (2026-11-11)
 
 ### Fixes
