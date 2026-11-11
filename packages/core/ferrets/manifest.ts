@@ -1,4 +1,4 @@
-import { AsksPort } from '@ferretry/core-asks/contract';
+import { AgendaContext, AsksPort } from '@ferretry/core-asks/contract';
 import { AUDIT_KINDS, audit, Bearers, CAPABILITIES, GatePort } from '@ferretry/core-gate/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
 import type { ConfigDef } from '@ferretry/kernel/contract';
@@ -532,7 +532,10 @@ export default definePlugin({
       { hook: FerretStopping },
       { hook: FerretStarted },
     ],
-    takes: [{ hook: Bearers, key: 'ferret' }],
+    takes: [
+      { hook: Bearers, key: 'ferret' },
+      { hook: AgendaContext, key: 'ferrets' },
+    ],
   },
   // Moves and forks (copying today's reach): a harness home is read through the read-only `harness-history` root, a
   // pane's process tree through `ps` and procfs (tmux joins when the pane preflight is bound, through Terminals' runner).
