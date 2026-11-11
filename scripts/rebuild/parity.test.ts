@@ -242,6 +242,36 @@ test("regeneration keeps a ticked route row's test path, and gives a reverted ro
   expect(f.run('--check').exitCode).toBe(0);
 });
 
+test('a ticked command row keeps the test path written in its check cell on regeneration, and an open one gets the default', () => {
+  const f = fixture();
+  expect(f.run().exitCode).toBe(0);
+  const what = 'fy task patch <id>';
+  const tsvPath = join(f.output, 'rebuild-parity.tsv');
+  const defaultCheck = f.rows().find(row => row.what === what)!.check;
+  const rewrite = (check: string, status: string) =>
+    writeFileSync(
+      tsvPath,
+      readFileSync(tsvPath, 'utf8')
+        .split('\n')
+        .map(line => {
+          const cells = line.split('\t');
+          if (cells[2] !== what) return line;
+          cells[8] = check;
+          cells[9] = status;
+          return cells.join('\t');
+        })
+        .join('\n'),
+    );
+  const testPath = 'packages/core/ferrets/tests/unit/cli/stream/stream.test.ts';
+  rewrite(testPath, '[x]');
+  expect(f.run().exitCode).toBe(0);
+  expect(f.rows().find(row => row.what === what)).toMatchObject({ check: testPath, status: '[x]' });
+  expect(f.run('--check').exitCode).toBe(0);
+  rewrite(testPath, '[ ]');
+  expect(f.run().exitCode).toBe(0);
+  expect(f.rows().find(row => row.what === what)).toMatchObject({ check: defaultCheck, status: '[ ]' });
+});
+
 test('BG-060 a ticked route row that REOWNED moves keeps its test path on regeneration, and an open one gets the default', () => {
   const f = fixture();
   expect(f.run().exitCode).toBe(0);

@@ -46,7 +46,7 @@ const KEYLIKE = `${'sk'}-${'ant'}-${'A1B2'.repeat(10)}`;
 function checked(text: string) {
   let ms = Number.POSITIVE_INFINITY;
   let result = checkConfigText(envDef, 'voice.yaml', text, 'fy');
-  for (let attempt = 0; attempt < 3 && ms >= BOUND_MS / 2; attempt += 1) {
+  for (let attempt = 0; attempt < 3 && ms >= BOUND_MS; attempt += 1) {
     const started = performance.now();
     result = checkConfigText(envDef, 'voice.yaml', text, 'fy');
     ms = Math.min(ms, performance.now() - started);

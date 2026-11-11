@@ -15,6 +15,7 @@ import {
   resolveDefaultRuntime,
 } from '../account/schema.ts';
 import { componentFilePath, freeName } from '../account/import.ts';
+import { looksSecret } from '@ferretry/std/credential-words';
 import { credentialHarnesses } from '../account/halves.ts';
 import {
   describeScopeConflict,
@@ -29,8 +30,7 @@ import {
 import { HARNESS_DISPLAY_NAMES, resolveProfile } from '../account/layering.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { parseSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
-import { looksSecret, type ShownWord, shownWords } from '@ferretry/core-vault/contract';
-import { shownWordsEtag } from './shown-words-etag.ts';
+import { refusedIndexes, type ShownWord, shownWords, shownWordsEtag } from './command-line.ts';
 import { slugName } from '../account/document.ts';
 import { holdsControlCharacter, INSTRUCTIONS_TEXT_LIMIT } from '../../../contract/index.ts';
 import type {
@@ -288,6 +288,10 @@ function resolvedWords(
     refuse(`${owner} has no value for ${what} ${String(at + 1)} to keep; type one`);
   const stored = Array.isArray(existing.words) ? (existing.words as readonly string[]) : [];
   const read = shownWords(stored, typeof existing.first === 'string' ? existing.first : undefined);
+  // THE NET: a list the read withheld (W still refuses a word the cutter showed) was never shown, so no word of it can
+  // be kept by its position; a whole-list replace with plain words still works.
+  if (refusedIndexes(read).size > 0 && input.some(word => typeof word !== 'string'))
+    refuse(`${owner}'s ${what}s are not shown, so none can be kept: retype the whole list`);
   const current = shownWordsEtag(read);
   const words = input.map(word => {
     if (typeof word === 'string') return word;

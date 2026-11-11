@@ -7,8 +7,8 @@
  *
  * - A text that holds a raw secret, or is over the cap, or that no mask can prove safe, is WITHHELD whole.
  * - Any other text is shown with each value that a credential name or a token shape marks cut to `‹hidden›`: per part,
- *   value only (a flag's spelling, a key's name, a URL's user and host stay). The words are cut by the kernel's copy of
- *   runtimes' word cutter ({@link shownWord}); the rest of the text is rebuilt by `editConfigText`, which sets only the
+ *   value only (a flag's spelling, a key's name, a URL's user and host stay). The words are cut by the one word cutter,
+ *   `@ferretry/std/credential-words` ({@link shownWord}); the rest of the text is rebuilt by `editConfigText`, which sets only the
  *   scalars that changed: every comment, the key order and the block layout stay, and the YAML library's round trip
  *   normalises the spacing of a flow list and before a trailing comment. A text with nothing to hide is returned as it
  *   is, byte for byte.
@@ -20,8 +20,14 @@
 import { configTextTooLarge, editConfigText, readConfigText } from '@ferretry/std/yaml';
 import { checkReadConfigText, type ConfigIssue, MAX_CONFIG_ISSUES, moreIssues } from './check.ts';
 import type { AnyConfigDef as ConfigDef } from './claims.ts';
-import { HIDDEN_VALUE_TEXT, looksSecret, shownWord, shownWords } from './secret-words.ts';
-import { rawTextHoldsSecret } from './secrets.ts';
+import {
+  findFlagSecrets,
+  HIDDEN_VALUE_TEXT,
+  looksSecretShown,
+  rawTextHoldsSecret,
+  shownWord,
+  shownWords,
+} from '@ferretry/std/credential-words';
 
 /** Why a text is not shown at all. */
 export type WithheldReason = 'raw_secret' | 'too_large' | 'unmaskable' | 'unparsed';
@@ -35,7 +41,8 @@ export type ShownConfigText =
 export const WITHHELD_WORDS: Readonly<Record<WithheldReason, string>> = {
   raw_secret: 'it holds a raw secret, which the owner must move into the secret store',
   too_large: 'it is larger than a configuration file may be',
-  unmaskable: 'a value in it could not be hidden safely',
+  unmaskable:
+    'a value in it could not be hidden safely, so none of the file is shown; move that value into the secret store and write its ${secret:NAME} pointer in its place',
   unparsed:
     'the file does not parse as YAML, so the app cannot tell which values to hide; fix the YAML on disk, at the machine',
 };
@@ -116,7 +123,7 @@ function shownItem(value: string, before: string | undefined): string {
 
 /** A string outside a list: cut whole under a secret name, else read as a word and, with blanks in it, as a command line. */
 function shownString(value: string, key: string | undefined): string {
-  if (key !== undefined && !SECRET_NAME_GRAMMAR.test(value) && looksSecret(key, value)) return HIDDEN_VALUE_TEXT;
+  if (key !== undefined && !SECRET_NAME_GRAMMAR.test(value) && looksSecretShown(key, value)) return HIDDEN_VALUE_TEXT;
   return shownItem(value, undefined);
 }
 
@@ -144,7 +151,7 @@ function maskedValue(value: unknown): { readonly value: unknown; readonly cuts: 
         const here = [...path, index];
         const word = scalarText(item);
         if (word === undefined) return walk(item, here);
-        const secretKey = key !== undefined && !SECRET_NAME_GRAMMAR.test(word) && looksSecret(key, word);
+        const secretKey = key !== undefined && !SECRET_NAME_GRAMMAR.test(word) && looksSecretShown(key, word);
         const shown = secretKey ? HIDDEN_VALUE_TEXT : shownItem(word, scalarText(node[index - 1]));
         return shown === word ? item : record(here, word, shown);
       });
@@ -192,7 +199,7 @@ function rawTextMayHold(text: string): boolean {
     const before = words[index - 1];
     return (
       shownWord(word, before).hidden ||
-      (before !== undefined && before.endsWith(':') && looksSecret(before.slice(0, -1), word))
+      (before !== undefined && before.endsWith(':') && looksSecretShown(before.slice(0, -1), word))
     );
   });
 }
@@ -231,6 +238,10 @@ export function shownConfigText(def: ConfigDef, path: string, text: string, bina
     return rawTextMayHold(text) ? { kind: 'withheld', reason: 'unparsed' } : { kind: 'shown', text, hidden: [] };
   const written = read.read.value;
   const { value, cuts } = maskedValue(written);
+  // What the write rule calls a raw flag secret is never shown (every W finding is under the read mask): a text whose
+  // mask leaves one is withheld whole, the safe answer, until the cutter learns that name. `‹hidden›` is 8 characters of
+  // no entropy, so a cut word never trips it.
+  if (findFlagSecrets(value).length > 0) return { kind: 'withheld', reason: 'unmaskable' };
   if (cuts.length === 0) return { kind: 'shown', text, hidden: [] };
   if (!isPlainObject(value)) return { kind: 'withheld', reason: 'unmaskable' };
   const shown = editConfigText(text, value, written, undefined);

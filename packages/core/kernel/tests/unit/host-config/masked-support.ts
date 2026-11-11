@@ -72,3 +72,42 @@ export const recordsDef = defineConfig({
   credentialRecords: true,
   loosens: () => [],
 });
+
+/**
+ * Names the write rule (W, `findFlagSecrets`) reads as a credential by the TAIL of the name (dashes stripped): the class
+ * the read mask must cut as well (CFG-LEAK-R). The first eight were shown raw before the mask took W's name test.
+ */
+export const TAIL_NAMES = [
+  'key',
+  'keys',
+  'tokens',
+  'secrets',
+  'passwords',
+  'passwds',
+  'apitoken',
+  'authtoken',
+  'sessiontoken',
+  'clientsecret',
+  'ssh-key',
+  'signing-key',
+  'encryption-key',
+  'license-key',
+  'master-key',
+  'credentials',
+  'credential',
+];
+
+/** The three forms a flag takes with a value: after a space, glued by `=`, and `-e NAME=v`. */
+export const flagForms = (name: string, value: string): readonly (readonly string[])[] => [
+  [`--${name}`, value],
+  [`--${name}=${value}`],
+  ['-e', `${name.toUpperCase().replaceAll('-', '_')}=${value}`],
+];
+
+/** A word that glues raw text to a `${secret:NAME}` pointer: the raw part is a credential written next to a pointer. */
+export const GLUED_POINTER_LINES: readonly (readonly string[])[] = [
+  ['-e', 'API_KEY=prefix${secret:X}'],
+  ['--token', 'prefix${secret:X}'],
+  ['-e', 'API_KEY=${secret:X}?model=short'],
+  ['--header=Authorization: Bearer v${secret:X}'],
+];

@@ -47,17 +47,8 @@ export {
   WITHHELD_SENTENCE,
 } from '@ferretry/kernel/contract';
 export * from './config.ts';
-// The one command-line rule and its vocabulary, by NAME: the strength helpers stay package-private to `lib/`.
-export { looksSecret, pointsElsewhere, SECRET_TOKEN_SOURCE, secretNamed } from './lib/credential-words.ts';
-export {
-  envEntryRefused,
-  firstRefusedWord,
-  HIDDEN_WORD_TEXT,
-  refusedLine,
-  type ShownWord,
-  shownWord,
-  shownWords,
-} from './lib/command-line.ts';
+// What a catalog refuses: the `publish` layer on `@ferretry/std/credential-words`, the one owner of the word rule.
+export { envEntryRefused, firstRefusedWord, refusedLine } from './lib/command-line.ts';
 export * from './inputs.ts';
 export * from './masks.ts';
 export * from './phone.ts';

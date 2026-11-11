@@ -91,7 +91,7 @@ imports. The kernel exports `./contract`, `./manifest`, `./testing`, `./host`, `
 4. A manifest imports only `@ferretry/kernel/manifest`, `@ferretry/kernel/contract`, and contracts.
 5. Halves use the kernel ports for clock, fs, env, network, processes (`banned-globals`: no `Date.now`, `setTimeout`,
    `node:fs`, `homedir`, `process.env`, `process.platform`, `fetch`, `Bun.spawn` outside the kernel's adapters).
-6. `@ferretry/std` holds no Ferretry noun.
+6. `@ferretry/std` holds no Ferretry noun, except the `${secret:NAME}` pointer grammar and the credential-word rules built on it (`./secret-reference`, `./credential-words`), which two contracts and two consumers must agree on byte for byte (fact-ownership).
 
 ## 5. The leaf API — `@ferretry/kernel/contract`
 

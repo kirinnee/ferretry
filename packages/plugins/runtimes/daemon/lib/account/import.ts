@@ -32,7 +32,8 @@
  * Pure: documents in, a plan out. Reading the host is the adapter's; writing the plan is the setup
  * executor's. A content digest is a caller-supplied function, because hashing is not this layer's.
  */
-import { looksSecret, secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
+import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
+import { looksSecret } from '@ferretry/std/credential-words';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
 import { FLEET_STARTER_MODELS } from '../defaults.ts';
@@ -306,6 +307,10 @@ export function freeName(name: string, taken: (candidate: string) => boolean): s
 }
 
 // ── Secrets ──────────────────────────────────────────────────────────────────────────────────────
+
+// The pure word tests (`looksSecret`, `secretNamed`, `pointsElsewhere`, the token formats) are `@ferretry/std`'s: ONE
+// implementation, shared with the kernel's read mask and this plugin's command-line views. This file keeps what is the
+// FLEET's: when an import refuses a secret, and what it writes in its place.
 
 /** A secret name in the store's grammar, from an environment variable name. */
 const secretNameOf = (variable: string): string => {

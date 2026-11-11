@@ -198,7 +198,7 @@ another subsystem's contract for a schema or id it reuses. A **core** contract n
 (the Asks contract carries a generic source envelope, §7.4). The contract graph must be
 acyclic (§2.4) and is checked separately from the start-order graph.
 
-**Shared code that is not a subsystem:** `@ferretry/std` (no Ferretry noun), `@ferretry/kernel` (the plugin SDK,
+**Shared code that is not a subsystem:** `@ferretry/std` (no Ferretry noun, except the `${secret:NAME}` pointer grammar and the credential-word rules built on it (`./secret-reference`, `./credential-words`), which two contracts and two consumers must agree on byte for byte (fact-ownership)), `@ferretry/kernel` (the plugin SDK,
 the test host, the daemon host), `packages/cli` (the `fy` shell: router, terminal ports, the generated command
 registry), `packages/app` (the app shell: router, layout engine, slots, theme tokens, the sealed session client, the
 reference grammar, the generated surface registry). None holds a feature.

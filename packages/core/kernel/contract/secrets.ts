@@ -8,10 +8,11 @@
  * {@link SecretsPort.send} is the narrower way for a secret that only ever rides on an HTTP request (Warden's Jev key):
  * the kernel places it, and the plugin never holds it at all.
  */
+import { SECRET_REFERENCE_SOURCE } from '@ferretry/std/secret-reference';
 import { z } from 'zod';
 
-/** The `${secret:NAME}` grammar (today's `SECRET_REFERENCE_SOURCE`). */
-export const SECRET_REFERENCE_SOURCE = '\\$\\{secret:([A-Z][A-Z0-9_]{0,63})\\}';
+/** The `${secret:NAME}` grammar: declared once in `@ferretry/std`, re-exported so this contract's callers keep one import. */
+export { SECRET_REFERENCE_SOURCE };
 
 /** Why a resolve answered no value. */
 export type OwnSecretRefusal = 'not_declared' | 'not_configured' | 'unknown';

@@ -195,6 +195,59 @@ anywhere, or a high-entropy value under a key ending `KEY`, `TOKEN`, `SECRET`, `
 line by line as well as by value, so a key left in a YAML comment or a tag is refused the same way, its issue
 naming only the line. Before 5.0 a comment was not scanned and such a file was accepted.
 
+## What a read shows
+
+`GET /v1/config/file` and the agent's `config_read` ask one function, so every caller is shown the same text: a
+ferret's token, a `--limited` device, the owner's paired device and the host admin alike. Who may read a file is the
+grant's answer; what a read shows has no "raw" class. The owner at the machine reads the raw file in their editor.
+
+- **A value that looks like a credential is replaced by `‹hidden›`.** A launch flag or an MCP argument holding a
+  token, a value after a secret-named flag or key (`--token v`, `API_KEY=v`, `Authorization: Bearer v`), a URL's
+  password and a URL's secret-named query parameter are cut, value only: the flag, the key, the URL's user and host
+  and every `${secret:NAME}` pointer stay. The rule is the one the Runtimes screens follow for a component's flags
+  ([secrets.md](secrets.md#secret-shaped-values-in-a-files-text)).
+- **Comments, key order and layout stay.** Only the changed scalars are rewritten. The YAML library's round trip
+  normalises the spacing of a flow list and the spacing before a trailing comment. A text with nothing to hide is
+  returned byte for byte.
+- **The etag is the sha256 of the text on disk**, not of what is shown, so a read of a masked file still names the
+  file a write must match (`If-Match`).
+- **A masked text saved back is refused.** A write that holds more `‹hidden›` than the file on disk, or a value that
+  holds one where the disk value at the same place does not, is refused as a `schema` issue at its line ("a value hidden
+  from the device or agent that read this file is still ‹hidden› here; nothing was written"), so the mask is never
+  written over a real value. The fix is to type the real value at the machine or replace the mark with
+  `${secret:NAME}`. A patch of another key of such a file is still applied.
+- **A name is read the way the write rule reads it.** A flag or key is a credential's when its name ENDS in `key`,
+  `token`, `secret`, `password`, `passwd` (plural too) or `credential(s)`, dashes ignored (`--key`, `--tokens`,
+  `--apitoken`, `--clientsecret`, `--ssh-key`, `SIGNING_KEY`), or holds a word such as `AUTH` or a pair such as
+  `API_KEY`. It over-hides on purpose (`--model-key v` is cut; so are a path after `--ssh-key`, `--public-key` or
+  `--signing-key`, `--monkey`, `--hockey`, `--key <anything of 8 or more characters>` and `--keys a,b,c`), and every
+  flag secret the write rule refuses is cut, or the file is withheld (`unmaskable`).
+- **Text glued to a `${secret:NAME}` pointer is cut.** `API_KEY=prefix${secret:X}`, `--token prefix${secret:X}`,
+  `API_KEY=${secret:X}?model=short` and `Authorization: Bearer v${secret:X}` hide the whole value (the raw part is a
+  credential written next to a pointer); one pointer alone, quoted or not, stays shown. A `,`, `;` or `&` right after
+  the pointer ends the key's value, and the text after it is cut too (`--key ${secret:X},v`), unless a key of its own
+  starts there (`--set=a=1,API_KEY=${secret:X},b=2` is shown). A key of its own followed by another `,`, `;` or `&`
+  and text with no key (`--key ${secret:X},b=2,v`, also with several keys or quotes) is cut whole; this over-cuts
+  innocent text of that shape too (`${secret:X},b=2,c`); keys only (`${secret:X},a=1,b=2`) or a trailing separator
+  (`${secret:X},b=2,`) stay shown where the write rule accepts them (`--set=a=1,API_KEY=${secret:X},a=1,b=2`); under a
+  credential flag (`--key ${secret:X},a=1,b=2`) it refuses them, so they are cut whole. A value that holds a pointer and raw text in any piece of it and that the write rule
+  refuses whole is cut whole, value start to word end, so this over-cuts the pointer and innocent text in it too (a
+  credential-named `--key prefix${secret:X},v`). A URL password glued to a pointer
+  (`https://u:${secret:X}abcdefgh@h/p`) is shown, and the write rule accepts it too: a shared GAP.
+- **Some texts are withheld whole.** The route (`GET /v1/config/file`) answers one comment line (a save of it is
+  refused, so it never wipes the file) and `config_read` answers an empty `text` with the reason in its summary; the
+  route's issues say why too. The reasons: `raw_secret` (it holds a raw secret, which is also refused on write),
+  `too_large` (over the cap), `unmaskable` (a value in it could not be hidden safely: a cut value still written
+  somewhere, or a text in which the write rule still finds a raw flag secret after the mask, so a mask that missed
+  something shows nothing) and `unparsed` (the file does not parse as YAML, so the values to hide cannot be told, but
+  only when the raw text holds a word the cutter would cut or a credential after a secret-named key; any other
+  unparsed text is shown as it is).
+
+What this does not do: a word shorter than 7 characters is never searched for a cut (`MIN_CUT_WORD`), and a value
+under 8 characters is no credential by a secret name (a URL's password is cut at any length); a JSON document inside a
+flag and a plain password stuck to a one-letter flag (`-p<password>`) are not cut; and a text that does not parse can
+show what neither check recognised. The full list is in [secrets.md](secrets.md#secret-shaped-values-in-a-files-text).
+
 ## Editing
 
 Every program that writes a file computes the value it wants and edits the existing text with the `yaml`

@@ -14,10 +14,11 @@ import type { CallStanding } from '../../../contract/route.ts';
 import { runInCall } from '../../../host/call-scope.ts';
 import { configRoutes } from '../../../host/config/routes.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
+import { WITHHELD_WORDS } from '../../../host/config/shown-text.ts';
 import { localArrival } from '../../../host/listener.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import { captureLog, HOME, manualClock } from './support.ts';
-import { HIDDEN, mcpDef, OTHER_VALUE, VALUE } from './masked-support.ts';
+import { flagForms, GLUED_POINTER_LINES, HIDDEN, mcpDef, OTHER_VALUE, TAIL_NAMES, VALUE } from './masked-support.ts';
 
 const FILE = `${HOME}/config/mcp/srv.yaml`;
 const PATH = 'mcp/srv.yaml';
@@ -115,6 +116,19 @@ describe('GET /v1/config/file shows the masked text to every caller', () => {
     expect(body.exists).toBe(true);
   });
 
+  test('S6 CFG-LEAK-R GET never shows a value under a name only the write rule reads by its tail, or one glued to a pointer', async () => {
+    const lines = [...TAIL_NAMES.flatMap(name => flagForms(name, VALUE)), ...GLUED_POINTER_LINES];
+    for (const words of lines) {
+      const w = world();
+      w.fs.seed(FILE, `args:\n${words.map(word => `  - ${JSON.stringify(word)}\n`).join('')}`);
+      await w.files.reload();
+      const body = json(await get(w.handlers));
+      const text = String(body.text);
+      expect([words, text.includes(VALUE), /prefix|=short|Bearer v\$/u.test(text)]).toEqual([words, false, false]);
+      expect([words, text.includes(HIDDEN)]).toEqual([words, true]);
+    }
+  });
+
   test('CFG-LEAK-R the route says where each value is hidden: one warning per cut, with the fix, never the value', async () => {
     const w = world();
     w.fs.seed(FILE, `args:\n  - --token\n  - ${VALUE}\n  - --api-key=${OTHER_VALUE}\n`);
@@ -205,12 +219,12 @@ describe('GET /v1/config/file shows the masked text to every caller', () => {
     const response = await get(w.handlers);
     const body = json(response);
     expect(body.text).toBe(
-      `# ${HIDDEN}: the text of this file is not shown because a value in it could not be hidden safely; edit it at the machine\n`,
+      `# ${HIDDEN}: the text of this file is not shown because ${WITHHELD_WORDS.unmaskable}; edit it at the machine\n`,
     );
     expect(issuesOf(response).at(-1)).toEqual({
       path: PATH,
       severity: 'error',
-      message: 'the text of this file is not shown because a value in it could not be hidden safely',
+      message: `the text of this file is not shown because ${WITHHELD_WORDS.unmaskable}`,
       fix: 'edit the file at the machine',
     });
     expect(response.body).not.toContain(VALUE);

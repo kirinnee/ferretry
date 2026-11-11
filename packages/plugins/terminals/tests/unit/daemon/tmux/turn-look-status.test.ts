@@ -26,6 +26,20 @@ describe('U5 status lines (what the live readout reads from a look)', () => {
   });
 });
 
+describe('B188 the turn look reads a compaction as status work, not as an overrulable spinner', () => {
+  const visible = readFileSync(
+    join(import.meta.dir, '../../../fixtures/composer/claude-2.1.30x-compacting-start-middot.txt'),
+    'utf8',
+  );
+
+  test('B188 a · tick compaction is working, never spinner-only, and not at the prompt', () => {
+    const look = turnLookOf({ dead: false, alive: true, promptReady: false, history: '', visible }, text => text);
+    expect(look.working).toBe(true);
+    expect(look.spinnerOnly).toBeUndefined();
+    expect(look.atPrompt).toBe(false);
+  });
+});
+
 describe('B187 the turn look reads an idle composer that holds a draft', () => {
   const fixture = (name: string): string =>
     readFileSync(join(import.meta.dir, '../../../fixtures/composer', name), 'utf8');

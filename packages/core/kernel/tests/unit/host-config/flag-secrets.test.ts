@@ -9,7 +9,7 @@
  * Fake only: every value is shaped like a credential and is none.
  */
 import { describe, expect, test } from 'bun:test';
-import { findFlagSecrets } from '../../../host/config/secrets.ts';
+import { findFlagSecrets } from '@ferretry/std/credential-words';
 import { createConfigFiles } from '../../../host/config/service.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import { captureLog, HOME, manualClock } from './support.ts';

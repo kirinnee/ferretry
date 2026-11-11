@@ -1,5 +1,13 @@
 import { InstantSchema } from '@ferretry/std';
+import {
+  MIN_SECRET_VALUE_LENGTH,
+  SECRET_REFERENCE_SOURCE,
+  secretReferencePattern,
+} from '@ferretry/std/secret-reference';
 import { z } from 'zod';
+
+/** The pointer grammar and the shortest value the store keeps: declared once in `@ferretry/std`, re-exported here. */
+export { MIN_SECRET_VALUE_LENGTH, SECRET_REFERENCE_SOURCE, secretReferencePattern };
 
 /**
  * Secrets: values ferrets use by name and never see (§2.2, docs/secrets.md). Today's `protocol/src/lib/secrets.ts`,
@@ -9,7 +17,6 @@ import { z } from 'zod';
 
 export const MAX_SECRET_NAME_LENGTH = 64;
 export const MAX_SECRETS_PER_DAEMON = 256;
-export const MIN_SECRET_VALUE_LENGTH = 8;
 export const MAX_SECRET_VALUE_LENGTH = 16 * 1024;
 
 export const SecretNameSchema = z
@@ -30,8 +37,6 @@ export const SecretSummarySchema = z.strictObject({
 });
 export type SecretSummary = z.infer<typeof SecretSummarySchema>;
 
-export const SECRET_REFERENCE_SOURCE = '\\$\\{secret:([A-Z][A-Z0-9_]{0,63})\\}';
-export const secretReferencePattern = (): RegExp => new RegExp(SECRET_REFERENCE_SOURCE, 'gu');
 export const secretReference = (name: SecretName): string => `\${secret:${name}}`;
 
 export function secretReferencesIn(value: string): readonly SecretName[] {

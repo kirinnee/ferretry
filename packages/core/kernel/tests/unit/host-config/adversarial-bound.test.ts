@@ -12,7 +12,7 @@ import { agentConfig } from '../../../host/config/agent.ts';
 import { checkConfigText } from '../../../host/config/check.ts';
 import { evaluateConfig } from '../../../host/config/evaluate.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
-import { findFlagSecrets } from '../../../host/config/secrets.ts';
+import { findFlagSecrets } from '@ferretry/std/credential-words';
 import { shownConfigText } from '../../../host/config/shown-text.ts';
 import { CONFIG_FILE_MAX_BYTES, CONFIG_TOO_LARGE, configTextTooLarge, readConfigText } from '@ferretry/std/yaml';
 import type { HostFs } from '../../../host/state/host-fs.ts';
@@ -80,13 +80,15 @@ function clockReads(label: string, ms: number): void {
 /**
  * The BEST of up to three samples (the same shape as `issue-cap.test.ts`): a quadratic path is slow in every sample and
  * fails, a collection or a busy moment on a shared runner lands in one and does not. A further sample is taken only
- * while the best so far is at or over half the bound, so a fast first sample costs nothing more. `sample` is told which
+ * while the best so far fails the bound: a sample that passes cannot be made to pass more, and re-sampling one cost a
+ * fresh world and a reload each, enough to cross bun's 5 s test timeout at 750 ms a call
+ * (T-0032, 5.7 s on CI). `sample` is told which
  * attempt it is: a later one starts from a world of its own, because a check one load made is remembered and a second
  * call on the same world would measure the memo, not the parse.
  */
 async function bestOf(sample: (attempt: number) => Promise<number>): Promise<number> {
   let best = Number.POSITIVE_INFINITY;
-  for (let attempt = 0; attempt < 3 && best >= BOUND_MS / 2; attempt += 1) {
+  for (let attempt = 0; attempt < 3 && best >= BOUND_MS; attempt += 1) {
     best = Math.min(best, await sample(attempt));
   }
   return best;

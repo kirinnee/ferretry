@@ -1,0 +1,9 @@
+
+  Done reading the cache layer; two snapshot tests still need refreshing.
+
+· Compacting conversation…
+
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

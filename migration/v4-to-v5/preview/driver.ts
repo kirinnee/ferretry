@@ -3,7 +3,7 @@
  * home from a v4 home and proves v4 was left alone. Neither starts a daemon. Every path is a parameter so a test
  * runs both in temp folders.
  */
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { convert } from '../src/convert.ts';
@@ -11,7 +11,7 @@ import { previewAuthoredFiles, previewHeldFiles, v4HeldFiles } from '../src/step
 import type { LockProbe } from '../src/preflight.ts';
 import { type ConversionReport, summarise } from '../src/report.ts';
 import { PREVIEW_WORKSPACE } from '../src/v5/harness-paths.ts';
-import { CODEX_HELD_SENTENCE, previewShellEnv } from '../src/v5/preview-env.ts';
+import { CODEX_HELD_SENTENCE, previewShellEnv, ZDOT_FOLDER } from '../src/v5/preview-env.ts';
 import { type Spellings } from '../src/v4/homes.ts';
 import { gateFiles, gateForecast } from './gate.ts';
 import { readLoginHarnesses } from './harness-map.ts';
@@ -37,6 +37,15 @@ export const stagingFor = (target: string) => `${target}.staging`;
 
 /** The conversion report, beside the preview home (a v5 home holds only declared files). */
 export const reportPathFor = (target: string) => `${target}.conversion-report.json`;
+
+/**
+ * Where `clean` parks the programs `build` installed (`<home>/libexec`) so the next `prepare` can put them back: the
+ * converter only writes a NEW, empty home, so they cannot stay in it. Beside the preview home, like the report.
+ */
+export const libexecParkFor = (target: string) => `${target}.libexec`;
+
+const isRealFolder = async (path: string): Promise<boolean> =>
+  (await lstat(path).catch(() => undefined))?.isDirectory() === true;
 
 /**
  * What the preview held out because it is a Codex (or not provably Claude Code) runtime: each entry by NAME with its
@@ -271,6 +280,9 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
   // outside every v4 path.
   await writeProof(home, target, v4Home, before);
   await writeFile(join(target, PREVIEW_MARKER), PREVIEW_MARKER_TEXT, { mode: 0o600 });
+  // The programs a `build` installed before the last `clean` come back: a new home does not mean a new build.
+  const parked = libexecParkFor(target);
+  if (await isRealFolder(parked)) await rename(parked, join(target, 'libexec'));
   // The report sits BESIDE the preview home (as `src/main.ts` writes it), never inside it: names and counts only.
   const reportPath = reportPathFor(target);
   await writeReport(reportPath, `${JSON.stringify(result.report, null, 2)}\n`);
@@ -305,16 +317,28 @@ export async function cleanPreview(v4Home: string, target: string, home: string 
     throw new Error(
       `${guarded.target} has no ${PREVIEW_MARKER} marker, so it is not a preview home; nothing was removed. If a prepare died before its marker, remove it yourself: rm -rf '${guarded.target}' '${guarded.staging}' '${reportPathFor(guarded.target)}' (and, if it exists, the proof file ${proofPathFor(home, guarded.target)})`,
     );
+  // The built programs are not state: they are parked beside the home (replacing an older park) for the next prepare.
+  const parked = libexecParkFor(guarded.target);
+  const built = join(guarded.target, 'libexec');
+  const keep = await isRealFolder(built);
+  if (keep) {
+    await rm(parked, { recursive: true, force: true });
+    await rename(built, parked);
+  }
   await rm(guarded.target, { recursive: true, force: true });
   await rm(guarded.staging, { recursive: true, force: true });
   await rm(reportPathFor(guarded.target), { force: true });
   await removeProof(home, guarded.target);
-  return `removed ${guarded.target}, its staging copy, its conversion report and its proof`;
+  return `removed ${guarded.target}, its staging copy, its conversion report and its proof${keep ? `; its built programs were kept at ${parked} and prepare puts them back` : ''}`;
 }
 
-/** Names the wrapper passes through from the caller's environment (and `LC_*`): nothing else reaches the binary. */
+/**
+ * Names the wrapper passes through from the caller's environment (and `LC_*`): nothing else reaches the binary. An
+ * ALLOW-LIST, not a deny-list: a credential variable nobody thought of (a new cloud's `*_TOKEN`) is stopped because it was
+ * never named, where a deny-list would pass it. HOME and SSH_AUTH_SOCK are deliberately NOT here: the wrapper sets the
+ * preview's own empty HOME and the host's agent socket never passes.
+ */
 export const ENV_ALLOWLIST = [
-  'HOME',
   'USER',
   'LOGNAME',
   'PATH',
@@ -325,8 +349,53 @@ export const ENV_ALLOWLIST = [
   'DISPLAY',
   'WAYLAND_DISPLAY',
   'DBUS_SESSION_BUS_ADDRESS',
-  'SSH_AUTH_SOCK',
 ] as const;
+
+/**
+ * What the wrapper sets in place of every host credential: the daemon's HOME is empty, `gh` finds no login, `git` reads
+ * no global or system config (so no credential helper) and never prompts. Relative to the home's no-host-creds folder.
+ */
+export const NO_CREDS_ENV = {
+  home: 'home',
+  gh: 'gh',
+  gitConfig: 'gitconfig',
+  zdot: ZDOT_FOLDER,
+} as const;
+
+/**
+ * The ONE file of the terminals' ZDOTDIR folder (`zdot/`, 0700, beside the HOME): an empty `.zshrc`. Without any zsh
+ * startup file, an interactive zsh runs its first-run menu (zsh-newuser-install) and swallows the first keys typed into
+ * the pane, so a terminal the daemon opens never ran the command typed into it. The file is empty, so it reads nothing and
+ * holds nothing. It lives in `zdot/`, not in the HOME, so the HOME stays EMPTY: the shells' own files (`.zcompdump*`,
+ * `.zsh_history`, `.zsh_sessions`, `.bash_history`) land in `zdot/` too, and the credential check tolerates exactly those
+ * names there, by name only. The wrapper makes the rc only in a daemon START, after it removed the folder.
+ */
+export const HOME_SHELL_RC = '.zshrc';
+
+/** The names a terminal's shell writes into `zdot/` by itself, after the proof; the credential check tolerates them (names only). */
+export const SHELL_STATE_NAMES: readonly RegExp[] = [
+  /^\.zcompdump(-.*)?$/u,
+  /^\.zsh_history$/u,
+  /^\.zsh_sessions$/u,
+  /^\.bash_history$/u,
+];
+
+/** What the `ssh` shim adds to every call: no config file, no key, no agent, no prompt (plus its own known_hosts file). */
+export const SSH_SHIM_OPTIONS =
+  '-F /dev/null -o IdentityFile=none -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes';
+
+/** The fixed variables the wrapper sets, as the `env -i` line carries them (values that are paths come from `home`). */
+export function noCredsValues(home: string): Readonly<Record<string, string>> {
+  const base = `${home}/${PREVIEW.noCredsFolder}`;
+  return {
+    HOME: `${base}/${NO_CREDS_ENV.home}`,
+    GH_CONFIG_DIR: `${base}/${NO_CREDS_ENV.gh}`,
+    GIT_CONFIG_GLOBAL: `${base}/${NO_CREDS_ENV.gitConfig}`,
+    GIT_CONFIG_SYSTEM: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_TERMINAL_PROMPT: '0',
+  };
+}
 
 /** Daemon verbs the preview never runs through the product's lifecycle: they write claim files beside v4's unit or answer for it. */
 export const REFUSED_DAEMON_VERBS = [
@@ -428,13 +497,21 @@ export function wrapperText(home: string, v4Home: string): string {
     'fi',
     "# PATH: the preview's own bin first (every bare fy, fyd and fyd-browser-worker is then the preview's), and nothing",
     "# under v4's home or its worktree folder.",
-    `path="${home}/bin"`,
+    '# The `ssh` shim folder (made below, its shim replaced by each daemon start) comes first of all: the daemon gives every child only',
+    '# PATH and HOME, so a PATH entry is the one way a child finds the shim. The first real `ssh` on the rest of the PATH is',
+    '# what the shim runs.',
+    `nocreds="${home}/${PREVIEW.noCredsFolder}"`,
+    `path="$nocreds/bin:${home}/bin"`,
+    'real_ssh=""',
     'set -f',
     'old_ifs="$IFS"; IFS=:',
     'for entry in ${PATH:-}; do',
     '  case "$entry" in',
-    `  ""|"${home}/bin"|"${v4Home}"|"${v4Home}"/*|"${v4Home}-worktrees"|"${v4Home}-worktrees"/*) ;;`,
-    '  *) path="$path:$entry" ;;',
+    `  ""|"$nocreds/bin"|"${home}/bin"|"${v4Home}"|"${v4Home}"/*|"${v4Home}-worktrees"|"${v4Home}-worktrees"/*) ;;`,
+    '  *)',
+    '    path="$path:$entry"',
+    '    if [ -z "$real_ssh" ] && [ -x "$entry/ssh" ] && [ ! -d "$entry/ssh" ]; then real_ssh="$entry/ssh"; fi',
+    '    ;;',
     '  esac',
     'done',
     'IFS="$old_ifs"; set +f',
@@ -454,7 +531,44 @@ export function wrapperText(home: string, v4Home: string): string {
     '  (umask 077; mkdir -p "$run"); chmod 700 "$run"',
     '  set -- "XDG_RUNTIME_DIR=$run" "$@"',
     'fi',
-    `exec env -i FY_HOME="${home}" FY_PORT="${PREVIEW.port}" FY_URL="${url}" FY_UPDATE_CHECK=off "$@"`,
+    "# No host credential: HOME, gh's config folder and git's global config are EMPTY ones under the preview home, git reads",
+    '# no system config (no credential helper) and never prompts. A daemon start makes them fresh; `preview.sh stop` removes',
+    '# them. The names the allowlist above never passes (GH_TOKEN, SSH_AUTH_SOCK, AWS_*, ...) are simply absent.',
+    '# The folder itself is never deleted: it also holds the `ssh` shim, which live ferret panes (their tmux server outlives the',
+    '# daemon) keep finding first on their PATH. It is made 0700 when missing and CHECKED when present (ours, 0700, no symlink).',
+    'private_dir() {',
+    '  if [ -L "$1" ] || [ ! -d "$1" ] || [ ! -O "$1" ] || [ "$(ls -ld "$1" | cut -c1-10)" != "drwx------" ]; then',
+    '    echo "fy5: refusing to go on: $1 is not a private (0700) folder of mine; move it aside and start again" >&2; exit 1',
+    '  fi',
+    '}',
+    '(umask 077; mkdir -p "$nocreds")',
+    'private_dir "$nocreds"',
+    `if [ "$daemon" = 1 ] && [ "$probe" = 0 ]; then rm -rf "$nocreds/${NO_CREDS_ENV.home}" "$nocreds/${NO_CREDS_ENV.gh}" "$nocreds/${NO_CREDS_ENV.gitConfig}" "$nocreds/${NO_CREDS_ENV.zdot}"; fi`,
+    `(umask 077; mkdir -p "$nocreds/${NO_CREDS_ENV.home}" "$nocreds/${NO_CREDS_ENV.gh}"; : >"$nocreds/${NO_CREDS_ENV.gitConfig}")`,
+    "# The empty .zshrc is the one file of the terminals' ZDOTDIR folder (zdot/, beside the HOME, which stays EMPTY): with no zsh",
+    '# startup file, an interactive zsh runs its first-run menu and swallows the first keys typed into a terminal the daemon',
+    '# opened. It is made ONLY in a daemon start, right after the folder was removed above (a probe or any other verb never',
+    '# writes it, so a link planted since cannot be followed), and with noclobber so a link that appears in between is refused.',
+    `if [ "$daemon" = 1 ] && [ "$probe" = 0 ]; then (umask 077; set -C; mkdir "$nocreds/${NO_CREDS_ENV.zdot}"; : >"$nocreds/${NO_CREDS_ENV.zdot}/${HOME_SHELL_RC}"); fi`,
+    "# The `ssh` shim: the first `ssh` on a child's PATH. It runs the real one (found above, by absolute path) with no config",
+    '# file, no key, no agent and no prompt, and its own known_hosts. A caller that names /usr/bin/ssh is not covered.',
+    '# Only a daemon START writes it (a probe or another verb never does), so the start check sees what the daemon has. It is',
+    '# written to a temp name in the same 0700 folder and renamed over bin/ssh, so a live pane never sees it missing or half written.',
+    '# A path with a quote, $, backtick or backslash is not written into the shim: on a first start, no shim means the start check refuses; after that the earlier shim stays.',
+    'case "$real_ssh" in',
+    String.raw`*"'"*|*'"'*|*'$'*|*'${'`'}'*|*'\'*) real_ssh="" ;;`,
+    'esac',
+    'if [ "$daemon" = 1 ] && [ "$probe" = 0 ] && [ -n "$real_ssh" ]; then',
+    String.raw`  (umask 077; mkdir -p "$nocreds/bin")
+  private_dir "$nocreds/bin"
+  rm -f "$nocreds/bin/.ssh.new."*
+  tmp="$nocreds/bin/.ssh.new.$$"
+  (umask 077; printf '%s\n' '#!/bin/sh' "exec \"$real_ssh\" ${SSH_SHIM_OPTIONS} -o UserKnownHostsFile=\"$nocreds/known_hosts\" \"\$@\"" >"$tmp"; chmod 700 "$tmp")
+  mv -f "$tmp" "$nocreds/bin/ssh"`,
+    'fi',
+    `exec env -i ${Object.entries(noCredsValues(home))
+      .map(([name, value]) => `${name}="${value}"`)
+      .join(' ')} FY_HOME="${home}" FY_PORT="${PREVIEW.port}" FY_URL="${url}" FY_UPDATE_CHECK=off "$@"`,
     '',
   ].join('\n');
 }

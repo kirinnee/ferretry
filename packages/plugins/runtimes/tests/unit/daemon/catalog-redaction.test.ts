@@ -1400,6 +1400,11 @@ describe('the redaction guarantees', () => {
     }
   });
 
+  // Per-test limit (testing standard): the test runs 7 shapes x (1 warm-up + 5 + 5 timed runs), 100 KB at the largest,
+  // through `shownFor`, which is the component-text path; the text net runs W's flag rule once per line. Measured
+  // alone, one file, wall clock: 5.0 3.24 s, fix 2 4.0 s, fix 3 4.5-5.5 s (5.26 s and 5.50 s failed bun's 5 s default),
+  // fix 4 4.76 s, 4.80 s, 4.80 s (+ one 5.13 s fail on the first run). The ratio and ceiling below are unchanged
+  // and are the linearity proof; 60 s is a margin for a loaded runner like net-command-value's, not a speed claim.
   it('S25 every shape rule is linear: a long run of any shape costs the same per character as a short one', () => {
     // Arrange: the shapes that made the old rules quadratic (name characters with no separator, repeated token heads,
     // a separator with nothing after it, a long block, a long expansion).
@@ -1436,5 +1441,5 @@ describe('the redaction guarantees', () => {
       should(large).be.below(small * 40);
       should(large).be.below(3_000);
     }
-  });
+  }, 60_000);
 });

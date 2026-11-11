@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { PLUGIN_API } from '../contract/ids.ts';
 import { DATA_KINDS } from '../manifest/types.ts';
 import type { HostFs } from './adapters/node-fs.ts';
-import { looksLikeRawSecret, RAW_SECRET_KEY_MESSAGE } from './config/secrets.ts';
+import { looksLikeRawSecret } from '@ferretry/std/credential-words';
+import { RAW_SECRET_KEY_MESSAGE } from './config/secrets.ts';
 import type { DataPluginManifest } from './snapshot.ts';
 
 const DATA_PLUGIN_FORMAT = 1;

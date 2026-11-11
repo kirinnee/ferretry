@@ -7,7 +7,7 @@
  *
  * Do not edit this to follow 5.0. It is a floor.
  */
-import { looksSecret } from '@ferretry/core-vault/contract';
+import { looksSecret } from '@ferretry/std/credential-words';
 
 const RESOLVED_HIDDEN_TEXT = '‹hidden›';
 

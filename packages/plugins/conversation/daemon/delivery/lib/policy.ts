@@ -89,7 +89,9 @@ export type SendRouting =
  */
 export function routeSend(target: SendTarget, pane: SendPaneObservation): SendRouting {
   if (TERMINAL_SEND_STATUSES.has(target.status) || !pane.alive || pane.dead) return 'revive';
-  if (target.promptReady === true || pane.promptReady) return 'idle';
+  // A RECORDED ready composer is the older word: it counts only while the pane shows no work, so a compaction
+  // that began after the record was written is never typed into (&B188).
+  if (pane.promptReady || (target.promptReady === true && !pane.activeWork)) return 'idle';
   if (target.status === 'waiting' && pane.activeWork) return 'busy';
   if (IDLE_SEND_STATUSES.has(target.status)) return 'idle';
   return 'busy';

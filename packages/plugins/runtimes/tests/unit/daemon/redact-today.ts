@@ -1,4 +1,5 @@
-import { looksSecret, MIN_SECRET_VALUE_LENGTH, SECRET_TOKEN_SOURCE } from '@ferretry/core-vault/contract';
+import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/core-vault/contract';
+import { looksSecret, SECRET_TOKEN_SOURCE } from '@ferretry/std/credential-words';
 
 /*
  * `redactText` exactly as it stands today (4.291.5, `packages/daemon/src/lib/fleet/catalog.ts` at bb89d054d), frozen

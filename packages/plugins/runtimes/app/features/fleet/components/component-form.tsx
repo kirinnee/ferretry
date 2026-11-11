@@ -17,6 +17,9 @@ import {
   type CatalogHarness,
   harnessBound,
   mcpDraftIsUrl,
+  WITHHELD_ARGS_PROBLEM,
+  WITHHELD_COMMAND_PROBLEM,
+  WITHHELD_FLAGS_PROBLEM,
 } from './component-model.ts';
 
 const BODY_LABEL = {
@@ -97,6 +100,15 @@ export function ComponentForm({ draft, onChange, editing, problem }: ComponentFo
           ) : draft.kind === 'mcp' ? (
             <span className="text-cell leading-base text-muted">
               The command that starts the server, or its web address.
+            </span>
+          ) : null}
+          {draft.wordsWithheld || draft.commandWithheld ? (
+            <span className="text-cell leading-base text-warn" data-component-withheld="">
+              {draft.commandWithheld
+                ? WITHHELD_COMMAND_PROBLEM
+                : draft.kind === 'mcp'
+                  ? WITHHELD_ARGS_PROBLEM
+                  : WITHHELD_FLAGS_PROBLEM}
             </span>
           ) : null}
         </label>

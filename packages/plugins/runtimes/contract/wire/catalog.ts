@@ -15,7 +15,7 @@
  * edit keeps it with `{ keep: true, at }` against the list's etag.
  * Every object is strict. Shapes owned by other subsystems come from `./shared.ts`.
  */
-import { HIDDEN_WORD_TEXT } from '@ferretry/core-vault/contract';
+import { HIDDEN_VALUE_TEXT } from '@ferretry/std/secret-reference';
 import { z } from 'zod';
 import { ApplyOutcomeSchema, DocumentSummarySchema, ProposalIdSchema, WriteOperationSchema } from './changes.ts';
 import {
@@ -206,8 +206,18 @@ export const EnvEntrySchema = z.union([
 ]);
 export type EnvEntry = z.infer<typeof EnvEntrySchema>;
 
-/** What stands in a command-line word for the value that is not shown, and so can never be typed as one (the Vault contract's). */
-export { HIDDEN_WORD_TEXT };
+/**
+ * What stands in a command-line word for the value that is not shown, and so can never be typed as one. Declared once
+ * in `@ferretry/std` (the kernel's read mask shows the same spelling) and re-exported here.
+ */
+export const HIDDEN_WORD_TEXT: string = HIDDEN_VALUE_TEXT;
+
+/**
+ * What a view says instead of a command line (or one word of it) the write rule still refuses once the word cutter has
+ * had its say: the text may hold a credential, so none of it is shown, never a part (CFG-LEAK, the Runtimes net). Plain
+ * words, for a person.
+ */
+export const WITHHELD_WORDS_TEXT = 'Not shown: this may hold a credential. Open the file at this machine to read it.';
 
 /**
  * One launch flag or MCP argument as it may travel: as written, or — when it carries a credential — the fact that it
@@ -224,10 +234,23 @@ export const ComponentDetailSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('mcp'),
     command: NonEmptyStringSchema.optional(),
+    /**
+     * As `argsWithheld`, for the text shown as written: the write rule still refuses the command (alone or with its
+     * arguments) or the word cutter would cut part of it, so `command` is absent and nothing of it is shown. An edit
+     * retypes the whole command line.
+     */
+    commandWithheld: z.literal(true).optional(),
     args: z.array(CommandWordSchema).readonly().optional(),
     /** The etag of `args` as read, present with them: an edit that keeps a hidden argument sends it back. */
     argsEtag: NonEmptyStringSchema.optional(),
+    /**
+     * The write rule still refuses a word the cutter showed, so the WHOLE list is withheld: `args` and `argsEtag` are
+     * absent and nothing of the list is shown. An edit keeps no word of it; it retypes the whole list.
+     */
+    argsWithheld: z.literal(true).optional(),
     url: NonEmptyStringSchema.optional(),
+    /** As `commandWithheld`, for the server's web address (a user or a `?token=` in it): `url` is absent. */
+    urlWithheld: z.literal(true).optional(),
     /** `oauth`: the server is signed in to from Ferretry (docs/mcp-oauth.md). */
     auth: z.literal('oauth').optional(),
     env: z.array(EnvEntrySchema).readonly(),
@@ -242,6 +265,8 @@ export const ComponentDetailSchema = z.discriminatedUnion('kind', [
       .optional(),
     /** The etag of `flags` as read, present with them: an edit that keeps a hidden flag sends it back. */
     flagsEtag: NonEmptyStringSchema.optional(),
+    /** As `argsWithheld`: the write rule still refuses a flag the cutter showed, so the whole list is withheld. */
+    flagsWithheld: z.literal(true).optional(),
     env: z.array(EnvEntrySchema).readonly(),
   }),
   z.strictObject({

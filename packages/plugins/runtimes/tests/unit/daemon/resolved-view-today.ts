@@ -6,7 +6,7 @@
  *
  * Do not edit this to follow 5.0. It is the floor 5.0 must hide at least as much as.
  */
-import { looksSecret } from '@ferretry/core-vault/contract';
+import { looksSecret } from '@ferretry/std/credential-words';
 
 const RESOLVED_HIDDEN_TEXT = '‹hidden›';
 

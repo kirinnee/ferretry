@@ -2,8 +2,15 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { type ResolvedProfile, type ResolveInput, resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
+import { WITHHELD_WORDS_TEXT } from '../../../contract/index.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
-import { hidesAtLeast, lineHidesAtLeast, nestedBreach, nestedFamily, nestedLineBreach } from './command-line-family.ts';
+import {
+  hidesAtLeast,
+  lineHidesAtLeast,
+  nestedBreach,
+  nestedFamily,
+  nestedLineBreach,
+} from '../../../../../std/tests/support/command-line-family.ts';
 import { todayFlag, todayServerLine } from './resolved-view-today.ts';
 import { shownWordsR2 } from './command-line-r2.ts';
 
@@ -678,40 +685,55 @@ describe('resolvedEntries — a credential nested inside a value (ruling #40)', 
   });
 });
 
+/**
+ * Each of the two generated sweeps below walks ~36k shapes: 1.9–2.1 s on a green CI run (42931627576), 5.7 s on a
+ * loaded runner (42935121742, both timed out at bun's 5 s default). A measured limit for a fixed-size sweep (the
+ * generator makes the same shapes every run), not a slower rule.
+ */
+const NESTED_FAMILY_MS = 30_000;
+
 describe('resolvedEntries — every nested credential shape (ruling #40, generated)', () => {
   const cases = nestedFamily();
 
-  it(`should hide every nested secret of every launch-flag shape (${String(cases.length)} shapes), keep the key and flag, at least as much as today, and touch no control`, () => {
-    // Act
-    const breaches = cases.flatMap(family => {
-      const shown = shownFlags(family.words);
-      const floor = family.words.flatMap((word, index) =>
-        hidesAtLeast(word, todayFlag(word), shown[index] ?? { value: '' }) ? [] : [`${family.label}: under today`],
-      );
-      const breach = nestedBreach(family, shown);
-      return breach === undefined ? floor : [...floor, breach];
-    });
+  it(
+    `should hide every nested secret of every launch-flag shape (${String(cases.length)} shapes), keep the key and flag, at least as much as today, and touch no control`,
+    () => {
+      // Act
+      const breaches = cases.flatMap(family => {
+        const shown = shownFlags(family.words);
+        const floor = family.words.flatMap((word, index) =>
+          hidesAtLeast(word, todayFlag(word), shown[index] ?? { value: '' }) ? [] : [`${family.label}: under today`],
+        );
+        const breach = nestedBreach(family, shown);
+        return breach === undefined ? floor : [...floor, breach];
+      });
 
-    // Assert
-    should(cases.filter(family => family.secret).length).be.above(1000);
-    should(cases.filter(family => !family.secret).length).be.above(1000);
-    should(breaches).deepEqual([]);
-  });
+      // Assert
+      should(cases.filter(family => family.secret).length).be.above(1000);
+      should(cases.filter(family => !family.secret).length).be.above(1000);
+      should(breaches).deepEqual([]);
+    },
+    NESTED_FAMILY_MS,
+  );
 
-  it(`should hide every nested secret of every MCP-argument shape (${String(cases.length)} shapes), at least as much as today, and touch no control`, () => {
-    // Act
-    const breaches = cases.flatMap(family => {
-      const line = shownServer(family.words);
-      const today = todayServerLine({ command: 'run-server', args: family.words });
-      return [
-        ...(lineHidesAtLeast(today, line) ? [] : [`${family.label}: under today`]),
-        ...[nestedLineBreach(family, 'run-server', line)].filter(breach => breach !== undefined),
-      ];
-    });
+  it(
+    `should hide every nested secret of every MCP-argument shape (${String(cases.length)} shapes), at least as much as today, and touch no control`,
+    () => {
+      // Act
+      const breaches = cases.flatMap(family => {
+        const line = shownServer(family.words);
+        const today = todayServerLine({ command: 'run-server', args: family.words });
+        return [
+          ...(lineHidesAtLeast(today, line) ? [] : [`${family.label}: under today`]),
+          ...[nestedLineBreach(family, 'run-server', line)].filter(breach => breach !== undefined),
+        ];
+      });
 
-    // Assert
-    should(breaches).deepEqual([]);
-  });
+      // Assert
+      should(breaches).deepEqual([]);
+    },
+    NESTED_FAMILY_MS,
+  );
 });
 
 // ── Review r1 of the #40 rule (F2, F3, and what the broadened generator found in r2) ──────────────────
@@ -780,8 +802,8 @@ describe('resolvedEntries — the #40 rule after review r1 (F2, F3)', () => {
     should(actual).deepEqual([
       hid(`--hdr,api_key:${HIDDEN}`),
       hid(`--hdr;password:${HIDDEN}`),
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
-      hid(`--x&X-Api-Key=${HIDDEN},\${secret:API_TOKEN}`),
+      // W refuses the whole value (a pointer and raw text), so the pointer in it is cut with the rest.
+      hid(`--x&X-Api-Key=${HIDDEN}`),
       hid(`--name&?API_KEY:${HIDDEN};Bearer ${HIDDEN}`),
       // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
       hid(`--hdr,api_key:${HIDDEN} x=\${secret:Y},token=${HIDDEN}`),
@@ -827,7 +849,8 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
     // Assert
     should(actual).deepEqual([
       hid(`--env API_KEY=${P} CLIENT_SECRET=${HIDDEN}`),
-      hid(`--x=password=${P}?password:${HIDDEN}`),
+      // CFG-LEAK-R (ii): the query is glued to the pointer, so the whole value of `password=` is cut with it.
+      hid(`--x=password=${HIDDEN}`),
       hid(`--header=Authorization: ${HIDDEN} LOG_LEVEL=${P}`),
       as('-c'),
       hid(`mcp_servers.x.env.API_KEY=${HIDDEN}`),
@@ -845,7 +868,8 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
 
     // Assert
     should(actual).deepEqual([
-      hid(`-eAPI_KEY=${HIDDEN},token=${HIDDEN}`),
+      // CFG-LEAK-R (i): `-eAPI_KEY` is a flag named by its tail (`KEY`), so its whole value is cut, `,token=<v>` with it.
+      hid(`-eAPI_KEY=${HIDDEN}`),
       hid(`-HAuthorization: ${HIDDEN}, X-Api-Key: ${HIDDEN}`),
       hid(`-eapiKey=${HIDDEN}`),
     ]);
@@ -857,8 +881,9 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
 
     // Assert
     should(actual).deepEqual([
-      hid(`--hdr,api_key=${HIDDEN};y=${P};token=${HIDDEN}`),
-      hid(`--x&X-Api-Key=${HIDDEN},y=${P},token=${HIDDEN}`),
+      // W refuses the whole value (it holds a pointer and raw text), so it is cut whole, value start to word end.
+      hid(`--hdr,api_key=${HIDDEN}`),
+      hid(`--x&X-Api-Key=${HIDDEN}`),
     ]);
   });
 
@@ -892,26 +917,35 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
 
     // Assert
     should(actual).equal(
-      `run-server API_KEY=${P} CLIENT_SECRET=${HIDDEN} -eAPI_KEY=${HIDDEN},token=${HIDDEN} --hdr,api_key=${HIDDEN};y=${P};token=${HIDDEN} -H${HIDDEN}`,
+      `run-server API_KEY=${P} CLIENT_SECRET=${HIDDEN} -eAPI_KEY=${HIDDEN} --hdr,api_key=${HIDDEN} -H${HIDDEN}`,
     );
   });
 
   it('should keep a value composed with a pointer, a pointer beside a harmless key and a flag a token is glued to as before (control)', () => {
-    // Arrange
+    // Arrange — CFG-LEAK-R (ii): `API_KEY=prefix<pointer>` and `API_KEY=<pointer>?model=short` were controls; text glued to
+    // a pointer is cut now, so they are asserted below as cut.
     const words = [
       `--header=Authorization: Bearer ${P}`,
-      `--env=API_KEY=prefix${P}`,
-      `--env=API_KEY=${P}?model=short`,
       `--env=API_KEY=${P} ${P}`,
       `LOG_LEVEL=${P} model=${FAKE_SECRET}`,
       `-emodel=claude-opus-5-5,LOG_LEVEL=${P}`,
     ];
 
     // Act
-    const actual = shownFlags([...words, `-password=${FAKE_TOKEN}`]);
+    const actual = shownFlags([
+      ...words,
+      `--env=API_KEY=prefix${P}`,
+      `--env=API_KEY=${P}?model=short`,
+      `-password=${FAKE_TOKEN}`,
+    ]);
 
     // Assert
-    should(actual).deepEqual([...words.map(as), hid(`-password=${HIDDEN}`)]);
+    should(actual).deepEqual([
+      ...words.map(as),
+      hid(`--env=API_KEY=${HIDDEN}`),
+      hid(`--env=API_KEY=${HIDDEN}`),
+      hid(`-password=${HIDDEN}`),
+    ]);
   });
 
   it("should cut a URL user's password whole, and as r2 did, when the user is itself a secret name and a key follows it", () => {
@@ -946,7 +980,16 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
     const actual = shownFlags([glued, spaced, defaults, quotes]);
 
     // Assert
-    should(actual.map(word => word.value)).deepEqual([glued, spaced, defaults, quotes]);
+    // CFG-LEAK-R (ii): a `?` glues the next key to the pointer, so the first value is cut whole; and each `P'x` glues a
+    // quote and text to its pointer, so each of those is cut. `spaced` holds no glue and is shown exactly as before.
+    // `defaults` is shown as before by the cutter, but it is an F5 line (a `${A:-` pointer never closed under a credential
+    // key): the write rule refuses it, so the NET (CFG-LEAK ii) withholds it in words rather than show raw text.
+    should(actual.map(word => word.value)).deepEqual([
+      `--set=password=${HIDDEN}`,
+      spaced,
+      WITHHELD_WORDS_TEXT,
+      `--set=${`api_key=${HIDDEN} `.repeat(20_000)}`,
+    ]);
     should(performance.now() - started).be.below(2_000);
   });
 });
@@ -1114,8 +1157,6 @@ describe('resolvedEntries — the #40 rule after review r4 (B1, B2)', () => {
       '--token',
       `Bearer ${P}`,
       '--token',
-      `prefix${P}`,
-      '--token',
       `${P} short`,
       '--token',
       `${P}`,
@@ -1134,6 +1175,8 @@ describe('resolvedEntries — the #40 rule after review r4 (B1, B2)', () => {
 
     // Assert
     should(actual).deepEqual(words.map(as));
+    // CFG-LEAK-R (ii): `prefix<pointer>` after a secret flag was a control here; text glued to a pointer is cut now.
+    should(shownFlags(['--token', `prefix${P}`])).deepEqual([as('--token'), hid(HIDDEN)]);
   });
 
   it('#40 B2 should hide base64 padding after a pointer, in a secret-named key’s value', () => {
@@ -1180,16 +1223,18 @@ describe('resolvedEntries — the #40 rule after review r4 (B1, B2)', () => {
       `API_KEY=${P} short==`,
       `LOG_LEVEL=${P} ${B64}==`,
       `API_KEY=${P} x= y`,
-      // A pointer past the end of the secret-named key's value (`,` ends it) is a harmless key's, and the text after it
-      // is that key's own.
-      `API_KEY=short,LOG_LEVEL=${P} ${B64}==`,
     ];
+    // A pointer past the end of the secret-named key's value (`,` ends it) is a harmless key's, and the text after it
+    // is that key's own: the CUTTER shows it (it was a control). It is also an F1 line, though: a credential KEY whose
+    // first piece (`short`) is no secret, and the write rule refuses the whole value. So the NET (CFG-LEAK ii)
+    // withholds it in words. State change vs (B): shown -> withheld, because W refuses it.
+    const refused = `API_KEY=short,LOG_LEVEL=${P} ${B64}==`;
 
     // Act
-    const actual = shownFlags(words);
+    const actual = shownFlags([...words, refused]);
 
     // Assert
-    should(actual).deepEqual(words.map(as));
+    should(actual).deepEqual([...words.map(as), hid(WITHHELD_WORDS_TEXT)]);
   });
 
   it('#40 B2 should still show a value with a pointer after it exactly as r4 did where nothing is padded (control)', () => {

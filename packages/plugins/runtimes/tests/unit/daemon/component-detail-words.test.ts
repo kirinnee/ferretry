@@ -8,14 +8,13 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { CommandWord, ComponentDetail } from '../../../contract/index.ts';
+import { type CommandWord, type ComponentDetail, WITHHELD_WORDS_TEXT } from '../../../contract/index.ts';
 import { type CatalogFacts, componentCatalog } from '../../../daemon/lib/service/catalog.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
-import { shownWords } from '@ferretry/core-vault/contract';
-import { shownWordsEtag } from '../../../daemon/lib/service/shown-words-etag.ts';
-import { HIDDEN, nestedBreach, nestedFamily } from './command-line-family.ts';
+import { shownWords, shownWordsEtag } from '../../../daemon/lib/service/command-line.ts';
+import { HIDDEN, nestedBreach, nestedFamily } from '../../../../../std/tests/support/command-line-family.ts';
 
 const FAKE_SECRET = 'not-a-real-secret-0000';
 const FAKE_TOKEN = 'sk-not-a-real-key-0000';
@@ -42,17 +41,24 @@ function detailOf(components: Record<string, unknown>, kind: string, name: strin
   return found.detail;
 }
 
+const hid = (shown: string): CommandWord => ({ shown, hidden: true });
+
+/**
+ * A list the detail WITHHELD (the write rule still refused a word the cutter showed: `flagsWithheld` / `argsWithheld`,
+ * no list and no etag) is read here as every word of it withheld in words, so the shared family checks see it hide all.
+ */
+const stood = (words: readonly string[], withheld: boolean, shown: readonly CommandWord[] | undefined) =>
+  withheld ? words.map(() => hid(WITHHELD_WORDS_TEXT)) : (shown ?? []);
+
 const flagsOf = (flags: readonly string[]): readonly CommandWord[] => {
   const detail = detailOf({ settings: { base: { harness: 'claude', flags: [...flags] } } }, 'settings', 'base');
-  return detail.kind === 'settings' ? (detail.flags ?? []) : [];
+  return detail.kind === 'settings' ? stood(flags, detail.flagsWithheld === true, detail.flags) : [];
 };
 
 const argsOf = (args: readonly string[], command = 'run-server'): readonly CommandWord[] => {
   const detail = detailOf({ mcp: { local: { command, args: [...args] } } }, 'mcp', 'local');
-  return detail.kind === 'mcp' ? (detail.args ?? []) : [];
+  return detail.kind === 'mcp' ? stood(args, detail.argsWithheld === true, detail.args) : [];
 };
-
-const hid = (shown: string): CommandWord => ({ shown, hidden: true });
 
 /** A detail's words as the Resolved view's `{ value, hidden }` pairs, for the shared family checks. */
 const asShown = (words: readonly CommandWord[]) =>
@@ -237,7 +243,8 @@ describe('componentDetail — the #40 rule after review r2 (R-0082, M1, M2, M3, 
     ];
     const expected = [
       hid(`--env API_KEY=${POINTER} CLIENT_SECRET=${HIDDEN}`),
-      hid(`--x=password=${POINTER}?password:${HIDDEN}`),
+      // CFG-LEAK-R (ii): the query is glued to the pointer, so the whole value of `password=` is cut with it.
+      hid(`--x=password=${HIDDEN}`),
       hid(`--header=Authorization: ${HIDDEN} LOG_LEVEL=${POINTER}`),
       hid(`-c env.API_KEY=${HIDDEN}`),
     ];
@@ -255,9 +262,11 @@ describe('componentDetail — the #40 rule after review r2 (R-0082, M1, M2, M3, 
       `--hdr,api_key=${NESTED};y=${POINTER};token=${NESTED}`,
     ];
     const expected = [
-      hid(`-eAPI_KEY=${HIDDEN},token=${HIDDEN}`),
+      // CFG-LEAK-R (i): `-eAPI_KEY` is a flag named by its tail (`KEY`), so its whole value is cut, `,token=<v>` with it.
+      hid(`-eAPI_KEY=${HIDDEN}`),
       hid(`-HAuthorization: ${HIDDEN}, X-Api-Key: ${HIDDEN}`),
-      hid(`--hdr,api_key=${HIDDEN};y=${POINTER};token=${HIDDEN}`),
+      // W refuses the whole value (a pointer and raw text), so it is cut whole, value start to word end.
+      hid(`--hdr,api_key=${HIDDEN}`),
     ];
 
     // Assert
@@ -351,7 +360,12 @@ describe('componentDetail — one rule with the Resolved view (rulings #39, #40)
         const preview = resolvedEntries(result.resolved)
           .filter(entry => entry.field === 'flags')
           .map(entry => (entry.hidden === true ? { value: entry.value, hidden: true } : { value: entry.value }));
-        return JSON.stringify(preview) !== JSON.stringify(asShown(flagsOf(words)));
+        const detail = asShown(flagsOf(words));
+        // The detail withholds a list WHOLE and the Resolved view withholds item by item, both by the same net: where the
+        // detail withheld, the Resolved view must have withheld at least one item (and nothing else is compared).
+        if (detail.length > 0 && detail.every(word => word.value === WITHHELD_WORDS_TEXT))
+          return !preview.some(word => word.value === WITHHELD_WORDS_TEXT);
+        return JSON.stringify(preview) !== JSON.stringify(detail);
       });
 
       // Assert
