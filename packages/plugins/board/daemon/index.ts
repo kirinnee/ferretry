@@ -20,7 +20,8 @@ import manifest from '../manifest.ts';
 import { boardArchiveKeeps } from './adapters/archive-keeps.ts';
 import { CARD_SOURCE } from './adapters/asks.ts';
 import { BoardReferenceCatalog } from './adapters/reference-catalog.ts';
-import { assemble, type BoardDefs } from './wiring.ts';
+import { boardAgendaContext } from './adapters/agenda-context.ts';
+import { assemble, type BoardDefs, machineIdOf } from './wiring.ts';
 import { type BoardCaller, BoardError, BOARD_SWEEP_INTERVAL_MS } from './lib/board/index.ts';
 import { boardRoutes } from './routes/board.ts';
 import { boardProjectRoutes } from './routes/lanes.ts';
@@ -164,6 +165,12 @@ export default implementDaemon(manifest, {
       hooks: {
         'ask.sources:card': { schema: CardAskRefSchema, title: '{card}', form: false, apply: world.applyAnswer },
         'start.decide': () => ALLOW,
+        'agenda.context:board': boardAgendaContext({
+          focusOf: async ferret => await world.focus.focusOf(ferret),
+          card: async id => await service.card(id).catch(() => undefined),
+          asking: async id => await world.gates.asking(id),
+          machineId: () => machineIdOf(kernel),
+        }),
         'sitrep.lines': () => [{ id: 'board', order: 50, item: { lines: async ferret => await world.lines(ferret) } }],
         // Board's cards are work Conversation's search finds (`fy search`, `search_work`).
         // read-scoped: none — Board hands over its cards raw; Conversation scrubs every text through the read-scoped redaction before it indexes or shows it

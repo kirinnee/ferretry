@@ -11,7 +11,7 @@ import {
   tool,
   verb,
 } from '@ferretry/kernel/manifest';
-import { AskAnswered, AsksPort, AskSources } from '@ferretry/core-asks/contract';
+import { AgendaContext, AskAnswered, AsksPort, AskSources } from '@ferretry/core-asks/contract';
 import { ArchiveKeeps, FerretStarted, FerretsPort, SitrepLines, StartDecide } from '@ferretry/core-ferrets/contract';
 import { ConversationPort, ReferenceCatalog, SearchSources, TurnEnded } from '@ferretry/plugin-conversation/contract';
 import {
@@ -313,6 +313,8 @@ export default definePlugin({
       { hook: ReferenceCatalog, key: '&' },
       // The session archive's keep rule (Ferrets' `session.archive-keeps`): every card, so a ferret on one in flight stays live.
       { hook: ArchiveKeeps },
+      // Asks' agenda reads a ferret's focus card, the to-test lane and a card's gate ask from here (`agenda.context`).
+      { hook: AgendaContext, key: 'board' },
     ],
     offers: [{ hook: CardMoving, timeoutMs: 200 }],
   },

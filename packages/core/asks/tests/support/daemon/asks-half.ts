@@ -15,6 +15,8 @@ import {
 } from '@ferretry/kernel/contract';
 import { type HookInvoker, type Needer, providedFor } from '@ferretry/kernel/manifest';
 import { testArrival, fixedClock, owner } from '@ferretry/kernel/testing';
+import type { AgendaFerretsContext } from '../../../contract/index.ts';
+import { isAgendaSessionId } from '../../../daemon/lib/agenda/index.ts';
 import asksDaemon from '../../../daemon/index.ts';
 import manifest from '../../../manifest.ts';
 import { asksStateAt } from './agenda-state.ts';
@@ -25,6 +27,18 @@ import { asksStateAt } from './agenda-state.ts';
  */
 const governanceOf = (governance?: CallerGovernance): { governance?: CallerGovernance } =>
   governance === undefined ? {} : { governance };
+
+/**
+ * Ferrets' half of `agenda.context` when a case names none: every well-formed ferret id exists and every ferret is a
+ * lead. A case that tests lineage passes its own under `'agenda.context:ferrets'`, or `'unavailable'` for Ferrets off.
+ */
+export const EVERY_FERRET: AgendaFerretsContext = {
+  has: async id => isAgendaSessionId(id),
+  leadOf: async () => undefined,
+  addressOf: async id => id,
+  get: async () => undefined,
+  all: async () => [],
+};
 
 /** What a handler answered, as a client reads it. */
 export interface Answered {
@@ -57,7 +71,11 @@ export async function asksHalf(
   const home = options.home ?? (await mkdtemp(join(tmpdir(), 'asks-half-')));
   const clock = fixedClock();
   const hooks = {
-    provider: (hook: { readonly name: string }, key: string) => providers[`${hook.name}:${key}`] ?? 'unavailable',
+    provider: (hook: { readonly name: string }, key: string) => {
+      const name = `${hook.name}:${key}`;
+      if (Object.hasOwn(providers, name)) return providers[name] ?? 'unavailable';
+      return hook.name === 'agenda.context' && key === 'ferrets' ? EVERY_FERRET : 'unavailable';
+    },
     providers: () => new Map(),
   } as unknown as HookInvoker;
   const jobs: JobSpec[] = [];

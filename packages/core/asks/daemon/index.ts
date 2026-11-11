@@ -10,15 +10,16 @@
  * - **Held configuration edits** (`--confirms`): no config port yet, so `--confirms` is refused.
  * - **Answers into a ferret's terminal**: typing into a ferret is Conversation's, provided under `ask.delivery:ferret`;
  *   unprovided, answers are held in the ferret's outbox, never lost, and shown as held.
- * - **Which ferrets exist**: Ferrets needs Asks, so Asks cannot ask Ferrets (a core cycle): any well-formed ferret id
- *   has a board, and an owner raise for a ferret that does not exist makes an orphan board (a known gap; every
- *   ferret's own raise comes through its own token).
+ * - **Which ferrets exist, who started whom, a ferret's focus card, a card's gate**: Ferrets and Board provide them under
+ *   `agenda.context`. With Ferrets off no ferret has a board and no raise is accepted; with Board off an item keeps the
+ *   card it was raised with and a card's gate reads as asking.
  * - **Push counts** after a raise: Notify's; meanwhile a raise says nothing about devices.
  */
 import { randomUUID } from 'node:crypto';
 import { implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
-import { AskDeliveries, AskSources, type SourceKey } from '../contract/index.ts';
+import { AgendaContext, AskDeliveries, AskSources, type SourceKey } from '../contract/index.ts';
+import { agendaContext } from './adapters/agenda-context.ts';
 import manifest from '../manifest.ts';
 import { askDelivery } from './adapters/ask-delivery.ts';
 import { asksPort } from './adapters/asks-port.ts';
@@ -31,7 +32,7 @@ import { FileAgendaSeenStore, SqliteAgendaVersionStore } from './adapters/agenda
 import { KeyedAgendaReplyTimers } from './adapters/agenda/keyed-agenda-reply-timers.ts';
 import { StateAgendaFiles } from './adapters/agenda/state-agenda-files.ts';
 import { tellFerret } from './adapters/agenda/tell-ferret.ts';
-import { AgendaReplyBatcher, AgendaService, isAgendaSessionId } from './lib/agenda/index.ts';
+import { AgendaReplyBatcher, AgendaService } from './lib/agenda/index.ts';
 import { KeyedSerialQueue } from './lib/agenda/serial-queue.ts';
 import { AgendaChangeFanout, AgendaReplyDelivery, AgendaBoardUndelivered } from './lib/agenda/observers.ts';
 import { agendaRoutes } from './lib/routes/agenda.ts';
@@ -61,21 +62,24 @@ export default implementDaemon(manifest, {
       now: () => clock.nowMs(),
       warn,
     });
+    // Lineage and card context are Ferrets' and Board's (`agenda.context`), read at each call; an answer that cannot be had
+    // is the safe side of its question (see `agendaContext`). The machine agenda and the owner's chat are not on this
+    // base: a notice with no owner home stays on the sub-ferret, and `fy agenda log` finds nothing.
+    const context = agendaContext(key => hooks.provider(AgendaContext, key), warn);
     const agenda = new AgendaService(
       repository,
       { now },
-      // Which ferrets exist is Ferrets' (no edge from Asks yet): a well-formed id has a board.
-      { has: async ferret => isAgendaSessionId(ferret) },
+      context.sessions,
       { raised: async () => undefined },
       new AgendaChangeFanout([
         new AgendaReplyDelivery({ add: (sessionId, key, message) => replies.add(sessionId, key, message) }, 'fy'),
         new AskEvents(kernel.events),
       ]),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+      context.focus,
+      context.subFerrets,
+      context.cards,
+      context.homes,
+      context.gates,
       undefined,
       undefined,
       versions,
