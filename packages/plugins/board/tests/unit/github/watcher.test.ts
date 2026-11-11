@@ -856,4 +856,31 @@ describe('GitHubWatcher: the job', () => {
     const healthy = rig({ cards: [] });
     should(await healthy.watcher.run()).deepEqual({ polled: [], written: [], refiled: [], reachable: true });
   });
+
+  it('should build the board index once a tick however many cards it watches', async () => {
+    const cards = [940, 941, 942, 943].map(number => withLinks([link(number)], { id: `F${number}` }));
+    const prs = Object.fromEntries(cards.map(watched => [watched.links.prs[0]?.number ?? 0, prNode(0)]));
+    // A BoardIndex walks the cards it is built from twice (by id, then by edges), so each walk of the snapshot's
+    // array is one half of one construction.
+    let walks = 0;
+    const snapshotCards = [...cards];
+    snapshotCards[Symbol.iterator] = function* (): Generator<Card> {
+      walks += 1;
+      for (let at = 0; at < this.length; at += 1) yield this[at] as Card;
+    };
+    const subject = rig({
+      cards,
+      gh: new FakeGh(
+        repoAnswer({ prs: Object.fromEntries(Object.keys(prs).map(number => [number, prNode(Number(number))])) }),
+      ),
+      board: service => ({
+        snapshot: async () => ({ ...(await service.snapshot()), cards: snapshotCards }),
+        act: async (...parameters) => await service.act(...parameters),
+        recordPullRequests: async (...parameters) => await service.recordPullRequests(...parameters),
+      }),
+    });
+    const report = await subject.watcher.tick();
+    should(report.written).have.length(cards.length);
+    should(walks).equal(2);
+  });
 });
