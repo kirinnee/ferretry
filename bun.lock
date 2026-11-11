@@ -518,6 +518,7 @@
       "version": "5.0.0",
       "dependencies": {
         "@ferretry/app": "workspace:*",
+        "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "lucide-react": "^0.468.0",

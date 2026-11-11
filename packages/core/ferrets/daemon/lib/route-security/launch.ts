@@ -26,8 +26,19 @@ export async function terminalLaunchRefusal(
       'known project roots are not bound, so this daemon cannot classify the launch',
       'launch_roots_unavailable',
     );
-  const outside =
-    !flagged && knownRoots !== undefined && !(await knownRoots()).some(root => within(request.folder, root));
+  // A flagged start is terminal access whatever the folder, so the list is not read for it. A list that cannot be read
+  // is NOT an empty one: this daemon cannot classify the launch, and it says so (503) rather than guess "outside".
+  const roots =
+    flagged || knownRoots === undefined
+      ? undefined
+      : await knownRoots().catch(() => {
+          throw new ApiError(
+            503,
+            'the known project roots could not be read, so this daemon cannot classify the launch',
+            'launch_roots_unavailable',
+          );
+        });
+  const outside = roots !== undefined && !roots.some(root => within(request.folder, root));
   if (!flagged && !outside) return;
   if (call.governance === undefined)
     throw new ApiError(503, 'this daemon cannot decide terminal.use for the launch', 'launch_gate_unavailable');

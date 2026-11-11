@@ -31,6 +31,8 @@ import {
   ArchiveKeeps,
   FerretLaunchSectionsFiles,
   Harnesses,
+  LAUNCH_ROOTS_KEY,
+  LaunchRoots,
   Logins,
   LaunchParts,
   OPENING_ATTACHMENTS_KEY,
@@ -644,6 +646,17 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
    */
   const stateHomeReach: StateHomeLaunchReach | undefined = undefined;
 
+  /**
+   * The folders a governed device may start a ferret in as an ordinary act (v4 `knownLaunchRoots`): the projects the
+   * owner registered, then the managed worktree root. With Projects off the list is empty, so a governed start is
+   * terminal access (`terminal.use`): narrower, never wider. A throw from Projects is NOT an empty list: it propagates.
+   */
+  const knownLaunchRoots = async (): Promise<readonly string[]> => {
+    const found = hooks.provider(LaunchRoots, LAUNCH_ROOTS_KEY);
+    const projects = found === 'unavailable' ? [] : await found.roots();
+    return worktrees.managedRoot === undefined ? projects : [...projects, worktrees.managedRoot];
+  };
+
   /** S47: an agent reaches only its own ferret and its helpers'; a person is unaffected. */
   const agentMayReach = (call: CallContext, target: FerretId): void => {
     if (!callerIsAgent(call)) return;
@@ -1187,8 +1200,9 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
           );
         // No identity/link-hop state-home reach is available in this kernel yet. Never replace it with a lexical fence.
         await stateHomeLaunchRefusal(callerIsAgent(call), stateHomeReach, parsed.folder);
-        // Project catalogs and the managed-root launch seam are unbound; a governed start fails closed without them.
-        await terminalLaunchRefusal(call, parsed, undefined);
+        // What counts as a known project: Projects' registered folders plus the managed worktree root. Read at each start;
+        // a throw from Projects answers 503 `launch_roots_unavailable` (it cannot classify), never "outside".
+        await terminalLaunchRefusal(call, parsed, knownLaunchRoots);
         let startedFerret: FerretId | undefined;
         const start = async (): Promise<ApiResponse> => {
           const started = await service.start({

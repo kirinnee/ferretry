@@ -12,6 +12,9 @@ import {
   type FerretId,
   type FerretRecord,
   Harnesses,
+  LAUNCH_ROOTS_KEY,
+  LaunchRoots,
+  type LaunchRootsSource,
   OPENING_ATTACHMENTS_KEY,
   OpeningAttachments,
   type OpeningAttachmentsSource,
@@ -175,3 +178,18 @@ export async function host(
   for (const each of records) first.state('ferrets').plant(FerretFiles, JSON.stringify(each), each.id);
   return await first.restart();
 }
+
+/** A stand-in for Projects (the one named taker of `launch.roots`): lists `source`'s roots as the known projects. */
+export const fakeLaunchRoots = (source: LaunchRootsSource) =>
+  implementDaemon(
+    definePlugin({
+      id: 'projects',
+      title: 'Projects (fake)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: LaunchRoots, key: LAUNCH_ROOTS_KEY }] },
+    }),
+    { build: () => ({ hooks: { 'launch.roots:projects': source } }) },
+  );

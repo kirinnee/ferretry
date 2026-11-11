@@ -31,6 +31,8 @@ export const implementProjects = (folders?: ProjectFolders) =>
           'POST /v1/projects': registerRoute(registry),
           'DELETE /v1/projects/:id': removeRoute(registry),
         },
+        // The folders a governed device may start a ferret in as an ordinary act (Ferrets reads this, never the registry).
+        hooks: { 'launch.roots:projects': { roots: async () => (await registry.list()).map(project => project.path) } },
         provides: {
           projects: {
             list: () => registry.list(),

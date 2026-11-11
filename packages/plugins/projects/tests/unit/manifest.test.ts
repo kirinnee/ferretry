@@ -21,3 +21,9 @@ describe('projects manifest', () => {
     for (const half of ['daemon', 'app', 'cli']) expect(await import(`../../${half}/index.ts`)).toBeDefined();
   });
 });
+
+describe('projects launch roots', () => {
+  test('takes launch.roots under its one key: the known projects are what Ferrets reads', () => {
+    expect(manifest.hooks.takes.map(take => [take.hook.name, take.key])).toEqual([['launch.roots', 'projects']]);
+  });
+});
