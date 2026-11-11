@@ -47,6 +47,8 @@ export {
   WITHHELD_SENTENCE,
 } from '@ferretry/kernel/contract';
 export * from './config.ts';
+// What a catalog refuses: the `publish` layer on `@ferretry/std/credential-words`, the one owner of the word rule.
+export { envEntryRefused, firstRefusedWord, refusedLine } from './lib/command-line.ts';
 export * from './inputs.ts';
 export * from './masks.ts';
 export * from './phone.ts';

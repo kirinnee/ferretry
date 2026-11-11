@@ -67,6 +67,7 @@ import { conservativeChanges } from './conservative-changes.ts';
 import {
   mcpAsInstalled,
   setupOfProjectEntry,
+  withoutCredentials,
   skillAsInstalled,
   withPlaceholders,
   withUnreadableFiles,
@@ -577,7 +578,7 @@ export class CatalogInstallService {
         scope: 'component',
         harness: 'claude',
         declaration: null,
-        component: component as McpComponentRecord | undefined,
+        component: component === undefined ? undefined : withoutCredentials(component as McpComponentRecord),
       });
       setup = converted.ok ? converted.setup : undefined;
     }

@@ -445,8 +445,13 @@ argument or a nested value to `‹hidden›`, for every caller, the owner's pair
 `@ferretry/std/credential-words` (with the `${secret:NAME}` grammar in `@ferretry/std/secret-reference`), imported by the
 kernel's read mask and by Runtimes' views; there is no second copy to keep equal, and `HIDDEN_WORD_TEXT` is std's
 `HIDDEN_VALUE_TEXT`. The std corpus test (`credential-words-corpus.test.ts`) holds the cutter to every name the write
-rule's own tail test refuses, so a name only the write rule knows is in it. A pin to the vault contract's cutter follows
-once `rebuild/fix-catalogs-one-rule` lands on 5.0.
+rule's own tail test refuses, so a name only the write rule knows is in it. `std` also owns the cutter's two tests as an
+injected pair (`CutterTests`, `shownWordWith`; `shownWord` is `shownWordWith(SHOWN_TESTS)`), and a catalog's publish rule
+(`@ferretry/core-vault/contract`) is that same cutter with a pair of its own, never a second copy: it refuses everything
+the write rule refuses and everything std's secret-name words and token shapes catch, plus the names KEY, PASS, PWD,
+BEARER and BASIC with a value of 16 or more. The one thing the display hides that a catalog accepts: a plain value under a
+name that only ends in key, token, secret or password (`--sort-key modified_time`); this is v4 parity, not a gap, and a
+real token shape under such a name is refused by its shape.
 
 **The mask and W read a name the same way.** One name test, in the kernel, decides whether a flag or a key is a
 credential's for both: its name ENDS in `key`, `token`, `secret`, `password`, `passwd` (plural too) or

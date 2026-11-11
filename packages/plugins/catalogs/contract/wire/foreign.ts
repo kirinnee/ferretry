@@ -253,7 +253,7 @@ type SessionMcpServer =
   | { readonly transport: 'url'; readonly oauth: boolean };
 
 /** Prefixes real providers put on their keys. */
-export const RAW_KEY_PREFIXES =
+const RAW_KEY_PREFIXES =
   /^(?:sk-|sk_live_|sk_test_|rk_live_|AKIA|ASIA|ghp_|gho_|ghs_|ghu_|github_pat_|glpat-|xox[abposr]-|AIza|hf_|pk_live_)/u;
 /** A name that announces a credential. */
 const SECRET_SOUNDING_NAME = /(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)/u;

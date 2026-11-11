@@ -5,6 +5,7 @@ import {
   mcpAsInstalled,
   setupOfProjectEntry,
   skillAsInstalled,
+  withoutCredentials,
   withPlaceholders,
   withUnreadableFiles,
 } from '../../../daemon/lib/catalog-installs/on-disk-item.ts';
@@ -79,6 +80,97 @@ describe('setupOfProjectEntry', () => {
       env: {},
     });
     should(setupOfProjectEntry({ command: 'acme-mcp', env: { A: 5 } })).be.undefined();
+    should(setupOfProjectEntry({ command: 'acme-mcp', args: [5] })).be.undefined();
+  });
+
+  it('R-0261 should read an entry the person typed a credential into, as one star where it stands', () => {
+    // A catalog refuses a credential written out, but a server on this machine may hold one: the diff must still read it.
+    should(
+      setupOfProjectEntry({
+        command: 'acme-mcp',
+        args: ['--token', 'fake-tok-0000', '--stdio'],
+        env: { DB_PASSWORD: 'fake-pw-0000', MODE: 'x', ACME_TOKEN: '${ACME_TOKEN_OWN}' },
+      }),
+    ).deepEqual({
+      transport: 'command',
+      command: 'acme-mcp',
+      args: ['--token', '*', '--stdio'],
+      env: { DB_PASSWORD: '*', MODE: 'x', ACME_TOKEN: '${secret:ACME_TOKEN_OWN}' },
+    });
+  });
+});
+
+describe('a placeholder with a long name on disk', () => {
+  it('R-0261 should keep a placeholder as written however long its name is', () => {
+    should(
+      setupOfProjectEntry({
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-github'],
+        env: { GITHUB_PERSONAL_ACCESS_TOKEN: '${GITHUB_PERSONAL_ACCESS_TOKEN}' },
+      }),
+    ).deepEqual({
+      transport: 'command',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-github'],
+      env: { GITHUB_PERSONAL_ACCESS_TOKEN: '${secret:GITHUB_PERSONAL_ACCESS_TOKEN}' },
+    });
+    should(
+      withoutCredentials({
+        command: 'npx',
+        env: { GITHUB_PERSONAL_ACCESS_TOKEN: '${secret:GITHUB_PERSONAL_ACCESS_TOKEN}', SHORT: '${secret:SHORT_TOKEN}' },
+      }),
+    ).deepEqual({
+      command: 'npx',
+      env: { GITHUB_PERSONAL_ACCESS_TOKEN: '${secret:GITHUB_PERSONAL_ACCESS_TOKEN}', SHORT: '${secret:SHORT_TOKEN}' },
+    });
+  });
+
+  it('R-0261 should still star a raw token glued to a placeholder', () => {
+    const token = 'ghp_aaaaaaaaaaaaaaaaaaaa';
+    should(
+      withoutCredentials({ command: 'npx', env: { NOTE: `\${secret:X}${token}`, OTHER: `${token}\${secret:X}` } }),
+    ).deepEqual({
+      command: 'npx',
+      env: { NOTE: '*', OTHER: '*' },
+    });
+  });
+});
+
+describe('withoutCredentials', () => {
+  it('R-0261 should put one star where an argument or an environment value holds a credential, and nothing else', () => {
+    should(
+      withoutCredentials({
+        command: 'acme-mcp',
+        args: ['postgres://person:fake-pw-0000@db/x', '--port', '80'],
+        env: { PASSWORD: 'fake-pw-0000', LOG: 'info', K: '${secret:K}' },
+        harness: 'claude',
+      }),
+    ).deepEqual({
+      command: 'acme-mcp',
+      args: ['*', '--port', '80'],
+      env: { PASSWORD: '*', LOG: 'info', K: '${secret:K}' },
+      harness: 'claude',
+    });
+  });
+
+  it('R-0261 should stand in an installed entry the publish rule refuses, so the diff still reads', () => {
+    const fake = 'fakevalue0000000000000';
+    should(
+      withoutCredentials({
+        command: 'acme-mcp',
+        // A publish-only name (--key, DB_PASS), a multi-word environment value, and a plain pair kept as written.
+        args: ['--key', fake, '--sort-key', 'modified_time'],
+        env: { DB_PASS: fake, OPTS: `--token ${fake}`, NOTE: 'plain' },
+      }),
+    ).deepEqual({
+      command: 'acme-mcp',
+      args: ['--key', '*', '--sort-key', 'modified_time'],
+      env: { DB_PASS: '*', OPTS: '*', NOTE: 'plain' },
+    });
+  });
+
+  it('should leave a record with no arguments and no environment as it is', () => {
+    should(withoutCredentials({ url: 'https://mcp.example.com/x' })).deepEqual({ url: 'https://mcp.example.com/x' });
   });
 });
 

@@ -35,8 +35,8 @@ import { canonicalJson } from '@ferretry/std';
 import { isCanonicalAssetPath } from './foreign.ts';
 import { InstantSchema } from './foreign.ts';
 import { DaemonIdSchema } from './foreign.ts';
-import { SECRET_REFERENCE_SOURCE } from '@ferretry/core-vault/contract';
-import { mcpServerRefusal, RAW_KEY_PREFIXES, SessionMcpEnvNameSchema, SessionMcpNameSchema } from './foreign.ts';
+import { envEntryRefused, firstRefusedWord, refusedLine, SECRET_REFERENCE_SOURCE } from '@ferretry/core-vault/contract';
+import { mcpServerRefusal, SessionMcpEnvNameSchema, SessionMcpNameSchema } from './foreign.ts';
 import {
   SharedCatalogIdSchema,
   SharedCatalogItemIdSchema,
@@ -300,77 +300,27 @@ const HTTP_URL = /^https?:\/\/[^\s/?#@]+(?:[/?#][^\s]*)?$/u;
 
 // biome-ignore lint/suspicious/noTemplateCurlyInString: the reference grammar, written out for a person to read
 const NO_SUBSTITUTION = 'a secret travels only as a whole environment value, ${secret:NAME}; nothing else may hold ${';
-// biome-ignore lint/suspicious/noTemplateCurlyInString: the reference grammar, written out for a person to read
-const RAW_KEY = 'this looks like a raw key: name a secret as a whole environment value, ${secret:NAME}, instead';
-
-/** The pieces of a value a key could hide in: words, and each side of `=`, `&`, `?`, `/`, `:` and quotes. */
-const pieces = (value: string): readonly string[] => value.split(/[\s=&?#/:,;"'`]+/u).filter(piece => piece !== '');
+const RAW_KEY =
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the reference grammar, written out for a person to read
+  'this holds a credential written out, so a catalog refuses it rather than hiding it: put the value in the secret store and name it as a whole environment value, ${secret:NAME}, instead';
 
 /**
- * The whole words that say the next value is a credential, and the HTTP auth schemes. Whole words of a
- * name split on `-`, `_` and `.`, never substrings: `--api-key` and `ACCESS_TOKEN` announce one, while
- * `--author`, `--keyboard-layout` and `/oauth/authorize` do not.
+ * Whether a piece of text a person reads as a command, an address or an id holds a credential: the ONE rule Runtimes
+ * hides a flag or an MCP argument by, at its publish strength (at least what Runtimes hides, and what a v4 catalog
+ * refused), run over the text's words. A catalog is read by people who are not your devices, so a credential is
+ * REFUSED, never masked: a mask in a shared catalog protects nobody. Never repeats the text.
  */
-const KEY_WORDS = new Set([
-  'key',
-  'apikey',
-  'token',
-  'secret',
-  'password',
-  'passwd',
-  'pass',
-  'pwd',
-  'credential',
-  'credentials',
-  'auth',
-  'pat',
-  'bearer',
-  'basic',
-]);
-export const announcesKey = (name: string): boolean =>
-  name
-    .toLowerCase()
-    .split(/[-_.]+/u)
-    .some(word => KEY_WORDS.has(word));
-
-/** A known provider prefix on a piece long enough to be a key. */
-const prefixedKey = (piece: string): boolean => RAW_KEY_PREFIXES.test(piece) && piece.length >= 20;
-
-/**
- * A HEURISTIC, not a guarantee: whether a value carries what looks like a raw key — a known provider
- * prefix anywhere in it, or a long unbroken value right after a word that announces one (`--token=…`,
- * `--api-key …`, `Bearer …`). A key with no known prefix under an innocent name is not found by anything.
- */
-export const holdsRawKey = (value: string): boolean => {
-  const parts = pieces(value);
-  return parts.some(
-    (part, index) => prefixedKey(part) || (index > 0 && announcesKey(parts[index - 1] ?? '') && part.length >= 16),
-  );
-};
-
-/**
- * The same heuristic for an address: a known prefix anywhere, and an announcing name only as a QUERY
- * parameter's name (`?api_key=…`). A path segment is never read as "name, then value", so
- * `/auth/callback-handler` is an ordinary address.
- */
-const addressHoldsRawKey = (url: string): boolean => {
-  if (pieces(url).some(prefixedKey)) return true;
-  const query = url.split(/[?#]/u)[1] ?? '';
-  return query.split('&').some(pair => {
-    const [name = '', value = ''] = pair.split('=');
-    return announcesKey(name) && value.length >= 16;
-  });
-};
+export const holdsCredential = (text: string): boolean => refusedLine(text);
 
 /** One line a person reads as a command, an address or an id. */
-const plainLine = (max: number, rawKey: (text: string) => boolean = holdsRawKey) =>
+const plainLine = (max: number) =>
   z
     .string()
     .min(1)
     .max(max)
     .refine(text => !HIDDEN_IN_LINE.test(text), NO_HIDDEN)
     .refine(text => !substitutes(text), NO_SUBSTITUTION)
-    .refine(text => !rawKey(text), RAW_KEY);
+    .refine(text => !holdsCredential(text), RAW_KEY);
 
 /** An argument or a value: tabs and line breaks are fine (the review quotes them), nothing hidden is. */
 const plainText = z
@@ -397,10 +347,7 @@ const CatalogMcpUrlSchema = z.strictObject({
   transport: z.literal('url'),
   // A plain pattern rather than `z.url()`, which accepts `javascript:` and `data:`. No user name or
   // password in the address: that is a credential in plain text.
-  url: plainLine(2_048, addressHoldsRawKey).regex(
-    HTTP_URL,
-    'an http:// or https:// address, with no user name or password in it',
-  ),
+  url: plainLine(2_048).regex(HTTP_URL, 'an http:// or https:// address, with no user name or password in it'),
   /** The installer signs in to it from their own machine (docs/mcp-oauth.md). A token never travels. */
   auth: z.literal('oauth').optional(),
   /** A client registered by hand with the provider. Its client SECRET has no field: it never travels. */
@@ -414,9 +361,11 @@ const CatalogMcpUrlSchema = z.strictObject({
 
 /**
  * One MCP server definition, as McpComponentSchema's fields, minus everything that would carry a
- * credential. Refused when it looks like it holds a raw key: by the rule the MCP forms run, and by
- * {@link holdsRawKey} on every argument and value. Both are heuristics; the guarantee is only that no
- * FIELD exists for a secret value, and that `${` reaches nothing but a placeholder the installer fills.
+ * credential. Refused when it looks like it holds a raw key: by the rule the MCP forms run, and by the ONE rule
+ * Runtimes hides a command-line word by, at its publish strength ({@link firstRefusedWord}, {@link envEntryRefused}),
+ * on every argument and every environment value, and the same rule over the command, the address and the OAuth client
+ * id ({@link refusedLine}). Both are heuristics; the guarantee is only
+ * that no FIELD exists for a secret value, and that `${` reaches nothing but a placeholder the installer fills.
  */
 export const CatalogMcpSetupSchema = z
   .discriminatedUnion('transport', [CatalogMcpCommandSchema, CatalogMcpUrlSchema])
@@ -433,15 +382,10 @@ export const CatalogMcpSetupSchema = z
     }
     const refusal = mcpServerRefusal('login', setup);
     if (refusal !== null) return issue(refusal, []);
-    const args = setup.args.findIndex(
-      (arg, index) => holdsRawKey(arg) || holdsRawKey(`${setup.args[index - 1] ?? ''} ${arg}`),
-    );
+    const args = firstRefusedWord(setup.args, setup.command);
     if (args !== -1) return issue(RAW_KEY, ['args', args]);
-    // A placeholder is a NAME, never a key, however long or secret-sounding it is.
-    const name = Object.keys(setup.env).find(key => {
-      const value = setup.env[key] ?? '';
-      return !WHOLE_SECRET_PLACEHOLDER.test(value) && holdsRawKey(`${key} ${value}`);
-    });
+    // A placeholder is a NAME, never a key: the one rule skips a whole one itself.
+    const name = Object.keys(setup.env).find(key => envEntryRefused(key, setup.env[key] ?? ''));
     if (name !== undefined) issue(`${name}: ${RAW_KEY}`, ['env', name]);
   });
 export type CatalogMcpSetup = z.infer<typeof CatalogMcpSetupSchema>;

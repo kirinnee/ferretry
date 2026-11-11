@@ -108,12 +108,13 @@ describe('see changes never carries text that may be a secret', () => {
 
   it('should say a value that is the same on both sides is unchanged, without showing it', async () => {
     const r = rig();
-    await install(r, mcpV(1, { DB_PASSWORD: PASSWORD }), runtimeTarget());
+    // A catalog can no longer carry a password written out (R-0261), so the value that stays the same is a plain one.
+    await install(r, mcpV(1, { REGION: 'eu-west-1' }), runtimeTarget());
     const preview = await r.service.preview(
       'runtime',
-      await request(alice, mcpV(2, { DB_PASSWORD: PASSWORD }), runtimeTarget()),
+      await request(alice, mcpV(2, { REGION: 'eu-west-1' }), runtimeTarget()),
     );
-    should(wire(preview.changes)).not.match(new RegExp(PASSWORD, 'u'));
+    should(wire(preview.changes)).not.match(/eu-west-1/u);
     should(preview.changes?.entries).eql([]);
     should(preview.changes?.unchanged).be.above(0);
   });

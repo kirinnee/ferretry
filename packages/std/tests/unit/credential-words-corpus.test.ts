@@ -16,7 +16,18 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { findFlagSecrets, shownWords } from '../../src/credential-words/index.ts';
+import { firstRefusedWord } from '../../../core/vault/contract/lib/command-line.ts';
+import {
+  type CutterTests,
+  findFlagSecrets,
+  findRawSecrets,
+  looksSecret,
+  SECRET_TOKEN_SOURCE,
+  secretNamed,
+  SHOWN_TESTS,
+  shownWords,
+  shownWordWith,
+} from '../../src/credential-words/index.ts';
 import { nestedFamily } from '../support/command-line-family.ts';
 
 /** A 16-character value of 16 distinct characters: past every length and entropy gate, and no known shape. */
@@ -355,6 +366,101 @@ describe('CFG-LEAK the one word cutter, over the corpus', () => {
     for (const name of ['model', 'signing', 'level', 'token-file', 'host', 'x'])
       should([name, refusedNames.has(name)]).eql([name, false]);
   });
+
+  // The cutter takes its two tests as a parameter so a reader that refuses more (a catalog's publish) is the SAME cutter
+  // with a wider pair (britnee #41). Two pins over this one corpus, each command before the first word as well.
+  it('CFG-LEAK-R shownWord is literally shownWordWith(SHOWN_TESTS): deep-equal over the whole corpus', () => {
+    for (const words of corpus())
+      for (const first of [undefined, '--token', '--model']) {
+        should(shownWords(words, first)).eql(
+          words.map((word, at) => shownWordWith(SHOWN_TESTS, word, at === 0 ? first : words[at - 1])),
+        );
+      }
+  }, 20_000);
+
+  // The publish tests are std's NARROW fleet tests plus the catalog's own rules; the display widens the name test to any
+  // name that merely ENDS in key/token/secret/password. Every word the display hides and a catalog accepts is that zone
+  // and nothing else: W accepts it, only the widened tail names it, and it carries no known token shape.
+  it('CFG-LEAK-R the publish tests withhold everything SHOWN_TESTS withholds, except the widened name-tail zone, pinned exactly', () => {
+    const narrow: CutterTests = { namesSecret: secretNamed, looksSecret };
+    const tokenShape = new RegExp(SECRET_TOKEN_SOURCE, 'u');
+    const widenedTail = /(?:key|token|secret|password|passwd)s?|credentials?/iu;
+    let hiddenWords = 0;
+    let gap = 0;
+    for (const words of corpus())
+      for (const first of [undefined, '--token', '--model'])
+        words.forEach((word, at) => {
+          const before = at === 0 ? first : words[at - 1];
+          if (!shownWordWith(SHOWN_TESTS, word, before).hidden) return;
+          hiddenWords += 1;
+          if (firstRefusedWord([word], before) !== -1) return;
+          gap += 1;
+          const args = before === undefined ? [word] : [before, word];
+          const reasons = {
+            writeRuleAccepts: findFlagSecrets({ args }).length === 0 && findRawSecrets({ args }).length === 0,
+            narrowNamesNothing: !shownWordWith(narrow, word, before).hidden,
+            tailNamesIt: widenedTail.test(`${before ?? ''} ${word}`),
+            noTokenShape: !tokenShape.test(word),
+          };
+          should([word, before, reasons]).eql([
+            word,
+            before,
+            { writeRuleAccepts: true, narrowNamesNothing: true, tailNamesIt: true, noTokenShape: true },
+          ]);
+        });
+    should(hiddenWords).be.above(1000);
+    // The zone is real in this corpus (the test would otherwise pin nothing).
+    should(gap).be.above(0);
+  }, 20_000);
+
+  // The corpus above holds token-tail words only, so it cannot pin the zone. This is the EXACT list, one tail word at a
+  // time (key, token, secret, password, passwd, credential, each singular and plural): a name that only ENDS in the
+  // tail word (glued, no word break before it) carrying a value W accepts. The measured gap over GAP_NAMES + the
+  // controls must EQUAL it: a zone that widens (a control refused-or-shown differently) or narrows (publish refusing
+  // one of these) both fail. Names that set the tail word apart (`--db-password`, `MY_SECRET`) are controls: the narrow
+  // tests name them, so publish refuses them and they are NOT in the zone.
+  const GAP_FLAGS = [
+    '--sort-key',
+    '--ssh-key',
+    '--mykeys',
+    '--mytoken',
+    '--mytokens',
+    '--apisecret',
+    '--apisecrets',
+    '--sort-secrets',
+    '--dbpassword',
+    '--dbpasswords',
+    '--dbpasswd',
+    '--clientcredential',
+    '--clientcredentials',
+  ];
+  const GAP_ENVS = ['PRIMARY_KEY', 'API_TOKENS', 'APISECRET', 'DBPASSWORD', 'DBPASSWD', 'CLIENTCREDENTIALS'];
+  const CONTROL_FLAGS = ['--db-password', '--my-passwd', '--client-secret', '--api-token', '--client-credentials'];
+  const CONTROL_ENVS = ['MY_SECRET', 'DB_PASSWORD', 'DB_PASSWD', 'CLIENT_CREDENTIALS', 'MY_TOKEN'];
+  const GAP_VALUES = ['modified_time', 'hunter2024', 'created_at_id', 'short-0001', '/run/secret/file'];
+
+  it('CFG-LEAK-R the name-tail zone is EXACTLY these cases: every tail word, widened and narrowed both go red', () => {
+    const cases = (
+      flags: readonly string[],
+      envs: readonly string[],
+    ): readonly (readonly [string | undefined, string])[] => [
+      ...flags.flatMap(flag => GAP_VALUES.map(value => [flag, value] as const)),
+      ...envs.flatMap(env => GAP_VALUES.map(value => [undefined, `${env}=${value}`] as const)),
+    ];
+    const measured = cases(GAP_FLAGS.concat(CONTROL_FLAGS), GAP_ENVS.concat(CONTROL_ENVS))
+      .filter(
+        ([before, word]) => shownWordWith(SHOWN_TESTS, word, before).hidden && firstRefusedWord([word], before) === -1,
+      )
+      .map(([before, word]) => `${before ?? ''} ${word}`.trim());
+    const expected = cases(GAP_FLAGS, GAP_ENVS).map(([before, word]) => `${before ?? ''} ${word}`.trim());
+    should(measured).eql(expected);
+    // Every case, gap or control, is withheld by the display; only the controls are refused at publish too.
+    for (const [before, word] of cases(GAP_FLAGS.concat(CONTROL_FLAGS), GAP_ENVS.concat(CONTROL_ENVS)))
+      should([before, word, shownWordWith(SHOWN_TESTS, word, before).hidden]).eql([before, word, true]);
+    for (const [before, word] of cases(CONTROL_FLAGS, CONTROL_ENVS))
+      should([before, word, firstRefusedWord([word], before) !== -1]).eql([before, word, true]);
+    should(expected.length).equal((GAP_FLAGS.length + GAP_ENVS.length) * GAP_VALUES.length);
+  }, 20_000);
 
   it('S6 CFG-LEAK-W the ruled controls stay shown: a pointer, then a key of its own and no raw text, is no glue', () => {
     for (const mark of [',', ';', '&'])

@@ -21,7 +21,7 @@ import {
   CATALOG_SKILL_ENTRY_FILE,
   type CatalogMcpSetup,
   hiddenCharacters,
-  holdsRawKey,
+  holdsCredential,
   revealHidden,
   type SharedCatalogItem,
 } from './shared-catalog.ts';
@@ -504,9 +504,9 @@ const RUNS_ON_ITS_OWN =
 /** Whether a tool runs or obeys a file at this path on its own: the rule behind the `runs-on-its-own` warning. */
 export const runsOnItsOwnPath = (path: string): boolean => RUNS_ON_ITS_OWN.test(path);
 
-/** Which carried files hold what the raw-key rule would refuse in an MCP setup. A guess, so a warning. */
+/** Which carried files hold what the one hide rule would refuse in an MCP setup. A guess, so a warning. */
 const filesWithPossibleSecret = (files: readonly { readonly path: string; readonly content: string }[]): string[] =>
-  files.filter(file => holdsRawKey(file.content)).map(file => file.path);
+  files.filter(file => holdsCredential(file.content)).map(file => file.path);
 
 const listed = (paths: readonly string[]): string => paths.join(', ');
 
