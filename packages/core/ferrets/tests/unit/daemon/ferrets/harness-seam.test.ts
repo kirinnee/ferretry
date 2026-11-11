@@ -265,8 +265,10 @@ describe('harness-refusals: interrupt presses the HARNESS’s stop key, only und
 test('decision 18: the seam offers deliver, queue (U3), interrupt, transcript and the send path’s pane look and composer acts only; no raw pane write exists', async () => {
   const f = await running();
   expect(Object.keys(f.seam).sort()).toEqual([
+    'askedQuestion',
     'clearComposer',
     'deliver',
+    'form',
     'heldAt',
     'interrupt',
     'observe',
@@ -469,5 +471,74 @@ describe('send path: the seam reaches the pane look and the composer acts throug
     const odd = await running();
     odd.runner.fail = { kind: 'not_ready', why: 'busy' };
     await expect(odd.seam.stopActive!()).rejects.toThrow();
+  });
+});
+
+describe('structured questions: the form seam and the asked-question file', () => {
+  test('form.capture answers the runner’s masked capture, no_pane for a pane it cannot read, plugin_unavailable for a runner without it', async () => {
+    const f = await running();
+    f.runner.form = {
+      alive: true,
+      dead: false,
+      promptReady: false,
+      activeWork: false,
+      visible: 'Pick one',
+      history: '',
+    };
+    expect(await f.seam.form!.capture()).toEqual({ ok: true, value: f.runner.form });
+    f.runner.form = undefined;
+    expect(await f.seam.form!.capture()).toEqual({ ok: false, error: { refused: 'no_pane' } });
+    (f.runner as { formCapture?: unknown }).formCapture = undefined;
+    expect(await f.seam.form!.capture()).toEqual({ ok: false, error: { refused: 'plugin_unavailable' } });
+  });
+
+  test('form.key and form.paste reach the runner’s own guarded writes, and answer its closed failures as refusals typed nothing', async () => {
+    const f = await running();
+    expect(await f.seam.form!.key('Down')).toEqual({ ok: true, value: undefined });
+    expect(await f.seam.form!.paste('free text')).toEqual({ ok: true, value: undefined });
+    expect(f.runner.formKeys).toEqual([{ handle: f.handle, key: 'Down' }]);
+    expect(f.runner.formPastes).toEqual([{ handle: f.handle, text: 'free text' }]);
+    f.runner.fail = { kind: 'held', code: 'input_pending' };
+    expect(await f.seam.form!.key('Enter')).toEqual({ ok: false, error: { refused: 'input_pending' } });
+    f.runner.fail = { kind: 'held', code: 'input_pending' };
+    expect(await f.seam.form!.paste('x')).toEqual({ ok: false, error: { refused: 'input_pending' } });
+    expect(f.runner.formKeys).toHaveLength(1);
+    f.runner.fail = { kind: 'not_ready', why: 'exited' };
+    expect(await f.seam.form!.key('Enter')).toEqual({ ok: false, error: { refused: 'not_ready', why: 'exited' } });
+    (f.runner as { formKey?: unknown }).formKey = undefined;
+    (f.runner as { formPaste?: unknown }).formPaste = undefined;
+    expect(await f.seam.form!.key('Enter')).toEqual({ ok: false, error: { refused: 'plugin_unavailable' } });
+    expect(await f.seam.form!.paste('x')).toEqual({ ok: false, error: { refused: 'plugin_unavailable' } });
+  });
+
+  test('a ferret that stopped since has no pane for the form', async () => {
+    const f = await running();
+    await f.service.stop(f.id, 'now');
+    expect(await f.seam.form!.key('Enter')).toEqual({ ok: false, error: { refused: 'no_pane' } });
+    expect(await f.seam.form!.paste('x')).toEqual({ ok: false, error: { refused: 'no_pane' } });
+    expect(await f.seam.form!.capture()).toEqual({ ok: false, error: { refused: 'no_pane' } });
+    expect(f.runner.formKeys).toEqual([]);
+  });
+
+  test('askedQuestion reads the session file with the harness’s proved transcript, and nothing when either is missing', async () => {
+    const written = '2026-11-11T05:00:00.000Z' as never;
+    const f = await running({
+      session: {
+        prepare: async () => {},
+        stamp: async () => {},
+        carry: async () => {},
+        askedQuestion: async () => ({ payload: '{"hook_event_name":"PreToolUse"}', writtenAt: written }),
+      },
+    });
+    f.harness.transcripts.set(f.id, { stamp: { file: '/t/fern.jsonl', size: 1, mtimeMs: 2 }, records: [] });
+    expect(await f.seam.askedQuestion!()).toEqual({
+      payload: '{"hook_event_name":"PreToolUse"}',
+      writtenAt: written,
+      transcript: '/t/fern.jsonl',
+    });
+    f.harness.transcripts.delete(f.id);
+    expect(await f.seam.askedQuestion!()).toEqual({ payload: '{"hook_event_name":"PreToolUse"}', writtenAt: written });
+    const bare = await running();
+    expect(await bare.seam.askedQuestion!()).toBeUndefined();
   });
 });

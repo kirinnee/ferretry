@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { ApiError, type Log, type RootHandle, type RootsPort } from '@ferretry/kernel/contract';
 import { FERRET_READABLE_FOLDERS, FERRET_SESSIONS_ROOT } from '../../contract/sessions-root.ts';
 import type { FerretTurnAuthor, FerretTurnWritten } from '../../contract/port.ts';
-import { type Duration, milliseconds } from '@ferretry/std';
+import { type Duration, type Instant, instantFromEpochMs, milliseconds } from '@ferretry/std';
 import { FileSessionEffectLedger } from '../adapters/session/effects/file-session-effect-ledger.ts';
 import {
   FileSessionEnvironmentStore,
@@ -175,6 +175,7 @@ export class SessionFiles {
           return resolved.value;
         });
       },
+      askedQuestion: async ferret => await this.readAskedQuestion(parseSessionId(ferret)),
       // Claude Code's question hook records the question it asks here (`FY_QUESTION_FILE`, today's `questionAsked`):
       // inside the ferret's own folder on the sessions root, never in its work tree.
       questionFile: async ferret => {
@@ -346,6 +347,38 @@ export class SessionFiles {
     } catch (error) {
       this.deps.log.warn('a revive turn could not be counted, so the ferret was not relaunched', { ferret: id });
       throw error;
+    }
+  }
+
+  /** The most bytes of `question-asked.json` read: a hook payload is a few kilobytes, so a larger file is not one. */
+  private static readonly ASKED_QUESTION_LIMIT = 262_144;
+
+  /** The payload last read per ferret and when it was FIRST seen (a root offers no mtime): the same text keeps its instant. */
+  readonly #askedSeen = new Map<SessionId, { readonly payload: string; readonly at: Instant }>();
+
+  /**
+   * THIS ferret's `question-asked.json` as the hook left it, bounded, and the instant that payload was first seen (the
+   * hook replaces the file whole for every question, so a changed payload is a new question). `undefined` when the file
+   * is absent, unreadable or over the bound; reading never throws.
+   */
+  private async readAskedQuestion(
+    id: SessionId,
+  ): Promise<{ readonly payload: string; readonly writtenAt: Instant } | undefined> {
+    try {
+      const root = this.root(id);
+      const named = root.resolve(QUESTION_ASKED_FILE);
+      if (!named.ok) return undefined;
+      const bytes = await root.readBytes(named.value, SessionFiles.ASKED_QUESTION_LIMIT + 1);
+      if (bytes.length > SessionFiles.ASKED_QUESTION_LIMIT) return undefined;
+      const payload = new TextDecoder().decode(bytes);
+      const known = this.#askedSeen.get(id);
+      if (known?.payload === payload) return { payload, writtenAt: known.at };
+      const at = instantFromEpochMs(Date.parse(this.deps.clock.now()));
+      this.#askedSeen.set(id, { payload, at });
+      return { payload, writtenAt: at };
+    } catch {
+      this.#askedSeen.delete(id);
+      return undefined;
     }
   }
 
