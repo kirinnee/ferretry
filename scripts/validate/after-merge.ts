@@ -44,6 +44,10 @@ export const OWNER_MOVED_ITEMS: readonly { readonly id: string; readonly decisio
     decision: 'britnee 2026-11-10: the rest of the followups sweep moves to after merge, owner gustavo',
   },
   {
+    id: 'links-keep-history-parse-worker',
+    decision: 'lizzette 2026-11-11: links/keep/history/parse worker move after merge (card &F3447)',
+  },
+  {
     id: 'coverage-lag',
     decision: '!A484: the coverage lag (12 unit batches + 40 int files, #32 CI-only proof) moves after merge',
   },
