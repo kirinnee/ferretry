@@ -8,6 +8,8 @@ import { buildAttachments } from './attachments/index.ts';
 import { AttachmentError } from './attachments/lib/index.ts';
 import { buildLinks } from './links/index.ts';
 import type { LinkHarness, LinkKeeper } from './links/lib/service.ts';
+import type { TranscriptOpener } from './reader/adapters/file-reads.ts';
+import type { HarnessTranscripts } from './reader/adapters/entries-source.ts';
 import { registerReader } from './reader/index.ts';
 import { TranscriptReadError, type TranscriptReadRedactor } from './reader/lib/reads.ts';
 import { messageTokenCodec } from './reader/adapters/message-token-key.ts';
@@ -15,12 +17,12 @@ import { buildRenders } from './renders/index.ts';
 import { RenderError } from './renders/lib/types.ts';
 import { buildSearch, WORK_SEARCH_WARM_DELAY_MS, type WorkSource } from './search/index.ts';
 import { tryParseSessionId } from './seams/ferret-id.ts';
+import { harnessFamily } from './seams/harness-family.ts';
 
-/** Said by everything that needs a harness plugin's transcript reader or conversation lists. */
-export const HARNESS_PENDING =
-  'This needs the harness plugin that wrote the conversation, and Conversation is not connected to it yet. Read the conversation from the harness itself for now.';
+/** Said by everything that needs the conversations a harness holds: the Conversations screen, its preview and keeping one. */
+const HARNESS_PENDING = 'Listing, previewing and keeping conversations from a harness is not in 5.0 yet.';
 
-/** THE HARNESS SEAM: Ferrets offers no way to reach a ferret's harness reader from another plugin yet, so these refuse. */
+/** THE HARNESS SEAM that is still open: Ferrets offers no list of a harness's conversations yet, so these refuse. */
 const harnessPending = (): never => {
   throw new ApiError(503, HARNESS_PENDING, 'conversation_harness_unavailable');
 };
@@ -112,16 +114,48 @@ export function buildReading(deps: {
   const history = kernel.roots.root('harness-history');
   const imports = kernel.roots.root('imports');
 
+  /**
+   * The ferret's own harness transcript as RAW bytes (G162): `undefined` while no transcript is proved, `unsupported`
+   * for a harness that offers entries only. Rejects with the seam's 503 `plugin_unavailable` while the harness is off.
+   * Conversation is the ONE consumer; every answer cut from these bytes is masked by the reader (`readRedactor`).
+   */
+  const bytes: TranscriptOpener = async ferret => {
+    const id = tryParseSessionId(ferret);
+    const harness = id === undefined ? undefined : await ferrets.harness?.(id);
+    if (harness === undefined) return undefined;
+    return harness.transcriptBytes === undefined ? 'unsupported' : await harness.transcriptBytes();
+  };
+  /** What a read falls back to when the harness offers no bytes: its masked entries. */
+  const entries: HarnessTranscripts = async ferret => {
+    const id = tryParseSessionId(ferret);
+    const summary = id === undefined ? undefined : await ferrets.get(id);
+    const harness = id === undefined ? undefined : await ferrets.harness?.(id);
+    const family = summary === undefined ? undefined : harnessFamily(summary.harness);
+    if (family === undefined || harness === undefined) return undefined;
+    // The seam's reader is bound to this ferret; the entries source names the ferret itself, so the binding drops it.
+    const bound = harness.transcript;
+    return {
+      harness: family,
+      reader: {
+        read: async (_ferret, after, limit) => await bound.read(after, limit),
+        follow: (_ferret, signal) => bound.follow(signal),
+        find: async (_ferret, entry) => await bound.find(entry),
+      },
+    };
+  };
   const reader = registerReader({
-    transcripts: async () => harnessPending(),
+    bytes,
+    transcripts: entries,
     exists: async ferret => {
       const id = tryParseSessionId(ferret);
       return id !== undefined && (await ferrets.get(id)) !== undefined;
     },
     codec: messageTokenCodec(kernel.state),
     redactor: readRedactor(kernel),
-    history,
-    locate: { locate: async () => harnessPending() },
+    // Hands the loop back between parse slices, so a long transcript never blocks the daemon (v4 paced the same way).
+    yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
+    sleep: async (delay: number) => await kernel.clock.sleep(milliseconds(delay)),
+    instant: () => kernel.clock.now(),
     now: () => kernel.clock.nowMs(),
   });
 
@@ -157,24 +191,43 @@ export function buildReading(deps: {
   // Today's warm-up: the index is built a little after start, so the first search rarely waits for it.
   const cancelWarm = kernel.clock.after(milliseconds(WORK_SEARCH_WARM_DELAY_MS), () => search.service.warm());
 
-  const pendingRefusal = async () => err({ code: 'conversation_harness_unavailable', message: HARNESS_PENDING });
+  /** The ferret must exist, as the routes' `known` requires; the same 404 for every port member. */
+  const knownFerret = async (ferret: FerretId): Promise<void> => {
+    if ((await ferrets.get(ferret)) === undefined) throw new ApiError(404, `no ferret ${ferret}`, 'not_found');
+  };
   const api: ReadingApi = {
-    // THE HARNESS SEAM: the routes serve these through `registerReader`; the port answers the same sentence.
-    transcript: pendingRefusal,
-    // The same reader the routes use, so it answers the harness sentence until a harness plugin supplies the transcript.
+    // The same reader the routes use: every answer is cut from the harness's bytes and masked by `readRedactor`.
+    // The newest messages (a tail) unless a cursor continues forward; `through` ends the page at a message.
+    transcript: async (ferret, options) =>
+      await guarded(async () => {
+        await knownFerret(ferret);
+        const backward =
+          options?.cursor === undefined
+            ? { ...(options?.through === undefined ? {} : { through: options.through }) }
+            : undefined;
+        return await reader.reads.messages(ferret, options?.cursor, options?.limit, backward);
+      }),
     transcriptEvents: async (ferret, options) =>
       await guarded(async () => {
-        if ((await ferrets.get(ferret)) === undefined) throw new ApiError(404, `no ferret ${ferret}`, 'not_found');
+        await knownFerret(ferret);
         return await reader.reads.transcriptEvents(ferret, options?.limit);
       }),
     // Today's `operatorReads.logs`: every event kind, rendered and masked as the log is.
     transcriptLog: async (ferret, options) =>
       await guarded(async () => {
-        if ((await ferrets.get(ferret)) === undefined) throw new ApiError(404, `no ferret ${ferret}`, 'not_found');
+        await knownFerret(ferret);
         return { v: 1 as const, ferret, log: await reader.reads.logs(ferret, options?.limit) };
       }),
-    logPage: pendingRefusal,
-    logSearch: pendingRefusal,
+    logPage: async (ferret, options) =>
+      await guarded(async () => {
+        await knownFerret(ferret);
+        return await reader.reads.logPage(ferret, options ?? {});
+      }),
+    logSearch: async (ferret, query, options) =>
+      await guarded(async () => {
+        await knownFerret(ferret);
+        return await reader.reads.logSearch(ferret, { q: query, ...options });
+      }),
 
     addAttachment: async (ferret, upload) =>
       await guarded(async () =>

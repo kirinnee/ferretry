@@ -142,14 +142,14 @@ describe('the merged half', () => {
       clock: fixedClock('2026-11-06T09:00:00Z'),
     });
 
-  test('the pending question reads as none, and a transcript says the harness is not connected yet', async () => {
+  test('the pending question reads as none, and a transcript says no transcript is proved yet', async () => {
     const host = await boot();
     const question = await host.request('GET', '/v1/ferrets/f1/question', { as: owner() });
     expect(question.status).toBe(200);
     expect(question.json()).toEqual({ question: null });
     const logs = await host.request('GET', '/v1/ferrets/f1/logs', { as: owner() });
-    expect(logs.status).toBe(503);
-    expect(logs.json()).toMatchObject({ code: 'conversation_harness_unavailable' });
+    expect(logs.status).toBe(409);
+    expect(logs.json()).toMatchObject({ code: 'no_transcript' });
   });
 
   test('a render saved is served back, and a link listing says the harness is not connected yet', async () => {
