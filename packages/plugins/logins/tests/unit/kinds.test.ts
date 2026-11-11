@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { LOGIN_KINDS, type LoginFile } from '../../contract/index.ts';
+import type { LaunchStore } from '../../daemon/lib/credentials/credentials-service.ts';
 import { kindOf, loginKinds } from '../../daemon/lib/kinds.ts';
 import { sampleLogin } from '../../contract/testing/index.ts';
 
@@ -27,8 +28,10 @@ const STORE = '/fy/state/logins/credentials';
 const kinds = loginKinds({
   clock: { sleep: async () => undefined },
   // What the credential service names for a Ferretry-kept Claude login; nothing for any other.
-  signInVariables: async (id): Promise<Record<string, string>> =>
-    id === 'work' ? { CLAUDE_SECURESTORAGE_CONFIG_DIR: `${STORE}/work` } : {},
+  launchStore: async (id): Promise<LaunchStore> =>
+    id === 'work'
+      ? { kind: 'owned', variables: { CLAUDE_SECURESTORAGE_CONFIG_DIR: `${STORE}/work` }, usable: true }
+      : { kind: 'none' },
   files: () => files,
   view: async id => sampleLogin(id),
   check: async id => sampleLogin(id),
@@ -88,7 +91,11 @@ describe('the five login kinds', () => {
   test('a Claude login with no usable sign-in refuses with the sentence the check gave, not a signed-out pane', async () => {
     const signedOut = loginKinds({
       clock: { sleep: async () => undefined },
-      signInVariables: async () => ({ CLAUDE_SECURESTORAGE_CONFIG_DIR: `${STORE}/work` }),
+      launchStore: async (): Promise<LaunchStore> => ({
+        kind: 'owned',
+        variables: { CLAUDE_SECURESTORAGE_CONFIG_DIR: `${STORE}/work` },
+        usable: true,
+      }),
       files: () => files,
       view: async id =>
         sampleLogin(id, {
@@ -141,7 +148,7 @@ describe('the five login kinds', () => {
       });
     const signedOut = loginKinds({
       clock: { sleep: async () => undefined },
-      signInVariables: async () => ({}),
+      launchStore: async (): Promise<LaunchStore> => ({ kind: 'none' }),
       files: () => files,
       view: async id => needsSignIn(id),
       check: async id => needsSignIn(id),

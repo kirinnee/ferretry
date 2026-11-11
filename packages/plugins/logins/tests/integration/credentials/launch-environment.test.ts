@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { LoginKind } from '@ferretry/core-ferrets/contract';
@@ -141,18 +141,72 @@ test('the Codex half of the same kind adds no variable here', async () => {
   }
 });
 
-test('a host-kept Claude login never gets a store variable; this build cannot read it, so the start is refused in a sentence', async () => {
+test('a host-kept Claude login launches with the EMPTY secure-storage selector and is admitted without reading the host store (v4 parity)', async () => {
   const f = await boot({ mine: { harness: 'claude-code', store: 'host' } });
   try {
     const answered = await f.anthropic().launchEnvironment?.('mine', 'claude-code');
 
-    // Never a variable (a host store is the person's own default store, which a launch must not name) and no pane is
-    // started signed out on a store this build cannot read.
-    expect(answered).toEqual({
-      ok: false,
-      error:
-        'the login mine is not signed in (This login cannot be reached on this machine.), so the ferret was not started',
-    });
+    // v4 (account/credentials.ts, materialise.ts): the empty value is a value, not an absence. With the real HOME kept,
+    // Claude then selects the person's own default store, which this build has no authority to read, so it is not read.
+    expect(answered).toEqual({ ok: true, value: { CLAUDE_SECURESTORAGE_CONFIG_DIR: '' } });
+  } finally {
+    await f.host.stop();
+  }
+});
+
+/** Writes raw text (not JSON.stringify) so a malformed file can be made. */
+async function putRaw(base: string, path: string, text: string) {
+  const target = join(base, path);
+  await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+  await writeFile(target, text, { mode: 0o600 });
+}
+
+const UNUSABLE = 'the login work has sign-in material this build cannot use, so the ferret was not started';
+
+test('B3: a credential file that is not JSON refuses the start with a fixed sentence that quotes nothing', async () => {
+  const f = await boot({ work: { harness: 'claude-code', store: 'ferretry' } });
+  try {
+    await putRaw(f.base, 'work/.credentials.json', '{broken fake JSON FAKE-MARKER-1');
+
+    const answered = await f.anthropic().launchEnvironment?.('work', 'claude-code');
+
+    expect(answered).toEqual({ ok: false, error: UNUSABLE });
+    expect(JSON.stringify(answered)).not.toContain('FAKE-MARKER');
+  } finally {
+    await f.host.stop();
+  }
+});
+
+test('B3: a credential file of the wrong top-level shape refuses the same way', async () => {
+  const f = await boot({ work: { harness: 'claude-code', store: 'ferretry' } });
+  try {
+    await putRaw(f.base, 'work/.credentials.json', '["FAKE-MARKER-2"]');
+
+    expect(await f.anthropic().launchEnvironment?.('work', 'claude-code')).toEqual({ ok: false, error: UNUSABLE });
+  } finally {
+    await f.host.stop();
+  }
+});
+
+test('B3: a credential reached through a link the owned store refuses is not admitted', async () => {
+  const f = await boot({ work: { harness: 'claude-code', store: 'ferretry' } });
+  try {
+    await f.put('work/fake.json', claudeCredential());
+    await symlink('fake.json', join(f.base, 'work', '.credentials.json'));
+
+    expect(await f.anthropic().launchEnvironment?.('work', 'claude-code')).toEqual({ ok: false, error: UNUSABLE });
+  } finally {
+    await f.host.stop();
+  }
+});
+
+test('B3 control: the same login with a well-formed file is still admitted', async () => {
+  const f = await boot({ work: { harness: 'claude-code', store: 'ferretry' } });
+  try {
+    await f.put('work/.credentials.json', claudeCredential());
+
+    const answered = await f.anthropic().launchEnvironment?.('work', 'claude-code');
+    expect(answered?.ok).toBe(true);
   } finally {
     await f.host.stop();
   }

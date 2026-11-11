@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { HarnessLoginFlow, LoginFile, LoginView } from '../../contract/index.ts';
+import type { LaunchStore } from '../../daemon/lib/credentials/credentials-service.ts';
 import { loginKinds } from '../../daemon/lib/kinds.ts';
 import { sampleLogin } from '../../contract/testing/index.ts';
 
@@ -30,7 +31,7 @@ function world(started: HarnessLoginFlow, ...later: HarnessLoginFlow[]) {
   const reads: string[] = [];
   const queue = [...later];
   const kinds = loginKinds({
-    signInVariables: async () => ({}),
+    launchStore: async (): Promise<LaunchStore> => ({ kind: 'none' }),
     clock: {
       sleep: async duration => {
         sleeps.push(Number(duration));
@@ -114,7 +115,7 @@ describe('a kind’s reads', () => {
   const quotaOf = async (view: LoginView) => {
     const kinds = loginKinds({
       clock: { sleep: async () => undefined },
-      signInVariables: async () => ({}),
+      launchStore: async (): Promise<LaunchStore> => ({ kind: 'none' }),
       files: () => FILES,
       view: async () => view,
       check: async () => view,
@@ -142,7 +143,7 @@ describe('a kind’s reads', () => {
   test('says the login does not exist when the list no longer shows it', async () => {
     const kinds = loginKinds({
       clock: { sleep: async () => undefined },
-      signInVariables: async () => ({}),
+      launchStore: async (): Promise<LaunchStore> => ({ kind: 'none' }),
       files: () => FILES,
       view: async () => undefined,
       check: async id => sampleLogin(id),
