@@ -186,16 +186,21 @@ describe('the queue, through the port and its routes', () => {
 });
 
 describe('what needs the ferret’s terminal and has none says so', () => {
-  test('a retry, a compact-at change and an answer are refused with the sentence for a terminal that is not connected', async () => {
+  test('a retry and a compact-at change are refused with the sentence for a terminal that is not connected', async () => {
     const { host, api } = await world();
 
-    for (const refused of [
-      await api().retrySend(F1, 's-1'),
-      await api().setCompactAt(F1, {} as never),
-      await api().answer(F1, { toolUseId: 't-1', labels: ['a'] }),
-    ])
+    for (const refused of [await api().retrySend(F1, 's-1'), await api().setCompactAt(F1, {} as never)])
       expect(refused).toMatchObject({ ok: false, error: { code: 'conversation_terminal_unavailable' } });
     expect(await api().compactAt(F1)).toBeUndefined();
+    await host.stop();
+  });
+
+  test('an answer is refused with the form-seam sentence, not the terminal one, when Ferrets offers no form acts', async () => {
+    const { host, api } = await world();
+
+    const refused = await api().answer(F1, { toolUseId: 't-1', labels: ['a'] });
+
+    expect(refused).toMatchObject({ ok: false, error: { code: 'plugin_unavailable' } });
     await host.stop();
   });
 

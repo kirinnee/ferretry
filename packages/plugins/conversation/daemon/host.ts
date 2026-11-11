@@ -66,7 +66,8 @@ import type { SessionStatus } from './seams/ferret-types.ts';
 import { sentDraftClearer, sharedDraftRoutes, sharedDraftSocketRoutes } from './drafts/lib/mounts/shared-drafts.ts';
 import { SessionSendError, sessionSendRoutes } from './delivery/lib/mounts/session-send.ts';
 import { StateDraftRepository } from './drafts/adapters/index.ts';
-import { clearAskedQuestion, writeAskedQuestion } from './questions/adapters/index.ts';
+import { buildQuestionAnswering, clearAskedQuestion, writeAskedQuestion } from './questions/adapters/index.ts';
+import { ANSWER_FAILURES, SessionAnswerError } from './questions/lib/mounts/session-answer.ts';
 import { QUESTION_WATCH_MS, QuestionWatch } from './questions/lib/watch.ts';
 import { OwnerWordsReader, TurnBoundaries, type TurnPhase } from './turns/lib/index.ts';
 import { SharedDraftPresence, SharedDraftService, sharedDraftOrigin } from './drafts/lib/index.ts';
@@ -1099,12 +1100,28 @@ export function buildConversationA(deps: {
     return question;
   };
   /**
-   * Answering a question's form is the structured-question drive, which waits on its own wiring (see the conversation line
-   * in `ports-pending.json`): until then every answer is refused and `question.json` stays. When it lands, an answer that
-   * landed ends the question, so `question.json` goes with it (the route's subsystem "returns only after … state cleared
-   * its exact bound tool id") through {@link clearAskedQuestion}.
+   * Answering a question's form is the structured-question drive (`questions/adapters/question-answering.ts`): the
+   * service binds `question.json`, the driver types into the live form through Ferrets' form seam only after binding it
+   * on a captured frame, the coordinator drives one logical answer at most once, and the stamp plus the exact-id clear of
+   * `question.json` is the commit point. Its failures are the route's refusals (`SessionAnswerError`).
    */
-  const answerQuestion = async (): Promise<SessionView> => pending();
+  const answering = buildQuestionAnswering({
+    state: kernel.state,
+    ferrets,
+    questionLane: questionSerial,
+    // Its own queue: the answered clear re-enters the question lane, which an answer must not hold across the drive.
+    serial: new KeyedSerialExecutor(),
+    clock,
+    status: async id => {
+      const summary = await ferrets.get(id);
+      return summary === undefined ? undefined : statusOf(summary);
+    },
+    publishAnswered: async (ferret, toolUseId) => await kernel.events.publish(QuestionAnswered, { ferret, toolUseId }),
+    log: { info: (event, fields) => kernel.log.info(event, fields), warn: message => kernel.log.warn(message) },
+    sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
+  });
+  const answerQuestion = async (...args: Parameters<typeof answering.answer>): Promise<SessionView> =>
+    await answering.answer(...args);
 
   /**
    * THE QUESTION WATCH: Claude Code's hook leaves the question it asks in the ferret's own file; this reads it on the 2 s
@@ -1326,7 +1343,20 @@ export function buildConversationA(deps: {
       }
     },
     question: async ferret => await askedQuestion(ferret),
-    answer: async () => err(pendingRefusal()),
+    answer: async (ferret, request) => {
+      try {
+        // No request id comes with the port's call: one is minted, and a repeat finds the question no longer pending.
+        await answering.answer(ferret, { ...request, requestId: String(kernel.ids.mint('answer')) });
+        return ok(undefined);
+      } catch (error) {
+        if (error instanceof SessionAnswerError)
+          return err({ code: ANSWER_FAILURES[error.failure].code, message: error.message });
+        return err({
+          code: error instanceof ApiError ? (error.code ?? 'answer_refused') : 'session_answer_failed',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
     compactAt: async () => undefined,
     setCompactAt: async () => err(pendingRefusal()),
     draft: async (ferret, slot) => await drafts.read(ferret, slot === 'chat' ? undefined : slot),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { Question } from '../../../../contract/index.ts';
 import {
+  SessionAnswerError,
   type SessionAnswerSubsystem,
   sessionAnswerRoutes,
 } from '../../../../daemon/questions/lib/mounts/session-answer.ts';
@@ -88,5 +89,55 @@ describe('POST answer', () => {
       body: { labels: [] },
     });
     expect(bad.status).toBe(400);
+  });
+});
+
+describe('POST answer, when it cannot be served', () => {
+  const failing = (error: unknown) =>
+    sessionAnswerRoutes({
+      question: async () => undefined,
+      answer: async () => {
+        throw error;
+      },
+    });
+  const post = (routes: ReturnType<typeof failing>, extra: { actor?: string } = {}) =>
+    refusalOf(routes, 'POST', ANSWER, {
+      params: ID,
+      headers: { 'x-fy-request-id': 'req-1' },
+      body: { toolUseId: 't1', labels: ['A'] },
+      ...extra,
+    });
+
+  it.each([
+    ['invalid', 400, 'invalid_request'],
+    ['not_found', 404, 'not-found'],
+    ['refused', 409, 'answer_refused'],
+    ['conflict', 409, 'answer_request_id_reused'],
+    ['already_answered', 409, 'question_already_answered'],
+    ['unconfirmed', 409, 'answer_unconfirmed'],
+    ['released', 409, 'answer_released'],
+    ['paused', 409, 'answer_paused'],
+    ['failed', 500, 'session_answer_failed'],
+  ] as const)('answers %s as %i %s', async (failure, status, code) => {
+    const refusal = await post(failing(new SessionAnswerError(failure, 'words')));
+    expect(refusal.status).toBe(status);
+    expect(refusal.code).toBe(code);
+    expect(refusal.message).toBe('words');
+  });
+
+  it('keeps the detail apart from the sentence, and says what was answered and how far a pause got', async () => {
+    const answered = await post(failing(new SessionAnswerError('already_answered', 'done', 'Yes', 'tech')));
+    expect(answered.extra).toEqual({ detail: 'tech', answeredWith: 'Yes' });
+    const paused = await post(
+      failing(
+        new SessionAnswerError('paused', 'stopped', undefined, 'tech', { stoppedAt: 1, answered: [true, false] }),
+      ),
+    );
+    expect(paused.extra).toEqual({ detail: 'tech', stoppedAt: 1, answered: [true, false] });
+  });
+
+  it('lets any other error through untouched', async () => {
+    const boom = new Error('boom');
+    expect((await post(failing(boom))) as unknown).toBe(boom);
   });
 });
