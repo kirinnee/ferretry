@@ -485,6 +485,22 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         return err(`the login ${login} could not be read, so the ferret was not started`);
       }
     },
+    // The sign-in FILE a login hands its harness (`LoginKind.credential`), through the SAME kind resolver; a kind with none
+    // answers `none`, and a hook that throws is `unavailable` with a fixed sentence (a Logins error is never quoted).
+    loginCredential: async (login, harness) => {
+      const kind = loginKindOf(login);
+      if (!kind.ok) return { kind: 'unavailable', sentence: kind.error };
+      const credential = kind.value.credential;
+      if (credential === undefined) return { kind: 'none' };
+      try {
+        return await credential.call(kind.value, login, harness);
+      } catch {
+        return {
+          kind: 'unavailable',
+          sentence: `the login ${login} could not be checked, so the ferret was not started`,
+        };
+      }
+    },
     openingAttachments: () => {
       const found = hooks.provider(OpeningAttachments, OPENING_ATTACHMENTS_KEY);
       return found === 'unavailable' ? undefined : found;
