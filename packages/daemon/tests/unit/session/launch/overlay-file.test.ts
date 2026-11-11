@@ -15,6 +15,7 @@ import {
   buildLaunchArgv,
   defaultStartWaitPolicy,
   FixedSettingsUnreadableError,
+  isLaunchOverlayFileName,
   type LaunchOverlayFile,
   type LaunchOverlayFiles,
   LaunchOverlayFileRequiredError,
@@ -305,5 +306,16 @@ describe('adoptedLaunchArgv with a login that pins its environment', () => {
 
     // Assert
     should(launch.kind).equal('unreadable');
+  });
+});
+
+describe('isLaunchOverlayFileName', () => {
+  it('should say yes only to the shape launchOverlayFile names a file with', () => {
+    // Act / Assert
+    should(isLaunchOverlayFileName(`launch-${'a'.repeat(24)}.json`)).be.true();
+    should(isLaunchOverlayFileName(`launch-${'a'.repeat(24)}-c100000-f1.json`)).be.true();
+    should(isLaunchOverlayFileName(`launch-${'a'.repeat(23)}.json`)).be.false();
+    should(isLaunchOverlayFileName(`.launch-${'a'.repeat(24)}.json.1.abc.tmp`)).be.false();
+    should(isLaunchOverlayFileName('notes.txt')).be.false();
   });
 });
