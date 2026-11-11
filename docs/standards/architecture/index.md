@@ -33,6 +33,19 @@ cask, installer, docs) are rewritten by `scripts/local/rename.sh --product <name
 `--bin <name>`, and `scripts/validate/cli-contracts.sh name-single-source` gates the
 invariant from pre-commit. See [Contracts](../contracts/README.md).
 
+## The GitHub owner
+
+A third fact has the same discipline: **who owns the GitHub repository**. Its single source is the root
+`package.json` `repository` field (`github:<owner>/<repo>`); the repo half equals the PRODUCT name.
+Every address a user or the product follows (cask, GoReleaser, installers, `INSTALLATION.md`, the
+get-started page, onboarding commands, the daemon's `RELEASE_OWNER`) carries it as a rewritable literal.
+
+`scripts/local/move-repo.sh --owner <new>` rewrites them all and
+`scripts/validate/repo-slug.sh` (pre-commit `a-repo-slug`) fails on any shipped file that disagrees.
+History, links to one issue or PR, and arbitrary test data are listed in
+`scripts/validate/repo-slug-allowlist.txt`. The procedure for moving the repository is
+[the runbook](../../runbooks/move-repo.md).
+
 ## Package layout
 
 ```

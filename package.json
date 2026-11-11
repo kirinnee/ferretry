@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "description": "Bun workspaces monorepo — this name field is the product name; the CLI package's bin key is the binary name",
+  "repository": "github:kirinnee/ferretry",
   "type": "module",
   "workspaces": [
     "packages/*"

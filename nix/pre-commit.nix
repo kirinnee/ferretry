@@ -190,6 +190,17 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # The GitHub owner is one fact (root package.json `repository`); every shipped address derives from
+    # it, and scripts/local/move-repo.sh moves them together. Scans the tree rather than the staged paths.
+    a-repo-slug = {
+      enable = true;
+      name = "GitHub owner single source";
+      entry = validator "scripts/validate/repo-slug.sh";
+      files = "^(package\\.json|\\.goreleaser\\.yaml|Casks/.*|INSTALLATION\\.md|docs/.*|packages/.*|scripts/.*)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     # The hosted relay is the one subsystem whose configuration meets its code only in production:
     # no test reads a wrangler config or a workflow's shell. Includes the adapter sources because
     # the gate cross-checks the routes and Durable Object classes they declare against the two.

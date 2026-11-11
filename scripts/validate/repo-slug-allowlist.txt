@@ -1,0 +1,49 @@
+# Where the GitHub slug (`<owner>/<repo>`) is allowed to differ from the root package.json
+# `repository` field. Read by scripts/validate/repo-slug.sh (the gate) and scripts/local/move-repo.sh
+# (the mover); docs/runbooks/move-repo.md explains the contract.
+#
+# One entry per line: `<mode> <git pathspec>`. `*` matches across `/` (git's own pathspec rule).
+#
+#   history  A record of what was true when it was written (changelogs, migration notes, design
+#            records, the validators themselves). Never rewritten, never checked.
+#   fixture  Test data that names the slug as an arbitrary example (board PR links, remote parsers,
+#            which are tested against `acme/ferretry` on purpose). Never rewritten, never checked.
+#   follow   A test that asserts a shipped address (update URLs, tap names, onboarding commands). The
+#            mover rewrites EVERY occurrence here, issue and pull-request links included, so the test
+#            keeps asserting what ships. The gate does not check it: the test suite does.
+#
+# Everywhere else the mover rewrites only addresses (a release, clone, tap, flake or API address) and
+# leaves a link to one issue or pull request alone: GitHub keeps redirecting those after a transfer.
+#
+# Not listed on purpose: anything a user or the product follows — Casks/, .goreleaser.yaml, install
+# scripts, INSTALLATION.md, the get-started page, onboarding commands, user docs. A shipped file
+# that names the slug is controlled, and a new one is controlled the moment it names it.
+history Changelog.md
+history Changelog.old.md
+history handover.md
+history docs/migration/*
+history docs/design/*
+history docs/PROMPT.md
+history config/test-quarantine.json
+history scripts/validate/*
+history scripts/local/move-repo.sh
+fixture packages/pwa/harness/*
+fixture packages/*/tests/*
+fixture tests/*
+follow packages/cli/tests/*/update/*
+follow packages/cli/tests/unit/daemon/controller.test.ts
+follow packages/cli/tests/unit/harness/harness.test.ts
+follow packages/daemon/tests/*/update/*
+follow packages/daemon/tests/unit/harness-update/*
+follow packages/daemon/tests/unit/runtime/mounts/daemon-update.test.ts
+follow packages/protocol/tests/fixtures.ts
+follow packages/protocol/tests/unit/daemon-update.test.ts
+follow packages/protocol/tests/unit/harness-update.test.ts
+follow packages/pwa/tests/fixtures/agent-setup-prompt.txt
+follow packages/pwa/tests/integration/fixtures/whats-new-scene.tsx
+follow packages/pwa/tests/unit/features/onboarding-model.test.ts
+follow packages/pwa/tests/unit/features/onboarding-page.test.tsx
+follow packages/pwa/tests/unit/features/settings/about-machine-support.ts
+follow packages/pwa/tests/unit/features/settings/about-machine.test.tsx
+follow packages/pwa/tests/unit/features/settings/agent-clis-support.ts
+follow packages/pwa/tests/unit/get-started-document.test.ts

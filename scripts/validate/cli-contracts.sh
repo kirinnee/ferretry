@@ -136,7 +136,11 @@ name-single-source)
   rg -qF "project_name: ${product}" .goreleaser.yaml
   test -f "Casks/${product}.rb"
   rg -qF "module ${product}" go.mod
-  rg -qF "REPO=\"kirinnee/${product}\"" scripts/release/install.sh
+  # The installer's repo is the root package.json `repository` slug (scripts/validate/repo-slug.sh
+  # holds every other shipped file to that same source).
+  release_slug="$(jq -r '.repository // empty | ltrimstr("github:")' package.json)"
+  test "${release_slug##*/}" = "${product}"
+  rg -qF "REPO=\"${release_slug}\"" scripts/release/install.sh
   rg -qF "binary: ${name}" .goreleaser.yaml
   rg -qF "package_name: ${name}" .goreleaser.yaml
   rg -qF "binary \"${name}\"" "Casks/${product}.rb"
