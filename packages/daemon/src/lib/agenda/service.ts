@@ -262,16 +262,26 @@ export class AgendaService {
   }
 
   /**
-   * The items a session's agenda holds, for the daemon's own board read (the cards' asks): what {@link list} returns,
-   * without proving the session in the directory. The proof exists so a WRITE never creates a phantom session
-   * directory; a read of a missing ledger creates nothing and answers no items, and the board already treats a read
-   * that fails as no asks. Across a whole board that proof was two session documents and two schemas per ferret.
+   * The items a session's agenda holds, for the daemon's own board read (the cards' asks): exactly what {@link list}
+   * answers, refusals included, but a session with no ledger costs no directory proof.
+   *
+   * WHY NOT NO PROOF AT ALL. A ledger can outlive its session — after config/state loss or an index removal — and
+   * {@link list} refuses it (`not-found`, or a thrown unusable document). The board must not show a reference the
+   * public agenda refuses, so a ledger that exists is still proved through the directory, which is the indexed
+   * membership check (archived sessions included) and then a proof memoized per frozen document. WHY THE
+   * SHORTCUT. Almost every session a board walk names is archived and has no ledger at all; "no items" is what
+   * {@link list} answers for it too — or `not-found`, which the board counts as no asks — so proving it would
+   * read two session documents per ferret for nothing.
    */
   async openItemsOf(sessionId: string): Promise<AgendaQueryResult<AgendaSnapshot['items']>> {
     const unnamed = this.unnameable(sessionId);
     if (unnamed !== null) return { ok: false, error: unnamed };
-    const current = await this.read(sessionId);
-    return { ok: true, value: agendaSnapshot(current ?? emptyAgendaLedger(sessionId, this.clock.now())).items };
+    const ledger = await this.repository.read(sessionId);
+    if (ledger === null) return { ok: true, value: [] };
+    const unauthorized = await this.authorize(sessionId);
+    if (unauthorized !== null) return { ok: false, error: unauthorized };
+    await this.flushChanges(sessionId);
+    return { ok: true, value: agendaSnapshot(ledger).items };
   }
 
   async count(sessionId: string): Promise<AgendaQueryResult<number>> {

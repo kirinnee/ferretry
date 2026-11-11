@@ -15,6 +15,7 @@ import {
   BunSqliteIndexFactory,
   type DaemonStorage,
   DaemonStorageFactory,
+  type DocumentCacheBudget,
   type DocumentChanges,
   InvalidStateDocumentError,
   KeyedSerialExecutor,
@@ -65,7 +66,11 @@ class PlainStateFileSystem extends CountingStateFileSystem {
   }
 }
 
-async function openStorage(make: (paths: FoundationPaths) => CountingStateFileSystem, changes?: DocumentChanges) {
+async function openStorage(
+  make: (paths: FoundationPaths) => CountingStateFileSystem,
+  changes?: DocumentChanges,
+  budget?: DocumentCacheBudget,
+) {
   const home = await mkdtemp(join(tmpdir(), 'fy-document-cache-'));
   homes.push(home);
   let fileSystem: CountingStateFileSystem | undefined;
@@ -83,6 +88,7 @@ async function openStorage(make: (paths: FoundationPaths) => CountingStateFileSy
     new SystemClock(),
     () => new KeyedSerialExecutor(),
     changes,
+    budget,
   );
   const opened = await factory.open();
   stores.push(opened.storage);
@@ -374,6 +380,110 @@ describe('the session document cache on a large fleet', () => {
     // Assert
     should(((await storage.readState(changed)) as Record<string, unknown>).status).equal('running');
   }, 60_000);
+});
+
+/**
+ * A fleet whose configs are `configChars` long, under a cache with a small byte budget. A config of 2,000 characters
+ * costs the cache about 10 KB once parsed, a state about 0.7 KB and a marker about 0.5 KB.
+ */
+async function budgetedFleet(sessions: number, budget: DocumentCacheBudget, configChars: number) {
+  const opened = await openStorage(paths => new CountingStateFileSystem(paths), undefined, budget);
+  const ids = await writeSessions(opened.paths, 'budget', sessions);
+  for (const id of ids)
+    await writeFile(createSessionPaths(opened.paths, id).config, JSON.stringify({ id, name: 'x'.repeat(configChars) }));
+  const rebuilt = await opened.storage.rebuildIndex();
+  if (rebuilt.sessionCount !== sessions) throw new Error(`indexed ${String(rebuilt.sessionCount)} sessions`);
+  return { ...opened, ids };
+}
+
+describe('the session document cache under its byte budget', () => {
+  const BUDGET: DocumentCacheBudget = { bytes: 150_000, documentChars: 100_000 };
+
+  it('should hold a fleet that fits the budget, so a second walk reads none of it', async () => {
+    // Arrange — 8 sessions of about 12 KB each: 96 KB of the 150 KB.
+    const { storage, fileSystem, ids } = await budgetedFleet(8, BUDGET, 2_000);
+    const walk = async () => {
+      for (const id of ids) await Promise.all([storage.readConfig(id), storage.readState(id)]);
+    };
+    await walk();
+    fileSystem.identifiedReads = [];
+
+    // Act
+    await walk();
+
+    // Assert
+    should(fileSystem.identifiedReads).deepEqual([]);
+  });
+
+  it('should let the oldest documents go once a fleet outgrows the budget, and keep the newest', async () => {
+    // Arrange — 40 sessions of about 12 KB each is 480 KB through a 150 KB budget; the entry bound (4,096) is nowhere near.
+    const { storage, paths, fileSystem, ids } = await budgetedFleet(40, BUDGET, 2_000);
+    for (const id of ids) {
+      await storage.readConfig(id);
+      await storage.readState(id);
+    }
+    const first = ids[0] as (typeof ids)[number];
+    const last = ids[39] as (typeof ids)[number];
+    fileSystem.identifiedReads = [];
+
+    // Act
+    await storage.readConfig(last);
+    const newestReads = [...fileSystem.identifiedReads];
+    await storage.readConfig(first);
+
+    // Assert
+    should(newestReads).deepEqual([]);
+    should(fileSystem.identifiedReads).containEql(createSessionPaths(paths, first).config);
+  });
+
+  it('should keep the total under the budget however many times a fleet is walked', async () => {
+    // Arrange
+    const { storage, fileSystem, ids } = await budgetedFleet(40, BUDGET, 2_000);
+    const walk = async () => {
+      for (const id of ids) await Promise.all([storage.readConfig(id), storage.readState(id)]);
+    };
+    await walk();
+    fileSystem.identifiedReads = [];
+
+    // Act — a second walk re-reads what the first let go (about 36 of 40 sessions), not fewer: the cache did not grow.
+    await walk();
+
+    // Assert
+    should(fileSystem.identifiedReads.length).be.aboveOrEqual(60);
+    should(storage.cachedDocumentBytes()).be.belowOrEqual(BUDGET.bytes);
+  });
+
+  it('should never cache a document over the per-document cap, and still read it correctly', async () => {
+    // Arrange
+    const { storage, paths, fileSystem, ids } = await budgetedFleet(2, { bytes: 150_000, documentChars: 1_000 }, 3_000);
+    const id = ids[0] as (typeof ids)[number];
+    const config = createSessionPaths(paths, id).config;
+    const state = createSessionPaths(paths, id).state;
+
+    // Act
+    const first = await storage.readConfig(id);
+    await storage.readState(id);
+    const second = await storage.readConfig(id);
+    await storage.readState(id);
+
+    // Assert
+    should(second).deepEqual(first);
+    should(fileSystem.identifiedReads.filter(path => path === config)).have.length(2);
+    should(fileSystem.identifiedReads.filter(path => path === state)).have.length(1);
+  });
+
+  it('should see a change to a document that was too big to cache', async () => {
+    // Arrange
+    const { storage, paths, ids } = await budgetedFleet(1, { bytes: 150_000, documentChars: 1_000 }, 3_000);
+    const id = ids[0] as (typeof ids)[number];
+    await storage.readConfig(id);
+
+    // Act
+    await writeFile(createSessionPaths(paths, id).config, JSON.stringify({ id, name: 'changed' }));
+
+    // Assert
+    should((await storage.readConfig(id)) as Record<string, unknown>).match({ name: 'changed' });
+  });
 });
 
 /** A watch the test inspects: the paths with an open subscription, and how many were ever closed. */
