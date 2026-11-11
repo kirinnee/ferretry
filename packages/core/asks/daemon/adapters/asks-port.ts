@@ -378,9 +378,12 @@ export function asksPort(
           PORT_ACTOR,
         );
         if (!mutation.ok) throw new AskRefusedError(mutation.error.message);
-        const id = mutation.item?.id ?? (await snapshot(ferret))?.items.find(item => item.sourceRef === sourceRef)?.id;
+        // The mutation says where the notice landed: a daemon notice about a sub-ferret goes to its lineage's home, so
+        // both the unchanged-item lookup and the returned ref name that board, not `ferret` (as `raise` does).
+        const landed = mutation.snapshot.sessionId;
+        const id = mutation.item?.id ?? (await snapshot(landed))?.items.find(item => item.sourceRef === sourceRef)?.id;
         if (id === undefined) throw new AskRefusedError('the board took the notice but named no item for it');
-        return { ferret, id: id as AskId };
+        return { ferret: landed, id: id as AskId };
       }),
     answers: async (filter, since) =>
       (
