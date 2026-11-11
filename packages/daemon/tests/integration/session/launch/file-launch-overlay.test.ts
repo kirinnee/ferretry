@@ -138,6 +138,20 @@ describe('FileLaunchOverlayFiles', () => {
     should(await readdir(home.directory)).eql([]);
   });
 
+  it('should check only the directory itself when it is not inside the state home', async () => {
+    // Arrange: a root that has nothing to do with the directory.
+    const home = await homeOf();
+    const unrelated = await tempDirectory('launch-overlay-root');
+    const files = new FileLaunchOverlayFiles(home.directory, { root: unrelated, live: nobody });
+
+    // Act
+    const path = await files.place({ name: NAME, content: 'x' }, { write: true });
+
+    // Assert
+    should(await readFile(path as string, 'utf8')).equal('x');
+    should((await stat(home.directory)).mode & 0o777).equal(0o700);
+  });
+
   it('should refuse a directory another user owns', async () => {
     // Arrange: the daemon believes it is a different user from the one that owns the directories.
     const home = await homeOf();
