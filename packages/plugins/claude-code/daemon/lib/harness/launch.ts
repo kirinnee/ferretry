@@ -32,6 +32,8 @@ export interface HomeInputs {
   readonly settings: ReadonlyMap<string, SettingsItem>;
   readonly hooks: ReadonlyMap<string, HooksItem>;
   readonly effort?: string | undefined;
+  /** The login's environment for this launch (`LaunchSpec.loginEnv`): names, literals and `${secret:}` references. */
+  readonly loginEnv?: Readonly<Record<string, string>> | undefined;
 }
 
 export interface HomeText {
@@ -62,6 +64,74 @@ export function settingsDocument(inputs: Pick<HomeInputs, 'settings' | 'hooks' |
   return document;
 }
 
+/**
+ * Names a pin never carries: Ferrets' own (`FY_*`), the ferret's home and Claude's store selector. Ferrets already
+ * keeps them out of `loginEnv`; this is the second lock, because a pin lives in a file.
+ */
+const NEVER_PINNED: ReadonlySet<string> = new Set(['HOME', 'CLAUDE_CONFIG_DIR', 'CLAUDE_SECURESTORAGE_CONFIG_DIR']);
+
+/** A value with a `$` that names something: `${…}` (a secret reference, either spelling, or `${NAME}`) or `$NAME`. */
+const REFERENCE = /\$\{|\$[A-Za-z_]/u;
+
+/**
+ * The login's LITERAL provider values to pin in the launch overlay (B190). Claude applies a settings file's `env` over
+ * the process environment, so a repository's `.claude/settings.local.json` can undo (or blank) a login's base URL; the
+ * `--settings` overlay outranks that file. A key is pinned only when
+ *
+ * - its value is a plain literal: never a `${secret:…}` / `${secret?:…}` reference (a secret never goes into a
+ *   file; it stays child environment, which a repo can still blank), and never `$NAME` / `${NAME}` (the child's shell
+ *   would expand those, a settings file would not, so the pin would be the TEXT `$NAME`);
+ * - it is not `FY_*`, `HOME`, `CLAUDE_CONFIG_DIR` or `CLAUDE_SECURESTORAGE_CONFIG_DIR`;
+ * - the child's final value for it IS the login's value: a later `env`/`shell` part (profile, MCP, shell) that sets the
+ *   key to something else wins in the child, so pinning the login's value would flip that order;
+ * - the merged settings document does not set it in its own `env` (B1): that block lands in the home's `settings.json`,
+ *   which `--settings` outranks, so a pin would flip the document's precedence over the process environment.
+ */
+export function loginEnvPins(
+  loginEnv: Readonly<Record<string, string>> | undefined,
+  parts: readonly LaunchPart[],
+  documentEnv: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, string>> {
+  const pins: Record<string, string> = {};
+  for (const [name, value] of Object.entries(loginEnv ?? {})) {
+    if (name.startsWith('FY_') || NEVER_PINNED.has(name) || REFERENCE.test(value) || Object.hasOwn(documentEnv, name))
+      continue;
+    let final = value;
+    for (const part of parts)
+      if ((part.kind === 'env' || part.kind === 'shell') && name in part.env) final = part.env[name] as string;
+    if (final === value) pins[name] = value;
+  }
+  return pins;
+}
+
+/**
+ * The launch overlay: the fixed layer, with the pins beneath it (`{ ...pins, ...fixed.env }`, so the fixed layer wins).
+ * Refuses to build a document that would carry a secret reference anywhere, because this file is plain text in the
+ * agent home.
+ *
+ * The guard is on THIS file only, on purpose (ruling B2). A reference is a NAME, not a value: a settings item, an MCP
+ * config or an instruction legitimately carries `${secret:NAME}` and reaches its file as that literal text, which
+ * resolves nothing (the Vault resolves a reference only into a child's environment). What this file must never hold is
+ * a pin the login contributed, and the pins already exclude every reference, so a throw here means a bug, not input.
+ */
+export function overlayDocument(
+  fixed: Readonly<Record<string, unknown>>,
+  pins: Readonly<Record<string, string>>,
+): Record<string, unknown> {
+  const fixedEnv = typeof fixed.env === 'object' && fixed.env !== null ? (fixed.env as Record<string, unknown>) : {};
+  const env = { ...pins, ...fixedEnv };
+  const document = { ...fixed, ...(Object.keys(env).length === 0 ? {} : { env }) };
+  if (/\$\{secret/u.test(JSON.stringify(document)))
+    throw new Error('the launch overlay would carry a secret reference, which must stay in the child environment');
+  return document;
+}
+
+/** The `env` block of a settings document, which lands in the home's `settings.json`. */
+function documentEnvOf(document: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  const { env } = document;
+  return typeof env === 'object' && env !== null && !Array.isArray(env) ? (env as Record<string, unknown>) : {};
+}
+
 /** The text of every file a launch writes into the home. */
 export function homeText(inputs: HomeInputs): HomeText {
   const fixed = fixedLayer(inputs.permissionMode, inputs.folder);
@@ -74,14 +144,19 @@ export function homeText(inputs: HomeInputs): HomeText {
   const servers = Object.fromEntries(
     inputs.parts.flatMap(part => (part.kind === 'mcp' ? [[part.name, part.config]] : [])),
   );
-  // A login's literal environment, pinned where a project's own `.claude/settings*.json` cannot replace it: the
-  // `--settings` file outranks a project's `env`, the process environment does not (#1587).
-  const pinned = Object.assign({}, ...inputs.parts.flatMap(part => (part.kind === 'pin' ? [part.env] : [])));
-  const overlay = Object.keys(pinned).length === 0 ? fixed.overlay : { ...fixed.overlay, env: pinned };
+  const settings = deepMergeSettings(settingsDocument(inputs), fixed.settings);
+  // Pins, from the two places a login's literals arrive: the login's own environment for this harness (`loginEnv`,
+  // Logins' kind) and the `pin` parts a runtime contributes from its published fixed settings (Runtimes). A runtime's
+  // value is the one the wrapper exports, so it wins a key both name.
+  const partPins: Record<string, string> = Object.assign(
+    {},
+    ...inputs.parts.flatMap(part => (part.kind === 'pin' ? [part.env] : [])),
+  );
+  const pins = { ...loginEnvPins(inputs.loginEnv, inputs.parts, documentEnvOf(settings)), ...partPins };
   return {
     memory: memory === '' ? '' : `${memory}\n`,
-    settings: `${JSON.stringify(deepMergeSettings(settingsDocument(inputs), fixed.settings), null, 2)}\n`,
-    overlay: `${JSON.stringify(overlay, null, 2)}\n`,
+    settings: `${JSON.stringify(settings, null, 2)}\n`,
+    overlay: `${JSON.stringify(overlayDocument(fixed.overlay, pins), null, 2)}\n`,
     claudeJson: `${JSON.stringify(fixed.claudeJson, null, 2)}\n`,
     ...(Object.keys(servers).length === 0 ? {} : { mcp: `${JSON.stringify({ mcpServers: servers }, null, 2)}\n` }),
   };

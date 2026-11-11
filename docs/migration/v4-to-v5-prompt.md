@@ -119,6 +119,15 @@ bun src/main.ts --from "$B" --to "$H"                # writes the new home at H
 2. `fy config check` — every YAML file in `H/config` parses and passes its schema.
 3. `fy doctor` — names any damaged file. A damaged file is a stop: tell the owner, do not start.
 4. `ls -la "$H"` shows only `home.json`, `config/`, `state/`, `run/`, `logs/`.
+5. **A literal credential in a v4 login file is refused in v5** (an intended difference, rebuild-parity.md). The converter
+   seals the keys it recognises; `fy config check` (step 2) names any login file that still holds one, as the FILE and the
+   KEY (never the value) and says to use `fy secret set NAME`. For each one, **the OWNER does this, not you**:
+   1. `fy secret set NAME` — the owner types the value at the prompt. You never read, copy, echo or paste it.
+   2. The owner rewrites that login's variable to `${secret:NAME}` (app: Settings › Files, or edit `config/logins/<id>.yaml`).
+   3. v5 **holds** a login file that newly names a secret reference until the owner acknowledges it. The owner confirms
+      that held edit: `fy config confirm logins/<id>.yaml` (list what waits with `fy config confirm`; or Allow it in the
+      app). Setting the secret does not approve the reference. Do not bypass this.
+   4. `fy config check` passes, and `fy secret run NAME -- true` succeeds.
 
 ## 6. What is kept, item by item
 

@@ -145,27 +145,35 @@ export function classifyShape(shape: CredentialShape, now: number): CredentialRe
  * Bytes that are not the JSON this build expects are `unreadable`, never `missing`: a credential
  * written by a newer harness is still a credential, and overwriting it would lose a working login.
  */
-function parseMaterial(material: CredentialMaterial, label: string): Record<string, unknown> | CredentialReading {
-  if (material.outcome === 'absent') return { state: 'missing' };
-  if (material.outcome === 'unreadable') return { state: 'unreadable', reason: material.reason };
+function parseMaterial(material: CredentialMaterial, label: string): ParsedMaterial {
+  const decided = (reading: CredentialReading): ParsedMaterial => ({ kind: 'decided', reading });
+  if (material.outcome === 'absent') return decided({ state: 'missing' });
+  if (material.outcome === 'unreadable') return decided({ state: 'unreadable', reason: material.reason });
   try {
     const parsed = JSON.parse(material.blob) as unknown;
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { state: 'unreadable', reason: `${label} is not a JSON object` };
+      return decided({ state: 'unreadable', reason: `${label} is not a JSON object` });
     }
-    return parsed as Record<string, unknown>;
+    return { kind: 'object', value: parsed as Record<string, unknown> };
   } catch {
-    return { state: 'unreadable', reason: `${label} is not readable JSON` };
+    return decided({ state: 'unreadable', reason: `${label} is not readable JSON` });
   }
 }
 
-const isReading = (value: Record<string, unknown> | CredentialReading): value is CredentialReading =>
-  typeof (value as CredentialReading).state === 'string';
+/**
+ * What {@link parseMaterial} found. TAGGED on purpose: the parsed file is provider-written data and `decided` is this
+ * module's own verdict, so a file that happens to hold a `state` field can never be mistaken for a verdict. Telling
+ * them apart by shape (an object with a string `state`) let `{"state":"valid"}` be admitted with no token at all.
+ */
+type ParsedMaterial =
+  | { readonly kind: 'decided'; readonly reading: CredentialReading }
+  | { readonly kind: 'object'; readonly value: Record<string, unknown> };
 
 /** A Claude Code OAuth credential blob, reduced to its {@link CredentialShape}. */
 function claudeShape(material: CredentialMaterial): CredentialShape {
-  const parsed = parseMaterial(material, 'the Claude credential');
-  if (isReading(parsed)) return { kind: 'decided', reading: parsed };
+  const found = parseMaterial(material, 'the Claude credential');
+  if (found.kind === 'decided') return found;
+  const parsed = found.value;
   const nested = parsed.claudeAiOauth;
   const credential = (nested !== null && typeof nested === 'object' ? nested : parsed) as Record<string, unknown>;
   const expiresAt =
@@ -177,9 +185,9 @@ function claudeShape(material: CredentialMaterial): CredentialShape {
 
 /** A Codex `auth.json`, reduced to its {@link CredentialShape}. Its access token carries its own expiry. */
 function codexShape(material: CredentialMaterial): CredentialShape {
-  const parsed = parseMaterial(material, 'the Codex credential');
-  if (isReading(parsed)) return { kind: 'decided', reading: parsed };
-  const tokens = parsed.tokens;
+  const found = parseMaterial(material, 'the Codex credential');
+  if (found.kind === 'decided') return found;
+  const tokens = found.value.tokens;
   if (tokens === null || typeof tokens !== 'object') return { kind: 'decided', reading: { state: 'missing' } };
   const { access_token: accessToken, refresh_token: refreshToken } = tokens as Record<string, unknown>;
   return tokenShape(accessToken, refreshToken, decodeJwtExpiry(accessToken));
