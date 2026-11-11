@@ -41,6 +41,11 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
 
 5. **CI green**, including the coverage ledgers, `fy check`, the nix build and the release guards.
 6. **No paid macOS run** (owner, !A480). The darwin smoke and the FFI descriptor verify line are after-merge items.
+7. **A ferret authenticates end to end** in CI: `packages/core/ferrets/tests/integration/daemon/ferret-auth/ferret-auth.test.ts` — a
+   Claude OAuth login (fake `.credentials.json`), a Claude env login (dummy base URL and token, also secret-backed) and a
+   Codex login (fake `auth.json`) each start a ferret through the daemon's real launch path, its first request reaches a
+   fake provider server with the expected auth header, and the reply is seen. No real credential. Owner ask via
+   lizzette, 2026-11-11.
 
 ## After merge
 
