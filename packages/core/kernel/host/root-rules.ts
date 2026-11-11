@@ -59,6 +59,10 @@ export function permittedMode(internal: boolean, mode: number): number | undefin
 /** One plain file name: never `.` or `..`, never a pattern, a path or NUL. `'*'` is not one, so it matches nothing. */
 const PLAIN_FILE_NAME = /^(?!\.{1,2}$)[A-Za-z0-9._+-]{1,255}$/u;
 
+/** Whether `name` is one plain file name (see {@link PLAIN_FILE_NAME}); a non-string is not one. */
+export const isPlainFileName = (name: unknown): name is string =>
+  typeof name === 'string' && PLAIN_FILE_NAME.test(name);
+
 /** Why `harnessFile` refused, before any disk is asked. */
 export type HarnessFileRefusal = 'not_declared' | 'outside' | 'fenced';
 

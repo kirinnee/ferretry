@@ -827,6 +827,11 @@ async function bootLocked(
         // Shared trees (`kernel.roots.share`): only a manifest that declares it mints; its own opaque named trees are the
         // only state it may share; every tree it minted is revoked when it stops.
         shareTrees: manifest.permissions?.shareTrees === true,
+        // Shared credentials (`kernel.roots.shareCredential`): only the `credentials` root's owner mints, and only a basename its
+        // manifest lists; every credential it minted is revoked when it stops.
+        ...(manifest.permissions?.shareCredentials === undefined
+          ? {}
+          : { shareCredentials: manifest.permissions.shareCredentials }),
         setMode: manifest.permissions?.setMode === true,
         ...(manifest.permissions?.projectFiles === undefined
           ? {}

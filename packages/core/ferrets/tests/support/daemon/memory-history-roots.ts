@@ -5,6 +5,7 @@ import type {
   RootName,
   RootStat,
   RootsPort,
+  SharedCredential,
   SharedTree,
 } from '@ferretry/kernel/contract';
 import { MAX_ROOT_WINDOW_BYTES } from '@ferretry/kernel/contract';
@@ -41,6 +42,10 @@ export class MemoryHistoryRoots implements RootsPort {
   }
 
   share(): Promise<SharedTree> {
+    return Promise.reject(new Error('the history roots share nothing'));
+  }
+
+  shareCredential(): Promise<SharedCredential> {
     return Promise.reject(new Error('the history roots share nothing'));
   }
 

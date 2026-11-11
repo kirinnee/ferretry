@@ -824,6 +824,15 @@ export interface RootHandle {
    * A tree that is forged, rebuilt from its JSON, or whose minter stopped is refused.
    */
   copyShared(tree: SharedTree, to: FencedPath, options?: TreeCopyOptions): Promise<SharedTreeCopied>;
+  /**
+   * Makes ONE symlink at `to` to a {@link SharedCredential}'s file. Only on `agent-homes`, only by the plugin the credential
+   * was minted for, only on a handle scoped to one subfolder (one ferret's home), only at `<that folder>/<file>` (the
+   * credential's own name, one level) and only when nothing is at `to`. The file must still be the very one minted (same
+   * device and inode, one name): otherwise `changed`. Never a copy. This is the ONE call that does not ask the private-place
+   * fence about the TARGET (the sign-in file is pinned by inode); the link's PLACE is fenced as usual. A link made stays
+   * until its holder removes it: revoking the credential stops new links only (a declared GAP).
+   */
+  linkCredential(credential: SharedCredential, to: FencedPath): Promise<void>;
   /** A folder made (or narrowed) to `0700`, refused when a link or a file is at the name. */
   ensurePrivateDirectory(path: FencedPath): Promise<void>;
   list(path: FencedPath): Promise<readonly string[]>;
@@ -945,6 +954,13 @@ export interface RootsPort {
    * of an owner's root (a project, an imports folder). Valid until this plugin stops.
    */
   share(source: SharedTreeSource): Promise<SharedTree>;
+  /**
+   * Mints a {@link SharedCredential}: ONE sign-in file of this plugin's own `credentials` root (`<folder>/<file>`), bound to
+   * ONE receiving plugin. Only for the plugin that may hold `credentials` (Logins alone) and has declared it, only for a
+   * basename listed in `permissions.shareCredentials`, and only for a regular file with one name and no link on the way.
+   * Valid until this plugin stops.
+   */
+  shareCredential(source: SharedCredentialSource): Promise<SharedCredential>;
 }
 
 declare const sharedTreeBrand: unique symbol;
@@ -967,6 +983,27 @@ export type SharedTreeSource = { readonly state: StateFileDef; readonly name: st
  * for a copy only, and a link made outlives the tree's revocation (both declared GAPs).
  */
 export type SharedTreeCopied = 'copied' | 'linked';
+
+declare const sharedCredentialBrand: unique symbol;
+
+/**
+ * One sign-in file of the `credentials` root's owner, handed to ONE named receiver to link into its own agent home. Opaque
+ * and unforgeable like a {@link SharedTree}: no field, kept in a kernel table; it serialises as `{ credential: <file name> }`
+ * only, never the login's folder or a path.
+ */
+export interface SharedCredential {
+  readonly [sharedCredentialBrand]: true;
+}
+
+/** What {@link RootsPort.shareCredential} shares. */
+export type SharedCredentialSource = {
+  /** One plain segment under the `credentials` root: the login's own folder. */
+  readonly folder: string;
+  /** A basename listed in the minter's `permissions.shareCredentials`. */
+  readonly file: string;
+  /** The plugin id that alone may materialize it (`'codex'`). */
+  readonly receiver: string;
+};
 
 // events ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 

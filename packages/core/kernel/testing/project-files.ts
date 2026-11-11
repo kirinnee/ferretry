@@ -231,6 +231,7 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
         if (name.startsWith(`${fromKey}/`)) files.set(`${toKey}${name.slice(fromKey.length)}`, text);
     },
     copyShared: async () => refuseShared('not_internal'),
+    linkCredential: async () => refuseShared('not_internal'),
     ensurePrivateDirectory: async path => {
       reachForWrite(path, 'make', 'keep');
     },

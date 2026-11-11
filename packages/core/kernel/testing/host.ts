@@ -22,6 +22,13 @@ import {
   takesUnlinks,
   unlinkNameRefusal,
 } from '../host/root-rules.ts';
+import {
+  credentialFileListed,
+  credentialPlacement,
+  isCredentialFolder,
+  isCredentialReceiver,
+  SharedCredentials,
+} from '../host/shared-credentials.ts';
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { projectFilesScope } from '../manifest/project-files.ts';
@@ -1383,6 +1390,12 @@ async function start(world: World): Promise<TestHost> {
   const sharedTrees = new SharedTrees<{
     readonly files: () => readonly (readonly [string, string])[];
   }>();
+  /** Every credential a test plugin minted: the key of its file in the flat world and the stand-in inode it had. */
+  const sharedCredentials = new SharedCredentials<{
+    readonly file: string;
+    readonly inode: bigint;
+    readonly reach: () => { readonly key: string; readonly inode: bigint };
+  }>();
   const rootsFor = (manifest: Manifest): KernelPorts['roots'] => {
     // As the real host: every tree a plugin minted is revoked when the host stops it.
     const life = { live: true };
@@ -1415,6 +1428,29 @@ async function start(world: World): Promise<TestHost> {
         if (files().length === 0 && state?.directories.has(folder) !== true)
           throw new Error(`no such folder ${folder}`);
         return sharedTrees.mint(folder.slice(folder.lastIndexOf('/') + 1), { files }, life);
+      },
+      // The same rules as production (`shareCredential` in `host/roots.ts`), over the flat world: only the `credentials` root's
+      // owner mints, only a listed basename, only a file with one name and no link on the way.
+      shareCredential: async source => {
+        if (!credentialFileListed(manifest.permissions?.shareCredentials, source?.file))
+          return refuseShared('not_permitted');
+        if (!mayHoldRoot(manifest.id, 'credentials') || !(manifest.permissions?.roots ?? []).includes('credentials'))
+          return refuseShared('not_permitted');
+        if (!isCredentialFolder(source.folder) || !isCredentialReceiver(source.receiver))
+          return refuseShared('not_own');
+        const key = `/credentials/${source.folder}/${source.file}`;
+        const reach = (): { readonly key: string; readonly inode: bigint } => {
+          if (testLinks.has(key) || testLinks.has(`/credentials/${source.folder}`)) return refuseShared('not_own');
+          if (!world.roots.has(key)) return refuseShared('absent');
+          if (testHardLinks.has(key)) return refuseShared('not_own');
+          return { key, inode: inodes.get(key) ?? 0n };
+        };
+        return sharedCredentials.mint(
+          source.file,
+          source.receiver,
+          { file: source.file, inode: reach().inode, reach },
+          life,
+        );
       },
       root(name, scope) {
         if (!(manifest.permissions?.roots ?? []).includes(name) || !mayHoldRoot(manifest.id, name)) {
@@ -1607,6 +1643,25 @@ async function start(world: World): Promise<TestHost> {
             // the test roots are one flat map: a link and a copy both put every file under `to`
             for (const [key, value] of files) world.roots.set(`${to}/${key}`, value);
             return copyOptions?.link === true ? 'linked' : 'copied';
+          },
+          linkCredential: async (credential, to) => {
+            if (!receivingRoot(name)) return refuseShared('not_internal');
+            const minted = sharedCredentials.open(credential, manifest.id);
+            // One ferret's home and nothing wider; the link lands at `<that home>/<file>` and nowhere else.
+            if (prefix === undefined || scoped === undefined || scoped === '') throw new RootError('outside');
+            const place = ownPath(to);
+            if (!credentialPlacement(prefix, minted.file, place)) throw new RootError('outside');
+            const reached = (() => {
+              try {
+                return minted.reach();
+              } catch {
+                throw new RootError('changed');
+              }
+            })();
+            if (reached.inode !== minted.inode) throw new RootError('changed');
+            if (world.roots.has(place) || testLinks.has(place) || testFolderExists(place))
+              throw new RootError('outside');
+            testLinks.set(place, reached.key);
           },
           copyTree: async (source, from, to, copyOptions) => {
             // A SOURCE that is a project folder is gated by its own handle (the declared set, no link on the way), and no

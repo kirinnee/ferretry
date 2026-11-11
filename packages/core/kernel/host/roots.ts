@@ -30,6 +30,8 @@ import type {
   RootPublished,
   RootPublishOptions,
   RootWriteOptions,
+  SharedCredential,
+  SharedCredentialSource,
   SharedTreeSource,
 } from '../contract/ports.ts';
 import type { FileIdentity, HostFs, OpenedDirectory, OpenedFile } from './adapters/node-fs.ts';
@@ -55,7 +57,21 @@ import {
 import { identityKey, type TruncationWatcher } from './fence-index.ts';
 import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from './internal-roots.ts';
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
-import { holdsPrivate, ownStateTree, receivingRoot, refuseShared, SharedTrees } from './shared-trees.ts';
+import {
+  credentialFileListed,
+  credentialPlacement,
+  isCredentialFolder,
+  isCredentialReceiver,
+  SharedCredentials,
+} from './shared-credentials.ts';
+import {
+  holdsPrivate,
+  ownStateTree,
+  receivingRoot,
+  refuseShared,
+  SharedTreeError,
+  SharedTrees,
+} from './shared-trees.ts';
 import { type OwnFolderSpellings, PROCESS_FOLDER_ROOTS, processFolderAllowed } from './processes.ts';
 import { type ProjectUse, projectFilesScope, projectPathRefusal } from '../manifest/project-files.ts';
 import {
@@ -1256,6 +1272,22 @@ interface SharedEntry {
 /** Every shared tree the kernel minted (`RootsPort.share`), known by identity only. */
 const SHARED = new SharedTrees<SharedEntry>();
 
+/** The sign-in file a shared credential names, as the kernel reached it: its real path and the identity it had. */
+interface ReachedCredential {
+  readonly real: string;
+  readonly identity: FileIdentity;
+}
+
+/** One minted shared credential: how to reach its file again (the minter's own checks), and the name it keeps. */
+interface CredentialEntry {
+  readonly file: string;
+  readonly identity: FileIdentity;
+  readonly reach: () => Promise<ReachedCredential>;
+}
+
+/** Every shared credential the kernel minted (`RootsPort.shareCredential`), known by identity only and bound to a receiver. */
+const CREDENTIALS = new SharedCredentials<CredentialEntry>();
+
 interface HandleSetup {
   readonly fs: HostFs;
   readonly home: string;
@@ -2240,6 +2272,42 @@ function rootHandle(setup: HandleSetup): RootHandle {
       });
       return 'copied';
     },
+    linkCredential: async (credential, to) => {
+      // The destination first: an internal, writable root the kernel makes (`agent-homes`), before the credential is opened.
+      if (!receivingRoot(name)) return refuseShared('not_internal');
+      writable();
+      // Forged, rebuilt, revoked (`not_shared`) or another plugin's (`not_receiver`): the table decides, never the caller.
+      const minted = CREDENTIALS.open(credential, plugin);
+      // One ferret's home and nothing wider, and the link lands at `<that home>/<file>`: the receiver chooses neither the
+      // folder nor the name.
+      const root = base();
+      if (scopedParent === undefined || root === undefined) return refuse('outside');
+      const lexical = lexicalInRoot(home, root, ownerRoot, to);
+      if (!lexical.ok) return refuse(lexical.error);
+      if (!credentialPlacement(absolute(root, 'a root'), minted.file, lexical.value)) return refuse('outside');
+      // The file is judged again NOW, by the minter's own checks: it must be the very one minted (a rename-over, a
+      // re-sign-in or a swapped folder is `changed`, and the next launch mints afresh).
+      const reached = await minted.reach().catch((error: unknown) => {
+        if (error instanceof SharedTreeError || error instanceof RootError) return refuse('changed');
+        throw error;
+      });
+      if (!same(minted.identity, reached.identity)) return refuse('changed');
+      const placed = await realParent(to, true);
+      // No link on the way: the folder `to` names, as this root names it, is the very folder reached.
+      if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
+        refuse('link_escape');
+      const made = await openFolderMaking(placed.scope, dirname(placed.full), 0o700, false);
+      try {
+        const leafAt = await entry(placed.scope, made.folder, made.real, basename(placed.full));
+        // THE exemption: the TARGET (a pinned sign-in file) is not asked of the private-place fence — only the identity
+        // the mint table holds is linked. The link's PLACE is fenced as for every link.
+        await refuseHeldName(placed.scope, join(made.real, basename(placed.full)));
+        if ((await fs.identity(leafAt)) !== undefined) refuse('outside');
+        await fs.symlink(reached.real, leafAt).catch(() => refuse('changed'));
+      } finally {
+        await made.folder.close();
+      }
+    },
     ensurePrivateDirectory: async path => {
       writable();
       gate(path, 'make');
@@ -2596,6 +2664,8 @@ export interface RootsOptions {
   readonly setMode?: boolean;
   /** Whether the manifest declares `permissions.shareTrees` (`RootsPort.share`); absent, every share is refused. */
   readonly shareTrees?: boolean;
+  /** The manifest's `permissions.shareCredentials` (`RootsPort.shareCredential`); absent, every mint is refused. */
+  readonly shareCredentials?: readonly string[];
   /** The manifest's `permissions.projectFiles`, for the `project-files` root; absent, every name of it is refused. */
   readonly projectFiles?: readonly string[];
   /** The plugin's declared state files: a shared named tree must be one of its own opaque ones. */
@@ -2647,7 +2717,7 @@ export function rootsPortFor(
   options.onStop?.(() => {
     life.live = false;
   });
-  return {
+  const port: RootsPort = {
     harnessFile: absolutePath => {
       const refusal = harnessFileRefusal({
         plugin: layout.plugin,
@@ -2669,6 +2739,41 @@ export function rootsPortFor(
       const access = stateTreeAccess(fs, home, layout.plugin, base, immutable, privateFiles);
       await existingFolder(access, base as FencedPath);
       return SHARED.mint(basename(base), { source: access, from: base as FencedPath }, life);
+    },
+    shareCredential: async (source: SharedCredentialSource): Promise<SharedCredential> => {
+      // Declared by name in the manifest, held by the root's one owner (`ROOT_OWNERS`: Logins alone, whatever another
+      // manifest says), and declared as a root: the three together are what makes this Logins-only.
+      if (!credentialFileListed(options.shareCredentials, source?.file)) return refuseShared('not_permitted');
+      if (!mayHoldRoot(layout.plugin, 'credentials') || !allowed.has('credentials'))
+        return refuseShared('not_permitted');
+      if (!isCredentialFolder(source.folder) || !isCredentialReceiver(source.receiver)) return refuseShared('not_own');
+      const handle = port.root('credentials');
+      const known = HANDLES.get(handle) as SourceAccess;
+      const rootBase = internalRootBase(home, layout.plugin, 'credentials') as string;
+      const path = handle.resolve(`${source.folder}/${source.file}`);
+      if (!path.ok) return refuseShared('not_own');
+      const from = path.value;
+      /** The file as the minter's own handle reaches it: no link on the way, a regular file with one name. */
+      const reach = async (): Promise<ReachedCredential> => {
+        const checked = await known.realParent(from);
+        const lexical = lexicalInRoot(home, rootBase, false, from);
+        if (!lexical.ok) return refuseShared('not_own');
+        if (relative(checked.scope.base.real, checked.full) !== relative(absolute(rootBase, 'a root'), lexical.value))
+          return refuseShared('not_own');
+        const found = await checked.scope.fs.identity(checked.full);
+        if (found === undefined) return refuseShared('absent');
+        if (found.kind !== 'file' || found.links !== 1) return refuseShared('not_own');
+        const problem = await fileProblem(checked.scope, checked.full, found);
+        if (problem !== undefined) return refuse(problem);
+        return { real: checked.full, identity: found };
+      };
+      const reached = await reach();
+      return CREDENTIALS.mint(
+        source.file,
+        source.receiver,
+        { file: source.file, identity: reached.identity, reach },
+        life,
+      );
     },
     root: (name, scope) => {
       if (!allowed.has(name)) throw new RootError('not_declared');
@@ -2761,6 +2866,7 @@ export function rootsPortFor(
       });
     },
   };
+  return port;
 }
 
 /** A shared tree's folder must exist, be a folder, and pass its source's own checks NOW (at mint, as at every copy). */
