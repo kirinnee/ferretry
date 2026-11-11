@@ -90,6 +90,17 @@ export class FolderSettingsOverrideError extends Error {
   }
 }
 
+/**
+ * Raised when the settings a launch folder's repository keeps cannot be looked for, so the start is refused rather than
+ * going ahead unchecked: a settings file that was never read could be the one that blanks the login.
+ */
+export class FolderSettingsUnreadableError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = 'FolderSettingsUnreadableError';
+  }
+}
+
 /** The published accounts, as the daemon's existing inventory already answers them. */
 export interface LaunchAccountInventory {
   accounts(): Promise<readonly FleetManifestAccount[]>;

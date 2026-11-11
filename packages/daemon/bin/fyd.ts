@@ -359,7 +359,11 @@ import {
   TmuxCodexPickerDrive,
   TmuxCodexPickerPane,
 } from '../src/adapters/session/harness/index.ts';
-import { FileLaunchOverlayFiles, FileLaunchSettingsDigest } from '../src/adapters/session/launch/index.ts';
+import {
+  BoundLiveLaunchCommands,
+  FileLaunchOverlayFiles,
+  FileLaunchSettingsDigest,
+} from '../src/adapters/session/launch/index.ts';
 import {
   DurableTerminalPaneRegistrar,
   DurableTerminalPaneStore,
@@ -8037,7 +8041,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * The per-launch Claude settings files a login that pins its environment launches under, so a credential never
    * rides an argv (see `prepareLaunchArgv`). In the daemon's state folder, private to it.
    */
-  const launchOverlays = new FileLaunchOverlayFiles(join(paths.state, 'launch-settings'));
+  /** The live sessions' recorded commands, which the sweep of those files reads; bound once the storage is open. */
+  const liveLaunchCommands = new BoundLiveLaunchCommands();
+  const launchOverlays = new FileLaunchOverlayFiles(join(paths.state, 'launch-settings'), {
+    root: paths.home,
+    live: liveLaunchCommands,
+  });
   /**
    * Every relaunch of an existing session builds its argv HERE, from its own documents and the fleet as
    * it is now — the revive, and the stale-settings read that compares against what a revive would run.
@@ -8913,6 +8922,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // Assigned rather than copied, so a renewal resolves `claude` through the SAME rule the boot
       // milestone and the doctor report already published — never a second detector.
       harnessPolicy = harnessDiscovery;
+      // The sweep of the per-launch settings files must never remove one a live session's command names.
+      liveLaunchCommands.bind(storage);
       // ONE durable ledger and ONE per-session queue for BOTH answer execution and monitor
       // reprojection. Observation never waits behind a live drive: that drive owns the freshest
       // state, and a later read/tick will project it after the key becomes idle. After a restart
