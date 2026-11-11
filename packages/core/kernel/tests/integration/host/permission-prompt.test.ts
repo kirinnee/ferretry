@@ -277,6 +277,9 @@ async function answer(host: TestHost, path: string, body: unknown) {
 
 const keysOf = (runner: FakeRunner): string[] => runner.formKeys.map(press => press.key);
 
+/** The same frame with its cursor glyph undrawn: every label and the request's identity kept (a redraw that lost the marker). */
+const markerless = (frame: string): string => frame.replace(/^(\s*)[❯›>]\s(?=[1-9][.)])/gmu, '$1  ');
+
 describe.each(ROWS)('what a $harness ferret is stopped on, through the real halves', row => {
   const { request } = row;
   const dialog = { id: row.dialogId };
@@ -404,6 +407,84 @@ describe.each(ROWS)('what a $harness ferret is stopped on, through the real halv
     expect(answered.status).toBe(200);
     expect(answered.json()).toEqual({ requestId: request.id, cleared: true });
     expect(keysOf(runner)).toEqual(['Down', 'Enter']);
+  });
+
+  // The cursor is never guessed: Enter confirms whichever row the harness's list is REALLY on, so every Enter needs exactly one
+  // cursor row positively read on the chosen row (reviewer's probes for rebuild/perm-codex 872d2bab8e).
+  test('a frame with no cursor glyph is refused 409 before any key: the live row is not guessed to be 1', async () => {
+    const { host, runner, id, show } = await boot(row);
+    // The live list is on row 2 ("allow always"); the captured frame shows no cursor. Choosing 1 must not press Enter.
+    let committed: number | undefined;
+    show(markerless(row.permission));
+    runner.onFormWrite = ({ key }) => {
+      if (key === 'Enter') {
+        committed = 2;
+        show(IDLE);
+      }
+    };
+
+    const answered = await answer(host, `/v1/ferrets/${id}/permission`, {
+      kind: 'choice',
+      requestId: request.id,
+      number: 1,
+    });
+
+    expect([answered.status, answered.json<{ code: string }>().code]).toEqual([409, 'permission_cursor_unknown']);
+    expect({ committed, keys: keysOf(runner), pastes: runner.formPastes }).toEqual({
+      committed: undefined,
+      keys: [],
+      pastes: [],
+    });
+  });
+
+  test('a dropped Up and a markerless redraw never prove the cursor arrived: no Enter', async () => {
+    const { host, runner, id, show } = await boot(row);
+    // Start on row 3, choose 1: one Up is lost, the live list sits on row 2 and redraws without its glyph.
+    show(moveCursor(moveCursor(row.permission, 1), 1));
+    let committed: number | undefined;
+    runner.onFormWrite = ({ key }) => {
+      if (key === 'Up') show(markerless(row.permission));
+      if (key === 'Enter') {
+        committed = 2;
+        show(IDLE);
+      }
+    };
+
+    const answered = await answer(host, `/v1/ferrets/${id}/permission`, {
+      kind: 'choice',
+      requestId: request.id,
+      number: 1,
+    });
+
+    expect(answered.status).toBe(200);
+    expect(answered.json()).toEqual({ requestId: request.id, cleared: false });
+    expect({ committed, keys: keysOf(runner) }).toEqual({ committed: undefined, keys: ['Up', 'Up'] });
+  });
+
+  test('two cursor rows are an unknown cursor too: refused before any key', async () => {
+    const { host, runner, id, show } = await boot(row);
+    const glyph = /^(\s*)([❯›>])\s(?=1[.)])/mu.exec(row.permission)?.[2] ?? '>';
+    // A stale marker left on row 1 while the cursor drew on row 2.
+    show(moveCursor(row.permission, 1).replace(/^(\s*)\s\s(?=1[.)])/mu, `$1${glyph} `));
+
+    const answered = await answer(host, `/v1/ferrets/${id}/permission`, {
+      kind: 'choice',
+      requestId: request.id,
+      number: 1,
+    });
+
+    expect([answered.status, answered.json<{ code: string }>().code]).toEqual([409, 'permission_cursor_unknown']);
+    expect(runner.formKeys).toEqual([]);
+  });
+
+  test('a dialog with no cursor glyph is refused 409 and nothing is pressed', async () => {
+    const { host, runner, id, show } = await boot(row);
+    show(markerless(row.dialog));
+
+    const chosen = await answer(host, `/v1/ferrets/${id}/dialog`, { kind: 'choice', dialogId: dialog.id, number: 1 });
+
+    expect([chosen.status, chosen.json<{ code: string }>().code]).toEqual([409, 'harness_dialog_gone']);
+    expect(runner.formKeys).toEqual([]);
   });
 
   test('a ferret with no live pane answers 409 pane_unknown and presses nothing', async () => {

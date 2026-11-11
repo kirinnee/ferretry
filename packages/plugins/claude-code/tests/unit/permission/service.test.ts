@@ -387,3 +387,67 @@ describe('PermissionAnswerService — one answer at a time per ferret', () => {
     should(writes).eql(['b:Escape', 'a:Enter']);
   });
 });
+
+/** The same frame with its cursor glyph undrawn (a redraw that lost the marker); labels and identity kept. */
+const markerless = (frame: string): string => frame.replace(/^(\s*)[❯›>]\s(?=[1-9][.)])/gmu, '$1  ');
+
+describe('PermissionAnswerService — an unknown cursor is never confirmed', () => {
+  it('refuses a choice on a frame with no cursor marker: nothing typed, no Enter, the zero-move path included', async () => {
+    // Arrange: the live list is on row 2; the captured frame shows no cursor. Choosing row 1 must not press Enter.
+    const frame = markerless(BASH);
+    const pane = new ScriptedPane([frame]);
+    const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    // Act
+    const error = await refusalOf(service.answer('s1', choice(BASH, 1)));
+
+    // Assert
+    should(error.refusal).equal('cursor_unknown');
+    should(pane.writes).eql([]);
+  });
+
+  it('refuses a choice when two rows show a cursor: ambiguous, nothing typed', async () => {
+    const both = BASH.replace(/^(\s*)\s\s(?=2[.)])/mu, '$1❯ ');
+    should(parsePermissionPrompt(both)?.selected).be.undefined();
+    const pane = new ScriptedPane([both]);
+    const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const error = await refusalOf(service.answer('s1', choice(BASH, 1)));
+
+    should(error.refusal).equal('cursor_unknown');
+    should(pane.writes).eql([]);
+  });
+
+  it('never presses Enter after a dropped arrow when the redraw shows no cursor: markerless is no evidence', async () => {
+    // Arrange: cursor on 3, choose 1; the first Up is lost and the pane redraws without its marker.
+    const pane = new ScriptedPane([withCursor(BASH, 3), markerless(BASH)]);
+    const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    // Act
+    const result = await service.answer('s1', choice(BASH, 1));
+
+    // Assert
+    should(result.cleared).be.false();
+    should(pane.writes).eql(['Up', 'Up']);
+  });
+
+  it('still refuses an unlisted choice as invalid, not as an unknown cursor', async () => {
+    const pane = new ScriptedPane([markerless(BASH)]);
+    const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const error = await refusalOf(service.answer('s1', choice(BASH, 9)));
+
+    should(error.refusal).equal('invalid_choice');
+    should(pane.writes).eql([]);
+  });
+
+  it('denies with Escape alone even when the cursor is unknown: a refusal needs no cursor', async () => {
+    const pane = new ScriptedPane([markerless(BASH), IDLE]);
+    const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const result = await service.answer('s1', deny(BASH));
+
+    should(result.cleared).be.true();
+    should(pane.writes).eql(['Escape']);
+  });
+});

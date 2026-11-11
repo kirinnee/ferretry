@@ -471,3 +471,33 @@ describe('DialogAnswerService — one answer at a time per ferret', () => {
     should(writes).eql(['b:enter', 'a:enter']);
   });
 });
+
+describe('DialogAnswerService — an unknown cursor is never confirmed', () => {
+  it('types nothing on a frame with no cursor, the zero-move choice included', async () => {
+    const bare = REVIEW.replace('❯ 1. Fix with Claude', '  1. Fix with Claude');
+    const pane = new ScriptedPane([bare]);
+    const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const error = await service.answer('s1', choice(REVIEW, 1)).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+
+    should(error).be.instanceOf(DialogAnswerError);
+    should(pane.writes).eql([]);
+  });
+
+  it('never presses Enter when the redraw after an arrow shows no cursor', async () => {
+    const bare = REVIEW.replace('❯ 1. Fix with Claude', '  1. Fix with Claude');
+    const pane = new ScriptedPane([THIRD, bare]);
+    const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const result = await service.answer('s1', choice(REVIEW, 1)).then(
+      value => value,
+      () => undefined,
+    );
+
+    should(result?.cleared ?? false).be.false();
+    should(pane.writes).not.containEql('Enter');
+  });
+});

@@ -276,6 +276,7 @@ export function parsePermissionPrompt(pane: string): PermissionRequest | undefin
     const label = clip(row.label.replace(KEY_HINT, '').trim(), LIMITS.label);
     return { number: row.number, label, kind: optionKind(label) };
   });
+  const marked = rows.filter(row => row.cursor);
   const request = {
     harness,
     tool: clip(subject.tool, LIMITS.tool),
@@ -288,7 +289,8 @@ export function parsePermissionPrompt(pane: string): PermissionRequest | undefin
   return {
     id: promptDigest(JSON.stringify(request)),
     ...request,
-    selected: rows.find(row => row.cursor)?.number ?? 1,
+    // The row the cursor is on ONLY when exactly one row shows it: no marker, or two, is an UNKNOWN selection, never row 1.
+    ...(marked.length === 1 ? { selected: (marked[0] as Row).number } : {}),
   };
 }
 
@@ -313,7 +315,9 @@ export function permissionAnswerKeys(
   answer: { readonly kind: 'choice'; readonly number: number } | { readonly kind: 'deny' },
 ): { readonly moves: FormKey[]; readonly confirm: FormKey } | undefined {
   if (answer.kind === 'deny') return { moves: [], confirm: 'Escape' };
-  if (!request.options.some(option => option.number === answer.number)) return undefined;
+  // No fallback: a cursor that was not positively read is not row 1, and an Enter on it could confirm any row.
+  if (request.selected === undefined || !request.options.some(option => option.number === answer.number))
+    return undefined;
   return { moves: cursorKeys(request.selected, answer.number), confirm: 'Enter' };
 }
 

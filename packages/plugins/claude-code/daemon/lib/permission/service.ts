@@ -11,7 +11,8 @@ import { parsePermissionPrompt, permissionAnswerKeys, recordedPermissionId } fro
  *      if it no longer shows that very request (answered at the terminal, replaced by the next one,
  *      gone with the turn), nothing is typed and the caller is told the prompt is gone. A key meant for
  *      one prompt never lands on another.
- *   2. THE CURSOR IS MOVED, THEN CHECKED, THEN ENTER. Arrows put the cursor on the chosen row; the pane is read
+ *   2. THE CURSOR IS MOVED, THEN CHECKED, THEN ENTER. EVERY Enter — the zero-move one too — needs exactly one cursor row
+ *      positively read on the chosen row; no marker, or two, is an unknown selection and refuses ("cursor_unknown"). Arrows put the cursor on the chosen row; the pane is read
  *      until it shows the same prompt with the cursor THERE, and only then is Enter pressed (see
  *      {@link permissionAnswerKeys}). A cursor that did not arrive is reported and Enter is never pressed on the wrong
  *      row. A refusal is Escape alone.
@@ -36,7 +37,7 @@ export interface FerretPane {
 }
 
 /** Why an answer was refused before any key was sent. */
-export type PermissionAnswerRefusal = 'gone' | 'invalid_choice';
+export type PermissionAnswerRefusal = 'gone' | 'invalid_choice' | 'cursor_unknown';
 
 export class PermissionAnswerError extends Error {
   constructor(
@@ -55,6 +56,9 @@ export interface PermissionAnswerTiming {
   readonly settleReads: number;
   readonly settleMs: number;
 }
+
+const CURSOR_UNKNOWN =
+  'the prompt does not show which choice is selected, so nothing was sent: answer it at the terminal';
 
 const DEFAULT_TIMING: PermissionAnswerTiming = { settleReads: 15, settleMs: 200 };
 
@@ -94,6 +98,14 @@ export class PermissionAnswerService {
         'this prompt is gone: the agent’s screen no longer shows it, so nothing was sent',
         shown,
       );
+    // Enter confirms whatever row the cursor is on, so a cursor that is not positively read (no marker, or two) refuses
+    // before any key: it is not row 1, and arrows counted from a guess would land anywhere.
+    if (
+      answer.kind === 'choice' &&
+      shown.selected === undefined &&
+      shown.options.some(option => option.number === answer.number)
+    )
+      throw new PermissionAnswerError('cursor_unknown', CURSOR_UNKNOWN, shown);
     const keys = permissionAnswerKeys(shown, answer);
     if (keys === undefined)
       throw new PermissionAnswerError(
@@ -113,6 +125,7 @@ export class PermissionAnswerService {
           'this prompt is gone: the agent’s screen no longer shows it, so nothing was confirmed',
           moved.last,
         );
+      // Not met: the cursor never showed, once and alone, on the chosen row (a markerless redraw is not evidence). No Enter.
       if (!moved.met) return { requestId: answer.requestId, cleared: false };
     }
     await this.pane.key(ferretId, keys.confirm);

@@ -391,3 +391,19 @@ describe('the usage-limit dialog', () => {
     should(dialog?.kind).not.equal('usage-limit');
   });
 });
+
+describe('parseHarnessDialog — one cursor row or no dialog to answer', () => {
+  it('reads no dialog when two rows show a cursor', () => {
+    const frame = fixture('claude-2.1.220-settings-error');
+    const both = frame.replace(/^(\s*)\s\s(?=2\.)/mu, '$1❯ ');
+
+    should(both).not.equal(frame);
+    should(parseHarnessDialog(both)).be.undefined();
+  });
+
+  it('reads no dialog when no row shows a cursor', () => {
+    const frame = fixture('claude-2.1.220-settings-error');
+
+    should(parseHarnessDialog(frame.replace(/^(\s*)❯\s(?=1\.)/mu, '$1  '))).be.undefined();
+  });
+});

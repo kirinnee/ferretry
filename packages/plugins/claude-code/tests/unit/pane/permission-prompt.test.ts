@@ -660,3 +660,24 @@ describe('paneBlockingPermission', () => {
     should(line?.startsWith('Permission prompt — Bash xxx')).be.true();
   });
 });
+
+describe('parsePermissionPrompt — the selection is never guessed', () => {
+  const pane = fixture('claude-2.1.281-bash');
+
+  it('reports no selection when no row shows a cursor, keeping the same id', () => {
+    const bare = pane.replace(/^(\s*)[❯›>]\s(?=[1-9][.)])/gmu, '$1  ');
+    const request = parsePermissionPrompt(bare);
+
+    should(request).not.be.undefined();
+    should(request?.selected).be.undefined();
+    should(request?.id).equal(parsePermissionPrompt(pane)?.id);
+    should(permissionAnswerKeys(request as never, { kind: 'choice', number: 1 })).be.undefined();
+    should(permissionAnswerKeys(request as never, { kind: 'deny' })).eql({ moves: [], confirm: 'Escape' });
+  });
+
+  it('reports no selection when two rows show a cursor', () => {
+    const both = pane.replace(/^(\s*)\s\s(?=2[.)])/mu, '$1❯ ');
+
+    should(parsePermissionPrompt(both)?.selected).be.undefined();
+  });
+});

@@ -290,6 +290,8 @@ export function parseHarnessDialog(pane: string): HarnessDialog | undefined {
       grantsTrust: grantsTrust(kind, label),
     };
   });
+  // Exactly one cursor row, or this is no dialog to answer: Enter confirms whichever row the cursor is really on.
+  if (found.rows.filter(row => row.cursor).length !== 1) return undefined;
   const cursor = found.rows.find(row => row.cursor) as DialogRow;
   const dialog = {
     harness: harnessOf(lines[cursor.index] as string),

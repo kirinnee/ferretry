@@ -55,7 +55,7 @@ describe('Codex permission prompts, read by the Claude Code plugin’s parser', 
   }
 
   it('answers a choice with arrows and Enter, and a refusal with Escape alone', () => {
-    const request = parsePermissionPrompt(fixture('permission-prompts', 'codex-0.156.1-shell'));
+    const request = parsePermissionPrompt(fixture('codex-permission-prompts', 'codex-0.156.1-shell'));
 
     expect(permissionAnswerKeys(request as never, { kind: 'choice', number: 3 })).toEqual({
       moves: ['Down', 'Down'],
@@ -100,7 +100,7 @@ describe('Codex dialogs, read by the Claude Code plugin’s parser', () => {
   }
 
   it('moves a Codex cursor with arrows, never a digit', () => {
-    const dialog = parseHarnessDialog(fixture('harness-dialogs', 'codex-0.156.1-hooks-review'));
+    const dialog = parseHarnessDialog(fixture('codex-harness-dialogs', 'codex-0.156.1-hooks-review'));
 
     expect(dialogCursorMoves(dialog as never, 2)).toEqual(['Down']);
   });

@@ -63,7 +63,9 @@ export function permissionRoute(permission: PermissionAnswerService): RouteHandl
       if (error instanceof PermissionAnswerError)
         throw error.refusal === 'gone'
           ? new ApiError(409, error.message, 'permission_prompt_gone')
-          : new ApiError(400, error.message, 'invalid_permission_choice');
+          : error.refusal === 'cursor_unknown'
+            ? new ApiError(409, error.message, 'permission_cursor_unknown')
+            : new ApiError(400, error.message, 'invalid_permission_choice');
       return paneRefusal(error);
     }
   };
