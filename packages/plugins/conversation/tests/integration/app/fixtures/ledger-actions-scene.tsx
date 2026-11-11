@@ -4,7 +4,7 @@
  *
  * Parameters:
  *
- *   ?state=sending|typed|unconfirmed|revived|failed|cancelled   which send state to draw (default sending)
+ *   ?state=sending|typed|unconfirmed|updated|revived|failed|cancelled  which send state to draw (default sending)
  *   ?theme=<family>-<mode>
  */
 
@@ -47,6 +47,8 @@ const RECORDS: Readonly<Record<string, LedgerSendRecord>> = {
   sending: { ...base, fate: 'accepted' },
   typed: { ...base, fate: 'accepted', typedNotSent: true },
   unconfirmed: { ...base, fate: 'unaccounted', unaccountedReason: 'timeout', fateAt: iso(SENT_AT + 30_000) },
+  // Sent before the 5.0 update: the update could not tell its transcript input from another's.
+  updated: { ...base, fate: 'unaccounted', unaccountedReason: 'update_unconfirmed', fateAt: iso(SENT_AT + 30_000) },
   // A peer message a revive carried, whose relaunch the transcript never proved.
   revived: {
     ...base,
