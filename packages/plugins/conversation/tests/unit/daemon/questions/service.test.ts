@@ -30,6 +30,7 @@ const diagnosticPane: StructuredQuestionDiagnosticPane = {
   alive: true,
   dead: false,
   promptReady: true,
+  activeWork: false,
   visible: '> ',
   history: 'Deploy?\n> Yes\n  No',
 };

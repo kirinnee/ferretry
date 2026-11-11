@@ -43,6 +43,21 @@ export class StructuredQuestionDrivePaused extends StructuredQuestionDriveFailur
   }
 }
 
+/** One step of a drive, journalled as it happens so a stopped drive says where and why. */
+export type StructuredQuestionDriveStep =
+  | { readonly step: 'started'; readonly mode: 'tabs' | 'pages'; readonly answered?: readonly boolean[] }
+  /** The question's answer was chosen and its tab (or page) visibly moved on. */
+  | { readonly step: 'answered'; readonly questionIndex: number }
+  /** A tab already ticked with the requested answer was passed over with →. */
+  | { readonly step: 'kept'; readonly questionIndex: number }
+  /** The review page listed a different answer, so the drive went back to this tab. */
+  | { readonly step: 'revisited'; readonly questionIndex: number; readonly shown?: string | undefined }
+  | { readonly step: 'review-verified' }
+  | { readonly step: 'submitted' };
+
+/** Where a driver reports its steps. Best-effort: a step that cannot be recorded never stops a drive. */
+export type StructuredQuestionDriveJournal = (id: SessionId, step: StructuredQuestionDriveStep) => Promise<void>;
+
 /** The receipt transition a failed attempt is allowed to make after recovery. */
 export type StructuredQuestionFailureReceipt = 'accepted' | 'withdrawn' | 'failed' | 'quarantined';
 
@@ -71,6 +86,8 @@ export class StructuredQuestionAttemptPaused extends StructuredQuestionAttemptFa
 
 /** The pane evidence retained with a failed answer. */
 export interface StructuredQuestionDiagnosticPane {
+  /** The runner's reading of the visible frame: a turn is running. */
+  readonly activeWork: boolean;
   readonly alive: boolean;
   readonly dead: boolean;
   readonly promptReady: boolean;
