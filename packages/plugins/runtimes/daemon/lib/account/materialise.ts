@@ -483,16 +483,11 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
 
     // B190: the login's non-secret variables are pinned in the `--settings` overlay too, since a repo's
     // own settings beat the process environment but not that file. Any Claude runtime gets them, an
-    // interactive one through an overlay of its own — unless the profile already passes `--settings`.
+    // interactive one through an overlay of its own.
     let pins = loginEnvironmentPins(harness, store, derived.env);
-    if (Object.keys(pins).length > 0 && !runtime.agent && passesSettingsFlag(resolved.flags)) {
-      problems.push({
-        runtime: name,
-        message:
-          "its profile already passes --settings, and Claude Code honours only one, so the login's environment cannot be pinned against a repository's own settings; drop that flag, or make the runtime an agent",
-      });
-      pins = {};
-    }
+    // Claude honours only one `--settings`, so an interactive runtime whose profile passes its own is left
+    // unpinned: that is no reason to refuse the whole fleet apply (a GAP in ports-pending.json says so).
+    if (Object.keys(pins).length > 0 && !runtime.agent && passesSettingsFlag(resolved.flags)) pins = {};
     const baseOverlay = fixed?.claudeSettingsOverlay;
     const overlay: SettingsObject | undefined =
       Object.keys(pins).length === 0

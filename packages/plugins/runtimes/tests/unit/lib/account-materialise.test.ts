@@ -920,7 +920,7 @@ describe('materialiseFleet', () => {
       should(at(result, `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`)).have.length(0);
     });
 
-    it('should report a problem rather than pin when the profile already passes --settings', () => {
+    it('should apply, and pin nothing, when the profile already passes --settings', () => {
       // Arrange
       const model = modelOf({
         components: {
@@ -934,10 +934,15 @@ describe('materialiseFleet', () => {
         runtimes: { 'claude-loge': { credential: 'loge', profile: 'default' } },
       });
 
-      // Act / Assert
-      const refused = failure(() => plan(model));
-      should(refused.problems[0]).match({ runtime: 'claude-loge' });
-      should(refused.problems[0]?.message).containEql('--settings');
+      // Act
+      const result = plan(model);
+
+      // Assert
+      should(at(result, `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`)).have.length(0);
+      const wrapper = wrapperOf(result, 'claude-loge');
+      should(wrapper.split("'--settings'")).have.length(2);
+      should(wrapper).containEql('/home/person/own.json');
+      should(wrapper).not.containEql(FIXED_SETTINGS_FILE);
     });
   });
   describe('profiles a runtime cannot use', () => {

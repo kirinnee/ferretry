@@ -351,14 +351,14 @@ the fleet is planned, never quietly trimmed. A **literal** credential written in
 gateway's `ANTHROPIC_AUTH_TOKEN`) is pinned: it is already plain text in the configuration, and so it may show
 in `ps` when fast mode or a compaction point is set. A real key belongs in the secret store.
 
-What pinning cannot cover is a secret-backed variable that a repository itself sets under `env`. The start of
-a Claude runtime is **refused** when its launch folder (or the git root) holds a `.claude/settings.json` or
-`settings.local.json` that sets one of that runtime's secret-backed variables, naming the file and the variable.
+What pinning cannot cover is a secret-backed variable that a repository itself sets under `env`, and an
+interactive Claude runtime whose profile already passes its own `--settings` (Claude Code honours only one,
+so that runtime is applied unpinned, with no refusal and no notice).
 
-- **GAP (B190, `b190-api-key-helper`):** nothing keeps such a repository from doing it; the start is only
-  refused. An `apiKeyHelper` fallback in `fixed.json` that prints a Ferretry-owned process variable would, and
-  waits for a contract test against the installed Claude Code. Until Ferrets calls the check
-  (`assertFolderLeavesLoginAlone`) at a Claude start, the refusal is not yet enforced either.
+- **GAP (B190, `b190-api-key-helper`):** nothing refuses or prevents a repository from doing it, so such a
+  runtime starts signed out. Both a refuse-at-start check and an `apiKeyHelper` fallback in `fixed.json` that
+  prints a Ferretry-owned process variable go after the merge; the helper waits for a contract test against the
+  installed Claude Code.
 
 `config/daemon.json` may carry a `secretEnvironment` block of reusable recipes:
 
