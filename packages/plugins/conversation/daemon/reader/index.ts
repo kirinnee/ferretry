@@ -54,6 +54,8 @@ export function registerReader(needs: ReaderNeeds) {
   return {
     reads,
     images,
+    /** Closes every harness transcript handle the reader holds. */
+    close: async () => await files.close(),
     routes: {
       'GET /v1/ferrets/:ferretId/logs': handlers.logs,
       'GET /v1/ferrets/:ferretId/log-page': handlers.logPage,

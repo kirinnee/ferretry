@@ -288,6 +288,11 @@ export function buildReading(deps: {
     tools: search.tools,
     api,
     release: ferret => attachments.release(ferret),
-    stop: () => cancelWarm(),
+    stop: () => {
+      cancelWarm();
+      // Every transcript handle the reader opened is closed with the daemon (a harness would close an idle one in a
+      // minute; the one consumer does not wait for that).
+      void reader.close();
+    },
   };
 }
