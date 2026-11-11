@@ -11,7 +11,7 @@ export type AskDeliverySource = (key: typeof ASK_DELIVERY_KEY) => AskDelivery | 
  */
 export function askDelivery(source: AskDeliverySource): {
   readonly messenger: AgendaMessenger;
-  readonly ports: AgendaDeliveryPorts;
+  readonly ports: Omit<AgendaDeliveryPorts, 'undelivered'>;
 } {
   const provider = (): AskDelivery | undefined => {
     const found = source(ASK_DELIVERY_KEY);
@@ -40,8 +40,6 @@ export function askDelivery(source: AskDeliverySource): {
           return delivery.receipt === undefined ? { state: 'delivered' } : await delivery.receipt(ferret, sendId);
         },
       },
-      // An answer that never arrived goes back to the owner as an open card once Conversation can say so.
-      undelivered: { undelivered: async () => undefined },
     },
   };
 }
