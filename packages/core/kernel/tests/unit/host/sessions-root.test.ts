@@ -670,6 +670,11 @@ describe('K1 the testing host refuses an owned root to a plugin that does not ow
           scoped.set('whole', ctx.kernel.roots.root('sessions'));
           scoped.set('nested', ctx.kernel.roots.root('sessions', { subfolder: 'a/b' }));
           scoped.set('upper', ctx.kernel.roots.root('sessions', { subfolder: 'AAA-1' }));
+          scoped.set('attach', ctx.kernel.roots.root('sessions', { subfolder: 'aaa-1/attachments' }));
+          scoped.set('turns', ctx.kernel.roots.root('sessions', { subfolder: 'aaa-1/turns' }));
+          scoped.set('deeper', ctx.kernel.roots.root('sessions', { subfolder: 'aaa-1/attachments/x' }));
+          scoped.set('bare', ctx.kernel.roots.root('sessions', { subfolder: '/attachments' }));
+          scoped.set('upAttach', ctx.kernel.roots.root('sessions', { subfolder: 'AAA-1/attachments' }));
           scoped.set('homeA', ctx.kernel.roots.root('agent-homes', { subfolder: 'aaa-1' }));
           scoped.set('homeB', ctx.kernel.roots.root('agent-homes', { subfolder: 'bbb-2' }));
           scoped.set('homeUp', ctx.kernel.roots.root('agent-homes', { subfolder: '../x' }));
@@ -696,8 +701,13 @@ describe('K1 the testing host refuses an owned root to a plugin that does not ow
     await homeA.writeText(resolved(homeA, 'x.json'), 'a');
     await expect(homeB.readText(resolved(homeB, 'x.json'))).rejects.toThrow();
     // production's refusals: the whole base, a nested path, an upper-case id, a traversing agent-homes scope
-    for (const key of ['whole', 'nested', 'upper', 'homeUp'])
+    for (const key of ['whole', 'nested', 'upper', 'homeUp', 'turns', 'deeper', 'bare', 'upAttach'])
       expect(handle(key).resolve('environment.json')).toEqual({ ok: false, error: 'outside' });
+    // a ferret's own `attachments` folder is the one nested scope, and a file written through it is that folder's alone
+    const attach = handle('attach');
+    await attach.writeText(resolved(attach, 'shot.txt'), 'in-attachments');
+    expect(await attach.readText(resolved(attach, 'shot.txt'))).toBe('in-attachments');
+    await expect(a.readText(resolved(a, 'shot.txt'))).rejects.toThrow();
     await host.stop();
   });
 

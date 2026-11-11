@@ -12,7 +12,7 @@
  * delivered name is, are decided here.
  */
 
-import { basename } from 'node:path';
+import { basename, extname } from 'node:path';
 import {
   type DeliveredAttachment,
   messageWithAttachments as handoffMessageWithAttachments,
@@ -22,14 +22,18 @@ export type { DeliveredAttachment };
 
 /**
  * The name a delivered copy is written under: the uploaded file's own basename, reduced to characters
- * that need no quoting in a prompt, and never one of the store's reserved entry names.
+ * that need no quoting in a prompt, never one of the store's reserved entry names, and short enough for any filesystem's
+ * name limit (the stem is cut, the extension kept: a harness decides what a file IS from its extension).
  */
+const MAX_DELIVERED_NAME = 120;
 export function deliveredFilename(filename: string): string {
   const bare = basename(filename.replaceAll('\\', '/'))
     .replace(/[^\w.-]+/gu, '-')
     .replace(/^[-.]+/u, '');
   if (bare === '' || bare === 'original' || bare === 'manifest.json') return `attachment-${bare || 'file'}`;
-  return bare;
+  if (bare.length <= MAX_DELIVERED_NAME) return bare;
+  const extension = extname(bare).length <= 16 ? extname(bare) : '';
+  return `${bare.slice(0, MAX_DELIVERED_NAME - extension.length)}${extension}`;
 }
 
 /**

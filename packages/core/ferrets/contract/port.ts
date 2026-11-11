@@ -346,8 +346,10 @@ export interface FerretHarness {
   /**
    * Additive (send path, attachments): hands files to THIS ferret by writing them into its own session folder's
    * `attachments/` folder (made `0700`; each file `0600`, published through a temporary name), the one place an agent
-   * may read them without being asked (`FERRET_READABLE_FOLDERS`). Answers the absolute path of each file, in order. A
-   * `name` is a bare file name: one that names a path writes NOTHING (the whole call is refused first). It is a file
+   * may read them without being asked (`FERRET_READABLE_FOLDERS`). The write goes through a handle scoped to that folder
+   * ALONE (no link from the home down to it, checked at each filesystem call), so an `attachments` that is a link, to a
+   * sibling in the session or anywhere else, refuses with nothing written. Answers the absolute path of each file, in
+   * order. A `name` (and a `folder`) is a bare name: one that names a path writes NOTHING (the whole call is refused first). It is a file
    * write into the ferret's own folder, not a key on its pane, so it neither types nor presses anything. Rejects when
    * the folder cannot be named or a file cannot be written; absent when this daemon cannot write session files.
    */
@@ -359,9 +361,14 @@ export interface FerretHarness {
   readonly transcript: BoundTranscriptReader;
 }
 
-/** One file {@link FerretHarness.deliverFiles} hands to a ferret: a bare file name and its bytes. */
+/**
+ * One file {@link FerretHarness.deliverFiles} hands to a ferret: a bare file name and its bytes, and optionally the bare
+ * name of a folder of its own inside `attachments/` (v4 kept each attachment in a folder named by its FULL id, so two
+ * files of one name never meet). Neither names a path; one that does writes nothing.
+ */
 export interface HarnessFile {
   readonly name: string;
+  readonly folder?: string;
   readonly contents: Uint8Array;
 }
 

@@ -122,10 +122,17 @@ function isPrivateRoot(name: RootName): boolean {
  */
 const SESSION_FOLDER = /^[a-z0-9][a-z0-9_-]{0,127}$/u;
 
-/** The one segment a `sessions` handle may be scoped to, or nothing when the given subfolder is not exactly that. */
+/**
+ * What a `sessions` handle may be scoped to: one minted ferret folder, or that folder's own `attachments` folder
+ * (`<ferret>/attachments`, so a writer of files an agent is sent holds THAT folder alone, with no link from the home down
+ * to it, instead of the whole session where a link to a sibling folder would still be inside the fence). Nothing else.
+ */
 function sessionFolder(subfolder: string | undefined): string | undefined {
-  return subfolder !== undefined && SESSION_FOLDER.test(subfolder) ? subfolder : undefined;
+  if (subfolder === undefined) return undefined;
+  const own = subfolder.endsWith(SESSION_ATTACHMENTS) ? subfolder.slice(0, -SESSION_ATTACHMENTS.length) : subfolder;
+  return SESSION_FOLDER.test(own) ? subfolder : undefined;
 }
+const SESSION_ATTACHMENTS = '/attachments';
 
 /**
  * The folder below an internal root's anchor that a handle scoped to `subfolder` names, or `undefined` when the

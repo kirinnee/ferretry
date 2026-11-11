@@ -109,7 +109,8 @@ describe('a send naming a file, through the real Ferrets and Conversation', () =
     expect(sent.status).toBe(200);
     const typed = runner.deliveries.slice(typedBefore).map(entry => entry.delivery.text);
     expect(typed).toHaveLength(1);
-    const name = `${attachment.replace(/^att_/u, '').slice(0, 8)}-Screen-Shot.png`;
+    // v4's layout: a folder per FULL attachment id, the file under its own name.
+    const name = `${attachment}/Screen-Shot.png`;
     expect(h.rootText('sessions', `${id}/attachments/${name}`)).toBe('FIXTURE-PNG-BYTES');
     expect(typed[0]).toContain('see the picture');
     expect(typed[0]).toContain(`${name} (image/png)`);
@@ -129,8 +130,6 @@ describe('a send naming a file, through the real Ferrets and Conversation', () =
     expect(sent.status).toBe(400);
     expect(sent.json<{ error: string }>().error).toMatch(/^an attached file could not be handed to the agent: /);
     expect(runner.deliveries).toHaveLength(typedBefore);
-    expect(
-      h.rootText('sessions', `${mine}/attachments/${theirs.replace(/^att_/u, '').slice(0, 8)}-secret.png`),
-    ).toBeUndefined();
+    expect(h.rootText('sessions', `${mine}/attachments/${theirs}/secret.png`)).toBeUndefined();
   });
 });

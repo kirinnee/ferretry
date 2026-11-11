@@ -123,7 +123,7 @@ class HarnessFerrets extends FakeFerrets {
   /** Set when `harness()` itself refuses, as Ferrets' mayTouch rule does. */
   refuseOpen: ApiError | undefined;
   /** Every batch of files handed to the ferret (`deliverFiles`), and whether the write fails or the seam offers none. */
-  readonly filesHanded: { readonly name: string; readonly contents: Uint8Array }[][] = [];
+  readonly filesHanded: { readonly name: string; readonly folder?: string; readonly contents: Uint8Array }[][] = [];
   files: 'writes' | 'fails' | 'absent' = 'writes';
 
   async harness(ferret: FerretId, caller?: FerretId): Promise<FerretHarness | undefined> {
@@ -160,10 +160,15 @@ class HarnessFerrets extends FakeFerrets {
       ...(this.files === 'absent'
         ? {}
         : {
-            deliverFiles: async (files: readonly { readonly name: string; readonly contents: Uint8Array }[]) => {
+            deliverFiles: async (
+              files: readonly { readonly name: string; readonly folder?: string; readonly contents: Uint8Array }[],
+            ) => {
               if (this.files === 'fails') throw new Error('FIXTURE_SECRET /state/ferrets/f1/attachments is read-only');
               this.filesHanded.push([...files]);
-              return files.map(file => `/state/ferrets/${ferret}/attachments/${file.name}`);
+              return files.map(
+                file =>
+                  `/state/ferrets/${ferret}/attachments/${file.folder === undefined ? '' : `${file.folder}/`}${file.name}`,
+              );
             },
           }),
       stopActive: async () => {
@@ -1238,11 +1243,12 @@ describe('a send carrying files or an fyi label types, and a file reaches the ag
     const response = await send(host, 'req-img', 'f1', { message: 'see the picture', attachmentIds: [id] });
 
     expect(response.status).toBe(200);
-    const name = `${id.replace(/^att_/u, '').slice(0, 8)}-Screen-Shot-1.png`;
+    const name = 'Screen-Shot-1.png';
     expect(ferrets.filesHanded).toHaveLength(1);
     expect(ferrets.filesHanded[0]?.map(file => file.name)).toEqual([name]);
+    expect(ferrets.filesHanded[0]?.map(file => file.folder)).toEqual([id]);
     expect(new TextDecoder().decode(ferrets.filesHanded[0]?.[0]?.contents)).toBe('FIXTURE-PNG-BYTES');
-    const path = `/state/ferrets/f1/attachments/${name}`;
+    const path = `/state/ferrets/f1/attachments/${id}/${name}`;
     expect(ferrets.delivered).toEqual([
       { text: `see the picture\n\nAttached files — open them from these paths:\n- ${path} (image/png)` },
     ]);
@@ -1261,9 +1267,35 @@ describe('a send carrying files or an fyi label types, and a file reaches the ag
 
     await api().send(F1, { kind: 'owner' }, { message: 'two', sendId: 's-two', attachmentIds: [first, second, first] });
 
-    const names = ferrets.filesHanded[0]?.map(file => file.name) ?? [];
+    const names = ferrets.filesHanded[0]?.map(file => `${file.folder}/${file.name}`) ?? [];
     expect(names).toHaveLength(2);
     expect(new Set(names).size).toBe(2);
+    await host.stop();
+  });
+
+  test('two different files whose ids share their first eight digest characters stay two distinct delivered paths', async () => {
+    const { host, ferrets, api } = await conversation();
+    // Both uploaded as same.txt; the two ids agree on `a53c3113` and differ after it.
+    const first = await upload(api, 'same.txt', 'FIXTURE-COLLISION-53803');
+    const second = await upload(api, 'same.txt', 'FIXTURE-COLLISION-62595');
+    expect(first.slice(0, 12)).toBe(second.slice(0, 12));
+    expect(first).not.toBe(second);
+
+    const response = await send(host, 'req-collide', 'f1', {
+      message: 'two different files',
+      attachmentIds: [first, second],
+    });
+
+    expect(response.status).toBe(200);
+    const handed = ferrets.filesHanded[0] ?? [];
+    expect(handed.map(file => new TextDecoder().decode(file.contents))).toEqual([
+      'FIXTURE-COLLISION-53803',
+      'FIXTURE-COLLISION-62595',
+    ]);
+    const paths = handed.map(file => `/state/ferrets/f1/attachments/${file.folder}/${file.name}`);
+    expect(new Set(paths).size).toBe(2);
+    expect(ferrets.delivered[0]?.text).toContain(paths[0]);
+    expect(ferrets.delivered[0]?.text).toContain(paths[1]);
     await host.stop();
   });
 

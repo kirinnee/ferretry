@@ -563,8 +563,9 @@ export function buildConversationA(deps: {
    * THE FILE HAND-OFF (v4 `deliverAttachments`). Each named stored original is read back through the store (which
    * re-checks its digest against the manifest, and finds only THIS ferret's) and written, by the ferret's harness seam,
    * into the ferret's OWN session `attachments/` folder (`0700`; `0600` per file): the one place an agent reads a file it
-   * is sent without asking. The name is the file's own reduced to plain characters, behind eight characters of its
-   * digest, so two different files of one name never overwrite each other and the same file twice is one path. Answers
+   * is sent without asking. Each file sits in a folder named by its FULL attachment id (v4's layout), under the file's own name reduced to
+   * plain characters: two different files of one name never overwrite each other (an eight-character digest prefix
+   * could alias two ids) and the same file twice is one path. Answers
    * the paths and types the message then lists. A file that is not this ferret's, or cannot be handed over, refuses the
    * whole send (400 `invalid`) BEFORE anything is typed, because "see the screenshot" with no screenshot is the worse
    * outcome. Nothing of the file but its path and type reaches the pane or the log.
@@ -580,13 +581,14 @@ export function buildConversationA(deps: {
     };
     const source = deps.attachments;
     if (source === undefined) return refuse(NO_ATTACHMENTS);
-    const files: { name: string; contents: Uint8Array; mime: string }[] = [];
+    const files: { name: string; folder: string; contents: Uint8Array; mime: string }[] = [];
     for (const id of wanted) {
       const found = await source.download(ferret, id).catch((error: unknown) => {
         return refuse(error instanceof Error ? error.message : 'it could not be read');
       });
       files.push({
-        name: `${found.attachment.id.replace(/^att_/u, '').slice(0, 8)}-${deliveredFilename(found.attachment.filename)}`,
+        name: deliveredFilename(found.attachment.filename),
+        folder: found.attachment.id,
         contents: found.bytes,
         mime: found.attachment.mime,
       });
@@ -594,7 +596,7 @@ export function buildConversationA(deps: {
     const harness = await ferrets.harness?.(ferret).catch(() => undefined);
     if (harness?.deliverFiles === undefined) return refuse("this ferret's files cannot be written from here");
     const paths = await harness
-      .deliverFiles(files.map(({ name, contents }) => ({ name, contents })))
+      .deliverFiles(files.map(({ name, folder, contents }) => ({ name, folder, contents })))
       .catch(() => refuse('they could not be written'));
     return files.map((file, at) => ({ path: paths[at] as string, mime: file.mime }));
   };

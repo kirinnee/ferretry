@@ -15,6 +15,13 @@ describe('attachment delivery', () => {
     should(deliveredFilename('...')).equal('attachment-file');
   });
 
+  it('keeps a long name within a filesystem’s name limit, cutting the stem and keeping the extension', () => {
+    const name = deliveredFilename(`${'a'.repeat(400)}.png`);
+    should(name.length).be.belowOrEqual(120);
+    should(name.endsWith('.png')).be.true();
+    should(deliveredFilename(`${'b'.repeat(400)}`).length).be.belowOrEqual(120);
+  });
+
   it('leaves a message with nothing attached exactly as it was', () => {
     should(messageWithAttachments('hello', [])).equal('hello');
   });

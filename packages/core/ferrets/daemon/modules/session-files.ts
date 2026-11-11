@@ -366,25 +366,40 @@ export class SessionFiles {
   }
 
   /**
-   * The files a start was given (`start -f`) written into the ferret's own `attachments/` folder: the session folder made
-   * `0700` first, each file published durably and `0600` through a temporary name (the folder itself is made `0700` by the
-   * publish). A name that is not a bare file name writes nothing at all, before the first file is written.
+   * The files a start was given (`start -f`) or a send carries, written into the ferret's own `attachments/` folder
+   * THROUGH A HANDLE SCOPED TO THAT FOLDER ALONE (`attachmentsRoot`): the kernel proves, at every filesystem call, that no
+   * link lies from the home down to it, so an `attachments` that is a link (to a sibling in the session or anywhere
+   * outside) refuses with nothing written, and a missing one is made a real `0700` directory. Each file is published
+   * durably and `0600` through a temporary name (a `folder` below it is made `0700` by the publish). A name or folder
+   * that is not a bare name writes nothing at all, before the first file is written.
    */
   private async writeAttachments(id: SessionId, files: readonly OpeningFile[]): Promise<void> {
-    const root = this.root(id);
-    await new OwnFolder(root).ensure();
+    const root = this.attachmentsRoot(id);
+    const bare = (name: string): boolean => /^[^/\\\0]+$/u.test(name) && name !== '.' && name !== '..';
     const named = files.map(file => {
-      const path =
-        /^[^/\\\0]+$/u.test(file.name) && file.name !== '.' && file.name !== '..'
-          ? root.resolve(`${ATTACHMENTS_FOLDER}/${file.name}`)
+      const relative =
+        bare(file.name) && (file.folder === undefined || bare(file.folder))
+          ? [...(file.folder === undefined ? [] : [file.folder]), file.name].join('/')
           : undefined;
+      const path = relative === undefined ? undefined : root.resolve(relative);
       if (path === undefined || !path.ok) throw new Error('an attachment of this ferret could not be named');
       return { path: path.value, contents: file.contents };
     });
+    await new OwnFolder(this.root(id)).ensure();
+    await new OwnFolder(root).ensure();
     for (const { path, contents } of named)
       await root.publish(path, typeof contents === 'string' ? new TextEncoder().encode(contents) : contents, {
         mode: 0o600,
       });
+  }
+
+  /**
+   * The ferret's `attachments/` folder and NOTHING else of its session: a `sessions` handle scoped to
+   * `<ferret>/attachments`, so the kernel's no-link, checked-descriptor walk covers the folder itself and a fence breach
+   * is refused at the operation, not by a name check on a whole-session handle.
+   */
+  private attachmentsRoot(ferret: string): RootHandle {
+    return this.deps.roots.root(FERRET_SESSIONS_ROOT, { subfolder: `${ferret}/${ATTACHMENTS_FOLDER}` });
   }
 
   /** The ferret's own `sessions` handle: one minted folder, internal, private. */
