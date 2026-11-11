@@ -76,6 +76,7 @@ import { instructionsAnswer } from './lib/agent-control/instructions.ts';
 import { LaunchEnvironmentStore, switchesOfRecord } from './lib/agent-control/launch-environment.ts';
 import { agentControlReader } from './lib/agent-control/reader.ts';
 import { RegistryWorkFolders } from './lib/work-folders/work-folders.ts';
+import { ferretsAgendaContext } from './modules/agenda-context.ts';
 import { buildWorktrees } from './modules/worktrees.ts';
 import { FY_REQUEST_ID_HEADER } from './lib/protocol/headers.ts';
 import { WARDEN_LABEL } from './lib/session/peers/warden-lifecycle.ts';
@@ -1151,6 +1152,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         await instructionsAnswer(callerFerret(call), id => launchEnvironment.read(id), kernel.identity.binaries.client),
     },
     hooks: {
+      // Lineage for the agenda: who exists and who started whom (Asks refuses a helper's item on it).
+      'agenda.context:ferrets': ferretsAgendaContext(registry, ready),
       'bearers:ferret': {
         ferretFor: (digest: BearerDigest) => {
           const ferret = tokens.ferretFor(digest);
