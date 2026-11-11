@@ -7,7 +7,8 @@ export { checkConfigText, describePath } from './check.ts';
 export type { AcceptedConfig, ConfigEntryState, DiskState, EvaluatedConfig, EvaluateInput } from './evaluate.ts';
 export { ABSENT_CONFIG_ETAG, defaultsOf, evaluateConfig } from './evaluate.ts';
 export { configJsonSchemaText, schemaFileName, schemaModeline } from './schemas.ts';
-export { findRawSecrets, looksLikeRawSecret, RAW_SECRET_MESSAGE, rawSecretFix } from './secrets.ts';
+export { RAW_SECRET_MESSAGE, rawSecretFix } from './secrets.ts';
+export { findRawSecrets, looksLikeRawSecret } from '@ferretry/std/credential-words';
 export type {
   ConfigEdit,
   ConfigFileView,

@@ -1,34 +1,23 @@
 /**
- * CFG-LEAK-R: the kernel's word cutter (`host/config/secret-words.ts`) is a COPY of runtimes' (`command-line.ts`),
- * because the kernel is a leaf and imports no plugin. Two copies of security code may not drift, so this test runs both
- * over ONE corpus and requires the same answer, word for word. The corpus is the whole generated family of ruling #40
- * that runtimes holds its own cutter to (`command-line-family.ts`), the cases the kernel's own tests pin
- * (`secret-words.test.ts`), and a generated block of every credential-naming word and token format.
+ * CFG-LEAK: the ONE word cutter and the write rule (W) of `@ferretry/std/credential-words`, over one corpus. The
+ * kernel's read mask and Runtimes' views both import this cutter (there used to be two copies pinned equal by an
+ * agreement test; there is one now, so there is nothing to keep equal). The corpus is the whole generated family of
+ * ruling #40 (`../support/command-line-family.ts`), the cases a person writes, and a generated block of every
+ * credential-naming word and token format.
  *
- * It reaches the kernel by relative path: `shownWords` and `findFlagSecrets` are not on `@ferretry/kernel/host`'s
- * export list, and a TEST may import both sides where the kernel's own code may not import a plugin.
- *
- * T-B2 holds the write rule (W, `findFlagSecrets`) under BOTH cutters, strictly: EVERY word W refuses is cut by the
- * kernel's mask and by runtimes' copy, residual 0 over THIS corpus (a pointer, then keys of its own, then raw text
- * included); the F1-F7 families, which are outside it, are pinned open in `kernel-cutter-f1-f7-pin.test.ts`. Its
- * corpus comes from W's own name tail, not from the mask's name list: a candidate name is in it exactly when W
- * refuses it, so a name only W knows is in it. A W-only widening onto a name outside CANDIDATE_NAMES is not seen.
- *
- * Pin to the vault contract's cutter once it lands on 5.0 (`rebuild/fix-catalogs-one-rule`, #41): this file has no
- * vault import until then.
+ * The CORPUS test (T-B1) holds that the cutter really cuts it. T-B2 holds the write rule (W, `findFlagSecrets`) under
+ * the cutter, strictly: EVERY word W refuses is cut, residual 0 over THIS corpus (a pointer, then keys of its own, then
+ * raw text included); the F1-F7 families, which are outside it, are not cut by the cutter and are held by the NET in each
+ * consumer (`shownConfigText`'s `unmaskable`, Runtimes' withheld views). Its corpus comes from W's own name tail, not
+ * from the cutter's name list: a candidate name is in it exactly when W refuses it, so a name only W knows is in it. A
+ * W-only widening onto a name outside CANDIDATE_NAMES is not seen.
  *
  * Fake only: every value is shaped like a credential and is none.
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { HIDDEN_WORD_TEXT } from '../../../contract/index.ts';
-import { shownWords as runtimesShownWords } from '../../../daemon/lib/service/command-line.ts';
-import { findFlagSecrets } from '../../../../../core/kernel/host/config/secrets.ts';
-import {
-  HIDDEN_VALUE_TEXT,
-  shownWords as kernelShownWords,
-} from '../../../../../core/kernel/host/config/secret-words.ts';
-import { nestedFamily } from './command-line-family.ts';
+import { findFlagSecrets, shownWords } from '../../src/credential-words/index.ts';
+import { nestedFamily } from '../support/command-line-family.ts';
 
 /** A 16-character value of 16 distinct characters: past every length and entropy gate, and no known shape. */
 const VALUE = 'Zk3pQ9vXw2LmN7rT';
@@ -79,7 +68,7 @@ const POINTER_CLASS_LINES: readonly (readonly string[])[] = [',', ';', '&'].flat
   POINTER_VALUES.flatMap(shape => VALUE_LEADS.map(lead => lead(shape(mark)))),
 );
 
-/** The cases the kernel's own `secret-words.test.ts` pins, and the lines a person writes. */
+/** The cases `credential-words.test.ts` pins, and the lines a person writes. */
 const OWN_LINES: readonly (readonly string[])[] = [
   ...POINTER_CLASS_LINES,
   // No pointer, so no whole-value cut: a quoted value's own cut ends at its closing quote (`,b=2` after it stays shown).
@@ -277,7 +266,7 @@ const formsOf = (name: string): readonly (readonly string[])[] => [
 const writeRuleLines = (): readonly (readonly string[])[] =>
   CANDIDATE_NAMES.flatMap(formsOf).filter(words => findFlagSecrets({ args: words }).length > 0);
 
-/** The ONE corpus both copies are run over. */
+/** The ONE corpus. */
 const corpus = (): readonly (readonly string[])[] => [
   ...nestedFamily().map(item => item.words),
   ...OWN_LINES,
@@ -286,55 +275,54 @@ const corpus = (): readonly (readonly string[])[] => [
   ...writeRuleLines(),
 ];
 
-/** Every word of `lines` W refuses, and whether each cutter cut it: `[words, index, kernel cut it, runtimes cut it]`. */
+/** Every word of `lines` W refuses, and whether the cutter cut it: `[words, index, cut]`. `first` is the command before. */
 function refusedWords(
   lines: readonly (readonly string[])[],
-): readonly (readonly [words: readonly string[], at: number, kernel: boolean, runtimes: boolean])[] {
+  withFirst = false,
+): readonly (readonly [words: readonly string[], at: number, cut: boolean])[] {
   return lines.flatMap(words => {
-    // W first, then both copies only on a line W refuses a word of: the other lines were 2.4 s of T-B2's 3 s (now 0.7).
+    // W first, then the cutter only on a line W refuses a word of: the other lines were 2.4 s of the test's 3 s (now 0.7).
     const findings = findFlagSecrets({ args: words });
     if (findings.length === 0) return [];
-    const kernel = kernelShownWords(words);
-    const runtimes = runtimesShownWords(words);
+    const shown = withFirst ? shownWords(words.slice(1), words[0]) : shownWords(words);
     return findings.map(finding => {
-      const at = finding.path[1] as number;
-      return [words, at, kernel[at]?.hidden === true, runtimes[at]?.hidden === true] as const;
+      const at = (finding.path[1] as number) - (withFirst ? 1 : 0);
+      return [words, at, shown[at]?.hidden === true] as const;
     });
   });
 }
 
-describe('CFG-LEAK-R the kernel copy of the cutter agrees with runtimes', () => {
-  // Measured alone with --coverage (bun 1.4.4, 3 runs, one other bun process running): 2.75 / 2.88 / 3.31 s. The limit is
-  // 3x the worst, 10 s: the corpus is thousands of lines cut twice, and the cost is the cutters, not a wait.
-  it('CFG-LEAK-R the kernel and runtimes cut every corpus word identically', () => {
+describe('CFG-LEAK the one word cutter, over the corpus', () => {
+  // Measured alone with --coverage (bun 1.4.4): the corpus is thousands of lines cut once, so it is the cutter's own
+  // cost, not a wait; the limit is set from the measured numbers recorded in the step-4 report (the old test cut every
+  // line twice and took 2.75 / 2.88 / 3.31 s, so a limit of 10 s is generous for half the work).
+  it('CFG-LEAK-R the cutter cuts the corpus: a body of lines hides a word, and none throws', () => {
     const lines = corpus();
     should(nestedFamily().length).be.above(500);
-    const kernel = lines.map(words => kernelShownWords(words));
-    const runtimes = lines.map(words => runtimesShownWords(words));
-    // The whole corpus in ONE comparison (a `should(...).eql` per line cost ~1 s of the test's 3 s); on a difference,
-    // the first line that differs, with its words, so the failure still says which.
-    if (JSON.stringify(kernel) !== JSON.stringify(runtimes)) {
-      const at = kernel.findIndex((shown, index) => JSON.stringify(shown) !== JSON.stringify(runtimes[index]));
-      should([lines[at], kernel[at]]).eql([lines[at], runtimes[at]]);
-    }
-    // …and the corpus really cuts: the two are not agreeing on "nothing".
-    should(kernel.filter(shown => shown.some(word => word.hidden)).length).be.above(400);
+    const shown = lines.map(words => shownWords(words));
+    // The corpus really cuts: the cutter is not answering "nothing" for all of it.
+    should(shown.filter(line => line.some(word => word.hidden)).length).be.above(400);
+    // …and a hidden word is never the word as written (a cut changes the text).
+    should(
+      lines.filter((words, at) => shown[at]?.some((word, index) => word.hidden && word.text === words[index])),
+    ).eql([]);
   }, 10_000);
 
-  // Measured alone with --coverage (same conditions): 2.60 / 2.64 / 2.70 s, under the 5 s default.
-  it('CFG-LEAK-R a command’s own flag before the first word is read the same by both', () => {
+  // Same cost class as above: the corpus is read once more, with the command before the first word.
+  it('CFG-LEAK-R a command’s own flag before the first word: every word W refuses is cut', () => {
     const lines = corpus().filter(line => line.length > 0);
-    const kernel = lines.map(words => kernelShownWords(words.slice(1), words[0]));
-    const runtimes = lines.map(words => runtimesShownWords(words.slice(1), words[0]));
-    if (JSON.stringify(kernel) !== JSON.stringify(runtimes)) {
-      const at = kernel.findIndex((shown, index) => JSON.stringify(shown) !== JSON.stringify(runtimes[index]));
-      should([lines[at], kernel[at]]).eql([lines[at], runtimes[at]]);
-    }
-  });
+    const missed = refusedWords(lines, true)
+      .filter(([, , cut]) => !cut)
+      // A line whose OWN first word is what W refuses is judged without a command before it: not this test's.
+      .filter(([words, at]) => at >= 0 && words.length > 1);
+    // The first word stands before the rest, so the words after it are judged with it as their `before`: nothing W
+    // refuses in them may show, however the first word reads.
+    should(missed.length).equal(0);
+  }, 10_000);
 
-  it('S6 CFG-LEAK-W every word W refuses is cut by the kernel mask AND by the runtimes copy: residual 0', () => {
+  it('S6 CFG-LEAK-W every word W refuses is cut by the cutter: residual 0 over this corpus', () => {
     // One word with blanks that does not start with a flag (`srv --token v`) is read as a command line by the kernel's
-    // `shownItem`, not by `shownWord`, so it is T-B1's (both cutters show it alike), not this test's.
+    // `shownItem` (and a Runtimes list is netted by W), not by `shownWord`, so it is not this test's.
     const writeRule = writeRuleLines();
     const lines = [...nestedFamily().map(item => item.words), ...OWN_LINES, ...GENERATED_LINES, ...writeRule];
     const refused = refusedWords(lines);
@@ -342,9 +330,7 @@ describe('CFG-LEAK-R the kernel copy of the cutter agrees with runtimes', () => 
     should(refused.length).be.above(1000);
     const names = new Set(writeRule.map(words => words.join(' ')));
     should(names.size).be.above(60);
-    const missed = refused
-      .filter(([, , kernel, runtimes]) => !kernel || !runtimes)
-      .map(([words, at, kernel, runtimes]) => [words, at, { kernel, runtimes }]);
+    const missed = refused.filter(([, , cut]) => !cut).map(([words, at]) => [words, at]);
     should(missed).eql([]);
   });
 
@@ -374,12 +360,7 @@ describe('CFG-LEAK-R the kernel copy of the cutter agrees with runtimes', () => 
     for (const mark of [',', ';', '&'])
       for (const words of [['--key', `${POINTER}${mark}b=2`], [`--set=a=1,API_KEY=${POINTER}${mark}b=2`]]) {
         should(findFlagSecrets({ args: words }).length).equal(0);
-        should([words, kernelShownWords(words).map(word => word.hidden)]).eql([words, words.map(() => false)]);
-        should([words, runtimesShownWords(words).map(word => word.hidden)]).eql([words, words.map(() => false)]);
+        should([words, shownWords(words).map(word => word.hidden)]).eql([words, words.map(() => false)]);
       }
-  });
-
-  it('CFG-LEAK-R HIDDEN_VALUE_TEXT === HIDDEN_WORD_TEXT', () => {
-    should(HIDDEN_VALUE_TEXT).equal(HIDDEN_WORD_TEXT);
   });
 });

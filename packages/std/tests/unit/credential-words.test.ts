@@ -1,23 +1,30 @@
 /**
- * CFG-LEAK-R: the kernel's COPY of the word cutter, on the hard cases its header names — a quoted value that holds the
+ * CFG-LEAK-R: the one word cutter, on the hard cases its header names — a quoted value that holds the
  * separator, a pointer beside a secret on either side, base64 padding, a user password inside a secret-named value, a
  * flag whose value has a pointer in it. Each case is one command-line word (or a flag and its value), and what a
  * person must see of it: the key, the flag and the pointer stay, the value goes.
  *
- * The copy is pinned equal to runtimes' original over its whole generated family by the runtimes agreement test (a
- * kernel test may not import a plugin: Unit B). These cases are what holds the copy's own branches here.
+ * The whole generated family is held by `credential-words-corpus.test.ts`; these cases hold the cutter's own branches.
  *
  * Fake only: every value is shaped like a credential and is none.
  */
 import { describe, expect, test } from 'bun:test';
-import { HIDDEN_VALUE_TEXT, shownWord, shownWords } from '../../../host/config/secret-words.ts';
-import { VALUE } from './masked-support.ts';
+import {
+  HIDDEN_VALUE_TEXT,
+  looksSecret,
+  looksSecretShown,
+  shownWord,
+  shownWords,
+} from '../../src/credential-words/index.ts';
+
+/** A fake credential-shaped value (no real secret scanner hit). */
+const VALUE = 'Zk3pQ9vXw2LmN7rT';
 
 const POINTER = '${secret:X}';
 
 const shown = (...words: readonly string[]): readonly string[] => shownWords(words).map(word => word.text);
 
-describe('CFG-LEAK-R the copied cutter, case by case', () => {
+describe('CFG-LEAK-R the cutter, case by case', () => {
   const HIDE: readonly (readonly [label: string, words: readonly string[], seen: readonly string[]])[] = [
     ['a quoted value that holds the separator', [`API_KEY="${VALUE},${VALUE}"`], [`API_KEY=${HIDDEN_VALUE_TEXT}`]],
     ['a single-quoted value after a part', [`API_KEY=a:'${VALUE},x'`], [`API_KEY=${HIDDEN_VALUE_TEXT}`]],
@@ -131,5 +138,20 @@ describe('CFG-LEAK-R the copied cutter, case by case', () => {
     // `first` is the word before the first: a command's own flag.
     expect(shownWords([VALUE], '--token').map(word => word.hidden)).toEqual([true]);
     expect(shownWords([VALUE]).map(word => word.hidden)).toEqual([false]);
+  });
+});
+
+describe('the name and value tests', () => {
+  test('looksSecret: a secret name or a token prefix with a long value; a short value or a reference is none', () => {
+    expect(looksSecret('API_KEY', VALUE)).toBe(true);
+    expect(looksSecret('NOTE', 'ghp_AbCdEfGh12345678')).toBe(true);
+    expect(looksSecret('NOTE', VALUE)).toBe(false);
+    expect(looksSecret('API_KEY', 'short')).toBe(false);
+    expect(looksSecret('API_KEY', '$OTHER_VARIABLE')).toBe(false);
+  });
+
+  test('looksSecretShown is never narrower than looksSecret on a secret name', () => {
+    expect(looksSecretShown('API_KEY', VALUE)).toBe(true);
+    expect(looksSecretShown('API_KEY', '${secret:X}')).toBe(false);
   });
 });

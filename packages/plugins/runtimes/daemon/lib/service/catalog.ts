@@ -40,7 +40,9 @@ import {
   type SkippedLayer,
 } from '../account/layering.ts';
 import { componentPartialSupport, describePartialSupport } from '../account/adapt.ts';
-import { freeName, looksSecret, SECRET_TOKEN_SOURCE } from '../account/import.ts';
+import { freeName } from '../account/import.ts';
+import { findFlagSecrets, looksSecret, rawTextHoldsSecret, SECRET_TOKEN_SOURCE } from '@ferretry/std/credential-words';
+import { hooksDocumentRefusedLines } from './hooks-document-net.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { runtimeDisable, type BudgetHolds } from '../account/disabled-runtime.ts';
 import type { SettingsObject } from '../settings.ts';
@@ -70,12 +72,21 @@ import type {
   StackView,
 } from '../../../contract/index.ts';
 import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/core-vault/contract';
+import { WITHHELD_WORDS_TEXT } from '../../../contract/index.ts';
 import { claudeFastSupport, harnessKey, scopeKey } from './foreign.ts';
 import { loginModelCatalog, type ModelCatalogSources } from '../models/catalog.ts';
 import { runtimeModels } from '../models/runtime.ts';
 import { runtimeDisabledView } from './disabled-view.ts';
 import { resolvedEntries } from './resolved-view.ts';
-import { shownWords, shownWordsEtag } from './command-line.ts';
+import {
+  commandWithheld,
+  commandWordsOf,
+  shownLine,
+  shownWordsEtag,
+  valueSaid,
+  valueWithheld,
+  writtenWithheld,
+} from './command-line.ts';
 
 const byName = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
@@ -246,7 +257,9 @@ const KIND_GROUPS: readonly { readonly kind: ComponentKind; readonly label: stri
 const envEntries = (env: Readonly<Record<string, string>> | undefined): EnvEntry[] =>
   Object.entries(env ?? {})
     .toSorted(([left], [right]) => byName(left, right))
-    .map(([name, value]) => (looksSecret(name, value) ? { name, hidden: true as const } : { name, value }));
+    .map(([name, value]) =>
+      looksSecret(name, value) || valueWithheld(name, value) ? { name, hidden: true as const } : { name, value },
+    );
 
 /**
  * A component's launch flags or MCP arguments as they may travel (rulings #39, #40): each word through the one
@@ -257,12 +270,18 @@ const envEntries = (env: Readonly<Record<string, string>> | undefined): EnvEntry
 function commandWords(
   words: unknown,
   first: unknown,
-): { readonly words: CommandWord[]; readonly etag: string } | undefined {
+):
+  | { readonly words: CommandWord[]; readonly etag: string; readonly withheld?: undefined }
+  | { readonly withheld: true }
+  | undefined {
   if (!Array.isArray(words)) return undefined;
-  const shown = shownWords(words as string[], typeof first === 'string' ? first : undefined);
+  // The word before the arguments is the last word of the command: `srv --token` then `v` is one pair (W reads the blanks).
+  const line = shownLine(words as string[], typeof first === 'string' ? commandWordsOf(first).at(-1) : undefined);
+  // THE NET: a word the write rule still refuses once the cutter has had its say withholds the WHOLE list, never a part.
+  if (line.withheld) return { withheld: true };
   return {
-    words: shown.map(word => (word.hidden ? { shown: word.text, hidden: true as const } : word.text)),
-    etag: shownWordsEtag(shown),
+    words: line.words.map(word => (word.hidden ? { shown: word.text, hidden: true as const } : word.text)),
+    etag: shownWordsEtag(line.words),
   };
 }
 
@@ -274,11 +293,18 @@ function componentDetail(kind: ComponentKind, component: Record<string, unknown>
       return { kind, file: typeof component.file === 'string' ? component.file : 'config/instructions' };
     case 'mcp': {
       const args = commandWords(component.args, component.command);
+      // THE NET, for the text shown as written: withheld whole, never a part of it.
+      const commandHeld = typeof component.command === 'string' && commandWithheld(component.command);
+      const urlHeld = typeof component.url === 'string' && writtenWithheld('url', component.url);
       return {
         kind,
-        ...text('command'),
-        ...(args === undefined ? {} : { args: args.words, argsEtag: args.etag }),
-        ...text('url'),
+        ...(commandHeld ? { commandWithheld: true as const } : text('command')),
+        ...(args === undefined
+          ? {}
+          : args.withheld
+            ? { argsWithheld: true as const }
+            : { args: args.words, argsEtag: args.etag }),
+        ...(urlHeld ? { urlWithheld: true as const } : text('url')),
         ...(component.auth === 'oauth' ? { auth: 'oauth' as const } : {}),
         env: envEntries(env),
       };
@@ -290,7 +316,11 @@ function componentDetail(kind: ComponentKind, component: Record<string, unknown>
       return {
         kind,
         ...text('file'),
-        ...(flags === undefined ? {} : { flags: flags.words, flagsEtag: flags.etag }),
+        ...(flags === undefined
+          ? {}
+          : flags.withheld
+            ? { flagsWithheld: true as const }
+            : { flags: flags.words, flagsEtag: flags.etag }),
         env: envEntries(env),
       };
     }
@@ -912,6 +942,62 @@ function redactText(
   return { text: cut, redacted: redacted || lines.redacted };
 }
 
+/** What stands in place of a line of an instructions or hooks text that the write rule still refuses after the cut. */
+export const WITHHELD_LINE = `${HIDDEN_TEXT}: this line is not shown because it looks like it holds a secret; it stays as written in the file`;
+
+/**
+ * The line net of a component's text: after {@link redactText}, each line (cut at `\n`, the unit the write rule reads)
+ * that the write rule's text test (`rawTextHoldsSecret`) still refuses is replaced by {@link WITHHELD_LINE}, so no
+ * line shown is one the write rule would refuse and every other line stays as the cut left it. A line is judged alone,
+ * as the write rule judges it, and also by its parts when a lone `\r` splits it. Linear: each line is read once.
+ */
+function netTextLines(text: string, mode: TextMode): { readonly text: string; readonly withheld: boolean } {
+  let withheld = false;
+  // A hooks file is a JSON document the write rule judges by its parsed values: the lines its refused paths stand on.
+  const document = mode === 'hooks' ? hooksDocumentRefusedLines(text) : undefined;
+  // An instructions text is also a VALUE (held in the component YAML): the write rule's flag test reads a string with
+  // blanks as words, and a flag may end one line while its value starts the next.
+  const flagged = (line: string): boolean => mode === 'instructions' && findFlagSecrets({ text: line }).length > 0;
+  let before = '';
+  const lines = text.split('\n').map((unit, index) => {
+    const carriage = unit.endsWith('\r') ? '\r' : '';
+    const line = carriage === '' ? unit : unit.slice(0, -1);
+    const last = lastWordOf(before);
+    before = line;
+    if (document === 'whole' || document?.has(index) === true) {
+      withheld = true;
+      return `${WITHHELD_LINE}${carriage}`;
+    }
+    // A lone `\r` is a line break to a reader, not to the write rule: the unit is refused whole, or by a part, and
+    // each part it holds a secret in (all of them, when the whole is refused) is replaced, so the breaks stay.
+    const whole = rawTextHoldsSecret(line) || flagged(line) || (last !== '' && flagged(`${last}\n${line}`));
+    const parts = line.split('\r');
+    if (!whole && (parts.length === 1 || !parts.some(part => rawTextHoldsSecret(part)))) return unit;
+    withheld = true;
+    return `${parts.map(part => (whole || rawTextHoldsSecret(part) ? WITHHELD_LINE : part)).join('\r')}${carriage}`;
+  });
+  return { text: lines.join('\n'), withheld };
+}
+
+/** What a text is read as: prose of an instructions file, a hooks JSON document, or any other text. */
+type TextMode = 'instructions' | 'hooks' | 'plain';
+
+/** The last blank-separated word of a line, `''` for a blank one (read from the end, once). */
+function lastWordOf(line: string): string {
+  let end = line.length;
+  while (end > 0 && line.charAt(end - 1).trim() === '') end -= 1;
+  let start = end;
+  while (start > 0 && line.charAt(start - 1).trim() !== '') start -= 1;
+  return line.slice(start, end);
+}
+
+/** A component's text as the views show it: cut by {@link redactText}, then netted line by line. */
+function shownComponentText(text: string, mode: TextMode): { readonly text: string; readonly redacted: boolean } {
+  const cut = redactText(text);
+  const netted = netTextLines(cut.text, mode);
+  return { text: netted.text, redacted: cut.redacted || netted.withheld };
+}
+
 const isTable = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) && Object.keys(value).length > 0;
 
@@ -940,7 +1026,7 @@ const settingsValueText = (value: unknown): string => (typeof value === 'string'
 function settingsEntries(settings: SettingsObject): SettingsEntry[] {
   return flattenSettings(settings).map(([key, value]) => {
     const text = settingsValueText(value);
-    return looksSecret(key, text) ? { key, hidden: true as const } : { key, value: text };
+    return looksSecret(key, text) || valueWithheld(key, value) ? { key, hidden: true as const } : { key, value: text };
   });
 }
 
@@ -951,7 +1037,8 @@ function componentContent(kind: ComponentKind, name: string, facts: CatalogFacts
   }
   const text =
     kind === 'instructions' ? facts.instructionBodies?.[name] : kind === 'hooks' ? facts.hooksTexts?.[name] : undefined;
-  return text === undefined ? undefined : { form: 'text', ...redactText(text) };
+  if (text === undefined) return undefined;
+  return { form: 'text', ...shownComponentText(text, kind === 'hooks' ? 'hooks' : 'instructions') };
 }
 
 /** A path under a person's home on macOS or Linux, as it appears in text (U15's clone uses the same). */
@@ -963,6 +1050,8 @@ const HOME_PATH = /\/(?:Users|home)\/[^\s"'`,;)}\]]+/gu;
  */
 function checkPathOf(kind: ComponentKind, name: string, component: Record<string, unknown>, facts: CatalogFacts) {
   const texts: string[] = [];
+  // The same text the detail shows: an instructions or a hooks file is netted as its kind, any other text as plain.
+  const mode: TextMode = kind === 'instructions' || kind === 'hooks' ? kind : 'plain';
   if (kind === 'instructions') texts.push(facts.instructionBodies?.[name] ?? '');
   if (kind === 'hooks') texts.push(facts.hooksTexts?.[name] ?? '');
   if (kind === 'settings') {
@@ -978,7 +1067,7 @@ function checkPathOf(kind: ComponentKind, name: string, component: Record<string
   }
   const home = facts.userHome;
   for (const text of texts) {
-    for (const match of redactText(text).text.matchAll(HOME_PATH)) {
+    for (const match of shownComponentText(text, mode).text.matchAll(HOME_PATH)) {
       const path = match[0];
       if (path !== home && !path.startsWith(`${home}/`)) return path;
     }
@@ -1013,7 +1102,14 @@ export function componentCatalog(model: AccountModel, facts: CatalogFacts): Comp
             partial: partial
               .filter(entry => entry.reference === reference)
               .map(entry => ({ harness: harnessKey(entry.harness), reason: describePartialSupport(entry) })),
-            warnings: missing ? [`Command not found: ${command as string}`] : [],
+            // The warning names the command, so it goes through the same net as the detail's `command`.
+            warnings: missing
+              ? [
+                  command !== undefined && commandWithheld(command)
+                    ? 'Command not found'
+                    : `Command not found: ${command as string}`,
+                ]
+              : [],
             usedBy: { profiles: usage.profiles, runtimes: usage.runtimes },
             editNote: editConsequence(usage) ?? 'Nothing uses it yet.',
             remove: act(
@@ -1074,7 +1170,10 @@ function conflictView(conflict: Conflict): LayerConflict {
     harness: harnessKey(conflict.harness),
     field: conflict.field,
     key: conflict.key,
-    sentence: describeConflict(conflict),
+    // A value the write rule refuses is not in the sentence (`valueSaid`), judged under the name the document holds it by.
+    sentence: describeConflict(conflict, (found, value) =>
+      valueSaid(found.path.findLast(part => typeof part === 'string') ?? found.key, value),
+    ),
     winner: layerName(conflict.winner.layer),
     overridden: conflict.overridden.map(setter => layerName(setter.layer)),
   };
@@ -1222,7 +1321,10 @@ const OVERRIDE_SENTENCE = (from: string): string => `From your ${from} · Overri
  * the key and the value both, for every caller.
  */
 function overriddenFlag(tokens: readonly string[]): { readonly key: string; readonly value: string } {
-  const shown = shownWords(tokens).map(word => word.text);
+  const line = shownLine(tokens);
+  // THE NET: a flag the write rule still refuses once the cutter has had its say is not shown, key and value both.
+  if (line.withheld) return { key: WITHHELD_WORDS_TEXT, value: WITHHELD_WORDS_TEXT };
+  const shown = line.words.map(word => word.text);
   return { key: shown[0] as string, value: shown.join(' ') };
 }
 
@@ -1256,7 +1358,7 @@ function fixedLayerView(
           entry.kind === 'setting'
             ? {
                 key: entry.key,
-                value: shown(entry.value),
+                value: valueSaid(entry.key, entry.value),
                 from: entry.layer.name,
                 sentence: OVERRIDE_SENTENCE(entry.layer.name),
               }

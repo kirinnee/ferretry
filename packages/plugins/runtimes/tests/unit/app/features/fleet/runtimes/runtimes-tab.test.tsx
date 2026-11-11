@@ -457,6 +457,32 @@ describe('a runtime’s own page', () => {
     expect(quiet.container.querySelector('[data-runtime-overridden]')).toBeNull();
     await quiet.unmount();
   });
+
+  it('two withheld overridden rows (same shown key) render with no duplicate-key warning', async () => {
+    const original = console.error;
+    const warnings: string[] = [];
+    console.error = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(' '));
+    };
+    try {
+      const withheld = {
+        key: '‹withheld›',
+        value: '‹withheld›',
+        from: 'Agent settings',
+        sentence: 'From your Agent settings · Overridden for agents by Ferretry',
+      };
+      const view = await pageWith({
+        name: 'claude-twin',
+        agent: true,
+        fixedLayer: { agentPermissions: 'auto', entries: [], overridden: [withheld, withheld] },
+      });
+      expect(view.container.querySelectorAll('[data-runtime-overridden] li')).toHaveLength(2);
+      await view.unmount();
+    } finally {
+      console.error = original;
+    }
+    expect(warnings.filter(line => line.includes('same key'))).toEqual([]);
+  });
 });
 
 describe('Launch', () => {

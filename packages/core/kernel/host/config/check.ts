@@ -8,16 +8,8 @@
  */
 import type { z } from 'zod';
 import type { AnyConfigDef as ConfigDef } from './claims.ts';
-import { HIDDEN_VALUE_TEXT } from './secret-words.ts';
-import {
-  findFlagSecrets,
-  findRawSecrets,
-  RAW_SECRET_KEY_MESSAGE,
-  RAW_SECRET_MESSAGE,
-  RAW_TEXT_SECRET_MESSAGE,
-  rawSecretFix,
-  rawTextSecretLine,
-} from './secrets.ts';
+import { findFlagSecrets, findRawSecrets, HIDDEN_VALUE_TEXT, rawTextSecretLine } from '@ferretry/std/credential-words';
+import { RAW_SECRET_KEY_MESSAGE, RAW_SECRET_MESSAGE, RAW_TEXT_SECRET_MESSAGE, rawSecretFix } from './secrets.ts';
 import {
   CONFIG_TOO_LARGE,
   configTextTooLarge,
