@@ -17,6 +17,19 @@ const matchedOf = (result: McpToolResult): boolean | undefined => {
 };
 
 /**
+ * `search_work.kind` as the public schema words it (v4's `task` | `agenda`) and as Conversation's tool reads it
+ * (`card` | `ask`, wire-search.ts). The public words stay; the translation is here, at the seam. Any other value is
+ * passed on untouched, so the tool's own refusal still names it.
+ */
+const WORK_KINDS: Readonly<Record<string, string>> = { task: 'card', agenda: 'ask' };
+
+function withWorkKind(args: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  const { kind } = args;
+  const translated = typeof kind === 'string' ? WORK_KINDS[kind] : undefined;
+  return translated === undefined ? args : { ...args, kind: translated };
+}
+
+/**
  * The tools server's one way to the daemon: `ctx.client.tool` over the kernel tool door (`POST /v1/agent/tools`).
  *
  * WAITS. The daemon holds one wait open for at most {@link AGENT_TOOL_MAX_WAIT_MS} (so no request outlives the
@@ -53,9 +66,14 @@ export function clientToolsPort(client: PluginClient): McpToolsPort {
   return {
     async call(name, args) {
       if (name === 'terminal_wait') return await sliced(name, args, result => matchedOf(result) === true);
-      // A `time` wait is a plain sleep: asked once. Any other page wait is over when it did not report "not yet".
-      if (name === 'browser_wait_for' && args.time === undefined)
-        return await sliced(name, args, result => matchedOf(result) !== false);
+      if (name === 'browser_wait_for') {
+        if (args.time === undefined) return await sliced(name, args, result => matchedOf(result) !== false);
+        // A `time` wait is a plain sleep: asked once, and WITHOUT the MCP budget — that budget (up to
+        // AGENT_TOOL_MAX_TOTAL_WAIT_MS) is a bound on slicing, and the wire call refuses one past its own cap.
+        const { timeoutMs: _budget, ...sleep } = args;
+        return await once(name, sleep);
+      }
+      if (name === 'search_work') return await once(name, withWorkKind(args));
       return await once(name, args);
     },
   };

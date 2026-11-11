@@ -60,6 +60,10 @@ export async function serveMcpOverStdio(
       const line = buffer.slice(0, newline);
       buffer = buffer.slice(newline + 1);
       if (discarding) discarding = false;
+      // The cap holds for a COMPLETE line too: one that arrives whole in a single chunk is as large as
+      // one that arrives in pieces, and is refused the same way, never dispatched.
+      else if (Buffer.byteLength(line, 'utf8') > maxLineBytes)
+        respond(parseError(`a message may be at most ${String(maxLineBytes)} bytes`));
       else dispatch(line);
     }
     if (Buffer.byteLength(buffer, 'utf8') > maxLineBytes) {

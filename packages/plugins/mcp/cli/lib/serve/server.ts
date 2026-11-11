@@ -145,12 +145,49 @@ function configText(result: McpToolResult): string {
 
 const PictureSchema = z.object({ mime: z.string(), base64: z.string() });
 
+/** One page of a browser listing, as the Browsers tool door puts it in `data.surfaces`. Loose: a later field is not refused. */
+const SurfaceRowsSchema = z.array(
+  z.looseObject({
+    id: z.string(),
+    name: z.string().optional(),
+    title: z.string(),
+    url: z.string().optional(),
+    openerId: z.string().optional(),
+    available: z.boolean().optional(),
+  }),
+);
+
+/**
+ * The listing rows of `browser_list` and `browser_tabs` as lines (v4's `renderToolResult`): the page's name, its title,
+ * its address, the page it is a popup of, and `[not yours]` for one this agent may not act on. The Browsers tool puts the
+ * rows in `data.surfaces` and only the sentence in `text`, so without this the model never sees them. Terminals renders
+ * its own rows into `text`, so it is left alone here.
+ */
+function surfaceLines(name: string, result: McpToolResult): readonly string[] {
+  if (!name.startsWith('browser_') || !isRecord(result.data)) return [];
+  const rows = SurfaceRowsSchema.safeParse(result.data.surfaces);
+  if (!rows.success) return [];
+  return rows.data.map(
+    surface =>
+      `  ${surface.name ?? surface.id}  ${surface.title}${surface.url === undefined ? '' : `  ${surface.url}`}${surface.openerId === undefined ? '' : `  (popup of ${surface.openerId})`}${surface.available === false ? '  [not yours]' : ''}`,
+  );
+}
+
+/** What a tool said, with the page rows (if any) placed straight after its first sentence. */
+function textOf(name: string, result: McpToolResult): string {
+  if (name.startsWith('config_')) return configText(result);
+  const rows = surfaceLines(name, result);
+  if (rows.length === 0) return result.text;
+  const [sentence = '', ...rest] = result.text.split('\n');
+  return [sentence, ...rows, ...rest].join('\n');
+}
+
 /** A tool's answer as MCP content: the words, then the picture when there is one; `isError` carried. */
 function content(name: string, result: McpToolResult) {
   const picture = isRecord(result.data) ? PictureSchema.safeParse(result.data.picture) : undefined;
   return {
     content: [
-      { type: 'text', text: name.startsWith('config_') ? configText(result) : result.text },
+      { type: 'text', text: textOf(name, result) },
       ...(picture?.success === true ? [{ type: 'image', data: picture.data.base64, mimeType: picture.data.mime }] : []),
     ],
     ...(result.isError === true ? { isError: true } : {}),
