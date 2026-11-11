@@ -142,3 +142,29 @@ describe('NO_SUB_FERRETS', () => {
     should(await NO_SUB_FERRETS.addressOf('any')).equal('any');
   });
 });
+
+describe('a directory that can say its lineage is unreadable', () => {
+  it('should refuse, saying the lineage cannot be read, rather than let an unplaced ferret through', async () => {
+    // Arrange
+    const unreadable: SubFerretDirectory = {
+      leadOf: async () => undefined,
+      addressOf: async sessionId => sessionId,
+      readable: async () => false,
+    };
+
+    // Act
+    const refusal = await subFerretRefusal(unreadable, 'stranger', 'raise agenda items');
+
+    // Assert
+    should(refusal).startWith("You can't raise agenda items just now");
+    should(refusal).containEql('cannot be read');
+  });
+
+  it('should refuse nothing when the lineage is readable and the caller is a lead', async () => {
+    // Arrange
+    const readable: SubFerretDirectory = { ...DIRECTORY, readable: async () => true };
+
+    // Assert
+    should(await subFerretRefusal(readable, 'stranger', 'x')).be.null();
+  });
+});

@@ -16,6 +16,12 @@ export interface SubFerretDirectory {
   leadOf(sessionId: string): Promise<string | undefined>;
   /** What `fy send` takes to reach a session: its callsign when it has one, else its id. */
   addressOf(sessionId: string): Promise<string>;
+  /**
+   * Whether this session's lineage could be read at all. Optional: absent, a lineage that cannot be read is taken as a
+   * lead (the board's rule). A directory that says `false` makes {@link subFerretRefusal} REFUSE, because an agenda
+   * raise from a ferret that cannot be placed must not land on the owner's agenda (docs/pack-mode.md).
+   */
+  readable?(sessionId: string): Promise<boolean>;
 }
 
 /** No session is a sub-ferret: every caller is a lead. The default for a service built without a directory. */
@@ -56,6 +62,8 @@ export const subFerretRefusal = async (
   may: string = SUB_FERRET_MAY_ON_BOARD,
   claim?: string,
 ): Promise<string | null> => {
+  if (directory.readable !== undefined && !(await directory.readable(sessionId).catch(() => false)))
+    return `You can't ${doing} just now: who started you cannot be read, so the daemon cannot tell whether you are a lead. Try again shortly, or ask the owner.`;
   const lead = await directory.leadOf(sessionId).catch(() => undefined);
   if (lead === undefined) return null;
   const address = await directory.addressOf(lead).catch(() => lead);
