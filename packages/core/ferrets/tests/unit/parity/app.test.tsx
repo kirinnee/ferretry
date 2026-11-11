@@ -372,3 +372,46 @@ describe('Info, the ⓘ on ferret.toolbar', () => {
     expect(root.querySelector('[data-info-panel]')).toBeNull();
   });
 });
+
+describe('the ferret list row menu', () => {
+  it('S-0074 the row menu opens for that ferret at the pointer, and as a sheet after a touch', async () => {
+    // ContextActionsMenu (v4's row menu) is the menu the built half's ferret list opens from a row: the screen
+    // provides it to every row, which opens it for its own ferret.
+    deviceControls().setDeviceControls({ sessionsMode: 'all' });
+    window.history.pushState(null, '', '/d/dm1/ferrets');
+    const Screen = must(
+      halfOver({ 'GET /v1/ferrets': [ferretSummary('f1', { name: 'hadi', title: 'Fix it', mode: 'auto' })] }).screens
+        ?.ferrets,
+      'the ferrets screen',
+    ) as FunctionComponent<ScreenProps>;
+    const root = await show(
+      <RouterProvider screens={SCREEN_REFS}>
+        <Screen params={{}} />
+      </RouterProvider>,
+    );
+    const row = must(root.querySelector<HTMLElement>('[data-sbar-session="f1"]'), 'the ferret row');
+    const fire = (target: EventTarget, type: string, fields: Record<string, unknown>): void => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(event, fields);
+      target.dispatchEvent(event);
+    };
+    const menu = (): HTMLElement | null => document.body.querySelector<HTMLElement>('[data-ferret-row-menu]');
+
+    await interact(() => fire(row, 'contextmenu', { clientX: 140, clientY: 210 }));
+    const atPointer = must(menu(), 'the menu at the pointer');
+    expect(atPointer.getAttribute('aria-label')).toBe('Hadi actions');
+    expect([atPointer.style.left, atPointer.style.top]).toEqual(['140px', '210px']);
+    expect(atPointer.className).not.toContain('fy-actions-menu--sheet');
+    expect(atPointer.querySelector('[data-ferret-action-item="open"]')).not.toBeNull();
+
+    await interact(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    await settle();
+    expect(menu()).toBeNull();
+
+    await interact(() => {
+      fire(document.body, 'pointerdown', { pointerType: 'touch' });
+      fire(row, 'contextmenu', { clientX: 5, clientY: 6 });
+    });
+    expect(must(menu(), 'the sheet').className).toContain('fy-actions-menu--sheet');
+  });
+});

@@ -7,9 +7,15 @@ import type { AppComponent, ScreenProps } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
 import '../features/list/ferret-list.css';
 import { FerretList } from '../features/list/ferret-list.tsx';
+import { FerretRowMenuProvider } from '../features/list/row-actions-host.tsx';
 import type { LiveFerretsClient } from '../lib/client.ts';
 
+/** The list draws inside the one row menu it shares: every row opens it through `RowMenuContext`. */
 export const createFerretListScreen = (client: LiveFerretsClient): AppComponent<ScreenProps> =>
   function FerretListScreen(): ReactNode {
-    return <FerretList client={client} />;
+    return (
+      <FerretRowMenuProvider client={client}>
+        <FerretList client={client} />
+      </FerretRowMenuProvider>
+    );
   };
