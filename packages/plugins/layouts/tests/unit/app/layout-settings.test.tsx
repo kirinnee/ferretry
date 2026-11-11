@@ -129,7 +129,7 @@ describe('the Layout tab', () => {
     const view = await mount(<LayoutSettings client={script.client} />);
     await settle();
     const box = must(view.container.querySelector<HTMLInputElement>('input[aria-labelledby]'), 'a list box');
-    expect(box.value).toBe('agenda, board, insights, settings');
+    expect(box.value).toBe('ferrets, agenda, board, insights, settings');
     const save = press(view.container, 'Save');
     expect(save.disabled).toBe(true);
     await type(box, 'agenda, board');

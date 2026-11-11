@@ -1,10 +1,10 @@
 # A denser layout: `fy layout use compact` (design §5.3).
 id: compact
-nav: { side: left, style: rail, items: [agenda, board, insights, settings] }
+nav: { side: left, style: rail, items: [ferrets, agenda, board, insights, settings] }
 side: { show: never, holds: panels }
 top: [daemon-picker, search]
 composer.tools: [attachments, dictation, runtime-picker, composer-quota]
 panels:
   ferret.side: [queue]
 density: compact
-phone: { nav: { side: bottom, items: [agenda, board] } }
+phone: { nav: { side: bottom, items: [ferrets, agenda, board] } }

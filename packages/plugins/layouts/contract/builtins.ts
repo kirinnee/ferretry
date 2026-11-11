@@ -8,25 +8,25 @@ import { LayoutSchema, ThemeSchema } from './wire.ts';
 /** The built-in default (design §5.3). With Layouts off, the app shell uses its own copy of the same layout. */
 export const DEFAULT_LAYOUT = LayoutSchema.parse({
   id: 'default',
-  nav: { side: 'left', style: 'list', items: ['agenda', 'board', 'insights', 'settings'] },
-  side: { show: 'wide-only', holds: 'panels' },
+  nav: { side: 'left', style: 'list', items: ['ferrets', 'agenda', 'board', 'insights', 'settings'] },
+  side: { show: 'wide-only', holds: 'ferrets' },
   top: ['daemon-picker', 'search'],
   'composer.tools': ['attachments', 'dictation', 'runtime-picker', 'composer-quota'],
   panels: { 'ferret.side': ['ferret-agenda', 'cards-of-ferret', 'files', 'ferret-warden', 'queue', 'insights'] },
   density: 'comfortable',
-  phone: { nav: { side: 'bottom', items: ['agenda', 'board'] } },
+  phone: { nav: { side: 'bottom', items: ['ferrets', 'agenda', 'board'] } },
 });
 
 /** A denser layout: `fy layout use compact`. */
 export const COMPACT_LAYOUT = LayoutSchema.parse({
   id: 'compact',
-  nav: { side: 'left', style: 'rail', items: ['agenda', 'board', 'insights', 'settings'] },
+  nav: { side: 'left', style: 'rail', items: ['ferrets', 'agenda', 'board', 'insights', 'settings'] },
   side: { show: 'never', holds: 'panels' },
   top: ['daemon-picker', 'search'],
   'composer.tools': ['attachments', 'dictation', 'runtime-picker', 'composer-quota'],
   panels: { 'ferret.side': ['queue'] },
   density: 'compact',
-  phone: { nav: { side: 'bottom', items: ['agenda', 'board'] } },
+  phone: { nav: { side: 'bottom', items: ['ferrets', 'agenda', 'board'] } },
 });
 
 /** The built-in theme: the house family with no token laid over it. */
