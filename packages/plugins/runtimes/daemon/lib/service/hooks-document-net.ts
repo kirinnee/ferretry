@@ -143,8 +143,9 @@ export function hooksDocumentRefusedLines(text: string): RefusedHooksLines | und
   if (targets === undefined) return undefined;
   try {
     return linesOf(text, targets);
-  } catch (error) {
-    if (error instanceof TooDeep) return 'whole';
-    throw error;
+  } catch {
+    // `TooDeep` is the only thing `linesOf` throws: the text parsed as JSON above, so the scan's own reads (a key
+    // string, a bracket) cannot fail, and the depth is capped so the stack cannot overflow. Any failure withholds whole.
+    return 'whole';
   }
 }
