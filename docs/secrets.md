@@ -334,6 +334,42 @@ There is one narrow exception, for a ferret's launch environment only. A variabl
 lands while a ferret is starting does not stop that ferret. It names nothing a plain reference could not.
 Anywhere else, or inside a longer value, it is plain text.
 
+### A login's variables and a repository's own Claude settings
+
+A Claude runtime on an environment login pins that login's **non-secret** variables (`ANTHROPIC_BASE_URL`,
+the catalog's `ANTHROPIC_DEFAULT_*_MODEL`, a literal `ANTHROPIC_AUTH_TOKEN`) under `env` in its
+`--settings` file (`<home>/.fy/fixed.json`). Claude Code lets that file beat a repository's
+`.claude/settings.local.json`, which the process environment does not, so a repo that blanks a provider
+variable can no longer start the runtime signed out **when a person runs the runtime's bin wrapper**. A
+ferret the daemon starts does not launch through that wrapper: it goes through the claude-code harness, which
+reads neither the login's environment nor this file today, so this pin does not cover it. That is a separate
+fix (tracked in `ports-pending.json`).
+
+Only a value that is a plain literal is pinned, and only when the runtime's process environment ends with the
+same value: a key the profile's settings (including the `env` block of a settings file or document, which lands in
+the runtime's `settings.json`, and which `--settings` would otherwise beat), an MCP server's forwarded
+variable or Ferretry itself sets later keeps its precedence. An `env` a person wrote into that home's
+`settings.json` by hand is not seen, and a pin of the same key still beats it. `FY_*` names are never pinned. An indirect `$NAME` / `${NAME}` is not pinned either
+(`--settings` env is not shell-expanded; the wrapper resolves it at exec).
+
+**A value that names `${secret:…}` (or the optional `${secret?:…}`) never goes into that file, any settings file, or a command line.** It stays
+process environment, which the wrapper resolves from the store when it execs. Why a command line counts: if a launch copies `fixed.json` **inline** into
+`--settings '<json>'` (v4's fast mode and compaction point did; 5.0 has no such reader, and the rule is kept
+as a precaution), that argv shows in `ps` and in the session's saved command. The rule is enforced
+twice in code: only values with no reference are pinned, and an overlay whose text contains one is refused when
+the fleet is planned, never quietly trimmed. A **literal** credential written in a login's YAML (an internal
+gateway's `ANTHROPIC_AUTH_TOKEN`) is pinned: it is already plain text in the configuration, and so it would show
+in `ps` if a launch ever copied the file inline. A real key belongs in the secret store.
+
+What pinning cannot cover is a secret-backed variable that a repository itself sets under `env`, and an
+interactive Claude runtime whose profile already passes its own `--settings` (Claude Code honours only one,
+so that runtime is applied unpinned, with no refusal and no notice).
+
+- **GAP (B190, `b190-api-key-helper`):** nothing refuses or prevents a repository from doing it, so such a
+  runtime starts signed out. Both a refuse-at-start check and an `apiKeyHelper` fallback in `fixed.json` that
+  prints a Ferretry-owned process variable go after the merge; the helper waits for a contract test against the
+  installed Claude Code.
+
 `config/daemon.json` may carry a `secretEnvironment` block of reusable recipes:
 
 ```json
