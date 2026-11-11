@@ -356,7 +356,7 @@ describe('materialiseFleet', () => {
     should(wrapper).containEql("export FY_CREDENTIAL='claude-you'");
     should(wrapper).containEql("export FY_RUNTIME='claude-default'");
     should(wrapper).containEql("export FY_HOME='/fy'");
-    should(wrapper).containEql('${GITHUB_TOKEN:?ferretry: GITHUB_TOKEN is not set');
+    should(wrapper).containEql('[ -z "${GITHUB_TOKEN:-}" ]').and.containEql('ferretry: GITHUB_TOKEN is not set');
     should(wrapper).not.match(/export HOME=/);
     should(wrapper).containEql("'/opt/ferretry/bin/fy' history claim --harness claude --pid $$ --from-arguments");
     // A runtime that is not an agent behaves like the person's own CLI: no mode, no seeding.
@@ -402,7 +402,9 @@ describe('materialiseFleet', () => {
     // Assert
     const wrapper = wrapperOf(result, 'claude-default');
     should(wrapper).containEql('if [ -r "$HOME/.secrets" ]; then');
-    should(wrapper).containEql('${ANTHROPIC_API_KEY:?ferretry: ANTHROPIC_API_KEY is not set');
+    should(wrapper)
+      .containEql('[ -z "${ANTHROPIC_API_KEY:-}" ]')
+      .and.containEql('ferretry: ANTHROPIC_API_KEY is not set');
     should(wrapper).not.containEql('CLAUDE_SECURESTORAGE_CONFIG_DIR');
     should(result.manifest.accounts[0]?.secretEnv).eql({
       ANTHROPIC_API_KEY: '${secret:WORK_KEY}',
@@ -950,12 +952,16 @@ describe('materialiseFleet', () => {
 
       // Assert — each runtime's wrapper and home carry only its own half
       const claudeWrapper = wrapperOf(result, 'claude-default');
-      should(claudeWrapper).containEql('${ANTHROPIC_AUTH_TOKEN:?ferretry: ANTHROPIC_AUTH_TOKEN is not set');
+      should(claudeWrapper)
+        .containEql('[ -z "${ANTHROPIC_AUTH_TOKEN:-}" ]')
+        .and.containEql('ferretry: ANTHROPIC_AUTH_TOKEN is not set');
       should(claudeWrapper).not.containEql('OPENROUTER_API_KEY');
       should(claudeWrapper).endWith(`exec claude '--model' 'claude-opus-5-5' "$@"\n`);
 
       const codexWrapper = wrapperOf(result, 'codex-default');
-      should(codexWrapper).containEql('${OPENROUTER_API_KEY:?ferretry: OPENROUTER_API_KEY is not set');
+      should(codexWrapper)
+        .containEql('[ -z "${OPENROUTER_API_KEY:-}" ]')
+        .and.containEql('ferretry: OPENROUTER_API_KEY is not set');
       should(codexWrapper).not.containEql('ANTHROPIC_AUTH_TOKEN');
       should(codexWrapper).containEql('model_provider="openrouter"');
 
