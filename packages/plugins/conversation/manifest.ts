@@ -47,7 +47,7 @@ import {
   TURN_INTERRUPTED_AUDIT,
   TurnEnded,
 } from './contract/index.ts';
-import { AskAnswered, AsksPort, AskSources } from '@ferretry/core-asks/contract';
+import { ASK_DELIVERY_KEY, AskAnswered, AskDeliveries, AsksPort, AskSources } from '@ferretry/core-asks/contract';
 import {
   ACTIONS_ROW_SLOT,
   FerretChanged,
@@ -356,6 +356,9 @@ export default definePlugin({
       // The files a start was given (`fy start -f`): this plugin owns attachments, so it is THE one provider that plans
       // them (a security-path provide hook naming only `conversation` as its taker).
       { hook: OpeningAttachments, key: OPENING_ATTACHMENTS_KEY },
+      // How an owner's agenda answer reaches a ferret: typed through this plugin's own send path (queue + ledger). The
+      // one provider of this security-path hook (`takers: ['conversation']`).
+      { hook: AskDeliveries, key: ASK_DELIVERY_KEY },
     ],
     offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
   },

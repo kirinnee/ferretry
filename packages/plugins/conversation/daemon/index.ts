@@ -1,4 +1,5 @@
 import { ApiError, type RouteHandler, type SocketAccept } from '@ferretry/kernel/contract';
+import { askDeliveryOf } from './delivery/adapters/ask-delivery.ts';
 import { implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
 import {
   type ConversationApi,
@@ -142,6 +143,7 @@ export const conversationDaemon = (gate: HarnessGate) =>
           // The files a start was given (`fy start -f`): decoded, bounded and worded here, written and appended by Ferrets.
           // The one provider of this security-path hook (`takers: ['conversation']`), under its one key.
           'opening.attachments:opening': openingAttachmentsSource(),
+          'ask.delivery:ferret': askDeliveryOf(api),
           'sitrep.lines': () => [{ id: 'conversation', item: a.sitrep }],
           // A stop is being attempted: the unlocked attachments are zeroed before it can fail.
           'ferret.stopping': followFerretStopping({ release: ferret => b.release(ferret) }),

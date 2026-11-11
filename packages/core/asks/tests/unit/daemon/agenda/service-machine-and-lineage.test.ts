@@ -373,3 +373,50 @@ describe('an ask about a card that the asker’s own agenda already carries', ()
     );
   });
 });
+
+describe('a lineage that is readable once and unreadable on the next read', () => {
+  it('should refuse the child’s add and create no item, rather than treat the second failure as a lead', async () => {
+    // Arrange: the first lookup returns the parent; every later one rejects.
+    const repository = new MemoryRepository();
+    let reads = 0;
+    const flaky: SubFerretDirectory = {
+      leadOf: async sessionId => {
+        reads += 1;
+        if (reads > 1) throw new Error('ferrets went away');
+        return sessionId === 'child' ? 'lead' : undefined;
+      },
+      addressOf: async sessionId => sessionId,
+      // As the real adapter's probe did: one lookup, its answer discarded.
+      readable: async sessionId => (await flaky.leadOf(sessionId), true),
+    };
+    const service = new AgendaService(
+      repository,
+      { now: () => NOW },
+      { has: async sessionId => SESSIONS.has(sessionId) },
+      { raised: async () => undefined },
+      undefined,
+      undefined,
+      flaky,
+    );
+
+    // Act
+    const mutation = await service.raise(
+      'child',
+      {
+        source: 'agent-raised',
+        sourceRef: null,
+        subject: 'Approve the release?',
+        why: 'It waits.',
+        howToResolve: 'Approve.',
+        premise: 'A decision is waiting.',
+        context: 'It changes the public service.',
+        ask: { kind: 'permission' },
+      },
+      CHILD,
+    );
+
+    // Assert
+    should(mutation).containDeep({ ok: false, error: { code: 'forbidden' } });
+    should(repository.ledgers.size).equal(0);
+  });
+});

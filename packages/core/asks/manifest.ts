@@ -2,6 +2,7 @@ import { GatePort } from '@ferretry/core-gate/contract';
 import { defineState, type ConfigDef } from '@ferretry/kernel/contract';
 import { definePlugin, route } from '@ferretry/kernel/manifest';
 import {
+  AgendaContext,
   AskAnswered,
   AskDeliveries,
   AsksConfigFile,
@@ -104,7 +105,7 @@ export default definePlugin({
     state: [...ASKS_STATE, AskVersionsFiles],
     publishes: [AskAnswered, AsksChanged],
   },
-  hooks: { offers: [{ hook: AskSources }, { hook: AskDeliveries }] },
+  hooks: { offers: [{ hook: AskSources }, { hook: AskDeliveries }, { hook: AgendaContext }] },
   actions: {
     routes: [
       route('GET /v1/ferrets/:ferretId/agenda/:id', read),
