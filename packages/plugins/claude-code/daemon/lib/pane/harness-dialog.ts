@@ -88,32 +88,52 @@ function rowOf(line: string): Row | undefined {
   };
 }
 
+/** The list `dialogRows` found: its rows, where it starts, and whether a row or digit anchored it. */
+interface FoundRows {
+  rows: DialogRow[];
+  top: number;
+  anchored: boolean;
+}
+
 /**
- * The rows above the footer: found from the cursor row outwards (from the lowest numbered row when no cursor is drawn),
- * every row starting its label at the anchor row's column. Blank lines may separate rows (Codex's sign-in screen) but not end the list.
+ * The rows above the footer, anchored in this order, the first anchor that yields a list winning:
+ *
+ *   1. the lowest row that draws a cursor;
+ *   2. no cursor drawn (a redraw in flight): the lowest NUMBERED row, so the dialog is recognised with an unread cursor
+ *      rather than taken for gone — which also holds when an old `❯` line (the prompt echo above a dialog) is the only
+ *      cursor left in reach, and cannot anchor a list;
+ *   3. no digits either (Claude 2.1.281 draws some lists so): the lowest non-blank line above the footer. Nothing marks a
+ *      row there, so the caller must name the dialog from its title before trusting this (`anchored` is false).
+ *
+ * Every row starts its label at the anchor row's column. No anchor ever selects a row. Blank lines may separate rows
+ * (Codex's sign-in screen) but not end the list.
  */
-function dialogRows(
+function dialogRows(lines: readonly string[], from: number, footer: number): FoundRows | undefined {
+  const lowest = (wanted: (line: string) => boolean): number => {
+    for (let index = footer - 1; index >= from; index -= 1) if (wanted(lines[index] as string)) return index;
+    return -1;
+  };
+  const cursorAt = lowest(line => rowOf(line)?.cursor === true);
+  const digitAt = lowest(line => rowOf(line)?.digit === true);
+  const lastAt = lowest(line => !blank(line));
+  const candidates = [
+    { at: cursorAt, anchored: true },
+    { at: digitAt, anchored: true },
+    { at: lastAt, anchored: false },
+  ];
+  for (const { at, anchored } of candidates) {
+    const found = at < 0 ? undefined : rowsAround(lines, from, footer, at);
+    if (found !== undefined) return { ...found, anchored };
+  }
+  return undefined;
+}
+
+function rowsAround(
   lines: readonly string[],
   from: number,
   footer: number,
+  cursorAt: number,
 ): { rows: DialogRow[]; top: number } | undefined {
-  let cursorAt = -1;
-  for (let index = footer - 1; index >= from; index -= 1) {
-    if (rowOf(lines[index] as string)?.cursor === true) {
-      cursorAt = index;
-      break;
-    }
-  }
-  // No cursor drawn at all (a redraw in flight): the list is still found, from its lowest NUMBERED row, so the dialog is
-  // recognised with an unread cursor rather than taken for gone. A list with no digits has nothing else to anchor on.
-  if (cursorAt < 0)
-    for (let index = footer - 1; index >= from; index -= 1) {
-      if (rowOf(lines[index] as string)?.digit === true) {
-        cursorAt = index;
-        break;
-      }
-    }
-  if (cursorAt < 0) return undefined;
   const anchor = rowOf(lines[cursorAt] as string) as Row;
   const numbered = anchor.digit;
   const kindOf = (line: string): 'row' | 'detail' | 'blank' | 'other' => {
@@ -316,6 +336,9 @@ export function readHarnessDialogFrame(pane: string): HarnessDialogFrame | undef
     ({ at }) => at >= 0,
   );
   const usageLimit = known === undefined && isUsageLimitDialog(found.rows);
+  // A list with no cursor and no digits has nothing in it to anchor on, so it is a dialog only when it is a NAMED one
+  // with at least two rows: a markerless frame that merely ends in a key-hint line is not a dialog to answer.
+  if (!found.anchored && ((known === undefined && !usageLimit) || found.rows.length < 2)) return undefined;
   const kind = usageLimit ? 'usage-limit' : (known?.kind ?? 'other');
   const titleAt = known?.at ?? 0;
   const notice = usageLimit ? limitNotice(lines, found.top) : undefined;

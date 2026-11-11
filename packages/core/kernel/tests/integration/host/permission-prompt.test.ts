@@ -91,6 +91,11 @@ interface Row {
   /** The dialog screen, and the id Ferrets records for it (the one a card answers with). */
   readonly dialog: string;
   readonly dialogId: string;
+  /**
+   * A SHIPPED dialog drawn WITHOUT digits, and the id Ferrets records for it, where this harness has one. Only Claude 2.1.281
+   * draws such lists (Codex's shipped dialogs are all numbered), so only that row carries one.
+   */
+  readonly unnumbered?: { readonly frame: string; readonly dialogId: string };
   /** The wrapper the harness's own half locates (`which`). */
   readonly program: string;
 }
@@ -116,6 +121,7 @@ const ROWS: readonly Row[] = [
     },
     dialog: fixture('harness-dialogs', 'claude-2.1.220-settings-error'),
     dialogId: 'd22104f390283939',
+    unnumbered: { frame: fixture('harness-dialogs', 'claude-2.1.281-mcp-servers'), dialogId: '1059ab450a27f463' },
     program: 'claude',
   },
   {
@@ -561,6 +567,85 @@ describe.each(ROWS)('what a $harness ferret is stopped on, through the real halv
     expect(chosen.body).toContain('could not be read safely');
     expect({ committed, keys: keysOf(runner) }).toEqual({ committed: undefined, keys: [number === 1 ? 'Up' : 'Down'] });
   });
+
+  // The same owner sentence for a supported UNNUMBERED list (no digit to anchor the markerless read on): recognised by its title,
+  // labels and footer, never by a guessed row.
+  const unnumbered = row.unnumbered;
+  if (unnumbered !== undefined) {
+    const unmarked = unnumbered.frame.replace(/^(\s*)❯\s/mu, '$1  ');
+    const expectUnsafe = (chosen: { status: number; body: string; json<T>(): T }): void => {
+      expect([chosen.status, chosen.json<{ code: string }>().code]).toEqual([409, 'dialog_cursor_unknown']);
+      expect(chosen.body).toContain('could not be read safely');
+      expect(chosen.body).toContain('nothing was sent');
+      expect(chosen.body).toContain('answer it at the terminal');
+      expect(chosen.body).not.toContain('is gone');
+    };
+
+    test('an unnumbered dialog with no cursor is refused dialog_cursor_unknown with the owner sentence, pressing nothing', async () => {
+      const { host, runner, id, show } = await boot(row);
+      expect(unmarked).not.toEqual(unnumbered.frame);
+      show(unmarked);
+
+      const chosen = await answer(host, `/v1/ferrets/${id}/dialog`, {
+        kind: 'choice',
+        dialogId: unnumbered.dialogId,
+        number: 1,
+      });
+      const escaped = await answer(host, `/v1/ferrets/${id}/dialog`, { kind: 'escape', dialogId: unnumbered.dialogId });
+
+      expectUnsafe(chosen);
+      expect([escaped.status, escaped.json<{ code: string }>().code]).toEqual([409, 'dialog_cursor_unknown']);
+      expect({ keys: keysOf(runner), pastes: runner.formPastes }).toEqual({ keys: [], pastes: [] });
+    });
+
+    test('an unnumbered dialog whose cursor vanishes after the arrows is refused dialog_cursor_unknown: no Enter, owner told', async () => {
+      const { host, runner, id, show } = await boot(row);
+      show(unnumbered.frame);
+      let committed = false;
+      runner.onFormWrite = ({ key }) => {
+        if (key === 'Up') show(unmarked);
+        if (key === 'Enter') {
+          committed = true;
+          show(IDLE);
+        }
+      };
+
+      const chosen = await answer(host, `/v1/ferrets/${id}/dialog`, {
+        kind: 'choice',
+        dialogId: unnumbered.dialogId,
+        number: 1,
+      });
+
+      expectUnsafe(chosen);
+      expect({ committed, keys: keysOf(runner), pastes: runner.formPastes }).toEqual({
+        committed: false,
+        keys: ['Up', 'Up'],
+        pastes: [],
+      });
+    });
+
+    test('an unnumbered dialog that really changed or went keeps the gone answer', async () => {
+      const { host, runner, id, show } = await boot(row);
+      show(row.dialog);
+      const changed = await answer(host, `/v1/ferrets/${id}/dialog`, {
+        kind: 'choice',
+        dialogId: unnumbered.dialogId,
+        number: 1,
+      });
+      show(IDLE);
+      const gone = await answer(host, `/v1/ferrets/${id}/dialog`, {
+        kind: 'choice',
+        dialogId: unnumbered.dialogId,
+        number: 1,
+      });
+
+      expect([changed.json<{ code: string }>().code, gone.json<{ code: string }>().code]).toEqual([
+        'harness_dialog_gone',
+        'harness_dialog_gone',
+      ]);
+      expect(runner.formKeys).toEqual([]);
+    });
+  }
 
   test('a dialog that is really gone keeps the gone answer, not the unsafe-read one', async () => {
     const { host, runner, id, show } = await boot(row);

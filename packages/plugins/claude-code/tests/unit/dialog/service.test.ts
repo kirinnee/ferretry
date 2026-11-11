@@ -539,3 +539,56 @@ describe('DialogAnswerService — an unknown cursor is never confirmed', () => {
     should(pane.writes).eql([UP, UP]);
   });
 });
+
+describe('DialogAnswerService — an unnumbered list with no cursor is still the dialog, never a guessed row', () => {
+  const original = fixture('claude-2.1.281-mcp-servers');
+  const bare = original.replace(/^(\s*)❯\s/mu, '$1  ');
+
+  it('refuses a missing cursor as cursor_unknown with the safe-read sentence, typing nothing', async () => {
+    should(bare).not.equal(original);
+    const pane = new ScriptedPane([bare]);
+    const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const error = await refusalOf(service.answer('s1', choice(original, 1)));
+    const escaped = await refusalOf(
+      new DialogAnswerService(new ScriptedPane([bare]), recordingSleep().sleep, TIMING).answer(
+        's1',
+        pressEsc(original),
+      ),
+    );
+
+    should(error.refusal).equal('cursor_unknown');
+    should(error.message).containEql('could not be read safely');
+    should(error.message).containEql('answer it at the terminal');
+    should(escaped.refusal).equal('cursor_unknown');
+    should(pane.writes).eql([]);
+  });
+
+  it('never presses Enter when the cursor is lost after the arrows: cursor_unknown', async () => {
+    const pane = new ScriptedPane([original, bare]);
+    const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const error = await refusalOf(service.answer('s1', choice(original, 1)));
+
+    should(error.refusal).equal('cursor_unknown');
+    should(error.message).containEql('could not be read safely');
+    should(pane.writes).eql([UP, UP]);
+  });
+
+  it('keeps the gone answer when the frame is another dialog or no dialog', async () => {
+    const other = await refusalOf(
+      new DialogAnswerService(new ScriptedPane([REVIEW]), recordingSleep().sleep, TIMING).answer(
+        's1',
+        choice(original, 1),
+      ),
+    );
+    const idle = await refusalOf(
+      new DialogAnswerService(new ScriptedPane([IDLE]), recordingSleep().sleep, TIMING).answer(
+        's1',
+        choice(original, 1),
+      ),
+    );
+
+    should([other.refusal, idle.refusal]).eql(['gone', 'gone']);
+  });
+});
