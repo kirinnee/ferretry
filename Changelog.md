@@ -1,3 +1,10 @@
+## [4.291.6](https://github.com/kirinnee/ferretry/compare/v4.291.5...v4.291.6) (2026-11-11)
+
+### Fixes
+
+* **daemon:** index the board once per GitHub watch tick ([#1582](https://github.com/kirinnee/ferretry/issues/1582)) ([58cd647](https://github.com/kirinnee/ferretry/commit/58cd647ae654b487e06dd7bba5113c4cfcfb46c8))
+* **daemon:** stop a compaction from stranding sends and pinning the turn at working ([#1583](https://github.com/kirinnee/ferretry/issues/1583)) ([40fa77d](https://github.com/kirinnee/ferretry/commit/40fa77d712b430fe1e0d319f197b586c2e225709))
+
 ## [4.291.5](https://github.com/kirinnee/ferretry/compare/v4.291.4...v4.291.5) (2026-11-06)
 
 ### Performance

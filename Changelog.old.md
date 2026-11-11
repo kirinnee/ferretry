@@ -1,3 +1,9 @@
+## [4.291.5](https://github.com/kirinnee/ferretry/compare/v4.291.4...v4.291.5) (2026-11-06)
+
+### Performance
+
+* **daemon,pwa:** page the session queue read and stop polling it every tick ([#1572](https://github.com/kirinnee/ferretry/issues/1572)) ([c78e04f](https://github.com/kirinnee/ferretry/commit/c78e04f6c5548d30b057909274d87db693f9118b))
+
 ## [4.291.4](https://github.com/kirinnee/ferretry/compare/v4.291.3...v4.291.4) (2026-11-06)
 
 ### Fixes
