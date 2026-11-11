@@ -135,6 +135,7 @@ export function fakeFerrets(known: readonly FerretSummary[] = [ferretSummary()])
       return ferret === undefined ? undefined : { folder: ferret.folder };
     },
     agentControl: async id => (known.some(ferret => ferret.id === id) ? DEFAULT_AGENT_CONTROL : NO_AGENT_CONTROL),
+    turnUsage: async () => undefined,
     sitrep: async () => undefined,
     summary: async () => undefined,
   };

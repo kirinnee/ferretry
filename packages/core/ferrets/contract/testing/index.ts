@@ -21,6 +21,8 @@ import {
   type RunnerDeliveryFailure,
   type Delivery,
   type Harness,
+  type TurnUsage,
+  type UsageReader,
   type LaunchSpec,
   type LoginKind,
   type OutboundMessage,
@@ -433,7 +435,7 @@ export class FakeHarness implements Harness {
     follow: async function* () {},
     find: async () => undefined,
   };
-  readonly usage = { turns: async () => [] };
+  readonly usage: UsageReader = { turns: async () => [] };
   readonly conversations = { list: async () => [] };
 }
 
@@ -714,6 +716,21 @@ export class FakeFerrets implements FerretsApi {
   async agentControl(ferret: FerretId): Promise<AgentControl> {
     if (!this.#ferrets.has(ferret)) return NO_AGENT_CONTROL;
     return { ...DEFAULT_AGENT_CONTROL, ...this.#controls.get(ferret) };
+  }
+  readonly #turns = new Map<FerretId, readonly TurnUsage[]>();
+  /** TEST ONLY: the turns one ferret's harness reports; a ferret with none planted reads as spending nothing. */
+  setTurnUsage(ferret: FerretId, turns: readonly TurnUsage[]): void {
+    this.#turns.set(ferret, turns);
+  }
+  /** TEST ONLY: this ferret's harness cannot be asked (off, or the reader threw): `turnUsage` answers undefined. */
+  forgetTurnUsage(ferret: FerretId): void {
+    this.#unreadable.add(ferret);
+  }
+  readonly #unreadable = new Set<FerretId>();
+  async turnUsage(ferret: FerretId, since?: Instant): Promise<readonly TurnUsage[] | undefined> {
+    if (!this.#ferrets.has(ferret) || this.#unreadable.has(ferret)) return undefined;
+    const turns = this.#turns.get(ferret) ?? [];
+    return since === undefined ? turns : turns.filter(turn => turn.at >= since);
   }
 }
 

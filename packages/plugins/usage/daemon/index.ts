@@ -1,8 +1,8 @@
-import type { FerretSummary } from '@ferretry/core-ferrets/contract';
+import type { FerretId, FerretSummary } from '@ferretry/core-ferrets/contract';
 import { type ApiResponse, errorResponse, jsonResponse, textResponse } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import type { LoginId } from '@ferretry/plugin-logins/contract';
-import { instantFromEpochMs, milliseconds } from '@ferretry/std';
+import { type Instant, instantFromEpochMs, milliseconds } from '@ferretry/std';
 import { platform } from 'node:os';
 import manifest from '../manifest.ts';
 import {
@@ -87,10 +87,12 @@ export default implementDaemon(manifest, {
     const nowMs = (): number => kernel.clock.nowMs();
 
     // ── what a ferret's harness says it spent ────────────────────────────────────────────────────────────────────────
-    // Ferrets offers no accessor for a harness's usage reader to another plugin yet (a declared GAP in the port's
-    // report), so no ferret can be asked: every amount reads PARTIAL and every insight row reads "unknown". An
-    // unreadable ferret is never counted as a free one.
-    const turnUsage: TurnUsageSource = { turns: async () => undefined };
+    // Ferrets owns which harness a ferret runs and reads that harness's usage (token counts only, never transcript text).
+    // `undefined` is PARTIAL (an unknown ferret, a harness that is off, a reader that threw): an unreadable ferret is
+    // never counted as a free one.
+    const turnUsage: TurnUsageSource = {
+      turns: async (ferret, since) => await needs.ferrets.turnUsage(ferret as FerretId, since as Instant | undefined),
+    };
 
     // ── pricing: the owner's rate catalog, plus list prices once Logins publishes them whole ──────────────────────────────
     const pricingConfiguration = new StatePricingConfiguration(kernel.state);

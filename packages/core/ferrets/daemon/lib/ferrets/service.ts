@@ -50,6 +50,7 @@ import type {
   RunnerHandle,
   Sitrep,
   SitrepLine,
+  TurnUsage,
   SitrepLineSource,
   StartDecideInput,
   StartFailure,
@@ -1170,6 +1171,22 @@ export class FerretsService implements FerretsApi {
     await this.ports.ready?.();
     if (this.registry.get(ferret) === undefined) return NO_AGENT_CONTROL;
     return effectiveAgentControl(this.ports.limits?.());
+  }
+
+  /**
+   * What a ferret spent, read through the harness its record names. `undefined` (PARTIAL, never zero) for a ferret this
+   * daemon does not know, a harness that is off, and a reader that throws: its error text can carry a path or a line of
+   * the transcript, so none is passed on.
+   */
+  async turnUsage(ferret: FerretId, since?: Instant): Promise<readonly TurnUsage[] | undefined> {
+    await this.ports.ready?.();
+    const record = this.registry.get(ferret);
+    if (record === undefined) return undefined;
+    try {
+      return await this.ports.harness(record.harness)?.usage.turns(ferret, since);
+    } catch {
+      return undefined;
+    }
   }
 
   /**
