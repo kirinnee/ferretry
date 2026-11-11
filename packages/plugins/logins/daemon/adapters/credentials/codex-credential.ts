@@ -17,7 +17,7 @@ const CODEX_CREDENTIAL_FILE = 'auth.json';
 const CODEX_PLUGIN = 'codex';
 
 export interface CodexCredentialSource {
-  /** Why this login's sign-in file cannot be used, in one sentence naming the login; `undefined` when it holds tokens. */
+  /** Why this login's sign-in file cannot be used, in one sentence naming the login; `undefined` when it holds a sign-in. */
   problem(login: string): Promise<string | undefined>;
   /** The kernel's shared credential for this login's file, or `undefined` when the kernel would not share it. */
   share(login: string): Promise<SharedCredential | undefined>;
@@ -40,7 +40,9 @@ export function codexCredentialSource(deps: {
       if (resolution.harness !== 'codex' || !('canonicalFile' in resolution))
         return `the login ${login} is not a Codex sign-in`;
       const facts = await deps.store.local(resolution).catch(() => undefined);
-      if (facts?.codex?.state !== 'tokens')
+      // A ChatGPT sign-in (`tokens`) or a key Codex was signed in with (`api_key`, a non-empty OPENAI_API_KEY): both are
+      // the file Codex reads. An empty file, one without either, or one that cannot be read is not a sign-in.
+      if (facts?.codex?.state !== 'tokens' && facts?.codex?.state !== 'api_key')
         return `the login ${login} is not signed in; sign it in from Logins and start the ferret again`;
       return undefined;
     },

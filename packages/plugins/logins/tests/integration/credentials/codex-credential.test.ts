@@ -113,6 +113,19 @@ describe('logins:openai credential()', () => {
     expect(JSON.parse(await readFile(placed, 'utf8'))).toEqual(TOKENS);
   });
 
+  test('a Codex key sign-in (auth_mode apikey with a non-empty key) is a sign-in too', async () => {
+    const f = await fixture({
+      seed: async base => {
+        await writeFile(
+          join(base, 'team', 'auth.json'),
+          JSON.stringify({ OPENAI_API_KEY: 'fake-key', auth_mode: 'apikey' }),
+          { mode: 0o600 },
+        );
+      },
+    });
+    expect((await f.kinds.openai.credential?.('team', 'codex'))?.kind).toBe('file');
+  });
+
   test('it never renews: the refresh path is not touched by any answer', async () => {
     const f = await fixture();
     await f.kinds.openai.credential?.('team', 'codex');
