@@ -100,15 +100,19 @@ export class FileTranscriptReads
 
   /** v4's `createTranscriptLocation`: which transcript is the ferret's, the source that reads it, its token and size. */
   async #located(ferret: string): Promise<Located> {
+    // Captured BEFORE the harness is asked: a release (the ferret stopped) while it opens makes this handle a late one.
+    const generation = this.runtime.generation(ferret);
     const opened = await this.open(ferret as FerretId);
     if (opened === 'unsupported') return { kind: this.fallback === undefined ? 'unresolved' : 'unsupported' };
     if (opened === undefined) return { kind: 'unresolved' };
     // The runtime now owns the handle (this reader opened it, and never closes it itself): it keeps ONE per ferret,
     // closes a duplicate or a replaced one, and closes them all when the reader stops.
-    const token = await this.runtime.adopt(opened, ferret);
+    const token = await this.runtime.adopt(opened, ferret, generation);
     const held = this.runtime.handle(token);
     const stat = await held?.stat().catch(() => undefined);
-    if (held === undefined || stat === undefined) return { kind: 'unreadable' };
+    // A release during the stat has already closed the handle: nothing of this read may go on through it.
+    if (held === undefined || stat === undefined || this.runtime.released(ferret, generation))
+      return { kind: 'unreadable' };
     return {
       kind: 'found',
       token,
