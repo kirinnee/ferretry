@@ -47,5 +47,6 @@ test('a tool result with prose still names its call', () => {
     }),
   );
   expect(mixed?.text).toBe('and a note');
-  expect(mixed?.data).toEqual({ toolResults: ['toolu_x'] });
+  expect(mixed?.tools).toEqual({ results: ['toolu_x'] });
+  expect(mixed?.data).toBeUndefined();
 });

@@ -19,12 +19,12 @@ const TRANSCRIPT = '/home/user/.claude/projects/-work-repro/48fa096f-185c-42e1-b
 const TOOL_USE_ID = 'toolu_01T4KnfY1in2GTL7P9wUmRtt';
 const WRITTEN = '2026-10-30T04:33:36.000Z' as Instant;
 const entry = (at: string, text = 'hello'): TranscriptEntry => ({ id: at, at: at as Instant, role: 'assistant', text });
-/** An entry that carries the call (`toolCalls`) or its result (`toolResults`) by id, as the Claude reader parses one. */
-const tool = (at: string, field: 'toolCalls' | 'toolResults', id = TOOL_USE_ID): TranscriptEntry => ({
+/** An entry that carries the call (`calls`) or its result (`results`) by id, as the Claude reader parses one. */
+const tool = (at: string, field: 'calls' | 'results', id = TOOL_USE_ID): TranscriptEntry => ({
   id: `${field}:${at}`,
   at: at as Instant,
   role: 'tool',
-  data: { [field]: [id] },
+  tools: { [field]: [id] },
 });
 
 /** One watch over a fake world: the hook file, the transcript, `question.json` and the events published. */
@@ -100,7 +100,7 @@ describe('the question watch: the hook’s file becomes question.json', () => {
   it('retires the question when the transcript names its call, publishes QuestionAnswered and never stores the stale file again', async () => {
     const w = world();
     await w.watch.sweep();
-    w.state.entries = [entry('2026-10-30T04:00:00.000Z'), tool('2026-10-30T04:00:01.000Z', 'toolResults')];
+    w.state.entries = [entry('2026-10-30T04:00:00.000Z'), tool('2026-10-30T04:00:01.000Z', 'results')];
     await w.watch.sweep();
     expect(w.state.question).toBeUndefined();
     expect(w.events).toEqual([`asked fern ${TOOL_USE_ID}`, `answered fern ${TOOL_USE_ID}`]);
@@ -117,7 +117,7 @@ describe('the question watch: the hook’s file becomes question.json', () => {
 
   it('does not take another call’s id for this one', async () => {
     const w = world();
-    w.state.entries = [tool('2026-10-30T04:00:00.000Z', 'toolResults', 'toolu_other')];
+    w.state.entries = [tool('2026-10-30T04:00:00.000Z', 'results', 'toolu_other')];
     await w.watch.sweep();
     expect(w.state.question?.toolUseId).toBe(TOOL_USE_ID);
   });
@@ -168,7 +168,7 @@ describe('the question watch: the hook’s file becomes question.json', () => {
 
   it('never shows a question the transcript already names (a daemon restart meeting an answered form’s file)', async () => {
     const w = world();
-    w.state.entries = [tool('2026-10-30T04:00:00.000Z', 'toolCalls')];
+    w.state.entries = [tool('2026-10-30T04:00:00.000Z', 'calls')];
     await w.watch.sweep();
     expect(w.state.question).toBeUndefined();
     expect(w.writes).toEqual([]);

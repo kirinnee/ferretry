@@ -117,7 +117,7 @@ describe('a question the hook recorded is shown, then retired, through the real 
     expect(JSON.stringify((await asking(h, id)).json())).toContain(TOOL_USE_ID);
 
     harness.entries = [
-      { id: 'e1', at: '2026-10-30T04:36:02.000Z' as never, role: 'tool', data: { toolResults: [TOOL_USE_ID] } },
+      { id: 'e1', at: '2026-10-30T04:36:02.000Z' as never, role: 'tool', tools: { results: [TOOL_USE_ID] } },
     ];
     await watchTick(h);
 
@@ -180,8 +180,8 @@ const shown = async (h: TestHost, id: string) => JSON.stringify((await asking(h,
 
 describe('an answered hook file is never a live question again', () => {
   test('the fixture names this payload’s call and result by the id the hook recorded', () => {
-    expect(CALL.data).toEqual({ toolCalls: [TOOL_USE_ID] });
-    expect(RESULT.data).toEqual({ toolResults: [TOOL_USE_ID] });
+    expect(CALL.tools).toEqual({ calls: [TOOL_USE_ID] });
+    expect(RESULT.tools).toEqual({ results: [TOOL_USE_ID] });
   });
 
   test('met late, with a file dated when it was asked: a newer transcript event retires it (time alone)', async () => {

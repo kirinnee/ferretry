@@ -40,18 +40,19 @@ const QUEUE_OPERATION_PROOF = 'queue-operation';
 const QUEUED_PROMPT_PROOF = 'queued-prompt';
 
 /**
- * The tool calls and tool results a message record carries, by their ids (`tool_use.id`, `tool_result.tool_use_id`). A
- * reader that must know whether ONE call was made or answered (the question watch) matches these exactly: the ids are
- * not in the entry's text, which holds only what a person would read. Absent when the record carries no such block.
+ * The tool calls and tool results a message record carries, by their ids (`tool_use.id`, `tool_result.tool_use_id`), as
+ * `TranscriptEntry.tools`. A reader that must know whether ONE call was made or answered (the question watch) matches
+ * these exactly: the ids are not in the entry's text, which holds only what a person would read. Kept out of `data`, which
+ * Conversation shows as a tool entry's content. Absent when the record carries no such block.
  */
-function toolIdentity(blocks: readonly (Json | undefined)[]): { toolCalls?: string[]; toolResults?: string[] } {
+function toolIdentity(blocks: readonly (Json | undefined)[]): NonNullable<TranscriptEntry['tools']> {
   const ids = (type: string, field: string): string[] =>
     blocks.flatMap(block => (block?.type === type && typeof block[field] === 'string' ? [block[field] as string] : []));
-  const toolCalls = ids('tool_use', 'id');
-  const toolResults = ids('tool_result', 'tool_use_id');
+  const calls = ids('tool_use', 'id');
+  const results = ids('tool_result', 'tool_use_id');
   return {
-    ...(toolCalls.length === 0 ? {} : { toolCalls }),
-    ...(toolResults.length === 0 ? {} : { toolResults }),
+    ...(calls.length === 0 ? {} : { calls }),
+    ...(results.length === 0 ? {} : { results }),
   };
 }
 
@@ -119,7 +120,7 @@ export function parseEntry(line: string, ordinal = 0): TranscriptEntry | undefin
     at,
     role: tool && text === undefined ? 'tool' : role,
     ...(text === undefined ? {} : { text }),
-    ...(Object.keys(identity).length === 0 ? {} : { data: identity }),
+    ...(Object.keys(identity).length === 0 ? {} : { tools: identity }),
   };
 }
 

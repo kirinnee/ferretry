@@ -3,13 +3,13 @@
     "id": "call-1",
     "at": "2026-10-30T04:36:02.000Z",
     "role": "tool",
-    "data": { "toolCalls": ["toolu_01T4KnfY1in2GTL7P9wUmRtt"] }
+    "tools": { "calls": ["toolu_01T4KnfY1in2GTL7P9wUmRtt"] }
   },
   {
     "id": "result-1",
     "at": "2026-10-30T04:36:02.100Z",
     "role": "tool",
-    "data": { "toolResults": ["toolu_01T4KnfY1in2GTL7P9wUmRtt"] }
+    "tools": { "results": ["toolu_01T4KnfY1in2GTL7P9wUmRtt"] }
   },
   {
     "id": "text-1",

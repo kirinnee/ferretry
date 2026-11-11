@@ -49,11 +49,9 @@ const CLAUDE_CODE = 'claude-code';
 /** How many looks store one payload before a state store that keeps failing is left alone (looks are 2 s apart). */
 const WRITE_ATTEMPTS = 5;
 
-/** The tool ids an entry's `data` names as a call it made or a result it carries (the reader puts them there). */
+/** Whether the entry made this call or carries its result, by id (the harness reader puts the ids in `entry.tools`). */
 function namesTool(entry: TranscriptEntry, toolUseId: string): boolean {
-  const data = entry.data;
-  if (typeof data !== 'object' || data === null || Array.isArray(data)) return false;
-  return [data.toolCalls, data.toolResults].some(ids => Array.isArray(ids) && ids.includes(toolUseId));
+  return (entry.tools?.calls?.includes(toolUseId) ?? false) || (entry.tools?.results?.includes(toolUseId) ?? false);
 }
 
 /**

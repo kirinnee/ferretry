@@ -512,6 +512,12 @@ export interface TranscriptEntry {
   readonly role: 'user' | 'assistant' | 'tool' | 'system';
   readonly text?: string;
   readonly data?: JsonValue;
+  /**
+   * The tool calls this record made and the tool results it carries, by their ids (Claude's `tool_use.id` and
+   * `tool_result.tool_use_id`): what a reader that must know whether ONE call was made or answered matches, exactly. They
+   * are not in `text`, which holds only what a person would read. Absent when the record holds no such block.
+   */
+  readonly tools?: { readonly calls?: readonly string[]; readonly results?: readonly string[] };
 }
 
 export interface TranscriptReader {
