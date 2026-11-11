@@ -7,7 +7,7 @@
  * The libexec tests are the other half: `clean` then `prepare` must not lose the programs `build` installed.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
@@ -171,8 +171,9 @@ async function daemonTerminals(
   shell: string,
   home: string,
   hostile: Record<string, string>,
-): Promise<{ run: Run; closed: () => number; zdotInPane: () => string | undefined }> {
+): Promise<{ run: Run; closed: () => number; zdotInPane: () => string | undefined; diagnostic: () => string }> {
   const probe = wrapper(home, ['__daemon-probe', 'sh', '-c', 'printf "%s\\n%s" "$PATH" "$HOME"'], hostile);
+  let lastRead = '';
   const [paneRoute = '', paneHome = ''] = probe.stdout.toString().split('\n');
   // The environment the REAL Terminals runtime hands a new pane (`new-session -e NAME=value`), from the environment the
   // converter wrote into terminals.yaml, not from previewShellEnv directly.
@@ -198,7 +199,10 @@ async function daemonTerminals(
       for (let tries = 0; tries < 60 && !(open?.read() ?? '').includes('FYCHECK-DONE'); tries++) await sleep(100);
       return { code: 0, stdout: '' };
     }
-    if (action === 'read') return { code: 0, stdout: open?.read() ?? '' };
+    if (action === 'read') {
+      lastRead = open?.read() ?? '';
+      return { code: 0, stdout: lastRead };
+    }
     closes++;
     open?.type('printf "ZDOT=%s\\n" "$ZDOTDIR"\n');
     await sleep(400);
@@ -209,7 +213,22 @@ async function daemonTerminals(
     open?.close();
     return { code: 0, stdout: '' };
   };
-  return { run, closed: () => closes, zdotInPane: () => zdot };
+  // Only paths, PATH and the raw pane text: no other environment value is printed.
+  const diagnostic = (): string => {
+    const shim = join(home, 'bin', 'fy');
+    const shimState = existsSync(shim)
+      ? (statSync(shim).mode & 0o111) !== 0
+        ? 'executable'
+        : 'not executable'
+      : 'absent';
+    return [
+      `shell=${shell} paneRoute=${paneRoute} paneHome=${paneHome}`,
+      `probe exit=${String(probe.exitCode)} stderr=${probe.stderr.toString().slice(0, 300)}`,
+      `${shim} is ${shimState}`,
+      `raw pane tail=${JSON.stringify(lastRead.slice(-600))}`,
+    ].join('\n');
+  };
+  return { run, closed: () => closes, zdotInPane: () => zdot, diagnostic };
 }
 
 describe('TTP-1 the terminal the preview daemon opens finds the preview fy and FY_HOME', () => {
@@ -221,6 +240,8 @@ describe('TTP-1 the terminal the preview daemon opens finds the preview fy and F
     expect(wrapper(home, ['daemon', 'start'], hostile).exitCode).toBe(0);
     const terminals = await daemonTerminals(shell, home, hostile);
     const proof = await terminalCheck({ target: home, v4Home: V4, callerEnv: hostile, run: terminals.run });
+    // A refused proof says what the pane saw, so a failure on a host this box is not reads as evidence.
+    if (!proof.ok) throw new Error(`${proof.problems.join('\n')}\n${terminals.diagnostic()}`);
     const creds = await credentialCheck({
       target: home,
       callerEnv: hostile,
