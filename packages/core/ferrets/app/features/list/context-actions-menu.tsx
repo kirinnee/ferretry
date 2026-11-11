@@ -16,6 +16,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import '../header/ferret-actions.css';
 import { BottomSheet, clampMenuPosition, type MenuAnchor, type MenuPosition, useDialogFocus } from '../../ui.ts';
 import { ActionForm, ActionSections } from '../header/actions-menu.tsx';
 import { type FerretActionFormHost, type FerretActionSection, findFerretAction } from '../header/registry.ts';

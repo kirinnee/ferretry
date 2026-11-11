@@ -17,6 +17,7 @@ import { ACTIONS_ROW_SLOT, type ActionsRowSlotProps } from '@ferretry/core-ferre
 import { Copy, MessageSquare } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FerretSummary } from '../../../contract/index.ts';
+import '../header/ferret-actions.css';
 import type { LiveFerretsClient } from '../../lib/client.ts';
 import { browserClipboardWriter, type MenuAnchor } from '../../ui.ts';
 import { ActionToast } from '../header/action-toast.tsx';
