@@ -1450,6 +1450,18 @@ readable by that runtime's agent. The refresh token and any client secret are NO
 rest in a separate sealed document only the sign-in service reads, so `use` and `${secret:…}` cannot
 reach them. **Sign out** deletes all of them.
 
+## A harness sign-in file in a ferret's home
+
+A Codex OAuth (or key) sign-in is not a vault secret either. Logins keeps the harness's own `auth.json` in its private
+`credentials` root; when a ferret starts on that login, Logins mints a one-file _shared credential_ bound to Codex and
+the kernel makes ONE symlink to it at `<the ferret's Codex home>/auth.json` (and Codex is launched with
+`cli_auth_credentials_store="file"`). No plugin and not the daemon reads the file through that link: the child process
+Codex reads it, and refreshes it in place, so the link keeps pointing at the one file. A login with no usable sign-in
+refuses the start with one sentence, before any pane exists. The residual is the same-user one: the agent runs as the
+same user and Codex's sandbox reads anywhere, so an agent's shell command can `cat` that file, exactly as in the old
+account model. The link outlives a revocation until the next launch of that ferret clears it, and two ferrets refreshing
+one login in the same instant can race on its single-use refresh token (both declared gaps).
+
 ## Sign-in tokens the usage read sends
 
 A Claude Code or Codex sign-in is not a vault secret: it is the harness's own credential file or macOS

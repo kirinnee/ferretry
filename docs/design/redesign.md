@@ -2686,6 +2686,19 @@ scoped handle:
   folder, so "read-only" holds for a copy only (a declared GAP). A link made also outlives the tree: revoking a tree (its
   minter stopping, or `shareTrees` leaving the manifest) stops new materializations only, and a link already in
   `agent-homes` stays until the harness removes it (a declared GAP).
+- A plugin's ONE sign-in file reaches the harness that spends it as a **shared credential**: the owner of the
+  `credentials` root (Logins alone, `ROOT_OWNERS`) mints it with `kernel.roots.shareCredential({ folder, file, receiver })`
+  (`permissions.shareCredentials`, exact basenames such as `auth.json`; the file must be a regular file with one name and
+  no link on the way, and the plugin must hold and have declared `credentials`), bound to ONE receiving plugin (`codex`).
+  The receiver makes ONE symlink with `RootHandle.linkCredential`: only on `agent-homes`, only by the bound receiver
+  (`not_receiver` for any other holder), only on a handle scoped to one subfolder (one ferret's home), only at
+  `<that folder>/<file>` (the credential's own name, one level), only when nothing is at the name, and only if the file
+  is still the very one minted (device, inode, one name; otherwise `changed`, and the next launch mints afresh). It is
+  never a copy, and no plugin can read through the link (`readText`/`stat` of it are `link_escape`): only the harness
+  child reads it, through the OS. A credential is opaque and held in a kernel table like a tree (a copy or
+  `{ credential: <file name> }` opens nothing) and is revoked when its minter stops. `linkTo`, `copyTree`, `share`,
+  `copyShared` and the private-place fence are unchanged. A link already made outlives the credential's revocation until
+  the harness's next `prepareHome` clears it or its home is removed (a declared GAP).
 - **Private files (`privacy`).** A plugin declares the files of its own `state/<id>/` a ferret must never reach —
   `privacy.private`, paths relative to that folder (a folder pins the folder and what it holds, to three levels — a
   login's `credentials/<id>/auth.json`, a browser profile's `data/<profile>/Default/Cookies`; a `credentials/*`
@@ -2696,7 +2709,8 @@ scoped handle:
   `fleet`, `sessions`, `credentials`, `downloads`), a harness file, a pinned read, a shared tree and a copy's source.
   A place the root itself holds (its base, a folder above it, anything below) is its own and is left out. A name that IS
   a private place is refused `fenced` for read, stat, write, rename-over (as target), `publish`, link (as target and
-  as the link's place), delete, mode change and copy, whatever its spelling: the verdict is the inode's, so a case
+  as the link's place), delete, mode change and copy, whatever its spelling (the ONE exception: `linkCredential` does not ask
+  the fence about its TARGET, the sign-in file the mint table holds by identity; the link's PLACE is fenced as usual): the verdict is the inode's, so a case
   variant, a double slash or a `.` segment changes nothing, and a bind mount (one link, the same device and inode —
   which the hard-link rule cannot see) is refused as a hard link is; `entries()` leaves such a name out. **The index.**
   The places are indexed ONCE (`host/fence-index.ts`, one per home and list, shared by every root) and kept
