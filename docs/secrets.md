@@ -340,16 +340,24 @@ A Claude runtime on an environment login pins that login's **non-secret** variab
 the catalog's `ANTHROPIC_DEFAULT_*_MODEL`, a literal `ANTHROPIC_AUTH_TOKEN`) under `env` in its
 `--settings` file (`<home>/.fy/fixed.json`). Claude Code lets that file beat a repository's
 `.claude/settings.local.json`, which the process environment does not, so a repo that blanks a provider
-variable can no longer start the runtime signed out.
+variable can no longer start the runtime signed out **when a person runs the runtime's bin wrapper**. A
+ferret the daemon starts does not launch through that wrapper: it goes through the claude-code harness, which
+reads neither the login's environment nor this file today, so this pin does not cover it. That is a separate
+fix (branch `rebuild/ferret-login-env`).
 
-**A value that names `${secret:…}` never goes into that file, any settings file, or a command line.** It stays
-process environment, which the wrapper resolves from the store when it execs. Why a command line counts: when
-a launch names fast mode or a compaction point, the daemon copies `fixed.json` **inline** into
-`--settings '<json>'`, and that argv shows in `ps` and in the session's saved command. The rule is enforced
+Only a value that is a plain literal is pinned, and only when the runtime's process environment ends with the
+same value: a key the profile's settings, an MCP server's forwarded variable or Ferretry itself sets later keeps
+its precedence, and `FY_*` names are never pinned. An indirect `$NAME` / `${NAME}` is not pinned either
+(`--settings` env is not shell-expanded; the wrapper resolves it at exec).
+
+**A value that names `${secret:…}` (or the optional `${secret?:…}`) never goes into that file, any settings file, or a command line.** It stays
+process environment, which the wrapper resolves from the store when it execs. Why a command line counts: if a launch copies `fixed.json` **inline** into
+`--settings '<json>'` (v4's fast mode and compaction point did; 5.0 has no such reader, and the rule is kept
+as a precaution), that argv shows in `ps` and in the session's saved command. The rule is enforced
 twice in code: only values with no reference are pinned, and an overlay whose text contains one is refused when
 the fleet is planned, never quietly trimmed. A **literal** credential written in a login's YAML (an internal
-gateway's `ANTHROPIC_AUTH_TOKEN`) is pinned: it is already plain text in the configuration, and so it may show
-in `ps` when fast mode or a compaction point is set. A real key belongs in the secret store.
+gateway's `ANTHROPIC_AUTH_TOKEN`) is pinned: it is already plain text in the configuration, and so it would show
+in `ps` if a launch ever copied the file inline. A real key belongs in the secret store.
 
 What pinning cannot cover is a secret-backed variable that a repository itself sets under `env`, and an
 interactive Claude runtime whose profile already passes its own `--settings` (Claude Code honours only one,

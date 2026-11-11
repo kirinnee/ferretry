@@ -889,6 +889,86 @@ describe('materialiseFleet', () => {
       should(JSON.stringify(wrapperOf(result, 'claude-loge'))).containEql('ANTHROPIC_AUTH_TOKEN');
     });
 
+    it('should never pin an indirect $NAME / ${NAME} value, which the wrapper resolves at exec (B1)', () => {
+      // Act
+      const result = plan(
+        loge(true, {
+          ANTHROPIC_BASE_URL: 'https://loge.example/anthropic',
+          ANTHROPIC_AUTH_TOKEN: '$GATEWAY_TOKEN',
+          OTHER: '${GW_URL}',
+        }),
+      );
+
+      // Assert
+      const fixed = fixedOf(result, HOME_A);
+      should(fixed.env).not.have.property('ANTHROPIC_AUTH_TOKEN');
+      should(fixed.env).not.have.property('OTHER');
+      should(fixed.env?.ANTHROPIC_BASE_URL).equal('https://loge.example/anthropic');
+      should(wrapperOf(result, 'claude-loge')).containEql('"${GATEWAY_TOKEN}"');
+    });
+
+    it("should never let a pin beat the profile's own environment (B2)", () => {
+      // Arrange
+      const model = modelOf({
+        components: {
+          ...COMPONENTS,
+          settings: {
+            own: {
+              harness: 'claude',
+              env: { ANTHROPIC_MODEL: 'profile-model', ANTHROPIC_DEFAULT_OPUS_MODEL: 'person-pick' },
+            },
+          },
+        },
+        credentials: {
+          loge: {
+            harness: 'claude',
+            store: 'environment',
+            env: { ANTHROPIC_BASE_URL: 'https://loge.example', ANTHROPIC_MODEL: 'login-model' },
+            claude: { env: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k3' } },
+          },
+        },
+        profiles: { default: { layers: [...DEFAULT_LAYERS, 'settings/own'] } },
+        runtimes: { 'claude-loge': { credential: 'loge', profile: 'default', agent: true } },
+      });
+
+      // Act
+      const result = plan(model);
+
+      // Assert
+      const pinned = fixedOf(result, HOME_A).env ?? {};
+      should(pinned).not.have.property('ANTHROPIC_MODEL');
+      should(pinned).not.have.property('ANTHROPIC_DEFAULT_OPUS_MODEL');
+      should(pinned.ANTHROPIC_BASE_URL).equal('https://loge.example');
+    });
+
+    it("should never let a pin beat an MCP server's forwarded variable (B2)", () => {
+      // Act
+      const result = plan(loge(true, { ANTHROPIC_BASE_URL: 'https://loge.example', GITHUB_TOKEN: 'login-literal' }));
+
+      // Assert — the default profile's github MCP forwards GITHUB_TOKEN from the store.
+      should(fixedOf(result, HOME_A).env ?? {}).not.have.property('GITHUB_TOKEN');
+    });
+
+    it('should never pin an FY_* name (B2)', () => {
+      // Act
+      const result = plan(loge(true, { ANTHROPIC_BASE_URL: 'https://loge.example', FY_TOKEN: 'fake-fy' }));
+
+      // Assert
+      should(fixedOf(result, HOME_A).env ?? {}).not.have.property('FY_TOKEN');
+    });
+
+    it('should treat the optional ${secret?:NAME} form as a secret (S1)', () => {
+      // Act
+      const result = plan(
+        loge(true, { ANTHROPIC_BASE_URL: 'https://loge.example', ANTHROPIC_AUTH_TOKEN: '${secret?:LOGE_KEY}' }),
+      );
+
+      // Assert
+      const text = (only(result, `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`) as { content: string }).content;
+      should(text).not.containEql('secret');
+      should(() => assertNoSecretInOverlay({ env: { A: '${secret?:LOGE_KEY}' } })).throw();
+    });
+
     it('should refuse an overlay that carries a secret reference', () => {
       // Act / Assert
       const refused = failure(() => assertNoSecretInOverlay({ env: { ANTHROPIC_AUTH_TOKEN: '${secret:LOGE_KEY}' } }));

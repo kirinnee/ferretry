@@ -31,7 +31,8 @@
  *
  * Pure: bodies are read by the caller, an id is minted by an injected function, the clock is a string.
  */
-import { secretReferencesIn } from '@ferretry/core-vault/contract';
+import { envReferenceName } from '../wrappers.ts';
+import { optionalSecretReferenceOf, secretReferencesIn } from '@ferretry/core-vault/contract';
 import type { z } from 'zod';
 import type { CompactAtSchema } from '../../../contract/index.ts';
 import { HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, harnessAsset } from '../assets.ts';
@@ -96,23 +97,33 @@ export const MATERIALISED_RECORD_FILE = 'materialised.json';
 
 /**
  * The `--settings` overlay a Claude runtime launches with: the fixed layer's, for an agent runtime, and
- * the login's non-secret environment, for any Claude runtime on an environment login (B190).
+ * the login's non-secret environment, for any Claude runtime on an environment login (B190). The pins reach
+ * a person running the runtime's bin wrapper; a daemon-started ferret launches through the claude-code
+ * harness instead (separate fix, branch `rebuild/ferret-login-env`).
  */
 export const FIXED_SETTINGS_FILE = 'fixed.json';
 
 /** The marker of a secret reference, which must never reach a settings file or an argv. */
-const SECRET_REFERENCE_MARKER = '${secret:';
+const SECRET_REFERENCE_MARKER = /\$\{secret\??:/u;
 
 /**
- * THE SECRET RULE (B190). The overlay is a file on disk, and the daemon copies it INLINE into
- * `--settings '<json>'` when a launch names fast mode or a compaction point, so its text shows in `ps`
- * and in the session's saved command. A value that names `${secret:…}` therefore never goes in: it stays
- * process environment, which the wrapper resolves from the store at exec.
+ * THE SECRET RULE (B190). The overlay is a file on disk, and a launch that copies it INLINE into
+ * `--settings '<json>'` (v4's fast mode and compaction point did; kept as a precaution) would show its text
+ * in `ps` and in the session's saved command. A value that names `${secret:…}` or `${secret?:…}` therefore
+ * never goes in: it stays process environment, which the wrapper resolves from the store at exec.
  *
- * The first enforcement: only the variables whose value names no secret are pinned.
+ * The first enforcement: only the variables whose value names no secret are pinned. Nor is an indirect
+ * `$NAME` / `${NAME}` pinned: `--settings` env is not shell-expanded, so it would be the literal text.
  */
+const namesSecret = (value: string): boolean =>
+  secretReferencesIn(value).length > 0 ||
+  optionalSecretReferenceOf(value) !== undefined ||
+  SECRET_REFERENCE_MARKER.test(value);
+
 function pinnableLoginEnvironment(env: Readonly<Record<string, string>>): Record<string, string> {
-  return Object.fromEntries(Object.entries(env).filter(([, value]) => secretReferencesIn(value).length === 0));
+  return Object.fromEntries(
+    Object.entries(env).filter(([, value]) => !namesSecret(value) && envReferenceName(value) === undefined),
+  );
 }
 
 /**
@@ -120,7 +131,7 @@ function pinnableLoginEnvironment(env: Readonly<Record<string, string>>): Record
  * never quietly trimmed, because a reference that got this far means a path no one meant to open.
  */
 export function assertNoSecretInOverlay(overlay: SettingsObject): void {
-  if (!JSON.stringify(overlay).includes(SECRET_REFERENCE_MARKER)) return;
+  if (!SECRET_REFERENCE_MARKER.test(JSON.stringify(overlay))) return;
   throw new FleetMaterialiseError([
     {
       message:
@@ -140,9 +151,15 @@ function loginEnvironmentPins(
   harness: HarnessKind,
   store: CredentialStoreResolution,
   derivedEnv: Readonly<Record<string, string>>,
+  finalEnv: Readonly<Record<string, string>>,
 ): Record<string, string> {
   if (harness !== 'claude' || store.store !== 'environment') return {};
-  return pinnableLoginEnvironment({ ...credentialLaunchEnvironment(store), ...derivedEnv });
+  const pins = pinnableLoginEnvironment({ ...credentialLaunchEnvironment(store), ...derivedEnv });
+  // `--settings` beats the process environment, so a pin is only safe where the process environment ends up
+  // with the same value: a later layer (profile, MCP forward, Ferretry's own) must keep its precedence.
+  return Object.fromEntries(
+    Object.entries(pins).filter(([variable, value]) => !variable.startsWith('FY_') && finalEnv[variable] === value),
+  );
 }
 
 /** Whether the profile's own flags already pass `--settings` (Claude Code honours only one). */
@@ -484,7 +501,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     // B190: the login's non-secret variables are pinned in the `--settings` overlay too, since a repo's
     // own settings beat the process environment but not that file. Any Claude runtime gets them, an
     // interactive one through an overlay of its own.
-    let pins = loginEnvironmentPins(harness, store, derived.env);
+    let pins = loginEnvironmentPins(harness, store, derived.env, env);
     // Claude honours only one `--settings`, so an interactive runtime whose profile passes its own is left
     // unpinned: that is no reason to refuse the whole fleet apply (a GAP in ports-pending.json says so).
     if (Object.keys(pins).length > 0 && !runtime.agent && passesSettingsFlag(resolved.flags)) pins = {};
@@ -494,7 +511,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         ? baseOverlay
         : {
             ...baseOverlay,
-            env: { ...(baseOverlay?.env as Record<string, string> | undefined), ...pins },
+            env: { ...pins, ...(baseOverlay?.env as Record<string, string> | undefined) },
           };
     if (overlay !== undefined) assertNoSecretInOverlay(overlay);
 

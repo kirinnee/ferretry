@@ -41,10 +41,13 @@
  *   failing. A `--settings` file IS the flag source, so naming the same mode there removes the
  *   condition; {@link CLAUDE_PROMPTS_SEEN} records the dialog as seen as well, and either alone holds.
  * - The overlay ALSO pins an environment login's NON-secret variables under `env` (B190, `./materialise.ts`).
+ *   That covers a person running the runtime's bin wrapper. A daemon-started ferret launches through the
+ *   claude-code harness instead, which reads neither this file nor the login's environment (separate fix,
+ *   branch `rebuild/ferret-login-env`).
  *   Claude Code lets a `--settings` value beat the same key in a repository's own
  *   `.claude/settings.local.json`, while the process environment loses to it, so a repo that blanked
  *   `ANTHROPIC_BASE_URL` signed the runtime out. A value naming `${secret:…}` is never pinned: it would show
- *   in `ps` when the daemon copies this file inline into a fast-mode launch, so it stays process
+ *   in `ps` if a launch copied this file inline (v4's fast mode did; kept as a precaution), so it stays process
  *   environment (docs/secrets.md). Interactive Claude runtimes get an env-only overlay for the same reason.
  * - Remote Control is forced OFF at startup (`remoteControlAtStartup: false`, also in the overlay).
  *   Claude Code 2.1.281 starts the bridge in a session when ANY of these is true, in this order:
