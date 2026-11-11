@@ -1,129 +1,122 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  ASK_READ_CONCURRENCY,
-  CardAskLinks,
-  type FerretAsksReader,
-  type OpenAskFacts,
-} from '../../../daemon/lib/board/index.ts';
+import { CardAskLinks, type CardAskReader, type OpenCardAsk } from '../../../daemon/lib/board/index.ts';
 import { card } from './support.ts';
 
-const ask = (id: string, extra: Partial<OpenAskFacts> = {}): OpenAskFacts => ({ id, cards: [], gateOf: [], ...extra });
+const ask = (ferret: string, id: string, cardId: string, extra: Partial<OpenCardAsk> = {}): OpenCardAsk => ({
+  ferret,
+  id,
+  cardId,
+  ...extra,
+});
 
-class FakeLedgers implements FerretAsksReader {
-  readonly reads: string[] = [];
+class FakeAsks implements CardAskReader {
+  reads = 0;
 
   constructor(
-    private readonly ledgers: Readonly<Record<string, readonly OpenAskFacts[]>>,
-    private readonly failing: ReadonlySet<string> = new Set(),
+    private readonly asks: readonly OpenCardAsk[],
+    private readonly failing = false,
   ) {}
 
-  async open(ferret: string): Promise<readonly OpenAskFacts[]> {
-    this.reads.push(ferret);
-    if (this.failing.has(ferret)) throw new Error('the ledger is damaged');
-    return this.ledgers[ferret] ?? [];
+  async open(): Promise<readonly OpenCardAsk[]> {
+    this.reads += 1;
+    if (this.failing) throw new Error('the ledger is damaged');
+    return this.asks;
   }
 }
 
-const links = (ledgers: FakeLedgers, warnings: string[] = []) =>
-  new CardAskLinks(ledgers, { warn: message => warnings.push(message) });
+const links = (asks: FakeAsks, warnings: string[] = []) =>
+  new CardAskLinks(asks, { warn: message => warnings.push(message) });
 
 describe("Asks' link to cards", () => {
-  it('should count every open ask carrying a card, and the ones that are its gate obligation as asking', async () => {
+  it('should group the open card asks by the card each names, every one of them asking', async () => {
     // Arrange
-    const ledgers = new FakeLedgers({
-      child: [
-        ask('A1', { cards: ['F2'], gateOf: ['F2'] }),
-        ask('A2', { cards: ['F2'] }),
-        ask('A3', { cards: ['F1'] }),
-        ask('A4', { cards: ['F9'], gateOf: ['F1'] }),
-      ],
-      lead: [ask('A1', { cards: ['F2'] })],
-    });
+    const asks = new FakeAsks([
+      ask('lead', 'A1', 'F2'),
+      ask('child', 'A1', 'F2'),
+      ask('child', 'A2', 'F1'),
+      ask('child', 'A3', 'F9'),
+    ]);
     const cards = [card({ id: 'F1' }), card({ id: 'F2', owner: 'lead', assignee: 'child' })];
 
     // Act
-    const asks = await links(ledgers).asksFor(cards);
+    const found = await links(asks).asksFor(cards);
 
     // Assert
-    should(asks.get('F2')).deepEqual({
+    should(found.get('F2')).deepEqual({
       open: [
         { ferret: 'lead', id: 'A1' },
         { ferret: 'child', id: 'A1' },
-        { ferret: 'child', id: 'A2' },
       ],
-      asking: [{ ferret: 'child', id: 'A1' }],
-    });
-    should(asks.get('F1')).deepEqual({
-      open: [
-        { ferret: 'child', id: 'A3' },
-        { ferret: 'child', id: 'A4' },
+      asking: [
+        { ferret: 'lead', id: 'A1' },
+        { ferret: 'child', id: 'A1' },
       ],
-      asking: [{ ferret: 'child', id: 'A4' }],
     });
+    should(found.get('F1')).deepEqual({
+      open: [{ ferret: 'child', id: 'A2' }],
+      asking: [{ ferret: 'child', id: 'A2' }],
+    });
+    should(found.has('F9')).be.false();
+  });
+
+  it('should show a gate ask on a ledger no card of the board names, because it reads every ledger', async () => {
+    const asks = new FakeAsks([ask('stranger', 'A7', 'F1')]);
+
+    const found = await links(asks).asksFor([card({ id: 'F1', owner: 'lead', assignee: 'child' })]);
+
+    should(found.get('F1')?.open).eql([{ ferret: 'stranger', id: 'A7' }]);
   });
 
   it('should never count a notice: it is context, not an ask', async () => {
-    const ledgers = new FakeLedgers({ lead: [ask('A1', { cards: ['F1'], notice: true })] });
+    const asks = new FakeAsks([ask('lead', 'A1', 'F1', { notice: true })]);
 
-    const asks = await links(ledgers).asksFor([card({ id: 'F1', owner: 'lead' })]);
+    const found = await links(asks).asksFor([card({ id: 'F1', owner: 'lead' })]);
 
-    should(asks.size).equal(0);
+    should(found.size).equal(0);
   });
 
-  it('should cost a card its asks, not the read, when one ledger cannot be read', async () => {
-    // Arrange
+  it('should make ONE Asks read per derivation, whatever the number of cards and ferrets on the board', async () => {
+    // Arrange: 600 cards over 600 distinct ferrets; the read used to be one ledger per ferret
+    const cards = Array.from({ length: 600 }, (_, i) =>
+      card({ id: `F${String(i + 1)}`, owner: `owner${String(i)}`, assignee: `helper${String(i)}` }),
+    );
+    const asks = new FakeAsks([ask('owner3', 'A1', 'F4')]);
+
+    // Act
+    const found = await links(asks).asksFor(cards);
+
+    // Assert
+    should(asks.reads).equal(1);
+    should(found.get('F4')?.open).eql([{ ferret: 'owner3', id: 'A1' }]);
+  });
+
+  it('should cost the cards their asks, not the read, when Asks cannot be read', async () => {
     const warnings: string[] = [];
-    const ledgers = new FakeLedgers({ child: [ask('A1', { cards: ['F1'] })] }, new Set(['lead']));
+    const asks = new FakeAsks([], true);
 
-    // Act
-    const asks = await links(ledgers, warnings).asksFor([card({ id: 'F1', owner: 'lead', assignee: 'child' })]);
+    const found = await links(asks, warnings).asksFor([card({ id: 'F1', owner: 'lead' })]);
 
-    // Assert
-    should(asks.get('F1')?.open).eql([{ ferret: 'child', id: 'A1' }]);
+    should(found.size).equal(0);
     should(warnings).have.length(1);
-    should(warnings[0]).containEql('could not read the asks of lead');
+    should(warnings[0]).containEql('could not read the asks of the cards');
   });
 
-  it('should read the ledger of each ferret once, and a card’s ask lives on its ferret’s home too', async () => {
-    // Arrange
-    const ledgers = new FakeLedgers({ top: [ask('A7', { cards: ['F1'] })] });
-    const homes = { of: async (ferret: string) => (ferret === 'child' ? 'top' : ferret) };
-
-    // Act
-    const asks = await new CardAskLinks(ledgers, { warn: () => undefined }, homes).asksFor([
-      card({ id: 'F1', owner: 'child', assignee: 'child' }),
-    ]);
-
-    // Assert
-    should(asks.get('F1')?.open).eql([{ ferret: 'top', id: 'A7' }]);
-    should([...ledgers.reads].sort()).eql(['child', 'top']);
-  });
-
-  it('should read the ledgers in batches', () => {
-    should(ASK_READ_CONCURRENCY).be.above(0);
-  });
-
-  it('should stop at the next batch once its signal aborts, reading no more ledgers', async () => {
-    const owners = Array.from({ length: ASK_READ_CONCURRENCY * 4 }, (_, i) => `owner${String(i)}`);
-    const ledgers = new FakeLedgers({});
+  it('should stop with its signal, before and after the one read', async () => {
     const controller = new AbortController();
-    const cards = owners.map((owner, i) => card({ id: `F${String(i + 1)}`, owner, assignee: owner }));
-    const seen = new FakeLedgers({});
-    const stopping: FerretAsksReader = {
-      open: async ferret => {
-        const read = await seen.open(ferret);
+    const asks = new FakeAsks([ask('lead', 'A1', 'F1')]);
+    const reading: CardAskReader = {
+      open: async () => {
+        const read = await asks.open();
         controller.abort();
         return read;
       },
     };
 
-    await new CardAskLinks(stopping, { warn: () => undefined }).asksFor(cards, cards, controller.signal).then(
+    await new CardAskLinks(reading, { warn: () => undefined }).asksFor([card({ id: 'F1' })], controller.signal).then(
       () => should.fail(undefined, undefined, 'a stopped read must not complete'),
       (error: unknown) => should((error as Error).name).equal('AbortError'),
     );
-
-    should(seen.reads.length).be.belowOrEqual(ASK_READ_CONCURRENCY);
-    should(ledgers.reads).eql([]);
+    should(asks.reads).equal(1);
   });
 });

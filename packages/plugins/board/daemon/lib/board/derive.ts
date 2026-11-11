@@ -154,10 +154,8 @@ export const neighbourhoodOf = (card: Card, index: BoardIndex): readonly Card[] 
 
 /**
  * Asks the two ports about a set of cards at once, so a page costs one call to each. The agenda
- * answers first: an open card ask on its agenda keeps a card from going stale.
- *
- * `board` is every card whose ferrets' agendas are read: an item about one card may sit in the agenda of
- * another card's ferret, so a subset still reads the whole board's ferrets and keeps only its own asks.
+ * answers first: an open card ask on its agenda keeps a card from going stale. Asks is read once for the set,
+ * so a neighbourhood costs the same one read as the whole board.
  */
 export const gatherDerivation = async (
   cards: readonly Card[],
@@ -168,10 +166,9 @@ export const gatherDerivation = async (
     readonly asks: CardAskLinkSource;
     readonly parents?: FerretParents;
   },
-  board: readonly Card[] = cards,
   signal?: AbortSignal,
 ): Promise<DerivationInputs> => {
-  const asks = await ports.asks.asksFor(cards, board, signal);
+  const asks = await ports.asks.asksFor(cards, signal);
   const activity = await ports.activity.derive({ cards, index, laneSets, asks });
   if (ports.parents === undefined) return { index, laneSets, activity, asks };
   return { index, laneSets, activity, asks, origins: await originFacts(cards, ports.parents) };

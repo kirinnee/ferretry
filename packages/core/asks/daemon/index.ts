@@ -98,7 +98,14 @@ export default implementDaemon(manifest, {
     );
 
     const sources = (key: SourceKey) => hooks.provider(AskSources, key);
-    const boards = { ferrets: async () => await state.list(AgendaLedgerFiles) };
+    const boards = {
+      ferrets: async () => {
+        const listed = await state.list(AgendaLedgerFiles);
+        // The cache holds every ledger that exists, so a read of all of them is not a miss per ledger.
+        repository.holdLedgers(listed.length);
+        return listed;
+      },
+    };
     const recover = async (signal: AbortSignal) => {
       const ferrets = [
         ...new Set(

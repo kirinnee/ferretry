@@ -1,6 +1,5 @@
 import type { AskAnswer, AskDraft, AskId, AsksApi, AskSummary } from '@ferretry/core-asks/contract';
 import type { EntryId, SourceKey } from '@ferretry/core-asks/contract';
-import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 import { type CardId, parseGateReference } from '../../contract/index.ts';
 import type {
   AnsweredAsk,
@@ -8,9 +7,9 @@ import type {
   BoardOptIn,
   BoardThreads,
   CardObligations,
-  FerretAsksReader,
+  CardAskReader,
   GateAnswer,
-  OpenAskFacts,
+  OpenCardAsk,
   OpenCardAskEntry,
 } from '../lib/board/index.ts';
 
@@ -70,22 +69,19 @@ export class AsksCardObligations implements CardObligations {
   }
 }
 
-/** One ferret's open asks, for the cards they are about (`AsksApi.open`). Empty for a ferret with none. */
-export class AsksFerretReader implements FerretAsksReader {
+/**
+ * Every open ask of the `card` source, with the card its gate entry names, in ONE Asks read (`AsksApi.open`). Asks
+ * links an ask to a card only through this source, so this is every ask a card can carry.
+ */
+export class AsksCardAskReader implements CardAskReader {
   constructor(private readonly asks: Pick<AsksApi, 'open'>) {}
 
-  async open(ferret: string): Promise<readonly OpenAskFacts[]> {
-    const id = FerretIdSchema.safeParse(ferret);
-    if (!id.success) return [];
-    const open = await this.asks.open({ ferret: id.data, state: 'open' });
-    return open.map(ask => {
-      const gate = ask.source === CARD_SOURCE ? cardOf(ask.entry) : undefined;
-      return {
-        id: ask.id,
-        notice: ask.kind === 'notice',
-        cards: gate === undefined ? [] : [gate],
-        gateOf: gate === undefined ? [] : [gate],
-      };
+  async open(): Promise<readonly OpenCardAsk[]> {
+    const open = await this.asks.open({ source: CARD_SOURCE, state: 'open' });
+    return open.flatMap(ask => {
+      const cardId = cardOf(ask.entry);
+      if (cardId === undefined || ask.ferret === undefined) return [];
+      return [{ ferret: ask.ferret, id: ask.id, cardId, notice: ask.kind === 'notice' }];
     });
   }
 }

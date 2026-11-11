@@ -406,7 +406,7 @@ export class BoardService {
     const snapshot = await this.ports.store.read();
     const laneSets = await this.laneSetsOf(snapshot.cards.map(card => card.projectId));
     const index = new BoardIndex(snapshot.cards, this.ports.machineId() ?? '');
-    const derivation = await gatherDerivation(snapshot.cards, index, laneSets, this.ports, snapshot.cards, signal);
+    const derivation = await gatherDerivation(snapshot.cards, index, laneSets, this.ports, signal);
     return { views: snapshot.cards.map(card => deriveView(card, derivation)), laneSets };
   }
 
@@ -1538,13 +1538,7 @@ export class BoardService {
     const laneSets = await this.laneSetsOf(snapshot.cards.map(entry => entry.projectId));
     const index = new BoardIndex(snapshot.cards, this.ports.machineId() ?? '');
     // One card derives only what its view reads, never the whole board.
-    const derivation = await gatherDerivation(
-      neighbourhoodOf(card, index),
-      index,
-      laneSets,
-      this.ports,
-      snapshot.cards,
-    );
+    const derivation = await gatherDerivation(neighbourhoodOf(card, index), index, laneSets, this.ports);
     return { card: deriveView(card, derivation), laneSet: laneSets.get(card.projectId) ?? null };
   }
 

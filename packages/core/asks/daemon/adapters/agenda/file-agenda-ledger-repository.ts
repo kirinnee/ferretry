@@ -85,7 +85,14 @@ export class InvalidAgendaLedgerError extends Error {
   }
 }
 
-/** How many sessions' parsed agendas are kept; past it the one read longest ago is dropped and read again from disk when asked for. */
+/**
+ * How many sessions' parsed agendas are kept at least; past the bound the one read longest ago is dropped and read
+ * again from disk when asked for. The bound is never below the number of ledgers on disk (`holdLedgers`): a read of
+ * every ledger always walks them in the same order, so a bound below the count misses on EVERY read and each pass
+ * re-reads, parses and freezes them all. Measured at 2,800 ledgers (3,600 cards): one read of all open card asks
+ * took 44 ms at 600 ledgers (all cached) and 1,686 ms at 2,800 (a bound of 2,048 thrashing). A ledger is small
+ * (about one frozen agenda per ferret that has asks).
+ */
 export const AGENDA_CACHE_LIMIT = 2_048;
 
 /** The files a repository reads: the agenda's store, with the identity reads the cache is proved by. */
@@ -128,6 +135,8 @@ function archiveRecords(text: string): AgendaArchiveRecord[] {
 export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   private readonly tails = new Map<string, Promise<void>>();
   private readonly cache = new Map<string, CachedLedger>();
+  /** The cache bound: `AGENDA_CACHE_LIMIT`, or the number of ledgers last listed when that is more. */
+  private cacheLimit = AGENDA_CACHE_LIMIT;
   /** Ferrets whose unfinished-change file was found absent: only this daemon writes one, so it is looked for again only after it does. */
   private readonly noPendingVersions = new Set<string>();
   readonly changeOutbox?: FileAgendaChangeOutbox;
@@ -152,6 +161,11 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
           }),
         this.runtime,
       );
+  }
+
+  /** The caller listed this many ledgers: the cache holds at least that many, so a read of every ledger hits on the second pass. */
+  holdLedgers(count: number): void {
+    this.cacheLimit = Math.max(AGENDA_CACHE_LIMIT, count);
   }
 
   file(sessionId: string): string {
@@ -192,7 +206,7 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     ) as unknown as AgendaLedger;
     this.cache.delete(sessionId);
     for (const oldest of this.cache.keys()) {
-      if (this.cache.size < AGENDA_CACHE_LIMIT) break;
+      if (this.cache.size < this.cacheLimit) break;
       this.cache.delete(oldest);
     }
     const found = { identity: read.identity, digest: digestOf(read.text), ledger };

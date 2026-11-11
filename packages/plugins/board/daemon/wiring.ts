@@ -31,7 +31,7 @@ import {
   AsksCardObligations,
   CARD_SOURCE,
   gateAnswerOf,
-  AsksFerretReader,
+  AsksCardAskReader,
   AsksOptIn,
   AsksThreads,
 } from './adapters/asks.ts';
@@ -280,7 +280,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     done,
     activity: new LivenessActivityDeriver({ sessions: liveness, clock }),
     liveness,
-    asks: new CardAskLinks(new AsksFerretReader(asks), diagnostics, { of: homeOf }),
+    asks: new CardAskLinks(new AsksCardAskReader(asks), diagnostics),
     changes: {
       changed: async (_ferret: string, event: BoardChangedEvent) => {
         kernel.events.publish(BoardChanged, event);

@@ -1752,8 +1752,8 @@ describe('reading the board', () => {
 
   /**
    * One card's read derived the whole board (every card's activity, every ferret's lineage) to show one card:
-   * ~140 ms for a 2.8 KB answer. Its neighbourhood alone gives it the same view; the agenda is still read for
-   * every ferret on the board, because an item about this card may sit in another card's ferret's agenda.
+   * ~140 ms for a 2.8 KB answer. Its neighbourhood alone gives it the same view; Asks is read once for every
+   * open card ask, so an ask about this card on another card's ferret's ledger still shows.
    */
   it('should derive one card from its neighbourhood alone and give it the view the whole board gives it', async () => {
     // Arrange
@@ -1767,7 +1767,7 @@ describe('reading the board', () => {
     const ask = { ferret: 'stranger', id: 'A1' };
     const agenda = new CardAskLinks(
       {
-        open: async ferret => (ferret === 'stranger' ? [{ id: 'A1', cards: [], gateOf: ['F1'] }] : []),
+        open: async () => [{ ferret: 'stranger', id: 'A1', cardId: 'F1' }],
       },
       { warn: () => undefined },
     );
