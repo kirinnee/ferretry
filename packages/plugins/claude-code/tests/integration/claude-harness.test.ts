@@ -1293,3 +1293,36 @@ describe('F-0006 prepareHome links the selected skills into the ferret home', ()
     ).toBe(false);
   });
 });
+
+describe('B190 a login’s literal provider values are pinned in the home’s launch overlay', () => {
+  test('prepareHome writes the literals into launch-settings.json env, and no secret reference into any home file', async () => {
+    const { harness } = build();
+
+    const plan = await harness.prepareHome(
+      spec({
+        loginEnv: {
+          ANTHROPIC_BASE_URL: 'https://gateway.example.test',
+          ANTHROPIC_AUTH_TOKEN: '${secret:GW_TOKEN}',
+          ANTHROPIC_API_KEY: '${secret?:OPTIONAL_KEY}',
+          INDIRECT: '$GATEWAY_TOKEN',
+          FY_SESSION_TOKEN: 'forged',
+        },
+      }),
+    );
+
+    const overlay = JSON.parse(await readFile(join(HOME, 'launch-settings.json'), 'utf8')) as {
+      env?: Record<string, string>;
+    };
+    expect(overlay.env).toEqual({ ANTHROPIC_BASE_URL: 'https://gateway.example.test' });
+    for (const file of plan.files) expect(await readFile(file, 'utf8')).not.toContain('secret');
+  });
+
+  test('a launch without a login writes an overlay with no env key', async () => {
+    const { harness } = build();
+
+    await harness.prepareHome(spec());
+
+    const overlay = JSON.parse(await readFile(join(HOME, 'launch-settings.json'), 'utf8')) as { env?: unknown };
+    expect(overlay.env).toBeUndefined();
+  });
+});

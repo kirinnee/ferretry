@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
@@ -8,6 +8,7 @@ import { FakeGate, ownerStanding, StandInAdmission } from '@ferretry/core-gate/c
 import { FakeVault, fakeChildEnvironmentValues } from '@ferretry/core-vault/contract/testing';
 import type { SecretName } from '@ferretry/core-vault/contract';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
+import { err, ok } from '@ferretry/std';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { Harnesses, Logins, type LoginKind, Runners } from '../../../../contract/index.ts';
 import { FakeHarness, FakeLoginKind, FakeRunner } from '../../../../contract/testing/index.ts';
@@ -23,14 +24,24 @@ import ferrets from '../../../../daemon/index.ts';
 
 const GATEWAY_URL = 'https://gateway.example.test';
 const GATEWAY_TOKEN = 'fake-gateway-token-value';
+const STORE_VARIABLE = 'CLAUDE_SECURESTORAGE_CONFIG_DIR';
+const STORE_DIRECTORY = '/fixture-fy/state/logins/credentials/personal';
 
 /** A kind holding exactly the logins it was given, each with the env it answers per harness. */
 class HoldingKind extends FakeLoginKind implements LoginKind {
   constructor(
     key: ConstructorParameters<typeof FakeLoginKind>[0],
     private readonly logins: Readonly<Record<string, Readonly<Record<string, string>>>>,
+    /** What Ferretry sets for a sign-in (`launchEnvironment`), by login; a login named here with `null` has no usable sign-in. */
+    private readonly launch: Readonly<Record<string, Readonly<Record<string, string>> | null>> = {},
   ) {
     super(key, Object.keys(logins));
+  }
+  async launchEnvironment(login: string) {
+    const found = this.launch[login];
+    return found === null
+      ? err(`the login ${login} is not signed in (sign in again), so the ferret was not started`)
+      : ok(found ?? {});
   }
   override async env(login: string) {
     const found = this.logins[login];
@@ -105,7 +116,11 @@ async function boot(withLogins = true) {
     },
     broken: { ANTHROPIC_AUTH_TOKEN: '${secret:NOT_STORED}' },
   });
-  const oauth = new HoldingKind('anthropic', { personal: {} });
+  const oauth = new HoldingKind(
+    'anthropic',
+    { personal: {}, lapsed: {} },
+    { personal: { [STORE_VARIABLE]: STORE_DIRECTORY }, lapsed: null },
+  );
   const host: TestHost = await testHost({
     plugins: [
       ferrets,
@@ -144,16 +159,28 @@ describe('a ferret started on a login launches with that login’s environment',
     expect(JSON.stringify(spec)).not.toContain(GATEWAY_TOKEN);
   });
 
-  test('an OAuth login, and a start with no login, add no provider environment', async () => {
+  test('a signed-in Claude OAuth login launches with exactly its store variable; a start with no login gets none', async () => {
     const { host, harness } = await boot();
 
     expect((await start(host, 'personal')).status).toBeLessThan(300);
     expect((await start(host)).status).toBeLessThan(300);
     await host.settle();
 
+    expect(harness.children[0]?.[STORE_VARIABLE]).toBe(STORE_DIRECTORY);
+    expect(Object.keys(harness.children[0] ?? {}).filter(name => name.startsWith('ANTHROPIC'))).toEqual([]);
+    expect(harness.children[1]?.[STORE_VARIABLE]).toBeUndefined();
+    // It is Ferretry's own variable, not part of what the login file declares.
     expect(harness.launched.map(spec => spec.loginEnv)).toEqual([undefined, undefined]);
-    for (const child of harness.children)
-      expect(Object.keys(child).some(name => name.startsWith('ANTHROPIC'))).toBe(false);
+  });
+
+  test('an OAuth login with no usable sign-in refuses the start with a sentence and launches nothing', async () => {
+    const { host, harness } = await boot();
+
+    const started = await start(host, 'lapsed');
+
+    expect(started.status).toBeGreaterThanOrEqual(400);
+    expect(started.body).toContain('the login lapsed is not signed in');
+    expect(harness.launched).toHaveLength(0);
   });
 
   test('a login no kind holds refuses the start with a sentence, and nothing launches', async () => {
@@ -304,6 +331,49 @@ describe('a ferret on an environment login reaches the login’s endpoint', () =
       expect(hit).toBe(0);
     } finally {
       await server.stop(true);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Claude's documented store rule, as a stand-in: the secure-storage variable if set, else the config dir. Reads only
+  // whether the sign-in file is there; it prints nothing. (macOS keeps the same store as a keychain item hashed from the
+  // same directory, so the one variable selects it on both platforms and the launch keeps the real HOME.)
+  const SIGNED_IN_STUB = [
+    'import { existsSync } from "node:fs";',
+    'const store = process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR ?? "";',
+    'process.exit(store !== "" && existsSync(`${store}/.credentials.json`) ? 0 : 1);',
+    '',
+  ].join('\n');
+
+  test('a ferret on a signed-in OAuth login finds its sign-in through the variable; one without the login does not', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'fy-login-env-'));
+    try {
+      const store = join(dir, 'state', 'logins', 'credentials', 'personal');
+      await mkdir(store, { recursive: true });
+      await writeFile(join(store, '.credentials.json'), '{"fake":"not-a-credential"}');
+      const script = join(dir, 'claude-stub.ts');
+      await writeFile(script, SIGNED_IN_STUB);
+      const harness = new StubClaudeHarness(script);
+      const host = await testHost({
+        plugins: [
+          ferrets,
+          harnessPlugin(harness),
+          runnerPlugin(new FakeRunner()),
+          loginsPlugin(
+            new HoldingKind('endpoint', {}),
+            new HoldingKind('anthropic', { personal: {} }, { personal: { [STORE_VARIABLE]: store } }),
+          ),
+        ],
+        gate: new StandInAdmission(() => ownerStanding()),
+        fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
+      });
+
+      await start(host, 'personal');
+      await start(host);
+
+      // The first reads the sign-in; the second (positive control: same launch, no login, so no variable) is signed out.
+      expect(await Promise.all(harness.exits)).toEqual([0, 1]);
+    } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });

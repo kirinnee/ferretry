@@ -322,6 +322,7 @@ export function buildLoginsDaemon() {
         // The hook is Ferrets' trusted launch path (decision 19). Person operations stay on admitted Logins
         // routes; the private orchestration grants no caller standing and is not exported through LoginsApi.
         check: id => credentials.checkForLaunch(id),
+        signInVariables: id => credentials.launchEnvironment(id),
         startSignIn: id => harnessLogin.startForLaunch({ loginId: id as LoginId }),
         signInStatus: flowId => harnessLogin.status(flowId),
       });

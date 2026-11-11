@@ -12,7 +12,7 @@ import {
   queryValue,
 } from '@ferretry/kernel/contract';
 import { type DaemonContext, type DaemonHalf, implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
-import { err, milliseconds, ok } from '@ferretry/std';
+import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import {
   type FerretId,
   FerretChanged,
@@ -34,6 +34,7 @@ import {
   LAUNCH_ROOTS_KEY,
   LaunchRoots,
   Logins,
+  type LoginKind,
   LaunchParts,
   OPENING_ATTACHMENTS_KEY,
   OpeningAttachments,
@@ -411,6 +412,22 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   let wakeTurnWatch: ((ferret: FerretId) => void) | undefined;
   // Bound once the harness transcript is built below: a stopped ferret's remembered transcript and tail are dropped.
   let forgetTranscript: ((ferret: FerretId) => void) | undefined;
+  /** The `logins:<kind>` provider that holds the named login, or why none does. */
+  const loginKindOf = (login: string): Result<LoginKind, string> => {
+    const kinds = [...hooks.providers(Logins).values()];
+    if (kinds.length === 0) return err(`no login provider is running, so the login ${login} cannot be used`);
+    const kind = kinds.find(candidate => candidate.holds(login));
+    return kind === undefined
+      ? err(`there is no login named ${login} on this machine, so the ferret was not started`)
+      : ok(kind);
+  };
+  const answered = async <T>(login: string, read: () => Promise<T>): Promise<Result<T, string>> => {
+    try {
+      return ok(await read());
+    } catch {
+      return err(`the login ${login} could not be read, so the ferret was not started`);
+    }
+  };
   const service = new FerretsService(registry, tokens, {
     launchEnvironment,
     launchSections: {
@@ -454,13 +471,18 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     // The kind that HOLDS the login answers (`LoginKind.holds`): no kind trial, no caught throw. Each failure is a
     // fixed sentence; a Logins error is never quoted, because it can sit beside a credential.
     loginEnv: async (login, harness) => {
-      const kinds = [...hooks.providers(Logins).values()];
-      if (kinds.length === 0) return err(`no login provider is running, so the login ${login} cannot be used`);
-      const kind = kinds.find(candidate => candidate.holds(login));
-      if (kind === undefined)
-        return err(`there is no login named ${login} on this machine, so the ferret was not started`);
+      const kind = loginKindOf(login);
+      if (!kind.ok) return kind;
+      return await answered(login, async () => await kind.value.env(login, harness));
+    },
+    // What Ferretry sets so the harness is signed in (`LoginKind.launchEnvironment`); a kind with none adds none.
+    loginLaunchEnv: async (login, harness) => {
+      const kind = loginKindOf(login);
+      if (!kind.ok) return kind;
+      const launch = kind.value.launchEnvironment;
+      if (launch === undefined) return ok({});
       try {
-        return ok(await kind.env(login, harness));
+        return await launch.call(kind.value, login, harness);
       } catch {
         return err(`the login ${login} could not be read, so the ferret was not started`);
       }
