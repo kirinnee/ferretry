@@ -98,7 +98,7 @@ import { parseSessionId, type SessionId, tryParseSessionId } from './seams/ferre
 import type { ClockPort } from './seams/ports.ts';
 import type { SessionView } from './seams/protocol.ts';
 
-/** Said by every route that needs the ferret's terminal and is not connected to it: a send, an interrupt, the composer, a question's form, a retry. */
+/** Said by every route that needs the ferret's terminal and is not connected to it: an explicit send retry, the compact-at setting. */
 const TERMINAL_PENDING =
   "This needs the ferret's terminal, and Conversation is not connected to it yet. Drive the ferret from its terminal for now.";
 
@@ -276,9 +276,9 @@ export interface ConversationAHalf {
  * Part a of Conversation's daemon half: the queue, the send ledger, questions, turns and the shared draft, on the
  * kernel's state, clock, events and ids. A send and an interrupt go through Ferrets' harness seam, which answers a
  * closed refusal for a send and presses the harness's own stop key (`deps.gate` can still hold either back, 503).
- * Everything else that needs the pane (the composer actions, a send's retry, cancel and submit, answering a question's
- * form, the harness's own compact-at setting) is wired to a refusal that says so; the queue, the ledger reads, the
- * shared draft and its stream are real.
+ * The composer actions, a send's cancel and Enter, and answering a question's form (the structured-question drive over
+ * the harness's form seam) are wired too. What is not (a send's explicit retry, the harness's own compact-at setting) is
+ * wired to a refusal that says so; the queue, the ledger reads, the shared draft and its stream are real.
  */
 export function buildConversationA(deps: {
   readonly kernel: KernelPorts;
@@ -342,7 +342,7 @@ export function buildConversationA(deps: {
   /**
    * THE TERMINAL SEAM: typing and interrupting go through Ferrets' harness seam (`FerretsApi.harness`), whose runner acts
    * on the ferret's terminal itself, so nothing here wraps a call in an act of its own. Answering a question's form is
-   * the structured-question drive, which still waits on its own wiring.
+   * the structured-question drive (`answering`, below), which types through the harness's form seam the same way.
    */
   const terminal = terminalSeam(ferrets);
   /**
@@ -673,9 +673,9 @@ export function buildConversationA(deps: {
    *  - a pane behind a blocking prompt (a permission, a picker) is not pressed: Escape would answer it for the person;
    * Where it does not press, the send goes on as any send does, and the delivery decides (type, queue, or refuse).
    * A ferret holding a pending structured question never reaches here: {@link refuseWhileAsking} refuses every send to it
-   * first. That check reads `question.json`, which NOTHING writes on 5.0 yet (the observer's question part is not
-   * mounted), so until it does, only this pane read stands between a send-now and a question form — and it is unproven on
-   * an AskUserQuestion screen (see the conversation line in `ports-pending.json`).
+   * first. That check reads `question.json`, which the question watch writes from the hook's file for a Claude Code ferret
+   * (one question or a tabbed form of several). A Codex `request_user_input` is not detected (no hook; see the
+   * claude-code line in `ports-pending.json`), so for Codex only this pane read stands between a send-now and a form.
    */
   const stopForNow = async (ferret: SessionId, bound: Awaited<ReturnType<typeof terminal.bind>>): Promise<void> => {
     const pane = await lookAtPane.observe(ferret);
@@ -688,7 +688,7 @@ export function buildConversationA(deps: {
    * TODAY'S `authorizeSend` REFUSAL, for every send (plain or now): a ferret holding an unanswered structured question
    * is showing a form, not a composer, and typing prose into it selects whichever option the keys land on. Nothing is
    * typed, nothing is kept, and the sentence is today's (`SendUnavailable`, answered as the route answers every
-   * session-side refusal: 409 `send_refused`). Inert until something writes `question.json` (see {@link stopForNow}).
+   * session-side refusal: 409 `send_refused`). Live for every Claude Code question the watch has stored (see {@link stopForNow}).
    */
   const refuseWhileAsking = async (ferret: SessionId): Promise<void> => {
     try {

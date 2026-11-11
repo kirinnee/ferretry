@@ -181,11 +181,7 @@
       "ignore": [
         "app/render/fy-render-workspace-media.ts",
         "app/render/workspace-path.ts",
-        "daemon/questions/lib/answer-wording.ts",
-        "daemon/questions/lib/coordinator.ts",
         "daemon/questions/lib/projection.ts",
-        "daemon/questions/lib/rendered-form.ts",
-        "daemon/questions/lib/service.ts",
         "daemon/reader/lib/session/conversation-index.ts",
         "daemon/reader/lib/session/reader.ts",
         "daemon/reader/lib/session/tail-cache.ts",
