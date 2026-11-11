@@ -5,14 +5,16 @@ import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { gateReference } from '../../../contract/index.ts';
 import {
   AsksCardObligations,
-  AsksFerretReader,
+  AsksCardAskReader,
   AsksOptIn,
   AsksThreads,
   CARD_SOURCE,
   gateAnswerOf,
 } from '../../../daemon/adapters/asks.ts';
 import { FerretsHelpers, FerretsLiveness, FerretsNames, FerretsParents } from '../../../daemon/adapters/ferrets.ts';
+import { CardAskLinks } from '../../../daemon/lib/board/index.ts';
 import { KeyedSerial } from '../../../daemon/lib/lanes/serial.ts';
+import { card } from '../../support/board.ts';
 
 const gate = (cardId: string, entry = 1) => gateReference({ cardId, laneId: 'plan', entry });
 
@@ -82,8 +84,8 @@ describe('a card gate as an obligation in Asks', () => {
   });
 });
 
-describe('a ferret’s open asks, read for the cards they are about', () => {
-  test('a gate ask names its card, a plain ask names none, a notice is flagged, and a name that is no ferret has none', async () => {
+describe('the open card asks, read for the cards they are about', () => {
+  test('every ledger’s gate asks name their card in one read; a plain ask and a notice from another source are left out', async () => {
     const asks = new FakeAsks();
     await new AsksCardObligations(asks).raise(gateDraft('F1'));
     await asks.raise({
@@ -96,15 +98,38 @@ describe('a ferret’s open asks, read for the cards they are about', () => {
       raisedBy: { kind: 'ferret', ferret: 'f1' },
       ferret: 'f1',
     });
-    const reader = new AsksFerretReader(asks);
+    await new AsksCardObligations(asks).raise(gateDraft('F2', 1, 'f2'));
+    await asks.raise({ ...gateDraft('F3'), entry: entryId('not-a-gate') });
+    const reader = new AsksCardAskReader(asks);
 
-    const open = await reader.open('f1');
+    const open = await reader.open();
 
-    expect(open.map(ask => ({ notice: ask.notice, cards: ask.cards, gateOf: ask.gateOf }))).toEqual([
-      { notice: false, cards: ['F1'], gateOf: ['F1'] },
-      { notice: true, cards: [], gateOf: [] },
+    expect(open.map(ask => ({ ferret: ask.ferret, cardId: ask.cardId, notice: ask.notice }))).toEqual([
+      { ferret: 'f1', cardId: 'F1', notice: false },
+      { ferret: 'f2', cardId: 'F2', notice: false },
     ]);
-    expect(await reader.open('not a ferret id!')).toEqual([]);
+  });
+});
+
+describe('the asks a card carries, through the real Asks reader', () => {
+  test('a card shows the gate ask on its ferret’s ledger and on a ledger outside its board, and an answered one is gone', async () => {
+    const asks = new FakeAsks();
+    const obligations = new AsksCardObligations(asks);
+    await obligations.raise(gateDraft('F1', 1, 'owner'));
+    await obligations.raise(gateDraft('F1', 2, 'stranger'));
+    await obligations.raise(gateDraft('F2', 1, 'helper'));
+    await asks.raise({ ...gateDraft('F1'), entry: entryId('not-a-gate') });
+    const links = new CardAskLinks(new AsksCardAskReader(asks), { warn: () => undefined });
+    const cards = [card({ id: 'F1', owner: 'owner' }), card({ id: 'F2', owner: 'owner', assignee: 'helper' })];
+
+    const found = await links.asksFor(cards);
+
+    expect(found.get('F1')?.open.map(ref => ref.ferret)).toEqual(['owner', 'stranger']);
+    expect(found.get('F1')?.asking).toEqual(found.get('F1')?.open ?? []);
+    expect(found.get('F2')?.open.map(ref => ref.ferret)).toEqual(['helper']);
+    const [first] = found.get('F1')?.open ?? [];
+    asks.answerAs({ ferret: first!.ferret, id: first!.id as never }, 'approve');
+    expect((await links.asksFor(cards)).get('F1')?.open.map(ref => ref.ferret)).toEqual(['stranger']);
   });
 });
 

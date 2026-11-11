@@ -4,90 +4,64 @@
  * and that it is never stale while its ask is open), so the card store holds no copy and answering the ask clears it
  * with no write to the card.
  *
- * An ask carries a card when it is about the card (a ferret's own ask naming it, or a card a merge brought in) or is
- * one of the card's gate obligations (source `card`). An ask lives on the ledger of the ferret that raised it, or of
- * the ferret the daemon raised it for; the ledgers read are the ferrets on the board — every card's owner and
- * assignee — and their homes, because a card's ask goes on its ferret's home. A notice is context, never an ask, so
- * it is not counted.
+ * A card links ONE kind of ask: the card's own gate obligation (source `card`, whose entry names the card). Asks has
+ * no other link to a card, so there is nothing else to read: the open `card` asks are read in ONE call, whatever the
+ * size of the board, and grouped by the card each names. (The board once read the ledger of every card's owner and
+ * assignee, and their homes, for these same asks: O(ferrets) reads of every card list, closed cards included.) A
+ * gate ask on a ledger outside the board's ferrets therefore shows too. A notice is context, never an ask, so it is
+ * not counted.
  */
 import type { AskRef } from '../../../contract/index.ts';
 import type { Card, CardId } from '../../../contract/index.ts';
-import { effectiveAssignee } from './authority.ts';
 import type { CardAskLinkSource, CardAsks } from './ports.ts';
 
-/** The part of an open ask the link reads. */
-export interface OpenAskFacts {
-  /** The ask's id on its ferret's ledger (`A12`). */
+/** The part of an open card ask the link reads. */
+export interface OpenCardAsk {
+  /** The ferret whose ledger the ask lives on. */
+  readonly ferret: string;
+  /** The ask's id on that ledger (`A12`). */
   readonly id: string;
+  /** The card whose gate obligation it is. */
+  readonly cardId: CardId;
   /** A notice is context, never an ask. */
   readonly notice?: boolean | undefined;
-  /** The cards it is about (a thread linked to a card, a merge). */
-  readonly cards: readonly CardId[];
-  /** The cards for which it is the open gate obligation. */
-  readonly gateOf: readonly CardId[];
 }
 
-/** One ferret's open asks, read through Asks (`AsksApi.open`). Empty for a ferret with none. */
-export interface FerretAsksReader {
-  open(ferret: string): Promise<readonly OpenAskFacts[]>;
+/** Every open ask of the `card` source, read through Asks (`AsksApi.open`) in one call. */
+export interface CardAskReader {
+  open(): Promise<readonly OpenCardAsk[]>;
 }
-
-/** Where a ferret's asks live: its home, the owner's own ferret at the root of its lineage. */
-export interface AskHomeLookup {
-  of(ferret: string): Promise<string>;
-}
-
-/** How many ledgers are read at once. */
-export const ASK_READ_CONCURRENCY = 16;
-
-/** Every ferret is its own home: for a board without helpers, and the tests. */
-const SELF_HOMES: AskHomeLookup = { of: async ferret => ferret };
 
 export class CardAskLinks implements CardAskLinkSource {
   constructor(
-    private readonly asks: FerretAsksReader,
+    private readonly asks: CardAskReader,
     private readonly diagnostics: { warn(message: string): void },
-    private readonly homes: AskHomeLookup = SELF_HOMES,
   ) {}
 
-  async asksFor(
-    cards: readonly Card[],
-    board: readonly Card[] = cards,
-    signal?: AbortSignal,
-  ): Promise<ReadonlyMap<CardId, CardAsks>> {
-    const ferrets = [...new Set(board.flatMap(card => [card.owner, effectiveAssignee(card)]))];
-    const homes = await Promise.all(ferrets.map(async each => await this.homes.of(each).catch(() => each)));
-    const ledgers = [...new Set([...ferrets, ...homes])];
+  async asksFor(cards: readonly Card[], signal?: AbortSignal): Promise<ReadonlyMap<CardId, CardAsks>> {
+    signal?.throwIfAborted();
+    const wanted = new Set<CardId>(cards.map(card => card.id));
     const found = new Map<CardId, { open: AskRef[]; asking: AskRef[] }>();
-    for (let start = 0; start < ledgers.length; start += ASK_READ_CONCURRENCY) {
-      signal?.throwIfAborted();
-      const batch = ledgers.slice(start, start + ASK_READ_CONCURRENCY);
-      const read = await Promise.all(batch.map(async ferret => [ferret, await this.read(ferret)] as const));
-      for (const [ferret, items] of read) {
-        for (const item of items) {
-          if (item.notice === true) continue;
-          const ref: AskRef = { ferret, id: item.id };
-          for (const card of cards) {
-            const gate = item.gateOf.includes(card.id);
-            if (!gate && !item.cards.includes(card.id)) continue;
-            const entry = found.get(card.id) ?? { open: [], asking: [] };
-            entry.open.push(ref);
-            if (gate) entry.asking.push(ref);
-            found.set(card.id, entry);
-          }
-        }
-      }
+    const items = await this.read();
+    signal?.throwIfAborted();
+    for (const item of items) {
+      if (item.notice === true || !wanted.has(item.cardId)) continue;
+      const ref: AskRef = { ferret: item.ferret, id: item.id };
+      const entry = found.get(item.cardId) ?? { open: [], asking: [] };
+      entry.open.push(ref);
+      entry.asking.push(ref);
+      found.set(item.cardId, entry);
     }
     return found;
   }
 
-  /** A ledger that cannot be read costs its asks, never the board read. */
-  private async read(ferret: string): Promise<readonly OpenAskFacts[]> {
+  /** Asks that cannot be read costs the cards their asks, never the board read. */
+  private async read(): Promise<readonly OpenCardAsk[]> {
     try {
-      return await this.asks.open(ferret);
+      return await this.asks.open();
     } catch (error) {
       this.diagnostics.warn(
-        `could not read the asks of ${ferret} for its cards: ${error instanceof Error ? error.message : String(error)}`,
+        `could not read the asks of the cards: ${error instanceof Error ? error.message : String(error)}`,
       );
       return [];
     }

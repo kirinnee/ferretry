@@ -2,7 +2,6 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type { Card } from '../../../contract/index.ts';
-import { ASK_READ_CONCURRENCY } from '../../../daemon/lib/board/ask-links.ts';
 import manifest from '../../../manifest.ts';
 import { as, boot, makeCard, TEST_IDENTITY } from '../../integration/daemon/harness.ts';
 import { card, PROJECT } from './support.ts';
@@ -87,10 +86,10 @@ describe('the board gate list through the real wiring (G1)', () => {
     // Act: the gate reconcile, whose card list is `gateBoard.cards()`
     await job.run(new AbortController().signal);
 
-    // Assert: one sweep reads each of the 20 ferrets' ledgers once, plus the reconcile's own single read of every open
-    // card ask (`openAll`) and one of the answered ones, and each of the 5 asks raised reads its own ledger once more.
-    // A per-card derivation reads 3000 times that.
-    should(calls.get('open')).equal(FERRETS + 1 + 5);
+    // Assert: one sweep reads the open card asks once (not once per ferret's ledger), plus the reconcile's own single
+    // read of every open card ask (`openAll`) and one of the answered ones, and each of the 5 asks raised reads its
+    // own ledger once more. A per-card derivation reads 3000 times that.
+    should(calls.get('open')).equal(1 + 1 + 5);
     should(calls.get('answers')).equal(1 + 5);
     // And the cards at a gate came out of that one list with their content: each asks the owner about its own card
     const raised = await asks.open({});
@@ -146,9 +145,6 @@ describe('the board sweep reads the board afresh on every pass (G3)', () => {
   }, 120_000);
 });
 
-/** How many ledgers one batch of the card-ask read takes at once. */
-const BATCH = ASK_READ_CONCURRENCY;
-
 /** Asks that stops the sweep the moment its first ledger is read, the way the daemon's stop does mid-pass. */
 const stoppedAtFirstRead = () => {
   const stop = new AbortController();
@@ -159,9 +155,8 @@ const stoppedAtFirstRead = () => {
 };
 
 describe('the board sweep stops with the daemon (G2)', () => {
-  it('should read one batch of ledgers, not the whole board, once stopped at the first read', async () => {
-    // Arrange: 3000 cards over 100 ferrets, so the board's ledgers are read in several batches; the stop comes with
-    // the first read
+  it('should make the one card-ask read and no more once stopped at that read', async () => {
+    // Arrange: 3000 cards over 100 ferrets; the stop comes with the first (and only) Asks read
     const { stop, asks, calls } = stoppedAtFirstRead();
     const world = await boot({ asks });
     await seed(world.host, 100);
@@ -174,14 +169,13 @@ describe('the board sweep stops with the daemon (G2)', () => {
       (error: unknown) => error,
     );
 
-    // Assert: the sweep ended with the stop's own reason, one batch in; the later batches were never read
+    // Assert: the sweep ended with the stop's own reason, at the one Asks read; nothing was read after it
     should(outcome).equal(stop.signal.reason);
-    should(calls.get('open')).equal(BATCH);
+    should(calls.get('open')).equal(1);
   }, 120_000);
 
   it('should plan, nudge and remember nothing once the stop came before the plan', async () => {
-    // Arrange: 10 ferrets are ONE batch, so the stop lands in the only read and the derivation itself finishes; only
-    // the sweep's own check after it can end the tick before it writes its memory
+    // Arrange: the stop lands in the only Asks read; the sweep must end the tick before it plans or writes its memory
     const { stop, asks } = stoppedAtFirstRead();
     const world = await boot({ asks });
     await seed(world.host, 10);
