@@ -12,7 +12,8 @@ export function turnPaneEvidenceOf(pane: PaneState, parsers: PaneParsers): TurnP
   return {
     working: work !== undefined,
     ...(work === 'spinner' ? { spinnerOnly: true } : {}),
-    atPrompt: pane.promptReady,
+    // An idle composer holding a draft is still an idle prompt; `promptReady` (accepts a send) says no to it.
+    atPrompt: pane.promptReady || (!pane.dead && parsers.idlePromptShown(pane.visible)),
     permission: request !== undefined || parsers.paneShowsPermissionPrompt(pane.visible),
     prompt: parsers.paneBlockingPrompt(pane.visible),
     request,

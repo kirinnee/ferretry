@@ -59,5 +59,7 @@ export interface PaneParsers {
   paneActiveWork(pane: string): 'status' | 'spinner' | undefined;
   paneShowsPermissionPrompt(pane: string): boolean;
   paneBlockingPrompt(pane: string): string | undefined;
+  /** Whether the pane shows an IDLE composer, whatever the box holds (a draft included): no work, dialog or permission prompt. */
+  idlePromptShown(pane: string): boolean;
   parseHarnessDialog(pane: string): HarnessDialog | undefined;
 }

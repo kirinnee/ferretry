@@ -35,6 +35,19 @@ describe('the work counters on a screen', () => {
     should(paneWorkCounters('✻ Working… (esc to interrupt)')).be.undefined();
     should(paneWorkCounters('Total: (5s) 20 tokens')).be.undefined();
   });
+
+  it('B188 should read a compaction as active work on any tick, as the terminals plugin reads it', () => {
+    // A compaction's `·` and ASCII `*` frames carry a clock with no separator dot, so no other marker takes them.
+    const frame = (line: string): string => `⏺ Done reading.\n\n${line}\n\n${'─'.repeat(40)}\n❯ \n${'─'.repeat(40)}`;
+
+    // Act / Assert
+    should(paneWorkCounters(frame('· Compacting conversation… (3s)'))).deepEqual({ elapsedSeconds: 3 });
+    should(paneWorkCounters(frame('* Compacting conversation... (1m 12s)'))).deepEqual({ elapsedSeconds: 72 });
+    should(paneWorkCounters(frame('✢ Compacting conversation… (2m 5s)'))).deepEqual({ elapsedSeconds: 125 });
+    // Prose that merely starts "Compacting", and a status line far above the composer, are not work.
+    should(paneWorkCounters(frame('· Compacting the notes… (3s)'))).be.undefined();
+    should(paneWorkCounters(`· Compacting conversation… (3s)\n${'row\n'.repeat(13)}❯ `)).be.undefined();
+  });
 });
 
 describe('folding a look into the ledger', () => {

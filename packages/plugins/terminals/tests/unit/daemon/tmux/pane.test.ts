@@ -3,11 +3,11 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import should from 'should';
 import {
-  COMPACTING_LINE,
   idlePromptShown,
   paneActiveWork,
   paneBlockingPrompt,
   paneShowsActiveWork,
+  paneShowsCompacting,
   paneShowsPermissionPrompt,
   promptIsReady,
 } from '../../../../daemon/lib/tmux/pane.ts';
@@ -380,7 +380,6 @@ describe('B188 a compaction is work, whatever the tick glyph', () => {
     const actual = {
       middot: paneActiveWork(withLine('· Compacting conversation… (3s)')),
       star: paneActiveWork(withLine('✶ Compacting conversation… (3s)')),
-      bullet: paneActiveWork(withLine('• Compacting conversation… (3s)')),
       ink: ['✻', '✳', '✶', '✽', '✢', '∗'].map(glyph => paneActiveWork(withLine(`${glyph} Compacting conversation…`))),
     };
 
@@ -388,7 +387,6 @@ describe('B188 a compaction is work, whatever the tick glyph', () => {
     should(actual).deepEqual({
       middot: 'status',
       star: 'status',
-      bullet: 'status',
       ink: ['status', 'status', 'status', 'status', 'status', 'status'],
     });
   });
@@ -422,15 +420,89 @@ describe('B188 a compaction is work, whatever the tick glyph', () => {
     should(actual).deepEqual({ middot: undefined, star: undefined, ready: true });
   });
 
-  it('B188 the exported compaction pattern is anchored to the start of a line', () => {
+  it('B188 the status line counts only inside the 12 rows above the end of the frame', () => {
+    // Arrange — the line sits at row N counted from the last row (row 1): 12 rows is the window.
+    const rowsBelow = (below: number): string =>
+      ['· Compacting conversation…', ...Array.from({ length: below - 1 }, (_, row) => `  detail row ${row + 1}`)].join(
+        '\n',
+      );
+
     // Act
     const actual = {
-      line: COMPACTING_LINE.test('  ✢ Compacting conversation…'),
-      inProse: COMPACTING_LINE.test('we were · Compacting conversation…'),
+      twelfth: paneShowsCompacting(rowsBelow(12)),
+      thirteenth: paneShowsCompacting(rowsBelow(13)),
+      sixteenth: paneShowsCompacting(rowsBelow(16)),
+      workAtTwelfth: paneActiveWork(rowsBelow(12)),
+      workAtThirteenth: paneActiveWork(rowsBelow(13)),
     };
 
     // Assert
-    should(actual).deepEqual({ line: true, inProse: false });
+    should(actual).deepEqual({
+      twelfth: true,
+      thirteenth: false,
+      sixteenth: false,
+      workAtTwelfth: 'status',
+      workAtThirteenth: undefined,
+    });
+  });
+
+  it('B188 trailing blank rows do not push a live status line out of the window', () => {
+    // Act
+    const actual = paneShowsCompacting(`· Compacting conversation…\n${'\n'.repeat(30)}`);
+
+    // Assert
+    should(actual).be.true();
+  });
+
+  it('B188 ordinary prose that starts "Compacting" just above a quiet composer is not a compaction', () => {
+    // Inside the window, right over the composer, but not Claude's status wording or its valid suffix.
+    for (const line of [
+      '  * Compacting the notes… is next',
+      '· Compacting the notes…',
+      '• Compacting conversation… (3s)',
+      '* Compacting conversation… is what the log said',
+      '· Compacting conversation… (see the notes)',
+      '· Compacting conversation… and then more',
+    ]) {
+      should([line, paneActiveWork(withLine(line)), paneShowsCompacting(withLine(line))]).deepEqual([
+        line,
+        undefined,
+        false,
+      ]);
+      should([line, idlePromptShown(withLine(line))]).deepEqual([line, true]);
+    }
+  });
+
+  it('B188 the word Compacting without a glyph and an ellipsis is not work', () => {
+    // Act
+    const actual = [
+      paneActiveWork(withLine('Compacting is what the harness calls it')),
+      paneActiveWork(withLine('· Compacting')),
+    ];
+
+    // Assert
+    should(actual).deepEqual([undefined, undefined]);
+  });
+
+  it('B188 a Compacting line with the interrupt hint alone reads as status in both ellipses', () => {
+    // Act
+    const actual = {
+      unicode: paneActiveWork(withLine('✢ Compacting conversation… (esc to interrupt)')),
+      ascii: paneActiveWork(withLine('✢ Compacting conversation... (esc to interrupt)')),
+      readyUnicode: promptIsReady(withLine('✢ Compacting conversation… (esc to interrupt)'), cursorY, cursorX),
+      // The interrupt hint alone already reads as work; what the compaction flag needs is the status line itself.
+      compactingUnicode: paneShowsCompacting(withLine('✢ Compacting conversation… (esc to interrupt)')),
+      compactingAscii: paneShowsCompacting(withLine('✢ Compacting conversation... (esc to interrupt)')),
+    };
+
+    // Assert
+    should(actual).deepEqual({
+      unicode: 'status',
+      ascii: 'status',
+      readyUnicode: false,
+      compactingUnicode: true,
+      compactingAscii: true,
+    });
   });
 
   it('B188 idlePromptShown is true for an idle composer holding a draft; promptIsReady stays false', () => {

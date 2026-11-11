@@ -50,6 +50,12 @@ export interface TranscriptEventMetadata {
    * message, `harness` marks a record Claude Code wrote without any model speaking (`model: "<synthetic>"`).
    */
   readonly inputSource?: 'native-queue' | 'harness';
+  /**
+   * Claude's own `isCompactSummary` marker, carried by every block of the user record that summarises a
+   * compaction ("This session is being continued…"). It is the harness tidying its context: not a person speaking
+   * and not a turn starting (&B188).
+   */
+  readonly compactSummary?: true;
   readonly blockIndex?: number;
 }
 

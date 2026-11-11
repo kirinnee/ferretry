@@ -291,6 +291,7 @@ export const SCRIPTED_PANE_PARSERS: PaneParsers = Object.freeze<PaneParsers>({
   paneActiveWork: activeWork,
   paneShowsPermissionPrompt: scriptedPaneShowsPermissionPrompt,
   paneBlockingPrompt: () => undefined,
+  idlePromptShown: () => false,
   parseHarnessDialog: () => undefined,
 });
 

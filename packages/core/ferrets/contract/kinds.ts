@@ -398,6 +398,11 @@ export interface RunnerPaneObservation {
   readonly promptReady: boolean;
   /** The harness is visibly mid-turn (a half-typed draft is neither this nor prompt-ready). */
   readonly activeWork: boolean;
+  /**
+   * The harness is visibly COMPACTING its context (&B188). A subset of `activeWork` that outranks a stored status: a
+   * person can start `/compact` from `awaiting_user` or `interrupted`, so those records say nothing about it.
+   */
+  readonly compacting?: boolean;
   /** Codex accepted a submission and PARKED it until its startup ends: the composer text is not a draft. */
   readonly startupParked?: boolean;
   /** A harness dialog, permission prompt or picker the pane is parked on, in the words a person is shown for it. */
