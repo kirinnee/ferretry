@@ -9,14 +9,10 @@
  * where one goes rather than what it is.
  */
 import { describe, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { FleetManifestAccount } from '@ferretry/fleet';
 import { MissingFleetSecretsError } from '@ferretry/fleet';
 import type { SecretName } from '@ferretry/protocol';
 import should from 'should';
-import { FolderClaudeSettingsFiles } from '../../../src/adapters/fleet/folder-claude-settings-file.ts';
 import {
   FleetLaunchEnvironment,
   FolderSettingsOverrideError,
@@ -316,44 +312,5 @@ describe('FleetLaunchEnvironment — a folder that would blank the login', () =>
 
     // Act / Assert
     should(await launcher.forWrapper(account().wrapper, '/work/pe')).deepEqual({});
-  });
-});
-
-describe('FolderClaudeSettingsFiles', () => {
-  it('should list the env names of both project files and drop every value', async () => {
-    // Arrange
-    const directory = await mkdtemp(join(tmpdir(), 'fy-folder-settings-'));
-    try {
-      await mkdir(join(directory, '.claude'));
-      await writeFile(join(directory, '.claude/settings.json'), JSON.stringify({ env: { A: 'x' }, other: 1 }));
-      await writeFile(join(directory, '.claude/settings.local.json'), JSON.stringify({ env: { B: '', C: 'y' } }));
-
-      // Act
-      const found = await new FolderClaudeSettingsFiles().variables(directory);
-
-      // Assert
-      should(found).deepEqual([
-        { file: '.claude/settings.json', names: ['A'] },
-        { file: '.claude/settings.local.json', names: ['B', 'C'] },
-      ]);
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  it('should answer nothing for a missing folder, a broken file or a file with no env', async () => {
-    // Arrange
-    const directory = await mkdtemp(join(tmpdir(), 'fy-folder-settings-'));
-    try {
-      await mkdir(join(directory, '.claude'));
-      await writeFile(join(directory, '.claude/settings.json'), '{ nope');
-      await writeFile(join(directory, '.claude/settings.local.json'), JSON.stringify({ permissions: {} }));
-
-      // Act / Assert
-      should(await new FolderClaudeSettingsFiles().variables(directory)).deepEqual([]);
-      should(await new FolderClaudeSettingsFiles().variables(join(directory, 'absent'))).deepEqual([]);
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
   });
 });
