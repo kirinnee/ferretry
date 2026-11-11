@@ -284,6 +284,36 @@ describe('the agenda repository cache limit', () => {
     should(files.parses).equal(keptParses + 1);
   });
 
+  it('should hold every listed ledger, so a second pass over 2,100 of them re-reads no file', async () => {
+    // Arrange: more ledgers than the floor; the caller listed them, the way a read of every ledger does
+    const { files, repository } = subject();
+    const count = AGENDA_CACHE_LIMIT + 52;
+    seed(files, count);
+    repository.holdLedgers(count);
+    for (let n = 0; n < count; n += 1) await repository.read(`bounded-${n}`);
+    const parsed = files.parses;
+    const reads = files.fullReads.length;
+
+    // Act
+    for (let n = 0; n < count; n += 1) await repository.read(`bounded-${n}`);
+
+    // Assert
+    should(files.parses).equal(parsed);
+    should(files.fullReads.length).equal(reads);
+  });
+
+  it('should never hold fewer than the floor, whatever count the caller lists', async () => {
+    const { files, repository } = subject();
+    seed(files, AGENDA_CACHE_LIMIT);
+    repository.holdLedgers(3);
+    for (let n = 0; n < AGENDA_CACHE_LIMIT; n += 1) await repository.read(`bounded-${n}`);
+    const parsed = files.parses;
+
+    for (let n = 0; n < AGENDA_CACHE_LIMIT; n += 1) await repository.read(`bounded-${n}`);
+
+    should(files.parses).equal(parsed);
+  });
+
   it('should keep a session that was read again recently, and drop the next oldest instead', async () => {
     // Arrange
     const { files, repository } = subject();
