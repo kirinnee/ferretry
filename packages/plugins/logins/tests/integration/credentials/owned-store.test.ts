@@ -474,7 +474,13 @@ test('owned passive usage supplies measured windows; a list never rotates Codex,
     expect(list.logins.find(login => login.id === 'codex')?.status.word).toBe('refresh_due');
     const checked = await host.request('POST', '/v1/logins/codex/check', { body: {} });
     expect(checked.status).toBe(200);
-    expect(starts).toEqual([{ program: 'codex', args: ['app-server'], env: { CODEX_HOME: join(f.base, 'codex') } }]);
+    expect(starts).toEqual([
+      {
+        program: 'codex',
+        args: ['-c', 'cli_auth_credentials_store="file"', 'app-server'],
+        env: { CODEX_HOME: join(f.base, 'codex') },
+      },
+    ]);
     expect(checked.json<{ status: { word: string } }>().status.word).toBe('ready');
     expect(checked.body.includes(REFRESH)).toBe(false);
     if (launchKind?.refresh === undefined) throw new Error('missing actual launch refresh hook');

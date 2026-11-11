@@ -4,6 +4,7 @@ import {
   type InstructionEntry,
   REFUSAL_CODES,
   type RefusalCode,
+  type SharedCredential,
   type SharedTree,
 } from '@ferretry/kernel/contract';
 import { z } from 'zod';
@@ -726,7 +727,23 @@ export interface LoginKind {
   quota?(login: string): Promise<LoginQuota | undefined>;
   /** The environment or config the harness needs, values as `${secret:NAME}` only. */
   env(login: string, harness: HarnessKey): Promise<Readonly<Record<string, string>>>;
+  /**
+   * For a login whose sign-in is a FILE the harness reads (Codex's `auth.json`): the file shared with that harness, or
+   * why it cannot be used. Absent on a kind that has none (an environment login). Never refreshes: a Codex refresh
+   * spends a single-use token, and the harness renews its own file in place.
+   */
+  credential?(login: string, harness: HarnessKey): Promise<LoginCredentialAnswer>;
 }
+
+/**
+ * What {@link LoginKind.credential} answers. `file` carries the kernel's unforgeable {@link SharedCredential} (never a
+ * path or a value); `unavailable` carries one plain sentence naming the login and the remedy, never a path or a token.
+ */
+export type LoginCredentialAnswer =
+  /** Nothing to place: this login arrives as environment, or this kind has no sign-in file. */
+  | { readonly kind: 'none' }
+  | { readonly kind: 'file'; readonly credential: SharedCredential }
+  | { readonly kind: 'unavailable'; readonly sentence: string };
 
 // ─── sitrep ───────────────────────────────────────────────────────────────────────────────────────────────────────
 

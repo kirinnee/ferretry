@@ -22,6 +22,7 @@ import {
   type Delivery,
   type Harness,
   type LaunchSpec,
+  type LoginCredentialAnswer,
   type LoginKind,
   type OutboundMessage,
   type QueueOutcome,
@@ -521,7 +522,14 @@ export function harnessConformance(name: string, make: () => HarnessSubject | Pr
 export class FakeLoginKind implements LoginKind {
   readonly fields = [{ id: 'key', label: 'API key', secret: true }];
   readonly harnesses: readonly HarnessKey[] = ['claude-code'];
-  constructor(readonly key: LoginKindKey = 'api-key') {}
+  /** Present only when the fake was given an answer: a kind with no sign-in file has no `credential` member. */
+  readonly credential?: LoginKind['credential'];
+  constructor(
+    readonly key: LoginKindKey = 'api-key',
+    answer?: LoginCredentialAnswer,
+  ) {
+    if (answer !== undefined) this.credential = async () => answer;
+  }
   async signIn() {
     return { kind: 'done' as const };
   }
@@ -571,6 +579,20 @@ export function loginKindConformance(
       const ids = login.fields.map(field => field.id);
       expect(new Set(ids).size).toBe(ids.length);
       expect(login.harnesses.length).toBeGreaterThan(0);
+    });
+    test('credential, when a kind has one, answers a closed set: a shared file, nothing, or one sentence without a path', async () => {
+      const login = await make();
+      if (login.credential === undefined) return;
+      for (const harness of login.harnesses) {
+        const answer = await login.credential('work', harness);
+        expect(['none', 'file', 'unavailable']).toContain(answer.kind);
+        if (answer.kind === 'unavailable') {
+          expect(answer.sentence.length).toBeGreaterThan(0);
+          expect(answer.sentence).not.toContain('/');
+        }
+        // A shared credential is opaque: no field of its own, so no path and no value can ride on it.
+        if (answer.kind === 'file') expect(Object.keys(answer.credential)).toEqual([]);
+      }
     });
     test('env carries every credential-bearing entry only as a ${secret:NAME} reference', async () => {
       const login = await make();

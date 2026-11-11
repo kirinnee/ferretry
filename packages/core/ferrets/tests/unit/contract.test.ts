@@ -60,6 +60,11 @@ harnessConformance('FakeHarness', () => {
 });
 
 loginKindConformance('FakeLoginKind', () => new FakeLoginKind(), { credentialEnv: ['ANTHROPIC_API_KEY'] });
+loginKindConformance(
+  'FakeLoginKind with an unavailable sign-in file',
+  () => new FakeLoginKind('api-key', { kind: 'unavailable', sentence: 'the login work is not signed in' }),
+  { credentialEnv: ['ANTHROPIC_API_KEY'] },
+);
 
 describe('login conformance refuses a leaking login', () => {
   const fixture = { credentialEnv: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'], plainEnv: ['ANTHROPIC_BASE_URL'] };

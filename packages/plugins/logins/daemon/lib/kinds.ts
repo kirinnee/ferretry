@@ -8,13 +8,14 @@
  */
 import type {
   HarnessKey,
+  LoginCredentialAnswer,
   LoginField,
   LoginKind,
   LoginQuota,
   LoginStatus,
   SignInFlow,
 } from '@ferretry/core-ferrets/contract';
-import type { Clock } from '@ferretry/kernel/contract';
+import type { Clock, SharedCredential } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import type { LOGIN_KINDS, LoginFile, LoginView } from '../../contract/index.ts';
 import type { HarnessLoginFlow } from '../../contract/index.ts';
@@ -31,6 +32,10 @@ export interface LoginKindDeps {
   check(id: string): Promise<LoginView>;
   startSignIn(id: string): Promise<HarnessLoginFlow>;
   signInStatus(flowId: string): Promise<HarnessLoginFlow>;
+  /** Why this login's sign-in FILE cannot be handed to a harness (not owned, no tokens), in one sentence; `undefined` when it can. */
+  credentialProblem(id: string): Promise<string | undefined>;
+  /** The kernel's shared credential for this login's sign-in file, or `undefined` when it could not be shared. Never renews. */
+  shareCredential(id: string): Promise<SharedCredential | undefined>;
 }
 
 /** Presets whose login is an endpoint behind another company's gateway (a proxy), not the provider's own key. */
@@ -131,6 +136,26 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
       ? { refresh: async (login: string) => statusOf(await deps.check(login)) }
       : {}),
     quota: async login => quotaOf(await viewOf(login, key)),
+    // Only a Codex sign-in is a FILE a harness reads. Claude's reaches a ferret as environment (`env`/launch environment).
+    ...(key === 'openai'
+      ? {
+          credential: async (login: string, harness: HarnessKey): Promise<LoginCredentialAnswer> => {
+            const unavailable = (sentence: string): LoginCredentialAnswer => ({ kind: 'unavailable', sentence });
+            known(login, key);
+            if (harness !== harnessKey('codex')) return unavailable(`the login ${login} is spent by Codex only`);
+            // The store and the file's state come first; the status word is the cached reading, never a renewal.
+            const problem = await deps.credentialProblem(login);
+            if (problem !== undefined) return unavailable(problem);
+            const view = await viewOf(login, key);
+            if (view.status.word === 'needs_sign_in')
+              return unavailable(`the login ${login} needs signing in: ${view.status.explanation}`);
+            const credential = await deps.shareCredential(login);
+            if (credential === undefined)
+              return unavailable(`the sign-in file of the login ${login} could not be shared with Codex`);
+            return { kind: 'file', credential };
+          },
+        }
+      : {}),
     async env(login, harness) {
       const file = known(login, key);
       const half = harness === harnessKey('codex') ? file.codex : file.claude;

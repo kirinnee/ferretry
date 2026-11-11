@@ -27,6 +27,7 @@ import { deliverCodexCallback } from './adapters/harness-login/callback-delivery
 import { harnessLoginTimer, spawnHarnessLoginChild } from './adapters/harness-login/login-child.ts';
 import { systemPortHolders } from './adapters/harness-login/port-holders.ts';
 import { OwnedLoginStore } from './adapters/credentials/owned-store.ts';
+import { codexCredentialSource } from './adapters/credentials/codex-credential.ts';
 import { AnthropicUsageProbe, quotaFetch } from './adapters/credentials/anthropic-usage-probe.ts';
 import { CodexUsageProbe } from './adapters/credentials/codex-usage-probe.ts';
 import { codexTokenRefresh } from './adapters/credentials/token-refresh.ts';
@@ -315,6 +316,7 @@ export function buildLoginsDaemon() {
         unwatchFiles();
       });
 
+      const codexCredential = codexCredentialSource({ catalog, store, roots: kernel.roots });
       const kinds = loginKinds({
         clock,
         files,
@@ -324,6 +326,8 @@ export function buildLoginsDaemon() {
         check: id => credentials.checkForLaunch(id),
         startSignIn: id => harnessLogin.startForLaunch({ loginId: id as LoginId }),
         signInStatus: flowId => harnessLogin.status(flowId),
+        credentialProblem: id => codexCredential.problem(id),
+        shareCredential: id => codexCredential.share(id),
       });
 
       return {

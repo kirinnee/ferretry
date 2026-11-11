@@ -34,6 +34,8 @@ const kinds = loginKinds({
   signInStatus: async () => {
     throw new Error('not used');
   },
+  credentialProblem: async () => undefined,
+  shareCredential: async () => undefined,
 });
 
 describe('the five login kinds', () => {
@@ -85,6 +87,8 @@ describe('the five login kinds', () => {
       signInStatus: async () => {
         throw new Error('not used');
       },
+      credentialProblem: async () => undefined,
+      shareCredential: async () => undefined,
     });
 
     expect(await signedOut.anthropic.status('work')).toEqual({
