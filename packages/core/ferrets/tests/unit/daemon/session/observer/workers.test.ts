@@ -182,6 +182,7 @@ describe('turnPaneEvidenceOf', () => {
     paneActiveWork: visible => (visible === working ? 'status' : undefined),
     paneShowsPermissionPrompt: visible => visible === permission,
     paneBlockingPrompt: () => undefined,
+    idlePromptShown: () => false,
     parseHarnessDialog: () => undefined,
   };
 

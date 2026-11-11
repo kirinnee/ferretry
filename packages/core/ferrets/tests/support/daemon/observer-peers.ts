@@ -74,6 +74,7 @@ export const INERT_PANE_PARSERS: PaneParsers = Object.freeze({
   paneActiveWork: () => undefined,
   paneShowsPermissionPrompt: () => false,
   paneBlockingPrompt: () => undefined,
+  idlePromptShown: () => false,
   parseHarnessDialog: () => undefined,
 });
 

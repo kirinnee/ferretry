@@ -130,6 +130,21 @@ describe('routeSend', () => {
     should(routeSend(target({ status: 'awaiting_user', promptReady: true }), pane({ activeWork: true }))).equal('idle');
   });
 
+  it('B188 a visible compaction routes busy under every stored status, parked ones included', () => {
+    // A person can start /compact from awaiting_user or interrupted, so those records cannot send into it.
+    for (const status of ['awaiting_user', 'interrupted', 'waiting', 'rate_limited', 'running'] as const) {
+      should(routeSend(target({ status }), pane({ activeWork: true, compacting: true }))).equal('busy');
+      should(routeSend(target({ status, promptReady: true }), pane({ activeWork: true, compacting: true }))).equal(
+        'busy',
+      );
+    }
+  });
+
+  it('B188 parked statuses outside a compaction keep their word over visible work', () => {
+    for (const status of ['awaiting_user', 'rate_limited', 'interrupted'] as const)
+      should(routeSend(target({ status }), pane({ activeWork: true, compacting: false }))).equal('idle');
+  });
+
   it('B188 a pane with neither work nor prompt under an idle record still routes idle', () => {
     should(routeSend(target({ status: 'running', promptReady: true }), pane())).equal('idle');
   });

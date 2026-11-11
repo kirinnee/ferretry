@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { HarnessDialog } from '../../../../daemon/lib/protocol/session-dialog.ts';
 import { eventOfRecord } from '../../../../daemon/adapters/session/live/harness-transcript.ts';
+import type { TranscriptEvent } from '../../../../daemon/lib/session/peers/transcript.ts';
 import {
   limitPatch,
   observeTurn,
@@ -184,5 +185,48 @@ describe('B187 an idle pane that holds a draft after idle compaction', () => {
       state: 'working',
       confirmed: true,
     });
+  });
+});
+
+describe('transcriptTurnPhase after a compaction (&B188)', () => {
+  const ended = (): TranscriptEvent => ({ harness: 'claude', role: 'system', kind: 'turn', state: 'completed' });
+  const compaction: TranscriptEvent = { harness: 'claude', role: 'system', kind: 'compaction', trigger: 'auto' };
+  const summary: TranscriptEvent = {
+    harness: 'claude',
+    role: 'user',
+    kind: 'message',
+    text: 'This session is being continued…',
+    inputSource: 'harness',
+    compactSummary: true,
+  };
+  const notification: TranscriptEvent = {
+    harness: 'claude',
+    role: 'user',
+    kind: 'message',
+    text: '<task-notification>done</task-notification>',
+    inputSource: 'harness',
+  };
+  const said: TranscriptEvent = { harness: 'claude', role: 'user', kind: 'message', text: 'ship it' };
+
+  test('B188 a compaction summary is not turn work, in any of its blocks', () => {
+    expect(transcriptTurnPhase([ended(), compaction, summary])).toBe('ended');
+    expect(
+      transcriptTurnPhase([ended(), compaction, summary, { ...summary, blockIndex: 1 }, { ...summary, blockIndex: 2 }]),
+    ).toBe('ended');
+  });
+
+  test('B188 a tail that starts at the summary does not read as working', () => {
+    expect(transcriptTurnPhase([summary])).toBe('unknown');
+    expect(transcriptTurnPhase([summary, { ...summary, blockIndex: 1 }])).toBe('unknown');
+  });
+
+  test('B188 a harness user record without the summary marker still is work, next to a boundary or not', () => {
+    expect(transcriptTurnPhase([ended(), notification])).toBe('working');
+    expect(transcriptTurnPhase([ended(), compaction, notification])).toBe('working');
+    expect(transcriptTurnPhase([ended(), compaction, summary, notification])).toBe('working');
+  });
+
+  test('B188 a person speaking after the summary starts a turn', () => {
+    expect(transcriptTurnPhase([ended(), compaction, summary, said])).toBe('working');
   });
 });

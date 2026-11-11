@@ -34,6 +34,7 @@ const observed = (seen: RunnerPaneObservation): SendPaneObservation => ({
   dead: seen.dead,
   promptReady: seen.promptReady,
   activeWork: seen.activeWork,
+  ...(seen.compacting === undefined ? {} : { compacting: seen.compacting }),
   ...(seen.startupParked === undefined ? {} : { startupParked: seen.startupParked }),
   ...(seen.blockingPrompt === undefined ? {} : { blockingPrompt: seen.blockingPrompt }),
   ...(seen.draft === undefined ? {} : { draft: seen.draft }),

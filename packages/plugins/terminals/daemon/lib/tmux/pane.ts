@@ -1,3 +1,4 @@
+import { COMPACTING_LINE } from '@ferretry/std/compaction-line';
 import type { PaneActivity, PaneMetadata, PaneState } from './contracts.ts';
 import { parseHarnessDialog } from './harness-dialog.ts';
 import { parsePermissionPrompt } from './permission-prompt.ts';
@@ -88,19 +89,17 @@ const TOKEN_COUNTER = /[\d.,]+k?\s*tokens\s*[·•∙]/;
  *  "working" for hours. */
 const SPINNER_PHRASE = /^[^\S\n]*[✻✳✶✽✢∗][^\n…]{1,120}…/mu;
 
-/** Claude's compaction line on ANY tick glyph, with or without a counter or a parenthetical —
- *  `· Compacting conversation…`, `* Compacting conversation… (3s)`, `✶ Compacting conversation… (3s · ↓ 1k tokens)`.
- *  Before the first token counter is drawn the line carries no clock, and Claude's idle compaction starts on `·` or
- *  ASCII `*` ticks the general spinner phrase deliberately does not take (bullet prose would read busy), so the
- *  compaction line is read on its own (&B188). Anchored to the start of a line, like the spinner. */
-export const COMPACTING_LINE = /^[^\S\n]*[·*•✻✳✶✽✢∗]\s+Compacting\b[^\n]{0,80}…/mu;
-
-/** How many rows from the bottom of the frame a compaction line may sit and still be this frame's: the composer,
- *  its rules and the footer take the bottom rows, and a line further up is history. */
+/** How many rows, counted from the last non-blank one, Claude's compaction status line may sit above: the status area
+ *  over the composer. The grammar of the line itself is `@ferretry/std/compaction-line`, the one every reader shares. */
 const COMPACTING_WINDOW_LINES = 12;
 
-/** Whether a frame shows a compaction in progress (see {@link COMPACTING_LINE}), within the bottom rows only. */
-function paneShowsCompaction(pane: string): boolean {
+/**
+ * Whether the rows just above the composer show Claude's `Compacting conversation…` line, on any spinner tick, with or
+ * without a counter (&B188). Before the first token counter is drawn the line carries no clock, and an idle compaction
+ * starts on `·` or ASCII `*` ticks the general spinner phrase deliberately does not take (a bullet in prose would read
+ * busy), so the compaction line is read on its own. A line further up is history.
+ */
+export function paneShowsCompacting(pane: string): boolean {
   const lines = pane.replaceAll('\r\n', '\n').trimEnd().split('\n').slice(-COMPACTING_WINDOW_LINES);
   return COMPACTING_LINE.test(lines.join('\n'));
 }
@@ -157,7 +156,7 @@ export function paneActiveWork(pane: string): 'status' | 'spinner' | undefined {
   if (INTERRUPT_HINTS.some(marker => lower.includes(marker))) return 'status';
   if (CODEX_ELAPSED.test(lower) || CLAUDE_ELAPSED.test(lower) || TOKEN_COUNTER.test(lower)) return 'status';
   // Compacting is work: a transcript that says the turn ENDED (an idle compaction starts from one) must not overrule it.
-  if (paneShowsCompaction(pane)) return 'status';
+  if (paneShowsCompacting(pane)) return 'status';
   return SPINNER_PHRASE.test(pane) || SPINNER_MARK.test(pane) ? 'spinner' : undefined;
 }
 

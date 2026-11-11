@@ -82,6 +82,11 @@ export function transcriptTurnPhase(events: readonly TranscriptEvent[]): Transcr
     if (event.kind === 'usage' || event.kind === 'settings' || event.kind === 'attachment' || event.kind === 'error')
       continue;
     if (event.role === 'system' || event.role === 'developer') continue;
+    // Claude marks a compaction's summary on the raw record (`isCompactSummary`): the harness tidying its own context,
+    // never a person speaking or a turn starting. Read as work it pinned an idle prompt at `working` until some real
+    // boundary came, and on an idle prompt none does (&B188). A harness record WITHOUT the marker (a task
+    // notification) is still work.
+    if (event.compactSummary === true) continue;
     return 'working';
   }
   return 'unknown';

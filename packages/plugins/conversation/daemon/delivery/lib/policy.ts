@@ -89,6 +89,9 @@ export type SendRouting =
  */
 export function routeSend(target: SendTarget, pane: SendPaneObservation): SendRouting {
   if (TERMINAL_SEND_STATUSES.has(target.status) || !pane.alive || pane.dead) return 'revive';
+  // A compaction the pane shows is busy under ANY stored status: `awaiting_user` and `interrupted` are states a person
+  // starts `/compact` from, so the idle-status fallback below must never carry a send into that composer (&B188).
+  if (pane.compacting === true) return 'busy';
   // A RECORDED ready composer is the older word: it counts only while the pane shows no work, so a compaction
   // that began after the record was written is never typed into (&B188).
   if (pane.promptReady || (target.promptReady === true && !pane.activeWork)) return 'idle';
