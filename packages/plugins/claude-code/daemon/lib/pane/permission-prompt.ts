@@ -1,3 +1,4 @@
+import type { FormKey } from '@ferretry/core-ferrets/contract';
 import type {
   PermissionAction,
   PermissionOption,
@@ -5,14 +6,18 @@ import type {
   PermissionRequest,
 } from '../../../contract/index.ts';
 
+/** The harness a pane belongs to, spelled as this plugin's contract spells it. */
+type Harness = 'claude-code' | 'codex';
+
 /**
  * THE TOOL-PERMISSION PROMPT A HARNESS IS PARKED ON, read off its visible pane as data.
  *
- * Claude Code stops before a tool it has not been allowed to run and draws a question, then a numbered
- * choice list with a cursor on one row: a titled dialog under a full-width rule ("Bash command", "Read
- * file", "Edit file", "Create file", "Fetch", "Tool use", "Exit plan mode?"). The shapes here were read
- * off real panes of Claude Code 2.1.220 and 2.1.281 (`tests/fixtures/permission-prompts/`), not off the
- * harness source. Codex's shapes are read by the Codex plugin.
+ * Both harnesses stop before a tool they have not been allowed to run and draw the same shape: a
+ * question, then a numbered choice list with a cursor on one row. Claude Code puts a titled dialog
+ * under a full-width rule ("Bash command", "Read file", "Edit file", "Create file", "Fetch", "Tool use",
+ * "Exit plan mode?"), Codex asks "Would you like to run the following command?" and lists the details
+ * under it. The shapes here were read off real panes of Claude Code 2.1.220 and 2.1.281 and Codex
+ * 0.145.0 and 0.156.1 (`tests/fixtures/permission-prompts/`), not off the harness source.
  *
  * WHY THE PANE AND NOT A HOOK. Claude's hooks can say THAT a permission prompt is up and which tool
  * asked, but not the rows its dialog offers — "don't ask again for: curl -s https://example.com" is
@@ -29,7 +34,7 @@ import type {
 /** How far up from the bottom of the frame the choice list may sit; matches `paneShowsPermissionPrompt`. */
 const OPTION_WINDOW_LINES = 25;
 
-/** How far above the first choice the question may sit. */
+/** How far above the first choice the question may sit — Codex lists details between them. */
 const QUESTION_REACH_LINES = 12;
 
 /** How far above the question a Claude dialog's rule and title may sit — an edit shows its diff there. */
@@ -42,7 +47,7 @@ const OPTION_ROW = /^(\s*[│|]?\s*)([>›❯»▌]\s*)?([1-9])[.)]\s+(\S.*)$/u;
 const COMPOSER = /^\s*[│|]?\s*[>›❯»](?:\s.*)?$/u;
 
 /** The question shapes a tool permission is asked in. */
-const QUESTION = /^(?:do you want to .+\?|exit plan mode\?)$/iu;
+const QUESTION = /^(?:do you want to .+\?|would you like to .+\?|exit plan mode\?|allow command\?)$/iu;
 
 /**
  * Dialogs with a question of the same shape that are NOT a tool permission: each has its own reading
@@ -58,6 +63,9 @@ const FENCE = /^[╌┄-]{20,}$/u;
 
 /** The keyboard hint a harness prints after a label: `(y)`, `(p)`, `(a)`, `(esc)`, `(shift+tab)`. */
 const KEY_HINT = /\s*\((?:[a-z]|esc|shift\+tab|tab)\)$/iu;
+
+/** Codex marks its rows with a single-letter hint; Claude never does (both print `(esc)`). */
+const CODEX_HINT = /\((?:y|p|a|n)\)$/u;
 
 const LIMITS = { tool: 120, what: 500, detail: 300, question: 300, label: 300 } as const;
 
@@ -125,21 +133,6 @@ function optionKind(label: string): PermissionOptionKind {
  * FNV-1a over the text, twice with different offsets: sixteen hex digits, stable across runs. Also the
  * id of a harness dialog (`./harness-dialog.ts`).
  */
-/** The harness as the runner's look and Ferrets' state document spell it (`claude`, `codex`), which is what their id digests. */
-const recordedHarness = (harness: 'claude-code' | 'codex'): 'claude' | 'codex' =>
-  harness === 'claude-code' ? 'claude' : 'codex';
-
-/**
- * The id the runner's own look gives THE SAME prompt, which is the id Ferrets records and the app's card answers with.
- * A runner reads the screen without this plugin and spells the harness as the state document does (`claude`), and the
- * id is a digest of that spelling, so the same prompt has two ids. An answer may name either; both mean this prompt.
- * Rebuilt from the fields a person decides on, in the order the digest was taken.
- */
-export function recordedPermissionId(request: PermissionRequest): string {
-  const { id: _id, harness, selected: _selected, ...rest } = request;
-  return promptDigest(JSON.stringify({ harness: recordedHarness(harness), ...rest }));
-}
-
 export function promptDigest(text: string): string {
   const half = (offset: number): string => {
     let hash = offset;
@@ -158,6 +151,14 @@ interface Subject {
   readonly what?: string | undefined;
   readonly detail?: string | undefined;
 }
+
+const after = (lines: readonly string[], prefix: RegExp): string | undefined => {
+  for (const line of lines) {
+    const match = prefix.exec(line);
+    if (match !== null) return (match[1] as string).trim() || undefined;
+  }
+  return undefined;
+};
 
 /** What a Claude dialog is about, from its title and the rows between the title and the question. */
 function claudeSubject(title: string | undefined, body: readonly string[], below: readonly string[]): Subject {
@@ -195,6 +196,20 @@ function claudeSubject(title: string | undefined, body: readonly string[], below
   }
 }
 
+/** What a Codex approval is about, from its question and the rows around it. */
+function codexSubject(question: string, above: readonly string[], below: readonly string[]): Subject {
+  const lower = question.toLowerCase();
+  const reason = after(below, /^Reason:\s*(.*)$/u);
+  if (lower.includes('run the following command'))
+    return { tool: 'Shell', action: 'run', what: after(below, /^\$\s+(.*)$/u), detail: reason };
+  if (lower.includes('make the following edits')) {
+    const changed = after(above, /^•\s+(?:Added|Edited|Updated|Deleted|Modified)\s+(.+?)(?:\s+\(.*\))?$/u);
+    return { tool: 'Edit', action: 'edit', what: after(below, /^Destination:\s*(.*)$/u) ?? changed, detail: reason };
+  }
+  if (lower.includes('grant these permissions')) return { tool: 'Permissions', action: 'other', detail: reason };
+  return { tool: 'Codex', action: 'other', what: below[0], detail: reason };
+}
+
 /**
  * The permission prompt this frame is parked on, or `undefined` when it shows none.
  *
@@ -218,6 +233,7 @@ export function parsePermissionPrompt(pane: string): PermissionRequest | undefin
   const question = bare(lines[questionAt] as string);
   if (NOT_A_TOOL_PERMISSION.some(marker => question.toLowerCase().includes(marker))) return undefined;
 
+  const harness: Harness = rows.some(row => CODEX_HINT.test(row.label)) ? 'codex' : 'claude-code';
   const meaningful = (line: string): boolean => {
     const text = bare(line);
     return text !== '' && !FENCE.test(text) && !text.startsWith('Tip:') && text !== 'This command requires approval';
@@ -227,36 +243,41 @@ export function parsePermissionPrompt(pane: string): PermissionRequest | undefin
     .filter(meaningful)
     .map(bare);
 
-  let rule = -1;
-  for (let index = questionAt; index >= Math.max(0, questionAt - HEADER_REACH_LINES); index -= 1) {
-    if (RULE.test(bare(lines[index] as string))) {
-      rule = index;
-      break;
+  let subject: Subject;
+  if (harness === 'codex') {
+    subject = codexSubject(question, lines.slice(Math.max(0, questionAt - 6), questionAt).map(bare), below);
+  } else {
+    let rule = -1;
+    for (let index = questionAt; index >= Math.max(0, questionAt - HEADER_REACH_LINES); index -= 1) {
+      if (RULE.test(bare(lines[index] as string))) {
+        rule = index;
+        break;
+      }
     }
+    // No rule in reach — a narrow or partly scrolled frame: the dialog is the block of rows that runs
+    // unbroken up to the question.
+    let top = rule + 1;
+    if (rule < 0) {
+      top = questionAt;
+      while (top > 0 && top > questionAt - 8 && bare(lines[top - 1] as string) !== '') top -= 1;
+    }
+    const dialog = lines
+      .slice(top, questionAt + 1)
+      .filter(meaningful)
+      .map(bare);
+    // A lone question is no title — except the plan dialog's, whose title IS its question.
+    const title = dialog[0] === question && question.toLowerCase() !== 'exit plan mode?' ? undefined : dialog[0];
+    // The plan dialog's title IS its question, so nothing sits between them.
+    const body = dialog.slice(1, title === question ? 1 : -1);
+    subject = claudeSubject(title, body, below);
   }
-  // No rule in reach — a narrow or partly scrolled frame: the dialog is the block of rows that runs
-  // unbroken up to the question.
-  let top = rule + 1;
-  if (rule < 0) {
-    top = questionAt;
-    while (top > 0 && top > questionAt - 8 && bare(lines[top - 1] as string) !== '') top -= 1;
-  }
-  const dialog = lines
-    .slice(top, questionAt + 1)
-    .filter(meaningful)
-    .map(bare);
-  // A lone question is no title — except the plan dialog's, whose title IS its question.
-  const title = dialog[0] === question && question.toLowerCase() !== 'exit plan mode?' ? undefined : dialog[0];
-  // The plan dialog's title IS its question, so nothing sits between them.
-  const body = dialog.slice(1, title === question ? 1 : -1);
-  const subject = claudeSubject(title, body, below);
 
   const options: PermissionOption[] = rows.map(row => {
     const label = clip(row.label.replace(KEY_HINT, '').trim(), LIMITS.label);
     return { number: row.number, label, kind: optionKind(label) };
   });
   const request = {
-    harness: 'claude-code' as const,
+    harness,
     tool: clip(subject.tool, LIMITS.tool),
     action: subject.action,
     ...(subject.what === undefined ? {} : { what: clip(subject.what, LIMITS.what) }),
@@ -271,20 +292,29 @@ export function parsePermissionPrompt(pane: string): PermissionRequest | undefin
   };
 }
 
+/** The arrow presses that take a cursor on row `from` to row `to`; none when it is already there. */
+export function cursorKeys(from: number, to: number): FormKey[] {
+  const distance = to - from;
+  return Array.from({ length: Math.abs(distance) }, (): FormKey => (distance > 0 ? 'Down' : 'Up'));
+}
+
 /**
- * The keys that answer `request` with `answer`, exactly as a person at the keyboard would press them.
+ * The presses that answer `request` with `answer`: the arrow keys that put the cursor on the chosen row, then the Enter
+ * that confirms it. A refusal is Escape alone: the harness's own `(esc)`, which stops the tool and leaves the agent at
+ * its prompt.
  *
- * A digit ALONE. Claude Code acts on the digit the moment it is pressed — measured on every version
- * the fixtures come from — so an Enter after it would land on whatever the harness drew next, and if
- * that is the next permission prompt, Enter would approve it unseen. A refusal is Escape: the
- * harness's own `(esc)`, which stops the tool and leaves the agent at its prompt.
+ * ARROWS, NOT THE DIGIT. A ferret's pane is driven through Ferrets' form seam, whose key set is closed (`FORM_KEYS`: no
+ * digit, no `y`), so a choice is made the way the dialogs' are: move the cursor, then the CALLER reads the pane again
+ * and presses Enter only when the very same prompt shows the cursor on the chosen row. That check is what makes the Enter
+ * safe — a prompt that was answered or replaced while the cursor moved is never confirmed.
  */
 export function permissionAnswerKeys(
   request: PermissionRequest,
   answer: { readonly kind: 'choice'; readonly number: number } | { readonly kind: 'deny' },
-): string | undefined {
-  if (answer.kind === 'deny') return '\u001b';
-  return request.options.some(option => option.number === answer.number) ? String(answer.number) : undefined;
+): { readonly moves: FormKey[]; readonly confirm: FormKey } | undefined {
+  if (answer.kind === 'deny') return { moves: [], confirm: 'Escape' };
+  if (!request.options.some(option => option.number === answer.number)) return undefined;
+  return { moves: cursorKeys(request.selected, answer.number), confirm: 'Enter' };
 }
 
 /**
@@ -296,4 +326,19 @@ export function paneBlockingPermission(pane: string): string | undefined {
   if (request === undefined) return undefined;
   const about = request.what === undefined ? request.tool : `${request.tool} ${request.what.split('\n')[0]}`;
   return clip(`Permission prompt — ${about}: ${request.question}`, 200);
+}
+
+/** The harness as the runner's look and Ferrets' state document spell it (`claude`, `codex`), which is what their id digests. */
+const recordedHarness = (harness: 'claude-code' | 'codex'): 'claude' | 'codex' =>
+  harness === 'claude-code' ? 'claude' : 'codex';
+
+/**
+ * The id the runner's own look gives THE SAME prompt, which is the id Ferrets records and the app's card answers with.
+ * A runner reads the screen without this plugin and spells the harness as the state document does (`claude`), and the
+ * id is a digest of that spelling, so the same prompt has two ids. An answer may name either; both mean this prompt.
+ * Rebuilt from the fields a person decides on, in the order the digest was taken.
+ */
+export function recordedPermissionId(request: PermissionRequest): string {
+  const { id: _id, harness, selected: _selected, ...rest } = request;
+  return promptDigest(JSON.stringify({ harness: recordedHarness(harness), ...rest }));
 }

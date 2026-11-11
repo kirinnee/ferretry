@@ -4,6 +4,18 @@ import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { ferretStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import daemon from '../../daemon/index.ts';
 
+/**
+ * Ferrets as the answer routes meet it: a harness seam for `known` ferrets (its form says `no_pane`), none for others.
+ * The answers press nothing through tmux of their own any more: they go through Ferrets' form seam.
+ */
+function ferretsKnowing(known: readonly string[]): FakeFerrets {
+  const refusing = async () => ({ ok: false as const, error: { refused: 'no_pane' as const } });
+  return Object.assign(new FakeFerrets(), {
+    harness: async (id: string) =>
+      known.includes(id) ? ({ form: { capture: refusing, key: refusing, paste: refusing } } as never) : undefined,
+  });
+}
+
 /** A machine with no claude on it, a tmux that records what it is told, and a pane that shows `frame`. */
 function machine(frame: string | undefined) {
   const typed: string[][] = [];
@@ -38,9 +50,9 @@ describe('claude-code daemon half', () => {
     expect(typed).toEqual([]);
   });
 
-  test('G31 an answer for a ferret whose pane is not known sends nothing and says why, and never echoes the choice', async () => {
+  test('G31 an answer for a ferret with no live pane sends nothing and says why, and never echoes the choice', async () => {
     const { spawn, typed } = machine(await read('permission-prompts/claude-2.1.220-bash'));
-    const host = await testHost({ fakes: { ferrets: new FakeFerrets() }, plugins: [daemon], spawn });
+    const host = await testHost({ fakes: { ferrets: ferretsKnowing(['f1']) }, plugins: [daemon], spawn });
 
     const response = await host.request('POST', '/v1/ferrets/f1/permission', {
       body: { kind: 'choice', requestId: '0123456789abcdef', number: 2 },
@@ -50,6 +62,20 @@ describe('claude-code daemon half', () => {
     expect(response.status).toBe(409);
     expect(response.json<{ code: string }>().code).toBe('pane_unknown');
     expect(response.body).not.toContain('"number"');
+    expect(typed).toEqual([]);
+  });
+
+  test('G31 an answer for a ferret this daemon does not know is a 404, and one with no Ferrets seam is a 503', async () => {
+    const { spawn, typed } = machine(await read('permission-prompts/claude-2.1.220-bash'));
+    const unknown = await testHost({ fakes: { ferrets: ferretsKnowing([]) }, plugins: [daemon], spawn });
+    const seamless = await testHost({ fakes: { ferrets: new FakeFerrets() }, plugins: [daemon], spawn });
+    const body = { kind: 'deny', requestId: '0123456789abcdef' };
+
+    const gone = await unknown.request('POST', '/v1/ferrets/f1/permission', { body, as: owner() });
+    const off = await seamless.request('POST', '/v1/ferrets/f1/permission', { body, as: owner() });
+
+    expect([gone.status, gone.json<{ code: string }>().code]).toEqual([404, 'not_found']);
+    expect([off.status, off.json<{ code: string }>().code]).toEqual([503, 'plugin_unavailable']);
     expect(typed).toEqual([]);
   });
 
@@ -66,9 +92,9 @@ describe('claude-code daemon half', () => {
     expect(typed).toEqual([]);
   });
 
-  test('G32 the harness-dialog answer is a person act and an unknown pane is refused, sending nothing', async () => {
+  test('G32 the harness-dialog answer is a person act and a ferret with no live pane is refused, sending nothing', async () => {
     const { spawn, typed } = machine(await read('harness-dialogs/claude-2.1.220-settings-error'));
-    const host = await testHost({ fakes: { ferrets: new FakeFerrets() }, plugins: [daemon], spawn });
+    const host = await testHost({ fakes: { ferrets: ferretsKnowing(['f1']) }, plugins: [daemon], spawn });
 
     const byFerret = await host.request('POST', '/v1/ferrets/f1/dialog', {
       body: { kind: 'escape', dialogId: '0123456789abcdef' },

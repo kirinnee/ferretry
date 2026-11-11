@@ -3,12 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import should from 'should';
 import { type HarnessDialog, type HarnessDialogOption, HarnessDialogSchema } from '../../../contract/index.ts';
-import {
-  DIALOG_KEYS,
-  dialogCursorMoves,
-  paneBlockingDialog,
-  parseHarnessDialog,
-} from '../../../daemon/lib/pane/harness-dialog.ts';
+import { dialogCursorMoves, paneBlockingDialog, parseHarnessDialog } from '../../../daemon/lib/pane/harness-dialog.ts';
 
 /**
  * The harness's own dialog a pane is parked on, read off real captured Claude Code frames
@@ -305,23 +300,23 @@ describe('dialogCursorMoves', () => {
   const dialog = parsed('claude-2.1.220-settings-error');
 
   it('moves down by the distance to a row below the cursor', () => {
-    should(dialogCursorMoves(dialog, 3)).equal(DIALOG_KEYS.down + DIALOG_KEYS.down);
+    should(dialogCursorMoves(dialog, 3)).eql(['Down', 'Down']);
   });
 
   it('moves up by the distance to a row above the cursor', () => {
-    should(dialogCursorMoves({ ...dialog, selected: 3 }, 1)).equal(DIALOG_KEYS.up + DIALOG_KEYS.up);
+    should(dialogCursorMoves({ ...dialog, selected: 3 }, 1)).eql(['Up', 'Up']);
   });
 
   it('moves nowhere when the cursor is already on the row', () => {
-    should(dialogCursorMoves(dialog, 1)).equal('');
+    should(dialogCursorMoves(dialog, 1)).eql([]);
   });
 
   it('answers nothing for a row the dialog does not list', () => {
     should(dialogCursorMoves(dialog, 4)).be.undefined();
   });
 
-  it('sends the bytes a terminal sends for each key', () => {
-    should(DIALOG_KEYS).deepEqual({ up: '\u001b[A', down: '\u001b[B', enter: '\r', escape: '\u001b' });
+  it('moves with the closed form keys alone, never a digit', () => {
+    should(dialogCursorMoves(dialog, 2)).eql(['Down']);
   });
 });
 

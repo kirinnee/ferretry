@@ -15,7 +15,8 @@ import {
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { ClaudeHarness } from './adapters/claude-harness.ts';
-import { PaneDirectory, TmuxPane } from './adapters/tmux-pane.ts';
+import { FerretFormPane } from './adapters/ferret-form-pane.ts';
+import { PaneDirectory } from './adapters/tmux-pane.ts';
 import { factsSource, hostFacts, locationSource, npmLatest, probe, spawnRun } from './adapters/update-ports.ts';
 import { DialogAnswerService } from './lib/dialog/service.ts';
 import { PermissionAnswerService } from './lib/permission/service.ts';
@@ -82,7 +83,8 @@ export default implementDaemon(manifest, {
     };
 
     const panes = new PaneDirectory();
-    const pane = new TmuxPane(kernel.spawn, panes);
+    // The ferret's own pane for the two answers: Ferrets' form seam, for either harness (nothing here names a tmux pane).
+    const pane = new FerretFormPane(needs.ferrets);
     const sleep = async (ms: number): Promise<void> => await kernel.clock.sleep(milliseconds(ms));
     // The harness's own plain-name guard (`ClaudeHarness.home`): a multi-part id would name a folder inside another home.
     const approvals = new ClaudeProjectApprovals(

@@ -600,10 +600,18 @@ describe('permissionAnswerKeys', () => {
     ReturnType<typeof parsePermissionPrompt>
   >;
 
-  it('answers a listed choice with its digit alone — no Enter', () => {
+  it('answers a listed choice with the arrows that reach its row, then Enter — never a digit', () => {
     // Act / Assert
-    should(permissionAnswerKeys(request, { kind: 'choice', number: 2 })).equal('2');
-    should(permissionAnswerKeys(request, { kind: 'choice', number: 3 })).equal('3');
+    should(permissionAnswerKeys(request, { kind: 'choice', number: 1 })).eql({ moves: [], confirm: 'Enter' });
+    should(permissionAnswerKeys(request, { kind: 'choice', number: 2 })).eql({ moves: ['Down'], confirm: 'Enter' });
+    should(permissionAnswerKeys(request, { kind: 'choice', number: 3 })).eql({
+      moves: ['Down', 'Down'],
+      confirm: 'Enter',
+    });
+    should(permissionAnswerKeys({ ...request, selected: 3 }, { kind: 'choice', number: 1 })).eql({
+      moves: ['Up', 'Up'],
+      confirm: 'Enter',
+    });
   });
 
   it('answers nothing for a number the prompt does not list', () => {
@@ -614,7 +622,7 @@ describe('permissionAnswerKeys', () => {
 
   it('refuses with Escape', () => {
     // Act / Assert
-    should(permissionAnswerKeys(request, { kind: 'deny' })).equal('\u001b');
+    should(permissionAnswerKeys(request, { kind: 'deny' })).eql({ moves: [], confirm: 'Escape' });
   });
 });
 

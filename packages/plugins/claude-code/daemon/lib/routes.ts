@@ -29,6 +29,7 @@ function ferretId(call: Parameters<RouteHandler>[0]): string {
 
 /** The pane could not be found or read or typed into: the answer was not sent. */
 function paneRefusal(error: unknown): never {
+  if (error instanceof ApiError) throw error;
   if (error instanceof Error && error.name === 'PaneUnknown') throw new ApiError(409, error.message, 'pane_unknown');
   if (error instanceof Error) throw new ApiError(409, error.message, 'console_input_failed');
   throw error;

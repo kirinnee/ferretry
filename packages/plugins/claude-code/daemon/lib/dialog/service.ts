@@ -1,5 +1,6 @@
+import type { FormKey } from '@ferretry/core-ferrets/contract';
 import type { HarnessDialog, HarnessDialogAnswerRequest, HarnessDialogAnswerResult } from '../../../contract/index.ts';
-import { DIALOG_KEYS, dialogCursorMoves, parseHarnessDialog, recordedDialogId } from '../pane/harness-dialog.ts';
+import { dialogCursorMoves, parseHarnessDialog, recordedDialogId } from '../pane/harness-dialog.ts';
 import type { FerretPane } from '../permission/service.ts';
 
 /**
@@ -73,8 +74,8 @@ export class DialogAnswerService {
     return parseHarnessDialog(await this.pane.capture(ferretId).catch(() => ''));
   }
 
-  private async type(ferretId: string, keys: string): Promise<void> {
-    await this.pane.write(ferretId, new TextEncoder().encode(keys));
+  private async type(ferretId: string, ...keys: FormKey[]): Promise<void> {
+    for (const key of keys) await this.pane.key(ferretId, key);
   }
 
   /** Reads the pane until `done` holds of what it shows; answers whether it did, and what it showed last. */
@@ -102,20 +103,20 @@ export class DialogAnswerService {
     const gone = (after: HarnessDialog | undefined): boolean => after?.id !== wanted;
     if (answer.kind === 'escape') {
       if (shown.escape === undefined) throw new DialogAnswerError('invalid_choice', 'this dialog offers no Esc', shown);
-      await this.type(ferretId, DIALOG_KEYS.escape);
+      await this.type(ferretId, 'Escape');
       return { dialogId: answer.dialogId, cleared: (await this.until(ferretId, gone)).met };
     }
     const moves = dialogCursorMoves(shown, answer.number);
     if (moves === undefined)
       throw new DialogAnswerError('invalid_choice', `the dialog has no choice ${answer.number}`, shown);
-    if (moves !== '') {
-      await this.type(ferretId, moves);
+    if (moves.length > 0) {
+      await this.type(ferretId, ...moves);
       const moved = await this.until(ferretId, after => gone(after) || after?.selected === answer.number);
       // Another screen came up while the cursor moved: nothing was confirmed, and Enter is not pressed.
       if (moved.met && gone(moved.last)) throw new DialogAnswerError('gone', GONE, moved.last);
       if (!moved.met) return { dialogId: answer.dialogId, cleared: false };
     }
-    await this.type(ferretId, DIALOG_KEYS.enter);
+    await this.type(ferretId, 'Enter');
     return { dialogId: answer.dialogId, cleared: (await this.until(ferretId, gone)).met };
   }
 }

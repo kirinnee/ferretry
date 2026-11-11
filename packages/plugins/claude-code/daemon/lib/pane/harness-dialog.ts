@@ -1,16 +1,20 @@
+import type { FormKey } from '@ferretry/core-ferrets/contract';
 import type { HarnessDialog, HarnessDialogKind, HarnessDialogOption } from '../../../contract/index.ts';
-import { parsePermissionPrompt, promptDigest } from './permission-prompt.ts';
+import { cursorKeys, parsePermissionPrompt, promptDigest } from './permission-prompt.ts';
+
+/** The harness a pane belongs to, spelled as this plugin's contract spells it. */
+type Harness = 'claude-code' | 'codex';
 
 /**
  * THE HARNESS'S OWN DIALOG A PANE IS PARKED ON, read off its visible frame as data.
  *
- * Apart from tool permissions (`./permission-prompt.ts`), Claude Code stops on screens of its own and
- * waits: "New MCP server found in this project", "Settings Error", the folder-trust question and the
- * spend-limit options. Read off real panes of Claude Code 2.1.220 and 2.1.281
- * (`tests/fixtures/harness-dialogs/`), they share one shape:
+ * Apart from tool permissions (`./permission-prompt.ts`), both harnesses stop on screens of their own
+ * and wait: Codex's "Hooks need review", "Update available" and sign-in screen, Claude's "New MCP
+ * server found in this project" and "Settings Error". Read off real panes of Codex 0.145.0, 0.156.1 and
+ * 0.163.0 and Claude Code 2.1.220 and 2.1.281 (`tests/fixtures/harness-dialogs/`), they share one shape:
  *
  *   a header block (title, then what it says) · a list of rows with a cursor on one · a key-hint footer
- *   ("Press enter to continue", "Enter to confirm · Esc to cancel")
+ *   ("enter confirm · esc skip", "Press enter to continue", "Enter to confirm · Esc to cancel")
  *
  * as the LAST thing on screen. Rows are read by where their label starts — the cursor row fixes the
  * column — because Claude 2.1.281 draws some lists without digits; a line indented to or past that
@@ -86,7 +90,7 @@ function rowOf(line: string): Row | undefined {
 
 /**
  * The rows above the footer: found from the cursor row outwards, every row starting its label at the
- * cursor row's column. Blank lines may separate rows but not end the list.
+ * cursor row's column. Blank lines may separate rows (Codex's sign-in screen) but not end the list.
  */
 function dialogRows(
   lines: readonly string[],
@@ -202,10 +206,18 @@ function limitNotice(lines: readonly string[], top: number): string | undefined 
 
 /** Which dialog a header shows, and the line that is its title. */
 const KINDS: readonly { readonly kind: HarnessDialogKind; readonly marker: RegExp }[] = [
+  { kind: 'hooks-review', marker: /^hooks need review$/iu },
+  { kind: 'update', marker: /update available/iu },
+  { kind: 'sign-in', marker: /^welcome to codex\b/iu },
   { kind: 'usage-limit', marker: /^usage limit reached$/iu },
   { kind: 'mcp-servers', marker: /^new mcp servers? found\b/iu },
   { kind: 'settings-error', marker: /^settings error$/iu },
-  { kind: 'directory-trust', marker: /quick safety check|do you trust the files/iu },
+  // Codex from 0.156 titles its folder screens "Folder access": the trust question, and the restricted
+  // opening of a folder its config marks untrusted.
+  {
+    kind: 'directory-trust',
+    marker: /do you trust the contents of this directory|quick safety check|do you trust the files|^folder access$/iu,
+  },
 ];
 
 /** Whether choosing `label` in a `kind` dialog trusts something to run. */
@@ -215,6 +227,28 @@ function grantsTrust(kind: HarnessDialogKind, label: string): boolean {
   if (kind === 'directory-trust') return /^(?:yes|trust and continue)\b/u.test(lower);
   // Every other dialog: a row that says it trusts, unless it says it does not.
   return /\btrust/u.test(lower) && !/\bwithout\b|\bnot\b|n't\b|^no\b/u.test(lower);
+}
+
+/** Codex marks its cursor `›` or `>`; Claude `❯`. */
+const harnessOf = (cursorLine: string): Harness => (cursorLine.includes('❯') ? 'claude-code' : 'codex');
+
+/** Codex's hook list, which "Review hooks" opens: a table, not a choice list. Esc closes it. */
+function hooksList(lines: readonly string[], footer: string): HarnessDialog | undefined {
+  if (!/\besc close\b/iu.test(footer)) return undefined;
+  const at = lines.findIndex(
+    (line, index) => line.trim() === 'Hooks' && /^lifecycle hooks from config/iu.test(lines[index + 1]?.trim() ?? ''),
+  );
+  if (at < 0) return undefined;
+  const warning = lines.slice(at + 2, at + 6).find(line => /hooks? needs? review/iu.test(line));
+  const dialog = {
+    harness: 'codex' as const,
+    kind: 'hooks-list' as const,
+    title: 'Hooks',
+    ...(warning === undefined ? {} : { body: clip(warning.trim(), LIMITS.body) }),
+    options: [],
+    escape: 'close',
+  };
+  return { id: promptDigest(JSON.stringify(dialog)), ...dialog };
 }
 
 /**
@@ -231,6 +265,8 @@ export function parseHarnessDialog(pane: string): HarnessDialog | undefined {
   const footer = (lines[footerAt] as string).trim();
   if (!FOOTER.test(footer) || !FOOTER_KEY.test(footer)) return undefined;
   if (parsePermissionPrompt(pane) !== undefined) return undefined;
+  const list = hooksList(lines, footer);
+  if (list !== undefined) return list;
 
   const found = dialogRows(lines, 0, footerAt);
   if (found === undefined) return undefined;
@@ -256,7 +292,7 @@ export function parseHarnessDialog(pane: string): HarnessDialog | undefined {
   });
   const cursor = found.rows.find(row => row.cursor) as DialogRow;
   const dialog = {
-    harness: 'claude-code' as const,
+    harness: harnessOf(lines[cursor.index] as string),
     kind,
     title: clip(header[titleAt] as string, LIMITS.title),
     ...(body === '' ? {} : { body: clip(body, LIMITS.body) }),
@@ -271,30 +307,17 @@ export function parseHarnessDialog(pane: string): HarnessDialog | undefined {
 }
 
 /**
- * The id the runner's own look gives THE SAME dialog (see `recordedPermissionId`): the harness spelled `claude`, as
- * Ferrets records it, digested in the order the fields were taken. An answer may name either id.
- */
-export function recordedDialogId(dialog: HarnessDialog): string {
-  const { id: _id, harness, selected: _selected, ...rest } = dialog;
-  return promptDigest(JSON.stringify({ harness: harness === 'claude-code' ? 'claude' : 'codex', ...rest }));
-}
-
-/** The bytes a terminal sends for the keys an answer presses. */
-export const DIALOG_KEYS = { up: '\u001b[A', down: '\u001b[B', enter: '\r', escape: '\u001b' } as const;
-
-/**
  * The cursor moves that put `dialog`'s cursor on option `number`, or `undefined` when it has no such
  * option. Empty when the cursor is already there.
  *
- * ARROWS, NEVER THE DIGIT. Claude 2.1.281 draws some lists with no digits at all, so a digit cannot name a row,
- * measured on
- * the fixtures' versions. Arrows then Enter mean the same thing on every screen, and the caller
- * confirms the cursor landed before it presses Enter.
+ * ARROWS, NEVER THE DIGIT. Codex's hook review moves the cursor on a digit and waits for Enter; its
+ * update prompt acts on the digit at once; Claude 2.1.281 draws some lists with no digits at all —
+ * all measured on the fixtures' versions. Arrows then Enter mean the same thing on every one of them,
+ * and the caller confirms the cursor landed before it presses Enter.
  */
-export function dialogCursorMoves(dialog: HarnessDialog, number: number): string | undefined {
+export function dialogCursorMoves(dialog: HarnessDialog, number: number): FormKey[] | undefined {
   if (dialog.selected === undefined || !dialog.options.some(option => option.number === number)) return undefined;
-  const distance = number - dialog.selected;
-  return (distance > 0 ? DIALOG_KEYS.down : DIALOG_KEYS.up).repeat(Math.abs(distance));
+  return cursorKeys(dialog.selected, number);
 }
 
 /**
@@ -304,4 +327,13 @@ export function dialogCursorMoves(dialog: HarnessDialog, number: number): string
 export function paneBlockingDialog(pane: string): string | undefined {
   const dialog = parseHarnessDialog(pane);
   return dialog === undefined ? undefined : clip(`Harness dialog — ${dialog.title}`, 200);
+}
+
+/**
+ * The id the runner's own look gives THE SAME dialog (see `recordedPermissionId`): the harness spelled `claude`, as
+ * Ferrets records it, digested in the order the fields were taken. An answer may name either id.
+ */
+export function recordedDialogId(dialog: HarnessDialog): string {
+  const { id: _id, harness, selected: _selected, ...rest } = dialog;
+  return promptDigest(JSON.stringify({ harness: harness === 'claude-code' ? 'claude' : 'codex', ...rest }));
 }
