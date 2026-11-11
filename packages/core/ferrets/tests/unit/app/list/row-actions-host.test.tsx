@@ -5,6 +5,8 @@ import { ACTIONS_ROW_SLOT, type ActionsRowOffer, type ActionsRowSlotProps } from
 import type { ReactElement } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { ActionsPanel } from '../../../../app/features/header/actions-panel.tsx';
+import { DetailedFailure } from '../../../../app/features/header/ferret-operations.ts';
+import { ContextActionsMenu } from '../../../../app/features/list/context-actions-menu.tsx';
 import {
   FerretRowActionsHost,
   type FerretRowActionsHostProps,
@@ -30,18 +32,24 @@ interface Harness {
   readonly client: LiveFerretsClient;
   readonly calls: string[];
   readonly refuse: Map<string, Error>;
+  /** What a route answers when it does not refuse. */
+  readonly answers: Map<string, unknown>;
+  readonly bodies: unknown[];
 }
 
 const harness = (): Harness => {
   const state: Harness = {
     calls: [],
     refuse: new Map(),
+    answers: new Map(),
+    bodies: [],
     client: {
-      call: async <Answer = unknown>(route: string): Promise<Answer> => {
+      call: async <Answer = unknown>(route: string, init?: { body?: unknown }): Promise<Answer> => {
         state.calls.push(route);
+        state.bodies.push(init?.body);
         const refusal = state.refuse.get(route);
         if (refusal !== undefined) throw refusal;
-        return undefined as Answer;
+        return state.answers.get(route) as Answer;
       },
     },
   };
@@ -271,6 +279,94 @@ describe('the row actions host', () => {
     expect(alert.getAttribute('role')).toBe('alert');
     expect(alert.textContent).toContain('only the owner may stop a ferret');
     expect(closes).toEqual([true]);
+  });
+
+  it('a settled form’s notice shows in the toast, which outlives the menu and can be dismissed', () => {
+    const h = harness();
+    const props = (open: boolean): ReactElement => inRouter(<FerretRowActionsHost {...hostProps(h, { open })} />);
+    renderer = render(props(true));
+    run(() => renderer?.root.findByType(ContextActionsMenu).props.onNotice('Saved for Hadi'));
+    const status = (): string => String(renderer?.root.findByProps({ role: 'status' }).children.join('') ?? '');
+    expect(status()).toBe('Saved for Hadi');
+    run(() => renderer?.update(props(false)));
+    expect(status()).toBe('Saved for Hadi');
+    run(() => renderer?.root.findByProps({ 'aria-label': 'Dismiss' }).props.onClick());
+    expect(status()).toBe('');
+  });
+
+  it('a failure that carries the daemon’s detail keeps it behind Details', async () => {
+    const h = harness();
+    h.refuse.set(STOP, new DetailedFailure('the daemon said no', 'refused: pane busy'));
+    const root = await mountHost(hostProps(h));
+    await click(root, '[data-ferret-action-item="stop"]');
+    await click(root, '[data-menu-confirm-yes]');
+    const alert = must(root.querySelector('[data-ferret-alert]'), 'the alert');
+    expect(alert.textContent).toContain('the daemon said no');
+    expect(alert.querySelector('details pre')?.textContent).toBe('refused: pane busy');
+  });
+
+  it('Copy ferret id copies the id, and says so when the browser blocks it', async () => {
+    const written: string[] = [];
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          written.push(text);
+        },
+      },
+    });
+    const h = harness();
+    const root = await mountHost(hostProps(h));
+    await click(root, '[data-ferret-action-item="copy-id"]');
+    expect(written).toEqual(['a1']);
+
+    await mounted?.unmount();
+    Object.defineProperty(globalThis.navigator, 'clipboard', { configurable: true, value: undefined });
+    const blocked = await mountHost(hostProps(h));
+    await click(blocked, '[data-ferret-action-item="copy-id"]');
+    expect(must(blocked.querySelector('[data-ferret-alert]'), 'the alert').textContent).toContain(
+      'Copying the id was blocked',
+    );
+  });
+
+  it('Restart CLI, and going back to the earlier conversation, are moves onto the login it is on', async () => {
+    const h = harness();
+    h.answers.set('POST /v1/ferrets/:ferretId/move', ferretA);
+    const root = await mountHost(hostProps(h));
+    await click(root, '[data-ferret-action-item="restart"]');
+    await click(root, '[data-menu-confirm-yes]');
+    expect(h.calls).toEqual(['POST /v1/ferrets/:ferretId/move']);
+    expect(h.bodies[0]).toMatchObject({ agent: 'claude-main' });
+    expect(root.querySelector('[data-ferret-alert]')).toBeNull();
+
+    await click(root, '[data-ferret-action-item="earlier-conversation"]');
+    await click(root, '[data-menu-confirm-yes]');
+    expect(h.calls).toHaveLength(2);
+    expect(h.bodies[1]).toMatchObject({ agent: 'claude-main', conversation: 'previous' });
+  });
+
+  it('Pin to top, Unpin and Resume are the core acts, each a daemon call for this ferret', async () => {
+    const h = harness();
+    const root = await mountHost(hostProps(h));
+    await click(root, '[data-ferret-action-item="pin"]');
+    expect(h.calls).toEqual(['POST /v1/ferrets/:ferretId/pin']);
+    await mounted?.unmount();
+
+    const stopped = ferretSummary('a1', {
+      name: 'hadi',
+      state: 'stopped',
+      pinnedAt: '2026-01-02T00:00:00.000Z' as FerretSummary['pinnedAt'],
+    });
+    const second = await mountHost(hostProps(h, { ferret: stopped }));
+    await click(second, '[data-ferret-action-item="pin"]');
+    await mounted?.unmount();
+    const third = await mountHost(hostProps(h, { ferret: stopped }));
+    await click(third, '[data-ferret-action-item="resume"]');
+    expect(h.calls).toEqual([
+      'POST /v1/ferrets/:ferretId/pin',
+      'POST /v1/ferrets/:ferretId/unpin',
+      'POST /v1/ferrets/:ferretId/resume',
+    ]);
   });
 
   it('hands focus back to the row only when asked, and closes either way', async () => {
