@@ -1,6 +1,7 @@
 /** Today's process-token-refresh.ts Codex app-server path, over the kernel's process and clock ports. */
 import type { Clock, SpawnPort } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
+import { CODEX_CREDENTIAL_STORE_FILE, CODEX_CREDENTIAL_STORE_KEY } from '../../lib/credentials/credentials.ts';
 import {
   mergeCodexRefreshEvidence,
   NO_CODEX_REFRESH_EVIDENCE,
@@ -46,7 +47,15 @@ export function codexTokenRefresh(spawn: SpawnPort, clock: Clock): FleetTokenRef
       if (target.kind !== 'codex')
         return { outcome: 'unavailable', reason: 'Claude renews its own login on its next use' };
       try {
-        const child = spawn.start('codex', ['app-server'], { env: { CODEX_HOME: target.home } });
+        // File storage is forced, as the sign-in forces it (credentials-service): a refresh must never move the credential into a
+        // keyring, where no link in a ferret's home could reach it.
+        const child = spawn.start(
+          'codex',
+          ['-c', `${CODEX_CREDENTIAL_STORE_KEY}="${CODEX_CREDENTIAL_STORE_FILE}"`, 'app-server'],
+          {
+            env: { CODEX_HOME: target.home },
+          },
+        );
         let evidence = NO_CODEX_REFRESH_EVIDENCE;
         let exited = false;
         void child.exited.then(() => {

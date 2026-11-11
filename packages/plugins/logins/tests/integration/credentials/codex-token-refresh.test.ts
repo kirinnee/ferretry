@@ -4,7 +4,7 @@
  */
 import { afterEach, describe, it } from 'bun:test';
 import { bunSpawn, systemClock } from '@ferretry/kernel/host';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -107,5 +107,30 @@ describe('the Codex renewal path', () => {
     const attempt = await codexTokenRefresh(dying as never, clock).refresh(target, never);
 
     should(attempt).deepEqual({ outcome: 'ran', evidence: { codes: ['invalid_grant'], unauthorized: false } });
+  });
+
+  it('should force file storage, so a Check now can never move the credential into a keyring', async () => {
+    // Arrange — a stand-in that records the argument list it was started with.
+    const log = join(await mkdtemp(join(tmpdir(), 'fy-codex-argv-')), 'argv');
+    folders.push(join(log, '..'));
+    const path = await codexOnPath(`printf '%s\\n' "$@" > ${log}; cat >/dev/null; sleep 1`);
+    const refresh = codexTokenRefresh(bunSpawn({ PATH: path }), clock);
+
+    // Act
+    await refresh.refresh(
+      target,
+      async () =>
+        await readFile(log).then(
+          () => true,
+          () => false,
+        ),
+    );
+
+    // Assert — the same key the sign-in passes (credentials-service), and the subcommand it runs.
+    const argv = (await readFile(log, 'utf8')).trim().split('\n');
+    should(argv).containEql('app-server');
+    const at = argv.indexOf('-c');
+    should(at).aboveOrEqual(0);
+    should(argv[at + 1]).equal('cli_auth_credentials_store="file"');
   });
 });
