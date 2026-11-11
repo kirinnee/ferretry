@@ -546,6 +546,34 @@ describe('materialiseFleet', () => {
     should(result.manifestPath).equal('/fy/fleet/manifest.json');
   });
 
+  it('should launch on a third-party model set that follows the Claude set in the profile (B191)', () => {
+    // Arrange — an environment login with no catalog, profile = claude set, then a kimi set
+    const model = modelOf({
+      credentials: {
+        'claude-you': {
+          harness: 'claude',
+          store: 'environment',
+          env: { ANTHROPIC_BASE_URL: 'https://loge.example/anthropic', ANTHROPIC_AUTH_TOKEN: 'loge-internal' },
+        },
+        'codex-work': { harness: 'codex', store: 'ferretry' },
+      },
+      components: {
+        ...COMPONENTS,
+        modelSets: { ...COMPONENTS.modelSets, kimi: { models: ['kimi-k3'], default: 'kimi-k3' } },
+      },
+      profiles: { default: { layers: [...DEFAULT_LAYERS.slice(0, 3), 'modelSets/claude', 'modelSets/kimi'] } },
+    });
+
+    // Act
+    const result = plan(model);
+
+    // Assert
+    const account = result.manifest.accounts[0];
+    should(account?.defaultModel).equal('kimi-k3');
+    should(account?.models.map(m => m.id)).eql(['kimi-k3']);
+    should(wrapperOf(result, 'claude-default')).containEql("'--model' 'kimi-k3'");
+  });
+
   it('should publish a runtime’s compaction default: its own, else its profile’s, else nothing', () => {
     // Arrange
     const model = modelOf({

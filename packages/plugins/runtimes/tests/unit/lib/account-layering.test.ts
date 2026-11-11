@@ -622,6 +622,7 @@ describe('resolveProfile — model sets (§3.4, K8, E23)', () => {
         heavy: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' },
         light: { models: ['claude-haiku-5-5', 'claude-opus-5-5'], default: 'claude-haiku-5-5' },
         alien: { models: ['llama-4'], default: 'llama-4' },
+        'kimi-models': { models: ['kimi-k3'], default: 'kimi-k3' },
       },
     },
     {
@@ -629,6 +630,7 @@ describe('resolveProfile — model sets (§3.4, K8, E23)', () => {
       mixed: { layers: ['modelSets/mixed'] },
       stacked: { layers: ['modelSets/heavy', 'modelSets/claude-models', 'modelSets/light'] },
       alien: { layers: ['modelSets/alien'] },
+      kimi: { layers: ['modelSets/claude-models', 'modelSets/kimi-models'] },
     },
   );
 
@@ -710,13 +712,27 @@ describe('resolveProfile — model sets (§3.4, K8, E23)', () => {
     should(actual.modelSet).containDeep({ layer: { name: 'two' } });
   });
 
-  it('should skip a set none of whose ids belong to any harness', () => {
+  it('should apply a set whose ids belong to no known harness on either harness', () => {
     // Act
-    const actual = resolved({ model: imported, profile: 'alien', harness: 'claude' });
+    const claude = resolved({ model: imported, profile: 'alien', harness: 'claude' });
+    const codex = resolved({ model: imported, profile: 'alien', harness: 'codex' });
 
     // Assert
-    should(actual.availability).deepEqual({ available: false, reason: 'nothing-applies' });
-    should(actual.modelSet).deepEqual({ source: 'harness-default' });
+    should(claude.modelSet).containDeep({ source: 'model-set', default: 'llama-4' });
+    should(codex.modelSet).containDeep({ source: 'model-set', default: 'llama-4' });
+  });
+
+  it('should let a third-party model set override the Claude set on a Claude runtime (B191)', () => {
+    // Act
+    const actual = resolved({ model: imported, profile: 'kimi', harness: 'claude' });
+
+    // Assert
+    should(actual.skipped).deepEqual([]);
+    should(actual.modelSet).containDeep({
+      source: 'model-set',
+      layer: { name: 'kimi-models' },
+      default: 'kimi-k3',
+    });
   });
 
   it('should strike through what the login cannot use and fall back to the first it can', () => {

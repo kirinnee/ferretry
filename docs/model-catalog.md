@@ -382,3 +382,11 @@ changes nothing.
   `modelCatalogRates`; the hosted app deploys before any release does, so this is a stale tab — reload it.
 - **Bedrock ids are the US inference profiles** (`us.anthropic.…`). A login whose `AWS_REGION` is outside
   the US needs the `eu.`, `au.`, `jp.` or `global.` ids, in `config/models/amazon-bedrock.yaml`.
+
+## Third-party ids in a model set
+
+A model id that neither Claude Code nor Codex claims (`kimi-k3`, `glm-5.3`, `deepseek-…`) fits whichever
+harness the login drives, so a model set holding it applies on that runtime and, as the later layer, wins over
+an earlier Claude set (the profile shows the override as a conflict). Only ids a harness claims
+(`claude-…`/aliases, `gpt-…`/`codex-…`/`o<n>`) are filtered by harness. One owner: `modelFitsHarness` in
+`layering.ts`.
