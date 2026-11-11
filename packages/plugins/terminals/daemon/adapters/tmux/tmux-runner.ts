@@ -2,7 +2,10 @@ import {
   type AttachRefusal,
   type FerretId,
   type DeliveryOutcome,
+  FORM_KEYS,
+  type FormKey,
   HARNESS_STOP_KEYS,
+  type RunnerFormCapture,
   type QueueOutcome,
   type RunnerComposerCleared,
   type RunnerComposerSubmitted,
@@ -494,6 +497,77 @@ export class TmuxRunner implements Runner {
         .catch(() => undefined);
     return await this.observe(handle);
   }
+
+  /**
+   * Structured questions: ONE capture of the live ferret pane for the question-form driver (today's `TmuxController.state`):
+   * the visible screen and the scrollback, each masked inside one `Redaction.read` (the scrollback tailed to what the masker
+   * takes, at a line boundary) and only then handed on, everything inside ONE `kernel.act(terminal %n, 'read')` so a hold
+   * refuses the whole read. Reads only. Total: a pane that is gone, not a ferret's own, unreadable or held reads `undefined`.
+   */
+  async formCapture(handle: RunnerHandle): Promise<RunnerFormCapture | undefined> {
+    const watch = this.options.look;
+    if (watch === undefined || !PANE_ID.test(handle)) return undefined;
+    const tmux = this.options.tmux;
+    const acted = await watch
+      .act(targetRef('terminal', handle), 'read', async () => {
+        const facts = await this.facts(handle);
+        if (facts === undefined || !isFerretSession(facts.session)) return { kind: 'content' as const };
+        if (facts.dead)
+          return {
+            kind: 'content' as const,
+            data: { alive: true, dead: true, promptReady: false, activeWork: false, visible: '', history: '' } as never,
+          };
+        const [visible, history] = await Promise.all([
+          tmux.execute(['capture-pane', '-p', '-t', handle]),
+          tmux.execute(['capture-pane', '-p', '-S', '-', '-t', handle]),
+        ]);
+        if (visible.code !== 0) return { kind: 'content' as const };
+        const earlier = history.code === 0 ? tailAtLine(history.stdout, FORM_HISTORY_CHARS) : '';
+        return await watch.redaction.read(scope => {
+          const shown = maskedScreen(scope, visible.stdout);
+          const state = paneStateFrom({ dead: false }, shown, earlier === '' ? '' : maskedScreen(scope, earlier));
+          return {
+            kind: 'content' as const,
+            data: {
+              alive: true,
+              dead: false,
+              promptReady: state.promptReady,
+              activeWork: paneShowsActiveWork(shown),
+              visible: state.visible,
+              history: state.history,
+            } satisfies RunnerFormCapture as never,
+          };
+        });
+      })
+      .catch(() => undefined);
+    if (acted === undefined || !acted.ok) return undefined;
+    return acted.value.data === undefined ? undefined : (acted.value.data as unknown as RunnerFormCapture);
+  }
+
+  /**
+   * Structured questions: ONE key of the closed {@link FORM_KEYS} typed at the pane through the guarded binding (every
+   * write is `kernel.act(terminal %n, 'keys')`, so a Vault hold types nothing and rejects `held`), exactly as `deliver`'s.
+   */
+  async formKey(handle: RunnerHandle, key: FormKey): Promise<void> {
+    if (!(FORM_KEYS as readonly string[]).includes(key))
+      throw new TypeError('that key is not one a form is driven with');
+    const pane = await this.guardedPane(handle);
+    try {
+      await new TmuxController(pane.port).sendKey(pane.session, key);
+    } catch (error) {
+      throw typedNotLost(error, { ...pane.written(), typings: 0 });
+    }
+  }
+
+  /** Structured questions: `text` pasted as one bracketed paste through the guarded binding, as {@link TmuxRunner.formKey}. */
+  async formPaste(handle: RunnerHandle, text: string): Promise<void> {
+    const pane = await this.guardedPane(handle);
+    try {
+      await new TmuxController(pane.port).paste(pane.session, text);
+    } catch (error) {
+      throw typedNotLost(error, pane.written());
+    }
+  }
   /**
    * One look at the live ferret pane behind `handle` for the turn watch (`Runner.look`): the activity stamp, the screen
    * captured again only when it may have changed (re-proving then that the pane is still a live ferret's own), masked
@@ -755,4 +829,15 @@ export class TmuxRunner implements Runner {
     await this.options.remember?.(spec.ferret, running);
     return ok(running);
   }
+}
+
+/** The most scrollback characters a form capture masks: the masker refuses a screen past its cap, so the tail is kept. */
+const FORM_HISTORY_CHARS = 200_000;
+
+/** The last `max` characters of `text`, starting at a line boundary so no half line is read. */
+function tailAtLine(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const cut = text.slice(text.length - max);
+  const newline = cut.indexOf('\n');
+  return newline < 0 ? '' : cut.slice(newline + 1);
 }

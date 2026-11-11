@@ -29,6 +29,13 @@ export function subject(options: { readonly unguarded?: boolean; readonly redact
   const holds: InputHolds = {
     decide: () => (held ? { refused: 'input_pending' } : 'allow'),
   };
+  /** The act the turn watch's reads run in (the same holds as the writes), recorded with them. */
+  const lookAct = testActRunner({
+    holds: () => holds,
+    actor: () => 'ferret',
+    minted: new TestMintedIds(),
+    record: act => acts.push(act),
+  });
   const runner = new TmuxRunner({
     tmux: {
       execute: async (args, stdin) => {
@@ -90,7 +97,7 @@ export function subject(options: { readonly unguarded?: boolean; readonly redact
     socketPath: '/fixture/tmux.sock',
     ...(options.redaction === undefined
       ? {}
-      : { look: { act: undefined as never, redaction: options.redaction, digest: undefined as never } }),
+      : { look: { act: lookAct, redaction: options.redaction, digest: undefined as never } }),
     instantOf: () => 'now' as never,
     now: () => 'now' as never,
     delivery:

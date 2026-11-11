@@ -1411,3 +1411,31 @@ describe('V-0443 a start carries its attachments with the opening message', () =
     expect(await readdir(w.folderOf(id))).not.toContain('attachments');
   });
 });
+
+describe('structured questions: FerretHarness.askedQuestion reads the hook’s question file from the ferret’s own folder', () => {
+  const HOOK = JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', tool_use_id: 'toolu_1' });
+  const asking = async () => {
+    const w = await world();
+    const id = await started(w);
+    return { w, id, seam: (await w.service.harness(id as never))!, file: `${w.folderOf(id)}/question-asked.json` };
+  };
+
+  test('absent file reads nothing; a written one answers its payload, the proved transcript and a stable first-seen instant', async () => {
+    const { w, id, seam, file } = await asking();
+    expect(await seam.askedQuestion!()).toBeUndefined();
+    await writeFile(file, HOOK, { mode: 0o600 });
+    w.harness.transcripts.set(id as never, { stamp: { file: '/t/fern.jsonl', size: 1, mtimeMs: 2 }, records: [] });
+    const first = await seam.askedQuestion!();
+    expect(first).toMatchObject({ payload: HOOK, transcript: '/t/fern.jsonl' });
+    // The same text keeps its instant; a different payload is a new question with its own.
+    expect((await seam.askedQuestion!())?.writtenAt).toBe(first?.writtenAt);
+    await writeFile(file, `${HOOK} `, { mode: 0o600 });
+    expect((await seam.askedQuestion!())?.payload).toBe(`${HOOK} `);
+  });
+
+  test('a file over the bound is not a hook payload and reads nothing, and it never throws', async () => {
+    const { seam, file } = await asking();
+    await writeFile(file, 'x'.repeat(262_145), { mode: 0o600 });
+    expect(await seam.askedQuestion!()).toBeUndefined();
+  });
+});

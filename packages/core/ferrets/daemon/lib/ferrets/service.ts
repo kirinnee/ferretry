@@ -10,7 +10,11 @@ import type {
   DeliveryOutcome,
   FerretChangedPayload,
   FerretEndCause,
+  AskedQuestionFile,
   FerretHarness,
+  FormKey,
+  HarnessForm,
+  RunnerFormCapture,
   FerretTurnAuthor,
   FerretTurnDocument,
   FerretTurnWritten,
@@ -315,6 +319,11 @@ export interface FerretSessionPort {
    * Unbound, or a path that cannot be named: the variable is not set, and the hook records nothing.
    */
   questionFile?(ferret: FerretId): Promise<FencedPath>;
+  /**
+   * Additive (structured questions): THIS ferret's `question-asked.json` as the hook left it (raw text, bounded) and its
+   * modification time; `undefined` when absent, unreadable or over the bound. Reads only. Unbound: no question is seen.
+   */
+  askedQuestion?(ferret: FerretId): Promise<{ readonly payload: string; readonly writtenAt: Instant } | undefined>;
   /**
    * Port-only (not on the contract): whether a ferret started under `parent` would be stamped into the Warden's
    * lineage, decided from the SAME source and rule the start's stamp uses (the session documents, `resolveWardenLineage`),
@@ -1415,6 +1424,45 @@ export class FerretsService implements FerretsApi {
               return files.map(file => posix.join(folder, file.name));
             },
           }),
+      // ── the structured-question acts (additive). The writes are the runner's own guarded ones (not wrapped in a second
+      // act here, for the reason `deliver` is not); the reads write nothing. No answer carries pane text but `capture`'s.
+      askedQuestion: async (): Promise<AskedQuestionFile | undefined> => {
+        const read = this.ports.session?.askedQuestion?.bind(this.ports.session);
+        if (read === undefined) return undefined;
+        const asked = await read(ferret).catch(() => undefined);
+        if (asked === undefined) return undefined;
+        const record = this.registry.get(ferret);
+        const harness = record === undefined ? undefined : this.ports.harness(record.harness);
+        const stamp = await harness?.transcriptStamp?.(ferret).catch(() => undefined);
+        return { ...asked, ...(stamp === undefined ? {} : { transcript: stamp.file }) };
+      },
+      form: {
+        capture: async (): Promise<Result<RunnerFormCapture, HarnessRefusal>> => {
+          const found = pane();
+          if (!found.ok) return found;
+          const { handle, runner } = found.value;
+          const capture = runner.formCapture?.bind(runner);
+          if (capture === undefined) return err({ refused: 'plugin_unavailable' });
+          const seen = await capture(handle).catch(() => undefined);
+          return seen === undefined ? err({ refused: 'no_pane' }) : ok(seen);
+        },
+        key: async (key: FormKey): Promise<Result<void, HarnessDeliveryFailure>> => {
+          const found = pane();
+          if (!found.ok) return found;
+          const { handle, runner } = found.value;
+          const press = runner.formKey?.bind(runner);
+          if (press === undefined) return err({ refused: 'plugin_unavailable' });
+          return await written(async () => await press(handle, key));
+        },
+        paste: async (text: string): Promise<Result<void, HarnessDeliveryFailure>> => {
+          const found = pane();
+          if (!found.ok) return found;
+          const { handle, runner } = found.value;
+          const paste = runner.formPaste?.bind(runner);
+          if (paste === undefined) return err({ refused: 'plugin_unavailable' });
+          return await written(async () => await paste(handle, text));
+        },
+      } satisfies HarnessForm,
       // Bound to the ferret this seam was opened for: there is no target to name, so it cannot read another ferret's.
       transcript: {
         read: async (after, limit) => await reader().read(ferret, after, limit),
