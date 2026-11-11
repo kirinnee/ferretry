@@ -37,6 +37,7 @@ import {
   CODEX_CREDENTIAL_STORE_FILE,
   CODEX_CREDENTIAL_STORE_KEY,
   type CodexStoreResolution,
+  credentialLaunchEnvironment,
   type CredentialStorePaths,
   type CredentialStoreResolution,
   HOST_CLAUDE_SECURE_STORAGE,
@@ -658,6 +659,18 @@ export class FleetCredentialsService {
       );
     }
     return await this.checkForLaunch(id);
+  }
+
+  /**
+   * Inside Logins only: what a runtime on this login is launched with beyond its own config dir. A Ferretry-kept Claude
+   * login gets its one secure-storage variable (`credentialLaunchEnvironment`); every other login gets nothing here (an
+   * environment login's own `env` travels through the login kind's `env`, a host store is not readable in this build, and
+   * Codex's credential is a link in its home, not a variable).
+   */
+  async launchEnvironment(id: string): Promise<Readonly<Record<string, string>>> {
+    const resolution = stored((await this.deps.catalog.entry(id)).resolution);
+    if (resolution?.harness !== 'claude' || resolution.store !== 'ferretry') return {};
+    return credentialLaunchEnvironment(resolution);
   }
 
   /** Inside Logins only: the trusted Ferrets launch hook shares Check now's work, never its caller standing. */

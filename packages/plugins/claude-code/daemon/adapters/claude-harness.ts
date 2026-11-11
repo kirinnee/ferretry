@@ -165,6 +165,7 @@ export class ClaudeHarness implements Harness {
       settings: inputs.settings as never,
       hooks: inputs.hooks as never,
       effort: spec.effort,
+      loginEnv: spec.loginEnv,
     });
     const files: FencedPath[] = [];
     const write = async (name: string, content: string): Promise<void> => {

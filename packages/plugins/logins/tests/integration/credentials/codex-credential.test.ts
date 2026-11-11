@@ -75,6 +75,7 @@ async function fixture(
   const kinds = loginKinds({
     clock: { sleep: async () => undefined },
     files: () => FILES,
+    signInVariables: async () => ({}),
     view: async id => view(id),
     check: async id => {
       refreshes.push(id);

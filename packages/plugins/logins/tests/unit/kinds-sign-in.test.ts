@@ -30,6 +30,7 @@ function world(started: HarnessLoginFlow, ...later: HarnessLoginFlow[]) {
   const reads: string[] = [];
   const queue = [...later];
   const kinds = loginKinds({
+    signInVariables: async () => ({}),
     clock: {
       sleep: async duration => {
         sleeps.push(Number(duration));
@@ -115,6 +116,7 @@ describe('a kind’s reads', () => {
   const quotaOf = async (view: LoginView) => {
     const kinds = loginKinds({
       clock: { sleep: async () => undefined },
+      signInVariables: async () => ({}),
       files: () => FILES,
       view: async () => view,
       check: async () => view,
@@ -144,6 +146,7 @@ describe('a kind’s reads', () => {
   test('says the login does not exist when the list no longer shows it', async () => {
     const kinds = loginKinds({
       clock: { sleep: async () => undefined },
+      signInVariables: async () => ({}),
       files: () => FILES,
       view: async () => undefined,
       check: async id => sampleLogin(id),

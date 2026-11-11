@@ -16,7 +16,7 @@ import type {
   SignInFlow,
 } from '@ferretry/core-ferrets/contract';
 import type { Clock, SharedCredential } from '@ferretry/kernel/contract';
-import { milliseconds } from '@ferretry/std';
+import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import type { LOGIN_KINDS, LoginFile, LoginView } from '../../contract/index.ts';
 import type { HarnessLoginFlow } from '../../contract/index.ts';
 import { harnessKey } from './shared/harness.ts';
@@ -36,6 +36,11 @@ export interface LoginKindDeps {
   credentialProblem(id: string): Promise<string | undefined>;
   /** The kernel's shared credential for this login's sign-in file, or `undefined` when it could not be shared. Never renews. */
   shareCredential(id: string): Promise<SharedCredential | undefined>;
+  /**
+   * The variables the credential store sets for a runtime on this login (`credentialLaunchEnvironment`): for a
+   * Ferretry-kept Claude login the one secure-storage variable, naming its store directory. Nothing for any other.
+   */
+  signInVariables(id: string): Promise<Readonly<Record<string, string>>>;
 }
 
 /** Presets whose login is an endpoint behind another company's gateway (a proxy), not the provider's own key. */
@@ -114,10 +119,32 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
     return view;
   };
 
+  /**
+   * Claude's launch variable for a Ferretry-kept sign-in, or why none can be given. Claude's store is a file under the
+   * store directory on Linux and a keychain item hashed from that same directory on macOS, so the one variable selects it
+   * on both, and the launch keeps the real HOME (the macOS keychain search list is found through it). A sign-in that
+   * is not there refuses the start instead of launching a pane that would sit signed out.
+   */
+  const claudeLaunch = async (
+    login: string,
+    harness: HarnessKey,
+  ): Promise<Result<Readonly<Record<string, string>>, string>> => {
+    if (harness !== harnessKey('claude')) return ok({});
+    const view = await viewOf(login, 'anthropic');
+    const status = statusOf(view);
+    if (status.state !== 'signed-in')
+      return err(`the login ${login} is not signed in (${status.sentence}), so the ferret was not started`);
+    return ok(await deps.signInVariables(login));
+  };
+
   const make = (key: KindKey): LoginKind => ({
     key,
     fields: FIELDS[key],
     harnesses: HARNESSES[key],
+    holds(login) {
+      const file = deps.files().get(login);
+      return file !== undefined && kindOf(file) === key;
+    },
     async signIn(login) {
       const file = known(login, key);
       // A key, a proxy or an endpoint is a config file plus a Vault secret: there is nothing to sign in to.
@@ -136,6 +163,17 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
       ? { refresh: async (login: string) => statusOf(await deps.check(login)) }
       : {}),
     quota: async login => quotaOf(await viewOf(login, key)),
+    ...(key === 'anthropic'
+      ? {
+          launchEnvironment: async (login: string, harness: HarnessKey) => {
+            try {
+              return await claudeLaunch(login, harness);
+            } catch {
+              return err(`the login ${login} could not be read, so the ferret was not started`);
+            }
+          },
+        }
+      : {}),
     // Only a Codex sign-in is a FILE a harness reads. Claude's reaches a ferret as environment (`env`/launch environment).
     ...(key === 'openai'
       ? {

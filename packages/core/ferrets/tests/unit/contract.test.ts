@@ -62,7 +62,7 @@ harnessConformance('FakeHarness', () => {
 loginKindConformance('FakeLoginKind', () => new FakeLoginKind(), { credentialEnv: ['ANTHROPIC_API_KEY'] });
 loginKindConformance(
   'FakeLoginKind with an unavailable sign-in file',
-  () => new FakeLoginKind('api-key', { kind: 'unavailable', sentence: 'the login work is not signed in' }),
+  () => new FakeLoginKind('api-key', undefined, { kind: 'unavailable', sentence: 'the login work is not signed in' }),
   { credentialEnv: ['ANTHROPIC_API_KEY'] },
 );
 
