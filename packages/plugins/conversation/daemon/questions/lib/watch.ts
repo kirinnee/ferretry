@@ -40,6 +40,9 @@ export interface QuestionWatchDeps {
 /** The only harness whose asking leaves a hook file: Claude Code's. Codex's `request_user_input` is not detected (GAP). */
 const CLAUDE_CODE = 'claude-code';
 
+/** How many looks store one payload before a state store that keeps failing is left alone (looks are 2 s apart). */
+const WRITE_ATTEMPTS = 5;
+
 /** Whether the transcript says the question is over: it names the call, or holds any event newer than the question. */
 function endedBy(entries: readonly TranscriptEntry[], toolUseId: string, askedAtMs: number): boolean {
   return entries.some(entry => {
@@ -62,6 +65,8 @@ function endedBy(entries: readonly TranscriptEntry[], toolUseId: string, askedAt
  */
 export class QuestionWatch {
   readonly #seen = new Map<string, string>();
+  /** A payload whose write failed, and how many looks have tried it (bounded by {@link WRITE_ATTEMPTS}). */
+  readonly #failed = new Map<string, { readonly payload: string; readonly attempts: number }>();
   readonly #looking = new Map<string, Promise<void>>();
 
   constructor(private readonly deps: QuestionWatchDeps) {}
@@ -90,6 +95,7 @@ export class QuestionWatch {
   /** The ferret stopped or went away: what was stored for it is forgotten, so a revive's old file is read afresh. */
   forget(ferret: string): void {
     this.#seen.delete(ferret);
+    this.#failed.delete(ferret);
   }
 
   async #lookNow(ferret: string): Promise<void> {
@@ -112,9 +118,25 @@ export class QuestionWatch {
         return;
       }
     }
-    this.#seen.set(ferret, file.payload);
-    const stored = await this.deps.write(ferret, file.payload, file.writtenAt, file.transcript);
-    if (stored !== undefined) await this.deps.asked(ferret, stored.toolUseId);
+    // The payload is remembered only once the write has landed: a transient state failure leaves it unseen, so the next
+    // look stores it. A payload that keeps failing is retried a bounded number of looks, then left (a forget or a new
+    // payload starts it afresh), so a broken store is not hammered forever. Publishing is separate: it runs after the
+    // payload is remembered, so a publish failure never writes (or announces) the question a second time.
+    try {
+      const stored = await this.deps.write(ferret, file.payload, file.writtenAt, file.transcript);
+      this.#seen.set(ferret, file.payload);
+      this.#failed.delete(ferret);
+      if (stored !== undefined) await this.deps.asked(ferret, stored.toolUseId);
+    } catch (error) {
+      if (this.#seen.get(ferret) === file.payload) throw error;
+      const previous = this.#failed.get(ferret);
+      const attempts = (previous?.payload === file.payload ? previous.attempts : 0) + 1;
+      if (attempts >= WRITE_ATTEMPTS) {
+        this.#seen.set(ferret, file.payload);
+        this.#failed.delete(ferret);
+      } else this.#failed.set(ferret, { payload: file.payload, attempts });
+      throw error;
+    }
   }
 
   /** `true` the question is over, `false` still open, `undefined` the transcript could not be read. */
