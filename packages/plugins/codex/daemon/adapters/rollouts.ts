@@ -32,6 +32,14 @@ const PROOF_REUSE_MS = 5_000;
 /** How much of the end of a rollout one tail read takes: a turn's records are near the end. */
 const TAIL_READ_BYTES = 512 * 1024;
 const decoder = new TextDecoder();
+/** The value with every string in it passed through `mask` (keys and shape untouched). */
+const scrubStrings = (value: unknown, mask: (text: string) => string): unknown => {
+  if (typeof value === 'string') return mask(value);
+  if (Array.isArray(value)) return value.map(item => scrubStrings(item, mask));
+  if (typeof value === 'object' && value !== null)
+    return Object.fromEntries(Object.entries(value).map(([name, each]) => [name, scrubStrings(each, mask)]));
+  return value;
+};
 const sha256Hex = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
 interface Rollout {
@@ -302,8 +310,16 @@ export class CodexRollouts {
       const start = after === undefined ? 0 : entries.findIndex(entry => entry.id === after) + 1;
       if (after !== undefined && start === 0) return [];
       const page = entries.slice(start, limit === undefined ? undefined : start + Math.max(0, limit));
-      return await this.kernel.redaction.read(
-        scope => JSON.parse(scope.text(JSON.stringify(page))) as TranscriptEntry[],
+      // Each string is masked ON ITS OWN, never the page's JSON: a secret holding a quote, a backslash, a newline or a
+      // control character is ESCAPED by JSON.stringify and so would not match its own words (ports-pending, G162).
+      return await this.kernel.redaction.read(scope =>
+        page.map(
+          (entry): TranscriptEntry => ({
+            ...entry,
+            ...(entry.text === undefined ? {} : { text: scope.text(entry.text) }),
+            ...(entry.data === undefined ? {} : { data: scrubStrings(entry.data, scope.text) as JsonValue }),
+          }),
+        ),
       );
     },
     find: async (ferret, id) => (await this.transcript.read(ferret)).find(entry => entry.id === id),

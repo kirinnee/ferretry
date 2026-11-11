@@ -26,7 +26,7 @@ const said = (text: string) =>
   line('response_item', { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
 
 /** A real home with two ferrets' agent homes, the kernel's roots over the disk, and a clock the test moves. */
-async function world() {
+async function world(secret?: string) {
   const parent = await mkdtemp(join(tmpdir(), 'ferretry-codex-rollouts-'));
   parents.push(parent);
   const home = join(parent, 'fy');
@@ -49,7 +49,10 @@ async function world() {
   const kernel = {
     roots,
     state: port,
-    redaction: { read: async (fn: (scope: { text(s: string): string }) => unknown) => await fn({ text: s => s }) },
+    redaction: {
+      read: async (fn: (scope: { text(s: string): string }) => unknown) =>
+        await fn({ text: s => (secret === undefined ? s : s.split(secret).join('******')) }),
+    },
     clock: {
       now: () => instantFromEpochMs(time.ms),
       sleep: async () => {
@@ -261,5 +264,35 @@ describe('G162 Codex rollouts: transcriptBytes is a windowed, unmasked byte hand
     await rm(join(gone.agent('f1'), 'sessions', 'rollout-a.jsonl'));
     await expect(gone.handle.read(0, 10)).rejects.toBeInstanceOf(HarnessTranscriptReplaced);
     expect(await gone.handle.stat()).toBeUndefined();
+  });
+});
+
+describe('ports-pending: a secret the JSON would escape is masked in each entry, not in the page’s JSON', () => {
+  // A double quote, a backslash, a newline and a control character: every one is ESCAPED by JSON.stringify.
+  const SECRET = 'pa"ss\\word\nline2\u0007end';
+
+  test('the entry text and every string of its data are masked, and nothing else about the entry changes', async () => {
+    const w = await world(SECRET);
+    await w.rollouts.launched(w.specOf('f1'));
+    await w.write(
+      'f1',
+      'rollout-a.jsonl',
+      `${header('native-a', w.agent('f1'))}${said(`my ${SECRET} here`)}${said('plain words')}`,
+    );
+
+    const entries = await w.rollouts.transcript.read('f1' as FerretId);
+
+    expect(entries.map(entry => entry.text)).toEqual(['my ****** here', 'plain words']);
+    // The same words are in `data` (the event itself): masked there too, in every string, with the shape unchanged.
+    const shown = JSON.stringify(entries);
+    expect(shown).not.toContain('ss\\\\word');
+    expect(shown).not.toContain(SECRET);
+    expect(shown).not.toContain(JSON.stringify(SECRET).slice(1, -1));
+    expect((entries[0]?.data as { text?: string } | undefined)?.text).toBe('my ****** here');
+    expect(entries[1]?.data).toMatchObject({ text: 'plain words', kind: 'message' });
+    // Ids, roles and instants are untouched, and paging still works over the masked entries.
+    expect(entries.map(entry => entry.role)).toEqual(['assistant', 'assistant']);
+    expect(await w.rollouts.transcript.read('f1' as FerretId, entries[0]?.id, 1)).toEqual(entries.slice(1, 2));
+    expect(await w.rollouts.transcript.find('f1' as FerretId, entries[1]?.id ?? '')).toEqual(entries[1]);
   });
 });
