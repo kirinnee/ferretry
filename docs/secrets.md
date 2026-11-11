@@ -515,9 +515,11 @@ per-document plan (one refused document writes nothing of the set).
   - **The text of an instructions or hooks file**: cut by its own line rule (`redactText`), pinned equal to v4 outside its
     tightened lines, and then netted line by line: a line W's text test still refuses after that cut (a long bare value
     under a plain key) is withheld, replaced by one plain sentence (`WITHHELD_LINE`) while every other line and the line
-    count stay. v4 showed those lines; the S26 pin exempts exactly the lines it replaces. Netted by W's VALUE rule too:
+    count stay. v4 showed those lines; the S26 pin exempts exactly the lines it replaces. W's text rule reads a
+    4,096-character window: a longer line is judged on its first 4,096 characters. Netted by W's VALUE rule too:
     instruction lines (an instruction Runtimes writes keeps its text in the component YAML, where a string with blanks is
-    read as words; a flag at the end of one line pairs with the value starting the next), and hooks by the parsed document
+    read as words; a flag at the end of one line pairs with the value starting the next line (a blank or spaces-only
+    line between them breaks the pairing: a counted gap, `cfg-leak-d-residuals`)), and hooks by the parsed document
     (the lines of each path W refuses are withheld; a refused list item withholds its whole list, because `--token` and its
     value are two lines; a text that does not parse as JSON is netted by the lines alone, and a document nested past 200
     levels is withheld whole).
