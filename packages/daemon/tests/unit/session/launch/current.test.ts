@@ -4,6 +4,7 @@ import {
   currentLaunchEffort,
   currentLaunchFast,
   currentLaunchModel,
+  movedModel,
 } from '../../../../src/lib/session/launch/index.ts';
 import { launchConfig, launchState } from './support.ts';
 
@@ -62,6 +63,61 @@ describe('currentLaunchModel', () => {
       currentLaunchModel(config, launchState({ observedModel: 'claude-sonnet-5', observedModelAt: LATER }), servesAll),
     ).equal('claude-sonnet-5');
     should(currentLaunchModel(config, launchState(), servesAll)).be.undefined();
+  });
+});
+
+describe('movedModel', () => {
+  // The target serves BOTH models, so only the picked-or-not rule decides.
+  const servesBoth = (model: string) => model === 'opus[1m]' || model === 'kimi-k3';
+  const move = (
+    config: ReturnType<typeof launchConfig>,
+    state = launchState(),
+    crossing = true,
+    sourceDefault = 'opus[1m]',
+  ) => movedModel({ config, state, sourceDefault, crossing, servable: servesBoth });
+
+  it("should take the target's default for a model that was only the source login's default", () => {
+    // Arrange
+    const config = launchConfig({ model: 'opus[1m]', launchModelSource: 'account-default' });
+
+    // Act / Assert
+    should(move(config)).be.undefined();
+  });
+
+  it('should keep a model the person picked when the session crosses runtimes', () => {
+    // Arrange
+    const config = launchConfig({ model: 'opus[1m]', launchModelSource: 'requested' });
+
+    // Act / Assert
+    should(move(config)).equal('opus[1m]');
+  });
+
+  it('should keep a model switched with /model after the decision, even one recorded as the default', () => {
+    // Arrange
+    const config = launchConfig({ model: 'opus[1m]', launchModelSource: 'account-default' });
+    const state = launchState({ observedModel: 'kimi-k3', observedModelAt: LATER });
+
+    // Act / Assert
+    should(move(config, state)).equal('kimi-k3');
+  });
+
+  it('should keep the model on a Restart, which stays on the same runtime', () => {
+    // Arrange
+    const config = launchConfig({ model: 'opus[1m]', launchModelSource: 'account-default' });
+
+    // Act / Assert
+    should(move(config, launchState(), false)).equal('opus[1m]');
+  });
+
+  it("should read a document with no record by comparing its model with the source login's default", () => {
+    // Arrange
+    const config = launchConfig({ model: 'kimi-k3' });
+    const defaulted = launchConfig({ model: 'opus[1m]' });
+
+    // Act / Assert
+    should(move(config)).equal('kimi-k3');
+    should(move(defaulted)).be.undefined();
+    should(move(defaulted, launchState(), true, 'opus')).be.undefined();
   });
 });
 

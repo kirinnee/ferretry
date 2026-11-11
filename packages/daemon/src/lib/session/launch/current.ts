@@ -52,6 +52,44 @@ export function currentLaunchModel(
   return decided;
 }
 
+/** What the planner reports as a model's source, narrowed to what a session document records. */
+export function recordedModelSource(source: string): 'requested' | 'account-default' {
+  return source === 'requested' ? 'requested' : 'account-default';
+}
+
+export interface MovedModelInput {
+  readonly config: SessionConfig;
+  readonly state: SessionState;
+  /** The SOURCE login's default model today, when it still exists. */
+  readonly sourceDefault: string | undefined;
+  /** Whether the move lands on another runtime (a Restart does not). */
+  readonly crossing: boolean;
+  readonly servable: (model: string) => boolean;
+}
+
+/**
+ * The model a MOVE should ask the target for, or nothing so the target's own default decides.
+ *
+ * A Restart (same runtime) keeps the model the session is on, as `currentLaunchModel` says. A move
+ * onto ANOTHER runtime keeps it only when the person chose it: the session's model is otherwise just
+ * the source login's default, and carrying that over would pin a session to a model its new login
+ * serves only incidentally. The person chose when the harness reported a switch after the decision
+ * (`/model`), when the launch recorded `requested`, or — on a document with no record — when the
+ * model is not the source login's default (and when that default is unknown, the model is kept).
+ */
+export function movedModel(input: MovedModelInput): string | undefined {
+  const { config, state, sourceDefault, crossing, servable } = input;
+  const current = currentLaunchModel(config, state, servable);
+  if (!crossing || current === undefined) return current;
+  const switched = current !== config.model;
+  const recorded = config.launchModelSource;
+  const picked =
+    switched ||
+    recorded === 'requested' ||
+    (recorded === undefined && (sourceDefault === undefined || !sameModel(current, sourceDefault)));
+  return picked ? current : undefined;
+}
+
 /**
  * The fast mode a relaunch should ask for: the harness's report when it is newer than the last
  * decision, else the state the session was launched in. Absent when neither was ever decided, which

@@ -55,6 +55,7 @@ import type {
 import type { ClockPort } from '../../lib/ports.ts';
 import { harnessQuirks } from '../../lib/session/harness/quirks.ts';
 import { startupModelArguments } from '../../lib/session/harness/startup.ts';
+import { recordedModelSource } from '../../lib/session/launch/current.ts';
 import { assignedTaskDocument, lifecyclePhase } from '../../lib/session/lifecycle/policy.ts';
 import { handoffReadArguments } from '../../lib/session/send/handoff.ts';
 import type { SessionRuntimeStartupHeldPort } from '../../lib/session/runtime-control/types.ts';
@@ -521,6 +522,7 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
         harness: resolved.account.kind,
         modelHint: plan.target.model ?? '',
         model: planned.model,
+        launchModelSource: recordedModelSource(planned.modelSource),
         remoteControl: plan.durable.remoteControl,
         harnessFlags: [...plan.durable.harnessFlags],
         // A fork ALWAYS materialises `turns/turn-001.md`, so the counter says one whatever the mode:
