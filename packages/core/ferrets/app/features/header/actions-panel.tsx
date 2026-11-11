@@ -3,36 +3,24 @@
  * button for a ferret that can come back, the toast a settled form leaves, and the paused-restart panel.
  *
  * It owns every Ferrets act on the header (stop, resume, rename, restart, pin, move), each through the half's own client
- * by route key. WHO MAY DO THEM is the daemon's: an owner act, or a governed device's, and a 403 or a step-up reaches
- * the screen as the alert line below.
+ * by route key (built once, in {@link useFerretActions}, which a list row's menu shares). WHO MAY DO THEM is the
+ * daemon's: an owner act, or a governed device's, and a 403 or a step-up reaches the screen as the alert line below.
  */
 
-import { PanelSlot, useOptionalRouter } from '@ferretry/app';
+import { PanelSlot } from '@ferretry/app';
 import { ACTIONS_ROW_SLOT, type ActionsRowSlotProps } from '@ferretry/core-ferrets/contract';
 import { Play } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
-import { displayCallsign } from '../../lib/callsign.ts';
+import { useState } from 'react';
+import type { FerretSummary } from '../../../contract/index.ts';
 import type { LiveFerretsClient } from '../../lib/client.ts';
 import { useFerret } from '../../lib/ferret-read.ts';
-import { browserClipboardWriter, cn, useLayoutMode } from '../../ui.ts';
+import { cn, useLayoutMode } from '../../ui.ts';
 import { ActionToast } from './action-toast.tsx';
 import { ActionsMenu } from './actions-menu.tsx';
-import { CORE_FERRET_ACTIONS, type CoreActionContext } from './core-actions.ts';
-import {
-  newRestartRequestId,
-  renameFerret,
-  restartOnEarlierConversation,
-  restartWithResume,
-  resumeFerret,
-  setFerretPinned,
-  stopFerret,
-} from './ferret-operations.ts';
-import { daemonOfRoute, movePath } from './header-paths.ts';
-import { useOfferedRows } from './offered-rows.ts';
-import { RenameForm } from './rename-form.tsx';
-import { type FerretActionContribution, type FerretActionFormHost, ferretActionSections } from './registry.ts';
+import type { CoreActionContext } from './core-actions.ts';
+import type { FerretActionContribution } from './registry.ts';
 import { reviveOffer } from './revive-offer.ts';
-import { useRestartRefusal } from './restart-refusal.tsx';
+import { useFerretActions } from './use-ferret-actions.tsx';
 
 export interface ActionsPanelProps {
   readonly client: LiveFerretsClient;
@@ -44,86 +32,38 @@ export interface ActionsPanelProps {
   readonly contributions?: readonly FerretActionContribution<CoreActionContext>[];
 }
 
-interface Alert {
-  readonly sentence: string;
-  readonly detail?: string;
-}
-
 export function ActionsPanel({ client, subject, canControl = true, contributions = [] }: ActionsPanelProps) {
   const { read, reload } = useFerret(client, subject);
+  if (read.kind !== 'ready' || subject === undefined) return null;
+  return (
+    <ActionsBar
+      canControl={canControl}
+      client={client}
+      contributions={contributions}
+      ferret={read.ferret}
+      reload={reload}
+    />
+  );
+}
+
+function ActionsBar({
+  client,
+  ferret,
+  reload,
+  canControl,
+  contributions,
+}: {
+  readonly client: LiveFerretsClient;
+  readonly ferret: FerretSummary;
+  readonly reload: () => Promise<unknown>;
+  readonly canControl: boolean;
+  readonly contributions: readonly FerretActionContribution<CoreActionContext>[];
+}) {
   const compact = useLayoutMode() === 'drawer';
-  const router = useOptionalRouter();
-  const daemon = router === null ? undefined : daemonOfRoute(router.route);
   const [form, setForm] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [alert, setAlert] = useState<Alert | null>(null);
-  const ferret = read.kind === 'ready' ? read.ferret : null;
-  const refusal = useRestartRefusal(() => void reload(), subject ?? '');
-  const clipboard = useMemo(() => browserClipboardWriter(), []);
-  const offered = useOfferedRows();
-
-  const fail = useCallback((sentence: string, detail?: string): void => {
-    setAlert({ sentence, ...(detail === undefined ? {} : { detail }) });
-  }, []);
-
-  if (ferret === null || subject === undefined) return null;
-  const name = displayCallsign(ferret.name) || ferret.id;
-
-  const act = async (work: () => Promise<unknown>): Promise<void> => {
-    setAlert(null);
-    await work();
-    await reload();
-  };
-  const restart = async (run: () => Promise<unknown>): Promise<void> => {
-    setAlert(null);
-    try {
-      await run();
-      await reload();
-    } catch (reason) {
-      // A restart the daemon paused is held by the panel below; anything else is the caller's to report.
-      if (!refusal.capture(reason)) throw reason;
-    }
-  };
-
-  const context: CoreActionContext = {
-    ferret,
-    name,
-    canControl,
-    copyId: () => {
-      void clipboard(ferret.id).catch(() => fail('Copying the id was blocked — select it instead.'));
-    },
-    openMove: () => {
-      if (router === null || daemon === undefined) fail('This page has no daemon to move the ferret on.');
-      else router.navigate(movePath(daemon, ferret.id));
-    },
-    // "Move to Codex… / Move to Claude…" is the move page opened on its CLI switch. It is offered for every ferret: the
-    // page says in its own words when the machine has no account of the other CLI to carry the conversation to.
-    openConvert: () => {
-      if (router === null || daemon === undefined) fail('This page has no daemon to move the ferret on.');
-      else router.navigate(movePath(daemon, ferret.id, true));
-    },
-    restart: async () => await restart(async () => await restartWithResume(client, ferret, newRestartRequestId())),
-    restartOnEarlierConversation: async () =>
-      await restart(async () => await restartOnEarlierConversation(client, ferret, newRestartRequestId())),
-    setPinned: async pinned => await act(async () => await setFerretPinned(client, ferret.id, pinned)),
-    stop: async () => await act(async () => await stopFerret(client, ferret.id)),
-    resume: async () => await act(async () => await resumeFerret(client, ferret.id)),
-    renderRename: (host: FerretActionFormHost) => (
-      <RenameForm
-        ferret={ferret}
-        host={host}
-        rename={async patch => {
-          const renamed = await renameFerret(client, ferret.id, patch);
-          await reload();
-          return renamed;
-        }}
-      />
-    ),
-  };
-  const sections = ferretActionSections([...CORE_FERRET_ACTIONS, ...contributions, ...offered.contributions], context);
+  const actions = useFerretActions(client, ferret, reload, { canControl, contributions });
+  const { context, daemon, name, alert, fail } = actions;
   const resumable = reviveOffer(ferret, canControl).offered;
-
-  const onFailure = (sentence: string, detail?: string): void => fail(sentence, detail);
 
   return (
     <div
@@ -153,7 +93,7 @@ export function ActionsPanel({ client, subject, canControl = true, contributions
       {daemon === undefined ? null : (
         <PanelSlot
           daemon={daemon}
-          props={{ ferret: ferret.id, name, canControl, offer: offered.offer } satisfies ActionsRowSlotProps}
+          props={{ ferret: ferret.id, name, canControl, offer: actions.offer } satisfies ActionsRowSlotProps}
           slot={ACTIONS_ROW_SLOT}
         />
       )}
@@ -161,10 +101,10 @@ export function ActionsPanel({ client, subject, canControl = true, contributions
         compact={compact}
         form={form}
         name={name}
-        onFailure={onFailure}
+        onFailure={fail}
         onFormChange={setForm}
-        onNotice={setNotice}
-        sections={sections}
+        onNotice={actions.setNotice}
+        sections={actions.sections}
       />
       {alert === null ? null : (
         <p className="fy-action-form__failure" data-ferret-alert="" role="alert">
@@ -177,8 +117,8 @@ export function ActionsPanel({ client, subject, canControl = true, contributions
           )}
         </p>
       )}
-      {refusal.panel}
-      <ActionToast notice={notice} onDismiss={() => setNotice(null)} />
+      {actions.panel}
+      <ActionToast notice={actions.notice} onDismiss={() => actions.setNotice(null)} />
     </div>
   );
 }
