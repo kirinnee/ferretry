@@ -736,6 +736,13 @@ export interface LoginKind {
   quota?(login: string): Promise<LoginQuota | undefined>;
   /** The environment or config the harness needs, values as `${secret:NAME}` only. */
   env(login: string, harness: HarnessKey): Promise<Readonly<Record<string, string>>>;
+  /**
+   * What FERRETRY (not the login's file) sets so this harness is signed in on this login: for a Claude sign-in kept in
+   * Ferretry's store, the one variable that points Claude at that store. Kept apart from {@link env}, which is only what
+   * the login file declares. An error is a sentence for the owner (the login has no usable sign-in) and refuses the
+   * start, so no pane starts signed out. A kind with nothing to add leaves it out.
+   */
+  launchEnvironment?(login: string, harness: HarnessKey): Promise<Result<Readonly<Record<string, string>>, string>>;
 }
 
 // ─── sitrep ───────────────────────────────────────────────────────────────────────────────────────────────────────

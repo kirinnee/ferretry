@@ -216,6 +216,13 @@ export interface FerretsPorts {
    * sit beside a credential. Unbound: a login contributes no environment.
    */
   loginEnv?(login: string, harness: HarnessKey): Promise<Result<Readonly<Record<string, string>>, string>>;
+  /**
+   * What Ferretry sets so the harness is SIGNED IN on the named login (`LoginKind.launchEnvironment`): for a Claude
+   * sign-in kept in Ferretry's store, the variable that points Claude at that store. Not what the login file declares
+   * (that is {@link loginEnv}). An error is a sentence and refuses the start as `login_unavailable`: no pane starts
+   * signed out. Unbound: none.
+   */
+  loginLaunchEnv?(login: string, harness: HarnessKey): Promise<Result<Readonly<Record<string, string>>, string>>;
   vault: Pick<VaultApi, 'childEnvironment'>;
   asks: Pick<AsksApi, 'open'>;
 }
@@ -1623,6 +1630,8 @@ export class FerretsService implements FerretsApi {
     // Before a token is issued: a login that cannot be read refuses the start with nothing to undo.
     const login = await this.loginEnvironment(record);
     if (!login.ok) return failed('login_unavailable', login.error);
+    const signedIn = await this.loginLaunchEnvironment(record);
+    if (!signedIn.ok) return failed('login_unavailable', signedIn.error);
     const issued = issueToken(record.id, this.ports.now());
     this.tokens.add(issued.entry);
     await this.ports.saveTokens(this.tokens.snapshot());
@@ -1662,7 +1671,7 @@ export class FerretsService implements FerretsApi {
         `the ${record.harness} harness could not prepare this ferret's home, so it was not started`,
       );
     }
-    const env = await this.environment(record.id, issued.token, parts, login.value);
+    const env = await this.environment(record.id, issued.token, parts, login.value, signedIn.value);
     if (!env.ok) return failed('login_unavailable', env.error);
     const started =
       conversation === undefined
@@ -1944,15 +1953,31 @@ export class FerretsService implements FerretsApi {
     return ok(Object.fromEntries(Object.entries(found.value).filter(([name]) => loginEnvAllowed(name))));
   }
 
+  /** What Ferretry sets so the ferret is signed in on its login (the Claude store variable), minus the reserved names. */
+  private async loginLaunchEnvironment(
+    record: FerretRecord,
+  ): Promise<Result<Readonly<Record<string, string>>, string>> {
+    if (record.login === undefined || this.ports.loginLaunchEnv === undefined) return ok({});
+    const found = await this.ports
+      .loginLaunchEnv(record.login, record.harness)
+      .catch(() => err(`the login ${record.login} could not be read, so the ferret was not started`));
+    if (!found.ok) return found;
+    return ok(Object.fromEntries(Object.entries(found.value).filter(([name]) => loginEnvAllowed(name))));
+  }
+
   private async environment(
     ferret: FerretId,
     token: string,
     parts: readonly LaunchPart[],
     login: Readonly<Record<string, string>>,
+    signedIn: Readonly<Record<string, string>>,
   ): Promise<Result<ChildEnvironment, string>> {
     // The login's environment goes in first, so every part (MCP, shells) and the FY_* switches below keep precedence.
     const env: Record<string, string> = { ...login };
     for (const part of parts) if (part.kind === 'env' || part.kind === 'shell') Object.assign(env, part.env);
+    // Ferretry's own sign-in variable goes in AFTER the parts: nothing a part or a login file says can move the store
+    // a ferret reads its credential from. (The kernel's spawn base is PATH and HOME only, so no inherited value is here.)
+    Object.assign(env, signedIn);
     env[FERRET_ID_VARIABLE] = ferret;
     env[FERRET_TOKEN_VARIABLE] = token;
     // The ferret's own question file (U4): its folder exists (`prepare` ran first); a path that cannot be named sets nothing.

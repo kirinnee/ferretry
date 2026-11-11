@@ -15,7 +15,7 @@ import type {
   SignInFlow,
 } from '@ferretry/core-ferrets/contract';
 import type { Clock } from '@ferretry/kernel/contract';
-import { milliseconds } from '@ferretry/std';
+import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import type { LOGIN_KINDS, LoginFile, LoginView } from '../../contract/index.ts';
 import type { HarnessLoginFlow } from '../../contract/index.ts';
 import { harnessKey } from './shared/harness.ts';
@@ -31,6 +31,11 @@ export interface LoginKindDeps {
   check(id: string): Promise<LoginView>;
   startSignIn(id: string): Promise<HarnessLoginFlow>;
   signInStatus(flowId: string): Promise<HarnessLoginFlow>;
+  /**
+   * The variables the credential store sets for a runtime on this login (`credentialLaunchEnvironment`): for a
+   * Ferretry-kept Claude login the one secure-storage variable, naming its store directory. Nothing for any other.
+   */
+  signInVariables(id: string): Promise<Readonly<Record<string, string>>>;
 }
 
 /** Presets whose login is an endpoint behind another company's gateway (a proxy), not the provider's own key. */
@@ -109,6 +114,24 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
     return view;
   };
 
+  /**
+   * Claude's launch variable for a Ferretry-kept sign-in, or why none can be given. Claude's store is a file under the
+   * store directory on Linux and a keychain item hashed from that same directory on macOS, so the one variable selects it
+   * on both, and the launch keeps the real HOME (the macOS keychain search list is found through it). A sign-in that
+   * is not there refuses the start instead of launching a pane that would sit signed out.
+   */
+  const claudeLaunch = async (
+    login: string,
+    harness: HarnessKey,
+  ): Promise<Result<Readonly<Record<string, string>>, string>> => {
+    if (harness !== harnessKey('claude')) return ok({});
+    const view = await viewOf(login, 'anthropic');
+    const status = statusOf(view);
+    if (status.state !== 'signed-in')
+      return err(`the login ${login} is not signed in (${status.sentence}), so the ferret was not started`);
+    return ok(await deps.signInVariables(login));
+  };
+
   const make = (key: KindKey): LoginKind => ({
     key,
     fields: FIELDS[key],
@@ -135,6 +158,17 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
       ? { refresh: async (login: string) => statusOf(await deps.check(login)) }
       : {}),
     quota: async login => quotaOf(await viewOf(login, key)),
+    ...(key === 'anthropic'
+      ? {
+          launchEnvironment: async (login: string, harness: HarnessKey) => {
+            try {
+              return await claudeLaunch(login, harness);
+            } catch {
+              return err(`the login ${login} could not be read, so the ferret was not started`);
+            }
+          },
+        }
+      : {}),
     async env(login, harness) {
       const file = known(login, key);
       const half = harness === harnessKey('codex') ? file.codex : file.claude;

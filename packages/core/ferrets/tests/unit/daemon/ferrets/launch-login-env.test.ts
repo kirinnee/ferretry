@@ -23,6 +23,7 @@ type Env = Readonly<Record<string, string>>;
 
 function fixture(options: {
   readonly loginEnv?: FerretsPorts['loginEnv'];
+  readonly loginLaunchEnv?: FerretsPorts['loginLaunchEnv'];
   readonly parts?: readonly LaunchPart[];
   readonly unknownSecrets?: readonly string[];
 }) {
@@ -52,6 +53,7 @@ function fixture(options: {
     folder: path => ok(fenced(path)),
     changed: () => {},
     ...(options.loginEnv === undefined ? {} : { loginEnv: options.loginEnv }),
+    ...(options.loginLaunchEnv === undefined ? {} : { loginLaunchEnv: options.loginLaunchEnv }),
     vault: {
       childEnvironment: async (_ferret, env) => {
         asked.push({ ...env });
@@ -192,5 +194,82 @@ describe('a ferret launch carries its login’s environment', () => {
     await f.service.start({ folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' });
 
     expect(seen).toEqual(['claude-code']);
+  });
+});
+
+const STORE = 'CLAUDE_SECURESTORAGE_CONFIG_DIR';
+
+describe('a ferret launch carries the environment Ferretry sets for its login’s sign-in', () => {
+  test('the store variable reaches the Vault by name and value, with the real HOME untouched', async () => {
+    const f = fixture({ loginLaunchEnv: env({ [STORE]: '/fy/state/logins/credentials/work' }) });
+
+    const started = await f.service.start({ folder: '/work', harness: 'claude-code', login: 'work', by: 'owner' });
+
+    expect(started.ok).toBe(true);
+    expect(f.asked[0]?.[STORE]).toBe('/fy/state/logins/credentials/work');
+    expect(Object.keys(f.asked[0] ?? {})).not.toContain('HOME');
+  });
+
+  test('it is merged AFTER the launch parts, so no part (MCP, shell, env) and no login-file env overrides it', async () => {
+    const f = fixture({
+      loginEnv: env({ [STORE]: '/from/login/file' }),
+      loginLaunchEnv: env({ [STORE]: '/the/store' }),
+      parts: [
+        { kind: 'env', env: { [STORE]: '/from/mcp' } },
+        { kind: 'shell', name: 'nix', env: { [STORE]: '/from/shell' } },
+      ],
+    });
+
+    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'work', by: 'owner' });
+
+    expect(f.asked[0]?.[STORE]).toBe('/the/store');
+  });
+
+  test('it never sets HOME, the harness homes or FY_*', async () => {
+    const f = fixture({
+      loginLaunchEnv: env({
+        HOME: '/elsewhere',
+        CLAUDE_CONFIG_DIR: '/elsewhere/.claude',
+        CODEX_HOME: '/elsewhere/.codex',
+        FY_SESSION_TOKEN: 'forged',
+        [STORE]: '/the/store',
+      }),
+    });
+
+    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'work', by: 'owner' });
+
+    const names = Object.keys(f.asked[0] ?? {});
+    for (const reserved of ['HOME', 'CLAUDE_CONFIG_DIR', 'CODEX_HOME']) expect(names).not.toContain(reserved);
+    expect(f.asked[0]?.FY_SESSION_TOKEN).not.toBe('forged');
+    expect(f.asked[0]?.[STORE]).toBe('/the/store');
+  });
+
+  test('a login that cannot sign a pane in refuses the start as login_unavailable, before a token or a launch', async () => {
+    const f = fixture({
+      loginLaunchEnv: async login => err(`the login ${login} is signed out, so the ferret was not started`),
+    });
+
+    const started = await f.service.start({ folder: '/work', harness: 'claude-code', login: 'work', by: 'owner' });
+
+    expect(started.ok).toBe(false);
+    if (started.ok) return;
+    expect(started.error.code).toBe('login_unavailable');
+    expect(started.error.reason).toBe('the login work is signed out, so the ferret was not started');
+    expect(f.harness.launched).toHaveLength(0);
+    expect(f.asked).toHaveLength(0);
+  });
+
+  test('a ferret with no login never asks for it', async () => {
+    let asks = 0;
+    const f = fixture({
+      loginLaunchEnv: async () => {
+        asks += 1;
+        return ok({});
+      },
+    });
+
+    await f.service.start({ folder: '/work', harness: 'claude-code', by: 'owner' });
+
+    expect(asks).toBe(0);
   });
 });
