@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { credentialCheck, credentialNames, readDaemonEnviron, type Inspected } from '../../preview/credential-check.ts';
 import { HOME_SHELL_RC, noCredsValues, shimText, wrapperText } from '../../preview/driver.ts';
+import { inspectPath } from '../../preview/inspect-path.ts';
 import { PREVIEW } from '../../preview/plan.ts';
 import type { Run } from '../../preview/start-checks.ts';
 import { stopPreview } from '../../preview/stop.ts';
@@ -175,10 +176,12 @@ describe('NHC-1 the daemon environment holds no host credential', () => {
     const base = join(home, PREVIEW.noCredsFolder);
     for (const folder of ['home', 'gh']) {
       expect((await stat(join(base, folder))).mode & 0o777).toBe(0o700);
-      // The HOME holds the one empty shell rc file (zsh's first-run menu would swallow a terminal's keys); gh holds nothing.
-      expect(await readdir(join(base, folder))).toEqual(folder === 'home' ? [HOME_SHELL_RC] : []);
+      // The HOME and the gh folder hold nothing; the terminals' ZDOTDIR folder holds the one empty shell rc.
+      expect(await readdir(join(base, folder))).toEqual([]);
     }
-    expect((await stat(join(base, 'home', HOME_SHELL_RC))).size).toBe(0);
+    expect((await stat(join(base, 'zdot'))).mode & 0o777).toBe(0o700);
+    expect(await readdir(join(base, 'zdot'))).toEqual([HOME_SHELL_RC]);
+    expect((await stat(join(base, 'zdot', HOME_SHELL_RC))).size).toBe(0);
     const git = await stat(join(base, 'gitconfig'));
     expect(git.isFile()).toBe(true);
     expect(git.size).toBe(0);
@@ -231,7 +234,12 @@ describe('NHC-2 stop removes the stand-ins', () => {
     };
     expect((await stopPreview('/h/p', ports)).stopped).toBe(true);
     expect((await stopPreview('/h/p', ports)).stopped).toBe(true);
-    const standIns = ['/h/p/no-host-creds/home', '/h/p/no-host-creds/gh', '/h/p/no-host-creds/gitconfig'];
+    const standIns = [
+      '/h/p/no-host-creds/home',
+      '/h/p/no-host-creds/gh',
+      '/h/p/no-host-creds/gitconfig',
+      '/h/p/no-host-creds/zdot',
+    ];
     expect(removed).toEqual([...standIns, ...standIns]);
     // A holder that stays is not "stopped": nothing is removed from under it.
     removed.length = 0;
@@ -248,18 +256,7 @@ const realWorld = (home: string, inspectOverride?: (path: string) => Promise<Ins
     return { code: done.exitCode ?? undefined, stdout: done.stdout.toString() };
   }) satisfies Run,
   childEnvironment: kernelChild,
-  inspect:
-    inspectOverride ??
-    (async (path: string): Promise<Inspected | undefined> => {
-      const seen = await stat(path).catch(() => undefined);
-      if (seen === undefined) return undefined;
-      return {
-        kind: seen.isDirectory() ? 'dir' : seen.isFile() ? 'file' : 'other',
-        mode: seen.mode & 0o777,
-        size: seen.size,
-        entries: seen.isDirectory() ? (await readdir(path)).length : 0,
-      };
-    }),
+  inspect: inspectOverride ?? inspectPath,
   target: home,
 });
 
@@ -350,18 +347,23 @@ describe('NHC-3 the start check proves the daemon reaches no credential, and ref
     const real = realWorld(home).inspect;
     const cases: Record<string, (path: string) => Promise<Inspected | undefined>> = {
       'home/ is not an empty 0700 folder': async path => (path === join(base, 'home') ? undefined : real(path)),
-      'home/ is not an empty 0700 folder (a second entry beside the shell rc)': async path =>
-        path === join(base, 'home') ? { kind: 'dir', mode: 0o700, size: 0, entries: 2 } : real(path),
-      'home/ is not an empty 0700 folder (no shell rc)': async path =>
-        path === join(base, 'home') ? { kind: 'dir', mode: 0o700, size: 0, entries: 0 } : real(path),
-      'home/ is not an empty 0700 folder (rc missing)': async path =>
-        path === join(base, 'home', HOME_SHELL_RC) ? undefined : real(path),
-      'home/ is not an empty 0700 folder (rc has content)': async path =>
-        path === join(base, 'home', HOME_SHELL_RC) ? { kind: 'file', mode: 0o600, size: 9, entries: 0 } : real(path),
-      'home/ is not an empty 0700 folder (rc mode)': async path =>
-        path === join(base, 'home', HOME_SHELL_RC) ? { kind: 'file', mode: 0o644, size: 0, entries: 0 } : real(path),
-      'home/ is not an empty 0700 folder (rc is a folder)': async path =>
-        path === join(base, 'home', HOME_SHELL_RC) ? { kind: 'dir', mode: 0o600, size: 0, entries: 0 } : real(path),
+      'home/ is not an empty 0700 folder (an entry)': async path =>
+        path === join(base, 'home') ? { kind: 'dir', mode: 0o700, size: 0, entries: 1 } : real(path),
+      'zdot/ is not a 0700 folder': async path => (path === join(base, 'zdot') ? undefined : real(path)),
+      'zdot/ is not a 0700 folder (mode)': async path =>
+        path === join(base, 'zdot')
+          ? { kind: 'dir', mode: 0o755, size: 0, entries: 1, names: [HOME_SHELL_RC] }
+          : real(path),
+      'zdot/ is not a 0700 folder (a link)': async path =>
+        path === join(base, 'zdot') ? { kind: 'other', mode: 0o777, size: 9, entries: 0 } : real(path),
+      'zdot/ is not a 0700 folder (rc missing)': async path =>
+        path === join(base, 'zdot', HOME_SHELL_RC) ? undefined : real(path),
+      'zdot/ is not a 0700 folder (rc has content)': async path =>
+        path === join(base, 'zdot', HOME_SHELL_RC) ? { kind: 'file', mode: 0o600, size: 9, entries: 0 } : real(path),
+      'zdot/ is not a 0700 folder (rc mode)': async path =>
+        path === join(base, 'zdot', HOME_SHELL_RC) ? { kind: 'file', mode: 0o644, size: 0, entries: 0 } : real(path),
+      'zdot/ is not a 0700 folder (rc is a link)': async path =>
+        path === join(base, 'zdot', HOME_SHELL_RC) ? { kind: 'other', mode: 0o777, size: 9, entries: 0 } : real(path),
       'gh/ is not an empty 0700 folder': async path =>
         path === join(base, 'gh') ? { kind: 'dir', mode: 0o700, size: 0, entries: 1 } : real(path),
       'gh/ is not an empty 0700 folder (mode)': async path =>

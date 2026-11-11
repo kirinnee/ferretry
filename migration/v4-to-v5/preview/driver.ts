@@ -11,7 +11,7 @@ import { previewAuthoredFiles, previewHeldFiles, v4HeldFiles } from '../src/step
 import type { LockProbe } from '../src/preflight.ts';
 import { type ConversionReport, summarise } from '../src/report.ts';
 import { PREVIEW_WORKSPACE } from '../src/v5/harness-paths.ts';
-import { CODEX_HELD_SENTENCE, previewShellEnv } from '../src/v5/preview-env.ts';
+import { CODEX_HELD_SENTENCE, previewShellEnv, ZDOT_FOLDER } from '../src/v5/preview-env.ts';
 import { type Spellings } from '../src/v4/homes.ts';
 import { gateFiles, gateForecast } from './gate.ts';
 import { readLoginHarnesses } from './harness-map.ts';
@@ -359,15 +359,26 @@ export const NO_CREDS_ENV = {
   home: 'home',
   gh: 'gh',
   gitConfig: 'gitconfig',
+  zdot: ZDOT_FOLDER,
 } as const;
 
 /**
- * The ONE file the stand-in HOME holds: an empty `.zshrc`. Without any zsh startup file in HOME, an interactive zsh runs
- * its first-run menu (zsh-newuser-install) and swallows the first keys typed into the pane, so a terminal the daemon
- * opens never ran the command typed into it. The file is empty, so it reads nothing and holds nothing; the credential
- * check accepts the HOME exactly when this is its only entry, empty and 0600.
+ * The ONE file of the terminals' ZDOTDIR folder (`zdot/`, 0700, beside the HOME): an empty `.zshrc`. Without any zsh
+ * startup file, an interactive zsh runs its first-run menu (zsh-newuser-install) and swallows the first keys typed into
+ * the pane, so a terminal the daemon opens never ran the command typed into it. The file is empty, so it reads nothing and
+ * holds nothing. It lives in `zdot/`, not in the HOME, so the HOME stays EMPTY: the shells' own files (`.zcompdump*`,
+ * `.zsh_history`, `.zsh_sessions`, `.bash_history`) land in `zdot/` too, and the credential check tolerates exactly those
+ * names there, by name only. The wrapper makes the rc only in a daemon START, after it removed the folder.
  */
 export const HOME_SHELL_RC = '.zshrc';
+
+/** The names a terminal's shell writes into `zdot/` by itself, after the proof; the credential check tolerates them (names only). */
+export const SHELL_STATE_NAMES: readonly RegExp[] = [
+  /^\.zcompdump(-.*)?$/u,
+  /^\.zsh_history$/u,
+  /^\.zsh_sessions$/u,
+  /^\.bash_history$/u,
+];
 
 /** What the `ssh` shim adds to every call: no config file, no key, no agent, no prompt (plus its own known_hosts file). */
 export const SSH_SHIM_OPTIONS =
@@ -532,10 +543,13 @@ export function wrapperText(home: string, v4Home: string): string {
     '}',
     '(umask 077; mkdir -p "$nocreds")',
     'private_dir "$nocreds"',
-    `if [ "$daemon" = 1 ] && [ "$probe" = 0 ]; then rm -rf "$nocreds/${NO_CREDS_ENV.home}" "$nocreds/${NO_CREDS_ENV.gh}" "$nocreds/${NO_CREDS_ENV.gitConfig}"; fi`,
-    `(umask 077; mkdir -p "$nocreds/${NO_CREDS_ENV.home}" "$nocreds/${NO_CREDS_ENV.gh}"; : >"$nocreds/${NO_CREDS_ENV.gitConfig}"; : >"$nocreds/${NO_CREDS_ENV.home}/${HOME_SHELL_RC}")`,
-    '# The empty .zshrc is the one file of that HOME: with no zsh startup file there, an interactive zsh runs its first-run',
-    '# menu and swallows the first keys typed into a terminal the daemon opened.',
+    `if [ "$daemon" = 1 ] && [ "$probe" = 0 ]; then rm -rf "$nocreds/${NO_CREDS_ENV.home}" "$nocreds/${NO_CREDS_ENV.gh}" "$nocreds/${NO_CREDS_ENV.gitConfig}" "$nocreds/${NO_CREDS_ENV.zdot}"; fi`,
+    `(umask 077; mkdir -p "$nocreds/${NO_CREDS_ENV.home}" "$nocreds/${NO_CREDS_ENV.gh}"; : >"$nocreds/${NO_CREDS_ENV.gitConfig}")`,
+    "# The empty .zshrc is the one file of the terminals' ZDOTDIR folder (zdot/, beside the HOME, which stays EMPTY): with no zsh",
+    '# startup file, an interactive zsh runs its first-run menu and swallows the first keys typed into a terminal the daemon',
+    '# opened. It is made ONLY in a daemon start, right after the folder was removed above (a probe or any other verb never',
+    '# writes it, so a link planted since cannot be followed), and with noclobber so a link that appears in between is refused.',
+    `if [ "$daemon" = 1 ] && [ "$probe" = 0 ]; then (umask 077; set -C; mkdir "$nocreds/${NO_CREDS_ENV.zdot}"; : >"$nocreds/${NO_CREDS_ENV.zdot}/${HOME_SHELL_RC}"); fi`,
     "# The `ssh` shim: the first `ssh` on a child's PATH. It runs the real one (found above, by absolute path) with no config",
     '# file, no key, no agent and no prompt, and its own known_hosts. A caller that names /usr/bin/ssh is not covered.',
     '# Only a daemon START writes it (a probe or another verb never does), so the start check sees what the daemon has. It is',
