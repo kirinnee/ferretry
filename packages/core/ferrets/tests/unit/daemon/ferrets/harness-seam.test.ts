@@ -276,7 +276,7 @@ test('decision 18: the seam offers deliver, queue (U3), interrupt, transcript an
     'transcript',
     'transcriptBytes',
   ]);
-  expect(Object.keys(f.seam.transcript).sort()).toEqual(['find', 'follow', 'read']);
+  expect(Object.keys(f.seam.transcript).sort()).toEqual(['find', 'follow', 'read', 'readCovering']);
 });
 
 test('decision 18: a ferret that stopped since has no pane to act on', async () => {

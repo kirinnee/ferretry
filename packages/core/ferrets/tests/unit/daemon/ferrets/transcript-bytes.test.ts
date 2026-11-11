@@ -26,7 +26,7 @@ test('G162: the handle names no path', async () => {
   const f = additivesFixture();
   f.harness.bytes.set(f.id, BYTES);
   const handle = (await (await f.service.harness(f.id))!.transcriptBytes!())!;
-  expect(Object.keys(handle).sort()).toEqual(['file', 'format', 'mtimeMs', 'read', 'size', 'stat']);
+  expect(Object.keys(handle).sort()).toEqual(['close', 'file', 'format', 'mtimeMs', 'read', 'size', 'stat']);
   expect(handle.file).not.toContain('/');
 });
 

@@ -5,6 +5,7 @@ import type {
   FoundConversation,
   Harness,
   HarnessTailRecord,
+  HarnessTranscriptBytes,
   LaunchSpec,
   TranscriptEntry,
   TurnUsage,
@@ -186,6 +187,15 @@ export class CodexRollouts {
       const stat = await root.stat(known.file).catch(() => undefined);
       if (stat?.kind === 'file') return { root, rollout: { ...known, size: stat.size, modified: stat.modified } };
     }
+    const fresh = await this.proveAfresh(ferret);
+    return fresh === undefined ? undefined : { root: fresh.root, rollout: fresh.rollout };
+  }
+
+  /** The proof itself, from the binding and the files on disk, never from the remembered one (which it replaces). */
+  private async proveAfresh(
+    ferret: FerretId,
+  ): Promise<{ readonly root: RootHandle; readonly rollout: Rollout; readonly binding: Binding } | undefined> {
+    const root = this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` });
     this.#proved.forget(ferret);
     const binding = await this.binding(ferret);
     if (binding === undefined) return undefined;
@@ -207,7 +217,7 @@ export class CodexRollouts {
     if (chosen === undefined) return undefined;
     // A proof older than PROOF_REUSE_MS is proved again before it is used, so it is dead weight: dropped here.
     this.#proved.remember(ferret, chosen, Date.parse(this.kernel.clock.now()));
-    return { root, rollout: chosen };
+    return { root, rollout: chosen, binding };
   }
 
   private async owned(ferret: FerretId): Promise<OwnedRollout | undefined> {
@@ -226,20 +236,48 @@ export class CodexRollouts {
 
   /**
    * The proved rollout as a windowed, UNMASKED byte handle (`Harness.transcriptBytes`, G162): read in windows, an opaque
-   * token and no path, re-checked for replacement on every read. Its one consumer (Conversation's reader) masks every
-   * answer it cuts from these bytes. Rides the same remembered proof the stamp does.
+   * token and no path, bound to the ONE object it opened. Its one consumer (Conversation's reader) masks every answer it
+   * cuts from these bytes.
+   *
+   * NEVER the remembered proof (that is a filename, and a name can be given to another file within its window): the
+   * ownership is proved afresh, the file is opened, and the proof is then CHECKED ON THE OPENED OBJECT itself (its
+   * header names the proved conversation and, until the harness has recorded the native id, its correlation marker is
+   * in the head or tail), so a file swapped in between the proof and the open is never handed over as the ferret's.
+   * Once held, a later replacement is caught by the handle on every read.
    */
   readonly bytes: NonNullable<Harness['transcriptBytes']> = async ferret => {
     try {
-      const found = await this.proved(ferret, true);
-      return found === undefined
-        ? undefined
-        : await openTranscriptBytes(found.root, found.rollout.file, 'codex', sha256Hex);
+      const found = await this.proveAfresh(ferret);
+      if (found === undefined) return undefined;
+      const handle = await openTranscriptBytes(found.root, found.rollout.file, 'codex', sha256Hex, {
+        clock: this.kernel.clock,
+      });
+      if (handle === undefined) return undefined;
+      if (await this.#ownsOpened(handle, found.rollout, found.binding)) return handle;
+      await handle.close();
+      return undefined;
     } catch {
       // A rollout the root refuses (a link put where the file was) is no proved transcript; the refusal is not passed on.
       return undefined;
     }
   };
+
+  /** Whether the object a handle holds is the rollout the proof chose: judged on what the DESCRIPTOR reads, not on a name. */
+  async #ownsOpened(handle: HarnessTranscriptBytes, rollout: Rollout, binding: Binding): Promise<boolean> {
+    try {
+      const head = decoder.decode(await handle.read(0, HEAD_BYTES));
+      if (metadata(head)?.id !== rollout.id) return false;
+      if (binding.native !== undefined) return true;
+      const needle = `${binding.home}/codex-correlation/unreachable`;
+      if (head.includes(needle)) return true;
+      const size = (await handle.stat())?.size ?? 0;
+      if (size <= HEAD_BYTES) return false;
+      const tail = decoder.decode(await handle.read(Math.max(HEAD_BYTES, size - TAIL_BYTES), TAIL_BYTES));
+      return tail.includes(needle);
+    } catch {
+      return false;
+    }
+  }
 
   /** The newest `limit` records of the proved rollout, without their text (`Harness.transcriptTail`). */
   readonly tail: NonNullable<Harness['transcriptTail']> = async (ferret, limit) => {

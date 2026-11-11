@@ -23,6 +23,7 @@ import type {
   RootsPort,
   RootStat,
   RootDurableHeld,
+  RootOpenedBytes,
   RootDurableRead,
   RootFileHandle,
   RootIdentity,
@@ -525,6 +526,16 @@ async function openLeaf(scope: Scope, real: string): Promise<OpenedFile> {
  * whole, up to a limit, a window or a tail: every read of a root goes through here.
  */
 async function withCheckedFile<T>(scope: Scope, full: string, use: (file: OpenedFile) => Promise<T>): Promise<T> {
+  const handle = await openCheckedFile(scope, full);
+  try {
+    return await use(handle);
+  } finally {
+    await handle.close();
+  }
+}
+
+/** {@link withCheckedFile}'s checks and open, handing the OPEN descriptor to the caller, who closes it. */
+async function openCheckedFile(scope: Scope, full: string): Promise<OpenedFile> {
   // The errno stays (`readDurable` goes by `ENOENT`); the system's message names the absolute path, so it does not.
   const resolved = await scope.fs.realpath(full).catch((error: unknown) => {
     const code = errnoOf(error);
@@ -539,9 +550,10 @@ async function withCheckedFile<T>(scope: Scope, full: string, use: (file: Opened
   try {
     const problem = await fileProblem(scope, real, handle.identity);
     if (problem !== undefined) refuse(problem);
-    return await use(handle);
-  } finally {
-    await handle.close();
+    return handle;
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    throw error;
   }
 }
 
@@ -2108,7 +2120,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
    * leaf link that stays inside the root: a symlinked leaf therefore never matches the file it read, so an exact
    * replay over a link is refused (stricter than today, which compared a followed `stat`).
    */
-  const rootHandleIdentity = async (path: FencedPath): Promise<RootIdentity | undefined> => {
+  const rootHandleLeaf = async (path: FencedPath): Promise<FileIdentity | undefined> => {
     const { full, scope } = await realParent(path).catch((error: unknown) => {
       if (errnoOf(error) === 'ENOENT') return { full: undefined, scope: undefined };
       throw error;
@@ -2120,10 +2132,68 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const found = await lookIn(scope, folder, dirname(full), basename(full));
       // An inode is a fact about a private place too: the name that IS one is not told.
       if (found !== undefined && (await heldPlace(scope, full))) refuse('fenced');
-      return found === undefined ? undefined : identityOfEntry(found);
+      return found;
     } finally {
       await folder.close();
     }
+  };
+  const rootHandleIdentity = async (path: FencedPath): Promise<RootIdentity | undefined> => {
+    const found = await rootHandleLeaf(path);
+    return found === undefined ? undefined : identityOfEntry(found);
+  };
+  /**
+   * The file at the name opened ONCE and held (`RootHandle.openBytes`). The open follows the real path, so the name is
+   * looked at AFTER it, never followed: it must be a regular file (a link, even to a file inside the root, is
+   * `not_a_file`) and the very device and inode the descriptor holds (else `changed`). From then on every read and stat
+   * is the descriptor's, and `stillNames` is the same no-follow look again.
+   */
+  const openBytes = async (path: FencedPath): Promise<RootOpenedBytes | undefined> => {
+    gate(path, 'file');
+    const { full, scope } = await real(path).catch((error: unknown) => {
+      if (errnoOf(error) === 'ENOENT') return { full: undefined, scope: undefined };
+      throw error;
+    });
+    if (full === undefined) return undefined;
+    const file = await openCheckedFile(scope, full).catch((error: unknown) => {
+      if (errnoOf(error) === 'ENOENT') return undefined;
+      throw error;
+    });
+    if (file === undefined) return undefined;
+    const held: RootIdentity = identityOfEntry(file.identity);
+    const named = async (): Promise<boolean> => {
+      const now = await rootHandleLeaf(path).catch(() => undefined);
+      return now?.kind === 'file' && now.device === held.device && now.inode === held.inode;
+    };
+    try {
+      const first = await rootHandleLeaf(path);
+      if (first?.kind !== 'file') refuse(first === undefined ? 'changed' : 'not_a_file');
+      if (!(await named())) refuse('changed');
+    } catch (error) {
+      await file.close().catch(() => undefined);
+      throw error;
+    }
+    let closed = false;
+    const birth = file.identity.birthNs;
+    return {
+      identity: held,
+      birthNs: birth === undefined || birth === 0n ? undefined : birth,
+      read: async (offset, length) => {
+        if (closed) refuse('changed');
+        if (!windowOk(offset, length)) refuse('outside');
+        return (await file.readWindow(offset, length)).bytes;
+      },
+      stat: async () => {
+        if (closed) refuse('changed');
+        const now = await file.stat();
+        return { size: now.size, mtimeMs: now.mtimeMs };
+      },
+      stillNames: async () => !closed && (await named()),
+      close: async () => {
+        if (closed) return;
+        closed = true;
+        await file.close();
+      },
+    };
   };
   const handle: RootHandle = {
     name,
@@ -2149,6 +2219,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
       if (!windowOk(0, maxBytes)) refuse('outside');
       return await read(path, async file => await file.readWindow(-maxBytes, maxBytes));
     },
+    openBytes,
     writeText: async (path, text, options) => await write(path, text, options),
     writeBytes: async (path, bytes, options) => await write(path, bytes, options),
     publish: async (path, bytes, options) => {

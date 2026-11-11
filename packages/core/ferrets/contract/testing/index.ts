@@ -371,6 +371,8 @@ export class FakeHarness implements Harness {
   bytesFormat: 'claude' | 'codex' = 'claude';
   /** Every ferret `transcriptBytes` was asked about, in order. */
   readonly bytesAsked: FerretId[] = [];
+  /** Every ferret whose handle was closed, in order (a handle's `close()` is idempotent in the real harnesses, not here). */
+  readonly bytesClosed: FerretId[] = [];
   readonly #bytesTokens = new WeakMap<Uint8Array, string>();
   #bytesOpened = 0;
   /** How many times each half of the transcript was asked for, so a test sees what a sample cost. */
@@ -414,6 +416,9 @@ export class FakeHarness implements Harness {
         return opened.slice(offset, offset + length);
       },
       stat: async () => (still() ? { size: opened.length, mtimeMs: 1 } : undefined),
+      close: async () => {
+        this.bytesClosed.push(ferret);
+      },
     };
   }
   async transcriptTail(ferret: FerretId, limit: number): Promise<HarnessTranscriptTail> {

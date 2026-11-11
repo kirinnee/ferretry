@@ -106,14 +106,27 @@ export function parseEntry(line: string, ordinal = 0): TranscriptEntry | undefin
 }
 
 /** Every entry in a transcript's text, in order. */
-export function parseEntries(text: string): readonly TranscriptEntry[] {
-  return text
-    .split('\n')
-    .filter(line => line.trim() !== '')
-    .flatMap((line, ordinal) => {
-      const entry = parseEntry(line, ordinal);
-      return entry === undefined ? [] : [entry];
-    });
+export function parseEntries(text: string, startByte?: number): readonly TranscriptEntry[] {
+  if (startByte === undefined)
+    return text
+      .split('\n')
+      .filter(line => line.trim() !== '')
+      .flatMap((line, ordinal) => {
+        const entry = parseEntry(line, ordinal);
+        return entry === undefined ? [] : [entry];
+      });
+  // A window cut from the end of the file: a line's place among the lines is unknown, so the id of a record that carries
+  // none of its own is its byte offset in the FILE (an append-only file keeps it, whatever window reads it).
+  const entries: TranscriptEntry[] = [];
+  let offset = startByte;
+  for (const line of text.split('\n')) {
+    if (line.trim() !== '') {
+      const entry = parseEntry(line, offset);
+      if (entry !== undefined) entries.push(entry);
+    }
+    offset += Buffer.byteLength(line, 'utf8') + 1;
+  }
+  return entries;
 }
 
 /** What each assistant turn spent, from the usage record Claude writes on it. */

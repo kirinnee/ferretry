@@ -30,7 +30,10 @@ beforeEach(async () => {
   await mkdir(join(fixture, 'fy-home/state/claude-code/agent-homes/f2'), { recursive: true });
   await mkdir(HISTORY, { recursive: true });
 });
+/** Every byte handle a test opened: the single consumer closes them, and so does the test (a descriptor is never left to the GC). */
+const heldHandles: { close(): Promise<void> }[] = [];
 afterEach(async () => {
+  for (const held of heldHandles.splice(0)) await held.close();
   await rm(fixture, { recursive: true, force: true });
 });
 const T = '2026-11-01T10:00:00.000Z' as Instant;
@@ -88,7 +91,7 @@ function build(
         } as SpawnResult;
       },
     } as never,
-    clock: { sleep: async () => {} } as never,
+    clock: { sleep: async () => {}, after: () => () => {} } as never,
     redaction: {
       read: async (fn: (scope: unknown) => unknown) =>
         await fn({
@@ -111,6 +114,12 @@ function build(
     newConversationId: () => 'conv-1',
     historyHome: async () => HISTORY,
   });
+  const openBytes = harness.transcriptBytes.bind(harness);
+  harness.transcriptBytes = async ferret => {
+    const handle = await openBytes(ferret);
+    if (handle !== undefined) heldHandles.push(handle);
+    return handle;
+  };
   return { harness, roots, writeHome, tmux, panes };
 }
 
@@ -820,22 +829,73 @@ describe('ClaudeHarness', () => {
     });
   });
 
-  test('G162 GAP pin: entries() reads only the FIRST 8 MiB of a transcript, so a long ferret’s newest turn is not in it', async () => {
-    const { harness, writeHome } = build();
-    await harness.start(spec(), runner({}), {} as never);
-    const old = JSON.stringify({ type: 'user', uuid: 'u1', timestamp: T, message: { content: 'OLDEST' } });
-    const pad = JSON.stringify({
-      type: 'system',
-      subtype: 'x',
-      uuid: 's',
-      timestamp: T,
-      pad: 'p'.repeat(9 * 1024 * 1024),
+  describe('G162: entries() reads the NEWEST 8 MiB of a long transcript, never its first', () => {
+    const MIB = 1024 * 1024;
+    const OLD_AT = '2026-11-10T00:00:00.000Z';
+    const NEW_AT = '2026-11-11T00:00:00.000Z';
+    const user = (uuid: string, at: string, text: string): string =>
+      `${JSON.stringify({ type: 'user', uuid, timestamp: at, message: { content: text } })}\n`;
+    const pad = (megabytes: number): string =>
+      `${JSON.stringify({ type: 'system', subtype: 'x', uuid: 's', timestamp: OLD_AT, pad: 'p'.repeat(megabytes * MIB) })}\n`;
+
+    test('a delivered input after 9 MiB is in the entries, and the cut-off oldest one is not', async () => {
+      const { harness, writeHome } = build();
+      await harness.start(spec(), runner({}), {} as never);
+      await writeHome(
+        'projects/-work/conv-1.jsonl',
+        user('u1', OLD_AT, 'OLDEST') + pad(9) + user('u2', NEW_AT, 'NEWEST'),
+      );
+      const texts = (await harness.transcript.read(FERRET)).map(entry => entry.text);
+      expect(texts).toContain('NEWEST');
+      expect(texts).not.toContain('OLDEST');
     });
-    const newest = JSON.stringify({ type: 'user', uuid: 'u2', timestamp: T, message: { content: 'NEWEST' } });
-    await writeHome('projects/-work/conv-1.jsonl', `${old}\n${pad}\n${newest}\n`);
-    const texts = (await harness.transcript.read(FERRET)).map(entry => entry.text);
-    expect(texts).toContain('OLDEST');
-    expect(texts).not.toContain('NEWEST');
+
+    test('the first line of a cut window is the end of a record and is dropped; a record that begins ON the window start is kept', async () => {
+      const { harness, writeHome } = build();
+      await harness.start(spec(), runner({}), {} as never);
+      const last = user('u3', NEW_AT, 'THIRD');
+      const first = user('u1', OLD_AT, 'OLDEST');
+      const middleOf = (text: number): string => user('u2', NEW_AT, 'M'.repeat(text));
+      // The middle record is sized so that it and the last one are EXACTLY the window (8 MiB): the window starts on its
+      // first byte, the byte before it ends a record, and it is kept.
+      const fit = 8 * MIB - Buffer.byteLength(last) - Buffer.byteLength(middleOf(0));
+      await writeHome('projects/-work/conv-1.jsonl', first + middleOf(fit) + last);
+      expect((await harness.transcript.read(FERRET)).map(entry => entry.id)).toEqual(['u2', 'u3']);
+      // One byte more and the window starts INSIDE the middle record: that half record is dropped, never parsed.
+      await writeHome('projects/-work/conv-1.jsonl', first + middleOf(fit + 1) + last);
+      expect((await harness.transcript.read(FERRET)).map(entry => entry.id)).toEqual(['u3']);
+    });
+
+    test('a window that does not reach back to the asked instant is NOT covered; a whole small file always is', async () => {
+      const { harness, writeHome } = build();
+      await harness.start(spec(), runner({}), {} as never);
+      await writeHome(
+        'projects/-work/conv-1.jsonl',
+        user('u1', OLD_AT, 'OLDEST') + pad(9) + user('u2', NEW_AT, 'NEWEST'),
+      );
+      const cut = await harness.transcript.readCovering!(FERRET, OLD_AT as Instant);
+      expect(cut.entries.map(entry => entry.text)).toEqual(['NEWEST']);
+      // The oldest complete record read is NEWER than the instant the caller needs: what lies before it is unknown.
+      expect(cut.covered).toBe(false);
+      // The window's oldest record is not newer than an instant after it: the read covers that.
+      expect((await harness.transcript.readCovering!(FERRET, '2026-11-12T00:00:00.000Z' as Instant)).covered).toBe(
+        true,
+      );
+      // A file under the window is read whole, so it covers everything, with the ordinals and ids it always had.
+      await writeHome('projects/-work/conv-1.jsonl', user('u1', OLD_AT, 'ONLY'));
+      const whole = await harness.transcript.readCovering!(FERRET, '2020-01-01T00:00:00.000Z' as Instant);
+      expect(whole.covered).toBe(true);
+      expect(whole.entries.map(entry => entry.id)).toEqual(['u1']);
+    });
+
+    test('a cut window whose only record is partial reads no entry and is not covered', async () => {
+      const { harness, writeHome } = build();
+      await harness.start(spec(), runner({}), {} as never);
+      await writeHome('projects/-work/conv-1.jsonl', pad(9));
+      const cut = await harness.transcript.readCovering!(FERRET, NEW_AT as Instant);
+      expect(cut.entries).toEqual([]);
+      expect(cut.covered).toBe(false);
+    });
   });
 
   test('dialogs.current finds nothing on an empty pane and answer refuses a prompt that is gone', async () => {

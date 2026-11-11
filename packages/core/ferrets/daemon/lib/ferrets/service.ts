@@ -1404,6 +1404,12 @@ export class FerretsService implements FerretsApi {
       // Bound to the ferret this seam was opened for: there is no target to name, so it cannot read another ferret's.
       transcript: {
         read: async (after, limit) => await reader().read(ferret, after, limit),
+        readCovering: async since => {
+          const current = reader();
+          return current.readCovering === undefined
+            ? { entries: await current.read(ferret), covered: true }
+            : await current.readCovering(ferret, since);
+        },
         follow: signal => reader().follow(ferret, signal),
         find: async entry => await reader().find(ferret, entry),
       },

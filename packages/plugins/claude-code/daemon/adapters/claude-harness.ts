@@ -26,6 +26,7 @@ import type {
   UsageReader,
 } from '@ferretry/core-ferrets/contract';
 import { materializeSkills, openTranscriptBytes } from '@ferretry/core-ferrets/contract';
+import { MAX_ROOT_WINDOW_BYTES } from '@ferretry/kernel/contract';
 import type {
   ChildEnvironment,
   Clock,
@@ -222,6 +223,14 @@ export class ClaudeHarness implements Harness {
       const entries = await this.entries(ferret);
       const from = after === undefined ? 0 : entries.findIndex(entry => entry.id === after) + 1;
       return entries.slice(from, limit === undefined ? undefined : from + limit);
+    },
+    readCovering: async (ferret, since) => {
+      const read = await this.window(ferret);
+      const first = read.entries[0];
+      return {
+        entries: read.entries,
+        covered: !read.cut || (first !== undefined && Date.parse(first.at) <= Date.parse(since)),
+      };
     },
     follow: (ferret, signal) => this.follow(ferret, signal),
     find: async (ferret, entry) => (await this.entries(ferret)).find(candidate => candidate.id === entry),
@@ -428,7 +437,9 @@ export class ClaudeHarness implements Harness {
   async transcriptBytes(ferret: FerretId): Promise<HarnessTranscriptBytes | undefined> {
     try {
       const found = await this.transcriptFile(ferret);
-      return found === undefined ? undefined : await openTranscriptBytes(found.home, found.file, 'claude', sha256Hex);
+      return found === undefined
+        ? undefined
+        : await openTranscriptBytes(found.home, found.file, 'claude', sha256Hex, { clock: this.deps.clock });
     } catch {
       // A transcript the root refuses (a link put where the file was, a fence it cannot pass) is no proved transcript:
       // none is offered, and the root's refusal is not passed on.
@@ -530,13 +541,54 @@ export class ClaudeHarness implements Harness {
     return found === undefined ? undefined : await found.home.readText(found.file, MAX_TRANSCRIPT_BYTES);
   }
 
+  /**
+   * The NEWEST part of the transcript, up to `MAX_TRANSCRIPT_BYTES`, as entries already masked. A long conversation's
+   * newest turns are the ones that matter (a delivered send, the turn in progress), so a file larger than the window is
+   * read from its END, never its start. The window's first line is dropped unless the byte before it ends a record (it is
+   * the end of a record whose start is outside the window); `cut` says the window does not start the file.
+   */
+  private async window(
+    ferret: FerretId,
+  ): Promise<{ readonly entries: readonly TranscriptEntry[]; readonly cut: boolean }> {
+    const found = await this.transcriptFile(ferret);
+    if (found === undefined) return { entries: [], cut: false };
+    const start = Math.max(0, found.stat.size - MAX_TRANSCRIPT_BYTES);
+    const cut = start > 0;
+    // One byte BEFORE a cut window tells whether it begins on a record boundary.
+    const from = cut ? start - 1 : 0;
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (from + total < found.stat.size) {
+      const length = Math.min(MAX_ROOT_WINDOW_BYTES, found.stat.size - from - total);
+      const chunk = await found.home.readBytes(found.file, { offset: from + total, length });
+      if (chunk.byteLength === 0) break;
+      chunks.push(chunk);
+      total += chunk.byteLength;
+    }
+    const bytes = new Uint8Array(total);
+    let at = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, at);
+      at += chunk.byteLength;
+    }
+    let keep = 0;
+    if (cut) {
+      const newline = bytes.indexOf(0x0a);
+      // No newline at all: the window is the middle of one record, and nothing in it is complete.
+      keep = newline < 0 ? bytes.length : bytes[0] === 0x0a ? 1 : newline + 1;
+    }
+    const text = new TextDecoder().decode(bytes.subarray(keep));
+    const entries = await this.deps.redaction.read(scope =>
+      parseEntries(text, cut ? from + keep : undefined).map(entry =>
+        entry.text === undefined ? entry : { ...entry, text: scope.text(entry.text) },
+      ),
+    );
+    return { entries, cut };
+  }
+
   /** Entries, already masked when they leave the reader. */
   private async entries(ferret: FerretId): Promise<readonly TranscriptEntry[]> {
-    const text = await this.transcriptText(ferret);
-    if (text === undefined) return [];
-    return await this.deps.redaction.read(scope =>
-      parseEntries(text).map(entry => (entry.text === undefined ? entry : { ...entry, text: scope.text(entry.text) })),
-    );
+    return (await this.window(ferret)).entries;
   }
 
   private async *follow(ferret: FerretId, signal: AbortSignal): AsyncIterable<TranscriptEntry> {

@@ -14,7 +14,10 @@ import { CODEX_ROLLOUTS } from '../../contract/index.ts';
 import { CodexRollouts } from '../../daemon/adapters/rollouts.ts';
 
 const parents: string[] = [];
+/** Every byte handle a test opened: the single consumer closes them, and so does the test (a descriptor is never left to the GC). */
+const heldHandles: { close(): Promise<void> }[] = [];
 afterEach(async () => {
+  for (const held of heldHandles.splice(0)) await held.close();
   for (const parent of parents.splice(0)) await rm(parent, { recursive: true, force: true });
 });
 
@@ -54,6 +57,7 @@ async function world(secret?: string) {
         await fn({ text: s => (secret === undefined ? s : s.split(secret).join('******')) }),
     },
     clock: {
+      after: () => () => undefined,
       now: () => instantFromEpochMs(time.ms),
       sleep: async () => {
         time.sleeps += 1;
@@ -63,11 +67,17 @@ async function world(secret?: string) {
     },
   } as unknown as KernelPorts;
   const rollouts = new CodexRollouts(kernel, async () => undefined);
+  const openBytes = rollouts.bytes;
+  (rollouts as { bytes: typeof openBytes }).bytes = async ferret => {
+    const handle = await openBytes(ferret);
+    if (handle !== undefined) heldHandles.push(handle);
+    return handle;
+  };
   const specOf = (ferret: string): LaunchSpec =>
     ({ ferret: ferret as FerretId, home: agent(ferret) as FencedPath }) as LaunchSpec;
   const write = async (ferret: string, name: string, text: string) =>
     await writeFile(join(agent(ferret), 'sessions', name), text);
-  return { rollouts, agent, specOf, write, time, parent };
+  return { rollouts, agent, specOf, write, time, parent, port };
 }
 
 describe('Codex rollouts on a real folder', () => {
@@ -264,6 +274,49 @@ describe('G162 Codex rollouts: transcriptBytes is a windowed, unmasked byte hand
     await rm(join(gone.agent('f1'), 'sessions', 'rollout-a.jsonl'));
     await expect(gone.handle.read(0, 10)).rejects.toBeInstanceOf(HarnessTranscriptReplaced);
     expect(await gone.handle.stat()).toBeUndefined();
+  });
+
+  test('P1-1: a NEW handle never trusts the remembered proof: a foreign rollout swapped in under the proved name is not handed over', async () => {
+    const w = await world();
+    await w.rollouts.launched(w.specOf('f1'));
+    const target = join(w.agent('f1'), 'sessions', 'rollout-a.jsonl');
+    await writeFile(target, `${header('native-a', w.agent('f1'))}${said('OWN')}`);
+    const first = await w.rollouts.bytes(F1);
+    expect(first).toBeDefined();
+    // Another native session, correlated to ANOTHER ferret's home, takes the proved NAME inside the proof's 5 s window.
+    await replace(target, `${header('native-b', w.agent('f2'))}${said('FOREIGN')}`);
+    await expect(first!.read(0, 4096)).rejects.toBeInstanceOf(HarnessTranscriptReplaced);
+    expect(await w.rollouts.bytes(F1)).toBeUndefined();
+    // And after an explicit forget, as before.
+    w.rollouts.forget(F1);
+    expect(await w.rollouts.bytes(F1)).toBeUndefined();
+  });
+
+  test('P1-1: a binding rewritten to another ferret’s home during the proof window leaves no handle', async () => {
+    const w = await world();
+    await w.rollouts.launched(w.specOf('f1'));
+    await w.write('f1', 'rollout-a.jsonl', `${header('native-a', w.agent('f1'))}${said('OWN')}`);
+    expect(await w.rollouts.bytes(F1)).toBeDefined();
+    await w.port.write(CODEX_ROLLOUTS, { format: 1, home: w.agent('f2'), baseline: [] }, 'f1');
+    expect(await w.rollouts.bytes(F1)).toBeUndefined();
+  });
+
+  test('P1-1: a file with the proved session id but another ferret’s correlation is not owned, even under the proved name', async () => {
+    const w = await world();
+    await w.rollouts.launched(w.specOf('f1'));
+    const target = join(w.agent('f1'), 'sessions', 'rollout-a.jsonl');
+    await writeFile(target, `${header('native-a', w.agent('f1'))}${said('OWN')}`);
+    expect(await w.rollouts.bytes(F1)).toBeDefined();
+    // The same session id, now naming another ferret's home: the proof on the opened object fails.
+    await replace(target, `${header('native-a', w.agent('f2'))}${said('FOREIGN')}`);
+    expect(await w.rollouts.bytes(F1)).toBeUndefined();
+  });
+
+  test('P1-1: the handle closes its descriptor (close is idempotent)', async () => {
+    const w = await opened();
+    await w.handle.close();
+    await w.handle.close();
+    await expect(w.handle.read(0, 4)).rejects.toThrow();
   });
 });
 
