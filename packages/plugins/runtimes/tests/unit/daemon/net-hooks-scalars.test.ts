@@ -36,18 +36,15 @@ describe('the hooks net reads scalars that are not strings', () => {
     ['true', 'true'],
     ['null', 'null'],
   ] as const) {
-    it(`should withhold the member whose value is ${name} when its key is secret-shaped`, () => {
+    it(`should not withhold a secret-shaped key holding a non-string scalar (W accepts it) when the value is ${name}`, () => {
       // Arrange
       const text = `{\n  "ok": 1,\n  "apiToken": ${scalar},\n  "after": false\n}`;
 
       // Act
       const found = hooksDocumentRefusedLines(text);
 
-      // Assert: the member is withheld, or nothing is (the write rule decides); a neighbour never is
-      if (found === undefined) return;
-      should(found).not.equal('whole');
-      should((found as ReadonlySet<number>).has(1)).be.false();
-      should((found as ReadonlySet<number>).has(3)).be.false();
+      // Assert: the write rule judges strings only, so the document is accepted and no line is withheld
+      should(found).equal(undefined);
     });
   }
 

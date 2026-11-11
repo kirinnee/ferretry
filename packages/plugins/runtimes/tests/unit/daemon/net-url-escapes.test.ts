@@ -1,6 +1,6 @@
 /**
  * CFG-LEAK (ii) fix 4 (G2): a Resolved MCP url whose path holds an escape that does not parse (`%E0%A4%A`, `%zz`, a lone
- * `%`) is shown as written, and is still withheld when the write rule refuses the path. Fake values only.
+ * `%`) is shown as written, and a token shape in the path is still withheld. Fake values only.
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
