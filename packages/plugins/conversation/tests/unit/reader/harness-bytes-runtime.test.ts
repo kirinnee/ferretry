@@ -381,4 +381,73 @@ describe('HarnessBytesRuntime shutdown and release', () => {
     should(again.closed).be.false();
     should(runtime.handle(token)).equal(again);
   });
+
+  it('should close a handle opened before its owner was released, and register nothing', async () => {
+    // Arrange: the opener was in flight when the release came
+    const runtime = new HarnessBytesRuntime();
+    const generation = runtime.generation('f1');
+    const late = new FakeHandle('late', text('a'));
+    runtime.releaseOwner('f1');
+
+    // Act
+    const token = await runtime.adopt(late, 'f1', generation);
+
+    // Assert
+    should(late.closed).be.true();
+    should(runtime.handle(token)).be.undefined();
+  });
+
+  it('should close a handle whose adoption was suspended on the held handle’s stat when its owner was released', async () => {
+    // Arrange
+    const runtime = new HarnessBytesRuntime();
+    const first = new FakeHandle('same', text('a'));
+    await runtime.adopt(first, 'f1');
+    let settle!: (value: { size: number; mtimeMs: number }) => void;
+    first.stat = () =>
+      new Promise(resolve => {
+        settle = resolve;
+      });
+    const next = new FakeHandle('same', text('a'));
+    const generation = runtime.generation('f1');
+
+    // Act
+    const adopting = runtime.adopt(next, 'f1', generation);
+    runtime.releaseOwner('f1');
+    settle({ size: 1, mtimeMs: 1 });
+    await adopting;
+
+    // Assert
+    should(next.closed).be.true();
+    should(runtime.handle('same')).be.undefined();
+  });
+
+  it('should adopt a handle opened after the release, and leave other owners’ generations alone', async () => {
+    // Arrange
+    const runtime = new HarnessBytesRuntime();
+    runtime.releaseOwner('f1');
+    const generation = runtime.generation('f1');
+    const fresh = new FakeHandle('fresh', text('a'));
+
+    // Act
+    const token = await runtime.adopt(fresh, 'f1', generation);
+
+    // Assert
+    should(fresh.closed).be.false();
+    should(runtime.handle(token)).equal(fresh);
+    should(runtime.generation('f2')).equal(0);
+    should(runtime.generation('f1')).equal(1);
+  });
+
+  it('should keep adopting normally when no release came and a generation is passed', async () => {
+    // Arrange
+    const runtime = new HarnessBytesRuntime();
+    const handle = new FakeHandle('same', text('a'));
+
+    // Act
+    const token = await runtime.adopt(handle, 'f1', runtime.generation('f1'));
+
+    // Assert
+    should(handle.closed).be.false();
+    should(runtime.handle(token)).equal(handle);
+  });
 });

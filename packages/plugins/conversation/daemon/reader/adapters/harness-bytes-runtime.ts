@@ -41,6 +41,22 @@ export class HarnessBytesRuntime implements TranscriptFileRuntime, ConversationI
   readonly #owners = new Map<string, TranscriptBytesHandle>();
   /** Set, synchronously, by {@link closeAll}: from then on this runtime owns no handle and takes none. */
   #closed = false;
+  /**
+   * Per owner, how many times it was released. A read captures this BEFORE asking the harness to open, and
+   * {@link adopt} refuses a handle from an earlier count: the opener (and the stat that follows it) may be suspended
+   * across the release, and a late handle must not be registered for an owner that stopped. Only a release bumps it.
+   */
+  readonly #generations = new Map<string, number>();
+
+  /** The owner's current generation: capture it before opening a handle for the owner, and hand it to {@link adopt}. */
+  generation(owner: string): number {
+    return this.#generations.get(owner) ?? 0;
+  }
+
+  /** Whether the owner has been released since `generation` was read. */
+  released(owner: string, generation: number): boolean {
+    return this.generation(owner) !== generation;
+  }
 
   /**
    * Takes ownership of `handle` (the caller opened it and now owes it no close) and returns the token it reads under.
@@ -52,15 +68,18 @@ export class HarnessBytesRuntime implements TranscriptFileRuntime, ConversationI
    *
    * AFTER {@link closeAll} no handle is ever registered: one given then, or one whose adoption was suspended on the stat
    * below while the runtime closed, is closed at once and answers no token (a read through it is an unreadable transcript).
+   * The same holds for one opened BEFORE its owner was released: pass the `generation` captured before opening, and a
+   * handle from an earlier generation (at the call, or by the time the stat below answers) is closed and registered nowhere.
    */
-  async adopt(handle: TranscriptBytesHandle, owner: string = handle.file): Promise<string> {
-    if (this.#closed) return this.#refuse(handle);
+  async adopt(handle: TranscriptBytesHandle, owner: string = handle.file, generation?: number): Promise<string> {
+    const stale = (): boolean => generation !== undefined && this.released(owner, generation);
+    if (this.#closed || stale()) return this.#refuse(handle);
     const known = this.#owners.get(owner);
     // A held handle may have closed itself (a harness lets an unused one go): it answers no stat, and is replaced.
     const alive =
       known !== undefined && known.file === handle.file ? await known.stat().catch(() => undefined) : undefined;
     // The runtime may have been closed while the held handle was being asked: this handle is not in the shutdown's snapshot.
-    if (this.#closed) return this.#refuse(handle);
+    if (this.#closed || stale()) return this.#refuse(handle);
     const current = this.#owners.get(owner);
     if (current !== undefined && current.file === handle.file && (current !== known || alive !== undefined)) {
       this.#owners.delete(owner);
@@ -90,6 +109,7 @@ export class HarnessBytesRuntime implements TranscriptFileRuntime, ConversationI
 
   /** Closes the handle held for `owner` (its ferret stopped or is gone); a later read opens a fresh one. */
   releaseOwner(owner: string): void {
+    this.#generations.set(owner, this.generation(owner) + 1);
     const held = this.#owners.get(owner);
     if (held !== undefined) this.#forget(owner, held);
   }

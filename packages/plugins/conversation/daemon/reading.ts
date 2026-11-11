@@ -35,11 +35,16 @@ const harnessPending = (): never => {
 
 const KEEP_PENDING = HARNESS_PENDING;
 
+/**
+ * Structured data with every string masked — the NAMES of its properties too. A secret used as an object key is serialised
+ * next, and one with a quote, backslash or newline is then spelled in a way the final text pass cannot match, so a key is
+ * masked as the original string, before any serialising.
+ */
 const scrubData = (value: unknown, text: (s: string) => string): unknown => {
   if (typeof value === 'string') return text(value);
   if (Array.isArray(value)) return value.map(item => scrubData(item, text));
   if (typeof value === 'object' && value !== null)
-    return Object.fromEntries(Object.entries(value).map(([name, each]) => [name, scrubData(each, text)]));
+    return Object.fromEntries(Object.entries(value).map(([name, each]) => [text(name), scrubData(each, text)]));
   return value;
 };
 
