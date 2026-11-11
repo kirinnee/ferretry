@@ -171,6 +171,10 @@ export default definePlugin({
       route('GET /v1/ferrets/:ferretId/question', { ...FERRET, ...READ, ...SECRETS }),
       route('POST /v1/ferrets/:ferretId/answer', {
         ...PERSON,
+        // DELIBERATE PARITY CORRECTION: v4 declared no capability here (R-0335 `capability=none`). On 5.0 the route
+        // types native keys and pastes into a pane, so a remote caller needs the terminal grant like
+        // every other route that types (composer, permission, dialog). A local owner is still exempt.
+        capability: cap('terminal', 'use'),
         audit: { record: QUESTION_ANSWERED_AUDIT },
         ...ACK,
       }),
