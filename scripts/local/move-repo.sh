@@ -121,7 +121,7 @@ echo "   itself keeps <old-owner>/<new-owner> placeholders and this script never
 echo "  1. review 'git diff', commit with a title that triggers a release (NOT 'chore:'), push, re-run CI:"
 echo "       fix(release): move the repository to ${new_owner}"
 echo "  2. after the merge, verify the new tag and its assets exist on the new owner:"
-echo "       git ls-remote --tags git@github.com:${new_owner}/${repo}.git 'v*' | tail -3"
+echo "       git ls-remote --tags --refs --sort=version:refname git@github.com:${new_owner}/${repo}.git 'v*' | tail -3"
 echo "       gh release view --repo ${new_owner}/${repo}"
 echo "  3. every clone:"
 echo "       git remote set-url origin git@github.com:${new_owner}/${repo}.git"

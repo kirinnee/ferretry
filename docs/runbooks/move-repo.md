@@ -85,9 +85,15 @@ host. They are separate accounts.
    transfer** (read-only), then compare after:
 
    ```bash
-   gh api repos/<old-owner>/ferretry/environments
+   # 1. Read every environment: `deployment_branch_policy` says whether it has a custom policy.
+   gh api repos/<old-owner>/ferretry/environments --jq '.environments[] | {name, deployment_branch_policy}'
+   # 2. Only for an environment whose `deployment_branch_policy` is NOT null, list its branches/tags:
    gh api repos/<old-owner>/ferretry/environments/<name>/deployment-branch-policies
    ```
+
+   **Skip step 2 when the policy is `null`.** That subresource answers `404 Not Found` for an
+   environment with no policy (today: `daemon-release`). It is not an error: `null` is the expected
+   unrestricted state, and what to keep is exactly that, no policy.
 
    | Environment      | Policy on 2026-11-11 (check it, do not trust this table) | Why it must stay                                                                                                       |
    | ---------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -163,8 +169,8 @@ host. They are separate accounts.
     not, stop and fix it (usually `RELEASE_TOKEN` or the Actions run) before touching any machine:
 
     ```bash
-    git ls-remote --tags git@github.com:<new-owner>/ferretry.git 'v*' | tail -3   # the new tag is listed
-    gh release view --repo <new-owner>/ferretry                                    # latest release: its assets are attached
+    git ls-remote --tags --refs --sort=version:refname git@github.com:<new-owner>/ferretry.git 'v*' | tail -3   # newest tag last
+    gh release view --repo <new-owner>/ferretry                                                                # latest release: its assets are attached
     ```
 
     The latest tag must be newer than the one that existed before the move, and the release must list

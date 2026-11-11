@@ -157,7 +157,7 @@ describe('the repository move script', () => {
       .and.containEql('brew tap newco/ferretry https://github.com/newco/ferretry')
       .and.containEql('brew install --cask newco/ferretry/ferretry')
       .and.containEql('github:oldco/ferretry  ->  github:newco/ferretry')
-      .and.containEql("git ls-remote --tags git@github.com:newco/ferretry.git 'v*'");
+      .and.containEql("git ls-remote --tags --refs --sort=version:refname git@github.com:newco/ferretry.git 'v*'");
     should(result.out).not.containEql("commit as 'chore");
   });
 
