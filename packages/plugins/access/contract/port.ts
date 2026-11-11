@@ -97,7 +97,7 @@ export type StagedStepUpAct = z.infer<typeof StagedStepUpActSchema>;
  * - `add-2fa-key` (Accounts, S90): `subjectOf(stage)` is `sha256("ferretry.add-2fa-key.v1\\0" + accountKey + "\\0" + stage)`,
  *   never the stage id; Access stamps the challenge with exactly that digest and the save takes only a proof stamped
  *   with its own account and stage.
- * - `approve-task-plan` (Board): `subjectOf(stage)`.
+ * - `approve-task-plan` (Accounts, `bindings.plans`): `subjectOf(stage)`.
  * - `approve-paste-rule` (Accounts): `subjectOf(stage, deviceId, kind)`.
  * - `approve-sign-in-rule` (Accounts): `challengeOf(stage, deviceId)`, the challenge derived from the rule's body.
  */

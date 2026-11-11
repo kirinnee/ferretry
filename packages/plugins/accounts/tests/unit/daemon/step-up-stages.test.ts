@@ -56,3 +56,19 @@ describe('step-up.stages providers', () => {
     should(Object.keys(rig().stages).sort()).eql(['approve-paste-rule', 'approve-sign-in-rule', 'approve-task-plan']);
   });
 });
+
+describe('G83 S90 Accounts takes and provides every step-up stage Access offers', () => {
+  it('G83 should take step-up.stages for all four staged acts, and nothing else of that hook', async () => {
+    const { default: manifest } = await import('../../../manifest.ts');
+    const keys = manifest.hooks.takes.filter(take => take.hook.name === 'step-up.stages').map(take => take.key);
+    should([...keys].sort()).eql(['add-2fa-key', 'approve-paste-rule', 'approve-sign-in-rule', 'approve-task-plan']);
+  });
+
+  it('S90 should answer an add-2fa-key subject only for a waiting stage, and nothing without a seed store', async () => {
+    const { addTwoFactorKeyStage } = await import('../../../daemon/index.ts');
+    const seeds = { boundSubjectOf: (stage: string) => (stage === 'st_waiting' ? 'bound-digest' : undefined) };
+    should(addTwoFactorKeyStage(seeds as never).subjectOf?.('st_waiting', 'd1')).equal('bound-digest');
+    should(addTwoFactorKeyStage(seeds as never).subjectOf?.('st_other', 'd1')).be.undefined();
+    should(addTwoFactorKeyStage(undefined).subjectOf?.('st_waiting', 'd1')).be.undefined();
+  });
+});

@@ -16,7 +16,8 @@ import type { PasteRuleService, PasteRuleStages } from './lib/secure-copy/index.
 import { signInApprovalSource } from './lib/sign-in-approval/asks.ts';
 import type { SignInRuleService, SignInRuleSuggestions } from './lib/sign-in-rules/index.ts';
 import { type DevicesChangedPayload, onDevicesChanged } from './lib/sign-in-rules/wiring.ts';
-import { type AccountsStagedAct, type StagedStepUp, stepUpStages } from './lib/step-up-stages.ts';
+import type { StagedStepUp } from '@ferretry/plugin-access/contract';
+import { type AccountsStagedAct, stepUpStages } from './lib/step-up-stages.ts';
 import type { TaskPlanService } from './lib/task-plans/index.ts';
 
 /** What Ferrets says of a ferret that changed (`ferrets.changed`): only the part an approval reads. */
@@ -54,7 +55,7 @@ export interface HalfB {
     /** A ferret that ended takes its waiting approvals with it. */
     readonly 'ferrets.changed': (payload: FerretsChangedPayload) => Promise<void>;
   };
-  /** TODO(contract): `step-up.stages:<act>` once Access's contract on this base declares `StepUpStages`. */
+  /** The `step-up.stages:<act>` providers for the three acts half b stages, provided by `../index.ts`. */
   readonly stepUpStages: Readonly<Record<AccountsStagedAct, StagedStepUp>>;
 }
 

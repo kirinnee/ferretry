@@ -1,7 +1,7 @@
 import { AskSources, AsksPort, type SourceKey } from '@ferretry/core-asks/contract';
 import { GatePort } from '@ferretry/core-gate/contract';
 import { accountDefaultsDifferences } from './contract/defaults-differences.ts';
-import { AccessPort, DevicesChanged } from '@ferretry/plugin-access/contract';
+import { AccessPort, DevicesChanged, StepUpStages } from '@ferretry/plugin-access/contract';
 import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
 import { FerretsChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { BoardPort } from '@ferretry/plugin-board/contract';
@@ -699,6 +699,11 @@ export default definePlugin({
       /** The Vault's `push: true` raise and `input_wait` on a `pa_` id are answered here: an approval is a sign-in's. */
       { hook: InputPhoneApprovals, key: 'phone' },
       { hook: AskSources, key: 'sign-in-approval' satisfies string as SourceKey, schema: SignInApprovalRefSchema },
+      /** Access issues a passkey challenge for a staged act only through the plugin that staged it (G83): each act is Accounts'. */
+      { hook: StepUpStages, key: 'add-2fa-key' },
+      { hook: StepUpStages, key: 'approve-task-plan' },
+      { hook: StepUpStages, key: 'approve-sign-in-rule' },
+      { hook: StepUpStages, key: 'approve-paste-rule' },
     ],
   },
 });
