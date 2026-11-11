@@ -13,6 +13,9 @@ import { decryptPdfInMemory, probePdfDecryptWorker } from '../../../daemon/attac
 import { PdfDecryptError } from '../../../daemon/attachments/lib/index.ts';
 import { SHARED_DRAFT_WRITE_DELAY_MS } from '../../../daemon/drafts/lib/index.ts';
 import daemon from '../../../daemon/index.ts';
+import { BytesTranscriptSource } from '../../../daemon/reader/adapters/file-source.ts';
+import { HarnessBytesRuntime } from '../../../daemon/reader/adapters/harness-bytes-runtime.ts';
+import { ClaudeTranscriptParser } from '../../../daemon/reader/lib/transcript/claude.ts';
 import { WORK_SEARCH_WARM_DELAY_MS } from '../../../daemon/search/index.ts';
 import { memoryStatePort } from '../../support/state.ts';
 
@@ -121,13 +124,35 @@ describe('the timers Conversation arms', () => {
   });
 });
 
+describe('the transcript follower', () => {
+  test('J-0147 a follow waits on the injected sleep between looks, with no wake timer and no watcher', async () => {
+    const slept: number[] = [];
+    const controller = new AbortController();
+    const subject = new BytesTranscriptSource(new ClaudeTranscriptParser(), new HarnessBytesRuntime(), {
+      now: () => '2026-11-11T09:00:00.000Z',
+      pacing: { now: () => 0, yieldToLoop: async () => undefined },
+      sleep: async delay => {
+        slept.push(delay);
+        if (slept.length === 2) controller.abort();
+      },
+    });
+
+    const batches: unknown[] = [];
+    for await (const batch of subject.follow('absent', { pollIntervalMs: 250, signal: controller.signal }))
+      batches.push(batch);
+
+    expect(slept).toEqual([250, 250]);
+    expect(batches).toHaveLength(1);
+  });
+});
+
 describe('loops that wait on a seam', () => {
   test.skip('J-0074 queue delivery is armed — pending port: Ferrets deliver seam', () => {});
   test.skip('J-0076 send tracking is armed — pending port: Ferrets deliver seam', () => {});
   test.skip('J-0075 J-0139 the stranded-send reproof runs, and pauses between — pending port: Ferrets deliver seam', () => {});
   test.skip('J-0073 the turn observer is armed — pending port: Ferrets deliver seam', () => {});
   test.skip('J-0229 the queue deliverer schedules its next look — pending port: Ferrets deliver seam', () => {});
-  test.skip('J-0202 J-0147 following a transcript that moved, and waking a waiting read — pending port: transcript seam', () => {});
+  test.skip('J-0202 following a transcript that moved — pending port: transcript seam (Ferrets’ live event stream has no per-ferret watch)', () => {});
   test.skip('J-0143 J-0144 the transcript conversion check’s spawn timers — pending port: transcript seam', () => {});
 });
 
