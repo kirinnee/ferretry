@@ -108,6 +108,11 @@ export function loginEnvPins(
  * The launch overlay: the fixed layer, with the pins beneath it (`{ ...pins, ...fixed.env }`, so the fixed layer wins).
  * Refuses to build a document that would carry a secret reference anywhere, because this file is plain text in the
  * agent home.
+ *
+ * The guard is on THIS file only, on purpose (ruling B2). A reference is a NAME, not a value: a settings item, an MCP
+ * config or an instruction legitimately carries `${secret:NAME}` and reaches its file as that literal text, which
+ * resolves nothing (the Vault resolves a reference only into a child's environment). What this file must never hold is
+ * a pin the login contributed, and the pins already exclude every reference, so a throw here means a bug, not input.
  */
 export function overlayDocument(
   fixed: Readonly<Record<string, unknown>>,
