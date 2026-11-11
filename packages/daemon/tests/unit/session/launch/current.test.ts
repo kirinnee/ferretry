@@ -5,6 +5,7 @@ import {
   currentLaunchFast,
   currentLaunchModel,
   movedModel,
+  recordedModelSource,
 } from '../../../../src/lib/session/launch/index.ts';
 import { launchConfig, launchState } from './support.ts';
 
@@ -63,6 +64,15 @@ describe('currentLaunchModel', () => {
       currentLaunchModel(config, launchState({ observedModel: 'claude-sonnet-5', observedModelAt: LATER }), servesAll),
     ).equal('claude-sonnet-5');
     should(currentLaunchModel(config, launchState(), servesAll)).be.undefined();
+  });
+});
+
+describe('recordedModelSource', () => {
+  it('should record only a requested model as requested', () => {
+    // Act / Assert
+    should(recordedModelSource('requested')).equal('requested');
+    should(recordedModelSource('account-default')).equal('account-default');
+    should(recordedModelSource('harness')).equal('account-default');
   });
 });
 

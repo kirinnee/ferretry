@@ -866,6 +866,24 @@ describe('profileCatalog', () => {
     should(stackOf(junk, 'codex').skipped).deepEqual([]);
   });
 
+  it('should say nothing applies, without naming a tool, when the only layer is a model set for the other tool', () => {
+    // Arrange
+    const model = modelOf({ profiles: { ...PROFILES, 'gpt-only': { layers: ['modelSets/gpt'] } } });
+
+    // Act
+    const actual = profileCatalog(model, withReadFacts());
+
+    // Assert
+    const stack = stackOf(profileNamed(actual, 'gpt-only'), 'claude');
+    should(stack.available).deepEqual({ available: false, reason: 'Nothing here applies on Claude Code.' });
+    should(stack.skipped).deepEqual([
+      {
+        reference: 'modelSets/gpt',
+        sentence: 'Model set gpt has no Claude Code model, so it is skipped on Claude Code.',
+      },
+    ]);
+  });
+
   it('should list what applies and what is skipped for the tool the stack is read on', () => {
     // Act
     const actual = profileCatalog(modelOf(), withReadFacts());
