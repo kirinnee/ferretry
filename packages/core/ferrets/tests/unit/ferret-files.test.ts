@@ -85,6 +85,7 @@ describe('the per-ferret file definitions', () => {
         'model',
         'launchReasoningEffort',
         'launchFast',
+        'launchModelSource',
         'launchSettings',
         'mode',
         'remoteControl',
