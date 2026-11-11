@@ -26,6 +26,7 @@ import {
   paneBlockingPrompt,
   paneHoldOf,
   paneShowsActiveWork,
+  paneShowsCompacting,
   paneShowsStartupWait,
   readComposer,
   showsPayload,
@@ -38,7 +39,7 @@ import {
   captureFrame,
   type DeliverySleep,
 } from '../../tmux/composer-fill.ts';
-import { PaneNotReadyError, type TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
+import { PaneNotReadyError, PaneStrandedError, type TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
 import type { TmuxPaneQueue } from '../../tmux/pane-queue.ts';
 
 /**
@@ -126,6 +127,7 @@ export class TmuxSendTerminal implements SendTerminal {
       dead: frame.dead,
       promptReady: frame.promptReady,
       activeWork: paneShowsActiveWork(frame.visible),
+      compacting: paneShowsCompacting(frame.visible),
       startupParked: paneShowsStartupWait(frame.visible),
       // A permission prompt blocks a send as surely as a dialog: a message typed into its choice list
       // could pick a row.
@@ -253,6 +255,8 @@ export class TmuxSendTerminal implements SendTerminal {
       if (error instanceof ComposerUnreadableError) throw new SendComposerUnreadable();
       if (error instanceof ComposerUnconfirmedError) throw new SendLandingUnconfirmed(error.message);
       if (error instanceof PaneNotReadyError) throw new SendPaneNotReady(error.message, error.why);
+      // Typed and Enter pressed, and the text is still in the composer: typed-but-unproven, not lost (&B188).
+      if (error instanceof PaneStrandedError) throw new SendLandingUnconfirmed(error.message);
       throw error;
     }
   }

@@ -315,3 +315,52 @@ describe('a rate-limited session', () => {
     should(isTurnStatus('rate_limited')).be.true();
   });
 });
+
+describe('transcriptTurnPhase after a compaction (&B188)', () => {
+  const compaction: TranscriptEvent = { harness: 'claude', role: 'system', kind: 'compaction', trigger: 'auto' };
+  const summary: TranscriptEvent = {
+    harness: 'claude',
+    role: 'user',
+    kind: 'message',
+    text: 'This session is being continued…',
+    inputSource: 'harness',
+    compactSummary: true,
+  };
+  const notification: TranscriptEvent = {
+    harness: 'claude',
+    role: 'user',
+    kind: 'message',
+    text: '<task-notification>done</task-notification>',
+    inputSource: 'harness',
+  };
+
+  it('B188 a compaction summary is not turn work', () => {
+    should(transcriptTurnPhase([turn('completed', 'claude'), compaction, summary])).equal('ended');
+    // Usage and system bookkeeping between the boundary and the summary change nothing.
+    should(transcriptTurnPhase([turn('completed', 'claude'), compaction, usage, summary])).equal('ended');
+  });
+
+  it('B188 a summary split into several message blocks is not turn work in any block', () => {
+    const blocks = [
+      summary,
+      { ...summary, text: 'second block', blockIndex: 1 },
+      { ...summary, text: 'third', blockIndex: 2 },
+    ];
+    should(transcriptTurnPhase([turn('completed', 'claude'), compaction, ...blocks])).equal('ended');
+  });
+
+  it('B188 a tail that starts at the summary does not read as working', () => {
+    should(transcriptTurnPhase([summary])).equal('unknown');
+    should(transcriptTurnPhase([summary, { ...summary, blockIndex: 1 }])).equal('unknown');
+  });
+
+  it('B188 a harness user record without the summary marker still is work, next to a boundary or not', () => {
+    should(transcriptTurnPhase([turn('completed', 'claude'), notification])).equal('working');
+    should(transcriptTurnPhase([turn('completed', 'claude'), compaction, notification])).equal('working');
+    should(transcriptTurnPhase([turn('completed', 'claude'), compaction, summary, notification])).equal('working');
+  });
+
+  it('B188 a person speaking after the summary starts a turn', () => {
+    should(transcriptTurnPhase([turn('completed', 'claude'), compaction, summary, said('user')])).equal('working');
+  });
+});

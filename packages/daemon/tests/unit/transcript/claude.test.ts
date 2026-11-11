@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { transcriptTurnPhase } from '../../../src/lib/session/turn/policy.ts';
 import { portableConversationRows } from '../../../src/lib/session/transcript/index.ts';
 import { ClaudeTranscriptParser } from '../../../src/lib/transcript/claude.ts';
 import fixture from '../../fixtures/transcript/claude.jsonl' with { type: 'text' };
@@ -399,6 +400,66 @@ describe('ClaudeTranscriptParser', () => {
     should(peer).containDeep([{ kind: 'message', inputSource: 'harness' }]);
     should(meta).containDeep([{ kind: 'message', inputSource: 'harness' }]);
     for (const events of [human, plain, blankOrigin, result]) should(events[0]).not.have.property('inputSource');
+  });
+});
+
+describe('ClaudeTranscriptParser compaction summary (&B188)', () => {
+  const summaryText = 'This session is being continued from a previous conversation that ran out of context.';
+
+  it('B188 marks every block of a raw isCompactSummary record, and only that record', () => {
+    // Arrange
+    const subject = new ClaudeTranscriptParser();
+    const user = (extra: Record<string, unknown>, content: unknown) =>
+      subject.parseRecord({ type: 'user', message: { role: 'user', content }, ...extra }).events;
+
+    // Act
+    const split = user({ isCompactSummary: true, isVisibleInTranscriptOnly: true }, [
+      { type: 'text', text: summaryText },
+      { type: 'text', text: 'The messages after this summary are kept verbatim.' },
+    ]);
+    const plain = user({ isCompactSummary: true }, summaryText);
+    const meta = user({ isMeta: true }, [{ type: 'text', text: 'meta' }]);
+    const notification = user({ origin: { kind: 'task-notification' } }, 'done');
+    const human = user({}, 'ship it');
+
+    // Assert
+    should(split.map(event => event.kind)).deepEqual(['message', 'message']);
+    for (const event of split) should(event).containDeep({ inputSource: 'harness', compactSummary: true });
+    should(plain).containDeep([{ inputSource: 'harness', compactSummary: true }]);
+    for (const events of [meta, notification, human]) should(events[0]).not.have.property('compactSummary');
+  });
+
+  it('B188 a raw transcript of boundary, split summary and quiet idle reads as an ended turn', () => {
+    // Arrange
+    const subject = new ClaudeTranscriptParser();
+    const records: Record<string, unknown>[] = [
+      {
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
+      },
+      {
+        type: 'system',
+        subtype: 'compact_boundary',
+        compactMetadata: { trigger: 'auto', preTokens: 100, durationMs: 1000 },
+      },
+      {
+        type: 'user',
+        isCompactSummary: true,
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: summaryText },
+            { type: 'text', text: 'Continue.' },
+          ],
+        },
+      },
+    ];
+
+    // Act
+    const events = records.flatMap(record => subject.parseRecord(record).events);
+
+    // Assert
+    should(transcriptTurnPhase(events)).equal('ended');
   });
 });
 

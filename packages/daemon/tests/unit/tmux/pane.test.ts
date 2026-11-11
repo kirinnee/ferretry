@@ -3,9 +3,11 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import should from 'should';
 import {
+  idlePromptShown,
   paneActiveWork,
   paneBlockingPrompt,
   paneShowsActiveWork,
+  paneShowsCompacting,
   paneShowsPermissionPrompt,
   promptIsReady,
 } from '../../../src/lib/index.ts';
@@ -340,5 +342,86 @@ describe('pane readiness under the feedback-draft panel', () => {
 
     // Assert
     should(actual).deepEqual({ boxedPhrase: false, boxedMark: false, indentedPhrase: true, laterLinePhrase: true });
+  });
+});
+
+describe('B188 a Compacting line on any spinner tick', () => {
+  const COMPOSER = ['', '─'.repeat(80), '❯ ', '─'.repeat(80), '  ⏵⏵ bypass permissions on'].join('\n');
+  const frame = (line: string): string => `⏺ Done reading the cache layer.\n\n${line}\n${COMPOSER}`;
+  const fixture = (name: string): string =>
+    readFileSync(join(import.meta.dir, '../../fixtures/compaction', name), 'utf8');
+
+  it('B188 a Compacting line on a · tick reads as status', () => {
+    const real = fixture('claude-2.1.30x-compacting-start-middot.txt');
+
+    should(paneActiveWork(real)).equal('status');
+    should(promptIsReady(real)).be.false();
+    should(paneActiveWork(frame('· Compacting conversation…'))).equal('status');
+  });
+
+  it('B188 a Compacting line on an ASCII * tick reads as status', () => {
+    should(paneActiveWork(frame('* Compacting conversation…'))).equal('status');
+    should(paneActiveWork(frame('* Compacting conversation... (3s)'))).equal('status');
+  });
+
+  it('B188 a Compacting line with (3s) and no counter reads as status', () => {
+    should(paneActiveWork(frame('✶ Compacting conversation… (3s)'))).equal('status');
+    should(paneActiveWork(frame('· Compacting conversation… (3s)'))).equal('status');
+    should(promptIsReady(frame('· Compacting conversation… (3s)'))).be.false();
+  });
+
+  it('B188 the real compaction fixtures still read as status', () => {
+    for (const name of ['claude-2.1.28x-compacting-no-bar.txt', 'claude-2.1.28x-compacting-progress.txt'])
+      should(paneActiveWork(fixture(name))).equal('status');
+  });
+
+  it('B188 a "· Compacting conversation…" line far above the composer (scrolled history) does not', () => {
+    const prose = ['· Compacting conversation…', ...Array.from({ length: 24 }, (_, row) => `  detail row ${row}`)].join(
+      '\n',
+    );
+
+    should(paneActiveWork(`${prose}\n${COMPOSER}`)).be.undefined();
+    should(promptIsReady(`${prose}\n${COMPOSER}`)).be.true();
+  });
+
+  it('B188 ordinary prose that starts "Compacting" just above a quiet composer is not a compaction', () => {
+    // Inside the window, right over the composer, but not Claude's status wording or its valid suffix.
+    for (const line of [
+      '  * Compacting the notes… is next',
+      '· Compacting the notes…',
+      '* Compacting conversation… is what the log said',
+      '· Compacting conversation… (see the notes)',
+      '· Compacting conversation… and then more',
+    ]) {
+      should(paneActiveWork(frame(line))).be.undefined();
+      should(paneShowsCompacting(frame(line))).be.false();
+      should(promptIsReady(frame(line))).be.true();
+      should(idlePromptShown(frame(line))).be.true();
+    }
+  });
+
+  it('B188 the word Compacting without a glyph and an ellipsis is not work', () => {
+    should(paneActiveWork(frame('Compacting is what the harness calls it'))).be.undefined();
+    should(paneActiveWork(frame('· Compacting'))).be.undefined();
+  });
+
+  it('B188 idlePromptShown is true for an idle composer holding a draft; promptIsReady stays false', () => {
+    const draft = [
+      '⏺ Done.',
+      '',
+      '─'.repeat(80),
+      '❯ Read the file /x/turn-001.md now, then follow it',
+      '─'.repeat(80),
+    ].join('\n');
+    // The cursor sits at the end of the draft, not at the prompt's first column.
+    should(promptIsReady(draft, 3, 52)).be.false();
+    should(idlePromptShown(draft)).be.true();
+  });
+
+  it('B188 idlePromptShown is false for work, a compaction and a numbered selector', () => {
+    should(idlePromptShown(frame('· Compacting conversation…'))).be.false();
+    should(idlePromptShown(frame('✻ Pondering… (3s · ↓ 1k tokens)'))).be.false();
+    should(idlePromptShown(' Do you want to proceed?\n ❯ 1. Yes\n   2. No')).be.false();
+    should(idlePromptShown('no composer here')).be.false();
   });
 });

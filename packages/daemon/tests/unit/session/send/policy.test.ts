@@ -115,13 +115,38 @@ describe('routeSend', () => {
     should(routeSend(target({ status: 'waiting', promptReady: false }), pane({ activeWork: true }))).equal('busy');
     // A prompt still wins, and the other idle statuses keep their word: they are set at a turn's end.
     should(routeSend(target({ status: 'waiting' }), pane({ activeWork: true, promptReady: true }))).equal('idle');
-    should(routeSend(target({ status: 'waiting', promptReady: true }), pane({ activeWork: true }))).equal('idle');
+    // The RECORD's ready flag is a stale ended-turn reading while the pane shows work (&B188), so it no longer wins.
+    should(routeSend(target({ status: 'waiting', promptReady: true }), pane({ activeWork: true }))).equal('busy');
     for (const status of ['awaiting_user', 'rate_limited', 'interrupted'] as const)
       should(routeSend(target({ status }), pane({ activeWork: true }))).equal('idle');
   });
 
   it("takes the tracked path when the document says the composer is ready even though the pane's frame lags", () => {
     should(routeSend(target({ promptReady: true }), pane())).equal('idle');
+  });
+
+  it('B188 a stale promptReady record does not route idle while the pane shows work', () => {
+    // An idle compaction starts from an ended turn, whose record still says ready; the pane is compacting.
+    should(routeSend(target({ promptReady: true, status: 'running' }), pane({ activeWork: true }))).equal('busy');
+  });
+
+  it('B188 a visible compaction routes busy under every stored status, parked ones included', () => {
+    // A person can start /compact from awaiting_user or interrupted, so those records cannot send into it.
+    for (const status of ['awaiting_user', 'interrupted', 'waiting', 'rate_limited', 'running'] as const) {
+      should(routeSend(target({ status }), pane({ activeWork: true, compacting: true }))).equal('busy');
+      should(routeSend(target({ status, promptReady: true }), pane({ activeWork: true, compacting: true }))).equal(
+        'busy',
+      );
+    }
+  });
+
+  it('B188 parked statuses outside a compaction keep their word over visible work', () => {
+    for (const status of ['awaiting_user', 'rate_limited', 'interrupted'] as const)
+      should(routeSend(target({ status }), pane({ activeWork: true, compacting: false }))).equal('idle');
+  });
+
+  it('B188 a pane with neither work nor prompt under an idle record still routes idle', () => {
+    should(routeSend(target({ promptReady: true }), pane({ activeWork: false, promptReady: false }))).equal('idle');
   });
 
   it('takes the tracked path when the pane itself is at a prompt', () => {

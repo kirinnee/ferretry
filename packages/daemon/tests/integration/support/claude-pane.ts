@@ -33,6 +33,11 @@ export class ClaudePane implements TmuxCommandPort {
    * draw a turn pointer before the fill stopped looking, which drew it later and never got its Enter).
    */
   stalled = false;
+  /**
+   * The status row drawn above the composer in place of the finished-turn line — a spinner tick such as
+   * `· Compacting conversation…` while the harness works (&B188). `undefined`: the idle frame.
+   */
+  status: string | undefined;
   private pending = '';
   /**
    * Typed after the payload, once the pane has been looked at this many times since the fill — after the
@@ -168,7 +173,7 @@ export class ClaudePane implements TmuxCommandPort {
     const lines = [
       "⏺ Next steps: say whether you want this drafted as a PR, and check who owns the tenancy's IAM.",
       '',
-      '✻ Cooked for 16m 51s · done 9:14 AM · 1 shell still running',
+      this.status ?? '✻ Cooked for 16m 51s · done 9:14 AM · 1 shell still running',
       '',
       titled,
       ...composer,

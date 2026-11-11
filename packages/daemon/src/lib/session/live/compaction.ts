@@ -1,6 +1,7 @@
 import type { SessionCompactionBasis, SessionCompactionState } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { TranscriptEvent, TranscriptHarness } from '../../transcript/types.ts';
+import { COMPACTING_LINE } from '../../tmux/pane.ts';
 import { tokenCounterValue } from './policy.ts';
 
 /**
@@ -28,9 +29,13 @@ import { tokenCounterValue } from './policy.ts';
 /** How far up from the bottom of a frame the status line may sit. */
 const STATUS_WINDOW_LINES = 25;
 
-/** A spinner or bullet glyph, `Compacting …`, an ellipsis, then a parenthetical naming a clock or Esc. */
-const COMPACTING_LINE =
-  /^\s*[•◦✻✳✶✽✢∗·✦✧]\s+Compacting\b[^\n(]{0,80}(?:…|\.\.\.)?\s*\([^)\n]*(?:interrupt|\d+\s*[hms]\b)[^)\n]*\)?\s*$/iu;
+/**
+ * Codex's compaction status — a bullet, `Compacting`, then a parenthetical naming a clock or Esc
+ * (`• Compacting (3s • Esc to interrupt)`). Claude's own line is {@link COMPACTING_LINE}, the ONE grammar the
+ * pane readers share, so a shape one reader sees the other sees (&B188).
+ */
+const CODEX_COMPACTING_LINE =
+  /^\s*[•◦]\s+Compacting\b[^\n(]{0,80}\s*\([^)\n]*(?:interrupt|\d+\s*[hms]\b)[^)\n]*\)?\s*$/iu;
 
 /** Claude Code's progress bar line: filled and empty block glyphs, then a whole percentage that ends the line. */
 const PROGRESS_LINE = /^\s*[▰▱▮▯■□█▓▒░]+\s+(\d{1,3})\s?%\s*$/u;
@@ -54,7 +59,7 @@ export const paneCompaction = (frame: string): PaneCompaction | undefined => {
   const lines = frame.replaceAll('\r\n', '\n').split('\n').slice(-STATUS_WINDOW_LINES);
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const line = lines[index] as string;
-    if (!COMPACTING_LINE.test(line)) continue;
+    if (!COMPACTING_LINE.test(line) && !CODEX_COMPACTING_LINE.test(line)) continue;
     const counter = WRITTEN_TOKENS.exec(line);
     const written = counter === null ? undefined : tokenCounterValue(counter[1] as string, counter[2] as string);
     const bar = PROGRESS_LINE.exec(lines[index + 1] ?? '');
