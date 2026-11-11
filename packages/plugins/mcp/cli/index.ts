@@ -1,13 +1,8 @@
 import { implementCli, type VerbHandler, type VerbInvocation } from '@ferretry/kernel/manifest';
 import { TOOLS_SERVER_INSTRUCTIONS } from '@ferretry/plugin-runtimes/contract';
 import manifest from '../manifest.ts';
-import { serveMcpOverStdio } from './adapters/stdio.ts';
-import { clientToolsPort } from './lib/serve/port.ts';
-import { McpServer } from './lib/serve/server.ts';
+import { serveTools } from './serve.ts';
 import { clientServersGateway, McpServersController } from './lib/servers.ts';
-
-/** The server name the runtimes register this server under (the fleet's fixed layer), and the name `initialize` says. */
-const SERVER_NAME = 'ferretry';
 
 const on = (invocation: VerbInvocation, name: string): boolean => {
   const value = invocation.options[name];
@@ -38,26 +33,14 @@ export default implementCli(manifest, {
     const servers = new McpServersController(clientServersGateway(client), io, env?.FY_SESSION_ID);
     return {
       verbs: {
-        'mcp serve': async () => {
-          if (stdin === undefined) {
-            io.err('this build gives `mcp serve` no standard input to read.\n');
-            return 70;
-          }
-          await serveMcpOverStdio(
-            new McpServer(clientToolsPort(client), {
-              name: SERVER_NAME,
-              version: manifest.version,
-              // One line only. Every behavioural instruction is in the appended system prompt the runtime wrapper
-              // composes, which a harness weighs above a server's instructions.
-              instructions: TOOLS_SERVER_INSTRUCTIONS,
-            }),
-            stdin(),
-            line => {
-              io.out(line);
-            },
-          );
-          return 0;
-        },
+        'mcp serve': async () =>
+          await serveTools({
+            client,
+            io,
+            stdin,
+            version: manifest.version,
+            instructions: TOOLS_SERVER_INSTRUCTIONS,
+          }),
         'mcp ls': async invocation =>
           await servers.list({
             ...(text(invocation, 'session') === undefined ? {} : { session: text(invocation, 'session') as string }),

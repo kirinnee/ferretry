@@ -6,6 +6,7 @@
  *   packages/core/kernel/src/generated/glossary.ts  every manifest's words
  *   packages/core/kernel/src/generated/client-binary.ts  the client binary name (`bin` key of packages/cli/package.json)
  *   packages/cli/src/generated/commands.ts          CLI halves + contract hashes
+ *   packages/cli/src/generated/slim.ts              what `fy mcp serve` loads instead of the registry (tool door facts + serve half)
  *   packages/app/src/generated/surfaces.ts          app halves + contract hashes
  *   packages/app/src/generated/plugin-styles.css    every app half's `app/styles.css`, imported once by the shell
  *   generated/hooks.md                              offers, takers and their order
@@ -51,6 +52,7 @@ export const GENERATED = {
   glossary: 'packages/core/kernel/src/generated/glossary.ts',
   clientBinary: 'packages/core/kernel/src/generated/client-binary.ts',
   commands: 'packages/cli/src/generated/commands.ts',
+  slim: 'packages/cli/src/generated/slim.ts',
   surfaces: 'packages/app/src/generated/surfaces.ts',
   pluginStyles: 'packages/app/src/generated/plugin-styles.css',
   hooks: 'generated/hooks.md',
@@ -226,6 +228,69 @@ function commandsRegistry(model: Model): string {
 }
 
 /**
+ * The one invocation the binary serves without the registry (`fy mcp serve`, `packages/cli/bin/mcp-serve.ts`): the
+ * package that owns it, where its serve module lives, and where the one line it says on `initialize` is defined.
+ * Both files are leaves (no manifest, no daemon half), which is what keeps the slim entry small.
+ */
+const SLIM_SERVE = {
+  plugin: 'mcp',
+  serve: 'cli/serve.ts',
+  instructionsPlugin: 'runtimes',
+  instructions: 'contract/tools-server.ts',
+} as const;
+
+/**
+ * `packages/cli/src/generated/slim.ts`: the facts the agent tool door's guard reads (`src/lib/entry/tool-door.ts`) and
+ * the loaders of the serve module. The tool facts are exactly what `surfacesOf(registry)` reads: the Kernel and every
+ * package with a CLI half, their manifests' agent tools, titles and effective hashes.
+ */
+function slimEntry(model: Model): string {
+  const out = join(model.ws.root, GENERATED.slim);
+  const manifestOf = (id: string) => model.loaded.find(subsystem => subsystem.id === id)?.manifest;
+  const ids = [
+    'kernel',
+    ...startOrder(model).filter(id => {
+      const pkg = model.ws.byId(id);
+      return pkg?.manifestPath !== undefined && halfPath(pkg, 'cli') !== undefined;
+    }),
+  ];
+  const contracts: Record<string, string> = {};
+  const titles: Record<string, string> = {};
+  const tools: { plugin: string; name: string; caller: string }[] = [];
+  for (const id of ids) {
+    const manifest = manifestOf(id);
+    if (manifest === undefined) throw new Error(`no loaded manifest for "${id}"`);
+    contracts[id] = model.hashes.get(id)?.effective ?? 'unhashed';
+    titles[id] = manifest.title;
+    for (const tool of manifest.actions?.agentTools ?? [])
+      tools.push({ plugin: id, name: tool.name, caller: tool.caller });
+  }
+  const file = (id: string, relative: string): string => {
+    const pkg = model.ws.byId(id);
+    const target = pkg === undefined ? undefined : join(pkg.dir, relative);
+    if (target === undefined || !existsSync(target)) throw new Error(`the slim serve entry needs ${id}/${relative}`);
+    return importPath(out, target);
+  };
+  const version = manifestOf(SLIM_SERVE.plugin)?.version;
+  if (version === undefined) throw new Error(`no manifest for "${SLIM_SERVE.plugin}"`);
+  return [
+    HEADER,
+    "import type { ToolDoor } from '../lib/entry/tool-door.ts';",
+    '',
+    "/** What the agent tool door's guard reads: the same facts `surfacesOf(registry)` builds from the manifests (§9.6). */",
+    `export const toolDoor: ToolDoor = ${JSON.stringify({ contracts, titles, tools }, null, 2)};`,
+    '',
+    '/** The serve module and the line it says on `initialize`, loaded only by the invocation that runs them. */',
+    'export const serveHalf = {',
+    `  version: ${JSON.stringify(version)},`,
+    `  load: async () => (await import('${file(SLIM_SERVE.plugin, SLIM_SERVE.serve)}')).serveTools,`,
+    `  instructions: async () => (await import('${file(SLIM_SERVE.instructionsPlugin, SLIM_SERVE.instructions)}')).TOOLS_SERVER_INSTRUCTIONS,`,
+    '};',
+    '',
+  ].join('\n');
+}
+
+/**
  * `packages/app/src/generated/surfaces.ts` in the app shell's shape (`packages/app/src/surfaces/registry.ts`):
  * `generated: GeneratedSurfaces = { appVersion, surfaces: [{ id, title, core, contract, consumes, manifest, app? }] }`.
  * The kernel has no app half, so its entry carries no `app`.
@@ -370,6 +435,7 @@ export function generateGlobal(model: Model): ReadonlyMap<string, string> {
     [GENERATED.glossary, glossary(model)],
     [GENERATED.clientBinary, clientBinary(model)],
     [GENERATED.commands, commandsRegistry(model)],
+    [GENERATED.slim, slimEntry(model)],
     [GENERATED.surfaces, surfacesRegistry(model)],
     [GENERATED.pluginStyles, pluginStyles(model)],
     [GENERATED.hooks, hooksMarkdown(model)],

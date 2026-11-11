@@ -31,3 +31,16 @@ export class DaemonRefusal extends ShellError {
 }
 
 export const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/**
+ * What the router does with a failure nobody handled: a {@link ShellError} says its own sentence and exit code; anything
+ * else is named after the binary and fails. Shared by the full router and the slim `mcp serve` entry, so both end alike.
+ */
+export function reportFailure(error: unknown, io: { err(text: string): void }, binary: string): number {
+  if (error instanceof ShellError) {
+    io.err(`${error.message}\n`);
+    return error.exitCode;
+  }
+  io.err(`${binary}: ${errorText(error)}\n`);
+  return EXIT.failure;
+}

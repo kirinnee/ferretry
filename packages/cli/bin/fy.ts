@@ -1,32 +1,18 @@
 #!/usr/bin/env bun
 /**
- * The `fy` host file (≤150 lines, names no subsystem): identity, the generated registry, the real world, one call.
- * The BINARY name is this package's `bin` key and the PRODUCT name is the root package's `name`; neither is written
- * anywhere else.
+ * The `fy` host file (≤150 lines, names no subsystem): decide which composition root this invocation needs, then load
+ * only that one. The BINARY name is this package's `bin` key and the PRODUCT name is the root package's `name`; neither
+ * is written anywhere else.
+ *
+ * Nothing is imported statically but the pure routing rule, because everything imported here is evaluated by EVERY `fy`
+ * process before it reads its arguments. A ferret's `fy mcp serve`, which lives as long as its pane, loads the slim root
+ * (`bin/mcp-serve.ts`); every other invocation loads the full program, `bin/program.ts`, exactly as before. The rule and
+ * why it is narrow: `src/lib/entry/route.ts`.
  */
-import { clearYamlLogSwitches } from '@ferretry/std/yaml';
-import root from '../../../package.json' with { type: 'json' };
-import pkg from '../package.json' with { type: 'json' };
-import { createWorld } from '../src/adapters/world.ts';
-import { ConsoleIo } from '../src/adapters/terminal/console-io.ts';
-import { registry } from '../src/generated/commands.ts';
-import { runFy } from '../src/lib/run.ts';
-import { assertSemver } from '../src/lib/version.ts';
-import { homedir } from 'node:os';
-import { isAbsolute } from 'node:path';
+import { entrySlice } from '../src/lib/entry/route.ts';
 
 if (import.meta.main) {
-  // FIRST: the yaml library prints what it parses when these are set, and a config may hold a credential.
-  clearYamlLogSwitches();
-  const declared = process.env.HOME;
-  const world = createWorld({
-    io: new ConsoleIo(),
-    environment: process.env,
-    userHome: declared !== undefined && isAbsolute(declared) ? declared : homedir(),
-    identity: { binary: Object.keys(pkg.bin)[0] ?? pkg.name, version: assertSemver(pkg.version) },
-    product: root.name,
-    registry,
-    selfPath: process.execPath,
-  });
-  process.exitCode = await runFy(process.argv.slice(2), world);
+  const slice = entrySlice(process.argv.slice(2));
+  const { execute } = slice === 'mcp-serve' ? await import('./mcp-serve.ts') : await import('./program.ts');
+  process.exitCode = await execute(process.argv);
 }
