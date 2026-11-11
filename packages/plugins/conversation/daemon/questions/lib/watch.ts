@@ -24,6 +24,12 @@ export interface QuestionWatchDeps {
   harness(ferret: string): Promise<WatchedHarness | undefined>;
   /** `question.json` as it stands. */
   current(ferret: string): Promise<Question | undefined>;
+  /**
+   * The tool id the answered stamp (`question-answered.json`) names: the last question an answer visibly landed on. A
+   * payload or a stored question for that id is over whatever the transcript has caught up to (v4's answered-stamp
+   * reconciliation); `undefined` when none was answered. A read that fails throws, and decides nothing.
+   */
+  lastAnswered(ferret: string): Promise<string | undefined>;
   /** The one writer (`writeAskedQuestion`): the question stored, or `undefined` when the payload cannot be stored whole. */
   write(
     ferret: string,
@@ -43,12 +49,22 @@ const CLAUDE_CODE = 'claude-code';
 /** How many looks store one payload before a state store that keeps failing is left alone (looks are 2 s apart). */
 const WRITE_ATTEMPTS = 5;
 
-/** Whether the transcript says the question is over: it names the call, or holds any event newer than the question. */
+/** The tool ids an entry's `data` names as a call it made or a result it carries (the reader puts them there). */
+function namesTool(entry: TranscriptEntry, toolUseId: string): boolean {
+  const data = entry.data;
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return false;
+  return [data.toolCalls, data.toolResults].some(ids => Array.isArray(ids) && ids.includes(toolUseId));
+}
+
+/**
+ * Whether the transcript says the question is over: an entry names the call or its result by id (exactly: the id is a
+ * field of the entry, never searched for in prose), or holds any event newer than the question.
+ */
 function endedBy(entries: readonly TranscriptEntry[], toolUseId: string, askedAtMs: number): boolean {
   return entries.some(entry => {
     const at = Date.parse(entry.at);
     if (Number.isFinite(at) && at > askedAtMs) return true;
-    return (entry.text?.includes(toolUseId) ?? false) || JSON.stringify(entry.data ?? null).includes(toolUseId);
+    return namesTool(entry, toolUseId);
   });
 }
 
@@ -102,7 +118,12 @@ export class QuestionWatch {
     const harness = await this.deps.harness(ferret);
     if (harness === undefined) return;
     const open = await this.deps.current(ferret);
-    if (open !== undefined && (await this.#over(harness, open.toolUseId, Date.parse(open.askedAt))) === true) {
+    // Read before the file, so a stamp written in between can only make a question over, never bring one back.
+    const stamped = await this.deps.lastAnswered(ferret);
+    if (
+      open !== undefined &&
+      (open.toolUseId === stamped || (await this.#over(harness, open.toolUseId, Date.parse(open.askedAt))) === true)
+    ) {
       await this.deps.clear(ferret, open.toolUseId);
       await this.deps.answered(ferret, open.toolUseId);
     }
@@ -110,6 +131,11 @@ export class QuestionWatch {
     if (file === undefined || this.#seen.get(ferret) === file.payload) return;
     const parsed = parseAskedQuestion(file.payload, Date.parse(file.writtenAt), file.transcript);
     if (parsed !== undefined) {
+      // A form an answer already landed on: the hook leaves its file behind, so it is never stored again.
+      if (parsed.toolUseId === stamped) {
+        this.#seen.set(ferret, file.payload);
+        return;
+      }
       const over = await this.#over(harness, parsed.toolUseId, parsed.askedAtMs);
       // Unreadable: decide nothing, look again. Over: a question that is gone, never shown.
       if (over === undefined) return;

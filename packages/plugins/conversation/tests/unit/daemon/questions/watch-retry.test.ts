@@ -38,6 +38,7 @@ function watchOf(overrides: Partial<QuestionWatchDeps>): QuestionWatch {
       transcript: { read: async () => [] },
     }),
     current: async () => undefined,
+    lastAnswered: async () => undefined,
     write: async () => STORED,
     clear: async () => {},
     asked: async () => {},

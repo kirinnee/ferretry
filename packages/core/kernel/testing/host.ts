@@ -51,7 +51,7 @@ import {
 } from '../host/secrets.ts';
 import { outboundSecretTransport } from '../host/adapters/outbound-secret.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { err, hours, instantFromEpochMs, ok } from '@ferretry/std';
+import { err, hours, type Instant, instantFromEpochMs, ok } from '@ferretry/std';
 import type { Actor, HoldDecision, RefusalCode, TargetRef } from '../contract/act.ts';
 import type {
   Admission,
@@ -361,7 +361,11 @@ export interface TestHost {
   release(target: TargetRef): void;
   /** Moves the stand-in output guard's generation: a guarded body built before now is withheld. */
   holdBegins(): void;
-  putRoot(name: RootName, relative: string, text: string): void;
+  /**
+   * A file planted at `relative` of the test root `name`. `modified` is the file's own modification time; left out, a stat
+   * answers the test clock at the moment it is asked (a world that models no write time).
+   */
+  putRoot(name: RootName, relative: string, text: string, modified?: Instant): void;
   /** The text of the file at `relative` of the test root `name`, or `undefined` when there is none. */
   rootText(name: RootName, relative: string): string | undefined;
   /**
@@ -1326,6 +1330,8 @@ async function start(world: World): Promise<TestHost> {
   const testLinks = new Map<string, string>();
   /** `setMode`'s modes in the test world, by path; a path never set keeps the default (`0o600` for a file). */
   const testModes = new Map<string, number>();
+  /** The modification time `putRoot` was given, by path; a file without one is as old as the moment it is asked about. */
+  const testModified = new Map<string, Instant>();
   /** Files of the test world that have a second name (`TestHost.putRootHardLink`), by key. */
   const testHardLinks = new Set<string>();
   /** Folders `makeDirectory` made, so an EMPTY folder exists in the flat test world (a rmdir has something to remove). */
@@ -1475,7 +1481,7 @@ async function start(world: World): Promise<TestHost> {
         const fileStat = (path: string) => ({
           kind: 'file' as const,
           size: (world.roots.get(path) ?? '').length,
-          modified: clock.now(),
+          modified: testModified.get(path) ?? clock.now(),
           mode: testModes.get(path) ?? 0o600,
           links: 1,
         });
@@ -2477,8 +2483,10 @@ async function start(world: World): Promise<TestHost> {
     holdBegins() {
       world.generation++;
     },
-    putRoot(name, relative, text) {
+    putRoot(name, relative, text, modified) {
       world.roots.set(rootKey(name, relative), text);
+      if (modified === undefined) testModified.delete(rootKey(name, relative));
+      else testModified.set(rootKey(name, relative), modified);
     },
     rootText(name, relative) {
       return world.roots.get(rootKey(name, relative));

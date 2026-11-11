@@ -20,6 +20,7 @@ import {
   QuestionAnswered,
   QuestionAsked,
   type QueuedMessage,
+  QUESTION_ANSWERED_STATE,
   QUESTION_STATE,
   type Question,
   type SendRecord,
@@ -1137,6 +1138,12 @@ export function buildConversationA(deps: {
     current: async ferret => {
       const read = await kernel.state.read(QUESTION_STATE, ferret);
       return read.ok ? read.value : undefined;
+    },
+    lastAnswered: async ferret => {
+      const read = await kernel.state.read(QUESTION_ANSWERED_STATE, ferret);
+      // Unreadable is missing evidence, never "nothing was answered": the look decides nothing and tries again.
+      if (!read.ok) throw new Error('the answered stamp is unreadable');
+      return read.value?.toolUseId;
     },
     write: async (ferret, payload, askedAt, transcript) =>
       await writeAskedQuestion(kernel.state, questionSerial, ferret, payload, askedAt, transcript),

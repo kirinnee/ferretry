@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { ApiError, type Log, type RootHandle, type RootsPort } from '@ferretry/kernel/contract';
 import { FERRET_READABLE_FOLDERS, FERRET_SESSIONS_ROOT } from '../../contract/sessions-root.ts';
 import type { FerretTurnAuthor, FerretTurnWritten } from '../../contract/port.ts';
-import { type Duration, type Instant, instantFromEpochMs, milliseconds } from '@ferretry/std';
+import { type Duration, type Instant, milliseconds } from '@ferretry/std';
 import { FileSessionEffectLedger } from '../adapters/session/effects/file-session-effect-ledger.ts';
 import {
   FileSessionEnvironmentStore,
@@ -353,13 +353,14 @@ export class SessionFiles {
   /** The most bytes of `question-asked.json` read: a hook payload is a few kilobytes, so a larger file is not one. */
   private static readonly ASKED_QUESTION_LIMIT = 262_144;
 
-  /** The payload last read per ferret and when it was FIRST seen (a root offers no mtime): the same text keeps its instant. */
-  readonly #askedSeen = new Map<SessionId, { readonly payload: string; readonly at: Instant }>();
-
   /**
-   * THIS ferret's `question-asked.json` as the hook left it, bounded, and the instant that payload was first seen (the
-   * hook replaces the file whole for every question, so a changed payload is a new question). `undefined` when the file
-   * is absent, unreadable or over the bound; reading never throws.
+   * THIS ferret's `question-asked.json` as the hook left it, bounded, and WHEN THE HOOK WROTE IT: the file's own
+   * modification time, read from the fenced root (the hook replaces the file whole for every question, so a changed
+   * payload is a new question and the time moves with it). That is the authoritative asking time: a daemon that meets the
+   * file late (a restart, a question answered before the first look) still dates it when it was asked, so a transcript
+   * that has since moved on retires it. First-read time is never substituted: it is always later than the answer. A file
+   * whose time cannot be read is `undefined`, like an absent one, so it is never shown on a guess. `undefined` too when
+   * the file is absent, unreadable or over the bound; reading never throws.
    */
   private async readAskedQuestion(
     id: SessionId,
@@ -371,13 +372,10 @@ export class SessionFiles {
       const bytes = await root.readBytes(named.value, SessionFiles.ASKED_QUESTION_LIMIT + 1);
       if (bytes.length > SessionFiles.ASKED_QUESTION_LIMIT) return undefined;
       const payload = new TextDecoder().decode(bytes);
-      const known = this.#askedSeen.get(id);
-      if (known?.payload === payload) return { payload, writtenAt: known.at };
-      const at = instantFromEpochMs(Date.parse(this.deps.clock.now()));
-      this.#askedSeen.set(id, { payload, at });
-      return { payload, writtenAt: at };
+      const stat = await root.stat(named.value);
+      if (stat === undefined || stat.kind !== 'file' || !Number.isFinite(Date.parse(stat.modified))) return undefined;
+      return { payload, writtenAt: stat.modified };
     } catch {
-      this.#askedSeen.delete(id);
       return undefined;
     }
   }
