@@ -854,26 +854,16 @@ describe('profileCatalog', () => {
     });
   });
 
-  it('should say nothing applies, without naming a tool, when the only layers are model sets for no tool', () => {
+  it('should apply a model set of third-party ids on every tool, skipping nothing', () => {
     // Act
     const actual = profileCatalog(modelOf(), withReadFacts());
 
-    // Assert
+    // Assert — llama-4 is neither tool's own id, so it is served through whichever CLI the login drives
     const junk = profileNamed(actual, 'junk');
-    should(stackOf(junk, 'claude').available).deepEqual({
-      available: false,
-      reason: 'Nothing here applies on Claude Code.',
-    });
-    should(stackOf(junk, 'codex').available).deepEqual({
-      available: false,
-      reason: 'Nothing here applies on Codex.',
-    });
-    should(stackOf(junk, 'claude').skipped).deepEqual([
-      {
-        reference: 'modelSets/junk',
-        sentence: 'Model set junk has no Claude Code model, so it is skipped on Claude Code.',
-      },
-    ]);
+    should(stackOf(junk, 'claude').available).deepEqual({ available: true });
+    should(stackOf(junk, 'codex').available).deepEqual({ available: true });
+    should(stackOf(junk, 'claude').skipped).deepEqual([]);
+    should(stackOf(junk, 'codex').skipped).deepEqual([]);
   });
 
   it('should list what applies and what is skipped for the tool the stack is read on', () => {
