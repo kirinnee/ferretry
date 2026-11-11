@@ -34,7 +34,11 @@ import {
   StructuredQuestionService,
 } from '../lib/service.ts';
 import { FORM_OFF, harnessFormPane } from './harness-form-pane.ts';
-import { HarnessQuestionDriver } from './harness-question-driver.ts';
+import {
+  HarnessQuestionDriver,
+  StructuredQuestionDriveError,
+  type StructuredQuestionPane,
+} from './harness-question-driver.ts';
 import { StateAnswerLedger } from './state-answer-ledger.ts';
 import { clearAskedQuestion, type QuestionLane } from './state-asked-question.ts';
 
@@ -112,21 +116,66 @@ export function buildQuestionAnswering(deps: QuestionAnsweringDeps) {
   const pane = harnessFormPane(ferrets);
   const key = (id: SessionId): string => String(id);
 
-  const driver = new HarnessQuestionDriver(
-    pane,
-    async id => key(id),
-    deps.sleep,
-    deps.polls,
-    deps.pollMs,
-    async (id, step) => {
-      // The step names only where the drive is: `shown` is the review page's text, which is an answer.
-      deps.log.info('question.answer_step', {
-        ferret: key(id),
-        step: step.step,
-        ...('questionIndex' in step ? { questionIndex: step.questionIndex } : {}),
+  /**
+   * A DRIVE IS BOUND TO ITS QUESTION, NOT TO A PANE. The service checks the tool id once, before the drive, but a
+   * question update or a withdrawal runs on another lane, and the pane cannot tell two forms with the same text apart. So
+   * every key and paste of a drive first asks, IN the ferret's question lane and in the same step as the input itself,
+   * whether `question.json` still holds this exact tool id; if it does not (replaced by a newer question, or withdrawn)
+   * nothing is typed. A writer cannot land a newer question between the check and the key, and the lane is held for one
+   * key only, never across the drive (the answered stamp and the failure release take it too).
+   *
+   * Captures are reads and are not bound: a form that is already answered, retired by the watch, or replaced by the next
+   * question is still read to confirm the answer; only input is refused.
+   */
+  const boundPane = (toolUseId: string): StructuredQuestionPane => {
+    const typeIfHeld = async <T>(ferret: string, input: () => Promise<T>): Promise<T> =>
+      await questionLane.run(ferret, async () => {
+        const read = await state.read(QUESTION_STATE, ferret);
+        if (!read.ok)
+          throw new StructuredQuestionDriveError(
+            'question state is unreadable; nothing further was typed into the form',
+            'none',
+            { phase: 'question-binding', reason: 'state-unreadable' },
+          );
+        if (read.value?.toolUseId !== toolUseId)
+          throw new StructuredQuestionDriveError(
+            `question ${toolUseId} is no longer the pending question (${read.value === undefined ? 'it was withdrawn' : 'it was replaced'}); nothing further was typed into the form`,
+            'none',
+            {
+              phase: 'question-binding',
+              reason: read.value === undefined ? 'question-withdrawn' : 'question-replaced',
+            },
+          );
+        return await input();
       });
-    },
-  );
+    return {
+      state: async ferret => await pane.state(ferret),
+      sendKey: async (ferret, pressed) => await typeIfHeld(ferret, async () => await pane.sendKey(ferret, pressed)),
+      paste: async (ferret, text) => await typeIfHeld(ferret, async () => await pane.paste(ferret, text)),
+    };
+  };
+
+  /** One driver per question: it types through the question's own bound pane. It keeps no other state. */
+  const driverFor = (toolUseId: string): HarnessQuestionDriver =>
+    new HarnessQuestionDriver(
+      boundPane(toolUseId),
+      async id => key(id),
+      deps.sleep,
+      deps.polls,
+      deps.pollMs,
+      async (id, step) => {
+        // The step names only where the drive is: `shown` is the review page's text, which is an answer.
+        deps.log.info('question.answer_step', {
+          ferret: key(id),
+          step: step.step,
+          ...('questionIndex' in step ? { questionIndex: step.questionIndex } : {}),
+        });
+      },
+    );
+  const driver = {
+    drive: async (id: SessionId, question: PendingQuestion, answers: readonly StructuredQuestionAnswer[]) =>
+      await driverFor(question.toolUseId).drive(id, question, answers),
+  };
 
   const diagnostics = (context: StructuredQuestionFailureContext) => ({
     acceptance: context.failure.acceptance,
@@ -155,11 +204,15 @@ export function buildQuestionAnswering(deps: QuestionAnsweringDeps) {
       answered: async (id, toolUseId, answers, confirmation) => {
         await questionLane.run(key(id), async () => {
           const read = await state.read(QUESTION_STATE, key(id));
-          if (!read.ok || read.value?.toolUseId !== toolUseId)
-            throw new SessionAnswerError('refused', `question ${toolUseId} is no longer pending; it was not cleared`);
-          // The stamp first: it is the proof reconciliation defers to, so a crash before the clear still reads answered.
+          // Unreadable is missing evidence: whether a newer question is stored cannot be told, so nothing is cleared.
+          if (!read.ok)
+            throw new SessionAnswerError('refused', `question ${toolUseId} state is unreadable; it was not cleared`);
+          // The form visibly advanced, so the answer is stamped even when the watch has already retired this question
+          // (the transcript said the call was over) or the next one has replaced it: the stamp is the proof of what
+          // landed. The stamp first: reconciliation defers to it, so a crash before the clear still reads answered.
           await state.write(QUESTION_ANSWERED_STATE, { format: 1, toolUseId, answeredAt: clock.now() }, key(id));
-          await state.remove(QUESTION_STATE, key(id));
+          // Only this exact question is cleared; a newer one the hook has stored since is its own.
+          if (read.value?.toolUseId === toolUseId) await state.remove(QUESTION_STATE, key(id));
         });
         deps.log.info('question.answered', {
           ferret: key(id),
@@ -207,7 +260,8 @@ export function buildQuestionAnswering(deps: QuestionAnsweringDeps) {
     {
       // The frame is the form's own evidence: handed to the service for its decision, never stored or logged.
       snapshot: async id => await pane.state(key(id)),
-      cancel: async (id, question) => await driver.cancel(id, question),
+      // The Escape is an input too: it is bound to this question, so a newer one's form is never cancelled by it.
+      cancel: async (id, question) => await driverFor(question.toolUseId).cancel(id, question),
     },
   );
 

@@ -293,3 +293,164 @@ describe('the form seam refuses what it cannot do', () => {
     await host.stop();
   });
 });
+
+/**
+ * Findings 4 and 5 of the structured-questions review: the pane cannot tell two forms with the same text apart, and the
+ * question lane (updates, the watch's retirement) is not the answer's. So an answer is bound to its question's tool id for
+ * every key it types, and a question retired or replaced after the answer took does not turn a delivered answer into an
+ * error. `onCapture` runs a step in the middle of the drive, in the frame the driver is reading.
+ */
+describe('a drive stays bound to its own question', () => {
+  type World = Awaited<ReturnType<typeof world>>;
+  const second: Question = { ...question, toolUseId: 'toolu_2' };
+
+  /** Runs `step` when the driver captures a frame; `when` decides which capture (the 1st is the preflight read). */
+  const onCapture = (w: World, when: (capture: number) => boolean, step: () => Promise<void>): void => {
+    const original = w.ferrets.harness.bind(w.ferrets);
+    let captures = 0;
+    w.ferrets.harness = async id => {
+      const harness = await original(id);
+      if (harness?.form === undefined) return harness;
+      const form = harness.form;
+      return {
+        ...harness,
+        form: {
+          ...form,
+          capture: async () => {
+            const captured = await form.capture();
+            captures += 1;
+            if (when(captures)) await step();
+            return captured;
+          },
+        },
+      };
+    };
+  };
+
+  /** Runs `step` right after the form took the `nth` key (1-based). */
+  const afterKey = (w: World, nth: number, step: () => Promise<void>): void => {
+    const original = w.ferrets.harness.bind(w.ferrets);
+    let typed = 0;
+    w.ferrets.harness = async id => {
+      const harness = await original(id);
+      if (harness?.form === undefined) return harness;
+      const form = harness.form;
+      return {
+        ...harness,
+        form: {
+          ...form,
+          key: async (pressed: FormKey) => {
+            const result = await form.key(pressed);
+            typed += 1;
+            if (typed === nth) await step();
+            return result;
+          },
+        },
+      };
+    };
+  };
+
+  test('a question replaced during the first look types nothing, and the newer question is left whole', async () => {
+    const w = await world();
+    onCapture(
+      w,
+      n => n === 1,
+      async () => await w.state.write(QUESTION_STATE, second, 'f1'),
+    );
+
+    const response = await w.answer({ toolUseId: 'toolu_1', labels: ['No'] });
+
+    expect(w.ferrets.keys).toEqual([]);
+    expect(response.status).toBe(409);
+    expect(await w.state.read(QUESTION_STATE, 'f1')).toMatchObject({ ok: true, value: { toolUseId: 'toolu_2' } });
+    expect(await w.state.read(QUESTION_ANSWERED_STATE, 'f1')).toMatchObject({ ok: true, value: undefined });
+    await w.host.stop();
+  });
+
+  test('a question withdrawn during the first look types nothing', async () => {
+    const w = await world();
+    onCapture(
+      w,
+      n => n === 1,
+      async () => await w.state.remove(QUESTION_STATE, 'f1'),
+    );
+
+    const response = await w.answer({ toolUseId: 'toolu_1', labels: ['No'] });
+
+    expect(w.ferrets.keys).toEqual([]);
+    expect(response.status).toBe(409);
+    await w.host.stop();
+  });
+
+  test('a question replaced between two keys stops the drive: the second key is never typed', async () => {
+    const w = await world();
+    // The first key (Down) has landed; the replacement arrives before Enter.
+    afterKey(w, 1, async () => await w.state.write(QUESTION_STATE, second, 'f1'));
+
+    const response = await w.answer({ toolUseId: 'toolu_1', labels: ['No'] });
+
+    expect(w.ferrets.keys).toEqual(['Down']);
+    expect(w.ferrets.keys).not.toContain('Enter');
+    expect(response.status).toBe(409);
+    expect(await w.state.read(QUESTION_STATE, 'f1')).toMatchObject({ ok: true, value: { toolUseId: 'toolu_2' } });
+    await w.host.stop();
+  });
+
+  test('the release Escape of a failed drive is not sent into a newer question’s form', async () => {
+    const w = await world();
+    w.ferrets.stuck = true; // Enter lands but the form never moves on: the drive fails and tries to cancel.
+    onCapture(
+      w,
+      n => n === 3,
+      async () => await w.state.write(QUESTION_STATE, second, 'f1'),
+    );
+
+    const response = await w.answer({ toolUseId: 'toolu_1', labels: ['No'] });
+
+    expect(response.status).toBe(409);
+    expect(w.ferrets.keys).not.toContain('Escape');
+    expect(await w.state.read(QUESTION_STATE, 'f1')).toMatchObject({ ok: true, value: { toolUseId: 'toolu_2' } });
+    await w.host.stop();
+  });
+
+  test('the watch retiring the question after the answer was typed does not turn the delivery into an error', async () => {
+    const w = await world();
+    // What the watch does once the transcript names the call: the exact-id clear, while the driver confirms.
+    onCapture(
+      w,
+      () => w.ferrets.answered,
+      async () => await w.state.remove(QUESTION_STATE, 'f1'),
+    );
+
+    const response = await w.answer({ toolUseId: 'toolu_1', labels: ['No'] });
+
+    expect(response.status).toBe(200);
+    expect(w.ferrets.keys).toEqual(['Down', 'Enter']);
+    expect(await w.state.read(QUESTION_ANSWERED_STATE, 'f1')).toMatchObject({
+      ok: true,
+      value: { toolUseId: 'toolu_1' },
+    });
+    expect(await w.state.read(QUESTION_STATE, 'f1')).toMatchObject({ ok: true, value: undefined });
+    expect(w.host.published.map(event => event.event)).toContain('conversation.question-answered');
+    await w.host.stop();
+  });
+
+  test('a next question that replaced the answered one before the commit survives the commit', async () => {
+    const w = await world();
+    onCapture(
+      w,
+      () => w.ferrets.answered,
+      async () => await w.state.write(QUESTION_STATE, second, 'f1'),
+    );
+
+    const response = await w.answer({ toolUseId: 'toolu_1', labels: ['No'] });
+
+    expect(response.status).toBe(200);
+    expect(await w.state.read(QUESTION_ANSWERED_STATE, 'f1')).toMatchObject({
+      ok: true,
+      value: { toolUseId: 'toolu_1' },
+    });
+    expect(await w.state.read(QUESTION_STATE, 'f1')).toMatchObject({ ok: true, value: { toolUseId: 'toolu_2' } });
+    await w.host.stop();
+  });
+});
