@@ -227,6 +227,7 @@ async function runPluginVerb(
     readText: path => world.host.readText(path),
     readBytes: path => world.host.readBytes(path),
     exists: path => world.host.exists(path),
+    stdin: () => world.host.stdin(),
     env: pluginEnvironment(world.environment, world.host.cwd()),
     ownState: world.host.ownState(plugin.manifest),
   });

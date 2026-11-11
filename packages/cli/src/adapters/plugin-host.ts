@@ -19,6 +19,8 @@ export interface PluginHostInputs {
   readonly readStdin?: () => Promise<string>;
   readonly readBytes?: (path: string) => Promise<Uint8Array>;
   readonly readStdinBytes?: () => Promise<Uint8Array>;
+  /** Standard input as a stream of chunks (default: `Bun.stdin.stream()`). */
+  readonly stdinStream?: () => AsyncIterable<Uint8Array>;
   readonly cwd?: () => string;
 }
 
@@ -47,6 +49,7 @@ export function createPluginHost(inputs: PluginHostInputs): PluginHost {
     readBytes: async path => (path === '-' ? await readStdinBytes() : await readBytes(path)),
     // As today's `existsSync(resolve(cwd, path))` (system-poller): no read, no stdin, a directory counts.
     exists: async path => await pathExists(resolve(cwd(), path)),
+    stdin: inputs.stdinStream ?? (() => Bun.stdin.stream()),
     ownState(manifest: Manifest) {
       // Only this plugin's own declared opaque files are ever visible to the port; anything else is refused.
       const files = (manifest.data?.state ?? []).filter(file => file.store === 'opaque');

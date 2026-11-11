@@ -71,6 +71,11 @@ function worldWithProbe(environment: Record<string, string | undefined> = {}) {
       return bytes;
     },
     readStdinBytes: async () => new Uint8Array([7, 8, 9]),
+    stdinStream: () =>
+      (async function* () {
+        yield new Uint8Array([1, 2]);
+        yield new Uint8Array([3]);
+      })(),
     readStdin: async () => 'typed on stdin',
     cwd: () => '/work',
   });
@@ -115,6 +120,16 @@ describe('the context every plugin cli half is handed', () => {
     should(ctx.readBytes).be.a.Function();
     should(ctx.env).be.an.Object();
     should(ctx.ownState).be.ok();
+  });
+
+  it('should hand a half the standard input as a stream of byte chunks, and a client that can run a tool', async () => {
+    const { world, probe } = worldWithProbe();
+    await runFy(['probe'], world);
+    const ctx = probe.context();
+    const chunks: number[][] = [];
+    for await (const chunk of ctx.stdin?.() ?? []) chunks.push([...chunk]);
+    should(chunks).eql([[1, 2], [3]]);
+    should(ctx.client.tool).be.a.Function();
   });
 
   it('should give a clock that reads the time', async () => {
