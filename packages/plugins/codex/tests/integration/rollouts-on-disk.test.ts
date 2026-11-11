@@ -3,10 +3,10 @@
  * and rollout files this test writes. Nothing here is a real harness home or a real sign-in document.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { LaunchSpec } from '@ferretry/core-ferrets/contract';
+import { HarnessTranscriptReplaced, type LaunchSpec } from '@ferretry/core-ferrets/contract';
 import type { FencedPath, FerretId, KernelPorts } from '@ferretry/kernel/contract';
 import { nodeFs, rootsPortFor, state } from '@ferretry/kernel/host';
 import { instantFromEpochMs } from '@ferretry/std';
@@ -137,5 +137,129 @@ describe('Codex rollouts on a real folder', () => {
     })();
 
     await expect(read).rejects.toThrow('the clock stopped');
+  });
+});
+
+describe('G162 Codex rollouts: transcriptBytes is a windowed, unmasked byte handle over the proved rollout', () => {
+  const F1 = 'f1' as FerretId;
+  const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+  /** A replacement made the way a real one is: the new file exists BESIDE the old one, then takes its name (another inode). */
+  const replace = async (path: string, body: string) => {
+    await writeFile(`${path}.new`, body);
+    await rename(`${path}.new`, path);
+  };
+  const opened = async (rollout?: string) => {
+    const w = await world();
+    await w.rollouts.launched(w.specOf('f1'));
+    const body = rollout ?? `${header('native-a', w.agent('f1'))}${said('hello')}`;
+    await w.write('f1', 'rollout-a.jsonl', body);
+    const handle = await w.rollouts.bytes(F1);
+    if (handle === undefined) throw new Error('the rollout is proved');
+    return { ...w, handle, body };
+  };
+
+  test('a ferret with no proved rollout has no bytes; so has one whose header does not name its home', async () => {
+    const w = await world();
+    expect(await w.rollouts.bytes(F1)).toBeUndefined();
+    await w.rollouts.launched(w.specOf('f1'));
+    expect(await w.rollouts.bytes(F1)).toBeUndefined();
+    // A rollout correlated to ANOTHER ferret's home proves nothing for this one.
+    await w.write('f1', 'rollout-b.jsonl', `${header('native-b', w.agent('f2'))}${said('not mine')}`);
+    expect(await w.rollouts.bytes(F1)).toBeUndefined();
+  });
+
+  test('the handle reads the proved rollout UNMASKED with a stable token, the file’s size and the codex format', async () => {
+    const { handle, rollouts, body } = await opened();
+    expect(handle.format).toBe('codex');
+    expect(handle.size).toBe(body.length);
+    expect(handle.mtimeMs).toBeGreaterThan(0);
+    expect(text(await handle.read(0, handle.size))).toBe(body);
+    expect((await rollouts.bytes(F1))?.file).toBe(handle.file);
+    expect(handle.file).toMatch(/^[0-9a-f]{22}$/);
+  });
+
+  test('the token changes when the rollout is replaced', async () => {
+    const w = await opened();
+    await replace(
+      join(w.agent('f1'), 'sessions', 'rollout-a.jsonl'),
+      `${header('native-a', w.agent('f1'))}${said('replacement')}`,
+    );
+    // Drop the remembered proof so the next ask proves afresh.
+    w.rollouts.forget(F1);
+    const again = await w.rollouts.bytes(F1);
+    expect(again?.file).not.toBe(w.handle.file);
+  });
+
+  test('a read past the end is short, one wholly past it is empty, and a read is clamped to the 4 MiB window', async () => {
+    const w = await opened();
+    expect(text(await w.handle.read(w.body.length - 4, 100))).toBe(w.body.slice(-4));
+    expect((await w.handle.read(w.body.length + 10, 100)).length).toBe(0);
+    const large = await world();
+    await large.rollouts.launched(large.specOf('f1'));
+    await large.write(
+      'f1',
+      'rollout-a.jsonl',
+      `${header('native-a', large.agent('f1'))}${'x'.repeat(5 * 1024 * 1024)}`,
+    );
+    const handle = await large.rollouts.bytes(F1);
+    expect((await handle!.read(0, 5 * 1024 * 1024)).length).toBe(4 * 1024 * 1024);
+  });
+
+  test('a negative, fractional or huge offset or length is refused, naming no path', async () => {
+    const { handle, parent } = await opened();
+    for (const [offset, length] of [
+      [-1, 10],
+      [0, -1],
+      [1.5, 10],
+      [2 ** 60, 10],
+      [0, 2 ** 60],
+      [Number.NaN, 10],
+    ] as const) {
+      const failure = await handle.read(offset, length).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(RangeError);
+      expect(String((failure as Error).message)).not.toContain(parent);
+    }
+  });
+
+  test('the handle and every error it raises carry no path', async () => {
+    const w = await opened();
+    const shown = JSON.stringify(
+      Object.fromEntries(Object.entries(w.handle).filter(([, v]) => typeof v !== 'function')),
+    );
+    for (const secret of [w.parent, 'rollout-a', 'agent-homes', 'sessions']) expect(shown).not.toContain(secret);
+    await replace(join(w.agent('f1'), 'sessions', 'rollout-a.jsonl'), 'replaced\n');
+    const failure = await w.handle.read(0, 10).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(HarnessTranscriptReplaced);
+    const said2 = `${(failure as Error).message} ${(failure as Error).stack ?? ''}`;
+    for (const secret of [w.parent, 'rollout-a.jsonl', 'agent-homes']) expect(said2).not.toContain(secret);
+  });
+
+  test('a rollout replaced after the proof is refused: by a new file, by a symlink put in its place, and by removal', async () => {
+    const w = await opened();
+    const target = join(w.agent('f1'), 'sessions', 'rollout-a.jsonl');
+    expect((await w.handle.stat())?.size).toBe(w.handle.size);
+    // Another inode at the same name.
+    await replace(target, 'NEW\n');
+    await expect(w.handle.read(0, 10)).rejects.toBeInstanceOf(HarnessTranscriptReplaced);
+    expect(await w.handle.stat()).toBeUndefined();
+
+    // A symlink at the name to a file outside the home holding bytes of its own.
+    const again = await opened();
+    const outside = join(again.parent, 'outside.jsonl');
+    await writeFile(outside, 'OUTSIDE-BYTES\n');
+    const link = join(again.agent('f1'), 'sessions', 'rollout-a.jsonl');
+    await rm(link);
+    await symlink(outside, link);
+    const failure = await again.handle.read(0, 100).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(HarnessTranscriptReplaced);
+    expect(await again.handle.stat()).toBeUndefined();
+    again.rollouts.forget(F1);
+    expect(await again.rollouts.bytes(F1)).toBeUndefined();
+
+    // Gone.
+    const gone = await opened();
+    await rm(join(gone.agent('f1'), 'sessions', 'rollout-a.jsonl'));
+    await expect(gone.handle.read(0, 10)).rejects.toBeInstanceOf(HarnessTranscriptReplaced);
+    expect(await gone.handle.stat()).toBeUndefined();
   });
 });

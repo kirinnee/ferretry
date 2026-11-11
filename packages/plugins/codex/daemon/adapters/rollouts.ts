@@ -1,4 +1,6 @@
 /** Codex rollout IO, through the two declared roots only. No sign-in document is opened. */
+import { createHash } from 'node:crypto';
+import { openTranscriptBytes } from '@ferretry/core-ferrets/contract';
 import type {
   FoundConversation,
   Harness,
@@ -30,6 +32,7 @@ const PROOF_REUSE_MS = 5_000;
 /** How much of the end of a rollout one tail read takes: a turn's records are near the end. */
 const TAIL_READ_BYTES = 512 * 1024;
 const decoder = new TextDecoder();
+const sha256Hex = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
 interface Rollout {
   readonly id: string;
@@ -211,6 +214,23 @@ export class CodexRollouts {
     const found = await this.proved(ferret, true).catch(() => undefined);
     if (found === undefined) return undefined;
     return { file: found.rollout.file, size: found.rollout.size, mtimeMs: Date.parse(found.rollout.modified) };
+  };
+
+  /**
+   * The proved rollout as a windowed, UNMASKED byte handle (`Harness.transcriptBytes`, G162): read in windows, an opaque
+   * token and no path, re-checked for replacement on every read. Its one consumer (Conversation's reader) masks every
+   * answer it cuts from these bytes. Rides the same remembered proof the stamp does.
+   */
+  readonly bytes: NonNullable<Harness['transcriptBytes']> = async ferret => {
+    try {
+      const found = await this.proved(ferret, true);
+      return found === undefined
+        ? undefined
+        : await openTranscriptBytes(found.root, found.rollout.file, 'codex', sha256Hex);
+    } catch {
+      // A rollout the root refuses (a link put where the file was) is no proved transcript; the refusal is not passed on.
+      return undefined;
+    }
   };
 
   /** The newest `limit` records of the proved rollout, without their text (`Harness.transcriptTail`). */
