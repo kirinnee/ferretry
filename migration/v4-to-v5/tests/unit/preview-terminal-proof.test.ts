@@ -4,10 +4,12 @@
  * tmux): with no zsh startup file in HOME, zsh runs its first-run menu and swallows the keys typed into the pane, so the
  * proof read nothing ("fy at nowhere, FY_HOME unset"). Nothing real is read: temp dirs, a stub `fy`, no daemon, no tmux.
  *
+ * The pane is read the way tmux shows it: its escape sequences (CSI, OSC context marks, keypad modes) are gone (TTP-1f).
+ *
  * The libexec tests are the other half: `clean` then `prepare` must not lose the programs `build` installed.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
@@ -43,36 +45,6 @@ const passwdShell = (): string | undefined => {
 const bashShell = (): string | undefined => Bun.which('bash') ?? undefined;
 const PASSWD = passwdShell();
 const BASH = bashShell();
-/**
- * Whether this host's INTERACTIVE login shell on a pty (what a pane is) still finds a `fy` that is first on the PATH it
- * is started with, given an empty HOME (as a pane under the empty daemon HOME is). The proof needs the preview's bin on
- * the pane PATH; a host whose system shell files rewrite PATH (the GitHub runner's: FY_HOME arrived, `fy` was found
- * nowhere, on runs 42933650667 and 42934508569; a non-interactive `-lc` there keeps PATH, so only the interactive
- * files rewrite it) makes the real proof REFUSE, which is the safe answer and is pinned by TTP-1b, but it cannot show
- * what TTP-1a/1e show (the zdot folder keeping HOME empty while the proof passes). Measured with the proof's own
- * question (`command -v fy`) in the pane's own shape (`script`, `<shell> -l`, interactive), not assumed.
- */
-const loginKeepsPath = (shell: string | undefined): boolean => {
-  if (shell === undefined) return false;
-  const empty = mkdtempSync(join(tmpdir(), 'ttp-login-path-'));
-  try {
-    const bin = join(empty, 'bin');
-    const home = join(empty, 'home');
-    const zdot = join(empty, 'zdot');
-    for (const dir of [bin, home, zdot]) mkdirSync(dir);
-    writeFileSync(join(bin, 'fy'), '#!/bin/sh\n', { mode: 0o755 });
-    writeFileSync(join(zdot, '.zshrc'), '', { mode: 0o600 });
-    const done = Bun.spawnSync(['script', '-qec', `${shell} -lic 'command -v fy'`, '/dev/null'], {
-      env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home, ZDOTDIR: zdot, TERM: 'xterm' },
-      cwd: empty,
-      stdin: 'ignore',
-      timeout: 10_000,
-    });
-    return done.stdout.toString().includes(join(bin, 'fy'));
-  } finally {
-    rmSync(empty, { recursive: true, force: true });
-  }
-};
 /** The kernel's own rule for what a child of the daemon gets (not exported by the package, so loaded by path). */
 const { childEnvironment } = (await import(
   join(import.meta.dir, '../../../../packages/core/kernel/host/adapters/process.ts')
@@ -124,11 +96,35 @@ function pane(shell: string, env: Record<string, string>) {
       child.stdin.write(text);
       void child.stdin.flush();
     },
-    // What tmux's capture-pane gives: the screen's text, without the escape sequences a shell prints (bash's bracketed paste).
-    read: () => output.replaceAll('\r', '').replace(/\u001b\[[0-9;?]*[a-zA-Z]/gu, ''),
+    // What tmux's capture-pane gives: the screen's text. tmux consumes every escape sequence a shell prints, so they are
+    // stripped here: CSI (bash's bracketed paste) and OSC (systemd's `/etc/profile.d` context marks, `ESC ] 3008 ; ... ESC \`,
+    // which the GitHub runner's shells print around each command: left in, the closing `ESC \` sat in front of `fy=` and the
+    // proof's `^fy=` line never matched, though the pane had printed the right answer).
+    read: () => screenText(output),
+    /** Resolves once `ready` holds for the screen's text, or after `ms` (the caller's next step then says what is missing). */
+    until: async (ready: (screen: string) => boolean, ms: number): Promise<void> => {
+      for (const deadline = Date.now() + ms; Date.now() < deadline && !ready(screenText(output)); ) await sleep(20);
+    },
+    /** The shell has gone (its `script` parent exited), or `ms` passed. */
+    gone: (ms: number): Promise<unknown> => Promise.race([child.exited, sleep(ms)]),
     close: () => child.kill(),
   };
 }
+
+/** What a terminal screen shows for the bytes a pty carried: carriage returns, CSI and OSC sequences removed. */
+function screenText(bytes: string): string {
+  return (
+    bytes
+      .replaceAll('\r', '')
+      .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/gu, '')
+      .replace(/\u001b\[[0-9;?]*[a-zA-Z]/gu, '')
+      // The two-byte modes zsh sets around its prompt (`ESC =` keypad application mode, `ESC >` numeric).
+      .replace(/\u001b[=>]/gu, '')
+  );
+}
+
+/** A shell prompt at the end of the screen: the shell has started and reads keys (`$`, `%`, `#` or `>`). */
+const PROMPT = /[$%#>]\s*$/u;
 
 /** The real Terminals runtime over a recording tmux: the `-e NAME=value` words of the `new-session` it sends, as an environment. */
 async function runtimeEnvironment(environment: Readonly<Record<string, string>>): Promise<Record<string, string>> {
@@ -171,8 +167,9 @@ async function daemonTerminals(
   shell: string,
   home: string,
   hostile: Record<string, string>,
-): Promise<{ run: Run; closed: () => number; zdotInPane: () => string | undefined }> {
+): Promise<{ run: Run; closed: () => number; zdotInPane: () => string | undefined; diagnostic: () => string }> {
   const probe = wrapper(home, ['__daemon-probe', 'sh', '-c', 'printf "%s\\n%s" "$PATH" "$HOME"'], hostile);
+  let lastRead = '';
   const [paneRoute = '', paneHome = ''] = probe.stdout.toString().split('\n');
   // The environment the REAL Terminals runtime hands a new pane (`new-session -e NAME=value`), from the environment the
   // converter wrote into terminals.yaml, not from previewShellEnv directly.
@@ -190,26 +187,44 @@ async function daemonTerminals(
     if (verb === 'ps') return { code: 0, stdout: JSON.stringify([{ id: 'ferret1' }]) };
     if (action === 'open') {
       open = pane(shell, env);
-      await sleep(400);
+      await open.until(screen => PROMPT.test(screen), 10_000);
       open.type(`${argv.at(-1) ?? ''}\n`);
       return { code: 0, stdout: '' };
     }
     if (action === 'wait') {
-      for (let tries = 0; tries < 60 && !(open?.read() ?? '').includes('FYCHECK-DONE'); tries++) await sleep(100);
+      await open?.until(screen => screen.includes('FYCHECK-DONE'), 10_000);
       return { code: 0, stdout: '' };
     }
-    if (action === 'read') return { code: 0, stdout: open?.read() ?? '' };
+    if (action === 'read') {
+      lastRead = open?.read() ?? '';
+      return { code: 0, stdout: lastRead };
+    }
     closes++;
     open?.type('printf "ZDOT=%s\\n" "$ZDOTDIR"\n');
-    await sleep(400);
+    await open?.until(screen => /^ZDOT=.*$/mu.test(screen), 10_000);
     zdot = /^ZDOT=(.*)$/mu.exec(open?.read() ?? '')?.[1];
     // The shell leaves as a pane does (so a bash writes its history), then the pane goes.
     open?.type('exit\n');
-    await sleep(600);
+    await open?.gone(5_000);
     open?.close();
     return { code: 0, stdout: '' };
   };
-  return { run, closed: () => closes, zdotInPane: () => zdot };
+  // Only paths, PATH and the raw pane text: no other environment value is printed.
+  const diagnostic = (): string => {
+    const shim = join(home, 'bin', 'fy');
+    const shimState = existsSync(shim)
+      ? (statSync(shim).mode & 0o111) !== 0
+        ? 'executable'
+        : 'not executable'
+      : 'absent';
+    return [
+      `shell=${shell} paneRoute=${paneRoute} paneHome=${paneHome}`,
+      `probe exit=${String(probe.exitCode)} stderr=${probe.stderr.toString().slice(0, 300)}`,
+      `${shim} is ${shimState}`,
+      `raw pane tail=${JSON.stringify(lastRead.slice(-600))}`,
+    ].join('\n');
+  };
+  return { run, closed: () => closes, zdotInPane: () => zdot, diagnostic };
 }
 
 describe('TTP-1 the terminal the preview daemon opens finds the preview fy and FY_HOME', () => {
@@ -221,6 +236,8 @@ describe('TTP-1 the terminal the preview daemon opens finds the preview fy and F
     expect(wrapper(home, ['daemon', 'start'], hostile).exitCode).toBe(0);
     const terminals = await daemonTerminals(shell, home, hostile);
     const proof = await terminalCheck({ target: home, v4Home: V4, callerEnv: hostile, run: terminals.run });
+    // A refused proof says what the pane saw, so a failure on a host this box is not reads as evidence.
+    if (!proof.ok) throw new Error(`${proof.problems.join('\n')}\n${terminals.diagnostic()}`);
     const creds = await credentialCheck({
       target: home,
       callerEnv: hostile,
@@ -234,7 +251,7 @@ describe('TTP-1 the terminal the preview daemon opens finds the preview fy and F
     return { home, proof, creds, terminals };
   };
 
-  test.skipIf(!canRunPane || PASSWD === undefined || !loginKeepsPath(PASSWD))(
+  test.skipIf(!canRunPane || PASSWD === undefined)(
     'TTP-1a the passwd login shell in a pane runs the typed proof command, and the credential check passes after it',
     async () => {
       const { home, proof, creds, terminals } = await startOrder(PASSWD as string);
@@ -255,7 +272,7 @@ describe('TTP-1 the terminal the preview daemon opens finds the preview fy and F
     60_000,
   );
 
-  test.skipIf(!canRunPane || BASH === undefined || !loginKeepsPath(BASH))(
+  test.skipIf(!canRunPane || BASH === undefined)(
     'TTP-1e a bash login shell in a pane leaves the daemon HOME empty, and the credential check passes (its history lands in zdot/)',
     async () => {
       const { home, proof, creds } = await startOrder(BASH as string);
@@ -280,13 +297,36 @@ describe('TTP-1 the terminal the preview daemon opens finds the preview fy and F
         callerEnv: hostile,
         run: async (argv, env) => {
           if (argv[2] === 'open')
-            return terminals.run([argv[0] as string, 'terminal', 'open', 'x', '--ferret', 'f', 'true'], env);
+            return terminals.run([argv[0] as string, 'terminal', 'open', 'x', '--ferret', 'f', CHECK_COMMAND], env);
           if (argv[2] === 'read') return { code: 0, stdout: 'fy=/usr/bin/fy\nhome=\n' };
           return terminals.run(argv, env);
         },
       });
       expect(done.ok).toBe(false);
       expect(done.problems.join('\n')).toContain('found fy at /usr/bin/fy and FY_HOME unset');
+    },
+    30_000,
+  );
+
+  test.skipIf(!canRunPane)(
+    'TTP-1f a pane screen carries no escape sequence: a shell that marks each command with an OSC context mark still reads `fy=` at a line start',
+    async () => {
+      // The GitHub runner's shells print `ESC ] 3008 ; ... ESC \` (systemd's context marks) around each command; tmux eats
+      // them, so the proof must see the line as `fy=...`. Both terminators (ST and BEL) and a CSI mark are printed here.
+      const shell = pane('sh', { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root, TERM: 'xterm' });
+      try {
+        await shell.until(screen => PROMPT.test(screen), 10_000);
+        shell.type(
+          `printf '\\033]3008;end=1;exit=success\\033\\\\fy=ok\\n\\033]0;title\\007\\033[2K\\033=home=fine\\n'\n`,
+        );
+        await shell.until(screen => /^home=fine$/mu.test(screen), 10_000);
+        const screen = shell.read();
+        expect(/^fy=ok$/mu.test(screen)).toBe(true);
+        expect(/^home=fine$/mu.test(screen)).toBe(true);
+        expect(screen).not.toContain('\u001b');
+      } finally {
+        shell.close();
+      }
     },
     30_000,
   );
