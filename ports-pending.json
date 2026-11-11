@@ -320,5 +320,92 @@
     "mcp": ["cli"],
     "skills": ["cli"]
   },
-  "pendingAppPorts": []
+  "pendingAppPorts": [],
+  "unwired": [
+    {
+      "seam": "hook:step-up.stages:add-2fa-key",
+      "card": "&F3431",
+      "why": "Adding a 2FA key from a device answers 'timed out' until Accounts takes the stage (builder C, M1)."
+    },
+    {
+      "seam": "hook:step-up.stages:approve-task-plan",
+      "card": "&F3431",
+      "why": "Approving a task plan with a passkey answers 'timed out' until Accounts takes the stage (builder C, M1)."
+    },
+    {
+      "seam": "hook:step-up.stages:approve-sign-in-rule",
+      "card": "&F3431",
+      "why": "Approving a standing sign-in rule answers 'timed out' until Accounts takes the stage (builder C, M1)."
+    },
+    {
+      "seam": "hook:step-up.stages:approve-paste-rule",
+      "card": "&F3431",
+      "why": "Approving a paste rule answers 'timed out' until Accounts takes the stage (builder C, M1)."
+    },
+    {
+      "seam": "hook:ask.delivery:ferret",
+      "card": "&F3430",
+      "why": "No agenda answer reaches a ferret until Conversation provides ask.delivery (builder B, B3)."
+    },
+    {
+      "seam": "code:packages/core/ferrets/daemon/index.ts:stateHomeReach",
+      "card": "&F3429",
+      "why": "A ferret cannot start a helper (fy new) until the state-home reach is bound (builder A, B1)."
+    },
+    {
+      "seam": "hook:card.moving",
+      "card": "&F1787",
+      "why": "Extension point: no plugin reacts when a card moves, which is fine until one needs to."
+    },
+    {
+      "seam": "hook:message.before-send",
+      "card": "&F1787",
+      "why": "Extension point: no plugin can change or refuse a message before it is sent."
+    },
+    {
+      "seam": "hook:catalog.items:skill",
+      "card": "&F1787",
+      "why": "Publishing or installing a shared skill answers 503 catalog_kind_unavailable."
+    },
+    {
+      "seam": "hook:catalog.items:mcp",
+      "card": "&F1787",
+      "why": "Publishing or installing a shared MCP setup answers 503 catalog_kind_unavailable."
+    },
+    {
+      "seam": "hook:catalog.items:artifact",
+      "card": "&F1787",
+      "why": "Publishing or installing a shared artifact answers 503 catalog_kind_unavailable."
+    },
+    {
+      "seam": "hook:reference.catalog::",
+      "card": "&F1787",
+      "why": "No plugin lists the ':' references (skills) for the composer to complete."
+    },
+    {
+      "seam": "hook:reference.catalog:@",
+      "card": "&F1787",
+      "why": "No plugin lists the '@' references (files) for the composer to complete."
+    },
+    {
+      "seam": "read:logins",
+      "card": "&F3413",
+      "why": "Ferrets offers logins:<kind> and never reads it, so a start gets no login environment (login-env, until it merges)."
+    },
+    {
+      "seam": "code:packages/plugins/accounts/daemon/index.ts:notBuiltRoute",
+      "card": "&F1787",
+      "why": "Any declared Accounts route without a handler answers 'not built'."
+    },
+    {
+      "seam": "code:packages/plugins/accounts/daemon/index.ts:notBuiltTool",
+      "card": "&F1787",
+      "why": "account_propose, secure_copy, secure_list, secure_discard, secure_paste and task_plan answer 'not built' (M2, after merge)."
+    },
+    {
+      "seam": "code:packages/core/ferrets/daemon/moves-deps.ts:*",
+      "card": "&F1787",
+      "why": "Move, fork and handover answer 503 until their ports are bound (R-0341, R-0344, R-0345, R-0346, R-0355, R-0356)."
+    }
+  ]
 }
