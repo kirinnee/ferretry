@@ -83,15 +83,19 @@ const REFERENCE = /\$\{|\$[A-Za-z_]/u;
  *   would expand those, a settings file would not, so the pin would be the TEXT `$NAME`);
  * - it is not `FY_*`, `HOME`, `CLAUDE_CONFIG_DIR` or `CLAUDE_SECURESTORAGE_CONFIG_DIR`;
  * - the child's final value for it IS the login's value: a later `env`/`shell` part (profile, MCP, shell) that sets the
- *   key to something else wins in the child, so pinning the login's value would flip that order.
+ *   key to something else wins in the child, so pinning the login's value would flip that order;
+ * - the merged settings document does not set it in its own `env` (B1): that block lands in the home's `settings.json`,
+ *   which `--settings` outranks, so a pin would flip the document's precedence over the process environment.
  */
 export function loginEnvPins(
   loginEnv: Readonly<Record<string, string>> | undefined,
   parts: readonly LaunchPart[],
+  documentEnv: Readonly<Record<string, unknown>> = {},
 ): Readonly<Record<string, string>> {
   const pins: Record<string, string> = {};
   for (const [name, value] of Object.entries(loginEnv ?? {})) {
-    if (name.startsWith('FY_') || NEVER_PINNED.has(name) || REFERENCE.test(value)) continue;
+    if (name.startsWith('FY_') || NEVER_PINNED.has(name) || REFERENCE.test(value) || Object.hasOwn(documentEnv, name))
+      continue;
     let final = value;
     for (const part of parts)
       if ((part.kind === 'env' || part.kind === 'shell') && name in part.env) final = part.env[name] as string;
@@ -117,6 +121,12 @@ export function overlayDocument(
   return document;
 }
 
+/** The `env` block of a settings document, which lands in the home's `settings.json`. */
+function documentEnvOf(document: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  const { env } = document;
+  return typeof env === 'object' && env !== null && !Array.isArray(env) ? (env as Record<string, unknown>) : {};
+}
+
 /** The text of every file a launch writes into the home. */
 export function homeText(inputs: HomeInputs): HomeText {
   const fixed = fixedLayer(inputs.permissionMode, inputs.folder);
@@ -129,10 +139,12 @@ export function homeText(inputs: HomeInputs): HomeText {
   const servers = Object.fromEntries(
     inputs.parts.flatMap(part => (part.kind === 'mcp' ? [[part.name, part.config]] : [])),
   );
+  const settings = deepMergeSettings(settingsDocument(inputs), fixed.settings);
+  const pins = loginEnvPins(inputs.loginEnv, inputs.parts, documentEnvOf(settings));
   return {
     memory: memory === '' ? '' : `${memory}\n`,
-    settings: `${JSON.stringify(deepMergeSettings(settingsDocument(inputs), fixed.settings), null, 2)}\n`,
-    overlay: `${JSON.stringify(overlayDocument(fixed.overlay, loginEnvPins(inputs.loginEnv, inputs.parts)), null, 2)}\n`,
+    settings: `${JSON.stringify(settings, null, 2)}\n`,
+    overlay: `${JSON.stringify(overlayDocument(fixed.overlay, pins), null, 2)}\n`,
     claudeJson: `${JSON.stringify(fixed.claudeJson, null, 2)}\n`,
     ...(Object.keys(servers).length === 0 ? {} : { mcp: `${JSON.stringify({ mcpServers: servers }, null, 2)}\n` }),
   };

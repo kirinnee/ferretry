@@ -156,3 +156,49 @@ describe('the guard', () => {
     expect(() => overlayDocument({ hooks: { command: 'echo ${secret:NAME}' } }, {})).toThrow('secret');
   });
 });
+
+describe('a pin never beats the merged settings document’s own env (B1)', () => {
+  const withDocument = (env: Record<string, string>, loginEnv: Record<string, string>) =>
+    homeText({
+      ...base,
+      parts: [],
+      settings: new Map([['harness', { settings: { env } }]]),
+      loginEnv,
+    });
+
+  test('a key a real settings item sets is not pinned; the home settings.json keeps the document’s value', () => {
+    const text = withDocument(
+      { ANTHROPIC_MODEL: 'settings-model', ANTHROPIC_BASE_URL: 'https://settings.example.test' },
+      { ANTHROPIC_MODEL: 'login-model', ANTHROPIC_BASE_URL: 'https://login.example.test', LOGIN_ONLY: 'kept' },
+    );
+
+    // Only the key the document does not set is pinned: --settings would otherwise beat settings.json.
+    expect(JSON.parse(text.overlay).env).toEqual({ LOGIN_ONLY: 'kept' });
+    const document = JSON.parse(text.settings) as { env: Record<string, string> };
+    expect(document.env.ANTHROPIC_MODEL).toBe('settings-model');
+    expect(document.env.ANTHROPIC_BASE_URL).toBe('https://settings.example.test');
+    // End to end through Claude's precedence: the settings value is the one the child sees.
+    const seen = effectiveEnv(
+      { ANTHROPIC_MODEL: 'login-model' },
+      { user: document.env, flag: JSON.parse(text.overlay).env },
+    );
+    expect(seen.ANTHROPIC_MODEL).toBe('settings-model');
+  });
+
+  test('control: with no settings item the same login value is pinned', () => {
+    const text = homeText({ ...base, parts: [], loginEnv: { ANTHROPIC_MODEL: 'login-model' } });
+
+    expect(JSON.parse(text.overlay).env).toEqual({ ANTHROPIC_MODEL: 'login-model' });
+  });
+
+  test('a settings item with no env block pins as before', () => {
+    const text = homeText({
+      ...base,
+      parts: [],
+      settings: new Map([['harness', { settings: { model: 'opus' } }]]),
+      loginEnv: { ANTHROPIC_MODEL: 'login-model' },
+    });
+
+    expect(JSON.parse(text.overlay).env).toEqual({ ANTHROPIC_MODEL: 'login-model' });
+  });
+});
