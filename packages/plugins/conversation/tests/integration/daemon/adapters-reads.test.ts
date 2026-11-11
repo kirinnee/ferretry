@@ -9,7 +9,6 @@ import type { Redaction, RootHandle } from '@ferretry/kernel/contract';
 import { diskRoot } from '@ferretry/kernel/testing';
 import type { Instant } from '@ferretry/std';
 import { EntriesTranscriptSource } from '../../../daemon/reader/adapters/entries-source.ts';
-import { historyFiles } from '../../../daemon/reader/adapters/history-files.ts';
 import { conversationFiles } from '../../../daemon/links/adapters/conversation-files.ts';
 import { asksSource } from '../../../daemon/search/adapters/asks-source.ts';
 import { workRedaction } from '../../../daemon/search/adapters/redaction.ts';
@@ -91,28 +90,6 @@ describe('the harness history root read in place for conversations', () => {
     expect(await files.tail('../../outside', 4)).toBeUndefined();
     const unreadable = { ...root, readBytes: async () => Promise.reject(new Error('io')) } as unknown as RootHandle;
     expect(await conversationFiles(unreadable).tail('proj/two.jsonl', 4)).toBeUndefined();
-  });
-});
-
-describe('the transcript files an image handle names', () => {
-  test('a file has a fingerprint, a folder, a missing file or a path outside the root has none', async () => {
-    const { root } = await history();
-    const files = historyFiles(root);
-
-    expect((await files.fingerprint('proj/one.jsonl'))?.size).toBe(10);
-    expect(await files.fingerprint('proj/sub')).toBeUndefined();
-    expect(await files.fingerprint('proj/absent.jsonl')).toBeUndefined();
-    expect(await files.fingerprint('../../outside')).toBeUndefined();
-  });
-
-  test('a range is the bytes between its offsets, shortened at the end, and empty outside the root', async () => {
-    const { root } = await history();
-    const files = historyFiles(root);
-    const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
-
-    expect(text(await files.readRange('proj/one.jsonl', 2, 3))).toBe('234');
-    expect(text(await files.readRange('proj/one.jsonl', 8, 10))).toBe('89');
-    expect((await files.readRange('../../outside', 0, 5)).byteLength).toBe(0);
   });
 });
 

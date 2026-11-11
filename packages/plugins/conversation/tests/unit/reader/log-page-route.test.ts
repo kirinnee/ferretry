@@ -96,8 +96,7 @@ const readerOver = (
         Buffer.from(createHmac('sha256', 'k').update(input).digest()).equals(Buffer.from(tag)),
     },
     redactor: readRedactor(redaction),
-    history: {} as never,
-    locate: { locate: async () => undefined },
+    bytes: async () => 'unsupported',
     now: () => 0,
   });
 
