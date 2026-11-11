@@ -836,6 +836,25 @@ describe('a create that finds something at its name', () => {
     expect((await lstat(`${work}/dangling.json`)).isSymbolicLink()).toBe(true);
   });
 
+  test('a replacing write refuses a stranger file or a link planted at its temp name and leaves both alone', async () => {
+    const { root, work, parent } = await world();
+    await writeFile(`${parent}/outside.txt`, 'protected');
+    await writeFile(`${work}/file.json`, 'standing');
+    await writeFile(`${work}/.file.json.t1.tmp`, 'stranger');
+    await writeFile(`${work}/link.json`, 'standing');
+    // the temp names are numbered across calls: the first write takes t1, the second t2
+    await symlink(`${parent}/outside.txt`, `${work}/.link.json.t2.tmp`);
+
+    for (const name of ['file.json', 'link.json'])
+      expect(await refusalOf(async () => await root.writeText(at(root, name), 'mine'))).not.toBe('resolved');
+
+    expect(await readFile(`${work}/.file.json.t1.tmp`, 'utf8')).toBe('stranger');
+    expect(await readFile(`${parent}/outside.txt`, 'utf8')).toBe('protected');
+    expect((await lstat(`${work}/.link.json.t2.tmp`)).isSymbolicLink()).toBe(true);
+    expect(await readFile(`${work}/file.json`, 'utf8')).toBe('standing');
+    expect(await readFile(`${work}/link.json`, 'utf8')).toBe('standing');
+  });
+
   test('a replacing write never writes through a planted link: what it points at is untouched and never made', async () => {
     const { root, work, parent } = await world();
     await writeFile(`${parent}/outside.txt`, 'protected');
