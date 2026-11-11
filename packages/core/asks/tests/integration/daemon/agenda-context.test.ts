@@ -90,6 +90,38 @@ describe('R-0333 M3 the agenda knows who started whom, and which card a ferret w
     expect((await items(half))[0]?.task).toBeUndefined();
   });
 
+  describe('a to-do on a card in the to-test lane offers to close it, as far as Board can say so', () => {
+    const todo = () => add({ kind: 'task', ask: { kind: 'task' }, task: { id: 'F12' } });
+    const offered = async (providers: Record<string, unknown>) => {
+      const half = await world(providers);
+      const added = await half.call(BOARD, LEAD, todo(), as('lead'));
+      expect(added.status).toBe(200);
+      return (await items(half)).map(item => (item as { offerClose?: boolean }).offerClose);
+    };
+
+    it('offers when Board says the card is in the to-test lane', async () => {
+      expect(
+        await offered({
+          'agenda.context:ferrets': lineage,
+          'agenda.context:board': board({ inToTest: async () => true }),
+        }),
+      ).toEqual([true]);
+    });
+
+    it('does not offer when Board says it is elsewhere, cannot say, or is off', async () => {
+      expect(await offered({ 'agenda.context:ferrets': lineage, 'agenda.context:board': board() })).toEqual([
+        undefined,
+      ]);
+      expect(
+        await offered({
+          'agenda.context:ferrets': lineage,
+          'agenda.context:board': board({ inToTest: async () => Promise.reject(new Error('board unreadable')) }),
+        }),
+      ).toEqual([undefined]);
+      expect(await offered({ 'agenda.context:ferrets': lineage })).toEqual([undefined]);
+    });
+  });
+
   it('with Ferrets off, no ferret has a board and no add is accepted', async () => {
     const half = await world({ 'agenda.context:ferrets': 'unavailable' });
     const refused = await half.call(BOARD, LEAD, add(), as('lead'));

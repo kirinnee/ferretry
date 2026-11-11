@@ -1367,6 +1367,18 @@ describe('registry generator', () => {
     expect(check().exitCode).toBe(0);
   });
 
+  test('the slim serve entry is generated only for a repo that has the binary importing it, and that repo must have its plugin', async () => {
+    const slim = 'packages/cli/src/generated/slim.ts';
+    // A repo with no `fy mcp serve` binary has nothing that would import the entry: it generates none, and does not ask for `mcp`.
+    const bare = ws([KERNEL_PACKAGE, { id: 'alpha' }]);
+    expect(generateGlobal(await buildModel(bare.root)).has(slim)).toBe(false);
+    // A repo that HAS the binary and lacks the plugin fails loudly, so the real tree cannot lose `mcp` quietly.
+    const broken = ws([KERNEL_PACKAGE, { id: 'alpha' }]);
+    broken.write('packages/cli/bin/mcp-serve.ts', 'export {};\n');
+    const model = await buildModel(broken.root);
+    expect(() => generateGlobal(model)).toThrow('no manifest for "mcp"');
+  });
+
   test('registries-fresh planted: a hand-edited generated file', async () => {
     const f = ws([KERNEL_PACKAGE, ...graph('name')], { pending: ['alpha', 'beta', 'gamma'] });
     const model = await buildModel(f.root);
