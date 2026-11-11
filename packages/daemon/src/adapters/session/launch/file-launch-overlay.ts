@@ -35,6 +35,8 @@ export interface FileLaunchOverlayOptions {
   readonly root: string;
   readonly live: LiveLaunchCommands;
   readonly now?: () => number;
+  /** Who must own every directory: the daemon's own user unless a test says otherwise. */
+  readonly uid?: number;
 }
 
 /**
@@ -64,12 +66,14 @@ export class FileLaunchOverlayFiles implements LaunchOverlayFiles {
   readonly #root: string;
   readonly #live: LiveLaunchCommands;
   readonly #now: () => number;
+  readonly #uid: number | undefined;
 
   constructor(directory: string, options: FileLaunchOverlayOptions) {
     this.#directory = resolve(directory);
     this.#root = resolve(options.root);
     this.#live = options.live;
     this.#now = options.now ?? Date.now;
+    this.#uid = options.uid ?? process.getuid?.();
   }
 
   async place(file: LaunchOverlayFile, options: { readonly write: boolean }): Promise<string | undefined> {
@@ -106,7 +110,7 @@ export class FileLaunchOverlayFiles implements LaunchOverlayFiles {
         : inside
             .split(sep)
             .reduce<string[]>((paths, step) => [...paths, join(paths.at(-1) ?? this.#root, step)], [this.#root]);
-    const uid = process.getuid?.();
+    const uid = this.#uid;
     for (const directory of chain) {
       const found = await lstat(directory).catch(() => undefined);
       if (found === undefined || found.isSymbolicLink() || !found.isDirectory())

@@ -16,6 +16,7 @@ import should from 'should';
 import {
   FleetLaunchEnvironment,
   FolderSettingsOverrideError,
+  FolderSettingsUnreadableError,
   type FolderSettingsVariables,
   type LaunchAccountInventory,
   type LaunchSecretValues,
@@ -280,6 +281,29 @@ describe('FleetLaunchEnvironment — a folder that would blank the login', () =>
     should(refused).be.instanceOf(FolderSettingsOverrideError);
     should(refused?.message).containEql('.claude/settings.local.json');
     should(refused?.message).containEql('ANTHROPIC_AUTH_TOKEN');
+    should(refused?.message).not.containEql('fixture-value');
+    should(secrets.opened).equal(0);
+  });
+
+  it('should refuse the start, with the reason, when the folder’s settings cannot be looked for', async () => {
+    // Arrange: the adapter could not complete its walk to the repository root.
+    const secrets = store({ LOGE_KEY: 'fixture-value' });
+    const launcher = new FleetLaunchEnvironment(inventory(secretAccount), secrets, undefined, undefined, {
+      variables: async () => {
+        throw new FolderSettingsUnreadableError('looking for the repository failed at /work/.git (EACCES)');
+      },
+    });
+
+    // Act
+    const refused = await launcher.forWrapper(secretAccount.wrapper, '/work/pe').then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+
+    // Assert
+    should(refused).be.instanceOf(FolderSettingsUnreadableError);
+    should(refused?.name).equal('FolderSettingsUnreadableError');
+    should(refused?.message).containEql('EACCES');
     should(refused?.message).not.containEql('fixture-value');
     should(secrets.opened).equal(0);
   });

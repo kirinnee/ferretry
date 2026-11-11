@@ -239,6 +239,22 @@ describe('FolderClaudeSettingsFiles', () => {
     should(found).deepEqual([{ file: join(repository, '.claude/settings.local.json'), names: ['ANTHROPIC_BASE_URL'] }]);
   });
 
+  it('should refuse, saying why, when a folder’s own .git cannot be looked at', async () => {
+    // Arrange: a folder that can be resolved but not searched (skipped where the platform ignores modes).
+    if (process.getuid?.() === 0) return;
+    const base = await realpath(await tempDirectory('folder-claude-settings'));
+    const folder = join(base, 'closed');
+    await mkdir(folder);
+    await chmod(folder, 0o000);
+
+    // Act / Assert
+    try {
+      await should(new FolderClaudeSettingsFiles('/nowhere').variables(folder)).rejectedWith(/cannot be checked/u);
+    } finally {
+      await chmod(folder, 0o700);
+    }
+  });
+
   it('should refuse, saying why, when the walk to the repository root cannot complete', async () => {
     // Arrange: a folder whose parent cannot be searched (skipped where the platform ignores modes).
     if (process.getuid?.() === 0) return;

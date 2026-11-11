@@ -138,6 +138,30 @@ describe('FileLaunchOverlayFiles', () => {
     should(await readdir(home.directory)).eql([]);
   });
 
+  it('should refuse a directory another user owns', async () => {
+    // Arrange: the daemon believes it is a different user from the one that owns the directories.
+    const home = await homeOf();
+    const files = new FileLaunchOverlayFiles(home.directory, {
+      root: home.root,
+      live: nobody,
+      uid: (process.getuid?.() ?? 0) + 1,
+    });
+
+    // Act / Assert
+    await should(files.place({ name: NAME, content: 'x' }, { write: true })).rejectedWith(/owned by another user/u);
+    should(await readdir(home.directory)).eql([]);
+  });
+
+  it('should leave no temporary behind, and say so, when the file cannot be put in place', async () => {
+    // Arrange: a directory already sits at the final name, so the rename cannot replace it.
+    const home = await homeOf();
+    await mkdir(join(home.directory, NAME, 'inside'), { recursive: true, mode: 0o700 });
+
+    // Act / Assert
+    await should(filesOf(home).place({ name: NAME, content: 'x' }, { write: true })).rejected();
+    should(await readdir(home.directory)).eql([NAME]);
+  });
+
   it('should create nothing when only asked where a file would be', async () => {
     // Arrange
     const home = await homeOf();
