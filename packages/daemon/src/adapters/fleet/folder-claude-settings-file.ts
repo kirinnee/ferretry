@@ -85,13 +85,13 @@ async function repositoryRoots(folder: string): Promise<RepositoryRoots | undefi
       const main = await verifiedMainCheckout(directory, marker);
       if (main === undefined)
         throw new FolderSettingsUnreadableError(
-          `the folder ${directory} has a .git file that does not prove it is a linked worktree of the repository it names (the worktree's gitdir, its back-link and commondir disagree), so its Claude settings cannot be checked`,
+          `the folder ${directory} has a .git file that does not prove it is a linked worktree of the repository it names (the worktree's gitdir, its back-link and commondir disagree; a submodule's does too), so its Claude settings cannot be checked. Start the ferret in the main repository folder or in a worktree made by \`git worktree add\`, instead`,
         );
       return { root: directory, main };
     }
     if (found !== undefined)
       throw new FolderSettingsUnreadableError(
-        `the folder ${directory} has a .git that is neither a plain directory nor a plain file (a symlink, for one), so which repository it belongs to cannot be proved and its Claude settings cannot be checked`,
+        `the folder ${directory} has a .git that is neither a plain directory nor a plain file (a symlink, for one), so which repository it belongs to cannot be proved and its Claude settings cannot be checked. Start the ferret in the repository's real folder instead`,
       );
     const parent = dirname(directory);
     if (parent === directory) return undefined;
@@ -132,7 +132,7 @@ export class FolderClaudeSettingsFiles implements FolderSettingsVariables {
       // A folder that is not there now can be made before the pane starts, inside a repository whose settings then
       // apply, so it is refused like any folder that cannot be resolved.
       throw new FolderSettingsUnreadableError(
-        `the launch folder ${cwd} cannot be resolved (${(failure as NodeJS.ErrnoException).code ?? 'unknown error'}), so its Claude settings cannot be checked`,
+        `the launch folder ${cwd} cannot be resolved (${(failure as NodeJS.ErrnoException).code ?? 'unknown error'}), so its Claude settings cannot be checked. Start the ferret in a folder that exists and can be read`,
       );
     }
     const placed = (await repositoryRoots(folder))?.main;
