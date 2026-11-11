@@ -143,4 +143,31 @@ describe("the agenda's link to cards", () => {
     // Assert
     should(agendas.reads).deepEqual(owners);
   });
+
+  it('should look up the agenda homes in bounded batches too, never all at once', async () => {
+    // Arrange
+    const owners = Array.from({ length: AGENDA_READ_CONCURRENCY * 3 + 1 }, (_, index) => `ferret-${index}`);
+    let inFlight = 0;
+    let widest = 0;
+    const looked: string[] = [];
+    const homes = {
+      of: async (sessionId: string) => {
+        looked.push(sessionId);
+        inFlight += 1;
+        widest = Math.max(widest, inFlight);
+        await Promise.resolve();
+        inFlight -= 1;
+        return sessionId;
+      },
+    };
+
+    // Act
+    await new AgendaCardLinks(new FakeAgendas({}), () => MACHINE, { warn: () => undefined }, homes).asksFor(
+      owners.map((owner, index) => card({ id: `F${index + 1}`, owner })),
+    );
+
+    // Assert
+    should(looked).deepEqual(owners);
+    should(widest).equal(AGENDA_READ_CONCURRENCY);
+  });
 });

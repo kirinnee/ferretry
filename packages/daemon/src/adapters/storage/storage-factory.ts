@@ -11,7 +11,7 @@ import {
   type SessionIndexFactory,
   type YieldingSerialExecutor,
 } from '../../lib/index.ts';
-import { DaemonStorage, type DocumentChanges } from './session-storage.ts';
+import { DaemonStorage, type DocumentCacheBudget, type DocumentChanges } from './session-storage.ts';
 import type { LayoutInitialization, StateHomeLayout } from './state-home-layout.ts';
 
 export interface OpenedDaemonStorage {
@@ -40,6 +40,8 @@ export class DaemonStorageFactory {
     private readonly serial: () => YieldingSerialExecutor,
     /** Where the storage hears its documents change, so an unchanged one costs no `stat` per read. */
     private readonly changes?: DocumentChanges,
+    /** How much the storage's document cache may hold; the default unless a test needs a small one. */
+    private readonly cacheBudget?: DocumentCacheBudget,
   ) {}
 
   async open(): Promise<OpenedDaemonStorage> {
@@ -60,7 +62,16 @@ export class DaemonStorageFactory {
       await homeLock.release();
       throw error;
     }
-    const storage = new DaemonStorage(paths, fileSystem, index, this.clock, this.serial(), homeLock, this.changes);
+    const storage = new DaemonStorage(
+      paths,
+      fileSystem,
+      index,
+      this.clock,
+      this.serial(),
+      homeLock,
+      this.changes,
+      this.cacheBudget,
+    );
     try {
       // The archive first: every walk below (and every one after boot) must already know which sessions have left.
       await storage.loadArchive();

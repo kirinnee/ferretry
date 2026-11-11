@@ -178,9 +178,52 @@ function sameJournalFile(left: JournalFingerprint, right: JournalFingerprint): b
  * sessions, nearly all of them finished, read 135 MB/s of its own unchanged documents and stalled its loop
  * for seconds. So the bound follows the fleet the index holds, with a spare slot per session, and never
  * drops below the floor.
+ *
+ * ARCHIVED SESSIONS COUNT TOO. An archived session leaves the index but every reader can still name it — the
+ * board reads the config and state of every card's owner and assignee, closed cards included — so the bound
+ * follows every session a reader can name, live or archived. Counting only the live ones put a host with ~5,100
+ * archived sessions at the floor, and each board read walked ~8,500 documents through a 4,096-document FIFO:
+ * a miss for every one, a parse, a zod pass and a freeze, and the live fleet's documents evicted with them.
  */
 const DOCUMENT_CACHE_FLOOR = 4_096;
 const DOCUMENTS_PER_SESSION = 4;
+
+/**
+ * THE ENTRY BOUND IS NOT A BYTE BOUND, SO THE CACHE ALSO HAS A BYTE BUDGET.
+ *
+ * {@link DOCUMENTS_PER_SESSION} counts entries. With ~4,800 archived sessions it lets 19,200 + 4 × live entries in,
+ * and nothing limited how large one was, so the memory the cache could pin had no finite bound. Every document now
+ * costs an estimate of the memory it holds — {@link DOCUMENT_ENTRY_BYTES} for the entry, {@link TEXT_BYTES_PER_CHAR}
+ * a character for its text (UTF-16 at worst), and {@link VALUE_BYTES_PER_CHAR} a character of text more once its
+ * parsed, frozen value is held — and the oldest documents go once the total passes the budget. A document whose text
+ * is over the per-document cap is never cached at all: it is read and parsed on every use, as it was before there was
+ * a cache.
+ *
+ * THE NUMBERS. Measured on the host that froze: configs 14.4 MB of text for the 2,824 sessions a board walk reads
+ * (8.4 KB on average, 58 KB at most) and ~1 KB per state, so a board walk's working set is ~8,500 documents,
+ * ~17 MB of text, and about 17 MB × (2 + 3) + 8,500 × 512 B ≈ 90 MB by this estimate; the live fleet's documents
+ * add ~20 MB. The budget is 192 MiB (≈ 201 MB), twice that working set, so a board walk still hits the cache on
+ * its second pass and the freeze fix holds. The per-document cap is 1 Mi characters, 17 times the largest document
+ * seen. Both are the defaults of {@link DocumentCacheBudget}; a test passes a small one.
+ */
+export interface DocumentCacheBudget {
+  /** The most estimated memory the cached documents may hold together, in bytes. */
+  readonly bytes: number;
+  /** The longest text, in characters, a document may have and still be cached. */
+  readonly documentChars: number;
+}
+
+export const DEFAULT_DOCUMENT_CACHE_BUDGET: DocumentCacheBudget = {
+  bytes: 192 * 1_024 * 1_024,
+  documentChars: 1_024 * 1_024,
+};
+
+/** What an entry costs beside its text: the path key, the map slot, the record and its identity. */
+const DOCUMENT_ENTRY_BYTES = 512;
+/** A character of cached text, at worst: V8 holds a string with any wide character as UTF-16. */
+const TEXT_BYTES_PER_CHAR = 2;
+/** A character of text, again, for the parsed and frozen value built from it: objects, keys and slots outweigh it. */
+const VALUE_BYTES_PER_CHAR = 3;
 
 /**
  * How much of a full cache is let go at once: the oldest eighth.
@@ -309,6 +352,8 @@ export class DaemonStorage {
    * old `stat`, never to a missed change.
    */
   private documentLimit = DOCUMENT_CACHE_FLOOR;
+  /** The estimated memory the cached documents hold now: the sum of {@link costOfDocument} over {@link documents}. */
+  private cachedBytes = 0;
   /** The generation of the last watch opened: every watch of this storage has one of its own ({@link Hearing}). */
   private watchGeneration = 0;
   /** Live journal appends for sockets served by THIS opened daemon storage, never process-global. */
@@ -345,6 +390,8 @@ export class DaemonStorage {
     private readonly serial: YieldingSerialExecutor,
     private readonly homeLock: HomeLockLease,
     private readonly changes?: DocumentChanges,
+    /** How much the identity cache may hold: see {@link DocumentCacheBudget}. */
+    private readonly budget: DocumentCacheBudget = DEFAULT_DOCUMENT_CACHE_BUDGET,
   ) {}
 
   private assertOpen(): void {
@@ -1164,12 +1211,12 @@ export class DaemonStorage {
     if (cached !== undefined && (await identity.call(this.fileSystem, path)) === cached.identity) {
       if (heard === undefined || sameHearing(cached.heard, heard)) return cached;
       const proved: CachedDocument = { ...cached, heard };
-      this.documents.set(path, proved);
+      this.retainDocument(path, proved);
       return proved;
     }
     const read = await readTextIdentified.call(this.fileSystem, path);
     if (read === undefined) {
-      this.documents.delete(path);
+      this.releaseDocument(path);
       return undefined;
     }
     if (this.documents.size >= this.documentBound(this.documents.size)) this.evictOldestDocuments();
@@ -1178,8 +1225,38 @@ export class DaemonStorage {
       text: read.text,
       ...(heard === undefined ? {} : { heard }),
     };
-    this.documents.set(path, fresh);
+    this.retainDocument(path, fresh);
     return fresh;
+  }
+
+  /** The memory a cached document is estimated to hold: its entry, its text, and its value once it has one. */
+  private costOfDocument(document: CachedDocument): number {
+    const perChar = TEXT_BYTES_PER_CHAR + (document.value === undefined ? 0 : VALUE_BYTES_PER_CHAR);
+    return DOCUMENT_ENTRY_BYTES + perChar * document.text.length;
+  }
+
+  /**
+   * Caches `document` for `path` in place of what it held, as the newest entry, unless its text is over the
+   * per-document cap — then `path` holds nothing, and its watch goes with it. Lets the oldest go once the total
+   * passes the byte budget.
+   */
+  private retainDocument(path: string, document: CachedDocument): void {
+    this.releaseDocument(path);
+    if (document.text.length > this.budget.documentChars) {
+      this.dropWatch(path);
+      return;
+    }
+    this.documents.set(path, document);
+    this.cachedBytes += this.costOfDocument(document);
+    if (this.cachedBytes > this.budget.bytes) this.evictOldestDocuments();
+  }
+
+  /** Lets go of what is cached for `path` and takes its cost off the total. Its watch is the caller's to drop. */
+  private releaseDocument(path: string): void {
+    const held = this.documents.get(path);
+    if (held === undefined) return;
+    this.documents.delete(path);
+    this.cachedBytes -= this.costOfDocument(held);
   }
 
   /**
@@ -1197,13 +1274,22 @@ export class DaemonStorage {
    * leaves the bound below the cache, so it lets go of enough to get back under it, not just an eighth.
    */
   private evictOldestDocuments(): void {
-    let surplus = Math.max(
-      Math.ceil(this.documents.size / DOCUMENT_EVICTION_SHARE),
-      this.documents.size - this.documentLimit + 1,
-    );
+    let surplus =
+      this.documents.size >= this.documentLimit
+        ? Math.max(
+            Math.ceil(this.documents.size / DOCUMENT_EVICTION_SHARE),
+            this.documents.size - this.documentLimit + 1,
+          )
+        : 0;
+    // Over the byte budget it lets go of the oldest eighth of the budget, for the same reason as the count: room
+    // for the next documents without counting again on the next read.
+    const bytesWanted =
+      this.cachedBytes > this.budget.bytes
+        ? this.budget.bytes - Math.ceil(this.budget.bytes / DOCUMENT_EVICTION_SHARE)
+        : Infinity;
     for (const path of this.documents.keys()) {
-      if (surplus === 0) return;
-      this.documents.delete(path);
+      if (surplus <= 0 && this.cachedBytes <= bytesWanted) return;
+      this.releaseDocument(path);
       this.dropWatch(path);
       surplus -= 1;
     }
@@ -1223,7 +1309,7 @@ export class DaemonStorage {
     let surplus = this.watched.size - this.documentLimit + Math.ceil(this.documentLimit / DOCUMENT_EVICTION_SHARE);
     for (const path of this.watched.keys()) {
       if (surplus === 0) return;
-      this.documents.delete(path);
+      this.releaseDocument(path);
       this.dropWatch(path);
       surplus -= 1;
     }
@@ -1234,7 +1320,10 @@ export class DaemonStorage {
    * An archive pass shrinks the live set by hundreds at once; without this the bound stays at the old fleet's size.
    */
   private recountDocumentBound(): void {
-    this.documentLimit = Math.max(DOCUMENT_CACHE_FLOOR, DOCUMENTS_PER_SESSION * this.index.listSessions().length);
+    this.documentLimit = Math.max(
+      DOCUMENT_CACHE_FLOOR,
+      DOCUMENTS_PER_SESSION * (this.index.listSessions().length + this.archived.size),
+    );
     this.trimWatches();
   }
 
@@ -1292,7 +1381,7 @@ export class DaemonStorage {
 
   /** Forgets what the cache holds for `path`, and counts a change on its watch. */
   private forgetDocument(path: string): void {
-    this.documents.delete(path);
+    this.releaseDocument(path);
     const watched = this.watched.get(path);
     if (watched !== undefined) watched.changes += 1;
   }
@@ -1316,7 +1405,7 @@ export class DaemonStorage {
     const parsed = parseJsonDocument(document.text);
     if (!parsed.ok) throw new InvalidStateDocumentError(file, parsed.message);
     const value = deepFreezeJson(parsed.value);
-    if (document.identity !== '') this.documents.set(file, { ...document, value });
+    if (document.identity !== '') this.retainDocument(file, { ...document, value });
     return value;
   }
 
@@ -1789,7 +1878,13 @@ export class DaemonStorage {
     this.archived = parsed ?? new Map();
     // An archive that crashed between the registry write and the index removal leaves rows behind.
     for (const id of this.archived.keys()) if (this.index.findSession(id) !== undefined) this.index.removeSession(id);
+    this.recountDocumentBound();
     return this.archived.size;
+  }
+
+  /** The memory the identity cache is estimated to hold now, in bytes: never above its budget (a gauge, and a test's proof). */
+  cachedDocumentBytes(): number {
+    return this.cachedBytes;
   }
 
   /** How many sessions have left the live set. */
