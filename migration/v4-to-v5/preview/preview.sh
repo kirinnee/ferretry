@@ -48,6 +48,8 @@ set -euo pipefail
 #   proof     compare v4 now with the snapshot `prepare` took (kept in ~/.ferretry-v5-proof/, outside the preview home);
 #             run it after a start and a stop; names only
 #   clean     remove the preview home and its proof, only if `prepare` marked it. Refuses while the preview daemon answers.
+#             The programs `build` installed (<target>/libexec) are parked beside it (<target>.libexec) and the next
+#             `prepare` puts them back, so clean + prepare needs no new build.
 #
 # fy5 itself refuses `update` and `daemon stop|restart|update|install|uninstall|reset|which|logs`: on a box with v4's service unit they answer
 # for v4's unit and write claim files beside it. Use this script's `stop` instead.

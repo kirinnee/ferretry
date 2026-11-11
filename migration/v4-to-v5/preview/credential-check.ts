@@ -5,7 +5,7 @@
  * environment to the proof, through `fy5 __daemon-probe`, and reads NAMES only, never a value:
  *
  *  - no variable of the daemon's environment has a credential-shaped name (`*_TOKEN`, `AWS_*`, `GH_*`, ...);
- *  - HOME, GH_CONFIG_DIR and GIT_CONFIG_GLOBAL are the preview's own, and the folders are EMPTY, with mode 0700 / 0600;
+ *  - HOME, GH_CONFIG_DIR and GIT_CONFIG_GLOBAL are the preview's own, and the folders are EMPTY (the HOME but for its one empty .zshrc), with mode 0700 / 0600;
  *  - git reads no system config and never prompts; there is no SSH agent socket;
  *  - `ssh -G`, run in the environment a CHILD of the daemon gets (the kernel's PATH and HOME only), shows `identityfile none`:
  *    the wrapper's `ssh` shim is first on that PATH;
@@ -13,7 +13,7 @@
  *    `gh` that is `<home>/bin/gh` is the preview's own (the gh stub) and is accepted without being asked.
  */
 import { join } from 'node:path';
-import { NO_CREDS_ENV, noCredsValues } from './driver.ts';
+import { HOME_SHELL_RC, NO_CREDS_ENV, noCredsValues } from './driver.ts';
 import { PREVIEW } from './plan.ts';
 import type { Run, StartChecks } from './start-checks.ts';
 
@@ -125,13 +125,27 @@ export async function credentialCheck(input: CredentialCheckInput): Promise<Star
 
   // 2. What stands in the credentials' place is EMPTY and private.
   const base = join(target, PREVIEW.noCredsFolder);
-  const folders = [NO_CREDS_ENV.home, NO_CREDS_ENV.gh];
   const folderProblems: string[] = [];
-  for (const name of folders) {
-    const seen = await inspect(join(base, name));
-    if (seen === undefined || seen.kind !== 'dir' || seen.mode !== 0o700 || seen.entries !== 0)
-      folderProblems.push(`${name}/ is not an empty 0700 folder`);
-  }
+  // The HOME holds exactly one thing, the empty 0600 shell rc file the wrapper makes (so zsh's first-run menu does not
+  // swallow the keys typed into a terminal); the gh folder holds nothing. Anything else in either is a miss.
+  const home = await inspect(join(base, NO_CREDS_ENV.home));
+  const rc = await inspect(join(base, NO_CREDS_ENV.home, HOME_SHELL_RC));
+  if (
+    home === undefined ||
+    home.kind !== 'dir' ||
+    home.mode !== 0o700 ||
+    home.entries !== 1 ||
+    rc === undefined ||
+    rc.kind !== 'file' ||
+    rc.mode !== 0o600 ||
+    rc.size !== 0
+  )
+    folderProblems.push(
+      `${NO_CREDS_ENV.home}/ is not an empty 0700 folder but for its one empty 0600 ${HOME_SHELL_RC}`,
+    );
+  const gh = await inspect(join(base, NO_CREDS_ENV.gh));
+  if (gh === undefined || gh.kind !== 'dir' || gh.mode !== 0o700 || gh.entries !== 0)
+    folderProblems.push(`${NO_CREDS_ENV.gh}/ is not an empty 0700 folder`);
   const git = await inspect(join(base, NO_CREDS_ENV.gitConfig));
   if (git === undefined || git.kind !== 'file' || git.mode !== 0o600 || git.size !== 0)
     folderProblems.push(`${NO_CREDS_ENV.gitConfig} is not an empty 0600 file`);
