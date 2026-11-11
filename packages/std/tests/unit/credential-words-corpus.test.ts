@@ -413,6 +413,55 @@ describe('CFG-LEAK the one word cutter, over the corpus', () => {
     should(gap).be.above(0);
   }, 20_000);
 
+  // The corpus above holds token-tail words only, so it cannot pin the zone. This is the EXACT list, one tail word at a
+  // time (key, token, secret, password, passwd, credential, each singular and plural): a name that only ENDS in the
+  // tail word (glued, no word break before it) carrying a value W accepts. The measured gap over GAP_NAMES + the
+  // controls must EQUAL it: a zone that widens (a control refused-or-shown differently) or narrows (publish refusing
+  // one of these) both fail. Names that set the tail word apart (`--db-password`, `MY_SECRET`) are controls: the narrow
+  // tests name them, so publish refuses them and they are NOT in the zone.
+  const GAP_FLAGS = [
+    '--sort-key',
+    '--ssh-key',
+    '--mykeys',
+    '--mytoken',
+    '--mytokens',
+    '--apisecret',
+    '--apisecrets',
+    '--sort-secrets',
+    '--dbpassword',
+    '--dbpasswords',
+    '--dbpasswd',
+    '--clientcredential',
+    '--clientcredentials',
+  ];
+  const GAP_ENVS = ['PRIMARY_KEY', 'API_TOKENS', 'APISECRET', 'DBPASSWORD', 'DBPASSWD', 'CLIENTCREDENTIALS'];
+  const CONTROL_FLAGS = ['--db-password', '--my-passwd', '--client-secret', '--api-token', '--client-credentials'];
+  const CONTROL_ENVS = ['MY_SECRET', 'DB_PASSWORD', 'DB_PASSWD', 'CLIENT_CREDENTIALS', 'MY_TOKEN'];
+  const GAP_VALUES = ['modified_time', 'hunter2024', 'created_at_id', 'short-0001', '/run/secret/file'];
+
+  it('CFG-LEAK-R the name-tail zone is EXACTLY these cases: every tail word, widened and narrowed both go red', () => {
+    const cases = (
+      flags: readonly string[],
+      envs: readonly string[],
+    ): readonly (readonly [string | undefined, string])[] => [
+      ...flags.flatMap(flag => GAP_VALUES.map(value => [flag, value] as const)),
+      ...envs.flatMap(env => GAP_VALUES.map(value => [undefined, `${env}=${value}`] as const)),
+    ];
+    const measured = cases(GAP_FLAGS.concat(CONTROL_FLAGS), GAP_ENVS.concat(CONTROL_ENVS))
+      .filter(
+        ([before, word]) => shownWordWith(SHOWN_TESTS, word, before).hidden && firstRefusedWord([word], before) === -1,
+      )
+      .map(([before, word]) => `${before ?? ''} ${word}`.trim());
+    const expected = cases(GAP_FLAGS, GAP_ENVS).map(([before, word]) => `${before ?? ''} ${word}`.trim());
+    should(measured).eql(expected);
+    // Every case, gap or control, is withheld by the display; only the controls are refused at publish too.
+    for (const [before, word] of cases(GAP_FLAGS.concat(CONTROL_FLAGS), GAP_ENVS.concat(CONTROL_ENVS)))
+      should([before, word, shownWordWith(SHOWN_TESTS, word, before).hidden]).eql([before, word, true]);
+    for (const [before, word] of cases(CONTROL_FLAGS, CONTROL_ENVS))
+      should([before, word, firstRefusedWord([word], before) !== -1]).eql([before, word, true]);
+    should(expected.length).equal((GAP_FLAGS.length + GAP_ENVS.length) * GAP_VALUES.length);
+  }, 20_000);
+
   it('S6 CFG-LEAK-W the ruled controls stay shown: a pointer, then a key of its own and no raw text, is no glue', () => {
     for (const mark of [',', ';', '&'])
       for (const words of [['--key', `${POINTER}${mark}b=2`], [`--set=a=1,API_KEY=${POINTER}${mark}b=2`]]) {
