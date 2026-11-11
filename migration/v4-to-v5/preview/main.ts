@@ -8,7 +8,7 @@
  * marked preview home. `stop` SIGTERMs the process that holds the preview home's daemon lock. Nothing here starts a
  * daemon, a service or a terminal.
  */
-import { chmod, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -18,7 +18,8 @@ import { cleanPreview, dryRun, PREVIEW_PROGRAMS, prepare, proofNow, shimText, wr
 import { guardTarget } from './paths.ts';
 import { PREVIEW } from './plan.ts';
 import { realRun } from './real-run.ts';
-import { credentialCheck, readDaemonEnviron, type Inspected } from './credential-check.ts';
+import { credentialCheck, readDaemonEnviron } from './credential-check.ts';
+import { inspectPath } from './inspect-path.ts';
 import { startChecks, terminalCheck } from './start-checks.ts';
 import { lockFileOf, pidsHolding, stopPreview } from './stop.ts';
 import { previewBooting, waitServing } from './wait-serving.ts';
@@ -174,16 +175,7 @@ async function main(argv: readonly string[]): Promise<number> {
             holders: pidsHolding,
             environOf: pid => readFile(`/proc/${String(pid)}/environ`, 'utf8').catch(() => undefined),
           }),
-        inspect: async (path): Promise<Inspected | undefined> => {
-          const seen = await stat(path).catch(() => undefined);
-          if (seen === undefined) return undefined;
-          return {
-            kind: seen.isDirectory() ? 'dir' : seen.isFile() ? 'file' : 'other',
-            mode: seen.mode & 0o777,
-            size: seen.size,
-            entries: seen.isDirectory() ? (await readdir(path)).length : 0,
-          };
-        },
+        inspect: inspectPath,
       });
       for (const line of done.passed) console.log(`ok: ${line}`);
       for (const line of done.problems) console.error(line);

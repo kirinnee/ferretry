@@ -7,6 +7,12 @@
  * whatever PATH a shell started with. Their guard variable is `__ETC_PROFILE_NIX_SOURCED`: with it set they do nothing.
  */
 
+/** The preview home's folder (relative to it) that holds what stands where the owner's host credentials would be. */
+export const NO_HOST_CREDS_FOLDER = 'no-host-creds';
+
+/** The folder inside it (a preview-owned 0700 one) that is the terminals' ZDOTDIR: the empty `.zshrc` and the shells' state. */
+export const ZDOT_FOLDER = 'zdot';
+
 /** Variables that stop this box's login and interactive shells re-prepending the nix profile. */
 export const SHELL_GUARD_ENV: Readonly<Record<string, string>> = Object.freeze({
   __ETC_PROFILE_NIX_SOURCED: '1',
@@ -37,8 +43,13 @@ export const CODEX_HELD_SENTENCE =
  * guard is what keeps a login shell from putting it behind v4's.
  */
 export function previewShellEnv(home: string, port: number): Readonly<Record<string, string>> {
+  const zdot = `${home}/${NO_HOST_CREDS_FOLDER}/${ZDOT_FOLDER}`;
   return Object.freeze({
     ...SHELL_GUARD_ENV,
+    // Where the shells a terminal runs keep their own files, so the daemon HOME stays EMPTY: zsh reads its (empty) rc and
+    // writes its completion dump and history there, and bash writes its history there.
+    ZDOTDIR: zdot,
+    HISTFILE: `${zdot}/.bash_history`,
     FY_HOME: home,
     FY_PORT: String(port),
     FY_URL: `http://127.0.0.1:${port}`,

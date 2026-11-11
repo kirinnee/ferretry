@@ -8,7 +8,8 @@ import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, wri
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { credentialCheck, credentialNames, readDaemonEnviron, type Inspected } from '../../preview/credential-check.ts';
-import { noCredsValues, shimText, wrapperText } from '../../preview/driver.ts';
+import { HOME_SHELL_RC, noCredsValues, shimText, wrapperText } from '../../preview/driver.ts';
+import { inspectPath } from '../../preview/inspect-path.ts';
 import { PREVIEW } from '../../preview/plan.ts';
 import type { Run } from '../../preview/start-checks.ts';
 import { stopPreview } from '../../preview/stop.ts';
@@ -175,8 +176,12 @@ describe('NHC-1 the daemon environment holds no host credential', () => {
     const base = join(home, PREVIEW.noCredsFolder);
     for (const folder of ['home', 'gh']) {
       expect((await stat(join(base, folder))).mode & 0o777).toBe(0o700);
+      // The HOME and the gh folder hold nothing; the terminals' ZDOTDIR folder holds the one empty shell rc.
       expect(await readdir(join(base, folder))).toEqual([]);
     }
+    expect((await stat(join(base, 'zdot'))).mode & 0o777).toBe(0o700);
+    expect(await readdir(join(base, 'zdot'))).toEqual([HOME_SHELL_RC]);
+    expect((await stat(join(base, 'zdot', HOME_SHELL_RC))).size).toBe(0);
     const git = await stat(join(base, 'gitconfig'));
     expect(git.isFile()).toBe(true);
     expect(git.size).toBe(0);
@@ -229,7 +234,12 @@ describe('NHC-2 stop removes the stand-ins', () => {
     };
     expect((await stopPreview('/h/p', ports)).stopped).toBe(true);
     expect((await stopPreview('/h/p', ports)).stopped).toBe(true);
-    const standIns = ['/h/p/no-host-creds/home', '/h/p/no-host-creds/gh', '/h/p/no-host-creds/gitconfig'];
+    const standIns = [
+      '/h/p/no-host-creds/home',
+      '/h/p/no-host-creds/gh',
+      '/h/p/no-host-creds/gitconfig',
+      '/h/p/no-host-creds/zdot',
+    ];
     expect(removed).toEqual([...standIns, ...standIns]);
     // A holder that stays is not "stopped": nothing is removed from under it.
     removed.length = 0;
@@ -246,18 +256,7 @@ const realWorld = (home: string, inspectOverride?: (path: string) => Promise<Ins
     return { code: done.exitCode ?? undefined, stdout: done.stdout.toString() };
   }) satisfies Run,
   childEnvironment: kernelChild,
-  inspect:
-    inspectOverride ??
-    (async (path: string): Promise<Inspected | undefined> => {
-      const seen = await stat(path).catch(() => undefined);
-      if (seen === undefined) return undefined;
-      return {
-        kind: seen.isDirectory() ? 'dir' : seen.isFile() ? 'file' : 'other',
-        mode: seen.mode & 0o777,
-        size: seen.size,
-        entries: seen.isDirectory() ? (await readdir(path)).length : 0,
-      };
-    }),
+  inspect: inspectOverride ?? inspectPath,
   target: home,
 });
 
@@ -348,6 +347,23 @@ describe('NHC-3 the start check proves the daemon reaches no credential, and ref
     const real = realWorld(home).inspect;
     const cases: Record<string, (path: string) => Promise<Inspected | undefined>> = {
       'home/ is not an empty 0700 folder': async path => (path === join(base, 'home') ? undefined : real(path)),
+      'home/ is not an empty 0700 folder (an entry)': async path =>
+        path === join(base, 'home') ? { kind: 'dir', mode: 0o700, size: 0, entries: 1 } : real(path),
+      'zdot/ is not a 0700 folder': async path => (path === join(base, 'zdot') ? undefined : real(path)),
+      'zdot/ is not a 0700 folder (mode)': async path =>
+        path === join(base, 'zdot')
+          ? { kind: 'dir', mode: 0o755, size: 0, entries: 1, names: [HOME_SHELL_RC] }
+          : real(path),
+      'zdot/ is not a 0700 folder (a link)': async path =>
+        path === join(base, 'zdot') ? { kind: 'other', mode: 0o777, size: 9, entries: 0 } : real(path),
+      'zdot/ is not a 0700 folder (rc missing)': async path =>
+        path === join(base, 'zdot', HOME_SHELL_RC) ? undefined : real(path),
+      'zdot/ is not a 0700 folder (rc has content)': async path =>
+        path === join(base, 'zdot', HOME_SHELL_RC) ? { kind: 'file', mode: 0o600, size: 9, entries: 0 } : real(path),
+      'zdot/ is not a 0700 folder (rc mode)': async path =>
+        path === join(base, 'zdot', HOME_SHELL_RC) ? { kind: 'file', mode: 0o644, size: 0, entries: 0 } : real(path),
+      'zdot/ is not a 0700 folder (rc is a link)': async path =>
+        path === join(base, 'zdot', HOME_SHELL_RC) ? { kind: 'other', mode: 0o777, size: 9, entries: 0 } : real(path),
       'gh/ is not an empty 0700 folder': async path =>
         path === join(base, 'gh') ? { kind: 'dir', mode: 0o700, size: 0, entries: 1 } : real(path),
       'gh/ is not an empty 0700 folder (mode)': async path =>
@@ -367,6 +383,14 @@ describe('NHC-3 the start check proves the daemon reaches no credential, and ref
       const done = await credentialCheck({ ...realWorld(home, inspect), callerEnv: hostile });
       expect(done.ok).toBe(false);
       expect(done.problems.join('\n')).toContain(sentence.replace(/ \(.*\)$/u, ''));
+      // A home prepared before zdot/ existed needs the OWNER's clean + prepare; every other miss is cured by stop + start.
+      if (sentence === 'zdot/ is not a 0700 folder') {
+        expect(done.problems.join('\n')).toContain('prepared by an older preview.sh');
+        expect(done.problems.join('\n')).toContain('preview.sh prepare --owner; stop and start alone will not fix it');
+      } else {
+        expect(done.problems.join('\n')).toContain('Run preview.sh stop, then start again.');
+        expect(done.problems.join('\n')).not.toContain('older preview.sh');
+      }
     }
   });
 

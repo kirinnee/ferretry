@@ -3,7 +3,7 @@
  * home from a v4 home and proves v4 was left alone. Neither starts a daemon. Every path is a parameter so a test
  * runs both in temp folders.
  */
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { convert } from '../src/convert.ts';
@@ -11,7 +11,7 @@ import { previewAuthoredFiles, previewHeldFiles, v4HeldFiles } from '../src/step
 import type { LockProbe } from '../src/preflight.ts';
 import { type ConversionReport, summarise } from '../src/report.ts';
 import { PREVIEW_WORKSPACE } from '../src/v5/harness-paths.ts';
-import { CODEX_HELD_SENTENCE, previewShellEnv } from '../src/v5/preview-env.ts';
+import { CODEX_HELD_SENTENCE, previewShellEnv, ZDOT_FOLDER } from '../src/v5/preview-env.ts';
 import { type Spellings } from '../src/v4/homes.ts';
 import { gateFiles, gateForecast } from './gate.ts';
 import { readLoginHarnesses } from './harness-map.ts';
@@ -37,6 +37,15 @@ export const stagingFor = (target: string) => `${target}.staging`;
 
 /** The conversion report, beside the preview home (a v5 home holds only declared files). */
 export const reportPathFor = (target: string) => `${target}.conversion-report.json`;
+
+/**
+ * Where `clean` parks the programs `build` installed (`<home>/libexec`) so the next `prepare` can put them back: the
+ * converter only writes a NEW, empty home, so they cannot stay in it. Beside the preview home, like the report.
+ */
+export const libexecParkFor = (target: string) => `${target}.libexec`;
+
+const isRealFolder = async (path: string): Promise<boolean> =>
+  (await lstat(path).catch(() => undefined))?.isDirectory() === true;
 
 /**
  * What the preview held out because it is a Codex (or not provably Claude Code) runtime: each entry by NAME with its
@@ -271,6 +280,9 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
   // outside every v4 path.
   await writeProof(home, target, v4Home, before);
   await writeFile(join(target, PREVIEW_MARKER), PREVIEW_MARKER_TEXT, { mode: 0o600 });
+  // The programs a `build` installed before the last `clean` come back: a new home does not mean a new build.
+  const parked = libexecParkFor(target);
+  if (await isRealFolder(parked)) await rename(parked, join(target, 'libexec'));
   // The report sits BESIDE the preview home (as `src/main.ts` writes it), never inside it: names and counts only.
   const reportPath = reportPathFor(target);
   await writeReport(reportPath, `${JSON.stringify(result.report, null, 2)}\n`);
@@ -305,11 +317,19 @@ export async function cleanPreview(v4Home: string, target: string, home: string 
     throw new Error(
       `${guarded.target} has no ${PREVIEW_MARKER} marker, so it is not a preview home; nothing was removed. If a prepare died before its marker, remove it yourself: rm -rf '${guarded.target}' '${guarded.staging}' '${reportPathFor(guarded.target)}' (and, if it exists, the proof file ${proofPathFor(home, guarded.target)})`,
     );
+  // The built programs are not state: they are parked beside the home (replacing an older park) for the next prepare.
+  const parked = libexecParkFor(guarded.target);
+  const built = join(guarded.target, 'libexec');
+  const keep = await isRealFolder(built);
+  if (keep) {
+    await rm(parked, { recursive: true, force: true });
+    await rename(built, parked);
+  }
   await rm(guarded.target, { recursive: true, force: true });
   await rm(guarded.staging, { recursive: true, force: true });
   await rm(reportPathFor(guarded.target), { force: true });
   await removeProof(home, guarded.target);
-  return `removed ${guarded.target}, its staging copy, its conversion report and its proof`;
+  return `removed ${guarded.target}, its staging copy, its conversion report and its proof${keep ? `; its built programs were kept at ${parked} and prepare puts them back` : ''}`;
 }
 
 /**
@@ -339,7 +359,26 @@ export const NO_CREDS_ENV = {
   home: 'home',
   gh: 'gh',
   gitConfig: 'gitconfig',
+  zdot: ZDOT_FOLDER,
 } as const;
+
+/**
+ * The ONE file of the terminals' ZDOTDIR folder (`zdot/`, 0700, beside the HOME): an empty `.zshrc`. Without any zsh
+ * startup file, an interactive zsh runs its first-run menu (zsh-newuser-install) and swallows the first keys typed into
+ * the pane, so a terminal the daemon opens never ran the command typed into it. The file is empty, so it reads nothing and
+ * holds nothing. It lives in `zdot/`, not in the HOME, so the HOME stays EMPTY: the shells' own files (`.zcompdump*`,
+ * `.zsh_history`, `.zsh_sessions`, `.bash_history`) land in `zdot/` too, and the credential check tolerates exactly those
+ * names there, by name only. The wrapper makes the rc only in a daemon START, after it removed the folder.
+ */
+export const HOME_SHELL_RC = '.zshrc';
+
+/** The names a terminal's shell writes into `zdot/` by itself, after the proof; the credential check tolerates them (names only). */
+export const SHELL_STATE_NAMES: readonly RegExp[] = [
+  /^\.zcompdump(-.*)?$/u,
+  /^\.zsh_history$/u,
+  /^\.zsh_sessions$/u,
+  /^\.bash_history$/u,
+];
 
 /** What the `ssh` shim adds to every call: no config file, no key, no agent, no prompt (plus its own known_hosts file). */
 export const SSH_SHIM_OPTIONS =
@@ -504,8 +543,13 @@ export function wrapperText(home: string, v4Home: string): string {
     '}',
     '(umask 077; mkdir -p "$nocreds")',
     'private_dir "$nocreds"',
-    `if [ "$daemon" = 1 ] && [ "$probe" = 0 ]; then rm -rf "$nocreds/${NO_CREDS_ENV.home}" "$nocreds/${NO_CREDS_ENV.gh}" "$nocreds/${NO_CREDS_ENV.gitConfig}"; fi`,
+    `if [ "$daemon" = 1 ] && [ "$probe" = 0 ]; then rm -rf "$nocreds/${NO_CREDS_ENV.home}" "$nocreds/${NO_CREDS_ENV.gh}" "$nocreds/${NO_CREDS_ENV.gitConfig}" "$nocreds/${NO_CREDS_ENV.zdot}"; fi`,
     `(umask 077; mkdir -p "$nocreds/${NO_CREDS_ENV.home}" "$nocreds/${NO_CREDS_ENV.gh}"; : >"$nocreds/${NO_CREDS_ENV.gitConfig}")`,
+    "# The empty .zshrc is the one file of the terminals' ZDOTDIR folder (zdot/, beside the HOME, which stays EMPTY): with no zsh",
+    '# startup file, an interactive zsh runs its first-run menu and swallows the first keys typed into a terminal the daemon',
+    '# opened. It is made ONLY in a daemon start, right after the folder was removed above (a probe or any other verb never',
+    '# writes it, so a link planted since cannot be followed), and with noclobber so a link that appears in between is refused.',
+    `if [ "$daemon" = 1 ] && [ "$probe" = 0 ]; then (umask 077; set -C; mkdir "$nocreds/${NO_CREDS_ENV.zdot}"; : >"$nocreds/${NO_CREDS_ENV.zdot}/${HOME_SHELL_RC}"); fi`,
     "# The `ssh` shim: the first `ssh` on a child's PATH. It runs the real one (found above, by absolute path) with no config",
     '# file, no key, no agent and no prompt, and its own known_hosts. A caller that names /usr/bin/ssh is not covered.',
     '# Only a daemon START writes it (a probe or another verb never does), so the start check sees what the daemon has. It is',

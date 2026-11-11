@@ -53,7 +53,7 @@ const previewCtx = (f: Awaited<ReturnType<typeof fixture>>) => ({
 });
 
 describe('MAJOR-1 prepare writes the terminal environment', () => {
-  test('config/terminals.yaml carries the four preview entries and parses with the Terminals schema', async () => {
+  test('config/terminals.yaml carries the six preview entries and parses with the Terminals schema', async () => {
     const f = await fixture();
     try {
       await write(f.from, 'layout-version', '2\n');
@@ -68,7 +68,14 @@ describe('MAJOR-1 prepare writes the terminal environment', () => {
       const text = await readFile(join(f.to, 'config/terminals.yaml'), 'utf8');
       const parsed = TerminalsConfigSchema.parse(parseYaml(text));
       const env = previewShellEnv(f.to, PREVIEW.port);
-      expect(Object.keys(env).sort()).toEqual(['FY_HOME', 'FY_PORT', 'FY_URL', '__ETC_PROFILE_NIX_SOURCED']);
+      expect(Object.keys(env).sort()).toEqual([
+        'FY_HOME',
+        'FY_PORT',
+        'FY_URL',
+        'HISTFILE',
+        'ZDOTDIR',
+        '__ETC_PROFILE_NIX_SOURCED',
+      ]);
       expect(parsed.environment).toEqual(env);
     } finally {
       await rm(f.root, { recursive: true, force: true });
