@@ -203,9 +203,10 @@ describe('commands parity', () => {
   });
 
   describe('reads', () => {
-    test('V-0366 fy ps lists GET /v1/ferrets, -a adds stopped ones, --json prints data; -l is refused with the word that replaced it', async () => {
+    test('V-0366 fy ps lists GET /v1/ferrets, -a adds stopped ones, --json prints data, -l/--label keeps only that exact label', async () => {
       const stopped = sessionView({ id: 'old', name: 'oak', state: 'stopped' });
-      const answers = { [FERRET_ROUTES.list]: [lead, stopped] };
+      const mine = sessionView({ id: 'mine', name: 'birch', label: 'mine' as never });
+      const answers = { [FERRET_ROUTES.list]: [lead, stopped, mine] };
       const plain = run({ answers });
       expect(await plain.verb('ps')).toBe(0);
       expect(plain.calls).toEqual([{ route: 'GET /v1/ferrets' }]);
@@ -221,10 +222,17 @@ describe('commands parity', () => {
       expect(JSON.parse(json.out.join('\n'))).toBeArray();
       for (const flag of ['l', 'label']) {
         const labelled = run({ answers });
-        expect(await labelled.verb('ps', [], { [flag]: 'mine' })).toBe(2);
-        expect(labelled.err.join('\n')).toContain('--pack');
-        expect(labelled.calls).toEqual([]);
+        expect(await labelled.verb('ps', [], { [flag]: 'mine' })).toBe(0);
+        expect(labelled.calls).toEqual([{ route: 'GET /v1/ferrets' }]);
+        expect(labelled.out.join('\n')).toContain('birch');
+        expect(labelled.out.join('\n')).not.toContain('wren');
       }
+      const none = run({ answers });
+      expect(await none.verb('ps', [], { label: 'nope' })).toBe(0);
+      expect(none.out).toEqual(['no ferrets with label "nope"']);
+      const filtered = run({ answers });
+      expect(await filtered.verb('ps', [], { l: 'mine', json: true })).toBe(0);
+      expect((JSON.parse(filtered.out.join('\n')) as { id: string }[]).map(row => row.id)).toEqual(['mine']);
     });
 
     test('V-0445 fy status [id] reads one ferret, --json prints it, --subtree reads the lineage table; no id is a usage error', async () => {
@@ -797,6 +805,38 @@ describe('commands parity', () => {
       for (const mode of ['orphan', 'cascade', 'children', 'label'])
         expect(bare.out.join('\n')).toContain(`fy stop ${mode}`);
       expect(bare.calls).toEqual([]);
+    });
+
+    test('V-0447 fy stop -r before the mode carries the reason to every stop; a -r after the mode wins; a switch that swallows the mode is a usage error', async () => {
+      const before = run({ answers });
+      expect(await before.verb('stop', ['cascade', 'wren'], { r: 'why', yes: true })).toBe(0);
+      expect(stops(before.calls)).toHaveLength(2);
+      for (const call of stops(before.calls)) expect(call.init).toMatchObject({ body: { reason: 'why' } });
+
+      const longSpelling = run({ answers });
+      expect(await longSpelling.verb('stop', ['label', 'batch'], { reason: 'sweep', yes: true })).toBe(0);
+      expect(longSpelling.calls.some(call => call.route === FERRET_ROUTES.list)).toBe(true);
+
+      const after = run({ answers });
+      expect(await after.verb('stop', ['cascade', 'wren'], { r: ['why', 'own'], yes: true })).toBe(0);
+      for (const call of stops(after.calls)) expect(call.init).toMatchObject({ body: { reason: 'own' } });
+
+      const swallowed = run({ answers });
+      expect(await swallowed.verb('stop', ['x'], { n: 'cascade', yes: true })).toBe(2);
+      expect(swallowed.out.join('\n')).toContain('fy stop cascade');
+      const lone = run({ answers });
+      expect(await lone.verb('stop', ['cascade'], { r: 'why' })).toBe(2);
+      const unknown = run({ answers });
+      expect(await unknown.verb('stop', ['toString', 'wren'])).toBe(2);
+      expect(swallowed.calls).toEqual([]);
+      expect(lone.calls).toEqual([]);
+      expect(unknown.calls).toEqual([]);
+    });
+
+    test('V-0447 fy stop label with no label says it is missing the label', async () => {
+      const bare = run({ answers });
+      expect(await bare.verb('stop label <label>')).toBe(2);
+      expect(bare.err.join('\n')).toContain('missing the label');
     });
 
     test('V-0447 fy stop keeps the issuing ferret (FY_SESSION_ID) out of the plan unless --include-caller, and says so', async () => {

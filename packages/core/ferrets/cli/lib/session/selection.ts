@@ -6,6 +6,8 @@ export interface SessionFilter {
   readonly all?: boolean;
   /** Only ferrets in this pack. */
   readonly pack?: string;
+  /** Only ferrets started under this exact ownership label (`start --label`); not trimmed, as in v4. */
+  readonly label?: string;
 }
 
 export interface SessionSelection<View extends FerretSummary = FerretSummary> {
@@ -22,9 +24,12 @@ export function selectSessions<View extends FerretSummary>(
   views: readonly View[],
   filter: SessionFilter = {},
 ): SessionSelection<View> {
-  const packed = filter.pack === undefined ? views : views.filter(view => view.pack === filter.pack);
+  const labelled = filter.label === undefined ? views : views.filter(view => view.label === filter.label);
+  const packed = filter.pack === undefined ? labelled : labelled.filter(view => view.pack === filter.pack);
   const sessions = filter.all === true ? packed : packed.filter(view => !TERMINAL_STATUSES.includes(view.state));
   if (sessions.length > 0) return { sessions };
+  if (filter.label !== undefined && labelled.length === 0)
+    return { sessions, emptyMessage: `no ferrets with label "${filter.label}"` };
   if (filter.pack !== undefined && packed.length === 0)
     return { sessions, emptyMessage: `no ferrets in pack "${filter.pack}"` };
   if (packed.length > 0) return { sessions, emptyMessage: 'no running ferrets (use -a to show stopped ones)' };
