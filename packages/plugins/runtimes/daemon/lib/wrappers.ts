@@ -112,9 +112,23 @@ const sourceSecretsLines = (secretsFile: string | undefined): readonly string[] 
   return [`if [ -r ${quoted} ]; then`, `  . ${quoted}`, 'fi', ''];
 };
 
+/**
+ * A guard that refuses to go on while `name` is unset or empty, printing `message` on stderr.
+ *
+ * It is an `if`, not `${NAME:?message}`, on purpose: the word of a `:?` expansion is still scanned by
+ * the shell — bash looks for a closing quote through an apostrophe inside it even within double quotes,
+ * so one `'` made the WHOLE launcher unparseable (B192) — and a caller-supplied path in it could close
+ * the expansion or substitute. Here the message is a single-quoted literal ({@link shellQuote}), which
+ * nothing in it can end. `name` is the one piece of text outside that quoting: it is always a POSIX
+ * variable name, because the environment's keys are validated by `EnvSchema` (`../config.ts`) and a
+ * reference is matched by {@link ENV_REFERENCE} before it reaches a guard.
+ */
+const requireLine = (name: string, message: string): string =>
+  `if [ -z "\${${name}:-}" ]; then printf '%s\\n' ${shellQuote(message)} >&2; exit 1; fi`;
+
 const guardLine = (name: string, secretsFile: string | undefined): string => {
   const origin = secretsFile === undefined ? 'the environment' : secretsFile;
-  return `: "\${${name}:?ferretry: ${name} is not set — expected it from ${origin}}"`;
+  return requireLine(name, `ferretry: ${name} is not set — expected it from ${origin}`);
 };
 
 /**
@@ -132,7 +146,10 @@ const guardLine = (name: string, secretsFile: string | undefined): string => {
  */
 const secretGuardLine = (name: string, secrets: readonly SecretName[]): string => {
   const which = `${secrets.length === 1 ? 'secret' : 'secrets'} ${secrets.join(', ')}`;
-  return `: "\${${name}:?ferretry: ${name} is not set — this account takes it from Ferretry's secret store (${which}). Launch it through the daemon, or run: fy secret set ${secrets[0] ?? name}}"`;
+  return requireLine(
+    name,
+    `ferretry: ${name} is not set — this account takes it from Ferretry's secret store (${which}). Launch it through the daemon, or run: fy secret set ${secrets[0] ?? name}`,
+  );
 };
 
 /** Set to `0` in the environment to launch without seeding the harness's first-run state. */

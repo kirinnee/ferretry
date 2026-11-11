@@ -231,9 +231,9 @@ describe('renderRuntimeWrapperScript', () => {
 
     // Assert
     should(actual).containEql(
-      `: "\${${TOKEN_NAME}:?ferretry: ${TOKEN_NAME} is not set — expected it from ~/.config/fy/provider-env}"`,
+      `if [ -z "\${${TOKEN_NAME}:-}" ]; then printf '%s\\n' 'ferretry: ${TOKEN_NAME} is not set — expected it from ~/.config/fy/provider-env' >&2; exit 1; fi`,
     );
-    should(actual.match(/:\?ferretry:/g)?.length).equal(1);
+    should(actual.match(/is not set — expected it from/g)?.length).equal(1);
   });
 
   it('should quote a literal environment value so no part of it can be interpreted', () => {
@@ -261,7 +261,7 @@ describe('renderRuntimeWrapperScript', () => {
 
     // Assert
     should(actual.indexOf('. "$HOME/.secrets"')).be.below(actual.indexOf('export TOKEN='));
-    should(actual.indexOf(':?ferretry:')).be.below(actual.indexOf('export TOKEN='));
+    should(actual.indexOf('is not set — expected it from')).be.below(actual.indexOf('export TOKEN='));
   });
 
   it('should quote every flag and keep the argument passthrough last', () => {
@@ -458,7 +458,7 @@ describe('an account whose profile takes a variable from the secret store', () =
 
     // Assert
     should(actual).containEql(
-      `: "\${ANTHROPIC_API_KEY:?ferretry: ANTHROPIC_API_KEY is not set — this account takes it from Ferretry's secret store (secret WORK_KEY). Launch it through the daemon, or run: fy secret set WORK_KEY}"`,
+      `if [ -z "\${ANTHROPIC_API_KEY:-}" ]; then printf '%s\\n' 'ferretry: ANTHROPIC_API_KEY is not set — this account takes it from Ferretry'\\''s secret store (secret WORK_KEY). Launch it through the daemon, or run: fy secret set WORK_KEY' >&2; exit 1; fi`,
     );
   });
 
@@ -476,7 +476,7 @@ describe('an account whose profile takes a variable from the secret store', () =
     const actual = render(account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } }));
 
     // Assert
-    should(actual.indexOf('${ANTHROPIC_API_KEY:?')).be.lessThan(actual.indexOf('export CLAUDE_CONFIG_DIR'));
+    should(actual.indexOf('${ANTHROPIC_API_KEY:-}')).be.lessThan(actual.indexOf('export CLAUDE_CONFIG_DIR'));
   });
 
   it('should still export the literal variables beside it', () => {
@@ -496,7 +496,7 @@ describe('an account whose profile takes a variable from the secret store', () =
     // Assert
     should(actual).containEql(`export OTHER="\${${TOKEN_NAME}}"`);
     should(actual).containEql(`expected it from the environment`);
-    should(actual).containEql(`Ferretry's secret store`);
+    should(actual).containEql('s secret store');
   });
 
   it('should leave a wrapper that binds no secret byte-identical to what it always was', () => {
@@ -508,7 +508,7 @@ describe('an account whose profile takes a variable from the secret store', () =
 
     // Assert — the two rendering rules that existed before, unchanged and in the same order.
     should(actual).containEql(
-      `: "\${${TOKEN_NAME}:?ferretry: ${TOKEN_NAME} is not set — expected it from the environment}"`,
+      `if [ -z "\${${TOKEN_NAME}:-}" ]; then printf '%s\\n' 'ferretry: ${TOKEN_NAME} is not set — expected it from the environment' >&2; exit 1; fi`,
     );
     should(actual).containEql("export ANTHROPIC_BASE_URL='https://example.invalid'");
     should(actual).not.containEql('secret store');
