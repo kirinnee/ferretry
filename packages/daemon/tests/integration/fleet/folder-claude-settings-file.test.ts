@@ -1,11 +1,12 @@
 /**
  * The names a launch folder's Claude settings files put in their `env`.
  *
- * The claims: both project files are read and only the NAMES come back; a missing folder, a broken file
- * and a file with no `env` contribute nothing; and every file Claude Code reads for the folder is read — the
- * repository root's local file for a nested folder, the main checkout's for a linked worktree.
+ * The claims: both project files are read and only the NAMES come back; a broken file and a file with no `env`
+ * contribute nothing; every file Claude Code reads for the folder is read — the repository root's local file for a
+ * nested folder, the main checkout's for a linked worktree; and a layout that cannot be proved (a missing folder, a
+ * symlinked `.git`, a `.git` file that fails its proof) REFUSES the launch rather than being guessed standalone.
  */
-import { chmod, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, describe, it } from 'bun:test';
 import should from 'should';
@@ -32,7 +33,7 @@ describe('FolderClaudeSettingsFiles', () => {
     ]);
   });
 
-  it('should answer nothing for a missing folder, a broken file, a non-object env or a file with no env', async () => {
+  it('should answer nothing for a broken file, a non-object env or a file with no env', async () => {
     // Arrange
     const directory = await tempDirectory('folder-claude-settings');
     await mkdir(join(directory, '.claude'));
@@ -46,7 +47,6 @@ describe('FolderClaudeSettingsFiles', () => {
     const adapter = new FolderClaudeSettingsFiles();
     should(await adapter.variables(directory)).deepEqual([]);
     should(await adapter.variables(arrayEnv)).deepEqual([]);
-    should(await adapter.variables(join(directory, 'absent'))).deepEqual([]);
   });
 
   const localFile = async (directory: string, env: Record<string, string>): Promise<void> => {
@@ -103,7 +103,7 @@ describe('FolderClaudeSettingsFiles', () => {
     should(fromNested).deepEqual(expected);
   });
 
-  it('should read nothing outside the repository for a hostile .git file', async () => {
+  it('should refuse a hostile .git file, reading nothing outside the repository', async () => {
     // Arrange: a synthetic checkout whose .git points at a victim's per-worktree directory (no back-link to it), at
     // another with commondir ".", and at a directory that is not under .git/worktrees at all.
     const base = await realpath(await tempDirectory('folder-claude-settings'));
@@ -128,17 +128,13 @@ describe('FolderClaudeSettingsFiles', () => {
 
     // Act
     const adapter = new FolderClaudeSettingsFiles('/nowhere');
-    const forged = await Promise.all(
-      [noBackLink, selfCommon, outsideParent].map(async path => await adapter.variables(path)),
-    );
+    for (const folder of [noBackLink, selfCommon, outsideParent])
+      await should(adapter.variables(folder)).rejectedWith(new RegExp(`${folder}.*cannot be checked`, 'u'));
 
-    // Assert: only the checkout's OWN files are ever read; the victim's local file never is.
-    should(forged[0]).deepEqual([]);
-    should(forged[1]).deepEqual([{ file: '.claude/settings.local.json', names: ['OWN'] }]);
-    should(forged[2]).deepEqual([]);
+    // Assert: each is refused, naming its folder, and the victim's local file is never read.
   });
 
-  it('should read nothing from a .git file that names an unrelated .git with commondir "."', async () => {
+  it('should refuse a .git file that names an unrelated .git with commondir "."', async () => {
     // Arrange: the reviewer's repro — `gitdir: ../unrelated/.git`, whose commondir is ".".
     const base = await realpath(await tempDirectory('folder-claude-settings'));
     const repository = join(base, 'repo');
@@ -149,11 +145,8 @@ describe('FolderClaudeSettingsFiles', () => {
     await writeFile(join(repository, '.git'), 'gitdir: ../unrelated/.git\n');
     await writeFile(join(unrelated, '.git/commondir'), '.\n');
 
-    // Act
-    const found = await new FolderClaudeSettingsFiles('/nowhere').variables(repository);
-
-    // Assert
-    should(found).deepEqual([]);
+    // Act / Assert
+    await should(new FolderClaudeSettingsFiles('/nowhere').variables(repository)).rejectedWith(/cannot be checked/u);
   });
 
   it('should accept a worktree made by a real git, from a nested folder and through a symlink alias', async () => {
@@ -193,18 +186,78 @@ describe('FolderClaudeSettingsFiles', () => {
     should(fromAlias).deepEqual(expected);
   });
 
-  it('should treat a worktree with no commondir or back-link as an ordinary checkout', async () => {
+  /** A real git repository with a linked worktree, and the local file that blanks the login in the main checkout. */
+  const realWorktree = async (): Promise<{ base: string; main: string; worktree: string }> => {
+    const base = await realpath(await tempDirectory('folder-claude-settings'));
+    const main = join(base, 'main');
+    const worktree = join(base, 'worktree');
+    await mkdir(main);
+    const git = (...args: string[]): void => {
+      const run = Bun.spawnSync(['git', ...args], {
+        cwd: main,
+        env: {
+          PATH: process.env.PATH ?? '',
+          HOME: base,
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          GIT_CONFIG_SYSTEM: '/dev/null',
+        },
+      });
+      should(run.exitCode).equal(0);
+    };
+    git('init', '-q');
+    git('-c', 'user.email=a@b.c', '-c', 'user.name=n', 'commit', '-q', '--allow-empty', '-m', 'x');
+    git('worktree', 'add', '--detach', '-q', worktree);
+    await mkdir(join(worktree, 'src'));
+    await localFile(main, { ANTHROPIC_AUTH_TOKEN: '' });
+    return { base, main, worktree };
+  };
+
+  it('should refuse a worktree whose .git marker is a symlink, which git still follows', async () => {
+    // Arrange
+    const { base, worktree } = await realWorktree();
+    const moved = join(base, 'marker');
+    await rename(join(worktree, '.git'), moved);
+    await symlink(moved, join(worktree, '.git'));
+
+    // Act / Assert
+    await should(new FolderClaudeSettingsFiles('/nowhere').variables(join(worktree, 'src'))).rejectedWith(
+      new RegExp(`${worktree}.*cannot be checked`, 'u'),
+    );
+  });
+
+  it('should refuse a copy of a real worktree’s .git file that has no back-link, which git still follows', async () => {
+    // Arrange
+    const { base, worktree } = await realWorktree();
+    const hostile = join(base, 'hostile');
+    await mkdir(join(hostile, 'src'), { recursive: true });
+    await writeFile(join(hostile, '.git'), await readFile(join(worktree, '.git'), 'utf8'));
+
+    // Act / Assert
+    await should(new FolderClaudeSettingsFiles('/nowhere').variables(join(hostile, 'src'))).rejectedWith(
+      new RegExp(`${hostile}.*cannot be checked`, 'u'),
+    );
+  });
+
+  it('should refuse a launch folder that is missing, which could be created inside the repository before the start', async () => {
+    // Arrange
+    const { main } = await realWorktree();
+    const removed = join(main, 'removed');
+
+    // Act / Assert
+    await should(new FolderClaudeSettingsFiles('/nowhere').variables(removed)).rejectedWith(
+      new RegExp(`${removed}.*cannot be resolved`, 'u'),
+    );
+  });
+
+  it('should refuse a worktree with no commondir, rather than treat it as standing alone', async () => {
     // Arrange
     const base = await realpath(await tempDirectory('folder-claude-settings'));
     const { main, worktree, perWorktree } = await linkedWorktree(base);
     await localFile(main, { A: '1' });
     await rm(join(perWorktree, 'commondir'));
 
-    // Act
-    const found = await new FolderClaudeSettingsFiles('/nowhere').variables(worktree);
-
-    // Assert
-    should(found).deepEqual([]);
+    // Act / Assert
+    await should(new FolderClaudeSettingsFiles('/nowhere').variables(worktree)).rejectedWith(/cannot be checked/u);
   });
 
   it('should find the git root’s local file from a folder 70 levels deep', async () => {

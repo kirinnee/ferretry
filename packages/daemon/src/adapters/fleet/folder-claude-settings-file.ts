@@ -61,8 +61,10 @@ async function verifiedMainCheckout(worktree: string, marker: string): Promise<s
  * with no fixed depth. Nothing is run: a folder is not a reason to start `git`.
  *
  * A `.git` directory is the repository. A `.git` FILE marks a linked worktree only when it is proved by
- * {@link verifiedMainCheckout}; unproved, the folder's checkout stands alone. A walk that cannot complete (a
- * directory that cannot be inspected) refuses, rather than leave a settings file unread.
+ * {@link verifiedMainCheckout}. WHEN THE LAYOUT CANNOT BE PROVED THE LAUNCH IS REFUSED, never guessed as "a checkout
+ * that stands alone": a `.git` that is a symlink or anything but a directory or file, a `.git` file that fails
+ * its proof, and a walk that cannot complete (a directory that cannot be inspected) all refuse, because git (or
+ * Claude) may still find a main checkout whose settings file would then be left unread.
  */
 async function repositoryRoots(folder: string): Promise<RepositoryRoots | undefined> {
   let directory = folder;
@@ -78,11 +80,19 @@ async function repositoryRoots(folder: string): Promise<RepositoryRoots | undefi
           `looking for the repository this folder is in failed at ${marker} (${code ?? 'unknown error'}), so its Claude settings cannot be checked`,
         );
     }
+    if (found?.isDirectory()) return { root: directory, main: directory };
     if (found?.isFile()) {
       const main = await verifiedMainCheckout(directory, marker);
-      return { root: directory, main: main ?? directory };
+      if (main === undefined)
+        throw new FolderSettingsUnreadableError(
+          `the folder ${directory} has a .git file that does not prove it is a linked worktree of the repository it names (the worktree's gitdir, its back-link and commondir disagree), so its Claude settings cannot be checked`,
+        );
+      return { root: directory, main };
     }
-    if (found !== undefined) return { root: directory, main: directory };
+    if (found !== undefined)
+      throw new FolderSettingsUnreadableError(
+        `the folder ${directory} has a .git that is neither a plain directory nor a plain file (a symlink, for one), so which repository it belongs to cannot be proved and its Claude settings cannot be checked`,
+      );
     const parent = dirname(directory);
     if (parent === directory) return undefined;
     directory = parent;
@@ -105,7 +115,8 @@ function shown(cwd: string, path: string): string {
  * (https://code.claude.com/docs/en/settings, "Where Claude Code keeps the local file in a git repository").
  *
  * DISCOVERY NEVER LEAVES THE REPOSITORY: the folder is resolved to its real path, the root is found by an unbounded
- * walk up from it, and a worktree's main checkout is believed only when it proves itself both ways. A file that is
+ * walk up from it, and a worktree's main checkout is believed only when it proves itself both ways; a folder or a
+ * layout that cannot be resolved or proved refuses the launch. A file that is
  * absent, unreadable or not a JSON object contributes nothing: Claude ignores a settings file it cannot parse, and a
  * start is not refused over a file that has no effect. File paths and key NAMES are all that leave this adapter; a
  * value is dropped here, so nothing above can hold one.
@@ -118,8 +129,8 @@ export class FolderClaudeSettingsFiles implements FolderSettingsVariables {
     try {
       folder = await realpath(resolve(cwd));
     } catch (failure) {
-      // A folder that is not there is not one a ferret starts in, so there is nothing of its settings to read.
-      if ((failure as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      // A folder that is not there now can be made before the pane starts, inside a repository whose settings then
+      // apply, so it is refused like any folder that cannot be resolved.
       throw new FolderSettingsUnreadableError(
         `the launch folder ${cwd} cannot be resolved (${(failure as NodeJS.ErrnoException).code ?? 'unknown error'}), so its Claude settings cannot be checked`,
       );
