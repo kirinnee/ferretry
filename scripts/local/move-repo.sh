@@ -9,6 +9,8 @@ set -euo pipefail
 # GoReleaser, the installers, INSTALLATION.md, the get-started page, onboarding commands, the daemon's
 # update addresses, user docs), then runs the gate that proves nothing was missed. Idempotent: a second
 # run with the same owner changes nothing.
+# The runbook names no real owner (`<old-owner>` / `<new-owner>` placeholders), so this script never
+# rewrites the migration instructions; it prints them filled in with both owners at the end of the run.
 #
 # Usage: scripts/local/move-repo.sh --owner <github-owner>
 # Runbook: docs/runbooks/move-repo.md
@@ -109,13 +111,26 @@ done
 if [ "${#changed[@]}" -eq 0 ]; then
   echo "  (nothing to change: already '${new_owner}')"
 else
-  printf '  rewrote %s\n' "${changed[@]}"
+  printf '%s\n' "${changed[@]}" | awk '!seen[$0]++ { printf "  rewrote %s\n", $0 }'
 fi
 bash scripts/validate/repo-slug.sh
 
 echo ""
-echo "📝 remaining manual steps (docs/runbooks/move-repo.md):"
-echo "  - git remote set-url origin git@github.com:${new_owner}/${repo}.git   (every clone)"
-echo "  - review 'git diff', commit as 'chore: move the repository to ${new_owner}', push, re-run CI"
-echo "  - release, 'fy daemon update --yes', and on each Mac: brew untap ${old_owner}/${repo} && brew tap ${new_owner}/${repo} https://github.com/${new_owner}/${repo}"
+echo "📝 remaining manual steps (docs/runbooks/move-repo.md). Both owners are filled in below; the runbook"
+echo "   itself keeps <old-owner>/<new-owner> placeholders and this script never rewrites it:"
+echo "  1. review 'git diff', commit with a title that triggers a release (NOT 'chore:'), push, re-run CI:"
+echo "       fix(release): move the repository to ${new_owner}"
+echo "  2. after the merge, verify the new tag and its assets exist on the new owner:"
+echo "       git ls-remote --tags git@github.com:${new_owner}/${repo}.git 'v*' | tail -3"
+echo "       gh release view --repo ${new_owner}/${repo}"
+echo "  3. every clone:"
+echo "       git remote set-url origin git@github.com:${new_owner}/${repo}.git"
+echo "  4. every daemon:  fy daemon update --yes"
+echo "  5. every Mac or Linux machine installed through Homebrew (the daemon keeps its state home):"
+echo "       brew uninstall --cask ${repo}"
+echo "       brew untap ${old_owner}/${repo}"
+echo "       brew tap ${new_owner}/${repo} https://github.com/${new_owner}/${repo}"
+echo "       brew install --cask ${new_owner}/${repo}/${repo}"
+echo "       fy daemon restart"
+echo "  6. Nix users:  github:${old_owner}/${repo}  ->  github:${new_owner}/${repo}  in their flake inputs, then 'nix flake update ${repo}'"
 echo "✅ move complete"

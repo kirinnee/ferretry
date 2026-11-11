@@ -54,8 +54,6 @@ const FILES: Files = {
 
 const ALLOW = [
   'history Changelog.md',
-  'history scripts/validate/*',
-  'history scripts/local/move-repo.sh',
   'fixture packages/*/tests/*',
   'follow packages/protocol/tests/unit/daemon-update.test.ts',
   '',
@@ -148,6 +146,28 @@ describe('the repository move script', () => {
     should(await snapshot(dir)).deepEqual(before);
   });
 
+  it('should print the migration lines with both owners filled in and a release-triggering commit title', async () => {
+    const dir = await repo();
+    const result = sh(dir, [MOVE, '--owner', 'newco']);
+    should(result.code).equal(0);
+    should(result.out)
+      .containEql('fix(release): move the repository to newco')
+      .and.containEql('brew uninstall --cask ferretry')
+      .and.containEql('brew untap oldco/ferretry')
+      .and.containEql('brew tap newco/ferretry https://github.com/newco/ferretry')
+      .and.containEql('brew install --cask newco/ferretry/ferretry')
+      .and.containEql('github:oldco/ferretry  ->  github:newco/ferretry')
+      .and.containEql("git ls-remote --tags git@github.com:newco/ferretry.git 'v*'");
+    should(result.out).not.containEql("commit as 'chore");
+  });
+
+  it('should never rewrite the runbook, whose migration lines use placeholders', async () => {
+    const runbook = 'brew untap <old-owner>/ferretry\nbrew tap <new-owner>/ferretry\n';
+    const dir = await repo({ 'docs/runbooks/move-repo.md': runbook });
+    should(sh(dir, [MOVE, '--owner', 'newco']).code).equal(0);
+    should(await read(dir, 'docs/runbooks/move-repo.md')).equal(runbook);
+  });
+
   it('should refuse an owner that is not a GitHub login', async () => {
     const dir = await repo();
     should(sh(dir, [MOVE, '--owner', 'not/valid']).code).equal(2);
@@ -201,5 +221,26 @@ describe('the repo-slug gate', () => {
     const result = sh(dir, [GATE]);
     should(result.code).equal(1);
     should(result.out).containEql('they stay equal');
+  });
+});
+
+describe('the runbook and the gate scope', () => {
+  it('should name no real owner, so the mover can never rewrite its migration lines', async () => {
+    const text = await readFile(join(REPO_ROOT, 'docs/runbooks/move-repo.md'), 'utf8');
+    // A placeholder is `<old-owner>/ferretry`; a real owner would sit right after a word character.
+    should(text.replace(/<(?:old|new)-owner>\/ferretry/gu, '')).not.match(/[A-Za-z0-9_-]\/ferretry(?!\.rb)/u);
+  });
+
+  it('should prescribe a commit title that triggers a release, never a chore', async () => {
+    const text = await readFile(join(REPO_ROOT, 'docs/runbooks/move-repo.md'), 'utf8');
+    should(text).containEql('fix(release): move the repository to <new-owner>').and.not.containEql('chore: move');
+  });
+
+  it('should leave a stray owner in a validator for the gate to catch', async () => {
+    const dir = await repo({ 'scripts/validate/other.sh': 'echo https://github.com/strayco/ferretry\n' });
+    Bun.spawnSync(['git', 'add', '-A'], { cwd: dir });
+    const result = sh(dir, [GATE]);
+    should(result.code).equal(1);
+    should(result.out).containEql('scripts/validate/other.sh:1');
   });
 });

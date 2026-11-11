@@ -5,7 +5,9 @@
 # One entry per line: `<mode> <git pathspec>`. `*` matches across `/` (git's own pathspec rule).
 #
 #   history  A record of what was true when it was written (changelogs, migration notes, design
-#            records, the validators themselves). Never rewritten, never checked.
+#            records). Never rewritten, never checked. Keep entries narrow: a validator or the mover
+#            is NOT exempt, because none of them spells the real slug (the runbook and the mover use
+#            `<old-owner>` / `<new-owner>` placeholders), so a stray owner there must fail the gate.
 #   fixture  Test data that names the slug as an arbitrary example (board PR links, remote parsers,
 #            which are tested against `acme/ferretry` on purpose). Never rewritten, never checked.
 #   follow   A test that asserts a shipped address (update URLs, tap names, onboarding commands). The
@@ -25,8 +27,6 @@ history docs/migration/*
 history docs/design/*
 history docs/PROMPT.md
 history config/test-quarantine.json
-history scripts/validate/*
-history scripts/local/move-repo.sh
 fixture packages/pwa/harness/*
 fixture packages/*/tests/*
 fixture tests/*

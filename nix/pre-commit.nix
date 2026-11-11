@@ -191,12 +191,13 @@ pre-commit-lib.run {
     };
 
     # The GitHub owner is one fact (root package.json `repository`); every shipped address derives from
-    # it, and scripts/local/move-repo.sh moves them together. Scans the tree rather than the staged paths.
+    # it, and scripts/local/move-repo.sh moves them together. Scans the whole tree rather than the staged paths,
+    # and has no `files` filter: an owner can hide in nix/, .github/, flake.nix or config/ as easily as in
+    # packages/, so every commit runs it (it is a git ls-files plus one rg, fast).
     a-repo-slug = {
       enable = true;
       name = "GitHub owner single source";
       entry = validator "scripts/validate/repo-slug.sh";
-      files = "^(package\\.json|\\.goreleaser\\.yaml|Casks/.*|INSTALLATION\\.md|docs/.*|packages/.*|scripts/.*)$";
       pass_filenames = false;
       language = "system";
     };
