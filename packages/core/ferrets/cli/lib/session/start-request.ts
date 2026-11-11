@@ -3,12 +3,56 @@ import { FERRET_CARD_ID_PATTERN, type InitialAttachment } from '../../../contrac
 import { SessionCommandError } from './errors.ts';
 import type { SessionEnvironment, StartBody } from './ports.ts';
 
+/** One refused flag group: the option keys that trigger it and the one sentence that says why and what to do. */
+export interface FlagRefusal {
+  readonly keys: readonly string[];
+  readonly sentence: string;
+}
+
+const COMPACT_AT_REFUSAL: FlagRefusal = {
+  keys: ['compact-at'],
+  sentence: "--compact-at: not in this version of Ferretry yet; the harness's own compaction trigger is used",
+};
+
 /**
- * Today's `fy start` flags whose value has no field in Ferrets' start (§2.2): where a conversation compacts is the
- * Conversation's, and a detached start has no 5.0 meaning (a start always waits for the launch). A typed one is
- * refused by name rather than sent and dropped, because a flag that was accepted and ignored is worse than a refusal.
+ * `fy start`'s refused flag: `--compact-at` is not built yet, so it is refused by name rather than sent and dropped.
+ * (`--detach` is NOT refused: v4 accepted it and did nothing, so a script that passes it keeps working.)
  */
-export const START_FLAGS_ELSEWHERE: readonly string[] = ['compact-at', 'detach'];
+export const START_REFUSALS: readonly FlagRefusal[] = [COMPACT_AT_REFUSAL];
+
+/** The one stderr line a typed `--detach` gets: the start runs exactly as without it. */
+export const DETACH_NOTE =
+  '--detach: not needed; fy start returns once the launch has settled and never attaches a terminal';
+
+/**
+ * The flags of `fy new` that are refused: continuing a conversation moved to `fy link`, `--compact-at` is not built
+ * yet, and a start's idempotency key and attachments are `fy start`'s alone (the shell's parser hands `-f` over under
+ * the key `f`, so both keys are refused, or `new -f a.png` would be accepted and the file silently dropped).
+ */
+export const NEW_REFUSALS: readonly FlagRefusal[] = [
+  {
+    keys: ['continue', 'since'],
+    sentence:
+      '--continue, --since: continuing an existing conversation is `fy link [words...] [--since <ISO date-time>]`, then `fy link keep <harness> <runtime> <conversation-id> --start`',
+  },
+  COMPACT_AT_REFUSAL,
+  {
+    keys: ['request-id'],
+    sentence: '--request-id: not taken by `fy new` in this version of Ferretry (another plugin decides it now)',
+  },
+  {
+    keys: ['file', 'f'],
+    sentence: '-f/--file: not taken by `fy new` in this version of Ferretry (another plugin decides it now)',
+  },
+];
+
+/** The folder a `--cwd` names: as typed when absolute, else under the shell's folder; the shell's own folder when none. */
+export function folderOf(typed: string | undefined, base: string | undefined): string | undefined {
+  const named = typed?.trim();
+  if (named === undefined || named === '') return base;
+  if (isAbsolute(named)) return named;
+  return base === undefined ? undefined : resolve(base, named);
+}
 
 /**
  * A value at or below this many seconds looks like someone reaching for a readiness wait ("give it
@@ -123,16 +167,7 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
     throw new SessionCommandError(
       'provide a prompt (arguments and/or --prompt-file), or use --mode interactive to start bare',
     );
-  const base = environment.cwd;
-  const typed = flags.cwd?.trim();
-  const folder =
-    typed !== undefined && typed !== ''
-      ? isAbsolute(typed)
-        ? typed
-        : base === undefined
-          ? undefined
-          : resolve(base, typed)
-      : base;
+  const folder = folderOf(flags.cwd, environment.cwd);
   if (folder === undefined) throw new SessionCommandError('name the folder to start in with --cwd <absolute path>');
   return {
     folder,

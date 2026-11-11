@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
 import { implementCli, type VerbInvocation } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { ClientRestartGateway, ClientSessionApi } from './lib/client.ts';
@@ -27,7 +28,7 @@ import {
   readPromptFile,
   requestIdOf,
 } from './lib/session/start-inputs.ts';
-import { START_FLAGS_ELSEWHERE } from './lib/session/start-request.ts';
+import { DETACH_NOTE, type FlagRefusal, NEW_REFUSALS, START_REFUSALS } from './lib/session/start-request.ts';
 import { SessionStatusController } from './lib/session/status-controller.ts';
 import { SessionSubtreeController } from './lib/session/subtree-controller.ts';
 import { BulkStopController } from './lib/stop/controller.ts';
@@ -54,6 +55,10 @@ function transportFailure(error: unknown): 'unavailable' | 'unresponsive' | unde
   return /Transport/.test(fields.name) ? 'unavailable' : undefined;
 }
 
+/** The ferret that typed the command: the shell passes its id as FY_SESSION_ID; a person's shell has none. */
+const callerOf = (env: Readonly<Partial<Record<string, string>>> | undefined): string | undefined =>
+  env?.FY_SESSION_ID?.trim() || undefined;
+
 /** Usage sentences a group verb prints when it is typed bare. */
 const STOP_USAGE = [
   'stop ferrets, selected by lineage or ownership label:',
@@ -69,29 +74,10 @@ const SESSION_USAGE = [
   `  ${BINARY} session unpin <ferret>`,
 ];
 
-/**
- * The flags of `fy new` that are not Ferrets' start: continuing an existing conversation (`--continue`, `--since`)
- * and where it compacts are the Conversation's, a scratch-folder override is not a field of the start, and a start's idempotency key and attachments are `fy start`'s alone. The model routing (`--model`, `--effort`, `--auto`), `--card` and
- * `--name <title>` are sent with the start.
- */
-const NEW_FLAGS_ELSEWHERE = ['continue', 'since', 'allow-scratch', 'compact-at', 'request-id', 'file', 'f'];
-
-/**
- * How a refused flag is named back to the caller: a flag with a short spelling is named by both (`-f/--file`), whichever
- * the caller typed (the shell's parser hands `-f` over under the key `f`, so both keys must be refused, or `new -f a.png`
- * would be accepted and the file silently dropped); any other by its long spelling.
- */
-const REFUSED_SPELLING: Readonly<Record<string, string>> = { file: '-f/--file', f: '-f/--file' };
-
-/** Refuses, by name, a typed flag whose value has no field in Ferrets' routes. */
-function refuseElsewhere(invocation: VerbInvocation, names: readonly string[], verb: string): void {
-  const found = [
-    ...new Set(names.filter(name => typed(invocation, name)).map(name => REFUSED_SPELLING[name] ?? `--${name}`)),
-  ];
-  if (found.length > 0)
-    throw new SessionCommandError(
-      `${found.join(', ')}: not taken by \`${BINARY} ${verb}\` in this version of Ferretry (another plugin decides it now)`,
-    );
+/** Refuses a typed flag with that flag's own sentence (the first group typed), sending nothing. */
+function refuseFlags(invocation: VerbInvocation, refusals: readonly FlagRefusal[]): void {
+  const found = refusals.find(refusal => typed(invocation, ...refusal.keys));
+  if (found !== undefined) throw new SessionCommandError(found.sentence);
 }
 
 /**
@@ -145,7 +131,8 @@ export default implementCli(manifest, {
 
     const start = (role: 'start' | 'new') =>
       verb(async (invocation, presenter) => {
-        refuseElsewhere(invocation, role === 'start' ? START_FLAGS_ELSEWHERE : NEW_FLAGS_ELSEWHERE, role);
+        refuseFlags(invocation, role === 'start' ? START_REFUSALS : NEW_REFUSALS);
+        if (role === 'start' && typed(invocation, 'detach')) presenter.note(DETACH_NOTE);
         const mode = text(invocation, 'mode') ?? 'auto';
         if (mode !== 'auto' && mode !== 'interactive') throw new SessionCommandError('--mode is auto or interactive');
         const agent = text(invocation, 'agent', 'a', 'runtime');
@@ -210,6 +197,15 @@ export default implementCli(manifest, {
           ...(login === undefined ? {} : { login }),
           ...(pack === undefined ? {} : { pack }),
           ...(cwd === undefined ? {} : { cwd }),
+          ...(role === 'new'
+            ? {
+                newFolder: {
+                  allowScratch: on(invocation, 'allow-scratch'),
+                  ...(callerOf(env) === undefined ? {} : { callerId: callerOf(env) as string }),
+                  tmpRoots: [tmpdir(), ...(env?.TMPDIR === undefined || env.TMPDIR === '' ? [] : [env.TMPDIR])],
+                },
+              }
+            : {}),
           ...(prompt === undefined ? {} : { prompt }),
           ...(initialAttachments.length === 0 ? {} : { initialAttachments }),
           ...(requestId === undefined ? {} : { requestId }),
@@ -224,7 +220,7 @@ export default implementCli(manifest, {
         const selector: BulkStopSelector = kind === 'label' ? { kind, label: value } : { kind, rootId: value };
         const includeCaller = on(invocation, 'include-caller');
         // The ferret that typed the command (the shell passes FY_SESSION_ID): the plan keeps it out unless --include-caller.
-        const callerId = env?.FY_SESSION_ID?.trim() || undefined;
+        const callerId = callerOf(env);
         await new BulkStopController(
           api,
           io,

@@ -101,8 +101,8 @@ describe('the ferrets cli half', () => {
         headers: { 'x-fy-request-id': expect.any(String) },
       },
     });
-    expect(await verb('start [prompt...]', ['x'], { 'compact-at': '250k', detach: true })).toBe(2);
-    expect(err.at(-1)).toContain('--compact-at, --detach');
+    expect(await verb('start [prompt...]', ['x'], { 'compact-at': '250k' })).toBe(2);
+    expect(err.at(-1)).toContain('--compact-at: not in this version of Ferretry yet');
     expect(await verb('start [prompt...]', ['x'], { mode: 'sideways' })).toBe(2);
     expect(calls).toHaveLength(2);
   });
@@ -194,7 +194,7 @@ describe('the ferrets cli half', () => {
     expect(await verb('new [words...]', ['look'], { cwd: '/abs' })).toBe(2);
     expect(err.at(-1)).toContain('name a --runtime, or pass --auto');
     expect(await verb('new [words...]', ['look'], { runtime: 'codex-beta', continue: true })).toBe(2);
-    expect(err.at(-1)).toContain('--continue');
+    expect(err.at(-1)).toContain('--continue, --since: continuing an existing conversation is `fy link');
     expect(calls).toHaveLength(before);
   });
 

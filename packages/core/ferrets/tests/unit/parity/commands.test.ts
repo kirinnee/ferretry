@@ -358,13 +358,26 @@ describe('commands parity', () => {
       expect(negated.calls[0]?.init).toMatchObject({ body: { mode: 'interactive', fast: false, remoteControl: true } });
     });
 
-    test('V-0443 fy start refuses, by name and unsent, a flag whose job another plugin took (--compact-at, --detach) and a bad number or mode', async () => {
-      for (const options of [{ 'compact-at': '250k' }, { detach: true }] as Options[]) {
-        const refused = run({ answers: startAnswers });
-        expect(await refused.verb('start [prompt...]', ['x'], options)).toBe(2);
-        expect(refused.err.join('\n')).toContain(`--${Object.keys(options)[0]}`);
-        expect(refused.calls).toEqual([]);
-      }
+    test('V-0443 fy start accepts --detach as a no-op with one stderr line and refuses --compact-at as not yet built by its own sentence, unsent', async () => {
+      const plain = run({ answers: startAnswers });
+      const detached = run({ answers: startAnswers });
+      expect(await plain.verb('start [prompt...]', ['x'], { cwd: '/abs' })).toBe(0);
+      expect(await detached.verb('start [prompt...]', ['x'], { cwd: '/abs', detach: true })).toBe(0);
+      // The same request (each start mints its own idempotency key, so only that header differs).
+      const sent = (calls: readonly Call[]) =>
+        JSON.stringify(calls.map(call => ({ ...call, init: (call.init as { body?: unknown } | undefined)?.body })));
+      expect(sent(detached.calls)).toBe(sent(plain.calls));
+      expect(detached.out).toEqual(plain.out);
+      expect(plain.err).toEqual([]);
+      expect(detached.err).toEqual([
+        '--detach: not needed; fy start returns once the launch has settled and never attaches a terminal',
+      ]);
+      const refused = run({ answers: startAnswers });
+      expect(await refused.verb('start [prompt...]', ['x'], { 'compact-at': '250k' })).toBe(2);
+      expect(refused.err.join('\n')).toBe(
+        "--compact-at: not in this version of Ferretry yet; the harness's own compaction trigger is used",
+      );
+      expect(refused.calls).toEqual([]);
       const bad = run({ answers: startAnswers });
       expect(await bad.verb('start [prompt...]', ['x'], { cwd: '/abs', interval: 'banana' })).toBe(2);
       expect(await bad.verb('start [prompt...]', ['x'], { cwd: '/abs', mode: 'sideways' })).toBe(2);
@@ -572,6 +585,75 @@ describe('commands parity', () => {
       expect(refused.calls).toEqual([]);
     });
 
+    test('V-0334 fy new names fy link for --continue/--since and says --compact-at is not built yet, each unsent', async () => {
+      for (const [options, sentence] of [
+        [
+          { continue: true },
+          '--continue, --since: continuing an existing conversation is `fy link [words...] [--since <ISO date-time>]`, then `fy link keep <harness> <runtime> <conversation-id> --start`',
+        ],
+        [{ since: '2026-11-01' }, '--continue, --since: continuing'],
+        [
+          { 'compact-at': '250k' },
+          "--compact-at: not in this version of Ferretry yet; the harness's own compaction trigger is used",
+        ],
+      ] as const) {
+        const refused = run({ answers: startAnswers });
+        expect(await refused.verb('new [words...]', ['x'], { runtime: 'codex-beta', cwd: '/abs', ...options })).toBe(2);
+        expect(refused.err.join('\n')).toContain(sentence);
+        expect(refused.calls).toEqual([]);
+      }
+    });
+
+    test("V-0334 fy new from a ferret runs the helper in its parent's folder (GET /v1/ferrets/:ferretId), even a temporary one, never the shell's", async () => {
+      const parent = sessionView({ id: 'lead', name: 'wren', folder: '/tmp/claude-1000/parent-work' });
+      const world = run({ answers: { ...startAnswers, [FERRET_ROUTES.get]: parent }, env: { FY_SESSION_ID: 'lead' } });
+      expect(await world.verb('new [words...]', ['x'], { runtime: 'codex-beta' })).toBe(0);
+      expect(world.calls[0]).toEqual({ route: FERRET_ROUTES.get, init: { params: { ferretId: 'lead' } } });
+      expect(world.calls[1]?.init).toMatchObject({ body: { folder: '/tmp/claude-1000/parent-work' } });
+      expect(world.calls[1]?.init).not.toMatchObject({ body: { folder: process.cwd() } });
+    });
+
+    test('V-0334 fy new refuses a named temporary --cwd with the folder and every way out, unless --allow-scratch, and sends nothing', async () => {
+      const refused = run({ answers: startAnswers });
+      expect(await refused.verb('new [words...]', ['x'], { runtime: 'codex-beta', cwd: '/tmp/scratch//' })).toBe(2);
+      const message = refused.err.join('\n');
+      expect(message).toContain('/tmp/scratch// is a temporary folder');
+      expect(message).toContain('Leave --cwd out');
+      expect(message).toContain('name the project folder with --cwd');
+      expect(message).toContain('--allow-scratch');
+      expect(refused.calls).toEqual([]);
+      // The shell's TMPDIR is a root too, and so is a person's own temporary shell folder (no --cwd, no caller).
+      const viaEnv = run({ answers: startAnswers, env: { TMPDIR: '/scratch-root/' } });
+      expect(await viaEnv.verb('new [words...]', ['x'], { runtime: 'codex-beta', cwd: '/scratch-root/a' })).toBe(2);
+      expect(viaEnv.calls).toEqual([]);
+      // The flag is honoured, consumed by the CLI and never sent.
+      const allowed = run({ answers: startAnswers });
+      expect(
+        await allowed.verb('new [words...]', ['x'], {
+          runtime: 'codex-beta',
+          cwd: '/tmp/scratch',
+          'allow-scratch': true,
+        }),
+      ).toBe(0);
+      expect(allowed.calls[0]?.init).toMatchObject({ body: { folder: '/tmp/scratch' } });
+      expect(JSON.stringify(allowed.calls[0]?.init)).not.toContain('allow');
+      // A relative --cwd is made absolute against the shell's folder, then guarded (v4 controller.test.ts:173).
+      const relative = run({ answers: startAnswers });
+      expect(await relative.verb('new [words...]', ['x'], { runtime: 'codex-beta', cwd: 'sub/dir' })).toBe(0);
+      expect(relative.calls[0]?.init).toMatchObject({ body: { folder: `${process.cwd()}/sub/dir` } });
+    });
+
+    test("V-0334 fy new from a ferret whose own record cannot be read is refused naming --cwd, never started in the shell's folder", async () => {
+      const lost = run({ fail: new Error('no such ferret'), env: { FY_SESSION_ID: 'lead' } });
+      expect(await lost.verb('new [words...]', ['x'], { runtime: 'codex-beta' })).toBe(2);
+      expect(lost.err.join('\n')).toContain('--cwd <folder>');
+      expect(lost.calls.map(call => call.route)).toEqual([FERRET_ROUTES.get]);
+      // An explicit --cwd needs no lookup at all.
+      const named = run({ answers: startAnswers, env: { FY_SESSION_ID: 'lead' } });
+      expect(await named.verb('new [words...]', ['x'], { runtime: 'codex-beta', cwd: '/abs' })).toBe(0);
+      expect(named.calls[0]?.route).toBe(FERRET_ROUTES.start);
+    });
+
     test('V-0334 fy new starts a helper on a named --runtime or --auto (never both), with --model, --effort, --name, --card, --json', async () => {
       const named = run({ answers: startAnswers });
       expect(
@@ -604,7 +686,7 @@ describe('commands parity', () => {
       expect(both.err.join('\n')).toContain('--auto picks the runtime');
       expect(await both.verb('new [words...]', ['look'], { cwd: '/abs' })).toBe(2);
       expect(both.err.join('\n')).toContain('name a --runtime, or pass --auto');
-      for (const flag of ['continue', 'since', 'allow-scratch', 'compact-at', 'request-id']) {
+      for (const flag of ['continue', 'since', 'compact-at', 'request-id']) {
         expect(await both.verb('new [words...]', ['look'], { runtime: 'codex-beta', [flag]: 'x' })).toBe(2);
         expect(both.err.at(-1)).toContain(`--${flag}`);
       }
