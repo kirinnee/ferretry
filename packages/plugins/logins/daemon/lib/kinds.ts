@@ -113,6 +113,10 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
     key,
     fields: FIELDS[key],
     harnesses: HARNESSES[key],
+    holds(login) {
+      const file = deps.files().get(login);
+      return file !== undefined && kindOf(file) === key;
+    },
     async signIn(login) {
       const file = known(login, key);
       // A key, a proxy or an endpoint is a config file plus a Vault secret: there is nothing to sign in to.

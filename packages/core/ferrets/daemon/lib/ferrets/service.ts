@@ -209,9 +209,23 @@ export interface FerretsPorts {
    * `Redaction.read` (`FerretsApi.prompt`). Unbound: nothing is asked.
    */
   promptState?(ferret: FerretId): Promise<FerretPrompt>;
+  /**
+   * The environment the named login defines for `harness` (`LoginKind.env` of the kind that holds it): literal settings
+   * and `${secret:NAME}` references, never a value read from the Vault. An error is a sentence for the owner (no such
+   * login, or none can be read) and refuses the start as `login_unavailable`; it never quotes a port error, which can
+   * sit beside a credential. Unbound: a login contributes no environment.
+   */
+  loginEnv?(login: string, harness: HarnessKey): Promise<Result<Readonly<Record<string, string>>, string>>;
   vault: Pick<VaultApi, 'childEnvironment'>;
   asks: Pick<AsksApi, 'open'>;
 }
+
+/**
+ * Names a login's environment may never set: the harness's own home, and every variable Ferrets owns for the launch.
+ * A login defines a provider (a base URL, a token); it never moves the ferret's home or forges its identity.
+ */
+const LOGIN_ENV_RESERVED: ReadonlySet<string> = new Set(['HOME', 'CLAUDE_CONFIG_DIR', 'CODEX_HOME']);
+const loginEnvAllowed = (name: string): boolean => !LOGIN_ENV_RESERVED.has(name) && !name.startsWith('FY_');
 
 /**
  * Whether one look shows the ferret mid-turn (today's `paneMidTurn`, from the pane alone): the harness's own working
@@ -1606,6 +1620,9 @@ export class FerretsService implements FerretsApi {
     if (harness === undefined) return failed('harness_unavailable', `${record.harness} is off`);
     const home = await this.home(record, harness);
     if (!home.ok) return home;
+    // Before a token is issued: a login that cannot be read refuses the start with nothing to undo.
+    const login = await this.loginEnvironment(record);
+    if (!login.ok) return failed('login_unavailable', login.error);
     const issued = issueToken(record.id, this.ports.now());
     this.tokens.add(issued.entry);
     await this.ports.saveTokens(this.tokens.snapshot());
@@ -1621,6 +1638,7 @@ export class FerretsService implements FerretsApi {
       harness: record.harness,
       ...(record.runtime === undefined ? {} : { runtime: record.runtime }),
       ...(record.login === undefined ? {} : { login: record.login }),
+      ...(Object.keys(login.value).length === 0 ? {} : { loginEnv: login.value }),
       ...launchOptions(this.registry.detailsOf(record.id)?.options),
       folder: record.folder as FencedPath,
       home: home.value,
@@ -1644,7 +1662,7 @@ export class FerretsService implements FerretsApi {
         `the ${record.harness} harness could not prepare this ferret's home, so it was not started`,
       );
     }
-    const env = await this.environment(record.id, issued.token, parts);
+    const env = await this.environment(record.id, issued.token, parts, login.value);
     if (!env.ok) return failed('login_unavailable', env.error);
     const started =
       conversation === undefined
@@ -1916,12 +1934,24 @@ export class FerretsService implements FerretsApi {
     return ok(home);
   }
 
+  /** The ferret's login's environment for its harness, minus the names a login may never set. Empty with no login. */
+  private async loginEnvironment(record: FerretRecord): Promise<Result<Readonly<Record<string, string>>, string>> {
+    if (record.login === undefined || this.ports.loginEnv === undefined) return ok({});
+    const found = await this.ports
+      .loginEnv(record.login, record.harness)
+      .catch(() => err(`the login ${record.login} could not be read, so the ferret was not started`));
+    if (!found.ok) return found;
+    return ok(Object.fromEntries(Object.entries(found.value).filter(([name]) => loginEnvAllowed(name))));
+  }
+
   private async environment(
     ferret: FerretId,
     token: string,
     parts: readonly LaunchPart[],
+    login: Readonly<Record<string, string>>,
   ): Promise<Result<ChildEnvironment, string>> {
-    const env: Record<string, string> = {};
+    // The login's environment goes in first, so every part (MCP, shells) and the FY_* switches below keep precedence.
+    const env: Record<string, string> = { ...login };
     for (const part of parts) if (part.kind === 'env' || part.kind === 'shell') Object.assign(env, part.env);
     env[FERRET_ID_VARIABLE] = ferret;
     env[FERRET_TOKEN_VARIABLE] = token;

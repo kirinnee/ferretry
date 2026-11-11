@@ -59,6 +59,20 @@ describe('the five login kinds', () => {
     expect(JSON.stringify(env)).not.toContain(RAW);
   });
 
+  test('exactly one kind holds a login: its own, never another’s, and none holds a name nobody wrote', () => {
+    const holders = (login: string) => LOGIN_KINDS.filter(kind => kinds[kind].holds(login));
+
+    expect(holders('work')).toEqual(['anthropic']);
+    expect(holders('team')).toEqual(['openai']);
+    expect(holders('ds')).toEqual(['endpoint']);
+    expect(holders('ghost')).toEqual([]);
+  });
+
+  test('a sign-in login (OAuth) answers an empty environment: its credential is not env', async () => {
+    expect(await kinds.anthropic.env('work', 'claude-code')).toEqual({});
+    expect(await kinds.openai.env('team', 'codex')).toEqual({});
+  });
+
   test('a kind refuses a login of another kind rather than answering for it', async () => {
     await expect(kinds.anthropic.status('team')).rejects.toThrow('no anthropic login named team');
   });

@@ -30,6 +30,14 @@ export interface LaunchSpec {
   readonly harness: HarnessKey;
   readonly runtime?: string;
   readonly login?: string;
+  /**
+   * The environment the ferret's login defines for this harness (`LoginKind.env`), set by Ferrets only and absent when
+   * the ferret has no login or its login defines none. Names, literal settings and `${secret:NAME}` references only:
+   * a raw secret never enters (the kind drops it), and Ferrets drops `HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `FY_*`.
+   * It is already in the launch's child environment, under every `launch.parts` env and below `FY_*`; a harness reads
+   * it only to learn WHICH literal values the child holds (the Claude overlay pins them), never to put one there.
+   */
+  readonly loginEnv?: Readonly<Record<string, string>>;
   readonly model?: string;
   readonly effort?: string;
   /** The work folder, fenced (`WorkFolders`). */
@@ -720,6 +728,8 @@ export interface LoginKind {
   readonly fields: readonly LoginField[];
   /** Which harnesses can spend it. */
   readonly harnesses: readonly HarnessKey[];
+  /** Whether this machine holds a login of this name AND of this kind (a name is one kind's, never two). */
+  holds(login: string): boolean;
   signIn(login: string): Promise<SignInFlow>;
   status(login: string): Promise<LoginStatus>;
   refresh?(login: string): Promise<LoginStatus>;

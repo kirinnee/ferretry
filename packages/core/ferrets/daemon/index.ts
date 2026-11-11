@@ -31,6 +31,7 @@ import {
   ArchiveKeeps,
   FerretLaunchSectionsFiles,
   Harnesses,
+  Logins,
   LaunchParts,
   OPENING_ATTACHMENTS_KEY,
   OpeningAttachments,
@@ -448,6 +449,20 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       return decision;
     },
     launchParts: () => hooks.contributions(LaunchParts).map(contribution => contribution.item),
+    // The kind that HOLDS the login answers (`LoginKind.holds`): no kind trial, no caught throw. Each failure is a
+    // fixed sentence; a Logins error is never quoted, because it can sit beside a credential.
+    loginEnv: async (login, harness) => {
+      const kinds = [...hooks.providers(Logins).values()];
+      if (kinds.length === 0) return err(`no login provider is running, so the login ${login} cannot be used`);
+      const kind = kinds.find(candidate => candidate.holds(login));
+      if (kind === undefined)
+        return err(`there is no login named ${login} on this machine, so the ferret was not started`);
+      try {
+        return ok(await kind.env(login, harness));
+      } catch {
+        return err(`the login ${login} could not be read, so the ferret was not started`);
+      }
+    },
     openingAttachments: () => {
       const found = hooks.provider(OpeningAttachments, OPENING_ATTACHMENTS_KEY);
       return found === 'unavailable' ? undefined : found;
