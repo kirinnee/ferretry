@@ -596,7 +596,9 @@ export type RootName =
    * One harness's OWN home on this machine, as the harness itself resolves it (`CLAUDE_CONFIG_DIR` or `~/.claude`,
    * `CODEX_HOME` or `~/.codex`), for the first-run import's scan: an owner's root, READ-ONLY, Runtimes alone. The
    * handle is scoped to the ABSOLUTE folder the caller names (`{ subfolder: '/home/me/.claude' }`, exactly as
-   * `harness-history` is), refuses everything inside the fence, and never follows a link out of that folder.
+   * `harness-history` is), refuses everything inside the fence, and never follows a link out of that folder. Runtimes also
+   * scopes it to a launch folder and each of its ancestors to read the Claude settings files and the repository layout
+   * a start would run under (a read, never a write: nothing in the folder is changed).
    */
   | 'harness-home'
   /**

@@ -206,12 +206,6 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
         'writes the per-launch Claude settings file a login that pins its environment launches under (a credential): a fresh O_CREAT|O_EXCL|O_NOFOLLOW 0600 file renamed over its name, after an lstat of every directory from the state home down (symlink, owner, group/other-writable), which no root handle does (RootHandle answers no link kind and offers no exclusive create); main-sync ruling (lizzette), port of v4 #1587',
     },
     {
-      pkg: 'runtimes',
-      folder: 'daemon/adapters/folder-claude-settings-file.ts',
-      reason:
-        'reads the Claude settings files of a LAUNCH FOLDER and its repository, which are outside every declared root: lstat of .git (a symlink refuses), the worktree gitdir/back-link/commondir proof, and the home directory as the walk limit; names only, never a value; main-sync ruling (lizzette), port of v4 #1587',
-    },
-    {
       pkg: 'terminals',
       folder: 'daemon/adapters/host/fs.ts',
       reason:

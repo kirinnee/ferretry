@@ -399,7 +399,10 @@ file at the git root (the **main checkout's** root, in a linked worktree; not wh
 
 - **It fails closed.** A layout that cannot be proved refuses the start with the reason: a missing launch folder, a `.git` that is a
   symlink, a `.git` file whose `gitdir`, back-link and `commondir` do not prove one another (a linked worktree is accepted only when
-  they do), or a directory it cannot search. The walk up from the real folder has no depth cap.
+  they do), a settings file that is a symlink or has a second hard link (Claude Code follows it; the kernel never does, so a file
+  it could not read is refused rather than skipped), or a directory it cannot search. The walk up from the real folder has no depth cap.
+- **Every read goes through the kernel.** The adapter takes a `harness-home` root scoped to each folder it looks in (read-only, no
+  link followed out of the folder, the daemon's own home refused) and touches no file system of its own.
 - **GAP — not composed yet.** No `AccountLaunchEnvironment` is implemented in 5.0 (a Ferrets start does not resolve the login's
   environment: `ports-pending.json`), so nothing calls the refusal on a start yet; a repository that sets such a variable still
   starts the runtime signed out. The refusal and its adapter are built and tested, and the `apiKeyHelper` alternative (the wrapper

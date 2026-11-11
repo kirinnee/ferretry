@@ -6,12 +6,13 @@
  * nested folder, the main checkout's for a linked worktree; and a layout that cannot be proved (a missing folder, a
  * symlinked `.git`, a `.git` file that fails its proof) REFUSES the launch rather than being guessed standalone.
  */
-import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, it } from 'bun:test';
+import { diskFolders } from '@ferretry/kernel/testing';
+import { afterAll, beforeAll, describe, it } from 'bun:test';
 import should from 'should';
-import { FolderClaudeSettingsFiles } from '../../daemon/adapters/folder-claude-settings-file.ts';
+import { type FolderRoots, FolderClaudeSettingsFiles } from '../../daemon/adapters/folder-claude-settings-file.ts';
 
 const created: string[] = [];
 
@@ -31,6 +32,14 @@ const cleanupTempDirectories = async (): Promise<void> => {
 
 afterAll(cleanupTempDirectories);
 
+/** The kernel's own `harness-home` root over the real disk: every read of the adapter goes through it. */
+let folders: FolderRoots;
+beforeAll(async () => {
+  folders = await diskFolders(await tempDirectory('folder-roots'));
+});
+
+const adapterOf = (home = '/nowhere'): FolderClaudeSettingsFiles => new FolderClaudeSettingsFiles(folders, home);
+
 describe('FolderClaudeSettingsFiles', () => {
   it('should list the env names of both project files and drop every value', async () => {
     // Arrange
@@ -40,7 +49,7 @@ describe('FolderClaudeSettingsFiles', () => {
     await writeFile(join(directory, '.claude/settings.local.json'), JSON.stringify({ env: { B: '', C: 'y' } }));
 
     // Act
-    const found = await new FolderClaudeSettingsFiles().variables(directory);
+    const found = await adapterOf().variables(directory);
 
     // Assert
     should(found).deepEqual([
@@ -60,7 +69,7 @@ describe('FolderClaudeSettingsFiles', () => {
     await writeFile(join(arrayEnv, '.claude/settings.json'), JSON.stringify({ env: ['A'] }));
 
     // Act / Assert
-    const adapter = new FolderClaudeSettingsFiles();
+    const adapter = adapterOf();
     should(await adapter.variables(directory)).deepEqual([]);
     should(await adapter.variables(arrayEnv)).deepEqual([]);
   });
@@ -80,7 +89,7 @@ describe('FolderClaudeSettingsFiles', () => {
     await localFile(nested, { OWN: 'x' });
 
     // Act
-    const found = await new FolderClaudeSettingsFiles('/nowhere').variables(nested);
+    const found = await adapterOf('/nowhere').variables(nested);
 
     // Assert: the folder's own file by a relative name, the root's by its path; names only.
     should(found).deepEqual([
@@ -109,7 +118,7 @@ describe('FolderClaudeSettingsFiles', () => {
     await localFile(main, { ANTHROPIC_AUTH_TOKEN: 'synthetic' });
 
     // Act: from the worktree's root and from a folder inside it.
-    const adapter = new FolderClaudeSettingsFiles('/nowhere');
+    const adapter = adapterOf('/nowhere');
     const fromRoot = await adapter.variables(worktree);
     const fromNested = await adapter.variables(join(worktree, 'src'));
 
@@ -143,7 +152,7 @@ describe('FolderClaudeSettingsFiles', () => {
     await writeFile(join(outsideParent, '.git'), `gitdir: ${victim}\n`);
 
     // Act
-    const adapter = new FolderClaudeSettingsFiles('/nowhere');
+    const adapter = adapterOf('/nowhere');
     for (const folder of [noBackLink, selfCommon, outsideParent])
       await should(adapter.variables(folder)).rejectedWith(new RegExp(`${folder}.*cannot be checked`, 'u'));
 
@@ -162,7 +171,7 @@ describe('FolderClaudeSettingsFiles', () => {
     await writeFile(join(unrelated, '.git/commondir'), '.\n');
 
     // Act / Assert
-    await should(new FolderClaudeSettingsFiles('/nowhere').variables(repository)).rejectedWith(/cannot be checked/u);
+    await should(adapterOf('/nowhere').variables(repository)).rejectedWith(/cannot be checked/u);
   });
 
   it('should accept a worktree made by a real git, from a nested folder and through a symlink alias', async () => {
@@ -192,7 +201,7 @@ describe('FolderClaudeSettingsFiles', () => {
     await symlink(join(worktree, 'src'), alias);
 
     // Act
-    const adapter = new FolderClaudeSettingsFiles('/nowhere');
+    const adapter = adapterOf('/nowhere');
     const fromNested = await adapter.variables(join(worktree, 'src'));
     const fromAlias = await adapter.variables(alias);
 
@@ -236,7 +245,7 @@ describe('FolderClaudeSettingsFiles', () => {
     await symlink(moved, join(worktree, '.git'));
 
     // Act / Assert
-    await should(new FolderClaudeSettingsFiles('/nowhere').variables(join(worktree, 'src'))).rejectedWith(
+    await should(adapterOf('/nowhere').variables(join(worktree, 'src'))).rejectedWith(
       new RegExp(`${worktree}.*cannot be checked`, 'u'),
     );
   });
@@ -249,7 +258,7 @@ describe('FolderClaudeSettingsFiles', () => {
     await writeFile(join(hostile, '.git'), await readFile(join(worktree, '.git'), 'utf8'));
 
     // Act / Assert
-    await should(new FolderClaudeSettingsFiles('/nowhere').variables(join(hostile, 'src'))).rejectedWith(
+    await should(adapterOf('/nowhere').variables(join(hostile, 'src'))).rejectedWith(
       new RegExp(`${hostile}.*cannot be checked`, 'u'),
     );
   });
@@ -260,7 +269,7 @@ describe('FolderClaudeSettingsFiles', () => {
     const removed = join(main, 'removed');
 
     // Act / Assert
-    await should(new FolderClaudeSettingsFiles('/nowhere').variables(removed)).rejectedWith(
+    await should(adapterOf('/nowhere').variables(removed)).rejectedWith(
       new RegExp(`${removed}.*cannot be resolved`, 'u'),
     );
   });
@@ -273,7 +282,7 @@ describe('FolderClaudeSettingsFiles', () => {
     await rm(join(perWorktree, 'commondir'));
 
     // Act / Assert
-    await should(new FolderClaudeSettingsFiles('/nowhere').variables(worktree)).rejectedWith(/cannot be checked/u);
+    await should(adapterOf('/nowhere').variables(worktree)).rejectedWith(/cannot be checked/u);
   });
 
   it('should find the git root’s local file from a folder 70 levels deep', async () => {
@@ -285,7 +294,7 @@ describe('FolderClaudeSettingsFiles', () => {
     await mkdir(deep, { recursive: true });
 
     // Act
-    const found = await new FolderClaudeSettingsFiles('/nowhere').variables(deep);
+    const found = await adapterOf('/nowhere').variables(deep);
 
     // Assert
     should(found).deepEqual([{ file: join(repository, '.claude/settings.local.json'), names: ['ANTHROPIC_BASE_URL'] }]);
@@ -302,7 +311,7 @@ describe('FolderClaudeSettingsFiles', () => {
     await symlink(join(repository, 'packages/child'), alias);
 
     // Act
-    const found = await new FolderClaudeSettingsFiles('/nowhere').variables(alias);
+    const found = await adapterOf('/nowhere').variables(alias);
 
     // Assert
     should(found).deepEqual([{ file: join(repository, '.claude/settings.local.json'), names: ['ANTHROPIC_BASE_URL'] }]);
@@ -318,7 +327,7 @@ describe('FolderClaudeSettingsFiles', () => {
 
     // Act / Assert
     try {
-      await should(new FolderClaudeSettingsFiles('/nowhere').variables(folder)).rejectedWith(/cannot be checked/u);
+      await should(adapterOf('/nowhere').variables(folder)).rejectedWith(/cannot be checked/u);
     } finally {
       await chmod(folder, 0o700);
     }
@@ -335,7 +344,7 @@ describe('FolderClaudeSettingsFiles', () => {
 
     // Act / Assert
     try {
-      await should(new FolderClaudeSettingsFiles('/nowhere').variables(folder)).rejectedWith(/cannot be checked/u);
+      await should(adapterOf('/nowhere').variables(folder)).rejectedWith(/cannot be checked/u);
     } finally {
       await chmod(locked, 0o700);
     }
@@ -354,7 +363,29 @@ describe('FolderClaudeSettingsFiles', () => {
     await mkdir(insideHome);
 
     // Act / Assert
-    should(await new FolderClaudeSettingsFiles('/nowhere').variables(child)).deepEqual([]);
-    should(await new FolderClaudeSettingsFiles(home).variables(insideHome)).deepEqual([]);
+    should(await adapterOf('/nowhere').variables(child)).deepEqual([]);
+    should(await adapterOf(home).variables(insideHome)).deepEqual([]);
+  });
+
+  it('should refuse a settings file that is a symlink, which Claude Code follows and the kernel root never does', async () => {
+    // Arrange: the project file is a link to a file that sets a variable.
+    const directory = await tempDirectory('folder-claude-settings');
+    await mkdir(join(directory, '.claude'));
+    await writeFile(join(directory, 'elsewhere.json'), JSON.stringify({ env: { HIDDEN: 'x' } }));
+    await symlink(join(directory, 'elsewhere.json'), join(directory, '.claude/settings.json'));
+
+    // Act / Assert: reading nothing from it would leave the file that blanks the login unseen.
+    await should(adapterOf().variables(directory)).rejectedWith(/settings\.json is a link.*cannot be checked/u);
+  });
+
+  it('should refuse a settings file that has a second hard link, which may be a file from anywhere', async () => {
+    // Arrange
+    const directory = await tempDirectory('folder-claude-settings');
+    await mkdir(join(directory, '.claude'));
+    await writeFile(join(directory, 'elsewhere.json'), JSON.stringify({ env: { HIDDEN: 'x' } }));
+    await link(join(directory, 'elsewhere.json'), join(directory, '.claude/settings.json'));
+
+    // Act / Assert
+    await should(adapterOf().variables(directory)).rejectedWith(/second name.*cannot be checked/u);
   });
 });

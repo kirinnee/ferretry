@@ -96,3 +96,27 @@ export async function diskSessionsRoots(
     folderOf: subfolder => `${home}/state/ferrets/sessions/${subfolder}`,
   };
 }
+
+/**
+ * A REAL `harness-home` root over any absolute folder (the kernel's own fenced implementation, read-only, as the
+ * `Runtimes` plugin holds it), for the tests of an adapter that reads a folder the person named: `folders(folder)` is the
+ * handle scoped to `folder`. `parent` is the test's own temp folder; the home the fence is judged against is made
+ * beside the folders inside it.
+ */
+export async function diskFolders(parent: string): Promise<(folder: string) => RootHandle> {
+  await mkdir(`${parent}/home/state`, { recursive: true });
+  let counter = 0;
+  const port = rootsPortFor(
+    nodeFs(() => 'x'),
+    { home: `${parent}/home`, plugin: 'runtimes', worktrees: `${parent}/worktrees` },
+    ['harness-home'],
+    () => undefined,
+    {
+      random: () => {
+        counter += 1;
+        return `t${String(counter)}`;
+      },
+    },
+  );
+  return folder => port.root('harness-home', { subfolder: folder });
+}

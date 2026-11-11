@@ -282,7 +282,8 @@ export default definePlugin({
 
   permissions: {
     // `fleet`: the wrappers, one harness home per runtime, `manifest.json`, `ids.json` (writable, Runtimes alone).
-    // `harness-home`: the machine's own Claude Code and Codex homes, READ-ONLY, for the first-run scan.
+    // `harness-home`: the machine's own Claude Code and Codex homes, READ-ONLY, for the first-run scan; also, scoped to one folder at
+    // a time, the launch folder and its ancestors for the folder-settings check (`folder-claude-settings-file.ts`).
     roots: ['fleet', 'harness-home'],
     network: [],
     spawn: ['brew', 'apt-get', 'npm'],
