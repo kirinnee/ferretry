@@ -306,6 +306,12 @@ admin token. In order:
   from the shell its commands run in — `FY_SESSION_TOKEN` included. Ferretry does not override that choice.
   `FY_SESSION_BOARD_CAPABILITY`, which `fy` reads too, survives it, so a Codex ferret's `fy` still finds its
   credential (measured on Codex 0.156.1, whose default strips neither); that name stays while Codex runs ferrets.
+- **The yaml log switches are cleared, and the daemon's workers are told so.** The `yaml` library prints every token it
+  parses when `LOG_TOKENS` or `LOG_STREAM` is set, and a config text can hold a credential, so `fy`, `fyd` and the
+  converter delete both first. That deletion does not reach a Bun macro (it runs when a module is transpiled, so in
+  source runs), a `new Worker(url)` given no options object, or a default-env `Bun.spawn` child: those get the original
+  native environment. So the daemon always starts its workers with an options object (which carries the cleared
+  environment), and the macros that parse the shipped catalogs clear the switches themselves.
 - **Restart ferrets to wall them.** A running ferret's `fy` presents its credential at once, because its pane
   already carries one. Its MCP server is the `fy` it started with and keeps the admin token until the pane
   restarts (`fy restart --all`), and a pane launched before the prefix needs the same restart.
