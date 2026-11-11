@@ -49,7 +49,12 @@ export class AgendaCardLinks implements AgendaLinkSource {
     board: readonly BoardTask[] = cards,
   ): Promise<ReadonlyMap<BoardTaskId, CardAsks>> {
     const ferrets = [...new Set(board.flatMap(card => [card.owner, effectiveAssignee(card)]))];
-    const homes = await Promise.all(ferrets.map(async each => await this.homes.of(each).catch(() => each)));
+    // In batches like the agenda reads below: a board of thousands of ferrets must not land its home walks in one burst.
+    const homes: string[] = [];
+    for (let start = 0; start < ferrets.length; start += AGENDA_READ_CONCURRENCY) {
+      const batch = ferrets.slice(start, start + AGENDA_READ_CONCURRENCY);
+      homes.push(...(await Promise.all(batch.map(async each => await this.homes.of(each).catch(() => each)))));
+    }
     const sessions = [...new Set([...ferrets, ...homes])];
     const machine = this.machineId();
     const asks = new Map<BoardTaskId, { open: AgendaRef[]; asking: AgendaRef[] }>();

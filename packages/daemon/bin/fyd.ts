@@ -9357,9 +9357,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         boardSends,
         boardOwnerSends,
         async sessionId => {
-          const listed = await agenda.list(sessionId);
+          // The board's read of every card's ferret: no directory proof per session (see AgendaService.openItemsOf).
+          const listed = await agenda.openItemsOf(sessionId);
           if (!listed.ok) throw new Error(listed.error.message);
-          return listed.value.items;
+          return listed.value;
         },
         CLIENT_NAME,
         boardSessions,

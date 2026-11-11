@@ -178,6 +178,12 @@ function sameJournalFile(left: JournalFingerprint, right: JournalFingerprint): b
  * sessions, nearly all of them finished, read 135 MB/s of its own unchanged documents and stalled its loop
  * for seconds. So the bound follows the fleet the index holds, with a spare slot per session, and never
  * drops below the floor.
+ *
+ * ARCHIVED SESSIONS COUNT TOO. An archived session leaves the index but every reader can still name it — the
+ * board reads the config and state of every card's owner and assignee, closed cards included — so the bound
+ * follows every session a reader can name, live or archived. Counting only the live ones put a host with ~5,100
+ * archived sessions at the floor, and each board read walked ~8,500 documents through a 4,096-document FIFO:
+ * a miss for every one, a parse, a zod pass and a freeze, and the live fleet's documents evicted with them.
  */
 const DOCUMENT_CACHE_FLOOR = 4_096;
 const DOCUMENTS_PER_SESSION = 4;
@@ -1234,7 +1240,10 @@ export class DaemonStorage {
    * An archive pass shrinks the live set by hundreds at once; without this the bound stays at the old fleet's size.
    */
   private recountDocumentBound(): void {
-    this.documentLimit = Math.max(DOCUMENT_CACHE_FLOOR, DOCUMENTS_PER_SESSION * this.index.listSessions().length);
+    this.documentLimit = Math.max(
+      DOCUMENT_CACHE_FLOOR,
+      DOCUMENTS_PER_SESSION * (this.index.listSessions().length + this.archived.size),
+    );
     this.trimWatches();
   }
 
@@ -1789,6 +1798,7 @@ export class DaemonStorage {
     this.archived = parsed ?? new Map();
     // An archive that crashed between the registry write and the index removal leaves rows behind.
     for (const id of this.archived.keys()) if (this.index.findSession(id) !== undefined) this.index.removeSession(id);
+    this.recountDocumentBound();
     return this.archived.size;
   }
 

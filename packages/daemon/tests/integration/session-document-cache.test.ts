@@ -339,6 +339,41 @@ describe('the session document cache on a large fleet', () => {
     // Assert
     should(((await storage.readState(changed)) as Record<string, unknown>).status).equal('running');
   }, 60_000);
+
+  it('should hold the documents of an archived fleet, so a second walk of archived sessions reads none of them', async () => {
+    // Arrange — 1,400 sessions, all but 10 archived: the bound followed only the live 10 (4 × 10 < 4,096), so the
+    // 4,200 documents of a walk overflowed it and every read after that was a walked read, a parse and a freeze.
+    const { storage, fileSystem, ids } = await largeFleet(1_400);
+    await storage.loadArchive();
+    await storage.archiveSessions(ids.slice(10), async () => ({}));
+    should(storage.archivedCount()).equal(1_390);
+    const walk = async () => {
+      for (const id of ids) await Promise.all([storage.readConfig(id), storage.readState(id)]);
+    };
+    await walk();
+    fileSystem.identifiedReads = [];
+
+    // Act
+    await walk();
+
+    // Assert
+    should(fileSystem.identifiedReads).deepEqual([]);
+  }, 60_000);
+
+  it('should still read a document that changed in an archived fleet that large', async () => {
+    // Arrange
+    const { storage, paths, ids } = await largeFleet(1_400);
+    await storage.loadArchive();
+    await storage.archiveSessions(ids.slice(10), async () => ({}));
+    for (const id of ids) await storage.readState(id);
+    const changed = ids[1_000] as (typeof ids)[number];
+
+    // Act
+    await writeFile(createSessionPaths(paths, changed).state, JSON.stringify({ id: changed, status: 'running' }));
+
+    // Assert
+    should(((await storage.readState(changed)) as Record<string, unknown>).status).equal('running');
+  }, 60_000);
 });
 
 /** A watch the test inspects: the paths with an open subscription, and how many were ever closed. */

@@ -261,6 +261,19 @@ export class AgendaService {
     };
   }
 
+  /**
+   * The items a session's agenda holds, for the daemon's own board read (the cards' asks): what {@link list} returns,
+   * without proving the session in the directory. The proof exists so a WRITE never creates a phantom session
+   * directory; a read of a missing ledger creates nothing and answers no items, and the board already treats a read
+   * that fails as no asks. Across a whole board that proof was two session documents and two schemas per ferret.
+   */
+  async openItemsOf(sessionId: string): Promise<AgendaQueryResult<AgendaSnapshot['items']>> {
+    const unnamed = this.unnameable(sessionId);
+    if (unnamed !== null) return { ok: false, error: unnamed };
+    const current = await this.read(sessionId);
+    return { ok: true, value: agendaSnapshot(current ?? emptyAgendaLedger(sessionId, this.clock.now())).items };
+  }
+
   async count(sessionId: string): Promise<AgendaQueryResult<number>> {
     const listed = await this.list(sessionId);
     return listed.ok ? { ok: true, value: listed.value.count } : listed;
@@ -936,14 +949,19 @@ export class AgendaService {
   private async authorize(sessionId: string, actor?: AgendaActor): Promise<AgendaFailure | null> {
     // This instance serves sessions and redirects daemon notices through a separate machine service. Only that
     // service owns the reserved ledger; a session id (even one accepted by a directory) cannot alias it.
-    if (sessionId === MACHINE_AGENDA_ID && this.machine !== undefined)
-      return { code: 'not-found', message: 'the machine agenda is available only at /v1/machine/agenda' };
-    const invalid = invalidSession(sessionId);
-    if (invalid !== null) return invalid;
+    const unnamed = this.unnameable(sessionId);
+    if (unnamed !== null) return unnamed;
     if (actor !== undefined && !agentConfinedTo(actor, sessionId)) {
       return { code: 'forbidden', message: 'an agent may change the agenda only in its own session' };
     }
     return (await this.sessions.has(sessionId)) ? null : { code: 'not-found', message: `no such session ${sessionId}` };
+  }
+
+  /** The refusals that need no directory: the machine's reserved ledger, and an id no session can have. */
+  private unnameable(sessionId: string): AgendaFailure | null {
+    if (sessionId === MACHINE_AGENDA_ID && this.machine !== undefined)
+      return { code: 'not-found', message: 'the machine agenda is available only at /v1/machine/agenda' };
+    return invalidSession(sessionId);
   }
 }
 
