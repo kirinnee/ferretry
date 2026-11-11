@@ -158,13 +158,15 @@ describe('MAJOR-A the start self-check refuses a reachable manager', () => {
 describe('MAJOR-B login shells find the preview fy', () => {
   const callerEnv = { HOME: '/home/u', PATH: '/usr/bin' };
 
-  test('the guard env carries the nix guard, FY_HOME, FY_PORT and FY_URL', () => {
+  test('the guard env carries the nix guard, FY_HOME, FY_PORT, FY_URL, ZDOTDIR and HISTFILE', () => {
     expect(SHELL_GUARD_ENV.__ETC_PROFILE_NIX_SOURCED).toBe('1');
     expect(previewShellEnv('/h/v5', 7458)).toEqual({
       __ETC_PROFILE_NIX_SOURCED: '1',
       FY_HOME: '/h/v5',
       FY_PORT: '7458',
       FY_URL: 'http://127.0.0.1:7458',
+      ZDOTDIR: '/h/v5/no-host-creds/zdot',
+      HISTFILE: '/h/v5/no-host-creds/zdot/.bash_history',
     });
   });
 

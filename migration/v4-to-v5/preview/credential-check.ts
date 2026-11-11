@@ -5,7 +5,7 @@
  * environment to the proof, through `fy5 __daemon-probe`, and reads NAMES only, never a value:
  *
  *  - no variable of the daemon's environment has a credential-shaped name (`*_TOKEN`, `AWS_*`, `GH_*`, ...);
- *  - HOME, GH_CONFIG_DIR and GIT_CONFIG_GLOBAL are the preview's own, and the folders are EMPTY, with mode 0700 / 0600;
+ *  - HOME, GH_CONFIG_DIR and GIT_CONFIG_GLOBAL are the preview's own, and the folders are EMPTY (the HOME and the gh folder hold nothing; zdot/ holds one empty .zshrc and, by name only, a shell's own state files), with mode 0700 / 0600, and none is a link;
  *  - git reads no system config and never prompts; there is no SSH agent socket;
  *  - `ssh -G`, run in the environment a CHILD of the daemon gets (the kernel's PATH and HOME only), shows `identityfile none`:
  *    the wrapper's `ssh` shim is first on that PATH;
@@ -13,7 +13,7 @@
  *    `gh` that is `<home>/bin/gh` is the preview's own (the gh stub) and is accepted without being asked.
  */
 import { join } from 'node:path';
-import { NO_CREDS_ENV, noCredsValues } from './driver.ts';
+import { HOME_SHELL_RC, NO_CREDS_ENV, noCredsValues, SHELL_STATE_NAMES } from './driver.ts';
 import { PREVIEW } from './plan.ts';
 import type { Run, StartChecks } from './start-checks.ts';
 
@@ -37,6 +37,8 @@ export interface Inspected {
   readonly mode: number;
   readonly size: number;
   readonly entries: number;
+  /** The entry NAMES of a folder (never a content); a name is all the check reads of a shell's own state files. */
+  readonly names?: readonly string[];
 }
 
 export interface CredentialCheckInput {
@@ -125,19 +127,43 @@ export async function credentialCheck(input: CredentialCheckInput): Promise<Star
 
   // 2. What stands in the credentials' place is EMPTY and private.
   const base = join(target, PREVIEW.noCredsFolder);
-  const folders = [NO_CREDS_ENV.home, NO_CREDS_ENV.gh];
   const folderProblems: string[] = [];
-  for (const name of folders) {
-    const seen = await inspect(join(base, name));
-    if (seen === undefined || seen.kind !== 'dir' || seen.mode !== 0o700 || seen.entries !== 0)
-      folderProblems.push(`${name}/ is not an empty 0700 folder`);
-  }
+  // The HOME and the gh folder hold nothing. The terminals' ZDOTDIR folder (zdot/) holds the one empty 0600 shell rc the
+  // wrapper makes (so zsh's first-run menu does not swallow the keys typed into a terminal), and may hold, by NAME only,
+  // the files a terminal's shell wrote after the proof; any other name is a miss. A link is never a folder or a file here.
+  const home = await inspect(join(base, NO_CREDS_ENV.home));
+  if (home === undefined || home.kind !== 'dir' || home.mode !== 0o700 || home.entries !== 0)
+    folderProblems.push(`${NO_CREDS_ENV.home}/ is not an empty 0700 folder`);
+  const zdot = await inspect(join(base, NO_CREDS_ENV.zdot));
+  const rc = await inspect(join(base, NO_CREDS_ENV.zdot, HOME_SHELL_RC));
+  if (
+    zdot === undefined ||
+    zdot.kind !== 'dir' ||
+    zdot.mode !== 0o700 ||
+    rc === undefined ||
+    rc.kind !== 'file' ||
+    rc.mode !== 0o600 ||
+    rc.size !== 0 ||
+    (zdot.names ?? []).some(name => name !== HOME_SHELL_RC && !SHELL_STATE_NAMES.some(pattern => pattern.test(name)))
+  )
+    folderProblems.push(
+      `${NO_CREDS_ENV.zdot}/ is not a 0700 folder holding one empty 0600 ${HOME_SHELL_RC} and nothing but a shell's own state files` +
+        (zdot === undefined
+          ? ` (it is missing: this preview home was prepared by an older preview.sh, so its fy5 and terminals.yaml do not keep the shells' files out of the HOME)`
+          : ''),
+    );
+  const gh = await inspect(join(base, NO_CREDS_ENV.gh));
+  if (gh === undefined || gh.kind !== 'dir' || gh.mode !== 0o700 || gh.entries !== 0)
+    folderProblems.push(`${NO_CREDS_ENV.gh}/ is not an empty 0700 folder`);
   const git = await inspect(join(base, NO_CREDS_ENV.gitConfig));
   if (git === undefined || git.kind !== 'file' || git.mode !== 0o600 || git.size !== 0)
     folderProblems.push(`${NO_CREDS_ENV.gitConfig} is not an empty 0600 file`);
   if (folderProblems.length > 0)
     problems.push(
-      `refusing to go on: under ${base}: ${folderProblems.join('; ')}. Run preview.sh stop, then start again.`,
+      `refusing to go on: under ${base}: ${folderProblems.join('; ')}. ` +
+        (zdot === undefined
+          ? 'The OWNER runs preview.sh stop, preview.sh clean, then preview.sh prepare --owner; stop and start alone will not fix it.'
+          : 'Run preview.sh stop, then start again.'),
     );
   else passed.push('the daemon HOME, gh config folder and git global config are empty and private');
 
