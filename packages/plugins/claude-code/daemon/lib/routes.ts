@@ -82,7 +82,9 @@ export function dialogRoute(dialog: DialogAnswerService): RouteHandler {
       if (error instanceof DialogAnswerError)
         throw error.refusal === 'gone'
           ? new ApiError(409, error.message, 'harness_dialog_gone')
-          : new ApiError(400, error.message, 'invalid_dialog_choice');
+          : error.refusal === 'cursor_unknown'
+            ? new ApiError(409, error.message, 'dialog_cursor_unknown')
+            : new ApiError(400, error.message, 'invalid_dialog_choice');
       return paneRefusal(error);
     }
   };

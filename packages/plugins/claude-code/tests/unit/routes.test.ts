@@ -270,6 +270,19 @@ describe('the harness-dialog answer route', () => {
     expect(pane.writes).toEqual([]);
   });
 
+  test('G32 a dialog whose cursor cannot be read is a 409 dialog_cursor_unknown that says so, and nothing is typed', async () => {
+    const bare = SETTINGS.replace('❯ 1. Fix with Claude', '  1. Fix with Claude');
+    const pane = new Pane([bare]);
+    const route = dialogRoute(new DialogAnswerService(pane, sleep, TIMING));
+
+    const error = await refused(route(call({ kind: 'choice', dialogId: dialogId(SETTINGS), number: 1 })));
+
+    expect(error).toMatchObject({ status: 409, code: 'dialog_cursor_unknown' });
+    expect((error as unknown as Error).message).toContain('could not be read safely');
+    expect((error as unknown as Error).message).toContain('nothing was sent');
+    expect(pane.writes).toEqual([]);
+  });
+
   test('G32 a row the dialog does not list is a 400', async () => {
     const pane = new Pane([SETTINGS]);
     const route = dialogRoute(new DialogAnswerService(pane, sleep, TIMING));

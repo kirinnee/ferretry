@@ -89,8 +89,8 @@ function rowOf(line: string): Row | undefined {
 }
 
 /**
- * The rows above the footer: found from the cursor row outwards, every row starting its label at the
- * cursor row's column. Blank lines may separate rows (Codex's sign-in screen) but not end the list.
+ * The rows above the footer: found from the cursor row outwards (from the lowest numbered row when no cursor is drawn),
+ * every row starting its label at the anchor row's column. Blank lines may separate rows (Codex's sign-in screen) but not end the list.
  */
 function dialogRows(
   lines: readonly string[],
@@ -104,6 +104,15 @@ function dialogRows(
       break;
     }
   }
+  // No cursor drawn at all (a redraw in flight): the list is still found, from its lowest NUMBERED row, so the dialog is
+  // recognised with an unread cursor rather than taken for gone. A list with no digits has nothing else to anchor on.
+  if (cursorAt < 0)
+    for (let index = footer - 1; index >= from; index -= 1) {
+      if (rowOf(lines[index] as string)?.digit === true) {
+        cursorAt = index;
+        break;
+      }
+    }
   if (cursorAt < 0) return undefined;
   const anchor = rowOf(lines[cursorAt] as string) as Row;
   const numbered = anchor.digit;
@@ -252,12 +261,43 @@ function hooksList(lines: readonly string[], footer: string): HarnessDialog | un
 }
 
 /**
- * The harness dialog this frame is parked on, or `undefined` when it shows none.
+ * A dialog a frame is parked on, and whether its cursor was positively read.
+ *
+ * `cursorRead` is false for a RECOGNISED dialog whose cursor is on no row or on several (a redraw, a stale marker):
+ * the dialog is still there, but Enter would confirm a row nobody can name. Its `dialog` has no `selected`, and its
+ * `id` is the same as when the cursor can be read — the id never covers the cursor.
+ *
+ * `names` is every id that names this dialog (this plugin's and Ferrets' recorded one). The harness is told from the
+ * cursor glyph, so a frame with no cursor at all could be either: both spellings are listed, and an answer that names
+ * the dialog by any of them is for it.
+ */
+export interface HarnessDialogFrame {
+  readonly dialog: HarnessDialog;
+  readonly cursorRead: boolean;
+  readonly names: readonly string[];
+}
+
+/**
+ * The harness dialog this frame is parked on, or `undefined` when it shows none — or shows one whose cursor cannot be
+ * read (see {@link readHarnessDialogFrame}, which tells those apart).
  *
  * Everything a person decides on is in the result; `id` is a digest of exactly that — not of where
  * the cursor is — so moving the cursor keeps the dialog, and another dialog is another id.
  */
 export function parseHarnessDialog(pane: string): HarnessDialog | undefined {
+  const frame = readHarnessDialogFrame(pane);
+  return frame?.cursorRead === true ? frame.dialog : undefined;
+}
+
+/** The ids that name `dialog`: the one this plugin reads, and the one Ferrets recorded off the same screen. */
+const namesOf = (dialog: HarnessDialog): string[] => [dialog.id, recordedDialogId(dialog)];
+
+/**
+ * The dialog this frame is parked on, with whether its cursor was read: `undefined` only when it shows no dialog at all.
+ * An answer needs this, not {@link parseHarnessDialog}: a dialog that changed is GONE, but one whose cursor cannot be
+ * read is still there, and the person must be told to answer it at the terminal instead.
+ */
+export function readHarnessDialogFrame(pane: string): HarnessDialogFrame | undefined {
   const all = pane.replaceAll('\r\n', '\n').trimEnd().split('\n');
   const from = Math.max(0, all.length - WINDOW_LINES);
   const lines = all.slice(from);
@@ -266,7 +306,7 @@ export function parseHarnessDialog(pane: string): HarnessDialog | undefined {
   if (!FOOTER.test(footer) || !FOOTER_KEY.test(footer)) return undefined;
   if (parsePermissionPrompt(pane) !== undefined) return undefined;
   const list = hooksList(lines, footer);
-  if (list !== undefined) return list;
+  if (list !== undefined) return { dialog: list, cursorRead: true, names: namesOf(list) };
 
   const found = dialogRows(lines, 0, footerAt);
   if (found === undefined) return undefined;
@@ -290,22 +330,29 @@ export function parseHarnessDialog(pane: string): HarnessDialog | undefined {
       grantsTrust: grantsTrust(kind, label),
     };
   });
-  // Exactly one cursor row, or this is no dialog to answer: Enter confirms whichever row the cursor is really on.
-  if (found.rows.filter(row => row.cursor).length !== 1) return undefined;
-  const cursor = found.rows.find(row => row.cursor) as DialogRow;
-  const dialog = {
-    harness: harnessOf(lines[cursor.index] as string),
+  // Exactly one cursor row, or the cursor is unknown: Enter confirms whichever row the cursor is really on.
+  const marked = found.rows.filter(row => row.cursor);
+  const cursor = marked.length === 1 ? marked[0] : undefined;
+  const glyphRow = cursor ?? marked[0];
+  // With no marker at all the harness cannot be told from the frame: both spellings are candidates (see `names`).
+  const harnesses: Harness[] =
+    glyphRow === undefined ? ['claude-code', 'codex'] : [harnessOf(lines[glyphRow.index] as string)];
+  const shape = {
     kind,
     title: clip(header[titleAt] as string, LIMITS.title),
     ...(body === '' ? {} : { body: clip(body, LIMITS.body) }),
     options,
     ...(escapeWord === undefined ? {} : { escape: escapeWord }),
   };
-  return {
-    id: promptDigest(JSON.stringify(dialog)),
-    ...dialog,
-    selected: found.rows.indexOf(cursor) + 1,
-  };
+  const dialogs = harnesses.map(harness => {
+    const dialog = { harness, ...shape };
+    return { id: promptDigest(JSON.stringify(dialog)), ...dialog };
+  });
+  const first = dialogs[0] as HarnessDialog;
+  const names = dialogs.flatMap(namesOf);
+  return cursor === undefined
+    ? { dialog: first, cursorRead: false, names }
+    : { dialog: { ...first, selected: found.rows.indexOf(cursor) + 1 }, cursorRead: true, names };
 }
 
 /**

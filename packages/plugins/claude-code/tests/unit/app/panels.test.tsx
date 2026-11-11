@@ -236,6 +236,23 @@ describe('the harness-dialog panel', () => {
     expect(client.calls.filter(call => call.route === 'POST /v1/ferrets/:ferretId/dialog')).toHaveLength(1);
   });
 
+  it('says the dialog could not be read safely, in the daemon’s words and not as gone, when its cursor cannot be read', async () => {
+    const sentence =
+      'the dialog could not be read safely (its selected row is not shown clearly), so nothing was sent: answer it at the terminal';
+    const unknown = Object.assign(new Error(sentence), { status: 409, code: 'dialog_cursor_unknown' });
+    const client = daemon([{ turnState: 'needs-input', dialog: DIALOG }], {
+      'POST /v1/ferrets/:ferretId/dialog': unknown,
+    });
+    const root = await draw(client, 'harness-dialog');
+
+    await click(must(root.querySelector('[data-dialog-option="1"]'), 'trust'));
+
+    const card = must(root.querySelector(`[data-harness-dialog="${DIALOG.id}"]`), 'the dialog card');
+    expect(card.textContent).toContain('could not be read safely');
+    expect(card.textContent).toContain('answer it at the terminal');
+    expect(card.textContent).not.toContain('is gone');
+  });
+
   it('draws nothing for a ferret stopped on nothing, and nothing for a permission request', async () => {
     const empty = await draw(daemon([{}]), 'harness-dialog');
     expect(empty.textContent).toBe('');

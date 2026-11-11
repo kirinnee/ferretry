@@ -3,7 +3,12 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import should from 'should';
 import { type HarnessDialog, type HarnessDialogOption, HarnessDialogSchema } from '../../../contract/index.ts';
-import { dialogCursorMoves, paneBlockingDialog, parseHarnessDialog } from '../../../daemon/lib/pane/harness-dialog.ts';
+import {
+  dialogCursorMoves,
+  paneBlockingDialog,
+  parseHarnessDialog,
+  readHarnessDialogFrame,
+} from '../../../daemon/lib/pane/harness-dialog.ts';
 
 /**
  * The harness's own dialog a pane is parked on, read off real captured Claude Code frames
@@ -405,5 +410,50 @@ describe('parseHarnessDialog — one cursor row or no dialog to answer', () => {
     const frame = fixture('claude-2.1.220-settings-error');
 
     should(parseHarnessDialog(frame.replace(/^(\s*)❯\s(?=1\.)/mu, '$1  '))).be.undefined();
+  });
+});
+
+describe('readHarnessDialogFrame — a dialog whose cursor cannot be read is still a dialog', () => {
+  const frame = fixture('claude-2.1.220-settings-error');
+  const bare = frame.replace(/^(\s*)❯\s(?=1\.)/mu, '$1  ');
+  const both = frame.replace(/^(\s*)\s\s(?=2\.)/mu, '$1❯ ');
+
+  it('names the same dialog under the same id with the cursor missing, with no selected row', () => {
+    const read = readHarnessDialogFrame(frame);
+    const unread = readHarnessDialogFrame(bare);
+
+    should(read?.cursorRead).be.true();
+    should(unread?.cursorRead).be.false();
+    should(unread?.dialog.selected).be.undefined();
+    should(unread?.names).containEql(read?.dialog.id);
+    should(unread?.dialog.options).eql(read?.dialog.options);
+  });
+
+  it('names the same dialog with two cursors, and still reads no dialog through parseHarnessDialog', () => {
+    const unread = readHarnessDialogFrame(both);
+
+    should(unread?.cursorRead).be.false();
+    should(unread?.names).containEql(parseHarnessDialog(frame)?.id);
+    should(parseHarnessDialog(both)).be.undefined();
+    should(parseHarnessDialog(bare)).be.undefined();
+    should(paneBlockingDialog(bare)).be.undefined();
+  });
+
+  it('names a Codex dialog with no cursor under its own id: the harness is not guessed from a glyph that is not there', () => {
+    const codex = readFileSync(
+      join(import.meta.dir, '../../fixtures/codex-harness-dialogs/codex-0.156.1-hooks-review.txt'),
+      'utf8',
+    );
+    const read = readHarnessDialogFrame(codex);
+    const unread = readHarnessDialogFrame(codex.replace(/^(\s*)›\s(?=\d\.)/mu, '$1  '));
+
+    should(read?.dialog.harness).equal('codex');
+    should(unread?.cursorRead).be.false();
+    should(unread?.names).containEql(read?.dialog.id);
+    should(unread?.names).containEql(read && read.names[1]);
+  });
+
+  it('reads nothing from a frame with no dialog in it', () => {
+    should(readHarnessDialogFrame('❯ \n  ? for shortcuts')).be.undefined();
   });
 });

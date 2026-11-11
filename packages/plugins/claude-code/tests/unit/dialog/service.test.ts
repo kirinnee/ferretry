@@ -478,26 +478,64 @@ describe('DialogAnswerService — an unknown cursor is never confirmed', () => {
     const pane = new ScriptedPane([bare]);
     const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
 
-    const error = await service.answer('s1', choice(REVIEW, 1)).then(
-      () => undefined,
-      (caught: unknown) => caught,
-    );
+    const error = await refusalOf(service.answer('s1', choice(REVIEW, 1)));
 
-    should(error).be.instanceOf(DialogAnswerError);
+    should(error.refusal).equal('cursor_unknown');
+    should(error.message).containEql('could not be read safely');
+    should(error.message).containEql('nothing was sent');
+    should(error.message).containEql('answer it at the terminal');
     should(pane.writes).eql([]);
   });
 
-  it('never presses Enter when the redraw after an arrow shows no cursor', async () => {
+  it('refuses a missing cursor under the recorded id too, and Esc as well: nothing is typed', async () => {
+    const bare = REVIEW.replace('❯ 1. Fix with Claude', '  1. Fix with Claude');
+    const pane = new ScriptedPane([bare]);
+    const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const byRecorded = await refusalOf(
+      service.answer('s1', {
+        kind: 'choice',
+        dialogId: recordedDialogId(parseHarnessDialog(REVIEW) as never),
+        number: 2,
+      }),
+    );
+    const escaped = await refusalOf(service.answer('s1', pressEsc(REVIEW)));
+
+    should([byRecorded.refusal, escaped.refusal]).eql(['cursor_unknown', 'cursor_unknown']);
+    should(pane.writes).eql([]);
+  });
+
+  it('refuses two cursor rows as an unknown cursor, not as gone', async () => {
+    const both = REVIEW.replace(/^(\s*)\s\s(?=2\.)/mu, '$1❯ ');
+    should(both).not.equal(REVIEW);
+    const pane = new ScriptedPane([both]);
+    const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const error = await refusalOf(service.answer('s1', choice(REVIEW, 1)));
+
+    should(error.refusal).equal('cursor_unknown');
+    should(pane.writes).eql([]);
+  });
+
+  it('keeps the gone answer for a dialog that really changed, and for a frame that is no dialog', async () => {
+    const service = (frame: string) =>
+      new DialogAnswerService(new ScriptedPane([frame]), recordingSleep().sleep, TIMING);
+
+    const other = await refusalOf(service(TWO).answer('s1', choice(REVIEW, 1)));
+    const idle = await refusalOf(service(IDLE).answer('s1', choice(REVIEW, 1)));
+
+    should([other.refusal, idle.refusal]).eql(['gone', 'gone']);
+  });
+
+  it('never presses Enter when the redraw after an arrow shows no cursor: refused as an unknown cursor', async () => {
     const bare = REVIEW.replace('❯ 1. Fix with Claude', '  1. Fix with Claude');
     const pane = new ScriptedPane([THIRD, bare]);
     const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
 
-    const result = await service.answer('s1', choice(REVIEW, 1)).then(
-      value => value,
-      () => undefined,
-    );
+    const error = await refusalOf(service.answer('s1', choice(REVIEW, 1)));
 
-    should(result?.cleared ?? false).be.false();
-    should(pane.writes).not.containEql('Enter');
+    should(error.refusal).equal('cursor_unknown');
+    should(error.message).containEql('could not be read safely');
+    should(pane.writes).eql([UP, UP]);
   });
 });

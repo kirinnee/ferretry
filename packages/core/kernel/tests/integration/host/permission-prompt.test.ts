@@ -509,13 +509,67 @@ describe.each(ROWS)('what a $harness ferret is stopped on, through the real halv
     expect(runner.formKeys).toEqual([]);
   });
 
-  test('a dialog with no cursor glyph is refused 409 and nothing is pressed', async () => {
+  // A dialog whose cursor cannot be read is NOT a vanished dialog: the owner is told it could not be read safely and to answer
+  // it at the terminal, under a code of its own (reviewer's probes for rebuild/perm-codex-fix 07dce59d84).
+  const twoCursors = (frame: string): string => {
+    const glyph = /^(\s*)([❯›>])\s(?=1[.)])/mu.exec(frame)?.[2] ?? '>';
+    return moveCursor(frame, 1).replace(/^(\s*)\s\s(?=1[.)])/mu, `$1${glyph} `);
+  };
+  for (const [name, frameOf] of [
+    ['missing', markerless],
+    ['ambiguous', twoCursors],
+  ] as const) {
+    test(`a dialog with a ${name} cursor is refused 409 dialog_cursor_unknown, tells the owner it could not be read safely, and presses nothing`, async () => {
+      const { host, runner, id, show } = await boot(row);
+      show(frameOf(row.dialog));
+
+      const chosen = await answer(host, `/v1/ferrets/${id}/dialog`, {
+        kind: 'choice',
+        dialogId: dialog.id,
+        number: 1,
+      });
+      const escaped = await answer(host, `/v1/ferrets/${id}/dialog`, { kind: 'escape', dialogId: dialog.id });
+
+      expect([chosen.status, chosen.json<{ code: string }>().code]).toEqual([409, 'dialog_cursor_unknown']);
+      expect(chosen.body).toContain('could not be read safely');
+      expect(chosen.body).toContain('nothing was sent');
+      expect(chosen.body).toContain('answer it at the terminal');
+      expect(chosen.body).not.toContain('is gone');
+      expect([escaped.status, escaped.json<{ code: string }>().code]).toEqual([409, 'dialog_cursor_unknown']);
+      expect({ keys: keysOf(runner), pastes: runner.formPastes }).toEqual({ keys: [], pastes: [] });
+    });
+  }
+
+  test('a dialog whose cursor vanishes after an arrow is refused dialog_cursor_unknown: no Enter, and the owner is told', async () => {
     const { host, runner, id, show } = await boot(row);
-    show(markerless(row.dialog));
+    show(row.dialog);
+    // Ask for a row the cursor is NOT on, so an arrow is pressed first.
+    const at = Number(/^\s*[❯›>]\s*(\d)/mu.exec(row.dialog)?.[1]);
+    const number = at === 2 ? 1 : 2;
+    let committed: number | undefined;
+    runner.onFormWrite = ({ key }) => {
+      if (key === 'Up' || key === 'Down') show(markerless(row.dialog));
+      if (key === 'Enter') {
+        committed = number;
+        show(IDLE);
+      }
+    };
+
+    const chosen = await answer(host, `/v1/ferrets/${id}/dialog`, { kind: 'choice', dialogId: dialog.id, number });
+
+    expect([chosen.status, chosen.json<{ code: string }>().code]).toEqual([409, 'dialog_cursor_unknown']);
+    expect(chosen.body).toContain('could not be read safely');
+    expect({ committed, keys: keysOf(runner) }).toEqual({ committed: undefined, keys: [number === 1 ? 'Up' : 'Down'] });
+  });
+
+  test('a dialog that is really gone keeps the gone answer, not the unsafe-read one', async () => {
+    const { host, runner, id, show } = await boot(row);
+    show(IDLE);
 
     const chosen = await answer(host, `/v1/ferrets/${id}/dialog`, { kind: 'choice', dialogId: dialog.id, number: 1 });
 
     expect([chosen.status, chosen.json<{ code: string }>().code]).toEqual([409, 'harness_dialog_gone']);
+    expect(chosen.body).toContain('is gone');
     expect(runner.formKeys).toEqual([]);
   });
 
