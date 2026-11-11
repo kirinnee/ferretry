@@ -4,7 +4,7 @@ import manifest from '../manifest.ts';
 import { lazyComponent } from './lazy.ts';
 import type { LiveFerretsClient } from './lib/client.ts';
 
-type ViewName = 'new-ferret' | 'move' | 'header' | 'info' | 'files';
+type ViewName = 'list' | 'new-ferret' | 'move' | 'header' | 'info' | 'files';
 
 /**
  * A view module (React), loaded on first use. The specifier is a Vite dynamic-import variable (`./views/*.tsx`), which
@@ -31,6 +31,7 @@ const panel = (name: ViewName, factory: string, client: LiveFerretsClient): AppC
 export default implementApp(manifest, {
   build: ({ client }) => ({
     screens: {
+      ferrets: screen('list', 'createFerretListScreen', client),
       'new-ferret': screen('new-ferret', 'createNewFerretScreen', client),
       move: screen('move', 'createMoveScreen', client),
     },
