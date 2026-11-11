@@ -211,3 +211,35 @@ test('B3 control: the same login with a well-formed file is still admitted', asy
     await f.host.stop();
   }
 });
+
+/**
+ * B3 (round 2): parsed file contents must never masquerade as the classifier's own verdict. A file holding only a
+ * `state` field is not token material, whatever that field says, so it is not admitted and nothing is quoted.
+ */
+for (const state of ['valid', 'refreshable'] as const) {
+  test(`B3: an owned file holding only {"state":"${state}"} and no tokens is not admitted`, async () => {
+    const f = await boot({ work: { harness: 'claude-code', store: 'ferretry' } });
+    try {
+      await f.put('work/.credentials.json', { state, fake: 'FAKE-MARKER-3' });
+
+      const answered = await f.anthropic().launchEnvironment?.('work', 'claude-code');
+
+      expect(answered?.ok).toBe(false);
+      expect(JSON.stringify(answered)).not.toContain('FAKE-MARKER');
+      expect(JSON.stringify(answered)).not.toContain('CLAUDE_SECURESTORAGE_CONFIG_DIR');
+    } finally {
+      await f.host.stop();
+    }
+  });
+}
+
+test('B3: a refresh-token-only file in the expected shape is still admitted (refreshable is real material)', async () => {
+  const f = await boot({ work: { harness: 'claude-code', store: 'ferretry' } });
+  try {
+    await f.put('work/.credentials.json', { claudeAiOauth: { refreshToken: REFRESH } });
+
+    expect((await f.anthropic().launchEnvironment?.('work', 'claude-code'))?.ok).toBe(true);
+  } finally {
+    await f.host.stop();
+  }
+});
