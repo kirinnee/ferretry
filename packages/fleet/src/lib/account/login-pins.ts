@@ -8,8 +8,8 @@
  * login names are written there too (docs/launch-settings.md).
  *
  * THE SECRET RULE. Nothing a secret store or an environment reference resolves is ever written to that
- * file. The daemon copies `fixed.json` INLINE into argv for a fast or compact start, so the file's text
- * reaches `ps` and the session document. A variable that names `${secret:NAME}` (or `$OTHER`, whose
+ * file. (A literal credential in it never reaches an argv either: a fast or compact start writes the merged
+ * overlay to a per-launch file and names only its path.) A variable that names `${secret:NAME}` (or `$OTHER`, whose
  * value comes from the host's environment or the secrets file at exec) stays process-environment only,
  * resolved at launch as it always was. A LITERAL in the login's YAML is already plain text in
  * configuration and is pinned. The rule is enforced twice: {@link pinnableLoginEnvironment} filters, and

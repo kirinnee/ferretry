@@ -359,7 +359,7 @@ import {
   TmuxCodexPickerDrive,
   TmuxCodexPickerPane,
 } from '../src/adapters/session/harness/index.ts';
-import { FileLaunchSettingsDigest } from '../src/adapters/session/launch/index.ts';
+import { FileLaunchOverlayFiles, FileLaunchSettingsDigest } from '../src/adapters/session/launch/index.ts';
 import {
   DurableTerminalPaneRegistrar,
   DurableTerminalPaneStore,
@@ -689,7 +689,6 @@ import {
   type BrowserViewerHost,
   BrowserViewerStream,
   type BrowserWorkerProgram,
-  buildLaunchArgv,
   CapabilityGrantService,
   type CatalogIdentitySource,
   CatalogLinkService,
@@ -863,6 +862,7 @@ import {
   type LoopWatchdogPort,
   lateSeedCards,
   launchEnvironment,
+  type LaunchOverlayFiles,
   launchedCompactAt,
   launchGuardActive,
   launchReasoningEffort,
@@ -944,6 +944,7 @@ import {
   planInitialAttachments,
   planStartupEffort,
   portCandidates,
+  prepareLaunchArgv,
   previousConversation,
   publishableDirectCarrier,
   publisherLabel,
@@ -2448,6 +2449,8 @@ async function storeAttachments(
 interface StartFastPorts {
   /** The text of the login's fixed Claude `--settings` file: empty when it has none, nothing when unreadable. */
   readonly fixedSettings: (executable: string, harness: HarnessKind) => Promise<string | undefined>;
+  /** Where a login that pins its environment gets the per-launch settings file its fast or compact launch is named by. */
+  readonly overlayFiles: LaunchOverlayFiles;
   /** The models a Codex login advertises, for a start asking for fast mode or a reasoning level on one of them. */
   readonly codexChoices: (executable: string, cwd: string) => Promise<readonly RuntimeModelChoice[]>;
 }
@@ -2758,19 +2761,22 @@ function createSessionControlSubsystem(
       // is on by then.
       const command = await (async (): Promise<readonly string[]> => {
         try {
-          return buildLaunchArgv({
-            harness: account.kind,
-            executable,
-            remoteControl: request.remoteControl === true ? plan.extraArgs : [],
-            transcript: transcript.launchArguments,
-            readableFolders: readableHandoffs(id),
-            model: plan.model,
-            ...(effortPlan.argvEffort === undefined ? {} : { effort: effortPlan.argvEffort }),
-            ...(request.fast === undefined ? {} : { fast: request.fast }),
-            ...(launchCompactAt === undefined ? {} : { compactAt: launchCompactAt }),
-            ...(request.fast === undefined && launchCompactAt === undefined ? {} : { fixedSettings }),
-            harnessFlags: request.harnessFlags ?? [],
-          });
+          return await prepareLaunchArgv(
+            {
+              harness: account.kind,
+              executable,
+              remoteControl: request.remoteControl === true ? plan.extraArgs : [],
+              transcript: transcript.launchArguments,
+              readableFolders: readableHandoffs(id),
+              model: plan.model,
+              ...(effortPlan.argvEffort === undefined ? {} : { effort: effortPlan.argvEffort }),
+              ...(request.fast === undefined ? {} : { fast: request.fast }),
+              ...(launchCompactAt === undefined ? {} : { compactAt: launchCompactAt }),
+              ...(request.fast === undefined && launchCompactAt === undefined ? {} : { fixedSettings }),
+              harnessFlags: request.harnessFlags ?? [],
+            },
+            fast.overlayFiles,
+          );
         } catch (error) {
           if (!(error instanceof FixedSettingsUnreadableError)) throw error;
           await releaseCallsign();
@@ -3116,6 +3122,7 @@ function createConversationAdopter(
   readableHandoffs: (id: SessionId) => readonly string[],
   linker: ConversationLinker,
   fixedSettings: (executable: string, harness: HarnessKind) => Promise<string | undefined>,
+  overlayFiles: LaunchOverlayFiles,
 ): ConversationAdopter {
   return {
     adopt: async ({ harness, runtime, conversation, start }) => {
@@ -3179,6 +3186,7 @@ function createConversationAdopter(
         accountDefault: account.compactAt,
         window: plan.contextWindow,
         fixedSettings,
+        overlayFiles,
       });
       if (launch.kind === 'unreadable') {
         if (teammate !== undefined) await callsigns.release(teammate, id).catch(() => undefined);
@@ -5107,6 +5115,8 @@ interface SessionMigrateParts {
   readonly readableHandoffs: (id: SessionId) => readonly string[];
   /** The text of the fixed `--settings` file a Claude wrapper launches under, which a compaction trigger replaces. */
   readonly fixedSettings: (executable: string, harness: HarnessKind) => Promise<string | undefined>;
+  /** Where a login that pins its environment gets the per-launch settings file a compaction trigger is named by. */
+  readonly overlayFiles: LaunchOverlayFiles;
   /** The registered pane's identity (pane id, pid, process start), or nothing when none can be read. */
   readonly paneIdentity: (id: SessionId) => Promise<string | undefined>;
   /** Serializes whole migrations of one session, so two cannot restamp the same document. */
@@ -5605,22 +5615,25 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         'unavailable',
         `${account.agent}'s fixed settings could not be read, so its compaction trigger cannot be applied`,
       );
-    const command = ((): readonly string[] => {
+    const command = await (async (): Promise<readonly string[]> => {
       try {
         return authorizeSessionCommand(
           executable,
-          buildLaunchArgv({
-            harness: account.kind,
-            executable,
-            remoteControl: config.remoteControl ? plan.extraArgs : [],
-            transcript: relaunchConversation.kind === 'unresumable' ? [] : relaunchConversation.launchArguments,
-            readableFolders: parts.readableHandoffs(id),
-            model: plan.model,
-            ...(effort === undefined ? {} : { effort }),
-            ...(compactAt === undefined ? {} : { compactAt, fixedSettings }),
-            // The owner's extra flags are the source CLI's; the other harness would refuse them.
-            harnessFlags: converting ? [] : config.harnessFlags,
-          }),
+          await prepareLaunchArgv(
+            {
+              harness: account.kind,
+              executable,
+              remoteControl: config.remoteControl ? plan.extraArgs : [],
+              transcript: relaunchConversation.kind === 'unresumable' ? [] : relaunchConversation.launchArguments,
+              readableFolders: parts.readableHandoffs(id),
+              model: plan.model,
+              ...(effort === undefined ? {} : { effort }),
+              ...(compactAt === undefined ? {} : { compactAt, fixedSettings }),
+              // The owner's extra flags are the source CLI's; the other harness would refuse them.
+              harnessFlags: converting ? [] : config.harnessFlags,
+            },
+            parts.overlayFiles,
+          ),
           defaultSessionLifecycleSettings,
         );
       } catch (error) {
@@ -8021,6 +8034,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   /** The fleet settings a wrapper launches under, digested; see `FileLaunchSettingsDigest`. */
   const launchSettings = new FileLaunchSettingsDigest(new FileHarnessWrapperSource(), process.env);
   /**
+   * The per-launch Claude settings files a login that pins its environment launches under, so a credential never
+   * rides an argv (see `prepareLaunchArgv`). In the daemon's state folder, private to it.
+   */
+  const launchOverlays = new FileLaunchOverlayFiles(join(paths.state, 'launch-settings'));
+  /**
    * Every relaunch of an existing session builds its argv HERE, from its own documents and the fleet as
    * it is now — the revive, and the stale-settings read that compares against what a revive would run.
    */
@@ -8048,6 +8066,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       },
       settings: async (executable, harness) => await launchSettings.digest(executable, harness),
       fixedSettings: async (executable, harness) => await launchSettings.fixedSettings(executable, harness),
+      overlayFiles: launchOverlays,
       transcriptStarted: async file => await Bun.file(file).exists(),
       authorize: (executable, argv) => authorizeSessionCommand(executable, argv, defaultSessionLifecycleSettings),
       record: async (id, launch) => {
@@ -9622,6 +9641,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             startHooks,
             {
               fixedSettings: async (executable, harness) => await launchSettings.fixedSettings(executable, harness),
+              overlayFiles: launchOverlays,
               codexChoices: async (executable, cwd) => await codexRuntimeModels.get(executable, cwd),
             },
             boardWorld.cards,
@@ -9671,6 +9691,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
             new NodeConversationLinker(),
             async (executable, harness) => await launchSettings.fixedSettings(executable, harness),
+            launchOverlays,
           ),
         },
         seamsOf.conversationImport(world),
@@ -10843,6 +10864,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionDirectory: id => createSessionPaths(paths, id).directory,
         readableHandoffs: id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
         fixedSettings: async (executable, harness) => await launchSettings.fixedSettings(executable, harness),
+        overlayFiles: launchOverlays,
         paneIdentity: async id => {
           // Only a LIVE pane that still is exactly the registered one counts: a registration alone can name a
           // pane that is dead, or one a failed relaunch replaced before it could register the replacement.

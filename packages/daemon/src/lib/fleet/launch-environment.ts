@@ -60,9 +60,10 @@ export interface ProjectLaunchEnvironment {
 }
 
 /**
- * The environment variables a folder's own Claude settings files set, by file (`.claude/settings.json`,
- * `.claude/settings.local.json`). NAMES ONLY: the value of a project's setting is not this daemon's
- * business and never leaves the adapter.
+ * The environment variables the Claude settings files that apply to a launch folder set, by file: the folder's own
+ * two, the repository root's local file, the main checkout's in a worktree. `file` is a path (relative to the folder
+ * when inside it). NAMES ONLY: the value of a project's setting is not this daemon's business and never leaves the
+ * adapter.
  */
 export interface FolderSettingsVariables {
   variables(cwd: string): Promise<readonly { readonly file: string; readonly names: readonly string[] }[]>;
@@ -83,7 +84,7 @@ export class FolderSettingsOverrideError extends Error {
     readonly runtime: string,
   ) {
     super(
-      `this folder's ${file} sets ${variable}, which overrides runtime ${runtime}'s login (it takes ${variable} from the secret store), so it would start signed out. Remove ${variable} from ${file}, or keep it out of the secret store.`,
+      `this folder's settings file ${file} sets ${variable}, which overrides runtime ${runtime}'s login (it takes ${variable} from the secret store or the host environment), so it would start signed out. Remove ${variable} from ${file}, or keep it out of the secret store.`,
     );
     this.name = 'FolderSettingsOverrideError';
   }
@@ -147,15 +148,19 @@ export class FleetLaunchEnvironment implements AccountLaunchEnvironment {
     const account = (await this.inventory.accounts()).find(
       published => wrapperNameOf(published.wrapper) === name || published.wrapper === wrapper,
     );
-    if (account === undefined || Object.keys(account.secretEnv).length === 0) return {};
-    // Before the store is opened: a folder that would blank the login refuses the start outright.
-    if (account.kind === 'claude' && cwd !== undefined && this.folderSettings !== undefined) {
-      const taken = new Set(Object.keys(account.secretEnv));
+    if (account === undefined) return {};
+    // Before the store is opened: a folder that would blank the login refuses the start outright. EVERY variable
+    // left to the process environment counts — a `${secret:}` one and a bare `$OTHER` reference alike — because
+    // neither is pinned in a settings file, so a folder's own `env` outranks both.
+    const secretNames = Object.keys(account.secretEnv);
+    const taken = new Set([...secretNames, ...(account.referencedEnv ?? [])]);
+    if (account.kind === 'claude' && taken.size > 0 && cwd !== undefined && this.folderSettings !== undefined) {
       for (const { file, names } of await this.folderSettings.variables(cwd)) {
         const clash = names.find(variable => taken.has(variable));
         if (clash !== undefined) throw new FolderSettingsOverrideError(file, clash, name);
       }
     }
+    if (secretNames.length === 0) return {};
     // Opened only now, and only for an account that declared it needs something. A fleet nobody
     // gave a profile to never touches the store at all.
     // Renewal on USE: the only moment an MCP token is refreshed is the moment a launch needs it.

@@ -55,6 +55,7 @@ import { type SettingsObject, serializeSettings } from '../settings.ts';
 import { sharedHistoryPoolDirectory, sharedHistoryPoolRequests } from '../shared-history.ts';
 import { CREDENTIAL_ENV } from '../usage.ts';
 import {
+  envReferenceName,
   MANAGED_MARKER,
   RUNTIME_NAME_ENV,
   renderCommandScript,
@@ -195,6 +196,8 @@ interface PlannedRuntime {
   /** The runtime's own `compactAt`, else its profile's. Absent is `auto`. */
   readonly compactAt?: CompactAt;
   readonly secretEnv: Readonly<Record<string, string>>;
+  /** The names of the variables that are a bare `$OTHER` reference, resolved at exec and never pinned. */
+  readonly referencedEnv: readonly string[];
   /** Why it cannot launch, when it cannot. */
   readonly blocked?: string;
 }
@@ -412,16 +415,23 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     for (const [variable, reason] of Object.entries(REFUSED_LAUNCH_VARIABLES)) {
       if (variable in env) problems.push({ runtime: name, message: `it may not set ${variable}: ${reason}` });
     }
-    // The login's literal variables, pinned in the --settings file as well, so a folder's own settings cannot blank them.
+    // The login's variables, pinned in the --settings file as well, so a folder's own settings cannot blank
+    // them: the KEYS the login and the catalog name, at the value the launch will actually run with (a
+    // profile's same-named variable wins here as it does in the process environment). Only literals are
+    // pinned; a reference stays in the process environment and is published below.
     const profileSettingsFlag = resolved.flags.some(
       ({ flag }) => flag === '--settings' || flag.startsWith('--settings='),
     );
     const pins =
       harness === 'claude'
-        ? pinnableLoginEnvironment({
-            ...(store.store === 'environment' ? credentialLaunchEnvironment(store) : {}),
-            ...derived.env,
-          })
+        ? pinnableLoginEnvironment(
+            Object.fromEntries(
+              Object.keys({
+                ...(store.store === 'environment' ? credentialLaunchEnvironment(store) : {}),
+                ...derived.env,
+              }).flatMap(variable => (variable in env ? [[variable, env[variable] as string]] : [])),
+            ),
+          )
         : {};
     if (!runtime.agent && Object.keys(pins).length > 0 && profileSettingsFlag) {
       problems.push({
@@ -516,6 +526,10 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       secretEnv: sorted(
         Object.fromEntries(Object.entries(env).filter(([, value]) => secretReferencesIn(value).length > 0)),
       ),
+      referencedEnv: Object.entries(env)
+        .filter(([, value]) => secretReferencesIn(value).length === 0 && envReferenceName(value) !== undefined)
+        .map(([variable]) => variable)
+        .sort(),
       ...(blocked === undefined ? {} : { blocked }),
     });
   }
@@ -555,6 +569,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         available: reason === undefined,
         unavailableReason: reason ?? null,
         secretEnv: runtime.secretEnv,
+        ...(runtime.referencedEnv.length === 0 ? {} : { referencedEnv: runtime.referencedEnv }),
       };
     }),
     runtimes: planned.map(runtime => ({

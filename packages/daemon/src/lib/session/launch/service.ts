@@ -24,8 +24,9 @@ import { type CoreAccount, canServeModel } from '../../core/inventory.ts';
 import type { SessionPlanner } from '../../core/session-planner.ts';
 import type { SessionId } from '../../session-id.ts';
 import { relaunchCommand } from '../transcript/relaunch.ts';
-import { buildLaunchArgv, FixedSettingsUnreadableError, settingsArguments, transcriptLaunchArguments } from './argv.ts';
+import { FixedSettingsUnreadableError, settingsArguments, transcriptLaunchArguments } from './argv.ts';
 import { currentLaunchCompactAt, currentLaunchEffort, currentLaunchFast, currentLaunchModel } from './current.ts';
+import { type LaunchOverlayFiles, prepareLaunchArgv } from './overlay-file.ts';
 
 /** What a relaunch reads about one session. */
 export interface LaunchSubject {
@@ -63,6 +64,11 @@ export interface SessionLaunchPorts {
    * when the login has none, nothing when it cannot be read at all.
    */
   readonly fixedSettings: (executable: string, harness: HarnessKind) => Promise<string | undefined>;
+  /**
+   * Where the per-launch settings file of a login that pins its environment is written. Absent refuses such a launch
+   * (its overlay would otherwise have to ride the argv), so a session that needs one is left to its record.
+   */
+  readonly overlayFiles?: LaunchOverlayFiles;
   /** A digest of the fleet settings this wrapper launches under now, or nothing when unreadable. */
   readonly settings: (executable: string, harness: HarnessKind) => Promise<string | undefined>;
   /** Whether the harness has written this transcript, i.e. already created its session. */
@@ -95,7 +101,7 @@ export class SessionLaunchService {
   async relaunch(id: SessionId): Promise<readonly string[] | undefined> {
     const subject = await this.ports.subject(id);
     if (subject === undefined) return undefined;
-    const planned = await this.#plan(id, subject);
+    const planned = await this.#plan(id, subject, { write: true });
     if (planned === undefined) return undefined;
     const argv = this.ports.authorize(planned.executable, planned.argv);
     const settings = await this.ports.settings(planned.executable, planned.harness);
@@ -115,7 +121,7 @@ export class SessionLaunchService {
   async drift(id: SessionId): Promise<SessionRelaunchSettings> {
     const subject = await this.ports.subject(id);
     if (subject === undefined) return UNKNOWN;
-    const planned = await this.#plan(id, subject);
+    const planned = await this.#plan(id, subject, { write: false });
     if (planned === undefined) return UNKNOWN;
     const reasons: SessionRelaunchDrift[] = [];
     if (JSON.stringify(settingsArguments(subject.command)) !== JSON.stringify(settingsArguments(planned.argv)))
@@ -127,7 +133,11 @@ export class SessionLaunchService {
   }
 
   /** The argv a start would build for this session today, on the model and effort it is on now. */
-  async #plan(id: SessionId, subject: LaunchSubject): Promise<PlannedLaunch | undefined> {
+  async #plan(
+    id: SessionId,
+    subject: LaunchSubject,
+    options: { readonly write: boolean },
+  ): Promise<PlannedLaunch | undefined> {
     const { config, state } = subject;
     const resolved = await this.ports.account(config.agent);
     // A family change under the same name is a different account, and its flags would not parse.
@@ -161,19 +171,23 @@ export class SessionLaunchService {
     if (fixedSettings === undefined) return undefined;
     try {
       return {
-        argv: buildLaunchArgv({
-          harness: account.kind,
-          executable,
-          remoteControl: config.remoteControl ? outcome.plan.extraArgs : [],
-          transcript: transcriptLaunchArguments(account.kind, config.transcript, subject.command),
-          readableFolders: this.ports.readableFolders(id),
-          model: outcome.plan.model,
-          ...(effort === undefined ? {} : { effort }),
-          ...(fast === undefined ? {} : { fast }),
-          ...(compactAt === undefined ? {} : { compactAt }),
-          ...(fast === undefined && compactAt === undefined ? {} : { fixedSettings }),
-          harnessFlags: config.harnessFlags,
-        }),
+        argv: await prepareLaunchArgv(
+          {
+            harness: account.kind,
+            executable,
+            remoteControl: config.remoteControl ? outcome.plan.extraArgs : [],
+            transcript: transcriptLaunchArguments(account.kind, config.transcript, subject.command),
+            readableFolders: this.ports.readableFolders(id),
+            model: outcome.plan.model,
+            ...(effort === undefined ? {} : { effort }),
+            ...(fast === undefined ? {} : { fast }),
+            ...(compactAt === undefined ? {} : { compactAt }),
+            ...(fast === undefined && compactAt === undefined ? {} : { fixedSettings }),
+            harnessFlags: config.harnessFlags,
+          },
+          this.ports.overlayFiles,
+          options,
+        ),
         model: outcome.plan.model,
         effort,
         fast,

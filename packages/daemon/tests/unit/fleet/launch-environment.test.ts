@@ -313,4 +313,44 @@ describe('FleetLaunchEnvironment — a folder that would blank the login', () =>
     // Act / Assert
     should(await launcher.forWrapper(account().wrapper, '/work/pe')).deepEqual({});
   });
+
+  it('should refuse a folder that blanks a variable the login takes from the environment by bare reference', async () => {
+    // Arrange: nothing in the secret store; the login's token is a bare reference resolved when the wrapper runs.
+    const referenced = account({ referencedEnv: ['ANTHROPIC_AUTH_TOKEN'] });
+    const secrets = store();
+    const launcher = new FleetLaunchEnvironment(
+      inventory(referenced),
+      secrets,
+      undefined,
+      undefined,
+      folder({ file: '/work/.claude/settings.local.json', names: ['ANTHROPIC_AUTH_TOKEN'] }),
+    );
+
+    // Act
+    const refused = await launcher.forWrapper(referenced.wrapper, '/work/pe/child').then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+
+    // Assert: named by its path and key, and the store was never opened for it.
+    should(refused).be.instanceOf(FolderSettingsOverrideError);
+    should(refused?.message).containEql('/work/.claude/settings.local.json');
+    should(refused?.message).containEql('ANTHROPIC_AUTH_TOKEN');
+    should(secrets.opened).equal(0);
+  });
+
+  it('should start, with nothing to resolve, when the folder sets only other variables than the referenced ones', async () => {
+    // Arrange
+    const referenced = account({ referencedEnv: ['ANTHROPIC_AUTH_TOKEN'] });
+    const launcher = new FleetLaunchEnvironment(
+      inventory(referenced),
+      store(),
+      undefined,
+      undefined,
+      folder({ file: '.claude/settings.json', names: ['SOMETHING_ELSE'] }),
+    );
+
+    // Act / Assert
+    should(await launcher.forWrapper(referenced.wrapper, '/work/pe')).deepEqual({});
+  });
 });

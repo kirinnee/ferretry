@@ -1261,5 +1261,82 @@ describe('materialiseFleet', () => {
       // Assert
       should(error.problems[0]?.message).containEql('honours only one');
     });
+
+    describe('profile precedence and what is left to the process environment', () => {
+      const withProfileEnv = (profileEnv: Record<string, string>, env: Record<string, string> = LOGE): AccountModel =>
+        modelOf({
+          credentials: { loge: { harness: 'claude', store: 'environment', env } },
+          components: {
+            ...COMPONENTS,
+            settings: { tuning: { harness: 'claude', env: profileEnv, file: 'claude.json' } },
+          },
+          profiles: { default: { layers: [...DEFAULT_LAYERS, 'settings/tuning'] } },
+          runtimes: { 'claude-loge': { credential: 'loge', profile: 'default', agent: true } },
+        });
+
+      it('should pin the profile’s value for a variable both it and the login set, as the wrapper exports it', () => {
+        // Act
+        const result = plan(withProfileEnv({ ANTHROPIC_BASE_URL: 'https://profile.example/anthropic' }), {
+          bodies: { settings: { tuning: {} } },
+        });
+
+        // Assert — the pin and the process environment agree, so --settings cannot hand the login's value back.
+        should((overlayOf(result).env as Record<string, string>).ANTHROPIC_BASE_URL).equal(
+          'https://profile.example/anthropic',
+        );
+        should(wrapperOf(result, 'claude-loge')).containEql(
+          "export ANTHROPIC_BASE_URL='https://profile.example/anthropic'",
+        );
+        should((overlayOf(result).env as Record<string, string>).ANTHROPIC_AUTH_TOKEN).equal('loge-internal');
+      });
+
+      it('should not pin a login literal a profile overrides with a reference, and publish the name', () => {
+        // Act
+        const result = plan(withProfileEnv({ ANTHROPIC_AUTH_TOKEN: '$HOST_TOKEN' }), {
+          bodies: { settings: { tuning: {} } },
+        });
+
+        // Assert — the login's own literal would otherwise win over the profile's reference.
+        const overlay = overlayOf(result);
+        should(Object.keys(overlay.env as object)).not.containEql('ANTHROPIC_AUTH_TOKEN');
+        should(JSON.stringify(overlay)).not.containEql('loge-internal');
+        should(JSON.stringify(overlay)).not.containEql('HOST_TOKEN');
+        should(result.manifest.accounts[0]?.referencedEnv).eql(['ANTHROPIC_AUTH_TOKEN']);
+      });
+
+      it('should not pin a variable only the profile sets', () => {
+        // Act
+        const result = plan(withProfileEnv({ LOG_LEVEL: 'debug' }), { bodies: { settings: { tuning: {} } } });
+
+        // Assert
+        should(Object.keys(overlayOf(result).env as object)).not.containEql('LOG_LEVEL');
+      });
+
+      it('should publish the name of every bare reference left to the process environment, never a value', () => {
+        // Act
+        const result = plan(
+          logeModel(true, {
+            ...LOGE,
+            ANTHROPIC_AUTH_TOKEN: '$HOST_TOKEN',
+            ANTHROPIC_CUSTOM_HEADERS: '${HOST_HEADERS}',
+            AWS_SECRET_ACCESS_KEY: '${secret:AWS_KEY}',
+          }),
+        );
+
+        // Assert — the secret one is in secretEnv, the bare ones in referencedEnv; literals are in neither.
+        const account = result.manifest.accounts[0];
+        should(account?.referencedEnv).eql(['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_CUSTOM_HEADERS']);
+        should(Object.keys(account?.secretEnv ?? {})).containEql('AWS_SECRET_ACCESS_KEY');
+        should(JSON.stringify(result.manifest)).not.containEql('HOST_TOKEN');
+      });
+
+      it('should publish no referencedEnv for a login that references nothing', () => {
+        // Act
+        const result = plan(logeModel(true));
+
+        // Assert
+        should(result.manifest.accounts[0]).not.have.property('referencedEnv');
+      });
+    });
   });
 });

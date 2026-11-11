@@ -4,3 +4,4 @@ export * from './current.ts';
 export * from './instruction-refresh.ts';
 export * from './outdated.ts';
 export * from './service.ts';
+export * from './overlay-file.ts';
