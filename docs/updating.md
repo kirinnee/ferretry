@@ -136,7 +136,7 @@ rewritten. A stopped daemon is left alone: its next start rewrites the plist.
 
 Homebrew only auto-updates its taps about once a day (and never with `HOMEBREW_NO_AUTO_UPDATE`), so a
 bare `brew upgrade --cask` can answer "already up to date" or install an old cask. The update therefore
-prints a progress line and runs `brew update` first (tapping `kirinnee/ferretry` again if the tap has
+prints a progress line and runs `brew update` first (running `brew tap kirinnee/ferretry` again if the tap has
 gone missing), then `brew upgrade --cask`, then proves the installed version is the target. A failure
 at any step names the manual recovery. The cask clears macOS quarantine in its own `postflight`.
 
