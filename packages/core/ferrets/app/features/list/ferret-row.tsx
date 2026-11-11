@@ -9,13 +9,14 @@
  * right-click alone.
  */
 
-import { type MouseEvent, type ReactNode, useContext, useRef } from 'react';
+import { type ReactNode, useContext, useRef, useState } from 'react';
 import type { FerretSummary } from '../../../contract/index.ts';
 import { ferretTitles } from '../../lib/ferret-title.ts';
 import { StatusMark } from '../../lib/status-mark.tsx';
 import { RouteLink } from '../../ui.ts';
 import { ferretChatHref } from '../new-ferret/hrefs.ts';
 import { ferretDirectory, isPinned, isStopped } from './list-model.ts';
+import { useRowContextGesture } from './row-context-gesture.ts';
 import { RowMenuContext, type RowMenuTrigger } from './row-menu-context.ts';
 
 export interface FerretRowProps {
@@ -29,6 +30,7 @@ export function FerretRow({ ferret, daemon, active, onNavigate }: FerretRowProps
   const { title, ferret: callsign } = ferretTitles(ferret);
   const openMenu = useContext(RowMenuContext);
   const link = useRef<HTMLAnchorElement | null>(null);
+  const [pressing, setPressing] = useState(false);
   const ask = (x: number, y: number, trigger: RowMenuTrigger): void =>
     openMenu?.({
       ferret,
@@ -42,6 +44,13 @@ export function FerretRow({ ferret, daemon, active, onNavigate }: FerretRowProps
         return true;
       },
     });
+  // Right-click, the Menu key, Shift+F10 and a held finger all open the same menu; `undefined` (no provider) leaves the
+  // browser's own context menu and every key alone.
+  const gesture = useRowContextGesture<FerretSummary>(
+    openMenu === undefined ? undefined : (_ferret, x, y, by) => ask(x, y, by),
+    ferret,
+    setPressing,
+  );
   return (
     <li className="fy-sbar__row">
       <RouteLink
@@ -49,16 +58,10 @@ export function FerretRow({ ferret, daemon, active, onNavigate }: FerretRowProps
         aria-haspopup={openMenu === undefined ? undefined : 'menu'}
         className="fy-sbar__session"
         data-sbar-pinned={isPinned(ferret) ? '' : undefined}
+        data-sbar-pressing={pressing ? '' : undefined}
         data-sbar-session={ferret.id}
         data-sbar-stopped={isStopped(ferret) ? '' : undefined}
-        onContextMenu={
-          openMenu === undefined
-            ? undefined
-            : (event: MouseEvent<HTMLAnchorElement>) => {
-                event.preventDefault();
-                ask(event.clientX, event.clientY, 'mouse');
-              }
-        }
+        {...gesture}
         ref={link}
         title={`${title}${callsign === null ? '' : ` — ${callsign}`}\n${ferret.folder}`}
         to={ferretChatHref(daemon, ferret.id)}
