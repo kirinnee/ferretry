@@ -13,6 +13,13 @@ import { daemonHomeHref } from '@ferretry/app';
 export const movePath = (daemon: string, ferret: string, convert = false): string =>
   `${daemonHomeHref(daemon)}/ferrets/${encodeURIComponent(ferret)}/move${convert ? '?mode=cli' : ''}`;
 
+/** The ferret a route is about (`ferrets/:ferret/…`: its chat, its move page), or `undefined` for a route about none. */
+export const ferretOfRoute = (
+  route:
+    | { readonly kind: 'screen'; readonly params: Readonly<Record<string, string>> }
+    | { readonly kind: 'home' | 'device-settings' | 'daemon-home' | 'daemon-settings' | 'not-found' },
+): string | undefined => (route.kind === 'screen' ? route.params.ferret : undefined);
+
 /** The daemon a route is under, or `undefined` for a route with none (home, device settings, a daemon-less screen). */
 export const daemonOfRoute = (
   route:
