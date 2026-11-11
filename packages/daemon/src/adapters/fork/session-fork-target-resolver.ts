@@ -42,6 +42,7 @@ import type { CoreAccount, HarnessKind } from '../../lib/core/inventory.ts';
 import type { SessionPlanner } from '../../lib/core/session-planner.ts';
 import type { SessionForkCommand } from '../../lib/fork/identity.ts';
 import type { SessionForkTargetResolver as SessionForkTargetResolverPort } from '../../lib/fork/types.ts';
+import { recordedModelSource } from '../../lib/session/launch/current.ts';
 import type { TransferTargetChoice } from '../../lib/transfer/types.ts';
 
 /**
@@ -191,6 +192,8 @@ export class SessionForkTargetResolver implements SessionForkTargetResolverPort 
       model: planned.plan.model,
       effort: command.effort,
       contextWindow: planned.plan.contextWindow,
+      // Frozen with the model: the binder re-plans the resolved model, which always reads as asked for.
+      modelSource: recordedModelSource(planned.plan.modelSource),
     };
   }
 

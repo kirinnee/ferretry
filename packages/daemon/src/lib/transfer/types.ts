@@ -95,6 +95,11 @@ export interface TransferTargetChoice {
   readonly model: string | null;
   readonly effort: string | null;
   readonly contextWindow: number;
+  /**
+   * Whether the caller chose `model` or it is the account's default, decided where the model was
+   * resolved and carried to the new session's record untouched. Absent on a plan frozen before this field.
+   */
+  readonly modelSource?: 'requested' | 'account-default';
 }
 
 /** One preparation, in the caller's terms. */

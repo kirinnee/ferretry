@@ -854,24 +854,32 @@ describe('profileCatalog', () => {
     });
   });
 
-  it('should say nothing applies, without naming a tool, when the only layers are model sets for no tool', () => {
+  it('should apply a model set of third-party ids on every tool, skipping nothing', () => {
     // Act
     const actual = profileCatalog(modelOf(), withReadFacts());
 
-    // Assert
+    // Assert — llama-4 is neither tool's own id, so it is served through whichever CLI the login drives
     const junk = profileNamed(actual, 'junk');
-    should(stackOf(junk, 'claude').available).deepEqual({
-      available: false,
-      reason: 'Nothing here applies on Claude Code.',
-    });
-    should(stackOf(junk, 'codex').available).deepEqual({
-      available: false,
-      reason: 'Nothing here applies on Codex.',
-    });
-    should(stackOf(junk, 'claude').skipped).deepEqual([
+    should(stackOf(junk, 'claude').available).deepEqual({ available: true });
+    should(stackOf(junk, 'codex').available).deepEqual({ available: true });
+    should(stackOf(junk, 'claude').skipped).deepEqual([]);
+    should(stackOf(junk, 'codex').skipped).deepEqual([]);
+  });
+
+  it('should say nothing applies, without naming a tool, when the only layer is a model set for the other tool', () => {
+    // Arrange
+    const model = modelOf({ profiles: { ...PROFILES, 'gpt-only': { layers: ['modelSets/gpt'] } } });
+
+    // Act
+    const actual = profileCatalog(model, withReadFacts());
+
+    // Assert
+    const stack = stackOf(profileNamed(actual, 'gpt-only'), 'claude');
+    should(stack.available).deepEqual({ available: false, reason: 'Nothing here applies on Claude Code.' });
+    should(stack.skipped).deepEqual([
       {
-        reference: 'modelSets/junk',
-        sentence: 'Model set junk has no Claude Code model, so it is skipped on Claude Code.',
+        reference: 'modelSets/gpt',
+        sentence: 'Model set gpt has no Claude Code model, so it is skipped on Claude Code.',
       },
     ]);
   });

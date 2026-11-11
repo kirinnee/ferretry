@@ -622,6 +622,7 @@ describe('resolveProfile — model sets (§3.4, K8, E23)', () => {
         heavy: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' },
         light: { models: ['claude-haiku-5-5', 'claude-opus-5-5'], default: 'claude-haiku-5-5' },
         alien: { models: ['llama-4'], default: 'llama-4' },
+        'kimi-models': { models: ['kimi-k3'], default: 'kimi-k3' },
       },
     },
     {
@@ -629,6 +630,7 @@ describe('resolveProfile — model sets (§3.4, K8, E23)', () => {
       mixed: { layers: ['modelSets/mixed'] },
       stacked: { layers: ['modelSets/heavy', 'modelSets/claude-models', 'modelSets/light'] },
       alien: { layers: ['modelSets/alien'] },
+      kimi: { layers: ['modelSets/claude-models', 'modelSets/kimi-models'] },
     },
   );
 
@@ -710,13 +712,32 @@ describe('resolveProfile — model sets (§3.4, K8, E23)', () => {
     should(actual.modelSet).containDeep({ layer: { name: 'two' } });
   });
 
-  it('should skip a set none of whose ids belong to any harness', () => {
-    // Act
-    const actual = resolved({ model: imported, profile: 'alien', harness: 'claude' });
+  it('should apply a set of third-party ids on whichever harness is asked', () => {
+    // Act — a model id no harness claims (llama-4, kimi-k3) is served through the CLI the login drives
+    const claude = resolved({ model: imported, profile: 'alien', harness: 'claude' });
+    const codex = resolved({ model: imported, profile: 'alien', harness: 'codex' });
 
     // Assert
-    should(actual.availability).deepEqual({ available: false, reason: 'nothing-applies' });
-    should(actual.modelSet).deepEqual({ source: 'harness-default' });
+    should(claude.skipped).deepEqual([]);
+    should(claude.modelSet).containDeep({ source: 'model-set', layer: { name: 'alien' }, default: 'llama-4' });
+    should(codex.skipped).deepEqual([]);
+    should(codex.modelSet).containDeep({ source: 'model-set', layer: { name: 'alien' }, default: 'llama-4' });
+  });
+
+  it('should let a later third-party set win over the Claude set before it on a Claude runtime', () => {
+    // Act — the owner's `kimi` profile: claude-default's set, then kimi-models
+    const actual = resolved({ model: imported, profile: 'kimi', harness: 'claude' });
+
+    // Assert
+    should(actual.skipped).deepEqual([]);
+    should(actual.modelSet).containDeep({
+      source: 'model-set',
+      layer: { name: 'kimi-models' },
+      models: [{ id: 'kimi-k3', available: true }],
+      default: 'kimi-k3',
+    });
+    should(actual.conflicts).have.length(1);
+    should(actual.conflicts[0]).containDeep({ field: 'model', winner: { value: 'kimi-k3' } });
   });
 
   it('should strike through what the login cannot use and fall back to the first it can', () => {

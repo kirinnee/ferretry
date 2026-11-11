@@ -151,8 +151,24 @@ describe('SessionForkTargetResolver', () => {
       model: 'claude-opus-5',
       effort: 'high',
       contextWindow: 1_000_000,
+      modelSource: 'requested',
     });
     should(catalogue.calls).eql([]);
+  });
+
+  it('should freeze whether the caller chose the model, because the frozen model alone cannot say', async () => {
+    // Act
+    const named = await resolver(served(CLAUDE)).resolve({
+      agent: 'claude-auto-zelda',
+      model: 'claude-opus-5',
+      effort: null,
+    });
+    const unnamed = await resolver(served(CLAUDE)).resolve({ agent: 'claude-auto-zelda', model: null, effort: null });
+
+    // Assert: both carry the same model; only the provenance differs.
+    should(unnamed.model).equal(named.model);
+    should(named.modelSource).equal('requested');
+    should(unnamed.modelSource).equal('account-default');
   });
 
   it('should take the harness from the account rather than from the agent the caller spelled', async () => {

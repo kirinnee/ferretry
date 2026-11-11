@@ -67,14 +67,24 @@ const CLAUDE_ALIASES: ReadonlySet<string> = new Set(['opus', 'sonnet', 'haiku', 
  *
  * The ONE owner of this mapping: a Claude id is `claude-…` or one of Claude Code's aliases (each
  * optionally with a context suffix such as `[1m]`); a Codex id is `gpt-…`, `codex-…` or an `o<n>…`
- * reasoning model. An id that is neither belongs to no harness, so a model set holding only such
- * ids applies nowhere and says so.
+ * reasoning model. An id that is neither is a THIRD-PARTY id (`kimi-k3`, `glm-5.3`, `deepseek-…`)
+ * served through whichever CLI its login drives, so it belongs to no harness in particular: see
+ * `modelFitsHarness`, which is how a model set decides whether such an id applies.
  */
 export function modelHarness(id: string): HarnessKind | undefined {
   const bare = id.replace(/\[[^\]]*\]$/, '').toLowerCase();
   if (bare.startsWith('claude-') || CLAUDE_ALIASES.has(bare)) return 'claude';
   if (bare.startsWith('gpt-') || bare.startsWith('codex-') || /^o\d/.test(bare)) return 'codex';
   return undefined;
+}
+
+/**
+ * Whether a model id can run on a harness: it is that harness's own, or it is no known harness's
+ * (a third-party id fits whichever CLI the login drives). Only an id that is KNOWN to be the other
+ * harness's is turned away.
+ */
+export function modelFitsHarness(id: string, harness: HarnessKind): boolean {
+  return (modelHarness(id) ?? harness) === harness;
 }
 
 // ── Flattening ───────────────────────────────────────────────────────────────────────────────────
@@ -355,7 +365,7 @@ export function resolveProfile(input: ResolveInput): ResolveResult {
     }
     if (layer.componentKind === 'modelSets') {
       const set = componentOf(catalogue, 'modelSets', layer.name);
-      if (!set.models.some(id => modelHarness(id) === harness)) {
+      if (!set.models.some(id => modelFitsHarness(id, harness))) {
         skipped.push({ layer, reason: 'no-model-for-harness' });
         continue;
       }
@@ -559,7 +569,7 @@ function resolveModelSet(
 ): ResolvedModelSet {
   const candidates = layers.map(layer => {
     const set = componentOf(catalogue, 'modelSets', layer.name);
-    const ids = set.models.filter(id => modelHarness(id) === harness);
+    const ids = set.models.filter(id => modelFitsHarness(id, harness));
     // A mixed set's own default may be the other harness's model: the first of ours stands in.
     const declaredDefault = ids.includes(set.default) ? set.default : (ids[0] as string);
     return { layer, ids, declaredDefault };

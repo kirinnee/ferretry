@@ -259,6 +259,17 @@ The model a relaunch asks for is the one the ferret is on: the CLI's own report 
 daemon's last decision (start, migration, or the previous relaunch) and names a model the login serves;
 otherwise the recorded decision. A model the login has stopped serving falls back to its default.
 
+A move onto **another runtime** keeps the model only when the person picked it: a `/model` switch, or a launch
+that recorded `launchModelSource: requested` (an explicit `--model`). A model that was only the source login's
+default (`account-default`) is dropped, so the target's own default decides. A session document with no record is
+read by comparing its model with the source login's current default. A Restart never drops it.
+
+The record follows the model through every step that persists one: a Restart or a revive that persists a newer
+`/model` switch records `requested`; one that falls back to the login's default because the model is no longer
+served records `account-default`; a refused move puts the record back with the rest of what it restamped. A fork or
+a handover freezes the provenance with the resolved model in its plan, so a fork that named no model stays
+`account-default` however the binder re-plans it.
+
 ## Declared gaps
 
 - A forked ferret's first launch records no settings digest, so its Settings row cannot report a fleet
