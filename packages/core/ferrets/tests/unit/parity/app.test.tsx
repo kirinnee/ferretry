@@ -6,13 +6,14 @@
  * the Actions panel and its menu, the three paused-restart panels, the move page's convert side, and Info. The views'
  * own behaviour is in the ported suites under tests/unit/app.
  *
- * Rows that are NOT here are the ones 5.0 has not built (the ferret list and its drawer, row context menu and `+ New`
+ * The ferret list (the `ferrets` screen, its nav item, the side column and the phone's first bottom-nav item) is proved in
+ * its own describe below. Rows that are NOT here are the ones 5.0 has not built (the row context menu and `+ New`
  * machine menu, the Ferret limits tab, the Lineage tab, the action drawer) or that another plugin owns in 5.0 (the chat
  * page, hypermedia and session search are Conversation's): ports-pending.json names them, and the report lists each.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import { RouterProvider } from '@ferretry/app/testing';
-import { deviceControls, routeTable, type ScreenRef } from '@ferretry/app';
+import { DEFAULT_LAYOUT, deviceControls, routeTable, type ScreenRef } from '@ferretry/app';
 import type { PanelProps, PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { type FunctionComponent, type ReactElement, Suspense } from 'react';
 import app from '../../../app/index.ts';
@@ -97,6 +98,69 @@ describe('the new-ferret screen (the page a ferret is started from)', () => {
     expect(root.querySelector('#fy-new-ferret-prompt')).not.toBeNull();
     const create = [...root.querySelectorAll('button')].find(button => button.textContent === 'Create ferret');
     expect(must(create, 'the Create ferret button').disabled).toBe(true);
+  });
+});
+
+describe("the ferret list screen (today's sessions bar and its drawer)", () => {
+  const listed = [
+    ferretSummary('f-1', { name: 'hadi', mode: 'interactive', folder: '/work/ferretry', title: 'Fix the sign-in' }),
+    ferretSummary('f-2', { name: 'maryah', mode: 'interactive', folder: '/work/home-manager', state: 'working' }),
+  ];
+  const drawList = async (path: string): Promise<HTMLElement> => {
+    deviceControls().setDeviceControls({ sessionsMode: 'interactive' });
+    window.history.pushState(null, '', path);
+    const Bound = must(
+      halfOver({ 'GET /v1/ferrets': listed }).screens?.ferrets,
+      'the ferrets screen',
+    ) as FunctionComponent<ScreenProps>;
+    return show(
+      // Conversation's chat screen is the page a row opens; its path is the address the open ferret is read from.
+      <RouterProvider
+        screens={[...SCREEN_REFS, { plugin: 'conversation', id: 'chat', path: 'ferrets/:ferret/chat', label: 'Chat' }]}
+      >
+        <Bound params={{}} />
+      </RouterProvider>,
+    );
+  };
+
+  it('S-0405 S-0380 S-0233 S-0354 S-0551 S-0552 the ferret list screen is declared at /d/<daemon>/ferrets with a Ferrets nav item and draws the live list', async () => {
+    // S-0405 screen 'sessions' -> screen `ferrets`; S-0551 the app-bar entry is the screen's `nav` item.
+    const declared = manifest.ui?.screens?.find(screen => screen.id === 'ferrets');
+    expect(declared?.path).toBe('ferrets');
+    expect(declared?.nav).toMatchObject({ label: 'Ferrets', order: 5 });
+    // S-0380 route /d/:daemonId/sessions -> /d/<daemon>/ferrets (sessions -> ferrets, §1.4), composed from the relative path.
+    const table = routeTable(SCREEN_REFS);
+    expect(table.href(refOf('ferrets'), {}, 'dm1')).toBe('/d/dm1/ferrets');
+    expect(table.parse('/d/dm1/ferrets')).toMatchObject({ kind: 'screen', daemon: 'dm1', screen: refOf('ferrets') });
+    // The list address does not swallow the move page, whose path has more segments.
+    expect(table.parse('/d/dm1/ferrets/f-1/move')).toMatchObject({ screen: refOf('move'), params: { ferret: 'f-1' } });
+    // S-0552 the shell's places source lists every nav screen that needs no subject (proved over the generated surfaces in
+    // packages/app/tests/unit/layout/builtin-layouts.test.ts): this one has a label and no `:` in its path.
+    expect(declared?.path.includes(':')).toBe(false);
+    // S-0233 SessionsRoute / S-0354 PAGE_SLOTS Sessions: the built half's `ferrets` screen, mounted by the shell, draws
+    // this daemon's ferrets from `GET /v1/ferrets`; a row is one link to the ferret's chat, the open one is current.
+    expect(typeof half().screens?.ferrets).toBe('function');
+    const root = await drawList('/d/dm1/ferrets');
+    const row = must(root.querySelector<HTMLAnchorElement>('[data-sbar-session="f-1"]'), 'the first ferret');
+    expect(row.getAttribute('href')).toBe('/d/dm1/ferrets/f-1/chat');
+    expect(row.querySelector('.fy-sbar__name')?.textContent).toBe('Fix the sign-in');
+    expect([...root.querySelectorAll('.fy-sbar__project')].map(node => node.textContent?.replace(/\d+$/u, ''))).toEqual(
+      ['ferretry', 'home-manager'],
+    );
+    expect(root.querySelector('[data-sbar-session][aria-current="page"]')).toBeNull();
+  });
+
+  it('S-0231 replaced: no Ferrets drawer; on a phone the ferrets screen is the first bottom-nav item and opens the live list', async () => {
+    // The layout the shell resolves for a phone puts the nav at the bottom with `ferrets` first (the shell owns nav, §5.3).
+    expect(DEFAULT_LAYOUT.phone?.nav?.side).toBe('bottom');
+    expect(DEFAULT_LAYOUT.phone?.nav?.items?.[0]).toBe('ferrets');
+    expect(manifest.ui?.screens?.some(screen => screen.id === 'ferrets' && screen.nav !== undefined)).toBe(true);
+    // Opening it draws this daemon's ferrets, live, with the open ferret marked.
+    const root = await drawList('/d/dm1/ferrets/f-2/chat');
+    expect(
+      [...root.querySelectorAll('[data-sbar-session]')].map(node => node.getAttribute('data-sbar-session')),
+    ).toEqual(['f-1', 'f-2']);
+    expect(root.querySelector('[data-sbar-session="f-2"]')?.getAttribute('aria-current')).toBe('page');
   });
 });
 

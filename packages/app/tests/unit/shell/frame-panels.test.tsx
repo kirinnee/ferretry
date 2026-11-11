@@ -170,12 +170,14 @@ const PHONE = { side: 'bottom', items: ['inbox'] };
 
 /**
  * This device's layout override. The built-in default names screens and panels these fixtures do not install, which would
- * refuse the whole candidate, so the override also clears the names it cannot resolve here.
+ * refuse the whole candidate, so the override also clears the names it cannot resolve here (the ferret list the side
+ * column holds is one: it goes back to the side slot's panels).
  */
 const deviceLayout = (nav: Record<string, unknown>, phoneNav: Record<string, unknown> = PHONE) => {
   const storage = memoryStore();
   writeRecord(storage, APP_STORAGE.layout, {
     nav,
+    side: { holds: 'panels' },
     phone: { nav: phoneNav },
     panels: { 'ferret.side': [] },
     'composer.tools': [],
@@ -605,12 +607,14 @@ describe('the device.settings slot', () => {
 
 describe('the side column', () => {
   test('shell S4: draws the side slot’s panels for the route’s daemon on a wide screen, and nothing without a daemon', async () => {
-    const app = await bootApp({ surfaces: [inbox], machines: ['d1', 'd2'], path: '/d/d2/inbox' });
+    // The built-in default holds the ferret list in this column, which these fixtures do not install: ask for panels.
+    const storage = deviceLayout({ side: 'left', style: 'list', items: ['inbox'] });
+    const app = await bootApp({ surfaces: [inbox], machines: ['d1', 'd2'], path: '/d/d2/inbox', storage });
     view = app.view;
     expect(panels('inbox.side-note')).toBe(1);
     expect(app.view.container.querySelector('.fy-side')).not.toBeNull();
     await view.unmount();
-    const home = await bootApp({ surfaces: [inbox], machines: ['d1', 'd2'], path: '/app/' });
+    const home = await bootApp({ surfaces: [inbox], machines: ['d1', 'd2'], path: '/app/', storage });
     view = home.view;
     expect(panels('inbox.side-note')).toBe(0);
   });

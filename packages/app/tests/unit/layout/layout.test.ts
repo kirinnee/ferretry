@@ -26,9 +26,10 @@ const surfaces = [
     panels: [{ id: 'ferret-agenda', slot: 'ferret.side', order: 0 }],
   }),
   plugin('warden', { panels: [{ id: 'ferret-warden', slot: 'ferret.side', order: 5 }] }),
-  // The ids the real manifests declare: Ferrets declares no list or ferret screen, only the new-ferret and move ones.
+  // The ids the real manifests declare: Ferrets declares the list screen and the new-ferret and move ones.
   plugin('ferrets', {
     screens: [
+      { id: 'ferrets', path: 'ferrets', nav: { label: 'Ferrets', order: 5 } },
       { id: 'new-ferret', path: 'new' },
       { id: 'move', path: 'ferrets/:ferret/move' },
     ],
@@ -89,7 +90,12 @@ describe('the layout item', () => {
   test('phone overrides apply only on a phone', () => {
     expect(resolveLayout(DEFAULT_LAYOUT, 'wide').nav.side).toBe('left');
     const phone = resolveLayout(DEFAULT_LAYOUT, 'phone');
-    expect(phone.nav).toEqual({ side: 'bottom', style: 'list', items: ['agenda', 'board'] });
+    expect(phone.nav).toEqual({ side: 'bottom', style: 'list', items: ['ferrets', 'agenda', 'board'] });
+    // The ferret list is the first bottom-nav item on a phone (S-0231: no Ferrets drawer).
+    const bottom = planFrame(phone, views).nav.entries[0];
+    expect(bottom?.kind === 'screen' ? `${bottom.screen.plugin}.${bottom.screen.id}` : bottom?.item).toBe(
+      'ferrets.ferrets',
+    );
   });
 });
 
@@ -159,7 +165,7 @@ describe('the owner layout and this device (§5.3)', () => {
 
   test('applyOverrides lays phone fields over the phone overrides the layout has', () => {
     const laid = applyOverrides(DEFAULT_LAYOUT, { phone: { nav: { side: 'top' } } });
-    expect(laid?.phone?.nav).toEqual({ side: 'top', items: ['agenda', 'board'] });
+    expect(laid?.phone?.nav).toEqual({ side: 'top', items: ['ferrets', 'agenda', 'board'] });
   });
 });
 
@@ -178,12 +184,19 @@ describe('the frame plan', () => {
   test('places nav entries, the side column and panels in layout order', () => {
     const plan = planFrame(resolveLayout(DEFAULT_LAYOUT, 'wide'), views);
     expect(plan.nav.entries.map(e => (e.kind === 'screen' ? `${e.screen.plugin}.${e.screen.id}` : e.item))).toEqual([
+      'ferrets.ferrets',
       'agenda.agenda',
       'board.board',
       'usage.insights',
       'settings',
     ]);
-    expect(plan.side.holds).toMatchObject({ kind: 'panels' });
+    // The side column holds the ferret list (today's left sessions bar); a layout naming `panels` still gets panels.
+    expect(plan.side.holds).toMatchObject({ kind: 'screen', screen: { plugin: 'ferrets', id: 'ferrets' } });
+    const kept = planFrame(
+      resolveLayout({ ...DEFAULT_LAYOUT, side: { show: 'wide-only', holds: 'panels' } }, 'wide'),
+      views,
+    );
+    expect(kept.side.holds).toMatchObject({ kind: 'panels' });
     expect(plan.panels('ferret.side').map(p => p.id)).toEqual([
       'ferret-agenda',
       'cards-of-ferret',

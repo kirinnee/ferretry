@@ -33,7 +33,7 @@ describe('the layout settings', () => {
     expect(choiceOf(DEFAULT_LAYOUT, 'density')).toBe('comfortable');
     expect(choiceOf(COMPACT_LAYOUT, 'density')).toBe('compact');
     expect(choiceOf(COMPACT_LAYOUT, 'side.show')).toBe('never');
-    expect(listOf(DEFAULT_LAYOUT, 'nav.items')).toEqual(['agenda', 'board', 'insights', 'settings']);
+    expect(listOf(DEFAULT_LAYOUT, 'nav.items')).toEqual(['ferrets', 'agenda', 'board', 'insights', 'settings']);
     expect(listOf(COMPACT_LAYOUT, 'panels.ferret.side')).toEqual(['queue']);
     expect(listOf(LayoutSchema.parse({ id: 'bare', nav: { side: 'left', items: [] } }), 'panels.ferret.side')).toEqual(
       [],
