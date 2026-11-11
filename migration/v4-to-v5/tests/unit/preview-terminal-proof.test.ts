@@ -7,7 +7,7 @@
  * The libexec tests are the other half: `clean` then `prepare` must not lose the programs `build` installed.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
@@ -44,22 +44,31 @@ const bashShell = (): string | undefined => Bun.which('bash') ?? undefined;
 const PASSWD = passwdShell();
 const BASH = bashShell();
 /**
- * Whether this host's login shell keeps the PATH it is started with, given an empty HOME (as a pane under the empty
- * daemon HOME is). The proof needs the preview's bin on the pane PATH; a host whose system login files rewrite PATH
- * (the GitHub runner's bash -l did on run 42933650667: FY_HOME arrived, `fy` was found nowhere) makes the real proof
- * REFUSE, which is the safe answer and is pinned by TTP-1b, but it cannot show what TTP-1a/1e show (the zdot folder
- * keeping HOME empty while the proof passes). Measured, not assumed: one login shell that prints its PATH.
+ * Whether this host's INTERACTIVE login shell on a pty (what a pane is) still finds a `fy` that is first on the PATH it
+ * is started with, given an empty HOME (as a pane under the empty daemon HOME is). The proof needs the preview's bin on
+ * the pane PATH; a host whose system shell files rewrite PATH (the GitHub runner's: FY_HOME arrived, `fy` was found
+ * nowhere, on runs 42933650667 and 42934508569; a non-interactive `-lc` there keeps PATH, so only the interactive
+ * files rewrite it) makes the real proof REFUSE, which is the safe answer and is pinned by TTP-1b, but it cannot show
+ * what TTP-1a/1e show (the zdot folder keeping HOME empty while the proof passes). Measured with the proof's own
+ * question (`command -v fy`) in the pane's own shape (`script`, `<shell> -l`, interactive), not assumed.
  */
 const loginKeepsPath = (shell: string | undefined): boolean => {
   if (shell === undefined) return false;
   const empty = mkdtempSync(join(tmpdir(), 'ttp-login-path-'));
   try {
-    const marker = join(empty, 'marker-bin');
-    const done = Bun.spawnSync([shell, '-lc', 'printf %s "$PATH"'], {
-      env: { PATH: `${marker}:/usr/bin:/bin`, HOME: empty, TERM: 'xterm' },
+    const bin = join(empty, 'bin');
+    const home = join(empty, 'home');
+    const zdot = join(empty, 'zdot');
+    for (const dir of [bin, home, zdot]) mkdirSync(dir);
+    writeFileSync(join(bin, 'fy'), '#!/bin/sh\n', { mode: 0o755 });
+    writeFileSync(join(zdot, '.zshrc'), '', { mode: 0o600 });
+    const done = Bun.spawnSync(['script', '-qec', `${shell} -lic 'command -v fy'`, '/dev/null'], {
+      env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home, ZDOTDIR: zdot, TERM: 'xterm' },
       cwd: empty,
+      stdin: 'ignore',
+      timeout: 10_000,
     });
-    return done.stdout.toString().split(':').includes(marker);
+    return done.stdout.toString().includes(join(bin, 'fy'));
   } finally {
     rmSync(empty, { recursive: true, force: true });
   }
