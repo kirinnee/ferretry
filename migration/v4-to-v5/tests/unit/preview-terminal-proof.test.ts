@@ -7,6 +7,7 @@
  * The libexec tests are the other half: `clean` then `prepare` must not lose the programs `build` installed.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
@@ -42,6 +43,27 @@ const passwdShell = (): string | undefined => {
 const bashShell = (): string | undefined => Bun.which('bash') ?? undefined;
 const PASSWD = passwdShell();
 const BASH = bashShell();
+/**
+ * Whether this host's login shell keeps the PATH it is started with, given an empty HOME (as a pane under the empty
+ * daemon HOME is). The proof needs the preview's bin on the pane PATH; a host whose system login files rewrite PATH
+ * (the GitHub runner's bash -l did on run 42933650667: FY_HOME arrived, `fy` was found nowhere) makes the real proof
+ * REFUSE, which is the safe answer and is pinned by TTP-1b, but it cannot show what TTP-1a/1e show (the zdot folder
+ * keeping HOME empty while the proof passes). Measured, not assumed: one login shell that prints its PATH.
+ */
+const loginKeepsPath = (shell: string | undefined): boolean => {
+  if (shell === undefined) return false;
+  const empty = mkdtempSync(join(tmpdir(), 'ttp-login-path-'));
+  try {
+    const marker = join(empty, 'marker-bin');
+    const done = Bun.spawnSync([shell, '-lc', 'printf %s "$PATH"'], {
+      env: { PATH: `${marker}:/usr/bin:/bin`, HOME: empty, TERM: 'xterm' },
+      cwd: empty,
+    });
+    return done.stdout.toString().split(':').includes(marker);
+  } finally {
+    rmSync(empty, { recursive: true, force: true });
+  }
+};
 /** The kernel's own rule for what a child of the daemon gets (not exported by the package, so loaded by path). */
 const { childEnvironment } = (await import(
   join(import.meta.dir, '../../../../packages/core/kernel/host/adapters/process.ts')
@@ -203,7 +225,7 @@ describe('TTP-1 the terminal the preview daemon opens finds the preview fy and F
     return { home, proof, creds, terminals };
   };
 
-  test.skipIf(!canRunPane || PASSWD === undefined)(
+  test.skipIf(!canRunPane || PASSWD === undefined || !loginKeepsPath(PASSWD))(
     'TTP-1a the passwd login shell in a pane runs the typed proof command, and the credential check passes after it',
     async () => {
       const { home, proof, creds, terminals } = await startOrder(PASSWD as string);
@@ -224,7 +246,7 @@ describe('TTP-1 the terminal the preview daemon opens finds the preview fy and F
     60_000,
   );
 
-  test.skipIf(!canRunPane || BASH === undefined)(
+  test.skipIf(!canRunPane || BASH === undefined || !loginKeepsPath(BASH))(
     'TTP-1e a bash login shell in a pane leaves the daemon HOME empty, and the credential check passes (its history lands in zdot/)',
     async () => {
       const { home, proof, creds } = await startOrder(BASH as string);
