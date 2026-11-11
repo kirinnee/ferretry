@@ -7,15 +7,19 @@
  * is transpiled and its value is inlined as a literal. A shipped file that does not parse is a build error, not a
  * daemon that cannot start. Callers that import these plainly get the same values, parsed when called.
  */
+import { clearYamlLogSwitches } from '@ferretry/std/yaml';
 import { builtInModelCatalogs } from './catalog/catalog.ts';
 import type { ModelCatalog } from './catalog/schema.ts';
 import { builtInPresets } from './presets/catalog.ts';
 import type { ProviderPreset } from './presets/schema.ts';
 
+/** A Bun macro: it runs in an environment of its own (the original native one), so it clears the yaml log switches itself. */
 export function checkedBuiltInModelCatalogs(): Readonly<Record<string, ModelCatalog>> {
+  clearYamlLogSwitches();
   return builtInModelCatalogs();
 }
 
 export function checkedBuiltInPresets(): readonly ProviderPreset[] {
+  clearYamlLogSwitches();
   return builtInPresets();
 }

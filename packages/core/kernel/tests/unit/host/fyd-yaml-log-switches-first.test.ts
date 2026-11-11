@@ -8,8 +8,10 @@ import { parseSync } from 'oxc-parser';
 // statement of `main()`, before the command line, the settings or the config are read.
 //
 // Why the syntax tree and not a spawn: `fyd --check` is the cheapest path that parses YAML, and it prints the token dump
-// whether or not the call is there (that parse runs outside what deleting the variable from `process.env` reaches: the
-// output is the same with the call removed), so a spawn of it cannot tell the call is gone. Booting the daemon for the
+// whether or not the call is there (that parse is a Bun macro of the logins plugin, run when its module is transpiled, in
+// an environment `main()`'s deletion does not reach: the output is the same with the call removed; the macros clear the
+// switches themselves, and `integration/host/fyd-yaml-token-dump.test.ts` pins that), so a spawn of it cannot tell the
+// call is gone. Booting the daemon for the
 // proof would be slow and timing-dependent. So the call is read from the tree (oxc-parser, never a regex over the text).
 
 type Node = { readonly type?: string; readonly [key: string]: unknown };

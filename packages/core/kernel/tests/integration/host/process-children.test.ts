@@ -130,3 +130,45 @@ describe("a worker's exit listener", () => {
     await worker.terminate();
   });
 });
+
+describe("a worker's environment", () => {
+  const NAME = 'FY_TEST_WORKER_ENV_PROBE';
+  const ENV_WORKER = new URL('./fixtures/env-worker.ts', import.meta.url);
+
+  async function seenBy(options: Parameters<ReturnType<typeof bunWorkers>['start']>[1], name = NAME): Promise<unknown> {
+    const worker = bunWorkers().start(ENV_WORKER, options);
+    try {
+      const answered = new Promise<unknown>(resolve => worker.onMessage(resolve));
+      worker.post([name]);
+      return await answered;
+    } finally {
+      await worker.terminate();
+    }
+  }
+
+  test("started without an env, it sees the daemon's CURRENT environment: a name the daemon deleted stays deleted", async () => {
+    // Bun hands `new Worker(url)` (NO options object) the process's ORIGINAL native environment, so a name the daemon had
+    // deleted (the yaml log switches) would come back in it; given ANY options object it hands over the current one.
+    // `bunWorkers` always passes an options object, and this pins that. The name must exist in the original environment for
+    // the probe to mean anything, so it is `PATH`, restored at once (nothing here needs it while it is gone).
+    const original = process.env['PATH'];
+    expect(original).toBeDefined();
+    try {
+      expect(await seenBy(undefined, 'PATH')).toEqual({ PATH: original });
+      delete process.env['PATH'];
+      expect(await seenBy(undefined, 'PATH')).toEqual({ PATH: null });
+    } finally {
+      process.env['PATH'] = original as string;
+    }
+  });
+
+  test('given an env, it sees exactly that and nothing of the daemon', async () => {
+    process.env[NAME] = 'set-in-the-daemon';
+    try {
+      expect(await seenBy({ env: {} })).toEqual({ [NAME]: null });
+      expect(await seenBy({ env: { [NAME]: 'handed' } })).toEqual({ [NAME]: 'handed' });
+    } finally {
+      delete process.env[NAME];
+    }
+  });
+});
