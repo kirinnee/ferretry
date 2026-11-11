@@ -1407,6 +1407,14 @@ export class FerretsService implements FerretsApi {
         follow: signal => reader().follow(ferret, signal),
         find: async entry => await reader().find(ferret, entry),
       },
+      // G162: resolved on every call like the reader, so an off harness is a 503 and an entries-only one has no bytes.
+      transcriptBytes: async () => {
+        const record = this.registry.get(ferret);
+        const harness = record === undefined ? undefined : this.ports.harness(record.harness);
+        if (harness === undefined)
+          throw new ApiError(503, 'the harness that wrote this conversation is off', 'plugin_unavailable');
+        return await harness.transcriptBytes?.(ferret);
+      },
     };
   }
 

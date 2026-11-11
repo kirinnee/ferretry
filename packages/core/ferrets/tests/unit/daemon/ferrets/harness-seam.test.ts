@@ -274,6 +274,7 @@ test('decision 18: the seam offers deliver, queue (U3), interrupt, transcript an
     'stopActive',
     'submitComposer',
     'transcript',
+    'transcriptBytes',
   ]);
   expect(Object.keys(f.seam.transcript).sort()).toEqual(['find', 'follow', 'read']);
 });
