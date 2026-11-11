@@ -66,7 +66,7 @@ async function seedProfiledFleet(home: string): Promise<string> {
     executable,
     [
       '#!/bin/sh',
-      `: "\${ANTHROPIC_API_KEY:?ferretry: ANTHROPIC_API_KEY is not set — this account takes it from Ferretry's secret store (secret WORK_KEY).}"`,
+      `[ -n "\${ANTHROPIC_API_KEY:-}" ] || { printf '%s\\n' 'ferretry: ANTHROPIC_API_KEY is not set — this account takes it from the Ferretry secret store (secret WORK_KEY).' >&2; exit 1; }`,
       `export CLAUDE_CONFIG_DIR="${join(home, 'harness')}"`,
       'exit 0',
       '',

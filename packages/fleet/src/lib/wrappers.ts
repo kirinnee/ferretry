@@ -112,9 +112,22 @@ const sourceSecretsLines = (secretsFile: string | undefined): readonly string[] 
   return [`if [ -r ${quoted} ]; then`, `  . ${quoted}`, 'fi', ''];
 };
 
+/**
+ * A guard that REFUSES when `name` is unset or empty: say `message` on stderr and exit 1.
+ *
+ * Deliberately not the `: "${NAME:?message}"` form. The message of a `${…:?…}` word is still shell
+ * text that every shell parses for itself, and they disagree about it: an apostrophe in it opens a
+ * single quote under bash (which is `/bin/sh` on macOS) while dash reads it as plain text, so a
+ * launcher that passed `sh -n` here died at start with a syntax error there. The message is also
+ * built from a secrets file path and secret names, which can hold any character. Here the message is
+ * one `shellQuote`d argument to `printf`, an inert literal in every POSIX shell whatever it holds.
+ */
+const refuseUnless = (name: string, message: string): string =>
+  `[ -n "\${${name}:-}" ] || { printf '%s\\n' ${shellQuote(message)} >&2; exit 1; }`;
+
 const guardLine = (name: string, secretsFile: string | undefined): string => {
   const origin = secretsFile === undefined ? 'the environment' : secretsFile;
-  return `: "\${${name}:?ferretry: ${name} is not set — expected it from ${origin}}"`;
+  return refuseUnless(name, `ferretry: ${name} is not set — expected it from ${origin}`);
 };
 
 /**
@@ -132,7 +145,10 @@ const guardLine = (name: string, secretsFile: string | undefined): string => {
  */
 const secretGuardLine = (name: string, secrets: readonly SecretName[]): string => {
   const which = `${secrets.length === 1 ? 'secret' : 'secrets'} ${secrets.join(', ')}`;
-  return `: "\${${name}:?ferretry: ${name} is not set — this account takes it from Ferretry's secret store (${which}). Launch it through the daemon, or run: fy secret set ${secrets[0] ?? name}}"`;
+  return refuseUnless(
+    name,
+    `ferretry: ${name} is not set — this account takes it from the Ferretry secret store (${which}). Launch it through the daemon, or run: fy secret set ${secrets[0] ?? name}`,
+  );
 };
 
 /** Set to `0` in the environment to launch without seeding the harness's first-run state. */
