@@ -86,6 +86,13 @@ async function boot(
   files: (home: string) => Readonly<Record<string, string>>,
   secret?: string,
   realClaude?: string,
+  /**
+   * Config files that name a `${secret:NAME}`, by path under `config/`. A reference written straight to disk is HELD for
+   * the owner's acknowledgment (kernel/host/config/evaluate.ts, addedSecretReferenceSentences: only an owner-written
+   * reference may be resolved), so these go through the door the product uses: the owner's `PUT /v1/config/file`, and
+   * `POST /v1/config/confirm` if the daemon holds the edit. The guard is exercised, never bypassed.
+   */
+  ownerFiles: Readonly<Record<string, string>> = {},
 ): Promise<Daemon> {
   const root = await mkdtemp(join(tmpdir(), 'fy-auth-e2e-'));
   const home = join(root, 'fy-home');
@@ -204,7 +211,21 @@ async function boot(
     const put = await call('POST', '/v1/secrets', { name: SECRET_NAME, value: secret });
     if (put.status >= 300) throw new Error(`could not set the temp Vault secret: ${String(put.status)} ${put.text}`);
   }
+  for (const [path, text] of Object.entries(ownerFiles)) await ownerWrites(daemon, path, text);
   return daemon;
+}
+
+/** The owner's door for a config file: write it, and confirm the held edit when the daemon holds it. */
+async function ownerWrites(daemon: Daemon, path: string, text: string): Promise<void> {
+  const wrote = await daemon.call('PUT', '/v1/config/file', { path, text });
+  if (wrote.status >= 300)
+    throw new Error(`the owner write of ${path} was refused: ${String(wrote.status)} ${wrote.text}`);
+  const { outcome, etag } = JSON.parse(wrote.text) as { outcome: string; etag: string };
+  if (outcome === 'pending') {
+    const confirmed = await daemon.call('POST', '/v1/config/confirm', { path, etag });
+    if (confirmed.status >= 300 || !(JSON.parse(confirmed.text) as { confirmed: boolean }).confirmed)
+      throw new Error(`the held edit of ${path} was not confirmed: ${String(confirmed.status)} ${confirmed.text}`);
+  } else if (outcome !== 'applied') throw new Error(`the owner write of ${path} answered ${outcome}`);
 }
 
 /** Starts a ferret on `login`, waits for the daemon's own transcript read (`GET …/messages`) to show the reply, and returns what the daemon reported. */
@@ -268,16 +289,12 @@ describe('a ferret authenticates end to end (merge bar 7)', () => {
   test('(b) Claude env login (dummy base URL, secret-backed token): the login env reaches the ferret', async () => {
     const provider = startFakeProvider(FAKE_TOKEN);
     cleanups.push(() => provider.stop());
-    const daemon = await boot(
-      provider,
-      home => ({
-        [join(home, 'config/logins/envsec.yaml')]: claudeLogin('environment', {
-          ANTHROPIC_BASE_URL: provider.url,
-          ANTHROPIC_AUTH_TOKEN: `\${secret:${SECRET_NAME}}`,
-        }),
+    const daemon = await boot(provider, () => ({}), FAKE_TOKEN, undefined, {
+      'logins/envsec.yaml': claudeLogin('environment', {
+        ANTHROPIC_BASE_URL: provider.url,
+        ANTHROPIC_AUTH_TOKEN: `\${secret:${SECRET_NAME}}`,
       }),
-      FAKE_TOKEN,
-    );
+    });
 
     const pane = await startAndSee(daemon, 'claude-code', 'envsec');
 
@@ -319,17 +336,12 @@ describe('a ferret authenticates end to end with the REAL claude binary (merge b
     async () => {
       const provider = startFakeProvider(FAKE_TOKEN);
       cleanups.push(() => provider.stop());
-      const daemon = await boot(
-        provider,
-        home => ({
-          [join(home, 'config/logins/envreal.yaml')]: claudeLogin('environment', {
-            ANTHROPIC_BASE_URL: provider.url,
-            ANTHROPIC_AUTH_TOKEN: `\${secret:${SECRET_NAME}}`,
-          }),
+      const daemon = await boot(provider, () => ({}), FAKE_TOKEN, realClaude ?? undefined, {
+        'logins/envreal.yaml': claudeLogin('environment', {
+          ANTHROPIC_BASE_URL: provider.url,
+          ANTHROPIC_AUTH_TOKEN: `\${secret:${SECRET_NAME}}`,
         }),
-        FAKE_TOKEN,
-        realClaude ?? undefined,
-      );
+      });
 
       await startAndSee(daemon, 'claude-code', 'envreal');
 
