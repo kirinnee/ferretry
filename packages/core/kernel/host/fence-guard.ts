@@ -270,7 +270,7 @@ function keysOf(snapshot: PrivateSnapshot): SnapshotKeys {
 const HOME_FOLDERS: readonly string[] = ['state', 'config'];
 
 /** A fence's absent entry: nothing there, or nothing a folder could be under. Anything else is a doubt. */
-const isAbsent = (error: unknown): boolean => {
+export const isAbsent = (error: unknown): boolean => {
   const code = (error as { code?: string }).code;
   return code === 'ENOENT' || code === 'ENOTDIR';
 };

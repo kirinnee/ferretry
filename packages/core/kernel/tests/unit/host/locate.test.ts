@@ -213,6 +213,7 @@ describe('K13 the override variable gate (permissions.whichOverrides)', () => {
       calls,
       home: () => '/h',
       checkDirectory: async () => ({ ok: true as const, value: { realPath: '/x' } }),
+      stateHomeHolding: async () => undefined,
       which: async () => undefined,
       locate: async (name, options) => {
         calls.push(`${name}:${options.override}`);
