@@ -19,16 +19,21 @@ import { buildSearch, WORK_SEARCH_WARM_DELAY_MS, type WorkSource } from './searc
 import { tryParseSessionId } from './seams/ferret-id.ts';
 import { harnessFamily } from './seams/harness-family.ts';
 
-/** Said by everything that needs the conversations a harness holds: the Conversations screen, its preview and keeping one. */
-const HARNESS_PENDING = 'Listing, previewing and keeping conversations from a harness is not in 5.0 yet.';
+/**
+ * The ONE sentence said by everything that needs the conversations a harness holds: the Conversations screen (its list
+ * and preview), keeping one as a ferret, and the harness history. Fixed wording (owner decision lizzette 2026-11-11), so
+ * the app draws it as it is and never a raw error. A ferret's own transcript is not behind it: that reads the harness's
+ * bytes.
+ */
+const HARNESS_PENDING =
+  'Not in 5.0 yet: browsing and keeping your Claude Code and Codex conversations. It waits on Ferrets listing what a harness holds.';
 
 /** THE HARNESS SEAM that is still open: Ferrets offers no list of a harness's conversations yet, so these refuse. */
 const harnessPending = (): never => {
   throw new ApiError(503, HARNESS_PENDING, 'conversation_harness_unavailable');
 };
 
-const KEEP_PENDING =
-  'Keeping a conversation as a ferret waits on Ferrets starting a ferret from a harness conversation.';
+const KEEP_PENDING = HARNESS_PENDING;
 
 const scrubData = (value: unknown, text: (s: string) => string): unknown => {
   if (typeof value === 'string') return text(value);
@@ -98,9 +103,10 @@ export interface ReadingHalf {
 }
 
 /**
- * Part b's slices (reader, links, attachments, renders, work search) over the kernel's ports and the declared needs. What
- * only a harness plugin can say (a ferret's transcript, the conversations a harness holds, starting a ferret from one)
- * refuses with a sentence at {@link HARNESS_PENDING} until Ferrets offers it.
+ * Part b's slices (reader, links, attachments, renders, work search) over the kernel's ports and the declared needs. A
+ * ferret's transcript is read from its harness's proved bytes (Ferrets' `transcriptBytes`). What only a harness plugin
+ * can still say (the conversations a harness holds, starting a ferret from one) refuses with the sentence at
+ * {@link HARNESS_PENDING} until Ferrets offers it.
  */
 export function buildReading(deps: {
   readonly kernel: KernelPorts;

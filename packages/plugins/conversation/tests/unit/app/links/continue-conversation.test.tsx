@@ -638,3 +638,38 @@ describe('ContinueConversation over this computer', () => {
     expect(listed(other).length).toBeGreaterThan(0);
   });
 });
+
+/** What the daemon says for everything that needs the conversations a harness holds (daemon/reading.ts HARNESS_PENDING). */
+const NOT_IN_5_0 =
+  'Not in 5.0 yet: browsing and keeping your Claude Code and Codex conversations. It waits on Ferrets listing what a harness holds.';
+const NOT_AVAILABLE = refuse(NOT_IN_5_0, 503, 'conversation_harness_unavailable');
+
+describe('ContinueConversation while the harness lists are not in 5.0 yet', () => {
+  it('shows the daemon’s one sentence for the search, never a raw error', async () => {
+    await open({ list: NOT_AVAILABLE });
+    expect(text('[data-continue-refused]')).toBe(NOT_IN_5_0);
+    expect(view?.container.textContent).not.toContain('503');
+    expect(view?.container.textContent).not.toContain('conversation_harness_unavailable');
+  });
+
+  it('shows it for a preview', async () => {
+    await open({ preview: NOT_AVAILABLE });
+    await click('[data-continue-row="shop-cart"]');
+    expect(text(`[data-continue-preview="${SHOP}"]`)).toContain(NOT_IN_5_0);
+  });
+
+  it('shows it for a keep, as a refusal and as the keeper’s reason', async () => {
+    const keepThen = async (keep: Handler): Promise<string> => {
+      await view?.unmount();
+      await open({ keep });
+      await click('[data-continue-row="shop-cart"]');
+      await click(action(SHOP));
+      await continueOn('claude-default-w');
+      return text(`[data-continue-issue="${SHOP}"]`);
+    };
+    expect(await keepThen(NOT_AVAILABLE)).toBe(NOT_IN_5_0);
+    expect(
+      await keepThen(() => ({ kept: [], refused: [{ id: 'shop-cart', code: 'unavailable', reason: NOT_IN_5_0 }] })),
+    ).toBe(NOT_IN_5_0);
+  });
+});
