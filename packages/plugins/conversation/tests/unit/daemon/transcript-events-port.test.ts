@@ -4,7 +4,6 @@ import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { fixedClock, testHost } from '@ferretry/kernel/testing';
 import { ConversationPort } from '../../../contract/index.ts';
 import daemon from '../../../daemon/index.ts';
-import { HARNESS_PENDING } from '../../../daemon/reading.ts';
 
 const F1 = ferretId('f1');
 
@@ -19,13 +18,10 @@ async function boot() {
 }
 
 describe('the port’s transcript tail with tool calls', () => {
-  test('a ferret whose harness is not connected yet is refused in words, never answered with an empty tail', async () => {
+  test('a ferret with no proved transcript is not_found, never answered with an empty tail', async () => {
     const host = await boot();
     const result = await host.provided(ConversationPort).transcriptEvents(F1, { limit: 50 });
-    expect(result).toEqual({
-      ok: false,
-      error: { code: 'conversation_harness_unavailable', message: HARNESS_PENDING },
-    });
+    expect(result).toMatchObject({ ok: false, error: { code: 'not_found' } });
     await host.stop();
   });
 
@@ -38,14 +34,11 @@ describe('the port’s transcript tail with tool calls', () => {
 });
 
 describe('the port’s log tail of every event kind (transcriptLog, additive)', () => {
-  test('a ferret whose harness is not connected yet is refused in words, never answered with an empty log', async () => {
+  test('a ferret with no proved transcript is not_found, never answered with an empty log', async () => {
     const host = await boot();
     const read = host.provided(ConversationPort).transcriptLog;
     if (read === undefined) throw new Error('Conversation provides transcriptLog');
-    expect(await read(F1, { limit: 20 })).toEqual({
-      ok: false,
-      error: { code: 'conversation_harness_unavailable', message: HARNESS_PENDING },
-    });
+    expect(await read(F1, { limit: 20 })).toMatchObject({ ok: false, error: { code: 'not_found' } });
     await host.stop();
   });
 
@@ -54,6 +47,27 @@ describe('the port’s log tail of every event kind (transcriptLog, additive)', 
     const read = host.provided(ConversationPort).transcriptLog;
     if (read === undefined) throw new Error('Conversation provides transcriptLog');
     expect(await read(ferretId('ghost'))).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    await host.stop();
+  });
+});
+
+describe('the port’s messages, log page and log search (G162, served by the same reader as the routes)', () => {
+  test('a ferret with no proved transcript is not_found on each, never an empty answer or the old pending sentence', async () => {
+    const host = await boot();
+    const port = host.provided(ConversationPort);
+    expect(await port.transcript(F1, { limit: 5 })).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(await port.logPage(F1, { limit: 5 })).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(await port.logSearch(F1, 'deploy')).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    await host.stop();
+  });
+
+  test('a ferret nobody knows is not_found on each', async () => {
+    const host = await boot();
+    const port = host.provided(ConversationPort);
+    const ghost = ferretId('ghost');
+    expect(await port.transcript(ghost)).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(await port.logPage(ghost)).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(await port.logSearch(ghost, 'x')).toMatchObject({ ok: false, error: { code: 'not_found' } });
     await host.stop();
   });
 });
