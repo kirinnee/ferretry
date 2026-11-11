@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { DaemonCallError } from '@ferretry/app';
 import { interact, mount, must } from '@ferretry/app/testing';
 import {
   type HistoryEntry,
@@ -175,5 +176,28 @@ describe('the history reads', () => {
     expect(harnessName('claude-code')).toBe('Claude Code');
     expect(harnessName('codex')).toBe('Codex');
     expect(harnessName('gemini')).toBe('gemini');
+  });
+});
+
+describe('HistoryPage while the harness history is not in 5.0 yet', () => {
+  it('shows the daemon’s one sentence, never a raw error', async () => {
+    const sentence =
+      'Not in 5.0 yet: browsing and keeping your Claude Code and Codex conversations. It waits on Ferrets listing what a harness holds.';
+    const view = await mount(
+      <HistoryPage
+        daemon={DAEMON}
+        readHistory={async () =>
+          await Promise.reject(new DaemonCallError(503, 'conversation_harness_unavailable', sentence))
+        }
+        readEntry={async () => detail}
+      />,
+    );
+    try {
+      await settle();
+      expect(view.container.querySelector('[role="alert"]')?.textContent).toBe(sentence);
+      expect(view.container.textContent).not.toContain('503');
+    } finally {
+      await view.unmount();
+    }
   });
 });
