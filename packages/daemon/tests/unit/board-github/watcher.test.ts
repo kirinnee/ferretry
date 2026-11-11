@@ -339,6 +339,86 @@ describe('GitHubWatcher: polling', () => {
   });
 });
 
+/** A board's card list that counts how many times it is walked with `for...of`: what a `BoardIndex` does twice. */
+const walkCounted = (cards: readonly BoardTask[], walks: { count: number }): readonly BoardTask[] => {
+  const counted = [...cards];
+  Object.defineProperty(counted, Symbol.iterator, {
+    value: function* walk(this: BoardTask[]) {
+      walks.count += 1;
+      for (let at = 0; at < this.length; at += 1) yield this[at] as BoardTask;
+    },
+  });
+  return counted;
+};
+
+describe('GitHubWatcher: a board of thousands of cards', () => {
+  const WATCHED = 300;
+  const filler = (count: number): BoardTask[] =>
+    Array.from({ length: count }, (_, at) => card({ id: `F${String(at + 1000)}`, laneId: 'closed' }));
+  const watching = (): BoardTask[] =>
+    Array.from({ length: WATCHED }, (_, at) => withLinks([link(at + 1)], { id: `F${String(at + 1)}` }));
+
+  it('should index the board once a tick, however many cards it watches', async () => {
+    const walks = { count: 0 };
+    const subject = rig({
+      cards: [...watching(), ...filler(3_000)],
+      gh: new FakeGh(
+        repoAnswer({
+          prs: Object.fromEntries(Array.from({ length: WATCHED }, (_, at) => [at + 1, prNode(at + 1)])),
+        }),
+      ),
+      board: service => ({
+        snapshot: async () => {
+          const snapshot = await service.snapshot();
+          return { ...snapshot, cards: walkCounted(snapshot.cards, walks) };
+        },
+        recordPullRequests: async (id, update) => await service.recordPullRequests(id, update),
+        act: async (id, request, caller) => await service.act(id, request, caller),
+      }),
+    });
+    const report = await subject.watcher.tick();
+    should(report.written).have.length(WATCHED);
+    // The board index walks the cards twice. One index for the tick is two walks (the refile step reads its own
+    // snapshot and builds none); one per watched card was `2 × ${String(WATCHED)}` walks of 3,300 cards on the event loop.
+    should(walks.count).be.belowOrEqual(4);
+    // Nothing changed on the second look, so no card is written and the index is still built once.
+    walks.count = 0;
+    subject.clock.ms += POLL_OPEN_MS;
+    should((await subject.watcher.tick()).written).be.empty();
+    should(walks.count).be.belowOrEqual(4);
+  });
+
+  it('should still see a card that changed since the last tick, and write only that one', async () => {
+    const subject = rig({
+      cards: [...watching(), ...filler(3_000)],
+      gh: new FakeGh(
+        repoAnswer({
+          prs: Object.fromEntries(Array.from({ length: WATCHED }, (_, at) => [at + 1, prNode(at + 1)])),
+        }),
+      ),
+    });
+    await subject.watcher.tick();
+    should(subject.store.writes).have.length(WATCHED);
+    // Another writer moves one card back to a PR GitHub has since merged, and the next tick must see it.
+    const changed = subject.store.cards.get('F7') as BoardTask;
+    subject.store.cards.set('F7', {
+      ...changed,
+      links: { ...changed.links, prs: [link(7, { state: 'open', checks: 'pending', polledAt: NOW })] },
+    });
+    const merged = subject.gh;
+    merged.graphql = repoAnswer({
+      prs: Object.fromEntries(
+        Array.from({ length: WATCHED }, (_, at) => [at + 1, prNode(at + 1, at === 6 ? { state: 'MERGED' } : {})]),
+      ),
+      releases: [],
+    });
+    subject.clock.ms += POLL_OPEN_MS;
+    const report = await subject.watcher.tick();
+    should(report.written).deepEqual(['F7']);
+    should(subject.stored('F7').links.prs[0]).match({ state: 'merged' });
+  });
+});
+
 describe('GitHubWatcher: auto-link', () => {
   it("should link an open PR from the card's branch, and a merge newer than the card, but not an old or closed one", async () => {
     const subject = rig({
