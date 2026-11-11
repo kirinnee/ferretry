@@ -264,24 +264,89 @@ export const V5OutboxLineSchema = z.strictObject({
 
 // ── v4 → v5 mappings (pure) ─────────────────────────────────────────────────────────────────────────────────────
 
+/** The `<path>#<start>#<end>` a v4 byte-span claim is spelled as; the path may itself contain `#`. */
+const V4_SPAN = /^(.+)#(\d+)#(\d+)$/u;
+
+/** A byte span that could name a line: two safe integers, the end after the start. Anything else matches nothing. */
+function validSpan(start: string, end: string): number | undefined {
+  const from = Number(start);
+  const to = Number(end);
+  return Number.isSafeInteger(from) && Number.isSafeInteger(to) && to > from ? from : undefined;
+}
+
 /**
- * The delivered input a v4 send claimed, named the way v5 will name the SAME input. One delivered input confirms at most
- * one send, and the claim is a string compared for equality, so a claim kept under v4's spelling would not claim the
- * drain in v5 and a second identical, still-pending send could be confirmed by it.
+ * What the converter can PROVE about the delivered inputs a ledger's sends claim. One delivered input confirms at most
+ * one send, and a claim is a string compared for equality, so a claim v5 would spell differently lets a second identical,
+ * still-pending send be confirmed by the input the first one already used.
+ *
+ * `transcript` is this ferret's OWN old transcript (`config.transcript.file`): a v4 byte-span claim is translated only
+ * when it names that file, because the offset means nothing in any other. `unprovable` is set when ANY send of the
+ * ledger claims an input v5 will name something this conversion cannot prove it names (see `claimIsProvable`).
+ */
+export interface LedgerClaims {
+  readonly transcript: string | undefined;
+  readonly unprovable: boolean;
+}
+
+/**
+ * Whether the claim reaches the SAME input under the id v5 will emit for it.
+ *
+ * - A Claude drain claim `<path>#<start>#<end>` is `queued-prompt:<start>` in v5, provably only when `<path>` is this
+ *   ferret's old transcript. Another path, or none known, cannot be proved, and the offset is not translated.
+ * - A Codex claim is never provable here: v4 named the input by byte span (`<rollout>#<start>#<end>`) or by the
+ *   payload's own `id`, and v5 names every Codex entry `<rollout>:<line>:<block>:<kind>` (the rollout is re-bound by
+ *   native-resume, not by path), so nothing the converter holds says which entry v5 will give that input.
+ * - A uuid names the same record in both versions. A key that is not a valid span (malformed, reversed, unsafe) is kept as
+ *   it was and claims nothing in v5, so it cannot match anything.
+ */
+export function claimIsProvable(evidence: NonNullable<V4Send['evidence']>, transcript: string | undefined): boolean {
+  if (evidence.harness !== 'claude') return false;
+  if (evidence.proof !== 'native-queue-drain') return true;
+  const span = V4_SPAN.exec(evidence.key);
+  if (span === null || validSpan(span[2] as string, span[3] as string) === undefined) return true;
+  return transcript !== undefined && span[1] === transcript;
+}
+
+/** What the whole ledger's claims allow: read once per ledger, before any of its lines is converted. */
+export function ledgerClaims(lines: readonly V4Send[], transcript: string | undefined): LedgerClaims {
+  return {
+    transcript,
+    unprovable: lines.some(line => line.evidence !== undefined && !claimIsProvable(line.evidence, transcript)),
+  };
+}
+
+/**
+ * The delivered input a v4 send claimed, named the way v5 will name the SAME input.
  *
  * A Claude native-queue drain without a uuid was `<transcript path>#<start>#<end>` in v4 (`observed-input.ts`, the byte
  * span of its line in the file) and is `queued-prompt:<start>` in v5 (the Claude harness's entry id: the same absolute
- * offset). Anything else is kept AS IT WAS, never cleared: a uuid names the same record in both versions, and a key that
- * is not provably a Claude byte span (a Codex key, a malformed span) stays a claim that nothing else can falsely match.
+ * offset) — when the path is this ferret's own transcript. Anything else is kept AS IT WAS, never cleared and never
+ * guessed: a uuid names the same record in both versions, and a key that is not provably this ferret's Claude byte span
+ * (a Codex key, another file's span, a malformed span) stays a claim that nothing else can falsely match. The sends
+ * that could still be confirmed by an input that claim cannot name are handled by `unconfirmed`.
  */
-function v5Evidence(evidence: V4Send['evidence'] & {}): V4Send['evidence'] {
+function v5Evidence(evidence: NonNullable<V4Send['evidence']>, transcript: string | undefined): V4Send['evidence'] {
   if (evidence.harness !== 'claude' || evidence.proof !== 'native-queue-drain') return evidence;
-  const span = /^.+#(\d+)#(\d+)$/u.exec(evidence.key);
-  if (span === null) return evidence;
-  const start = Number(span[1]);
-  const end = Number(span[2]);
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end <= start) return evidence;
-  return { ...evidence, key: `queued-prompt:${start}` };
+  const span = V4_SPAN.exec(evidence.key);
+  if (span === null || transcript === undefined || span[1] !== transcript) return evidence;
+  const start = validSpan(span[2] as string, span[3] as string);
+  return start === undefined ? evidence : { ...evidence, key: `queued-prompt:${start}` };
+}
+
+/** The fates whose truth is still open: nothing proved them delivered, and the tracker could still decide one. */
+const UNRESOLVED = new Set<V4Send['fate']>(['accepted', 'queued', 'unaccounted', 'timed_out', 'cancelled']);
+
+/**
+ * A still-unresolved send of a ledger whose claims cannot be proved, in the one state 5.0 never corrects: reason
+ * `update_unconfirmed` (the tracker neither watches nor retypes it, and the app says "unconfirmed — check the chat").
+ * A send still waiting its turn (`accepted`, `queued`) or timed out is settled `unaccounted`, because retyping it from a
+ * guess is what a duplicate looks like; a held (revive-retained) or cancelled one keeps its fate and takes the reason.
+ * `delivered` and `withdrawn` rows stay exactly as they were.
+ */
+function unconfirmed(line: V4Send): Pick<V4Send, 'fate'> & { unaccountedReason: 'update_unconfirmed' } {
+  const settle =
+    (line.fate === 'accepted' || line.fate === 'queued' || line.fate === 'timed_out') && line.held !== true;
+  return { fate: settle ? 'unaccounted' : line.fate, unaccountedReason: 'update_unconfirmed' };
 }
 
 /**
@@ -290,7 +355,7 @@ function v5Evidence(evidence: V4Send['evidence'] & {}): V4Send['evidence'] {
  * and what was typed in `matchText`), and `opportunityAt`, `unaccountedDeadline`, `hardDeadline`, `timeoutFrozenAt`
  * (v4 tracker timers v5's record does not have and nothing in v5 reads).
  */
-export function v5SendLine(line: V4Send): unknown {
+export function v5SendLine(line: V4Send, claims: LedgerClaims = { transcript: undefined, unprovable: false }): unknown {
   const {
     payloadFile: _payload,
     opportunityAt: _opportunity,
@@ -301,13 +366,17 @@ export function v5SendLine(line: V4Send): unknown {
     evidence,
     ...rest
   } = line;
+  const marked = claims.unprovable && UNRESOLVED.has(line.fate) ? unconfirmed(line) : undefined;
   return {
     format: 1,
     ...rest,
-    ...(evidence === undefined ? {} : { evidence: v5Evidence(evidence) }),
-    ...(unaccountedReason === undefined
-      ? {}
-      : { unaccountedReason: unaccountedReason === 'session_ended' ? 'ferret_ended' : unaccountedReason }),
+    ...(marked === undefined ? {} : { fate: marked.fate }),
+    ...(evidence === undefined ? {} : { evidence: v5Evidence(evidence, claims.transcript) }),
+    ...(marked !== undefined
+      ? { unaccountedReason: marked.unaccountedReason }
+      : unaccountedReason === undefined
+        ? {}
+        : { unaccountedReason: unaccountedReason === 'session_ended' ? 'ferret_ended' : unaccountedReason }),
   };
 }
 
@@ -500,6 +569,7 @@ export const conversationStep: Step = {
         inbox: 0,
         outbox: 0,
         outboxQuestions: 0,
+        sendsUnconfirmed: 0,
         questions: 0,
         questionsDropped: 0,
         attachments: 0,
@@ -570,13 +640,13 @@ export const conversationStep: Step = {
       };
 
       /**
-       * One v4 log, line for line, into its v5 file. `map` answers the v5 line, or `undefined` for a line v5 keeps
-       * nowhere. A line v5 would refuse (its schema, or the kernel's line bound) fails the step by file and line.
+       * One v4 log, line for line, into its v5 file. `map` answers the v5 line (given every line of the log, for a
+       * decision about the log as a whole), or `undefined` for a line v5 keeps nowhere. A line v5 would refuse (its schema, or the kernel's line bound) fails the step by file and line.
        */
       const convertLog = async <V4, V5>(
         from: string,
         v4Schema: z.ZodType<V4>,
-        map: (line: V4) => unknown,
+        map: (line: V4, all: readonly V4[]) => unknown,
         v5Schema: z.ZodType<V5>,
         to: string,
         check: (line: V5) => boolean = () => true,
@@ -600,8 +670,9 @@ export const conversationStep: Step = {
         }
         const out: V5[] = [];
         let skipped = 0;
+        const all = lines.map(entry => entry.value);
         for (const { line, value } of lines) {
-          const mapped = map(value);
+          const mapped = map(value, all);
           if (mapped === undefined) {
             skipped++;
             continue;
@@ -714,16 +785,21 @@ export const conversationStep: Step = {
         counts.queueLines += queue.written;
         counts.queued += foldV4Queue(queue.v4).length;
 
+        // A claim is translated only against THIS ferret's old transcript; a ledger whose claims cannot be proved
+        // leaves its unresolved sends unconfirmed (see `ledgerClaims`).
+        let claims: LedgerClaims | undefined;
         const sends = await convertLog(
           join(channel, 'sends.jsonl'),
           V4SendLine,
-          v5SendLine,
+          (line, all) => v5SendLine(line, (claims ??= ledgerClaims(all, config.transcript?.file))),
           V5SendLineSchema,
           v5SendsFile(config.id),
           line => SendRecordSchema.safeParse(v5SendView(line)).success,
         );
         counts.sendLines += sends.written;
         counts.sends += latestV4Sends(sends.v4).length;
+        if (claims?.unprovable === true)
+          counts.sendsUnconfirmed += latestV4Sends(sends.v4).filter(line => UNRESOLVED.has(line.fate)).length;
         counts.payloadPointers += sends.v4.filter(line => line.payloadFile !== undefined).length;
 
         const answers = await convertLog(
@@ -912,6 +988,10 @@ export const conversationStep: Step = {
         [counts.tornRenders, 'render payload(s) with no meta omitted'],
       ] as const;
       const notes = omitted.filter(([count]) => count > 0).map(([count, what]) => `${count} ${what}`);
+      if (counts.sendsUnconfirmed > 0)
+        notes.push(
+          `${counts.sendsUnconfirmed} unresolved send(s) left "unconfirmed — check the chat": their ledger holds a delivered-input claim this conversion cannot prove names the same input in 5.0 (a Codex input, or a span of another file), so 5.0 will neither confirm them from the transcript nor type them again`,
+        );
       if (counts.missingOriginals.length > 0)
         notes.push(
           `${counts.missingOriginals.length} attachments with no original file (not carried; v5 keeps no manifest without its original): ${counts.missingOriginals.join(', ')}`,

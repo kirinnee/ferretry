@@ -339,8 +339,23 @@ console.log(JSON.stringify({ text }));
       tier: 'exact-text',
       ...extra,
     });
-    const converted = async (rows: readonly unknown[]) => {
-      await f.session('f1');
+    /** A Claude ferret whose old transcript is `V4_PATH`, the only file a v4 byte-span claim may be translated against. */
+    const converted = async (rows: readonly unknown[], transcript: string | null = V4_PATH, harness = 'claude') => {
+      await f.session(
+        'f1',
+        transcript === null
+          ? { harness }
+          : {
+              harness,
+              transcript: {
+                v: 1,
+                home: '/v4/home/runtimes/claude',
+                identity: 'minted',
+                harnessSessionId: 'c',
+                file: transcript,
+              },
+            },
+      );
       await raw('state/sessions/f1/channel/sends.jsonl', jsonl(rows));
       await conversationStep.run(f.ctx());
       return (await lines(v5SendsFile('f1'))).map(line => V5SendLineSchema.parse(line));
@@ -361,10 +376,13 @@ console.log(JSON.stringify({ text }));
     });
 
     test('a path with # in it converts by its trailing byte span', async () => {
-      const written = await converted([
-        send('a', 'delivered', { evidence: evidence('/home/a#b/c.jsonl#12#99') }),
-        send('b', 'delivered', { evidence: evidence('/home/a#b/c.jsonl#99#200') }),
-      ]);
+      const written = await converted(
+        [
+          send('a', 'delivered', { evidence: evidence('/home/a#b/c.jsonl#12#99') }),
+          send('b', 'delivered', { evidence: evidence('/home/a#b/c.jsonl#99#200') }),
+        ],
+        '/home/a#b/c.jsonl',
+      );
       expect(written.map(line => line.evidence?.key)).toEqual(['queued-prompt:12', 'queued-prompt:99']);
     });
 
@@ -384,6 +402,133 @@ console.log(JSON.stringify({ text }));
         send('c', 'delivered', { evidence: evidence(`${V4_PATH}#99#12`) }),
       ]);
       expect(written.map(line => line.evidence?.key)).toEqual([codex, 'not-a-span#x#y', `${V4_PATH}#99#12`]);
+    });
+
+    describe('a claim the conversion cannot prove leaves the ledger’s unresolved sends unconfirmed (never corrected, never retyped)', () => {
+      const codexSpan = (extra: Record<string, unknown> = {}) =>
+        evidence('/v4/home/runtimes/codex/sessions/rollout-a.jsonl#120#340', {
+          harness: 'codex',
+          kind: 'response_item',
+          proof: 'normal-user-record',
+          ...extra,
+        });
+      const codexPayloadId = () =>
+        evidence('native-message-uuid', { harness: 'codex', kind: 'response_item', proof: 'normal-user-record' });
+      const second = { acceptedAt: '2026-11-11T00:00:02.000Z', at: '2026-11-11T00:00:02.000Z' };
+      const state = (written: readonly { sendId: string; fate: string; unaccountedReason?: string }[]) =>
+        written.map(line => [line.sendId, line.fate, line.unaccountedReason]);
+
+      for (const [name, claim] of [
+        ['a Codex byte-span claim', codexSpan],
+        ['a Codex payload.id claim', codexPayloadId],
+      ] as const)
+        test(`${name}: the delivered row stays delivered and claimed as it was; the pending send is unconfirmed`, async () => {
+          const written = await converted(
+            [send('first', 'delivered', { evidence: claim(), fateAt: AT }), send('second', 'accepted', second)],
+            null,
+            'codex',
+          );
+          expect(state(written)).toEqual([
+            ['first', 'delivered', undefined],
+            ['second', 'unaccounted', 'update_unconfirmed'],
+          ]);
+          expect(written[0]?.evidence?.key).toBe(claim().key);
+          // The unconfirmed line is servable and says nothing a code would: the wire projection parses.
+          for (const line of written) SendRecordSchema.parse(v5SendView(line));
+        });
+
+      test('every unresolved fate is marked, and delivered and withdrawn rows are not', async () => {
+        const written = await converted(
+          [
+            send('d', 'delivered', { evidence: codexSpan(), fateAt: AT }),
+            send('a', 'accepted'),
+            send('q', 'queued'),
+            send('u', 'unaccounted', { unaccountedReason: 'timeout' }),
+            send('t', 'timed_out', { unaccountedReason: 'timeout', retryable: true }),
+            send('c', 'cancelled'),
+            send('h', 'accepted', { held: true }),
+            send('w', 'withdrawn', { reason: 'refused' }),
+          ],
+          null,
+          'codex',
+        );
+        expect(state(written)).toEqual([
+          ['d', 'delivered', undefined],
+          ['a', 'unaccounted', 'update_unconfirmed'],
+          ['q', 'unaccounted', 'update_unconfirmed'],
+          ['u', 'unaccounted', 'update_unconfirmed'],
+          ['t', 'unaccounted', 'update_unconfirmed'],
+          ['c', 'cancelled', 'update_unconfirmed'],
+          // A held (revive-retained) send keeps its fate: nothing was typed, and a revive types it itself.
+          ['h', 'accepted', 'update_unconfirmed'],
+          ['w', 'withdrawn', undefined],
+        ]);
+      });
+
+      test('a ledger with no claim at all is converted as before', async () => {
+        const written = await converted([
+          send('a', 'accepted'),
+          send('u', 'unaccounted', { unaccountedReason: 'session_ended' }),
+        ]);
+        expect(state(written)).toEqual([
+          ['a', 'accepted', undefined],
+          ['u', 'unaccounted', 'ferret_ended'],
+        ]);
+      });
+
+      test('a Claude drain span of ANOTHER file is not translated onto this transcript, and marks the ledger', async () => {
+        const foreign = '/v4/home/runtimes/claude/projects/-work/another-conversation.jsonl#0#198';
+        const written = await converted([
+          send('first', 'delivered', { evidence: evidence(foreign), fateAt: AT }),
+          send('second', 'accepted', second),
+        ]);
+        expect(written[0]?.evidence?.key).toBe(foreign);
+        expect(state(written)).toEqual([
+          ['first', 'delivered', undefined],
+          ['second', 'unaccounted', 'update_unconfirmed'],
+        ]);
+      });
+
+      test('a Claude drain span with no known transcript cannot be proved either', async () => {
+        const written = await converted(
+          [
+            send('first', 'delivered', { evidence: evidence(`${V4_PATH}#283#476`) }),
+            send('second', 'accepted', second),
+          ],
+          null,
+        );
+        expect(written[0]?.evidence?.key).toBe(`${V4_PATH}#283#476`);
+        expect(state(written)[1]).toEqual(['second', 'unaccounted', 'update_unconfirmed']);
+      });
+
+      test('a span of this ferret’s own transcript is translated and the pending send stays pending', async () => {
+        const written = await converted([
+          send('first', 'delivered', { evidence: evidence(`${V4_PATH}#283#476`) }),
+          send('second', 'accepted', second),
+        ]);
+        expect(written[0]?.evidence?.key).toBe('queued-prompt:283');
+        expect(state(written)[1]).toEqual(['second', 'accepted', undefined]);
+      });
+
+      test('a uuid and an invalid span claim nothing in 5.0, so neither marks the ledger', async () => {
+        const written = await converted([
+          send('a', 'delivered', { evidence: evidence('5f0c2f8e-1a5d-4c53-9a39-0e1d4b1d9c11') }),
+          send('b', 'delivered', { evidence: evidence('not-a-span#x#y') }),
+          send('c', 'delivered', { evidence: evidence(`/elsewhere.jsonl#99#12`) }),
+          send('d', 'accepted', second),
+        ]);
+        expect(state(written)[3]).toEqual(['d', 'accepted', undefined]);
+      });
+
+      test('the report says how many sends were left unconfirmed, in plain words', async () => {
+        await f.session('f1', { harness: 'codex' });
+        await raw(
+          'state/sessions/f1/channel/sends.jsonl',
+          jsonl([send('first', 'delivered', { evidence: codexSpan() }), send('second', 'accepted', second)]),
+        );
+        const report = await conversationStep.run(f.ctx());
+        expect(report.note).toContain('1 unresolved send(s) left "unconfirmed — check the chat"');
+      });
     });
   });
 

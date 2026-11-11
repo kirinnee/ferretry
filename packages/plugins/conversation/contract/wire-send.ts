@@ -29,6 +29,11 @@ export const SendUnaccountedReasonSchema = z.enum([
   'landing_unconfirmed',
   'typed_not_submitted',
   'not_delivered',
+  /**
+   * A send the v4 → 5.0 conversion could not prove the transcript's inputs apart for (a Codex input, or a claim on another
+   * file): it is NEVER corrected to delivered from the transcript and never typed again. The person checks the chat.
+   */
+  'update_unconfirmed',
 ]);
 export type SendUnaccountedReason = z.infer<typeof SendUnaccountedReasonSchema>;
 

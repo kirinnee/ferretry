@@ -35,6 +35,7 @@ const REASONS: Readonly<Record<SendUnaccountedReason, string>> = {
   landing_unconfirmed: 'it was typed into the agent’s box, but the agent didn’t show it there in time',
   typed_not_submitted: 'it is typed into the agent’s box but was not sent: the Enter did not take',
   not_delivered: 'it never reached the agent',
+  update_unconfirmed: 'it was sent before this update, so Ferretry can’t tell whether the agent got it',
 };
 
 /** What cancelling did on the agent’s screen — only some of it can be undone there, so each says which. */
@@ -142,7 +143,10 @@ export const sendBadge = (record: LedgerSendRecord): SendBadge => {
     return {
       label: 'unconfirmed',
       tone: QUIET_TONE,
-      detail: `unconfirmed — ${reasonOf(record)}; it may still have landed`,
+      detail:
+        record.unaccountedReason === 'update_unconfirmed'
+          ? 'unconfirmed — check the chat. This was sent before the update, so Ferretry can’t tell whether the agent got it.'
+          : `unconfirmed — ${reasonOf(record)}; it may still have landed`,
     };
   // AN OPEN ROW THIS BROWSER CAN NO LONGER READ says that, and why, instead of the last fate it saw:
   // "the daemon has it and is checking" was the sentence a phone kept showing after the daemon had

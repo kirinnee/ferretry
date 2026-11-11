@@ -106,6 +106,8 @@ export const SendUnaccountedReasonSchema = z.enum([
   'typed_not_submitted',
   /** Proven absent after every attempt. */
   'not_delivered',
+  /** Sent before the 5.0 update, and its transcript input cannot be told apart from another's: the person checks the chat. */
+  'update_unconfirmed',
 ]);
 
 /** Who asked for the message: a person, another agent, or the daemon itself (a failure notice). */

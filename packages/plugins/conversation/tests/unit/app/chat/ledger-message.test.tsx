@@ -480,6 +480,19 @@ describe('LedgerMessage', () => {
     );
   });
 
+  test('a send left unconfirmed by the 5.0 update says to check the chat, in a plain sentence', async () => {
+    const migrated = record({ fate: 'unaccounted', unaccountedReason: 'update_unconfirmed' });
+    const badge = sendBadge(migrated);
+    expect(badge.label).toBe('unconfirmed');
+    expect(badge.detail).toBe(
+      'unconfirmed — check the chat. This was sent before the update, so Ferretry can’t tell whether the agent got it.',
+    );
+    expect(badge.detail).not.toContain('update_unconfirmed');
+    expect(textOf(render(<LedgerMessage onRetry={async () => true} record={migrated} />))).not.toContain(
+      'update_unconfirmed',
+    );
+  });
+
   test('drops "Sending again" once the attempt it described has settled, so it never sticks', async () => {
     const first = record({ fate: 'unaccounted', unaccountedReason: 'timeout' });
     const row = render(<LedgerMessage onRetry={async () => true} record={first} />);
