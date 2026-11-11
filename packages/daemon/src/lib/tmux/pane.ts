@@ -95,12 +95,13 @@ const SPINNER_PHRASE = /^[^\S\n]*[✻✳✶✽✢∗][^\n…]{1,120}…/mu;
  * idle-looking composer under it would be typed into.
  *
  * Matches the WHOLE line and only Claude's real wording (see `tests/fixtures/compaction`): a spinner glyph, exactly
- * `Compacting conversation`, an ellipsis, then nothing or a parenthetical that opens on the elapsed clock
- * (`(3s)`, `(7m 14s · ↓ 37.4k tokens)`, clipped on a narrow pane). Prose such as `  * Compacting the notes… is next`
+ * `Compacting conversation`, an ellipsis (`…` or `...`), then nothing or a parenthetical that opens on the elapsed clock,
+ * a token count or the interrupt hint alone (`(3s)`, `(7m 14s · ↓ 37.4k tokens)`, `(esc to interrupt)`, clipped on a narrow
+ * pane). The shapes this must accept are tabled in `tests/support/compaction-shapes.ts`, shared with `paneCompaction`. Prose such as `  * Compacting the notes… is next`
  * therefore never reads as a compaction, however close to the composer it sits.
  */
 export const COMPACTING_LINE =
-  /^[^\S\n]*[·*✻✳✶✽✢∗][^\S\n]+Compacting conversation(?:…|\.\.\.)(?:[^\S\n]*\([^\S\n]*(?:\d+[^\S\n]*[hms]\b|[\d.,]+k?[^\S\n]*tokens)[^\n]*)?[^\S\n]*$/mu;
+  /^[^\S\n]*[·*✻✳✶✽✢∗✦✧][^\S\n]+Compacting conversation(?:…|\.\.\.)(?:[^\S\n]*\([^\S\n]*(?:\d+[^\S\n]*[hms]\b|[\d.,]+k?[^\S\n]*tokens|[Ee]sc to interrupt)[^\n]*)?[^\S\n]*$/mu;
 
 /** How many rows, counted from the last non-blank one, the status line may sit above: the status area over the composer. */
 const COMPACTING_WINDOW_LINES = 12;
