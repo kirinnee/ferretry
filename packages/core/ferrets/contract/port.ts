@@ -1,5 +1,5 @@
 import { defineEvent, definePort, type FerretId, type RefusalCode } from '@ferretry/kernel/contract';
-import type { JsonValue, Result } from '@ferretry/std';
+import type { Instant, JsonValue, Result } from '@ferretry/std';
 import { z } from 'zod';
 import {
   FerretCardIdSchema,
@@ -13,6 +13,8 @@ import {
 } from './ids.ts';
 import type {
   DeliveryOutcome,
+  FormKey,
+  RunnerFormCapture,
   PaneNotReadyReason,
   QueueOutcome,
   RunnerComposerCleared,
@@ -270,6 +272,21 @@ export interface HarnessInterrupted {
   readonly working?: boolean;
 }
 
+/** What {@link FerretHarness.askedQuestion} reads: the hook's payload, when it was written, and the proved transcript. */
+export interface AskedQuestionFile {
+  readonly payload: string;
+  /** The question file's modification time. */
+  readonly writtenAt: Instant;
+  /** The ferret's proved transcript path, or `undefined` when the harness proves none (then the payload proves nothing). */
+  readonly transcript?: string;
+}
+
+/** The form seam of {@link FerretHarness}: capture the pane, press one closed key, paste text. */
+export interface HarnessForm {
+  capture(): Promise<Result<RunnerFormCapture, HarnessRefusal>>;
+  key(key: FormKey): Promise<Result<void, HarnessDeliveryFailure>>;
+  paste(text: string): Promise<Result<void, HarnessDeliveryFailure>>;
+}
 /**
  * The harness seam (decision #18): what Conversation needs to type into a ferret, interrupt it and read its transcript.
  * Every write goes through `kernel.act(<the ferret's terminal pane>, 'keys')`, so Vault's input holds and the guarded
@@ -356,6 +373,22 @@ export interface FerretHarness {
    * The seam's own ferret's transcript through its harness, already masked (rejects with 503 while the harness is off).
    * It is bound to that ferret and names no other.
    */
+  /**
+   * Additive (structured questions): what Claude Code's `AskUserQuestion` hook recorded in THIS ferret's own
+   * `question-asked.json` (`FY_QUESTION_FILE`), read bounded, with the ferret's proved transcript path (the harness's
+   * `transcriptStamp().file`) that `parseAskedQuestion` demands the payload name. `undefined` when the file is absent,
+   * unreadable, over its bound, or no transcript is proved. Reads only; `writtenAt` is the file's mtime, so a caller
+   * compares it to skip an unchanged file. The payload is the hook's raw text and goes to Conversation's one writer only.
+   */
+  askedQuestion?(): Promise<AskedQuestionFile | undefined>;
+  /**
+   * Additive (structured questions): the form's own acts on the ferret's pane, for the structured-answer driver. Each is
+   * the runner's, guarded by `kernel.act(<pane>, 'keys'|'read')` exactly like `deliver` (so Vault holds apply and a hold
+   * types NOTHING, answered as its `RefusalCode`); `key` takes only a {@link FormKey}. SECURITY-SENSITIVE: this is a raw
+   * write on a ferret's pane, so a caller drives it only against a form it has positively bound on `capture`.
+   * `capture` answers `no_pane` / `plugin_unavailable` as `observe` does; `key` and `paste` answer as `deliver` does.
+   */
+  readonly form?: HarnessForm;
   readonly transcript: BoundTranscriptReader;
 }
 
