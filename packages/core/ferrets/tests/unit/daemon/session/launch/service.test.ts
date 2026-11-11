@@ -97,8 +97,31 @@ describe('SessionLaunchService.relaunch', () => {
       'high',
     ]);
     should(ports.recorded).eql([
-      { command: created, model: 'claude-sonnet-5', launchReasoningEffort: 'high', launchSettings: 'settings-now' },
+      {
+        command: created,
+        model: 'claude-sonnet-5',
+        launchModelSource: 'requested',
+        launchReasoningEffort: 'high',
+        launchSettings: 'settings-now',
+      },
     ]);
+  });
+
+  it('should write the source of a /model switch it adopts, and none when it keeps the recorded model (B191/B4)', async () => {
+    // Arrange: the same session, once with an observed switch and once without.
+    const switched = new Ports();
+    switched.subjectValue = unruledSubject({
+      state: launchState({ observedModel: 'claude-sonnet-5', observedModelAt: LATER }),
+    });
+    const kept = new Ports();
+
+    // Act
+    await new SessionLaunchService(switched).relaunch(ID);
+    await new SessionLaunchService(kept).relaunch(ID);
+
+    // Assert
+    should(switched.recorded[0]?.launchModelSource).equal('requested');
+    should(kept.recorded[0]?.launchModelSource).be.undefined();
   });
 
   it('should still create a harness session that never wrote its transcript, and record no unknowns', async () => {

@@ -424,6 +424,8 @@ describe('SessionForkTargetBinder', () => {
     should(started.config.harness).equal('claude');
     should(started.config.agent).equal('claude-auto-zelda');
     should(started.config.model).equal('claude-opus-5');
+    // The fork named no model, so the default it resolved is the account's, not a pick (B191/B5).
+    should(started.config.launchModelSource).equal('account-default');
     should(started.config.turn).equal(1);
     // The lineage edge, on the TARGET, naming the exact cut.
     should(started.config.transferredFrom?.kind).equal('fork');
@@ -447,6 +449,30 @@ describe('SessionForkTargetBinder', () => {
     // The plan is durable beneath the target, so a later replay reads it rather than the source.
     should((await subject.plans.load(subject.target))?.planId).equal(subject.plan.planId);
     should(subject.counts()).eql({ captures: 1, creates: 1 });
+  });
+
+  it('should record a fork onto a model other than the account default as picked (B191/B5)', async () => {
+    // Arrange: the plan froze sonnet on an account whose own default is opus.
+    const subject = await harness('picked-model', {
+      plan: base => ({ ...base, target: { ...base.target, model: 'claude-sonnet-5', contextWindow: 200_000 } }),
+    });
+    subject.publish({
+      account: account({
+        defaultModel: 'claude-opus-5',
+        models: [
+          { id: 'claude-opus-5', available: true },
+          { id: 'claude-sonnet-5', available: true },
+        ],
+      }),
+      executable: '/fleet/bin/claude-auto-zelda',
+    });
+
+    // Act
+    const started = await drive(subject);
+
+    // Assert
+    should(started.config.model).equal('claude-sonnet-5');
+    should(started.config.launchModelSource).equal('requested');
   });
 
   it('should reallocate the title and never carry the source callsign', async () => {

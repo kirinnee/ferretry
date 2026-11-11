@@ -65,6 +65,7 @@ import {
   currentLaunchCompactAt,
   currentLaunchEffort,
   movedModel,
+  movedModelSource,
   type SessionLaunchService,
   transcriptLaunchArguments,
 } from '../lib/session/launch/index.ts';
@@ -702,15 +703,9 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
     const families = { sourceHarness: config.harness, targetHarness: account.kind, targetAgent: account.agent };
     const mismatch = converting ? harnessConversionRefusal(families) : harnessMoveRefusal(families);
     if (mismatch !== undefined) throw new SessionMoveError('harness_mismatch', mismatch);
-    const sourceAccount0 = findAccountByAgent(await parts.accounts.accounts(), config.agent);
-    const { keep, planned } = planModel(
-      id,
-      config,
-      state,
-      account,
-      request.model,
-      sourceAccount0?.defaultModel ?? undefined,
-    );
+    const sourceAccount = findAccountByAgent(await parts.accounts.accounts(), config.agent);
+    const sourceDefault = sourceAccount?.defaultModel ?? undefined;
+    const { keep, planned } = planModel(id, config, state, account, request.model, sourceDefault);
     // And the effort it is on, which no request names — unless the move crosses harnesses, whose effort
     // vocabularies differ: the target then starts on its own login's setting.
     const effort = converting ? undefined : currentLaunchEffort(config, state);
@@ -779,7 +774,6 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
     })();
     // The window the session runs in, read the way the plan reads the target's: the harness's own report, the
     // selector in its configured model, then what its account's catalog declares for it.
-    const sourceAccount = findAccountByAgent(await parts.accounts.accounts(), config.agent);
     const window = currentContextWindow(
       parts.contextWindowForSession,
       config,
@@ -904,13 +898,14 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
         agent: account.agent,
         harness: account.kind,
         model: plan.model,
-        // A restart onto the same runtime keeps who chose the model; a crossing records the new plan's source.
-        launchModelSource:
-          account.agent === config.agent && config.launchModelSource !== undefined
-            ? config.launchModelSource
-            : plan.modelSource === 'requested'
-              ? 'requested'
-              : 'account-default',
+        // Who chose the model: a Restart keeps the recorded source unless it adopted a `/model` switch.
+        launchModelSource: movedModelSource({
+          config,
+          sourceDefault,
+          named: request.model !== undefined,
+          kept: keep?.kind === 'planned',
+          model: plan.model,
+        }),
         modelHint: request.model ?? account.defaultModel ?? '',
         command: [...command],
         incarnation: `${id}-${generation}`,
