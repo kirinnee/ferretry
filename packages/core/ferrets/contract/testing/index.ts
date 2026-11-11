@@ -32,6 +32,7 @@ import {
   type RunnerComposerSubmitted,
   type FormKey,
   type RunnerFormCapture,
+  type TranscriptEntry,
   type RunnerHeldAt,
   type RunnerLook,
   type RunnerPaneObservation,
@@ -462,8 +463,10 @@ export class FakeHarness implements Harness {
     }
     return { status: 'delivered', id: message.id };
   }
+  /** What `transcript.read` answers (a test sets the conversation's entries; empty by default). */
+  entries: readonly TranscriptEntry[] = [];
   readonly transcript = {
-    read: async () => [],
+    read: async (): Promise<readonly TranscriptEntry[]> => this.entries,
     follow: async function* () {},
     find: async () => undefined,
   };

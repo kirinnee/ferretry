@@ -151,6 +151,7 @@ export const conversationDaemon = (gate: HarnessGate) =>
           'ferret.changed': followFerretChanges({
             release: ferret => b.release(ferret),
             look: (ferret, phase) => a.turns.look(ferret, phase),
+            lookQuestion: ferret => a.questions.look(ferret),
             forget: ferret => a.turns.forget(ferret),
             withdrawQuestion: ferret =>
               void a

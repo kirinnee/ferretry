@@ -17,6 +17,8 @@ import {
   PEER_MESSAGE_LABELS,
   type PeerMessageLabel,
   QueueChanged,
+  QuestionAnswered,
+  QuestionAsked,
   type QueuedMessage,
   QUESTION_STATE,
   type Question,
@@ -64,7 +66,8 @@ import type { SessionStatus } from './seams/ferret-types.ts';
 import { sentDraftClearer, sharedDraftRoutes, sharedDraftSocketRoutes } from './drafts/lib/mounts/shared-drafts.ts';
 import { SessionSendError, sessionSendRoutes } from './delivery/lib/mounts/session-send.ts';
 import { StateDraftRepository } from './drafts/adapters/index.ts';
-import { clearAskedQuestion } from './questions/adapters/index.ts';
+import { clearAskedQuestion, writeAskedQuestion } from './questions/adapters/index.ts';
+import { QUESTION_WATCH_MS, QuestionWatch } from './questions/lib/watch.ts';
 import { OwnerWordsReader, TurnBoundaries, type TurnPhase } from './turns/lib/index.ts';
 import { SharedDraftPresence, SharedDraftService, sharedDraftOrigin } from './drafts/lib/index.ts';
 import { StateQueueStore } from './queue/adapters/index.ts';
@@ -262,6 +265,8 @@ export interface ConversationAHalf {
   onAskAnswered(answered: { readonly ferret: string; readonly askId: AskId }): Promise<void>;
   /** What Ferrets says of a ferret's phase, for `turn.ended`. */
   readonly turns: { look(ferret: string, phase: TurnPhase): void; forget(ferret: string): void };
+  /** The question watch: one look at a ferret (a state change), and what is forgotten about a ferret that stopped. */
+  readonly questions: { look(ferret: string): void; forget(ferret: string): void };
   stop(): void;
 }
 
@@ -1101,6 +1106,43 @@ export function buildConversationA(deps: {
    */
   const answerQuestion = async (): Promise<SessionView> => pending();
 
+  /**
+   * THE QUESTION WATCH: Claude Code's hook leaves the question it asks in the ferret's own file; this reads it on the 2 s
+   * cadence over the roster (and once on a ferret's state change) and makes it `question.json`, which is what the app, the
+   * agenda and the send guard read. It also retires the question when the transcript says it was answered. Reads only.
+   */
+  const questionWatch = new QuestionWatch({
+    roster: async () => (await ferrets.list()).map(({ id, harness, state }) => ({ id, harness, state })),
+    harness: async ferret => {
+      const id = tryParseSessionId(ferret);
+      return id === undefined ? undefined : await ferrets.harness?.(id);
+    },
+    current: async ferret => {
+      const read = await kernel.state.read(QUESTION_STATE, ferret);
+      return read.ok ? read.value : undefined;
+    },
+    write: async (ferret, payload, askedAt, transcript) =>
+      await writeAskedQuestion(kernel.state, questionSerial, ferret, payload, askedAt, transcript),
+    clear: async (ferret, toolUseId) => await clearAskedQuestion(kernel.state, questionSerial, ferret, toolUseId),
+    asked: async (ferret, toolUseId) => {
+      await kernel.events.publish(QuestionAsked, { ferret: parseSessionId(ferret), toolUseId });
+    },
+    answered: async (ferret, toolUseId) => {
+      await kernel.events.publish(QuestionAnswered, { ferret: parseSessionId(ferret), toolUseId });
+    },
+  });
+  let cancelQuestionWatch: (() => void) | undefined;
+  const watchQuestions = (): void => {
+    if (stopped) return;
+    cancelQuestionWatch = kernel.clock.after(milliseconds(QUESTION_WATCH_MS), () => {
+      void questionWatch
+        .sweep()
+        .catch(() => undefined)
+        .finally(watchQuestions);
+    });
+  };
+  watchQuestions();
+
   const hypermediaSwitch = new StateHypermediaSwitch(kernel.state);
   const hypermedia = new SessionHypermediaService({
     facts: async ferret => {
@@ -1327,7 +1369,14 @@ export function buildConversationA(deps: {
     api,
     sitrep,
     hypermediaRecorded: async ferret => await hypermediaSwitch.recorded(ferret),
-    withdrawQuestion: async ferret => await clearAskedQuestion(kernel.state, questionSerial, ferret),
+    withdrawQuestion: async ferret => {
+      questionWatch.forget(ferret);
+      await clearAskedQuestion(kernel.state, questionSerial, ferret);
+    },
+    questions: {
+      look: ferret => void questionWatch.look(ferret).catch(() => undefined),
+      forget: ferret => questionWatch.forget(ferret),
+    },
     onAskAnswered: async ({ ferret, askId }) => {
       await drafts.discard(ferret, askId).catch(() => undefined);
     },
@@ -1357,6 +1406,7 @@ export function buildConversationA(deps: {
     },
     stop: () => {
       stopped = true;
+      cancelQuestionWatch?.();
       disarm?.();
       for (const waiter of [...waiters.values()]) waiter.end();
       scheduler.cancelAll();

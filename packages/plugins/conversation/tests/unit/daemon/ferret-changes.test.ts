@@ -28,6 +28,7 @@ describe('followFerretChanges', () => {
       look: (ferret, phase) => calls.push(`look ${ferret} ${phase}`),
       forget: ferret => calls.push(`forget ${ferret}`),
       withdrawQuestion: ferret => calls.push(`withdraw ${ferret}`),
+      lookQuestion: ferret => calls.push(`question ${ferret}`),
       warn: message => calls.push(`warn ${message}`),
     });
     return { calls, follow };
@@ -43,14 +44,14 @@ describe('followFerretChanges', () => {
     const { calls, follow } = record();
     follow(change('stopped', 'removed'));
     follow(change('stopped', 'state'));
-    expect(calls).toEqual(['release f1', 'withdraw f1', 'forget f1', 'release f1', 'withdraw f1', 'look f1 stopped']);
+    expect(calls).toEqual(['release f1', 'withdraw f1', 'forget f1', 'release f1', 'withdraw f1', 'look f1 stopped']); // a stopped ferret is never looked at for a question
   });
 
   test('a change of phase while running releases nothing and is one look', () => {
     const { calls, follow } = record();
     follow(change('working', 'state'));
     follow(change('idle', 'state'));
-    expect(calls).toEqual(['look f1 working', 'look f1 idle']);
+    expect(calls).toEqual(['look f1 working', 'question f1', 'look f1 idle', 'question f1']);
   });
 
   test('a release that throws still lets the turn be followed, and the failure is not swallowed', () => {
