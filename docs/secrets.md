@@ -314,6 +314,59 @@ published fleet — a start's account, the launch's bindings, the runtime names 
 (`packages/daemon/src/lib/fleet/publication.ts`). A second apply landing between the judgment and the
 pane's exec is still fail-closed: the new wrapper carries its own guard for every secret-backed variable.
 
+### A login's environment against a folder's own settings
+
+Claude Code ranks a folder's `.claude/settings.json` and `settings.local.json` `env` **above the process
+environment**, so a repo that blanks `ANTHROPIC_BASE_URL` used to hijack a runtime on another provider. A
+runtime's `--settings` file (`<home>/.fy/fixed.json`) ranks above both, so the login's **literal**
+variables — `env`, `claude.env` and the catalog's model pins — are pinned in its `env`, for interactive
+runtimes as well as agents.
+
+**The rule: a value the secret store resolves never goes into `fixed.json`.** A variable that names
+`${secret:NAME}` — or a bare `$OTHER` reference, which resolves from the host's environment or the secrets
+file at exec — stays process environment only. It is enforced twice: the pin step filters, and the write
+step **throws** (`FleetMaterialiseError`, naming the key, never a value) if one ever reaches it. A
+variable both the login and the profile set is pinned at the **profile's** value, the one the wrapper
+exports, so `--settings` cannot hand the login's value back; if the profile's value is a reference, the
+key is not pinned at all.
+
+**A literal credential never reaches an argv either.** A literal in a login's YAML
+(`ANTHROPIC_AUTH_TOKEN=loge-internal`) is plain text in configuration, so it **is** pinned in `fixed.json`
+(a 0600 file). But fast mode or a compaction trigger _replaces_ that file with a merged overlay, and an
+overlay used to be written inline into `--settings '<json>'`, which shows in `ps`, the pane's command line
+and the session document's recorded `command`. An overlay that carries an `env` is therefore **never
+inlined**: the daemon writes it to a per-launch file and the argv names only its path
+(`<state>/state/launch-settings/launch-<digest>[-c<n>][-f<0|1>].json`).
+
+- The file is 0600 in a 0700 directory, written atomically (a private temporary, then a rename).
+- It is content-addressed — the name carries a digest of the login's fixed settings, the compaction trigger
+  and fast mode — so a start, a revive, a Restart and a move all rebuild the same path, and the
+  stale-settings comparison reads the trigger and login back out of the name (fast mode, a run fact, is left
+  out, as it was inline).
+- It is swept only after 30 days unused; every launch, and every stale-settings read, touches it. A swept
+  file is written again by the next launch. `buildLaunchArgv` refuses (`LaunchOverlayFileRequiredError`)
+  rather than inline such an overlay, so a caller that forgets the file fails loudly.
+- An overlay with no `env` (a login that pins nothing) is still inline, as before.
+
+**A variable left to the process environment cannot be pinned, so a folder that sets one refuses the
+start.** Before a Claude ferret launches, the daemon reads every settings file Claude Code reads for the
+launch folder — its own `.claude/settings.json` and `settings.local.json`, and the local file at the git
+root (the **main checkout's** root, in a linked worktree; not when the root is the home directory). If any
+sets a variable the runtime takes from the store (`secretEnv`) or from a bare `$OTHER` reference
+(`referencedEnv` in the manifest, names only), the ferret does not start and the reason names the file
+path and the key (never the value): remove it there, or keep that key out of the secret store.
+
+- **GAP — a folder's secret-backed override is refused, not defeated.** There is no way to make a
+  store-backed `ANTHROPIC_AUTH_TOKEN` win over a folder that blanks it without writing the secret to a
+  file. An `apiKeyHelper` fallback (the wrapper exports the value as a Ferretry-owned variable and
+  `fixed.json` carries only command text) was designed and **not built**; it needs a contract test
+  against the installed Claude Code first.
+- **GAP — managed policy and intermediate parents are not checked.** Only the files Claude Code documents
+  reading (the folder's, the git root's local file) are. Ownership exceptions Claude applies to the root
+  location are not modelled.
+- **GAP — profile-only `env` is not pinned.** A variable only the profile sets is the person's tuning and
+  keeps its process-environment precedence, so a folder can still override it.
+
 ## Accounts and sign-ins: the store
 
 The saved logins became **accounts** (one identity: label, plain username, password, 2FA keys) and
