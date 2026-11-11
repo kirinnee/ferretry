@@ -79,6 +79,8 @@ class Disk {
   #current: { readonly token: string; readonly bytes: Uint8Array } | undefined;
   #opened = 0;
   format: 'claude' | 'codex' = 'claude';
+  /** Every handle opened, and whether the consumer closed it: the reader must close what it opens. */
+  readonly handles: { closed: boolean }[] = [];
   off = false;
   /** Whether the harness offers bytes at all; `false` is a harness that only keeps entries. */
   offers = true;
@@ -97,6 +99,8 @@ class Disk {
     if (!this.offers) return 'unsupported';
     const opened = this.#current;
     if (opened === undefined) return undefined;
+    const state = { closed: false };
+    this.handles.push(state);
     const still = (): boolean => this.#current === opened;
     return {
       format: this.format,
@@ -104,10 +108,14 @@ class Disk {
       size: opened.bytes.byteLength,
       mtimeMs: 1,
       read: async (offset, length) => {
+        if (state.closed) throw new Error('closed');
         if (!still()) throw new HarnessTranscriptReplaced();
         return opened.bytes.slice(offset, offset + length);
       },
-      stat: async () => (still() ? { size: opened.bytes.byteLength, mtimeMs: 1 } : undefined),
+      stat: async () => (still() && !state.closed ? { size: opened.bytes.byteLength, mtimeMs: 1 } : undefined),
+      close: async () => {
+        state.closed = true;
+      },
     };
   };
 }
@@ -294,6 +302,41 @@ describe('a ferret’s transcript read from the harness bytes', () => {
 
     expect(body).toContain('entries only hello');
     expect(body).toContain('entries only reply');
+  });
+
+  test('the reader keeps one open handle per ferret however many reads it serves, and closes them all on close', async () => {
+    const disk = new Disk();
+    disk.put(conversation());
+    const reading = reader(disk);
+
+    for (let index = 0; index < 5; index += 1) await reading.routes[LOGS](call());
+    await reading.routes[PAGE](call());
+    await reading.routes[SEARCH](call({ q: 'deploy' }));
+    await reading.routes[MESSAGES](call({ limit: '10' }));
+    // Let the closes of the duplicates (fire and forget) settle.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(disk.handles.filter(handle => !handle.closed)).toHaveLength(1);
+
+    await reading.close();
+
+    expect(disk.handles.every(handle => handle.closed)).toBe(true);
+  });
+
+  test('a replaced transcript closes the handle on the old file', async () => {
+    const disk = new Disk();
+    disk.put(conversation());
+    const reading = reader(disk);
+    await reading.routes[LOGS](call());
+    disk.put(conversation().slice(0, 3));
+
+    await reading.routes[LOGS](call());
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(disk.handles.filter(handle => !handle.closed)).toHaveLength(1);
+    expect(disk.handles[0]?.closed).toBe(true);
   });
 
   test('a transcript that grew is read again, not served from before', async () => {

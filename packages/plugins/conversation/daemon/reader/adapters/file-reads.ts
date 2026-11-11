@@ -103,15 +103,18 @@ export class FileTranscriptReads
     const opened = await this.open(ferret as FerretId);
     if (opened === 'unsupported') return { kind: this.fallback === undefined ? 'unresolved' : 'unsupported' };
     if (opened === undefined) return { kind: 'unresolved' };
-    const token = this.runtime.adopt(opened);
-    const stat = await opened.stat().catch(() => undefined);
-    if (stat === undefined) return { kind: 'unreadable' };
+    // The runtime now owns the handle (this reader opened it, and never closes it itself): it keeps ONE per ferret,
+    // closes a duplicate or a replaced one, and closes them all when the reader stops.
+    const token = await this.runtime.adopt(opened, ferret);
+    const held = this.runtime.handle(token);
+    const stat = await held?.stat().catch(() => undefined);
+    if (held === undefined || stat === undefined) return { kind: 'unreadable' };
     return {
       kind: 'found',
       token,
-      format: opened.format,
-      source: this.#sources[opened.format],
-      handle: opened,
+      format: held.format,
+      source: this.#sources[held.format],
+      handle: held,
       size: stat.size,
     };
   }
@@ -212,6 +215,11 @@ export class FileTranscriptReads
       },
       rows,
     };
+  }
+
+  /** Closes every transcript handle this reader opened: the daemon is stopping. */
+  async close(): Promise<void> {
+    await this.runtime.closeAll();
   }
 
   /** The image reader's locator: the proved transcript's token is the `file` it reads through {@link runtime}. */

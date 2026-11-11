@@ -143,6 +143,7 @@ export class MemoryFiles {
         return window(entry, offset, length);
       },
       stat: async () => (still() ? { size: entry.size, mtimeMs: entry.mtime } : undefined),
+      close: async () => undefined,
     };
   }
 
@@ -194,33 +195,33 @@ export class MemoryFileRuntime implements TranscriptFileRuntime {
   constructor(private readonly tree: MemoryFiles = files) {}
 
   /** The token the runtime reads `path` under, or `ENOENT`. */
-  token(path: string): string {
+  async token(path: string): Promise<string> {
     const handle = this.tree.handle(path);
     if (handle === undefined) throw code('ENOENT');
-    return this.inner.adopt(handle);
+    return await this.inner.adopt(handle);
   }
 
   async info(path: string): Promise<TranscriptFileInfo | undefined> {
     const found = this.tree.resolve(path);
     if (found === undefined) return undefined;
     if (found.node.kind !== 'file') return { identity: `dir:${path}`, size: 0, modifiedMs: 0, isFile: false };
-    return await this.inner.info(this.token(path));
+    return await this.inner.info(await this.token(path));
   }
 
   async countNewlines(path: string, byteLength: number): Promise<number> {
-    return await this.inner.countNewlines(this.token(path), byteLength);
+    return await this.inner.countNewlines(await this.token(path), byteLength);
   }
 
   async readTrailingLine(path: string, byteLength: number, byteLimit: number): Promise<BoundedTranscriptRead> {
-    return await this.inner.readTrailingLine(this.token(path), byteLength, byteLimit);
+    return await this.inner.readTrailingLine(await this.token(path), byteLength, byteLimit);
   }
 
   async readRange(path: string, byteOffset: number, byteLength: number): Promise<Uint8Array> {
-    return await this.inner.readRange(this.token(path), byteOffset, byteLength);
+    return await this.inner.readRange(await this.token(path), byteOffset, byteLength);
   }
 
   async readFrom(path: string, byteOffset: number, byteLimit: number): Promise<BoundedTranscriptRead> {
-    return await this.inner.readFrom(this.token(path), byteOffset, byteLimit);
+    return await this.inner.readFrom(await this.token(path), byteOffset, byteLimit);
   }
 }
 
