@@ -941,6 +941,36 @@ describe('materialiseFleet', () => {
       should(pinned.ANTHROPIC_BASE_URL).equal('https://loge.example');
     });
 
+    it("should never let a pin beat a settings document's own env block (B2b)", () => {
+      // Arrange — the document's `env` lands in the home's settings.json, not in the process environment.
+      const model = modelOf({
+        components: { ...COMPONENTS, settings: { doc: { harness: 'claude', file: 'doc.json' } } },
+        credentials: {
+          loge: {
+            harness: 'claude',
+            store: 'environment',
+            env: { ANTHROPIC_BASE_URL: 'https://l', ANTHROPIC_MODEL: 'login-model' },
+            claude: { env: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k3' } },
+          },
+        },
+        profiles: { default: { layers: [...DEFAULT_LAYERS, 'settings/doc'] } },
+        runtimes: { 'claude-loge': { credential: 'loge', profile: 'default', agent: true } },
+      });
+
+      // Act
+      const result = plan(model, {
+        bodies: {
+          settings: { doc: { env: { ANTHROPIC_MODEL: 'doc-model', ANTHROPIC_DEFAULT_OPUS_MODEL: 'doc-opus' } } },
+        },
+      });
+
+      // Assert
+      const pinned = fixedOf(result, HOME_A).env ?? {};
+      should(pinned).not.have.property('ANTHROPIC_MODEL');
+      should(pinned).not.have.property('ANTHROPIC_DEFAULT_OPUS_MODEL');
+      should(pinned.ANTHROPIC_BASE_URL).equal('https://l');
+    });
+
     it("should never let a pin beat an MCP server's forwarded variable (B2)", () => {
       // Act
       const result = plan(loge(true, { ANTHROPIC_BASE_URL: 'https://loge.example', GITHUB_TOKEN: 'login-literal' }));

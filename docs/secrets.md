@@ -343,11 +343,13 @@ the catalog's `ANTHROPIC_DEFAULT_*_MODEL`, a literal `ANTHROPIC_AUTH_TOKEN`) und
 variable can no longer start the runtime signed out **when a person runs the runtime's bin wrapper**. A
 ferret the daemon starts does not launch through that wrapper: it goes through the claude-code harness, which
 reads neither the login's environment nor this file today, so this pin does not cover it. That is a separate
-fix (branch `rebuild/ferret-login-env`).
+fix (tracked in `ports-pending.json`).
 
 Only a value that is a plain literal is pinned, and only when the runtime's process environment ends with the
-same value: a key the profile's settings, an MCP server's forwarded variable or Ferretry itself sets later keeps
-its precedence, and `FY_*` names are never pinned. An indirect `$NAME` / `${NAME}` is not pinned either
+same value: a key the profile's settings (including the `env` block of a settings file or document, which lands in
+the runtime's `settings.json`, and which `--settings` would otherwise beat), an MCP server's forwarded
+variable or Ferretry itself sets later keeps its precedence. An `env` a person wrote into that home's
+`settings.json` by hand is not seen, and a pin of the same key still beats it. `FY_*` names are never pinned. An indirect `$NAME` / `${NAME}` is not pinned either
 (`--settings` env is not shell-expanded; the wrapper resolves it at exec).
 
 **A value that names `${secret:…}` (or the optional `${secret?:…}`) never goes into that file, any settings file, or a command line.** It stays

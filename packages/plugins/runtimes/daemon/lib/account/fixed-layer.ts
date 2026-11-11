@@ -43,7 +43,7 @@
  * - The overlay ALSO pins an environment login's NON-secret variables under `env` (B190, `./materialise.ts`).
  *   That covers a person running the runtime's bin wrapper. A daemon-started ferret launches through the
  *   claude-code harness instead, which reads neither this file nor the login's environment (separate fix,
- *   branch `rebuild/ferret-login-env`).
+ *   tracked in ports-pending.json).
  *   Claude Code lets a `--settings` value beat the same key in a repository's own
  *   `.claude/settings.local.json`, while the process environment loses to it, so a repo that blanked
  *   `ANTHROPIC_BASE_URL` signed the runtime out. A value naming `${secret:…}` is never pinned: it would show

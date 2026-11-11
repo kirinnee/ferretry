@@ -31,7 +31,6 @@
  *
  * Pure: bodies are read by the caller, an id is minted by an injected function, the clock is a string.
  */
-import { envReferenceName } from '../wrappers.ts';
 import { optionalSecretReferenceOf, secretReferencesIn } from '@ferretry/core-vault/contract';
 import type { z } from 'zod';
 import type { CompactAtSchema } from '../../../contract/index.ts';
@@ -57,6 +56,7 @@ import { type SettingsObject, serializeSettings } from '../settings.ts';
 import { sharedHistoryPoolDirectory, sharedHistoryPoolRequests } from '../shared-history.ts';
 import { CREDENTIAL_ENV } from '../foreign.ts';
 import {
+  envReferenceName,
   MANAGED_MARKER,
   RUNTIME_NAME_ENV,
   renderCommandScript,
@@ -99,7 +99,7 @@ export const MATERIALISED_RECORD_FILE = 'materialised.json';
  * The `--settings` overlay a Claude runtime launches with: the fixed layer's, for an agent runtime, and
  * the login's non-secret environment, for any Claude runtime on an environment login (B190). The pins reach
  * a person running the runtime's bin wrapper; a daemon-started ferret launches through the claude-code
- * harness instead (separate fix, branch `rebuild/ferret-login-env`).
+ * harness instead (separate fix, tracked in ports-pending.json).
  */
 export const FIXED_SETTINGS_FILE = 'fixed.json';
 
@@ -152,14 +152,26 @@ function loginEnvironmentPins(
   store: CredentialStoreResolution,
   derivedEnv: Readonly<Record<string, string>>,
   finalEnv: Readonly<Record<string, string>>,
+  documentEnv: Readonly<Record<string, unknown>>,
 ): Record<string, string> {
   if (harness !== 'claude' || store.store !== 'environment') return {};
   const pins = pinnableLoginEnvironment({ ...credentialLaunchEnvironment(store), ...derivedEnv });
   // `--settings` beats the process environment, so a pin is only safe where the process environment ends up
   // with the same value: a later layer (profile, MCP forward, Ferretry's own) must keep its precedence.
+  // The merged settings document's own `env` goes to the home's settings.json, not the process environment, and
+  // `--settings` beats that file, so a key the document sets is never pinned either.
   return Object.fromEntries(
-    Object.entries(pins).filter(([variable, value]) => !variable.startsWith('FY_') && finalEnv[variable] === value),
+    Object.entries(pins).filter(
+      ([variable, value]) =>
+        !variable.startsWith('FY_') && finalEnv[variable] === value && !Object.hasOwn(documentEnv, variable),
+    ),
   );
+}
+
+/** The `env` block of the merged settings document, which lands in the home's settings.json. */
+function documentEnvOf(document: SettingsObject): Readonly<Record<string, unknown>> {
+  const { env } = document;
+  return typeof env === 'object' && env !== null && !Array.isArray(env) ? (env as Record<string, unknown>) : {};
 }
 
 /** Whether the profile's own flags already pass `--settings` (Claude Code honours only one). */
@@ -501,7 +513,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     // B190: the login's non-secret variables are pinned in the `--settings` overlay too, since a repo's
     // own settings beat the process environment but not that file. Any Claude runtime gets them, an
     // interactive one through an overlay of its own.
-    let pins = loginEnvironmentPins(harness, store, derived.env, env);
+    let pins = loginEnvironmentPins(harness, store, derived.env, env, documentEnvOf(adapted.settings.value));
     // Claude honours only one `--settings`, so an interactive runtime whose profile passes its own is left
     // unpinned: that is no reason to refuse the whole fleet apply (a GAP in ports-pending.json says so).
     if (Object.keys(pins).length > 0 && !runtime.agent && passesSettingsFlag(resolved.flags)) pins = {};
