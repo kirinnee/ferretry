@@ -33,17 +33,19 @@ export class StateAgentPinRepository implements AgentPinRepository {
       this.kept = undefined;
       return [];
     }
-    if (this.kept?.etag !== version.etag) {
+    let kept = this.kept;
+    if (kept?.etag !== version.etag) {
       // The identity was taken BEFORE the read: a file that moves in between is read newer than its etag, and the
       // next load sees a different etag and reads again, so a stale list is never kept.
-      const pins = this.read();
-      const kept = { etag: version.etag, pins };
-      this.kept = kept;
-      pins.catch(() => {
-        if (this.kept === kept) this.kept = undefined;
+      const mine = { etag: version.etag, pins: this.read() };
+      kept = mine;
+      this.kept = mine;
+      // A read that failed is not kept: the next load tries again.
+      mine.pins.catch(() => {
+        if (this.kept === mine) this.kept = undefined;
       });
     }
-    return await (this.kept?.pins ?? this.read());
+    return await kept.pins;
   }
 
   private async read(): Promise<readonly AgentPin[]> {
