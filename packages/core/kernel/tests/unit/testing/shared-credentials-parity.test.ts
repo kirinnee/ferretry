@@ -1,8 +1,9 @@
 /**
  * The testing host's shared credentials stay in step with the real roots port: the same rules
  * (`host/shared-credentials.ts`) decide who may mint, from what, who may place it and where, so a plugin's unit test meets
- * the refusals and the link production makes. (The identity re-check, `changed`, needs a real rename and is proved on the
- * real port only: the test world's files have no inode that moves.)
+ * the refusals and the link production makes, `changed` and the single use of a credential included (the test world gives a
+ * file a new stand-in inode whenever it is removed and written again, as a rename-over does on disk). What the testing host
+ * still models more loosely is the placed link itself (`entries`, `fileIdentity`, renaming it back), not these rules.)
  */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
@@ -224,7 +225,7 @@ const CASES: Readonly<Record<string, Case>> = {
       );
     return answers;
   },
-  'changed: a re-link with a credential whose file was replaced after it was placed': async side => {
+  'not shared: a re-link with a credential already placed, even after its file was replaced': async side => {
     const credential = await mint(side);
     const home = homeOf(side.codex);
     await home.linkCredential(credential, resolved(home, 'auth.json'));
@@ -268,9 +269,39 @@ const CASES: Readonly<Record<string, Case>> = {
     });
   },
   'outside: something already at the name': async side => {
+    const home = homeOf(side.codex);
+    await home.linkCredential(await mint(side), resolved(home, 'auth.json'));
+    return await outcome(async () => {
+      await home.linkCredential(await mint(side), resolved(home, 'auth.json'));
+      return home;
+    });
+  },
+  'not shared: the same credential after its link was removed': async side => {
     const credential = await mint(side);
     const home = homeOf(side.codex);
     await home.linkCredential(credential, resolved(home, 'auth.json'));
+    await home.unlink(resolved(home, 'auth.json'));
+    return await outcome(async () => {
+      await home.linkCredential(credential, resolved(home, 'auth.json'));
+      return home;
+    });
+  },
+  'not shared: the same credential into another ferret’s home': async side => {
+    const credential = await mint(side);
+    const first = homeOf(side.codex, 'f1');
+    await first.linkCredential(credential, resolved(first, 'auth.json'));
+    const second = homeOf(side.codex, 'f2');
+    return await outcome(async () => {
+      await second.linkCredential(credential, resolved(second, 'auth.json'));
+      return second;
+    });
+  },
+  'link: a refused attempt does not spend the credential': async side => {
+    const credential = await mint(side);
+    const home = homeOf(side.codex);
+    // a nested name is refused before anything is made...
+    await home.linkCredential(credential, resolved(home, 'sub/auth.json')).catch(() => undefined);
+    // ...so the credential still links where it should
     return await outcome(async () => {
       await home.linkCredential(credential, resolved(home, 'auth.json'));
       return home;
@@ -309,8 +340,19 @@ test('the new cases each refuse, on the real roots', async () => {
     Array.from({ length: 5 }, () => 'root:link_escape'),
   );
   expect(
-    await CASES['changed: a re-link with a credential whose file was replaced after it was placed']?.(await real()),
-  ).toEqual({ refused: 'root:changed' });
+    await CASES['not shared: a re-link with a credential already placed, even after its file was replaced']?.(
+      await real(),
+    ),
+  ).toEqual({ refused: 'not_shared' });
+  expect(await CASES['not shared: the same credential after its link was removed']?.(await real())).toEqual({
+    refused: 'not_shared',
+  });
+  expect(await CASES['not shared: the same credential into another ferret’s home']?.(await real())).toEqual({
+    refused: 'not_shared',
+  });
+  expect(await CASES['link: a refused attempt does not spend the credential']?.(await real())).toEqual({
+    made: 'symlink',
+  });
 });
 
 test('the cases cover each answer (the parity is not vacuous)', async () => {

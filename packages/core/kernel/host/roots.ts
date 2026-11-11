@@ -2281,66 +2281,77 @@ function rootHandle(setup: HandleSetup): RootHandle {
       // The destination first: an internal, writable root the kernel makes (`agent-homes`), before the credential is opened.
       if (!receivingRoot(name)) return refuseShared('not_internal');
       writable();
-      // Forged, rebuilt, revoked (`not_shared`) or another plugin's (`not_receiver`): the table decides, never the caller.
-      const minted = CREDENTIALS.open(credential, plugin);
-      // One ferret's home and nothing wider, and the link lands at `<that home>/<file>`: the receiver chooses neither the
-      // folder nor the name.
-      const root = base();
-      if (scopedParent === undefined || root === undefined) return refuse('outside');
-      const lexical = lexicalInRoot(home, root, ownerRoot, to);
-      if (!lexical.ok) return refuse(lexical.error);
-      if (!credentialPlacement(absolute(root, 'a root'), minted.file, lexical.value)) return refuse('outside');
-      // The file is judged again NOW, by the minter's own checks: it must be the very one minted (a rename-over, a
-      // re-sign-in or a swapped folder is `changed`, and the next launch mints afresh).
-      const lookAgain = async (): Promise<ReachedCredential> => {
-        const found = await minted.reach().catch((error: unknown) => {
-          if (error instanceof SharedTreeError || error instanceof RootError) return refuse('changed');
-          throw error;
-        });
-        // The very inode minted, at the very real path minted: the link's text is that path, nothing the caller names.
-        if (!isMintedInode(minted.identity, found.identity) || found.real !== minted.real) return refuse('changed');
-        return found;
-      };
-      const reached = await lookAgain();
-      const placed = await realParent(to, true);
-      // No link on the way: the folder `to` names, as this root names it, is the very folder reached.
-      if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
-        refuse('link_escape');
-      const made = await openFolderMaking(placed.scope, dirname(placed.full), 0o700, false);
-      try {
-        const leafAt = await entry(placed.scope, made.folder, made.real, basename(placed.full));
-        // THE exemption: the TARGET (a pinned sign-in file) is not asked of the private-place fence — only the identity
-        // the mint table holds is linked. The link's PLACE is fenced as for every link.
-        await refuseHeldName(placed.scope, join(made.real, basename(placed.full)));
-        if ((await fs.identity(leafAt)) !== undefined) refuse('outside');
-        await fs.symlink(reached.real, leafAt).catch(() => refuse('changed'));
-        // PROVED before it stays: the source is judged again by descriptor (no link on the way, the minted inode) and the
-        // link, followed, must land on that same real path. Anything else — a swap between the first look and the
-        // `symlink` call — takes the link back and refuses; no link that reaches an unminted file is ever left.
-        const held = await (async () => {
-          try {
-            const after = await lookAgain();
-            const landed = await fs.realpath(leafAt);
-            const there = await fs.identity(landed);
-            return (
-              there !== undefined &&
-              placedLinkHolds(
-                { real: minted.real, ...minted.identity },
-                { real: landed, device: there.device, inode: there.inode },
-              ) &&
-              isMintedInode(minted.identity, after.identity)
-            );
-          } catch {
-            return false;
+      // Forged, rebuilt, revoked, already spent or in use (`not_shared`) or another plugin's (`not_receiver`): the table
+      // decides, never the caller. The first link that stays spends it; an attempt that made none gives it back.
+      const claim = CREDENTIALS.claim(credential, plugin);
+      const minted = claim.entry;
+      const place = async (): Promise<void> => {
+        // One ferret's home and nothing wider, and the link lands at `<that home>/<file>`: the receiver chooses neither the
+        // folder nor the name.
+        const root = base();
+        if (scopedParent === undefined || root === undefined) return refuse('outside');
+        const lexical = lexicalInRoot(home, root, ownerRoot, to);
+        if (!lexical.ok) return refuse(lexical.error);
+        if (!credentialPlacement(absolute(root, 'a root'), minted.file, lexical.value)) return refuse('outside');
+        // The file is judged again NOW, by the minter's own checks: it must be the very one minted (a rename-over, a
+        // re-sign-in or a swapped folder is `changed`, and the next launch mints afresh).
+        const lookAgain = async (): Promise<ReachedCredential> => {
+          const found = await minted.reach().catch((error: unknown) => {
+            if (error instanceof SharedTreeError || error instanceof RootError) return refuse('changed');
+            throw error;
+          });
+          // The very inode minted, at the very real path minted: the link's text is that path, nothing the caller names.
+          if (!isMintedInode(minted.identity, found.identity) || found.real !== minted.real) return refuse('changed');
+          return found;
+        };
+        const reached = await lookAgain();
+        const placed = await realParent(to, true);
+        // No link on the way: the folder `to` names, as this root names it, is the very folder reached.
+        if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
+          refuse('link_escape');
+        const made = await openFolderMaking(placed.scope, dirname(placed.full), 0o700, false);
+        try {
+          const leafAt = await entry(placed.scope, made.folder, made.real, basename(placed.full));
+          // THE exemption: the TARGET (a pinned sign-in file) is not asked of the private-place fence — only the identity
+          // the mint table holds is linked. The link's PLACE is fenced as for every link.
+          await refuseHeldName(placed.scope, join(made.real, basename(placed.full)));
+          if ((await fs.identity(leafAt)) !== undefined) refuse('outside');
+          await fs.symlink(reached.real, leafAt).catch(() => refuse('changed'));
+          // PROVED before it stays: the source is judged again by descriptor (no link on the way, the minted inode) and the
+          // link, followed, must land on that same real path. Anything else — a swap between the first look and the
+          // `symlink` call — takes the link back and refuses; no link that reaches an unminted file is ever left.
+          const held = await (async () => {
+            try {
+              const after = await lookAgain();
+              const landed = await fs.realpath(leafAt);
+              const there = await fs.identity(landed);
+              return (
+                there !== undefined &&
+                placedLinkHolds(
+                  { real: minted.real, ...minted.identity },
+                  { real: landed, device: there.device, inode: there.inode },
+                ) &&
+                isMintedInode(minted.identity, after.identity)
+              );
+            } catch {
+              return false;
+            }
+          })();
+          if (!held) {
+            await fs.unlink(leafAt).catch(() => undefined);
+            refuse('changed');
           }
-        })();
-        if (!held) {
-          await fs.unlink(leafAt).catch(() => undefined);
-          refuse('changed');
+        } finally {
+          await made.folder.close();
         }
-      } finally {
-        await made.folder.close();
+      };
+      try {
+        await place();
+      } catch (error) {
+        claim.release();
+        throw error;
       }
+      claim.spend();
     },
     ensurePrivateDirectory: async path => {
       writable();

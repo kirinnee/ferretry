@@ -1660,26 +1660,34 @@ async function start(world: World): Promise<TestHost> {
           },
           linkCredential: async (credential, to) => {
             if (!receivingRoot(name)) return refuseShared('not_internal');
-            const minted = sharedCredentials.open(credential, manifest.id);
-            // One ferret's home and nothing wider; the link lands at `<that home>/<file>` and nowhere else.
-            if (prefix === undefined || scoped === undefined || scoped === '') throw new RootError('outside');
-            const place = ownPath(to);
-            if (!credentialPlacement(prefix, minted.file, place)) throw new RootError('outside');
-            // As production: no link on the way to the home (the root, the home or any folder between): `link_escape`.
-            const steps = prefix.split('/').map((_, at, all) => all.slice(0, at + 1).join('/'));
-            if (steps.some(step => step !== '' && testLinks.has(step))) throw new RootError('link_escape');
-            const reached = (() => {
-              try {
-                return minted.reach();
-              } catch {
+            // As production: single-use. The first link that stays spends it; an attempt that made none gives it back.
+            const claim = sharedCredentials.claim(credential, manifest.id);
+            const minted = claim.entry;
+            try {
+              // One ferret's home and nothing wider; the link lands at `<that home>/<file>` and nowhere else.
+              if (prefix === undefined || scoped === undefined || scoped === '') throw new RootError('outside');
+              const place = ownPath(to);
+              if (!credentialPlacement(prefix, minted.file, place)) throw new RootError('outside');
+              // As production: no link on the way to the home (the root, the home or any folder between): `link_escape`.
+              const steps = prefix.split('/').map((_, at, all) => all.slice(0, at + 1).join('/'));
+              if (steps.some(step => step !== '' && testLinks.has(step))) throw new RootError('link_escape');
+              const reached = (() => {
+                try {
+                  return minted.reach();
+                } catch {
+                  throw new RootError('changed');
+                }
+              })();
+              if (!isMintedInode({ device: 1n, inode: minted.inode }, { device: 1n, inode: reached.inode }))
                 throw new RootError('changed');
-              }
-            })();
-            if (!isMintedInode({ device: 1n, inode: minted.inode }, { device: 1n, inode: reached.inode }))
-              throw new RootError('changed');
-            if (world.roots.has(place) || testLinks.has(place) || testFolderExists(place))
-              throw new RootError('outside');
-            testLinks.set(place, reached.key);
+              if (world.roots.has(place) || testLinks.has(place) || testFolderExists(place))
+                throw new RootError('outside');
+              testLinks.set(place, reached.key);
+            } catch (error) {
+              claim.release();
+              throw error;
+            }
+            claim.spend();
           },
           copyTree: async (source, from, to, copyOptions) => {
             // A SOURCE that is a project folder is gated by its own handle (the declared set, no link on the way), and no

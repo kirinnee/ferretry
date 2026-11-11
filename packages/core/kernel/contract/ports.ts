@@ -826,11 +826,14 @@ export interface RootHandle {
   copyShared(tree: SharedTree, to: FencedPath, options?: TreeCopyOptions): Promise<SharedTreeCopied>;
   /**
    * Makes ONE symlink at `to` to a {@link SharedCredential}'s file. Only on `agent-homes`, only by the plugin the credential
-   * was minted for, only on a handle scoped to one subfolder (one ferret's home), only at `<that folder>/<file>` (the
+   * was minted for, only on a handle scoped to one subfolder (a ferret's home; the kernel does not know which ferret, so
+   * the credential is bound to the receiver, not to a ferret), only at `<that folder>/<file>` (the
    * credential's own name, one level) and only when nothing is at `to`. The file must still be the very one minted (same
    * device and inode, one name): otherwise `changed`. Never a copy. This is the ONE call that does not ask the private-place
-   * fence about the TARGET (the sign-in file is pinned by inode); the link's PLACE is fenced as usual. A link made stays
-   * until its holder removes it: revoking the credential stops new links only (a declared GAP).
+   * fence about the TARGET (the sign-in file is pinned by inode); the link's PLACE is fenced as usual. The credential is
+   * SINGLE-USE: the first link that stays spends it, and any later link with it (after an unlink, or into another
+   * ferret's home) is refused `not_shared`; an attempt that made no link does not spend it. A link made stays until its
+   * holder removes it: revoking the credential stops new links only (a declared GAP).
    */
   linkCredential(credential: SharedCredential, to: FencedPath): Promise<void>;
   /** A folder made (or narrowed) to `0700`, refused when a link or a file is at the name. */

@@ -33,6 +33,7 @@ function fixture(options: {
   const runner = new FakeRunner();
   let tokenSaves = 0;
   let next = 0;
+  const takerSaw: object[] = [];
   const ports: FerretsPorts = {
     now: () => T0,
     newId: () => {
@@ -50,7 +51,14 @@ function fixture(options: {
     harnessKeys: () => ['codex'],
     runner: () => runner,
     decide: async () => ({ allow: true }),
-    launchParts: () => [{ parts: async () => options.parts ?? [] }],
+    launchParts: () => [
+      {
+        parts: async spec => {
+          takerSaw.push(spec);
+          return options.parts ?? [];
+        },
+      },
+    ],
     sitrepSources: () => [],
     instructions: () => [],
     folder: path => ok(fenced(path)),
@@ -64,6 +72,7 @@ function fixture(options: {
     runner,
     registry,
     tokenSaves: () => tokenSaves,
+    takerSaw,
     service: new FerretsService(registry, tokens, ports),
   };
 }
@@ -121,6 +130,17 @@ describe('a ferret on a login with a sign-in file', () => {
     expect(f.harness.prepared[0]?.credential).toBe(CREDENTIAL);
     expect(f.harness.launched[0]?.credential).toBe(CREDENTIAL);
     expect(f.harness.launched[0]?.parts).toEqual([]);
+  });
+
+  test('F1: a launch.parts taker is handed the spec without the credential, while the harness still gets it', async () => {
+    const f = fixture({ loginCredential: answering({ kind: 'file', credential: CREDENTIAL }) });
+
+    const started = await f.service.start({ folder: '/work', harness: 'codex', login: 'team', by: 'owner' });
+
+    expect(started.ok).toBe(true);
+    expect(f.takerSaw).toHaveLength(1);
+    expect('credential' in (f.takerSaw[0] as object)).toBe(false);
+    expect(f.harness.launched[0]?.credential).toBe(CREDENTIAL);
   });
 
   test('16: start, resume and revive each ask again, so each launch carries a credential minted for it', async () => {

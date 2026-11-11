@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { LOGIN_KINDS, type LoginFile } from '../../contract/index.ts';
-import { kindOf, loginKinds } from '../../daemon/lib/kinds.ts';
+import { kindOf, loginKinds, notPlainFileSentence } from '../../daemon/lib/kinds.ts';
 import { sampleLogin } from '../../contract/testing/index.ts';
 
 const RAW = 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789';
@@ -85,6 +85,30 @@ describe('the five login kinds', () => {
       value: { CLAUDE_SECURESTORAGE_CONFIG_DIR: `${STORE}/work` },
     });
     expect(await kinds.anthropic.env('work', 'claude-code')).toEqual({});
+  });
+
+  test('F2: a sign-in file the kernel calls not_own is unavailable with the remedy sentence, and no path', async () => {
+    const wedged = loginKinds({
+      clock: { sleep: async () => undefined },
+      credentialProblem: async () => undefined,
+      shareCredential: async () => 'not_own',
+      signInVariables: async () => ({}),
+      files: () => files,
+      view: async id => sampleLogin(id),
+      check: async id => sampleLogin(id),
+      startSignIn: async () => {
+        throw new Error('not used');
+      },
+      signInStatus: async () => {
+        throw new Error('not used');
+      },
+    });
+
+    const answer = await wedged.openai.credential?.('team', 'codex');
+
+    expect(answer).toEqual({ kind: 'unavailable', sentence: notPlainFileSentence('team') });
+    expect(answer?.kind === 'unavailable' ? answer.sentence : '').toContain('remove the extra link');
+    expect(JSON.stringify(answer)).not.toContain('/');
   });
 
   test('a Claude login with no usable sign-in refuses with the sentence the check gave, not a signed-out pane', async () => {

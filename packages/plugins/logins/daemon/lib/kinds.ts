@@ -24,6 +24,14 @@ import { looksLikeRawSecret } from '../../contract/secret-shape.ts';
 
 type KindKey = (typeof LOGIN_KINDS)[number];
 
+/**
+ * The one sentence for a sign-in file the kernel will not share because it is not a plain file with one name: it says what
+ * to remove or redo, and names no path (the owner already sees the login).
+ */
+export function notPlainFileSentence(login: string): string {
+  return `the sign-in file of the login ${login} is not a plain file with a single name (another link to it exists, or it is itself a link); remove the extra link, or sign the login out and in again from Logins, then start the ferret again`;
+}
+
 /** What the kinds need of the rest of this half. */
 export interface LoginKindDeps {
   readonly clock: Pick<Clock, 'sleep'>;
@@ -34,8 +42,11 @@ export interface LoginKindDeps {
   signInStatus(flowId: string): Promise<HarnessLoginFlow>;
   /** Why this login's sign-in FILE cannot be handed to a harness (not owned, no tokens), in one sentence; `undefined` when it can. */
   credentialProblem(id: string): Promise<string | undefined>;
-  /** The kernel's shared credential for this login's sign-in file, or `undefined` when it could not be shared. Never renews. */
-  shareCredential(id: string): Promise<SharedCredential | undefined>;
+  /**
+   * The kernel's shared credential for this login's sign-in file; `'not_own'` when the file is not a plain file with one
+   * name (something is linked to it, or it is a link); `undefined` when it could not be shared. Never renews.
+   */
+  shareCredential(id: string): Promise<SharedCredential | 'not_own' | undefined>;
   /**
    * The variables the credential store sets for a runtime on this login (`credentialLaunchEnvironment`): for a
    * Ferretry-kept Claude login the one secure-storage variable, naming its store directory. Nothing for any other.
@@ -188,6 +199,7 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
             if (view.status.word === 'needs_sign_in')
               return unavailable(`the login ${login} needs signing in: ${view.status.explanation}`);
             const credential = await deps.shareCredential(login);
+            if (credential === 'not_own') return unavailable(notPlainFileSentence(login));
             if (credential === undefined)
               return unavailable(`the sign-in file of the login ${login} could not be shared with Codex`);
             return { kind: 'file', credential };

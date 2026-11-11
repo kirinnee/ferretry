@@ -185,7 +185,7 @@ describe('logins:openai credential()', () => {
       expect(f.kinds[kind].credential).toBeUndefined();
   });
 
-  test('a file replaced by something with a second name is unavailable, never shared', async () => {
+  test('F2: a file with a second name is unavailable, in one sentence that says what to remove and names no path', async () => {
     const f = await fixture({
       seed: async base => {
         await writeFile(join(base, 'team', 'auth.json'), JSON.stringify(TOKENS), { mode: 0o600 });
@@ -194,7 +194,11 @@ describe('logins:openai credential()', () => {
       },
     });
     const answer = await f.kinds.openai.credential?.('team', 'codex');
-    expect(answer?.kind).toBe('unavailable');
-    expect(answer?.kind === 'unavailable' ? answer.sentence : '').toContain('team');
+    expect(answer).toEqual({
+      kind: 'unavailable',
+      sentence:
+        'the sign-in file of the login team is not a plain file with a single name (another link to it exists, or it is itself a link); remove the extra link, or sign the login out and in again from Logins, then start the ferret again',
+    });
+    expect(JSON.stringify(answer)).not.toContain(f.fyHome);
   });
 });

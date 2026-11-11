@@ -27,6 +27,7 @@ import { defineState } from '../../../contract/define.ts';
 import type { RootHandle, RootName, RootsPort, SharedCredential } from '../../../contract/ports.ts';
 import { type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
 import { ensureInternalRootBases, RootError, rootsPortFor } from '../../../host/roots.ts';
+import { credentialFileListed } from '../../../host/shared-credentials.ts';
 import { SharedTreeError } from '../../../host/shared-trees.ts';
 
 const CREDENTIALS = defineState({ name: 'credentials', path: 'credentials/*', store: 'opaque', format: 1 });
@@ -314,6 +315,65 @@ describe('RootHandle.linkCredential: where it may land', () => {
   });
 });
 
+describe('F5: only a list names a listed file', () => {
+  test('a malformed (non-array) manifest value matches nothing, not by substring', () => {
+    expect(credentialFileListed(['auth.json'], 'auth.json')).toBe(true);
+    expect(credentialFileListed('auth.json' as unknown as readonly string[], 'auth.json')).toBe(false);
+    expect(credentialFileListed('auth.json' as unknown as readonly string[], 'auth')).toBe(false);
+    expect(credentialFileListed(undefined, 'auth.json')).toBe(false);
+    expect(credentialFileListed(['*'], 'auth.json')).toBe(false);
+  });
+});
+
+describe('F1: a credential is single-use', () => {
+  test('a second link of the same credential is refused not_shared, and nothing more is made', async () => {
+    const w = await world();
+    const credential = await mint(w);
+    const home = w.homeOf(w.codex);
+    await home.linkCredential(credential, resolved(home, 'auth.json'));
+    await home.unlink(resolved(home, 'auth.json'));
+    expect(await refusalOf(home.linkCredential(credential, resolved(home, 'auth.json')))).toBe('not_shared');
+    await expect(lstat(`${w.homePath('codex')}/auth.json`)).rejects.toThrow();
+  });
+
+  test('the same credential cannot be linked into another ferret’s home after the first', async () => {
+    const w = await world();
+    const credential = await mint(w);
+    const first = w.homeOf(w.codex, 'f1');
+    const second = w.homeOf(w.codex, 'f2');
+    await first.linkCredential(credential, resolved(first, 'auth.json'));
+    expect(await refusalOf(second.linkCredential(credential, resolved(second, 'auth.json')))).toBe('not_shared');
+    await expect(lstat(`${w.homePath('codex', 'f2')}/auth.json`)).rejects.toThrow();
+  });
+
+  test('two links started together make exactly one', async () => {
+    const w = await world();
+    const credential = await mint(w);
+    const first = w.homeOf(w.codex, 'f1');
+    const second = w.homeOf(w.codex, 'f2');
+    const answers = await Promise.all([
+      refusalOf(first.linkCredential(credential, resolved(first, 'auth.json'))),
+      refusalOf(second.linkCredential(credential, resolved(second, 'auth.json'))),
+    ]);
+    expect(answers.filter(answer => answer === 'none')).toHaveLength(1);
+    expect(answers.filter(answer => answer === 'not_shared')).toHaveLength(1);
+  });
+
+  test('an attempt that makes no link does not spend it', async () => {
+    const w = await world();
+    const credential = await mint(w);
+    const home = w.homeOf(w.codex);
+    expect(await refusalOf(home.linkCredential(credential, resolved(home, 'other.json')))).toBe('root:outside');
+    await mkdir(w.homePath('codex'), { recursive: true, mode: 0o700 });
+    await writeFile(`${w.homePath('codex')}/auth.json`, 'stale');
+    expect(await refusalOf(home.linkCredential(credential, resolved(home, 'auth.json')))).toBe('root:outside');
+    await rm(`${w.homePath('codex')}/auth.json`);
+    // refused twice and nothing made, so it still links where it should
+    await home.linkCredential(credential, resolved(home, 'auth.json'));
+    expect((await lstat(`${w.homePath('codex')}/auth.json`)).isSymbolicLink()).toBe(true);
+  });
+});
+
 describe('the file must still be the one minted', () => {
   test('8: replaced by a rename between mint and link, it is refused changed and nothing is linked', async () => {
     const w = await world();
@@ -428,7 +488,7 @@ describe('round 1 review: the source is re-judged by descriptor and the link is 
     await expect(lstat(`${w.homePath('codex')}/auth.json`)).rejects.toThrow();
   });
 
-  test('R2: a link made, then its inode replaced: the same credential links nothing more (changed), and a fresh mint is the way on', async () => {
+  test('R2: a link made, then its inode replaced: the same credential links nothing more (spent), and a fresh mint is the way on', async () => {
     const w = await world();
     const credential = await mint(w);
     const home = w.homeOf(w.codex);
@@ -436,9 +496,9 @@ describe('round 1 review: the source is re-judged by descriptor and the link is 
     await rename(w.canonical, `${w.canonical}.saved`);
     await writeFile(w.canonical, '{"fake":"REPLACEMENT"}\n', { mode: 0o600 });
     // The OS follows the name (declared GAP: a symlink cannot pin an inode); the kernel never re-vouches for it.
-    expect(await refusalOf(home.linkCredential(credential, resolved(home, 'auth.json')))).toBe('root:changed');
+    expect(await refusalOf(home.linkCredential(credential, resolved(home, 'auth.json')))).toBe('not_shared');
     await home.unlink(resolved(home, 'auth.json'));
-    expect(await refusalOf(home.linkCredential(credential, resolved(home, 'auth.json')))).toBe('root:changed');
+    expect(await refusalOf(home.linkCredential(credential, resolved(home, 'auth.json')))).toBe('not_shared');
     await home.linkCredential(await mint(w), resolved(home, 'auth.json'));
     expect(await readFile(`${w.homePath('codex')}/auth.json`, 'utf8')).toBe('{"fake":"REPLACEMENT"}\n');
   });

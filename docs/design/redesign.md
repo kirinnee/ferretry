@@ -2691,9 +2691,14 @@ scoped handle:
   (`permissions.shareCredentials`, exact basenames such as `auth.json`; the file must be a regular file with one name and
   no link on the way, and the plugin must hold and have declared `credentials`), bound to ONE receiving plugin (`codex`).
   The receiver makes ONE symlink with `RootHandle.linkCredential`: only on `agent-homes`, only by the bound receiver
-  (`not_receiver` for any other holder), only on a handle scoped to one subfolder (one ferret's home), only at
-  `<that folder>/<file>` (the credential's own name, one level), only when nothing is at the name, and only if the file
-  is still the very one minted (device, inode, one name; otherwise `changed`, and the next launch mints afresh). It is
+  (`not_receiver` for any other holder), only on a handle scoped to one subfolder (a ferret's home: the kernel does not
+  know WHICH ferret, so the credential is not bound to one), only at `<that folder>/<file>` (the credential's own name,
+  one level), only when nothing is at the name, and only if the file is still the very one minted (device, inode, one
+  name; otherwise `changed`, and the next launch mints afresh). A credential is **single-use**: the first link that stays
+  spends it, so a second link, a link after the first was removed and a link into another ferret's home are refused
+  (`not_shared`); an attempt that made no link does not spend it, and two started together make one. Ferrets mints one
+  per launch and hands it to the harness alone (a `launch.parts` taker is never given it), and which ferret's home it
+  lands in is the harness's own discipline. It is
   never a copy, and no plugin can read through the link (`readText`/`stat` of it are `link_escape`): only the harness
   child reads it, through the OS. A credential is opaque and held in a kernel table like a tree (a copy or
   `{ credential: <file name> }` opens nothing) and is revoked when its minter stops. `linkTo`, `copyTree`, `share`,

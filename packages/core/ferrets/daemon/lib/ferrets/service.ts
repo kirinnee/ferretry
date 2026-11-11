@@ -1670,9 +1670,11 @@ export class FerretsService implements FerretsApi {
       ...(conversation === undefined ? {} : { harnessConversation: conversation }),
       ...(readable.length === 0 ? {} : { readable }),
     };
+    // A `launch.parts` taker is handed the spec WITHOUT the sign-in credential: only the harness asks the kernel to link it.
+    const { credential: _kept, ...forTakers } = base;
     const parts = (
       await Promise.all(
-        this.ports.launchParts().map(source => source.parts(base).catch(() => [] as readonly LaunchPart[])),
+        this.ports.launchParts().map(source => source.parts(forTakers).catch(() => [] as readonly LaunchPart[])),
       )
     ).flat();
     const spec: LaunchSpec = { ...base, parts };

@@ -322,16 +322,29 @@ export function harnessHomeCases(): void {
       expect(await readFile(join(home, 'auth.json'), 'utf8')).toBe(FAKE);
     });
 
-    test('a second prepare replaces the link it made, and the canonical file is untouched', async () => {
+    test('a second prepare replaces the link it made with the credential minted for it, and the canonical file is untouched', async () => {
       const { harness } = build();
       const home = await harness.homeFor('f2' as FerretId);
       const { credential, canonical } = await mintedCredential();
       await harness.prepareHome({ ...spec('f2', home), credential } as LaunchSpec);
 
-      await harness.prepareHome({ ...spec('f2', home), credential } as LaunchSpec);
+      // Each launch mints its own (a credential is single-use in the kernel).
+      const next = await mintedCredential();
+      await harness.prepareHome({ ...spec('f2', home), credential: next.credential } as LaunchSpec);
 
       expect(await kind(join(home, 'auth.json'))).toBe('link');
       expect(await readFile(canonical, 'utf8')).toBe(FAKE);
+    });
+
+    test('the credential of an earlier launch links nothing a second time', async () => {
+      const { harness } = build();
+      const home = await harness.homeFor('f2' as FerretId);
+      const { credential } = await mintedCredential();
+      await harness.prepareHome({ ...spec('f2', home), credential } as LaunchSpec);
+
+      await expect(harness.prepareHome({ ...spec('f2', home), credential } as LaunchSpec)).rejects.toThrow();
+
+      expect(await kind(join(home, 'auth.json'))).toBe('absent');
     });
 
     test('without a credential, a stale link is removed and the file it pointed at is left alone', async () => {

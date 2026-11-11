@@ -60,7 +60,9 @@ export interface LaunchSpec {
   /**
    * The login's sign-in FILE, shared with this harness (`LoginKind.credential`): Codex's `auth.json`, which the harness
    * asks the kernel to link into its own home (`RootHandle.linkCredential`). Set by Ferrets from the login only, never by
-   * a `launch.parts` taker, so no plugin can put a credential into another's launch. Absent: nothing to link.
+   * a `launch.parts` taker, so no plugin can put a credential into another's launch; and a taker is never handed it
+   * (`LaunchPartSource.parts` takes the spec without it). It is single-use in the kernel: the one link the harness makes
+   * spends it, and each launch mints its own. Absent: nothing to link.
    */
   readonly credential?: SharedCredential;
   /** The first message, when the owner gave one. */
@@ -99,7 +101,7 @@ export type LaunchPart =
 
 /** What a `launch.parts` taker contributes: a source asked per launch (a contribute item is static; the parts are not). */
 export interface LaunchPartSource {
-  parts(spec: Omit<LaunchSpec, 'parts'>): Promise<readonly LaunchPart[]>;
+  parts(spec: Omit<LaunchSpec, 'parts' | 'credential'>): Promise<readonly LaunchPart[]>;
 }
 
 /**
