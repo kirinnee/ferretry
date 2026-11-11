@@ -339,6 +339,20 @@ export interface Runner {
    */
   stopActiveTurn?(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerPaneObservation | undefined>;
   /**
+   * Additive (structured questions): ONE capture of the pane behind `handle` for the question-form driver, inside
+   * `kernel.act(terminal %n, 'read')` (a hold refuses it: `undefined`), masked before it leaves. Reads only. `undefined`
+   * for a handle with nothing live behind it or a pane that is not a ferret's own. Absent: the form cannot be read.
+   */
+  formCapture?(handle: RunnerHandle): Promise<RunnerFormCapture | undefined>;
+  /**
+   * Additive (structured questions): ONE key of {@link FORM_KEYS} typed at the pane, guarded exactly as `deliver`'s
+   * writes are (`kernel.act(terminal %n, 'keys')` by the runner itself, so a Vault hold types NOTHING). Rejects with a
+   * {@link RunnerDeliveryFailure} as `deliver` does. Absent: the form cannot be driven.
+   */
+  formKey?(handle: RunnerHandle, key: FormKey): Promise<void>;
+  /** Additive (structured questions): `text` pasted into the pane as one bracketed paste; guarded as {@link Runner.formKey}. */
+  formPaste?(handle: RunnerHandle, text: string): Promise<void>;
+  /**
    * Additive (W2-a, today's `TmuxSessionExitObserver.exitOf` `gone` proof): whether the runner PROVES that `ferret`'s own
    * terminal is not there at all (tmux: the ferret's session cannot be found, or the private server is not running,
    * which takes every pane with it). `false` for a live terminal, one tmux kept dead with an exit status (an agent that
@@ -412,6 +426,30 @@ export type RunnerHeldAt = 'composer' | 'queue';
 export type RunnerComposerCleared = 'cleared' | 'absent' | 'foreign' | 'stuck';
 /** What pressing Enter on a message in the composer did (today's `ComposerSubmitOutcome`). */
 export type RunnerComposerSubmitted = 'submitted' | 'holding' | 'absent';
+
+/**
+ * The closed set of keys a structured-question form is driven with (today's v4 driver sends exactly these). A key
+ * outside it cannot be named, so the form seam can never be used to type an arbitrary key: no `C-c`, no `y`.
+ */
+export const FORM_KEYS = ['Enter', 'Escape', 'Tab', 'Up', 'Down', 'Left', 'Right', 'Space'] as const;
+export type FormKey = (typeof FORM_KEYS)[number];
+
+/**
+ * ONE capture of a ferret's pane for the structured-question driver (today's `PaneState`): the visible screen and the
+ * scrollback, MASKED inside one `Redaction.read` before they leave the runner. It is the form's own evidence and goes to
+ * the driver only; it is never logged, stored or quoted in any answer.
+ */
+export interface RunnerFormCapture {
+  readonly alive: boolean;
+  /** The pane exists but its process is gone. */
+  readonly dead: boolean;
+  /** The harness is at a prompt and will accept typed input. */
+  readonly promptReady: boolean;
+  readonly visible: string;
+  readonly history: string;
+  /** The harness is visibly mid-turn on the VISIBLE frame (terminals' `paneShowsActiveWork`, computed by the runner, which owns that fact). */
+  readonly activeWork: boolean;
+}
 
 /** How many of a frame's last lines {@link RunnerLook.status} carries (the live readout's status window). */
 export const RUNNER_LOOK_STATUS_LINES = 25;

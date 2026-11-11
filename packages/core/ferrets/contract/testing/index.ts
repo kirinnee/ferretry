@@ -30,6 +30,8 @@ import {
   runnerDeliveryFailure,
   type RunnerComposerCleared,
   type RunnerComposerSubmitted,
+  type FormKey,
+  type RunnerFormCapture,
   type RunnerHeldAt,
   type RunnerLook,
   type RunnerPaneObservation,
@@ -173,6 +175,38 @@ export class FakeRunner implements Runner {
     this.stoppedActive.push({ handle, stop });
     if (shouldPressStopKey(this.working, stop)) this.pressed.push({ handle, key: stop.key });
     return this.pane;
+  }
+  /**
+   * The structured-question form seam (additive). A test sets what the pane shows (`form`, `undefined` is a pane that
+   * cannot be read) and sees every key pressed and text pasted, in order. A handle with nothing live behind it captures
+   * nothing, and a write to it rejects `not_ready`/`exited`, as `deliver` does.
+   */
+  form: RunnerFormCapture | undefined = {
+    alive: true,
+    dead: false,
+    promptReady: false,
+    activeWork: false,
+    visible: '',
+    history: '',
+  };
+  readonly formKeys: { readonly handle: RunnerHandle; readonly key: FormKey }[] = [];
+  readonly formPastes: { readonly handle: RunnerHandle; readonly text: string }[] = [];
+  /** Runs after each key or paste lands, so a test can redraw `form` the way a real form would. */
+  onFormWrite: (write: { readonly key?: FormKey; readonly text?: string }) => void = () => {};
+  async formCapture(handle: RunnerHandle): Promise<RunnerFormCapture | undefined> {
+    return this.#live.has(handle) ? this.form : undefined;
+  }
+  async formKey(handle: RunnerHandle, key: FormKey): Promise<void> {
+    this.#fail();
+    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    this.formKeys.push({ handle, key });
+    this.onFormWrite({ key });
+  }
+  async formPaste(handle: RunnerHandle, text: string): Promise<void> {
+    this.#fail();
+    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    this.formPastes.push({ handle, text });
+    this.onFormWrite({ text });
   }
   /**
    * What `look` sees on each live handle's pane, set by a test (`frame` is the screen's identity); a live handle
