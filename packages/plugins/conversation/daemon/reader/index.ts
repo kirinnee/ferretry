@@ -54,6 +54,8 @@ export function registerReader(needs: ReaderNeeds) {
   return {
     reads,
     images,
+    /** Closes the transcript handle held for one ferret that stopped or was removed. */
+    release: (ferret: string) => files.release(ferret),
     /** Closes every harness transcript handle the reader holds. */
     close: async () => await files.close(),
     routes: {
