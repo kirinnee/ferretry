@@ -54,6 +54,35 @@ export function currentLaunchModel(
 }
 
 /**
+ * The model a MOVE should ask the target for, or nothing when the target's own default should decide.
+ *
+ * A move onto the SAME runtime (Restart) keeps the model the session is on. A move onto ANOTHER runtime
+ * keeps it only when the person picked it: the harness reported a different model after the decision
+ * (`/model`), the start or move named it (`launchModelSource: 'requested'`), or — for a session
+ * recorded before the source was stamped — it is not the source account's default. A model that was
+ * only the source runtime's default must not follow the session onto a runtime with its own (B191).
+ */
+export function movedModel(input: {
+  readonly config: SessionConfig;
+  readonly state: SessionState;
+  /** The SOURCE account's current default model, for a session with no recorded source. */
+  readonly sourceDefault: string | undefined;
+  readonly crossing: { readonly sameRuntime: boolean };
+  readonly servable: (model: string) => boolean;
+}): string | undefined {
+  const { config, state, sourceDefault, crossing, servable } = input;
+  const current = currentLaunchModel(config, state, servable);
+  if (crossing.sameRuntime || current === undefined) return current;
+  const decided = config.model;
+  if (decided === undefined || !sameModel(decided, current)) return current; // observed /model switch
+  const picked =
+    config.launchModelSource !== undefined
+      ? config.launchModelSource === 'requested'
+      : sourceDefault === undefined || !sameModel(decided, sourceDefault);
+  return picked ? current : undefined;
+}
+
+/**
  * The fast mode a relaunch should ask for: the harness's report when it is newer than the last
  * decision, else the state the session was launched in. Absent when neither was ever decided, which
  * leaves the harness's own setting in charge — a relaunch must not turn a default into a choice.

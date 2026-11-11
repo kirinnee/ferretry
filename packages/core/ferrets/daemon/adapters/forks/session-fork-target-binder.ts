@@ -530,6 +530,7 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
         harness: resolved.account.kind,
         modelHint: plan.target.model ?? '',
         model: planned.model,
+        launchModelSource: planned.modelSource === 'requested' ? ('requested' as const) : ('account-default' as const),
         remoteControl: plan.durable.remoteControl,
         harnessFlags: [...plan.durable.harnessFlags],
         // A fork ALWAYS materialises `turns/turn-001.md`, so the counter says one whatever the mode:
