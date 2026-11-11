@@ -12,7 +12,7 @@ import { DialogAnswerService } from '../../daemon/lib/dialog/service.ts';
 import { parseHarnessDialog } from '../../daemon/lib/pane/harness-dialog.ts';
 import { parsePermissionPrompt } from '../../daemon/lib/pane/permission-prompt.ts';
 import { PermissionAnswerService } from '../../daemon/lib/permission/service.ts';
-import { dialogRoute, permissionRoute, updateStartRoute } from '../../daemon/lib/routes.ts';
+import { dialogRoute, permissionRoute, promptRoute, updateStartRoute } from '../../daemon/lib/routes.ts';
 import { HarnessUpdateRefusal } from '../../daemon/lib/update/service.ts';
 
 const fixture = (dir: string, name: string): string =>
@@ -603,5 +603,73 @@ describe('the update start route', () => {
     expect(answers.map(each => each.status).sort()).toEqual([202, 403]);
     expect(answers.find(each => each.status === 403)?.json.code).toBe('grant_step_up_required');
     expect([started, phone.state.spent]).toEqual([1, 1]);
+  });
+});
+
+describe('the prompt read: what the ferret is stopped on, as Ferrets records and masks it', () => {
+  const PROMPT = {
+    turnState: 'needs-input',
+    prompt: 'Do you want to proceed?',
+    permissionRequest: { id: '0123456789abcdef', tool: 'Read' },
+  } as const;
+  const get = (call_: ReturnType<typeof call>) => call_;
+
+  test('it answers exactly what Ferrets served, for the ferret in the path, and an owner names no caller', async () => {
+    const asked: { ferret: string; caller: string | undefined }[] = [];
+    const route = promptRoute({
+      prompt: async (ferret, caller) => {
+        asked.push({ ferret, caller });
+        return PROMPT;
+      },
+    });
+
+    const answer = body(await route(get(call({}, ownerStanding()))));
+
+    expect(answer.status).toBe(200);
+    expect(answer.json).toEqual(PROMPT);
+    expect(asked).toEqual([{ ferret: 'f1', caller: undefined }]);
+  });
+
+  test('a ferret asking passes its own id to Ferrets, so Ferrets’ rule decides what it may read', async () => {
+    const asked: (string | undefined)[] = [];
+    const route = promptRoute({
+      prompt: async (_ferret, caller) => {
+        asked.push(caller);
+        return {};
+      },
+    });
+
+    await route(get(call({}, ferretStanding('F1' as never))));
+
+    expect(asked).toEqual(['F1']);
+  });
+
+  test('a ferret reading another ferret’s prompt is refused as Ferrets refuses it, and nothing is served', async () => {
+    const route = promptRoute({
+      prompt: async () => {
+        throw Object.assign(new Error('a ferret acts only on itself and its helpers'), {
+          status: 403,
+          code: 'forbidden',
+        });
+      },
+    });
+
+    const error = await refused(route(get(call({}, ferretStanding('F2' as never)))));
+
+    expect(error).toMatchObject({ status: 403, code: 'forbidden' });
+  });
+
+  test('a ferret this daemon does not know is 404, and a pane that records nothing is an empty object', async () => {
+    const missing = await refused(promptRoute({ prompt: async () => undefined })(get(call({}, ownerStanding()))));
+    const nothing = body(await promptRoute({ prompt: async () => ({}) })(get(call({}, ownerStanding()))));
+
+    expect(missing).toMatchObject({ status: 404, code: 'not_found' });
+    expect([nothing.status, nothing.json]).toEqual([200, {}]);
+  });
+
+  test('a Ferrets that cannot say answers 503 plugin_unavailable, never an empty prompt', async () => {
+    const error = await refused(promptRoute({})(get(call({}, ownerStanding()))));
+
+    expect(error).toMatchObject({ status: 503, code: 'plugin_unavailable' });
   });
 });

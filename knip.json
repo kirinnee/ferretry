@@ -72,7 +72,7 @@
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/claude-code": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/packs": {

@@ -4,6 +4,7 @@ import { ensureDom, render, run } from '@ferretry/app/testing';
 import type { FerretLiveActivity } from '@ferretry/core-ferrets/contract';
 import type { ComponentProps } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
+import { CONVERSATION_ABOVE_COMPOSER_SLOT } from '../../../../contract/index.ts';
 import { HandoffSourceProvider } from '../../../../app/chat/handoff-message.tsx';
 import { SessionChatPage } from '../../../../app/chat/session-chat-page.tsx';
 import { Transcript } from '../../../../app/chat/transcript.tsx';
@@ -77,8 +78,33 @@ describe('SessionChatPage', () => {
       ['ferret.toolbar', 'shared'],
       ['conversation.row-actions', 'shared'],
       ['conversation.row', 'shared'],
+      ['conversation.above-composer', 'shared'],
       ['ferret.side', 'shared'],
     ]);
+  });
+
+  test('offers the above-composer slot for this ferret, in the input column directly before the composer', () => {
+    const page = draw();
+
+    const column = page.root.findByProps({ className: 'fy-chat-input__column' });
+    const drawn = column.children.filter((child): child is ReactTestInstance => typeof child !== 'string');
+    expect(drawn.map(child => child.type)).toEqual([PanelSlot, Composer]);
+    expect(drawn[0]?.props).toMatchObject({
+      daemon: 'alpha',
+      slot: CONVERSATION_ABOVE_COMPOSER_SLOT,
+      subject: 'shared',
+    });
+  });
+
+  test('keeps the slot above a pending question’s form too: a permission card is not hidden by a question', () => {
+    const page = draw({
+      question: QUESTION,
+      session: ferretView('shared', { state: { status: 'awaiting_question' } }),
+    });
+
+    const column = page.root.findByProps({ className: 'fy-chat-input__column' });
+    const drawn = column.children.filter((child): child is ReactTestInstance => typeof child !== 'string');
+    expect(drawn.map(child => child.type)).toEqual([PanelSlot, QuestionForm]);
   });
 
   test('hands the composer this device’s Enter-key choices, Vim mode and suggestion families', () => {

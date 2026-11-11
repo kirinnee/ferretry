@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import should from 'should';
 import type { PermissionAnswerRequest } from '../../../contract/index.ts';
-import { parsePermissionPrompt } from '../../../daemon/lib/pane/permission-prompt.ts';
+import { parsePermissionPrompt, recordedPermissionId } from '../../../daemon/lib/pane/permission-prompt.ts';
 import {
   type FerretPane,
   PermissionAnswerError,
@@ -75,6 +75,37 @@ const refusalOf = async (promise: Promise<unknown>): Promise<PermissionAnswerErr
   should(error).be.instanceOf(PermissionAnswerError);
   return error as PermissionAnswerError;
 };
+
+describe('PermissionAnswerService.answer, by the id Ferrets recorded', () => {
+  const recorded = (pane: string): string =>
+    recordedPermissionId(parsePermissionPrompt(pane) as NonNullable<ReturnType<typeof parsePermissionPrompt>>);
+
+  it('answers the prompt the recorded id names (the card holds it), and reports it under that id', async () => {
+    // Arrange
+    const pane = new ScriptedPane([BASH, BASH, IDLE]);
+    const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    // Act
+    const result = await service.answer('s1', { kind: 'choice', requestId: recorded(BASH), number: 2 });
+
+    // Assert
+    should(result).eql({ requestId: recorded(BASH), cleared: true });
+    should(pane.writes).eql(['2']);
+  });
+
+  it('still refuses as gone, typing nothing, when the recorded id is another prompt’s', async () => {
+    // Arrange
+    const pane = new ScriptedPane([WRITE]);
+    const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    // Act
+    const error = await refusalOf(service.answer('s1', { kind: 'deny', requestId: recorded(BASH) }));
+
+    // Assert
+    should(error.refusal).equal('gone');
+    should(pane.writes).eql([]);
+  });
+});
 
 describe('PermissionAnswerService.answer', () => {
   it('types exactly the digit of the chosen row, then reads until the prompt is gone', async () => {

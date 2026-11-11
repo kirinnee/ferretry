@@ -1,5 +1,5 @@
 import type { HarnessDialog, HarnessDialogAnswerRequest, HarnessDialogAnswerResult } from '../../../contract/index.ts';
-import { DIALOG_KEYS, dialogCursorMoves, parseHarnessDialog } from '../pane/harness-dialog.ts';
+import { DIALOG_KEYS, dialogCursorMoves, parseHarnessDialog, recordedDialogId } from '../pane/harness-dialog.ts';
 import type { FerretPane } from '../permission/service.ts';
 
 /**
@@ -93,8 +93,13 @@ export class DialogAnswerService {
 
   private async answerNow(ferretId: string, answer: HarnessDialogAnswerRequest): Promise<HarnessDialogAnswerResult> {
     const shown = parseHarnessDialog(await this.pane.capture(ferretId));
-    if (shown?.id !== answer.dialogId) throw new DialogAnswerError('gone', GONE, shown);
-    const gone = (after: HarnessDialog | undefined): boolean => after?.id !== answer.dialogId;
+    // Either id names this dialog: the one this plugin reads, or the one Ferrets recorded off the same screen.
+    const wanted =
+      shown !== undefined && (answer.dialogId === shown.id || answer.dialogId === recordedDialogId(shown))
+        ? shown.id
+        : answer.dialogId;
+    if (shown?.id !== wanted) throw new DialogAnswerError('gone', GONE, shown);
+    const gone = (after: HarnessDialog | undefined): boolean => after?.id !== wanted;
     if (answer.kind === 'escape') {
       if (shown.escape === undefined) throw new DialogAnswerError('invalid_choice', 'this dialog offers no Esc', shown);
       await this.type(ferretId, DIALOG_KEYS.escape);

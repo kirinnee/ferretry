@@ -23,7 +23,7 @@ import { isConversationId } from './lib/harness/claude-path.ts';
 import { fastStartDecision } from './lib/harness/fast-mode.ts';
 import { claudeHooksSource, claudeSettingsSource } from './lib/profile-components.ts';
 import { ClaudeProjectApprovals } from './lib/project-approvals.ts';
-import { dialogRoute, permissionRoute, updateStartRoute, updateViewRoute } from './lib/routes.ts';
+import { dialogRoute, permissionRoute, promptRoute, updateStartRoute, updateViewRoute } from './lib/routes.ts';
 import { HarnessUpdateService } from './lib/update/service.ts';
 
 /** The product name the verification link is built from. */
@@ -50,7 +50,7 @@ const discoveryOf = (view: HarnessCliView, checkedAt: Discovery['checkedAt']): D
  * (`agent-homes`, scoped to that ferret), so MCP holds no root over a harness home.
  */
 export default implementDaemon(manifest, {
-  build: ({ kernel }) => {
+  build: ({ kernel, needs }) => {
     const host = hostFacts(kernel.spawn);
     const location = locationSource(kernel.spawn, () => kernel.config.file(configFile), host);
     const inner = new HarnessUpdateService({
@@ -119,6 +119,7 @@ export default implementDaemon(manifest, {
       routes: {
         'GET /v1/claude-code/update': updateViewRoute(update),
         'POST /v1/claude-code/update': updateStartRoute(update),
+        'GET /v1/ferrets/:ferretId/prompt': promptRoute(needs.ferrets),
         'POST /v1/ferrets/:ferretId/permission': permissionRoute(permission),
         'POST /v1/ferrets/:ferretId/dialog': dialogRoute(dialog),
       },

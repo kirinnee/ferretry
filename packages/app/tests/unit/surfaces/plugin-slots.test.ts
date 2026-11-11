@@ -6,7 +6,11 @@ import {
   FILES_SEARCH_SLOT,
 } from '../../../../core/ferrets/contract/slots.ts';
 import { AGENDA_CONVERSATION_SLOT as AGENDA_OFFERS } from '../../../../plugins/agenda/contract/slots.ts';
-import { AGENDA_CONVERSATION_SLOT } from '../../../../plugins/conversation/contract/slots.ts';
+import {
+  AGENDA_CONVERSATION_SLOT,
+  CONVERSATION_ABOVE_COMPOSER_SLOT,
+  CONVERSATION_SLOTS,
+} from '../../../../plugins/conversation/contract/slots.ts';
 import { generated } from '../../../src/generated/surfaces.ts';
 import { viewsOf } from '../../../src/layout/engine.ts';
 import { isSlotName } from '../../../src/layout/slots.ts';
@@ -94,5 +98,31 @@ describe('the slot Agenda offers and Conversation fills', () => {
     expect(AGENDA_CONVERSATION_SLOT).toBe(AGENDA_OFFERS);
     const contributors = (viewsOf(entries).panels.get(AGENDA_OFFERS) ?? []).map(panel => `${panel.plugin}.${panel.id}`);
     expect(contributors).toEqual(['conversation.agenda-conversation']);
+  });
+});
+
+describe('the slot Conversation offers above its composer and Claude Code fills', () => {
+  test('Claude Code writes the name Conversation owns, and puts its two cards there in order', () => {
+    const contributors = (viewsOf(entries).panels.get(CONVERSATION_ABOVE_COMPOSER_SLOT) ?? []).map(
+      panel => `${panel.plugin}.${panel.id}`,
+    );
+    expect(contributors).toEqual(['claude-code.permission-request', 'claude-code.harness-dialog']);
+    expect(CONVERSATION_ABOVE_COMPOSER_SLOT).toBe('conversation.above-composer');
+    expect(isSlotName(CONVERSATION_ABOVE_COMPOSER_SLOT)).toBe(true);
+  });
+
+  test('every panel contributed to a conversation.* slot is one of the slots Conversation’s contract names', () => {
+    const named: readonly string[] = CONVERSATION_SLOTS;
+    const contributed = entries.flatMap(entry =>
+      (entry.manifest.ui?.panels ?? [])
+        .map(panel => panel.slot as string)
+        .filter(slot => slot.startsWith('conversation.')),
+    );
+    for (const slot of contributed) expect(named).toContain(slot);
+  });
+
+  test('Claude Code imports nothing of Conversation: the two agree by name, and this test is the pairing', () => {
+    expect(entryOf('claude-code')?.consumes).not.toContain('conversation');
+    expect(Object.keys(entryOf('claude-code')?.manifest.needs ?? {})).toEqual(['ferrets']);
   });
 });

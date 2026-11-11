@@ -1,5 +1,5 @@
 import type { PermissionAnswerRequest, PermissionAnswerResult, PermissionRequest } from '../../../contract/index.ts';
-import { parsePermissionPrompt, permissionAnswerKeys } from '../pane/permission-prompt.ts';
+import { parsePermissionPrompt, permissionAnswerKeys, recordedPermissionId } from '../pane/permission-prompt.ts';
 
 /**
  * ANSWERING A HARNESS PERMISSION PROMPT FOR A PERSON WHO IS NOT AT THE TERMINAL.
@@ -75,7 +75,13 @@ export class PermissionAnswerService {
 
   private async answerNow(ferretId: string, answer: PermissionAnswerRequest): Promise<PermissionAnswerResult> {
     const shown = parsePermissionPrompt(await this.pane.capture(ferretId));
-    if (shown?.id !== answer.requestId)
+    // The id the card holds is the one Ferrets recorded off the same screen (the runner spells the harness its own way):
+    // either names this prompt, and from here on the prompt is known by the id this plugin reads.
+    const wanted =
+      shown !== undefined && (answer.requestId === shown.id || answer.requestId === recordedPermissionId(shown))
+        ? shown.id
+        : answer.requestId;
+    if (shown?.id !== wanted)
       throw new PermissionAnswerError(
         'gone',
         'this prompt is gone: the agent’s screen no longer shows it, so nothing was sent',
@@ -92,7 +98,7 @@ export class PermissionAnswerService {
     for (let read = 0; read < this.timing.settleReads; read += 1) {
       await this.sleep(this.timing.settleMs);
       const after = parsePermissionPrompt(await this.pane.capture(ferretId).catch(() => ''));
-      if (after?.id !== answer.requestId) return { requestId: answer.requestId, cleared: true };
+      if (after?.id !== wanted) return { requestId: answer.requestId, cleared: true };
     }
     return { requestId: answer.requestId, cleared: false };
   }

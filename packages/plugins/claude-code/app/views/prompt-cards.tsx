@@ -7,6 +7,7 @@
  */
 
 import { useId, useRef, useState } from 'react';
+import './prompt-cards.css';
 import type { HarnessDialog, PermissionRequest } from '../../contract/index.ts';
 import type { ClaudeCodeClient } from '../lib/client.ts';
 import {
@@ -82,6 +83,7 @@ export function PermissionCard({
   return (
     <section
       aria-labelledby={headingId}
+      className="fy-prompt-card"
       data-permission-request={request.id}
       data-permission-phase={typeof phase === 'string' ? phase : 'refused'}
     >
@@ -89,30 +91,33 @@ export function PermissionCard({
         {words.lead}
         {words.what === undefined ? null : <code> {words.what}</code>}
       </p>
-      {request.options.map(option => {
-        const label = permissionOptionWords(option);
-        return (
-          <button
-            data-permission-option={option.number}
-            disabled={busy}
-            key={option.number}
-            onClick={() =>
-              void run(() =>
-                answerPermissionRequest(client, ferret, {
-                  kind: 'choice',
-                  requestId: request.id,
-                  number: option.number,
-                }),
-              )
-            }
-            title={label.harness}
-            type="button"
-          >
-            {label.label}
-            {label.secondary === undefined ? null : <small> {label.secondary}</small>}
-          </button>
-        );
-      })}
+      <div className="fy-prompt-card__options">
+        {request.options.map(option => {
+          const label = permissionOptionWords(option);
+          return (
+            <button
+              data-kind={option.kind}
+              data-permission-option={option.number}
+              disabled={busy}
+              key={option.number}
+              onClick={() =>
+                void run(() =>
+                  answerPermissionRequest(client, ferret, {
+                    kind: 'choice',
+                    requestId: request.id,
+                    number: option.number,
+                  }),
+                )
+              }
+              title={label.harness}
+              type="button"
+            >
+              {label.label}
+              {label.secondary === undefined ? null : <small> {label.secondary}</small>}
+            </button>
+          );
+        })}
+      </div>
       {text === null ? null : <p role="status">{text}</p>}
     </section>
   );
@@ -130,39 +135,47 @@ export function DialogCard({
   const busy = phase === 'sending' || phase === 'answered' || phase === 'gone';
   const text = phaseText(phase, agentName, 'dialog');
   return (
-    <section aria-labelledby={headingId} data-harness-dialog={dialog.id} data-dialog-kind={dialog.kind}>
+    <section
+      aria-labelledby={headingId}
+      className="fy-prompt-card"
+      data-harness-dialog={dialog.id}
+      data-dialog-kind={dialog.kind}
+    >
       <p id={headingId}>{harnessDialogSentence(agentName, dialog)}</p>
       {dialog.body === undefined ? null : <p>{dialog.body}</p>}
-      {dialog.options.map(option => (
-        <button
-          data-dialog-option={option.number}
-          disabled={busy}
-          key={option.number}
-          onClick={() =>
-            void run(() =>
-              answerHarnessDialog(client, ferret, { kind: 'choice', dialogId: dialog.id, number: option.number }),
-            )
-          }
-          title={option.label}
-          type="button"
-        >
-          {option.label}
-          {option.number === dialog.selected ? ' · default' : ''}
-          {option.grantsTrust ? <small> {harnessTrustNote(dialog)}</small> : null}
-        </button>
-      ))}
-      {dialog.escape === undefined ? null : (
-        <button
-          data-dialog-escape=""
-          disabled={busy}
-          onClick={() => void run(() => answerHarnessDialog(client, ferret, { kind: 'escape', dialogId: dialog.id }))}
-          title="Esc"
-          type="button"
-        >
-          {dialog.escape.charAt(0).toUpperCase()}
-          {dialog.escape.slice(1)}
-        </button>
-      )}
+      <div className="fy-prompt-card__options">
+        {dialog.options.map(option => (
+          <button
+            data-dialog-option={option.number}
+            data-trust={option.grantsTrust ? 'true' : undefined}
+            disabled={busy}
+            key={option.number}
+            onClick={() =>
+              void run(() =>
+                answerHarnessDialog(client, ferret, { kind: 'choice', dialogId: dialog.id, number: option.number }),
+              )
+            }
+            title={option.label}
+            type="button"
+          >
+            {option.label}
+            {option.number === dialog.selected ? ' · default' : ''}
+            {option.grantsTrust ? <small> {harnessTrustNote(dialog)}</small> : null}
+          </button>
+        ))}
+        {dialog.escape === undefined ? null : (
+          <button
+            data-dialog-escape=""
+            disabled={busy}
+            onClick={() => void run(() => answerHarnessDialog(client, ferret, { kind: 'escape', dialogId: dialog.id }))}
+            title="Esc"
+            type="button"
+          >
+            {dialog.escape.charAt(0).toUpperCase()}
+            {dialog.escape.slice(1)}
+          </button>
+        )}
+      </div>
       {text === null ? null : <p role="status">{text}</p>}
     </section>
   );
