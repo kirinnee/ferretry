@@ -160,7 +160,7 @@ export function ActionsMenu({ sections, compact, name, form, onFormChange, onFai
 }
 
 /** The menu's groups, rows and inline confirms — drawn identically by every surface that shows them. */
-function ActionSections({
+export function ActionSections({
   sections,
   confirming,
   pending,
@@ -276,7 +276,7 @@ function ConfirmRow({
   );
 }
 
-function ActionForm({
+export function ActionForm({
   entry,
   host,
 }: {

@@ -49,7 +49,9 @@ export interface FerretActionsOptions {
   /** More actions, from features that add them (same shape as the core ones). */
   readonly contributions?: readonly FerretActionContribution<CoreActionContext>[];
   /** Extra entries that belong to one surface only (a list row's Open and Copy name), built with the same context. */
-  readonly extra?: readonly FerretActionContribution<CoreActionContext>[];
+  readonly extra?: (
+    fail: (sentence: string, detail?: string) => void,
+  ) => readonly FerretActionContribution<CoreActionContext>[];
 }
 
 export interface FerretActions {
@@ -80,7 +82,7 @@ export function useFerretActions(
   client: LiveFerretsClient,
   ferret: FerretSummary,
   reload: () => Promise<unknown>,
-  { canControl = true, contributions = [], extra = [] }: FerretActionsOptions = {},
+  { canControl = true, contributions = [], extra }: FerretActionsOptions = {},
 ): FerretActions {
   const router = useOptionalRouter();
   const daemon = router === null ? undefined : daemonOfRoute(router.route);
@@ -148,7 +150,7 @@ export function useFerretActions(
     ),
   };
   const sections = ferretActionSections(
-    [...CORE_FERRET_ACTIONS, ...extra, ...contributions, ...offered.contributions],
+    [...CORE_FERRET_ACTIONS, ...(extra?.(fail) ?? []), ...contributions, ...offered.contributions],
     context,
   );
   const report = (sentence: string, detail?: string, reason?: unknown): void => {
