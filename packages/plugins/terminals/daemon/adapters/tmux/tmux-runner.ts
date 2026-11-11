@@ -708,11 +708,31 @@ export class TmuxRunner implements Runner {
       return err('real_harness');
     }
     if ((await this.options.tmux.execute(['has-session', '-t', session])).code === 0) return err('failed');
-    // Started without the handle, so the server never holds a ferret's values in its own environment.
-    if ((await this.options.tmux.execute(['start-server'])).code !== 0) return err('unavailable');
-    const before = await this.options.tmux.execute(['show-options', '-gv', 'update-environment']);
-    if (before.code !== 0) return err('unavailable');
-    const kept = before.stdout
+    // The server is started HERE, by a client that holds no handle, so it never holds a ferret's values in its own
+    // environment (it takes the environment of the client that starts it, which the script's client below is not
+    // allowed to be). With no session yet `exit-empty` would end it the moment this client is done, before the script's
+    // client arrives: one invocation starts it, reads what is to be put back, and holds it up until the session does.
+    const prepared = await this.options.tmux.execute([
+      'start-server',
+      ';',
+      'show-options',
+      '-sv',
+      'exit-empty',
+      ';',
+      'show-options',
+      '-gv',
+      'update-environment',
+      ';',
+      'set-option',
+      '-s',
+      'exit-empty',
+      'off',
+    ]);
+    if (prepared.code !== 0) return err('unavailable');
+    const [exitEmptyLine = '', ...keptLines] = prepared.stdout.split('\n');
+    const exitEmpty = exitEmptyLine.trim() === 'off' ? 'off' : 'on';
+    const kept = keptLines
+      .join('\n')
       .split(/\s+/u)
       .map(name => name.trim())
       .filter(name => name !== '');
@@ -733,6 +753,7 @@ export class TmuxRunner implements Runner {
         ...args,
       ]),
       scriptLine(['set-option', '-g', 'update-environment', kept.join(' ')]),
+      scriptLine(['set-option', '-s', 'exit-empty', exitEmpty]),
     ].join('');
     const created = await this.options.spawn.run(
       TMUX_PROGRAM,
@@ -741,8 +762,18 @@ export class TmuxRunner implements Runner {
     );
     const [paneId = '', pid = ''] = created.stdout.trim().split('|');
     if (created.exitCode !== 0 || !PANE_ID.test(paneId)) {
-      // Whatever the script did, the option is put back from a client that holds no values.
-      await this.options.tmux.execute(['set-option', '-g', 'update-environment', kept.join(' ')]);
+      // Whatever the script did, the options are put back from a client that holds no values.
+      await this.options.tmux.execute([
+        'set-option',
+        '-g',
+        'update-environment',
+        kept.join(' '),
+        ';',
+        'set-option',
+        '-s',
+        'exit-empty',
+        exitEmpty,
+      ]);
       return err('failed');
     }
     await this.options.tmux.execute(remainOnExitArguments(session));

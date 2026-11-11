@@ -32,8 +32,8 @@ function launching(
       execute: async args => {
         sent.push(args);
         if (args[0] === 'has-session') return options.sessionExists === true ? done() : refused("can't find session");
-        if (args[0] === 'start-server') return done();
-        if (args[0] === 'show-options') return done('PATH TERM\n');
+        // The server is started and its options read in ONE client: exit-empty first, then update-environment.
+        if (args[0] === 'start-server') return done('on\nPATH TERM\n');
         if (args[0] === 'display-message')
           return options.noPane === true
             ? refused("can't find pane")
@@ -141,7 +141,17 @@ describe('TmuxRunner launch', () => {
     // Assert
     should(started.ok ? undefined : started.error).equal('failed');
     const last = world.sent.at(-1);
-    should(last).deepEqual(['set-option', '-g', 'update-environment', 'PATH TERM']);
+    should(last).deepEqual([
+      'set-option',
+      '-g',
+      'update-environment',
+      'PATH TERM',
+      ';',
+      'set-option',
+      '-s',
+      'exit-empty',
+      'on',
+    ]);
   });
 
   it('should refuse a command that is empty or names an environment variable that is not one', async () => {
