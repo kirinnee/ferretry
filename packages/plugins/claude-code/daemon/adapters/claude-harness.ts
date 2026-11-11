@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type {
   ConversationFinder,
   Delivery,
@@ -8,6 +9,7 @@ import type {
   HarnessInstall,
   HarnessLaunchSettings,
   HarnessMissing,
+  HarnessTranscriptBytes,
   HarnessTranscriptStamp,
   HarnessTranscriptTail,
   HomePlan,
@@ -23,7 +25,7 @@ import type {
   UpdateResult,
   UsageReader,
 } from '@ferretry/core-ferrets/contract';
-import { materializeSkills } from '@ferretry/core-ferrets/contract';
+import { materializeSkills, openTranscriptBytes } from '@ferretry/core-ferrets/contract';
 import type {
   ChildEnvironment,
   Clock,
@@ -418,6 +420,22 @@ export class ClaudeHarness implements Harness {
     return { file: found.file, size: found.stat.size, mtimeMs: Date.parse(found.stat.modified) };
   }
 
+  /**
+   * The assigned conversation's transcript as a windowed, UNMASKED byte handle (`Harness.transcriptBytes`, G162): the
+   * file `transcriptFile` proved, read in windows and re-checked for replacement on every read, with an opaque token and
+   * no path. Its one consumer (Conversation's reader) masks every answer it cuts from these bytes.
+   */
+  async transcriptBytes(ferret: FerretId): Promise<HarnessTranscriptBytes | undefined> {
+    try {
+      const found = await this.transcriptFile(ferret);
+      return found === undefined ? undefined : await openTranscriptBytes(found.home, found.file, 'claude', sha256Hex);
+    } catch {
+      // A transcript the root refuses (a link put where the file was, a fence it cannot pass) is no proved transcript:
+      // none is offered, and the root's refusal is not passed on.
+      return undefined;
+    }
+  }
+
   /** The newest `limit` records of that transcript, without their text (`Harness.transcriptTail`). */
   async transcriptTail(ferret: FerretId, limit: number): Promise<HarnessTranscriptTail> {
     const found = await this.transcriptFile(ferret);
@@ -533,6 +551,8 @@ export class ClaudeHarness implements Harness {
     }
   }
 }
+
+const sha256Hex = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
 /** The folder Claude recorded on the first record that names one. */
 function firstCwd(head: string): string | undefined {

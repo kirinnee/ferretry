@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { LaunchSpec, Runner } from '@ferretry/core-ferrets/contract';
+import { HarnessTranscriptReplaced, type LaunchSpec, type Runner } from '@ferretry/core-ferrets/contract';
 import { FakeRunner, harnessConformance } from '@ferretry/core-ferrets/contract/testing';
 import type { FerretId, SpawnResult, StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
@@ -701,6 +701,141 @@ describe('ClaudeHarness', () => {
     const decided = await harness.transcriptTail(FERRET, 10);
     expect(decided.kind === 'read' && decided.records.some(record => record.kind === 'turn')).toBe(true);
     expect(decided.kind === 'read' && decided.records.every(record => record.kind !== 'work')).toBe(true);
+  });
+
+  describe('G162 transcriptBytes: a windowed, unmasked byte handle over the proved transcript', () => {
+    const TRANSCRIPT = 'projects/-work/conv-1.jsonl';
+    const line = (n: number) =>
+      `${JSON.stringify({ type: 'user', uuid: `u${n}`, timestamp: T, message: { content: `m${n}` } })}\n`;
+    const open = async (text = `${line(1)}${line(2)}`) => {
+      const built = build();
+      await built.harness.start(spec(), runner({}), {} as never);
+      await built.writeHome(TRANSCRIPT, text);
+      const handle = await built.harness.transcriptBytes(FERRET);
+      if (handle === undefined) throw new Error('the transcript is proved');
+      return { ...built, handle, text };
+    };
+    const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+
+    test('a ferret with no binding, or a binding that is not a conversation id in an absolute folder, has no bytes', async () => {
+      const { harness, writeHome } = build();
+      expect(await harness.transcriptBytes(FERRET)).toBeUndefined();
+      await writeHome('conversation.json', JSON.stringify({ format: 1, id: '../../etc/passwd', cwd: '/work' }));
+      expect(await harness.transcriptBytes(FERRET)).toBeUndefined();
+      await writeHome('conversation.json', JSON.stringify({ format: 1, id: 'conv-1', cwd: 'relative' }));
+      expect(await harness.transcriptBytes(FERRET)).toBeUndefined();
+      // A binding that proves a file that is not there proves nothing.
+      await writeHome('conversation.json', JSON.stringify({ format: 1, id: 'conv-1', cwd: '/work' }));
+      expect(await harness.transcriptBytes(FERRET)).toBeUndefined();
+    });
+
+    test('the handle reads the assigned conversation UNMASKED, with a stable token and the file’s size', async () => {
+      const { harness, handle } = await open(`${line(1)}SECRET\n`);
+      expect(handle.format).toBe('claude');
+      expect(handle.size).toBe(`${line(1)}SECRET\n`.length);
+      expect(handle.mtimeMs).toBeGreaterThan(0);
+      expect(text(await handle.read(0, handle.size))).toContain('SECRET');
+      expect((await harness.transcriptBytes(FERRET))?.file).toBe(handle.file);
+      expect(handle.file).toMatch(/^[0-9a-f]{22}$/);
+    });
+
+    test('the token changes when the file is replaced', async () => {
+      const { harness, handle, writeHome } = await open();
+      await writeHome(TRANSCRIPT, line(9));
+      const again = await harness.transcriptBytes(FERRET);
+      expect(again?.file).not.toBe(handle.file);
+    });
+
+    test('a read past the end is short, and one wholly past it is empty', async () => {
+      const { handle, text: whole } = await open();
+      expect(text(await handle.read(whole.length - 5, 100))).toBe(whole.slice(-5));
+      expect((await handle.read(whole.length + 10, 100)).length).toBe(0);
+      expect((await handle.read(0, 0)).length).toBe(0);
+    });
+
+    test('a read is clamped to the 4 MiB window', async () => {
+      const { handle } = await open('x'.repeat(5 * 1024 * 1024));
+      expect((await handle.read(0, 5 * 1024 * 1024)).length).toBe(4 * 1024 * 1024);
+      expect((await handle.read(4 * 1024 * 1024, 5 * 1024 * 1024)).length).toBe(1024 * 1024);
+    });
+
+    test('a negative, fractional or huge offset or length is refused, naming no path', async () => {
+      const { handle } = await open();
+      for (const [offset, length] of [
+        [-1, 10],
+        [0, -1],
+        [1.5, 10],
+        [0, 2.5],
+        [2 ** 60, 10],
+        [0, 2 ** 60],
+        [Number.NaN, 10],
+        [Number.POSITIVE_INFINITY, 10],
+      ] as const) {
+        const failure = await handle.read(offset, length).catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(RangeError);
+        expect(String((failure as Error).message)).not.toContain(fixture);
+      }
+    });
+
+    test('the handle and every error it raises carry no path', async () => {
+      const { handle, writeHome } = await open();
+      const shown = JSON.stringify(
+        Object.fromEntries(Object.entries(handle).filter(([, v]) => typeof v !== 'function')),
+      );
+      for (const secret of [fixture, HOME, 'conv-1', 'projects', 'agent-homes']) expect(shown).not.toContain(secret);
+      await writeHome(TRANSCRIPT, line(9));
+      const replaced = await handle.read(0, 10).catch((error: unknown) => error);
+      expect(replaced).toBeInstanceOf(HarnessTranscriptReplaced);
+      const said = `${(replaced as Error).message} ${(replaced as Error).stack ?? ''}`;
+      for (const secret of [fixture, HOME, 'conv-1.jsonl', 'agent-homes']) expect(said).not.toContain(secret);
+    });
+
+    test('a file replaced after the proof is refused: by a new file, by a symlink put in its place, and by removal', async () => {
+      const { handle, writeHome } = await open();
+      expect((await handle.stat())?.size).toBe(handle.size);
+      // A new file at the same name (an atomic replace): another inode.
+      await writeHome(TRANSCRIPT, line(9));
+      await expect(handle.read(0, 10)).rejects.toBeInstanceOf(HarnessTranscriptReplaced);
+      expect(await handle.stat()).toBeUndefined();
+
+      // A symlink at the name, to a file outside the home that holds bytes of its own.
+      const reopened = await open();
+      const outside = join(fixture, 'outside.jsonl');
+      await writeFile(outside, 'OUTSIDE-BYTES\n');
+      const target = join(HOME, TRANSCRIPT);
+      await rm(target);
+      await symlink(outside, target);
+      const failure = await reopened.handle.read(0, 100).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(HarnessTranscriptReplaced);
+      expect(await reopened.handle.stat()).toBeUndefined();
+      // Opening afresh over the link proves nothing either.
+      expect(await reopened.harness.transcriptBytes(FERRET)).toBeUndefined();
+
+      // Gone.
+      await rm(target);
+      const gone = await open();
+      await rm(join(HOME, TRANSCRIPT));
+      await expect(gone.handle.read(0, 10)).rejects.toBeInstanceOf(HarnessTranscriptReplaced);
+      expect(await gone.handle.stat()).toBeUndefined();
+    });
+  });
+
+  test('G162 GAP pin: entries() reads only the FIRST 8 MiB of a transcript, so a long ferret’s newest turn is not in it', async () => {
+    const { harness, writeHome } = build();
+    await harness.start(spec(), runner({}), {} as never);
+    const old = JSON.stringify({ type: 'user', uuid: 'u1', timestamp: T, message: { content: 'OLDEST' } });
+    const pad = JSON.stringify({
+      type: 'system',
+      subtype: 'x',
+      uuid: 's',
+      timestamp: T,
+      pad: 'p'.repeat(9 * 1024 * 1024),
+    });
+    const newest = JSON.stringify({ type: 'user', uuid: 'u2', timestamp: T, message: { content: 'NEWEST' } });
+    await writeHome('projects/-work/conv-1.jsonl', `${old}\n${pad}\n${newest}\n`);
+    const texts = (await harness.transcript.read(FERRET)).map(entry => entry.text);
+    expect(texts).toContain('OLDEST');
+    expect(texts).not.toContain('NEWEST');
   });
 
   test('dialogs.current finds nothing on an empty pane and answer refuses a prompt that is gone', async () => {
