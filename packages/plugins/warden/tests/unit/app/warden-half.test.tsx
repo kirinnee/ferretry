@@ -147,6 +147,11 @@ describe('the Warden half, bound to the shell', () => {
         </Suspense>
       </RouterProvider>,
     );
+    // The screen is a Suspense boundary over a lazily loaded module: six zero-length turns were not enough on a loaded
+    // runner (CI run 42935121742 found no page after 11 ms), so wait for the page itself, bounded under bun's 5 s.
+    for (let waited = 0; view.container.querySelector('[data-warden-page]') === null && waited < 2_000; waited += 10) {
+      await interact(() => new Promise(resolve => setTimeout(resolve, 10)));
+    }
     await settle();
     expect(must(view.container.querySelector('[data-warden-page]'), 'the Warden page')).toBeDefined();
     expect(client.calls).toContain('GET /v1/warden/status');

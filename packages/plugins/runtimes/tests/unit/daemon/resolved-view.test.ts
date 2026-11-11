@@ -678,40 +678,55 @@ describe('resolvedEntries — a credential nested inside a value (ruling #40)', 
   });
 });
 
+/**
+ * Each of the two generated sweeps below walks ~36k shapes: 1.9–2.1 s on a green CI run (42931627576), 5.7 s on a
+ * loaded runner (42935121742, both timed out at bun's 5 s default). A measured limit for a fixed-size sweep (the
+ * generator makes the same shapes every run), not a slower rule.
+ */
+const NESTED_FAMILY_MS = 30_000;
+
 describe('resolvedEntries — every nested credential shape (ruling #40, generated)', () => {
   const cases = nestedFamily();
 
-  it(`should hide every nested secret of every launch-flag shape (${String(cases.length)} shapes), keep the key and flag, at least as much as today, and touch no control`, () => {
-    // Act
-    const breaches = cases.flatMap(family => {
-      const shown = shownFlags(family.words);
-      const floor = family.words.flatMap((word, index) =>
-        hidesAtLeast(word, todayFlag(word), shown[index] ?? { value: '' }) ? [] : [`${family.label}: under today`],
-      );
-      const breach = nestedBreach(family, shown);
-      return breach === undefined ? floor : [...floor, breach];
-    });
+  it(
+    `should hide every nested secret of every launch-flag shape (${String(cases.length)} shapes), keep the key and flag, at least as much as today, and touch no control`,
+    () => {
+      // Act
+      const breaches = cases.flatMap(family => {
+        const shown = shownFlags(family.words);
+        const floor = family.words.flatMap((word, index) =>
+          hidesAtLeast(word, todayFlag(word), shown[index] ?? { value: '' }) ? [] : [`${family.label}: under today`],
+        );
+        const breach = nestedBreach(family, shown);
+        return breach === undefined ? floor : [...floor, breach];
+      });
 
-    // Assert
-    should(cases.filter(family => family.secret).length).be.above(1000);
-    should(cases.filter(family => !family.secret).length).be.above(1000);
-    should(breaches).deepEqual([]);
-  });
+      // Assert
+      should(cases.filter(family => family.secret).length).be.above(1000);
+      should(cases.filter(family => !family.secret).length).be.above(1000);
+      should(breaches).deepEqual([]);
+    },
+    NESTED_FAMILY_MS,
+  );
 
-  it(`should hide every nested secret of every MCP-argument shape (${String(cases.length)} shapes), at least as much as today, and touch no control`, () => {
-    // Act
-    const breaches = cases.flatMap(family => {
-      const line = shownServer(family.words);
-      const today = todayServerLine({ command: 'run-server', args: family.words });
-      return [
-        ...(lineHidesAtLeast(today, line) ? [] : [`${family.label}: under today`]),
-        ...[nestedLineBreach(family, 'run-server', line)].filter(breach => breach !== undefined),
-      ];
-    });
+  it(
+    `should hide every nested secret of every MCP-argument shape (${String(cases.length)} shapes), at least as much as today, and touch no control`,
+    () => {
+      // Act
+      const breaches = cases.flatMap(family => {
+        const line = shownServer(family.words);
+        const today = todayServerLine({ command: 'run-server', args: family.words });
+        return [
+          ...(lineHidesAtLeast(today, line) ? [] : [`${family.label}: under today`]),
+          ...[nestedLineBreach(family, 'run-server', line)].filter(breach => breach !== undefined),
+        ];
+      });
 
-    // Assert
-    should(breaches).deepEqual([]);
-  });
+      // Assert
+      should(breaches).deepEqual([]);
+    },
+    NESTED_FAMILY_MS,
+  );
 });
 
 // ── Review r1 of the #40 rule (F2, F3, and what the broadened generator found in r2) ──────────────────
