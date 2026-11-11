@@ -1466,7 +1466,7 @@ Every ferret on a login shares that ONE `auth.json`, and each runs as the same u
 rewrite the shared file** and so change the account for every other ferret on it (or hard-link it, which makes the next
 start on that login refuse until the extra link is removed or the login is signed out and in again). This is the same-user
 residual above, not a new reach. The kernel hands the credential over once (it is single-use, and only the harness is
-given it), but it cannot stop the agent that then holds the file. When the kernel refuses the link at the last step, the
+given it), and it refuses to move the placed link, or a folder holding it, out of the ferret home it was linked into (`link_escape`; removing it stays allowed), but it cannot stop the agent that then holds the file. When the kernel refuses the link at the last step, the
 start fails with the general "could not prepare this ferret's home" sentence (`failed`), not `login_unavailable`.
 
 ## Sign-in tokens the usage read sends

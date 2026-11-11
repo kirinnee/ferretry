@@ -832,8 +832,10 @@ export interface RootHandle {
    * device and inode, one name): otherwise `changed`. Never a copy. This is the ONE call that does not ask the private-place
    * fence about the TARGET (the sign-in file is pinned by inode); the link's PLACE is fenced as usual. The credential is
    * SINGLE-USE: the first link that stays spends it, and any later link with it (after an unlink, or into another
-   * ferret's home) is refused `not_shared`; an attempt that made no link does not spend it. A link made stays until its
-   * holder removes it: revoking the credential stops new links only (a declared GAP).
+   * ferret's home) is refused `not_shared`; an attempt that made no link does not spend it. The kernel records the link
+   * it placed (by the link itself, not its name): `rename` on `agent-homes` refuses (`link_escape`, nothing written) to
+   * move it, or a folder holding it, out of the home it was linked into; removing it (`unlink`, `remove`) stays allowed.
+   * A link made stays until its holder removes it: revoking the credential stops new links only (a declared GAP).
    */
   linkCredential(credential: SharedCredential, to: FencedPath): Promise<void>;
   /** A folder made (or narrowed) to `0700`, refused when a link or a file is at the name. */

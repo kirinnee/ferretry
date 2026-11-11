@@ -3,7 +3,8 @@
  * (`host/shared-credentials.ts`) decide who may mint, from what, who may place it and where, so a plugin's unit test meets
  * the refusals and the link production makes, `changed` and the single use of a credential included (the test world gives a
  * file a new stand-in inode whenever it is removed and written again, as a rename-over does on disk). What the testing host
- * still models more loosely is the placed link itself (`entries`, `fileIdentity`, renaming it back), not these rules.)
+ * still models more loosely is the placed link itself (`entries`, `fileIdentity`), not these rules. A move of the placed link, or
+ * of a folder holding it, is refused by the same rule on both.)
  */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
