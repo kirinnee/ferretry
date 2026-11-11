@@ -122,6 +122,17 @@ async function harness(options: { hang?: boolean } = {}) {
   const settle = async (): Promise<void> => {
     await new Promise<void>(resolve => setTimeout(resolve, 40));
   };
+  /**
+   * Waits for an outcome a test asserts happened, then settles once more for anything after it. A fixed 40 ms is
+   * not enough for a flood of a few hundred port messages on a loaded runner: n1 saw no flood yet after 40 ms on
+   * CI run 42927226492 (attempt 2) while the same test passed in attempt 1. The 2 s cap stays under bun's 5 s test timeout, so a real failure is the assertion, not a timeout.
+   */
+  const settleUntil = async (done: () => boolean, capMs = 2_000): Promise<void> => {
+    for (let waited = 0; !done() && waited < capMs; waited += 10) {
+      await new Promise<void>(resolve => setTimeout(resolve, 10));
+    }
+    await settle();
+  };
   return {
     store,
     seen,
@@ -134,6 +145,7 @@ async function harness(options: { hang?: boolean } = {}) {
     workers,
     start,
     settle,
+    settleUntil,
     advance: (ms: number) => {
       now += ms;
     },
@@ -206,7 +218,7 @@ describe('worker grants hardening: a flood ends the channel', () => {
     const h = await harness();
     const { port } = h.start();
     for (let i = 0; i < MAX_GRANT_REFUSALS_PER_WINDOW + 5; i += 1) port.postMessage({ id: i, kind: 'nonsense' });
-    await h.settle();
+    await h.settleUntil(() => h.flooded.length > 0);
     expect(h.flooded).toEqual(['logins']);
     const answered = h.replies.length;
     expect(answered).toBeLessThanOrEqual(MAX_GRANT_REFUSALS_PER_WINDOW + 1);
@@ -225,7 +237,7 @@ describe('worker grants hardening: a flood ends the channel', () => {
       h.advance(GRANT_REFUSAL_WINDOW_MS);
     }
     port.postMessage(fetchOf(5000));
-    await h.settle();
+    await h.settleUntil(() => h.replies.some(reply => reply.id === 5000));
     expect(h.flooded).toEqual([]);
     expect(h.replies.find(reply => reply.id === 5000)).toMatchObject({ ok: true });
   });
@@ -310,7 +322,7 @@ describe('worker grants hardening: every message is bounded, handlers do not pil
     const h = await harness();
     const { port } = h.start();
     for (let i = 0; i < MAX_GRANT_MESSAGES_PER_WINDOW + 5; i += 1) port.postMessage({ kind: 'cancel', id: i });
-    await h.settle();
+    await h.settleUntil(() => h.flooded.length > 0);
     expect(h.flooded).toEqual(['logins']);
     port.postMessage(fetchOf(1));
     await h.settle();
