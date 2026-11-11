@@ -49,6 +49,7 @@ import type {
   SessionForkTargetBinder as SessionForkTargetBinderPort,
 } from '../../lib/forks/types.ts';
 import type { ClockPort } from '../../lib/ports.ts';
+import { pickedModelSource } from '../../lib/session/launch/current.ts';
 import { assignedTaskDocument, lifecyclePhase } from '../../lib/session/lifecycle/policy.ts';
 import type { CoreAccount, SessionPlanner } from '../../lib/session/peers/core.ts';
 import {
@@ -530,6 +531,9 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
         harness: resolved.account.kind,
         modelHint: plan.target.model ?? '',
         model: planned.model,
+        // The fork command's model reaches here resolved, default included, so what was picked is what differs
+        // from the account's own default.
+        launchModelSource: pickedModelSource(planned.model, resolved.account.defaultModel ?? undefined),
         remoteControl: plan.durable.remoteControl,
         harnessFlags: [...plan.durable.harnessFlags],
         // A fork ALWAYS materialises `turns/turn-001.md`, so the counter says one whatever the mode:

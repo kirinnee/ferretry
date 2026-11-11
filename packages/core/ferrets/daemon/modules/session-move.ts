@@ -64,7 +64,8 @@ import {
   buildLaunchArgv,
   currentLaunchCompactAt,
   currentLaunchEffort,
-  currentLaunchModel,
+  movedModel,
+  movedModelSource,
   type SessionLaunchService,
   transcriptLaunchArguments,
 } from '../lib/session/launch/index.ts';
@@ -656,6 +657,7 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
     state: z.infer<typeof SessionStateSchema>,
     account: Awaited<ReturnType<typeof resolveTarget>>['account'],
     requestedModel: string | undefined,
+    sourceDefault: string | undefined,
   ) => {
     const shape = {
       id,
@@ -669,7 +671,13 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
     // target's default, so Restart CLI — a move onto the same account — quietly moved a session
     // the owner had switched to another model back onto the default. The model it is on now is asked
     // for instead; only when the target cannot serve it does the target's default decide, as before.
-    const current = currentLaunchModel(config, state, model => canServeModel(account, model));
+    const current = movedModel({
+      config,
+      state,
+      sourceDefault,
+      crossing: { sameRuntime: account.agent === config.agent },
+      servable: model => canServeModel(account, model),
+    });
     const keep =
       requestedModel === undefined && current !== undefined
         ? parts.planner.plan({ ...shape, requestedModel: current })
@@ -695,7 +703,9 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
     const families = { sourceHarness: config.harness, targetHarness: account.kind, targetAgent: account.agent };
     const mismatch = converting ? harnessConversionRefusal(families) : harnessMoveRefusal(families);
     if (mismatch !== undefined) throw new SessionMoveError('harness_mismatch', mismatch);
-    const { keep, planned } = planModel(id, config, state, account, request.model);
+    const sourceAccount = findAccountByAgent(await parts.accounts.accounts(), config.agent);
+    const sourceDefault = sourceAccount?.defaultModel ?? undefined;
+    const { keep, planned } = planModel(id, config, state, account, request.model, sourceDefault);
     // And the effort it is on, which no request names — unless the move crosses harnesses, whose effort
     // vocabularies differ: the target then starts on its own login's setting.
     const effort = converting ? undefined : currentLaunchEffort(config, state);
@@ -764,7 +774,6 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
     })();
     // The window the session runs in, read the way the plan reads the target's: the harness's own report, the
     // selector in its configured model, then what its account's catalog declares for it.
-    const sourceAccount = findAccountByAgent(await parts.accounts.accounts(), config.agent);
     const window = currentContextWindow(
       parts.contextWindowForSession,
       config,
@@ -889,6 +898,14 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
         agent: account.agent,
         harness: account.kind,
         model: plan.model,
+        // Who chose the model: a Restart keeps the recorded source unless it adopted a `/model` switch.
+        launchModelSource: movedModelSource({
+          config,
+          sourceDefault,
+          named: request.model !== undefined,
+          kept: keep?.kind === 'planned',
+          model: plan.model,
+        }),
         modelHint: request.model ?? account.defaultModel ?? '',
         command: [...command],
         incarnation: `${id}-${generation}`,
@@ -1012,7 +1029,14 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
       targetAgent: account.agent,
     });
     if (mismatch !== undefined) return refused(mismatch);
-    const { planned } = planModel(id, config, state, account, request.model);
+    const { planned } = planModel(
+      id,
+      config,
+      state,
+      account,
+      request.model,
+      findAccountByAgent(await parts.accounts.accounts(), config.agent)?.defaultModel ?? undefined,
+    );
     if (planned.kind === 'unservable-model') return refused(planned.reason);
     const conversion = await planConversion(parts, {
       id,

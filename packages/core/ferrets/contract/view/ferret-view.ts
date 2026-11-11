@@ -155,6 +155,12 @@ export const SessionConfigSchema = z.object({
   modelHint: z.string(),
   model: z.string().optional(),
   /**
+   * Who chose `model`: the person (the start or a move named it) or the account's default. A move onto
+   * another runtime keeps a requested model and takes the target's default otherwise. Absent on a session
+   * recorded before this was stamped; a move then compares `model` with the source account's default.
+   */
+  launchModelSource: z.enum(['requested', 'account-default']).optional(),
+  /**
    * The reasoning level this session was LAUNCHED on: the start request's, else the one the
    * runtime's own settings file held at launch. A launch fact, not an observation — a surface prefers
    * anything the harness later reports. Absent means the harness's own default.

@@ -101,7 +101,9 @@ export function sessionDocument(seed: SessionDocumentSeed, now: string): Session
     agent: record.runtime ?? record.harness,
     harness: record.harness === 'codex' ? 'codex' : 'claude',
     modelHint: options?.model ?? '',
-    ...(options?.model === undefined ? {} : { model: options.model }),
+    ...(options?.model === undefined
+      ? { launchModelSource: 'account-default' as const }
+      : { model: options.model, launchModelSource: 'requested' as const }),
     ...(options?.effort === undefined ? {} : { launchReasoningEffort: options.effort }),
     ...(options?.fast === undefined ? {} : { launchFast: options.fast }),
     mode: record.mode ?? 'auto',

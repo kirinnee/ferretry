@@ -30,7 +30,14 @@ import type { SessionPlanner } from '../peers/core.ts';
 import type { SessionId } from '../../session-id.ts';
 import { relaunchCommand } from '../peers/transcript-launch.ts';
 import { buildLaunchArgv, FixedSettingsUnreadableError, settingsArguments, transcriptLaunchArguments } from './argv.ts';
-import { currentLaunchCompactAt, currentLaunchEffort, currentLaunchFast, currentLaunchModel } from './current.ts';
+import {
+  currentLaunchCompactAt,
+  currentLaunchEffort,
+  currentLaunchFast,
+  currentLaunchModel,
+  type LaunchModelSource,
+  relaunchModelSource,
+} from './current.ts';
 
 /** What a relaunch reads about one session. */
 export interface LaunchSubject {
@@ -51,6 +58,8 @@ export interface RecordedLaunch {
   /** The argv in its CREATE form; a revive's resume flag is decided at launch, never stored. */
   readonly command: readonly string[];
   readonly model: string;
+  /** Set only when the revive adopted a model the document did not record; absent leaves the source as it is. */
+  readonly launchModelSource?: LaunchModelSource;
   readonly launchReasoningEffort?: string;
   readonly launchFast?: boolean;
   readonly launchSettings?: string;
@@ -81,6 +90,7 @@ export interface SessionLaunchPorts {
 interface PlannedLaunch {
   readonly argv: readonly string[];
   readonly model: string;
+  readonly modelSource: LaunchModelSource | undefined;
   readonly effort: string | undefined;
   readonly fast: boolean | undefined;
   readonly executable: string;
@@ -107,6 +117,7 @@ export class SessionLaunchService {
     await this.ports.record(id, {
       command: argv,
       model: planned.model,
+      ...(planned.modelSource === undefined ? {} : { launchModelSource: planned.modelSource }),
       ...(planned.effort === undefined ? {} : { launchReasoningEffort: planned.effort }),
       ...(planned.fast === undefined ? {} : { launchFast: planned.fast }),
       ...(settings === undefined ? {} : { launchSettings: settings }),
@@ -180,6 +191,11 @@ export class SessionLaunchService {
           harnessFlags: config.harnessFlags,
         }),
         model: outcome.plan.model,
+        modelSource: relaunchModelSource({
+          config,
+          accountDefault: account.defaultModel ?? undefined,
+          model: outcome.plan.model,
+        }),
         effort,
         fast,
         executable,
