@@ -112,15 +112,26 @@ describe('routeSend', () => {
     // that never came and threw before any key; the harness's own queue is where the message belongs.
     should(routeSend(target({ status: 'waiting' }), pane({ activeWork: true }))).equal('busy');
     should(routeSend(target({ status: 'waiting', promptReady: false }), pane({ activeWork: true }))).equal('busy');
-    // A prompt still wins, and the other idle statuses keep their word: they are set at a turn's end.
+    // The PANE's own prompt still wins; a recorded one no longer does while the pane shows work (&B188); and the
+    // other idle statuses keep their word: they are set at a turn's end.
     should(routeSend(target({ status: 'waiting' }), pane({ activeWork: true, promptReady: true }))).equal('idle');
-    should(routeSend(target({ status: 'waiting', promptReady: true }), pane({ activeWork: true }))).equal('idle');
+    should(routeSend(target({ status: 'waiting', promptReady: true }), pane({ activeWork: true }))).equal('busy');
     for (const status of ['awaiting_user', 'rate_limited', 'interrupted'] as const)
       should(routeSend(target({ status }), pane({ activeWork: true }))).equal('idle');
   });
 
   it("takes the tracked path when the document says the composer is ready even though the pane's frame lags", () => {
     should(routeSend(target({ promptReady: true }), pane())).equal('idle');
+  });
+
+  it('B188 a stale promptReady record does not route idle while the pane shows work', () => {
+    // The record was written when the turn ended; an idle compaction has since begun and the pane shows it.
+    should(routeSend(target({ status: 'running', promptReady: true }), pane({ activeWork: true }))).equal('busy');
+    should(routeSend(target({ status: 'awaiting_user', promptReady: true }), pane({ activeWork: true }))).equal('idle');
+  });
+
+  it('B188 a pane with neither work nor prompt under an idle record still routes idle', () => {
+    should(routeSend(target({ status: 'running', promptReady: true }), pane())).equal('idle');
   });
 
   it('takes the tracked path when the pane itself is at a prompt', () => {
