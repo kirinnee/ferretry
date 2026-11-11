@@ -216,6 +216,39 @@ describe('G162 the byte handle is bound to ONE opened object', () => {
     await next.close();
   });
 
+  test('a host that reports NO birth time still gives every replacement generation another token, even under a reused inode (rv2 P2a)', async () => {
+    const w = await world();
+    await writeFile(w.target, 'PROVED');
+    const before = await lstat(w.target, { bigint: true });
+    // The real root, with the one host answer the contract allows: no creation time.
+    const noBirth: TranscriptBytesRoot = {
+      openBytes: async file => {
+        const opened = await w.root.openBytes!(file);
+        return opened === undefined ? undefined : { ...opened, birthNs: undefined };
+      },
+    };
+    const first = (await openTranscriptBytes(noBirth, w.file, 'codex', digest))!;
+    const firstToken = first.file;
+    await first.close();
+    let reused = false;
+    for (let n = 0; n < 2048 && !reused; n++) {
+      await rm(w.target);
+      await writeFile(w.target, `RECREATED-${n}`);
+      const now = await lstat(w.target, { bigint: true });
+      reused = now.dev === before.dev && now.ino === before.ino;
+    }
+    // The filesystem must have handed the number out again, or this proves nothing.
+    expect(reused).toBe(true);
+    const second = (await openTranscriptBytes(noBirth, w.file, 'codex', digest))!;
+    expect(second.file).not.toBe(firstToken);
+    // One handle's token never changes under it, whatever it does.
+    const token = second.file;
+    await second.read(0, 4);
+    await second.stat();
+    expect(second.file).toBe(token);
+    await second.close();
+  });
+
   test('a token is a digest of the path and the object’s identity: the same identity and birth give the same token, another birth another', async () => {
     const seen: string[] = [];
     const opened = (birthNs: bigint | undefined): RootOpenedBytes => ({
@@ -294,6 +327,52 @@ describe('G162 the handle is closable and bounded', () => {
       },
     };
   };
+
+  describe('an exception after the descriptor is acquired closes it (rv2 P2b)', () => {
+    test('a clock that cannot install the idle backstop', async () => {
+      const w = await world();
+      await writeFile(w.target, 'PROVED');
+      const base = await descriptors();
+      const broken = {
+        after: () => {
+          throw new Error('timer unavailable');
+        },
+      };
+      await expect(openTranscriptBytes(w.root, w.file, 'codex', digest, { clock: broken })).rejects.toThrow(
+        'timer unavailable',
+      );
+      if (base !== undefined) expect(await descriptors()).toBe(base);
+    });
+
+    test('a digest that throws', async () => {
+      const w = await world();
+      await writeFile(w.target, 'PROVED');
+      const base = await descriptors();
+      await expect(
+        openTranscriptBytes(w.root, w.file, 'codex', () => {
+          throw new Error('digest unavailable');
+        }),
+      ).rejects.toThrow('digest unavailable');
+      if (base !== undefined) expect(await descriptors()).toBe(base);
+    });
+
+    test('a failure over many opens leaves the descriptor count flat, and a working open afterwards is unaffected', async () => {
+      const w = await world();
+      await writeFile(w.target, 'PROVED');
+      const base = await descriptors();
+      const broken = {
+        after: () => {
+          throw new Error('timer unavailable');
+        },
+      };
+      for (let n = 0; n < 20; n++)
+        await openTranscriptBytes(w.root, w.file, 'codex', digest, { clock: broken }).catch(() => undefined);
+      if (base !== undefined) expect(await descriptors()).toBe(base);
+      const handle = (await openTranscriptBytes(w.root, w.file, 'codex', digest))!;
+      expect(decode(await handle.read(0, 6))).toBe('PROVED');
+      await handle.close();
+    });
+  });
 
   test('a handle nobody closes lets its descriptor go when its idle time passes', async () => {
     const w = await world();

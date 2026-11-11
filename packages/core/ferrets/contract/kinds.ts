@@ -636,7 +636,9 @@ export interface HarnessTranscriptBytes {
   /**
    * Opaque. A digest of the path and of the OPENED object (device, inode and, where the host reports one, its creation
    * time): the same for every handle on one generation of the file, and different for every replacement generation,
-   * including a file recreated under a reused inode number.
+   * including a file recreated under a reused inode number. A host that reports no creation time cannot offer the first
+   * half: its token is fixed for ONE handle and never repeats for another open, so a consumer that compares tokens across
+   * handles there sees a change and starts over, and never mistakes a replacement for the same file.
    */
   readonly file: string;
   /** The file's size and modification time when the handle was opened. */

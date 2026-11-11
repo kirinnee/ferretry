@@ -577,9 +577,10 @@ export class ClaudeHarness implements Harness {
       // No newline at all: the window is the middle of one record, and nothing in it is complete.
       keep = newline < 0 ? bytes.length : bytes[0] === 0x0a ? 1 : newline + 1;
     }
-    const text = new TextDecoder().decode(bytes.subarray(keep));
+    // The same record gets the same id in a whole read and in a cut one: an id that has none of its own is its byte offset
+    // IN THE FILE (`from + keep` is where these bytes begin in it), not a place within whatever window was read.
     const entries = await this.deps.redaction.read(scope =>
-      parseEntries(text, cut ? from + keep : undefined).map(entry =>
+      parseEntries(bytes.subarray(keep), from + keep).map(entry =>
         entry.text === undefined ? entry : { ...entry, text: scope.text(entry.text) },
       ),
     );

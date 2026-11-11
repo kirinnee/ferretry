@@ -42,7 +42,7 @@ const QUEUED_PROMPT_PROOF = 'queued-prompt';
 const QUEUE_OPERATIONS: ReadonlySet<string> = new Set(['enqueue', 'dequeue', 'remove']);
 
 /** The input-proof entry a line is, or `undefined` (a prompt typed mid-turn, held or drained by Claude's own queue). */
-function proofEntry(record: Json, ordinal: number): TranscriptEntry | undefined {
+function proofEntry(record: Json, offset: number): TranscriptEntry | undefined {
   const at = asInstant(record.timestamp);
   if (record.type === 'queue-operation') {
     const operation = typeof record.operation === 'string' ? record.operation : undefined;
@@ -50,7 +50,7 @@ function proofEntry(record: Json, ordinal: number): TranscriptEntry | undefined 
     if (at === undefined || operation === undefined || !QUEUE_OPERATIONS.has(operation) || content === undefined)
       return undefined;
     return {
-      id: `${QUEUE_OPERATION_PROOF}:${ordinal}`,
+      id: `${QUEUE_OPERATION_PROOF}:${offset}`,
       at,
       role: 'system',
       text: content,
@@ -66,7 +66,7 @@ function proofEntry(record: Json, ordinal: number): TranscriptEntry | undefined 
   const drained = at ?? originatedAt;
   if (text === undefined || text.trim() === '' || drained === undefined) return undefined;
   return {
-    id: typeof record.uuid === 'string' ? record.uuid : `${QUEUED_PROMPT_PROOF}:${ordinal}`,
+    id: typeof record.uuid === 'string' ? record.uuid : `${QUEUED_PROMPT_PROOF}:${offset}`,
     at: drained,
     role: 'system',
     text,
@@ -75,10 +75,11 @@ function proofEntry(record: Json, ordinal: number): TranscriptEntry | undefined 
 }
 
 /**
- * One transcript line as an entry, or `undefined` when it is not a conversation record. `ordinal` is the line's place among
- * the transcript's lines: it names an input-proof record, which carries no id of its own (an append-only file keeps it).
+ * One transcript line as an entry, or `undefined` when it is not a conversation record. `offset` is the byte offset at which
+ * the line begins in the FILE: it names an input-proof record, which carries no id of its own (an append-only file keeps it,
+ * and every window that reads the line gives it the same one).
  */
-export function parseEntry(line: string, ordinal = 0): TranscriptEntry | undefined {
+export function parseEntry(line: string, offset = 0): TranscriptEntry | undefined {
   let record: Json | undefined;
   try {
     record = asObject(JSON.parse(line));
@@ -86,7 +87,7 @@ export function parseEntry(line: string, ordinal = 0): TranscriptEntry | undefin
     return undefined;
   }
   if (record === undefined) return undefined;
-  const proof = proofEntry(record, ordinal);
+  const proof = proofEntry(record, offset);
   if (proof !== undefined) return proof;
   const role = record.type === 'user' || record.type === 'assistant' ? record.type : undefined;
   const id = typeof record.uuid === 'string' ? record.uuid : undefined;
@@ -105,26 +106,29 @@ export function parseEntry(line: string, ordinal = 0): TranscriptEntry | undefin
   };
 }
 
-/** Every entry in a transcript's text, in order. */
-export function parseEntries(text: string, startByte?: number): readonly TranscriptEntry[] {
-  if (startByte === undefined)
-    return text
-      .split('\n')
-      .filter(line => line.trim() !== '')
-      .flatMap((line, ordinal) => {
-        const entry = parseEntry(line, ordinal);
-        return entry === undefined ? [] : [entry];
-      });
-  // A window cut from the end of the file: a line's place among the lines is unknown, so the id of a record that carries
-  // none of its own is its byte offset in the FILE (an append-only file keeps it, whatever window reads it).
+/**
+ * Every entry in the BYTES of a transcript, or of a window cut from it, in order. `startByte` is the window's place in the
+ * FILE (0 for the whole file). A record that carries no id of its own (a queue record, a drained prompt) is named by the
+ * byte offset at which its line begins IN THE FILE: an append-only file never moves it, so a whole read, a read of the
+ * newest window and a read after the file has grown all name the same record the same way, and the evidence that has
+ * claimed it (one delivered input confirms at most one send) keeps recognising it when the file first outgrows the
+ * window. The offset is counted on the raw bytes, never on decoded text (an invalid byte decodes to a longer character
+ * and would shift every later line by a window-dependent amount).
+ */
+export function parseEntries(bytes: Uint8Array, startByte = 0): readonly TranscriptEntry[] {
+  const decoder = new TextDecoder();
   const entries: TranscriptEntry[] = [];
-  let offset = startByte;
-  for (const line of text.split('\n')) {
+  let begin = 0;
+  while (begin <= bytes.length) {
+    const newline = bytes.indexOf(0x0a, begin);
+    const finish = newline < 0 ? bytes.length : newline;
+    const line = decoder.decode(bytes.subarray(begin, finish));
     if (line.trim() !== '') {
-      const entry = parseEntry(line, offset);
+      const entry = parseEntry(line, startByte + begin);
       if (entry !== undefined) entries.push(entry);
     }
-    offset += Buffer.byteLength(line, 'utf8') + 1;
+    if (newline < 0) break;
+    begin = newline + 1;
   }
   return entries;
 }

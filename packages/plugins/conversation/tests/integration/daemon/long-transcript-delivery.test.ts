@@ -49,11 +49,16 @@ const evidenceOver = (reader: Pick<BoundTranscriptReader, 'read' | 'readCovering
   new EntriesSendEvidence(async () => ({ harness: 'claude', reader }));
 
 /** The tracker over the evidence, one send accepted at AT whose deadline has passed, a quiet idle pane. */
-async function tracked(evidence: EntriesSendEvidence) {
+async function tracked(
+  evidence: EntriesSendEvidence,
+  /** A second send of the same words (`acceptedAt`), with the earlier send still in the ledger as it settled. */
+  second?: { readonly acceptedAt: string; readonly earlier: Record<string, unknown> },
+) {
+  const acceptedAt = second?.acceptedAt ?? AT;
   let record: Record<string, unknown> = {
-    sendId: 'send-1',
-    acceptedAt: AT,
-    attemptAt: AT,
+    sendId: second === undefined ? 'send-1' : 'send-2',
+    acceptedAt,
+    attemptAt: acceptedAt,
     acceptedTurn: 4,
     path: 'direct',
     message: MESSAGE,
@@ -62,13 +67,13 @@ async function tracked(evidence: EntriesSendEvidence) {
     fate: 'accepted',
     attempt: 1,
     senderKind: 'human',
-    deadlineAt: new Date(Date.parse(AT) + 1000).toISOString(),
+    deadlineAt: new Date(Date.parse(acceptedAt) + 1000).toISOString(),
   };
   const retyped: string[] = [];
   const tracker = new SendTracker(
     {
       ledger: {
-        list: async () => [record],
+        list: async () => (second === undefined ? [record] : [second.earlier, record]),
         settle: async (_id: unknown, _send: unknown, patch: object) => {
           record = { ...record, ...patch };
           return record;
@@ -95,7 +100,7 @@ async function tracked(evidence: EntriesSendEvidence) {
       scheduler: { schedule: () => {}, cancelAll: () => {} },
       roster: { sessions: () => [] },
       serial: { run: async (_id: unknown, work: () => Promise<unknown>) => await work() },
-      clock: { now: () => new Date(Date.parse(AT) + 10_000).toISOString() },
+      clock: { now: () => new Date(Date.parse(acceptedAt) + 10_000).toISOString() },
     } as never,
     defaultSendTrackerSettings,
   );
@@ -136,5 +141,33 @@ describe('P1-4: a long transcript’s delivered input is found, and an unprovabl
     expect((await evidence.read('f1', AT)).readable).toBe(true);
     const { retyped } = await tracked(evidence);
     expect(retyped).toEqual(['send-1']);
+  });
+});
+
+/**
+ * rv2 P1: a record that carries no id of its own (a drained queued prompt) must keep ONE identity whichever window reads
+ * it, or the delivery accounting that remembers which record already confirmed which send loses track of it and one
+ * delivered input confirms two sends. The reader here keeps the harness contract exactly: the same record has the same
+ * entry id in a whole read and in a cut one (the real Claude Code harness is proved to do so in its own test, "a record
+ * without a uuid keeps ONE identity", because another package's daemon half is not imported here).
+ */
+describe('rv2 P1: one delivered input confirms at most one send, across a transcript outgrowing its window', () => {
+  const drain = entry('queued-prompt:7340059', AT, MESSAGE);
+  const wholeRead = cutReader([drain], false);
+  const cutRead = cutReader([drain, entry('after', '2026-11-11T00:00:01.000Z', 'later work')], true);
+  const SECOND_AT = '2026-11-11T00:00:02.000Z';
+
+  test('positive control: the first send confirms on the record, and a second identical send is not confirmed by it', async () => {
+    const first = await tracked(evidenceOver(wholeRead));
+    expect(first.record().fate).toBe('delivered');
+    const second = await tracked(evidenceOver(wholeRead), { acceptedAt: SECOND_AT, earlier: first.record() });
+    expect(second.record().fate).not.toBe('delivered');
+  });
+
+  test('after the file outgrows the window the same record still cannot confirm the second send', async () => {
+    const first = await tracked(evidenceOver(wholeRead));
+    expect(first.record().fate).toBe('delivered');
+    const second = await tracked(evidenceOver(cutRead), { acceptedAt: SECOND_AT, earlier: first.record() });
+    expect(second.record().fate).not.toBe('delivered');
   });
 });

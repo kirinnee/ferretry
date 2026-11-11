@@ -34,11 +34,18 @@ export interface TranscriptBytesOptions {
  * - the handle names no path: `file` is a digest of the path, the device, the inode and, where the host reports one, the
  *   creation time (so a file removed and recreated under a reused inode number is another generation with another
  *   token), and no field of the handle and no message of an error it raises carries the path;
+ * - a host that reports NO creation time cannot tell a generation from the one before it once the old descriptor is gone
+ *   (the inode number can be handed out again), so then the token also carries a nonce drawn for THIS open: it never
+ *   repeats for another open, and it is the same for every use of this handle. The consequence, said plainly: on such a
+ *   host two handles on one unchanged file have different tokens, and a consumer that compares tokens across handles
+ *   sees a change and starts over (it never mistakes a replacement for the same file);
  * - a window is `[offset, offset + length)` clamped to `MAX_ROOT_WINDOW_BYTES`, short where the file ends and empty past
  *   it; a negative, fractional or unsafe offset or length is refused;
  * - `close()` lets the descriptor go (idempotent); an unused handle closes itself after `idleMs`.
  *
- * `undefined` when the root offers no held open or the name is not a regular file the root can open.
+ * `undefined` when the root offers no held open or the name is not a regular file the root can open. Once the descriptor
+ * is held, ANY failure (the first stat, the digest, the clock that times the backstop) closes it before the failure
+ * leaves: a handle is returned only if it owns its descriptor and a backstop for it, and none that cannot.
  */
 export async function openTranscriptBytes(
   root: TranscriptBytesRoot,
@@ -81,10 +88,22 @@ export async function openTranscriptBytes(
     await close();
     return undefined;
   }
-  const birth = opened.birthNs === undefined ? '' : `\0${opened.birthNs}`;
-  const token = sha256Hex(`${file}\0${opened.identity.device}:${opened.identity.inode}${birth}`).slice(0, TOKEN_LENGTH);
+  let token: string;
+  try {
+    // Where the host reports no creation time the object alone cannot name a generation: this open's own nonce does.
+    const generation = opened.birthNs === undefined ? `\0open:${crypto.randomUUID()}` : `\0${opened.birthNs}`;
+    token = sha256Hex(`${file}\0${opened.identity.device}:${opened.identity.inode}${generation}`).slice(
+      0,
+      TOKEN_LENGTH,
+    );
+    // The first timer too: nothing past the acquisition may leave the descriptor without an owner.
+    touch();
+  } catch (failure) {
+    // The digest or the clock is a caller's own port misbehaving: that is not hidden, but it never costs a descriptor.
+    await close();
+    throw failure;
+  }
   const named = async (): Promise<boolean> => await opened.stillNames().catch(() => false);
-  touch();
   return {
     format,
     file: token,

@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { HarnessTranscriptReplaced, type LaunchSpec, type Runner } from '@ferretry/core-ferrets/contract';
+import {
+  HarnessTranscriptReplaced,
+  type LaunchSpec,
+  type Runner,
+  type TranscriptEntry,
+} from '@ferretry/core-ferrets/contract';
 import { FakeRunner, harnessConformance } from '@ferretry/core-ferrets/contract/testing';
 import type { FerretId, SpawnResult, StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
@@ -895,6 +900,79 @@ describe('ClaudeHarness', () => {
       const cut = await harness.transcript.readCovering!(FERRET, NEW_AT as Instant);
       expect(cut.entries).toEqual([]);
       expect(cut.covered).toBe(false);
+    });
+
+    describe('a record without a uuid keeps ONE identity whichever window reads it (rv2 P1)', () => {
+      const queueOp = (): string =>
+        `${JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: NEW_AT, content: 'HELD PROMPT' })}\n`;
+      const drain = (text: string): string =>
+        `${JSON.stringify({
+          type: 'attachment',
+          timestamp: NEW_AT,
+          attachment: { type: 'queued_command', commandMode: 'prompt', origin: { kind: 'human' }, prompt: text },
+        })}\n`;
+      const idsOf = async (harness: ReturnType<typeof build>['harness']): Promise<Record<string, string>> =>
+        Object.fromEntries((await harness.transcript.read(FERRET)).map(entry => [entry.text ?? entry.id, entry.id]));
+
+      test('a drain and a queue record keep their ids when an append first pushes the file past 8 MiB', async () => {
+        const { harness, writeHome } = build();
+        await harness.start(spec(), runner({}), {} as never);
+        const path = 'projects/-work/conv-1.jsonl';
+        // 7 MiB in front of the records (a whole read), then 2 MiB more after them (a cut read that still holds them).
+        const head = pad(7) + queueOp() + drain('DRAINED PROMPT');
+        await writeHome(path, head);
+        const whole = await idsOf(harness);
+        expect(Object.keys(whole).sort()).toEqual(['DRAINED PROMPT', 'HELD PROMPT']);
+        await writeHome(path, head + pad(2));
+        const cut = await idsOf(harness);
+        expect(cut).toEqual(whole);
+      });
+
+      test('the ids do not depend on where the window starts: two cut windows of one growing file agree', async () => {
+        const { harness, writeHome } = build();
+        await harness.start(spec(), runner({}), {} as never);
+        const path = 'projects/-work/conv-1.jsonl';
+        const head = pad(5) + drain('DRAINED PROMPT') + pad(2) + queueOp();
+        await writeHome(path, head + pad(2));
+        const first = await idsOf(harness);
+        // Growth moves the window start; the records are still inside it.
+        await writeHome(path, head + pad(2) + user('u9', NEW_AT, 'later'));
+        const second = await idsOf(harness);
+        expect(second['DRAINED PROMPT']).toBe(first['DRAINED PROMPT']);
+        expect(second['HELD PROMPT']).toBe(first['HELD PROMPT']);
+      });
+
+      test('two identical drains stay two records', async () => {
+        const { harness, writeHome } = build();
+        await harness.start(spec(), runner({}), {} as never);
+        await writeHome('projects/-work/conv-1.jsonl', drain('SAME') + drain('SAME'));
+        const ids = (await harness.transcript.read(FERRET)).map(entry => entry.id);
+        expect(new Set(ids).size).toBe(2);
+      });
+
+      test('one delivered input confirms at most ONE send, across the 8 MiB transition (positive control)', async () => {
+        const { harness, writeHome } = build();
+        await harness.start(spec(), runner({}), {} as never);
+        const path = 'projects/-work/conv-1.jsonl';
+        const message = 'repeat this exact queued message';
+        const head = pad(7) + drain(message);
+        await writeHome(path, head);
+        // The Conversation side, over the real harness's own reader: the delivery matcher claims a record by its entry id.
+        const reader = (): Promise<readonly TranscriptEntry[]> => harness.transcript.read(FERRET);
+        const claimed = new Set<string>();
+        const claim = async (): Promise<boolean> => {
+          const found = (await reader()).find(entry => entry.text === message && !claimed.has(entry.id));
+          if (found === undefined) return false;
+          claimed.add(found.id);
+          return true;
+        };
+        expect(await claim()).toBe(true);
+        // Control: below the limit the same record cannot confirm a second send.
+        expect(await claim()).toBe(false);
+        await writeHome(path, head + pad(2));
+        // Across the limit it still cannot: it is the same record under the same key.
+        expect(await claim()).toBe(false);
+      });
     });
   });
 
