@@ -2,6 +2,7 @@ import {
   FY_REQUEST_ID_HEADER,
   type SessionHandoverFailure,
   type SessionHandoverReceipt,
+  type SessionHandoverResolvedAccount,
   type SessionHandoverRequest,
   SessionHandoverRequestSchema,
 } from '@ferretry/protocol';
@@ -169,6 +170,33 @@ function refuse(error: unknown): never {
   throw error;
 }
 
+/** An account fact without the model provenance, which no older client's strict schema can read. */
+function withoutModelSource<T extends { readonly modelSource?: unknown }>(account: T): Omit<T, 'modelSource'> {
+  const { modelSource: _frozen, ...rest } = account;
+  return rest;
+}
+
+/**
+ * The receipt as every public handover response carries it.
+ *
+ * `modelSource` stays in the DURABLE plan and receipt — the binder reads it from there — but it is
+ * stripped from the replacement, the coordinator and `plan.target` here. The nested schemas an older
+ * client parses with are strict objects, so a receipt carrying the new key would make that client throw
+ * `unrecognized_keys` on a response it could otherwise read. One projection, used by all three routes,
+ * so no route can forget it.
+ */
+export function publicHandoverReceipt(receipt: SessionHandoverReceipt): SessionHandoverReceipt {
+  const { replacement, coordinator } = receipt.resolvedTarget;
+  return {
+    ...receipt,
+    resolvedTarget: {
+      replacement: withoutModelSource<SessionHandoverResolvedAccount>(replacement),
+      coordinator: coordinator === null ? null : withoutModelSource<SessionHandoverResolvedAccount>(coordinator),
+    },
+    plan: { ...receipt.plan, target: withoutModelSource(receipt.plan.target) },
+  };
+}
+
 /** The raw path parameter, decoded. A parameter that regains a separator never reaches the service. */
 function pathSessionId(context: RouteContext): string {
   const raw = context.params.get('sessionId') ?? '';
@@ -209,7 +237,7 @@ async function begin(subsystem: SessionHandoverSubsystem, context: RouteContext)
   const target = await parseBody(context.request, SessionHandoverRequestSchema);
   const id = requestId(context.request);
   const receipt = await subsystem.begin(sessionId, target, id).catch(refuse);
-  return jsonResponse(receipt, 202);
+  return jsonResponse(publicHandoverReceipt(receipt), 202);
 }
 
 /** Reads the durable receipt at any phase. Authenticated rather than operator-scoped, because a paired
@@ -217,7 +245,7 @@ async function begin(subsystem: SessionHandoverSubsystem, context: RouteContext)
 async function read(subsystem: SessionHandoverSubsystem, context: RouteContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const receipt = await subsystem.receipt(sessionId).catch(refuse);
-  return jsonResponse(receipt);
+  return jsonResponse(publicHandoverReceipt(receipt));
 }
 
 /**
@@ -281,7 +309,7 @@ async function cancel(subsystem: SessionHandoverSubsystem, context: RouteContext
   assertEmptyCancelBody(await cancelBodyText(context.request));
   const id = requestId(context.request);
   const receipt = await subsystem.cancel(sessionId, id).catch(refuse);
-  return jsonResponse(receipt, 202);
+  return jsonResponse(publicHandoverReceipt(receipt), 202);
 }
 
 /**

@@ -521,6 +521,9 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
         harness: resolved.account.kind,
         modelHint: plan.target.model ?? '',
         model: planned.model,
+        // The provenance the resolver froze into the plan. The re-plan above asks for the frozen model,
+        // which always reads as requested, so it says nothing about who chose it.
+        ...(plan.target.modelSource === undefined ? {} : { launchModelSource: plan.target.modelSource }),
         remoteControl: plan.durable.remoteControl,
         harnessFlags: [...plan.durable.harnessFlags],
         // A fork ALWAYS materialises `turns/turn-001.md`, so the counter says one whatever the mode:

@@ -439,6 +439,31 @@ describe('SessionForkTargetBinder', () => {
     should(subject.counts()).eql({ captures: 1, creates: 1 });
   });
 
+  it('should record the provenance the plan froze, not what re-planning its model reads as', async () => {
+    // Arrange: a fork that named no model froze the account's default; the binder re-asks that default,
+    // which always reads as "requested". Another fork named kimi-k3, and a plan frozen before the field has none.
+    const withSource =
+      (modelSource: 'requested' | 'account-default' | undefined) =>
+      (base: SessionTransferPlan): SessionTransferPlan => ({
+        ...base,
+        target: {
+          ...base.target,
+          ...(modelSource === undefined ? {} : { modelSource }),
+        },
+      });
+    const defaulted = await harness('source-default', { plan: withSource('account-default') });
+    const chosen = await harness('source-chosen', { plan: withSource('requested') });
+    const legacy = await harness('source-legacy', { plan: withSource(undefined) });
+
+    // Act
+    const [fromDefault, fromChoice, fromLegacy] = [await drive(defaulted), await drive(chosen), await drive(legacy)];
+
+    // Assert
+    should(fromDefault.config.launchModelSource).equal('account-default');
+    should(fromChoice.config.launchModelSource).equal('requested');
+    should(fromLegacy.config.launchModelSource).equal(undefined);
+  });
+
   it('should reallocate the title and never carry the source callsign', async () => {
     // Arrange
     const subject = await harness('fresh-identity');

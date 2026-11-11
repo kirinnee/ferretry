@@ -414,6 +414,35 @@ describe('materialiseFleet', () => {
     });
   });
 
+  it("should launch an environment login on its profile's later third-party model set, not the Claude set before it", () => {
+    // Arrange — the `kimi` profile: claude-default's set, then kimi-models, on a hand-made login (no catalog)
+    const model = modelOf({
+      credentials: {
+        'claude-you': {
+          harness: 'claude',
+          store: 'environment',
+          env: { ANTHROPIC_BASE_URL: 'https://loge.example/anthropic', ANTHROPIC_AUTH_TOKEN: 'loge-internal' },
+        },
+        'codex-work': { harness: 'codex', store: 'ferretry' },
+      },
+      components: {
+        ...COMPONENTS,
+        modelSets: { ...COMPONENTS.modelSets, 'kimi-models': { models: ['kimi-k3'], default: 'kimi-k3' } },
+      },
+      profiles: { kimi: { layers: ['modelSets/claude', 'modelSets/kimi-models'] } },
+      runtimes: { 'claude-kimi': { credential: 'claude-you', profile: 'kimi', agent: true } },
+    });
+
+    // Act
+    const result = plan(model);
+
+    // Assert
+    const account = result.manifest.accounts[0];
+    should(account?.defaultModel).equal('kimi-k3');
+    should(account?.models.map(entry => entry.id)).eql(['kimi-k3']);
+    should(wrapperOf(result, 'claude-kimi')).match(/exec claude '--model' 'kimi-k3' /u);
+  });
+
   it("should start a Codex environment login on its model provider, before the profile's own flags", () => {
     // Arrange
     const model = modelOf({

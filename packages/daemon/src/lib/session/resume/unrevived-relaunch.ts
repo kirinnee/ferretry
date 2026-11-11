@@ -10,6 +10,7 @@ export const RESTAMPED_RECORD_KEYS = [
   'harness',
   'model',
   'modelHint',
+  'launchModelSource',
   'command',
   'incarnation',
   'runtimeGeneration',

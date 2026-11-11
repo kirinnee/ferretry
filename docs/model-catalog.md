@@ -63,6 +63,10 @@ catalog, a half has no models or more than one default, or a tier slot names a m
   follows its preset's catalog automatically; nothing is migrated, because a login only names its preset.
 - A login made by hand, with no preset, reads none: its runtimes offer their profile's model set, as
   before catalogs.
+- **A third-party id in a model set** (`kimi-k3`, `glm-5.3`, `deepseek-…`) is neither Claude's nor Codex's, so
+  it fits whichever CLI the runtime's login drives. Only an id known to be the other CLI's (`gpt-…` on Claude)
+  keeps a set off a runtime. When a profile stacks sets, the later one wins, so `[claude-default, kimi-models]`
+  launches `--model kimi-k3`.
 
 ## What a runtime gets
 

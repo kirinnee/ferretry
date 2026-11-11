@@ -236,13 +236,10 @@ describe('deriveAccountChange: runtime.put', () => {
   });
 
   it('should refuse a generic profile with nothing for the login’s harness (P5, E14)', () => {
-    // Arrange — a model set of ids neither harness runs is generic, and applies nowhere.
+    // Arrange — a profile with no layers is generic and has nothing for any login. (A model set of ids
+    // neither harness claims is no longer such a profile: it applies on whichever CLI the login drives.)
     const model = modelOf({
-      components: {
-        ...modelOf().components,
-        modelSets: { odd: { models: ['llama-9'], default: 'llama-9' } },
-      },
-      profiles: { ...modelOf().profiles, odd: { layers: ['modelSets/odd'] } },
+      profiles: { ...modelOf().profiles, odd: { layers: [] } },
     });
 
     // Act + Assert

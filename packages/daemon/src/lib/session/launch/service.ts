@@ -25,7 +25,13 @@ import type { SessionPlanner } from '../../core/session-planner.ts';
 import type { SessionId } from '../../session-id.ts';
 import { relaunchCommand } from '../transcript/relaunch.ts';
 import { FixedSettingsUnreadableError, settingsArguments, transcriptLaunchArguments } from './argv.ts';
-import { currentLaunchCompactAt, currentLaunchEffort, currentLaunchFast, currentLaunchModel } from './current.ts';
+import {
+  currentLaunchCompactAt,
+  currentLaunchEffort,
+  currentLaunchFast,
+  currentLaunchModel,
+  relaunchedModelSource,
+} from './current.ts';
 import { type LaunchOverlayFiles, prepareLaunchArgv } from './overlay-file.ts';
 
 /** What a relaunch reads about one session. */
@@ -47,6 +53,8 @@ export interface RecordedLaunch {
   /** The argv in its CREATE form; a revive's resume flag is decided at launch, never stored. */
   readonly command: readonly string[];
   readonly model: string;
+  /** Who chose `model`: carried with it, because a newer observed switch persisted here is a pick. */
+  readonly launchModelSource?: 'requested' | 'account-default';
   readonly launchReasoningEffort?: string;
   readonly launchFast?: boolean;
   readonly launchSettings?: string;
@@ -82,6 +90,7 @@ export interface SessionLaunchPorts {
 interface PlannedLaunch {
   readonly argv: readonly string[];
   readonly model: string;
+  readonly modelSource: 'requested' | 'account-default' | undefined;
   readonly effort: string | undefined;
   readonly fast: boolean | undefined;
   readonly executable: string;
@@ -108,6 +117,7 @@ export class SessionLaunchService {
     await this.ports.record(id, {
       command: argv,
       model: planned.model,
+      ...(planned.modelSource === undefined ? {} : { launchModelSource: planned.modelSource }),
       ...(planned.effort === undefined ? {} : { launchReasoningEffort: planned.effort }),
       ...(planned.fast === undefined ? {} : { launchFast: planned.fast }),
       ...(settings === undefined ? {} : { launchSettings: settings }),
@@ -189,6 +199,7 @@ export class SessionLaunchService {
           options,
         ),
         model: outcome.plan.model,
+        modelSource: relaunchedModelSource({ config, wanted, served: outcome === requested }),
         effort,
         fast,
         executable,
