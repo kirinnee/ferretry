@@ -77,4 +77,32 @@ describe('serveMcpOverStdio', () => {
     await done;
     should(lines.map(line => (JSON.parse(line) as { id: number }).id)).eql([2, 1]);
   });
+
+  it('should refuse a complete line over the cap in one chunk, never dispatch it, and read on', async () => {
+    const big = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping', padding: 'x'.repeat(300) });
+    const answers = await run(bytes(`${big}\n{"jsonrpc":"2.0","id":2,"method":"ping"}\n`), server(), 100);
+    should(answers).have.length(2);
+    should(answers[0]).match({ id: null, error: { code: -32_700 } });
+    should(answers[1]).eql({ jsonrpc: '2.0', id: 2, result: {} });
+  });
+
+  it('should refuse a line over the cap that arrives in pieces each under it, then read on', async () => {
+    const big = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping', padding: 'x'.repeat(300) });
+    const answers = await run(
+      bytes(big.slice(0, 80), big.slice(80, 160), `${big.slice(160)}\n`, `{"jsonrpc":"2.0","id":2,"method":"ping"}\n`),
+      server(),
+      100,
+    );
+    should(answers).have.length(2);
+    should(answers[0]).match({ id: null, error: { code: -32_700 } });
+    should(answers[1]).eql({ jsonrpc: '2.0', id: 2, result: {} });
+  });
+
+  it('should count the cap in bytes, so a complete line of multi-byte characters over it is refused', async () => {
+    const big = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping', padding: 'é'.repeat(40) });
+    const answers = await run(bytes(`${big}\n`), server(), 100);
+    should(big.length).be.below(100);
+    should(answers).have.length(1);
+    should(answers[0]).match({ error: { code: -32_700 } });
+  });
 });
