@@ -308,3 +308,77 @@ describe('BytesRecordScanner', () => {
     should(out).have.length(0);
   });
 });
+
+describe('HarnessBytesRuntime shutdown and release', () => {
+  it('should close a handle whose adoption was suspended on the held handle’s stat when closeAll ran', async () => {
+    // Arrange
+    const runtime = new HarnessBytesRuntime();
+    const first = new FakeHandle('same', text('a'));
+    await runtime.adopt(first, 'lead');
+    let settle!: (value: undefined) => void;
+    first.stat = () =>
+      new Promise(resolve => {
+        settle = resolve;
+      });
+    const next = new FakeHandle('same', text('a'));
+
+    // Act
+    const adopting = runtime.adopt(next, 'lead');
+    await runtime.closeAll();
+    settle(undefined);
+    await adopting;
+
+    // Assert
+    should(next.closed).be.true();
+    should(runtime.handle('same')).be.undefined();
+  });
+
+  it('should close, and never register, a handle adopted after closeAll', async () => {
+    // Arrange
+    const runtime = new HarnessBytesRuntime();
+    await runtime.closeAll();
+    const late = new FakeHandle('late', text('a'));
+
+    // Act
+    const token = await runtime.adopt(late, 'lead');
+
+    // Assert
+    should(late.closed).be.true();
+    should(runtime.handle(token)).be.undefined();
+    await should(runtime.info(token)).resolvedWith(undefined);
+  });
+
+  it('should close the handle held for one owner on releaseOwner and leave the others', async () => {
+    // Arrange
+    const runtime = new HarnessBytesRuntime();
+    const mine = new FakeHandle('mine', text('a'));
+    const other = new FakeHandle('other', text('b'));
+    await runtime.adopt(mine, 'f1');
+    await runtime.adopt(other, 'f2');
+
+    // Act
+    runtime.releaseOwner('f1');
+    runtime.releaseOwner('nobody');
+
+    // Assert
+    should(mine.closed).be.true();
+    should(runtime.handle('mine')).be.undefined();
+    should(other.closed).be.false();
+    should(runtime.handle('other')).equal(other);
+  });
+
+  it('should adopt a fresh handle for an owner after its release', async () => {
+    // Arrange
+    const runtime = new HarnessBytesRuntime();
+    await runtime.adopt(new FakeHandle('mine', text('a')), 'f1');
+    runtime.releaseOwner('f1');
+    const again = new FakeHandle('mine', text('a'));
+
+    // Act
+    const token = await runtime.adopt(again, 'f1');
+
+    // Assert
+    should(again.closed).be.false();
+    should(runtime.handle(token)).equal(again);
+  });
+});

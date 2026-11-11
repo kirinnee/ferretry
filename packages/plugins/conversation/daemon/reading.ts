@@ -96,7 +96,7 @@ export interface ReadingHalf {
   readonly routes: Readonly<Record<string, RouteHandler>>;
   readonly tools: { readonly search_work: ToolHandler };
   readonly api: ReadingApi;
-  /** A ferret stopped or is gone: its attachment plaintext is zeroed and forgotten. */
+  /** A ferret stopped or is gone: its attachment plaintext is zeroed and forgotten, and its transcript handle is closed. */
   release(ferret: string): void;
   /** The daemon is stopping: nothing more is scheduled. */
   stop(): void;
@@ -287,7 +287,14 @@ export function buildReading(deps: {
     },
     tools: search.tools,
     api,
-    release: ferret => attachments.release(ferret),
+    release: ferret => {
+      // Attachments first (their plaintext is the case worth failing closed for), then the ferret's transcript handle.
+      try {
+        attachments.release(ferret);
+      } finally {
+        reader.release(ferret);
+      }
+    },
     stop: () => {
       cancelWarm();
       // Every transcript handle the reader opened is closed with the daemon (a harness would close an idle one in a
