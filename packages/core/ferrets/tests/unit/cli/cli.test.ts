@@ -69,7 +69,7 @@ describe('the ferrets cli half', () => {
     expect(manifest.actions.cli?.some(decl => decl.verb.includes('compact-at'))).toBe(false);
   });
 
-  test('V-0366 ps reads GET /v1/ferrets; -a shows stopped ones; -l (a label) is refused with the word that replaced it', async () => {
+  test('V-0366 ps reads GET /v1/ferrets; -a shows stopped ones; -l keeps only that label', async () => {
     const stopped = sessionView({ id: 'old', name: 'oak', state: 'stopped' });
     const { verb, calls, out, err } = run({ [FERRET_ROUTES.list]: [ferret, stopped] });
     expect(await verb('ps')).toBe(0);
@@ -77,8 +77,9 @@ describe('the ferrets cli half', () => {
     expect(out.join('\n')).not.toContain('oak');
     expect(await verb('ps', [], { a: true })).toBe(0);
     expect(out.join('\n')).toContain('oak');
-    expect(await verb('ps', [], { l: 'mine' })).toBe(2);
-    expect(err.at(-1)).toContain('--pack');
+    expect(await verb('ps', [], { l: 'mine', a: true })).toBe(0);
+    expect(out.at(-1)).toBe('no ferrets with label "mine"');
+    expect(err).toEqual([]);
   });
 
   test('V-0445 status reads one ferret by the reference typed; without one it is a usage error', async () => {

@@ -108,14 +108,12 @@ export default implementCli(manifest, {
     };
 
     const list = verb(async (invocation, presenter) => {
-      if (typed(invocation, 'label', 'l'))
-        throw new SessionCommandError(
-          'ps does not filter by label in this version of Ferretry; filter by its pack with --pack <pack>',
-        );
       const pack = text(invocation, 'pack');
+      const label = text(invocation, 'label', 'l');
       await new ListSessionsController(api, presenter, PLAIN).execute({
         ...(on(invocation, 'all', 'a') ? { all: true } : {}),
         ...(pack === undefined ? {} : { pack }),
+        ...(label === undefined ? {} : { label }),
         ...json(invocation),
       });
     });
@@ -216,7 +214,7 @@ export default implementCli(manifest, {
     const stopBy = (kind: BulkStopSelector['kind']) =>
       verb(async (invocation, _presenter, io) => {
         const reason = text(invocation, 'reason', 'r');
-        const value = first(invocation, kind === 'label' ? 'pack' : 'ferret');
+        const value = first(invocation, kind === 'label' ? 'label' : 'ferret');
         const selector: BulkStopSelector = kind === 'label' ? { kind, label: value } : { kind, rootId: value };
         const includeCaller = on(invocation, 'include-caller');
         // The ferret that typed the command (the shell passes FY_SESSION_ID): the plan keeps it out unless --include-caller.
@@ -239,6 +237,22 @@ export default implementCli(manifest, {
         presenter.report(lines);
         io.setExitCode(2);
       });
+
+    const stopModes = {
+      orphan: stopBy('orphan'),
+      cascade: stopBy('cascade'),
+      children: stopBy('children'),
+      label: stopBy('label'),
+    } as const;
+    const stopUsage = usage(STOP_USAGE);
+    // `stop -r why cascade wren`: the shell reads the `-r` before the mode as an option of the bare `stop`, so the mode
+    // arrives as the first word. It runs that mode with the same options (a `-r` after the mode wins: the last is kept).
+    const stop = async (invocation: VerbInvocation): Promise<number> => {
+      const [mode, ...rest] = invocation.args;
+      if (mode === undefined || rest.length === 0 || !Object.hasOwn(stopModes, mode))
+        return await stopUsage(invocation);
+      return await stopModes[mode as keyof typeof stopModes]({ ...invocation, args: rest });
+    };
 
     const rename = verb(async (invocation, presenter) => {
       const title = text(invocation, 'title');
@@ -413,11 +427,11 @@ export default implementCli(manifest, {
         'status [id]': status,
         'start [prompt...]': start('start'),
         'new [words...]': start('new'),
-        stop: usage(STOP_USAGE),
-        'stop orphan <session>': stopBy('orphan'),
-        'stop cascade <session>': stopBy('cascade'),
-        'stop children <session>': stopBy('children'),
-        'stop label <label>': stopBy('label'),
+        stop,
+        'stop orphan <session>': stopModes.orphan,
+        'stop cascade <session>': stopModes.cascade,
+        'stop children <session>': stopModes.children,
+        'stop label <label>': stopModes.label,
         'rename <session> [name]': rename,
         name: names,
         'resume <id> [message...]': resume,
