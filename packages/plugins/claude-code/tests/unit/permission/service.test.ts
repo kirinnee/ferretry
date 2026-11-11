@@ -264,10 +264,11 @@ describe('PermissionAnswerService — the cursor is checked before Enter', () =>
     const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
 
     // Act
-    const result = await service.answer('s1', choice(BASH, 3));
+    const error = await refusalOf(service.answer('s1', choice(BASH, 3)));
 
-    // Assert
-    should(result.cleared).be.false();
+    // Assert: refused with words for the owner, and Enter never pressed
+    should(error.refusal).equal('cursor_unknown');
+    should(error.message).match(/nothing was confirmed/u);
     should(pane.keys).eql(['Down', 'Down']);
   });
 
@@ -403,6 +404,7 @@ describe('PermissionAnswerService — an unknown cursor is never confirmed', () 
 
     // Assert
     should(error.refusal).equal('cursor_unknown');
+    should(error.message).match(/could not be read safely/u);
     should(pane.writes).eql([]);
   });
 
@@ -424,10 +426,11 @@ describe('PermissionAnswerService — an unknown cursor is never confirmed', () 
     const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
 
     // Act
-    const result = await service.answer('s1', choice(BASH, 1));
+    const error = await refusalOf(service.answer('s1', choice(BASH, 1)));
 
     // Assert
-    should(result.cleared).be.false();
+    should(error.refusal).equal('cursor_unknown');
+    should(error.message).match(/could not be read safely/u);
     should(pane.writes).eql(['Up', 'Up']);
   });
 

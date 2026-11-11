@@ -57,8 +57,11 @@ export interface PermissionAnswerTiming {
   readonly settleMs: number;
 }
 
+/** What the owner is told when the selected answer cannot be read: nothing was typed, and the terminal is the way on. */
 const CURSOR_UNKNOWN =
-  'the prompt does not show which choice is selected, so nothing was sent: answer it at the terminal';
+  'the prompt could not be read safely (its selected answer is not shown), so nothing was sent: answer it at the terminal';
+const CURSOR_NOT_ARRIVED =
+  'the selection did not reach the chosen answer, so nothing was confirmed and Enter was not pressed: answer it at the terminal';
 
 const DEFAULT_TIMING: PermissionAnswerTiming = { settleReads: 15, settleMs: 200 };
 
@@ -125,8 +128,14 @@ export class PermissionAnswerService {
           'this prompt is gone: the agent’s screen no longer shows it, so nothing was confirmed',
           moved.last,
         );
-      // Not met: the cursor never showed, once and alone, on the chosen row (a markerless redraw is not evidence). No Enter.
-      if (!moved.met) return { requestId: answer.requestId, cleared: false };
+      // Not met: the cursor never showed, once and alone, on the chosen row (a markerless redraw is not evidence, and a
+      // cursor left on another row — "allow always" included — is not the row asked for). No Enter, and the owner is told.
+      if (!moved.met)
+        throw new PermissionAnswerError(
+          'cursor_unknown',
+          moved.last?.selected === undefined ? CURSOR_UNKNOWN : CURSOR_NOT_ARRIVED,
+          moved.last,
+        );
     }
     await this.pane.key(ferretId, keys.confirm);
     return { requestId: answer.requestId, cleared: (await this.until(ferretId, gone)).met };

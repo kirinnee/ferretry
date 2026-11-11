@@ -430,6 +430,9 @@ describe.each(ROWS)('what a $harness ferret is stopped on, through the real halv
     });
 
     expect([answered.status, answered.json<{ code: string }>().code]).toEqual([409, 'permission_cursor_unknown']);
+    // The owner is told in words, not by a bare code.
+    expect(answered.body).toContain('could not be read safely');
+    expect(answered.body).toContain('nothing was sent');
     expect({ committed, keys: keysOf(runner), pastes: runner.formPastes }).toEqual({
       committed: undefined,
       keys: [],
@@ -456,8 +459,37 @@ describe.each(ROWS)('what a $harness ferret is stopped on, through the real halv
       number: 1,
     });
 
-    expect(answered.status).toBe(200);
-    expect(answered.json()).toEqual({ requestId: request.id, cleared: false });
+    expect([answered.status, answered.json<{ code: string }>().code]).toEqual([409, 'permission_cursor_unknown']);
+    expect(answered.body).toContain('could not be read safely');
+    expect({ committed, keys: keysOf(runner) }).toEqual({ committed: undefined, keys: ['Up', 'Up'] });
+  });
+
+  test('a cursor left on the allow-always row when another row was asked is refused: no Enter, and the owner is told', async () => {
+    const { host, runner, id, show } = await boot(row);
+    // Start on row 3, ask for row 1. One Up lands on row 2 ("allow always") and the list then ignores the arrows.
+    show(moveCursor(moveCursor(row.permission, 1), 1));
+    let committed: number | undefined;
+    let ups = 0;
+    runner.onFormWrite = ({ key }) => {
+      if (key === 'Up') {
+        ups += 1;
+        if (ups === 1) show(moveCursor(runner.form?.visible ?? '', -1));
+      }
+      if (key === 'Enter') {
+        committed = 2;
+        show(IDLE);
+      }
+    };
+
+    const answered = await answer(host, `/v1/ferrets/${id}/permission`, {
+      kind: 'choice',
+      requestId: request.id,
+      number: 1,
+    });
+
+    expect([answered.status, answered.json<{ code: string }>().code]).toEqual([409, 'permission_cursor_unknown']);
+    expect(answered.body).toContain('did not reach the chosen answer');
+    expect(answered.body).toContain('Enter was not pressed');
     expect({ committed, keys: keysOf(runner) }).toEqual({ committed: undefined, keys: ['Up', 'Up'] });
   });
 
