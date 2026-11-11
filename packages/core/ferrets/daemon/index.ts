@@ -497,6 +497,9 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       if (!path.startsWith('/')) return err('the folder must be an absolute path');
       return ok(path as FencedPath);
     },
+    // The folder the ferret will really work in, judged by the kernel's identity fence (a work folder or a link swapped
+    // in after the route's check lands here).
+    stateHomeHolding: async path => await kernel.paths.stateHomeHolding(path),
     delivered: ferret => wakeTurnWatch?.(ferret),
     changed: payload => {
       followStatus(payload.ferret, payload.state, 'lifecycle');
@@ -661,12 +664,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
 
   /**
-   * The kernel gives a plugin no state-home identity or link-hop reach yet, so the launch refusal (the folder a ferret
-   * is started in) fails closed for an agent with today's 503 `state_home_unresolved`, and never with a lexical
-   * stand-in. The file browser needs none: the pin a work root hands out judges every walk beneath it against the
-   * kernel's fence itself (S40, S47).
+   * The kernel's own identity fence answers whether a folder is in (or through) this daemon's state home: as named, on
+   * every link hop, by real path and by identity up to `/` (S40, S47). It is never a lexical stand-in. A throw means the
+   * fence could not be built, and the launch refusal answers 503 `state_home_unresolved` for an agent.
    */
-  const stateHomeReach: StateHomeLaunchReach | undefined = undefined;
+  const stateHomeReach: StateHomeLaunchReach = { holding: async path => await kernel.paths.stateHomeHolding(path) };
 
   /**
    * The folders a governed device may start a ferret in as an ordinary act (v4 `knownLaunchRoots`): the projects the
@@ -1095,7 +1097,13 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
 
   const startFailure = (failure: { readonly code: string; readonly reason: string }): never => {
     const status =
-      failure.code === 'refused' || failure.code === 'unservable_model' ? 409 : failure.code === 'folder' ? 400 : 503;
+      failure.code === 'refused' || failure.code === 'unservable_model'
+        ? 409
+        : failure.code === 'folder'
+          ? 400
+          : failure.code === 'state_home'
+            ? 403
+            : 503;
     throw new ApiError(status, failure.reason, failure.code);
   };
 
@@ -1220,7 +1228,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
             'only the Warden starts a ferret under its own label; leave --label out',
             'owner_only',
           );
-        // No identity/link-hop state-home reach is available in this kernel yet. Never replace it with a lexical fence.
+        // An agent starts no child inside the state home (identity and link-hop fence, the kernel's). A person is unaffected.
         await stateHomeLaunchRefusal(callerIsAgent(call), stateHomeReach, parsed.folder);
         // What counts as a known project: Projects' registered folders plus the managed worktree root. Read at each start;
         // a throw from Projects answers 503 `launch_roots_unavailable` (it cannot classify), never "outside".

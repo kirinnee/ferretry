@@ -45,12 +45,14 @@ test('G12 the ferret behind a call: its own token, or the admin token naming it;
 
 test('G12 admin token + header naming ferret F starting a child is F’s helper: a helper start is not the owner’s', async () => {
   const h = await host([record('lead')], { harness: new FakeHarness(), runner: new FakeRunner(), standing });
-  // An agent's start waits on the state-home fence (the same answer a ferret's own token gets), for the parent left
-  // out and for the caller's own id alike — never the owner's path.
+  // An agent's start passes the kernel's state-home fence (a project folder), then waits on Packs' admission as a
+  // helper (the same answer a ferret's own token gets), for the parent left out and for the caller's own id alike —
+  // never the owner's path.
   for (const body of [{ folder: '/work/b' }, { folder: '/work/b', parent: 'lead' }]) {
-    const answer = await start(h, adminAs('lead'), body);
+    const headers = { ...adminAs('lead').headers, 'x-fy-request-id': `admin-${'parent' in body ? 'lead' : 'none'}` };
+    const answer = await start(h, { headers }, body);
     expect(answer.status).toBe(503);
-    expect(answer.json<{ code: string }>().code).toBe('state_home_unresolved');
+    expect(answer.json<{ code: string }>().code).toBe('helper_admission_unavailable');
   }
 });
 

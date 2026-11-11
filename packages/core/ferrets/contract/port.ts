@@ -155,6 +155,7 @@ export type StartFailure =
   | { readonly code: 'refused' | 'unservable_model'; readonly reason: string } // a start.decide taker said no, or a test-mode runner refused a real harness (`real_harness`) (`unservable_model`: what the start asked of its model cannot be given)
   | { readonly code: 'folder'; readonly reason: string } // WorkFolders refused the folder
   | { readonly code: 'harness_unavailable' | 'runner_unavailable' | 'login_unavailable'; readonly reason: string }
+  | { readonly code: 'state_home' | 'state_home_unresolved'; readonly reason: string } // a ferret's start in (or through a link to) the state home, or the fence could not be built (an agent start only)
   | { readonly code: 'failed'; readonly reason: string };
 
 /**

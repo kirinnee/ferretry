@@ -46,6 +46,7 @@ function fixture() {
     sitrepSources: () => [],
     instructions: () => [],
     folder: path => ok(fenced(path)),
+    stateHomeHolding: async () => undefined,
     changed: () => {},
     vault: { childEnvironment: async () => ok(emptyChildEnvironment()) },
     asks: { open: async () => [] },

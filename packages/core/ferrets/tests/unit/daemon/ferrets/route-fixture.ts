@@ -158,6 +158,10 @@ export async function host(
     readonly spawn?: Parameters<typeof testHost>[0]['spawn'];
     /** More plugins on the host (a fake taker of a Ferrets hook). */
     readonly plugins?: Parameters<typeof testHost>[0]['plugins'];
+    /** What the kernel's state-home fence answers for a folder (the home's name, or none); it may throw. */
+    readonly stateHomeHolding?: Parameters<typeof testHost>[0]['stateHomeHolding'];
+    /** A real-disk state home the kernel's production fence judges (links, identity). */
+    readonly stateHome?: string;
   } = {},
 ): Promise<TestHost> {
   const plugins = [
@@ -173,6 +177,8 @@ export async function host(
     ...(extra.config === undefined ? {} : { config: extra.config }),
     ...(extra.pinner === undefined ? {} : { pinner: extra.pinner }),
     ...(extra.spawn === undefined ? {} : { spawn: extra.spawn }),
+    ...(extra.stateHomeHolding === undefined ? {} : { stateHomeHolding: extra.stateHomeHolding }),
+    ...(extra.stateHome === undefined ? {} : { stateHome: extra.stateHome }),
   });
   if (records.length === 0) return first;
   for (const each of records) first.state('ferrets').plant(FerretFiles, JSON.stringify(each), each.id);
