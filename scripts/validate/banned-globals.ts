@@ -200,12 +200,6 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
       reason: 'fy itself attaches the person terminal to tmux (lead ruling)',
     },
     {
-      pkg: 'runtimes',
-      folder: 'daemon/adapters/folder-claude-settings-file.ts',
-      reason:
-        'reads the Claude settings files of a LAUNCH FOLDER and its repository, which are outside every declared root: lstat of .git (a symlink refuses), the worktree gitdir/back-link/commondir proof, and the home directory as the walk limit; names only, never a value; main-sync ruling (lizzette), port of v4 #1587',
-    },
-    {
       pkg: 'terminals',
       folder: 'daemon/adapters/host/fs.ts',
       reason:

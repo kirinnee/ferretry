@@ -240,6 +240,12 @@ export interface TestHostOptions {
   readonly linkedProjectFolders?: ReadonlyMap<string, string>;
   /** The directories `kernel.paths.checkDirectory` accepts: the absolute path asked → its real path. Default: none. */
   readonly directories?: Readonly<Record<string, string>>;
+  /**
+   * Backs a `harness-home` handle scoped to an ABSOLUTE folder (what a launch folder's settings are read through) with
+   * this function instead of the flat test world, which keeps no per-folder files: `diskFolders` over a temp folder gives
+   * the real root rules over real files. Default: the flat world, as every other root.
+   */
+  readonly harnessHomeFolders?: (folder: string) => RootHandle;
   /** The absolute paths `kernel.paths.which` finds executable. Default: none. */
   readonly executables?: readonly string[];
   /** The `PATH` `kernel.paths.which` searches after the caller's own folders. Default: none. */
@@ -1422,6 +1428,12 @@ async function start(world: World): Promise<TestHost> {
           if (name === 'project-files') throw new RootError('not_declared');
           throw new Error(`${manifest.id}: root ${name} is not declared`);
         }
+        if (
+          name === 'harness-home' &&
+          options.harnessHomeFolders !== undefined &&
+          scope?.subfolder?.startsWith('/') === true
+        )
+          return options.harnessHomeFolders(scope.subfolder);
         // A `within` anchor is judged by the one rule production reads (`anchorWalk`): the folder itself or an ancestor of
         // it, compared by component, on a root that takes an absolute folder. Anything else names no folder here either.
         // The world holds no real disk folders for an absolute scope, so the lstat walk itself is production's alone.

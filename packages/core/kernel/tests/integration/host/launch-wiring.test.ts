@@ -11,7 +11,7 @@ import { FakeVault } from '../../../../vault/contract/testing/index.ts';
 import { fakeLoginChanges, fakeLogins } from '../../../../../plugins/logins/contract/testing/index.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import { daemonImplementations } from '../../../src/generated/plugins.ts';
-import { type TestHost, testHost } from '../../../testing/index.ts';
+import { diskFolders, type TestHost, testHost } from '../../../testing/index.ts';
 
 /**
  * #1587 through the daemon, on the path production takes: the REAL Ferrets, Runtimes and Claude Code halves, as the
@@ -113,6 +113,8 @@ afterEach(async () => {
 
 async function boot(runner: RecordingRunner): Promise<TestHost> {
   const h = await testHost({
+    // The launch folder's settings are read through the kernel's own `harness-home` rules, here over real temp files.
+    harnessHomeFolders: await diskFolders(await mkdtemp(join(fixture, 'roots-'))),
     plugins: [real('ferrets'), real('runtimes'), real('claude-code'), runnerPlugin(runner)],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: {

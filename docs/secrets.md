@@ -398,8 +398,12 @@ file at the git root (the **main checkout's** root, in a linked worktree; not wh
 
 - **It fails closed.** A layout that cannot be proved refuses the start with the reason: a missing launch folder, a `.git` that is a
   symlink, a `.git` file whose `gitdir`, back-link and `commondir` do not prove one another (a linked worktree is accepted only when
-  they do), or a directory it cannot search. The walk up from the real folder has no depth cap. Published runtimes that cannot be
-  read refuse the start of a ferret that names one, and an answer that does not arrive in the kernel's decide bound is a no.
+  they do), a settings file that is a symlink or has a second hard link (Claude Code follows it; the kernel never does, so a file
+  it could not read is refused rather than skipped), or a directory it cannot search. The walk up from the real folder has no depth cap.
+  Published runtimes that cannot be read refuse the start of a ferret that names one, and an answer that does not arrive in the
+  kernel's decide bound is a no.
+- **Every read goes through the kernel.** The adapter takes a `harness-home` root scoped to each folder it looks in (read-only, no
+  link followed out of the folder, the daemon's own home refused) and touches no file system of its own.
 - **GAP — the harness still does not resolve the login's process-environment variables.** A launched ferret gets the pins above, but
   the variables a login leaves to the process environment (`${secret:…}`, `$OTHER`) are not yet resolved into its child environment
   by Ferrets (`ports-pending.json`, the `cross: ferrets` line), and the `apiKeyHelper` alternative (the wrapper exports the value as a

@@ -66,6 +66,7 @@ export {
   type DiskRoot,
   type DiskSessionsRoots,
   diskPaths,
+  diskFolders,
   diskRoot,
   diskSessionsRoot,
   diskSessionsRoots,

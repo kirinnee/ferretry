@@ -447,7 +447,10 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           // login is refused before anything is written; with no facts to check against, a start of a runtime is refused.
           'start.decide': launchStartDecision({
             source: launchFacts,
-            folderSettings: new FolderClaudeSettingsFiles(ctx.kernel.paths.home()),
+            folderSettings: new FolderClaudeSettingsFiles(
+              folder => ctx.kernel.roots.root('harness-home', { subfolder: folder }),
+              ctx.kernel.paths.home(),
+            ),
           }),
         },
 
