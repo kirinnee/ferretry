@@ -53,11 +53,11 @@ export const INTERRUPT_UNAVAILABLE =
   "Stopping a ferret's turn from here is not available yet: this machine cannot yet tell safely whether the ferret is working or waiting at its prompt, so a stop could quit the agent instead. Stop it in the ferret's terminal for now.";
 
 /**
- * Said by a send that carries what the seam does not type yet: files, or the fyi label (which holds a message to the
- * turn's end). Each would be dropped and the message still reported as sent.
+ * Said by the send service's own typing ports (a numbered turn, a queued payload, a revive), which this host does not
+ * run through that service: a send is typed by the host's own path, so these refuse rather than type a second way.
  */
-export const SEND_EXTRAS_UNAVAILABLE =
-  "Sending files or an fyi message held to the turn's end is not available yet: they would be dropped and the message still reported as sent. Send the message alone (as an action or a blocker), or type it in the ferret's terminal.";
+export const SEND_PATH_UNWIRED =
+  "This part of sending runs through the daemon's own send path, not here, so nothing was typed. Send the message again, or type it in the ferret's terminal.";
 
 /**
  * ONE FIXED SENTENCE PER REASON a pane never came to a prompt. Nothing of the message was typed, so the same send may
