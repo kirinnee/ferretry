@@ -74,10 +74,14 @@ export function homeText(inputs: HomeInputs): HomeText {
   const servers = Object.fromEntries(
     inputs.parts.flatMap(part => (part.kind === 'mcp' ? [[part.name, part.config]] : [])),
   );
+  // A login's literal environment, pinned where a project's own `.claude/settings*.json` cannot replace it: the
+  // `--settings` file outranks a project's `env`, the process environment does not (#1587).
+  const pinned = Object.assign({}, ...inputs.parts.flatMap(part => (part.kind === 'pin' ? [part.env] : [])));
+  const overlay = Object.keys(pinned).length === 0 ? fixed.overlay : { ...fixed.overlay, env: pinned };
   return {
     memory: memory === '' ? '' : `${memory}\n`,
     settings: `${JSON.stringify(deepMergeSettings(settingsDocument(inputs), fixed.settings), null, 2)}\n`,
-    overlay: `${JSON.stringify(fixed.overlay, null, 2)}\n`,
+    overlay: `${JSON.stringify(overlay, null, 2)}\n`,
     claudeJson: `${JSON.stringify(fixed.claudeJson, null, 2)}\n`,
     ...(Object.keys(servers).length === 0 ? {} : { mcp: `${JSON.stringify({ mcpServers: servers }, null, 2)}\n` }),
   };

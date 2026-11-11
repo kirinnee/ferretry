@@ -31,6 +31,8 @@ import { PROVIDER_ANSWER_MS, withinMs } from './adapters/profile-components.ts';
 import { writeAllConfigWriter } from './adapters/config-write-all.ts';
 import { credentialMounts, FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
 import { readFleetManifest } from './adapters/manifest-file.ts';
+import { FIXED_SETTINGS_FILE, pinnableLoginEnvironment, RUNTIME_STATE_DIRECTORY } from './lib/account/materialise.ts';
+import type { RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import type { AdapterHost } from './adapters/ports.ts';
 import { refuseBeforeWriting, runtimesConfigFiles } from './adapters/runtimes-config-files.ts';
 import { fleetMounts, harnessMounts, rootHostFiles } from './adapters/root-host-files.ts';
@@ -112,6 +114,51 @@ export function endedSeams(
         published => published.name === runtime,
       )?.wrapper,
   };
+}
+
+/**
+ * What a launch of a published runtime needs of it (`lib/launch-gate.ts`): its kind, the names its login leaves to the
+ * process environment (the manifest) and the literals it pins (its `fixed.json`, read through the `fleet` root).
+ * Read between applies, so it never sees a half-written fleet. A runtime matches by name or by id.
+ */
+export function launchFactsSource(
+  kernel: Pick<KernelPorts, 'roots'>,
+  publication: FleetPublication = new FleetPublication(),
+): RuntimeLaunchFactsSource {
+  return {
+    facts: async runtime => {
+      const fleet = kernel.roots.root('fleet');
+      const { directory, manifest } = await publishedFleet(kernel.roots, fleet, publication);
+      const published = manifest?.runtimes.find(row => row.name === runtime || row.id === runtime);
+      const account = manifest?.accounts.find(row => row.id === published?.id);
+      if (published === undefined || account === undefined) return undefined;
+      const files = rootHostFiles(fleetMounts(kernel.roots, fleet, directory));
+      const text = await files.readText(`${account.home}/${RUNTIME_STATE_DIRECTORY}/${FIXED_SETTINGS_FILE}`);
+      return {
+        runtime: published.name,
+        kind: account.kind,
+        secretEnvNames: Object.keys(account.secretEnv),
+        referencedEnv: account.referencedEnv ?? [],
+        pins: account.kind === 'claude' ? pinsOf(text) : {},
+      };
+    },
+  };
+}
+
+/** The literal `env` of a `fixed.json` text, once more through the pin filter: a reference or a secret is never a pin. */
+function pinsOf(text: string | undefined): Readonly<Record<string, string>> {
+  if (text === undefined) return {};
+  let document: unknown;
+  try {
+    document = JSON.parse(text);
+  } catch {
+    throw new Error('the runtime’s fixed settings are not valid JSON, so its pinned login environment cannot be read');
+  }
+  const env = (document as { env?: unknown } | null)?.env;
+  if (typeof env !== 'object' || env === null || Array.isArray(env)) return {};
+  return pinnableLoginEnvironment(
+    Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
+  );
 }
 
 /** The harness homes a first run may read and a component may come from: the person's own, by the OS's home. */

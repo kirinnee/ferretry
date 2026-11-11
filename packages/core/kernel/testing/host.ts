@@ -1531,7 +1531,8 @@ async function start(world: World): Promise<TestHost> {
           resolve(relative) {
             if (prefix === undefined || relative.startsWith('/') || relative.split('/').includes('..'))
               return { ok: false, error: 'outside' };
-            return { ok: true, value: `${prefix}/${relative}` as never };
+            // The real host normalizes (`join`), so the root's own folder is spelled without a trailing slash.
+            return { ok: true, value: (relative === '' ? prefix : `${prefix}/${relative}`) as never };
           },
           readText: async path => {
             const text = world.roots.get(path);

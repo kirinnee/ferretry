@@ -40,6 +40,7 @@ export function compactAtFloorRefusal(tokens: number): string | undefined {
 /**
  * Whether a value fits this model: at or above the floor and no larger than its context window. `window` is absent
  * when the daemon cannot say, in which case only the floor is checked. Returns the refusal, or `undefined`.
+ * @pending ferrets: Actions rows still to port: compact-at
  */
 export function checkCompactAt(value: CompactAt, window: number | undefined): string | undefined {
   if (value === 'auto') return undefined;
@@ -60,7 +61,10 @@ export function formatTokens(tokens: number): string {
   return tokens.toLocaleString('en-US');
 }
 
-/** `Auto` or `250k`, as a surface labels the value. */
+/**
+ * `Auto` or `250k`, as a surface labels the value.
+ * @pending ferrets: Actions rows still to port: compact-at
+ */
 export function describeCompactAt(value: CompactAt): string {
   return value === 'auto' ? 'Auto' : formatTokens(value);
 }

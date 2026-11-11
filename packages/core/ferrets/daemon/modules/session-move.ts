@@ -60,18 +60,9 @@ import {
   type SessionMoveSubsystem,
 } from '../lib/runtime/mounts/session-move.ts';
 import { sessionMoveContribution } from '../lib/runtime/mounts/session-move.ts';
-import {
-  currentLaunchCompactAt,
-  currentLaunchEffort,
-  movedModel,
-  type LaunchOverlayFiles,
-  prepareLaunchArgv,
-  movedModelSource,
-  type SessionLaunchService,
-  transcriptLaunchArguments,
-} from '../lib/session/launch/index.ts';
-import { authorizeSessionCommand } from '../lib/session/lifecycle/policy.ts';
-import { defaultSessionLifecycleSettings } from '../lib/session/lifecycle/settings.ts';
+import { currentLaunchEffort, movedModel, movedModelSource } from '../lib/session/launch/index.ts';
+import { transcriptLaunchArguments } from '../lib/session/peers/transcript-launch.ts';
+import type { RelaunchDrift } from './relaunch-settings.ts';
 import { SessionLifecycleConfigSchema } from '../lib/session/lifecycle/types.ts';
 import {
   type AccountInventoryPort,
@@ -131,7 +122,7 @@ export interface SessionMoveNeeds {
   /** The SAME service the revive uses. */
   readonly resume: Pick<SessionResumeService, 'resume'>;
   /** The relaunch-settings read (W2-c): asked whether a relaunch would run the ferret on other harness settings. */
-  readonly launch: Pick<SessionLaunchService, 'drift'>;
+  readonly launch: RelaunchDrift;
   readonly preflight: MovePreflight;
   /** Puts one Ferretry-authored message in the session's queue (a closure over the queue and its deliverer). */
   readonly askAgent: SessionMoveParts['askAgent'];
@@ -162,8 +153,6 @@ export interface SessionMoveNeeds {
   /** The harness CLI itself, discovered the SAME way a start's readiness check and the doctor do. */
   readonly locateHarness: SessionMoveParts['locateHarness'];
   readonly readableHandoffs: SessionMoveParts['readableHandoffs'];
-  readonly fixedSettings: SessionMoveParts['fixedSettings'];
-  readonly overlayFiles?: SessionMoveParts['overlayFiles'];
   /** Terminals: the registered pane's identity. */
   readonly paneIdentity: SessionMoveParts['paneIdentity'];
   /** The harness plugins: the reasoning effort a harness last persisted in a home. */
@@ -234,13 +223,6 @@ interface SessionMoveParts {
   readonly resolveDirectory: (id: SessionId, cwd: string) => Promise<string>;
   /** The folders the agent is pointed into to read what it was sent (`handoffFolders`). */
   readonly readableHandoffs: (id: SessionId) => readonly string[];
-  /** The text of the fixed `--settings` file a Claude wrapper launches under, which a compaction trigger replaces. */
-  readonly fixedSettings: (executable: string, harness: HarnessKind) => Promise<string | undefined>;
-  /**
-   * Where a login that pins its environment gets the per-launch settings file a compaction trigger is named by
-   * (#1587): that overlay carries a credential, which may never ride an argv. Absent refuses such a move.
-   */
-  readonly overlayFiles?: LaunchOverlayFiles | undefined;
   /** The registered pane's identity (pane id, pid, process start), or nothing when none can be read. */
   readonly paneIdentity: (id: SessionId) => Promise<string | undefined>;
   readonly persistedReasoningEffort: PersistedReasoningEffort;
@@ -249,7 +231,7 @@ interface SessionMoveParts {
   /** Serializes whole moves of one session, so two cannot restamp the same document. */
   readonly serial: KeyedSerialExecutor;
   /** The relaunch-settings read (W2-c): asked whether a relaunch would run the ferret on other harness settings. */
-  readonly launch: Pick<SessionLaunchService, 'drift'>;
+  readonly launch: RelaunchDrift;
   /** The binary name a person drives, which an account resolution is typed with. */
   readonly clientName: string;
 }
@@ -259,6 +241,8 @@ interface MoveSubject {
   readonly config: z.infer<typeof SessionConfigSchema>;
   readonly state: z.infer<typeof SessionStateSchema>;
   readonly tmuxSession: string;
+  /** The command the session document records: a move leaves it as it is (the launch path builds a relaunch itself). */
+  readonly command: readonly string[];
 }
 
 /** How each account-resolution refusal is restated in the move's own taxonomy. The resolver is
@@ -621,7 +605,12 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
     const lifecycle = SessionLifecycleConfigSchema.safeParse(lifecycleConfigDocument(raw));
     if (!lifecycle.success)
       throw new SessionMoveError('unusable', `session ${id} records no terminal this daemon could inspect`);
-    return { config: config.data, state: state.data, tmuxSession: lifecycle.data.tmuxSession };
+    return {
+      config: config.data,
+      state: state.data,
+      tmuxSession: lifecycle.data.tmuxSession,
+      command: lifecycle.data.command,
+    };
   };
 
   /** The view of a session this mount just moved. A document it cannot read back is a wiring fault. */
@@ -697,7 +686,7 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
   };
 
   const move = async (id: SessionId, request: Parameters<SessionMoveSubsystem['move']>[1]): Promise<SessionView> => {
-    const { config, state, tmuxSession } = await subject(id);
+    const { config, state, tmuxSession, command } = await subject(id);
     const { account, executable } = await resolveTarget(request.agent);
     // SAME-KIND, ENFORCED HERE — the first thing decided once both families are known, and before any
     // other work at all. Everything below it either reads the host or writes the session: the planner,
@@ -747,41 +736,8 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
       targetWindow: plan.contextWindow,
       conversation: request.conversation ?? 'resume',
     });
-    // The compaction trigger travels with the session (its own choice stays on the document), else the TARGET
-    // login's default. Claude carries it in the replacement `--settings`, so that overlay is read now.
-    const compactAt = currentLaunchCompactAt(config, account.compactAt, plan.contextWindow);
-    const fixedSettings =
-      account.kind === 'claude' && compactAt !== undefined ? await parts.fixedSettings(executable, account.kind) : '';
-    if (fixedSettings === undefined)
-      throw new SessionMoveError(
-        'unavailable',
-        `${account.agent}'s fixed settings could not be read, so its compaction trigger cannot be applied`,
-      );
-    const command = await (async (): Promise<readonly string[]> => {
-      try {
-        return authorizeSessionCommand(
-          executable,
-          await prepareLaunchArgv(
-            {
-              harness: account.kind,
-              executable,
-              remoteControl: config.remoteControl ? plan.extraArgs : [],
-              transcript: relaunchConversation.kind === 'unresumable' ? [] : relaunchConversation.launchArguments,
-              readableFolders: parts.readableHandoffs(id),
-              model: plan.model,
-              ...(effort === undefined ? {} : { effort }),
-              ...(compactAt === undefined ? {} : { compactAt, fixedSettings }),
-              // The owner's extra flags are the source CLI's; the other harness would refuse them.
-              harnessFlags: converting ? [] : config.harnessFlags,
-            },
-            parts.overlayFiles,
-          ),
-          defaultSessionLifecycleSettings,
-        );
-      } catch (error) {
-        throw new SessionMoveError('unavailable', error instanceof Error ? error.message : String(error));
-      }
-    })();
+    // The session document's `command` is left as it is: a relaunch is built at launch time by the one launch path
+    // (`FerretsService.launchAttempt` -> the harness), never replayed from here, so a move builds no argv of its own.
     // The window the session runs in, read the way the plan reads the target's: the harness's own report, the
     // selector in its configured model, then what its account's catalog declares for it.
     const window = currentContextWindow(
@@ -804,7 +760,7 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
           'Re-run with --allow-context-downgrade to accept that.',
         { downgrade: { model: plan.model, targetWindow: plan.contextWindow, currentWindow: window } },
       );
-    const report = await inspect(id, { config, state, tmuxSession });
+    const report = await inspect(id, { config, state, tmuxSession, command });
     const decision = parts.preflight.gate(report, { force: request.forceInflight });
     if (!decision.proceed)
       throw new SessionMoveError('refused', `${decision.reason}\n${parts.preflight.summarize(report)}`, {
@@ -1185,8 +1141,6 @@ export const sessionMoveModule: SessionMoveModule = {
       sessionDirectory: needs.sessionDirectory,
       resolveDirectory: async (id, cwd) => await resolveInWorkFolder(roots, id, cwd),
       readableHandoffs: needs.readableHandoffs,
-      fixedSettings: needs.fixedSettings,
-      overlayFiles: needs.overlayFiles,
       paneIdentity: needs.paneIdentity,
       persistedReasoningEffort: needs.persistedReasoningEffort,
       contextWindowForSession: needs.contextWindowForSession,

@@ -208,6 +208,37 @@ describe('ClaudeHarness', () => {
     expect(await listing(f2)).toEqual(['conversation.json', 'projects']);
   });
 
+  describe.each(['start', 'resume'] as const)('a login’s pinned literal environment (#1587) on %s', method => {
+    const PINS = { ANTHROPIC_BASE_URL: 'https://fixture.invalid', ANTHROPIC_AUTH_TOKEN: 'FIXTURE-CREDENTIAL' };
+
+    test('is written into the private --settings file the argv names, and into no argv', async () => {
+      const { harness } = build();
+      const started: { command?: readonly string[] } = {};
+      const input = spec({ parts: [{ kind: 'pin', env: PINS }] });
+
+      const result =
+        method === 'start'
+          ? await harness.start(input, runner(started), {} as never)
+          : await harness.resume(input, runner(started), {} as never, 'conv-resume');
+
+      expect(result.ok).toBe(true);
+      const file = join(HOME, 'launch-settings.json');
+      expect(JSON.parse(await readFile(file, 'utf8')).env).toEqual(PINS);
+      expect((await lstat(file)).mode & 0o777).toBe(0o600);
+      expect(started.command).toContain(file);
+      expect(JSON.stringify(started.command)).not.toContain('FIXTURE-CREDENTIAL');
+    });
+
+    test('is absent when the launch pins nothing', async () => {
+      const { harness } = build();
+      const started: { command?: readonly string[] } = {};
+
+      await harness.start(spec({ parts: [] }), runner(started), {} as never);
+
+      expect(JSON.parse(await readFile(join(HOME, 'launch-settings.json'), 'utf8')).env).toBeUndefined();
+    });
+  });
+
   test('S42 a fresh ferret with only the agent-homes parent gets a private home made by the kernel and launches', async () => {
     const { harness } = build();
     const fresh = join(AGENT_HOMES(), 'fresh');

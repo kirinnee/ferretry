@@ -340,10 +340,9 @@ A Claude runtime on an environment login pins that login's **non-secret** variab
 the catalog's `ANTHROPIC_DEFAULT_*_MODEL`, a literal `ANTHROPIC_AUTH_TOKEN`) under `env` in its
 `--settings` file (`<home>/.fy/fixed.json`). Claude Code lets that file beat a repository's
 `.claude/settings.local.json`, which the process environment does not, so a repo that blanks a provider
-variable can no longer start the runtime signed out **when a person runs the runtime's bin wrapper**. A
-ferret the daemon starts does not launch through that wrapper: it goes through the claude-code harness, which
-reads neither the login's environment nor this file today, so this pin does not cover it. That is a separate
-fix (tracked in `ports-pending.json`).
+variable can no longer start the runtime signed out when a person runs the runtime's bin wrapper. A
+ferret the daemon starts goes through the claude-code harness instead, which gets the same pins as a `pin` launch part and writes
+them into its own `--settings` file (below).
 
 Only a value that is a plain literal is pinned, and it is pinned at the value the runtime's process environment ends
 with: a variable both the login and the profile set is pinned at the **profile's** value, the one the wrapper
@@ -365,50 +364,50 @@ reaches it, never quietly trimming it. A **literal** credential written in a log
 gateway's `ANTHROPIC_AUTH_TOKEN`) is pinned: it is already plain text in the configuration, and so it would show
 in `ps` if a launch ever copied the file inline. A real key belongs in the secret store.
 
-**A literal credential never reaches an argv either (#1587).** Fast mode or a compaction trigger _replaces_ `fixed.json`
-with a merged overlay, and a pinned literal credential is in it. An overlay that carries an `env` is therefore **never
-inlined** into `--settings '<json>'` (which shows in `ps`, the pane's command line and the session document's recorded
-`command`): the launch writes it to a per-launch file and the argv names only its path
-(`<state>/launch-settings/launch-<digest>[-c<n>][-f<0|1>].json`). `prepareLaunchArgv` is the one door every caller of
-`buildLaunchArgv` goes through, and `buildLaunchArgv` refuses (`LaunchOverlayFileRequiredError`) rather than inline such an
-overlay, so a caller that forgets the file fails loudly. An overlay with no `env` is still inline.
+**A literal credential never reaches an argv, a ferret's pins are in its own private settings file, and there is ONE launch path (#1587).**
+A ferret the daemon starts, restarts, revives, moves or adopts is launched by exactly one thing,
+`FerretsService.launchAttempt` → the harness → the runner. For a Claude ferret:
 
-- The file is written by `FileLaunchOverlayFiles` (`core/ferrets/daemon/adapters/session/launch/file-launch-overlay.ts`): a fresh
-  `O_CREAT|O_EXCL|O_NOFOLLOW` 0600 temporary, synced, then `rename`d over the final name, which replaces a planted symlink
-  instead of following it. Nothing found at the path is read, reused or chmod-ed. Every directory from the state home down to
-  the launch directory is `lstat`ed: a symlink, a directory owned by another user, or one writable by group or everyone refuses
-  the launch (it is never repaired by path).
-- It is content-addressed — the name carries a digest of the login's fixed settings, the compaction trigger and fast mode — so
-  a start, a revive, a Restart and a move all rebuild the same path, and the stale-settings comparison reads the trigger and
-  login back out of the name (fast mode, a run fact, is left out, as it was inline).
-- It is swept only after 30 days unused (a leftover temporary after one day), never the file just placed and **never one a live
-  session's recorded command names** (`BoundLiveLaunchCommands`); when the live sessions cannot be listed, nothing is swept.
-- **GAP — not composed yet.** The Ferrets plugin builds no argv with a compaction trigger or fast mode in 5.0 (`moves-deps` leaves
-  `fixedSettings` unbound), so `FileLaunchOverlayFiles` and `BoundLiveLaunchCommands` are built and tested but nothing hands
-  `overlayFiles` to `SessionMoveParts`, `SessionLaunchPorts` or `adoptedLaunchArgv` yet; until it does, a move that needs such an
-  overlay refuses instead of inlining it.
+- **The pins.** Runtimes takes `launch.parts` and, for a Claude start on a published runtime, contributes a `pin` part: the literal
+  `env` of that runtime's `fixed.json` (`plugins/runtimes/daemon/lib/launch-gate.ts`, `launchPinParts`), filtered once more through the
+  same rule that wrote the file (a value that names a secret or another variable is never a pin). The Claude harness merges the pins
+  into the `env` of the `launch-settings.json` it writes in the ferret's own home, which `--settings` names, so a folder's own `env`
+  cannot replace them.
+- **The credential is never in an argv.** The command is `env CLAUDE_CONFIG_DIR=<home> … claude --settings <home>/launch-settings.json …`:
+  it names a path, never a value, so `ps`, the pane's command line and the session document's recorded `command` hold none. The file
+  is written through the kernel's `agent-homes` root: `0600`, inside the ferret's `0700` home, and a link or a file the root refuses fails the launch
+  (the same checks as every other file of the home). It is rewritten by every launch, so a start, a restart, a revive, a move and an adoption all give a ferret
+  the pins of the runtime it is on NOW; it lives and goes with the ferret's home, which is why there is no sweep of launch files and no
+  live-session guard for one.
+- **No inline overlay anywhere.** v4's fast-mode and compaction `--settings '<json>'` overlay, its per-launch file adapter, its argv
+  builder and its launch service were deleted with this change: nothing in 5.0 builds a second argv, and the move module keeps the
+  session document's `command` as it is (its route is still a 503 skeleton on this base, see `moves-deps.ts`).
+- A pinned **literal** credential written in a login's YAML (an internal gateway's `ANTHROPIC_AUTH_TOKEN`) is plain text in the
+  configuration already; a real key belongs in the secret store.
 
 **A variable left to the process environment cannot be pinned, so a folder that sets one refuses the start.** A
 `${secret:…}` variable or a bare `$OTHER` reference (`referencedEnv` in the manifest, names only) stays process environment,
-and a repository's own `env` outranks it. `assertFolderLeavesLoginAlone` (`plugins/runtimes/daemon/lib/folder-settings.ts`) refuses a
-Claude start whose folder sets one, naming the settings file and the key (never a value): remove it there, or keep that key out of
-the secret store. `FolderClaudeSettingsFiles` (`plugins/runtimes/daemon/adapters/folder-claude-settings-file.ts`) reads every
+and a repository's own `env` outranks it. Runtimes takes `start.decide`, which Ferrets asks before it writes anything for every start
+and every resume (a restart, a revive, a move's relaunch and an adoption among them), and refuses a Claude start on a published
+runtime whose folder sets one, naming the settings file and the key (never a value): remove it there, or keep that key out of
+the secret store (`assertFolderLeavesLoginAlone`, `plugins/runtimes/daemon/lib/folder-settings.ts`). `FolderClaudeSettingsFiles`
+(`plugins/runtimes/daemon/adapters/folder-claude-settings-file.ts`) reads every
 settings file Claude Code reads for the launch folder — its own `.claude/settings.json` and `settings.local.json`, and the local
 file at the git root (the **main checkout's** root, in a linked worktree; not when the root is the home directory) — and returns
 **names only**.
 
 - **It fails closed.** A layout that cannot be proved refuses the start with the reason: a missing launch folder, a `.git` that is a
   symlink, a `.git` file whose `gitdir`, back-link and `commondir` do not prove one another (a linked worktree is accepted only when
-  they do), or a directory it cannot search. The walk up from the real folder has no depth cap.
-- **GAP — not composed yet.** No `AccountLaunchEnvironment` is implemented in 5.0 (a Ferrets start does not resolve the login's
-  environment: `ports-pending.json`), so nothing calls the refusal on a start yet; a repository that sets such a variable still
-  starts the runtime signed out. The refusal and its adapter are built and tested, and the `apiKeyHelper` alternative (the wrapper
-  exports the value as a Ferretry-owned variable and `fixed.json` carries only command text) was designed and **not built**: it needs
-  a contract test against the installed Claude Code first.
+  they do), or a directory it cannot search. The walk up from the real folder has no depth cap. Published runtimes that cannot be
+  read refuse the start of a ferret that names one, and an answer that does not arrive in the kernel's decide bound is a no.
+- **GAP — the harness still does not resolve the login's process-environment variables.** A launched ferret gets the pins above, but
+  the variables a login leaves to the process environment (`${secret:…}`, `$OTHER`) are not yet resolved into its child environment
+  by Ferrets (`ports-pending.json`, the `cross: ferrets` line), and the `apiKeyHelper` alternative (the wrapper exports the value as a
+  Ferretry-owned variable and `fixed.json` carries only command text) was designed and **not built**: it needs a contract test
+  against the installed Claude Code first. The refusal above is what keeps a repository from blanking such a variable meanwhile.
 - **GAP — managed policy and intermediate parents are not checked.** Only the files Claude Code documents reading are. Ownership
   exceptions Claude applies to the root location are not modelled.
-- **GAP — an interactive runtime whose profile passes its own `--settings`** (Claude Code honours only one) is applied unpinned, with no
-  refusal and no notice (B190 chose that over failing the whole apply).
+- **An interactive runtime whose profile passes its own `--settings` is refused at apply** (Claude Code honours only one, so the login cannot be pinned against a folder's settings): the sentence names the runtime and the remedy, remove `--settings` from the profile (v4 #1587). An agent runtime launches through the harness and is not affected.
 
 `config/daemon.json` may carry a `secretEnvironment` block of reusable recipes:
 
@@ -451,415 +450,13 @@ strings, and one with a refusal of this rule. The cost: a file whose only fault 
 too. A def without the flag shows a failing file's text.
 
 - **Under a credential-named variable** (a credential word anywhere, a last word `KEY` or `KEYS`, or one glued word
-  such as `GATEWAYTOKEN`) a value must be exactly one allowed shape: a placeholder under 8 characters with no `# Secrets
-
-A daemon-scoped store for credentials, and a way for an agent to **use** one without ever holding
-it.
-
-Read the [threat model](#threat-model) before you trust it with anything. The useful property here
-is real, and it is narrower than people assume.
-
-## Where it is on screen
-
-Settings › this machine has three tabs, one per kind of credential; they share no data and no route:
-
-- **Secrets** — env vars for the programs ferrets run (this page), and "Copy to another machine…".
-- **Accounts** — who ferrets sign in as: username, password and 2FA keys, per site (the former "Saved logins").
-  See [input requests](input-requests.md#saved-logins).
-- **Secure copy** — values moved without a ferret seeing them, and "Pastes approved in advance"
-  ([secure copy](secure-copy.md)).
-
-The Claude, Codex and API-key logins with spend budgets are **AI logins** on screen (Warden, config files, Fleet);
-their files stay `config/logins/*.yaml`.
-
-## The shape
-
-```bash
-# Store a value. It comes in on stdin — never as an argument.
-printf %s "$ANTHROPIC_API_KEY" | fy secret set ANTHROPIC_API_KEY
-
-# See what exists. Names and instants; there is no value to show.
-fy secret ls
-
-# Use one. The value goes into the CHILD ferretry spawns, not into you.
-fy secret use --with ANTHROPIC_API_KEY -- \
-  curl -sS -H "x-api-key: $ANTHROPIC_API_KEY" https://api.anthropic.com/v1/models
-
-fy secret rm ANTHROPIC_API_KEY
-```
-
-The same store is managed from the PWA under **Settings → this daemon → Secrets**: create, replace,
-delete, and see _that_ a secret exists with its name and when it last changed.
-
-## Why `use` instead of injecting into the agent
-
-The obvious design puts the secret in the agent's own environment. That is honest but weak: a
-process that has a value in its environment **can read it**, so "the agent cannot see it" would
-simply be false, and only redaction would keep the transcript clean.
-
-`fy secret use` moves the value out of the agent entirely. The agent writes the **name**; the daemon
-resolves it and spawns a child with the value in _that child's_ environment; only the child's output
-comes back, scrubbed. There is nothing in the agent's own process to echo into its conversation.
-
-**There is no route, command or API that returns a secret value.** Not to an agent, not to `fy`, not
-to the browser, not to a debug endpoint. This is enforced by the types rather than by a check: the
-route table is handed a `SecretDirectory`, which has no method that opens ciphertext. Only six
-things hold a `SecretVault` — the redactor, the use executor, the fleet launch environment that
-resolves a runtime's credential and profile into the pane being started, the [MCP sign-in](mcp-oauth.md)
-service, which opens an access token only to revoke it at sign-out (and alone holds a second vault over
-its own sealed document of refresh tokens and client secrets), the
-[outbound provider authorizer](#speed-up-keys-the-fifth-holder), and the
-[secret export](#copying-secrets-to-another-machine), which answers only ciphertext that another machine
-alone can open — and none of them returns what it read.
-A getter added "just for testing" would delete the whole property.
-
-[Accounts](#accounts-and-sign-ins-the-store) (the former saved logins) — the input bridge's password manager — follow the
-same rule over a **separate** sealed document (`login-secrets.json`, under the same key). The route table is
-handed an `AccountDirectory` (and the saved-login `LoginDirectory` built over it), which seals and never opens;
-only two things hold the `AccountVault` that opens it: the redactor (saved values are masked as
-`[redacted:login:<ID>:password]`) and the input-request service, which types one into the target the owner tapped
-"Use" for and answers only what happened. Two narrow parts of it are handed out, and neither answers a value: the
-directory holds its **seal port** (a merge moves a sealed value to the kept account inside the vault, and asks
-whether two values are the same), and the look-alike route holds its **look-alike answer** (handles only). Both are fresh closures (`narrowAccountVault`), never the vault itself, so nothing that holds one can reach a value. `use`
-cannot spend an account and `${secret:…}` cannot name one. The agent tool `account_hint` (`login_hint` still works) is
-handed the account directory (and `GET /v1/accounts/hint` and `GET /v1/secrets/logins/hint` the same store): it
-answers sign-in ids, labels, methods, places and usernames, never a value nor which fields exist.
-
-## Redaction
-
-Because the daemon knows the values, it removes them from text before that text is stored or
-rendered:
-
-- the output of a `use` child, on both stdout and stderr;
-- an operator read of a session's **screen**, its **transcript**, and its **journal**;
-- what a **browser page** shows through the browser tools — a read, a snapshot, the page's address —
-  to an agent and to a person ([agent-tools.md](agent-tools.md#what-is-enforced-and-where)); a screenshot
-  is pixels and is not;
-- a ferret's **Processes** tab: every command line and every byte of a process's output
-  ([processes.md](processes.md#secrets) says what that cannot catch).
-
-So `fy secret use --with TOKEN -- sh -c 'echo $TOKEN'` returns `[redacted:TOKEN]`. The child really
-did hold the value; what came back is a mask.
-
-A vault the daemon cannot open **refuses** those reads rather than serving unscrubbed text. Text it
-cannot scrub is text it must not serve.
-
-Each read opens the vault **once**: a whole page of a journal or a transcript is scrubbed under one
-open (`SecretRedactor.batch`), and the opened values are let go when that read returns. Nothing
-caches them between reads, so plaintext lives no longer than the read that needed it.
-
-### A file or diff that holds a value: refused to an agent, masked for a person
-
-`GET /v1/ferrets/:id/fs/file` and `fs/diff` mask every vault value found **whole** in the text (or, for a file that
-is not text, in its bytes), one `*` per character, as Terminals does. In a diff the section heading git prints after a
-hunk header's closing `@@` is read as the line before the hunk's first line, and the hunks of a file are looked at
-together when the next one has a heading, so a value split between the previous hunk's trailing context, that heading
-and the leading context is found whole and masked in every place. The heading stays in the header, masked where covered. An **agent** is refused instead: a masked copy
-looks like ordinary content and could be written back over the real file, so the answer is a 403 with the code
-`holds_secret` and one sentence that names the path only, whatever the count of values. A **person** keeps the masked
-text, and the file answer says `redacted: true`; the app says "private values masked — this is not the file" and offers
-no download or open of the masked bytes. Matching is whole-value only, never a prefix or a piece — with one fail-safe
-exception: because the heading's place in the file is not known, the joined look of a hunk can also match a value whose
-lines are all shown but are not next to each other in the file; that text is then masked, and an agent is refused
-(`holds_secret`) a diff that holds no value. It over-masks, and never under-masks.
-
-- **The whole-value oracle — GAP.** The refusal and the mask both tell a caller "this file contains a vault value", so an
-  agent that writes a guess into its own worktree can confirm a WHOLE-value guess. That is negligible for a
-  high-entropy secret and real for a short one (a PIN). Not closed: closing it would mean not saying so.
-- **A diff for an agent also asks the two sides.** `fs/diff` runs the file check over the HEAD bytes and the working
-  bytes the service has already read (no further read) and refuses with `holds_secret` if either holds a vault value,
-  whatever part of it the diff shows. A person's diff is masked, never refused.
-- Not found, so not masked: a value inside compressed bytes, in a UTF-16 file, or a non-ASCII value in bytes that are
-  not valid UTF-8 (valid UTF-8 is masked as text even when it holds a NUL), and, in a person's diff, a value the diff
-  shows only in part (a file, or one side of a diff, that holds only part of a value is shown as it is, even when the
-  other side holds it whole — apart from an identical line, which takes the other side's mask). A section heading that
-  git does not pick (a line that starts with a digit or a symbol is skipped) is not part of the diff, so a value
-  split across it is the same partial.
-  Git also cuts a section heading to 80 bytes and drops its trailing spaces and tabs, so a value whose line in the
-  heading (its first, middle or last) is longer than that, or ends in whitespace, is shown only in part (the same
-  partial; an agent is still refused by the two-sides check above).
-  A value is found in a CRLF file whether it was stored with `\r` (a CRLF key file, `token\r`) or without (LF), and a CRLF-stored value in an LF file: all
-  three looks are made and the coverage is their union; the `\r` and the line breaks are kept in the output, so a masked
-  multi-line value keeps one mask per line. Positions are
-  UTF-16 units, as Vault's own starring counts them.
-
-### Text a component shows: recognised by shape
-
-A component's text on the fleet view (a settings file, an instructions file, a server's command) was
-never put in the store, so the daemon does not know its values. `redactText` finds them by **shape** and
-replaces each with `‹hidden›`:
-
-- a value beside a name that announces a secret (`API_KEY=…`, `password: …`, `"token": "…"`), on the
-  same line or the next, or the block under `password: |`;
-- a **well-known token** (`ghp_…`, `sk-…`, `AKIA…`, `xox…-`, `github_pat_…`) and a **private-key
-  block**, wherever they stand. A token is cut only when no letter or digit stands right before it and
-  its body holds a digit, so `task-plan-ended` and `vosk-model-small-en-us-0` are left alone (they hold
-  `sk-plan-ended` and `sk-model-small-en-us-0`);
-- the default of `${NAME-default}` (also `:-` `=` `:=` `+` `:+` `?` `:?`), read as NAME's value.
-
-A **pointer** is only `$NAME`, `${NAME}` or `${secret:NAME}`; it holds no secret and is left as it is.
-
-Every rule is **linear**: a name is found where a run of name characters starts, a value is looked at
-through a capped look-ahead and consumed once it is hidden, and no pattern backtracks, so a long run of
-one character costs one pass, not one per character. The rule is held to what it replaced by a
-differential test (`redact-differential.test.ts`) that generates text and fails if a value the old rule
-hid survives the new one; CI runs 20 000 cases per shape, and a review can run more:
-`REDACT_FUZZ_SEED=7 REDACT_FUZZ_CASES=100000 bun test redact-differential --timeout 1800000`.
-
-Known gaps, the same as before this rule: a name `looksSecret` does not list (`pass: x`, so a value under
-`db:⏎  pass: x` stays), the items of a list under a secret key (`secrets:⏎  - x`), and a secret in prose with
-no name and no well-known shape. A token glued to the end of a longer word (`mask-sk-…`) is a word, not a
-token, by the rule above. Shape is a floor, not a guarantee: the store is the only place a secret is safe.
-
-## Threat model
-
-### What this protects against
-
-- **Secrets in transcripts and history.** An agent writes `${secret:NAME}` or `--with NAME`; the
-  value is never in its conversation. If a tool prints one anyway, redaction masks it.
-- **A value read off a screen.** The PWA never receives one. Write-only in, masked forever after.
-- **A secret in a configuration file, or copied along with one.** `config/daemon.json`, a fleet
-  document and any copied configuration hold a **reference**, never a value.
-- **An agent writing the store.** Every ferret can reach the host admin token, but the daemon tells a ferret
-  (`peer:`, a warden) from the owner's own `fy` and from a paired device, and **refuses a ferret the
-  routes that change the store**, before it reads a body: `POST /v1/secrets` (set or replace),
-  `DELETE /v1/secrets/:name`, the saved-login writes (`PUT`, rename, `DELETE` under
-  `/v1/secrets/logins`), opening or filing a copy-in (`POST /v1/secrets/imports[/:importId]`) and
-  sealing values out (`POST /v1/secrets/exports/:importId`). So a confused or prompt-injected agent cannot
-  swap `GITHUB_TOKEN` for a value it controls, or delete it. It can still list names and **use** a secret
-  by name. A ferret gets a value into the store the way it gets any secret from the owner: an input
-  request (the owner sees a card and types it) or a sealed copy pasted into the store ([secure
-  copy](secure-copy.md)); both show the owner a card. The owner's `fy secret set` in a normal shell and
-  the app's write-only form keep working. Every one of these is a `caller: 'person'` route, refused with
-  `403 owner_only` at the authorization boundary to a ferret on its own session credential, to the admin
-  token naming a ferret's session, and to a warden (`callerIsAgent`, [agent-tools.md](agent-tools.md#who-a-ferret-may-be-every-route-says)).
-  It holds against an honest or confused client, and a prompt-injected one using its tools and `fy`, not
-  one that reads the admin token off the disk and leaves its session out.
-- **A credential in shell history or in `/proc`.** `fy secret set` takes no value argument, so it
-  cannot be typed onto a command line.
-- **One file travelling without the other.** The vault at `<FY_HOME>/state/secrets.json` is
-  AES-256-GCM ciphertext; the key is in `<FY_HOME>/state/secrets.key`. Both are `0600`. The most
-  common way a secret escapes a machine is one file moving somewhere it should not — a backup, a
-  tarball for a bug report, a synced directory, a paste into a chat — and every one of those fails
-  safe now.
-
-### What this does NOT protect against
-
-- **An agent that is actively trying to exfiltrate a secret it is allowed to use.** Redaction finds
-  the literal value. `echo $KEY | base64`, reversing it, printing it one character per line — none
-  of those share a substring with the secret, and nothing can recognise an encoding it was not told
-  about. **This is the same boundary `sudo` has.** It stops accidents and casual reading; it is not
-  a sandbox.
-- **Anyone who can read both files.** The key sits beside the ciphertext, so any process running as
-  your user — or a backup that took the whole directory — has everything. This is encryption at rest
-  against _accidents_, not against local access. A passphrase-derived key or an OS keychain would be
-  a stronger claim; this is not that.
-- **Anyone who already has your user account on that machine.**
-- **A ferret that drops its identity, or reads the vault directly.** The refusal above is an
-  **honest-client guard**, like the other owner-only rules (updating the daemon, confirming a configuration
-  change). A ferret's own session credential is always refused it — the daemon reads who is asking from the
-  credential, never from a header, and a ferret's `fy` and MCP server present that credential rather than
-  the admin token ([below](#what-a-ferrets-fy-presents)). But the admin token is readable to the same user, so
-  an agent can read it, or run `fy --as-owner`, and look like the owner's shell. The real limit is the one
-  this whole section states: **agents run as the same user, with the admin token in reach.** Such an agent
-  can also read `secrets.json` and `secrets.key` straight off the disk. The guard stops a confused or
-  prompt-injected agent from using the obvious route; it does not stop one that is working around it.
-  Only keeping ferrets out of the state home would.
-- **Two writers that are not the store's own routes.** Importing your harness setup
-  (`fy`'s setup import and clone, through `/v1/fleet/proposals/:id/apply`) adds secrets read from this
-  machine's harness files, and only under names the store does not hold, so it cannot replace one. An
-  MCP sign-in stores the token its authorization server answered, after a browser consent. Neither takes a
-  value the agent chose; both are listed so they are decisions, not oversights.
-- **A paired device, once it unlocks.** The secret routes sit on the seventh capability, `secrets`:
-  `use` lists them and runs a command with one in its environment through `POST /v1/secrets/use`,
-  which is code execution on this machine, and `configure` sets and deletes them. A device proves
-  itself only inside a session its non-extractable device key signed, and does nothing until it unlocks
-  the machine with a passkey ([design/zero-trust.md](design/zero-trust.md) A, B1). A new device holds
-  `secrets` behind that unlock unless its code was minted `fy pair --limited`, and **inside an unlock it
-  may use every secret with no further prompt** unless the owner turned on a per-act step-up. Treat an
-  unlocked device as holding the vault's `use`.
-
-Say the narrow version wherever this is described. Someone who believes the wide one will hand an
-untrusted agent a production credential.
-
-### What the state-home fence refuses
-
-Two routes let a ferret read a file **with its own session credential**, no token stolen, and both used to reach
-into the state home. They are closed by one rule, the state-home fence (`StateHomeFence` in `@ferretry/fleet`):
-nothing the daemon reads, copies or starts for a ferret has a real path inside `FY_HOME` or the daemon's state and
-config directories, wherever those are configured. Every check is made on the real path — and, where a file is
-read, on the descriptor that was opened — so a symlink, a `..` or a folder that holds the home does not get past.
-Each surface has exactly one opening, the one place it has a reason to read inside the home.
-
-| Surface                                                                                        | What a ferret could do                                                                                                                                                                                         | What is refused now                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | The opening                                          |
-| ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Fleet component sources (`config.write`, the `settings` control)                               | `file: ~/.ferretry/api-token` copied the admin token into a runtime's `CLAUDE.md` — the model's context; `directory: ~/.ferretry` copied `secrets.key`                                                         | an **error** in the configuration check (never in effect; an older accepted version is retired), and refused again by the provisioner on every link hop and the real path at apply time                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | the fleet asset tree, `<fleet>/assets`, by real path |
-| Fleet component destinations (every apply, and the shared-history migration)                   | swap `<runtime>/skills` for a link to `~/.ferretry/state` after its check: the sweep moved `secrets.key` aside as a "stale skill" and deleted it at commit                                                     | every folder below a runtime is reached through a checked descriptor, never by path (Linux `/proc`; macOS `fchdir` descriptor calls, proved on every step); a link below the home refuses the apply, and a backup is deleted only from the folder it was moved aside in. Where descriptor reach cannot be loaded, nothing outside the daemon's own folders is moved aside or removed — those operations, and the shared-history migration as a whole, are skipped and named in the result ([agent-tools.md](agent-tools.md#component-destinations))                                                                                                                                                                                                                                                                                                             | none                                                 |
-| Conversation leases (`fleet/shared/<harness>/.leases`, every launch that names a conversation) | swap `.leases` (or the pool) for a link to `~/.ferretry`, then launch with `--resume api-token`: the lease JSON was renamed over the admin token, a later release deleted it, and `~/.ferretry/.lock` was made | the daemon's claim and the wrapper's `fy history claim` resolve one fence (`stateHomeFence`, owned by the fleet package: the homes and their pinned key files); the conversation id is parsed as one plain name at every boundary (letters, digits, `-`, `_`; a leading letter or digit; at most 128); `.leases` is opened through the guard — walked from the home without following a link, refused where it is a home or a key file by identity — and the lock, every lease read (a regular file only, never blocking, at most 64 KiB — a larger file is no lease; only `ENOENT` is none), write (a temporary made exclusively, renamed in the same held folder) and unlink reach their entry through that folder. Where descriptor reach or the lock's C call cannot be loaded, the lease is refused and the launch that named it says why; nothing else is | none                                                 |
-| Session files (`/v1/sessions/:id/fs/*`)                                                        | read any session's tree, and `~/.ferretry/*` through a session started in `~`                                                                                                                                  | another session (only its own and its sub-ferrets'), every path inside the home, and a hard-linked file, for an **agent**; a person is unchanged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | that session's media folder (`scope=media`)          |
-| Starting a session (`POST /v1/sessions`, `fy new --cwd`)                                       | start a child whose working folder is `~/.ferretry`                                                                                                                                                            | a `cwd` inside the home, named or through a link, for an agent                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | none                                                 |
-
-**What it does not change.** It is the daemon's fence, not the disk's: a ferret's own shell runs as the same user and
-can still open `~/.ferretry` directly, which is the limit stated [above](#what-this-does-not-protect-against). What the
-fence closes is the route where Ferretry itself does the reading — copying, linking, serving or starting — on a
-ferret's word. **Hard links** are refused as a component source (another name of the file could be the admin token)
-except inside the Nix store, which is root-owned and immutable and hard-links identical files by design. A home the
-daemon cannot resolve refuses rather than guesses. The rules for each surface are in
-[agent-tools.md](agent-tools.md#the-state-home); the agent file tools (`browser_upload` and friends) apply the
-same guard ([agent-tools.md](agent-tools.md#files)).
-
-### What a ferret's `fy` presents
-
-A ferret's `fy` and its MCP server (`fy mcp serve`) present the **ferret's own credential**, not the host
-admin token. In order:
-
-1. **`FY_TOKEN` is set** → that, as always: the owner's scripts, a daemon on another machine.
-2. **`FY_SESSION_TOKEN`** (or the older `FY_SESSION_BOARD_CAPABILITY`) **holds a `fys_` value** → `fy` asks
-   the daemon's public `GET /v1/health` once per daemon per process. If it lists `session.credential.1`,
-   every request carries `Authorization: Bearer fys_…` and `~/.ferretry/api-token` is **never opened**. This
-   holds with or without `FY_SESSION_ID`: a ferret that drops its session id is still itself.
-3. **Otherwise** → the admin token from `api-token`, plus `x-ferretry-session-id` inside a pane, as before.
-
-- **A refusal is the answer.** Against a daemon that offers the credential, `403 owner_only`, `404` and `5xx`
-  are reported as they are; `fy` never tries again with the admin token. A `401` earns one fresh health
-  read, and only if that daemon no longer lists the feature (it restarted onto a wildcard or LAN bind, or was
-  downgraded) is the request sent once more with the admin token, with a one-line note on stderr. Anything
-  else, the read failing included, reports the `401`.
-- **An older daemon**, or one reached on a bind where no session bearer resolves, does not list the feature, so
-  it gets the admin token as before and its ferrets keep `fy send`. A long-lived process left on the admin
-  token this way (`fy mcp serve`) reads the daemon's health again at most every 30 s, and moves to its own
-  credential as soon as the daemon offers it or another daemon instance (a new pid) answers at that address.
-- **A pane from before the `fys_` prefix** holds an unprefixed value. It is never sent as a bearer — only on
-  the agent tools' own `x-fy-session-capability` header, as before — and that pane's `fy` uses the admin token
-  until the pane restarts.
-- **Never off this machine.** Neither credential goes to a non-loopback `FY_URL` (that needs `FY_TOKEN`), and
-  each goes only to a listener this user owns.
-- **`fy --as-owner …`** skips step 2. It is for a person who attached to a ferret's pane and wants their own
-  rights there. **It is not a permission.** Any process that can read `api-token` can pass it, so a ferret can
-  too, and a prompt injection that says "run `fy --as-owner …`" gets past these refusals exactly as one that
-  says "read `~/.ferretry/api-token`" does — until the sandbox that denies ferrets that file, when the flag
-  fails because the file cannot be read. The daemon cannot tell its calls from the owner's shell; the only
-  trace is the command line and one stderr line, which lands in the ferret's own tool output:
-  `fy: --as-owner: acting with the host admin token, not this ferret’s credential`. Inside a pane, the board, agenda,
-  notify, session, work-search and `--session` terminal and browser commands still send `x-ferretry-session-id`
-  under it, so those acts stay the ferret's (`peer:<id>`) and are still refused on person routes; only
-  commands that send no session header (config, secrets, the daemon group, …) act as the owner.
-- **The owner-only verbs refuse in a pane whatever `--as-owner` says.** `fy rules`, `fy plan` (and its alias
-  `fy copy plan`), `fy copy` and `fy input` refuse inside a ferret's pane before they ask the daemon anything,
-  read or change alike, on the environment alone (`FY_SESSION_ID`, or an agent credential in the pane): "this is
-  the owner's command; a ferret's pane can't run it". `--as-owner` changes which credential is presented, not
-  where the command runs, so it does not lift this; run them from your own shell. The daemon refuses a ferret on
-  these routes again (`403 owner_only`). `fy account` asks the daemon instead, and a refusal there says "this is
-  the owner's command, and it ran with a ferret's credential", for a read like `fy account ls` as for a change.
-- **`FY_TOKEN` in a pane wins.** Step 1 comes first, so a shell rc that exports `FY_TOKEN` puts every ferret
-  whose shell reads it on the admin token, silently. `fy doctor` inside a pane warns about it, and about a
-  pane whose credential is from before the prefix.
-- **Codex shells.** Codex's `shell_environment_policy` default excludes, when a config turns them on
-  (`ignore_default_excludes = false`), strip every variable whose name contains `TOKEN`, `KEY` or `SECRET`
-  from the shell its commands run in — `FY_SESSION_TOKEN` included. Ferretry does not override that choice.
-  `FY_SESSION_BOARD_CAPABILITY`, which `fy` reads too, survives it, so a Codex ferret's `fy` still finds its
-  credential (measured on Codex 0.156.1, whose default strips neither); that name stays while Codex runs ferrets.
-- **The yaml log switches are cleared, and the daemon's workers are told so.** The `yaml` library prints every token it
-  parses when `LOG_TOKENS` or `LOG_STREAM` is set, and a config text can hold a credential, so `fy`, `fyd` and the
-  converter delete both first. That deletion does not reach a Bun macro (it runs when a module is transpiled, so in
-  source runs), a `new Worker(url)` given no options object, or a default-env `Bun.spawn` child: those get the original
-  native environment. So the daemon always starts its workers with an options object (which carries the cleared
-  environment), and the macros that parse the shipped catalogs clear the switches themselves.
-- **Restart ferrets to wall them.** A running ferret's `fy` presents its credential at once, because its pane
-  already carries one. Its MCP server is the `fy` it started with and keeps the admin token until the pane
-  restarts (`fy restart --all`), and a pane launched before the prefix needs the same restart.
-
-What this makes a wall: every `caller: 'person'` refusal now holds against a ferret that uses its tools and
-`fy` as shipped, including one prompt-injected through page text that drives them. What it does not: a
-ferret that reads `api-token`, `secrets.key` or the sealed files through its own shell is still the owner to
-this daemon. That needs keeping ferrets out of the state home, which a later change adds where the agent's
-sandbox can enforce it.
-
-A `git` or `gh` child the daemon starts gets a short allow-list of non-secret names (`XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS`, `GH_CONFIG_DIR`, `SSH_AUTH_SOCK` and the proxy variables) and never `GH_TOKEN` or `GITHUB_TOKEN`. The proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, in both cases) pass through unchanged, and a proxy address may carry credentials (`user:pass@host`), so a credential written there reaches those children.
-
-## References in configuration
-
-One grammar, everywhere: `${secret:NAME}`.
-
-There is one narrow exception, for a ferret's launch environment only. A variable whose **whole** value is
-`${secret?:NAME}` is set to the secret when the store holds it, and **left unset** when it does not.
-`${secret:NAME}` refuses the launch instead. MCP uses it for its sign-in variables, so a sign-out that
-lands while a ferret is starting does not stop that ferret. It names nothing a plain reference could not.
-Anywhere else, or inside a longer value, it is plain text.
-
-### A login's variables and a repository's own Claude settings
-
-A Claude runtime on an environment login pins that login's **non-secret** variables (`ANTHROPIC_BASE_URL`,
-the catalog's `ANTHROPIC_DEFAULT_*_MODEL`, a literal `ANTHROPIC_AUTH_TOKEN`) under `env` in its
-`--settings` file (`<home>/.fy/fixed.json`). Claude Code lets that file beat a repository's
-`.claude/settings.local.json`, which the process environment does not, so a repo that blanks a provider
-variable can no longer start the runtime signed out **when a person runs the runtime's bin wrapper**. A
-ferret the daemon starts does not launch through that wrapper: it goes through the claude-code harness, which
-reads neither the login's environment nor this file today, so this pin does not cover it. That is a separate
-fix (tracked in `ports-pending.json`).
-
-Only a value that is a plain literal is pinned, and only when the runtime's process environment ends with the
-same value: a key the profile's settings (including the `env` block of a settings file or document, which lands in
-the runtime's `settings.json`, and which `--settings` would otherwise beat), an MCP server's forwarded
-variable or Ferretry itself sets later keeps its precedence. An `env` a person wrote into that home's
-`settings.json` by hand is not seen, and a pin of the same key still beats it. `FY_*` names are never pinned. An indirect `$NAME` / `${NAME}` is not pinned either
-(`--settings` env is not shell-expanded; the wrapper resolves it at exec).
-
-**A value that names `${secret:…}` (or the optional `${secret?:…}`) never goes into that file, any settings file, or a command line.** It stays
-process environment, which the wrapper resolves from the store when it execs. Why a command line counts: if a launch copies `fixed.json` **inline** into
-`--settings '<json>'` (v4's fast mode and compaction point did; 5.0 has no such reader, and the rule is kept
-as a precaution), that argv shows in `ps` and in the session's saved command. The rule is enforced
-twice in code: only values with no reference are pinned, and an overlay whose text contains one is refused when
-the fleet is planned, never quietly trimmed. A **literal** credential written in a login's YAML (an internal
-gateway's `ANTHROPIC_AUTH_TOKEN`) is pinned: it is already plain text in the configuration, and so it would show
-in `ps` if a launch ever copied the file inline. A real key belongs in the secret store.
-
-What pinning cannot cover is a secret-backed variable that a repository itself sets under `env`, and an
-interactive Claude runtime whose profile already passes its own `--settings` (Claude Code honours only one,
-so that runtime is applied unpinned, with no refusal and no notice).
-
-- **GAP (B190, `b190-api-key-helper`):** nothing refuses or prevents a repository from doing it, so such a
-  runtime starts signed out. Both a refuse-at-start check and an `apiKeyHelper` fallback in `fixed.json` that
-  prints a Ferretry-owned process variable go after the merge; the helper waits for a contract test against the
-  installed Claude Code.
-
-`config/daemon.json` may carry a `secretEnvironment` block of reusable recipes:
-
-```json
-{
-  "secretEnvironment": {
-    "AUTH_HEADER": "Bearer ${secret:ANTHROPIC_API_KEY}"
-  }
-}
-```
-
-A recipe is injected into a use child **only when every secret it names is one the caller explicitly
-asked for**. Without that rule an operator's convenience would silently widen a request — a child
-that asked for a staging key would be handed a header built from the production one.
-
-**A missing referenced secret refuses at launch.** Never an empty string: a blank credential produces
-a 401 twenty minutes later with nothing to point at. The management surface lists every configured
-reference and whether the store holds it, so a broken one is visible before anything runs.
-
-A **credential with `store: environment`** (and a **settings component**) is the other place a reference
-comes from: its `env` may bind a variable to `${secret:NAME}`, which is how a runtime authenticates with
-no login at all. Same grammar, same store, same refusal — see [the account model](./account-model.md).
-
-**The refusal is judged against a published fleet, never the middle of an apply.** An apply moves the
-manifest aside before linking its replacement in, and a launch that read the gap would find no account,
-so no binding, so nothing to refuse. Every apply the daemon makes is exclusive, and every read of the
-published fleet — a start's account, the launch's bindings, the runtime names — waits for one in flight
-(`packages/daemon/src/lib/fleet/publication.ts`). A second apply landing between the judgment and the
-pane's exec is still fail-closed: the new wrapper carries its own guard for every secret-backed variable.
-
-; one
-or more `${secret:NAME}`; a scheme word (letters and `-`, at most 16, no digit: `Bearer`, `Api-Token`, `ApiKey`) and references; a header name, `:` or `=` and either of those; `$NAME` or
-`${NAME}`; a number or flag word; one `http`, `https`, `ws`, `wss`, `socks5` or `socks5h` address with no user key,
-password, fragment or bare query, only short query values, and no key-like run; or an absolute or `~/` path with no
-key-like run. A **key-like run** is 24 or more letters, digits and `_` with a digit in them and entropy of at least
-3.5 bits per character, read on the text split at every character other than a letter, a digit and `_`; in the
-path shape alone `+` and `=` also stay in a run, so a standard base64 key is one run.
-
+  such as `GATEWAYTOKEN`) a value must be exactly one allowed shape: a placeholder under 8 characters with no `$`; one
+  or more `${secret:NAME}`; a scheme word (letters and `-`, at most 16, no digit: `Bearer`, `Api-Token`, `ApiKey`) and references; a header name, `:` or `=` and either of those; `$NAME` or
+  `${NAME}`; a number or flag word; one `http`, `https`, `ws`, `wss`, `socks5` or `socks5h` address with no user key,
+  password, fragment or bare query, only short query values, and no key-like run; or an absolute or `~/` path with no
+  key-like run. A **key-like run** is 24 or more letters, digits and `_` with a digit in them and entropy of at least
+  3.5 bits per character, read on the text split at every character other than a letter, a digit and `_`; in the
+  path shape alone `+` and `=` also stay in a run, so a standard base64 key is one run.
 - **Under any name** a token shape (a provider prefix, a JWT, a PEM private-key header), a credential-named header or
   JSON member (`x-api-key: …`, `"api_key":"…"`) with a literal value, and an address carrying a password, a user key or
   a credential-named query value are refused. In a variable that IS a header list (`…HEADERS`), a header with no

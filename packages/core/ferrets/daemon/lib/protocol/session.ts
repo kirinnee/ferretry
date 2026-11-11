@@ -416,7 +416,6 @@ export type ArchivedSessions = z.infer<typeof ArchivedSessionsSchema>;
  *              fixed layer
  */
 export const SessionRelaunchDriftSchema = z.enum(['arguments', 'settings']);
-export type SessionRelaunchDrift = z.infer<typeof SessionRelaunchDriftSchema>;
 
 /** Whether a running session is on the settings a relaunch would give it, and if not, why. */
 export const SessionRelaunchSettingsSchema = z.object({

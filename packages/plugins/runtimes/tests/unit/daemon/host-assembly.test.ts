@@ -8,7 +8,7 @@ import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import type { KernelPorts } from '@ferretry/kernel/contract';
 import { testHost, testProcessTable } from '@ferretry/kernel/testing';
 import should from 'should';
-import { endedSeams } from '../../../daemon/host-assembly.ts';
+import { endedSeams, launchFactsSource } from '../../../daemon/host-assembly.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { autoResumeSwitch } from '../../../daemon/lib/service/auto-resume-answer.ts';
 
@@ -130,5 +130,123 @@ describe('autoResumeSwitch', () => {
 
   it('should say nothing for a broken file with no last good version, which resumes nothing', () => {
     should(autoResumeSwitch('invalid', undefined)).be.undefined();
+  });
+});
+
+describe('launchFactsSource', () => {
+  const CLAUDE_ID = '00000000-0000-4000-8000-000000000002';
+  const CLAUDE_HOME = `/fleet/homes/${CLAUDE_ID}`;
+  const claudeManifest = buildFleetManifest({
+    generatedAt: '2027-01-15T08:00:00.000Z',
+    accounts: [
+      {
+        id: CLAUDE_ID,
+        kind: 'claude',
+        mode: 'auto',
+        wrapper: '/fleet/bin/claude-work',
+        home: CLAUDE_HOME,
+        displayName: 'Work',
+        defaultModel: 'm',
+        models: [{ id: 'm', displayName: 'M', available: true }],
+        available: true,
+        unavailableReason: null,
+        secretEnv: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' },
+        referencedEnv: ['OTHER_KEY'],
+      },
+    ],
+    runtimes: [
+      {
+        id: CLAUDE_ID,
+        name: 'work',
+        harness: 'claude',
+        credential: 'c',
+        profile: 'p',
+        agent: true,
+        wrapper: '/fleet/bin/claude-work',
+        models: [],
+        defaultModel: null,
+      },
+    ],
+  });
+
+  async function source(files: Readonly<Record<string, string>>) {
+    const seen: { kernel?: KernelPorts } = {};
+    const host = await testHost({
+      plugins: [
+        implementDaemon(
+          definePlugin({
+            id: 'runtimes',
+            title: 'Runtimes',
+            version: '5.0.0',
+            api: 5,
+            core: false,
+            kinds: [],
+            permissions: { roots: ['fleet'] },
+          }),
+          {
+            build: ({ kernel }) => {
+              seen.kernel = kernel;
+              return {};
+            },
+          },
+        ),
+      ],
+    });
+    stoppers.push(async () => await host.stop());
+    const kernel = seen.kernel as KernelPorts;
+    const fleet = kernel.roots.root('fleet');
+    for (const [path, text] of Object.entries(files)) {
+      const resolved = fleet.resolve(path);
+      if (!resolved.ok) throw new Error(resolved.error);
+      await fleet.writeText(resolved.value, text);
+    }
+    return launchFactsSource(kernel);
+  }
+
+  it('should publish the login’s names and the literal pins of its fixed settings, by name or by id', async () => {
+    const facts = await source({
+      'manifest.json': JSON.stringify(claudeManifest),
+      [`homes/${CLAUDE_ID}/.fy/fixed.json`]: JSON.stringify({
+        env: { ANTHROPIC_BASE_URL: 'https://gateway.invalid', LEAK: '${secret:K}', INDIRECT: '$OTHER', N: 1 },
+      }),
+    });
+
+    const expected = {
+      runtime: 'work',
+      kind: 'claude',
+      secretEnvNames: ['ANTHROPIC_API_KEY'],
+      referencedEnv: ['OTHER_KEY'],
+      pins: { ANTHROPIC_BASE_URL: 'https://gateway.invalid' },
+    };
+    should(await facts.facts('work')).deepEqual(expected);
+    should(await facts.facts(CLAUDE_ID)).deepEqual(expected);
+  });
+
+  it('should publish no pins for a runtime with no fixed settings or none that pin anything', async () => {
+    const none = await source({ 'manifest.json': JSON.stringify(claudeManifest) });
+    const noEnv = await source({
+      'manifest.json': JSON.stringify(claudeManifest),
+      [`homes/${CLAUDE_ID}/.fy/fixed.json`]: JSON.stringify({ permissions: {} }),
+    });
+
+    should((await none.facts('work'))?.pins).deepEqual({});
+    should((await noEnv.facts('work'))?.pins).deepEqual({});
+  });
+
+  it('should say nothing of an unpublished runtime or a fleet nobody published', async () => {
+    const facts = await source({ 'manifest.json': JSON.stringify(claudeManifest) });
+    const empty = await source({});
+
+    should(await facts.facts('other')).be.undefined();
+    should(await empty.facts('work')).be.undefined();
+  });
+
+  it('should refuse, rather than guess, fixed settings that are not JSON', async () => {
+    const facts = await source({
+      'manifest.json': JSON.stringify(claudeManifest),
+      [`homes/${CLAUDE_ID}/.fy/fixed.json`]: '{ not json',
+    });
+
+    await should(facts.facts('work')).be.rejectedWith(/not valid JSON/u);
   });
 });

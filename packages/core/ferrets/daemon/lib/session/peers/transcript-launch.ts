@@ -8,6 +8,7 @@
  */
 import type { Harness } from '../../protocol/session-base.ts';
 import type { HarnessKind } from './fleet.ts';
+import type { TranscriptProvenance } from '../../protocol/session.ts';
 
 // --- session/send/handoff.ts ------------------------------------------------------------------------------------
 
@@ -56,9 +57,9 @@ export function isCodexCorrelationPair(flag: string, value: string | undefined):
 // --- session/transcript/relaunch.ts -----------------------------------------------------------------------------
 
 /** The Claude flag a start uses to name the session it is creating. */
-export const HARNESS_SESSION_FLAG = '--session-id';
+const HARNESS_SESSION_FLAG = '--session-id';
 /** The Claude flag that continues a session the harness already has. */
-export const HARNESS_RESUME_FLAG = '--resume';
+const HARNESS_RESUME_FLAG = '--resume';
 
 /**
  * The argv to relaunch with.
@@ -138,4 +139,31 @@ export function harnessHomeFromWrapper(
 ): string | undefined {
   const declared = assignedValue(source, HOME_VARIABLE[harness]);
   return declared === undefined ? undefined : expand(declared, environment);
+}
+
+/** Codex's subcommand for continuing a conversation it already has. */
+const CODEX_RESUME = 'resume';
+
+/**
+ * The transcript arguments a RELAUNCH of an existing session must carry.
+ *
+ * The recorded provenance is the evidence: Claude's minted id is what the start put on the argv. Codex names its own
+ * session, so a fresh one takes nothing; once its thread is KNOWN — proven by correlation, or adopted and started with
+ * `resume <id>` — every relaunch resumes it. A Codex session with a correlation token is relaunched DECLARING it again,
+ * as its start did, so Restart can repair a session whose rollout was never proven.
+ */
+export function transcriptLaunchArguments(
+  harness: HarnessKind,
+  provenance: TranscriptProvenance | undefined,
+): readonly string[] {
+  if (harness !== 'claude') {
+    // The schema makes an id present exactly when the identity is established.
+    const id = provenance?.harnessSessionId;
+    const token = provenance?.correlationToken;
+    return [
+      ...(id === undefined ? [] : [CODEX_RESUME, id]),
+      ...(token === undefined ? [] : codexCorrelationArguments(token)),
+    ];
+  }
+  return provenance?.harnessSessionId === undefined ? [] : claudeSessionArguments(provenance.harnessSessionId);
 }

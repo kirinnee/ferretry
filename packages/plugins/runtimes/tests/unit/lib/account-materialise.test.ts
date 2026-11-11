@@ -1091,7 +1091,7 @@ describe('materialiseFleet', () => {
       should(at(result, `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`)).have.length(0);
     });
 
-    it('should apply, and pin nothing, when the profile already passes --settings', () => {
+    it('should refuse the apply, naming the remedy, when an interactive runtime’s profile already passes --settings', () => {
       // Arrange
       const model = modelOf({
         components: {
@@ -1106,14 +1106,11 @@ describe('materialiseFleet', () => {
       });
 
       // Act
-      const result = plan(model);
+      const error = failure(() => plan(model));
 
-      // Assert
-      should(at(result, `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`)).have.length(0);
-      const wrapper = wrapperOf(result, 'claude-loge');
-      should(wrapper.split("'--settings'")).have.length(2);
-      should(wrapper).containEql('/home/person/own.json');
-      should(wrapper).not.containEql(FIXED_SETTINGS_FILE);
+      // Assert — v4 #1587: Claude Code honours only one `--settings`, so nothing can be pinned; the apply fails
+      should(error.message).containEql('claude-loge');
+      should(error.message).containEql('remove --settings from the profile');
     });
   });
   describe('profiles a runtime cannot use', () => {
@@ -1575,7 +1572,7 @@ describe('materialiseFleet', () => {
       should(() => fixedSettingsOperation('/s', { env: { A: 'literal' } })).not.throw();
     });
 
-    it('should leave an interactive runtime whose profile passes its own --settings unpinned, and not refuse the apply', () => {
+    it('should refuse the apply of an interactive runtime whose profile passes its own --settings, naming the remedy (v4 #1587)', () => {
       // Arrange
       const model = modelOf({
         credentials: { loge: { harness: 'claude', store: 'environment', env: LOGE } },
@@ -1585,10 +1582,34 @@ describe('materialiseFleet', () => {
       });
 
       // Act
-      const result = plan(model);
+      const error = (() => {
+        try {
+          plan(model);
+        } catch (failure) {
+          return failure as Error;
+        }
+        return undefined;
+      })();
 
-      // Assert — Claude Code honours only one `--settings`; B190 chose an unpinned runtime over a failed apply
-      should(at(result, OVERLAY)).be.empty();
+      // Assert — Claude Code honours only one `--settings`, so the login cannot be pinned against a folder's own
+      // settings: v4 refuses the apply rather than leave a repo able to blank it
+      should(error).be.instanceOf(FleetMaterialiseError);
+      should(error?.message).containEql('claude-loge');
+      should(error?.message).containEql('its profile passes its own --settings');
+      should(error?.message).containEql('remove --settings from the profile');
+    });
+
+    it('should still apply an AGENT runtime whose profile passes its own --settings', () => {
+      // Arrange — an agent launches through the harness, which owns its `--settings`; nothing to pin against
+      const model = modelOf({
+        credentials: { loge: { harness: 'claude', store: 'environment', env: LOGE } },
+        components: { ...COMPONENTS, settings: { own: { harness: 'claude', flags: ['--settings=/x.json'] } } },
+        profiles: { default: { layers: [...DEFAULT_LAYERS, 'settings/own'] } },
+        runtimes: { 'claude-loge': { credential: 'loge', profile: 'default', agent: true } },
+      });
+
+      // Act / Assert
+      should(() => plan(model)).not.throw();
     });
 
     describe('profile precedence and what is left to the process environment', () => {

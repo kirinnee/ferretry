@@ -30,7 +30,7 @@ import type { SessionId } from './lib/session-id.ts';
  *   handover: sessions, startAccount, planner — Ferrets' session services / Runtimes.
  *   move:     preflight, askAgent, sessions, planner (resume and launch are bound by `index.ts`) — Ferrets' session services; accounts,
  *             accountResolver, transcripts, transcriptProvenance, codexRollouts, toolkit, conversionCheck,
- *             harnessVersion, rolloutFormat, locateHarness, fixedSettings, persistedReasoningEffort,
+ *             harnessVersion, rolloutFormat, locateHarness, persistedReasoningEffort,
  *             contextWindowForSession — Runtimes / Conversation / the harness plugins; paneIdentity — Terminals;
  *             signals — the kernel has no signal capability for a pid; host.procWorkingDirectory — no cwd read.
  */
@@ -160,7 +160,6 @@ export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): M
       rolloutFormat: unbound('The rollout format probe'),
       locateHarness: unboundFn('Locating the harness'),
       readableHandoffs: unboundFn('The readable hand-off folders'),
-      fixedSettings: unboundFn('The launch settings'),
       paneIdentity: unboundFn('The pane identity'),
       persistedReasoningEffort: unboundFn('The persisted reasoning effort'),
       contextWindowForSession: unboundFn('The context window'),

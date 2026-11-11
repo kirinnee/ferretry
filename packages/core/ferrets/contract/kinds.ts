@@ -80,7 +80,13 @@ export type LaunchPart =
   | { readonly kind: 'shell'; readonly name: string; readonly env: Readonly<Record<string, string>> }
   | { readonly kind: 'instruction'; readonly id: string; readonly text: string }
   /** Names and `${secret:NAME}` references only; never a value. */
-  | { readonly kind: 'env'; readonly env: Readonly<Record<string, string>> };
+  | { readonly kind: 'env'; readonly env: Readonly<Record<string, string>> }
+  /**
+   * Literal environment a login PINS into the harness's own settings file (Claude: the `--settings` overlay), because a
+   * project's settings outrank the process environment but not that file (#1587). LITERALS ONLY, never a `${secret:NAME}`
+   * or another variable: the value goes into a private file in the ferret's home and never into an argv.
+   */
+  | { readonly kind: 'pin'; readonly env: Readonly<Record<string, string>> };
 
 /** What a `launch.parts` taker contributes: a source asked per launch (a contribute item is static; the parts are not). */
 export interface LaunchPartSource {
