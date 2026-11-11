@@ -55,7 +55,6 @@ import type {
 import type { ClockPort } from '../../lib/ports.ts';
 import { harnessQuirks } from '../../lib/session/harness/quirks.ts';
 import { startupModelArguments } from '../../lib/session/harness/startup.ts';
-import { recordedModelSource } from '../../lib/session/launch/current.ts';
 import { assignedTaskDocument, lifecyclePhase } from '../../lib/session/lifecycle/policy.ts';
 import { handoffReadArguments } from '../../lib/session/send/handoff.ts';
 import type { SessionRuntimeStartupHeldPort } from '../../lib/session/runtime-control/types.ts';
@@ -522,7 +521,9 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
         harness: resolved.account.kind,
         modelHint: plan.target.model ?? '',
         model: planned.model,
-        launchModelSource: recordedModelSource(planned.modelSource),
+        // The provenance the resolver froze into the plan. The re-plan above asks for the frozen model,
+        // which always reads as requested, so it says nothing about who chose it.
+        ...(plan.target.modelSource === undefined ? {} : { launchModelSource: plan.target.modelSource }),
         remoteControl: plan.durable.remoteControl,
         harnessFlags: [...plan.durable.harnessFlags],
         // A fork ALWAYS materialises `turns/turn-001.md`, so the counter says one whatever the mode:

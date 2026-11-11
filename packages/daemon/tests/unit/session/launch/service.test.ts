@@ -3,6 +3,7 @@ import should from 'should';
 import {
   defaultStartWaitPolicy,
   type LaunchSubject,
+  movedModel,
   parseSessionId,
   type RecordedLaunch,
   type SessionLaunchPorts,
@@ -97,8 +98,15 @@ describe('SessionLaunchService.relaunch', () => {
       '--effort',
       'high',
     ]);
+    // The switch is the person's pick, so it is persisted as one.
     should(ports.recorded).eql([
-      { command: created, model: 'claude-sonnet-5', launchReasoningEffort: 'high', launchSettings: 'settings-now' },
+      {
+        command: created,
+        model: 'claude-sonnet-5',
+        launchModelSource: 'requested',
+        launchReasoningEffort: 'high',
+        launchSettings: 'settings-now',
+      },
     ]);
   });
 
@@ -378,5 +386,103 @@ describe('SessionLaunchService.drift', () => {
     should(await new SessionLaunchService(unreadableNow).drift(ID)).eql({ current: true, reasons: [] });
     should(await new SessionLaunchService(missing).drift(ID)).eql({ current: true, reasons: [] });
     should(await new SessionLaunchService(gone).drift(ID)).eql({ current: true, reasons: [] });
+  });
+});
+
+describe('model provenance across a lifecycle sequence', () => {
+  const servesKimi = launchAccount({
+    models: [
+      { id: 'claude-opus-5', available: true },
+      { id: 'kimi-k3', available: true },
+    ],
+  });
+  const targetServes = (model: string) => model === 'claude-opus-5' || model === 'kimi-k3';
+  /** What the production recorder writes onto the document, without the rest of the daemon. */
+  const apply = (subject: LaunchSubject, launch: RecordedLaunch): LaunchSubject => ({
+    ...subject,
+    config: launchConfig({
+      ...subject.config,
+      model: launch.model,
+      ...(launch.launchModelSource === undefined ? {} : { launchModelSource: launch.launchModelSource }),
+    }),
+  });
+  const picked = () =>
+    legacySubject({
+      config: launchConfig({ model: 'claude-opus-5', launchModelSource: 'account-default' }),
+      state: launchState({ observedModel: 'kimi-k3', observedModelAt: LATER }),
+    });
+
+  it('should keep a /model pick through a resume and then a move onto another runtime', async () => {
+    // Arrange: a session on the account default whose owner typed /model kimi-k3.
+    const ports = new Ports();
+    ports.accountValue = servesKimi;
+    ports.subjectValue = picked();
+
+    // Act: the revive persists the observed switch, then the session is moved.
+    await new SessionLaunchService(ports).relaunch(ID);
+    const [recorded] = ports.recorded;
+    const after = apply(picked(), recorded as RecordedLaunch);
+    const moved = movedModel({
+      config: after.config,
+      state: after.state,
+      sourceDefault: 'claude-opus-5',
+      crossing: true,
+      servable: targetServes,
+    });
+
+    // Assert
+    should(recorded).have.property('model', 'kimi-k3');
+    should(recorded).have.property('launchModelSource', 'requested');
+    should(moved).equal('kimi-k3');
+  });
+
+  it('should still take the target default for a session whose model nobody picked, after a resume', async () => {
+    // Arrange
+    const ports = new Ports();
+    ports.accountValue = servesKimi;
+    ports.subjectValue = legacySubject({
+      config: launchConfig({ model: 'claude-opus-5', launchModelSource: 'account-default' }),
+    });
+
+    // Act
+    await new SessionLaunchService(ports).relaunch(ID);
+    const after = apply(ports.subjectValue, ports.recorded[0] as RecordedLaunch);
+    const moved = movedModel({
+      config: after.config,
+      state: after.state,
+      sourceDefault: 'claude-opus-5',
+      crossing: true,
+      servable: targetServes,
+    });
+
+    // Assert
+    should(ports.recorded[0]).have.property('launchModelSource', 'account-default');
+    should(moved).be.undefined();
+  });
+
+  it('should stop calling a model picked once the account no longer serves it and its default took over', async () => {
+    // Arrange
+    const ports = new Ports();
+    ports.subjectValue = legacySubject({
+      config: launchConfig({ model: 'claude-retired-4', launchModelSource: 'requested' }),
+    });
+
+    // Act
+    await new SessionLaunchService(ports).relaunch(ID);
+
+    // Assert
+    should(ports.recorded[0]).have.property('model', 'claude-opus-5');
+    should(ports.recorded[0]).have.property('launchModelSource', 'account-default');
+  });
+
+  it('should write no provenance for a document that never had any when nothing changed', async () => {
+    // Arrange
+    const ports = new Ports();
+
+    // Act
+    await new SessionLaunchService(ports).relaunch(ID);
+
+    // Assert
+    should(ports.recorded[0]).not.have.property('launchModelSource');
   });
 });

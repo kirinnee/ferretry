@@ -4,7 +4,9 @@ import {
   currentLaunchEffort,
   currentLaunchFast,
   currentLaunchModel,
+  migratedModelSource,
   movedModel,
+  optionalModelSource,
   recordedModelSource,
 } from '../../../../src/lib/session/launch/index.ts';
 import { launchConfig, launchState } from './support.ts';
@@ -128,6 +130,91 @@ describe('movedModel', () => {
     should(move(config)).equal('kimi-k3');
     should(move(defaulted)).be.undefined();
     should(move(defaulted, launchState(), true, 'opus')).be.undefined();
+  });
+});
+
+describe('model provenance across a Restart and a move', () => {
+  const servesBoth = (model: string) => model === 'opus[1m]' || model === 'kimi-k3';
+  /** What the migration writes: the plan's model, and the provenance `migratedModelSource` says. */
+  const restamp = (
+    config: ReturnType<typeof launchConfig>,
+    plan: { model: string; source: string },
+    restart: boolean,
+  ) =>
+    launchConfig({
+      ...config,
+      model: plan.model,
+      ...optionalModelSource(migratedModelSource({ config, restart, planModel: plan.model, planSource: plan.source })),
+    });
+  const afterRestart = (config: ReturnType<typeof launchConfig>, state: ReturnType<typeof launchState>) => {
+    // A Restart re-asks the model the session is on; the planner calls every re-asked model "requested".
+    const model = currentLaunchModel(config, state, servesBoth) ?? 'opus[1m]';
+    return restamp(config, { model, source: 'requested' }, true);
+  };
+
+  it('should keep a /model pick through a Restart and then a move', () => {
+    // Arrange: on the default; the owner then typed /model kimi-k3.
+    const config = launchConfig({ model: 'opus[1m]', launchModelSource: 'account-default' });
+    const state = launchState({ observedModel: 'kimi-k3', observedModelAt: LATER });
+
+    // Act: Restart persists the observed switch, then the session crosses runtimes.
+    const restarted = afterRestart(config, state);
+    const moved = movedModel({
+      config: restarted,
+      state,
+      sourceDefault: 'opus[1m]',
+      crossing: true,
+      servable: servesBoth,
+    });
+
+    // Assert
+    should(restarted.model).equal('kimi-k3');
+    should(restarted.launchModelSource).equal('requested');
+    should(moved).equal('kimi-k3');
+  });
+
+  it('should leave a defaulted model defaulted through a Restart, so a move still takes the target default', () => {
+    // Arrange
+    const config = launchConfig({ model: 'opus[1m]', launchModelSource: 'account-default' });
+
+    // Act
+    const restarted = afterRestart(config, launchState());
+
+    // Assert
+    should(restarted.launchModelSource).equal('account-default');
+    should(
+      movedModel({
+        config: restarted,
+        state: launchState(),
+        sourceDefault: 'opus[1m]',
+        crossing: true,
+        servable: servesBoth,
+      }),
+    ).be.undefined();
+  });
+
+  it('should not invent provenance for a document that has none when a Restart changes nothing', () => {
+    // Arrange / Act
+    const restarted = afterRestart(launchConfig({ model: 'opus[1m]' }), launchState());
+
+    // Assert
+    should(restarted.launchModelSource).be.undefined();
+  });
+
+  it('should record what the planner decided for a move, and a default that replaced an unserved model', () => {
+    // Arrange
+    const config = launchConfig({ model: 'opus[1m]', launchModelSource: 'requested' });
+
+    // Act / Assert
+    should(migratedModelSource({ config, restart: false, planModel: 'kimi-k3', planSource: 'account-default' })).equal(
+      'account-default',
+    );
+    should(migratedModelSource({ config, restart: false, planModel: 'kimi-k3', planSource: 'requested' })).equal(
+      'requested',
+    );
+    should(migratedModelSource({ config, restart: true, planModel: 'kimi-k3', planSource: 'account-default' })).equal(
+      'account-default',
+    );
   });
 });
 

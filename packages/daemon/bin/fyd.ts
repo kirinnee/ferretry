@@ -736,7 +736,9 @@ import {
   createWardenPaths,
   currentLaunchCompactAt,
   currentLaunchEffort,
+  migratedModelSource,
   movedModel,
+  optionalModelSource,
   recordedModelSource,
   type DaemonConfig,
   type DaemonConfigStore,
@@ -5775,11 +5777,14 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         model: plan.model,
         // A RESTART carries the record forward (its `keep` reports "requested" for any model it re-asks
         // for); a move records whether the person picked what the target now runs.
-        ...(account.agent === config.agent && request.model === undefined
-          ? config.launchModelSource === undefined
-            ? {}
-            : { launchModelSource: config.launchModelSource }
-          : { launchModelSource: recordedModelSource(plan.modelSource) }),
+        ...optionalModelSource(
+          migratedModelSource({
+            config,
+            restart: account.agent === config.agent && request.model === undefined,
+            planModel: plan.model,
+            planSource: plan.modelSource,
+          }),
+        ),
         modelHint: request.model ?? account.defaultModel ?? '',
         command: [...command],
         incarnation: `${id}-${generation}`,
@@ -6199,6 +6204,7 @@ export function createSessionHandoverSubsystem(
             model: planned.plan.model,
             effort: null,
             contextWindow: planned.plan.contextWindow,
+            modelSource: recordedModelSource(planned.plan.modelSource),
           };
         },
       },
@@ -8084,6 +8090,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             ...retained,
             command: [...launch.command],
             model: launch.model,
+            ...(launch.launchModelSource === undefined ? {} : { launchModelSource: launch.launchModelSource }),
             ...(launch.launchReasoningEffort === undefined
               ? {}
               : { launchReasoningEffort: launch.launchReasoningEffort }),

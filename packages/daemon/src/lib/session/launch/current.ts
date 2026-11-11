@@ -57,6 +57,57 @@ export function recordedModelSource(source: string): 'requested' | 'account-defa
   return source === 'requested' ? 'requested' : 'account-default';
 }
 
+/**
+ * The provenance a relaunch records beside the model it persists. The shared rule: the source is
+ * `requested` only when the person picked the model, and `account-default` only when nobody did.
+ *
+ *   * the model is the decision's own (`launched` equals `config.model`): the record stands as it was;
+ *   * the harness reported a newer `/model` switch that is now persisted: the person picked it, so
+ *     `requested`, or the next move would see no switch and drop the pick;
+ *   * the model the session was on is no longer served and the account's default replaced it: nobody
+ *     picked what runs now, so `account-default`.
+ */
+export function relaunchedModelSource(input: {
+  readonly config: Pick<SessionConfig, 'model' | 'launchModelSource'>;
+  /** What `currentLaunchModel` asked the planner for. */
+  readonly wanted: string | undefined;
+  /** Whether the planner served `wanted`, rather than falling back to the account's default. */
+  readonly served: boolean;
+}): 'requested' | 'account-default' | undefined {
+  const { config, wanted, served } = input;
+  if (wanted === undefined) return config.launchModelSource;
+  if (!served) return 'account-default';
+  return wanted === config.model ? config.launchModelSource : 'requested';
+}
+
+/**
+ * The provenance a MIGRATION records beside the model it persists, by the same rule as a relaunch.
+ *
+ * A Restart (same runtime, no model named) re-asks the model the session is on, and the planner reports
+ * ANY re-asked model as `requested`, so its own source says nothing. The record therefore stands while the
+ * model is unchanged. When the plan persists a DIFFERENT model, it is the planner's report that is true: the
+ * harness's newer `/model` switch was re-asked and kept (`requested`), or the old model was no longer served
+ * and the account's default replaced it (`account-default`). A move onto another runtime, or one that
+ * names a model, records what the planner decided.
+ */
+export function migratedModelSource(input: {
+  readonly config: Pick<SessionConfig, 'model' | 'launchModelSource'>;
+  readonly restart: boolean;
+  readonly planModel: string;
+  readonly planSource: string;
+}): 'requested' | 'account-default' | undefined {
+  const { config, restart, planModel, planSource } = input;
+  if (restart && planModel === config.model) return config.launchModelSource;
+  return recordedModelSource(planSource);
+}
+
+/** The field a document records, or nothing when no provenance is known. */
+export function optionalModelSource(
+  source: 'requested' | 'account-default' | undefined,
+): { launchModelSource: 'requested' | 'account-default' } | Record<string, never> {
+  return source === undefined ? {} : { launchModelSource: source };
+}
+
 export interface MovedModelInput {
   readonly config: SessionConfig;
   readonly state: SessionState;

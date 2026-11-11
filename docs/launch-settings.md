@@ -264,6 +264,12 @@ that recorded `launchModelSource: requested` (an explicit `--model`). A model th
 default (`account-default`) is dropped, so the target's own default decides. A session document with no record is
 read by comparing its model with the source login's current default. A Restart never drops it.
 
+The record follows the model through every step that persists one: a Restart or a revive that persists a newer
+`/model` switch records `requested`; one that falls back to the login's default because the model is no longer
+served records `account-default`; a refused move puts the record back with the rest of what it restamped. A fork or
+a handover freezes the provenance with the resolved model in its plan, so a fork that named no model stays
+`account-default` however the binder re-plans it.
+
 ## Declared gaps
 
 - A forked ferret's first launch records no settings digest, so its Settings row cannot report a fleet
