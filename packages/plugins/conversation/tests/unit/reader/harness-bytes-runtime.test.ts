@@ -12,6 +12,7 @@ import { BytesRecordScanner } from '../../../daemon/reader/adapters/record-scan.
 class FakeHandle implements TranscriptBytesHandle {
   readonly format = 'claude' as const;
   replaced = false;
+  closed = false;
   reads: { offset: number; length: number }[] = [];
   mtimeMs = 1;
   constructor(
@@ -22,13 +23,17 @@ class FakeHandle implements TranscriptBytesHandle {
     return this.bytes.byteLength;
   }
   async read(offset: number, length: number): Promise<Uint8Array> {
+    if (this.closed) throw new Error('closed');
     if (this.replaced) throw Object.assign(new Error('replaced'), { name: 'HarnessTranscriptReplaced' });
     this.reads.push({ offset, length });
     // A handle clamps a window, as the kernel's root handle does.
     return this.bytes.slice(offset, offset + Math.min(length, BYTES_WINDOW));
   }
   async stat(): Promise<{ size: number; mtimeMs: number } | undefined> {
-    return this.replaced ? undefined : { size: this.bytes.byteLength, mtimeMs: this.mtimeMs };
+    return this.replaced || this.closed ? undefined : { size: this.bytes.byteLength, mtimeMs: this.mtimeMs };
+  }
+  async close(): Promise<void> {
+    this.closed = true;
   }
 }
 
@@ -40,7 +45,7 @@ describe('HarnessBytesRuntime', () => {
     const runtime = new HarnessBytesRuntime();
     const bytes = new Uint8Array(BYTES_WINDOW * 2 + 10).fill(7);
     const handle = new FakeHandle('t', bytes);
-    const token = runtime.adopt(handle);
+    const token = await runtime.adopt(handle);
 
     // Act
     const actual = await runtime.readRange(token, 5, bytes.byteLength - 5);
@@ -54,7 +59,7 @@ describe('HarnessBytesRuntime', () => {
   it('should answer a short read where the file ends, and an empty one past it', async () => {
     // Arrange
     const runtime = new HarnessBytesRuntime();
-    const token = runtime.adopt(new FakeHandle('t', text('abcdef')));
+    const token = await runtime.adopt(new FakeHandle('t', text('abcdef')));
 
     // Act
     const short = await runtime.readRange(token, 4, 100);
@@ -69,7 +74,7 @@ describe('HarnessBytesRuntime', () => {
     // Arrange
     const runtime = new HarnessBytesRuntime();
     const handle = new FakeHandle('tok', text('one\ntwo\n'));
-    const token = runtime.adopt(handle);
+    const token = await runtime.adopt(handle);
 
     // Act
     const info = await runtime.info(token);
@@ -88,7 +93,7 @@ describe('HarnessBytesRuntime', () => {
     // Arrange
     const runtime = new HarnessBytesRuntime();
     const handle = new FakeHandle('tok', text('abc\n'));
-    const token = runtime.adopt(handle);
+    const token = await runtime.adopt(handle);
     handle.replaced = true;
 
     // Act
@@ -107,7 +112,7 @@ describe('HarnessBytesRuntime', () => {
     handle.read = async () => {
       throw new Error('disk on fire');
     };
-    const token = runtime.adopt(handle);
+    const token = await runtime.adopt(handle);
 
     // Act
     const actual = await runtime.readRange(token, 0, 4).catch((error: unknown) => error);
@@ -119,7 +124,7 @@ describe('HarnessBytesRuntime', () => {
   it('should count newlines, find the trailing line and say when it stopped at its limit', async () => {
     // Arrange
     const runtime = new HarnessBytesRuntime();
-    const token = runtime.adopt(new FakeHandle('t', text('a\nbb\nccc')));
+    const token = await runtime.adopt(new FakeHandle('t', text('a\nbb\nccc')));
 
     // Act
     const lines = await runtime.countNewlines(token, 8);
@@ -138,7 +143,7 @@ describe('HarnessBytesRuntime', () => {
   it('should say a capped read was capped only when bytes remain past the cap', async () => {
     // Arrange
     const runtime = new HarnessBytesRuntime();
-    const token = runtime.adopt(new FakeHandle('t', text('abcdef')));
+    const token = await runtime.adopt(new FakeHandle('t', text('abcdef')));
 
     // Act
     const exact = await runtime.readFrom(token, 0, 6);
@@ -152,19 +157,84 @@ describe('HarnessBytesRuntime', () => {
     should(none.truncated).be.true();
   });
 
-  it('should forget the oldest handle once more than its bound are held', async () => {
+  it('should keep ONE handle per owner, closing a duplicate of the file it holds', async () => {
     // Arrange
     const runtime = new HarnessBytesRuntime();
-    for (let index = 0; index <= MAX_REGISTERED; index += 1)
-      runtime.adopt(new FakeHandle(`t${String(index)}`, text('x')));
+    const first = new FakeHandle('same', text('x'));
+    const again = new FakeHandle('same', text('x'));
 
     // Act
-    const oldest = runtime.handle('t0');
-    const newest = runtime.handle(`t${String(MAX_REGISTERED)}`);
+    await runtime.adopt(first, 'ferret');
+    await runtime.adopt(again, 'ferret');
 
     // Assert
-    should(oldest).be.undefined();
-    should(newest).not.be.undefined();
+    should(runtime.handle('same')).equal(first);
+    should(first.closed).be.false();
+    should(again.closed).be.true();
+  });
+
+  it('should close the held handle when the owner’s file is replaced by another', async () => {
+    // Arrange
+    const runtime = new HarnessBytesRuntime();
+    const old = new FakeHandle('gen-1', text('x'));
+    const next = new FakeHandle('gen-2', text('y'));
+    await runtime.adopt(old, 'ferret');
+
+    // Act
+    await runtime.adopt(next, 'ferret');
+
+    // Assert
+    should(old.closed).be.true();
+    should(next.closed).be.false();
+    should(runtime.handle('gen-1')).be.undefined();
+    should(runtime.handle('gen-2')).equal(next);
+  });
+
+  it('should replace a held handle that closed itself, instead of reading through a dead one', async () => {
+    // Arrange
+    const runtime = new HarnessBytesRuntime();
+    const held = new FakeHandle('same', text('x'));
+    await runtime.adopt(held, 'ferret');
+    held.closed = true;
+    const fresh = new FakeHandle('same', text('x'));
+
+    // Act
+    await runtime.adopt(fresh, 'ferret');
+
+    // Assert
+    should(runtime.handle('same')).equal(fresh);
+    should(fresh.closed).be.false();
+  });
+
+  it('should close the oldest owner’s handle once more than its bound are held', async () => {
+    // Arrange
+    const runtime = new HarnessBytesRuntime();
+    const handles = Array.from(
+      { length: MAX_REGISTERED + 1 },
+      (_, index) => new FakeHandle(`t${String(index)}`, text('x')),
+    );
+    for (const handle of handles) await runtime.adopt(handle);
+
+    // Assert
+    should(handles[0]?.closed).be.true();
+    should(handles.slice(1).every(handle => !handle.closed)).be.true();
+    should(runtime.handle('t0')).be.undefined();
+    should(runtime.handle(`t${String(MAX_REGISTERED)}`)).not.be.undefined();
+  });
+
+  it('should close every handle it holds, once, when asked', async () => {
+    // Arrange
+    const runtime = new HarnessBytesRuntime();
+    const handles = [new FakeHandle('a', text('x')), new FakeHandle('b', text('y'))];
+    for (const handle of handles) await runtime.adopt(handle);
+
+    // Act
+    await runtime.closeAll();
+    await runtime.closeAll();
+
+    // Assert
+    should(handles.every(handle => handle.closed)).be.true();
+    should(runtime.handle('a')).be.undefined();
   });
 });
 
@@ -176,7 +246,7 @@ describe('BytesRecordScanner', () => {
     maxRecord?: number,
   ): Promise<string[]> => {
     const runtime = new HarnessBytesRuntime();
-    const token = runtime.adopt(new FakeHandle('t', text(body)));
+    const token = await runtime.adopt(new FakeHandle('t', text(body)));
     const out: string[] = [];
     for await (const range of new BytesRecordScanner(runtime, chunk, maxRecord).records(token, needle)) {
       out.push(body.slice(range.start, range.end));

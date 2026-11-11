@@ -23,6 +23,11 @@ class TranscriptFileGone extends Error {
   }
 }
 
+/** Lets a handle's descriptor go; a close that fails leaves nothing to do (the harness closes an unused one itself). */
+const release = (handle: TranscriptBytesHandle): void => {
+  void handle.close().catch(() => undefined);
+};
+
 const isReplaced = (error: unknown): boolean => error instanceof Error && error.name === 'HarnessTranscriptReplaced';
 
 /**
@@ -31,23 +36,58 @@ const isReplaced = (error: unknown): boolean => error instanceof Error && error.
  * the image reader and the record scanner all read the same bytes through it.
  */
 export class HarnessBytesRuntime implements TranscriptFileRuntime, ConversationIndexFiles, TranscriptImageFiles {
+  /** Token to handle, for the reads; and owner to handle, which is what bounds and closes them. */
   readonly #handles = new Map<string, TranscriptBytesHandle>();
+  readonly #owners = new Map<string, TranscriptBytesHandle>();
 
-  /** Remembers `handle` under its token and returns the token. */
-  adopt(handle: TranscriptBytesHandle): string {
-    this.#handles.delete(handle.file);
+  /**
+   * Takes ownership of `handle` (the caller opened it and now owes it no close) and returns the token it reads under.
+   *
+   * ONE live handle is kept per `owner` (a ferret): a handle for the file already held is the same generation, so the
+   * held one stays and the new one is closed at once; a handle for another file (the proved transcript was replaced) closes
+   * the old one. Beyond {@link MAX_REGISTERED} owners the least recently adopted is closed. A request that was reading
+   * through a handle closed this way fails as an unreadable transcript, which is what a replaced file is.
+   */
+  async adopt(handle: TranscriptBytesHandle, owner: string = handle.file): Promise<string> {
+    const known = this.#owners.get(owner);
+    // A held handle may have closed itself (a harness lets an unused one go): it answers no stat, and is replaced.
+    const alive =
+      known !== undefined && known.file === handle.file ? await known.stat().catch(() => undefined) : undefined;
+    const current = this.#owners.get(owner);
+    if (current !== undefined && current.file === handle.file && (current !== known || alive !== undefined)) {
+      this.#owners.delete(owner);
+      this.#owners.set(owner, current);
+      if (current !== handle) release(handle);
+      return current.file;
+    }
+    if (current !== undefined) this.#forget(owner, current);
+    this.#owners.set(owner, handle);
     this.#handles.set(handle.file, handle);
-    while (this.#handles.size > MAX_REGISTERED) {
-      const oldest = this.#handles.keys().next();
+    while (this.#owners.size > MAX_REGISTERED) {
+      const oldest = this.#owners.entries().next();
       if (oldest.done === true) break;
-      this.#handles.delete(oldest.value);
+      this.#forget(oldest.value[0], oldest.value[1]);
     }
     return handle.file;
+  }
+
+  /** Closes every handle held: the daemon is stopping. */
+  async closeAll(): Promise<void> {
+    const held = [...this.#owners.values()];
+    this.#owners.clear();
+    this.#handles.clear();
+    await Promise.all(held.map(async handle => await handle.close().catch(() => undefined)));
   }
 
   /** The handle a token names, or `undefined` once it was forgotten. */
   handle(token: string): TranscriptBytesHandle | undefined {
     return this.#handles.get(token);
+  }
+
+  #forget(owner: string, handle: TranscriptBytesHandle): void {
+    this.#owners.delete(owner);
+    if (this.#handles.get(handle.file) === handle) this.#handles.delete(handle.file);
+    release(handle);
   }
 
   async info(token: string): Promise<TranscriptFileInfo | undefined> {
