@@ -92,6 +92,71 @@ describe('S47 kernel.paths.stateHomeHolding', () => {
   });
 });
 
+describe('S47 kernel.paths.stateHomeHolding resolves links BEFORE it judges (no lexical ".." erasure)', () => {
+  test('a ".." taken through a link into the home is judged at the real folder: a link to home/state/inner', async () => {
+    const { home, work } = await world();
+    await mkdir(`${home}/state/inner`);
+    await mkdir(`${work}/inner`);
+    await symlink(`${home}/state/inner`, `${work}/entry`);
+
+    expect(await holding(home, `${work}/entry/../inner`)).toBe(home);
+    expect(await holding(home, `${work}/entry/..`)).toBe(home);
+  });
+
+  test('a ".." cannot erase an in-home link hop even when the final folder is outside the home', async () => {
+    const { home, work } = await world();
+    await mkdir(`${work}/plain`);
+    await symlink(`${home}/state`, `${work}/bridge`);
+    await symlink(`${work}/plain`, `${home}/state/out`);
+
+    expect(await holding(home, `${work}/bridge/out/../plain`)).toBe(home);
+  });
+
+  test('a link in the home that points outside the state home is judged on its hop, then by real path', async () => {
+    const { parent, home, work } = await world();
+    await mkdir(`${work}/deep`);
+    await symlink(work, `${home}/state/leave`);
+    await symlink(`${home}/state/leave`, `${parent}/via`);
+
+    expect(await holding(home, `${home}/state/leave/deep`)).toBe(home);
+    expect(await holding(home, `${parent}/via/deep`)).toBe(home);
+  });
+
+  test('a ".." through a link OUT of the home lands where it really is: outside answers undefined', async () => {
+    const { parent, home, work } = await world();
+    await mkdir(`${work}/inner`);
+    await symlink(work, `${parent}/outer-link`);
+
+    // outer-link -> work (outside the home): outer-link/inner/.. is work, outside the fence.
+    expect(await holding(home, `${parent}/outer-link/inner/..`)).toBeUndefined();
+    // ferretry/../work is the sibling, outside; the lexical result is the same here and stays outside.
+    expect(await holding(home, `${home}/../work`)).toBeUndefined();
+  });
+
+  test('a real folder inside the home is found (including through "." and doubled slashes)', async () => {
+    const { home } = await world();
+
+    expect(await holding(home, `${home}/state/./ferrets/`)).toBe(home);
+    expect(await holding(home, `${home}//state///ferrets`)).toBe(home);
+    expect(await holding(home, `${home}/state/ferrets/../ferrets`)).toBe(home);
+  });
+
+  test('a path that is not there inside the home is still held; one outside is not', async () => {
+    const { home, work } = await world();
+
+    expect(await holding(home, `${home}/state/ferrets/missing/deeper`)).toBe(home);
+    expect(await holding(home, `${work}/missing/../other`)).toBeUndefined();
+  });
+
+  test('a link loop fails closed (held), never throws or hangs', async () => {
+    const { parent, home } = await world();
+    await symlink(`${parent}/loop-b`, `${parent}/loop-a`);
+    await symlink(`${parent}/loop-a`, `${parent}/loop-b`);
+
+    expect(await holding(home, `${parent}/loop-a/x`)).toBe(home);
+  });
+});
+
 describe('S47 kernel.paths.stateHomeHolding is gated by permissions.checkDirectory', () => {
   const base: PathsPort = {
     home: () => '/h',

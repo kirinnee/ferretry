@@ -31,7 +31,14 @@ the page and end with it. The reference grammar is unchanged — see
 `browser.hover` · `browser.drag` · `browser.mouse` · `browser.press` · `browser.scroll` · `browser.select` · `browser.check` ·
 `browser.fill_form` · `browser.highlight` (see [Pointer and keys](#pointer-and-keys)) ·
 `browser.eval(name, function, target?, timeoutMs?)` (owner-gated: [Page scripts](#page-scripts-owner-gated)) ·
-`browser.close(name)` · `browser.ask_owner(name, message?)` · `task.plan(lines, expiresInSeconds?)` (see [Task plan](#task-plan-ask-once-before-a-task)).
+`browser.close(name)` · `browser.ask_owner(name, message?)`.
+
+> **Not available on 5.0 yet — these come AFTER MERGE (M2, tracked in
+> [`rebuild/after-merge.json`](rebuild/after-merge.json)).** The Accounts plugin declares only `account_hint`. These
+> six are NOT declared, so the CLI builds no MCP tool for them and an agent cannot call them until each is built and
+> declared again: `account_propose`, `task_plan` (`task.plan`), `secure_copy`, `secure_list`, `secure_discard` and
+> `secure_paste`. Every section below that describes one of them is the design it will be built to, not a thing a
+> ferret can use today.
 
 A **target** is exactly one of a `ref`, a `selector`, or — for a click only — a point `x`, `y`; see
 [Refs and targets](#refs-and-targets). `history` is `back`, `forward` or `reload`.
@@ -43,7 +50,7 @@ The wire body is `AgentToolCallSchema` (`packages/protocol/src/lib/agent-tools.t
 
 A single value at a prompt (a password, passphrase, one-time or 2FA code) is `terminal.request_input`, not `terminal.ask_owner`: the owner types it on a card (or `fy input answer`), and the agent never receives it ([input-requests.md](input-requests.md)). A one-time code is sensitivity `code`: the ferret may see it, and may instead read it from an inbox it has and type it itself, only on the page of the sign-in it is for ([one-time codes](input-requests.md#one-time-codes-code)). `fy input ls|answer|cancel` is the owner's command and refuses to run inside a ferret.
 
-A value the agent must move but not see (a token it just minted, a key a command prints) is `secure.copy`: the daemon captures it as `sealed:<name>`, masks it everywhere it scrubs text, and the agent learns only its source, length and expiry. `secure.list` shows the session's copies and `secure.discard` lets go of one. Pasting a copy is an owner-approved input request ([secure-copy.md](secure-copy.md)).
+**After merge (M2), not callable on 5.0 yet:** a value the agent must move but not see (a token it just minted, a key a command prints) is `secure.copy`: the daemon captures it as `sealed:<name>`, masks it everywhere it scrubs text, and the agent learns only its source, length and expiry. `secure.list` shows the session's copies and `secure.discard` lets go of one. Pasting a copy is an owner-approved input request ([secure-copy.md](secure-copy.md)).
 
 The MCP names swap the dot for an underscore: `terminal_open`, `terminal_ask_owner`, `browser_ask_owner`, …
 
@@ -303,6 +310,10 @@ a staged path the daemon alone saves.
 
 ## Task plan: ask once before a task
 
+> **Not available on 5.0 yet: after merge (M2, [`rebuild/after-merge.json`](rebuild/after-merge.json)).** `task_plan`
+> is not declared by the Accounts plugin, so no ferret has this tool today; this section is the design it will be built
+> to. Until then a sign-in or paste simply asks the owner each time.
+
 `task.plan(lines, expiresInSeconds?)` (MCP `task_plan`) is how a ferret asks the owner, once, to pre-approve the
 sign-ins and pastes a task will need. One call raises ONE card on the owner's agenda, up to 10 lines, for
 `expiresInSeconds` (300 to 86,400: five minutes to a day; two hours when it is left out):
@@ -350,6 +361,10 @@ reads Ferretry's own files." Every ferret can read Ferretry's own state-home fil
 [secure-copy.md](secure-copy.md#task-plans).
 
 ## Suggesting a standing rule
+
+> **Not available on 5.0 yet: after merge (M2, [`rebuild/after-merge.json`](rebuild/after-merge.json)).**
+> `account_propose` is not declared by the Accounts plugin, so a ferret cannot call it today; the owner makes standing
+> rules from the app or `fy`. This section is the design it will be built to.
 
 `account_propose` takes `preapprove: true` (and `recipe` is then optional) to ask the owner to consider a
 [standing sign-in rule](secrets.md#standing-sign-in-rules) for one sign-in. It is a **suggestion and nothing more**:
@@ -593,8 +608,9 @@ its own).
 - **`any` routes take a session credential as that session, always.** Its actor is `peer:<its session>`
   — never the owner, on the board and the agenda too — whatever any header says. That covers everything a
   ferret's `fy` and MCP tools need: `fy send` and `fy notify`, its board card and notes, its own agenda
-  items, signals, starting a sub-ferret, config reads and (held) writes, input requests and secure copy
-  through the agent tools, `account_hint`/`account_propose`, and session and fleet reads.
+  items, signals, starting a sub-ferret, config reads and (held) writes, input requests through the agent
+  tools, `account_hint`, and session and fleet reads. (Secure copy and `account_propose` join this list after merge,
+  M2: they are not declared on 5.0 yet.)
 - **A handler keeps a second line**, keyed on the same predicate, for the PARTS of an `any` route that are
   the owner's: another session's agenda item, an unheld config loosening, confirming a lane set, widening
   what ferrets may drive through a fleet proposal, revealing a quarantined terminal.
