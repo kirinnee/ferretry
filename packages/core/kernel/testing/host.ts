@@ -29,7 +29,8 @@ import { PROJECT_SOURCES, projectFileKey, projectFilesHandle } from './project-f
 import { failureResponse } from '../host/responses.ts';
 import type { ContractSurface, FetchPort, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
-import { gatedOverrides, gatedPaths, gatedWhich } from '../host/paths.ts';
+import { nodeFs } from '../host/adapters/node-fs.ts';
+import { gatedOverrides, gatedPaths, gatedWhich, stateHomeHolding } from '../host/paths.ts';
 import { handleReaders, locateCommand, whichCommand, whichForCommand } from '../host/which.ts';
 import {
   NO_PROCESS_TABLE,
@@ -240,6 +241,14 @@ export interface TestHostOptions {
   readonly linkedProjectFolders?: ReadonlyMap<string, string>;
   /** The directories `kernel.paths.checkDirectory` accepts: the absolute path asked → its real path. Default: none. */
   readonly directories?: Readonly<Record<string, string>>;
+  /**
+   * The state home `kernel.paths.stateHomeHolding` judges against, a folder on the REAL disk: the production fence
+   * (name, link hops, real path, identity) runs over it, so a test plants real folders and links. Default: none
+   * (the world has no home, so nothing is held). `stateHomeHolding` below wins when given.
+   */
+  readonly stateHome?: string;
+  /** An overriding fake for `kernel.paths.stateHomeHolding`: the home name for a path it holds, `undefined` for one it does not; it may throw. */
+  readonly stateHomeHolding?: (absolutePath: string) => Promise<string | undefined>;
   /** The absolute paths `kernel.paths.which` finds executable. Default: none. */
   readonly executables?: readonly string[];
   /** The `PATH` `kernel.paths.which` searches after the caller's own folders. Default: none. */
@@ -2027,6 +2036,16 @@ async function start(world: World): Promise<TestHost> {
                 }
                 return await whichForCommand(name, searchPath, async path =>
                   (options.executables ?? []).includes(path),
+                );
+              },
+              stateHomeHolding: async (absolutePath: string) => {
+                if (options.stateHomeHolding !== undefined) return await options.stateHomeHolding(absolutePath);
+                if (options.stateHome === undefined) return undefined;
+                return await stateHomeHolding(
+                  nodeFs(() => 'x'),
+                  options.stateHome,
+                  { files: [], recheckMs: 0 },
+                  absolutePath,
                 );
               },
               // The test world keeps no disk: a directory is one the test named in `options.directories` (its real path).

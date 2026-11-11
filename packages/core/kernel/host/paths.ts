@@ -2,6 +2,8 @@ import { err, ok, type Result } from '@ferretry/std';
 import { isAbsolute } from 'node:path';
 import type { CheckedDirectory, DirectoryRefusal, PathsPort } from '../contract/ports.ts';
 import type { HostFs } from './adapters/node-fs.ts';
+import { absolute, fencedByName, fencedReal, fenceOf, hopsThroughFence, isAbsent } from './fence-guard.ts';
+import type { TruncationWatcher } from './fence-index.ts';
 import { mayReadOverride } from './which.ts';
 
 /**
@@ -29,6 +31,31 @@ export async function checkDirectory(
 }
 
 /**
+ * `kernel.paths.stateHomeHolding`: the state home `absolutePath` is in, judged exactly as every owner root is (S40–S47).
+ * Not a lexical stand-in: the fence is built from the disk (`fenceOf`, which THROWS when the home cannot be identified,
+ * so the caller refuses), then the path is tried as named, on every link hop (a link that lives in the home and leads
+ * out is a hop through the fence), by real path, and by identity up to `/`. The answer is the home's configured name,
+ * or `undefined` when the path is outside the fence or is not there (a start in a missing folder is refused later,
+ * as a folder). Read-only; a relative path is refused with a throw.
+ */
+export async function stateHomeHolding(
+  fs: HostFs,
+  home: string,
+  privateFiles: { readonly files: readonly string[]; readonly recheckMs: number; readonly watch?: TruncationWatcher },
+  absolutePath: string,
+): Promise<string | undefined> {
+  const fence = await fenceOf(fs, home, privateFiles.files, privateFiles.recheckMs, privateFiles.watch);
+  const named = absolute(absolutePath.trim(), 'the path');
+  if (fencedByName(fence, named) || (await hopsThroughFence(fs, fence, named))) return fence.named;
+  const real = await fs.realpath(named).catch((error: unknown) => {
+    if (isAbsent(error)) return undefined;
+    throw error;
+  });
+  if (real === undefined) return undefined;
+  return (await fencedReal(fs, fence, real)) ? fence.named : undefined;
+}
+
+/**
  * What a plugin holds as `kernel.paths`. `checkDirectory` answers for ANY absolute path, with no root and no fence
  * (`~/.ssh` answers like any other), so only a manifest that declares `permissions.checkDirectory` gets it; any
  * other plugin's call is refused naming the plugin (the way `hostFacts` is).
@@ -38,6 +65,9 @@ export function gatedPaths(plugin: string, declared: boolean, base: PathsPort): 
   return Object.freeze({
     home: base.home,
     checkDirectory: async () => {
+      throw new Error(`${plugin} did not declare permissions.checkDirectory, so it probes no absolute path.`);
+    },
+    stateHomeHolding: async () => {
       throw new Error(`${plugin} did not declare permissions.checkDirectory, so it probes no absolute path.`);
     },
     // Gated on their own permission ({@link gatedWhich}), never by this one.
@@ -60,6 +90,7 @@ export function gatedWhich(plugin: string, declared: boolean, base: PathsPort): 
   return Object.freeze({
     home: base.home,
     checkDirectory: base.checkDirectory,
+    stateHomeHolding: base.stateHomeHolding,
     which: refused,
     locate: refused,
     whichFor: refused,
