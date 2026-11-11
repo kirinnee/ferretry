@@ -135,3 +135,38 @@ export class SharedCredentials<Entry> {
     };
   }
 }
+
+/**
+ * The credential links the kernel PLACED, by what it recorded when it made them (the path the link sits at and a mark of
+ * the link itself: its device and inode on disk, the text it holds in the test world), never by the link's name. A move
+ * of one of them (the link, or any folder that holds it) is refused: single use stops a second link, so it is the placed
+ * one that must not be carried into another ferret's home. Removing it (`unlink`, `remove`) stays allowed.
+ */
+export class PlacedCredentialLinks {
+  readonly #placed = new Map<string, string>();
+
+  /** Records the link just placed at `path`, with the `mark` the host reads from the link itself. */
+  place(path: string, mark: string): void {
+    this.#placed.set(path, mark);
+  }
+
+  /** Forgets a placed link at `path` and every one below it (a link or a folder was removed). */
+  forgetUnder(path: string): void {
+    for (const key of [...this.#placed.keys()])
+      if (key === path || key.startsWith(`${path}/`)) this.#placed.delete(key);
+  }
+
+  /** The recorded links a move of `from` would carry: `from` itself and every recorded one below it, each with its mark. */
+  affected(from: string): readonly (readonly [string, string])[] {
+    return [...this.#placed].filter(([key]) => key === from || key.startsWith(`${from}/`));
+  }
+}
+
+/**
+ * The rule for a move (`rename`): `placed` are the recorded links the move would carry that are STILL the recorded link
+ * (the host compared the mark it reads now). None: the move is nobody's business here. Some: `link_escape`, nothing is
+ * written. (The same name at both ends never reaches this: `renameNamesRefusal` refuses it first and moves nothing.)
+ */
+export function placedLinkMoveVerdict(placed: readonly unknown[]): 'link_escape' | undefined {
+  return placed.length === 0 ? undefined : 'link_escape';
+}

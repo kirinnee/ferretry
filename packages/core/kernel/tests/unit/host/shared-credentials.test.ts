@@ -27,7 +27,11 @@ import { defineState } from '../../../contract/define.ts';
 import type { RootHandle, RootName, RootsPort, SharedCredential } from '../../../contract/ports.ts';
 import { type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
 import { ensureInternalRootBases, RootError, rootsPortFor } from '../../../host/roots.ts';
-import { credentialFileListed } from '../../../host/shared-credentials.ts';
+import {
+  credentialFileListed,
+  PlacedCredentialLinks,
+  placedLinkMoveVerdict,
+} from '../../../host/shared-credentials.ts';
 import { SharedTreeError } from '../../../host/shared-trees.ts';
 
 const CREDENTIALS = defineState({ name: 'credentials', path: 'credentials/*', store: 'opaque', format: 1 });
@@ -516,5 +520,33 @@ describe('round 1 review: the source is re-judged by descriptor and the link is 
       () => home.stat(path),
     ])
       expect(await refusalOf(call())).toBe('root:link_escape');
+  });
+});
+
+describe('placed credential links (the pure move rule)', () => {
+  test('a move carries a recorded link when it is the link or a folder above it, never a sibling or a longer name', () => {
+    const placed = new PlacedCredentialLinks();
+    placed.place('/h/f1/auth.json', '1:2');
+    expect(placed.affected('/h/f1/auth.json')).toEqual([['/h/f1/auth.json', '1:2']]);
+    expect(placed.affected('/h/f1')).toEqual([['/h/f1/auth.json', '1:2']]);
+    expect(placed.affected('/h')).toEqual([['/h/f1/auth.json', '1:2']]);
+    expect(placed.affected('/h/f1/auth.json.bak')).toEqual([]);
+    expect(placed.affected('/h/f10')).toEqual([]);
+    expect(placed.affected('/h/f1/other')).toEqual([]);
+  });
+
+  test('forgetting a link, or a folder above it, ends the refusal', () => {
+    const placed = new PlacedCredentialLinks();
+    placed.place('/h/f1/auth.json', '1:2');
+    placed.place('/h/f2/auth.json', '1:3');
+    placed.forgetUnder('/h/f1/auth.json');
+    expect(placed.affected('/h/f1')).toEqual([]);
+    placed.forgetUnder('/h');
+    expect(placed.affected('/h/f2')).toEqual([]);
+  });
+
+  test('the verdict is link_escape whenever a placed link would be carried, and silent otherwise', () => {
+    expect(placedLinkMoveVerdict([])).toBeUndefined();
+    expect(placedLinkMoveVerdict(['/h/f1/auth.json'])).toBe('link_escape');
   });
 });

@@ -29,6 +29,8 @@ import {
   isCredentialFolder,
   isCredentialReceiver,
   isMintedInode,
+  PlacedCredentialLinks,
+  placedLinkMoveVerdict,
   SharedCredentials,
 } from '../host/shared-credentials.ts';
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
@@ -1398,6 +1400,8 @@ async function start(world: World): Promise<TestHost> {
     readonly inode: bigint;
     readonly reach: () => { readonly key: string; readonly inode: bigint };
   }>();
+  /** Every credential link a test plugin placed, marked by the text the link holds: as production, a move of one is refused. */
+  const placedCredentialLinks = new PlacedCredentialLinks();
   /** Gives a NEW file of the flat world its own stand-in inode (an existing one keeps its inode: a write in place). */
   const writingFile = (path: string): void => {
     if (!world.roots.has(path)) {
@@ -1683,6 +1687,7 @@ async function start(world: World): Promise<TestHost> {
               if (world.roots.has(place) || testLinks.has(place) || testFolderExists(place))
                 throw new RootError('outside');
               testLinks.set(place, reached.key);
+              placedCredentialLinks.place(place, reached.key);
             } catch (error) {
               claim.release();
               throw error;
@@ -1784,6 +1789,7 @@ async function start(world: World): Promise<TestHost> {
             if (testLinks.has(place)) {
               testLinks.delete(place);
               testModes.delete(place);
+              placedCredentialLinks.forgetUnder(place);
               return;
             }
             if (world.roots.has(place)) {
@@ -1803,6 +1809,7 @@ async function start(world: World): Promise<TestHost> {
             for (const key of [...testLinks.keys()]) if (under(key)) testLinks.delete(key);
             for (const key of [...testModes.keys()]) if (under(key)) testModes.delete(key);
             for (const key of [...testMadeFolders]) if (under(key)) testMadeFolders.delete(key);
+            placedCredentialLinks.forgetUnder(place);
           },
           // The real host's rules (`host/root-rules.ts`) over the flat test world, with the same refusals.
           linkTo: async (at, target) => {
@@ -1858,6 +1865,13 @@ async function start(world: World): Promise<TestHost> {
             if (world.roots.has(target) || testLinks.has(target) || testFolderExists(target))
               throw new RootError('outside');
             if (target.startsWith(`${source}/`)) throw new RootError('changed');
+            // As production: a placed credential link (judged by what was recorded, not its name) is not moved, itself or
+            // inside a folder that goes.
+            const carried = placedCredentialLinks
+              .affected(source)
+              .filter(([path, mark]) => testLinks.get(path) === mark);
+            const verdict = placedLinkMoveVerdict(carried);
+            if (verdict !== undefined) throw new RootError(verdict);
             // The flat world keeps files, links and modes in three maps keyed by full path: everything at `source`
             // or under it moves to the same place under `target`, a link as the text it holds.
             const under = (key: string): boolean => key === source || key.startsWith(`${source}/`);
@@ -1894,6 +1908,7 @@ async function start(world: World): Promise<TestHost> {
             if (steps.some(step => step !== '' && testLinks.has(step))) throw new RootError('link_escape');
             if (!testLinks.has(place)) throw new RootError('outside');
             testLinks.delete(place);
+            placedCredentialLinks.forgetUnder(place);
           },
           setMode: async (path, mode) => {
             if (manifest.permissions?.setMode !== true) throw new RootError('not_declared');

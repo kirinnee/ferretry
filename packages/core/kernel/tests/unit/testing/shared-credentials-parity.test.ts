@@ -195,6 +195,27 @@ const placing =
 
 type Case = (side: Side) => Promise<unknown>;
 
+/** Places the credential at f1/auth.json (unless `place` is false), makes f2, runs `move` and answers what it came to and what is where. */
+async function afterMove(side: Side, move: (all: RootHandle) => Promise<void>, place = true) {
+  const home = homeOf(side.codex);
+  if (place) await home.linkCredential(await mint(side), resolved(home, 'auth.json'));
+  const all = side.codex.root('agent-homes');
+  await all.makeDirectory(resolved(all, 'f2')).catch(() => undefined);
+  const result = await move(all).then(
+    () => 'moved',
+    (error: unknown) => (error instanceof RootError ? `root:${error.refusal}` : 'unexpected-error'),
+  );
+  const kind = async (path: string) => (await all.lstat(resolved(all, path)).catch(() => undefined))?.kind ?? 'nothing';
+  return {
+    result,
+    placed: await kind('f1/auth.json'),
+    other: await kind('f2/auth.json'),
+    renamedHome: await kind('g1/auth.json'),
+    inOther: await kind('f2/f1/auth.json'),
+    renamedHere: await kind('f1/other.json'),
+  };
+}
+
 const CASES: Readonly<Record<string, Case>> = {
   'changed: the sign-in file replaced by another inode after the mint': async side => {
     const credential = await mint(side);
@@ -315,6 +336,49 @@ const CASES: Readonly<Record<string, Case>> = {
       return creds;
     }, 'work/other.json');
   },
+  'link_escape: the placed link renamed into another ferret’s home': async side =>
+    await afterMove(side, all => all.rename(resolved(all, 'f1/auth.json'), resolved(all, 'f2/auth.json'))),
+  'link_escape: the placed link renamed to another name in its own home': async side =>
+    await afterMove(side, all => all.rename(resolved(all, 'f1/auth.json'), resolved(all, 'f1/other.json'))),
+  'link_escape: the ferret home holding the placed link renamed': async side =>
+    await afterMove(side, all => all.rename(resolved(all, 'f1'), resolved(all, 'g1'))),
+  'link_escape: the ferret home holding the placed link moved into another home': async side =>
+    await afterMove(side, all => all.rename(resolved(all, 'f1'), resolved(all, 'f2/f1'))),
+  'outside: the placed link renamed onto its own name (moves nothing, as for any name)': async side =>
+    await afterMove(side, all => all.rename(resolved(all, 'f1/auth.json'), resolved(all, 'f1/auth.json'))),
+  'link: an ordinary file in the home still moves': async side => {
+    const all = side.codex.root('agent-homes');
+    await all.makeDirectory(resolved(all, 'f1'));
+    await all.makeDirectory(resolved(all, 'f2'));
+    await all.writeText(resolved(all, 'f1/notes.txt'), 'x');
+    return await afterMove(
+      side,
+      all2 => all2.rename(resolved(all2, 'f1/notes.txt'), resolved(all2, 'f2/notes.txt')),
+      false,
+    );
+  },
+  'link: the placed link removed, then its name reused by another file, moves': async side => {
+    const home = homeOf(side.codex);
+    await home.linkCredential(await mint(side), resolved(home, 'auth.json'));
+    await home.unlink(resolved(home, 'auth.json'));
+    await home.writeText(resolved(home, 'auth.json'), 'mine');
+    const all = side.codex.root('agent-homes');
+    await all.makeDirectory(resolved(all, 'f2'));
+    await all.rename(resolved(all, 'f1/auth.json'), resolved(all, 'f2/auth.json'));
+    return {
+      f1: (await all.lstat(resolved(all, 'f1/auth.json')))?.kind,
+      f2: (await all.lstat(resolved(all, 'f2/auth.json')))?.kind,
+    };
+  },
+  'link: the home of a removed placed link moves': async side => {
+    const home = homeOf(side.codex);
+    await home.linkCredential(await mint(side), resolved(home, 'auth.json'));
+    await home.unlink(resolved(home, 'auth.json'));
+    await home.writeText(resolved(home, 'notes.txt'), 'x');
+    const all = side.codex.root('agent-homes');
+    await all.rename(resolved(all, 'f1'), resolved(all, 'g1'));
+    return { g1: (await all.lstat(resolved(all, 'g1')))?.kind };
+  },
   'revoked: the minter stopped': async side => {
     const credential = await mint(side);
     await side.stop();
@@ -376,4 +440,38 @@ test('the cases cover each answer (the parity is not vacuous)', async () => {
     ['revoked: the minter stopped', 'not_shared'],
   ] as const)
     expect(await CASES[name]?.(await real())).toEqual({ refused: refusal });
+});
+
+test('moving a placed credential link is refused on the real roots and the testing host, and nothing is written', async () => {
+  const refused = {
+    result: 'root:link_escape',
+    placed: 'symlink',
+    other: 'nothing',
+    renamedHome: 'nothing',
+    inOther: 'nothing',
+    renamedHere: 'nothing',
+  };
+  for (const name of [
+    'link_escape: the placed link renamed into another ferret’s home',
+    'link_escape: the placed link renamed to another name in its own home',
+    'link_escape: the ferret home holding the placed link renamed',
+    'link_escape: the ferret home holding the placed link moved into another home',
+  ])
+    for (const build of [real, testing]) expect(await CASES[name]?.(await build())).toEqual(refused);
+  expect(
+    await CASES['outside: the placed link renamed onto its own name (moves nothing, as for any name)']?.(await real()),
+  ).toEqual({
+    ...refused,
+    result: 'root:outside',
+  });
+  expect(await CASES['link: an ordinary file in the home still moves']?.(await real())).toMatchObject({
+    result: 'moved',
+  });
+  expect(
+    await CASES['link: the placed link removed, then its name reused by another file, moves']?.(await real()),
+  ).toEqual({
+    f1: undefined,
+    f2: 'file',
+  });
+  expect(await CASES['link: the home of a removed placed link moves']?.(await real())).toEqual({ g1: 'directory' });
 });
