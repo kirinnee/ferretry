@@ -217,6 +217,11 @@ export class FileTranscriptReads
     };
   }
 
+  /** Closes the transcript handle held for one ferret (it stopped or was removed); a later read opens a fresh one. */
+  release(ferret: string): void {
+    this.runtime.releaseOwner(ferret);
+  }
+
   /** Closes every transcript handle this reader opened: the daemon is stopping. */
   async close(): Promise<void> {
     await this.runtime.closeAll();

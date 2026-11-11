@@ -39,6 +39,8 @@ export class HarnessBytesRuntime implements TranscriptFileRuntime, ConversationI
   /** Token to handle, for the reads; and owner to handle, which is what bounds and closes them. */
   readonly #handles = new Map<string, TranscriptBytesHandle>();
   readonly #owners = new Map<string, TranscriptBytesHandle>();
+  /** Set, synchronously, by {@link closeAll}: from then on this runtime owns no handle and takes none. */
+  #closed = false;
 
   /**
    * Takes ownership of `handle` (the caller opened it and now owes it no close) and returns the token it reads under.
@@ -47,12 +49,18 @@ export class HarnessBytesRuntime implements TranscriptFileRuntime, ConversationI
    * held one stays and the new one is closed at once; a handle for another file (the proved transcript was replaced) closes
    * the old one. Beyond {@link MAX_REGISTERED} owners the least recently adopted is closed. A request that was reading
    * through a handle closed this way fails as an unreadable transcript, which is what a replaced file is.
+   *
+   * AFTER {@link closeAll} no handle is ever registered: one given then, or one whose adoption was suspended on the stat
+   * below while the runtime closed, is closed at once and answers no token (a read through it is an unreadable transcript).
    */
   async adopt(handle: TranscriptBytesHandle, owner: string = handle.file): Promise<string> {
+    if (this.#closed) return this.#refuse(handle);
     const known = this.#owners.get(owner);
     // A held handle may have closed itself (a harness lets an unused one go): it answers no stat, and is replaced.
     const alive =
       known !== undefined && known.file === handle.file ? await known.stat().catch(() => undefined) : undefined;
+    // The runtime may have been closed while the held handle was being asked: this handle is not in the shutdown's snapshot.
+    if (this.#closed) return this.#refuse(handle);
     const current = this.#owners.get(owner);
     if (current !== undefined && current.file === handle.file && (current !== known || alive !== undefined)) {
       this.#owners.delete(owner);
@@ -73,10 +81,22 @@ export class HarnessBytesRuntime implements TranscriptFileRuntime, ConversationI
 
   /** Closes every handle held: the daemon is stopping. */
   async closeAll(): Promise<void> {
+    this.#closed = true;
     const held = [...this.#owners.values()];
     this.#owners.clear();
     this.#handles.clear();
     await Promise.all(held.map(async handle => await handle.close().catch(() => undefined)));
+  }
+
+  /** Closes the handle held for `owner` (its ferret stopped or is gone); a later read opens a fresh one. */
+  releaseOwner(owner: string): void {
+    const held = this.#owners.get(owner);
+    if (held !== undefined) this.#forget(owner, held);
+  }
+
+  #refuse(handle: TranscriptBytesHandle): string {
+    release(handle);
+    return handle.file;
   }
 
   /** The handle a token names, or `undefined` once it was forgotten. */
