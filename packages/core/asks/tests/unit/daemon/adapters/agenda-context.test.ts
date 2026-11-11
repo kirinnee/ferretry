@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { agendaContext } from '../../../../daemon/adapters/agenda-context.ts';
+import { subFerretRefusal } from '../../../../daemon/lib/sub-ferret/index.ts';
 import type { AgendaBoardContext, AgendaFerretsContext } from '../../../../contract/index.ts';
 
 const TASK = { id: 'F12' } as never;
@@ -40,6 +41,44 @@ describe('M3 the agenda context Asks binds from agenda.context', () => {
     expect(await of().subFerrets.readable?.('child')).toBe(false);
     const down = of(ferrets({ leadOf: async () => Promise.reject(new Error('down')) }));
     expect(await down.subFerrets.readable?.('child')).toBe(false);
+  });
+
+  test('subFerrets.lineage reads Ferrets ONCE: readable and lead come from the same answer', async () => {
+    let reads = 0;
+    const counted = of(
+      ferrets({
+        leadOf: async id => {
+          reads += 1;
+          return id === 'child' ? 'lead' : undefined;
+        },
+      }),
+    );
+    expect(await counted.subFerrets.lineage?.('child')).toEqual({ readable: true, lead: 'lead' });
+    expect(reads).toBe(1);
+    expect(await counted.subFerrets.lineage?.('lead')).toEqual({ readable: true, lead: undefined });
+    expect(await of().subFerrets.lineage?.('child')).toEqual({ readable: false });
+    const down = of(ferrets({ leadOf: async () => Promise.reject(new Error('down')) }));
+    expect(await down.subFerrets.lineage?.('child')).toEqual({ readable: false });
+  });
+
+  test('a provider that answers once and then goes away refuses the raise (fail closed on the second read)', async () => {
+    let gone = false;
+    const ctx = agendaContext(
+      key =>
+        key === 'ferrets'
+          ? gone
+            ? 'unavailable'
+            : ferrets({
+                leadOf: async id => {
+                  gone = true;
+                  return id === 'child' ? 'lead' : undefined;
+                },
+              })
+          : 'unavailable',
+      () => undefined,
+    );
+    const refusal = await subFerretRefusal(ctx.subFerrets, 'child', 'raise agenda items');
+    expect(refusal).not.toBeNull();
   });
 
   test('focus and cards come from Board; absent Board is benign (no focus card, not in to-test)', async () => {

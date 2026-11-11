@@ -168,3 +168,72 @@ describe('a directory that can say its lineage is unreadable', () => {
     should(await subFerretRefusal(readable, 'stranger', 'x')).be.null();
   });
 });
+
+describe('a lineage that is readable once and gone on the next read', () => {
+  const FLAKY_REFUSAL = "You can't raise agenda items just now";
+
+  it('should refuse, not grant lead authority, when the second leadOf read rejects', async () => {
+    // Arrange: first read finds the parent, every later read rejects (the provider went away between the two checks).
+    let reads = 0;
+    const flaky: SubFerretDirectory = {
+      leadOf: async () => {
+        reads += 1;
+        if (reads > 1) throw new Error('ferrets went away');
+        return 'lead';
+      },
+      addressOf: async sessionId => sessionId,
+      // The probe is itself a lookup whose answer is discarded (as the adapter did before lineage()).
+      readable: async sessionId => (await flaky.leadOf(sessionId), true),
+    };
+
+    // Act
+    const refusal = await subFerretRefusal(flaky, 'child', 'raise agenda items');
+
+    // Assert
+    should(refusal).startWith(FLAKY_REFUSAL);
+    should(refusal).containEql('cannot be read');
+  });
+
+  it('should read the lineage once and reuse that answer for the readability and the lead', async () => {
+    // Arrange
+    let reads = 0;
+    const once: SubFerretDirectory = {
+      leadOf: async () => {
+        throw new Error('a directory that answers lineage() is not asked leadOf() again');
+      },
+      addressOf: async sessionId => (sessionId === 'lead' ? 'lizzette' : sessionId),
+      lineage: async () => {
+        reads += 1;
+        return { readable: true, lead: 'lead' };
+      },
+    };
+
+    // Act
+    const refusal = await subFerretRefusal(once, 'child', 'raise agenda items', 'read the agenda');
+
+    // Assert
+    should(reads).equal(1);
+    should(refusal).containEql('fy send lizzette');
+  });
+
+  it('should refuse when the single lineage read rejects or says it is unreadable', async () => {
+    // Arrange
+    const rejecting: SubFerretDirectory = {
+      ...DIRECTORY,
+      lineage: async () => Promise.reject(new Error('down')),
+    };
+    const unreadable: SubFerretDirectory = { ...DIRECTORY, lineage: async () => ({ readable: false }) };
+
+    // Assert
+    should(await subFerretRefusal(rejecting, 'child', 'raise agenda items')).startWith(FLAKY_REFUSAL);
+    should(await subFerretRefusal(unreadable, 'child', 'raise agenda items')).startWith(FLAKY_REFUSAL);
+  });
+
+  it('should refuse nothing when the single lineage read says the caller is a lead', async () => {
+    // Arrange
+    const lead: SubFerretDirectory = { ...DIRECTORY, lineage: async () => ({ readable: true, lead: undefined }) };
+
+    // Assert
+    should(await subFerretRefusal(lead, 'stranger', 'x')).be.null();
+  });
+});

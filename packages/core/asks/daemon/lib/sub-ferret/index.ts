@@ -22,7 +22,17 @@ export interface SubFerretDirectory {
    * raise from a ferret that cannot be placed must not land on the owner's agenda (docs/pack-mode.md).
    */
   readable?(sessionId: string): Promise<boolean>;
+  /**
+   * The lineage read ONCE: whether it could be read and, when it could, who started the session. Optional. Given, it
+   * is the only read {@link subFerretRefusal} makes, so "readable" and "the lead" cannot disagree between two lookups
+   * (a provider that answered the first and went away before the second would otherwise read as a lead). A rejection
+   * or `{ readable: false }` refuses.
+   */
+  lineage?(sessionId: string): Promise<Lineage>;
 }
+
+/** One read of a session's lineage: unreadable, or readable with the session that started it (absent for a lead). */
+export type Lineage = { readonly readable: false } | { readonly readable: true; readonly lead: string | undefined };
 
 /** No session is a sub-ferret: every caller is a lead. The default for a service built without a directory. */
 export const NO_SUB_FERRETS: SubFerretDirectory = {
@@ -62,9 +72,24 @@ export const subFerretRefusal = async (
   may: string = SUB_FERRET_MAY_ON_BOARD,
   claim?: string,
 ): Promise<string | null> => {
-  if (directory.readable !== undefined && !(await directory.readable(sessionId).catch(() => false)))
-    return `You can't ${doing} just now: who started you cannot be read, so the daemon cannot tell whether you are a lead. Try again shortly, or ask the owner.`;
-  const lead = await directory.leadOf(sessionId).catch(() => undefined);
+  const unreadable = `You can't ${doing} just now: who started you cannot be read, so the daemon cannot tell whether you are a lead. Try again shortly, or ask the owner.`;
+  let lead: string | undefined;
+  if (directory.lineage !== undefined) {
+    const read = await directory.lineage(sessionId).catch(() => ({ readable: false }) as const);
+    if (!read.readable) return unreadable;
+    lead = read.lead;
+  } else if (directory.readable !== undefined) {
+    if (!(await directory.readable(sessionId).catch(() => false))) return unreadable;
+    // Readable a moment ago is not readable now: the read that decides is itself fail-closed.
+    const found = await directory.leadOf(sessionId).then(
+      value => ({ value }),
+      () => undefined,
+    );
+    if (found === undefined) return unreadable;
+    lead = found.value;
+  } else {
+    lead = await directory.leadOf(sessionId).catch(() => undefined);
+  }
   if (lead === undefined) return null;
   const address = await directory.addressOf(lead).catch(() => lead);
   return subFerretRefusalMessage(doing, may, address, claim);

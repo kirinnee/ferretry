@@ -7,7 +7,7 @@ import type {
   AgendaSessionDirectory,
 } from '../lib/agenda/service.ts';
 import type { AgendaHomeResolver } from '../lib/agenda/home.ts';
-import type { SubFerretDirectory } from '../lib/sub-ferret/index.ts';
+import type { Lineage, SubFerretDirectory } from '../lib/sub-ferret/index.ts';
 
 /** Where one half of the context is read from: the `agenda.context:<key>` provider, or none while its plugin is off. */
 export type AgendaContextSource = (
@@ -44,6 +44,16 @@ export function agendaContext(source: AgendaContextSource, warn: (message: strin
     const found = source('board');
     return found === 'unavailable' ? undefined : (found as AgendaBoardContext);
   };
+  /** One lookup of who started `id`: its answer carries both whether it could be read and the lead. */
+  const lineageOf = async (id: string): Promise<Lineage> => {
+    const found = ferrets();
+    if (found === undefined) return { readable: false };
+    try {
+      return { readable: true, lead: await found.leadOf(id) };
+    } catch {
+      return { readable: false };
+    }
+  };
   const homes = new AgendaHomes(
     {
       get: async (id): Promise<HomeSession | undefined> => await ferrets()?.get(id),
@@ -62,16 +72,8 @@ export function agendaContext(source: AgendaContextSource, warn: (message: strin
     subFerrets: {
       leadOf: async id => await ferrets()?.leadOf(id),
       addressOf: async id => (await ferrets()?.addressOf(id)) ?? id,
-      readable: async id => {
-        const found = ferrets();
-        if (found === undefined) return false;
-        try {
-          await found.leadOf(id);
-          return true;
-        } catch {
-          return false;
-        }
-      },
+      readable: async id => (await lineageOf(id)).readable,
+      lineage: async id => await lineageOf(id),
     },
     focus: { focusOf: async id => (await board()?.focusOf(id)) ?? null },
     cards: {
