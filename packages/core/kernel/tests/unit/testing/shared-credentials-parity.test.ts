@@ -5,7 +5,7 @@
  * real port only: the test world's files have no inode that moves.)
  */
 import { afterEach, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { err } from '@ferretry/std';
 import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
@@ -57,6 +57,10 @@ interface Side {
   /** A plugin that is not Logins but declares everything Logins does. */
   readonly impostor: KernelPorts['roots'];
   stop(): Promise<void> | void;
+  /** The sign-in file replaced by another inode (a rename-over, a re-sign-in): what a mint no longer names. */
+  replaceCredential(): Promise<void>;
+  /** The receiver's ferret home `f1` planted as a symlink out of agent-homes. */
+  plantHomeLink(): Promise<void>;
 }
 
 const parents: string[] = [];
@@ -101,7 +105,16 @@ async function real(): Promise<Side> {
         onStop: fn => stops.push(fn),
       },
     );
+  const canonical = `${home}/state/logins/credentials/work/auth.json`;
   return {
+    replaceCredential: async () => {
+      await rename(canonical, `${canonical}.saved`);
+      await writeFile(canonical, '{"fake":"REPLACEMENT"}\n', { mode: 0o600 });
+    },
+    plantHomeLink: async () => {
+      await mkdir(`${parent}/outside`, { recursive: true });
+      await symlink(`${parent}/outside`, `${home}/state/codex/agent-homes/f1`);
+    },
     logins: port(loginsManifest),
     codex: port(codexManifest),
     skills: port(skillsManifest),
@@ -131,6 +144,15 @@ async function testing(): Promise<Side> {
     return found;
   };
   return {
+    replaceCredential: async () => {
+      const creds = get('logins').root('credentials');
+      const at = resolved(creds, 'work/auth.json');
+      await creds.remove(at);
+      await creds.writeText(at, '{"fake":"REPLACEMENT"}\n');
+    },
+    plantHomeLink: async () => {
+      host.putRootLink('agent-homes', 'f1');
+    },
     logins: get('logins'),
     codex: get('codex'),
     skills: get('skills'),
@@ -173,6 +195,45 @@ const placing =
 type Case = (side: Side) => Promise<unknown>;
 
 const CASES: Readonly<Record<string, Case>> = {
+  'changed: the sign-in file replaced by another inode after the mint': async side => {
+    const credential = await mint(side);
+    await side.replaceCredential();
+    return await outcome(placing(side, async () => credential));
+  },
+  'link_escape: the receiver’s home is itself a link': async side => {
+    await side.plantHomeLink();
+    return await outcome(placing(side, () => mint(side)));
+  },
+  'link_escape: every read and stat through the placed link': async side => {
+    const home = homeOf(side.codex);
+    await home.linkCredential(await mint(side), resolved(home, 'auth.json'));
+    const path = resolved(home, 'auth.json');
+    const answers: string[] = [];
+    for (const call of [
+      () => home.readText(path),
+      () => home.readBytes(path),
+      () => home.readBytes(path, 4),
+      () => home.readTail(path, 4),
+      () => home.stat(path),
+    ])
+      answers.push(
+        await call().then(
+          () => 'read',
+          (error: unknown) => (error instanceof RootError ? `root:${error.refusal}` : 'unexpected-error'),
+        ),
+      );
+    return answers;
+  },
+  'changed: a re-link with a credential whose file was replaced after it was placed': async side => {
+    const credential = await mint(side);
+    const home = homeOf(side.codex);
+    await home.linkCredential(credential, resolved(home, 'auth.json'));
+    await side.replaceCredential();
+    return await outcome(async () => {
+      await home.linkCredential(credential, resolved(home, 'auth.json'));
+      return home;
+    });
+  },
   'link: the receiver places the credential at <home>/auth.json': async side =>
     await outcome(placing(side, () => mint(side))),
   'not permitted: a plugin other than Logins mints': async side =>
@@ -236,6 +297,21 @@ for (const [name, run] of Object.entries(CASES))
     const onTesting = await run(await testing());
     expect(onTesting).toEqual(onReal);
   });
+
+test('the new cases each refuse, on the real roots', async () => {
+  expect(await CASES['changed: the sign-in file replaced by another inode after the mint']?.(await real())).toEqual({
+    refused: 'root:changed',
+  });
+  expect(await CASES['link_escape: the receiver’s home is itself a link']?.(await real())).toEqual({
+    refused: 'root:link_escape',
+  });
+  expect(await CASES['link_escape: every read and stat through the placed link']?.(await real())).toEqual(
+    Array.from({ length: 5 }, () => 'root:link_escape'),
+  );
+  expect(
+    await CASES['changed: a re-link with a credential whose file was replaced after it was placed']?.(await real()),
+  ).toEqual({ refused: 'root:changed' });
+});
 
 test('the cases cover each answer (the parity is not vacuous)', async () => {
   expect(await CASES['link: the receiver places the credential at <home>/auth.json']?.(await real())).toEqual({

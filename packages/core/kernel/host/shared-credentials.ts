@@ -39,6 +39,38 @@ export function credentialPlacement(scopedBase: string, file: string, to: string
   return posix.join(scopedBase, file) === to;
 }
 
+/** What a host knows of the sign-in file: its kind, its names, and the device and inode that name it whatever path reached it. */
+export interface CredentialFacts {
+  readonly kind: string;
+  readonly links: number;
+  readonly device: bigint;
+  readonly inode: bigint;
+}
+
+/** Why a sign-in file cannot be shared: not a regular file with exactly one name. One rule for both hosts (mint AND link time). */
+export function credentialFileRefusal(found: Pick<CredentialFacts, 'kind' | 'links'>): 'not_own' | undefined {
+  return found.kind === 'file' && found.links === 1 ? undefined : 'not_own';
+}
+
+/** Whether `now` is the very inode that was minted (same device and inode): a rename-over, a re-sign-in or a swap is not. */
+export function isMintedInode(
+  minted: Pick<CredentialFacts, 'device' | 'inode'>,
+  now: Pick<CredentialFacts, 'device' | 'inode'>,
+): boolean {
+  return minted.device === now.device && minted.inode === now.inode;
+}
+
+/**
+ * Whether a placed link, once made, is the link that was meant: the real path it resolves to is the minted file's real
+ * path, and the inode there is the minted one. A link that fails this is taken back and refused `changed`.
+ */
+export function placedLinkHolds(
+  minted: { readonly real: string } & Pick<CredentialFacts, 'device' | 'inode'>,
+  landed: { readonly real: string } & Pick<CredentialFacts, 'device' | 'inode'>,
+): boolean {
+  return minted.real === landed.real && isMintedInode(minted, landed);
+}
+
 /** One minted credential: what the host needs to reach it again, and whether its minter is still running. */
 interface Minted<Entry> {
   readonly entry: Entry;

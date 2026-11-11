@@ -25,7 +25,7 @@ import { err } from '@ferretry/std';
 import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
 import { defineState } from '../../../contract/define.ts';
 import type { RootHandle, RootName, RootsPort, SharedCredential } from '../../../contract/ports.ts';
-import { nodeFs } from '../../../host/adapters/node-fs.ts';
+import { type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
 import { ensureInternalRootBases, RootError, rootsPortFor } from '../../../host/roots.ts';
 import { SharedTreeError } from '../../../host/shared-trees.ts';
 
@@ -35,10 +35,20 @@ const PRIVATE = ['state/logins/credentials'];
 
 const parents: string[] = [];
 afterEach(async () => {
+  beforeSymlink = undefined;
   for (const parent of parents.splice(0)) await rm(parent, { recursive: true, force: true });
 });
 
-const fs = nodeFs(() => crypto.randomUUID());
+const baseFs = nodeFs(() => crypto.randomUUID());
+/** A hook run just before the kernel makes a symlink: where a test swaps the source after the kernel judged it. */
+let beforeSymlink: undefined | (() => Promise<void>);
+const fs: HostFs = {
+  ...baseFs,
+  symlink: async (target, path) => {
+    await beforeSymlink?.();
+    await baseFs.symlink(target, path);
+  },
+};
 
 interface PortOptions {
   readonly shareCredentials?: readonly string[];
@@ -70,6 +80,9 @@ async function world() {
   return {
     parent,
     home,
+    swapBeforeLink: (swap: () => Promise<void>) => {
+      beforeSymlink = swap;
+    },
     port,
     logins,
     codex,
@@ -370,5 +383,78 @@ describe('9: the fence is not widened', () => {
     const credential = await mint(w);
     const home = w.homeOf(w.codex);
     expect(await refusalOf(home.copyShared(credential as never, resolved(home, 'copied')))).toBe('not_shared');
+  });
+});
+
+describe('round 1 review: the source is re-judged by descriptor and the link is proved before it stays', () => {
+  test('R1: a symlink swapped in at the source after the check is refused changed, and nothing stays linked', async () => {
+    const w = await world();
+    const credential = await mint(w);
+    const home = w.homeOf(w.codex);
+    const unminted = `${w.parent}/unminted.json`;
+    await writeFile(unminted, '{"fake":"UNMINTED"}\n');
+    w.swapBeforeLink(async () => {
+      await rename(w.canonical, `${w.canonical}.saved`);
+      await symlink(unminted, w.canonical);
+    });
+    expect(await refusalOf(home.linkCredential(credential, resolved(home, 'auth.json')))).toBe('root:changed');
+    await expect(lstat(`${w.homePath('codex')}/auth.json`)).rejects.toThrow();
+  });
+
+  test('R1: the login folder swapped for a link to a look-alike folder after the check is refused changed', async () => {
+    const w = await world();
+    const credential = await mint(w);
+    const home = w.homeOf(w.codex);
+    const folder = `${w.home}/state/logins/credentials/work`;
+    await mkdir(`${w.parent}/lookalike`, { mode: 0o700 });
+    await writeFile(`${w.parent}/lookalike/auth.json`, '{"fake":"UNMINTED"}\n');
+    w.swapBeforeLink(async () => {
+      await rename(folder, `${folder}.saved`);
+      await symlink(`${w.parent}/lookalike`, folder);
+    });
+    expect(await refusalOf(home.linkCredential(credential, resolved(home, 'auth.json')))).toBe('root:changed');
+    await expect(lstat(`${w.homePath('codex')}/auth.json`)).rejects.toThrow();
+  });
+
+  test('R2: a replacement inode put at the name after the check is refused changed, and the link is taken back', async () => {
+    const w = await world();
+    const credential = await mint(w);
+    const home = w.homeOf(w.codex);
+    w.swapBeforeLink(async () => {
+      await rename(w.canonical, `${w.canonical}.saved`);
+      await writeFile(w.canonical, '{"fake":"REPLACEMENT"}\n', { mode: 0o600 });
+    });
+    expect(await refusalOf(home.linkCredential(credential, resolved(home, 'auth.json')))).toBe('root:changed');
+    await expect(lstat(`${w.homePath('codex')}/auth.json`)).rejects.toThrow();
+  });
+
+  test('R2: a link made, then its inode replaced: the same credential links nothing more (changed), and a fresh mint is the way on', async () => {
+    const w = await world();
+    const credential = await mint(w);
+    const home = w.homeOf(w.codex);
+    await home.linkCredential(credential, resolved(home, 'auth.json'));
+    await rename(w.canonical, `${w.canonical}.saved`);
+    await writeFile(w.canonical, '{"fake":"REPLACEMENT"}\n', { mode: 0o600 });
+    // The OS follows the name (declared GAP: a symlink cannot pin an inode); the kernel never re-vouches for it.
+    expect(await refusalOf(home.linkCredential(credential, resolved(home, 'auth.json')))).toBe('root:changed');
+    await home.unlink(resolved(home, 'auth.json'));
+    expect(await refusalOf(home.linkCredential(credential, resolved(home, 'auth.json')))).toBe('root:changed');
+    await home.linkCredential(await mint(w), resolved(home, 'auth.json'));
+    expect(await readFile(`${w.homePath('codex')}/auth.json`, 'utf8')).toBe('{"fake":"REPLACEMENT"}\n');
+  });
+
+  test('R4: reading or stat-ing through the placed link answers link_escape for every read', async () => {
+    const w = await world();
+    const home = w.homeOf(w.codex);
+    await home.linkCredential(await mint(w), resolved(home, 'auth.json'));
+    const path = resolved(home, 'auth.json');
+    for (const call of [
+      () => home.readText(path),
+      () => home.readBytes(path),
+      () => home.readBytes(path, 4),
+      () => home.readTail(path, 4),
+      () => home.stat(path),
+    ])
+      expect(await refusalOf(call())).toBe('root:link_escape');
   });
 });

@@ -24,9 +24,11 @@ import {
 } from '../host/root-rules.ts';
 import {
   credentialFileListed,
+  credentialFileRefusal,
   credentialPlacement,
   isCredentialFolder,
   isCredentialReceiver,
+  isMintedInode,
   SharedCredentials,
 } from '../host/shared-credentials.ts';
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
@@ -1396,6 +1398,13 @@ async function start(world: World): Promise<TestHost> {
     readonly inode: bigint;
     readonly reach: () => { readonly key: string; readonly inode: bigint };
   }>();
+  /** Gives a NEW file of the flat world its own stand-in inode (an existing one keeps its inode: a write in place). */
+  const writingFile = (path: string): void => {
+    if (!world.roots.has(path)) {
+      nextInode += 1n;
+      inodes.set(path, nextInode);
+    }
+  };
   const rootsFor = (manifest: Manifest): KernelPorts['roots'] => {
     // As the real host: every tree a plugin minted is revoked when the host stops it.
     const life = { live: true };
@@ -1442,7 +1451,8 @@ async function start(world: World): Promise<TestHost> {
         const reach = (): { readonly key: string; readonly inode: bigint } => {
           if (testLinks.has(key) || testLinks.has(`/credentials/${source.folder}`)) return refuseShared('not_own');
           if (!world.roots.has(key)) return refuseShared('absent');
-          if (testHardLinks.has(key)) return refuseShared('not_own');
+          const found = { kind: 'file', links: testHardLinks.has(key) ? 2 : 1 };
+          if (credentialFileRefusal(found) !== undefined) return refuseShared('not_own');
           return { key, inode: inodes.get(key) ?? 0n };
         };
         return sharedCredentials.mint(
@@ -1569,8 +1579,10 @@ async function start(world: World): Promise<TestHost> {
               return { ok: false, error: 'outside' };
             return { ok: true, value: `${prefix}/${relative}` as never };
           },
+          // As production: a link on the way (the leaf's too) is followed and judged — one that reaches outside this root is
+          // `link_escape`, so no plugin reads through a link into another root (the placed sign-in link included).
           readText: async path => {
-            const text = world.roots.get(path);
+            const text = world.roots.get(followLinks(path));
             if (text === undefined) throw new Error(`no such file ${path}`);
             return text;
           },
@@ -1591,12 +1603,14 @@ async function start(world: World): Promise<TestHost> {
             if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
             if (writeOptions?.replaceExisting === true && !world.roots.has(path))
               throw new Error(`no such file ${path}`);
+            writingFile(path);
             world.roots.set(path, text);
           },
           writeBytes: async (path, bytes, writeOptions) => {
             if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
             if (writeOptions?.replaceExisting === true && !world.roots.has(path))
               throw new Error(`no such file ${path}`);
+            writingFile(path);
             world.roots.set(path, new TextDecoder().decode(bytes));
           },
           publish: async (path, bytes, publishOptions) => {
@@ -1651,6 +1665,9 @@ async function start(world: World): Promise<TestHost> {
             if (prefix === undefined || scoped === undefined || scoped === '') throw new RootError('outside');
             const place = ownPath(to);
             if (!credentialPlacement(prefix, minted.file, place)) throw new RootError('outside');
+            // As production: no link on the way to the home (the root, the home or any folder between): `link_escape`.
+            const steps = prefix.split('/').map((_, at, all) => all.slice(0, at + 1).join('/'));
+            if (steps.some(step => step !== '' && testLinks.has(step))) throw new RootError('link_escape');
             const reached = (() => {
               try {
                 return minted.reach();
@@ -1658,7 +1675,8 @@ async function start(world: World): Promise<TestHost> {
                 throw new RootError('changed');
               }
             })();
-            if (reached.inode !== minted.inode) throw new RootError('changed');
+            if (!isMintedInode({ device: 1n, inode: minted.inode }, { device: 1n, inode: reached.inode }))
+              throw new RootError('changed');
             if (world.roots.has(place) || testLinks.has(place) || testFolderExists(place))
               throw new RootError('outside');
             testLinks.set(place, reached.key);
@@ -1715,7 +1733,10 @@ async function start(world: World): Promise<TestHost> {
                 links: 1,
               };
             }),
-          stat: async path => (world.roots.has(path) ? fileStat(path) : undefined),
+          stat: async path => {
+            const reached = followLinks(path);
+            return world.roots.has(reached) ? fileStat(reached) : undefined;
+          },
           // The real host's rules over the flat test world, with the same refusals: the LEAF IS NEVER FOLLOWED (the parent
           // is opened first, then the entry goes by its own name; a link goes as a link and its target stays), and
           // `onlyIfEmpty` is `rmdir` (one step: refused `not_empty` when anything is inside, never recursing).
@@ -1759,6 +1780,7 @@ async function start(world: World): Promise<TestHost> {
             }
             if (world.roots.has(place)) {
               world.roots.delete(place);
+              inodes.delete(place);
               testModes.delete(place);
               return;
             }

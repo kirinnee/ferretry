@@ -59,9 +59,12 @@ import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from './internal-
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
 import {
   credentialFileListed,
+  credentialFileRefusal,
   credentialPlacement,
   isCredentialFolder,
   isCredentialReceiver,
+  isMintedInode,
+  placedLinkHolds,
   SharedCredentials,
 } from './shared-credentials.ts';
 import {
@@ -1281,6 +1284,8 @@ interface ReachedCredential {
 /** One minted shared credential: how to reach its file again (the minter's own checks), and the name it keeps. */
 interface CredentialEntry {
   readonly file: string;
+  /** The real path the file had when minted: the link's text, and what a later look must still find. */
+  readonly real: string;
   readonly identity: FileIdentity;
   readonly reach: () => Promise<ReachedCredential>;
 }
@@ -2287,11 +2292,16 @@ function rootHandle(setup: HandleSetup): RootHandle {
       if (!credentialPlacement(absolute(root, 'a root'), minted.file, lexical.value)) return refuse('outside');
       // The file is judged again NOW, by the minter's own checks: it must be the very one minted (a rename-over, a
       // re-sign-in or a swapped folder is `changed`, and the next launch mints afresh).
-      const reached = await minted.reach().catch((error: unknown) => {
-        if (error instanceof SharedTreeError || error instanceof RootError) return refuse('changed');
-        throw error;
-      });
-      if (!same(minted.identity, reached.identity)) return refuse('changed');
+      const lookAgain = async (): Promise<ReachedCredential> => {
+        const found = await minted.reach().catch((error: unknown) => {
+          if (error instanceof SharedTreeError || error instanceof RootError) return refuse('changed');
+          throw error;
+        });
+        // The very inode minted, at the very real path minted: the link's text is that path, nothing the caller names.
+        if (!isMintedInode(minted.identity, found.identity) || found.real !== minted.real) return refuse('changed');
+        return found;
+      };
+      const reached = await lookAgain();
       const placed = await realParent(to, true);
       // No link on the way: the folder `to` names, as this root names it, is the very folder reached.
       if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
@@ -2304,6 +2314,30 @@ function rootHandle(setup: HandleSetup): RootHandle {
         await refuseHeldName(placed.scope, join(made.real, basename(placed.full)));
         if ((await fs.identity(leafAt)) !== undefined) refuse('outside');
         await fs.symlink(reached.real, leafAt).catch(() => refuse('changed'));
+        // PROVED before it stays: the source is judged again by descriptor (no link on the way, the minted inode) and the
+        // link, followed, must land on that same real path. Anything else — a swap between the first look and the
+        // `symlink` call — takes the link back and refuses; no link that reaches an unminted file is ever left.
+        const held = await (async () => {
+          try {
+            const after = await lookAgain();
+            const landed = await fs.realpath(leafAt);
+            const there = await fs.identity(landed);
+            return (
+              there !== undefined &&
+              placedLinkHolds(
+                { real: minted.real, ...minted.identity },
+                { real: landed, device: there.device, inode: there.inode },
+              ) &&
+              isMintedInode(minted.identity, after.identity)
+            );
+          } catch {
+            return false;
+          }
+        })();
+        if (!held) {
+          await fs.unlink(leafAt).catch(() => undefined);
+          refuse('changed');
+        }
       } finally {
         await made.folder.close();
       }
@@ -2760,18 +2794,20 @@ export function rootsPortFor(
         if (!lexical.ok) return refuseShared('not_own');
         if (relative(checked.scope.base.real, checked.full) !== relative(absolute(rootBase, 'a root'), lexical.value))
           return refuseShared('not_own');
-        const found = await checked.scope.fs.identity(checked.full);
-        if (found === undefined) return refuseShared('absent');
-        if (found.kind !== 'file' || found.links !== 1) return refuseShared('not_own');
-        const problem = await fileProblem(checked.scope, checked.full, found);
-        if (problem !== undefined) return refuse(problem);
+        const named = await checked.scope.fs.identity(checked.full);
+        if (named === undefined) return refuseShared('absent');
+        if (credentialFileRefusal(named) !== undefined) return refuseShared('not_own');
+        // Judged by DESCRIPTOR: the file is opened (`O_NOFOLLOW`, from its folder's descriptor, the folder itself walked
+        // down from the root without following a link) and the identity is the open descriptor's, not a path's.
+        const found = await withCheckedFile(checked.scope, checked.full, async file => file.identity);
+        if (credentialFileRefusal(found) !== undefined) return refuseShared('not_own');
         return { real: checked.full, identity: found };
       };
       const reached = await reach();
       return CREDENTIALS.mint(
         source.file,
         source.receiver,
-        { file: source.file, identity: reached.identity, reach },
+        { file: source.file, real: reached.real, identity: reached.identity, reach },
         life,
       );
     },
