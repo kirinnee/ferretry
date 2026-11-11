@@ -835,7 +835,15 @@ agenda items in a sub-ferret's session with `-s <session>`, proven by lineage.
 whose credential is in its environment, and nothing else: it talks only to the daemon on this machine. The
 agent routes get the credential on their own header; its other calls (`search_work`) present it as the
 bearer, exactly as a ferret's `fy` does, and use the admin token only against a daemon that does not take it
-([secrets.md](secrets.md#what-a-ferrets-fy-presents)). The fleet's fixed layer adds it to every
+([secrets.md](secrets.md#what-a-ferrets-fy-presents)). **It is a slim process.** Every runtime keeps one for the life
+of its pane, so a machine with thirty ferrets runs thirty; loading the whole command registry made each about 170 MiB.
+Every `fy mcp serve` is routed by `bin/fy.ts` to `bin/mcp-serve.ts` (only `--help` and a refused option are answered by
+the full program, since they never connect). It acts **only as the ferret whose pane credential it holds**
+(`FY_SESSION_TOKEN`, or its documented alias `FY_SESSION_BOARD_CAPABILITY`, starting `fys_`): it never reads `FY_TOKEN`
+or the admin token file, refuses `--as-owner`, and a missing, empty or unprefixed pane credential ends it at once with a
+sentence and sends nothing — no fallback to the owner (`tests/sit/mcp-serve-credential.sit.test.ts`). It loads the ferret's connection, the guard with the tool facts and contract hashes the
+generator wrote into `src/generated/slim.ts`, and the serve module — no plugin's CLI half and no manifest. It is
+about 46–48 MiB idle after `initialize` (budget 60, asserted by `tests/sit/mcp-serve-memory.sit.test.ts`); the bun runtime alone is about 16. Tools, guard and errors are the full program's. Every other command (`mcp ls`, `mcp check`, …) takes the full path, `bin/program.ts`. The fleet's fixed layer adds it to every
 agent runtime as a locked entry, with a short built-in instruction (the tools, the rules for changing
 Ferretry's own settings, then how to notify the owner and, in agenda mode, raise agenda items) in the system prompt:
 

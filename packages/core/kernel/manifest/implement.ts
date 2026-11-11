@@ -399,6 +399,11 @@ export interface PluginClient {
     params: Readonly<Record<string, string>>,
     init?: PluginConditionalInit,
   ): Promise<PluginConditionalAnswer>;
+  /**
+   * Runs a declared agent tool (`POST /v1/agent/tools`) as the caller this process is, guarded like `call`. The answer
+   * is the tool's kernel `ToolResult` (text already masked). Optional until every shell fills it in.
+   */
+  tool?(name: string, input?: unknown): Promise<unknown>;
 }
 
 /** A UI component, framework-neutral here; the app shell narrows it to React. */
@@ -482,6 +487,11 @@ export interface CliContext<M extends Manifest> {
    * content, so a poll (`fy wait --until-marker`) costs one probe, not a whole-file read.
    */
   exists?(path: string): Promise<boolean>;
+  /**
+   * Standard input as it arrives, chunk by chunk (a server that answers each line as it comes, like `mcp serve`):
+   * `readText('-')` waits for the end of input, this does not. Optional until the fy shell fills it in.
+   */
+  stdin?(): AsyncIterable<Uint8Array>;
   /** Own declared opaque defs only; private directory operations and stat require named trees. Optional until fy supplies it. */
   readonly ownState?: Pick<
     StatePort,
