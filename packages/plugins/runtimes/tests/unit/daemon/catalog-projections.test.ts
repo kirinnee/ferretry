@@ -1087,6 +1087,28 @@ describe('stacks nothing applies to', () => {
     should(claude?.available).eql({ available: false, reason: 'Nothing here applies on Claude Code.' });
   });
 
+  it('should apply a model set of third-party ids on every tool, skipping nothing (#1586)', () => {
+    // Arrange — llama-4 is neither tool's own id, so it is served through whichever CLI the login drives
+    const base = documentOf();
+    const model = modelOf({
+      components: {
+        ...base.components,
+        modelSets: { ...base.components?.modelSets, junk: { models: ['llama-4'], default: 'llama-4' } },
+      },
+      profiles: { ...base.profiles, junk: { layers: ['modelSets/junk'] } },
+    });
+
+    // Act
+    const actual = profileCatalog(model, FACTS).profiles.find(entry => entry.name === 'junk');
+    const stackOf = (harness: 'claude-code' | 'codex') => actual?.harnesses.find(entry => entry.harness === harness);
+
+    // Assert
+    should(stackOf('claude-code')?.available).eql({ available: true });
+    should(stackOf('codex')?.available).eql({ available: true });
+    should(stackOf('claude-code')?.skipped).eql([]);
+    should(stackOf('codex')?.skipped).eql([]);
+  });
+
   it('should show an agent runtime on a profile that cannot be read with no overrides', () => {
     // Arrange — the schema refuses a dangling base; the projection stays total
     const model = modelOf();

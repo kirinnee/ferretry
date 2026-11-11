@@ -45,6 +45,7 @@ import type {
   HarnessRuntimeCatalogs,
   HarnessRuntimeSwitchRequest,
 } from '../../lib/session/peers/harness.ts';
+import { plannedModelSource } from '../../lib/session/launch/current.ts';
 import type { TransferTargetChoice } from '../../lib/transfer/types.ts';
 
 /**
@@ -202,6 +203,8 @@ export class SessionForkTargetResolver implements SessionForkTargetResolverPort 
       model: planned.plan.model,
       effort: command.effort,
       contextWindow: planned.plan.contextWindow,
+      // Frozen with the model: the binder re-plans the resolved model, which always reads as asked for (#1586).
+      modelSource: plannedModelSource(planned.plan.modelSource),
     };
   }
 

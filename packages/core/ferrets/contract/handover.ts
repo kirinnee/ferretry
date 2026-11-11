@@ -119,6 +119,12 @@ export const SessionHandoverResolvedAccountSchema = z.strictObject({
   model: z.string().min(1).nullable(),
   effort: z.string().min(1).nullable(),
   contextWindow: PositiveIntegerSchema,
+  /**
+   * Whether the person CHOSE `model` or it is the account's default, frozen with it. A transfer's
+   * binder records this on the new session, so a later move can tell a pick from a default; it is never
+   * inferred from re-planning. Absent on a plan written before this field, which records nothing.
+   */
+  modelSource: z.enum(['requested', 'account-default']).optional(),
 });
 export type SessionHandoverResolvedAccount = z.infer<typeof SessionHandoverResolvedAccountSchema>;
 
@@ -416,6 +422,12 @@ export const SessionHandoverReceiptSchema = z
         'resolvedTarget',
         'replacement',
         'effort',
+      ]);
+    if (replacement.modelSource !== target.modelSource)
+      add('resolvedTarget.replacement.modelSource must agree with plan.target.modelSource', [
+        'resolvedTarget',
+        'replacement',
+        'modelSource',
       ]);
     if (replacement.contextWindow !== target.contextWindow) {
       add('resolvedTarget.replacement.contextWindow must agree with plan.target.contextWindow', [

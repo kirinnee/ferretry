@@ -61,10 +61,11 @@ import {
 } from '../lib/runtime/mounts/session-move.ts';
 import { sessionMoveContribution } from '../lib/runtime/mounts/session-move.ts';
 import {
-  buildLaunchArgv,
   currentLaunchCompactAt,
   currentLaunchEffort,
   movedModel,
+  type LaunchOverlayFiles,
+  prepareLaunchArgv,
   movedModelSource,
   type SessionLaunchService,
   transcriptLaunchArguments,
@@ -162,6 +163,7 @@ export interface SessionMoveNeeds {
   readonly locateHarness: SessionMoveParts['locateHarness'];
   readonly readableHandoffs: SessionMoveParts['readableHandoffs'];
   readonly fixedSettings: SessionMoveParts['fixedSettings'];
+  readonly overlayFiles?: SessionMoveParts['overlayFiles'];
   /** Terminals: the registered pane's identity. */
   readonly paneIdentity: SessionMoveParts['paneIdentity'];
   /** The harness plugins: the reasoning effort a harness last persisted in a home. */
@@ -234,6 +236,11 @@ interface SessionMoveParts {
   readonly readableHandoffs: (id: SessionId) => readonly string[];
   /** The text of the fixed `--settings` file a Claude wrapper launches under, which a compaction trigger replaces. */
   readonly fixedSettings: (executable: string, harness: HarnessKind) => Promise<string | undefined>;
+  /**
+   * Where a login that pins its environment gets the per-launch settings file a compaction trigger is named by
+   * (#1587): that overlay carries a credential, which may never ride an argv. Absent refuses such a move.
+   */
+  readonly overlayFiles?: LaunchOverlayFiles | undefined;
   /** The registered pane's identity (pane id, pid, process start), or nothing when none can be read. */
   readonly paneIdentity: (id: SessionId) => Promise<string | undefined>;
   readonly persistedReasoningEffort: PersistedReasoningEffort;
@@ -750,22 +757,25 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
         'unavailable',
         `${account.agent}'s fixed settings could not be read, so its compaction trigger cannot be applied`,
       );
-    const command = ((): readonly string[] => {
+    const command = await (async (): Promise<readonly string[]> => {
       try {
         return authorizeSessionCommand(
           executable,
-          buildLaunchArgv({
-            harness: account.kind,
-            executable,
-            remoteControl: config.remoteControl ? plan.extraArgs : [],
-            transcript: relaunchConversation.kind === 'unresumable' ? [] : relaunchConversation.launchArguments,
-            readableFolders: parts.readableHandoffs(id),
-            model: plan.model,
-            ...(effort === undefined ? {} : { effort }),
-            ...(compactAt === undefined ? {} : { compactAt, fixedSettings }),
-            // The owner's extra flags are the source CLI's; the other harness would refuse them.
-            harnessFlags: converting ? [] : config.harnessFlags,
-          }),
+          await prepareLaunchArgv(
+            {
+              harness: account.kind,
+              executable,
+              remoteControl: config.remoteControl ? plan.extraArgs : [],
+              transcript: relaunchConversation.kind === 'unresumable' ? [] : relaunchConversation.launchArguments,
+              readableFolders: parts.readableHandoffs(id),
+              model: plan.model,
+              ...(effort === undefined ? {} : { effort }),
+              ...(compactAt === undefined ? {} : { compactAt, fixedSettings }),
+              // The owner's extra flags are the source CLI's; the other harness would refuse them.
+              harnessFlags: converting ? [] : config.harnessFlags,
+            },
+            parts.overlayFiles,
+          ),
           defaultSessionLifecycleSettings,
         );
       } catch (error) {
@@ -1176,6 +1186,7 @@ export const sessionMoveModule: SessionMoveModule = {
       resolveDirectory: async (id, cwd) => await resolveInWorkFolder(roots, id, cwd),
       readableHandoffs: needs.readableHandoffs,
       fixedSettings: needs.fixedSettings,
+      overlayFiles: needs.overlayFiles,
       paneIdentity: needs.paneIdentity,
       persistedReasoningEffort: needs.persistedReasoningEffort,
       contextWindowForSession: needs.contextWindowForSession,

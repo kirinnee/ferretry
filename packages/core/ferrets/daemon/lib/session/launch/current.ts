@@ -23,6 +23,11 @@ import { resolveCompactAt } from '../peers/compact-at.ts';
 /** Who chose a session's launch model: the person, or the account's default. */
 export type LaunchModelSource = NonNullable<SessionConfig['launchModelSource']>;
 
+/** What the planner reports as a model's source, narrowed to what a session document records. */
+export function plannedModelSource(source: string): LaunchModelSource {
+  return source === 'requested' ? 'requested' : 'account-default';
+}
+
 /** A `[1m]`-style selector suffix, which a harness drops from the model it reports. */
 const SELECTOR = /\[[^\]]*\]$/u;
 

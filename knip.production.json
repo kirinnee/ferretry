@@ -66,6 +66,8 @@
         "daemon/lib/session/live/compaction.ts",
         "daemon/adapters/session/live/index.ts",
         "daemon/adapters/session/live/file-compaction-history.ts",
+        "daemon/adapters/session/launch/file-launch-overlay.ts",
+        "daemon/adapters/session/launch/live-launch-commands.ts",
         "daemon/adapters/session/archive/index.ts",
         "daemon/lib/session/directory/session-directory.ts",
         "daemon/adapters/session/session-address-candidates.ts",
@@ -143,9 +145,11 @@
       "ignore": [
         "daemon/adapters/ports.ts",
         "daemon/adapters/runtime-ids-file.ts",
+        "daemon/adapters/folder-claude-settings-file.ts",
         "daemon/adapters/runtime-session-records.ts",
         "daemon/adapters/setup-files.ts",
         "daemon/lib/env-profiles.ts",
+        "daemon/lib/folder-settings.ts",
         "daemon/lib/harness-env.ts",
         "daemon/lib/harness.ts"
       ]

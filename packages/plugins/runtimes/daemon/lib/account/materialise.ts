@@ -141,11 +141,41 @@ export function assertNoSecretInOverlay(overlay: SettingsObject): void {
 }
 
 /**
+ * The write of `fixed.json` (#1587). THE SECRET RULE lives here as a throw: a value that names a secret OR another
+ * environment variable never reaches the file, because the file is read back into a fast or compact start. The filter
+ * in {@link loginEnvironmentPins} should have kept such a key out; reaching here is a bug, and silently dropping it
+ * would hide one. It names the KEY, never a value and never a secret's name.
+ */
+export function fixedSettingsOperation(state: string, overlay: SettingsObject): FleetWriteOperation {
+  const { env } = overlay;
+  const unsafeKeys =
+    typeof env === 'object' && env !== null && !Array.isArray(env)
+      ? Object.entries(env).flatMap(([key, value]) =>
+          typeof value === 'string' && (namesSecret(value) || envReferenceName(value) !== undefined) ? [key] : [],
+        )
+      : [];
+  if (unsafeKeys.length > 0) {
+    throw new FleetMaterialiseError([
+      {
+        message: `${FIXED_SETTINGS_FILE} may not hold a value that names a secret or another variable (${unsafeKeys.join(', ')}): the file is shown in argv`,
+      },
+    ]);
+  }
+  assertNoSecretInOverlay(overlay);
+  return {
+    kind: 'file',
+    path: joinPath(state, FIXED_SETTINGS_FILE),
+    content: serializeSettings(overlay, 'json'),
+    mode: PRIVATE_FILE_MODE,
+  };
+}
+
+/**
  * The login's non-secret environment, as the `env` of the `--settings` overlay of a Claude runtime. Claude
  * Code lets a `--settings` value beat the same key in a repo's `.claude/settings.local.json`, while a
  * variable only in the process environment loses to it — so a repo that blanks ANTHROPIC_BASE_URL would
- * start the runtime signed out. Only an environment login has variables of its own; the profile's
- * environment and Ferretry's own variables stay process environment.
+ * start the runtime signed out. The login's own variables (an environment login) and the catalog's pins (any login) are pinned;
+ * a variable only the profile sets, and Ferretry's own, stay process environment.
  */
 function loginEnvironmentPins(
   harness: HarnessKind,
@@ -154,16 +184,24 @@ function loginEnvironmentPins(
   finalEnv: Readonly<Record<string, string>>,
   documentEnv: Readonly<Record<string, unknown>>,
 ): Record<string, string> {
-  if (harness !== 'claude' || store.store !== 'environment') return {};
-  const pins = pinnableLoginEnvironment({ ...credentialLaunchEnvironment(store), ...derivedEnv });
-  // `--settings` beats the process environment, so a pin is only safe where the process environment ends up
-  // with the same value: a later layer (profile, MCP forward, Ferretry's own) must keep its precedence.
+  if (harness !== 'claude') return {};
+  // The KEYS the login (environment logins only) and the catalog (model pins, `claude.env`: any login) name, at the
+  // value the launch will actually run with: a profile's same-named variable wins here as it does in the process
+  // environment, so `--settings` cannot hand the login's value back over it (#1587). Only a literal is pinned; a
+  // key whose final value is a reference or a secret stays process environment (and is published, see
+  // `referencedEnv`), and `pinnableLoginEnvironment` is the filter for both.
+  const named = Object.keys({
+    ...(store.store === 'environment' ? credentialLaunchEnvironment(store) : {}),
+    ...derivedEnv,
+  });
+  const atFinalValue = Object.fromEntries(
+    named.flatMap(variable => (variable in finalEnv ? [[variable, finalEnv[variable] as string]] : [])),
+  );
   // The merged settings document's own `env` goes to the home's settings.json, not the process environment, and
   // `--settings` beats that file, so a key the document sets is never pinned either.
   return Object.fromEntries(
-    Object.entries(pins).filter(
-      ([variable, value]) =>
-        !variable.startsWith('FY_') && finalEnv[variable] === value && !Object.hasOwn(documentEnv, variable),
+    Object.entries(pinnableLoginEnvironment(atFinalValue)).filter(
+      ([variable]) => !variable.startsWith('FY_') && !Object.hasOwn(documentEnv, variable),
     ),
   );
 }
@@ -278,6 +316,8 @@ interface PlannedRuntime {
   /** The runtime's own `compactAt`, else its profile's. Absent is `auto`. */
   readonly compactAt?: z.infer<typeof CompactAtSchema>;
   readonly secretEnv: Readonly<Record<string, string>>;
+  /** The names of the variables that are a bare `$OTHER` reference, resolved at exec and never pinned. */
+  readonly referencedEnv: readonly string[];
   /** Why it cannot launch, when it cannot. */
   readonly blocked?: string;
 }
@@ -594,6 +634,10 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       secretEnv: sorted(
         Object.fromEntries(Object.entries(env).filter(([, value]) => secretReferencesIn(value).length > 0)),
       ),
+      referencedEnv: Object.entries(env)
+        .filter(([, value]) => secretReferencesIn(value).length === 0 && envReferenceName(value) !== undefined)
+        .map(([variable]) => variable)
+        .sort(),
       ...(blocked === undefined ? {} : { blocked }),
     });
   }
@@ -633,6 +677,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         available: reason === undefined,
         unavailableReason: reason ?? null,
         secretEnv: runtime.secretEnv,
+        ...(runtime.referencedEnv.length === 0 ? {} : { referencedEnv: runtime.referencedEnv }),
       };
     }),
     runtimes: planned.map(runtime => ({
@@ -742,14 +787,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       replaceKeys: Object.keys(input.claudeJson),
     });
   }
-  if (input.overlay !== undefined) {
-    operations.push({
-      kind: 'file',
-      path: joinPath(state, FIXED_SETTINGS_FILE),
-      content: serializeSettings(input.overlay, 'json'),
-      mode: PRIVATE_FILE_MODE,
-    });
-  }
+  if (input.overlay !== undefined) operations.push(fixedSettingsOperation(state, input.overlay));
   if (input.codexCatalog !== undefined) {
     operations.push({
       kind: 'file',
