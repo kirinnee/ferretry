@@ -42,7 +42,7 @@ describe('fy layout and fy theme', () => {
   test('layout show prints the layout and theme in words, or JSON with --json', async () => {
     const { run, out } = harness({ 'GET /v1/layouts/current': current });
     expect(await run('layout show')).toBe(0);
-    expect(out.join('\n')).toContain('nav      left, list: agenda, board, insights, settings');
+    expect(out.join('\n')).toContain('nav      left, list: ferrets, agenda, board, insights, settings');
     expect(out.join('\n')).toContain('theme    default');
     out.length = 0;
     await run('layout show', [], { json: true });

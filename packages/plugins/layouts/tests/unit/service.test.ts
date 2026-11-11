@@ -35,6 +35,18 @@ describe('layouts service', () => {
     expect(service.current().layout.nav.items).toEqual(DEFAULT_LAYOUT.nav.items);
   });
 
+  test('only the built-in defaults moved to the ferret list: a saved layout or override naming side.holds panels keeps it', () => {
+    expect(DEFAULT_LAYOUT.side.holds).toBe('ferrets');
+    const mine = { ...DEFAULT_LAYOUT, id: 'mine', side: { show: 'wide-only', holds: 'panels' } };
+    const saved = make({ 'layouts/mine': mine, 'layout.yaml': { layout: 'mine' } });
+    expect(saved.service.current().layout.side.holds).toBe('panels');
+    expect(saved.tree.calls).toEqual([]);
+    expect(saved.tree.documents.get('layouts/mine')).toEqual(mine);
+    const overridden = make({ 'layout.yaml': { layout: 'default', overrides: { side: { holds: 'panels' } } } });
+    expect(overridden.service.current().layout.side.holds).toBe('panels');
+    expect(overridden.tree.calls).toEqual([]);
+  });
+
   test('a refused set writes nothing', async () => {
     const { service, tree } = make();
     const result = await service.set([{ path: 'nav.side', value: 'diagonal' }]);
