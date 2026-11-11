@@ -22,4 +22,4 @@ export const callFailure = (failure: unknown): CallFailure | null =>
  * The client a screen that re-reads on a change talks through: `call`, and `subscribe` when the shell hands one. A
  * screen under test is handed `call` alone and simply hears no events.
  */
-export type LiveFerretsClient = FerretsClient & Partial<Pick<PluginClient, 'subscribe'>>;
+export type LiveFerretsClient = FerretsClient & Partial<Pick<PluginClient, 'subscribe' | 'conditional'>>;
