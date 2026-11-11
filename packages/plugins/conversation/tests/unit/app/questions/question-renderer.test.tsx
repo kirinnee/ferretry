@@ -38,6 +38,20 @@ describe('the ask:question renderer', () => {
     });
   });
 
+  test('a tabbed form reads as a form of every question it asked, in order', () => {
+    const tabbed: Question = {
+      ...QUESTION,
+      more: [{ header: 'Region', text: 'Which region?', options: [{ label: 'eu' }, { label: 'us' }], multiple: true }],
+    };
+    expect(pendingQuestionOf(tabbed)).toEqual({
+      toolUseId: 'toolu_1',
+      questions: [
+        { question: 'Ship it now?', header: 'Deploy', options: QUESTION.options, multiSelect: false },
+        { question: 'Which region?', header: 'Region', options: [{ label: 'eu' }, { label: 'us' }], multiSelect: true },
+      ],
+    });
+  });
+
   test('with no ferret it is the read-only card: an answer must name its ferret', async () => {
     view = await mount(withClient(fakeClient(), <QuestionRenderer value={QUESTION} />));
     expect(view.container.querySelector('.fy-question-card')).not.toBeNull();

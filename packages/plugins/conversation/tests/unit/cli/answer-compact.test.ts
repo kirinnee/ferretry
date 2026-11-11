@@ -41,8 +41,17 @@ describe('planAnswer', () => {
 
   it('should refuse an answer that chose nothing, more responses than questions, and a ferret asking nothing', () => {
     should(() => planAnswer({ labels: [' '] }, asked())).throw(/provide labels/);
-    should(() => planAnswer({ responses: ['a', 'b'] }, asked())).throw(/exactly one --response/);
+    should(() => planAnswer({ responses: ['a', 'b'] }, asked())).throw(/asked 1 question\(s\); pass exactly one/);
     should(() => planAnswer({ labels: ['yes'] }, undefined)).throw(/no pending question/);
+  });
+
+  it('takes one response per question of a tabbed form, and no more', () => {
+    const tabbed = {
+      ...asked('t'),
+      more: [{ text: 'Second?', options: [{ label: 'x' }], multiple: false }],
+    };
+    should(planAnswer({ responses: ['a', 'b'] }, tabbed).responses).deepEqual(['a', 'b']);
+    should(() => planAnswer({ responses: ['a', 'b', 'c'] }, tabbed)).throw(/asked 2 question\(s\)/);
   });
 });
 

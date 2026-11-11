@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type { FerretHarness, FerretId, FormKey, RunnerFormCapture } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
@@ -13,6 +15,8 @@ import {
   QUESTION_STATE,
 } from '../../../contract/index.ts';
 import daemon from '../../../daemon/index.ts';
+import { writeAskedQuestion } from '../../../daemon/questions/adapters/index.ts';
+import { KeyedSerialExecutor } from '../../../daemon/seams/keyed-serial-executor.ts';
 import { memoryStatePort } from '../../support/state.ts';
 import { wardenStandIn } from '../../support/warden-plugin.ts';
 
@@ -60,8 +64,21 @@ class FormFerrets extends FakeFerrets {
   answered = false;
   /** A pane that shows the form and ignores Enter, so the answer never visibly takes. */
   stuck = false;
+  /**
+   * Whole recorded panes, replayed one per capture (the last one stays): for a tabbed form, whose redraws are a recording
+   * rather than something this class can compute. Keys are only noted. Left out, the pane draws the single form above.
+   */
+  replay: readonly { readonly visible: string; readonly history: string }[] | undefined;
+  private replayed = 0;
 
   private frame(): RunnerFormCapture {
+    if (this.replay !== undefined) {
+      const shown = this.replay[Math.min(this.replayed, this.replay.length - 1)];
+      this.replayed += 1;
+      if (shown === undefined) throw new Error('the replay holds no pane');
+      const activeWork = /esc to interrupt|\(\d+s\s*[·•]/iu.test(shown.visible);
+      return { alive: true, dead: false, promptReady: false, activeWork, ...shown };
+    }
     const visible = this.answered ? '> ' : claude(this.asks, this.rows, this.cursor);
     return { alive: true, dead: false, promptReady: this.answered, activeWork: false, visible, history: visible };
   }
@@ -451,6 +468,94 @@ describe('a drive stays bound to its own question', () => {
       value: { toolUseId: 'toolu_1' },
     });
     expect(await w.state.read(QUESTION_STATE, 'f1')).toMatchObject({ ok: true, value: { toolUseId: 'toolu_2' } });
+    await w.host.stop();
+  });
+});
+
+/**
+ * A tabbed form: several questions in ONE tool call (finding 2 of the structured-questions review). The hook's payload is
+ * stored whole, so the form is shown and guarded, and it is answered tab by tab through the recorded Claude Code 2.1.281
+ * panes of a four-question form, then cleared.
+ */
+describe('a tabbed form of several questions', () => {
+  const TABS = join(import.meta.dir, '../../fixtures/question-forms/claude-2.1.281-tabs4');
+  const recorded = (run: string) =>
+    readdirSync(join(TABS, run))
+      .filter(file => file.endsWith('.txt'))
+      .sort()
+      .map(file => {
+        const history = readFileSync(join(TABS, run, file), 'utf8');
+        return { visible: `${history.split('\n').slice(0, -1).slice(-24).join('\n')}\n`, history };
+      });
+  const pending = JSON.parse(readFileSync(join(TABS, 'pending.json'), 'utf8')) as {
+    toolUseId: string;
+    questions: unknown[];
+  };
+  const hookPayload = JSON.stringify({
+    hook_event_name: 'PreToolUse',
+    tool_name: 'AskUserQuestion',
+    tool_use_id: pending.toolUseId,
+    transcript_path: question.transcript,
+    tool_input: { questions: pending.questions },
+  });
+
+  test('is stored whole by the writer, then answered tab by tab and cleared', async () => {
+    const w = await world(f => {
+      f.replay = recorded('fresh');
+    });
+    const stored = await writeAskedQuestion(
+      w.state,
+      new KeyedSerialExecutor(),
+      'f1',
+      hookPayload,
+      ASKED_AT,
+      question.transcript,
+    );
+    expect(stored?.more).toHaveLength(pending.questions.length - 1);
+
+    const response = await w.answer({
+      toolUseId: pending.toolUseId,
+      labels: [],
+      answers: [
+        { kind: 'selection', labels: ['Lunch only'] },
+        { kind: 'selection', labels: ['Decline'] },
+        { kind: 'other', text: 'Only if it is on Zoom' },
+        { kind: 'selection', labels: ['Maybe'] },
+      ],
+    });
+
+    expect(response.status).toBe(200);
+    const keys: FormKey[] = [
+      ...(['Down', 'Down', 'Enter'] as const),
+      ...(['Down', 'Enter'] as const),
+      ...(['Down', 'Down', 'Enter'] as const),
+      ...(['Down', 'Down', 'Enter'] as const),
+      'Enter',
+    ];
+    expect(w.ferrets.keys).toEqual(keys);
+    expect(w.ferrets.pasted).toEqual(['Only if it is on Zoom']);
+    expect(await w.state.read(QUESTION_STATE, 'f1')).toMatchObject({ ok: true, value: undefined });
+    expect(await w.state.read(QUESTION_ANSWERED_STATE, 'f1')).toMatchObject({
+      ok: true,
+      value: { toolUseId: pending.toolUseId },
+    });
+    await w.host.stop();
+  });
+
+  test('a request that answers fewer questions than the form holds is refused before any key', async () => {
+    const w = await world(f => {
+      f.replay = recorded('fresh');
+    });
+    await writeAskedQuestion(w.state, new KeyedSerialExecutor(), 'f1', hookPayload, ASKED_AT, question.transcript);
+
+    const response = await w.answer({
+      toolUseId: pending.toolUseId,
+      labels: [],
+      answers: [{ kind: 'selection', labels: ['Lunch only'] }],
+    });
+
+    expect(response.status).toBe(409);
+    expect(w.ferrets.keys).toEqual([]);
     await w.host.stop();
   });
 });

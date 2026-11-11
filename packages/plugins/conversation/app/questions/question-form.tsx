@@ -19,8 +19,9 @@ import {
 import './questions.css';
 
 /**
- * The form's questions. The daemon keeps one question per ferret (`QuestionSchema`); the form still steps through a
- * list, as today, so one tool call that asked several reads the same way.
+ * The form's questions. The daemon keeps one question (and its tool call) per ferret (`QuestionSchema`: the first
+ * question and the ones after it); the form steps through the list, so one tool call that asked several reads the same
+ * way.
  */
 export interface PendingQuestion {
   readonly toolUseId: string;
@@ -42,6 +43,12 @@ export const pendingQuestionOf = (question: Question): PendingQuestion => ({
       options: question.options,
       multiSelect: question.multiple,
     },
+    ...(question.more ?? []).map(more => ({
+      question: more.text,
+      ...(more.header === undefined ? {} : { header: more.header }),
+      options: more.options,
+      multiSelect: more.multiple,
+    })),
   ],
 });
 

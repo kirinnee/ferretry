@@ -22,11 +22,11 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
 /** Reads the renderer's value; `undefined` when it holds no question this plugin wrote. */
 export const questionAskValue = (value: unknown): QuestionAskValue | undefined => {
   const outer = record(value);
-  const candidates = [outer?.['ref'], record(outer?.['source'])?.['ref'], outer?.['question'], value];
+  const candidates = [outer?.ref, record(outer?.source)?.ref, outer?.question, value];
   for (const candidate of candidates) {
     const parsed = QuestionSchema.safeParse(candidate);
     if (!parsed.success) continue;
-    const ferret = outer?.['ferret'];
+    const ferret = outer?.ferret;
     return { question: parsed.data, ...(typeof ferret === 'string' && ferret !== '' ? { ferret } : {}) };
   }
   return undefined;
@@ -48,6 +48,12 @@ export function QuestionRenderer({ value }: { readonly value: unknown }) {
             options: question.options,
             multiSelect: question.multiple,
           },
+          ...(question.more ?? []).map(more => ({
+            ...(more.header === undefined ? {} : { header: more.header }),
+            question: more.text,
+            options: more.options,
+            multiSelect: more.multiple,
+          })),
         ]}
       />
     );

@@ -244,3 +244,52 @@ describe('an answered hook file is never a live question again', () => {
     await h.stop();
   });
 });
+
+/** Finding 2 of the structured-questions review: a call that asks SEVERAL questions is one open form, shown and guarded. */
+describe('a tabbed form of several questions at once', () => {
+  const tabbed = () => {
+    const payload = JSON.parse(PAYLOAD) as { tool_input: { questions: { header?: string; question: string }[] } };
+    const [first] = payload.tool_input.questions;
+    if (first === undefined) throw new Error('the fixture holds no question');
+    payload.tool_input.questions.push({ ...first, header: 'Second', question: 'Choose a second thing?' });
+    return JSON.stringify(payload);
+  };
+
+  test('is shown whole on the question route', async () => {
+    const { h, id } = await boot();
+    h.putRoot('sessions', `${id}/question-asked.json`, tabbed());
+    await watchTick(h);
+    const response = await asking(h, id);
+    const body = response.json<{ question: { toolUseId: string; more: { text: string }[] } | null }>();
+    expect(body.question?.toolUseId).toBe(TOOL_USE_ID);
+    expect(body.question?.more.map(item => item.text)).toEqual(['Choose a second thing?']);
+    await h.stop();
+  });
+
+  test('keeps the send guard: a send while the form is open is refused 409 and nothing is typed', async () => {
+    const { h, runner, id } = await boot();
+    h.putRoot('sessions', `${id}/question-asked.json`, tabbed());
+    await watchTick(h);
+    const typed = runner.deliveries.length;
+
+    const sent = await h.request('POST', `/v1/ferrets/${id}/send`, {
+      headers: { 'x-fy-request-id': randomUUID() },
+      body: { message: 'hello' },
+    });
+
+    expect(sent.status).toBe(409);
+    expect(runner.deliveries).toHaveLength(typed);
+    await h.stop();
+  });
+
+  test('is retired like any other when the transcript names its call', async () => {
+    const { h, harness, id } = await boot();
+    h.putRoot('sessions', `${id}/question-asked.json`, tabbed());
+    await watchTick(h);
+    expect(await shown(h, id)).toContain(TOOL_USE_ID);
+    harness.entries = [CALL, RESULT];
+    await watchTick(h);
+    expect(await shown(h, id)).not.toContain(TOOL_USE_ID);
+    await h.stop();
+  });
+});

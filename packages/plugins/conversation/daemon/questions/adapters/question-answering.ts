@@ -78,19 +78,24 @@ export interface QuestionAnswerRequest {
 
 const PROTECTED: ReadonlySet<SessionStatus> = new Set(['completed', 'stopped', 'failed', 'kill_failed']);
 
-/** The question as the structured-answer domain reads it (`question.json` holds exactly one question). */
+/** The question as the structured-answer domain reads it: the first question and, for a tabbed form, the ones after it. */
 function pendingOf(question: Question): PendingQuestion {
+  const item = (
+    text: string,
+    header: string | undefined,
+    options: Question['options'],
+    multiple: boolean,
+  ): PendingQuestion['questions'][number] => ({
+    question: text,
+    ...(header === undefined ? {} : { header }),
+    options: options.map(({ label, description }) => (description === undefined ? { label } : { label, description })),
+    multiSelect: multiple,
+  });
   return {
     toolUseId: question.toolUseId,
     questions: [
-      {
-        question: question.text,
-        ...(question.header === undefined ? {} : { header: question.header }),
-        options: question.options.map(({ label, description }) =>
-          description === undefined ? { label } : { label, description },
-        ),
-        multiSelect: question.multiple,
-      },
+      item(question.text, question.header, question.options, question.multiple),
+      ...(question.more ?? []).map(more => item(more.text, more.header, more.options, more.multiple)),
     ],
     askedAt: question.askedAt as Instant,
   };

@@ -102,6 +102,39 @@ describe('question.json holds the parsed question, never the raw hook payload', 
     await host.stop();
   });
 
+  test('a tabbed form of several questions is stored whole: the first question and the ones after it', async () => {
+    const { host, state } = await conversation();
+    const envelope = JSON.parse(PAYLOAD) as { tool_input: { questions: { question: string; header?: string }[] } };
+    const [first] = envelope.tool_input.questions;
+    const tabbed = JSON.stringify({
+      ...envelope,
+      tool_input: { questions: [first, { ...first, header: 'Second', question: 'Choose a second thing?' }] },
+    });
+    const written = await writeAskedQuestion(state, lane, F1, tabbed, ASKED_AT, TRANSCRIPT);
+    expect(written?.text).toBe(first?.question);
+    expect(written?.more).toHaveLength(1);
+    expect(written?.more?.[0]).toMatchObject({ header: 'Second', text: 'Choose a second thing?' });
+    // The evidence laid over the transcript carries the whole form, in order.
+    const asked = await readAskedQuestion(state, F1, TRANSCRIPT);
+    expect(asked?.questions.map(question => question.question)).toEqual([
+      String(first?.question),
+      'Choose a second thing?',
+    ]);
+    const input = asked?.input as { questions: unknown[] } | undefined;
+    expect(input?.questions).toHaveLength(2);
+    // The question route answers both, so the app steps through them.
+    const shown = await host.request('GET', '/v1/ferrets/f1/question', { as: owner() });
+    expect(shown.json<{ question: { more: unknown[] } }>().question.more).toHaveLength(1);
+    await host.stop();
+  });
+
+  test('a single question stores no "more"', async () => {
+    const { host, state } = await conversation();
+    const written = await writeAskedQuestion(state, lane, F1, PAYLOAD, ASKED_AT, TRANSCRIPT);
+    expect(written).not.toHaveProperty('more');
+    await host.stop();
+  });
+
   test('a question proved against another transcript is not this reader’s question', async () => {
     const { host, state } = await conversation();
     await writeAskedQuestion(state, lane, F1, PAYLOAD, ASKED_AT, TRANSCRIPT);
@@ -110,19 +143,14 @@ describe('question.json holds the parsed question, never the raw hook payload', 
     await host.stop();
   });
 
-  test('what cannot be stored whole is not written: another transcript, another tool, several questions at once', async () => {
+  test('what cannot be stored whole is not written: another transcript, another tool, not json', async () => {
     const { host, state } = await conversation();
     // Each payload replaces the file whole: an earlier question stored first is cleared by every one of them.
     const envelope = JSON.parse(PAYLOAD) as { tool_input: { questions: unknown[] } };
-    const twice = JSON.stringify({
-      ...envelope,
-      tool_input: { questions: [envelope.tool_input.questions[0], envelope.tool_input.questions[0]] },
-    });
     for (const [payload, transcript] of [
       [PAYLOAD, '/home/user/.claude/projects/-work-repro/other.jsonl'],
       [PAYLOAD, undefined],
       [JSON.stringify({ ...envelope, tool_name: 'Bash' }), TRANSCRIPT],
-      [twice, TRANSCRIPT],
       ['not json', TRANSCRIPT],
     ] as const) {
       expect(await writeAskedQuestion(state, lane, F1, PAYLOAD, ASKED_AT, TRANSCRIPT)).toBeDefined();

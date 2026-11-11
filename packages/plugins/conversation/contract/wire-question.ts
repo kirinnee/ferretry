@@ -23,13 +23,30 @@ export type AnswerRequest = z.infer<typeof AnswerRequestSchema>;
  * PARSED, never as the hook's raw payload: Conversation's writer reads the `PreToolUse` payload, proves it against the
  * ferret's transcript, and keeps only this.
  */
+const QuestionOptionSchema = z.strictObject({ label: z.string().min(1), description: z.string().optional() });
+
+/** One further question of a form that asks several in one tool call (Claude's tabbed `AskUserQuestion`). */
+export const FollowUpQuestionSchema = z.strictObject({
+  header: z.string().optional(),
+  text: z.string(),
+  options: z.array(QuestionOptionSchema),
+  multiple: z.boolean().default(false),
+});
+export type FollowUpQuestion = z.infer<typeof FollowUpQuestionSchema>;
+
 export const QuestionSchema = z.strictObject({
   format: z.literal(1),
   toolUseId: z.string().min(1),
   header: z.string().optional(),
   text: z.string(),
-  options: z.array(z.strictObject({ label: z.string().min(1), description: z.string().optional() })),
+  options: z.array(QuestionOptionSchema),
   multiple: z.boolean().default(false),
+  /**
+   * The questions AFTER the first, when one tool call asked several (a tabbed form). The first question stays in
+   * `header`/`text`/`options`/`multiple`, so a reader that knows one question reads the first of them; absent for a
+   * single question. The whole set is one form, answered and cleared as one.
+   */
+  more: z.array(FollowUpQuestionSchema).min(1).optional(),
   askedAt: InstantSchema,
   /**
    * The transcript the asking hook named, which the question was proved against when it was written: a reader holding

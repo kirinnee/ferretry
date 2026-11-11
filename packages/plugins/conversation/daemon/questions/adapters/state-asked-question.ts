@@ -19,10 +19,10 @@ export interface QuestionLane {
  * whole `AskUserQuestion` call, naming `transcript` — and stored as a {@link Question}, never raw.
  *
  * EVERY PAYLOAD REPLACES THE FILE WHOLE, as today's hook file was "replaced whole by every question": what cannot be
- * stored whole — a payload that does not parse, names another transcript, or asks several questions at once (a
- * `Question` holds one) — clears it, so an earlier question is never shown while a different form is open, and the
- * ferret's question is then what its transcript says (today's fallback when the hook's evidence is refused). Answers
- * the question written, or `undefined`. It runs in the ferret's {@link QuestionLane}, like the clear and the withdrawal.
+ * stored whole — a payload that does not parse or names another transcript — clears it, so an earlier question is never shown while a different form is open, and the
+ * ferret's question is then what its transcript says (today's fallback when the hook's evidence is refused). A call that
+ * asks SEVERAL questions is one form and is stored whole (the first question and `more`), so it is shown and its sends are
+ * guarded like any other. Answers the question written, or `undefined`. It runs in the ferret's {@link QuestionLane}, like the clear and the withdrawal.
  */
 export async function writeAskedQuestion(
   state: StatePort,
@@ -44,7 +44,7 @@ async function writeNow(
 ): Promise<Question | undefined> {
   const asked = parseAskedQuestion(payload, Date.parse(askedAt), transcript);
   const [first, ...more] = asked?.questions ?? [];
-  if (asked === undefined || first === undefined || more.length > 0 || transcript === undefined) {
+  if (asked === undefined || first === undefined || transcript === undefined) {
     await state.remove(QUESTION_STATE, ferret);
     return undefined;
   }
@@ -57,6 +57,19 @@ async function writeNow(
       description === undefined ? { label } : { label, description },
     ),
     multiple: first.multiple,
+    // Every question of the tool call is kept: a tabbed form is ONE form, shown and guarded whole.
+    ...(more.length === 0
+      ? {}
+      : {
+          more: more.map(item => ({
+            ...(item.header === undefined ? {} : { header: item.header }),
+            text: item.question,
+            options: item.options.map(({ label, description }) =>
+              description === undefined ? { label } : { label, description },
+            ),
+            multiple: item.multiple,
+          })),
+        }),
     askedAt,
     transcript,
   };
@@ -103,25 +116,29 @@ export async function readAskedQuestion(
     const question = read.value;
     const askedAtMs = Date.parse(question.askedAt);
     if (question.transcript !== transcript || !Number.isFinite(askedAtMs)) return undefined;
+    const items = [
+      {
+        question: question.text,
+        ...(question.header === undefined ? {} : { header: question.header }),
+        options: question.options,
+        multiple: question.multiple,
+      },
+      ...(question.more ?? []).map(item => ({
+        question: item.text,
+        ...(item.header === undefined ? {} : { header: item.header }),
+        options: item.options,
+        multiple: item.multiple,
+      })),
+    ];
     return {
       toolUseId: question.toolUseId,
-      questions: [
-        {
-          question: question.text,
-          ...(question.header === undefined ? {} : { header: question.header }),
-          options: question.options,
-          multiple: question.multiple,
-        },
-      ],
+      questions: items,
       input: {
-        questions: [
-          {
-            question: question.text,
-            ...(question.header === undefined ? {} : { header: question.header }),
-            multiSelect: question.multiple,
-            options: question.options.map(option => ({ ...option })),
-          },
-        ],
+        questions: items.map(({ multiple, options, ...item }) => ({
+          ...item,
+          multiSelect: multiple,
+          options: options.map(option => ({ ...option })),
+        })),
       },
       askedAtMs,
     };
