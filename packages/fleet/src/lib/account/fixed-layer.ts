@@ -54,6 +54,11 @@
  *   Claude Code 2.1.281 writes an `AskUserQuestion` call to its transcript only once the form is answered,
  *   so the daemon, which reads the transcript, never saw an open question; the hook hands it the call as
  *   it is asked. Fast mode's replacement overlay copies the whole file, hooks included.
+ * - The overlay ALSO pins the login's LITERAL environment (`env`, `claude.env`, the catalog's model pins) —
+ *   `./login-pins.ts`. Claude ranks a folder's `.claude/settings*.json` `env` above the process
+ *   environment, so a repo could blank a runtime's base URL; a `--settings` file outranks the folder.
+ *   Interactive runtimes get an env-only file for the same reason. A value naming a secret never goes in
+ *   it (the file is copied into argv): docs/secrets.md.
  * - Codex's one-shot notices (the full-access warning, the rate-limit model nudge, the model
  *   migration prompts) are hidden with ONE `-c notice={…}` inline table, which merges with
  *   `config.toml`'s own `[notice]` like the trust table does.

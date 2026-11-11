@@ -9,12 +9,18 @@
  * where one goes rather than what it is.
  */
 import { describe, it } from 'bun:test';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FleetManifestAccount } from '@ferretry/fleet';
 import { MissingFleetSecretsError } from '@ferretry/fleet';
 import type { SecretName } from '@ferretry/protocol';
 import should from 'should';
+import { FolderClaudeSettingsFiles } from '../../../src/adapters/fleet/folder-claude-settings-file.ts';
 import {
   FleetLaunchEnvironment,
+  FolderSettingsOverrideError,
+  type FolderSettingsVariables,
   type LaunchAccountInventory,
   type LaunchSecretValues,
   launchEnvironment,
@@ -248,5 +254,106 @@ describe('launchEnvironment', () => {
 
     // Assert
     should(actual).deepEqual({ A: '1', B: '2' });
+  });
+});
+
+describe('FleetLaunchEnvironment — a folder that would blank the login', () => {
+  const secretAccount = account({ secretEnv: { ANTHROPIC_AUTH_TOKEN: '${secret:LOGE_KEY}' } });
+  const folder = (...files: { file: string; names: readonly string[] }[]): FolderSettingsVariables => ({
+    variables: async () => files,
+  });
+
+  it('should refuse the start, naming the file and the key but never a value', async () => {
+    // Arrange
+    const secrets = store({ LOGE_KEY: 'fixture-value' });
+    const launcher = new FleetLaunchEnvironment(
+      inventory(secretAccount),
+      secrets,
+      undefined,
+      undefined,
+      folder({ file: '.claude/settings.local.json', names: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'] }),
+    );
+
+    // Act
+    const refused = await launcher.forWrapper(secretAccount.wrapper, '/work/pe').then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+
+    // Assert
+    should(refused).be.instanceOf(FolderSettingsOverrideError);
+    should(refused?.message).containEql('.claude/settings.local.json');
+    should(refused?.message).containEql('ANTHROPIC_AUTH_TOKEN');
+    should(refused?.message).not.containEql('fixture-value');
+    should(secrets.opened).equal(0);
+  });
+
+  it('should start when the folder sets only variables the login pins itself', async () => {
+    // Arrange
+    const launcher = new FleetLaunchEnvironment(
+      inventory(secretAccount),
+      store({ LOGE_KEY: 'fixture-value' }),
+      undefined,
+      undefined,
+      folder({ file: '.claude/settings.json', names: ['ANTHROPIC_BASE_URL'] }),
+    );
+
+    // Act / Assert
+    should(await launcher.forWrapper(secretAccount.wrapper, '/work/pe')).deepEqual({
+      ANTHROPIC_AUTH_TOKEN: 'fixture-value',
+    });
+  });
+
+  it('should not look at a folder for an account that takes nothing from the store', async () => {
+    // Arrange
+    const launcher = new FleetLaunchEnvironment(
+      inventory(account()),
+      store(),
+      undefined,
+      undefined,
+      folder({ file: '.claude/settings.json', names: ['ANTHROPIC_AUTH_TOKEN'] }),
+    );
+
+    // Act / Assert
+    should(await launcher.forWrapper(account().wrapper, '/work/pe')).deepEqual({});
+  });
+});
+
+describe('FolderClaudeSettingsFiles', () => {
+  it('should list the env names of both project files and drop every value', async () => {
+    // Arrange
+    const directory = await mkdtemp(join(tmpdir(), 'fy-folder-settings-'));
+    try {
+      await mkdir(join(directory, '.claude'));
+      await writeFile(join(directory, '.claude/settings.json'), JSON.stringify({ env: { A: 'x' }, other: 1 }));
+      await writeFile(join(directory, '.claude/settings.local.json'), JSON.stringify({ env: { B: '', C: 'y' } }));
+
+      // Act
+      const found = await new FolderClaudeSettingsFiles().variables(directory);
+
+      // Assert
+      should(found).deepEqual([
+        { file: '.claude/settings.json', names: ['A'] },
+        { file: '.claude/settings.local.json', names: ['B', 'C'] },
+      ]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('should answer nothing for a missing folder, a broken file or a file with no env', async () => {
+    // Arrange
+    const directory = await mkdtemp(join(tmpdir(), 'fy-folder-settings-'));
+    try {
+      await mkdir(join(directory, '.claude'));
+      await writeFile(join(directory, '.claude/settings.json'), '{ nope');
+      await writeFile(join(directory, '.claude/settings.local.json'), JSON.stringify({ permissions: {} }));
+
+      // Act / Assert
+      should(await new FolderClaudeSettingsFiles().variables(directory)).deepEqual([]);
+      should(await new FolderClaudeSettingsFiles().variables(join(directory, 'absent'))).deepEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

@@ -314,6 +314,39 @@ published fleet — a start's account, the launch's bindings, the runtime names 
 (`packages/daemon/src/lib/fleet/publication.ts`). A second apply landing between the judgment and the
 pane's exec is still fail-closed: the new wrapper carries its own guard for every secret-backed variable.
 
+### A login's environment against a folder's own settings
+
+Claude Code ranks a folder's `.claude/settings.json` and `settings.local.json` `env` **above the process
+environment**, so a repo that blanks `ANTHROPIC_BASE_URL` used to hijack a runtime on another provider. A
+runtime's `--settings` file (`<home>/.fy/fixed.json`) ranks above both, so the login's **literal**
+variables — `env`, `claude.env` and the catalog's model pins — are pinned in its `env`, for interactive
+runtimes as well as agents.
+
+**The rule: a value the secret store resolves never goes into `fixed.json`.** The daemon copies that
+file _inline into argv_ for a fast or compact start, so its text reaches `ps` and the session document.
+A variable that names `${secret:NAME}` — or a bare `$OTHER` reference, which resolves from the host's
+environment or the secrets file at exec — stays process environment only. It is enforced twice: the pin
+step filters, and the write step **throws** (`FleetMaterialiseError`, naming the key, never a value) if
+one ever reaches it. A literal credential written in a login's YAML (`ANTHROPIC_AUTH_TOKEN=loge-internal`)
+is already plain text in configuration and **is** pinned, so it may show in `ps` when fast or compact
+is used; a real key belongs in the secret store.
+
+**A secret-backed variable cannot be pinned, so a folder that sets one refuses the start.** Before a
+Claude ferret launches, the daemon reads the launch folder's `.claude/settings.json` and
+`settings.local.json`; if either sets a variable the runtime takes from the store, the ferret does not
+start and the reason names the file and the key (never the value): remove it there, or keep that key out
+of the secret store.
+
+- **GAP — a folder's secret-backed override is refused, not defeated.** There is no way to make a
+  store-backed `ANTHROPIC_AUTH_TOKEN` win over a folder that blanks it without writing the secret to a
+  file. An `apiKeyHelper` fallback (the wrapper exports the value as a Ferretry-owned variable and
+  `fixed.json` carries only command text) was designed and **not built**; it needs a contract test
+  against the installed Claude Code first.
+- **GAP — only the launch folder's own files are read.** A parent directory's `.claude`, a git root above
+  the folder, and managed policy are not checked.
+- **GAP — profile `env` is not pinned.** It is the person's tuning and keeps its process-environment
+  precedence, so a folder can still override it.
+
 ## Accounts and sign-ins: the store
 
 The saved logins became **accounts** (one identity: label, plain username, password, 2FA keys) and

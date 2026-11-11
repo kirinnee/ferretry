@@ -59,6 +59,36 @@ export interface ProjectLaunchEnvironment {
   forLaunch(agent: string, cwd: string): Promise<Readonly<Record<string, string>>>;
 }
 
+/**
+ * The environment variables a folder's own Claude settings files set, by file (`.claude/settings.json`,
+ * `.claude/settings.local.json`). NAMES ONLY: the value of a project's setting is not this daemon's
+ * business and never leaves the adapter.
+ */
+export interface FolderSettingsVariables {
+  variables(cwd: string): Promise<readonly { readonly file: string; readonly names: readonly string[] }[]>;
+}
+
+/**
+ * Raised when a folder's own settings set a variable this runtime takes from the secret store.
+ *
+ * Claude Code ranks a project's `env` above the process environment the secret reaches it through (and a
+ * secret may not be pinned into a `--settings` file, which travels in argv), so the ferret would start
+ * signed out and sit on "Not logged in". Said at the start instead, naming the file and the key — never
+ * the value.
+ */
+export class FolderSettingsOverrideError extends Error {
+  constructor(
+    readonly file: string,
+    readonly variable: string,
+    readonly runtime: string,
+  ) {
+    super(
+      `this folder's ${file} sets ${variable}, which overrides runtime ${runtime}'s login (it takes ${variable} from the secret store), so it would start signed out. Remove ${variable} from ${file}, or keep it out of the secret store.`,
+    );
+    this.name = 'FolderSettingsOverrideError';
+  }
+}
+
 /** The published accounts, as the daemon's existing inventory already answers them. */
 export interface LaunchAccountInventory {
   accounts(): Promise<readonly FleetManifestAccount[]>;
@@ -100,23 +130,32 @@ export class FleetLaunchEnvironment implements AccountLaunchEnvironment {
     private readonly secrets: LaunchSecretValues,
     private readonly renewal?: LaunchSecretRenewal,
     private readonly project?: ProjectLaunchEnvironment,
+    private readonly folderSettings?: FolderSettingsVariables,
   ) {}
 
   async forWrapper(wrapper: string, cwd?: string): Promise<Readonly<Record<string, string>>> {
     const [own, project] = await Promise.all([
-      this.#account(wrapper),
+      this.#account(wrapper, cwd),
       cwd === undefined || this.project === undefined ? {} : this.project.forLaunch(wrapper, cwd),
     ]);
     // The profile's own bindings win a same-named variable: a project server's is derived, theirs is chosen.
     return { ...project, ...own };
   }
 
-  async #account(wrapper: string): Promise<Readonly<Record<string, string>>> {
+  async #account(wrapper: string, cwd?: string): Promise<Readonly<Record<string, string>>> {
     const name = wrapperNameOf(wrapper);
     const account = (await this.inventory.accounts()).find(
       published => wrapperNameOf(published.wrapper) === name || published.wrapper === wrapper,
     );
     if (account === undefined || Object.keys(account.secretEnv).length === 0) return {};
+    // Before the store is opened: a folder that would blank the login refuses the start outright.
+    if (account.kind === 'claude' && cwd !== undefined && this.folderSettings !== undefined) {
+      const taken = new Set(Object.keys(account.secretEnv));
+      for (const { file, names } of await this.folderSettings.variables(cwd)) {
+        const clash = names.find(variable => taken.has(variable));
+        if (clash !== undefined) throw new FolderSettingsOverrideError(file, clash, name);
+      }
+    }
     // Opened only now, and only for an account that declared it needs something. A fleet nobody
     // gave a profile to never touches the store at all.
     // Renewal on USE: the only moment an MCP token is refreshed is the moment a launch needs it.

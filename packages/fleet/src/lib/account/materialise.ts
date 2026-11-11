@@ -39,6 +39,7 @@ import {
   type FleetManifestModelCatalog,
   type HarnessKind,
 } from '../manifest.ts';
+import { overlayWithPins, pinnableLoginEnvironment, secretBackedOverlayKeys } from './login-pins.ts';
 import { loginModelCatalog, type ModelCatalogSources } from '../models/catalog.ts';
 import {
   CODEX_CATALOG_FORMAT,
@@ -411,6 +412,28 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     for (const [variable, reason] of Object.entries(REFUSED_LAUNCH_VARIABLES)) {
       if (variable in env) problems.push({ runtime: name, message: `it may not set ${variable}: ${reason}` });
     }
+    // The login's literal variables, pinned in the --settings file as well, so a folder's own settings cannot blank them.
+    const profileSettingsFlag = resolved.flags.some(
+      ({ flag }) => flag === '--settings' || flag.startsWith('--settings='),
+    );
+    const pins =
+      harness === 'claude'
+        ? pinnableLoginEnvironment({
+            ...(store.store === 'environment' ? credentialLaunchEnvironment(store) : {}),
+            ...derived.env,
+          })
+        : {};
+    if (!runtime.agent && Object.keys(pins).length > 0 && profileSettingsFlag) {
+      problems.push({
+        runtime: name,
+        message:
+          "its profile passes its own --settings, and Claude Code honours only one, so the login's environment cannot be pinned against a folder's settings; remove --settings from the profile",
+      });
+    }
+    const overlay =
+      harness === 'claude' && !(profileSettingsFlag && !runtime.agent)
+        ? overlayWithPins(fixed?.claudeSettingsOverlay, pins)
+        : fixed?.claudeSettingsOverlay;
     env[CREDENTIAL_ENV] = runtime.credential;
     env[RUNTIME_NAME_ENV] = name;
     env[STATE_HOME_ENV] = layout.stateHome;
@@ -435,14 +458,14 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         absent: adapted.absent,
         settings: adapted.settings,
         claudeJson: adapted.claudeJson,
-        overlay: fixed?.claudeSettingsOverlay,
+        overlay,
         credentialLink: codexCredentialLink(home, store),
         layout,
       }),
     );
 
     const fixedSettingsArgs =
-      fixed?.claudeSettingsOverlay === undefined
+      overlay === undefined
         ? []
         : ['--settings', joinPath(joinPath(home, RUNTIME_STATE_DIRECTORY), FIXED_SETTINGS_FILE)];
     const { models, modelCatalog, defaultModel } = publishedModels(derived);
@@ -461,7 +484,9 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         args: [
           ...credentialLaunchArguments(store, defaultModel !== null),
           ...(codexCatalog === undefined ? [] : codexCatalogArguments(codexCatalogPath)),
-          ...(launch === undefined ? resolved.flags.map(flag => flag.flag) : [...launch.args, ...fixedSettingsArgs]),
+          ...(launch === undefined
+            ? [...resolved.flags.map(flag => flag.flag), ...fixedSettingsArgs]
+            : [...launch.args, ...fixedSettingsArgs]),
         ],
         defaultModel: defaultModel ?? undefined,
         seedFirstRun: runtime.agent && harness === 'claude',
@@ -574,6 +599,29 @@ interface ConfigDirectoryInput {
 }
 
 /**
+ * The write of `fixed.json`. THE SECRET RULE lives here as a throw: the daemon copies this file inline
+ * into argv for a fast or compact start, so a value the secret store (or the environment) resolves must
+ * never reach it. The filter in `./login-pins.ts` should have kept such a key out; reaching here is a bug,
+ * and silently dropping it would hide one. Names the key, never a value.
+ */
+export function fixedSettingsOperation(state: string, overlay: SettingsObject): FleetWriteOperation {
+  const leaking = secretBackedOverlayKeys(overlay);
+  if (leaking.length > 0) {
+    throw new FleetMaterialiseError([
+      {
+        message: `${FIXED_SETTINGS_FILE} may not hold a value that names a secret or another variable (${leaking.join(', ')}): the file is shown in argv`,
+      },
+    ]);
+  }
+  return {
+    kind: 'file',
+    path: joinPath(state, FIXED_SETTINGS_FILE),
+    content: serializeSettings(overlay, 'json'),
+    mode: PRIVATE_FILE_MODE,
+  };
+}
+
+/**
  * One runtime's config directory: the directory, the narrowed sweep of what the profile no longer
  * fills, every entry, the skills folder per item, the generated settings, the credential link, and the
  * record the next apply reads.
@@ -639,14 +687,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       replaceKeys: Object.keys(input.claudeJson),
     });
   }
-  if (input.overlay !== undefined) {
-    operations.push({
-      kind: 'file',
-      path: joinPath(state, FIXED_SETTINGS_FILE),
-      content: serializeSettings(input.overlay, 'json'),
-      mode: PRIVATE_FILE_MODE,
-    });
-  }
+  if (input.overlay !== undefined) operations.push(fixedSettingsOperation(state, input.overlay));
   if (input.codexCatalog !== undefined) {
     operations.push({
       kind: 'file',

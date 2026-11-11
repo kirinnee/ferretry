@@ -173,6 +173,7 @@ import {
   readDeclaredAccountModel,
   sessionStatusOf,
 } from '../src/adapters/fleet/account-model-files.ts';
+import { FolderClaudeSettingsFiles } from '../src/adapters/fleet/folder-claude-settings-file.ts';
 import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
 import { RuntimeSessionRecords } from '../src/adapters/fleet/runtime-session-records.ts';
@@ -7277,6 +7278,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     secretVault,
     mcpFoundations.oauth,
     mcpFoundations.launch,
+    new FolderClaudeSettingsFiles(),
   );
   /**
    * What this host can actually run: a published wrapper by its path, a harness command by name.
