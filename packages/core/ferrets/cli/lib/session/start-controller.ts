@@ -1,7 +1,7 @@
 import { SessionCommandError } from './errors.ts';
 import type { ISessionApi, SessionEnvironment } from './ports.ts';
 import type { SessionPresenter } from './presenter.ts';
-import { COMMON_SCRATCH_ROOTS, isScratchPath, SCRATCH_REMEDY, scratchMessage } from './scratch.ts';
+import { COMMON_SCRATCH_ROOTS, isTemporaryFolder, type Realpath, SCRATCH_REMEDY, scratchMessage } from './scratch.ts';
 import { buildStartRequest, folderOf, type StartFlags, startWarnings } from './start-request.ts';
 
 /**
@@ -32,6 +32,8 @@ export class StartSessionController {
     private readonly environment: SessionEnvironment,
     /** The shipped command name, so the follow-up hint names commands that exist. */
     private readonly binaryName: string,
+    /** The shell's `realpath`, so a named folder is judged where it really is; none judges the normalised path only. */
+    private readonly realpath?: Realpath,
   ) {}
 
   /**
@@ -52,7 +54,7 @@ export class StartSessionController {
     }
     const folder = folderOf(named, this.environment.cwd);
     const roots = [...COMMON_SCRATCH_ROOTS, ...(policy.tmpRoots ?? [])];
-    if (folder !== undefined && !policy.allowScratch && isScratchPath(folder, roots))
+    if (folder !== undefined && !policy.allowScratch && (await isTemporaryFolder(folder, roots, this.realpath)))
       throw new SessionCommandError(`${scratchMessage(folder)} ${SCRATCH_REMEDY}`);
     return folder;
   }

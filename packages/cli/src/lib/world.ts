@@ -49,6 +49,8 @@ export interface PluginHost {
   readBytes(path: string): Promise<Uint8Array>;
   /** As today's `existsSync(resolve(cwd, path))`: a directory or an unreadable file exists; `-` is a file name. */
   exists(path: string): Promise<boolean>;
+  /** As `fs.realpath(resolve(cwd, path))`: where the path really is, links followed; rejects when it cannot be resolved. */
+  realpath(path: string): Promise<string>;
   /** The CLI's real working directory, never the inherited `PWD`, which a parent's `cwd:` option leaves stale. */
   cwd(): string;
   /** The kernel's state port over ONLY this plugin's own declared opaque files; any other file is refused. */

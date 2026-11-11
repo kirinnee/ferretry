@@ -90,7 +90,7 @@ describe('the ferrets cli half', () => {
     expect(err.at(-1)).toContain('status <id>');
   });
 
-  test('V-0443 start posts the body Ferrets start takes and refuses, by name, a flag another plugin decides now', async () => {
+  test('V-0443 start posts the body Ferrets start takes and refuses --compact-at by name: no 5.0 launch carries a compaction trigger yet', async () => {
     const { verb, calls, err } = run({ [FERRET_ROUTES.start]: { id: 'lead' }, [FERRET_ROUTES.get]: ferret });
     expect(await verb('start [prompt...]', ['fix', 'it'], { a: 'claude-alpha', cwd: '/abs', teammate: 'wren' })).toBe(
       0,

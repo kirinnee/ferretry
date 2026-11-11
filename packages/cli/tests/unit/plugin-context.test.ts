@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { chmod, mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PROTOCOL } from '@ferretry/kernel/contract';
@@ -202,6 +202,44 @@ describe('the context every plugin cli half is handed', () => {
     should(await real.exists(dir)).be.true();
     should(await real.exists(`${dir}/marker.txt`)).be.true();
     should(await real.exists(`${dir}/absent`)).be.false();
+  });
+
+  it('V-0334 should give a half realpath, resolved against the working directory, rejecting what cannot be resolved', async () => {
+    const asked: string[] = [];
+    const host = createPluginHost({
+      home: '/h',
+      fs: state.createMemoryHostFs(),
+      cwd: () => '/work',
+      realpath: async absolute => {
+        asked.push(absolute);
+        if (absolute.endsWith('/missing')) throw new Error('ENOENT');
+        return `/real${absolute}`;
+      },
+    });
+    should(await host.realpath('link/')).equal('/real/work/link');
+    should(await host.realpath('/abs/x')).equal('/real/abs/x');
+    await host.realpath('/abs/missing').then(
+      () => {
+        throw new Error('resolved a missing path');
+      },
+      error => should(String(error)).containEql('ENOENT'),
+    );
+    should(asked).deepEqual(['/work/link', '/abs/x', '/abs/missing']);
+  });
+
+  it('V-0334 should follow a real symlink and reject a missing path', async () => {
+    const real = createPluginHost({ home: '/h', fs: state.createMemoryHostFs() });
+    const dir = await mkdtemp(join(tmpdir(), 'fy-realpath-'));
+    scratch.push(dir);
+    await mkdir(`${dir}/target`);
+    await symlink(`${dir}/target`, `${dir}/link`);
+    should(await real.realpath(`${dir}/link`)).equal(await realpath(`${dir}/target`));
+    await real.realpath(`${dir}/absent`).then(
+      () => {
+        throw new Error('resolved a missing path');
+      },
+      error => should((error as NodeJS.ErrnoException).code).equal('ENOENT'),
+    );
   });
 
   it('should hand a half the real working directory as PWD, not a stale inherited one', async () => {

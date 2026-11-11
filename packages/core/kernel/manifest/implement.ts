@@ -482,6 +482,12 @@ export interface CliContext<M extends Manifest> {
    * content, so a poll (`fy wait --until-marker`) costs one probe, not a whole-file read.
    */
   exists?(path: string): Promise<boolean>;
+  /**
+   * Where a path really is: resolved against the CLI working directory, every symlink followed (today's `realpath`).
+   * Rejects when the path does not exist or cannot be resolved; a caller that can live with the spelling it was given
+   * falls back to its own normalised path. Reads no content.
+   */
+  realpath?(path: string): Promise<string>;
   /** Own declared opaque defs only; private directory operations and stat require named trees. Optional until fy supplies it. */
   readonly ownState?: Pick<
     StatePort,

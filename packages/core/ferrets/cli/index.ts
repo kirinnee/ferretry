@@ -89,7 +89,7 @@ function refuseFlags(invocation: VerbInvocation, refusals: readonly FlagRefusal[
  * folder `fy` was run in unless `--cwd` names another.
  */
 export default implementCli(manifest, {
-  build({ client, io: terminal, env, clock, sleep, exists, readText, readBytes }) {
+  build({ client, io: terminal, env, clock, sleep, exists, readText, readBytes, realpath }) {
     const api = new ClientSessionApi(client);
     const environment: SessionEnvironment = { cwd: process.cwd() };
 
@@ -175,7 +175,7 @@ export default implementCli(manifest, {
           directMax: count(invocation, 'direct-max'),
           maxSnapshots: count(invocation, 'max-snapshots'),
         };
-        await new StartSessionController(api, presenter, environment, BINARY).execute({
+        await new StartSessionController(api, presenter, environment, BINARY, realpath).execute({
           mode,
           ...(on(invocation, 'teammate-fallback') ? { teammateFallback: true } : {}),
           ...(title === undefined ? {} : { title }),

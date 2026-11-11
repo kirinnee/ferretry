@@ -5,9 +5,9 @@
  * NAMED (an explicit `--cwd`, or a person's own shell folder) is refused when it is temporary, unless the caller says
  * it means it.
  *
- * Pure and LEXICAL: the path, already made absolute, and the temporary roots this machine has. No symlink is
- * followed (a cli half has no filesystem port for it), so a link INTO a temporary folder is not caught.
+ * Pure over an injected resolver: the shell's `realpath` follows the links, so a link INTO a temporary folder is caught.
  */
+import { resolve } from 'node:path';
 
 /** The temporary roots every machine has, before its own `TMPDIR` and the runtime's temp folder. */
 export const COMMON_SCRATCH_ROOTS: readonly string[] = [
@@ -28,6 +28,30 @@ export function isScratchPath(path: string, roots: readonly string[]): boolean {
     .map(trimmed)
     .filter(root => root !== '' && root !== '/')
     .some(root => target === root || target.startsWith(`${root}/`));
+}
+
+/** Where a path really is (symlinks followed); rejects when it cannot be resolved. The shell's `CliContext.realpath`. */
+export type Realpath = (path: string) => Promise<string>;
+
+/**
+ * Whether the folder is temporary, judged where it really is (today's `fyd.ts` canonicalisation): made absolute and
+ * normalised (`/home/../tmp/x` is `/tmp/x`, `/tmp/../home/me` is not), then resolved through its links, and the roots
+ * too, so `/tmp` being `/private/tmp` on macOS and a link into a temporary folder both count. A path that cannot be
+ * resolved is judged by its normalised self, and the roots are kept in both spellings.
+ */
+export async function isTemporaryFolder(
+  folder: string,
+  roots: readonly string[],
+  realpath?: Realpath,
+): Promise<boolean> {
+  const real = async (path: string): Promise<string> => {
+    const absolute = resolve(path);
+    return realpath === undefined ? absolute : await realpath(absolute).catch(() => absolute);
+  };
+  // An empty root names nothing; `resolve('')` would be the working folder.
+  const named = roots.filter(root => root !== '');
+  const resolved = await Promise.all(named.map(real));
+  return isScratchPath(await real(folder), [...named.map(root => resolve(root)), ...resolved]);
 }
 
 /** The refusal's sentence, naming the folder. */

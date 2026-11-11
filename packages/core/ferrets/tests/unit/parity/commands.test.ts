@@ -27,6 +27,7 @@ interface World {
   readonly exists?: NonNullable<CliContext<Manifest>['exists']>;
   readonly readText?: NonNullable<CliContext<Manifest>['readText']>;
   readonly readBytes?: NonNullable<CliContext<Manifest>['readBytes']>;
+  readonly realpath?: NonNullable<CliContext<Manifest>['realpath']>;
 }
 
 /** The cli half's verbs, run against a recording API: what each asks the daemon, what it prints, how it exits. */
@@ -55,6 +56,7 @@ function run(world: World = {}) {
     ...(world.exists === undefined ? {} : { exists: world.exists }),
     ...(world.readText === undefined ? {} : { readText: world.readText }),
     ...(world.readBytes === undefined ? {} : { readBytes: world.readBytes }),
+    ...(world.realpath === undefined ? {} : { realpath: world.realpath }),
   });
   if (half === undefined) throw new Error('the cli half is real');
   const verbs = half.verbs as Readonly<Record<string, (invocation: VerbInvocation) => Promise<number>>>;
@@ -649,6 +651,41 @@ describe('commands parity', () => {
       const relative = run({ answers: startAnswers });
       expect(await relative.verb('new [words...]', ['x'], { runtime: 'codex-beta', cwd: 'sub/dir' })).toBe(0);
       expect(relative.calls[0]?.init).toMatchObject({ body: { folder: `${process.cwd()}/sub/dir` } });
+    });
+
+    test('V-0334 fy new judges a named folder where it really is: a link into /tmp is refused, ../ is normalised, a missing path falls back, a link that stays inside is allowed', async () => {
+      const links: Readonly<Record<string, string>> = {
+        '/home/me/link-to-tmp': '/tmp/real/work',
+        '/home/me/inside': '/home/me/project',
+      };
+      const realpath = async (path: string): Promise<string> => {
+        const target = links[path];
+        if (target === undefined) throw new Error('ENOENT');
+        return target;
+      };
+      const started = async (cwd: string): Promise<boolean> => {
+        const attempt = run({ answers: startAnswers, realpath });
+        const exit = await attempt.verb('new [words...]', ['x'], { runtime: 'codex-beta', cwd });
+        if (exit === 2) expect(attempt.calls).toEqual([]);
+        return exit === 0;
+      };
+      expect(await started('/home/me/link-to-tmp')).toBe(false);
+      expect(await started('/home/../tmp/x')).toBe(false);
+      expect(await started('/tmp/scratch//')).toBe(false);
+      expect(await started('/tmp/../home/kirin')).toBe(true);
+      expect(await started('/home/me/missing')).toBe(true);
+      expect(await started('/home/me/inside')).toBe(true);
+      // Without a resolver the shell's `..` is still normalised, never judged as typed.
+      const bare = run({ answers: startAnswers });
+      expect(await bare.verb('new [words...]', ['x'], { runtime: 'codex-beta', cwd: '/home/../tmp/x' })).toBe(2);
+      // A root that is itself a link (a TMPDIR on a link) is resolved too.
+      const viaRoot = run({
+        answers: startAnswers,
+        env: { TMPDIR: '/work/tmp-link' },
+        realpath: async path =>
+          path === '/work/tmp-link' ? '/data/tmp' : path === '/data/tmp/a' ? '/data/tmp/a' : await realpath(path),
+      });
+      expect(await viaRoot.verb('new [words...]', ['x'], { runtime: 'codex-beta', cwd: '/data/tmp/a' })).toBe(2);
     });
 
     test("V-0334 fy new from a ferret whose own record cannot be read is refused naming --cwd, never started in the shell's folder", async () => {

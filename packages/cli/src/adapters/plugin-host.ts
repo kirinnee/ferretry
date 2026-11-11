@@ -2,7 +2,7 @@
  * The facilities every plugin's `cli` half is handed (`CliContext`): the clock and a cancellable sleep, a text reader
  * (today's `readRecipe`), and the kernel's state port scoped to ONE plugin's own declared opaque files.
  */
-import { access } from 'node:fs/promises';
+import { access, realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { state, systemClock } from '@ferretry/kernel/host';
 import type { Manifest } from '@ferretry/kernel/manifest';
@@ -20,6 +20,8 @@ export interface PluginHostInputs {
   readonly readBytes?: (path: string) => Promise<Uint8Array>;
   readonly readStdinBytes?: () => Promise<Uint8Array>;
   readonly cwd?: () => string;
+  /** Where an absolute path really is (default: `fs.realpath`). */
+  readonly realpath?: (absolute: string) => Promise<string>;
 }
 
 export function createPluginHost(inputs: PluginHostInputs): PluginHost {
@@ -30,6 +32,7 @@ export function createPluginHost(inputs: PluginHostInputs): PluginHost {
   const readBytes = inputs.readBytes ?? (async path => new Uint8Array(await Bun.file(path).arrayBuffer()));
   const readStdinBytes = inputs.readStdinBytes ?? (async () => new Uint8Array(await Bun.stdin.arrayBuffer()));
   const cwd = inputs.cwd ?? (() => process.cwd());
+  const resolveReal = inputs.realpath ?? realpath;
   const pathExists =
     inputs.pathExists ??
     (async absolute =>
@@ -47,6 +50,8 @@ export function createPluginHost(inputs: PluginHostInputs): PluginHost {
     readBytes: async path => (path === '-' ? await readStdinBytes() : await readBytes(path)),
     // As today's `existsSync(resolve(cwd, path))` (system-poller): no read, no stdin, a directory counts.
     exists: async path => await pathExists(resolve(cwd(), path)),
+    // Where a path really is, links followed (today's `realpath`); a path that cannot be resolved rejects.
+    realpath: async path => await resolveReal(resolve(cwd(), path)),
     ownState(manifest: Manifest) {
       // Only this plugin's own declared opaque files are ever visible to the port; anything else is refused.
       const files = (manifest.data?.state ?? []).filter(file => file.store === 'opaque');
