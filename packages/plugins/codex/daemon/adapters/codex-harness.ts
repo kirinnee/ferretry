@@ -3,10 +3,11 @@
  *
  * It finds the binary and its version (never its sign-in files), writes a ferret's home in Codex's own format, builds
  * the launch argv, and starts, resumes and stops through whichever runner Ferrets hands it. It never reads
- * `auth.json`: the login's credentials arrive as the Vault's `ChildEnvironment`, which this code passes on unopened.
- *
+ * `auth.json`: an OAuth login's file is linked into the home by the kernel from Logins' shared credential
+ * (`LaunchSpec.credential` -> `RootHandle.linkCredential`), and an environment login arrives as the Vault's
+ * `ChildEnvironment`, which this code passes on unopened.
  */
-import type { FencedPath, FerretId, KernelPorts } from '@ferretry/kernel/contract';
+import type { FencedPath, FerretId, KernelPorts, RootHandle } from '@ferretry/kernel/contract';
 import type {
   Delivery,
   Harness,
@@ -200,6 +201,26 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     return home;
   };
 
+  /**
+   * The login's sign-in file in this ferret's home: ONE link `auth.json`, made by the kernel from the credential Logins
+   * shared with this plugin, or nothing. The name is always cleared first (agent homes are Ferretry's only, so no file
+   * there is the person's): a stale link goes, and so does a file Codex may have written in its place (a refresh that
+   * did not write in place), said once so the loss is visible. A FOLDER at the name is never removed.
+   */
+  const placeCredential = async (root: RootHandle, spec: LaunchSpec): Promise<void> => {
+    const at = root.resolve('auth.json');
+    if (!at.ok) throw new Error(`Codex's auth.json could not be placed in the ferret's home: ${at.error}`);
+    const found = await root.lstat(at.value);
+    if (found?.kind === 'symlink') await root.unlink(at.value);
+    else if (found?.kind === 'file') {
+      kernel.log.warn(
+        "a ferret's auth.json was a file, not the login’s link: Codex may have replaced it (see the credential-link contract)",
+      );
+      await root.remove(at.value);
+    } else if (found !== undefined) throw new Error("a ferret's auth.json is a folder, not the login's link");
+    if (spec.credential !== undefined) await root.linkCredential(spec.credential, at.value);
+  };
+
   return {
     key: 'codex',
     // Today's stop key. NOT safe when idle: at an idle Codex prompt a stop key is one of the ways the TUI quits, so an
@@ -244,6 +265,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
 
     async prepareHome(spec: LaunchSpec): Promise<HomePlan> {
       const root = await ensureHome(spec);
+      await placeCredential(root, spec);
       // The selected skills: Skills' shared folders linked into `skills/`, the rest swept; Codex's own `.system` stays.
       await materializeSkills(root, spec.parts, CODEX_OWNED_SKILLS);
       const files: FencedPath[] = [];

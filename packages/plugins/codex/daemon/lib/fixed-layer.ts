@@ -25,6 +25,10 @@ export function codexFixedArguments(permissionMode: HarnessConfig['permissionMod
     '-c',
     `projects={${tomlString(cwd)}={trust_level="trusted"}}`,
     '--no-alt-screen',
+    // Every launch keeps the sign-in in a FILE: one moved into a keyring is one the link in this home cannot reach. A `-c`
+    // outranks a settings item that says `keyring`.
+    '-c',
+    `cli_auth_credentials_store=${tomlString('file')}`,
     '-c',
     `notice={${CODEX_HIDDEN_NOTICES.map(key => `${/^[A-Za-z0-9_-]+$/.test(key) ? key : tomlString(key)}=true`).join(',')}}`,
   ];

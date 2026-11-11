@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile, chmod } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LaunchSpec, Runner, RunSpec } from '@ferretry/core-ferrets/contract';
 import { FakeRunner, harnessConformance } from '@ferretry/core-ferrets/contract/testing';
-import { defineState, type FerretId } from '@ferretry/kernel/contract';
+import { defineState, type FerretId, type SharedCredential } from '@ferretry/kernel/contract';
 import { ok } from '@ferretry/std';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { CODEX_SETTINGS } from '../../contract/index.ts';
@@ -280,6 +280,125 @@ export function harnessHomeCases(): void {
       deliveredCount: () => runner.deliveries.length,
       deliversElsewhere: true,
     };
+  });
+
+  // ─── the login's sign-in file: Logins' shared credential linked into the Codex home (kernel `linkCredential`) ───────────
+
+  describe('prepareHome links the login’s sign-in file into the Codex home', () => {
+    const FAKE = '{"tokens":{"access_token":"fake-access","refresh_token":"fake-refresh"}}\n';
+    /** The file Logins keeps, and the shared credential its real kernel roots mint for it (fake tokens only). */
+    async function mintedCredential(): Promise<{ readonly credential: SharedCredential; readonly canonical: string }> {
+      const canonical = join(fixture, 'fy-home/state/logins/credentials/work/auth.json');
+      await mkdir(join(canonical, '..'), { recursive: true, mode: 0o700 });
+      await writeFile(canonical, FAKE, { mode: 0o600 });
+      const roots = rootsPortFor(
+        nodeFs(() => crypto.randomUUID()),
+        { home: join(fixture, 'fy-home'), plugin: 'logins', worktrees: join(fixture, 'worktrees') },
+        ['credentials'],
+        () => undefined,
+        { shareCredentials: ['auth.json'], privateFiles: ['state/logins/credentials'], onStop: () => {} },
+      );
+      return {
+        credential: await roots.shareCredential({ folder: 'work', file: 'auth.json', receiver: 'codex' }),
+        canonical,
+      };
+    }
+    const kind = async (path: string) =>
+      (await lstat(path).catch(() => undefined))?.isSymbolicLink()
+        ? 'link'
+        : (await lstat(path).catch(() => undefined)) === undefined
+          ? 'absent'
+          : 'other';
+
+    test('with spec.credential, auth.json is a link to the login’s file and Codex can read it', async () => {
+      const { harness } = build();
+      const home = await harness.homeFor('f2' as FerretId);
+      const { credential, canonical } = await mintedCredential();
+
+      await harness.prepareHome({ ...spec('f2', home), credential } as LaunchSpec);
+
+      expect(await kind(join(home, 'auth.json'))).toBe('link');
+      expect(await realpath(join(home, 'auth.json'))).toBe(await realpath(canonical));
+      expect(await readFile(join(home, 'auth.json'), 'utf8')).toBe(FAKE);
+    });
+
+    test('a second prepare replaces the link it made, and the canonical file is untouched', async () => {
+      const { harness } = build();
+      const home = await harness.homeFor('f2' as FerretId);
+      const { credential, canonical } = await mintedCredential();
+      await harness.prepareHome({ ...spec('f2', home), credential } as LaunchSpec);
+
+      await harness.prepareHome({ ...spec('f2', home), credential } as LaunchSpec);
+
+      expect(await kind(join(home, 'auth.json'))).toBe('link');
+      expect(await readFile(canonical, 'utf8')).toBe(FAKE);
+    });
+
+    test('without a credential, a stale link is removed and the file it pointed at is left alone', async () => {
+      const { harness } = build();
+      const home = await harness.homeFor('f2' as FerretId);
+      const { credential, canonical } = await mintedCredential();
+      await harness.prepareHome({ ...spec('f2', home), credential } as LaunchSpec);
+
+      await harness.prepareHome(spec('f2', home));
+
+      expect(await kind(join(home, 'auth.json'))).toBe('absent');
+      expect(await readFile(canonical, 'utf8')).toBe(FAKE);
+    });
+
+    test('without a credential, a stale auth.json FILE is removed and said so (Codex may have replaced the link)', async () => {
+      const warned: string[] = [];
+      const { harness } = build(new Map(), { warned });
+      const home = await harness.homeFor('f2' as FerretId);
+      await writeFile(join(home, 'auth.json'), 'a stale copy');
+
+      await harness.prepareHome(spec('f2', home));
+
+      expect(await kind(join(home, 'auth.json'))).toBe('absent');
+      expect(warned).toHaveLength(1);
+      expect(warned[0]).toContain('auth.json was a file, not the login’s link');
+      expect(warned[0]).not.toContain('a stale copy');
+    });
+
+    test('a stale FILE is replaced by the link when a credential is given', async () => {
+      const { harness } = build(new Map(), { warned: [] });
+      const home = await harness.homeFor('f2' as FerretId);
+      const { credential } = await mintedCredential();
+      await writeFile(join(home, 'auth.json'), 'a stale copy');
+
+      await harness.prepareHome({ ...spec('f2', home), credential } as LaunchSpec);
+
+      expect(await kind(join(home, 'auth.json'))).toBe('link');
+      expect(await readFile(join(home, 'auth.json'), 'utf8')).toBe(FAKE);
+    });
+
+    test('a folder at auth.json is refused, never removed', async () => {
+      const { harness } = build();
+      const home = await harness.homeFor('f2' as FerretId);
+      await mkdir(join(home, 'auth.json'));
+      await writeFile(join(home, 'auth.json', 'keep'), 'x');
+
+      await expect(harness.prepareHome(spec('f2', home))).rejects.toThrow('auth.json');
+      expect(await readFile(join(home, 'auth.json', 'keep'), 'utf8')).toBe('x');
+    });
+
+    test('a credential minted for another plugin is refused and no link is made', async () => {
+      const { harness } = build();
+      const home = await harness.homeFor('f2' as FerretId);
+      const { canonical } = await mintedCredential();
+      const roots = rootsPortFor(
+        nodeFs(() => crypto.randomUUID()),
+        { home: join(fixture, 'fy-home'), plugin: 'logins', worktrees: join(fixture, 'worktrees') },
+        ['credentials'],
+        () => undefined,
+        { shareCredentials: ['auth.json'], privateFiles: ['state/logins/credentials'], onStop: () => {} },
+      );
+      const other = await roots.shareCredential({ folder: 'work', file: 'auth.json', receiver: 'claude-code' });
+
+      await expect(harness.prepareHome({ ...spec('f2', home), credential: other } as LaunchSpec)).rejects.toThrow();
+      expect(await kind(join(home, 'auth.json'))).toBe('absent');
+      expect(await readFile(canonical, 'utf8')).toBe(FAKE);
+    });
   });
 
   // ─── skills: Skills' shared folders linked into the Codex home (kernel batch #10, owner decision !A466) ──────────────

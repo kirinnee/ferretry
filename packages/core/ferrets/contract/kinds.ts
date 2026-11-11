@@ -49,6 +49,12 @@ export interface LaunchSpec {
   readonly readable?: readonly FencedPath[];
   /** What `launch.parts` takers added for this ferret. */
   readonly parts: readonly LaunchPart[];
+  /**
+   * The login's sign-in FILE, shared with this harness (`LoginKind.credential`): Codex's `auth.json`, which the harness
+   * asks the kernel to link into its own home (`RootHandle.linkCredential`). Set by Ferrets from the login only, never by
+   * a `launch.parts` taker, so no plugin can put a credential into another's launch. Absent: nothing to link.
+   */
+  readonly credential?: SharedCredential;
   /** The first message, when the owner gave one. */
   readonly prompt?: string;
   readonly harnessConversation?: string;
