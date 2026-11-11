@@ -244,6 +244,9 @@ describe('allowing a paste', () => {
     await w.service.cancel(SESSION_ID, request.id, OWNER);
 
     should(w.told.at(-1)).containEql('ended without saving sealed:vercel (cancelled');
+    // M2: secure_paste is not built, so a ferret is never told to call it again.
+    should(w.told.at(-1)).containEql('If you still need it saved, ask the owner.');
+    should(w.told.at(-1)).not.containEql('secure_paste');
   });
 });
 

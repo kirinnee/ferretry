@@ -156,11 +156,11 @@ describe('the hint carries recipes', () => {
     for (const hint of hints) expect(AccountHintSchema.safeParse(hint).success).toBe(true);
   });
 
-  it('should tell the ferret the steps and how to propose better ones', () => {
+  it('should tell the ferret the steps, and name no tool that is not built (M2)', () => {
     const summary = accountHintSummary('vercel.com', hintsFor('vercel.com', [google, okta, vercel]));
     expect(summary).toContain("Recipe (the owner's steps), between the markers:\n<<<recipe\nOpen vercel.com");
     expect(summary).toContain('[[OKTA]]\nrecipe>>>');
-    expect(summary).toContain('account_propose');
+    expect(summary).not.toContain('account_propose');
     expect(accountHintSummary('nothing.com', [])).not.toContain('account_propose');
   });
 

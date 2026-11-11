@@ -41,16 +41,8 @@ describe('accounts manifest', () => {
       }
     }
   });
-  test("declares today's seven account and secure-copy tools, none showing a value", () => {
-    expect(manifest.actions.agentTools.map(entry => entry.name)).toEqual([
-      'account_hint',
-      'account_propose',
-      'secure_copy',
-      'secure_list',
-      'secure_discard',
-      'secure_paste',
-      'task_plan',
-    ]);
+  test('M2 lists only the one agent tool that is built (account_hint), none showing a value; the six unbuilt are not offered to agents', () => {
+    expect(manifest.actions.agentTools.map(entry => entry.name)).toEqual(['account_hint']);
     for (const entry of manifest.actions.agentTools) expect(entry.guard).not.toBe('secrets');
   });
   test('needs the Vault, its sealed documents and Asks, and takes the phone-approval, sign-in-approval and four step-up stage hooks', () => {
