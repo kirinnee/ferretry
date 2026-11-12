@@ -107,6 +107,15 @@ export const isUpdateUnconfirmed = (record: Pick<LedgerSendRecord, 'unaccountedR
   record.unaccountedReason === 'update_unconfirmed';
 
 /**
+ * What an ordinary (unmarked) HELD send says. 5.0 creates no held row itself (the durable hold for an explicit revive is
+ * a declared pending port); a held row can only have come from before the update, and nothing sends it: a revive
+ * leaves it held. So it promises no delivery, and says in the same short sentences as {@link HELD_UPDATE_NOTE} what is
+ * true and what to do. It does not repeat "(sent before the update)": only the marked row carries that suffix.
+ */
+const HELD_NOTE =
+  'held from before the update. Ferretry will not send this message on its own. If it is missing from the chat, send it again yourself.';
+
+/**
  * What a HELD send the update marked says. Nothing delivers it when the session is revived (a revive skips a marked
  * row: Ferretry cannot tell whether the old copy already arrived), so the row must not promise that. It keeps the
  * migration sentence's words, so the amber note below the message reads as one note.
@@ -179,12 +188,7 @@ const badgeOf = (record: LedgerSendRecord): SendBadge => {
     };
   if (record.held === true && isUpdateUnconfirmed(record))
     return { label: 'unconfirmed', tone: QUIET_TONE, detail: HELD_UPDATE_NOTE };
-  if (record.held === true)
-    return {
-      label: 'held for revive',
-      tone: WAITING_TONE,
-      detail: 'kept safely; it will be delivered when this session is revived',
-    };
+  if (record.held === true) return { label: 'held', tone: WAITING_TONE, detail: HELD_NOTE };
   if (record.fate === 'queued')
     return {
       label: 'queued',

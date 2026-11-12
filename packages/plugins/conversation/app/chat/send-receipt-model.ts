@@ -97,7 +97,7 @@ const queueReceipt = (record: LedgerSendRecord, detail: string): SendReceipt | u
  * | daemon state                       | receipt       | mark            | chip            |
  * | ---------------------------------- | ------------- | --------------- | --------------- |
  * | `accepted` (checking where it went) | `sending`     | faint clock     | —               |
- * | `held` (kept for a revive)          | `held`        | faint clock     | —               |
+ * | `held` (from before the update)     | `held`        | faint clock     | —               |
  * | `queued` (in the agent's queue)     | `queued`      | one grey tick   | —               |
  * | `delivered`                         | `delivered`   | two grey ticks  | —               |
  * | `delivered` + a reply after it      | `answered`    | two accent ticks| —               |
@@ -144,7 +144,7 @@ const receiptOf = (record: LedgerSendRecord, answered: boolean): SendReceipt => 
         return { kind: 'unconfirmed', name: 'Status unknown', detail, chip: 'status unknown' };
       if (record.typedNotSent === true)
         return { kind: 'typed', name: 'Typed, not sent', detail, chip: 'typed, not sent' };
-      if (record.held === true) return { kind: 'held', name: 'Held for revive', detail };
+      if (record.held === true) return { kind: 'held', name: 'Held', detail };
       if (record.fate === 'queued') return { kind: 'queued', name: 'Queued', detail };
       return { kind: 'sending', name: 'Sending', detail };
   }
@@ -162,7 +162,11 @@ export interface ReceiptLegendRow {
 }
 
 export const RECEIPT_LEGEND: readonly ReceiptLegendRow[] = [
-  { kind: 'sending', name: 'Sending', meaning: 'On its way, or kept until the session is revived.' },
+  {
+    kind: 'sending',
+    name: 'Sending',
+    meaning: 'On its way. A message held from before the update shows here too; Ferretry will not send it on its own.',
+  },
   {
     kind: 'saved',
     name: 'Saved on this device',

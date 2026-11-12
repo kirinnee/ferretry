@@ -928,6 +928,70 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
     await host.stop();
   });
 
+  // RV8/fix9: the durable hold for an explicit revive is a declared pending port (ports-pending.json), and 5.0 creates
+  // no held row itself, so a held row can only be one the update carried over. A revive must leave it held, and its
+  // words must promise nothing automatic.
+  test('an ordinary held row stays held when a revive happens, and its words promise no delivery', async () => {
+    const { SENDS_STATE, SendLineSchema } = await import('../../../contract/index.ts');
+    const { sendBadge } = await import('../../../app/chat/send-badge.ts');
+    const ferrets = new HarnessFerrets();
+    // A relaunch that carries the NEW send, as Ferrets' resume does: it tells the send what it typed.
+    ferrets.resume = (async (
+      id: FerretId,
+      message?: string,
+      options?: { readonly onCarried?: (typed: { text: string; turn: number; file: string }) => void },
+    ) => {
+      ferrets.resumes.push({ ferret: id, ...(message === undefined ? {} : { message }) });
+      ferrets.setState(id, 'working');
+      options?.onCarried?.({ text: 'read /tmp/fixed-fake-turn-001.md', turn: 1, file: '/tmp/fixed-fake-turn-001.md' });
+      return ok(id);
+    }) as typeof ferrets.resume;
+    const { host, api, state } = await conversation(ferrets, OPEN, { state: 'stopped', harness: 'codex' });
+    try {
+      const at = '2026-11-08T08:55:00.000Z';
+      await state.append(
+        SENDS_STATE,
+        SendLineSchema.parse({
+          sendId: 'ordinary-held',
+          acceptedAt: at,
+          at,
+          acceptedTurn: 0,
+          message: 'fixed ordinary held message',
+          path: 'revive-queue',
+          fate: 'accepted',
+          held: true,
+          attempt: 1,
+          attemptAt: at,
+          senderKind: 'human',
+        }),
+        F1,
+      );
+      const rowOf = async () => (await api().sends(F1)).sends.find(row => row.sendId === 'ordinary-held')!;
+      const before = await rowOf();
+      expect(before.unaccountedReason).toBeUndefined();
+      expect(sendBadge(before as never).label).toBe('held');
+
+      const revived = await api().send(F1, { kind: 'warden' }, { message: 'new revive message', sendId: 'new-revive' });
+
+      // The revive really happened and carried only the NEW message...
+      expect(revived.ok).toBe(true);
+      expect(ferrets.resumes).toEqual([{ ferret: F1, message: 'new revive message' }]);
+      expect((await ferrets.get(F1))?.state).toBe('working');
+      // ...and the old row is still held, with nothing typed or queued for it.
+      const after = await rowOf();
+      expect(after.held).toBe(true);
+      expect(after.fate).toBe('accepted');
+      expect(ferrets.delivered).toEqual([]);
+      expect(ferrets.queued).toEqual([]);
+      // So its copy must not say a revive delivers it.
+      const said = sendBadge(after as never).detail;
+      expect(said).toContain('Ferretry will not send this message on its own');
+      expect(said).not.toMatch(/revive|delivered|kept safely/i);
+    } finally {
+      await host.stop();
+    }
+  });
+
   test('D2 #19 a Warden send to a ferret this machine does not know is not_found: nothing typed, nothing kept', async () => {
     const { host, ferrets, api } = await conversation();
 

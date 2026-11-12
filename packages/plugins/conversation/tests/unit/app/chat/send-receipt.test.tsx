@@ -44,8 +44,8 @@ describe('sendReceipt', () => {
   test('maps every daemon state to exactly one receipt, and only the two that need the reader get a word', () => {
     const cases: readonly [string, LedgerSendRecord, boolean, SendReceiptKind, string, string | undefined][] = [
       ['accepted', record(), false, 'sending', 'Sending', undefined],
-      ['held', record({ held: true }), false, 'held', 'Held for revive', undefined],
-      ['held while queued', record({ fate: 'queued', held: true }), false, 'held', 'Held for revive', undefined],
+      ['held', record({ held: true }), false, 'held', 'Held', undefined],
+      ['held while queued', record({ fate: 'queued', held: true }), false, 'held', 'Held', undefined],
       ['queued', record({ fate: 'queued' }), false, 'queued', 'Queued', undefined],
       ['typed in the composer', record({ typedNotSent: true }), false, 'typed', 'Typed, not sent', 'typed, not sent'],
       [
