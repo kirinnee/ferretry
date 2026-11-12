@@ -1,6 +1,6 @@
 /**
  * Ferretry 5's `fy daemon install`, `restart` and `update` (the update machine's restart and install) on a Ferretry 4
- * home that was never carried over: each refuses with the daemon's own sentence (prompt + the way back to 4.291.9),
+ * home that was never carried over: each refuses with the daemon's own sentence (prompt + the way back to 4.291.10),
  * writes no unit and no plist, starts no service manager command, and leaves the home byte-for-byte as it was.
  * The service manager is a pair of fake `systemctl`/`launchctl` scripts on PATH that record every call.
  */
@@ -86,7 +86,7 @@ describe('Ferretry 5 on a Ferretry 4 home that was not carried over', () => {
         );
         should(refusal)
           .containEql(PROMPT)
-          .and.containEql('reinstall 4.291.9')
+          .and.containEql('reinstall 4.291.10 or later')
           .and.containEql('this folder is unchanged');
         should(refusal).not.containEql('creates it on its first start');
       }
@@ -113,8 +113,8 @@ describe('Ferretry 5 on a Ferretry 4 home that was not carried over', () => {
         },
         { view: async () => await Promise.resolve(undefined) },
       );
-      await should(machine.deps.lifecycle.restart()).rejectedWith(/reinstall 4\.291\.9/);
-      await should(machine.deps.lifecycle.installAt(join(h.bin, 'fyd'))).rejectedWith(/reinstall 4\.291\.9/);
+      await should(machine.deps.lifecycle.restart()).rejectedWith(/reinstall 4\.291\.10 or later/);
+      await should(machine.deps.lifecycle.installAt(join(h.bin, 'fyd'))).rejectedWith(/reinstall 4\.291\.10 or later/);
       should(h.units()).be.false();
       await h.noServiceManagerCall();
       should(snapshotTree(h.home)).eql(before);

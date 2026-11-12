@@ -131,12 +131,12 @@ describe('why a service definition may not be written for a home', () => {
       );
   });
 
-  it('should give a folder with content and no home.json the carry-over sentence and the way back to 4.291.9', async () => {
+  it('should give a folder with content and no home.json the carry-over sentence and the way back to 4.291.10', async () => {
     const dir = await temp();
     await writeFile(join(dir, 'layout-version'), '2\n');
     const said = await serviceRefusal(dir);
     should(said).containEql(`${dir} is not empty and has no home.json`);
-    should(said).containEql('docs/migration/v4-to-v5-prompt.md').and.containEql('reinstall 4.291.9');
+    should(said).containEql('docs/migration/v4-to-v5-prompt.md').and.containEql('reinstall 4.291.10 or later');
     should(said).not.containEql('creates it on its first start');
   });
 
