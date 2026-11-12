@@ -21,12 +21,16 @@ export const MINIMUM_REPORTS_READ = 40;
  */
 export function reportsWorthReading(files: readonly WardenFileInfo[], limit: number): readonly WardenFileInfo[] {
   if (limit <= 0) return [];
+  return newestReportsFirst(files).slice(0, Math.max(MINIMUM_REPORTS_READ, limit * 2));
+}
+
+/** Every report file, newest first, ties broken on path: the order of the window above, with no window. */
+export function newestReportsFirst(files: readonly WardenFileInfo[]): readonly WardenFileInfo[] {
   return files
     .filter(file => file.path.endsWith(REPORT_EXTENSION))
     .toSorted((left, right) =>
       left.mtimeMs === right.mtimeMs ? left.path.localeCompare(right.path) : right.mtimeMs - left.mtimeMs,
-    )
-    .slice(0, Math.max(MINIMUM_REPORTS_READ, limit * 2));
+    );
 }
 
 /** Provenance as the API surfaces it: the recorded facts, plus the reason the

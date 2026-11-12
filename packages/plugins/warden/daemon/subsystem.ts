@@ -44,7 +44,7 @@ import {
   WardenSweepLoop,
   WardenSweepService,
   type WardenSpawner,
-  type WardenStatusScope,
+  type WardenReadScope,
   wardenTriggerEnabled,
 } from './lib/index.ts';
 import { parseWardenConfigPatch } from './lib/config.ts';
@@ -79,13 +79,17 @@ export interface WardenHost {
 
 /** What the routes serve (today's `WardenSubsystem`, in the contract's words where they differ). */
 export interface WardenSubsystem {
-  status(scope?: WardenStatusScope): Promise<WardenStatusView>;
-  verdicts(): Promise<readonly WardenVerdict[]>;
-  report(reportPath: string): Promise<string | undefined>;
+  /**
+   * A scope narrows the ROWS of every list before its cut (see `WardenReadScope`). What a ferret is TOLD of the answer
+   * is `ferretWardenView`'s, applied by the route: a scoped answer is never served as it is.
+   */
+  status(scope?: WardenReadScope): Promise<WardenStatusView>;
+  verdicts(scope?: WardenReadScope): Promise<readonly WardenVerdict[]>;
+  report(reportPath: string, scope?: WardenReadScope): Promise<string | undefined>;
   run(spawn: boolean): Promise<WardenRunView>;
   config(): ReturnType<WardenSweepService['view']>;
   updateConfig(patch: unknown): ReturnType<WardenSweepService['updateConfig']>;
-  agenda(): Promise<WardenAgendaView>;
+  agenda(scope?: WardenReadScope): Promise<WardenAgendaView>;
   investigate(ferret: string, note?: string): Promise<WardenInvestigateView>;
   leave(ferret: string, duration: '1h' | '4h' | 'until_change'): ReturnType<WardenSweepService['leaveAlone']>;
   /** An event that may bring the next sweep forward (a turn ended, a ferret stopped). */
@@ -343,12 +347,13 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       const due = loop.nextDueAtMs();
       return await service.status(due === undefined ? undefined : isoFromMs(due), scope);
     },
-    verdicts: async () => await reader.readVerdicts(),
-    report: async reportPath => await reader.readReportAt(posix.join(REPORTS_DIRECTORY, posix.basename(reportPath))),
+    verdicts: async scope => await reader.readVerdicts(undefined, scope),
+    report: async (reportPath, scope) =>
+      await reader.readReportAt(posix.join(REPORTS_DIRECTORY, posix.basename(reportPath)), scope),
     run: async spawn => await loop.run(spawn),
     config: async () => await service.view(),
     updateConfig: async patch => await service.updateConfig(parseWardenConfigPatch(patch)),
-    agenda: async () => await service.agenda(),
+    agenda: async scope => await service.agenda(scope),
     // Queued inside the sweep chain, then a sweep right behind it: if a slot is free the investigation starts now.
     investigate: async (ferret, note) => {
       const queued = await loop.exclusive(async () => await service.requestInvestigation(ferret, note));

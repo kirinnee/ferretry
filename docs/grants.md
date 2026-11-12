@@ -120,6 +120,17 @@ It is not an investigation request (`warden.use`): it switches supervision of th
 which is how the Warden behaves on this host — so a governed device steps up for it, and a remote warden,
 which can never step up, can never quiet its own supervision or anyone else's.
 
+**A ferret reads only its own lineage of the Warden.** The owner and an enrolled device read the whole fleet. A
+ferret caller (itself and its helpers, Ferrets' `mayTouch`) reads, on `GET /v1/warden/status`, `verdicts`, `report`,
+`agenda` and `POST /v1/warden/run`, its own lineage's rows and plain states, and nothing about another lineage: no
+identity, no figure, no activity. One projection (`ferretWardenView`, `warden/daemon/lib/ferret-view.ts`) builds that
+answer at the route spine from an allowlist, so a field added to the owner's view later is absent for a ferret until it
+is listed. Lists are narrowed to the lineage **before** their newest-N cut, so another lineage's records cannot evict the
+caller's own. A report about anyone outside the lineage (or about no one, or about the lineage and a stranger) is
+**404**, never 403, so its existence is not confirmed. The ferret's status carries no spend, savings, history,
+fingerprint, spawn time or failover strikes; a Warden's id appears only while it investigates the caller's own, otherwise
+a plain `wardenRunning` boolean. The owner's static settings (`GET /v1/warden/config`, the `config` block) are readable.
+
 **Updating the daemon is `fleet`.** Reading `GET /v1/daemon/update` is `use`; starting an update and
 changing automatic install are `configure`, and a governed device also gives a passkey step-up for that
 act alone (turning automatic install off never needs one). See [updating.md](updating.md).

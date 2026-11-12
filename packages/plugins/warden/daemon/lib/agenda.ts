@@ -68,6 +68,8 @@ export interface WardenAgendaInput {
   readonly exhaustedSince?: string;
   /** Sweep cadence; a sweep older than three times this reads as degraded. */
   readonly sweepIntervalMinutes?: number;
+  /** Which ferrets a reader may be told about; a notification about any other is not listed. Absent: all. */
+  readonly mayRead?: (sessionId: string) => boolean;
 }
 
 /** The size the wire's verdict window reports. The view joins no verdicts, so it is never truncated. */
@@ -89,6 +91,7 @@ export function buildWardenAgendaView(input: WardenAgendaInput): WardenAgendaVie
       const identity = parseWardenEscalationSourceRef(item.sourceRef);
       // The ferret it is about: a sub-ferret's notification sits on its agenda home and names it in its reference.
       const about = (identity?.scope === 'session' ? identity.sessionId : undefined) ?? board.sessionId;
+      if (input.mayRead !== undefined && !input.mayRead(about)) continue;
       const session = sessionsById.get(about);
       // A finished ferret's notification is cleared by the next sweep; it is never the owner's to act on now.
       if (session?.state.status !== undefined && isTerminalStatus(session.state.status)) continue;

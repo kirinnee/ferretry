@@ -77,8 +77,10 @@ export const askWardenBlocker = (status: WardenStatusView): string | null => {
   if (login !== null) return `${login}. Choose one in Settings › Warden.`;
   const paced = wardenPacedUntil(status, 'investigation');
   if (paced !== undefined) return `This hour’s share of the investigation cap is spent. Try again at ${paced}.`;
+  // A ferret's view carries no amounts, so it cannot tell the day's cap from this hour's share: both read
+  // `investigation_cap`. It says only what is true of either, never "today's cap is reached".
   if (status.spend === undefined)
-    return status.triage.llm.reason === 'investigation_cap' ? 'Today’s investigation cap is reached.' : null;
+    return status.triage.llm.reason === 'investigation_cap' ? 'Investigations are paused by the cap.' : null;
   if (status.spend.capsHit.includes('investigation'))
     return `Today’s ${usd(status.spend.investigationCapUsd)} investigation cap is reached. Raise it in Settings › Warden.`;
   return null;

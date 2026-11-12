@@ -79,7 +79,7 @@ export function WardenStrip({ status, now = Date.now() }: WardenStripProps) {
           </span>
         </>
       )}
-      {status.liveWarden !== undefined && (
+      {(status.liveWarden !== undefined || status.wardenRunning === true) && (
         <>
           <Dot />
           <span className="text-muted">investigating</span>

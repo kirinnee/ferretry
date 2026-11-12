@@ -18,6 +18,13 @@ import { WardenConfigHeld, WardenConfigMoved, WardenConfigRefused } from './adap
 import type { WardenSubsystem } from './subsystem.ts';
 import { WardenRequestError, type WardenRequestFailure } from './lib/index.ts';
 import {
+  ferretAgendaView,
+  ferretRunView,
+  ferretStatusView,
+  ferretVerdictsView,
+  type WardenReadScope,
+} from './lib/index.ts';
+import {
   toWireAgenda,
   toWireInvestigate,
   toWireLeave,
@@ -66,38 +73,49 @@ const first = (call: CallContext, name: string): string | undefined => call.requ
  * it sends to a model.
  */
 export function wardenRoutes(subsystem: WardenSubsystem, ferrets: Pick<FerretsApi, 'mayTouch'>) {
+  // The owner and a person read the whole fleet. A FERRET reads its own lineage (itself and its helpers, `mayTouch`):
+  // the scope narrows every list at its source, before its cut, and the answer is then built by the ONE deny-by-default
+  // projection of `ferret-view.ts`, which a ferret's reply never skips: every route below that a ferret can call
+  // (`status`, `verdicts`, `report`, `agenda`, `run`) answers through it. `config` is the owner's static settings,
+  // which a ferret may read; `investigate`, `leave` and `PATCH config` are person-only and refuse a ferret at Gate.
+  const scopeOf = (call: CallContext): WardenReadScope | undefined => {
+    const caller = ferretOf(call);
+    return caller === undefined ? undefined : { mayRead: ferret => ferrets.mayTouch(caller, ferret as FerretId) };
+  };
   return {
-    // The owner and a person read the whole fleet. A FERRET reads its own lineage only (itself and its helpers,
-    // `mayTouch`): the checks and target investigations about them, filtered BEFORE the newest-N cut, and NO fleet
-    // aggregate (spend, savings, history, totals) nor targetless pack investigation, which belong to no lineage. It
-    // still sees whether Warden is capped or paused (`triage`), a state and never an amount.
     'GET /v1/warden/status': guarded(async call => {
-      const caller = ferretOf(call);
-      return jsonResponse(
-        toWireStatus(
-          await subsystem.status(
-            caller === undefined ? undefined : { mayRead: ferret => ferrets.mayTouch(caller, ferret as FerretId) },
-          ),
-        ),
-      );
+      const scope = scopeOf(call);
+      const owner = toWireStatus(await subsystem.status(scope));
+      return jsonResponse(scope === undefined ? owner : ferretStatusView(owner, scope));
     }),
-    'GET /v1/warden/verdicts': guarded(async () => jsonResponse(toWireVerdicts(await subsystem.verdicts()))),
+    'GET /v1/warden/verdicts': guarded(async call => {
+      const scope = scopeOf(call);
+      const owner = toWireVerdicts(await subsystem.verdicts(scope));
+      return jsonResponse(scope === undefined ? owner : ferretVerdictsView(owner, scope));
+    }),
+    // A report about anyone outside the lineage is NOT FOUND (404, never 403), so its existence is not confirmed.
     'GET /v1/warden/report': guarded(async call => {
       const reportPath = first(call, 'path');
       if (reportPath === undefined || reportPath.trim() === '')
         throw new ApiError(400, 'a warden report path is required', 'invalid_request');
-      const body = await subsystem.report(reportPath);
+      const body = await subsystem.report(reportPath, scopeOf(call));
       if (body === undefined) throw new ApiError(404, 'warden report not found', 'warden_report_not_found');
       return textResponse(body);
     }),
-    'GET /v1/warden/agenda': guarded(async () => jsonResponse(toWireAgenda(await subsystem.agenda()))),
+    'GET /v1/warden/agenda': guarded(async call => {
+      const scope = scopeOf(call);
+      const owner = toWireAgenda(await subsystem.agenda(scope));
+      return jsonResponse(scope === undefined ? owner : ferretAgendaView(owner, scope));
+    }),
     'POST /v1/warden/run': guarded(async call => {
       const request = await parseOptionalBody(call.request, WardenRunRequestSchema);
       // A sweep that may SPAWN investigators starts warden sessions with no parent, so only a person asks for one; a
       // ferret may still ask for a sweep that only looks. No ferret starts a session that is not its own child.
       if (request.spawn === true && isFerretCall(call))
         throw new ApiError(403, 'a ferret cannot start Warden investigators; ask the owner', OWNER_ONLY_CODE);
-      return jsonResponse(toWireRun(await subsystem.run(request.spawn === true)));
+      const scope = scopeOf(call);
+      const owner = toWireRun(await subsystem.run(request.spawn === true));
+      return jsonResponse(scope === undefined ? owner : ferretRunView(owner, scope));
     }),
     'POST /v1/warden/investigate': guarded(async call => {
       const request = await parseBody(call.request, WardenInvestigateRequestSchema);

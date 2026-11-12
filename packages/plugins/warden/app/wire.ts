@@ -373,6 +373,8 @@ export interface WardenStatusView {
   readonly flags: readonly WardenFlag[];
   readonly fingerprint: string;
   readonly liveWarden?: string;
+  /** A ferret's view only: some Warden is investigating (its id is not the ferret's to know). */
+  readonly wardenRunning?: boolean;
   readonly lastSpawnAt?: string;
   readonly lastReport?: { readonly reportId: string; readonly head: string };
   readonly failover?: WardenFailoverStatus;

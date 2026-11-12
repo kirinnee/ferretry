@@ -553,6 +553,8 @@ export const WardenStatusViewSchema = z.looseObject({
   flags: z.array(WardenFlagSchema),
   fingerprint: z.string(),
   liveWarden: z.string().optional(),
+  /** A ferret's view only: whether some Warden is investigating, when whose it is is not the ferret's to know. */
+  wardenRunning: z.boolean().optional(),
   lastSpawnAt: InstantSchema.optional(),
   lastReport: z.strictObject({ reportId: z.string().min(1), head: z.string() }).optional(),
   triage: WardenTriageStatusSchema,

@@ -11,6 +11,7 @@ export * from './detect.ts';
 export * from './escalation.ts';
 export * from './failover.ts';
 export * from './feed.ts';
+export * from './ferret-view.ts';
 export * from './focus-card.ts';
 export * from './jev-checks.ts';
 export * from './jev-tree.ts';
