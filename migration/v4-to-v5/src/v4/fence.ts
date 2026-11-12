@@ -42,11 +42,22 @@ export async function fenceV4(home: string): Promise<ReadonlySet<string>> {
 export const FENCED_ENTRIES: readonly string[] = ['home.json', 'layout-version', 'daemon.lock'];
 
 /**
- * The fence ENFORCED: one plain sentence per fenced folder that is a link or not a folder, and per entry that is a link,
- * each with the remedy and never the target. Empty when the home is safe to read. `lstat` only, before anything else in the
- * home is looked at, so a refused conversion has made no resolving call on any of them.
+ * The fence ENFORCED: what refuses the conversion, and what is left alone. `lstat` and directory listings only,
+ * before anything else in the home is looked at, so a refused conversion has made no resolving call on any link.
+ *
+ * - REFUSED (`problems`, one plain sentence each, with the remedy, never the target): a fenced folder or one of the
+ *   home's single entries that is a link, and ANY link inside `config`, `state` or `fleet` outside the three trees
+ *   below: a step reads those, and reading one would resolve it.
+ * - LEFT ALONE (`leftAlone`, link PATHS only): any link inside `fleet/homes`, `fleet/shared` and `fleet/bin`. v4's own
+ *   provisioner links each account home's sign-in and its shared-history files there; the harness-homes step looks at
+ *   each with `lstat`, never follows it, never carries it. Conversion continues.
  */
-export async function fenceProblems(home: string): Promise<readonly string[]> {
+export interface FenceReport {
+  readonly problems: readonly string[];
+  readonly leftAlone: readonly string[];
+}
+
+export async function fenceReport(home: string): Promise<FenceReport> {
   const problems: string[] = [];
   for (const entry of FENCED_ENTRIES) {
     const facts = await lstat(join(home, entry)).catch(() => undefined);
@@ -62,29 +73,50 @@ export async function fenceProblems(home: string): Promise<readonly string[]> {
       `${join(home, folder)} is a link or not a folder, so the conversion did not start: replace it with the real folder, then run again`,
     );
   }
-  // ANY link inside a fenced tree refuses too: a reader that met one would resolve it. The three roots cover every other fenced folder.
+  // The three roots cover every other fenced folder; a root that is itself fenced is already refused above.
+  const leftAlone: string[] = [];
   for (const root of WALKED_ROOTS) {
     if (isFenced(fenced, root)) continue;
-    for (const link of await linksUnder(join(home, root))) {
+    const left = new Set(LEFT_ALONE_TREES.map(tree => join(home, tree)));
+    for (const link of await linksUnder(join(home, root), left, false, leftAlone)) {
       problems.push(
         `${link} is a link, so the conversion did not start: replace it with the real file or folder, then run again`,
       );
     }
   }
-  return problems;
+  return { problems, leftAlone: leftAlone.sort() };
+}
+
+/** The fence ENFORCED, problems only (see {@link fenceReport}). */
+export async function fenceProblems(home: string): Promise<readonly string[]> {
+  return (await fenceReport(home)).problems;
 }
 
 /** The roots whose whole trees are searched for links (every other fenced folder is inside `fleet`). */
 const WALKED_ROOTS: readonly string[] = ['config', 'state', 'fleet'];
 
-/** Every link entry under `folder` (never followed: only real folders are entered, entries are read by type). */
-async function linksUnder(folder: string): Promise<readonly string[]> {
+/** The trees v4's own provisioner and shared-history writer put links in: looked at with `lstat`, never followed. */
+export const LEFT_ALONE_TREES: readonly string[] = ['fleet/homes', 'fleet/shared', 'fleet/bin'];
+
+/**
+ * Every link entry under `folder` (never followed: only real folders are entered, entries are read by type). Inside a
+ * `left` tree a link is added to `leftAlone` instead of being returned.
+ */
+async function linksUnder(
+  folder: string,
+  left: ReadonlySet<string>,
+  inLeft: boolean,
+  leftAlone: string[],
+): Promise<readonly string[]> {
   const entries = await readdir(folder, { withFileTypes: true }).catch(() => []);
   const found: string[] = [];
   for (const entry of entries) {
     const path = join(folder, entry.name);
-    if (entry.isSymbolicLink()) found.push(path);
-    else if (entry.isDirectory()) found.push(...(await linksUnder(path)));
+    const here = inLeft || left.has(path);
+    if (entry.isSymbolicLink()) {
+      if (here) leftAlone.push(path);
+      else found.push(path);
+    } else if (entry.isDirectory()) found.push(...(await linksUnder(path, left, here, leftAlone)));
   }
   return found;
 }

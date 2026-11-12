@@ -2,12 +2,14 @@
  * What must be true before anything is written: the source is a stopped v4 home, the target is new.
  * Every check reads metadata or the plain-text layout marker only — never a state file's content.
  */
-import { readdir, readFile, readlink, realpath, stat } from 'node:fs/promises';
+import { lstat, readdir, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
-import { fenceProblems } from './v4/fence.ts';
+import { fenceReport } from './v4/fence.ts';
 import { V4_LAYOUT_VERSION, v4Paths } from './v4/layout.ts';
 
-export type Preflight = { readonly ok: true } | { readonly ok: false; readonly problems: readonly string[] };
+export type Preflight =
+  | { readonly ok: true; readonly notes: readonly string[] }
+  | { readonly ok: false; readonly problems: readonly string[] };
 
 /** Who holds a path open, without reading it. Injected so tests do not depend on the host's process table. */
 export interface LockProbe {
@@ -24,8 +26,11 @@ export async function preflight(from: string, to: string, lock: LockProbe): Prom
 
   // First, before anything else in the home is read: a link or non-folder among the folders the steps descend into, or
   // among the entries read below, refuses the whole conversion. Nothing resolves through one.
-  const fenced = await fenceProblems(from);
-  if (fenced.length > 0) return { ok: false, problems: [...fenced] };
+  const fence = await fenceReport(from);
+  if (fence.problems.length > 0) return { ok: false, problems: [...fence.problems] };
+  const notes = fence.leftAlone.map(
+    path => `${path} is a link: left alone, not carried (5.0 rebuilds the account and shared-history links)`,
+  );
 
   if (await exists(join(from, 'home.json'))) {
     problems.push(`${from} has a home.json: it is already a v5 home, not a v4 one`);
@@ -44,6 +49,15 @@ export async function preflight(from: string, to: string, lock: LockProbe): Prom
     if (held === undefined) problems.push(`cannot tell whether a v4 daemon holds ${v4.daemonLock} on this host`);
   }
 
+  // The new home is only ever written below a real folder: its own entry is looked at, never followed.
+  if ((await lstat(to).catch(() => undefined))?.isSymbolicLink() === true) {
+    return {
+      ok: false,
+      problems: [
+        `${to} is a link, so the conversion did not start: replace it with a real folder (or name a new one), then run again`,
+      ],
+    };
+  }
   const resolvedFrom = await realpath(from);
   const target = await stat(to).catch(() => undefined);
   if (target !== undefined) {
@@ -54,7 +68,7 @@ export async function preflight(from: string, to: string, lock: LockProbe): Prom
   if (inside(resolvedFrom, resolvedTo) || inside(resolvedTo, resolvedFrom)) {
     problems.push(`${to} and ${from} overlap; the new home must be a separate folder`);
   }
-  return problems.length === 0 ? { ok: true } : { ok: false, problems };
+  return problems.length === 0 ? { ok: true, notes } : { ok: false, problems };
 }
 
 function inside(parent: string, child: string): boolean {

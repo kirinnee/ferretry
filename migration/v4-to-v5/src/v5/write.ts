@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { parseDocument } from 'yaml';
 import type { z } from 'zod';
 import { keyPath } from '../key-path.ts';
+import { refuseLinkOnPath } from './no-link.ts';
 
 /**
  * The part of a v5 `defineConfig` declaration the writer needs: one file under `config/`, or a folder of
@@ -116,6 +117,7 @@ export function v5Writer(home: string, options: { readonly dryRun: boolean }): V
   const place = async (relativePath: string, text: string | Uint8Array, mode: number): Promise<void> => {
     if (options.dryRun) return;
     const target = join(home, relativePath);
+    refuseLinkOnPath(home, target);
     await mkdir(dirname(target), { recursive: true, mode: 0o700 });
     const temporary = `${target}.tmp-${process.pid}`;
     await writeFile(temporary, text, { mode, flag: 'wx' });
@@ -166,7 +168,9 @@ export function v5Writer(home: string, options: { readonly dryRun: boolean }): V
       return new Map(sources);
     },
     resolve(relativePath) {
-      return join(home, relativePath);
+      const path = join(home, relativePath);
+      refuseLinkOnPath(home, path);
+      return path;
     },
   };
 }

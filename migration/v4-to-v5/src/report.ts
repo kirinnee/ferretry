@@ -33,6 +33,11 @@ export interface ConversionReport {
   readonly at: string;
   readonly dryRun: boolean;
   readonly steps: readonly StepReport[];
+  /**
+   * Links v4 itself made inside its account homes, shared history and wrappers (`fleet/homes`, `fleet/shared`,
+   * `fleet/bin`) that the conversion left alone: one line per link PATH, never what it points to. Absent when none.
+   */
+  readonly notes?: readonly string[];
   /** True only when every step converted or was declared not carried, and home.json was written. */
   readonly complete: boolean;
 }
@@ -47,5 +52,6 @@ export function summarise(report: ConversionReport): string {
   const verdict = report.complete
     ? 'complete: home.json written, v5 may start on this home'
     : 'NOT complete: home.json was not written, so v5 refuses this folder (by design)';
-  return [`v4 -> v5 conversion ${report.dryRun ? '(dry run) ' : ''}${verdict}`, ...lines].join('\n');
+  const notes = (report.notes ?? []).map(line => `  note: ${line}`);
+  return [`v4 -> v5 conversion ${report.dryRun ? '(dry run) ' : ''}${verdict}`, ...lines, ...notes].join('\n');
 }

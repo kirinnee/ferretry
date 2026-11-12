@@ -3,7 +3,6 @@
  * finished. The v4 home is opened read-only and never written.
  */
 import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
 import type { LoginHarness } from './steps/preview-hold.ts';
 import { type LockProbe, preflight } from './preflight.ts';
 import type { ConversionReport, StepReport } from './report.ts';
@@ -199,7 +198,8 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
   if (finished && !options.dryRun) {
     // The tree v5's openHome makes for a NEW home (it makes none for an existing one): without `logs/` fyd writes no
     // log at all, and `run/` holds its lock and sockets. Then home.json, last.
-    for (const folder of V5_HOME_TREE) await mkdir(join(options.to, folder), { recursive: true, mode: 0o700 });
+    for (const folder of V5_HOME_TREE) await mkdir(ctx.v5.resolve(folder), { recursive: true, mode: 0o700 });
+    ctx.v5.resolve('home.json');
     await writeHomeJson(options.to, at, 'ferretry-v4-to-v5');
   }
   return {
@@ -212,6 +212,7 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
       at: at.toISOString(),
       dryRun: options.dryRun,
       steps: reports,
+      ...(checked.notes.length === 0 ? {} : { notes: checked.notes }),
       complete: finished && !options.dryRun,
     },
   };

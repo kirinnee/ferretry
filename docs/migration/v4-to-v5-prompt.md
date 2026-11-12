@@ -99,6 +99,7 @@ bun src/main.ts --from "$B" --to "$H"                # writes the new home at H
   second name inside the new home (a hard link, so the same running server answers there); this is why `B` and `H`
   must be on one filesystem. It prints counts and names
   only, and writes a report **beside** the new home: `$H.conversion-report.json`. Show the owner the printed summary.
+  Links inside the v4 account and shared-history folders (`fleet/homes`, `fleet/shared`, `fleet/bin`) are not carried: the summary lists each by path as a note, and 5.0 rebuilds them.
 - A **dry run** writes nothing (not even `H`): exit 0 means every step would convert, exit 3 means one would not; read
   the printed summary to the owner before the real run.
 - **Exit 0** means complete: every item converted, and `H/home.json` written **last**. **Exit 3** means some step did

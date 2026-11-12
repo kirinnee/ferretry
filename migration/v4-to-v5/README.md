@@ -220,12 +220,14 @@ temp ones.
 
 The fence (`src/v4/fence.ts`, run first in `preflight`): before anything else in the v4 home is read, the converter `lstat`s the
 home's own folders the steps descend into (`config`, `state`, `fleet` and its `credentials`, `assets`, `homes`, `shared`, `bin`) and the
-entries preflight reads (`home.json`, `layout-version`, `daemon.lock`). A folder that is a link or not a folder, an entry that is a link, or ANY link met anywhere inside `config`, `state` or `fleet` (a login folder, a file in `fleet/assets`, …),
+entries preflight reads (`home.json`, `layout-version`, `daemon.lock`). A folder that is a link or not a folder, an entry that is a link, or ANY link met anywhere inside `config`, `state` or `fleet` outside `fleet/homes`, `fleet/shared` and `fleet/bin` (a login folder, a file in `fleet/assets`, …),
 **REFUSES the conversion before any step runs**, writing nothing (not even the new home), with a plain sentence naming it and the remedy
 (replace the link with the real folder, then run again). The target is never named, and no resolving call (`stat`, `readFile`, `readdir`,
 `exists`, `open`, `realpath`) is made on anything that resolves into `~/.claude`, `~/.claude.json` or `~/.codex`; only `lstat` and
 `readlink` of a link entry itself. Service-definition links are walked component by component, `..` applied against the real folder after the links before it are
 expanded.
+
+The links v4 writes itself (its provisioner's per-account links in `fleet/homes`, its shared-history links in `fleet/shared`, wrappers in `fleet/bin`) are the one exception: they are LEFT ALONE. They are `lstat`ed and never followed or carried, the conversion continues, and the report (`notes`, and the printed summary) lists each link by PATH, never its target. Nothing is written through a link either: every path written in the new home has each component `lstat`ed first (`src/v5/no-link.ts`), and a link anywhere on it, the new home or the report path included, refuses.
 
 The `rebuild/migration-ferrets-b` development branch contains a local merge of the unreviewed
 `rebuild/port-ferrets-a2` schemas. **Do not integrate it before Ferrets lands on `rebuild/5.0`.** Once Ferrets lands,

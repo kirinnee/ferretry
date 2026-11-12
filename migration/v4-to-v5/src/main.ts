@@ -9,7 +9,7 @@
  * folder). 2: refused before writing anything. 64: usage. A dry run writes nothing (its report says `complete: false`)
  * and exits 0 when every step WOULD convert, 3 when one would not.
  */
-import { writeFile } from 'node:fs/promises';
+import { lstat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -46,6 +46,15 @@ async function main(argv: readonly string[]): Promise<number> {
   const from = resolve(values.from);
   const to = resolve(values.to);
   const dryRun = values['dry-run'] ?? false;
+  // The report sits BESIDE the new home, never inside it: a v5 home holds only declared files. A link at its path is
+  // refused before anything is written (the report is never written through a link).
+  const reportPath = resolve(values.report ?? `${to}.conversion-report.json`);
+  if ((await lstat(reportPath).catch(() => undefined))?.isSymbolicLink() === true) {
+    console.error(
+      `refused; nothing was written:\n  - ${reportPath} is a link: replace it with a real file (or name another with --report), then run again`,
+    );
+    return 2;
+  }
   const result = await convert({
     from,
     to,
@@ -63,8 +72,6 @@ async function main(argv: readonly string[]): Promise<number> {
     console.error(`refused; nothing was written:\n${result.problems.map(p => `  - ${p}`).join('\n')}`);
     return 2;
   }
-  // The report sits BESIDE the new home, never inside it: a v5 home holds only declared files.
-  const reportPath = resolve(values.report ?? `${to}.conversion-report.json`);
   await writeFile(reportPath, `${JSON.stringify(result.report, null, 2)}\n`, { mode: 0o600 });
   console.log(summarise(result.report));
   console.log(`report: ${reportPath}`);

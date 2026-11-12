@@ -31,6 +31,7 @@ import { fileURLToPath } from 'node:url';
 import type { LockProbe } from '../../src/preflight.ts';
 import type { Step } from '../../src/steps/index.ts';
 import { fixture } from './ferret-fixture.ts';
+import { plantTripwire, provisionerLinks, TRIPWIRE_CANARY } from './v4-links-fixture.ts';
 
 /** The REAL link readers, taken before the mock so the tripwire's own look is never itself guarded. */
 const real = { lstat: realFs.lstatSync, readlink: realFs.readlinkSync, realpath: realFs.realpathSync };
@@ -310,8 +311,14 @@ test('the WHOLE conversion REFUSES a login folder that is a link (any link insid
   expect(wire.hits).toEqual([]);
 });
 
-test('the WHOLE conversion REFUSES a link met deep inside state, config or fleet, whatever it points at', async () => {
-  for (const deep of ['state/board/tasks/one.json', 'config/components/x/y.yaml', 'fleet/homes/h/inner/file']) {
+test('the WHOLE conversion REFUSES a link met deep inside state, config or fleet (outside homes, shared and bin), whatever it points at', async () => {
+  for (const deep of [
+    'state/board/tasks/one.json',
+    'config/components/x/y.yaml',
+    'fleet/credentials/login/inner/file',
+    'fleet/assets/components/hooks/h.sh',
+    'fleet/ids.json',
+  ]) {
     await rm(f.to, { recursive: true, force: true });
     await mkdir(join(f.from, deep, '..'), { recursive: true });
     await writeFile(join(f.root, 'harmless.txt'), 'x');
@@ -568,4 +575,168 @@ test('a Codex host login whose name v5 cannot use fails by file name, and a v4 h
   expect(plain.status).toBe('converted');
   expect(plain.note).toBeUndefined();
   expect(plain.kept.some(item => item.what.includes('Codex store: host'))).toBe(false);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// RULES A and C: links v4 writes itself (provisioner links in fleet/homes, shared-history links in fleet/shared, a
+// wrapper link in fleet/bin) are LEFT ALONE: lstat only, never followed, never carried, one note per link PATH. The
+// oracle is independent of the converter: the tripwire folders are chmod 000 for the run, so any access through a link
+// fails with EACCES; the guarded fs (round 3's per-prefix lstat oracle) records it even when swallowed; and the
+// tripwire's own files and listings are compared before and after.
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Every file path under `folder`, never following a link. */
+async function filesUnder(folder: string): Promise<string[]> {
+  const found: string[] = [];
+  for (const entry of await readdir(folder, { withFileTypes: true })) {
+    const path = join(folder, entry.name);
+    if (entry.isDirectory()) found.push(...(await filesUnder(path)));
+    else found.push(path);
+  }
+  return found;
+}
+
+test('a REAL v4 shape: provisioner, shared-history and wrapper links are left alone, noted by path, and the tripwire is untouched', async () => {
+  const tripwire = await plantTripwire(userHome);
+  try {
+    const links = await provisionerLinks(f.from, userHome);
+    // A ferret whose transcript pointer goes THROUGH the account's link: only its text is rewritten, nothing is opened.
+    const account = join(f.from, 'fleet/homes/acct1');
+    await f.session('f1', {
+      transcript: {
+        v: 1,
+        home: account,
+        harnessSessionId: 'abc',
+        identity: 'adopted',
+        file: join(account, '.codex/sessions/rollout.jsonl'),
+      },
+    });
+    await tripwire.lock();
+    const result = await whole();
+    expect(result.kind).toBe('done');
+    // Zero hits from the guarded fs (swallowed or not) ...
+    expect(wire.hits).toEqual([]);
+    // ... one note per link, naming the PATH only (never the target, which is inside the user's home) ...
+    const notes = result.kind === 'done' ? (result.report.notes ?? []) : [];
+    expect(notes.map(note => note.split(' is a link')[0])).toEqual([...links]);
+    expect(notes.every(note => note.includes('left alone, not carried'))).toBe(true);
+    expect(notes.join('\n')).not.toContain(userHome);
+    expect(JSON.stringify(result)).not.toContain(userHome);
+    // ... the harness-homes step walked the account and counted every link in it and in the shared pool, carried none ...
+    const homes = stepOf(result, 'harness-homes');
+    expect(homes?.status).toBe('converted');
+    expect(homes?.kept).toContainEqual({ what: 'links omitted (no v5 policy)', count: 7 });
+    expect(homes?.kept).toContainEqual({ what: 'runtime homes copied', count: 1 });
+    expect((await filesUnder(f.to)).some(path => path.endsWith('projects/own.jsonl'))).toBe(true);
+    for (const path of await filesUnder(f.to)) expect((await readFile(path)).includes(TRIPWIRE_CANARY)).toBe(false);
+    // ... and the v4 links are as they were.
+    for (const link of links) expect((await lstat(link)).isSymbolicLink()).toBe(true);
+  } finally {
+    wire.armed = false;
+    await tripwire.restore();
+  }
+  // The oracle, independent of any converter code: no byte of the tripwire was read, listed or changed.
+  expect(await tripwire.snapshot()).toBe(tripwire.before);
+  await tripwire.restore();
+});
+
+test('the same shape is converted in a DRY run too, with the notes and no hit', async () => {
+  const tripwire = await plantTripwire(userHome);
+  try {
+    await provisionerLinks(f.from, userHome);
+    await tripwire.lock();
+    await writeFile(join(f.from, 'layout-version'), '2\n', { mode: 0o600 });
+    await arm();
+    const result = await convert({
+      from: f.from,
+      to: f.to,
+      dryRun: true,
+      lock: notHeld,
+      now: () => new Date('2026-11-07T01:00:00.000Z'),
+      host: { homeDirectory: userHome, env: {} },
+    });
+    wire.armed = false;
+    expect(result.kind).toBe('done');
+    expect(wire.hits).toEqual([]);
+    expect(result.kind === 'done' ? result.report.notes?.length : 0).toBe(8);
+  } finally {
+    wire.armed = false;
+    await tripwire.restore();
+  }
+});
+
+test('the real-shape fixture is still REFUSED when a B-tree link sits beside the left-alone ones', async () => {
+  const tripwire = await plantTripwire(userHome);
+  try {
+    await provisionerLinks(f.from, userHome);
+    await mkdir(join(f.from, 'fleet/assets'), { recursive: true });
+    await symlink(join(userHome, '.codex/auth.json'), join(f.from, 'fleet/assets/hook.sh'));
+    await tripwire.lock();
+    const result = await whole();
+    expect(result.kind).toBe('refused');
+    const text = result.kind === 'refused' ? result.problems.join('\n') : '';
+    expect(text).toContain(`${f.from}/fleet/assets/hook.sh is a link, so the conversion did not start`);
+    // Only the B link is a problem; the left-alone ones are not named as problems.
+    expect(text).not.toContain('fleet/homes');
+    expect(text).not.toContain(userHome);
+    expect(wire.hits).toEqual([]);
+  } finally {
+    wire.armed = false;
+    await tripwire.restore();
+  }
+});
+
+test('ORACLE (RED control): a reader that FOLLOWS a provisioner link trips the guarded fs AND the chmod 000 itself', async () => {
+  const tripwire = await plantTripwire(userHome);
+  try {
+    await provisionerLinks(f.from, userHome);
+    await tripwire.lock();
+    const alias = join(f.from, 'fleet/homes/acct1/.codex');
+    // The probe swallows the error, like a careless reader; the oracle still saw the attempt ...
+    await direct(injected(() => guardedFs.readdir(alias)));
+    expect(wire.hits).toEqual(['readdir']);
+    // ... and, with no guard at all, the kernel itself refuses: the folder behind the link is mode 000.
+    await expect(readdir(alias)).rejects.toMatchObject({ code: 'EACCES' });
+    await expect(stat(join(f.from, 'fleet/shared/claude/projects'))).rejects.toMatchObject({ code: 'EACCES' });
+    // lstat of the link ENTRY is what the converter may do, and it works.
+    expect((await lstat(alias)).isSymbolicLink()).toBe(true);
+  } finally {
+    wire.armed = false;
+    await tripwire.restore();
+  }
+});
+
+test('ORACLE (RED control): a stat or readFile through a shared-history link or the wrapper link is caught', async () => {
+  const tripwire = await plantTripwire(userHome);
+  try {
+    await provisionerLinks(f.from, userHome);
+    await tripwire.lock();
+    // `direct` re-arms (and so clears the hits) each time: one look per call.
+    const looks = [
+      ['stat', 'fleet/shared/codex/history.jsonl'],
+      ['readFile', 'fleet/bin/codex-wrapper/auth.json'],
+      ['readFile', 'fleet/homes/acct1/.claude.json'],
+    ] as const;
+    for (const [name, path] of looks) {
+      await direct(injected(() => guardedFs[name](join(f.from, path))));
+      expect(wire.hits).toEqual([name]);
+    }
+  } finally {
+    wire.armed = false;
+    await tripwire.restore();
+  }
+});
+
+test('a link inside fleet/homes, shared or bin does not hide a fenced folder that is itself a link', async () => {
+  const tripwire = await plantTripwire(userHome);
+  try {
+    await provisionerLinks(f.from, userHome);
+    await rm(join(f.from, 'fleet/bin'), { recursive: true, force: true });
+    await symlink(join(userHome, '.codex'), join(f.from, 'fleet/bin'));
+    await tripwire.lock();
+    await refusedWith(await whole(), 'fleet/bin');
+  } finally {
+    wire.armed = false;
+    await tripwire.restore();
+  }
 });
