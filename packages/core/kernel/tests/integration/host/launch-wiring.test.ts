@@ -14,21 +14,18 @@ import { daemonImplementations } from '../../../src/generated/plugins.ts';
 import { diskFolders, type TestHost, testHost } from '../../../testing/index.ts';
 
 /**
- * #1587 through the daemon, on the path production takes: the REAL Ferrets, Runtimes and Claude Code halves, as the
+ * The launch path through the daemon, as production takes it: the REAL Ferrets, Runtimes and Claude Code halves, as the
  * generated registry builds them. Every start, restart/revive and adoption goes `FerretsService.launchAttempt` ->
  * `ClaudeHarness.launch` -> the runner; the table drives that and nothing else.
  *
- *  (i)   a folder whose `.claude/settings*.json` sets a key the login leaves to the process environment is refused,
- *        naming the file and the key, and nothing is launched;
- *  (ii)  a symlinked `.git`, an unverified worktree back-link and a missing folder are refused;
- *  (iii) the login's credential never appears in the runner's argv, and rides only the harness's private settings file;
- *  (iv)  a clean folder launches;
- *  (v)   the login's pinned literal environment is in the `--settings` file, which outranks a folder's own `env`.
+ * A project's own `.claude` settings win over a login's environment (v4 before 4.291.9; owner, !A500), so:
  *
- * (vi)  the login's pins are never lost AFTER the folder was judged: the facts are read once, so a `fixed.json` that breaks
- *       after the decision still launches with the pins that were checked, and one already broken refuses the launch;
- * (vii) `fast: true` writes `fastMode` and a published account `compactAt` writes `autoCompactWindow`, on a start, a
- *       stop/resume and an adoption alike, into the same private settings file.
+ *  (i)   a folder whose `.claude/settings*.json` sets a key the login leaves to the secret store is NOT refused, and no
+ *        repository layout is read at all (a symlinked `.git`, an unprovable worktree back-link);
+ *  (ii)  the login's credential never appears in the runner's argv, and no login environment is pinned into the harness's
+ *        private settings file (a stale `fixed.json` env from an earlier apply is never read);
+ *  (iii) `fast: true` writes `fastMode` and a published account `compactAt` writes `autoCompactWindow`, on a start, a
+ *        stop/resume and an adoption alike, into the same private settings file.
  *
  * A MOVE is the fifth path. Its route (`POST /v1/ferrets/:id/move`) is still a 503 skeleton on this base (its account
  * inventory, planner and session directory are unbound): with a request id and a COMPLETE legacy lifecycle record it
@@ -36,7 +33,7 @@ import { diskFolders, type TestHost, testHost } from '../../../testing/index.ts'
  * record has no lifecycle command, so it answers `409 session_unusable` first. Both are pinned here so the day the
  * route is bound it must go through `launchAttempt` too.
  *
- * Fixture values only; folders are real temporary directories because the folder settings are read from disk.
+ * Fixture values only; folders are real temporary directories.
  */
 
 /**
@@ -111,11 +108,11 @@ const runnerPlugin = (runner: FakeRunner) =>
 const ID = '00000000-0000-4000-8000-0000000000a1';
 const HOME = `/fleet/homes/${ID}`;
 const RUNTIME = 'work';
-/** A literal credential in a login's YAML (an internal gateway's token): pinned, so it must never ride an argv. */
+/** A literal credential an earlier apply left in fixed.json (an internal gateway's token): never read, never in an argv. */
 const TOKEN = 'fixture-gateway-token-0001';
 const BASE_URL = 'https://gateway.fixture.invalid';
 
-/** The fleet one apply publishes: a Claude runtime whose login pins two literals and leaves one key to the secret store. */
+/** The fleet one apply publishes: a Claude runtime whose login leaves one key to the secret store. */
 const manifest = {
   version: 1,
   generatedAt: '2027-01-15T08:00:00.000Z',
@@ -148,7 +145,8 @@ const manifest = {
     },
   ],
 };
-const FIXED = JSON.stringify({ env: { ANTHROPIC_BASE_URL: BASE_URL, ANTHROPIC_AUTH_TOKEN: TOKEN } });
+/** What an earlier (pinning) apply left in the runtime's fixed.json: nothing reads it any more. */
+const STALE_FIXED = JSON.stringify({ env: { ANTHROPIC_BASE_URL: BASE_URL, ANTHROPIC_AUTH_TOKEN: TOKEN } });
 
 let fixture: string;
 beforeEach(async () => {
@@ -162,10 +160,9 @@ afterEach(async () => {
   await rm(fixture, { recursive: true, force: true });
 });
 
-async function boot(runner: RecordingRunner, fixed: string | null = FIXED): Promise<TestHost> {
+async function boot(runner: RecordingRunner, fixed: string | null = STALE_FIXED): Promise<TestHost> {
   const h = await testHost({
     everyDirectory: true,
-    // The launch folder's settings are read through the kernel's own `harness-home` rules, here over real temp files.
     harnessHomeFolders: await diskFolders(await mkdtemp(join(fixture, 'roots-'))),
     plugins: [real('ferrets'), real('runtimes'), real('claude-code'), runnerPlugin(runner), faultPlugin()],
     gate: new StandInAdmission(() => ownerStanding()),
@@ -328,61 +325,56 @@ const ROWS: readonly Row[] = [
   },
 ];
 
-/** The cases: what is wrong with the folder, and what the refusal must say. */
-const REFUSED: readonly { readonly name: string; readonly plant: Plant; readonly says: readonly string[] }[] = [
+/** Folders that used to refuse a start (#1587): a project's own env and a repository layout nobody now reads. */
+const NOT_REFUSED: readonly { readonly name: string; readonly plant: Plant }[] = [
   {
     name: 'settings.json sets the key the login leaves to the secret store',
     plant: settings('settings.json', { ANTHROPIC_API_KEY: '' }),
-    says: ['.claude/settings.json', 'ANTHROPIC_API_KEY'],
   },
+  { name: 'settings.local.json sets it', plant: settings('settings.local.json', { ANTHROPIC_API_KEY: 'x' }) },
   {
-    name: 'settings.local.json sets it',
-    plant: settings('settings.local.json', { ANTHROPIC_API_KEY: 'x' }),
-    says: ['.claude/settings.local.json', 'ANTHROPIC_API_KEY'],
+    name: 'settings.local.json sets a key the login never named',
+    plant: settings('settings.local.json', { SOME_OTHER_KEY: 'project-value' }),
   },
   {
     name: '.git is a symlink',
     plant: async directory => await symlink(join(fixture, 'elsewhere'), join(directory, '.git')),
-    says: ['.git'],
   },
   {
     name: 'a worktree whose back-link cannot be proved',
     plant: async directory =>
       await writeFile(join(directory, '.git'), `gitdir: ${join(fixture, 'no-such-repo', '.git', 'worktrees', 'w')}\n`),
-    says: [],
-  },
-  {
-    name: 'the folder is gone',
-    plant: async directory => await rm(directory, { recursive: true, force: true }),
-    says: [],
   },
 ];
 
-describe.each(ROWS.map(row => [row.name, row] as const))('#1587 launch wiring: %s', (name, row) => {
+describe.each(ROWS.map(row => [row.name, row] as const))('launch wiring: %s', (name, row) => {
   const isMove = name === 'move';
 
-  test.each(REFUSED.map(c => [c.name, c] as const))(
-    '(i)(ii) a folder where %s is refused, and nothing is launched',
-    async (_case, refused) => {
+  test.each(NOT_REFUSED.map(c => [c.name, c] as const))(
+    'a folder where %s is not refused: it launches, and the project’s env is the project’s',
+    async (_case, planted) => {
       const runner = new RecordingRunner();
       const h = await boot(runner);
 
-      const result = await row.drive(h, runner, `refused-${randomUUID()}`, refused.plant);
+      const result = await row.drive(h, runner, `planted-${randomUUID()}`, planted.plant);
 
       if (isMove) {
-        // The skeleton refuses first, whatever the folder: the exact code, and never a launch.
+        // The skeleton refuses first, whatever the folder; the folder is never the reason.
         expect(result.status).toBe(503);
         expect(JSON.parse(result.body)).toMatchObject({ code: 'plugin_unavailable' });
-      } else {
-        expect(result.status).toBeGreaterThanOrEqual(400);
-        for (const sentence of refused.says) expect(result.body).toContain(sentence);
+        expect((JSON.parse(result.body) as { error: string }).error).toContain('account resolution');
+        await h.stop();
+        return;
       }
-      expect(result.launches).toBe(0);
+      expect(result.status).toBeLessThan(300);
+      expect(result.launches).toBe(1);
+      // Nothing of the login's environment is pinned over the project: the settings file carries no `env`.
+      expect(overlayOf(h, result.ferret as string)?.env).toBeUndefined();
       await h.stop();
     },
   );
 
-  test('(iii)(iv)(v) a clean folder launches; the credential is in no argv and the login’s pins are in the private settings file', async () => {
+  test('a clean folder launches; the credential is in no argv and no login environment is in the private settings file', async () => {
     const runner = new RecordingRunner();
     const h = await boot(runner);
 
@@ -406,16 +398,15 @@ describe.each(ROWS.map(row => [row.name, row] as const))('#1587 launch wiring: %
     );
     // The argv names the settings file's path, never its content.
     expect(spec.command).toContain(`${home}/launch-settings.json`);
-    expect(overlayOf(h, result.ferret as string)?.env).toEqual({
-      ANTHROPIC_BASE_URL: BASE_URL,
-      ANTHROPIC_AUTH_TOKEN: TOKEN,
-    });
+    // A stale fixed.json env (an earlier apply's pins) is never read into the launch.
+    expect(overlayOf(h, result.ferret as string)?.env).toBeUndefined();
+    expect(h.rootText('agent-homes', `${result.ferret as string}/launch-settings.json`)).not.toContain(TOKEN);
     await h.stop();
   });
 });
 
-describe('#1587 what is not judged', () => {
-  test('a start on no runtime launches without the fleet being consulted or any pin written', async () => {
+describe('a start on no runtime', () => {
+  test('launches without the fleet being consulted and with no env in the settings file', async () => {
     const runner = new RecordingRunner();
     const h = await boot(runner);
     const where = await folder('norun');
@@ -434,114 +425,8 @@ describe('#1587 what is not judged', () => {
 
 /** The rows that really launch (a move is a skeleton on this base). */
 const LAUNCHING = ROWS.filter(row => row.name !== 'move');
-const PINS = { ANTHROPIC_BASE_URL: BASE_URL, ANTHROPIC_AUTH_TOKEN: TOKEN };
-const BROKEN_FIXED = '{ fixture-corruption';
 
-describe.each(LAUNCHING.map(row => [row.name, row] as const))('#1587 the pins never fail open: %s', (name, row) => {
-  test('a fixed.json already broken refuses the launch, and the runner is not called', async () => {
-    const runner = new RecordingRunner();
-    const h = await boot(runner);
-
-    // A revive judges the file as it is at the resume; a start and an adoption as it is at the start.
-    const result = await row.drive(h, runner, `broken-${randomUUID()}`, async () => {
-      h.putRoot('fleet', `homes/${ID}/.fy/fixed.json`, BROKEN_FIXED);
-    });
-
-    expect(result.status).toBeGreaterThanOrEqual(400);
-    expect(result.body).toContain('could not be read');
-    expect(result.launches).toBe(0);
-    await h.stop();
-  });
-
-  test('a fixed.json that breaks after the folder was judged still launches with the pins that were checked', async () => {
-    // The facts are read ONCE per launch (at \`start.decide\`) and carried to the launch: nothing is read again, so the
-    // launch cannot meet a half-written or broken file after the decision and carry on without the pins.
-    let h: TestHost | undefined;
-    // A revive's first launch is its start; the launch under test is the resume.
-    const underTest = name === 'revive' ? 2 : 1;
-    atLaunch = launch => {
-      if (launch === underTest) h?.putRoot('fleet', `homes/${ID}/.fy/fixed.json`, BROKEN_FIXED);
-    };
-    const runner = new RecordingRunner();
-    h = await boot(runner);
-
-    const result = await row.drive(h, runner, `after-${randomUUID()}`, async () => undefined);
-
-    expect(result.status).toBeLessThan(300);
-    expect(result.launches).toBe(1);
-    expect(overlayOf(h, result.ferret as string)?.env).toEqual(PINS);
-    expect(launchesAsked).toBe(underTest);
-    await h.stop();
-  });
-});
-
-/** A PRESENT fixed.json of the wrong shape is damaged evidence, never "no pins" (v4's fixedSettingsObject refused all of these). */
-const WRONG_SHAPES: readonly (readonly [string, string])[] = [
-  ['null', 'null'],
-  ['an array', '[]'],
-  ['a number', '42'],
-  ['an env that is an array', '{"env":[]}'],
-  ['an env that is null', '{"env":null}'],
-  ['an env value that is not text', '{"env":{"ANTHROPIC_AUTH_TOKEN":42,"ANTHROPIC_BASE_URL":"fixture-literal-9931"}}'],
-];
-
-describe.each(LAUNCHING.map(row => [row.name, row] as const))(
-  '#1587 a damaged fixed.json refuses: %s',
-  (_name, row) => {
-    test.each(WRONG_SHAPES)(
-      '%s refuses the launch, names the file, shows no value, and starts nothing',
-      async (_label, text) => {
-        const runner = new RecordingRunner();
-        const h = await boot(runner);
-
-        const result = await row.drive(h, runner, `shape-${randomUUID()}`, async () => {
-          h.putRoot('fleet', `homes/${ID}/.fy/fixed.json`, text);
-        });
-
-        expect(result.status).toBeGreaterThanOrEqual(400);
-        expect(result.body).toContain('fixed.json');
-        expect(result.body).not.toContain('fixture-literal-9931');
-        expect(result.body).not.toContain(TOKEN);
-        expect(result.launches).toBe(0);
-        await h.stop();
-      },
-    );
-
-    test.each([
-      ['an object with no env', '{}'],
-      ['an object whose env is empty', '{"env":{}}'],
-      [
-        'an object with other keys beside a valid env',
-        '{"theme":"dark","env":{"ANTHROPIC_BASE_URL":"https://gateway.fixture.invalid"}}',
-      ],
-    ])('%s is still the deliberate "pins what it holds" case', async (_label, text) => {
-      const runner = new RecordingRunner();
-      const h = await boot(runner);
-
-      const result = await row.drive(h, runner, `shape-ok-${randomUUID()}`, async () => {
-        h.putRoot('fleet', `homes/${ID}/.fy/fixed.json`, text);
-      });
-
-      expect(result.status).toBeLessThan(300);
-      expect(result.launches).toBe(1);
-      await h.stop();
-    });
-
-    test('a fixed.json that is absent is a login that pins nothing: it launches, with no pin written', async () => {
-      const runner = new RecordingRunner();
-      const h = await boot(runner, null);
-
-      const result = await row.drive(h, runner, `absent-${randomUUID()}`, async () => undefined);
-
-      expect(result.status).toBeLessThan(300);
-      expect(result.launches).toBe(1);
-      expect(overlayOf(h, result.ferret as string)?.env).toBeUndefined();
-      await h.stop();
-    });
-  },
-);
-
-describe.each(LAUNCHING.map(row => [row.name, row] as const))('#1587 fast mode and compaction: %s', (_name, row) => {
+describe.each(LAUNCHING.map(row => [row.name, row] as const))('fast mode and compaction: %s', (_name, row) => {
   const overlay = (h: TestHost, id: string) =>
     JSON.parse(h.rootText('agent-homes', `${id}/launch-settings.json`) as string) as {
       fastMode?: boolean;
@@ -555,7 +440,7 @@ describe.each(LAUNCHING.map(row => [row.name, row] as const))('#1587 fast mode a
       JSON.stringify({ ...manifest, accounts: [{ ...manifest.accounts[0], compactAt }] }),
     );
 
-  test('a published account compactAt reaches the private settings file as autoCompactWindow, beside the pins', async () => {
+  test('a published account compactAt reaches the private settings file as autoCompactWindow, and no env beside it', async () => {
     const runner = new RecordingRunner();
     const h = await boot(runner);
     publish(h, 200_000);
@@ -565,7 +450,7 @@ describe.each(LAUNCHING.map(row => [row.name, row] as const))('#1587 fast mode a
     expect(result.status).toBeLessThan(300);
     expect(result.launches).toBe(1);
     expect(overlay(h, result.ferret as string).autoCompactWindow).toBe(200_000);
-    expect(overlay(h, result.ferret as string).env).toEqual(PINS);
+    expect(overlay(h, result.ferret as string).env).toBeUndefined();
     // The value rides the private file only, never the argv.
     expect(JSON.stringify(runner.specs.at(-1)?.command)).not.toContain('200000');
     await h.stop();
@@ -773,7 +658,7 @@ describe('#1587 fast mode through the production start', () => {
     await h.settle();
     const id = idOf(first);
     expect(overlay(h, id).fastMode).toBe(true);
-    expect(overlay(h, id).env).toEqual(PINS);
+    expect(overlay(h, id).env).toBeUndefined();
     expect(
       (await h.request('POST', `/v1/ferrets/${id}/stop`, { query: { how: 'now' }, body: {} })).status,
     ).toBeLessThan(300);
@@ -784,7 +669,7 @@ describe('#1587 fast mode through the production start', () => {
 
     expect(resumed.status).toBe(200);
     expect(overlay(h, id).fastMode).toBe(true);
-    expect(overlay(h, id).env).toEqual(PINS);
+    expect(overlay(h, id).env).toBeUndefined();
     await h.stop();
   });
 

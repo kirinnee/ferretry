@@ -66,8 +66,7 @@
     "packages/plugins/runtimes/daemon/adapters/fleet-home-reader.ts",
     "packages/plugins/runtimes/daemon/adapters/following-handle.ts",
     "packages/plugins/runtimes/daemon/adapters/root-host-files.ts",
-    "packages/plugins/runtimes/daemon/host-assembly.ts",
-    "packages/plugins/runtimes/daemon/index.ts"
+    "packages/plugins/runtimes/daemon/host-assembly.ts"
   ],
   "handleReceivers": [
     "packages/core/kernel/host/worker-grants/serve.ts",
@@ -75,11 +74,9 @@
     "packages/plugins/runtimes/daemon/adapters/document-link.ts",
     "packages/plugins/runtimes/daemon/adapters/fleet-disk.ts",
     "packages/plugins/runtimes/daemon/adapters/fleet-home-reader.ts",
-    "packages/plugins/runtimes/daemon/adapters/folder-claude-settings-file.ts",
     "packages/plugins/runtimes/daemon/adapters/following-handle.ts",
     "packages/plugins/runtimes/daemon/adapters/root-host-files.ts",
-    "packages/plugins/runtimes/daemon/host-assembly.ts",
-    "packages/plugins/runtimes/daemon/index.ts"
+    "packages/plugins/runtimes/daemon/host-assembly.ts"
   ],
   "diskOperations": ["copyInto", "linkTo"],
   "diskHolders": [

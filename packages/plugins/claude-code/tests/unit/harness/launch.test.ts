@@ -234,17 +234,17 @@ describe('homeText', () => {
       should('autoCompactWindow' in overlayOf({})).be.false();
     });
 
-    it('carries the pins, fast mode and the compaction trigger together in the one overlay, and into no other file', () => {
+    it('carries fast mode and the compaction trigger together in the one overlay, and into no other file; env parts are not in it', () => {
       const text = homeText({
         ...base,
         parts: [
-          { kind: 'pin', env: { ANTHROPIC_BASE_URL: 'https://gateway.invalid' } },
+          { kind: 'env', env: { ANTHROPIC_BASE_URL: 'https://gateway.invalid' } },
           { kind: 'compact', at: 200_000 },
         ],
         fast: true,
       });
       const overlay = JSON.parse(text.overlay);
-      should(overlay.env).eql({ ANTHROPIC_BASE_URL: 'https://gateway.invalid' });
+      should(overlay).not.have.property('env');
       should(overlay.fastMode).equal(true);
       should(overlay.autoCompactWindow).equal(200_000);
       should(text.settings).not.containEql('fastMode');

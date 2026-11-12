@@ -1860,7 +1860,6 @@ export class FerretsService implements FerretsApi {
       harness: record.harness,
       ...(record.runtime === undefined ? {} : { runtime: record.runtime }),
       ...(record.login === undefined ? {} : { login: record.login }),
-      ...(Object.keys(login.value).length === 0 ? {} : { loginEnv: login.value }),
       // Set from the login only, never by a launch part: the spec field has no other writer.
       ...(credential.value === undefined ? {} : { credential: credential.value }),
       ...launchOptions(this.registry.detailsOf(record.id)?.options),
