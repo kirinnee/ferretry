@@ -255,6 +255,40 @@ daemon cannot resolve refuses rather than guesses. The rules for each surface ar
 [agent-tools.md](agent-tools.md#the-state-home); the agent file tools (`browser_upload` and friends) apply the
 same guard ([agent-tools.md](agent-tools.md#files)).
 
+### Launch safety is a kernel fact: the directory chain and the bound launch folder
+
+Two checks every launch needs are not a plugin's to write, because a plugin cannot do them without a filesystem of its own.
+The kernel owns both, on the same roots every plugin already holds; there is no plugin filesystem exemption.
+
+**The directory chain (`RootHandle.checkPrivateChain`).** Before a credential-bearing file is written under a ferret's home —
+and again right before it is used — the kernel looks at EVERY folder from `FY_HOME` down to the target, each by its own
+`lstat`. A folder that is missing, is not a plain directory, is a **symbolic link**, is **owned by another user** than the
+daemon's, or is **writable by its group or by everyone** refuses the write with a sentence naming that folder (its path
+relative to the home, never a file's content). A healthy `0700` or `0755` chain passes. It never changes a mode: narrowing an
+open ancestor would hide that it was open. This is v4's launch-overlay rule (`FileLaunchOverlayFiles#ensureDirectory`), kept
+at the kernel. The home's own spelling may be a link (every internal root already anchors on its real path); what it reaches is
+judged like the rest. A root outside the home answers `outside_home`: it has no chain to judge.
+
+- **GAP — a check is not a lock.** The chain is judged, then the file is written. The write itself reaches its folder through
+  no-follow descriptors (`publish`), so a link swapped in after the check reaches nothing; but another user who becomes able to write a
+  folder, or the owner changing a mode, between the check and the write is seen only by the next check. Ask again right before use.
+- **GAP — folders above the home are not judged.** The chain starts at `FY_HOME`; `/home/<user>` and its parents are the machine's.
+
+**The bound launch folder (`kernel.paths.bindDirectory`).** `checkDirectory` answers a folder once, and a folder is a name: it
+can be renamed away and replaced by a link into the state home a moment after the answer. `bindDirectory` remembers the answer
+— the folder's real path, the device and inode of the directory it resolved to, and the state-home fence's answer (inside the
+home by name, by identity up every folder, or through a link that lives in the home) — and `verify()` looks again immediately
+before the process is started. Any difference is `changed` and the start is held; anything the kernel cannot read, including a
+fence it cannot compute, is `unresolved` and also held. `insideStateHome` is the fence's answer at the check: an agent is
+refused there by the caller, a person is not. A symlinked project root that stays outside the state home binds and verifies.
+
+- **GAP — the instant between `verify()` and the child's `chdir`.** The runner still starts the child by path. Every swap made
+  before `verify()` is held; one made inside that instant is not. Closing it takes a directory the
+  runner can start the child in by descriptor: on Linux a held descriptor's `/proc/<daemon pid>/fd/<n>` is accepted by `tmux
+new-session -c` and the pane then starts in that directory (measured; the session's recorded path stays the `/proc` spelling and
+  goes stale when the descriptor closes). macOS has no such path, so the kernel's `kernel.spawn` pin (`RootHandle.pin`: a held directory the child starts inside, installed for
+  the instant of the spawn) is the existing way. Neither is wired into the runner here; this is declared, not scheduled.
+
 ### What a ferret's `fy` presents
 
 A ferret's `fy` and its MCP server (`fy mcp serve`) present the **ferret's own credential**, not the host

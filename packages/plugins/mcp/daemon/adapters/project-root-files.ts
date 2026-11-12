@@ -135,6 +135,7 @@ export function mcpFileOnly(handle: RootHandle): RootHandle {
     setMode: refuse('change a mode'),
     rename: refuse('move an entry'),
     unlink: refuse('remove a link'),
+    checkPrivateChain: refuse('check a folder chain'),
   };
 }
 

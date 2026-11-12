@@ -135,6 +135,7 @@ function kernelRoots(
         setMode: missing('change a mode'),
         rename: missing('move an entry'),
         unlink: missing('remove a link'),
+        checkPrivateChain: missing('check a folder chain'),
       };
     },
   };
