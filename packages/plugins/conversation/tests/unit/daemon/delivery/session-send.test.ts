@@ -57,7 +57,14 @@ describe('POST send', () => {
     expect(answer).toEqual({ status: 200, json: { ferret: 'f1', disposition: 'queued' } });
     expect(calls[0]?.args).toEqual([
       'f1',
-      { message: 'hi', sendId: 'req-1', attachmentIds: ['a1'], now: true, replyExpected: true },
+      {
+        message: 'hi',
+        sendId: 'req-1',
+        attachmentIds: ['a1'],
+        now: true,
+        replyExpected: true,
+        origin: { kind: 'person' },
+      },
     ]);
   });
 
@@ -84,12 +91,14 @@ describe('POST send', () => {
     });
     await answerOf(routes, 'POST', SEND, { params: ID, headers: KEY, standing: ownerStanding(), body });
     await answerOf(routes, 'POST', SEND, { params: ID, headers: KEY, standing: wardenStanding(f9), body });
+    // The launch origin rides the same credential: every ferret caller is an agent (naming its ferret when it has one),
+    // the owner is a person, and the Warden's token is an agent that names no ferret. None of it is read from the body.
     expect(calls.map(call => call.args[1])).toEqual([
-      { message: 'hi', sendId: 'req-1', label: 'fyi', senderSessionId: 'f9' },
-      { message: 'hi', sendId: 'req-1', label: 'fyi', senderSessionId: 'f9' },
-      { message: 'hi', sendId: 'req-1', label: 'fyi', senderSessionId: 'f9' },
-      { message: 'hi', sendId: 'req-1' },
-      { message: 'hi', sendId: 'req-1' },
+      { message: 'hi', sendId: 'req-1', label: 'fyi', senderSessionId: 'f9', origin: { kind: 'agent', ferret: 'f9' } },
+      { message: 'hi', sendId: 'req-1', label: 'fyi', senderSessionId: 'f9', origin: { kind: 'agent', ferret: 'f9' } },
+      { message: 'hi', sendId: 'req-1', label: 'fyi', senderSessionId: 'f9', origin: { kind: 'agent', ferret: 'f9' } },
+      { message: 'hi', sendId: 'req-1', origin: { kind: 'person' } },
+      { message: 'hi', sendId: 'req-1', origin: { kind: 'agent' } },
     ]);
   });
 
@@ -105,9 +114,11 @@ describe('POST send', () => {
       body: { message: 'hi', label: 'fyi' },
     });
     await answerOf(routes, 'POST', SEND, { params: ID, headers: KEY, actor: 'peer:f9', body: { message: 'hi' } });
+    // The admin credential with an actor that is not a human is an agent call (Gate's own predicate) that names no ferret,
+    // so it is an agent origin with no ferret and no sender; the same actor with no admitted credential is a person's.
     expect(calls.map(call => call.args[1])).toEqual([
-      { message: 'hi', sendId: 'req-1' },
-      { message: 'hi', sendId: 'req-1' },
+      { message: 'hi', sendId: 'req-1', origin: { kind: 'agent' } },
+      { message: 'hi', sendId: 'req-1', origin: { kind: 'person' } },
     ]);
   });
 

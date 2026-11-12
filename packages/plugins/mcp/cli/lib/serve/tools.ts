@@ -901,8 +901,9 @@ const CARD_TOOLS: readonly McpToolDefinition[] = [
 ];
 
 /**
- * Agent tools the daemon declares but whose owner (Accounts) answers "is not built yet". An agent is not told to use a
- * tool that cannot work (M2 ruling), so they are not listed; they are listed here so the parity test can say so.
+ * Agent tools whose owner (Accounts) has not built them. An agent is not told to use a tool that cannot work (M2 ruling), so
+ * the owner's manifest no longer declares them and this list keeps their definitions out of what the server lists, whatever
+ * a manifest declares later; the parity test pins both.
  */
 const UNBUILT_TOOLS: ReadonlySet<string> = new Set([
   'account_propose',

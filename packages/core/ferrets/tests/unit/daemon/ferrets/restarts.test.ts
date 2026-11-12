@@ -279,6 +279,36 @@ describe('restarting ferrets', () => {
   });
 });
 
+describe('who a restart is journalled as (G12), through the real route, adapter and files', () => {
+  test('G12 an immediate restart by the owner is journalled as the owner', async () => {
+    const { h, start } = await running();
+    const id = await start('aniya');
+    await h.request('POST', `/v1/ferrets/${id}/signal`, { body: { kind: 'waiting', condition: 'CI' } });
+    const answer = await ask(h, { scope: 'ids', ids: ['aniya'] });
+    expect(answer.json<RestartResult>().restarted).toEqual([{ id, name: 'aniya' }]);
+    const lines = (h.state('ferrets').raw(FerretHistoryFiles, id) as string)
+      .split('\n')
+      .filter(line => line !== '')
+      .map(line => JSON.parse(line) as { type: string; data?: { requestedBy?: string } });
+    expect(lines.find(line => line.type === 'session.restarted')?.data?.requestedBy).toBe('owner');
+    await h.stop();
+  });
+
+  test('G12 a ferret restarting itself is queued as that ferret\u2019s session, with an agent origin naming it', async () => {
+    const { h, start } = await running();
+    const id = await start('aniya');
+    const self = await ask(h, { scope: 'ids', ids: [id] }, id);
+    expect(self.json<RestartResult>().queued).toEqual([{ id, name: 'aniya', reason: 'own-session' }]);
+    const kept = JSON.parse(h.state('ferrets').raw(RestartsFile) as string) as {
+      queued: { id: string; requestedBy?: string; origin?: unknown }[];
+    };
+    expect(kept.queued.map(entry => ({ id: entry.id, requestedBy: entry.requestedBy, origin: entry.origin }))).toEqual([
+      { id, requestedBy: `session:${id}`, origin: { kind: 'agent', ferret: id } },
+    ]);
+    await h.stop();
+  });
+});
+
 describe('who may restart', () => {
   test('G43 R-0323 a ferret restarts itself, which waits for its own turn to end, and not the whole fleet', async () => {
     const { h, runner, start } = await running();

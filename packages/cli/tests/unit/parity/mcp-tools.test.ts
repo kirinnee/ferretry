@@ -15,7 +15,11 @@ import { registry } from '../../../src/generated/commands.ts';
 const everyManifest = [registry.kernel, ...registry.plugins];
 const declared = everyManifest.flatMap(entry => entry.manifest.actions?.agentTools ?? []);
 
-/** Declared by a manifest, answered `is not built yet` by its owner: not listed (M2 ruling). */
+/**
+ * Tools whose owner has not built them (M2 ruling, lizzette 2026-11-11: they move after merge). Their owner no longer declares
+ * them in its manifest (they are declared again once built), and the CLI lists none of them: an agent is not told to call a
+ * tool that answers `is not built yet`.
+ */
 const UNBUILT = ['account_propose', 'secure_copy', 'secure_list', 'secure_discard', 'secure_paste', 'task_plan'];
 
 /**
@@ -74,9 +78,13 @@ describe('the MCP tool rows against the manifests’ agent tools', async () => {
     );
   });
 
-  it('should hide only tools that are declared (an unbuilt name no manifest declares is a stale entry)', () => {
+  it('should neither declare nor list a tool its owner has not built (the M2 shape: out of the manifests, out of the list)', () => {
     const names = declared.map(tool => tool.name);
-    for (const name of UNBUILT) should(names).containEql(name);
+    const listed = rows.map(row => row.name);
+    for (const name of UNBUILT) {
+      should(names).not.containEql(name);
+      should(listed).not.containEql(name);
+    }
   });
 
   it('should pin the tools that declare no zod input, so the gap is the whole of it', () => {
