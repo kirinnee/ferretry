@@ -1492,7 +1492,9 @@ Two more rules keep that one link the only door, both enforced identically on th
 **Declared exception: Runtimes' fleet credential store and the host harness homes (not implemented, pinned).** The
 credential-home rule above does not reach the `fleet` root (the fleet credential store, `fleet/credentials/<id>`, and
 Runtimes' runtime homes) or the `harness-home` root (the host's own Claude Code and Codex homes). Generic `linkTo` and
-`copyTree` link mode from and into them remain allowed, for **Runtimes' provisioning only** (`FleetDisk` in
+`copyTree` link mode from and into them remain allowed, within the root-specific refusals that still apply (a `harness-home`
+is a read-only destination, and `copyTree` link mode FROM `harness-home` is `not_declared`; the host reach this exception
+accepts is `linkTo` FROM `harness-home` INTO `fleet`), for **Runtimes' provisioning only** (`FleetDisk` in
 `fleet-disk.ts` and `FileFleetProvisioner` in `file-provisioner.ts`), because Runtimes provisions fleet homes, host sources
 and not-yet-existing sign-in slots, none of which the dedicated `linkCredential` (scoped `agent-homes` only) can place. So a
 Runtimes link can reach a real fleet or host sign-in outside `linkCredential`: a link in the fleet assets to a login in
@@ -1502,8 +1504,13 @@ and link an ordinary file from it into the fleet credential store. Reach is limi
 hold either root (the kernel's ownership rule), a project file is never a link source, an `agent-homes` link is refused, no
 route or tool lets a ferret choose the operation, and a shell already running as the user can use the filesystem directly (the
 same-user residual above). The exception is pinned by a fitness test, `scripts/gen/tests/fleet-link-callers.test.ts`: it fails if
-any production module other than those two calls (or aliases) `linkTo` or `copyTree`, and if either root is ever held by a plugin
-other than Runtimes, so a future caller cannot slip in before the move. It is to be **removed by the after-merge move** (&F3537,
+any production module other than those two reads, aliases or destructures `linkTo` or `copyTree` (also through a constant computed
+key, and through a computed key it cannot resolve on a value typed `RootHandle`, which fails closed), and if either root is ever held
+by a plugin other than Runtimes, so a future caller cannot slip in before the move. No directory is exempt: a new kernel
+module (a host helper, a worker-grants write handler) that calls `fleet.linkTo` fails like any other, and the kernel's own
+definitions pass because a definition is not a member read. **Not caught (declared):** a handle that reaches a module
+without that module naming the `RootHandle` type and is then indexed with an unresolvable key, reflection
+(`Reflect.get`), and a function exported from an allowed module under another name and called elsewhere. It is to be **removed by the after-merge move** (&F3537,
 "Dedicated credential link operation"): Runtimes onto a dedicated credential operation, the fleet store becoming a credential home,
 and ordinary asset links that land in a runtime credential home becoming copies. The ruling that scopes it, quoted exactly:
 

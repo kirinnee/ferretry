@@ -11,93 +11,57 @@
  * pins it so a future caller cannot slip in first:
  *
  * 1. no production module other than Runtimes' `fleet-disk.ts` and `file-provisioner.ts` reaches `linkTo` or `copyTree`
- *    (called, aliased or destructured; the kernel's own host, testing host and contract define them and are not callers);
+ *    (read, aliased, destructured, or reached through a constant or unresolvable computed key on a `RootHandle`). NO
+ *    directory is exempt: the kernel's host, testing host and contract are scanned like any module, and they pass because
+ *    the API's definitions (`linkTo: async …` in an object, `linkTo(…)` in an interface) are not member reads — a NEW
+ *    kernel module that calls `fleet.linkTo` fails;
  * 2. the allowed files really do (a stale allowance would hide a removal, and the after-merge move must delete it);
- * 3. `fleet` and `harness-home` are held by no plugin but Runtimes, by the kernel's ownership rule and by every manifest.
+ * 3. `fleet` and `harness-home` are held by no plugin but Runtimes, by the kernel's ownership rule and by every manifest;
+ * 4. the scanner itself catches each shape of a stray caller (isolated fixture workspaces, below), so (1) cannot go
+ *    vacuously green.
+ *
+ * The scanner is `../lib/fleet-link-scan.ts`; its docs say what it does not handle.
  */
-import { describe, expect, test } from 'bun:test';
-import { join, relative, sep } from 'node:path';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, relative, sep } from 'node:path';
 import { mayHoldRoot } from '../../../packages/core/kernel/host/roots.ts';
-import { type AstNode, parseFile, walk } from '../lib/check.ts';
-import { loadManifests, loadWorkspace, sourceFiles } from '../lib/workspace.ts';
+import { UNRESOLVED_OPERATION, reaches } from '../lib/fleet-link-scan.ts';
+import { loadManifests, loadWorkspace } from '../lib/workspace.ts';
 
 const ROOT = join(import.meta.dir, '..', '..', '..');
 const AFTER_MERGE_CARD = '&F3537';
-const LINK_OPERATIONS: ReadonlySet<string> = new Set(['linkTo', 'copyTree']);
 const FLEET_ROOTS = ['fleet', 'harness-home'] as const;
 
+const FLEET_DISK = 'packages/plugins/runtimes/daemon/adapters/fleet-disk.ts';
+const FILE_PROVISIONER = 'packages/plugins/runtimes/daemon/adapters/file-provisioner.ts';
 /** The ONLY modules that may reach a link operation on the fleet or a harness home. Remove both at &F3537. */
-const RUNTIMES_PROVISIONING: ReadonlySet<string> = new Set([
-  'packages/plugins/runtimes/daemon/adapters/fleet-disk.ts',
-  'packages/plugins/runtimes/daemon/adapters/file-provisioner.ts',
-]);
-/** The kernel's own implementations of the operations: they define the API and are not callers of it. */
-const KERNEL_IMPLEMENTATION = [
-  'packages/core/kernel/host/',
-  'packages/core/kernel/testing/',
-  'packages/core/kernel/contract/',
-];
+const RUNTIMES_PROVISIONING: ReadonlySet<string> = new Set([FLEET_DISK, FILE_PROVISIONER]);
 
-const posix = (path: string): string => relative(ROOT, path).split(sep).join('/');
+const reachesAt = (root: string): Map<string, string[]> =>
+  reaches(root, file => relative(root, file).split(sep).join('/'));
+/** The real tree is scanned once for the tests that read it (parsing every production module is the cost). */
+let realTree: Map<string, string[]> | undefined;
+const realReaches = (): Map<string, string[]> => (realTree ??= reachesAt(ROOT));
 
-function operationOf(node: AstNode): string | undefined {
-  const name = (key: unknown): string | undefined => {
-    const found = key as AstNode | undefined;
-    if (found?.type === 'Identifier') return found.name as string;
-    if (found?.type === 'Literal' && typeof found.value === 'string') return found.value;
-    return undefined;
-  };
-  // `root.linkTo`, `root?.linkTo`, `root['copyTree']`
-  if (node.type === 'MemberExpression') {
-    const property = name(node.property);
-    return property !== undefined && LINK_OPERATIONS.has(property) ? property : undefined;
-  }
-  // `const { linkTo } = root`, `const { copyTree: copy } = root`
-  if (node.type === 'ObjectPattern') {
-    for (const entry of (node.properties as AstNode[] | undefined) ?? []) {
-      const key = entry.type === 'Property' ? name(entry.key) : undefined;
-      if (key !== undefined && LINK_OPERATIONS.has(key)) return key;
-    }
-  }
-  return undefined;
-}
-
-/** Every `file:line operation` in the production source of the repo (tests excluded) that reaches a link operation. */
-function reaches(): Map<string, string[]> {
-  const ws = loadWorkspace(ROOT);
-  const found = new Map<string, string[]>();
-  const files = [
-    ...ws.packages.flatMap(pkg => sourceFiles(pkg, { tests: false })),
-    ...[...new Bun.Glob('migration/**/*.{ts,tsx,mts}').scanSync({ cwd: ROOT, onlyFiles: true })]
-      .filter(path => !path.includes('node_modules/') && !/(^|\/)(tests?|fixtures)\//.test(path))
-      .map(path => join(ROOT, path)),
-  ];
-  for (const file of files) {
-    const rel = posix(file);
-    if (KERNEL_IMPLEMENTATION.some(prefix => rel.startsWith(prefix))) continue;
-    const parsed = parseFile(file);
-    walk(parsed.program, node => {
-      const operation = operationOf(node);
-      if (operation === undefined) return;
-      found.set(rel, [...(found.get(rel) ?? []), `${rel}:${parsed.line(node.start)} ${operation}`]);
-    });
-  }
-  return found;
-}
+/** Every `file:line operation` reached outside the allowed modules. */
+const strays = (found: ReadonlyMap<string, string[]>): string[] =>
+  [...found].filter(([rel]) => !RUNTIMES_PROVISIONING.has(rel)).flatMap(([, places]) => places);
 
 describe('the fleet and harness-home link exception (declared; to be removed at the after-merge move)', () => {
   test('no production module outside Runtimes’ provisioning reaches linkTo or copyTree', () => {
-    const strays = [...reaches()].filter(([rel]) => !RUNTIMES_PROVISIONING.has(rel)).flatMap(([, places]) => places);
+    const found = strays(realReaches());
     expect(
-      strays,
-      `${strays.join('; ')} reach a generic link operation. Generic links from/into the fleet credential store and the ` +
+      found,
+      `${found.join('; ')} reach a generic link operation. Generic links from/into the fleet credential store and the ` +
         `host harness homes are a declared exception for Runtimes' provisioning only (docs/secrets.md); a new caller must ` +
         `not appear before the after-merge move (${AFTER_MERGE_CARD}, dedicated credential link operation).`,
     ).toEqual([]);
   });
 
   test('the two allowed modules still make the calls (a stale allowance is removed with the move)', () => {
-    const found = reaches();
+    const found = realReaches();
     for (const allowed of RUNTIMES_PROVISIONING)
       expect(
         found.has(allowed),
@@ -120,5 +84,139 @@ describe('the fleet and harness-home link exception (declared; to be removed at 
       holders,
       `a plugin other than runtimes declares fleet or harness-home: the declared link exception covers Runtimes only (${AFTER_MERGE_CARD})`,
     ).toEqual(['runtimes']);
+  });
+});
+
+describe('the scanner catches every shape of a stray caller (isolated fixture workspaces)', () => {
+  const TYPES = `import type { FencedPath, RootHandle, RootLinkTarget } from '@ferretry/kernel/contract';\n`;
+  const made: string[] = [];
+  afterAll(async () => {
+    await Promise.all(made.map(dir => rm(dir, { recursive: true, force: true })));
+  });
+
+  /** A workspace holding exactly the two allowed modules (so the stale-allowance shape holds) plus `extra`. */
+  async function workspace(extra: Readonly<Record<string, string>> = {}): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'fleet-link-fixture-'));
+    made.push(dir);
+    const files: Record<string, string> = {
+      'package.json': JSON.stringify({ name: 'fixture', workspaces: ['packages/core/*', 'packages/plugins/*'] }),
+      'packages/core/kernel/package.json': JSON.stringify({ name: '@fixture/kernel' }),
+      'packages/plugins/runtimes/package.json': JSON.stringify({ name: '@fixture/runtimes' }),
+      'packages/plugins/other/package.json': JSON.stringify({ name: '@fixture/other' }),
+      [FLEET_DISK]: `${TYPES}export const anchor = (root: RootHandle) => root.copyTree;\n`,
+      [FILE_PROVISIONER]: `${TYPES}export const anchor = (root: RootHandle) => root.linkTo;\n`,
+      ...extra,
+    };
+    for (const [file, text] of Object.entries(files)) {
+      await mkdir(dirname(join(dir, file)), { recursive: true });
+      await writeFile(join(dir, file), text);
+    }
+    return dir;
+  }
+
+  const CALL = 'at: FencedPath, target: RootLinkTarget';
+
+  /** Each stray shape: where it sits, the code, and what it is reported as. */
+  const STRAYS: readonly {
+    readonly name: string;
+    readonly file: string;
+    readonly code: string;
+    readonly as: string;
+  }[] = [
+    {
+      name: 'a new kernel host helper calling fleet.linkTo',
+      file: 'packages/core/kernel/host/fleet-repair.ts',
+      code: `${TYPES}export function restoreAlias(fleet: RootHandle, ${CALL}) {\n  return fleet.linkTo(at, target);\n}\n`,
+      as: 'linkTo',
+    },
+    {
+      name: 'a kernel worker-grants write handler calling copyTree',
+      file: 'packages/core/kernel/host/worker-grants/write-handler.ts',
+      code: `${TYPES}export const serve = (fleet: RootHandle, from: RootHandle, path: FencedPath) =>\n  fleet.copyTree(from, path, path, { link: true });\n`,
+      as: 'copyTree',
+    },
+    {
+      name: 'a new kernel testing helper using an optional literal-key call',
+      file: 'packages/core/kernel/testing/relink.ts',
+      code: `${TYPES}export const relink = async (fleet: RootHandle, ${CALL}) => void (await fleet?.['linkTo'](at, target));\n`,
+      as: 'linkTo',
+    },
+    {
+      name: 'a plugin worker module calling linkTo',
+      file: 'packages/plugins/other/daemon/worker/link-worker.ts',
+      code: `${TYPES}export const run = (root: RootHandle, ${CALL}) => root.linkTo(at, target);\n`,
+      as: 'linkTo',
+    },
+    {
+      name: 'a call through a constant computed key',
+      file: 'packages/plugins/runtimes/daemon/adapters/restore-alias.ts',
+      code: `${TYPES}const operation = 'linkTo' as const;\nexport function restoreAlias(fleet: RootHandle, ${CALL}) {\n  return fleet[operation](at, target);\n}\n`,
+      as: 'linkTo',
+    },
+    {
+      name: 'a copyTree call through a constant computed key (template, satisfies)',
+      file: 'packages/plugins/other/daemon/copy-alias.ts',
+      code: `${TYPES}const op = \`copyTree\` satisfies string;\nexport const copy = (fleet: RootHandle, from: RootHandle, p: FencedPath) => fleet[op](from, p, p);\n`,
+      as: 'copyTree',
+    },
+    {
+      name: 'a computed destructuring through a constant',
+      file: 'packages/plugins/runtimes/daemon/adapters/destructure-alias.ts',
+      code: `${TYPES}const operation = 'linkTo' as const;\nexport const alias = (fleet: RootHandle) => {\n  const { [operation]: link } = fleet;\n  return link;\n};\n`,
+      as: 'linkTo',
+    },
+    {
+      name: 'a literal destructuring alias',
+      file: 'packages/plugins/other/daemon/destructure-literal.ts',
+      code: `export const alias = (fleet: { linkTo: unknown }) => {\n  const { linkTo: link } = fleet;\n  return link;\n};\n`,
+      as: 'linkTo',
+    },
+    {
+      name: 'an unresolvable computed key on a RootHandle parameter fails closed',
+      file: 'packages/plugins/runtimes/daemon/adapters/dispatch.ts',
+      code: `${TYPES}export const dispatch = (fleet: RootHandle, name: string, ${CALL}) => (fleet as never as Record<string, Function>)[name]?.(at, target);\n`,
+      as: UNRESOLVED_OPERATION,
+    },
+    {
+      name: 'an imported (so unresolvable) constant key on a RootHandle alias fails closed',
+      file: 'packages/plugins/other/daemon/dispatch-imported.ts',
+      code: `${TYPES}import { OPERATION } from './operations.ts';\nexport function run(fleet: RootHandle, ${CALL}) {\n  const handle = fleet;\n  return handle[OPERATION](at, target);\n}\n`,
+      as: UNRESOLVED_OPERATION,
+    },
+    {
+      name: 'an unresolvable computed destructuring of a RootHandle field fails closed',
+      file: 'packages/plugins/other/daemon/dispatch-pattern.ts',
+      code: `${TYPES}export class Repair {\n  constructor(private readonly fleet: RootHandle) {}\n  pick(name: string) {\n    const { [name]: found } = this.fleet;\n    return found;\n  }\n}\n`,
+      as: UNRESOLVED_OPERATION,
+    },
+  ];
+
+  test('a workspace of only the two allowed modules has no stray, and both allowed modules are found', async () => {
+    const found = reachesAt(await workspace());
+    expect(strays(found)).toEqual([]);
+    expect([...found.keys()].sort()).toEqual([FLEET_DISK, FILE_PROVISIONER].sort());
+  });
+
+  for (const stray of STRAYS)
+    test(`detects ${stray.name}`, async () => {
+      const found = strays(reachesAt(await workspace({ [stray.file]: stray.code })));
+      expect(found.length).toBeGreaterThan(0);
+      expect(found.every(place => place.startsWith(`${stray.file}:`))).toBe(true);
+      expect(found.map(place => place.split(' ').at(-1))).toContain(stray.as);
+    });
+
+  test('the kernel’s own definitions of the operations are not callers, and ordinary computed access is not flagged', async () => {
+    const found = strays(
+      reachesAt(
+        await workspace({
+          'packages/core/kernel/host/definitions.ts':
+            `${TYPES}export interface Door {\n  linkTo(${CALL}): Promise<void>;\n  copyTree(from: RootHandle, a: FencedPath, b: FencedPath): Promise<void>;\n}\n` +
+            `export const door: Door = {\n  linkTo: async () => undefined,\n  copyTree: async () => undefined,\n};\n` +
+            `export const lookup = (fleet: RootHandle, table: Record<string, number>, name: string, i: number) => [table[name], [1][i], fleet.toString()];\n`,
+          'packages/plugins/other/daemon/lookup.ts': `export const pick = (table: Record<string, number>, key: string) => table[key];\n`,
+        }),
+      ),
+    );
+    expect(found).toEqual([]);
   });
 });
