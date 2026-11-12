@@ -1,7 +1,6 @@
 import type { CompactAt } from '@ferretry/protocol';
-import { FixedSettingsUnreadableError, type LaunchArgvParts } from './argv.ts';
+import { buildLaunchArgv, FixedSettingsUnreadableError, type LaunchArgvParts } from './argv.ts';
 import { currentLaunchCompactAt } from './current.ts';
-import { type LaunchOverlayFiles, prepareLaunchArgv } from './overlay-file.ts';
 
 export type AdoptedLaunch =
   | { readonly kind: 'argv'; readonly argv: readonly string[] }
@@ -17,8 +16,6 @@ export async function adoptedLaunchArgv(input: {
   readonly accountDefault: CompactAt | undefined;
   readonly window: number | undefined;
   readonly fixedSettings: (executable: string, harness: LaunchArgvParts['harness']) => Promise<string | undefined>;
-  /** Where a login that pins its environment gets its per-launch settings file; see {@link prepareLaunchArgv}. */
-  readonly overlayFiles?: LaunchOverlayFiles;
 }): Promise<AdoptedLaunch> {
   const { parts } = input;
   const compactAt = currentLaunchCompactAt({}, input.accountDefault, input.window);
@@ -34,10 +31,7 @@ export async function adoptedLaunchArgv(input: {
   try {
     return {
       kind: 'argv',
-      argv: await prepareLaunchArgv(
-        { ...parts, ...(compactAt === undefined ? {} : { compactAt, fixedSettings: overlay }) },
-        input.overlayFiles,
-      ),
+      argv: buildLaunchArgv({ ...parts, ...(compactAt === undefined ? {} : { compactAt, fixedSettings: overlay }) }),
     };
   } catch (error) {
     if (error instanceof FixedSettingsUnreadableError) return unreadable;
