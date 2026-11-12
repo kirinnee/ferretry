@@ -57,6 +57,8 @@ describe('buildRequest', () => {
     should(buildRequest('POST /v1/x', { headers: forged as never }).headers).deepEqual({ 'x-fy-request-id': 'req-2' });
     should('headers' in buildRequest('POST /v1/x', { headers: { 'x-fy-agenda-channel': '1' as never } })).be.false();
     should('headers' in buildRequest('POST /v1/x', { headers: {} })).be.false();
+    for (const bad of [123, true, ['req-1'], { id: 'req-1' }, ''])
+      should('headers' in buildRequest('POST /v1/x', { headers: { 'x-fy-request-id': bad as never } })).be.false();
     should('headers' in buildRequest('POST /v1/x')).be.false();
   });
 

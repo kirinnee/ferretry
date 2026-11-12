@@ -16,7 +16,7 @@ export function allowedCallHeaders(given: PluginCallHeaders | undefined): Record
   if (given === undefined) return undefined;
   const sent: Record<string, string> = {};
   const requestId = given[REQUEST_ID_HEADER];
-  if (requestId !== undefined) sent[REQUEST_ID_HEADER] = requestId;
+  if (typeof requestId === 'string' && requestId !== '') sent[REQUEST_ID_HEADER] = requestId;
   const channel = given[AGENDA_CHANNEL_HEADER];
   if (channel !== undefined && AGENDA_CHANNEL_VERSIONS.has(channel)) sent[AGENDA_CHANNEL_HEADER] = channel;
   return Object.keys(sent).length === 0 ? undefined : sent;

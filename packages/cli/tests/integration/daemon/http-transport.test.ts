@@ -1,6 +1,7 @@
 import { afterEach, describe, it } from 'bun:test';
 import should from 'should';
 import { type FeedSocket, HttpTransport } from '../../../src/adapters/daemon/http-transport.ts';
+import { buildRequest } from '../../../src/lib/request.ts';
 import { DAEMON_STARTING_CODE } from '../../../src/lib/restart.ts';
 import { standInDaemon } from '../support/stand-in-daemon.ts';
 
@@ -43,6 +44,20 @@ describe('sending a request to the daemon over HTTP', () => {
     );
 
     should(daemon.seen[0]?.headers).match({ authorization: 'Bearer test-credential', 'x-fy-request-id': 'req-1' });
+  });
+
+  it('should put no request id on the wire when a half hands over one that is not a non-empty string', async () => {
+    const daemon = standInDaemon(() => Response.json({ ok: true }));
+    const http = transport(daemon.url);
+
+    for (const bad of [123, true, ['req-1'], { id: 'req-1' }, '']) {
+      await http.send(buildRequest('POST /v1/ferrets', { headers: { 'x-fy-request-id': bad as never } }), {
+        repeatable: false,
+      });
+    }
+
+    should(daemon.seen).have.length(5);
+    for (const request of daemon.seen) should(request.headers).not.have.property('x-fy-request-id');
   });
 
   it('should send no credential when there is none, and no body or content type for a bare GET', async () => {
