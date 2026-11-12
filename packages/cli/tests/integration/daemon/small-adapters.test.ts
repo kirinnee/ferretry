@@ -8,7 +8,7 @@ import { RunRecordDaemonHealth } from '../../../src/adapters/daemon/health.ts';
 import { privateRuntimeDirectory } from '../../../src/adapters/daemon/runtime-directory.ts';
 import { TmuxSessionTerminalServer } from '../../../src/adapters/daemon/session-terminals.ts';
 import { sleepUnlessAborted } from '../../../src/adapters/daemon/sleep.ts';
-import { homeMarker } from '../../../src/adapters/daemon/state-home-marker.ts';
+import { homeMarker, serviceRefusal } from '../../../src/adapters/daemon/state-home-marker.ts';
 import { DaemonTokenFileError, readAdminToken } from '../../../src/adapters/daemon/token-file.ts';
 import { terminalPrompt } from '../../../src/adapters/terminal/prompt.ts';
 import { HEALTH, standInDaemon } from '../support/stand-in-daemon.ts';
@@ -107,6 +107,51 @@ describe('the marker of a state home', () => {
     should(await homeMarker.inspect(broken)).equal('unclaimed');
     should(await homeMarker.inspect(stuff)).equal('unclaimed');
     should(await homeMarker.inspect(file)).equal('unclaimed');
+  });
+});
+
+/** What the service definitions say of a folder that is not a Ferretry 5 home: ours, or the carry-over sentence. */
+describe('why a service definition may not be written for a home', () => {
+  it('should say nothing of a Ferretry 5 home', async () => {
+    const dir = await temp();
+    await writeFile(
+      join(dir, 'home.json'),
+      JSON.stringify({ format: 1, createdBy: 'fyd 5.0.0', createdAt: '2026-11-06T09:00:00.000Z' }),
+    );
+    should(await serviceRefusal(dir)).be.undefined();
+  });
+
+  it('should say the daemon creates a home that is missing or empty, and only then', async () => {
+    const dir = await temp();
+    const empty = join(dir, 'empty');
+    await mkdir(empty);
+    for (const home of [join(dir, 'absent'), empty])
+      should(await serviceRefusal(home)).equal(
+        `${home} is not a Ferretry home; the daemon creates it on its first start`,
+      );
+  });
+
+  it('should give a folder with content and no home.json the carry-over sentence and the way back to 4.291.9', async () => {
+    const dir = await temp();
+    await writeFile(join(dir, 'layout-version'), '2\n');
+    const said = await serviceRefusal(dir);
+    should(said).containEql(`${dir} is not empty and has no home.json`);
+    should(said).containEql('docs/migration/v4-to-v5-prompt.md').and.containEql('reinstall 4.291.9');
+    should(said).not.containEql('creates it on its first start');
+  });
+
+  it("should give a home.json of another format or shape the kernel's own sentence for it", async () => {
+    const dir = await temp();
+    const newer = join(dir, 'newer');
+    const broken = join(dir, 'broken');
+    await mkdir(newer);
+    await mkdir(broken);
+    await writeFile(join(newer, 'home.json'), JSON.stringify({ format: 2 }));
+    await writeFile(join(broken, 'home.json'), '{nope');
+    should(await serviceRefusal(newer)).containEql('was written by a newer Ferretry');
+    should(await serviceRefusal(broken))
+      .be.a.String()
+      .and.not.containEql('creates it on its first start');
   });
 });
 

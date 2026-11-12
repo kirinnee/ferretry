@@ -37,6 +37,7 @@ const CARRY_OVER_SENTENCE = (home: string): string =>
   `If it is a home from an older Ferretry, follow ${CARRY_OVER_PROMPT}: it moves the folder aside ` +
   'with your yes, and Ferretry then starts empty.\n' +
   'If it is a Ferretry 5 home whose home.json was lost, restore home.json from a backup.\n' +
+  'To go back to Ferretry 4, reinstall 4.291.9 (see section 9 of that prompt); this folder is unchanged.\n' +
   'Or point FY_HOME at another folder.';
 
 /**

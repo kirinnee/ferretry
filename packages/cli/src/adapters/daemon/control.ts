@@ -30,7 +30,7 @@ import { readDaemonRunDocument } from './run-file.ts';
 import { FileServiceStore } from './service-files.ts';
 import { TmuxSessionTerminalServer } from './session-terminals.ts';
 import { terminalPrompt } from '../terminal/prompt.ts';
-import { homeMarker } from './state-home-marker.ts';
+import { homeMarker, serviceRefusal } from './state-home-marker.ts';
 import type { Fetcher } from './http-transport.ts';
 import type { LaunchResult } from '../../lib/world.ts';
 
@@ -86,8 +86,8 @@ export function buildDaemonController(
   const claims = {
     ...homeMarker,
     claim: async (home: string) => {
-      if ((await homeMarker.inspect(home)) !== 'claimed')
-        throw new Error(`${home} is not a Ferretry home; the daemon creates it on its first start`);
+      const refusal = await serviceRefusal(home);
+      if (refusal !== undefined) throw new Error(refusal);
     },
   };
   const service =
