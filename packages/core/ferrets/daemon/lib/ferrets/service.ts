@@ -62,6 +62,7 @@ import type {
   QueueOutcome,
   Runner,
   RunnerHandle,
+  RuntimeStartResolution,
   Sitrep,
   SitrepLine,
   TurnUsage,
@@ -159,6 +160,11 @@ export interface FerretsPorts {
   harnessKeys(): readonly HarnessKey[];
   runner(): Runner | undefined;
   decide(input: StartDecideInput): Promise<HookDecision>;
+  /**
+   * Which harness and login a runtime starts with (Runtimes' `runtime.start`). Unbound only in a unit fixture; the daemon
+   * always binds it, and with no provider it answers a refusal, so a runtime-named start never launches signed out.
+   */
+  runtimeStart?(runtime: string): Promise<RuntimeStartResolution>;
   launchParts(): readonly LaunchPartSource[];
   /** The ONE provider that plans the files a start was given (`start -f`); unbound or none: a start that carries attachments is refused. */
   openingAttachments?(): OpeningAttachmentsSource | undefined;
@@ -856,7 +862,12 @@ export class FerretsService implements FerretsApi {
       const fenced = await this.stateHomeRefusal(folder.value);
       if (fenced !== undefined) return fenced;
     }
-    const harnessKey = request.harness ?? this.ports.harnessKeys()[0];
+    // A start that names a runtime launches with THAT runtime's harness and login (Runtimes answers); resolved before
+    // anything is written, so a runtime that cannot serve refuses here and is never launched signed out.
+    const resolved = await this.resolveRuntime(request);
+    if (!resolved.ok) return resolved;
+    const login = resolved.value.login;
+    const harnessKey = resolved.value.harness ?? this.ports.harnessKeys()[0];
     if (harnessKey === undefined || !(HARNESS_KEYS as readonly string[]).includes(harnessKey))
       return failed('harness_unavailable', 'no harness plugin is on');
     // The folder's identity is captured HERE, before any taker is asked, and re-verified as the last step before the
@@ -872,7 +883,7 @@ export class FerretsService implements FerretsApi {
       ...(request.pack === undefined ? {} : { pack: request.pack }),
       harness: harnessKey,
       ...(request.runtime === undefined ? {} : { runtime: request.runtime }),
-      ...(request.login === undefined ? {} : { login: request.login }),
+      ...(login === undefined ? {} : { login }),
       folder: folder.value,
       by: request.by,
       ...(request.options?.model === undefined ? {} : { model: request.options.model }),
@@ -906,7 +917,7 @@ export class FerretsService implements FerretsApi {
       birth: birthOf(origin),
       runner: 'tmux',
       ...(request.runtime === undefined ? {} : { runtime: request.runtime }),
-      ...(request.login === undefined ? {} : { login: request.login }),
+      ...(login === undefined ? {} : { login }),
       folder: folder.value,
       state: 'starting',
       ...(request.harnessConversation === undefined ? {} : { harnessConversation: request.harnessConversation }),
@@ -2196,6 +2207,33 @@ export class FerretsService implements FerretsApi {
         `the ${record.harness} harness named a home that holds the homes of other ferrets, so it was not started`,
       );
     return ok(home);
+  }
+
+  /**
+   * The harness and login a start launches with. A start that names no runtime keeps its own fields. One that names a
+   * runtime takes the runtime's harness and login from Runtimes (via `ports.runtimeStart`); the request's own fields keep
+   * their precedence: an explicit login is the one spent (the owner named it beside the runtime), and an explicit harness
+   * that is not the runtime's is refused, since the runtime's login signs in to its own harness only. A runtime that
+   * cannot serve (unknown, off, login missing or needing sign-in, no provider) is a plain refusal, never a signed-out launch.
+   */
+  private async resolveRuntime(
+    request: StartRequest,
+  ): Promise<Result<{ readonly harness: HarnessKey | undefined; readonly login: string | undefined }, StartFailure>> {
+    const own = { harness: request.harness, login: request.login };
+    if (request.runtime === undefined || this.ports.runtimeStart === undefined) return ok(own);
+    const answer = await this.ports.runtimeStart(request.runtime).catch(
+      (): RuntimeStartResolution => ({
+        ok: false,
+        sentence: `runtime ${request.runtime} could not be checked, so the ferret was not started`,
+      }),
+    );
+    if (!answer.ok) return failed('refused', answer.sentence);
+    if (request.harness !== undefined && request.harness !== answer.harness)
+      return failed(
+        'refused',
+        `runtime ${request.runtime} runs the ${answer.harness} harness, not ${request.harness}, so the ferret was not started`,
+      );
+    return ok({ harness: answer.harness, login: request.login ?? answer.login });
   }
 
   /** The ferret's login's environment for its harness, minus the names a login may never set. Empty with no login. */

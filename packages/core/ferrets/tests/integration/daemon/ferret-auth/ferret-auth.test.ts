@@ -8,6 +8,9 @@ import { join } from 'node:path';
 import { DAEMON_RUN_FILE, DaemonRunSchema } from '@ferretry/kernel/contract';
 import { FAKE_REPLY, startFakeProvider, type FakeProvider } from './fake-provider.ts';
 import { writeStubBinaries } from './stub-binaries.ts';
+import { allowedCallHeaders } from '@ferretry/kernel/manifest';
+import type { FerretsClient } from '../../../../app/lib/client.ts';
+import { emptyNewFerretDraft, startFerret } from '../../../../app/features/new-ferret/new-ferret-draft.ts';
 
 /**
  * THE MERGE-BAR LINE: A FERRET AUTHENTICATES END TO END (docs/rebuild/merge-bar.md, before-merge line 7).
@@ -423,16 +426,29 @@ describe('a ferret authenticates end to end (merge bar 7)', () => {
 });
 
 /**
- * THE MERGE-BAR LINE: THE REAL `fy` STARTS A FERRET (docs/rebuild/merge-bar.md, before-merge line 9; smoke step 2).
+ * THE MERGE-BAR LINE: A START BY RUNTIME REACHES THE PROVIDER SIGNED IN (docs/rebuild/merge-bar.md, before-merge line 9;
+ * smoke step 2).
  *
- * The 5.0 preview answered `fy new` / `fy start` with "a start must carry x-fy-request-id" and no ferret was made:
- * Ferrets' CLI half set the header, but the CLI shell's client had no `headers` on a call and dropped it. Every test
- * above starts a ferret with a raw `POST /v1/ferrets` and a hand-written header, which is exactly the part that was
- * broken, so none could see it. This one types the command: the real `fy` process (the production entry point, its
- * real shell client and HTTP transport) against the real `fyd`, then reads the ferret back through `fy ps`.
- * Same stand-in harness and fake provider as above; loopback only, fake values only.
+ * The 5.0 preview answered `fy new` / `fy start` with "a start must carry x-fy-request-id" and no ferret was made, and
+ * once that was fixed `fy new --runtime rt` still launched SIGNED OUT: the request names a runtime, nothing turned the
+ * runtime into its login, so the record had no login and the launch carried no credential. Every test above starts a
+ * ferret with a raw `POST /v1/ferrets` that names the login itself, which is exactly the part that was broken, so none
+ * could see it. These cases start the way the owner does, on a configured runtime (`login: oauth`, a real profile):
+ *
+ * - the real `fy` process (the production entry point, its real shell client and HTTP transport) typing `fy new --runtime`;
+ * - the APP's new-ferret request: the app's own draft/request builder (`startFerret`, the code behind the New ferret
+ *   button) sending through a loopback client to the real fyd. The client applies the SAME closed header list the app's
+ *   `DaemonClient` uses (`allowedCallHeaders`), so a header the app does not set does not reach the daemon. NOT covered
+ *   (a test in this package may not import the app shell, rebuild-checks `context-imports`): the app's `DaemonClient`
+ *   route guard and inventory hash check, the sealed session / carrier the browser really uses to reach the daemon (that
+ *   needs a paired device and a relay), and the React page that collects the draft. The shell's own client tests cover
+ *   the guard and the header list with a fake transport; all of them reach this same `POST /v1/ferrets`.
+ *
+ * The fake provider here is STRICT: it answers only a request carrying the signed-in login's credential, so a signed-out
+ * launch gets no reply. Each case reads the reply back and checks the non-secret login facts of the launch (its auth kind
+ * and the credential store the login names; never a value). Same stand-in harness; loopback only, fake values only.
  */
-describe('the real fy starts a ferret on a real fyd (merge bar 9)', () => {
+describe('a start by runtime reaches the provider signed in (merge bar 9)', () => {
   const fy = async (daemon: Daemon, args: readonly string[]) => {
     const proc = Bun.spawn([process.execPath, FY, ...args], {
       cwd: daemon.folder,
@@ -455,59 +471,82 @@ describe('the real fy starts a ferret on a real fyd (merge bar 9)', () => {
     return { code, out, err };
   };
 
-  /** The daemon's own record of the ferret `id`: it started, and under which runtime. */
-  const startedFerret = async (daemon: Daemon, id: string) => {
-    const listing = JSON.parse((await daemon.call('GET', '/v1/ferrets')).text) as { id: string; runtime?: string }[];
-    return listing.find(ferret => ferret.id === id);
+  /** The fake OAuth login `oauth` (signed in) and the runtime `rt` over it: `login`, a real `profile`, launched as an agent. */
+  const oauthWorld = (home: string): Record<string, string> => ({
+    [join(home, 'config/logins/oauth.yaml')]: claudeLogin('ferretry'),
+    [join(home, 'config/profiles/plain.yaml')]: 'contents: []\n',
+    [join(home, 'config/runtimes/rt.yaml')]: 'login: oauth\nprofile: plain\nagent: true\n',
+    // A runtime whose login has no credential: it exists but cannot serve a launch (needs sign-in).
+    [join(home, 'config/logins/signedout.yaml')]: claudeLogin('ferretry'),
+    [join(home, 'config/runtimes/rt-signedout.yaml')]: 'login: signedout\nprofile: plain\nagent: true\n',
+    [join(home, 'state/logins/credentials/oauth/.credentials.json')]: JSON.stringify({
+      claudeAiOauth: {
+        accessToken: FAKE_TOKEN,
+        refreshToken: 'fake-refresh',
+        expiresAt: 4_102_444_800_000,
+        scopes: ['user:inference'],
+      },
+    }),
+  });
+
+  const bootStrict = async () => {
+    const provider = startFakeProvider(FAKE_TOKEN, { strict: true });
+    cleanups.push(() => provider.stop());
+    return { provider, daemon: await boot(provider, oauthWorld) };
   };
 
-  /** Boots the real fyd on a fake OAuth login (and a runtime `rt` over it), runs the real `fy` with `args`, and proves the ferret. */
-  const startsAFerret = async (args: (daemon: Daemon) => readonly string[], proof: 'reply' | 'listed' = 'reply') => {
-    const provider = startFakeProvider(FAKE_TOKEN);
-    cleanups.push(() => provider.stop());
-    const daemon = await boot(provider, home => ({
-      [join(home, 'config/logins/oauth.yaml')]: claudeLogin('ferretry'),
-      // A runtime is one login plus one profile: the file `fy new --runtime rt` names.
-      [join(home, 'config/profiles/plain.yaml')]: 'contents: []\n',
-      [join(home, 'config/runtimes/rt.yaml')]: 'credential: oauth\nprofile: plain\n',
-      [join(home, 'state/logins/credentials/oauth/.credentials.json')]: JSON.stringify({
-        claudeAiOauth: {
-          accessToken: FAKE_TOKEN,
-          refreshToken: 'fake-refresh',
-          expiresAt: 4_102_444_800_000,
-          scopes: ['user:inference'],
-        },
-      }),
-    }));
+  /** The stand-in claude's launch record of the ferret: waits for it. */
+  const launchedClaude = async (daemon: Daemon) => {
+    const until = Date.now() + SEE_MS;
+    while (Date.now() < until) {
+      const launched = daemon.launches().filter(record => record.binary === 'claude');
+      if (launched.length > 0) return launched.at(-1);
+      await Bun.sleep(250);
+    }
+    throw new Error('the stand-in claude was never launched');
+  };
 
-    const started = await fy(daemon, args(daemon));
+  /** Waits for the daemon's own transcript read of ferret `id` to show the provider's reply. */
+  const readsReply = async (daemon: Daemon, id: string) => {
+    const until = Date.now() + SEE_MS;
+    let seen = '';
+    while (Date.now() < until && !seen.includes(FAKE_REPLY)) {
+      seen = (await daemon.call('GET', `/v1/ferrets/${id}/messages`)).text;
+      if (!seen.includes(FAKE_REPLY)) await Bun.sleep(500);
+    }
+    return seen;
+  };
 
+  /** What the launch proves of the login, none of it secret: the auth kind it found and the credential store it was handed. */
+  const expectSignedInOn = async (daemon: Daemon, provider: FakeProvider, id: string) => {
+    expect(await readsReply(daemon, id)).toContain(FAKE_REPLY);
+    const launched = await launchedClaude(daemon);
+    expect(launched?.auth).toBe('oauth-file');
+    // Logins' store variable reached the CLI itself (the direct launch, not a wrapper), as the `--login` path gives it.
+    expect(launched?.envNames).toContain('CLAUDE_SECURESTORAGE_CONFIG_DIR');
+    expect(String(launched?.storeDir)).toMatch(/\/credentials\/oauth$/u);
+    expect(provider.seen.map(r => [r.path, r.authHeaders, r.tokenMatches])).toEqual([
+      ['/v1/messages', ['authorization'], true],
+    ]);
+  };
+
+  /** Runs the real `fy` with `args`, and returns the ferret id it printed (`callsign (id)  state ...`). */
+  const startsViaFy = async (daemon: Daemon, args: readonly string[]) => {
+    const started = await fy(daemon, args);
     // The shell forwarded the request id: no refusal, an exit of 0 and a ferret id on the screen.
     expect(`${started.out}\n${started.err}`.includes('x-fy-request-id')).toBe(false);
     expect(started.code, `fy start: ${started.err}`).toBe(0);
-    // The headline names the ferret: `callsign (id)  state  harness ...`.
     const id = /\(([^()\s]+)\)/u.exec(started.out)?.[1];
     expect(typeof id).toBe('string');
     const listed = await fy(daemon, ['ps']);
     expect(listed.code).toBe(0);
     expect(listed.out).toContain(id as string);
-    if (proof === 'listed') {
-      // The runtime path: the start is what is under test here (the header the shell forwards), so the daemon's own record
-      // of the ferret is the proof; the reply needs the runtime's launch wrapper, which is not part of this case.
-      expect((await startedFerret(daemon, id as string))?.runtime).toBe('rt');
-      return;
-    }
-    const until = Date.now() + SEE_MS;
-    let seen = '';
-    while (Date.now() < until && !seen.includes(FAKE_REPLY)) {
-      seen = (await daemon.call('GET', `/v1/ferrets/${id as string}/messages`)).text;
-      if (!seen.includes(FAKE_REPLY)) await Bun.sleep(500);
-    }
-    expect(seen).toContain(FAKE_REPLY);
+    return id as string;
   };
 
-  test('`fy start` makes a ferret, which `fy ps` lists, and the reply reaches it', () =>
-    startsAFerret(daemon => [
+  test('`fy start --harness claude-code --login oauth` makes a ferret, which `fy ps` lists, and the reply reaches it', async () => {
+    const { provider, daemon } = await bootStrict();
+    const id = await startsViaFy(daemon, [
       'start',
       '--harness',
       'claude-code',
@@ -518,14 +557,98 @@ describe('the real fy starts a ferret on a real fyd (merge bar 9)', () => {
       '--cwd',
       daemon.folder,
       'say hello',
-    ]));
+    ]);
+    await expectSignedInOn(daemon, provider, id);
+  });
 
-  test('`fy new --runtime rt` (the command the owner types) makes a ferret the same way, over a temporary runtime config', () =>
-    startsAFerret(
-      daemon => ['new', '--runtime', 'rt', '--mode', 'interactive', '--cwd', daemon.folder, 'say hello'],
-      'listed',
-    ));
+  test('`fy new --runtime rt` (the command the owner types) on a configured runtime reaches the provider signed in', async () => {
+    const { provider, daemon } = await bootStrict();
+    const id = await startsViaFy(daemon, [
+      'new',
+      '--runtime',
+      'rt',
+      '--mode',
+      'interactive',
+      '--cwd',
+      daemon.folder,
+      'say hello',
+    ]);
+    const listing = JSON.parse((await daemon.call('GET', '/v1/ferrets')).text) as { id: string; runtime?: string }[];
+    expect(listing.find(ferret => ferret.id === id)?.runtime).toBe('rt');
+    await expectSignedInOn(daemon, provider, id);
+  });
+
+  test("the app's new-ferret request (its own request builder, the app's header list, a loopback client) on a configured runtime reaches the provider signed in", async () => {
+    const { provider, daemon } = await bootStrict();
+    // The app's own start: `startFerret` builds `POST /v1/ferrets` from the form's draft, and the client sends it.
+    const id = await startFerret(loopbackClient(daemon), {
+      ...emptyNewFerretDraft,
+      runtime: 'rt',
+      folder: daemon.folder,
+      mode: 'interactive',
+      prompt: 'say hello',
+    });
+    await expectSignedInOn(daemon, provider, id);
+  });
+
+  test('a runtime that does not exist, or whose login needs sign-in, is refused with a sentence naming it: no ferret, no signed-out launch', async () => {
+    const { daemon } = await bootStrict();
+    for (const runtime of ['no-such-runtime', 'rt-signedout']) {
+      const refused = await fy(daemon, [
+        'new',
+        '--runtime',
+        runtime,
+        '--mode',
+        'interactive',
+        '--cwd',
+        daemon.folder,
+        'say hello',
+      ]);
+      expect(refused.code, `fy new ${runtime}`).not.toBe(0);
+      expect(`${refused.out}\n${refused.err}`).toContain(runtime);
+    }
+    const listing = JSON.parse((await daemon.call('GET', '/v1/ferrets')).text) as unknown[];
+    expect(listing).toEqual([]);
+    expect(daemon.launches().filter(record => record.binary === 'claude')).toEqual([]);
+  });
 });
+
+/**
+ * The per-daemon client the ferrets app half is handed, over loopback HTTP to a real fyd. It fills the route's path
+ * parameters and sends the call's headers through the closed list every shell uses (`allowedCallHeaders`); it holds the
+ * admin credential the way a paired device's session would. The sealed session the browser really uses is NOT part of this.
+ */
+function loopbackClient(daemon: Daemon): FerretsClient {
+  return {
+    call: async <Answer = unknown>(
+      route: string,
+      init?: {
+        readonly params?: Readonly<Record<string, string>>;
+        readonly query?: Readonly<Record<string, string>>;
+        readonly body?: unknown;
+        readonly headers?: Parameters<typeof allowedCallHeaders>[0];
+      },
+    ): Promise<Answer> => {
+      const [method, template] = route.split(' ') as [string, string];
+      const path = template.replace(/:(\w+)/gu, (_, name: string) => encodeURIComponent(init?.params?.[name] ?? ''));
+      const query = init?.query === undefined ? '' : `?${new URLSearchParams(init.query).toString()}`;
+      const response = await fetch(`${daemon.base}${path}${query}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${daemon.admin}`,
+          'x-ferretry-client': 'cli',
+          accept: 'application/json',
+          ...(init?.body === undefined ? {} : { 'content-type': 'application/json' }),
+          ...allowedCallHeaders(init?.headers),
+        },
+        ...(init?.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+      });
+      const text = await response.text();
+      if (!response.ok) throw new Error(`${route} answered ${String(response.status)}: ${text}`);
+      return JSON.parse(text) as Answer;
+    },
+  };
+}
 
 // THE REAL BINARY, for (b) only. Measured (claude 2.1.317, strace, a loopback server): with ANTHROPIC_BASE_URL and
 // ANTHROPIC_AUTH_TOKEN the real claude makes `POST /v1/messages` with `Authorization: Bearer <token>` and no other host

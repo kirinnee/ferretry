@@ -77,8 +77,20 @@ export function buildStartBody(draft: NewFerretDraft): StartBody {
 
 const StartedSchema = z.object({ id: z.string().min(1) });
 
-/** Starts the ferret the draft describes and answers its id. A refusal throws with the daemon's sentence. */
-export async function startFerret(client: FerretsClient, draft: NewFerretDraft): Promise<string> {
-  const answer = await client.call('POST /v1/ferrets', { body: buildStartBody(draft) });
+/**
+ * Starts the ferret the draft describes and answers its id. A refusal throws with the daemon's sentence.
+ *
+ * A start is idempotent on its request id (the daemon answers 400 `missing_request_id` to one with none), so the call carries
+ * one: a fresh id per attempt, or the caller's own when a retry of the SAME attempt must not start a second ferret.
+ */
+export async function startFerret(
+  client: FerretsClient,
+  draft: NewFerretDraft,
+  requestId: string = crypto.randomUUID(),
+): Promise<string> {
+  const answer = await client.call('POST /v1/ferrets', {
+    body: buildStartBody(draft),
+    headers: { 'x-fy-request-id': requestId },
+  });
   return StartedSchema.parse(answer).id;
 }

@@ -58,13 +58,20 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
    `POST /v1/pair/code`: a `local-only` link on the port the daemon really bound must come back, and is cancelled
    (`DELETE /v1/pair/code/:pairingId`). A wildcard bind still refuses with `wildcard-bind`. Owner block !A472, 2026-11-12.
    No code is ever printed.
-9. **The real `fy` starts a ferret on a real `fyd`**: the `merge bar 9` case in
-   `packages/core/ferrets/tests/integration/daemon/ferret-auth/ferret-auth.test.ts` (smoke step 2) types `fy start` against a
-   REAL `fyd` on a temp home and an ephemeral loopback port (stand-in harness, fake provider, no network), reads the
-   ferret back through `fy ps`, and sees the reply; a second case types `fy new --runtime rt` (the command the owner uses)
-   over a temporary runtime config in the same temp home and checks the daemon lists the ferret under that runtime. The 5.0 preview refused every `fy new` / `fy start` with "a start must
-   carry x-fy-request-id" because the CLI shell dropped the header a half set; every other start test used a raw
-   `POST /v1/ferrets`. No credential is printed.
+9. **A start by runtime reaches the provider signed in**: the `merge bar 9` cases in
+   `packages/core/ferrets/tests/integration/daemon/ferret-auth/ferret-auth.test.ts` (smoke step 2) start a ferret on a
+   REAL `fyd` on a temp home and an ephemeral loopback port (stand-in harness, no network) whose runtime `rt` is
+   configured from FILES ONLY (`login: oauth`, a real profile; no `fy runtime add`, no apply, nothing published). The fake
+   provider is strict: it replies only to a request carrying the signed-in login's credential, so a signed-out launch gets
+   no reply. Each case reads that reply back and checks the launch's non-secret login facts (auth kind and the login's
+   credential store). Cases: `fy start --harness claude-code --login oauth` (control); `fy new --runtime rt` (the command
+   the owner types), which must reach the provider signed in; the APP's new-ferret request (the app's own `startFerret`
+   through the app's own `DaemonClient`, over loopback HTTP: the sealed browser session and the React page are not in
+   it); and a runtime that does not exist or whose login needs sign-in, which must be refused with a sentence naming it
+   and start nothing. The 5.0 preview refused every `fy new` / `fy start` with "a start must carry x-fy-request-id"
+   because the CLI shell dropped the header a half set (and the app's start sent none), and a start by runtime then
+   launched signed out because nothing turned the runtime into its login; every other start test named the login in a
+   raw `POST /v1/ferrets`. No credential is printed.
 
 ## After merge
 

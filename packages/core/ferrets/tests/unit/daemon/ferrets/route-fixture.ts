@@ -15,9 +15,11 @@ import {
   LAUNCH_ROOTS_KEY,
   LaunchRoots,
   type LaunchRootsSource,
+  Logins,
   OPENING_ATTACHMENTS_KEY,
   OpeningAttachments,
   type OpeningAttachmentsSource,
+  type RuntimeStartSource,
   Runners,
   StartDecide,
   type StartDecideInput,
@@ -205,4 +207,43 @@ export const fakeLaunchRoots = (source: LaunchRootsSource) =>
       hooks: { takes: [{ hook: LaunchRoots, key: LAUNCH_ROOTS_KEY }] },
     }),
     { build: () => ({ hooks: { 'launch.roots:projects': source } }) },
+  );
+
+/** What a fake Runtimes answers on `runtime.start`: any runtime resolves to Claude Code and the login `fake-login`. */
+const FAKE_RUNTIME_LOGIN = 'fake-login';
+export const fakeRuntimeStartAnswer: RuntimeStartSource = {
+  resolve: async () => ({ ok: true, harness: 'claude-code', login: FAKE_RUNTIME_LOGIN }),
+};
+
+/**
+ * A stand-in for Logins (the `logins` plugin, kind `anthropic`) that holds every login and needs nothing from it. A start
+ * by runtime records the runtime's login, and the launch asks the Logins kind that holds it; with no Logins at all the
+ * start is refused, so a fixture that starts by runtime holds this beside its fake Runtimes.
+ */
+export const fakeLogins = () =>
+  implementDaemon(
+    definePlugin({
+      id: 'logins',
+      title: 'Logins (fake)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: Logins, key: 'anthropic' }] },
+    }),
+    {
+      build: () => ({
+        hooks: {
+          'logins:anthropic': {
+            key: 'anthropic' as const,
+            fields: [],
+            harnesses: ['claude-code' as const],
+            holds: () => true,
+            signIn: async () => ({}) as never,
+            status: async () => ({}) as never,
+            env: async () => ({}),
+          },
+        },
+      }),
+    },
   );

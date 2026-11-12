@@ -41,6 +41,7 @@ import { FleetPublication } from './lib/service/publication.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
 import type { FleetCatalogService } from './lib/service/catalog-service.ts';
 import { autoResumeAnswer, autoResumeSwitch, readAutoResume } from './lib/service/auto-resume-answer.ts';
+import { runtimeStartAnswer } from './lib/service/runtime-start-answer.ts';
 import { DisableExpiryWatch, earliestExpiry, keepUnpublished, runtimesBackOn } from './lib/service/disable-expiry.ts';
 import { loginUsers } from './lib/service/login-users.ts';
 import { createProfileLayers } from './lib/service/profile-layers.ts';
@@ -445,6 +446,10 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
               ),
             resolve: async id => await api.resolve(id),
           }),
+          // A start that names a runtime spends that runtime's login: its harness and login, or why it cannot start now.
+          'runtime.start:runtimes': {
+            resolve: runtimeStartAnswer({ resolve: async id => await api.resolve(id) }),
+          },
           // A start's own compaction trigger is judged against its model's window, and the facts launch.parts uses are read
           // here; with no facts to read, a Claude start of a runtime is refused.
           'start.decide': launchGate.decide,

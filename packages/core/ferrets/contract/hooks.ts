@@ -264,3 +264,29 @@ export const LaunchRoots = defineHook('launch.roots', {
   value: z.custom<LaunchRootsSource>(),
   takers: ['projects'],
 });
+
+/** What a start needs of the runtime it names: the harness it runs and the login it spends. */
+export type RuntimeStartResolution =
+  | { readonly ok: true; readonly harness: z.infer<typeof HarnessKeySchema>; readonly login: string }
+  | { readonly ok: false; readonly sentence: string };
+
+/** Runtimes' answer to "what does this runtime start with?" (`fy new --runtime`, the app's new-ferret). */
+export interface RuntimeStartSource {
+  /** The runtime NAMED `runtime`, resolved; or the plain sentence saying why it cannot serve a launch now. */
+  resolve(runtime: string): Promise<RuntimeStartResolution>;
+}
+
+/** The one key `runtime.start` is provided under: a runtime has exactly one owner. */
+export const RUNTIME_START_KEY = 'runtimes';
+
+/**
+ * Which harness and login a start that names a RUNTIME spends. On the security path: it decides which credential a
+ * launch holds, so ONE named plugin provides it. Ferrets cannot reach Runtimes by port (Runtimes needs Ferrets), so it
+ * asks through this hook; with no provider a start that names a runtime is refused rather than launched signed out.
+ */
+export const RuntimeStart = defineHook('runtime.start', {
+  mode: 'provide',
+  key: z.literal(RUNTIME_START_KEY),
+  value: z.custom<RuntimeStartSource>(),
+  takers: ['runtimes'],
+});

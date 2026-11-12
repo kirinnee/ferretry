@@ -81,8 +81,18 @@ describe('startFerret', () => {
         params: undefined,
         query: undefined,
         body: { runtime: 'claude-a', folder: '/work/a', mode: 'auto', prompt: 'Go' },
+        headers: { 'x-fy-request-id': expect.any(String) },
       },
     ]);
+  });
+
+  it('carries a request id the daemon requires (a start with none is refused), the caller’s own when given', async () => {
+    const calls: Call[] = [];
+    const client = scripted({ 'POST /v1/ferrets': { id: 'f9' } }, calls);
+    await startFerret(client, draft());
+    await startFerret(client, draft(), 'req-1');
+    expect(calls[0]?.headers?.['x-fy-request-id']).toMatch(/\S+/u);
+    expect(calls[1]?.headers).toEqual({ 'x-fy-request-id': 'req-1' });
   });
 
   it('lets a daemon refusal through with its own sentence, and refuses an answer with no id', async () => {

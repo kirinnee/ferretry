@@ -23,7 +23,7 @@ async function boot(harness = new FakeHarness()) {
 
 const start = async (h: TestHost, name: string): Promise<FerretId> => {
   const answer = await h.request('POST', '/v1/ferrets', {
-    body: { name, folder: `/work/${name}`, runtime: 'claude-work' },
+    body: { name, folder: `/work/${name}` },
     headers: { 'x-fy-request-id': randomUUID() },
   });
   expect(answer.status).toBe(201);
