@@ -12,7 +12,7 @@
 
 import { z } from 'zod';
 import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
-import { compareProtocolVersions, ProtocolVersionSchema } from './version-skew.ts';
+import { compareProtocolVersions, isNewerMajorVersion, ProtocolVersionSchema } from './version-skew.ts';
 
 /**
  * The GitHub account that publishes releases. The repository is the PRODUCT name, which callers pass
@@ -182,7 +182,10 @@ export function classifyNixStorePath(facts: NixPathFacts): NixInstallMethod {
 export function classifyInstallMethod(facts: InstallFacts): InstallMethod {
   if (!facts.compiled) return { kind: 'unknown', reason: 'this is a development build run from source' };
   const resolved = facts.resolvedPath;
-  if (resolved.includes(`/Caskroom/${facts.product}/`)) return { kind: 'homebrew', cask: facts.product };
+  const cask = resolved.split('/Caskroom/')[1]?.split('/')[0];
+  if (cask === facts.product || cask === `${facts.product}@4`) {
+    return { kind: 'homebrew', cask: `${releaseTapName(facts.product)}/${cask}` };
+  }
   if (facts.systemPackage !== undefined) return { kind: 'system-package', manager: facts.systemPackage };
   if (isNixStoreFile(resolved)) return classifyNixStorePath(facts);
   return { kind: 'standalone', directory: parentDirectory(resolved) };
@@ -443,10 +446,10 @@ export function parseGitHubNewestTag(product: string, value: unknown): LatestRel
   return { version: newest, url: `https://github.com/${RELEASE_OWNER}/${product}/releases/tag/v${newest}` };
 }
 
-/** Whether `latest` is newer than `current`. Versions that do not parse are never "newer". */
+/** Whether a newer release is available within this major. New majors require migration. */
 export function isUpdateAvailable(current: string, latest: LatestRelease | undefined): boolean {
   if (latest === undefined) return false;
-  return compareProtocolVersions(latest.version, current) === 1;
+  return compareProtocolVersions(latest.version, current) === 1 && !isNewerMajorVersion(current, latest.version);
 }
 
 // ---------------------------------------------------------------------------------------------------

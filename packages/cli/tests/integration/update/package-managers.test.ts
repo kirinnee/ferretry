@@ -3,6 +3,12 @@ import should from 'should';
 import { CommandPackageManagers } from '../../../src/adapters/update/package-managers';
 
 const TAP = 'kirinnee/ferretry';
+const LOCKED = {
+  source: 'github:kirinnee/ferretry',
+  reference: `github:kirinnee/ferretry/${'a'.repeat(40)}`,
+  version: '4.291.10',
+  profile: { attribute: 'packages.x86_64-linux.default', priority: 5 },
+};
 const URL = 'https://github.com/kirinnee/ferretry';
 
 /** A fake brew: answers `brew tap` with `taps`, fails any command in `failing`, records every argv. */
@@ -22,14 +28,15 @@ describe('CommandPackageManagers', () => {
     const { ran, managers } = fakeBrew(`homebrew/core\n${TAP}\n`);
     await managers.brewRefresh(TAP, URL);
     await managers.brewUpgrade('ferretry');
-    await managers.nixProfileUpgrade('ferretry');
+    await managers.nixProfileUpgrade('ferretry', LOCKED);
     await managers.nixProfileRollback();
     await managers.nixProfileInstall('github:kirinnee/ferretry');
     should(ran).deepEqual([
       'brew tap',
       'brew update',
-      'brew upgrade --cask ferretry',
-      'nix --extra-experimental-features nix-command flakes profile upgrade --refresh ferretry',
+      'env HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade --cask ferretry',
+      `nix --extra-experimental-features nix-command flakes profile install --no-update-lock-file --priority 6 ${LOCKED.reference}#packages.x86_64-linux.default`,
+      'nix --extra-experimental-features nix-command flakes profile remove ferretry',
       'nix --extra-experimental-features nix-command flakes profile rollback',
       'nix --extra-experimental-features nix-command flakes profile install --refresh github:kirinnee/ferretry',
     ]);
@@ -72,9 +79,11 @@ describe('CommandPackageManagers — watched', () => {
       return await Promise.resolve({ code: 1, stdout: '', stderr: `${lines.join('\n')}\n` });
     });
     const seen: string[] = [];
-    const outcome = await managers.nixProfileUpgrade('ferretry', activity => seen.push(JSON.stringify(activity)));
+    const outcome = await managers.nixProfileUpgrade('ferretry', LOCKED, activity =>
+      seen.push(JSON.stringify(activity)),
+    );
     should(argvs[0]?.join(' ')).equal(
-      'nix --extra-experimental-features nix-command flakes profile upgrade --refresh --log-format internal-json -v ferretry',
+      `nix --extra-experimental-features nix-command flakes profile install --no-update-lock-file --priority 6 --log-format internal-json -v ${LOCKED.reference}#packages.x86_64-linux.default`,
     );
     should(seen[0]).equal('{"phase":"preparing"}');
     should(seen.some(line => line.includes('"packages":{"done":0,"expected":3}'))).be.true();

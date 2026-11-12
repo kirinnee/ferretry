@@ -25,6 +25,17 @@ export interface ILatestReleasePort {
   newestTag(): Promise<LatestReleaseAnswer>;
 }
 
+/** A source version learned from local package metadata; unreadable metadata refuses. */
+export type PackageVersion = { readonly version: string } | { readonly failure: string };
+
+/** The refreshed source and its immutable revision, judged together before installing. */
+export interface LockedNixTarget {
+  readonly source: string;
+  readonly reference: string;
+  readonly profile?: { readonly attribute: string; readonly priority: number };
+  readonly version: string;
+}
+
 /**
  * The package managers a self-update drives, one method per command it ever runs.
  *
@@ -35,10 +46,16 @@ export interface ILatestReleasePort {
 export interface IPackageManagerPort {
   /** Bring the tap clone up to date, tapping it first when it is missing. */
   brewRefresh(tap: string, url: string, observer?: UpdateObserver): Promise<CommandOutcome>;
+  brewCaskVersion(cask: string): Promise<PackageVersion>;
+  nixResolve(flake: string, element?: string): Promise<LockedNixTarget | { readonly failure: string }>;
   brewUpgrade(cask: string, observer?: UpdateObserver): Promise<CommandOutcome>;
-  nixProfileUpgrade(element: string, observer?: UpdateObserver): Promise<CommandOutcome>;
+  nixProfileUpgrade(
+    element: string,
+    target: LockedNixTarget | undefined,
+    observer?: UpdateObserver,
+  ): Promise<CommandOutcome>;
   nixProfileRollback(): Promise<CommandOutcome>;
-  nixProfileInstall(flake: string, observer?: UpdateObserver): Promise<CommandOutcome>;
+  nixProfileInstall(flake: string, observer?: UpdateObserver, target?: LockedNixTarget): Promise<CommandOutcome>;
 }
 
 /** A release unpacked beside the current binaries, verified, and not yet in place. */

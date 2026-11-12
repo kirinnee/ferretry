@@ -43,6 +43,20 @@ describe('about machine words', () => {
     expect(updateHeadline(updateView({ available: false, current: '4.29.0' }))).toBe('Up to date — version 4.29.0');
   });
 
+  it('says a newer major needs migration even when an older daemon offers it', () => {
+    for (const available of [false, true]) {
+      expect(
+        updateHeadline(
+          updateView({
+            current: '4.291.9',
+            available,
+            check: { state: 'ok', checkedAt: '2026-10-18T10:00:00.000Z', latest: { ...latest, version: '5.0.0' } },
+          }),
+        ),
+      ).toBe('5.0 is out: it needs the migration, not an update');
+    }
+  });
+
   it('names the install method with its detail', () => {
     expect(installWords(updateView())).toEqual({ label: 'Homebrew', detail: 'Homebrew cask ferretry' });
   });

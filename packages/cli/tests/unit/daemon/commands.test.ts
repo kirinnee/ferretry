@@ -135,6 +135,7 @@ describe('daemon command surface', () => {
       '--check',
       '--to',
       '4.29.0',
+      '--major',
       '--yes',
       '--when-idle',
       '--switch-to-profile',
@@ -149,6 +150,7 @@ describe('daemon command surface', () => {
       {
         check: true,
         to: '4.29.0',
+        major: true,
         yes: true,
         whenIdle: true,
         switchToProfile: true,

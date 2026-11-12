@@ -1152,7 +1152,7 @@ describe('daemon status — install and update', () => {
   it('should add the install method and the available update to the human summary', async () => {
     const { controller, out } = harness({ probes: [health()], overrides: { updateStatus } });
     await controller.status({});
-    should(out.text).containEql('  installed via Homebrew cask ferretry');
+    should(out.text).containEql('  installed via Homebrew cask kirinnee/ferretry/ferretry');
     should(out.text).containEql(
       '  update available 1.2.3 → 1.3.0 (https://github.com/kirinnee/ferretry/releases/tag/v1.3.0)',
     );

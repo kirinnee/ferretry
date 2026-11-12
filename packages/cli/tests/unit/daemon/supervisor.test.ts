@@ -319,6 +319,20 @@ describe('launchd supervisor install', () => {
 });
 
 describe('launchd supervisor start', () => {
+  it('repoints a legacy Caskroom definition to the stable brew link after a cask swap', async () => {
+    const { supervisor, processes, files } = launchd();
+    await supervisor.install('/opt/homebrew/Caskroom/ferretry/4.291.9/fyd');
+    processes.ran.length = 0;
+    await supervisor.start('/opt/homebrew/bin/fyd');
+    should(files.written.get(mac.launchAgentFile)).containEql(
+      '<key>ProgramArguments</key><array><string>/opt/homebrew/bin/fyd</string></array>',
+    );
+    should(files.written.get(mac.launchAgentFile)).not.containEql('Caskroom');
+    should(processes.ran).deepEqual([
+      'launchctl bootout gui/501/com.ferretry.fyd',
+      `launchctl bootstrap gui/501 ${mac.launchAgentFile}`,
+    ]);
+  });
   it('should reload a cached legacy job after writing the exact snapshot arguments', async () => {
     // Arrange — launchd keeps the ProgramArguments loaded at bootstrap even after the plist changes.
     const { supervisor, processes, files } = launchd();

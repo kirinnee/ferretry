@@ -1,8 +1,10 @@
+import { ProtocolVersionSchema } from '@ferretry/protocol';
+import { z } from 'zod';
 import type { CommandOutcome } from '../../lib/daemon/ports.ts';
 import { plainLine } from '../../lib/progress/index.ts';
 import type { UpdateObserver, UpdatePhase } from '../../lib/update/activity.ts';
 import { NixProgressTracker } from '../../lib/update/nix-progress.ts';
-import type { IPackageManagerPort } from '../../lib/update/ports.ts';
+import type { IPackageManagerPort, LockedNixTarget, PackageVersion } from '../../lib/update/ports.ts';
 
 /** The experimental features every `nix profile` command needs, named so no host's config decides. */
 const NIX = ['nix', '--extra-experimental-features', 'nix-command flakes'] as const;
@@ -16,9 +18,9 @@ export type RunCommand = (argv: readonly string[], onLine?: (line: string) => vo
 /**
  * The package-manager commands a self-update runs, as the user, never with `sudo`.
  *
- * `--refresh` on the nix commands is the difference between an update and a no-op: an unlocked
- * `github:` reference is cached for an hour, so without it `nix profile upgrade` reinstalls the
- * version it already has and reports success.
+ * Refresh only while resolving an immutable target. The later installation binds the original
+ * install command names only that exact revision. Profile replacements stage it below the old
+ * element's precedence, so rollback restores the old executable with one generation change.
  *
  * With an observer, a command's output is read as it happens and reported as what it means: nix is
  * asked for its activity events, brew's last line is the detail. The returned outcome is the same
@@ -37,20 +39,126 @@ export class CommandPackageManagers implements IPackageManagerPort {
     return this.#brew(['brew', 'update'], 'refreshing', observer);
   }
 
-  brewUpgrade(cask: string, observer?: UpdateObserver): Promise<CommandOutcome> {
-    return this.#brew(['brew', 'upgrade', '--cask', cask], 'upgrading', observer);
+  async brewCaskVersion(cask: string): Promise<PackageVersion> {
+    const answer = await this.run(['env', 'HOMEBREW_NO_AUTO_UPDATE=1', 'brew', 'info', '--cask', '--json=v2', cask]);
+    try {
+      const data = z
+        .object({ casks: z.array(z.object({ full_token: z.string(), version: ProtocolVersionSchema })).length(1) })
+        .parse(JSON.parse(answer.stdout));
+      const found = data.casks[0];
+      if (answer.code === 0 && found?.full_token === cask) return { version: found.version };
+    } catch {
+      /* A failed or malformed source check always refuses. */
+    }
+    return { failure: `could not learn the local Homebrew cask version for ${cask}` };
   }
 
-  nixProfileUpgrade(element: string, observer?: UpdateObserver): Promise<CommandOutcome> {
-    return this.#nix(['profile', 'upgrade', '--refresh'], element, observer);
+  async nixResolve(flake: string, element?: string): Promise<LockedNixTarget | { readonly failure: string }> {
+    try {
+      let source = flake;
+      let profileTarget: LockedNixTarget['profile'];
+      if (element !== undefined) {
+        const listed = await this.run([...NIX, 'profile', 'list', '--json']);
+        if (listed.code !== 0) return { failure: 'could not read the Nix profile source' };
+        const entrySchema = z.object({
+          originalUrl: z.string(),
+          attrPath: z.string().regex(/^[A-Za-z0-9_.-]+$/u),
+          priority: z.number().int().min(-2147483648).max(2147483646).default(5),
+        });
+        const profile = z
+          .object({ elements: z.union([z.array(z.unknown()), z.record(z.string(), z.unknown())]) })
+          .parse(JSON.parse(listed.stdout));
+        const entry = Array.isArray(profile.elements) ? profile.elements[Number(element)] : profile.elements[element];
+        if (entry === undefined) return { failure: 'could not find the Nix profile element' };
+        const parsed = entrySchema.parse(entry);
+        source = parsed.originalUrl;
+        profileTarget = { attribute: parsed.attrPath, priority: parsed.priority };
+      }
+      // A bare product source or one of our own immutable revision pins can advance.
+      // Tags, forks and other sources are explicit pins whose intent this updater cannot change.
+      const suffix = source.slice(flake.length);
+      if (!source.startsWith(flake) || (suffix !== '' && !/^\/[a-f0-9]{40}$/u.test(suffix)))
+        return {
+          failure:
+            'this Nix profile source is explicitly pinned or unsupported; change its source explicitly before updating',
+        };
+      source = flake;
+      const metadata = await this.run([...NIX, 'flake', 'metadata', '--refresh', '--json', source]);
+      if (metadata.code !== 0) return { failure: 'could not resolve the refreshed Nix revision' };
+      const locked = z
+        .object({
+          locked: z.object({
+            type: z.literal('github'),
+            owner: z.string(),
+            repo: z.string(),
+            rev: z.string().regex(/^[a-f0-9]{40}$/u),
+          }),
+        })
+        .parse(JSON.parse(metadata.stdout)).locked;
+      if (`github:${locked.owner}/${locked.repo}` !== flake)
+        return { failure: 'the refreshed Nix revision belongs to another source' };
+      const reference = `${flake}/${locked.rev}`;
+      const version = await this.run([
+        ...NIX,
+        'eval',
+        '--raw',
+        '--no-registries',
+        '--expr',
+        `builtins.readFile ((builtins.getFlake "${reference}").outPath + "/VERSION")`,
+      ]);
+      const parsed = ProtocolVersionSchema.safeParse(version.stdout.trim());
+      if (version.code !== 0 || !parsed.success)
+        return { failure: 'could not learn VERSION at the locked Nix revision' };
+      return {
+        source,
+        reference,
+        version: parsed.data,
+        ...(profileTarget === undefined ? {} : { profile: profileTarget }),
+      };
+    } catch {
+      return { failure: 'could not parse the Nix source or locked revision; refusing to install' };
+    }
+  }
+
+  brewUpgrade(cask: string, observer?: UpdateObserver): Promise<CommandOutcome> {
+    return this.#brew(['env', 'HOMEBREW_NO_AUTO_UPDATE=1', 'brew', 'upgrade', '--cask', cask], 'upgrading', observer);
+  }
+
+  async nixProfileUpgrade(
+    element: string,
+    target: LockedNixTarget | undefined,
+    observer?: UpdateObserver,
+  ): Promise<CommandOutcome> {
+    const profile = target?.profile;
+    if (profile === undefined || target === undefined)
+      return { code: 1, stdout: '', stderr: 'no profile attribute or priority was judged; refusing to install' };
+    // Higher numeric priority means LOWER precedence. Adding the new element leaves the old
+    // executable active; removing the old one switches it. One rollback restores old precedence.
+    const installed = await this.#nix(
+      ['profile', 'install', '--no-update-lock-file', '--priority', String(profile.priority + 1)],
+      `${target.reference}#${profile.attribute}`,
+      observer,
+    );
+    if (installed.code !== 0) return installed;
+    const removed = await this.run([...NIX, 'profile', 'remove', element]);
+    if (removed.code === 0) return removed;
+    const rollback = await this.nixProfileRollback();
+    return {
+      ...removed,
+      stderr: `${removed.stderr}\n${rollback.code === 0 ? 'the staged profile generation was rolled back' : 'rollback failed; run nix profile rollback before retrying'}`,
+    };
   }
 
   nixProfileRollback(): Promise<CommandOutcome> {
     return this.run([...NIX, 'profile', 'rollback']);
   }
 
-  nixProfileInstall(flake: string, observer?: UpdateObserver): Promise<CommandOutcome> {
-    return this.#nix(['profile', 'install', '--refresh'], flake, observer);
+  nixProfileInstall(flake: string, observer?: UpdateObserver, target?: LockedNixTarget): Promise<CommandOutcome> {
+    return this.#nix(
+      target === undefined ? ['profile', 'install', '--refresh'] : ['profile', 'install', '--no-update-lock-file'],
+      target?.reference ?? flake,
+      observer,
+    );
   }
 
   #brew(argv: readonly string[], phase: UpdatePhase, observer: UpdateObserver | undefined): Promise<CommandOutcome> {
