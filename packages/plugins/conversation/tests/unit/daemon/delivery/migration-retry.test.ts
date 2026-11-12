@@ -18,9 +18,19 @@ import { memoryStatePort } from '../../../support/state.ts';
  */
 const F1 = 'f1' as never;
 const MESSAGE = 'repeat this exact Codex message';
-const OLD_INPUT_AT = '2026-11-11T00:00:00.000Z';
-const PENDING_AT = '2026-11-11T00:00:02.000Z';
 const RETRY_AT = '2026-11-11T01:00:30.000Z';
+/**
+ * When the historical input and the unconfirmed send were written, relative to the Retry: an hour before it, and
+ * seconds before it — INSIDE the five seconds of clock-skew slack an ordinary send's evidence window allows. The
+ * Retry's fresh attempt must exclude both.
+ */
+const SCHEDULES = {
+  'an hour before the Retry': { oldInputAt: '2026-11-11T00:00:00.000Z', pendingAt: '2026-11-11T00:00:02.000Z' },
+  'seconds before the Retry': { oldInputAt: '2026-11-11T01:00:26.000Z', pendingAt: '2026-11-11T01:00:28.000Z' },
+} as const;
+type Schedule = (typeof SCHEDULES)[keyof typeof SCHEDULES];
+const OLD_INPUT_AT = SCHEDULES['an hour before the Retry'].oldInputAt;
+const PENDING_AT = SCHEDULES['an hour before the Retry'].pendingAt;
 
 const input = (proofKey: string, observedAt: string): ObservedHumanInput => ({
   harness: 'codex',
@@ -37,8 +47,8 @@ const KEYS = {
   'payload.id': 'native-message-uuid',
 } as const;
 
-async function world(claimKey: string) {
-  const ledger = new StateSendLedger(memoryStatePort([SENDS_STATE]), { now: () => OLD_INPUT_AT as never });
+async function world(claimKey: string, at: Schedule = SCHEDULES['an hour before the Retry']) {
+  const ledger = new StateSendLedger(memoryStatePort([SENDS_STATE]), { now: () => at.oldInputAt as never });
   const base = {
     acceptedTurn: 0,
     path: 'direct' as const,
@@ -50,16 +60,16 @@ async function world(claimKey: string) {
   await ledger.accept(F1, {
     ...base,
     sendId: 'first-send',
-    acceptedAt: OLD_INPUT_AT,
-    attemptAt: OLD_INPUT_AT,
+    acceptedAt: at.oldInputAt,
+    attemptAt: at.oldInputAt,
     fate: 'delivered',
-    fateAt: OLD_INPUT_AT,
+    fateAt: at.oldInputAt,
     evidence: {
       key: claimKey,
       harness: 'codex',
       kind: 'response_item',
       proof: 'normal-user-record',
-      observedAt: OLD_INPUT_AT as never,
+      observedAt: at.oldInputAt as never,
       shapeVersion: 1,
       matchedTurn: 0,
       tier: 'exact-text',
@@ -68,14 +78,14 @@ async function world(claimKey: string) {
   await ledger.accept(F1, {
     ...base,
     sendId: 'send-1',
-    acceptedAt: PENDING_AT,
-    attemptAt: PENDING_AT,
+    acceptedAt: at.pendingAt,
+    attemptAt: at.pendingAt,
     fate: 'unaccounted',
     unaccountedReason: 'update_unconfirmed',
   } as never);
 
   let now = RETRY_AT;
-  let inputs: readonly ObservedHumanInput[] = [input('native-a:2:0:message', OLD_INPUT_AT)];
+  let inputs: readonly ObservedHumanInput[] = [input('native-a:2:0:message', at.oldInputAt)];
   const typed: string[] = [];
   const serial = { run: async (_id: unknown, work: () => Promise<unknown>) => await work() };
   const clock = { now: () => now };
@@ -143,48 +153,61 @@ async function world(claimKey: string) {
   };
 }
 
-for (const [spelling, claimKey] of Object.entries(KEYS))
-  describe(`RETRY: a person's Retry of an update-unconfirmed send (${spelling} claim)`, () => {
-    test('is a fresh send: a new acceptance, and the unchanged historical input never delivers it', async () => {
-      const w = await world(claimKey);
-      const retried = await w.service.reattempt(F1, 'send-1', { by: 'person', force: true });
-      expect(w.typed).toEqual([MESSAGE]);
-      expect(retried.unaccountedReason).toBeUndefined();
-      expect(retried.attempt).toBe(2);
-      expect(retried.attemptAt).toBe(RETRY_AT);
-      expect(retried.acceptedAt).toBe(RETRY_AT);
+for (const [when, at] of Object.entries(SCHEDULES))
+  for (const [spelling, claimKey] of Object.entries(KEYS))
+    describe(`RETRY: a person's Retry of an update-unconfirmed send (${spelling} claim, input written ${when})`, () => {
+      test('is a fresh send: a new acceptance, and the unchanged historical input never delivers it', async () => {
+        const w = await world(claimKey, at);
+        const retried = await w.service.reattempt(F1, 'send-1', { by: 'person', force: true });
+        expect(w.typed).toEqual([MESSAGE]);
+        expect(retried.unaccountedReason).toBeUndefined();
+        expect(retried.attempt).toBe(2);
+        expect(retried.attemptAt).toBe(RETRY_AT);
+        expect(retried.acceptedAt).toBe(RETRY_AT);
 
-      await w.look(1_000);
-      expect((await w.row()).fate).not.toBe('delivered');
-      expect((await w.row()).evidence).toBeUndefined();
-      expect(w.retyped).toEqual([]);
+        await w.look(1_000);
+        expect((await w.row()).fate).not.toBe('delivered');
+        expect((await w.row()).evidence).toBeUndefined();
+        expect(w.retyped).toEqual([]);
+      });
+
+      test('is delivered once a genuinely new entry appears, and by nothing older', async () => {
+        const w = await world(claimKey, at);
+        await w.service.reattempt(F1, 'send-1', { by: 'person', force: true });
+        await w.look(1_000);
+        expect((await w.row()).fate).not.toBe('delivered');
+
+        w.appears(input('native-a:9:0:message', '2026-11-11T01:00:40.000Z'));
+        await w.look(15_000);
+        const saved = await w.row();
+        expect(saved.fate).toBe('delivered');
+        expect(saved.evidence?.key).toBe('native-a:9:0:message');
+      });
+
+      test('the daemon’s own retry refuses it: only a person’s Retry clears the mark', async () => {
+        const w = await world(claimKey, at);
+        await expect(w.service.reattempt(F1, 'send-1', { by: 'daemon' })).rejects.toBeInstanceOf(SendRefused);
+        await expect(w.service.reattempt(F1, 'send-1', { by: 'daemon', force: true })).rejects.toBeInstanceOf(
+          SendRefused,
+        );
+        expect(w.typed).toEqual([]);
+        const saved = await w.row();
+        expect(saved.unaccountedReason).toBe('update_unconfirmed');
+        expect(saved.acceptedAt).toBe(at.pendingAt);
+      });
+
+      test('an entry written exactly AT the Retry delivers it, and one a moment before never does', async () => {
+        const w = await world(claimKey, at);
+        await w.service.reattempt(F1, 'send-1', { by: 'person', force: true });
+        w.appears(input('native-a:7:0:message', new Date(Date.parse(RETRY_AT) - 1).toISOString()));
+        await w.look(1_000);
+        expect((await w.row()).fate).not.toBe('delivered');
+
+        w.appears(input('native-a:8:0:message', RETRY_AT));
+        await w.look(15_000);
+        expect((await w.row()).evidence?.key).toBe('native-a:8:0:message');
+      });
     });
-
-    test('is delivered once a genuinely new entry appears, and by nothing older', async () => {
-      const w = await world(claimKey);
-      await w.service.reattempt(F1, 'send-1', { by: 'person', force: true });
-      await w.look(1_000);
-      expect((await w.row()).fate).not.toBe('delivered');
-
-      w.appears(input('native-a:9:0:message', '2026-11-11T01:00:40.000Z'));
-      await w.look(15_000);
-      const saved = await w.row();
-      expect(saved.fate).toBe('delivered');
-      expect(saved.evidence?.key).toBe('native-a:9:0:message');
-    });
-
-    test('the daemon’s own retry refuses it: only a person’s Retry clears the mark', async () => {
-      const w = await world(claimKey);
-      await expect(w.service.reattempt(F1, 'send-1', { by: 'daemon' })).rejects.toBeInstanceOf(SendRefused);
-      await expect(w.service.reattempt(F1, 'send-1', { by: 'daemon', force: true })).rejects.toBeInstanceOf(
-        SendRefused,
-      );
-      expect(w.typed).toEqual([]);
-      const saved = await w.row();
-      expect(saved.unaccountedReason).toBe('update_unconfirmed');
-      expect(saved.acceptedAt).toBe(PENDING_AT);
-    });
-  });
 
 test('an ordinary unconfirmed send keeps its acceptance across a person’s Retry (only the update’s mark makes it fresh)', async () => {
   const w = await world(KEYS['payload.id']);
