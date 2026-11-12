@@ -176,5 +176,23 @@ describe('the input boundary: a key goes only to the form it was meant for', () 
       expect(refusal(PERMISSION, page)).toBe('unbound');
       expect(refusal('> ', page)).toBe('unbound');
     });
+
+    it('is not an unnumbered dialog that quotes the question, nor a page lacking the entry line', () => {
+      const dialog = [RULE, 'New MCP server found in this project: Deploy?', '', '  Use this server', '  Skip it'].join(
+        '\n',
+      );
+      expect(refusal(dialog, page)).toBe('unbound');
+      expect(refusal([RULE, 'Deploy?', ''].join('\n'), page)).toBe('unbound');
+      expect(refusal([RULE, 'Deploy?', '', 'Type your answer: █', 'Enter to continue'].join('\n'), page)).toBe(
+        'unbound',
+      );
+    });
+
+    it('needs the pasted text drawn on its entry line before the Enter that sends it', () => {
+      const typed: InputExpectation = { kind: 'page', index: 0, typed: 'later' };
+      expect(refusal([RULE, 'Deploy?', '', 'Type your answer: later█'].join('\n'), typed)).toBeUndefined();
+      expect(refusal([RULE, 'Deploy?', '', 'Type your answer: █'].join('\n'), typed)).toBe('unbound');
+      expect(refusal([RULE, 'Deploy?', '', 'Type your answer: other'].join('\n'), typed)).toBe('unbound');
+    });
   });
 });

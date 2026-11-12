@@ -4,9 +4,9 @@ import {
   type FormSurface,
   formFrame,
   formHeaderShows,
+  freeFormPageShown,
   type QuestionScreen,
   type RenderedQuestion,
-  screenShowsQuestion,
   showsOnlyKnownRows,
   surfaceStillShown,
   type TypedRow,
@@ -45,6 +45,11 @@ export type InputExpectation =
       readonly cursor?: number | undefined;
       /** Text pasted into the inline free-form row: that one row must now draw it. */
       readonly typed?: TypedRow | undefined;
+      /**
+       * Only with no `surface`: the answer this drive typed on that tab earlier (the review page listed it). The tab now
+       * draws it, marked `✔`, in place of its free-form row, and that one row is known.
+       */
+      readonly held?: string | undefined;
     }
   | {
       readonly kind: 'review';
@@ -56,8 +61,11 @@ export type InputExpectation =
    * into (`last`, when it typed at all) or, with nothing typed yet, one that offers nothing but the question's own rows.
    */
   | { readonly kind: 'cancel'; readonly last?: Extract<InputExpectation, { readonly kind: 'question' }> | undefined }
-  /** A free-form page opened by Enter on a plain `Other` row: the question's text, and no numbered form of anything else. */
-  | { readonly kind: 'page'; readonly index: number };
+  /**
+   * The free-form page Enter on a plain `Other` row opens, positively read ({@link freeFormPageShown}): the question as its
+   * whole heading and one entry line, nothing else. `typed` is the text already pasted into it, which the entry line must draw.
+   */
+  | { readonly kind: 'page'; readonly index: number; readonly typed?: string | undefined };
 
 /** Why an input was refused. Only `cursor-moved` can heal by itself (a redraw that has not arrived yet). */
 type InputRefusal = 'unbound' | 'cursor-missing' | 'cursor-moved';
@@ -87,7 +95,7 @@ export function refuseInput(
   const frame = formFrame(screen);
   if (expect.kind === 'page') {
     const question = questions[expect.index];
-    if (question === undefined || frame !== undefined || !screenShowsQuestion(screen, question.question))
+    if (question === undefined || frame !== undefined || !freeFormPageShown(screen, question, expect.typed))
       return unbound('the free-form page of the pending question');
     return undefined;
   }
@@ -107,13 +115,13 @@ export function refuseInput(
     if (question === undefined) return unbound('the pending question');
     const shown =
       expect.surface === undefined
-        ? showsOnlyKnownRows(screen, question)
+        ? showsOnlyKnownRows(screen, question, expect.held)
         : surfaceStillShown(screen, question, expect.surface, expect.typed);
     // The longer question wins when one question's text contains another's; typed text hides no header.
     const named =
       expect.typed === undefined
         ? boundQuestionIndex(screen, questions) === expect.index
-        : formHeaderShows(screen, question.question);
+        : formHeaderShows(screen, question);
     if (!shown || !named) return unbound('the form of the pending question');
   }
   if (frame === undefined || frame.cursors !== 1 || frame.cursor === undefined)

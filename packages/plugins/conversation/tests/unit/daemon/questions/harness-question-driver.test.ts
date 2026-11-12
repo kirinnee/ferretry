@@ -141,7 +141,40 @@ describe('tmux structured-question driver', () => {
       const pane = new ScriptedPane([frame(DEPLOY), other]);
       pane.completed = async () => true;
 
-      await should(driver(pane).drive(ID, single, yes)).be.rejectedWith(/did not visibly advance/u);
+      await should(driver(pane).drive(ID, single, yes)).be.rejectedWith(/different question or prompt/u);
+    });
+
+    it('does not take another still-blocking numbered form for a running turn or a ready prompt, its footer included', async () => {
+      const modal = (footer: string) => frame(`${claude('Which unrelated deployment?', ['Red', 'Blue'])}\n${footer}`);
+      for (const footer of ['esc to interrupt', 'Enter to select']) {
+        const pane = new ScriptedPane([frame(DEPLOY), modal(footer)]);
+        pane.completed = async () => true;
+        const failure = await failureOf(driver(pane).drive(ID, single, yes));
+        should(failure.message).match(/different question or prompt/u);
+      }
+      const ready = new ScriptedPane([
+        frame(DEPLOY),
+        frame(claude('Which unrelated deployment?', ['Red', 'Blue']), { promptReady: true }),
+      ]);
+      await should(driver(ready).drive(ID, single, yes)).be.rejectedWith(/different question or prompt/u);
+    });
+
+    it('still takes a running turn and a ready prompt that print a numbered list without a selection', async () => {
+      const list = '⏺ Done:\n  1. first\n  2. second\n';
+      should(
+        await driver(new ScriptedPane([frame(DEPLOY), frame(`${list}esc to interrupt`, { activeWork: true })])).drive(
+          ID,
+          single,
+          yes,
+        ),
+      ).deepEqual({ confirmedBy: 'turn-started' });
+      should(
+        await driver(new ScriptedPane([frame(DEPLOY), frame(`${list}> `, { promptReady: true })])).drive(
+          ID,
+          single,
+          yes,
+        ),
+      ).deepEqual({ confirmedBy: 'prompt-ready' });
     });
 
     it('does not take a changed pane for the answer without the question’s own end as evidence', async () => {
@@ -1031,7 +1064,7 @@ describe('every native input names the form it is for', () => {
 
     should(pane.expected.slice(-2)).deepEqual([
       { kind: 'page', index: 0 },
-      { kind: 'page', index: 0 },
+      { kind: 'page', index: 0, typed: 'later' },
     ]);
   });
 });

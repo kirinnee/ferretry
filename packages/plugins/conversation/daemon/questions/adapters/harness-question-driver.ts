@@ -4,6 +4,7 @@ import type { PendingQuestion, StructuredQuestionAnswer } from '../../seams/prot
 import {
   type BoundQuestionForm,
   formFrame,
+  freeFormPageShown,
   bindQuestionForm,
   bindReviewPage,
   bindTabStrip,
@@ -12,7 +13,6 @@ import {
   questionScreen,
   type RenderedQuestion,
   reviewShowsAnswer,
-  screenShowsQuestion,
   surfaceOf,
   type TypedRow,
 } from '../lib/rendered-form.ts';
@@ -258,9 +258,18 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
         at = wrong;
         await this.step(id, { step: 'revisited', questionIndex: wrong, shown: review.shown[wrong] });
         // The review is the tab after the last question.
-        // Each step is typed on the page it starts from: the review, then the tab before it, and so on.
-        for (let move = 0; move < total - wrong; move++)
-          await keys.sendKey('Left', move === 0 ? { kind: 'review' } : { kind: 'question', index: total - move });
+        // Each step is typed on the page it starts from: the review, then the tab before it, and so on. A tab passed on
+        // the way holds the answer this drive typed when the review lists exactly that: it draws it, so it is a known row.
+        for (let move = 0; move < total - wrong; move++) {
+          const passing = total - move;
+          const typed = answers[passing];
+          const passed = pending.questions[passing];
+          const held =
+            typed?.kind === 'other' && passed !== undefined && reviewShowsAnswer(review.shown[passing], passed, typed)
+              ? typed.text
+              : undefined;
+          await keys.sendKey('Left', move === 0 ? { kind: 'review' } : { kind: 'question', index: passing, held });
+        }
         await this.waitForTab(
           session,
           pane => boundQuestionIndex(screenOf(pane), pending.questions) === wrong,
@@ -530,13 +539,14 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
     if (free.entry === 'page') {
       const opened = (await this.tmux.state(session)).visible;
       await keys.sendKey('Enter', here());
+      // The page is positively the question's own text-entry page, read again before the paste and before the Enter.
       await this.waitForScreen(
         session,
-        pane => pane.visible !== opened && screenShowsQuestion(screenOf(pane), question.question),
+        pane => pane.visible !== opened && pane.blocking === undefined && freeFormPageShown(screenOf(pane), question),
         'selecting Other did not produce a bound free-form page',
       );
       await keys.paste(text, { kind: 'page', index });
-      await keys.sendKey('Enter', { kind: 'page', index });
+      await keys.sendKey('Enter', { kind: 'page', index, typed: text });
       return;
     }
     if (free.entry === 'notes') {
@@ -662,6 +672,7 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
     reviewMayFollow: boolean,
   ): Promise<Confirmation | 'review'> {
     let reviewing = false;
+    let other = false;
     for (let poll = 0; poll < this.polls; poll++) {
       await this.sleep(this.pollMs);
       const state = await this.tmux.state(session);
@@ -683,8 +694,12 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
       if (reviewing && reviewMayFollow) return 'review';
       if (reviewing) continue;
       const anyQuestion = pending.questions.some(question => bindQuestionForm(screen, question) !== undefined);
-      if (!anyQuestion && state.activeWork) return 'turn-started';
-      if (!anyQuestion && state.promptReady) return 'prompt-ready';
+      // A numbered form that still holds the selection (another question, a permission prompt, a dialog — its footer may
+      // say "esc to interrupt") is the pane still BLOCKED, never a running turn or a ready prompt.
+      const blocked = (formFrame(screen)?.cursors ?? 0) > 0;
+      if (blocked && !anyQuestion) other = true;
+      if (!anyQuestion && !blocked && state.activeWork) return 'turn-started';
+      if (!anyQuestion && !blocked && state.promptReady) return 'prompt-ready';
       // A changed pane proves nothing: another form can replace this one. Only the question's own end does — the watch
       // retired it, or the transcript carries its result — and only when no numbered form is on the pane in its place.
       if (
@@ -698,7 +713,9 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
     throw new StructuredQuestionDriveError(
       reviewing
         ? 'Submit answers was chosen, but the review page did not close'
-        : 'the answer keys were sent, but the rendered form did not visibly advance',
+        : other
+          ? 'the answer keys were sent, but the pane now shows a different question or prompt that is still waiting; nothing further was typed'
+          : 'the answer keys were sent, but the rendered form did not visibly advance',
     );
   }
 }
