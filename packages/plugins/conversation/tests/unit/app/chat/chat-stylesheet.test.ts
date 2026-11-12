@@ -51,6 +51,32 @@ describe("the chat's own stylesheet", () => {
     expect(rule(css, '.fy-peer-open')).toContain('text-overflow: ellipsis;');
   });
 
+  it('draws the update’s “check the chat” note at the normal badge size, in warn text on the warn tint that is AA in every themed swatch', () => {
+    const note = rule(css, '.fy-receipt-note');
+    expect(note).toContain('font-size: var(--text-sm);');
+    expect(note).toContain('color: var(--warn);');
+    expect(note).toContain('background: var(--warn-bg);');
+    const themes = readFileSync(join(import.meta.dir, '../../../../../../app/src/styles/themes.css'), 'utf8');
+    const linear = (channel: number): number => {
+      const unit = channel / 255;
+      return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
+    };
+    const luminance = (hex: string): number => {
+      const value = Number.parseInt(hex.slice(1), 16);
+      return 0.2126 * linear((value >> 16) & 255) + 0.7152 * linear((value >> 8) & 255) + 0.0722 * linear(value & 255);
+    };
+    const checked: string[] = [];
+    for (const block of themes.matchAll(/\n(\[data-swatch[^{]*)\{([^}]*)\}/gu)) {
+      const warn = block[2]?.match(/--warn:\s*(#[0-9a-fA-F]{6});/u)?.[1];
+      const tint = block[2]?.match(/--warn-bg:\s*(#[0-9a-fA-F]{6});/u)?.[1];
+      if (warn === undefined || tint === undefined) continue; // a tint mixed from the surface is not a fixed pair
+      const [light, dark] = [luminance(warn), luminance(tint)].sort((a, b) => b - a) as [number, number];
+      expect((light + 0.05) / (dark + 0.05)).toBeGreaterThanOrEqual(4.5);
+      checked.push(block[1]?.trim() ?? '');
+    }
+    expect(checked.length).toBeGreaterThanOrEqual(8);
+  });
+
   it('leaves the rules other homes own to them', () => {
     for (const foreign of ['.fy-question-form', '.fy-remote-browser', '.fy-chat-search', '.fy-convo-row'])
       expect(css).not.toContain(foreign);

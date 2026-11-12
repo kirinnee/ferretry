@@ -38,6 +38,7 @@ import {
   type ComposerDraftOutcome,
   type ComposerSubmitOutcome,
   dispositionOf,
+  isUpdateUnconfirmed,
   isUnconfirmedTyping,
   type PeerWaitEnder,
   ReviveRefusedForSend,
@@ -317,6 +318,7 @@ export type StrandedEnterOutcome = ComposerSubmitOutcome | 'refused';
 /** The fields a re-attempt overwrites, as they stood before it, so a refused one can put them back. */
 function restorable(record: SendRecord): SendSettlement {
   return {
+    acceptedAt: record.acceptedAt,
     fate: record.fate,
     attempt: record.attempt,
     attemptAt: record.attemptAt,
@@ -432,6 +434,12 @@ export class SessionSendService {
         );
       if (current.held === true || current.path === 'revive' || current.path === 'revive-queue')
         throw new SendRefused(`send ${sendId} rides a revive; revive the session to deliver it`);
+      // The update's mark is cleared by a PERSON's Retry alone; nothing automatic is consent to resend this send.
+      const leftByUpdate = isUpdateUnconfirmed(current);
+      if (leftByUpdate && options.by !== 'person')
+        throw new SendRefused(
+          `send ${sendId} was sent before this update and Ferretry can't tell whether the agent got it; only a person's Retry sends it again`,
+        );
       const target = await this.require(id);
       authorizeSend(target, []);
       const observed = await this.ports.terminal.observe(id);
@@ -486,10 +494,14 @@ export class SessionSendService {
         );
       // A send nothing was typed for yet keeps its attempt number: this is its FIRST typing.
       const attempt = current.untyped === true ? (current.attempt ?? 1) : (current.attempt ?? 1) + 1;
+      const now = this.ports.clock.now();
       const next = await this.ports.ledger.settle(id, sendId, {
         fate: 'accepted',
         attempt,
-        attemptAt: this.ports.clock.now(),
+        attemptAt: now,
+        // A person's Retry of an update-unconfirmed send is a FRESH send: the tracker matches transcript entries from
+        // `acceptedAt`, and the historical input that left it unconfirmed is exactly the one it must not confirm from.
+        ...(leftByUpdate ? { acceptedAt: now } : {}),
         fateAt: undefined,
         deadlineAt: undefined,
         unaccountedReason: undefined,
@@ -1066,6 +1078,9 @@ export class SessionSendService {
     limit: number,
     observed?: SendPaneObservation,
   ): Promise<{ readonly outcome: StrandedEnterOutcome; readonly record: SendRecord }> {
+    // A send the update left unconfirmed is a person's to retry: no automatic Enter is pressed for it, and no Enter
+    // here is consent to resend it (`isUpdateUnconfirmed`).
+    if (isUpdateUnconfirmed(record)) return { outcome: 'refused', record };
     const records = await this.ports.ledger.list(id);
     const text = strandableText(record, records);
     if (text === undefined || (record.submitNudges ?? 0) >= limit) return { outcome: 'refused', record };
@@ -1268,7 +1283,8 @@ export class SessionSendService {
       typedNotSent: undefined,
       deadlineAt: undefined,
       attemptAt: this.ports.clock.now(),
-      ...(record.fate === 'unaccounted'
+      // The update's mark is not reopened by an Enter: the old claim still cannot be told from this send's input.
+      ...(record.fate === 'unaccounted' && !isUpdateUnconfirmed(record)
         ? { fate: 'accepted', fateAt: undefined, unaccountedReason: undefined, retryable: undefined }
         : {}),
     });

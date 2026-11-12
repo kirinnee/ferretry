@@ -198,6 +198,7 @@ export type SendSettlement = Partial<
   Pick<
     SendRecord,
     | 'fate'
+    | 'acceptedAt'
     | 'fateAt'
     | 'evidence'
     | 'unaccountedReason'
@@ -306,6 +307,16 @@ export function isUnconfirmedTyping(record: Pick<SendRecord, 'fate' | 'unaccount
     record?.fate === 'unaccounted' &&
     (record.unaccountedReason === 'landing_unconfirmed' || record.unaccountedReason === 'typed_not_submitted')
   );
+}
+
+/**
+ * Whether the v4 → 5.0 conversion marked this send: its ledger claim could not be proved to name the transcript input
+ * 5.0 emits, so ANY input might be one an earlier send already used. The mark is a durable disposition, not a state the
+ * send path may move out of: only a person's own Retry (`SessionSendService.reattempt`, `by: 'person'`) clears it, as a
+ * fresh send. Every automatic act — the tracker's look, a daemon retype, the Warden's Enter — refuses such a row.
+ */
+export function isUpdateUnconfirmed(record: Pick<SendRecord, 'unaccountedReason'> | undefined): boolean {
+  return record?.unaccountedReason === 'update_unconfirmed';
 }
 
 /** One durable state change a send or an interrupt makes, named by the event it journals. */

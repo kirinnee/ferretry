@@ -493,6 +493,49 @@ describe('LedgerMessage', () => {
     );
   });
 
+  describe('every row the update marked explains itself, whatever else it is', () => {
+    const marked = { unaccountedReason: 'update_unconfirmed' } as const;
+    const cases: readonly [string, Partial<LedgerSendRecord>, string][] = [
+      ['an ordinary one', { fate: 'unaccounted' }, 'unconfirmed — check the chat. This was sent before the update'],
+      [
+        'one held for a revive',
+        { fate: 'accepted', held: true },
+        'kept safely; it will be delivered when this session is revived; unconfirmed — check the chat (sent before the update)',
+      ],
+      [
+        'a cancelled one',
+        { fate: 'cancelled' },
+        'taken back; what that did on the agent’s screen is not known; unconfirmed — check the chat (sent before the update)',
+      ],
+      [
+        'a cancelled one that cleared the composer',
+        { fate: 'cancelled', cancelEffect: 'cleared' },
+        'removed, and erased from the agent’s composer; unconfirmed — check the chat (sent before the update)',
+      ],
+    ];
+    for (const [name, patch, detail] of cases)
+      test(`${name} says so in its detail and draws the plain sentence, visibly`, () => {
+        const row = record({ ...patch, ...marked });
+        expect(sendBadge(row).detail).toContain(detail);
+        const drawn = render(<LedgerMessage onRetry={async () => true} record={row} />);
+        const note = drawn.root.findAll(node => node.props['data-migration-note'] === '');
+        expect(note).toHaveLength(1);
+        expect(textOfNode(note[0] as ReactTestInstance)).toBe('unconfirmed — check the chat');
+        expect(textOf(drawn)).not.toContain('update_unconfirmed');
+      });
+
+    test('a row the update did not mark draws no such note', () => {
+      for (const patch of [
+        { fate: 'unaccounted', unaccountedReason: 'timeout' },
+        { held: true },
+        { fate: 'cancelled' },
+      ] as const) {
+        const drawn = render(<LedgerMessage onRetry={async () => true} record={record(patch)} />);
+        expect(drawn.root.findAll(node => node.props['data-migration-note'] === '')).toHaveLength(0);
+      }
+    });
+  });
+
   test('drops "Sending again" once the attempt it described has settled, so it never sticks', async () => {
     const first = record({ fate: 'unaccounted', unaccountedReason: 'timeout' });
     const row = render(<LedgerMessage onRetry={async () => true} record={first} />);

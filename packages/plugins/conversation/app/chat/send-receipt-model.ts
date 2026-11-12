@@ -18,7 +18,7 @@
  */
 
 import type { SendReceiptKind } from '@ferretry/app';
-import { sendBadge } from './send-badge.ts';
+import { isUpdateUnconfirmed, UPDATE_NOTE, sendBadge } from './send-badge.ts';
 import { effectiveQueueState } from '../queue/send-queue.ts';
 import { isSessionEndedTimeout, type LedgerSendRecord } from './send-ledger.ts';
 
@@ -33,6 +33,11 @@ export interface SendReceipt {
   readonly detail: string;
   /** A small word beside the mark, only for a state that needs the reader. */
   readonly chip?: string;
+  /**
+   * A plain sentence drawn under the message, always visible: the update marked this send, whatever else it is. A chip
+   * and a mark cannot carry "go and look" for a message that may or may not have arrived.
+   */
+  readonly note?: string;
 }
 
 const ANSWERED_DETAIL = 'the agent has replied since this message arrived';
@@ -106,6 +111,11 @@ const queueReceipt = (record: LedgerSendRecord, detail: string): SendReceipt | u
  * | open, ledger unread (`unread`)     | `unconfirmed` | faint question  | "status unknown" |
  */
 export const sendReceipt = (record: LedgerSendRecord, answered = false): SendReceipt => {
+  const receipt = receiptOf(record, answered);
+  return isUpdateUnconfirmed(record) ? { ...receipt, note: UPDATE_NOTE } : receipt;
+};
+
+const receiptOf = (record: LedgerSendRecord, answered: boolean): SendReceipt => {
   const { detail } = sendBadge(record);
   const saved = outboxReceipt(record, detail);
   if (saved !== undefined) return saved;

@@ -104,6 +104,17 @@ describe('when a send is stuck in the box', () => {
     should(stuckSendOf([swallowed({ typedNotSent: false })], NOW)).be.undefined();
   });
 
+  it('should never select a send the update left unconfirmed: its Enter would count as consent to resend it', () => {
+    should(
+      stuckSendOf([swallowed({ fate: 'unaccounted', unaccountedReason: 'update_unconfirmed' })], NOW),
+    ).be.undefined();
+    should(stuckSendOf([pointer({ unaccountedReason: 'update_unconfirmed' })], NOW)).be.undefined();
+    // Another stuck send is still found beside it.
+    should(
+      stuckSendOf([swallowed({ sendId: 'migrated', unaccountedReason: 'update_unconfirmed' }), pointer()], NOW)?.sendId,
+    ).equal(pointer().sendId);
+  });
+
   it('should leave alone a send too young, too old, settled, never typed, held, carried by a revive, or proven', () => {
     const young = iso(NOW - STUCK_INPUT_MS + 1_000);
     const cases: StuckInputSend[] = [

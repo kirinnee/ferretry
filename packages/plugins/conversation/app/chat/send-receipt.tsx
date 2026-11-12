@@ -104,6 +104,11 @@ export function MessageFooter({
         {trailing}
       </div>
       {leadDetail}
+      {receipt.note === undefined ? null : (
+        <p className="fy-receipt-note" data-migration-note="" data-side={side}>
+          {receipt.note}
+        </p>
+      )}
       {open ? (
         <p className="fy-receipt-detail" data-send-reason="" data-side={side}>
           {sent === undefined ? receipt.detail : `${receipt.name} · ${sent} — ${receipt.detail}`}

@@ -113,6 +113,10 @@ class HarnessFerrets extends FakeFerrets {
   script: Script = {};
   /** Set when `harness()` itself refuses, as Ferrets' mayTouch rule does. */
   refuseOpen: ApiError | undefined;
+  /** What the transcript read returns, when a test supplies one (a fixed historical entry); otherwise the seam is not read. */
+  reviewEntries:
+    | readonly { readonly id: string; readonly at: string; readonly role: string; readonly text: string }[]
+    | undefined;
 
   async harness(ferret: FerretId, caller?: FerretId): Promise<FerretHarness | undefined> {
     this.opens.push({ ferret, caller });
@@ -151,6 +155,7 @@ class HarnessFerrets extends FakeFerrets {
       },
       transcript: {
         read: async () => {
+          if (this.reviewEntries !== undefined) return this.reviewEntries as never;
           throw new Error('Conversation does not read the transcript through the terminal seam');
         },
         follow: () => {
@@ -242,6 +247,7 @@ async function conversation(
     host,
     ferrets,
     acted,
+    state,
     asking,
     writes,
     // The Warden's view: the one consumer that may press the composer, a send's Enter and cancel, and speak as itself.
@@ -2068,4 +2074,125 @@ describe('the port binds the Warden claim to the consumer the kernel built it fo
     expect(w.ferrets.composerKeys).toEqual([`submit:${DRAFT}`]);
     await w.host.stop();
   });
+});
+
+/**
+ * The rows the v4 → 5.0 conversion writes for an old Codex ledger (`v5SendLine` over `ledgerClaims`, copied from
+ * its output): the first send delivered under a claim on `native-message-uuid`, an identical second one that
+ * conversion could not prove names any input 5.0 emits — so it is `unaccounted` / `update_unconfirmed`, with its
+ * `typedNotSent` kept. The one transcript entry is the OLD input, written before the second send was accepted.
+ */
+const MIGRATED_MESSAGE = 'please look at the failing build and report back';
+const OLD_INPUT_AT = '2026-11-08T08:55:00.000Z';
+const migratedRows = (senderKind: 'human' | 'daemon') => [
+  {
+    sendId: 'first',
+    acceptedAt: OLD_INPUT_AT,
+    acceptedTurn: 0,
+    path: 'direct',
+    message: MIGRATED_MESSAGE,
+    matchText: MIGRATED_MESSAGE,
+    senderKind,
+    fate: 'delivered',
+    fateAt: OLD_INPUT_AT,
+    evidence: {
+      key: 'native-message-uuid',
+      harness: 'codex',
+      kind: 'response_item',
+      proof: 'normal-user-record',
+      observedAt: OLD_INPUT_AT,
+      shapeVersion: 1,
+      matchedTurn: 0,
+      tier: 'exact-text',
+    },
+    attempt: 1,
+    attemptAt: OLD_INPUT_AT,
+    at: OLD_INPUT_AT,
+  },
+  {
+    sendId: 'pending',
+    acceptedAt: '2026-11-08T08:55:02.000Z',
+    acceptedTurn: 0,
+    path: 'direct',
+    message: MIGRATED_MESSAGE,
+    matchText: MIGRATED_MESSAGE,
+    senderKind,
+    fate: 'unaccounted',
+    unaccountedReason: 'update_unconfirmed',
+    attempt: 1,
+    attemptAt: '2026-11-08T08:55:02.000Z',
+    typedNotSent: true,
+    at: '2026-11-08T08:55:02.000Z',
+  },
+];
+
+async function migratedWorld(senderKind: 'human' | 'daemon') {
+  const { SENDS_STATE, SendLineSchema } = await import('../../../contract/index.ts');
+  const ferrets = new HarnessFerrets();
+  ferrets.reviewEntries = [{ id: 'native-a:2:0:message', at: OLD_INPUT_AT, role: 'user', text: MIGRATED_MESSAGE }];
+  const w = await conversation(ferrets, OPEN, { harness: 'codex' });
+  for (const row of migratedRows(senderKind)) await w.state.append(SENDS_STATE, SendLineSchema.parse(row), 'f1');
+  const pending = async () => (await w.api().sends(F1)).sends.find(row => row.sendId === 'pending')!;
+  return { ...w, pending };
+}
+
+for (const senderKind of ['human', 'daemon'] as const)
+  describe(`RV5 AUTOMATIC: nothing automatic touches a migrated send's update_unconfirmed mark (${senderKind} send)`, () => {
+    test('the Warden’s verified Enter refuses it: no key pressed, the mark and the old claim stand', async () => {
+      const w = await migratedWorld(senderKind);
+      try {
+        expect((await w.pending()).unaccountedReason).toBe('update_unconfirmed');
+        w.ferrets.script.observe = async () =>
+          ok({ alive: true, dead: false, promptReady: true, activeWork: false, draft: MIGRATED_MESSAGE });
+        const acted = await w.api().resubmitStuck!(F1, { kind: 'warden' }, 'pending');
+        expect(acted).toEqual({ ok: true, value: 'refused' });
+        expect(w.ferrets.composerKeys).toEqual([]);
+        const saved = await w.pending();
+        expect(saved.fate).toBe('unaccounted');
+        expect(saved.unaccountedReason).toBe('update_unconfirmed');
+        expect(saved.evidence).toBeUndefined();
+      } finally {
+        await w.host.stop();
+      }
+    });
+
+    test('an Enter pressed for it (the send’s own enter) neither clears the mark nor lets the old input deliver it', async () => {
+      const w = await migratedWorld(senderKind);
+      try {
+        w.ferrets.script.observe = async () =>
+          ok({ alive: true, dead: false, promptReady: true, activeWork: false, draft: MIGRATED_MESSAGE });
+        await w.api().enterSend(F1, 'pending');
+        const saved = await w.pending();
+        expect(saved.fate).toBe('unaccounted');
+        expect(saved.unaccountedReason).toBe('update_unconfirmed');
+        expect(saved.evidence).toBeUndefined();
+      } finally {
+        await w.host.stop();
+      }
+    });
+  });
+
+test('RV5 RETRY ROUTE: a ferret is refused owner_only before the pending handler', async () => {
+  const w = await conversation();
+  try {
+    const response = await w.host.request('POST', '/v1/ferrets/f1/sends/pending/retry', {
+      as: asFerret('lead'),
+      body: { force: true },
+    });
+    expect(response.status).toBe(403);
+    expect(response.json()).toMatchObject({ code: 'owner_only' });
+  } finally {
+    await w.host.stop();
+  }
+});
+
+test('RV5 RETRY ROUTE: a person still gets the pending answer (the public route is not wired yet)', async () => {
+  const w = await conversation();
+  try {
+    const response = await w.host.request('POST', '/v1/ferrets/f1/sends/pending/retry', { as: owner(), body: {} });
+    expect(response.status).toBe(503);
+    expect(response.json()).toMatchObject({ code: 'conversation_terminal_unavailable' });
+  } finally {
+    await w.host.stop();
+  }
 });

@@ -315,6 +315,26 @@ button.fy-receipt {
   margin: 2px 0 0;
   text-align: right;
 }
+/* A send the 5.0 update marked says, in plain words and at the normal badge size, that the reader must go and look
+   (`MIGRATION_NOTE`). Warn text on the warn tint is AA in every theme (checked by `chat-stylesheet.test.ts`); it is
+   never a chip or a mark alone, and never hidden behind a tap. */
+.fy-receipt-note {
+  background: var(--warn-bg);
+  border: var(--stroke) solid var(--warn-border);
+  border-radius: var(--radius-badge);
+  color: var(--warn);
+  font-size: var(--text-sm);
+  line-height: 16px;
+  margin: 3px 0 0 auto;
+  padding: 1px 6px;
+  text-align: right;
+  width: fit-content;
+}
+.fy-receipt-note[data-side='other'] {
+  margin-left: 0;
+  margin-right: auto;
+  text-align: left;
+}
 /* The same foot on the other side of the conversation sits at the message's left edge. */
 .fy-receipt-line[data-side='other'] {
   justify-content: flex-start;

@@ -110,7 +110,7 @@ const queueBadge = (record: LedgerSendRecord): SendBadge | undefined => {
  *   * `unconfirmed` — could be proven neither way. NOT an error, and never red: it may well have
  *     landed, and red invites a resend that would make the agent read it twice.
  */
-export const sendBadge = (record: LedgerSendRecord): SendBadge => {
+const badgeOf = (record: LedgerSendRecord): SendBadge => {
   const queued = queueBadge(record);
   if (queued !== undefined) return queued;
   if (record.fate === 'delivered')
@@ -183,4 +183,22 @@ export const sendBadge = (record: LedgerSendRecord): SendBadge => {
         ? `sending again (${attempts(record)}) — the first try was proven not to have arrived`
         : 'the daemon has it and is checking that it reached the agent',
   };
+};
+
+/** What the 5.0 update left unsaid about a send it marked, in the words every such row ends with. */
+export const UPDATE_NOTE = 'unconfirmed — check the chat';
+
+/** Whether the v4 → 5.0 conversion marked this send: its old delivery claim could not be tied to what 5.0 reads. */
+export const isUpdateUnconfirmed = (record: Pick<LedgerSendRecord, 'unaccountedReason'>): boolean =>
+  record.unaccountedReason === 'update_unconfirmed';
+
+/**
+ * The chip for a send. A send the update marked says so WHATEVER its state: a held or cancelled one keeps its own
+ * context (`kept safely …`, `taken back …`) and ends with the migration sentence, so no marked row is left explaining
+ * only part of what is known. The unconfirmed state itself already says it.
+ */
+export const sendBadge = (record: LedgerSendRecord): SendBadge => {
+  const badge = badgeOf(record);
+  if (!isUpdateUnconfirmed(record) || badge.detail.includes(UPDATE_NOTE)) return badge;
+  return { ...badge, detail: `${badge.detail}; unconfirmed — check the chat (sent before the update)` };
 };
