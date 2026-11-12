@@ -113,6 +113,8 @@ export interface AdvertisementNotice {
 
 /** The document an operator edits, spelled the way every other user-facing sentence spells it. */
 const CONFIG_DOCUMENT = '<FY_HOME>/config/daemon.json';
+/** Where 5.0 keeps the direct carrier's host and port (`direct`), spelled the way every other sentence spells it. */
+const CONNECTIONS_DOCUMENT = '<FY_HOME>/config/connections.yaml';
 
 /** A private address: obviously an example, unmistakably a LAN. */
 const EXAMPLE_LAN_HOST = '192.168.1.10';
@@ -190,7 +192,7 @@ const REFUSAL_AUDIENCES: Readonly<Record<AdvertisementRefusal, string>> = {
 const REFUSAL_REMEDIES: Readonly<Record<AdvertisementRefusal, string>> = {
   'loopback-bind': bindAndAdvertiseRemedy(`http://${EXAMPLE_LAN_HOST}`),
   'wildcard-bind': advertiseRemedy(`http://${EXAMPLE_LAN_HOST}:<the port this daemon bound>`),
-  'no-port': `start the daemon once so it records the port it takes, or write "port" on the bind entry in "carriers" of ${CONFIG_DOCUMENT} yourself (or the top-level "port" if the document has no bind entry); "publicUrl" cannot supply an address nothing has bound`,
+  'no-port': `start the daemon so it binds a port (--port or FY_PORT chooses it), or write "port" under "direct" in ${CONNECTIONS_DOCUMENT} yourself; "publicUrl" cannot supply an address nothing has bound`,
 };
 
 /** What to say when there is no address to hand out at all, per reason. */

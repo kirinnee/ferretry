@@ -34,6 +34,8 @@ export interface KernelPorts {
    * takes that carrier's hook and declares the route.
    */
   readonly carrierListener: CarrierListenerPort;
+  /** Where this daemon's own local listener really bound, once it has: read at the moment of use, never at build. */
+  readonly bind: BindPort;
   /** Who this daemon is, read-only: its id and name, never its key. */
   readonly identity: IdentityPort;
   /** Read-only facts about where things are on this machine (daemon halves only; never on the app or CLI contexts). */
@@ -1388,6 +1390,21 @@ export interface CarrierListenerPort {
     readonly carrier: CarrierKey;
     readonly surface: CarrierListenerSurface;
   }): Promise<CarrierListenerHandle>;
+}
+
+/** The address of the daemon's TCP listener as it BOUND (an ephemeral `0` is the port the OS chose). */
+export interface BoundAddress {
+  readonly host: string;
+  readonly port: number;
+}
+
+/**
+ * The one fact about the listener a plugin may need: the host and port the kernel actually bound, whichever of
+ * `--port`, `FY_PORT` or the default decided them. `current()` is `undefined` until the kernel has listened (plugins
+ * are built BEFORE that) and again after it stops, so ask when the answer is needed, not when the plugin is built.
+ */
+export interface BindPort {
+  current(): BoundAddress | undefined;
 }
 
 // identity ─────────────────────────────────────────────────────────────────────────────────────────────────────────

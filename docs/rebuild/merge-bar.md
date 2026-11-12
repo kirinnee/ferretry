@@ -52,6 +52,12 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
    Codex login (fake `auth.json`) each start a ferret through the daemon's real launch path, its first request reaches a
    fake provider server with the expected auth header, and the reply is seen. No real credential. Owner ask via
    lizzette, 2026-11-11.
+8. **`fy pair` gives a link on a loopback daemon**: `packages/plugins/access/tests/integration/daemon/pair-link/pair-link.test.ts`
+   (smoke step 1) boots a REAL `fyd` on a temp home and an ephemeral loopback port (chosen by `FY_PORT=0`)
+   with a relay source on and no `connections.yaml` port, then asks for a code through the real `fy pair` and through
+   `POST /v1/pair/code`: a `local-only` link on the port the daemon really bound must come back, and is cancelled
+   (`DELETE /v1/pair/code/:pairingId`). A wildcard bind still refuses with `wildcard-bind`. Owner block !A472, 2026-11-12.
+   No code is ever printed.
 
 ## After merge
 

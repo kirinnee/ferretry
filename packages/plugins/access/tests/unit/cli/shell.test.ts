@@ -102,8 +102,11 @@ describe('the remedy sentences', () => {
     expect(wildcard).toContain('"publicUrl"');
     expect(wildcard).not.toContain(WILDCARD_BIND_HOST);
     const noPort = refusalNotice('no-port').remedy;
-    expect(noPort).toContain('start the daemon once');
-    expect(noPort).toContain('write "port"');
+    expect(noPort).toContain('start the daemon so it binds a port');
+    expect(noPort).toContain('config/connections.yaml');
+    expect(noPort).not.toContain('daemon.json');
+    expect(noPort).not.toContain('bind entry');
+    expect(noPort).toContain('write "port" under "direct"');
     expect(noPort).toContain('"publicUrl" cannot supply an address nothing has bound');
   });
 

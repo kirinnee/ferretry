@@ -249,20 +249,14 @@ export class AccessRuntime {
         },
       },
     });
-    // Connections owns the host-facing reach (`advertisement()`). Without it, the honest answer is `none`: the code is
-    // still minted, the link is refused and the fix is named (P84).
-    const advertised: Omit<ConnectionAdvertisement, 'appOrigin' | 'allowedOrigins'> = this.#deps
-      .connections()
-      ?.advertisement() ?? {
-      advertisement: { kind: 'none', refusal: 'no-port' },
-    };
     pairing = new AccessPairingService(
       {
         daemonId: state.daemonId,
         daemonName: state.daemonName,
-        advertisement: advertised.advertisement,
+        // Asked at EVERY mint, never at build: the kernel binds after this is built and Connections may not be provided
+        // yet, so a value read here once would freeze the fallback in for the life of the process.
+        reach: () => this.#reach(kernel.log.warn.bind(kernel.log)),
         carriers: { current: () => this.#deps.connections()?.carriers() ?? [] },
-        ...(advertised.discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl: advertised.discoveredRelayUrl }),
         clock: { now: () => clock.nowMs() },
         cryptography: new NodePairingCryptography(),
         devices: repository,
@@ -312,6 +306,28 @@ export class AccessRuntime {
       routes.set(routeKey(route), route.handle);
     if (unlockNotice !== undefined) kernel.log.warn(unlockNotice);
     return { pairing, registry, stepUp, passkeyStore, push, routes };
+  }
+
+  /**
+   * What to hand out right now. Connections owns the host-facing reach (`advertisement()`). Without it, the honest answer
+   * is `none`: the code is still minted, the link is refused and the fix is named (P84). A Connections that is provided
+   * but cannot answer says why in the log, because "no port" would otherwise hide a fault behind a configuration remedy.
+   */
+  #reach(warn: (sentence: string) => void): Pick<ConnectionAdvertisement, 'advertisement' | 'discoveredRelayUrl'> {
+    const connections = this.#deps.connections();
+    if (connections === undefined) return { advertisement: { kind: 'none', refusal: 'no-port' } };
+    try {
+      const advertised = connections.advertisement();
+      return {
+        advertisement: advertised.advertisement,
+        ...(advertised.discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl: advertised.discoveredRelayUrl }),
+      };
+    } catch (error) {
+      warn(
+        `Connections could not say how other devices reach this daemon, so no pairing link was made: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return { advertisement: { kind: 'none', refusal: 'no-port' } };
+    }
   }
 
   /** Every unlock or lock is persisted through the ledger: each one is a standing change Gate must re-admit on. */

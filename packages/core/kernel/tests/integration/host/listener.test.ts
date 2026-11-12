@@ -50,6 +50,13 @@ async function listening(seen: ApiRequest[]): Promise<{ home: string; listener: 
 }
 
 describe('the local listener (§2.2, §4.8)', () => {
+  test('it reports the host and the port it really bound, an ephemeral one included', async () => {
+    const { home, listener } = await listening([]);
+    const recorded = JSON.parse(await readFile(runBindPath(home), 'utf8')) as { host: string; port: number };
+    expect(listener.bound).toEqual({ host: '127.0.0.1', port: recorded.port });
+    expect(listener.bound?.port).toBeGreaterThan(0);
+  });
+
   test('G14 local arrival is decided by the listener from the real socket peer, never from a header', async () => {
     const seen: ApiRequest[] = [];
     const { home } = await listening(seen);

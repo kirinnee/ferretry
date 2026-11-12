@@ -623,3 +623,70 @@ describe('the carrier set the daemon publishes (Appendix D, connections batch 3)
     expect(ConnectionsConfigSchema.safeParse({ direct: { host: '0.0.0.0', port: 7431 } }).success).toBe(true);
   });
 });
+
+describe('the advertisement follows the listener the kernel bound', () => {
+  const unbound: ConnectionBindings = { identity, openSession: (layer, key, peer) => layer.open(key, peer) };
+  const hosted = { read: async () => ({ kind: 'available', relayUrl: 'wss://hosted.example/fy' }) as const };
+  const via = (bind: () => { host: string; port: number } | undefined, config?: object) =>
+    testHost({
+      plugins: [
+        implementDaemon(manifest, {
+          build: ctx =>
+            buildConnections(ctx, { ...unbound, directory: hosted, ...kernelConnectionBindings(ctx.kernel) }),
+        }),
+      ],
+      bind,
+      ...(config === undefined ? {} : { config: { 'connections.yaml': config } }),
+    });
+
+  test('a loopback listener with no connections.yaml is a local-only address on the port it really bound', async () => {
+    const host = await via(() => ({ host: '127.0.0.1', port: 7458 }));
+    await host.runJob('relay-discovery');
+    const advertised = host.provided(ConnectionsPort).advertisement();
+    expect(advertised.advertisement).toEqual({ kind: 'local-only', url: 'http://127.0.0.1:7458' });
+    expect(advertised.port).toBe(7458);
+    expect(advertised.discoveredRelayUrl).toBe('wss://hosted.example/fy');
+    expect(advertised.allowedOrigins).toContain('http://127.0.0.1:7458');
+    await host.stop();
+  });
+
+  test('the bound port wins over direct.port in the configuration, and the configuration answers only while nothing is bound', async () => {
+    let bound: { host: string; port: number } | undefined;
+    const host = await via(() => bound, { direct: { host: '127.0.0.1', port: 9999 } });
+    await host.runJob('relay-discovery');
+    expect(host.provided(ConnectionsPort).advertisement().advertisement).toEqual({
+      kind: 'local-only',
+      url: 'http://127.0.0.1:9999',
+    });
+    bound = { host: '127.0.0.1', port: 7458 };
+    expect(host.provided(ConnectionsPort).advertisement().advertisement).toEqual({
+      kind: 'local-only',
+      url: 'http://127.0.0.1:7458',
+    });
+    await host.stop();
+  });
+
+  test('it is read when asked, not when built: no port before the listener binds, an address after', async () => {
+    let bound: { host: string; port: number } | undefined;
+    const host = await via(() => bound);
+    expect(host.provided(ConnectionsPort).advertisement().advertisement).toEqual({
+      kind: 'none',
+      refusal: 'no-port',
+    });
+    bound = { host: '127.0.0.1', port: 51234 };
+    expect(host.provided(ConnectionsPort).advertisement().advertisement).toEqual({
+      kind: 'local-only',
+      url: 'http://127.0.0.1:51234',
+    });
+    await host.stop();
+  });
+
+  test('a wildcard listener still refuses with wildcard-bind, whatever the configuration says', async () => {
+    const host = await via(() => ({ host: '0.0.0.0', port: 7458 }), { direct: { host: '127.0.0.1', port: 7458 } });
+    expect(host.provided(ConnectionsPort).advertisement().advertisement).toEqual({
+      kind: 'none',
+      refusal: 'wildcard-bind',
+    });
+    await host.stop();
+  });
+});
