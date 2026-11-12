@@ -17,6 +17,25 @@ const draft = (overrides: Partial<NewFerretDraft> = {}): NewFerretDraft => ({
   ...overrides,
 });
 
+/**
+ * Runs `body` in a browser with no WebCrypto, then puts back the exact `crypto` the host had. The whole
+ * `crypto` global is swapped, never its `subtle`: Bun's own `subtle` cannot be redefined, and a DOM
+ * preload's is inherited, so stubbing it in place either throws or is never restored.
+ */
+const withoutWebCrypto = async (body: () => Promise<void>): Promise<void> => {
+  const host = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  const real = globalThis.crypto;
+  // Ids still mint (`randomUUID` predates `subtle` in every browser); only the digest is missing.
+  const noSubtle = { randomUUID: () => real.randomUUID(), getRandomValues: real.getRandomValues.bind(real) };
+  Object.defineProperty(globalThis, 'crypto', { value: noSubtle, configurable: true, writable: true });
+  try {
+    await body();
+  } finally {
+    if (host === undefined) Reflect.deleteProperty(globalThis, 'crypto');
+    else Object.defineProperty(globalThis, 'crypto', host);
+  }
+};
+
 describe('canStartFerret', () => {
   it('needs a runtime, a folder and — in auto mode — a prompt', () => {
     expect(canStartFerret(emptyNewFerretDraft, false)).toBeFalse();
@@ -181,17 +200,35 @@ describe('a start whose answer was lost', () => {
   });
 
   it('throws the original failure when this browser cannot digest the body, so recovery cannot be asked', async () => {
-    const subtle = Object.getOwnPropertyDescriptor(globalThis.crypto, 'subtle');
-    Object.defineProperty(globalThis.crypto, 'subtle', { value: undefined, configurable: true });
-    try {
+    await withoutWebCrypto(async () => {
       const calls: Call[] = [];
       const client = scripted({ 'POST /v1/ferrets': new TypeError('fetch failed') }, calls);
 
       await expect(startFerret(client, draft(), startAttemptFor(draft()))).rejects.toThrow('fetch failed');
       expect(calls.map(call => call.route)).toEqual(['POST /v1/ferrets', 'POST /v1/ferrets']);
+    });
+  });
+
+  it('hands WebCrypto back exactly as it found it, even where `subtle` is inherited (a DOM preload’s crypto)', async () => {
+    // The whole unit tier runs in ONE process: a crypto left without `subtle` breaks every later file that mints a key.
+    const real = globalThis.crypto;
+    const inherited = Object.create({
+      subtle: real.subtle,
+      randomUUID: () => real.randomUUID(),
+      getRandomValues: real.getRandomValues.bind(real),
+    }) as Crypto;
+    const host = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    Object.defineProperty(globalThis, 'crypto', { value: inherited, configurable: true, writable: true });
+    try {
+      await withoutWebCrypto(async () => {
+        expect(globalThis.crypto?.subtle).toBeUndefined();
+      });
+      expect(globalThis.crypto).toBe(inherited);
+      expect(typeof globalThis.crypto.subtle.digest).toBe('function');
     } finally {
-      if (subtle !== undefined) Object.defineProperty(globalThis.crypto, 'subtle', subtle);
+      if (host !== undefined) Object.defineProperty(globalThis, 'crypto', host);
     }
+    expect(typeof globalThis.crypto.subtle.generateKey).toBe('function');
   });
 
   it('throws a daemon refusal at once: an answered start did not happen, and nothing is retried', async () => {
