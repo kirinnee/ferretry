@@ -3,7 +3,7 @@
  * with an EMPTY private folder; a Claude `store: host` login and a `store: ferretry` login are not touched. Everything
  * here is a temp folder with FAKE bytes; the user home is a temp folder holding planted `.claude/` and `.codex/` canaries
  * (mode 0). An ALIAS-AWARE TRIPWIRE stands in for `node:fs` and `node:fs/promises` while a conversion runs: for every call
- * it resolves the path argument by chasing symlinks with the REAL `readlink` through each component, and a call that
+ * it asks the filesystem itself (every prefix `lstat`ed directly, the kernel's `realpath` of the whole path), sharing no code with the converter, and a call that
  * RESOLVES (stat, open, readdir, readFile, realpath, exists, …) fails when the resolved path is under the planted folders,
  * whether the path names them directly or goes through a link at any level. Only `lstat`, `readlink` and `rm` of a link ENTRY
  * itself are allowed (the entry is not followed). The call is recorded and fails whether or not the converter swallows
@@ -26,17 +26,17 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { LockProbe } from '../../src/preflight.ts';
 import type { Step } from '../../src/steps/index.ts';
 import { fixture } from './ferret-fixture.ts';
 
 /** The REAL link readers, taken before the mock so the tripwire's own look is never itself guarded. */
-const real = { lstat: realFs.lstatSync, readlink: realFs.readlinkSync };
+const real = { lstat: realFs.lstatSync, readlink: realFs.readlinkSync, realpath: realFs.realpathSync };
 
 /** What the tripwire guards and what it caught. Armed only around a conversion, so the test's own setup is not seen. */
-const wire = { armed: false, planted: [] as string[], hits: [] as string[] };
+const wire = { armed: false, planted: [] as string[], hits: [] as string[], aliases: [] as string[] };
 
 /** Calls that act on a link ENTRY itself and never follow it (as `lstat(2)`, `readlink(2)`, `unlink(2)` do). */
 const ENTRY_CALLS = new Set(['lstat', 'readlink', 'rm', 'unlink', 'rmdir', 'symlink']);
@@ -46,34 +46,45 @@ const TWO_PATHS = new Set(['rename', 'copyFile', 'cp', 'link']);
 const under = (path: string, base: string): boolean => path === base || path.startsWith(base + sep);
 
 /**
- * `path` with every link on the way followed by lexical resolution (real `readlink`, never a `stat`), the last part
- * only when `followLast`. A part that cannot be looked at ends the walk where it is (the rest stays lexical).
+ * Whether a call on `path` would reach `planted`, decided WITHOUT any code the converter uses and without lexical
+ * path arithmetic: the filesystem itself answers. (1) Every prefix of the path (from the root down) is `lstat`ed
+ * directly, and a prefix that is a link whose `realpath` is under a planted folder flags the call. (2) A resolving call
+ * is also flagged when the kernel's own `realpath` of the whole path (the deepest part that exists, then the rest) is
+ * under one, `..` after a link included. An `lstat`/`readlink`/`rm` of the last part (the entry) is not followed.
  */
-function chased(path: string, followLast: boolean): string {
-  let current = resolve(path);
-  for (let hops = 0; hops < 64; hops++) {
-    const parts = current.split(sep).filter(part => part !== '');
-    let walked: string = sep;
-    let moved = false;
-    for (const [index, part] of parts.entries()) {
-      const next = join(walked, part);
-      if (index === parts.length - 1 && !followLast) return next;
-      let target: string | undefined;
+function reaches(path: string, followLast: boolean): boolean {
+  const absolute = path.startsWith(sep) ? path : join(process.cwd(), path);
+  const names = absolute.split(sep).filter(name => name !== '' && name !== '.');
+  const planted = (candidate: string): boolean => wire.planted.some(base => under(candidate, base));
+  const settle = (candidate: string): string => {
+    // The kernel resolves; where it cannot (absent, no right to), the deepest part it can is used.
+    for (let cut = candidate.split(sep).length; cut > 0; cut--) {
+      const head = candidate.split(sep).slice(0, cut).join(sep) || sep;
       try {
-        if (real.lstat(next).isSymbolicLink()) target = String(real.readlink(next));
+        return join(real.realpath(head), ...candidate.split(sep).slice(cut));
       } catch {
-        return current;
+        // try the parent
       }
-      if (target !== undefined) {
-        current = resolve(walked, target, ...parts.slice(index + 1));
-        moved = true;
-        break;
-      }
-      walked = next;
     }
-    if (!moved) return current;
+    return candidate;
+  };
+  if (planted(absolute)) return true;
+  for (let index = 1; index <= names.length; index++) {
+    const prefix = sep + names.slice(0, index).join(sep);
+    if (names.slice(0, index).includes('..')) break;
+    if (index === names.length && !followLast) break;
+    try {
+      if (real.lstat(prefix).isSymbolicLink()) {
+        if (planted(settle(prefix))) return true;
+        // The kernel could not resolve it (a mode-0 folder in the way): the link's own text, read from its real parent, decides.
+        const text = String(real.readlink(prefix));
+        if (planted(text.startsWith(sep) ? text : join(settle(dirname(prefix)), text))) return true;
+      }
+    } catch {
+      // cannot be looked at: the whole-path check below still decides
+    }
   }
-  return current;
+  return planted(followLast ? settle(absolute) : join(settle(dirname(absolute)), names[names.length - 1] ?? ''));
 }
 
 function guarded(name: string, call: (...args: unknown[]) => unknown) {
@@ -86,8 +97,10 @@ function guarded(name: string, call: (...args: unknown[]) => unknown) {
         const text =
           arg instanceof URL ? fileURLToPath(arg) : typeof arg === 'string' || Buffer.isBuffer(arg) ? String(arg) : '';
         if (text === '') continue;
-        const resolved = chased(text, !ENTRY_CALLS.has(base));
-        if (wire.planted.some(planted => under(resolved, planted))) {
+        // INDEPENDENT of reaches() too: a path KNOWN to be an alias into the planted folders (set by the test that built the
+        // link), compared by its plain spelling, so a path-resolution mistake shared with production cannot hide it.
+        const knownAlias = !ENTRY_CALLS.has(base) && wire.aliases.includes(text);
+        if (knownAlias || reaches(text, !ENTRY_CALLS.has(base))) {
           wire.hits.push(name);
           throw new Error(`TRIPWIRE: ${name} reached the planted terminal folder`);
         }
@@ -119,6 +132,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   wire.armed = false;
+  wire.aliases = [];
   // A mode-0 canary must not stop the temp folders from being removed.
   for (const path of [
     '.claude',
@@ -233,8 +247,8 @@ const SERVICE_TEXT = (hours: number): string =>
   `[Service]\nEnvironment="FYD_SESSION_ARCHIVE_AFTER_HOURS=${String(hours)}"\n`;
 
 /** The WHOLE conversion over the fixture, tripwire armed. */
-async function whole(steps?: readonly Step[]) {
-  await writeFile(join(f.from, 'layout-version'), '2\n', { mode: 0o600 });
+async function whole(steps?: readonly Step[], marker = true) {
+  if (marker) await writeFile(join(f.from, 'layout-version'), '2\n', { mode: 0o600 });
   await arm();
   const result = await convert({
     from: f.from,
@@ -261,7 +275,11 @@ const injected = (call: () => Promise<unknown>): Step => ({
   sealed: [],
   notCarried: [],
   async run() {
-    await call().catch(() => undefined);
+    try {
+      await call();
+    } catch {
+      // swallowed, like a careless step
+    }
     return { id: 'probe', title: 'probe', status: 'converted', kept: [], notCarried: [], sealed: [] };
   },
 });
@@ -269,18 +287,40 @@ const injected = (call: () => Promise<unknown>): Step => ({
 // The guarded fs the converter's own modules see (the test file's own imports above are the unguarded setup).
 const guardedFs = await import('node:fs/promises');
 
-test('the WHOLE conversion never reaches the terminal folders through a login folder that is a link, Usage included', async () => {
+/** A negative control runs its step DIRECTLY, armed (convert() would refuse these fixtures before any step ran). */
+async function direct(step: Step) {
+  await arm();
+  await step.run(ctx());
+  wire.armed = false;
+}
+
+test('the WHOLE conversion REFUSES a login folder that is a link (any link inside a fenced tree), touching nothing', async () => {
   await plant();
-  // Usage reads fleet/credentials/<login>/usage.json: v4's Codex host folder is a link out, and so is a second login's.
   await writeFile(join(f.from, 'layout-version'), '2\n', { mode: 0o600 });
   await mkdir(join(f.from, 'state/sessions'), { recursive: true });
   await symlink(join(userHome, '.claude'), join(f.from, 'fleet/credentials/claude-link'));
   const result = await whole();
-  expect(result.kind).toBe('done');
+  expect(result.kind).toBe('refused');
+  const text = result.kind === 'refused' ? result.problems.join('\n') : '';
+  expect(text).toContain(`${f.from}/fleet/credentials/codex-you is a link, so the conversion did not start`);
+  expect(text).toContain(`${f.from}/fleet/credentials/claude-link is a link`);
+  expect(text).toContain('replace it with the real file or folder, then run again');
+  expect(text).not.toContain('.codex');
+  expect(text).not.toContain('.claude');
   expect(wire.hits).toEqual([]);
-  expect(stepOf(result, 'usage')?.status).toBe('converted');
-  expect(stepOf(result, 'usage')?.note).toContain('login folder(s) not carried: the login folder is a link');
-  expect(stepOf(result, 'logins')?.status).toBe('converted');
+});
+
+test('the WHOLE conversion REFUSES a link met deep inside state, config or fleet, whatever it points at', async () => {
+  for (const deep of ['state/board/tasks/one.json', 'config/components/x/y.yaml', 'fleet/homes/h/inner/file']) {
+    await rm(f.to, { recursive: true, force: true });
+    await mkdir(join(f.from, deep, '..'), { recursive: true });
+    await writeFile(join(f.root, 'harmless.txt'), 'x');
+    await symlink(join(f.root, 'harmless.txt'), join(f.from, deep));
+    const result = await whole();
+    expect(result.kind).toBe('refused');
+    expect(result.kind === 'refused' ? result.problems.join('\n') : '').toContain(`${join(f.from, deep)} is a link`);
+    await rm(join(f.from, deep));
+  }
 });
 
 test('the WHOLE conversion never resolves into the terminal folders when fleet/credentials is a link', async () => {
@@ -289,20 +329,94 @@ test('the WHOLE conversion never resolves into the terminal folders when fleet/c
   await mkdir(join(f.from, 'fleet'), { recursive: true });
   await symlink(join(userHome, '.codex'), join(f.from, 'fleet/credentials'));
   const result = await whole();
-  expect(result.kind).toBe('done');
+  expect(result.kind).toBe('refused');
   expect(wire.hits).toEqual([]);
 });
 
-test('the WHOLE conversion never resolves into the terminal folders when fleet itself is a link, Lessons included', async () => {
-  await canaries();
-  await writeFile(join(f.from, 'layout-version'), '2\n', { mode: 0o600 });
-  await symlink(join(userHome, '.codex'), join(f.from, 'fleet'));
-  const result = await whole();
-  expect(result.kind).toBe('done');
+// THE FENCE, ENFORCED: a fenced v4 folder that is a link (or not a folder) REFUSES the conversion before any step runs.
+const FENCED = [
+  'config',
+  'state',
+  'fleet',
+  'fleet/credentials',
+  'fleet/assets',
+  'fleet/homes',
+  'fleet/shared',
+  'fleet/bin',
+];
+
+async function refusedWith(result: Awaited<ReturnType<typeof whole>>, folder: string) {
+  expect(result.kind).toBe('refused');
+  const text = result.kind === 'refused' ? result.problems.join('\n') : '';
+  expect(text).toContain(`${f.from}/${folder} is a link or not a folder`);
+  expect(text).toContain('replace it with the real folder, then run again');
+  // The target is never named, and nothing was written: no v5 home was even made.
+  expect(text).not.toContain('.codex');
   expect(wire.hits).toEqual([]);
-  // Said, with no target named: the lessons document sits under the link and was not carried.
-  expect(stepOf(result, 'lessons')?.note).toContain('is not carried: the folder is a link');
-  expect(JSON.stringify(result)).not.toContain('.codex');
+  expect(
+    await stat(f.to).then(
+      () => true,
+      () => false,
+    ),
+  ).toBe(false);
+}
+
+for (const folder of FENCED) {
+  test(`the WHOLE conversion REFUSES, touching nothing in the planted folders, when ${folder} is a link`, async () => {
+    await canaries();
+    await mkdir(join(f.from, folder, '..'), { recursive: true });
+    await rm(join(f.from, folder), { recursive: true, force: true });
+    await symlink(join(userHome, '.codex'), join(f.from, folder));
+    await refusedWith(await whole(), folder);
+  });
+}
+
+test('the WHOLE conversion REFUSES when a fenced folder is a plain file', async () => {
+  await rm(join(f.from, 'state'), { recursive: true, force: true });
+  await writeFile(join(f.from, 'state'), 'not a folder');
+  await refusedWith(await whole(), 'state');
+});
+
+// The reviewer's five probes (RED on 773ac42a27): state link, config link, layout-version link, daemon.lock link, dot-dot service link.
+test('PROBE layout-version that is a link into the planted .codex is refused before it is read', async () => {
+  await canaries();
+  await symlink(join(userHome, '.codex/auth.json'), join(f.from, 'layout-version'));
+  const result = await whole(undefined, false);
+  expect(wire.hits).toEqual([]);
+  expect(result.kind).toBe('refused');
+  expect(result.kind === 'refused' ? result.problems.join('\n') : '').toContain('layout-version is a link');
+});
+
+test('PROBE daemon.lock that is a link into the planted .codex is refused before it is statted', async () => {
+  await canaries();
+  await symlink(join(userHome, '.codex/auth.json'), join(f.from, 'daemon.lock'));
+  const result = await whole();
+  expect(wire.hits).toEqual([]);
+  expect(result.kind).toBe('refused');
+  expect(result.kind === 'refused' ? result.problems.join('\n') : '').toContain('daemon.lock is a link');
+});
+
+test('PROBE a service link through ".." after a link into the planted .codex is refused, nothing carried', async () => {
+  const unit = join(userHome, '.config/systemd/user/fyd.service');
+  await mkdir(dirname(unit), { recursive: true });
+  await canaries();
+  await chmod(join(userHome, '.codex'), 0o700);
+  await mkdir(join(userHome, '.codex/inner'));
+  await chmod(join(userHome, '.codex/service-canary.conf'), 0o600);
+  // pivot -> .codex/inner ; unit -> <home>/pivot/../service-canary.conf : the filesystem enters .codex/inner first, so
+  // ".." lands in .codex. Collapsing ".." lexically would read <home>/service-canary.conf (absent) and miss it.
+  await symlink(join(userHome, '.codex/inner'), join(userHome, 'pivot'));
+  await symlink(`${userHome}/pivot/../service-canary.conf`, unit);
+  wire.aliases = [unit];
+  const result = await whole();
+  expect(wire.hits).toEqual([]);
+  expect(stepOf(result, 'archive-setting')?.note).toContain('the service file points into a terminal sign-in folder');
+  expect(
+    await stat(join(f.to, 'config/archive.yaml')).then(
+      () => true,
+      () => false,
+    ),
+  ).toBe(false);
 });
 
 test('a service definition that is a link into a Nix-store-like folder is read; one into the planted .codex is refused', async () => {
@@ -365,31 +479,32 @@ test('a service folder or drop-in reached through a link, at any level, into the
 
 test('NEGATIVE (a): a stat of the login ALIAS entry (it resolves into the planted .codex) is caught', async () => {
   await plant();
-  await whole([injected(() => guardedFs.stat(join(f.from, 'fleet/credentials/codex-you')))]);
+  await direct(injected(() => guardedFs.stat(join(f.from, 'fleet/credentials/codex-you'))));
   expect(wire.hits).toEqual(['stat']);
 });
 
 test('NEGATIVE (b): an lstat of the planted .codex itself is caught', async () => {
   await plant();
-  await whole([injected(() => guardedFs.lstat(join(userHome, '.codex')))]);
+  await direct(injected(() => guardedFs.lstat(join(userHome, '.codex'))));
   expect(wire.hits).toEqual(['lstat']);
 });
 
 test('NEGATIVE (b2): lstat / readlink of the link ENTRY itself stay allowed', async () => {
   await plant();
-  await whole([
+  await direct(
     injected(async () => {
       await guardedFs.lstat(join(f.from, 'fleet/credentials/codex-you'));
       await guardedFs.readlink(join(f.from, 'fleet/credentials/codex-you'));
     }),
-  ]);
+  );
   expect(wire.hits).toEqual([]);
 });
 
 test('NEGATIVE (c): the old Lessons lookup (an lstat under fleet/assets) on a fleet that is a link is caught', async () => {
   await canaries();
   await symlink(join(userHome, '.codex'), join(f.from, 'fleet'));
-  await whole([injected(() => guardedFs.lstat(join(f.from, 'fleet', 'assets', 'instructions', 'lessons.md')))]);
+  // convert() now refuses a fleet that is a link before any step runs, so the old lookup is made directly, armed.
+  await direct(injected(() => guardedFs.lstat(join(f.from, 'fleet', 'assets', 'instructions', 'lessons.md'))));
   expect(wire.hits).toEqual(['lstat']);
 });
 
@@ -398,7 +513,26 @@ test('NEGATIVE (d): an unfenced read of a service definition that is a link into
   await mkdir(dirname(unit), { recursive: true });
   await canaries();
   await symlink(join(userHome, '.codex/service-canary.conf'), unit);
-  await whole([injected(() => guardedFs.readFile(unit, 'utf8'))]);
+  await direct(injected(() => guardedFs.readFile(unit, 'utf8')));
+  expect(wire.hits).toEqual(['readFile']);
+});
+
+test('NEGATIVE (e): the oracle itself resolves ".." after a link (component by component), and the independent alias guard agrees', async () => {
+  const unit = join(userHome, '.config/systemd/user/fyd.service');
+  await mkdir(dirname(unit), { recursive: true });
+  await canaries();
+  await chmod(join(userHome, '.codex'), 0o700);
+  await chmod(join(userHome, '.codex/service-canary.conf'), 0o600);
+  await mkdir(join(userHome, '.codex/inner'), { recursive: true });
+  await symlink(join(userHome, '.codex/inner'), join(userHome, 'pivot'));
+  await symlink(`${userHome}/pivot/../service-canary.conf`, unit);
+  // Only reaches() sees it: no known alias listed.
+  await direct(injected(() => guardedFs.readFile(unit, 'utf8')));
+  expect(wire.hits).toEqual(['readFile']);
+  // And the alias guard alone sees it too, on a path the oracle's resolver is not asked about.
+  await rm(f.to, { recursive: true, force: true });
+  wire.aliases = [join(f.root, 'any-alias')];
+  await direct(injected(() => guardedFs.readFile(join(f.root, 'any-alias'), 'utf8')));
   expect(wire.hits).toEqual(['readFile']);
 });
 

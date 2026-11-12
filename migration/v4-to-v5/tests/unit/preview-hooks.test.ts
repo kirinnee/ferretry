@@ -101,7 +101,6 @@ test("the owner's shape: both files are carried byte for byte, the script stays 
 });
 
 const refusedCases: readonly (readonly [string, () => Promise<void>])[] = [
-  ['a link', async () => symlink('/etc/hostname', join(f.from, 'fleet/assets', BEFORE))],
   [
     'a hard link',
     async () => {
@@ -240,6 +239,13 @@ const refusedCases: readonly (readonly [string, () => Promise<void>])[] = [
   ],
   ['a file whose content names ${HOME}/.codex', async () => put(`fleet/assets/${BEFORE}`, 'cat ${HOME}/.codex/x\n')],
 ];
+
+test('a link inside fleet/assets REFUSES the conversion before any step, naming the link', async () => {
+  await mkdir(join(f.from, 'fleet/assets/components/hooks'), { recursive: true, mode: 0o700 });
+  await symlink('/etc/hostname', join(f.from, 'fleet/assets', BEFORE));
+  await expect(run(cat(), sh())).rejects.toThrow('expected a run');
+  expect(await stat(f.to).catch(() => undefined)).toBeUndefined();
+});
 
 for (const [name, arrange] of refusedCases)
   test(`${name} that a hook points at is not carried; the component is named by reason, never the command`, async () => {

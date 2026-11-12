@@ -150,7 +150,7 @@ made again, never followed) and turns
 are lowercase. A Codex login with `store: host` (the terminal's own folder, which 5.0 cannot start Codex from) is written
 `store: ferretry` under the same name by the Settings step and gets an EMPTY 0700 folder here: nothing of the terminal's sign-in
 (`~/.claude*`, `~/.codex*`, the keychain) is read, listed or linked, and the report says "moved to Ferretry's own sign-in; needs
-one sign-in: fy login signin <name>". A Claude `store: host` login keeps its terminal sign-in and configuration as they are (5.0 starts it from the terminal); a login folder that is a link is never followed by any step (Usage skips it and says so).
+one sign-in: fy login signin <name>". A Claude `store: host` login keeps its terminal sign-in and configuration as they are (5.0 starts it from the terminal); a login folder that is a link refuses the whole conversion before any step runs (see the fence).
 `config/warden.yaml` and `config/logins/*.yaml` belong to the Settings step.
 
 Settings (`src/steps/settings.ts`) turns each v4 `config/*.yaml` into the v5 plugin config file that owns it: runtimes
@@ -218,9 +218,14 @@ then read; only one whose chain of links (followed with `readlink` alone, at mos
 `rebuild/5.0` yet), restated in the step until it lands. `src/main.ts` passes the real home directory and environment; tests inject
 temp ones.
 
-The fence (`src/v4/fence.ts`): before any step runs, `convert()` `lstat`s the v4 home's own folders the steps descend into (`config`,
-`state`, `fleet` and its `credentials`, `assets`, `homes`, `shared`, `bin`). One that is a link, or not a folder, is never looked inside by any
-step (not even for a missing file); Lessons says its document was not carried because the folder is a link. The target is never named.
+The fence (`src/v4/fence.ts`, run first in `preflight`): before anything else in the v4 home is read, the converter `lstat`s the
+home's own folders the steps descend into (`config`, `state`, `fleet` and its `credentials`, `assets`, `homes`, `shared`, `bin`) and the
+entries preflight reads (`home.json`, `layout-version`, `daemon.lock`). A folder that is a link or not a folder, an entry that is a link, or ANY link met anywhere inside `config`, `state` or `fleet` (a login folder, a file in `fleet/assets`, …),
+**REFUSES the conversion before any step runs**, writing nothing (not even the new home), with a plain sentence naming it and the remedy
+(replace the link with the real folder, then run again). The target is never named, and no resolving call (`stat`, `readFile`, `readdir`,
+`exists`, `open`, `realpath`) is made on anything that resolves into `~/.claude`, `~/.claude.json` or `~/.codex`; only `lstat` and
+`readlink` of a link entry itself. Service-definition links are walked component by component, `..` applied against the real folder after the links before it are
+expanded.
 
 The `rebuild/migration-ferrets-b` development branch contains a local merge of the unreviewed
 `rebuild/port-ferrets-a2` schemas. **Do not integrate it before Ferrets lands on `rebuild/5.0`.** Once Ferrets lands,

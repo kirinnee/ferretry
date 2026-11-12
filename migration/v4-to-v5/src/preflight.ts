@@ -4,6 +4,7 @@
  */
 import { readdir, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
+import { fenceProblems } from './v4/fence.ts';
 import { V4_LAYOUT_VERSION, v4Paths } from './v4/layout.ts';
 
 export type Preflight = { readonly ok: true } | { readonly ok: false; readonly problems: readonly string[] };
@@ -20,6 +21,11 @@ export async function preflight(from: string, to: string, lock: LockProbe): Prom
 
   const source = await stat(from).catch(() => undefined);
   if (!source?.isDirectory()) return { ok: false, problems: [`${from} is not a folder`] };
+
+  // First, before anything else in the home is read: a link or non-folder among the folders the steps descend into, or
+  // among the entries read below, refuses the whole conversion. Nothing resolves through one.
+  const fenced = await fenceProblems(from);
+  if (fenced.length > 0) return { ok: false, problems: [...fenced] };
 
   if (await exists(join(from, 'home.json'))) {
     problems.push(`${from} has a home.json: it is already a v5 home, not a v4 one`);

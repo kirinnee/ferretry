@@ -74,6 +74,16 @@ const done = async (extra: { dropUncarried?: boolean } = {}) => {
   return result.report;
 };
 
+/** The conversion is refused, saying which link and the remedy, and nothing was written. */
+const refusedFor = async (sentence: string) => {
+  const result = await run();
+  expect(result.kind).toBe('refused');
+  const problems = result.kind === 'refused' ? result.problems.join('\n') : '';
+  expect(problems).toContain(sentence);
+  expect(problems).toContain('then run again');
+  expect(await stat(f.to).catch(() => undefined)).toBeUndefined();
+};
+
 const settingsOf = (report: Awaited<ReturnType<typeof done>>) => {
   const step = report.steps.find(item => item.id === 'settings');
   if (step === undefined) throw new Error('no settings step');
@@ -568,7 +578,7 @@ test('a settings file over 1 MiB is held by name and never read', async () => {
   await expect(stat(join(f.to, 'config/claude-code/settings/big.yaml'))).rejects.toThrow();
 });
 
-test('links are never followed: a file link in fleet/assets, fleet/assets itself a link, fleet a link', async () => {
+test('links are never followed: a file link in fleet/assets, fleet/assets itself a link, a folder link on the way REFUSE the conversion', async () => {
   await text('layout-version', '2\n');
   const real = join(outside, 'real.json');
   await writeFile(real, JSON.stringify({ marker: OUTSIDE_MARKER }), { mode: 0o600 });
@@ -576,20 +586,14 @@ test('links are never followed: a file link in fleet/assets, fleet/assets itself
   await mkdir(join(f.from, 'fleet/assets'), { recursive: true });
   await symlink(real, join(f.from, 'fleet/assets/link.json'));
   await text('config/components/settings/filelink.yaml', 'harness: claude\nfile: link.json\n');
-  let report = await done();
-  expect(namedIn(settingsOf(report))).toContain('config/components/settings/filelink.yaml');
-  for (const path of await allFiles(f.to)) expect((await readFile(path)).includes(OUTSIDE_MARKER)).toBe(false);
-  await rm(f.to, { recursive: true, force: true });
+  await refusedFor(`${f.from}/fleet/assets/link.json is a link`);
 
   // 2. fleet/assets itself a link to a folder outside the home
   await rm(join(f.from, 'fleet/assets'), { recursive: true, force: true });
   await writeFile(join(outside, 'settings.json'), JSON.stringify({ marker: OUTSIDE_MARKER }), { mode: 0o600 });
   await symlink(outside, join(f.from, 'fleet/assets'));
   await text('config/components/settings/s.yaml', 'harness: claude\nfile: settings.json\n');
-  report = await done();
-  expect(namedIn(settingsOf(report))).toContain('config/components/settings/s.yaml');
-  for (const path of await allFiles(f.to)) expect((await readFile(path)).includes(OUTSIDE_MARKER)).toBe(false);
-  await rm(f.to, { recursive: true, force: true });
+  await refusedFor(`${f.from}/fleet/assets is a link or not a folder`);
 
   // 3. a folder link inside fleet/assets on the way to the file
   await rm(join(f.from, 'fleet/assets'), { force: true });
@@ -597,9 +601,7 @@ test('links are never followed: a file link in fleet/assets, fleet/assets itself
   await writeFile(join(outside, 'h.json'), JSON.stringify({ marker: OUTSIDE_MARKER }), { mode: 0o600 });
   await symlink(outside, join(f.from, 'fleet/assets/components/hooks'));
   await text('config/components/hooks/h.yaml', 'harness: claude\nfile: components/hooks/h.json\n');
-  report = await done();
-  expect(namedIn(settingsOf(report))).toContain('config/components/hooks/h.yaml');
-  for (const path of await allFiles(f.to)) expect((await readFile(path)).includes(OUTSIDE_MARKER)).toBe(false);
+  await refusedFor(`${f.from}/fleet/assets/components/hooks is a link`);
 });
 
 test('an absolute path inside the real v4 home is read from the snapshot copy; one outside it is not', async () => {
