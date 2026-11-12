@@ -82,6 +82,27 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
     One plain line per repair says what happened, and when the old file could not be kept aside it names the aside path
     (the files are named, never their contents). A start resolves its runtime from the rebuilt file with the same
     harness homes, and a valid manifest is left alone. Live v4 outage, 2026-11-12.
+11. **A start by runtime reaches the provider signed in**: the `merge bar 9` cases in
+    `packages/core/ferrets/tests/integration/daemon/ferret-auth/ferret-auth.test.ts` (smoke step 2) start a ferret on a
+    REAL `fyd` on a temp home and an ephemeral loopback port (stand-in harness, no network) whose runtime `rt` is
+    configured from FILES ONLY (`login: oauth`, a real profile; no `fy runtime add`, no apply, nothing published). The fake
+    provider is strict: it replies only to a request carrying the signed-in login's credential, so a signed-out launch gets
+    no reply. Each case reads that reply back and checks the launch's non-secret login facts (auth kind and the login's
+    credential store). Cases: `fy start --harness claude-code --login oauth` (control); `fy new --runtime rt` (the command
+    the owner types), which must reach the provider signed in; the app's own `startFerret` request builder (body and
+    request-id header) sent over a loopback HTTP client that applies the shared `allowedCallHeaders` list, which must
+    reach it too (the app's `DaemonClient` and its route guard and inventory check, the sealed browser session and
+    carrier, and the React page are NOT in this case: the real New ferret screen is checked in a browser on the preview);
+    a STOPPED ferret as the v4 -> v5 converter writes it (a runtime, no login) resumed through `POST
+/v1/ferrets/<name>/resume`, which must resume signed in on its runtime's login (restart and automatic resume are the
+    same `service.resume`), and one whose runtime cannot serve, which must not launch; a runtime named beside another
+    login, which is refused, and beside its own, which starts; a login the owner switched off, named directly or through
+    its runtime, which is refused with nothing spent; a start whose reply was lost and is submitted again, which starts
+    ONE ferret; and a runtime that does not exist or whose login needs sign-in, which must be refused with a sentence
+    naming it and start nothing. The 5.0 preview refused every `fy new` / `fy start` with "a start must carry x-fy-request-id"
+    because the CLI shell dropped the header a half set (and the app's start sent none), and a start by runtime then
+    launched signed out because nothing turned the runtime into its login; every other start test named the login in a
+    raw `POST /v1/ferrets`. No credential is printed.
 
 ## After merge
 

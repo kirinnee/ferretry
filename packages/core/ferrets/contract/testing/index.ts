@@ -13,6 +13,7 @@ import {
   type WorkFolders,
 } from '@ferretry/kernel/contract';
 import { err, type Instant, instantFromEpochMs, ok, type Result } from '@ferretry/std';
+import type { LoginStartResolution, RuntimeStartResolution, RuntimeStartSource } from '../hooks.ts';
 import type { FerretState, FerretSummary, HarnessKey, LoginKindKey, PackId } from '../ids.ts';
 import {
   type AttachRefusal,
@@ -919,4 +920,20 @@ export function workFoldersConformance(
       expect(folders.folderOf(ferretId('nobody'))).toBeUndefined();
     });
   });
+}
+
+/**
+ * A stand-in Runtimes' `runtime.start` answer for a Ferrets half booted whole. A start that names a LOGIN is checked by
+ * `login` (a login switched off or over its budget is refused) and, with no Runtimes taking the hook, is refused rather
+ * than spent, so a fixture that starts on a login holds a plugin `runtimes` providing this one. It lets every login
+ * through and resolves no runtime.
+ */
+export class FakeRuntimeStart implements RuntimeStartSource {
+  async login(): Promise<LoginStartResolution> {
+    return { ok: true };
+  }
+
+  async resolve(runtime: string): Promise<RuntimeStartResolution> {
+    return { ok: false, sentence: `no runtime ${runtime} on this fixture` };
+  }
 }

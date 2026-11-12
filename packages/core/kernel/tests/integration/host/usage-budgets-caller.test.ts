@@ -3,8 +3,8 @@ import { expect, test } from 'bun:test';
 import { fakeConversation } from '../../../../../plugins/conversation/contract/testing/index.ts';
 import { fakeLogins, sampleLogin } from '../../../../../plugins/logins/contract/testing/index.ts';
 import { FakeAsks } from '../../../../asks/contract/testing/index.ts';
-import { Logins, Runners, type FerretId } from '../../../../ferrets/contract/index.ts';
-import { FakeLoginKind, FakeRunner } from '../../../../ferrets/contract/testing/index.ts';
+import { RUNTIME_START_KEY, RuntimeStart, Logins, Runners, type FerretId } from '../../../../ferrets/contract/index.ts';
+import { FakeLoginKind, FakeRunner, FakeRuntimeStart } from '../../../../ferrets/contract/testing/index.ts';
 import { FakeGate, ferretStanding, ownerStanding, StandInAdmission } from '../../../../gate/contract/testing/index.ts';
 import { type SecretName } from '../../../../vault/contract/index.ts';
 import { FakeVault } from '../../../../vault/contract/testing/index.ts';
@@ -74,6 +74,19 @@ const world = async () => {
           hooks: { takes: [{ hook: Logins, key: 'api-key' }] },
         }),
         { build: () => ({ hooks: { 'logins:api-key': new FakeLoginKind('api-key', ['work']) } }) },
+      ),
+      // Runtimes' `runtime.start`: a start that names a login is checked there (a stand-in that lets every login through).
+      implementDaemon(
+        definePlugin({
+          id: 'runtimes',
+          title: 'Runtimes (fake)',
+          version: '5.0.0',
+          api: 5,
+          core: false,
+          kinds: [],
+          hooks: { takes: [{ hook: RuntimeStart, key: RUNTIME_START_KEY }] },
+        }),
+        { build: () => ({ hooks: { 'runtime.start:runtimes': new FakeRuntimeStart() } }) },
       ),
       implementDaemon(
         definePlugin({

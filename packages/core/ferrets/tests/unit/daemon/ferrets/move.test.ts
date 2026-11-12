@@ -158,6 +158,70 @@ test('a move never carries the previous login: the moves module records none, so
   expect(f.codex.launched[0]?.login).toBeUndefined();
 });
 
+/** Runtimes' answer for the codex target: the runtime IS the account, so it names the login the relaunch spends. */
+const withCodexAccount = (f: ReturnType<typeof onOldRuntime>, serving = true) => {
+  f.ports.runtimeStart = async runtime => {
+    if (runtime === 'claude-one') return { ok: true, harness: 'claude-code', login: 'first' };
+    return serving && runtime === 'codex-two'
+      ? { ok: true, harness: 'codex', login: 'codex-login' }
+      : { ok: false, sentence: `runtime ${runtime} was not started: its login needs signing in` };
+  };
+};
+
+test('a move resolves the TARGET runtime like a start: the relaunch spends the target’s own login, never the old one', async () => {
+  const f = onOldRuntime();
+  withCodexAccount(f);
+  await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
+  f.asked.length = 0;
+  const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), codexTarget);
+  await resume.resume({ origin: PERSON_ORIGIN, id: f.id as never, policy });
+  expect(f.codex.launched[0]).toMatchObject({ runtime: 'codex-two', harness: 'codex', login: 'codex-login' });
+  expect(f.registry.get(f.id)).toMatchObject({ runtime: 'codex-two', login: 'codex-login', state: 'working' });
+  expect(f.asked).toEqual([{ harness: 'codex', runtime: 'codex-two', login: 'codex-login' }]);
+});
+
+test('a move onto a runtime that cannot serve is refused BEFORE the working pane is released', async () => {
+  const f = onOldRuntime();
+  withCodexAccount(f, false);
+  await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
+  const before = (await f.service.handle(f.id))!;
+  const starts = f.runner.starts;
+  const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), codexTarget);
+  await expect(resume.resume({ origin: PERSON_ORIGIN, id: f.id as never, policy })).rejects.toThrow(
+    /runtime codex-two was not started/u,
+  );
+  expect(await f.runner.alive(before)).toBe(true);
+  expect(f.runner.starts).toBe(starts);
+  expect(f.codex.launched).toEqual([]);
+  expect(f.registry.get(f.id)).toMatchObject({ runtime: 'claude-one', login: 'first', state: 'working' });
+});
+
+test('a move onto a runtime whose login is switched off or over its budget is refused, and the working pane stays', async () => {
+  for (const why of ['switched off', 'over budget'] as const) {
+    const f = onOldRuntime();
+    f.ports.runtimeStart = async runtime =>
+      runtime === 'claude-one'
+        ? { ok: true, harness: 'claude-code', login: 'first' }
+        : why === 'switched off'
+          ? { ok: false, sentence: 'runtime codex-two was not started: login codex-login is switched off (owner-off)' }
+          : { ok: true, harness: 'codex', login: 'codex-login' };
+    // Usage's `start.decide`: the login the move resolved is over its budget.
+    f.ports.decide = async input =>
+      why === 'over budget' && input.login === 'codex-login'
+        ? { allow: false, reason: 'login "codex-login" is paused: over its daily budget on this machine' }
+        : { allow: true };
+    await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
+    const before = (await f.service.handle(f.id))!;
+    const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), codexTarget);
+    await expect(resume.resume({ origin: PERSON_ORIGIN, id: f.id as never, policy })).rejects.toThrow(
+      /login "?codex-login"? is (switched off|paused)/u,
+    );
+    expect(await f.runner.alive(before), why).toBe(true);
+    expect(f.codex.launched, why).toEqual([]);
+    expect(f.registry.get(f.id), why).toMatchObject({ runtime: 'claude-one', login: 'first' });
+  }
+});
+
 /** The keys `session-move.ts` restamps onto the session's `config.json` (a stand-in for what it writes). */
 const restamp = (extra: Record<string, unknown> = {}) => ({
   agent: 'codex-two',

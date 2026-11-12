@@ -7,6 +7,7 @@ import {
   LaunchParts,
   MOVE_ACCOUNT_SLOT,
   NEW_FERRET_ACCOUNT_SLOT,
+  RuntimeStart,
   StartDecide,
 } from '@ferretry/core-ferrets/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
@@ -273,6 +274,8 @@ export default definePlugin({
       { hook: AutoResumeDecide },
       // A start's own compaction trigger is judged against its model's window; the launch carries the login's trigger.
       { hook: StartDecide },
+      // Ferrets asks which harness and login a runtime starts with (a start that names a runtime); only this plugin answers.
+      { hook: RuntimeStart, key: 'runtimes' },
       { hook: LaunchParts },
     ],
     offers: [

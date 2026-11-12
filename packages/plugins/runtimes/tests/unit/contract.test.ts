@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { LoginChangesPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
-import { AutoResumeDecide, LaunchParts, StartDecide } from '@ferretry/core-ferrets/contract';
+import { AutoResumeDecide, LaunchParts, RuntimeStart, StartDecide } from '@ferretry/core-ferrets/contract';
 import { ITEM_NAME_PATTERN as StdItemNamePattern } from '@ferretry/std';
 import {
   INSTRUCTION_ITEMS,
@@ -160,11 +160,12 @@ describe('runtimes contract', () => {
     expect(Object.keys(manifest.needs)).toEqual(['ferrets', 'logins', 'loginChanges']);
   });
 
-  test('Runtimes answers which runtimes use a login (logins.used-by) and whether an auto-resume may spend, and is the only plugin that writes logins', () => {
+  test('Runtimes answers which runtimes use a login (logins.used-by) and whether an auto-resume may spend and which login a runtime starts with, and is the only plugin that writes logins', () => {
     expect(manifest.hooks?.takes).toEqual([
       { hook: LoginsUsedBy, key: 'runtimes' },
       { hook: AutoResumeDecide },
       { hook: StartDecide },
+      { hook: RuntimeStart, key: 'runtimes' },
       { hook: LaunchParts },
     ]);
     expect(manifest.needs.loginChanges).toBe(LoginChangesPort);

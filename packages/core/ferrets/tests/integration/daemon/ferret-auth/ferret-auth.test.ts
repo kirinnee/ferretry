@@ -8,6 +8,13 @@ import { join } from 'node:path';
 import { DAEMON_RUN_FILE, DaemonRunSchema } from '@ferretry/kernel/contract';
 import { FAKE_REPLY, startFakeProvider, type FakeProvider } from './fake-provider.ts';
 import { writeStubBinaries } from './stub-binaries.ts';
+import { allowedCallHeaders } from '@ferretry/kernel/manifest';
+import type { FerretsClient } from '../../../../app/lib/client.ts';
+import {
+  emptyNewFerretDraft,
+  startAttemptFor,
+  startFerret,
+} from '../../../../app/features/new-ferret/new-ferret-draft.ts';
 
 /**
  * THE MERGE-BAR LINE: A FERRET AUTHENTICATES END TO END (docs/rebuild/merge-bar.md, before-merge line 7).
@@ -54,6 +61,7 @@ import { writeStubBinaries } from './stub-binaries.ts';
 const FAKE_TOKEN = 'fake-token';
 const SECRET_NAME = 'FAKE_PROVIDER_TOKEN';
 const FYD = join(import.meta.dir, '../../../../../kernel/host/fyd.ts');
+const FY = join(import.meta.dir, '../../../../../../cli/bin/fy.ts');
 const REPO = join(import.meta.dir, '../../../../../../..');
 const READY_MS = 90_000;
 const SEE_MS = 45_000;
@@ -420,6 +428,403 @@ describe('a ferret authenticates end to end (merge bar 7)', () => {
     expect(pane).toContain(FAKE_REPLY);
   });
 });
+
+/**
+ * THE MERGE-BAR LINE: A START BY RUNTIME REACHES THE PROVIDER SIGNED IN (docs/rebuild/merge-bar.md, before-merge line 9;
+ * smoke step 2).
+ *
+ * The 5.0 preview answered `fy new` / `fy start` with "a start must carry x-fy-request-id" and no ferret was made, and
+ * once that was fixed `fy new --runtime rt` still launched SIGNED OUT: the request names a runtime, nothing turned the
+ * runtime into its login, so the record had no login and the launch carried no credential. Every test above starts a
+ * ferret with a raw `POST /v1/ferrets` that names the login itself, which is exactly the part that was broken, so none
+ * could see it. These cases start the way the owner does, on a configured runtime (`login: oauth`, a real profile):
+ *
+ * - the real `fy` process (the production entry point, its real shell client and HTTP transport) typing `fy new --runtime`;
+ * - the APP's new-ferret request: the app's own draft/request builder (`startFerret`, the code behind the New ferret
+ *   button) sending through a loopback client to the real fyd. The client applies the SAME closed header list the app's
+ *   `DaemonClient` uses (`allowedCallHeaders`), so a header the app does not set does not reach the daemon. NOT covered
+ *   (a test in this package may not import the app shell, rebuild-checks `context-imports`): the app's `DaemonClient`
+ *   route guard and inventory hash check, the sealed session / carrier the browser really uses to reach the daemon (that
+ *   needs a paired device and a relay), and the React page that collects the draft. The shell's own client tests cover
+ *   the guard and the header list with a fake transport; all of them reach this same `POST /v1/ferrets`.
+ *
+ * The fake provider here is STRICT: it answers only a request carrying the signed-in login's credential, so a signed-out
+ * launch gets no reply. Each case reads the reply back and checks the non-secret login facts of the launch (its auth kind
+ * and the credential store the login names; never a value). Same stand-in harness; loopback only, fake values only.
+ */
+describe('a start by runtime reaches the provider signed in (merge bar 9)', () => {
+  const fy = async (daemon: Daemon, args: readonly string[]) => {
+    const proc = Bun.spawn([process.execPath, FY, ...args], {
+      cwd: daemon.folder,
+      env: {
+        PATH: process.env.PATH ?? '/usr/bin:/bin',
+        HOME: join(daemon.home, '..', 'user-home'),
+        NO_COLOR: '1',
+        FY_HOME: daemon.home,
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+      timeout: 60_000,
+      killSignal: 'SIGKILL',
+    });
+    const [out, err, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return { code, out, err };
+  };
+
+  /** The fake OAuth login `oauth` (signed in) and the runtime `rt` over it: `login`, a real `profile`, launched as an agent. */
+  const oauthWorld = (home: string): Record<string, string> => ({
+    [join(home, 'config/logins/oauth.yaml')]: claudeLogin('ferretry'),
+    [join(home, 'config/profiles/plain.yaml')]: 'contents: []\n',
+    [join(home, 'config/runtimes/rt.yaml')]: 'login: oauth\nprofile: plain\nagent: true\n',
+    // A runtime whose login has no credential: it exists but cannot serve a launch (needs sign-in).
+    [join(home, 'config/logins/signedout.yaml')]: claudeLogin('ferretry'),
+    [join(home, 'config/runtimes/rt-signedout.yaml')]: 'login: signedout\nprofile: plain\nagent: true\n',
+    [join(home, 'state/logins/credentials/oauth/.credentials.json')]: JSON.stringify({
+      claudeAiOauth: {
+        accessToken: FAKE_TOKEN,
+        refreshToken: 'fake-refresh',
+        expiresAt: 4_102_444_800_000,
+        scopes: ['user:inference'],
+      },
+    }),
+  });
+
+  const bootStrict = async () => {
+    const provider = startFakeProvider(FAKE_TOKEN, { strict: true });
+    cleanups.push(() => provider.stop());
+    return { provider, daemon: await boot(provider, oauthWorld) };
+  };
+
+  /** The stand-in claude's launch record of the ferret: waits for it. */
+  const launchedClaude = async (daemon: Daemon) => {
+    const until = Date.now() + SEE_MS;
+    while (Date.now() < until) {
+      const launched = daemon.launches().filter(record => record.binary === 'claude');
+      if (launched.length > 0) return launched.at(-1);
+      await Bun.sleep(250);
+    }
+    throw new Error('the stand-in claude was never launched');
+  };
+
+  /** Waits for the daemon's own transcript read of ferret `id` to show the provider's reply. */
+  const readsReply = async (daemon: Daemon, id: string) => {
+    const until = Date.now() + SEE_MS;
+    let seen = '';
+    while (Date.now() < until && !seen.includes(FAKE_REPLY)) {
+      seen = (await daemon.call('GET', `/v1/ferrets/${id}/messages`)).text;
+      if (!seen.includes(FAKE_REPLY)) await Bun.sleep(500);
+    }
+    return seen;
+  };
+
+  /** What the launch proves of the login, none of it secret: the auth kind it found and the credential store it was handed. */
+  const expectSignedInOn = async (daemon: Daemon, provider: FakeProvider, id: string) => {
+    expect(await readsReply(daemon, id)).toContain(FAKE_REPLY);
+    const launched = await launchedClaude(daemon);
+    expect(launched?.auth).toBe('oauth-file');
+    // Logins' store variable reached the CLI itself (the direct launch, not a wrapper), as the `--login` path gives it.
+    expect(launched?.envNames).toContain('CLAUDE_SECURESTORAGE_CONFIG_DIR');
+    expect(String(launched?.storeDir)).toMatch(/\/credentials\/oauth$/u);
+    expect(provider.seen.map(r => [r.path, r.authHeaders, r.tokenMatches])).toEqual([
+      ['/v1/messages', ['authorization'], true],
+    ]);
+  };
+
+  /** Runs the real `fy` with `args`, and returns the ferret id it printed (`callsign (id)  state ...`). */
+  const startsViaFy = async (daemon: Daemon, args: readonly string[]) => {
+    const started = await fy(daemon, args);
+    // The shell forwarded the request id: no refusal, an exit of 0 and a ferret id on the screen.
+    expect(`${started.out}\n${started.err}`.includes('x-fy-request-id')).toBe(false);
+    expect(started.code, `fy start: ${started.err}`).toBe(0);
+    const id = /\(([^()\s]+)\)/u.exec(started.out)?.[1];
+    expect(typeof id).toBe('string');
+    const listed = await fy(daemon, ['ps']);
+    expect(listed.code).toBe(0);
+    expect(listed.out).toContain(id as string);
+    return id as string;
+  };
+
+  test('`fy start --harness claude-code --login oauth` makes a ferret, which `fy ps` lists, and the reply reaches it', async () => {
+    const { provider, daemon } = await bootStrict();
+    const id = await startsViaFy(daemon, [
+      'start',
+      '--harness',
+      'claude-code',
+      '--login',
+      'oauth',
+      '--mode',
+      'interactive',
+      '--cwd',
+      daemon.folder,
+      'say hello',
+    ]);
+    await expectSignedInOn(daemon, provider, id);
+  });
+
+  test('`fy new --runtime rt` (the command the owner types) on a configured runtime reaches the provider signed in', async () => {
+    const { provider, daemon } = await bootStrict();
+    const id = await startsViaFy(daemon, [
+      'new',
+      '--runtime',
+      'rt',
+      '--mode',
+      'interactive',
+      '--cwd',
+      daemon.folder,
+      'say hello',
+    ]);
+    const listing = JSON.parse((await daemon.call('GET', '/v1/ferrets')).text) as { id: string; runtime?: string }[];
+    expect(listing.find(ferret => ferret.id === id)?.runtime).toBe('rt');
+    await expectSignedInOn(daemon, provider, id);
+  });
+
+  test("the app's new-ferret request (its own request builder, the app's header list, a loopback client) on a configured runtime reaches the provider signed in", async () => {
+    const { provider, daemon } = await bootStrict();
+    // The app's own start: `startFerret` builds `POST /v1/ferrets` from the form's draft, and the client sends it.
+    const id = await startFerret(loopbackClient(daemon), {
+      ...emptyNewFerretDraft,
+      runtime: 'rt',
+      folder: daemon.folder,
+      mode: 'interactive',
+      prompt: 'say hello',
+    });
+    await expectSignedInOn(daemon, provider, id);
+  });
+
+  /** The world above plus a second fake OAuth login `off` the owner switched off (valid sign-in material), and `rt-off` over it. */
+  const withSwitchedOffLogin = (home: string): Record<string, string> => {
+    const files = oauthWorld(home);
+    return {
+      ...files,
+      [join(home, 'config/logins/off.yaml')]: `${claudeLogin('ferretry')}disabled: {reason: owner-off}\n`,
+      [join(home, 'state/logins/credentials/off/.credentials.json')]: files[
+        join(home, 'state/logins/credentials/oauth/.credentials.json')
+      ] as string,
+      [join(home, 'config/runtimes/rt-off.yaml')]: 'login: off\nprofile: plain\nagent: true\n',
+    };
+  };
+
+  /** A stopped ferret as the v4 -> v5 converter writes it: a runtime, a harness, and NO login. */
+  const convertedRecord = (home: string): Record<string, string> => ({
+    ...oauthWorld(home),
+    [join(home, 'state/ferrets/tokens.json')]: JSON.stringify({ format: 1, tokens: [] }),
+    [join(home, 'state/ferrets/converted/ferret.json')]: JSON.stringify({
+      format: 1,
+      id: 'converted',
+      name: 'cedar',
+      role: 'lead',
+      birth: 'person',
+      harness: 'claude-code',
+      runner: 'tmux',
+      runtime: 'rt',
+      mode: 'interactive',
+      folder: join(home, '..', 'work'),
+      state: 'stopped',
+      createdAt: '2026-11-01T00:00:00Z',
+      stateAt: '2026-11-01T00:00:00Z',
+    }),
+  });
+
+  test('a converted ferret (a runtime, no login) RESUMES signed in on its runtime’s login: resume resolves the runtime like a start', async () => {
+    const provider = startFakeProvider(FAKE_TOKEN, { strict: true });
+    cleanups.push(() => provider.stop());
+    const daemon = await boot(provider, convertedRecord);
+
+    const resumed = await daemon.call('POST', '/v1/ferrets/converted/resume', { message: 'say hello' });
+
+    expect(resumed.status, resumed.text).toBeLessThan(300);
+    // The daemon cannot read a converted ferret's transcript back, so the proof is the launch's own facts and the strict
+    // provider seeing the signed-in credential on the request the resumed ferret made.
+    const launched = await launchedClaude(daemon);
+    expect(launched?.auth).toBe('oauth-file');
+    expect(launched?.envNames).toContain('CLAUDE_SECURESTORAGE_CONFIG_DIR');
+    expect(String(launched?.storeDir)).toMatch(/\/credentials\/oauth$/u);
+    const until = Date.now() + SEE_MS;
+    while (Date.now() < until && provider.seen.length === 0) await Bun.sleep(250);
+    expect(provider.seen.map(r => [r.path, r.authHeaders, r.tokenMatches])).toEqual([
+      ['/v1/messages', ['authorization'], true],
+    ]);
+  });
+
+  test('a converted ferret whose runtime cannot serve (its login needs sign-in) is NOT resumed signed out', async () => {
+    const provider = startFakeProvider(FAKE_TOKEN, { strict: true });
+    cleanups.push(() => provider.stop());
+    const daemon = await boot(provider, home => {
+      const files = convertedRecord(home);
+      const path = join(home, 'state/ferrets/converted/ferret.json');
+      return { ...files, [path]: (files[path] as string).replace('"runtime":"rt"', '"runtime":"rt-signedout"') };
+    });
+
+    const resumed = await daemon.call('POST', '/v1/ferrets/converted/resume', {});
+
+    expect(resumed.status).toBeGreaterThanOrEqual(400);
+    expect(resumed.text).toContain('rt-signedout');
+    expect(daemon.launches().filter(record => record.binary === 'claude')).toEqual([]);
+  });
+
+  test('a runtime is its own account: another login named beside it is refused, its own login starts', async () => {
+    const provider = startFakeProvider(FAKE_TOKEN, { strict: true });
+    cleanups.push(() => provider.stop());
+    const daemon = await boot(provider, withSwitchedOffLogin);
+    const start = async (body: Record<string, unknown>) =>
+      await daemon.call(
+        'POST',
+        '/v1/ferrets',
+        { folder: daemon.folder, mode: 'interactive', prompt: 'say hello', ...body },
+        { 'x-fy-request-id': crypto.randomUUID() },
+      );
+
+    const refused = await start({ runtime: 'rt', login: 'off' });
+
+    expect(refused.status).toBeGreaterThanOrEqual(400);
+    expect(refused.text).toContain('signs in with its own login, not off');
+    expect(daemon.launches().filter(record => record.binary === 'claude')).toEqual([]);
+    expect(JSON.parse((await daemon.call('GET', '/v1/ferrets')).text)).toEqual([]);
+
+    const started = await start({ runtime: 'rt', login: 'oauth' });
+    expect(started.status, started.text).toBeLessThan(300);
+    await expectSignedInOn(daemon, provider, (JSON.parse(started.text) as { id: string }).id);
+  });
+
+  test('a login the owner switched off is refused when named directly or through its runtime: nothing is spent', async () => {
+    const provider = startFakeProvider(FAKE_TOKEN, { strict: true });
+    cleanups.push(() => provider.stop());
+    const daemon = await boot(provider, withSwitchedOffLogin);
+
+    const direct = await fy(daemon, [
+      'start',
+      '--harness',
+      'claude-code',
+      '--login',
+      'off',
+      '--mode',
+      'interactive',
+      '--cwd',
+      daemon.folder,
+      'say hello',
+    ]);
+    const viaRuntime = await fy(daemon, [
+      'new',
+      '--runtime',
+      'rt-off',
+      '--mode',
+      'interactive',
+      '--cwd',
+      daemon.folder,
+      'say hello',
+    ]);
+
+    expect(direct.code).not.toBe(0);
+    expect(`${direct.out}\n${direct.err}`).toContain('login off is switched off (owner-off)');
+    expect(viaRuntime.code).not.toBe(0);
+    expect(`${viaRuntime.out}\n${viaRuntime.err}`).toContain('switched off');
+    expect(JSON.parse((await daemon.call('GET', '/v1/ferrets')).text)).toEqual([]);
+    expect(daemon.launches().filter(record => record.binary === 'claude')).toEqual([]);
+    expect(provider.seen).toEqual([]);
+  });
+
+  test("the app's new-ferret start whose reply was lost, then submitted again as the page does, starts ONE ferret", async () => {
+    const { provider, daemon } = await bootStrict();
+    const real = loopbackClient(daemon);
+    const lose = async (route: string, init?: Parameters<FerretsClient['call']>[1]) => {
+      await real.call(route, init);
+      throw new TypeError('fetch failed');
+    };
+    const draft = {
+      ...emptyNewFerretDraft,
+      runtime: 'rt',
+      folder: daemon.folder,
+      mode: 'interactive' as const,
+      prompt: 'say hello',
+    };
+    // The first attempt: BOTH sends reach the daemon but their answers are lost, and so is the recovery read.
+    let losing = 3;
+    const flaky: FerretsClient = {
+      call: (async (route: string, init?: Parameters<FerretsClient['call']>[1]) => {
+        if (losing > 0) {
+          losing -= 1;
+          return await lose(route, init);
+        }
+        return await real.call(route, init);
+      }) as FerretsClient['call'],
+    };
+    const attempt = startAttemptFor(draft);
+
+    await expect(startFerret(flaky, draft, attempt)).rejects.toThrow('fetch failed');
+    // The page keeps the attempt; the person presses Create again with the draft unchanged.
+    const id = await startFerret(flaky, draft, startAttemptFor(draft, attempt));
+
+    const listing = JSON.parse((await daemon.call('GET', '/v1/ferrets')).text) as { id: string }[];
+    expect(listing.map(ferret => ferret.id)).toEqual([id]);
+    await expectSignedInOn(daemon, provider, id);
+  });
+
+  test('a runtime that does not exist, or whose login needs sign-in, is refused with a sentence naming it: no ferret, no signed-out launch', async () => {
+    const { daemon } = await bootStrict();
+    for (const runtime of ['no-such-runtime', 'rt-signedout']) {
+      const refused = await fy(daemon, [
+        'new',
+        '--runtime',
+        runtime,
+        '--mode',
+        'interactive',
+        '--cwd',
+        daemon.folder,
+        'say hello',
+      ]);
+      expect(refused.code, `fy new ${runtime}`).not.toBe(0);
+      expect(`${refused.out}\n${refused.err}`).toContain(runtime);
+    }
+    const listing = JSON.parse((await daemon.call('GET', '/v1/ferrets')).text) as unknown[];
+    expect(listing).toEqual([]);
+    expect(daemon.launches().filter(record => record.binary === 'claude')).toEqual([]);
+  });
+});
+
+/**
+ * The per-daemon client the ferrets app half is handed, over loopback HTTP to a real fyd. It fills the route's path
+ * parameters and sends the call's headers through the closed list every shell uses (`allowedCallHeaders`); it holds the
+ * admin credential the way a paired device's session would. The sealed session the browser really uses is NOT part of this.
+ */
+function loopbackClient(daemon: Daemon): FerretsClient {
+  return {
+    call: async <Answer = unknown>(
+      route: string,
+      init?: {
+        readonly params?: Readonly<Record<string, string>>;
+        readonly query?: Readonly<Record<string, string>>;
+        readonly body?: unknown;
+        readonly headers?: Parameters<typeof allowedCallHeaders>[0];
+      },
+    ): Promise<Answer> => {
+      const [method, template] = route.split(' ') as [string, string];
+      const path = template.replace(/:(\w+)/gu, (_, name: string) => encodeURIComponent(init?.params?.[name] ?? ''));
+      const query = init?.query === undefined ? '' : `?${new URLSearchParams(init.query).toString()}`;
+      const response = await fetch(`${daemon.base}${path}${query}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${daemon.admin}`,
+          'x-ferretry-client': 'cli',
+          accept: 'application/json',
+          ...(init?.body === undefined ? {} : { 'content-type': 'application/json' }),
+          ...allowedCallHeaders(init?.headers),
+        },
+        ...(init?.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+      });
+      const text = await response.text();
+      // An answered refusal carries its status, as the shell's `DaemonCallError` does: it is not a lost answer.
+      if (!response.ok)
+        throw Object.assign(new Error(`${route} answered ${String(response.status)}: ${text}`), {
+          status: response.status,
+        });
+      return JSON.parse(text) as Answer;
+    },
+  };
+}
 
 // THE REAL BINARY, for (b) only. Measured (claude 2.1.317, strace, a loopback server): with ANTHROPIC_BASE_URL and
 // ANTHROPIC_AUTH_TOKEN the real claude makes `POST /v1/messages` with `Authorization: Bearer <token>` and no other host

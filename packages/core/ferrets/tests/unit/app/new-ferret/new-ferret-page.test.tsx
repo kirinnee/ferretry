@@ -209,6 +209,7 @@ describe('NewFerretPage', () => {
         params: undefined,
         query: undefined,
         body: { runtime: 'claude-auto-loge', folder: '/work/ferretry', mode: 'auto', prompt: 'Port the page' },
+        headers: { 'x-fy-request-id': expect.any(String) },
       },
     ]);
     expect(harness.navigated).toEqual(['/d/daemon%2Fa/ferrets/new-ferret/chat']);
@@ -227,6 +228,33 @@ describe('NewFerretPage', () => {
     expect(harness.view.root.findByProps({ role: 'alert' }).children.join('')).toBe('daemon refused start');
     expect(button(harness.view, 'Create ferret').props.disabled).toBeFalse();
     expect(harness.navigated).toEqual([]);
+  });
+
+  it('resubmits the SAME draft after a lost answer with the same request id, and a changed draft with a new one', async () => {
+    const harness = page({ start: new TypeError('fetch failed') });
+    fill(harness.view);
+    const submit = () =>
+      runAsync(async () => {
+        button(harness.view, 'Create ferret').props.onClick();
+        for (let turn = 0; turn < 12; turn += 1) await Promise.resolve();
+      });
+    const requestIds = () =>
+      harness.calls
+        .filter(call => call.route === 'POST /v1/ferrets')
+        .map(call => call.headers?.['x-fy-request-id'] ?? '');
+
+    await submit();
+    const firstAttempt = new Set(requestIds());
+    // The answer was lost: the form is actionable again, and the unchanged draft is sent again as the same request.
+    expect(button(harness.view, 'Create ferret').props.disabled).toBeFalse();
+    await submit();
+    expect(new Set(requestIds())).toEqual(firstAttempt);
+    expect(firstAttempt.size).toBe(1);
+
+    // A genuinely new draft is a new start.
+    change(harness.view, 'fy-new-ferret-prompt', 'Port another page');
+    await submit();
+    expect(new Set(requestIds()).size).toBe(2);
   });
 
   it('refuses a runtime the daemon could not name before sending anything', async () => {

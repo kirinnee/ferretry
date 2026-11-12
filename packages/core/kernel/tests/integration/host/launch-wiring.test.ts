@@ -4,11 +4,12 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeAsks } from '../../../../asks/contract/testing/index.ts';
-import { FerretConfigFile, LaunchParts, Runners, type RunSpec } from '../../../../ferrets/contract/index.ts';
-import { FakeRunner } from '../../../../ferrets/contract/testing/index.ts';
+import { FerretConfigFile, LaunchParts, Logins, Runners, type RunSpec } from '../../../../ferrets/contract/index.ts';
+import { FakeLoginKind, FakeRunner } from '../../../../ferrets/contract/testing/index.ts';
 import { FakeGate, ownerStanding, StandInAdmission } from '../../../../gate/contract/testing/index.ts';
+import { type SecretName } from '../../../../vault/contract/index.ts';
 import { FakeVault } from '../../../../vault/contract/testing/index.ts';
-import { fakeLoginChanges, fakeLogins } from '../../../../../plugins/logins/contract/testing/index.ts';
+import { fakeLoginChanges, fakeLogins, sampleLogin } from '../../../../../plugins/logins/contract/testing/index.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import { daemonImplementations } from '../../../src/generated/plugins.ts';
 import { diskFolders, type TestHost, testHost } from '../../../testing/index.ts';
@@ -91,6 +92,21 @@ class RecordingRunner extends FakeRunner {
   }
 }
 
+/** The login `work` is held by a fake login kind, as a runtime's login is in production (its kind answers the launch environment). */
+const loginKindPlugin = () =>
+  implementDaemon(
+    definePlugin({
+      id: 'logins',
+      title: 'Logins (fake kind)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: Logins, key: 'api-key' }] },
+    }),
+    { build: () => ({ hooks: { 'logins:api-key': new FakeLoginKind('api-key', [RUNTIME]) } }) },
+  );
+
 const runnerPlugin = (runner: FakeRunner) =>
   implementDaemon(
     definePlugin({
@@ -108,6 +124,8 @@ const runnerPlugin = (runner: FakeRunner) =>
 const ID = '00000000-0000-4000-8000-0000000000a1';
 const HOME = `/fleet/homes/${ID}`;
 const RUNTIME = 'work';
+/** A runtime this machine has configured (v5) that the published fleet manifest does not list. */
+const UNPUBLISHED = 'not-published-runtime';
 /** A literal credential an earlier apply left in fixed.json (an internal gateway's token): never read, never in an argv. */
 const TOKEN = 'fixture-gateway-token-0001';
 const BASE_URL = 'https://gateway.fixture.invalid';
@@ -161,16 +179,36 @@ afterEach(async () => {
 });
 
 async function boot(runner: RecordingRunner, fixed: string | null = STALE_FIXED): Promise<TestHost> {
+  // The login's key is held by the secret store (a fixture value, not a credential); the launch environment names it.
+  const vault = new FakeVault();
+  await vault.put('LOGIN_WORK' as SecretName, 'fixture-not-a-credential');
   const h = await testHost({
     everyDirectory: true,
     harnessHomeFolders: await diskFolders(await mkdtemp(join(fixture, 'roots-'))),
-    plugins: [real('ferrets'), real('runtimes'), real('claude-code'), runnerPlugin(runner), faultPlugin()],
+    plugins: [
+      real('ferrets'),
+      real('runtimes'),
+      real('claude-code'),
+      loginKindPlugin(),
+      runnerPlugin(runner),
+      faultPlugin(),
+    ],
+    // The v5 runtime world a start by runtime reads: the runtime `work` (its login, a profile, launched as an agent).
+    config: {
+      runtimes: {
+        [RUNTIME]: { login: RUNTIME, profile: 'plain', agent: true },
+        // Configured on this machine but absent from the published fleet manifest: the case 'a runtime that is not published'.
+        [UNPUBLISHED]: { login: RUNTIME, profile: 'plain', agent: true },
+      },
+      profiles: { plain: { contents: [] } },
+    },
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: {
       gate: new FakeGate(),
-      vault: new FakeVault(),
+      vault,
       asks: new FakeAsks(),
-      logins: fakeLogins(),
+      // The runtime `work` below runs on this signed-in login: a start by runtime resolves it (v5), and the launch spends it.
+      logins: fakeLogins([sampleLogin(RUNTIME)]),
       loginChanges: fakeLoginChanges(),
     },
     // `claude` exists and answers its version, so the harness is discovered.
@@ -851,7 +889,7 @@ describe.each(LAUNCHING.map(row => [row.name, row] as const))(
 // that is not published): the conservative 200k window v4 used for a model that states none. Mounted start requests.
 describe.each([
   { label: 'no runtime named', runtime: undefined },
-  { label: 'a runtime that is not published', runtime: 'not-published-runtime' },
+  { label: 'a runtime that is not published', runtime: UNPUBLISHED },
 ])('an explicit start compactAt with $label', ({ runtime }) => {
   test('above the 200k unknown-window ceiling is refused before anything is written or started', async () => {
     const runner = new RecordingRunner();
