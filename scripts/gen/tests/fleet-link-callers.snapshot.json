@@ -1,0 +1,79 @@
+{
+  "exports": {
+    "packages/plugins/runtimes/daemon/adapters/fleet-disk.ts": [
+      "AlreadyExistsError.code",
+      "AlreadyExistsError.constructor",
+      "AlreadyExistsError: class",
+      "CopiedSource.kind",
+      "CopiedSource.left",
+      "CopiedSource: interface",
+      "FleetDisk.assertServed",
+      "FleetDisk.assertSource",
+      "FleetDisk.checkLinkTarget",
+      "FleetDisk.constructor",
+      "FleetDisk.contains",
+      "FleetDisk.copyInto",
+      "FleetDisk.create",
+      "FleetDisk.directory",
+      "FleetDisk.entries",
+      "FleetDisk.fenced",
+      "FleetDisk.fleet",
+      "FleetDisk.identity",
+      "FleetDisk.isSource",
+      "FleetDisk.linkTo",
+      "FleetDisk.lstat",
+      "FleetDisk.makeFolder",
+      "FleetDisk.readBytes",
+      "FleetDisk.readSource",
+      "FleetDisk.readSourceText",
+      "FleetDisk.readText",
+      "FleetDisk.remove",
+      "FleetDisk.rename",
+      "FleetDisk.setMode",
+      "FleetDisk: class",
+      "FleetDiskOptions.credentials",
+      "FleetDiskOptions.directory",
+      "FleetDiskOptions.fleet",
+      "FleetDiskOptions.sources",
+      "FleetDiskOptions: interface",
+      "LeftOut.path",
+      "LeftOut.reason",
+      "LeftOut: interface",
+      "NoDescriptorReachError.constructor",
+      "NoDescriptorReachError: class",
+      "credentialMounts: function",
+      "sourceMounts: function"
+    ],
+    "packages/plugins/runtimes/daemon/adapters/file-provisioner.ts": [
+      "FileFleetProvisioner.apply",
+      "FileFleetProvisioner.constructor",
+      "FileFleetProvisioner.preview",
+      "FileFleetProvisioner: class"
+    ]
+  },
+  "importers": [
+    "packages/plugins/runtimes/daemon/adapters/account-model-files.ts",
+    "packages/plugins/runtimes/daemon/adapters/apply-claim.ts",
+    "packages/plugins/runtimes/daemon/adapters/mutation-journal.ts",
+    "packages/plugins/runtimes/daemon/adapters/ports.ts",
+    "packages/plugins/runtimes/daemon/host-assembly.ts"
+  ],
+  "handleOrigins": [
+    "packages/core/kernel/host/worker-grants/serve.ts",
+    "packages/plugins/runtimes/daemon/adapters/document-link.ts",
+    "packages/plugins/runtimes/daemon/adapters/fleet-disk.ts",
+    "packages/plugins/runtimes/daemon/adapters/fleet-home-reader.ts",
+    "packages/plugins/runtimes/daemon/adapters/following-handle.ts",
+    "packages/plugins/runtimes/daemon/adapters/root-host-files.ts",
+    "packages/plugins/runtimes/daemon/host-assembly.ts"
+  ],
+  "handleReceivers": [
+    "packages/core/kernel/host/worker-grants/serve.ts",
+    "packages/plugins/runtimes/daemon/adapters/document-link.ts",
+    "packages/plugins/runtimes/daemon/adapters/fleet-disk.ts",
+    "packages/plugins/runtimes/daemon/adapters/fleet-home-reader.ts",
+    "packages/plugins/runtimes/daemon/adapters/following-handle.ts",
+    "packages/plugins/runtimes/daemon/adapters/root-host-files.ts",
+    "packages/plugins/runtimes/daemon/host-assembly.ts"
+  ]
+}
