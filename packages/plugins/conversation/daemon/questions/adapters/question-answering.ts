@@ -155,13 +155,7 @@ export function buildQuestionAnswering(deps: QuestionAnsweringDeps) {
     const toolUseId = pending.toolUseId;
     const polls = deps.polls ?? 12;
     const pollMs = deps.pollMs ?? 250;
-    const formStillShown = async (ferret: string, expect: InputExpectation | undefined): Promise<void> => {
-      // An input that names no surface is bound to nothing, so it types nothing.
-      if (expect === undefined)
-        throw new StructuredQuestionDriveError('an input without an expected form was refused', 'none', {
-          phase: 'input-binding',
-          reason: 'input-unbound',
-        });
+    const formStillShown = async (ferret: string, expect: InputExpectation): Promise<void> => {
       for (let poll = 0; ; poll++) {
         const shown = await pane.state(ferret);
         if (!shown.alive || shown.dead)
@@ -189,11 +183,7 @@ export function buildQuestionAnswering(deps: QuestionAnsweringDeps) {
         await deps.sleep(pollMs);
       }
     };
-    const typeIfHeld = async <T>(
-      ferret: string,
-      expect: InputExpectation | undefined,
-      input: () => Promise<T>,
-    ): Promise<T> =>
+    const typeIfHeld = async <T>(ferret: string, expect: InputExpectation, input: () => Promise<T>): Promise<T> =>
       await questionLane.run(ferret, async () => {
         const read = await state.read(QUESTION_STATE, ferret);
         if (!read.ok)
@@ -221,9 +211,9 @@ export function buildQuestionAnswering(deps: QuestionAnsweringDeps) {
         const stamp = await state.read(QUESTION_ANSWERED_STATE, ferret);
         return (stamp.ok && stamp.value?.toolUseId === id) || (await pane.completed?.(ferret, id)) === true;
       },
-      sendKey: async (ferret, pressed, expect) =>
+      sendKey: async (ferret, pressed, expect: InputExpectation) =>
         await typeIfHeld(ferret, expect, async () => await pane.sendKey(ferret, pressed)),
-      paste: async (ferret, text, expect) =>
+      paste: async (ferret, text, expect: InputExpectation) =>
         await typeIfHeld(ferret, expect, async () => await pane.paste(ferret, text)),
     };
   };

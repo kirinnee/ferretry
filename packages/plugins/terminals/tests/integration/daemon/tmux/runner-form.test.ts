@@ -37,6 +37,43 @@ describe('structured questions: the runner’s form seam', () => {
     expect(keys(world)).toEqual([]);
   });
 
+  it('formCapture reports a pane tmux kept after its process exited as dead, with nothing of its screen read or shown', async () => {
+    const world = subject({ redaction: identity });
+    world.server.transcript = 'the last words of a process that exited';
+    world.server.dead = true;
+
+    const seen = await world.runner.formCapture(world.handle);
+
+    expect(seen).toEqual({ alive: true, dead: true, promptReady: false, activeWork: false, visible: '', history: '' });
+    expect(world.acts.map(act => act.op)).toEqual(['read']);
+    expect(world.server.calls.some(call => call[0] === 'capture-pane')).toBe(false);
+    expect(keys(world)).toEqual([]);
+  });
+
+  it('formCapture keeps only the tail of an enormous scrollback, cut at a line boundary so no half line is masked or read', async () => {
+    const world = subject({ redaction: identity });
+    const lines = Array.from({ length: 30_000 }, (_, index) => `scrollback line ${String(index).padStart(5, '0')}`);
+    world.server.transcript = lines.join('\n');
+    expect(world.server.transcript.length).toBeGreaterThan(200_000);
+    // A real pane shows a screenful; only its scrollback is long. The fake serves one frame for both reads, so the visible
+    // read (no `-S`) is cut down to what a screen holds.
+    const serve = world.server.execute.bind(world.server);
+    world.server.execute = async (argv, stdin) =>
+      argv[0] === 'capture-pane' && !argv.includes('-S')
+        ? { code: 0, stdout: 'the visible screen\n', stderr: '' }
+        : await serve(argv, stdin);
+
+    const seen = await world.runner.formCapture(world.handle);
+
+    // The tail of a 200,000-character cap, starting on a whole line and still ending with the newest one.
+    expect(seen?.visible).toContain('the visible screen');
+    expect(seen?.history.length).toBeLessThanOrEqual(200_000);
+    expect(seen?.history.length).toBeGreaterThan(190_000);
+    expect(seen?.history.startsWith('scrollback line ')).toBe(true);
+    expect(seen?.history).toContain(lines.at(-1) as string);
+    expect(seen?.history).not.toContain(lines[0] as string);
+  });
+
   it('formCapture masks a value the Vault holds in both the screen and the scrollback', async () => {
     const world = subject({ redaction: redacting('hunter2') });
     world.server.transcript = 'the password is hunter2';

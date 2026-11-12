@@ -65,6 +65,50 @@ describe('Codex permission prompts, read by the Claude Code plugin’s parser', 
     expect(permissionAnswerKeys(request as never, { kind: 'choice', number: 9 })).toBeUndefined();
   });
 
+  const codexQuestion = (question: string, detail: readonly string[]): string =>
+    [
+      '  >_ OpenAI Codex (v0.164.0)',
+      '',
+      `  ${question}`,
+      '',
+      ...detail,
+      '',
+      '› 1. Yes, proceed (y)',
+      '  2. No, and tell Codex what to do differently (esc)',
+      '',
+      '  Press enter to confirm or esc to cancel',
+    ].join('\n');
+
+  it('reads a request for more permissions as a Permissions prompt whose reason is the detail', () => {
+    const request = parsePermissionPrompt(
+      codexQuestion('Would you like to grant these permissions?', ['  Reason: Needs network access']),
+    );
+
+    expect(request).toMatchObject({
+      harness: 'codex',
+      tool: 'Permissions',
+      action: 'other',
+      detail: 'Needs network access',
+      selected: 1,
+    });
+    expect(request?.what).toBeUndefined();
+  });
+
+  it('reads a Codex question it has no name for as a generic Codex prompt, the first line under it as the subject', () => {
+    const request = parsePermissionPrompt(
+      codexQuestion('Would you like to open the pod bay doors?', ['  Doors: pod bay', '  Reason: Hal asked']),
+    );
+
+    expect(request).toMatchObject({
+      harness: 'codex',
+      tool: 'Codex',
+      action: 'other',
+      what: 'Doors: pod bay',
+      detail: 'Hal asked',
+      selected: 1,
+    });
+  });
+
   it('does not take a Codex composer under a numbered list for a prompt', () => {
     const idle = ['Do you want to proceed?', '  1. Yes', '  2. No', '', '› Ask Codex to do anything'].join('\n');
 

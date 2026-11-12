@@ -502,6 +502,12 @@ describe('readHarnessDialogFrame — every shipped dialog fixture, cursor remove
     should(paneBlockingDialog(bare)).be.undefined();
   });
 
+  it('reads no dialog from a key-hint footer with nothing above it to be a list', () => {
+    const footer = '  Enter to confirm · Esc to cancel';
+
+    should([readHarnessDialogFrame(footer), readHarnessDialogFrame(`\n\n${footer}`)]).deepEqual([undefined, undefined]);
+  });
+
   it('still reads nothing from an unnumbered, markerless list whose header names no dialog', () => {
     const frame = [RULE, '  Pick one', '', '    A', '    B', '', '  Enter to confirm · Esc to cancel'].join('\n');
 
