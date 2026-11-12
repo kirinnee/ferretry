@@ -255,7 +255,10 @@ describe('launchEnvironment', () => {
 });
 
 describe('FleetLaunchEnvironment — a folder that would blank the login', () => {
-  const secretAccount = account({ secretEnv: { ANTHROPIC_AUTH_TOKEN: '${secret:LOGE_KEY}' } });
+  const secretAccount = account({
+    secretEnv: { ANTHROPIC_AUTH_TOKEN: '${secret:LOGE_KEY}' },
+    claudeEnvOverrides: ['ANTHROPIC_AUTH_TOKEN'],
+  });
   const folder = (...files: { file: string; names: readonly string[] }[]): FolderSettingsVariables => ({
     variables: async () => files,
   });
@@ -340,7 +343,7 @@ describe('FleetLaunchEnvironment — a folder that would blank the login', () =>
 
   it('should refuse a folder that blanks a variable the login takes from the environment by bare reference', async () => {
     // Arrange: nothing in the secret store; the login's token is a bare reference resolved when the wrapper runs.
-    const referenced = account({ referencedEnv: ['ANTHROPIC_AUTH_TOKEN'] });
+    const referenced = account({ claudeEnvOverrides: ['ANTHROPIC_AUTH_TOKEN'] });
     const secrets = store();
     const launcher = new FleetLaunchEnvironment(
       inventory(referenced),
@@ -365,7 +368,7 @@ describe('FleetLaunchEnvironment — a folder that would blank the login', () =>
 
   it('should start, with nothing to resolve, when the folder sets only other variables than the referenced ones', async () => {
     // Arrange
-    const referenced = account({ referencedEnv: ['ANTHROPIC_AUTH_TOKEN'] });
+    const referenced = account({ claudeEnvOverrides: ['ANTHROPIC_AUTH_TOKEN'] });
     const launcher = new FleetLaunchEnvironment(
       inventory(referenced),
       store(),
@@ -376,5 +379,41 @@ describe('FleetLaunchEnvironment — a folder that would blank the login', () =>
 
     // Act / Assert
     should(await launcher.forWrapper(referenced.wrapper, '/work/pe')).deepEqual({});
+  });
+
+  it('should let a project override a plain env secret binding and never inspect its settings', async () => {
+    const plain = account({ secretEnv: { ANTHROPIC_AUTH_TOKEN: '${secret:LOGE_KEY}' } });
+    const launcher = new FleetLaunchEnvironment(
+      inventory(plain),
+      store({ LOGE_KEY: 'fixture-value' }),
+      undefined,
+      undefined,
+      {
+        variables: async () => {
+          throw new Error('plain env leaves project settings alone');
+        },
+      },
+    );
+
+    should(await launcher.forWrapper(plain.wrapper, '/work/pe')).deepEqual({ ANTHROPIC_AUTH_TOKEN: 'fixture-value' });
+  });
+
+  it('should let project settings set other secret-backed variables alongside an explicit claude.env override', async () => {
+    const mixed = account({
+      secretEnv: { ANTHROPIC_AUTH_TOKEN: '${secret:LOGE_KEY}', OTHER_TOKEN: '${secret:OTHER_KEY}' },
+      claudeEnvOverrides: ['ANTHROPIC_AUTH_TOKEN'],
+    });
+    const launcher = new FleetLaunchEnvironment(
+      inventory(mixed),
+      store({ LOGE_KEY: 'fixture-value', OTHER_KEY: 'other-fixture' }),
+      undefined,
+      undefined,
+      folder({ file: '.claude/settings.local.json', names: ['OTHER_TOKEN'] }),
+    );
+
+    should(await launcher.forWrapper(mixed.wrapper, '/work/pe')).deepEqual({
+      ANTHROPIC_AUTH_TOKEN: 'fixture-value',
+      OTHER_TOKEN: 'other-fixture',
+    });
   });
 });
