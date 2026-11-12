@@ -7,9 +7,9 @@ import {
   parseWardenReports,
   parseWardenSpawnProvenance,
   provenancePath,
-  reportReadableBy,
+  reportNamedFor,
+  reportOwnedBy,
   reportsWorthReading,
-  reportTargets,
   type WardenReadScope,
   type WardenReportFile,
   type WardenReportFileSystem,
@@ -61,14 +61,35 @@ export class WardenReportReader {
   }
 
   /**
-   * One report, only when every verdict entry in it is about the scope's lineage; `undefined` otherwise, which is also
-   * what a report that does not exist reads as, so a caller cannot tell a stranger's report from a missing one.
+   * One report, only when EVERY part of it is attributable to the scope's lineage (`reportOwnedBy`: a strict check of the
+   * report's structure and of the daemon's own file name and sidecar, not the best-effort verdict parser); `undefined`
+   * otherwise, which is also what a report that does not exist or cannot be read reads as, so a caller cannot tell a
+   * stranger's report from a missing one. A report whose NAME puts it outside the lineage is not even opened.
    */
   async readReportFor(reportPath: string, scope: WardenReadScope): Promise<string | undefined> {
+    const named = reportNamedFor(reportPath);
+    if (named !== undefined && !scope.mayRead(named)) return undefined;
     const content = await this.files.readText(reportPath).catch(() => undefined);
-    if (content === undefined || !reportReadableBy(reportTargets({ path: reportPath, mtimeMs: 0, content }), scope))
-      return undefined;
-    return mergeWardenReportProvenance(content, await this.readProvenance(reportPath));
+    if (content === undefined) return undefined;
+    const provenance = await this.readProvenance(reportPath);
+    return this.ownedBy({ path: reportPath, content }, provenance, scope)
+      ? mergeWardenReportProvenance(content, provenance)
+      : undefined;
+  }
+
+  private ownedBy(
+    report: { readonly path: string; readonly content: string },
+    provenance: WardenSpawnProvenance | undefined,
+    scope: WardenReadScope,
+  ): boolean {
+    return reportOwnedBy(
+      {
+        ...report,
+        ...(provenance?.target === undefined ? {} : { provenanceTarget: provenance.target }),
+        ...(provenance === undefined ? {} : { provenanceWarden: provenance.wardenSessionId }),
+      },
+      scope,
+    );
   }
 
   /**
@@ -127,24 +148,41 @@ export class WardenReportReader {
     return attachSpawnProvenance(parseWardenReports(reports, limit), provenance);
   }
 
+  /**
+   * The scope's verdicts, newest report first, filtered by lineage BEFORE anything is read or cut. A report whose name puts
+   * it outside the lineage is never opened; one whose name does not say whose it is (a fleet triage) is opened and counts
+   * only when every part of it is the lineage's, and when it cannot be read it is simply not the scope's, so no report
+   * the scope may not read can change a row, an error or a banner. A report named for the lineage that cannot be read is
+   * the scope's own and fails the read, as it does for the owner.
+   */
   private async readVerdictsFor(
     ordered: readonly { readonly path: string; readonly mtimeMs: number }[],
     limit: number,
     scope: WardenReadScope,
   ): Promise<readonly (WardenVerdict & { readonly spawn?: WardenVerdictSpawn })[]> {
     const rows: (WardenVerdict & { readonly spawn?: WardenVerdictSpawn })[] = [];
-    for (let from = 0; from < ordered.length && rows.length < limit; from += SCAN_BATCH) {
-      const loaded = await mapWithConcurrency(ordered.slice(from, from + SCAN_BATCH), async candidate => {
+    const candidates = ordered.filter(candidate => {
+      const named = reportNamedFor(candidate.path);
+      return named === undefined || scope.mayRead(named);
+    });
+    for (let from = 0; from < candidates.length && rows.length < limit; from += SCAN_BATCH) {
+      const loaded = await mapWithConcurrency(candidates.slice(from, from + SCAN_BATCH), async candidate => {
         const content = await this.files.readText(candidate.path).catch(() => undefined);
-        return content === undefined || content.trim() === ''
-          ? undefined
-          : ({ path: candidate.path, mtimeMs: candidate.mtimeMs, content } satisfies WardenReportFile);
+        return {
+          candidate,
+          report:
+            content === undefined || content.trim() === ''
+              ? undefined
+              : ({ path: candidate.path, mtimeMs: candidate.mtimeMs, content } satisfies WardenReportFile),
+        };
       });
-      // As for the whole fleet: a report that cannot be read is evidence we cannot safely summarize.
-      if (loaded.some(file => file === undefined)) throw new Error('a Warden report could not be read');
-      for (const report of loaded) {
-        if (report === undefined || !reportReadableBy(reportTargets(report), scope)) continue;
+      // The scope's OWN report (named for it) that cannot be read is evidence we cannot safely summarize.
+      if (loaded.some(entry => entry.report === undefined && reportNamedFor(entry.candidate.path) !== undefined))
+        throw new Error('a Warden report could not be read');
+      for (const { report } of loaded) {
+        if (report === undefined) continue;
         const provenance = await this.readProvenance(report.path);
+        if (!this.ownedBy(report, provenance, scope)) continue;
         rows.push(
           ...attachSpawnProvenance(
             parseWardenReports([report], limit),

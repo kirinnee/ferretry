@@ -271,7 +271,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       config: configStore,
       agents,
       usage: { accounts: async () => [] },
-      verdicts: { recent: async () => await reader.readVerdicts().catch(() => undefined) },
+      verdicts: { recent: async scope => await reader.readVerdicts(undefined, scope).catch(() => undefined) },
       attention: agenda,
       journal: { record: (type, data) => kernel.log.info(type, scalars(data)) },
       jevChecks: new StateWardenJevCheckLog(kernel.state, nowMs),

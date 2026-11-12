@@ -126,6 +126,16 @@ const LAYER_OFF: Readonly<Record<Exclude<WardenTriageReason, 'configured' | 'dis
 };
 
 /**
+ * The same, for a view with NO amounts (a ferret's): it cannot tell the day's cap from this hour's share, so it says
+ * only what is true of either — paused — and never that a cap is "hit".
+ */
+const LAYER_PAUSED: Readonly<Record<keyof typeof LAYER_OFF, string>> = {
+  jev_cap: 'Jev paused',
+  investigation_cap: 'full checks paused',
+  no_login: 'no login',
+};
+
+/**
  * The layers in effect, and any the owner switched on that are off now and why: `Rules + Jev + LLM`,
  * `Rules + LLM (Jev cap hit)`, `Rules only (no login)`, `Off`.
  */
@@ -143,6 +153,6 @@ export const wardenTriageLabel = (status: WardenStatusView): string => {
   const off = [triage.jev, triage.llm]
     .map(layer => layer.reason)
     .filter((reason): reason is keyof typeof LAYER_OFF => reason in LAYER_OFF)
-    .map(reason => paced(reason) ?? LAYER_OFF[reason]);
+    .map(reason => paced(reason) ?? (status.spend === undefined ? LAYER_PAUSED : LAYER_OFF)[reason]);
   return off.length === 0 ? label : `${label} (${off.join(', ')})`;
 };

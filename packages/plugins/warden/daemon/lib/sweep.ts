@@ -427,7 +427,8 @@ interface WardenJournal {
  * sweep is told it is blind and reconciles nothing that pass.
  */
 interface WardenVerdictReader {
-  recent(): Promise<readonly WardenEscalationVerdict[] | undefined>;
+  /** A scope reads only the reports attributable to its lineage (filtered before anything is read). */
+  recent(scope?: WardenReadScope): Promise<readonly WardenEscalationVerdict[] | undefined>;
 }
 
 /** How the daemon's raise or refresh landed. */
@@ -1007,7 +1008,9 @@ export class WardenSweepService {
       live.map(async session => await this.ports.feed.board(session.config.id).catch(() => undefined)),
     );
     const boards = read.filter((board): board is AgendaBoardInput => board !== undefined);
-    const reports = await this.ports.verdicts.recent().catch(() => undefined);
+    // A scoped reader's "could not be read" is about ITS reports only: another lineage's report, readable or not, is
+    // not a reason for its banner.
+    const reports = await this.ports.verdicts.recent(scope).catch(() => undefined);
     return buildWardenAgendaView({
       now: this.ports.nowMs(),
       sessions: fleet,

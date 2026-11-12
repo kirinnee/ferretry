@@ -273,17 +273,10 @@ export function ferretAgendaView(owner: Agenda, scope: WardenReadScope): Agenda 
     generatedAt: owner.generatedAt,
     ...pick(owner, ['lastSweepAt']),
     outcome,
-    ...(owner.wardenDegraded === undefined ? {} : { wardenDegraded: pick(owner.wardenDegraded, ['since', 'reason']) }),
+    // The plain state and its sentence; never `since`: that is the instant of an investigation failure somewhere in the
+    // fleet (the global failover's `exhaustedSince`), which is activity of whichever lineage it happened to.
+    ...(owner.wardenDegraded === undefined ? {} : { wardenDegraded: pick(owner.wardenDegraded, ['reason']) }),
     items,
     verdictCoverage: pick(owner.verdictCoverage, ['limit', 'truncated']),
   });
-}
-
-/**
- * Whether a report may be read by the scope: it has at least one entry, and EVERY entry names a target in the lineage.
- * A pack report (no target) and a sweep report that also covers a stranger belong to no one caller, so they are not
- * found. `targets` are the sessions its verdict entries are about, `undefined` for an entry that names none.
- */
-export function reportReadableBy(targets: readonly (string | undefined)[], scope: WardenReadScope): boolean {
-  return targets.length > 0 && targets.every(target => target !== undefined && scope.mayRead(target));
 }

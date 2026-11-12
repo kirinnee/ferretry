@@ -10,7 +10,6 @@ import {
   ferretRunView,
   ferretStatusView,
   ferretVerdictsView,
-  reportReadableBy,
   type WardenReadScope,
 } from '../../daemon/lib/index.ts';
 
@@ -237,13 +236,21 @@ describe('the other Warden reads are deny by default too', () => {
     expect(view).toEqual({ sweptAt: AT, flags: [flag(MINE)] });
   });
 
-  test('a report is a caller’s only when every entry in it is about the lineage', () => {
-    expect(reportReadableBy([MINE], scope)).toBe(true);
-    expect(reportReadableBy([MINE, HELPER], scope)).toBe(true);
-    expect(reportReadableBy([MINE, STRANGER], scope)).toBe(false);
-    expect(reportReadableBy([MINE, undefined], scope)).toBe(false);
-    expect(reportReadableBy([undefined], scope)).toBe(false);
-    expect(reportReadableBy([], scope)).toBe(false);
+  test('an agenda says the accounts are exhausted but not since when: that instant is some lineage’s failure', () => {
+    const view = ferretAgendaView(
+      {
+        generatedAt: AT,
+        outcome: 'degraded',
+        wardenDegraded: { since: '2026-11-06T08:57:33.123Z', reason: 'All warden accounts are exhausted.' },
+        items: [],
+        boardsWithParseErrors: [],
+        verdictCoverage: { limit: 100, truncated: false },
+      } as unknown as Parameters<typeof ferretAgendaView>[0],
+      scope,
+    );
+    expect(view.outcome).toBe('degraded');
+    expect(view.wardenDegraded).toEqual({ reason: 'All warden accounts are exhausted.' });
+    expect(JSON.stringify(view)).not.toContain('08:57:33');
   });
 });
 

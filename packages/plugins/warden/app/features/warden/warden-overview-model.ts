@@ -124,14 +124,20 @@ const guardWarning = (status: WardenStatusView, now: number): string | undefined
   const llmPaced = wardenPacedUntil(status, 'investigation');
   if (llm.reason === 'investigation_cap' && llmPaced !== undefined)
     return `Full checks paused until ${llmPaced} — new flags wait for you`;
-  if (llm.reason === 'investigation_cap') return 'LLM cap hit — flags wait for you until midnight UTC';
+  // A view with no amounts (a ferret's) cannot tell the day's cap from this hour's share, so it claims neither.
+  if (llm.reason === 'investigation_cap')
+    return status.spend === undefined
+      ? 'Full checks paused — new flags wait for you'
+      : 'LLM cap hit — flags wait for you until midnight UTC';
   if (llm.reason === 'no_login')
     return `${wardenLoginProblem(status.login, status.failover?.accounts ?? []) ?? 'No investigation login'} — investigations are off until you choose one in Settings › Warden`;
   const jevPaced = wardenPacedUntil(status, 'jev');
   if (jev.reason === 'jev_cap' && jevPaced !== undefined)
     return `Jev paused until ${jevPaced} — new flags ${pausedTo(status)}`;
   if (jev.reason === 'jev_cap')
-    return `Jev paused: daily cap reached — every flag ${passedTo(status)} until midnight UTC`;
+    return status.spend === undefined
+      ? `Jev paused — every flag ${passedTo(status)}`
+      : `Jev paused: daily cap reached — every flag ${passedTo(status)} until midnight UTC`;
   if (!jev.configured) return undefined;
   if (status.triage.guardFailure?.code === 'not_set') return `No Jev key — every flag ${passedTo(status)}`;
   const backoff = Date.parse(status.triage.guardBackoffUntil ?? '');

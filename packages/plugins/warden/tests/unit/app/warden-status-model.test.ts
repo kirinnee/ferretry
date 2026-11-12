@@ -224,6 +224,25 @@ describe('wardenTriageLabel', () => {
     ]);
     expect(wardenTriageLabel(wardenStatus({ triage: { jev: off, llm: on } }))).toBe('Rules + LLM');
   });
+
+  it('should say only "paused" where the view has no amounts, as a ferret’s has: it cannot tell a day’s cap from an hour’s', () => {
+    // Arrange: a ferret's status carries no `spend`, so a layer a cap stopped reads `*_cap` for either cause.
+    const ferretView = (overrides: Parameters<typeof wardenStatus>[0]) => {
+      const { spend: _amounts, ...view } = wardenStatus(overrides);
+      return view as ReturnType<typeof wardenStatus>;
+    };
+    const llmStopped = ferretView({
+      triage: { jev: on, llm: { configured: true, active: false, reason: 'investigation_cap' } },
+    });
+    const jevStopped = ferretView({
+      triage: { jev: { configured: true, active: false, reason: 'jev_cap' }, llm: on },
+    });
+
+    // Assert
+    expect(wardenTriageLabel(llmStopped)).toBe('Rules + Jev (full checks paused)');
+    expect(wardenTriageLabel(jevStopped)).toBe('Rules + LLM (Jev paused)');
+    for (const view of [llmStopped, jevStopped]) expect(wardenTriageLabel(view)).not.toMatch(/cap/i);
+  });
 });
 
 describe('the investigation login', () => {

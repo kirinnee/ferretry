@@ -372,12 +372,3 @@ export function parseWardenReports(
 function pick<K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> {
   return value === undefined ? {} : ({ [key]: value } as Record<K, V>);
 }
-
-/**
- * The sessions one report is about, one per verdict entry (`undefined` for an entry that names none). A caller's
- * right to read the report is decided on these (`reportReadableBy`): the report's own text is the only record of what
- * it is about.
- */
-export function reportTargets(file: WardenReportFile): readonly (string | undefined)[] {
-  return parseWardenReports([file], Number.MAX_SAFE_INTEGER).map(entry => entry.targetSession);
-}

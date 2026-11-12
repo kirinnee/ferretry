@@ -130,6 +130,17 @@ caller's own. A report about anyone outside the lineage (or about no one, or abo
 **404**, never 403, so its existence is not confirmed. The ferret's status carries no spend, savings, history,
 fingerprint, spawn time or failover strikes; a Warden's id appears only while it investigates the caller's own, otherwise
 a plain `wardenRunning` boolean. The owner's static settings (`GET /v1/warden/config`, the `config` block) are readable.
+**A ferret's answers do not change because of another lineage's data** — a status code, a banner, a degraded state or a
+timestamp included. Raw report text (`report`, the newest report's head) and verdict rows come from a report only when
+**every part of it is attributable to the lineage**, decided by a strict, fail-closed check (`reportOwnedBy`,
+`warden/daemon/lib/report-ownership.ts`) and never by the best-effort parser the owner's summaries use: every anomaly
+heading well formed and naming a lineage session, no other second-level section in a fleet report, exactly one
+well-formed header in an assigned one that agrees with the daemon's file name and sidecar, and no identity outside the
+lineage anywhere in the text. A report that fails, is headless, or is unreadable is simply not the ferret's (404, or
+absent from its rows), and a report whose file name puts it outside the lineage is not even opened, so it cannot fail the
+ferret's verdicts or darken its agenda. The agenda's "could not be read" banner is computed from the ferret's own
+reports only, and its "all accounts exhausted" state carries no timestamp (that instant belongs to whichever lineage's
+investigation failed). The owner and a device keep today's semantics, an unreadable report included.
 
 **Updating the daemon is `fleet`.** Reading `GET /v1/daemon/update` is `use`; starting an update and
 changing automatic install are `configure`, and a governed device also gives a passkey step-up for that

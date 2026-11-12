@@ -202,6 +202,30 @@ describe('wardenStatusLine', () => {
     ]);
   });
 
+  it('should claim no daily cap and no midnight where the view has no amounts, as a ferret’s has', () => {
+    // Arrange
+    const ferretView = (overrides: Partial<WardenStatusView>): WardenStatusView => {
+      const { spend: _amounts, ...view } = jevStatus(overrides);
+      return view;
+    };
+    const statuses = [
+      ferretView({ triage: { jev: on, llm: stopped('investigation_cap') } }),
+      ferretView({ triage: { jev: stopped('jev_cap'), llm: on } }),
+      ferretView({ triage: { jev: stopped('jev_cap'), llm: off } }),
+    ];
+
+    // Act
+    const warnings = statuses.map(status => wardenStatusLine(status, NOW).warning);
+
+    // Assert
+    expect(warnings).toEqual([
+      'Full checks paused — new flags wait for you',
+      'Jev paused — every flag goes to an investigation',
+      'Jev paused — every flag waits for you',
+    ]);
+    for (const warning of warnings) expect(warning).not.toMatch(/daily|midnight|cap/i);
+  });
+
   it('should say a cap reached only for this hour is back at the top of the hour, not at midnight', () => {
     // Arrange
     const base = jevStatus();
