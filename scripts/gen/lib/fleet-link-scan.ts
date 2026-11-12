@@ -28,6 +28,10 @@
  * operations exactly like the handle's, reported as `FleetDisk.<member>`. A `Pick<AdapterHost, 'disk'>`, `host.disk.linkTo`, a
  * wrapper, an alias and a destructuring are the same value to the checker, so they are all seen.
  *
+ * Every production project is scanned (the root, `packages/app`, the one-shot migration), each with the disk module as ITS program
+ * holds it — the module is in a secondary project's program when that project imports `FleetDisk`, even though it is assigned
+ * to the root project.
+ *
  * NOT caught (declared): reflection (`Reflect.get`, `Object.entries`, `Object.getOwnPropertyDescriptor`) — a name that is
  * never a typed key — and a handle that reaches an `any` some other way (a property, a return, a container) and is then
  * indexed by a key that is not an operation's name.
@@ -112,14 +116,23 @@ export async function handleFactsOf(project: Project): Promise<HandleFacts | und
   };
 }
 
-/** The disk's facts, with `operations` its link-capable members. */
+/**
+ * The disk module as THIS project's program holds it, whichever project it is assigned to: a secondary project (the
+ * migration) that imports `FleetDisk` has the module in its program without it being among its assigned files.
+ */
+export async function diskModuleOf(project: Project): Promise<string | undefined> {
+  return (await project.program.getSourceFileNames()).find(name =>
+    name.replaceAll('\\', '/').endsWith(FLEET_DISK_MODULE),
+  );
+}
+
+/** The disk's facts in one project's program, with `operations` its link-capable members. */
 async function diskFactsOf(
   project: Project,
-  files: readonly string[],
   root: HandleFacts,
   rootOracle: HandleOracle,
 ): Promise<HandleFacts | undefined> {
-  const file = files.find(name => name.replaceAll('\\', '/').endsWith(FLEET_DISK_MODULE));
+  const file = await diskModuleOf(project);
   const sf = file === undefined ? undefined : await project.program.getSourceFile(file);
   if (file === undefined || sf === undefined) return undefined;
   const reads: Node[] = [];
@@ -164,7 +177,7 @@ export async function diskOperationsOf(program: ProductionProgram): Promise<stri
   if (root === undefined) return [];
   const facts = await handleFactsOf(root.project);
   if (facts === undefined) return [];
-  const disk = await diskFactsOf(root.project, root.files, facts, new HandleOracle(facts));
+  const disk = await diskFactsOf(root.project, facts, new HandleOracle(facts));
   return [...(disk?.operations ?? [])].sort();
 }
 
@@ -511,7 +524,7 @@ export async function reachesIn(program: ProductionProgram): Promise<Map<string,
     const authorities: Authority[] = [];
     if (facts !== undefined && oracle !== undefined) {
       authorities.push({ facts, oracle });
-      const disk = await diskFactsOf(project, files, facts, oracle);
+      const disk = await diskFactsOf(project, facts, oracle);
       if (disk !== undefined) authorities.push({ facts: disk, oracle: new HandleOracle(disk) });
     }
     const names = new Set(authorities.flatMap(({ facts: each }) => [...each.operations]));

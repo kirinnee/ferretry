@@ -22,6 +22,10 @@
  *    that implements it. A new, removed or renamed operation changes the pin whatever it is called, so a reviewer decides its
  *    guard — the scan cannot infer link semantics from an unlisted name.
  *
+ * EVERY production project is derived (the root, `packages/app`, the one-shot migration) and the results combined: a caller in a
+ * secondary project is a caller. Only the allowed modules' export definitions (1) and the interface's member list (6) are
+ * pinned once, from the root project that owns them.
+ *
  * Origins (3) are found by what a call RESOLVES to (the declaration of `RootsPort.root`), not by how the callee is spelled:
  * a destructuring, a rename, an element access, `.bind`/`.call`/`.apply` and passing `roots.root` as a value are all followed
  * until the calls they end in; a root name that cannot be resolved counts as a fleet root.
@@ -42,8 +46,9 @@ import {
 import { type Expression, type Node, type SourceFile, SyntaxKind } from 'typescript/unstable/ast';
 import {
   FLEET_DISK_CLASS,
-  FLEET_DISK_MODULE,
+  type HandleFacts,
   HandleOracle,
+  diskModuleOf,
   handleFactsOf,
   diskOperationsOf,
   keyNamesOf,
@@ -750,12 +755,8 @@ const TYPE_CONTAINERS: ReadonlySet<SyntaxKind> = new Set([
   SyntaxKind.ConditionalType,
 ]);
 
-async function diskHolders(
-  project: Project,
-  files: readonly string[],
-  production: ReadonlySet<string>,
-): Promise<string[]> {
-  const file = files.find(name => name.replaceAll('\\', '/').endsWith(FLEET_DISK_MODULE));
+async function diskHolders(project: Project, production: ReadonlySet<string>): Promise<string[]> {
+  const file = await diskModuleOf(project);
   const sf = file === undefined ? undefined : await project.program.getSourceFile(file);
   const declaration = sf?.statements.find(
     statement =>
@@ -928,10 +929,13 @@ function enclosingName(node: Node): string {
   return '<anonymous>';
 }
 
-async function handleApi(program: ProductionProgram, project: Project, files: readonly string[]): Promise<HandleApi> {
-  const facts = await handleFactsOf(project);
-  if (facts === undefined)
-    throw new Error(`the kernel contract (${KERNEL_PORTS}) is not part of the root TypeScript project`);
+/** The interface's members (named once, from the root project) and the implementations in one project's assigned files. */
+async function handleApi(
+  program: ProductionProgram,
+  project: Project,
+  files: readonly string[],
+  facts: HandleFacts,
+): Promise<HandleApi> {
   const members = await memberLabels(project, facts.handle, false);
   const methodNames = new Set(
     (await project.checker.getPropertiesOfType(facts.handle))
@@ -984,24 +988,43 @@ export async function authoritySurface(
 ): Promise<AuthoritySurface> {
   const root = program.projects[0];
   if (root === undefined) throw new Error('no TypeScript project');
-  const { project, files } = root;
-  const absolute = new Map(files.map(file => [program.rel(file), file]));
+  // The allowed modules' export definitions are pinned ONCE, from the root project that owns them. Everything about who
+  // reaches them is derived from EVERY project that type-checks production code (the root, `packages/app`, the migration):
+  // a caller in a secondary project is a caller, whichever project the allowed modules are assigned to.
+  const absolute = new Map(root.files.map(file => [program.rel(file), file]));
   const exports: Record<string, readonly string[]> = {};
   for (const rel of allowedModules) {
     const file = absolute.get(rel);
-    const sf = file === undefined ? undefined : await project.program.getSourceFile(file);
+    const sf = file === undefined ? undefined : await root.project.program.getSourceFile(file);
     if (sf === undefined) throw new Error(`${rel} is not a production module of the root TypeScript project`);
-    exports[rel] = await exportsOf(project, sf);
+    exports[rel] = await exportsOf(root.project, sf);
   }
-  const edges = await importEdges(program, project, files);
-  const importers = importersOf(edges, new Set(allowedModules));
-  const ports = [...(await project.program.getSourceFileNames())].find(name => name.endsWith(KERNEL_PORTS));
-  if (ports === undefined)
-    throw new Error(`the kernel contract (${KERNEL_PORTS}) is not part of the root TypeScript project`);
-  const production = new Set(files);
-  const origins = await rootOrigins(project, files, production);
-  const flow = new HandleFlow(project, production);
-  await flow.run(origins.seeds);
+  const production = new Set(program.projects.flatMap(each => each.files));
+  const edges: Edge[] = [];
+  const origins = new Set<string>();
+  const receivers = new Set<string>();
+  const holders = new Set<string>();
+  const implementations: Record<string, readonly string[]> = {};
+  let members: readonly string[] = [];
+  for (const [index, { project, files }] of program.projects.entries()) {
+    edges.push(...(await importEdges(program, project, files)));
+    // A project without the kernel contract has no `RootHandle` or `RootsPort`: no value in it can be one.
+    const facts = await handleFactsOf(project);
+    if (facts === undefined) {
+      if (index === 0)
+        throw new Error(`the kernel contract (${KERNEL_PORTS}) is not part of the root TypeScript project`);
+      continue;
+    }
+    const found = await rootOrigins(project, files, production);
+    const flow = new HandleFlow(project, production);
+    await flow.run(found.seeds);
+    for (const file of found.modules) origins.add(file);
+    for (const file of flow.modules) receivers.add(file);
+    for (const file of await diskHolders(project, production)) holders.add(file);
+    const api = await handleApi(program, project, files, facts);
+    if (index === 0) members = api.members;
+    Object.assign(implementations, api.implementations);
+  }
   const relative = (set: Iterable<string>): string[] =>
     [...set]
       .filter(file => production.has(file))
@@ -1009,12 +1032,12 @@ export async function authoritySurface(
       .sort();
   return {
     exports,
-    importers,
-    handleOrigins: relative(origins.modules),
-    handleReceivers: relative(flow.modules),
+    importers: importersOf(edges, new Set(allowedModules)),
+    handleOrigins: relative(origins),
+    handleReceivers: relative(receivers),
     diskOperations: await diskOperationsOf(program),
-    diskHolders: relative(await diskHolders(project, files, production)),
-    handleApi: await handleApi(program, project, files),
+    diskHolders: relative(holders),
+    handleApi: { members, implementations },
   };
 }
 

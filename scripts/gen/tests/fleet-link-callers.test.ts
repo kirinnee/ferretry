@@ -32,7 +32,11 @@
  * The scanner is `../lib/fleet-link-scan.ts`, the surface `../lib/fleet-link-authority.ts`; their docs say what they
  * do not follow (reflection, a handle put in a container).
  *
- * RUNTIME (measured 2026-11-12, Linux x64): the whole file takes ~27 s (round 7: ~17 s). One run opens the TypeScript 7
+ * EVERY PRODUCTION PROJECT is covered in both layers (round 9): the root project, `packages/app` and the one-shot migration each
+ * open their own program, and a project that imports `FleetDisk` holds the disk module in its program whichever project it is
+ * assigned to, so a caller in the migration is a caller. The allowed modules' export definitions are pinned once.
+ *
+ * RUNTIME (measured 2026-11-12, Linux x64): the whole file takes ~30 s (round 8: ~27 s; round 7: ~17 s). One run opens the TypeScript 7
  * checker over ~4,300 production modules once (~2 s), scans them for both authorities (~10 s) and derives the surface
  * (~15 s: origins by reference, the disk's holders, the handle's API); each fixture workspace adds ~2-3 s (it type-checks
  * the real kernel contract; the three that change the contract hold their own copy of it). The timeouts below are those
@@ -55,6 +59,8 @@ const AFTER_MERGE_CARD = '&F3537';
 const FLEET_ROOTS = ['fleet', 'harness-home'] as const;
 const SNAPSHOT = join(import.meta.dir, 'fleet-link-callers.snapshot.json');
 
+/** The secondary TypeScript project's source directory (the real migration has its own tsconfig the root does not include). */
+const MIGRATION = 'migration/second-project';
 const FLEET_DISK = 'packages/plugins/runtimes/daemon/adapters/fleet-disk.ts';
 const FILE_PROVISIONER = 'packages/plugins/runtimes/daemon/adapters/file-provisioner.ts';
 /** The ONLY module that may read a link operation off a `RootHandle`. Remove it at &F3537. */
@@ -198,6 +204,8 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
         include: ['packages/**/*.ts'],
         exclude: [],
       }),
+      // A SECOND TypeScript project, as the real one-shot migration is: its own tsconfig, none of its modules in the root's.
+      [`${MIGRATION}/tsconfig.json`]: JSON.stringify({ extends: '../../tsconfig.json', include: ['src'], exclude: [] }),
       'packages/core/kernel/package.json': JSON.stringify({ name: '@fixture/kernel' }),
       'packages/plugins/runtimes/package.json': JSON.stringify({ name: '@fixture/runtimes' }),
       'packages/plugins/other/package.json': JSON.stringify({ name: '@fixture/other' }),
@@ -419,6 +427,19 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
       file: `${ADAPTERS}/disk-holder.ts`,
       code: `import type { FleetDisk } from './fleet-disk.ts';\nexport class Holder {\n  constructor(private readonly disk: FleetDisk) {}\n  go(at: string) {\n    return this.disk.link(at as never, undefined as never);\n  }\n}\n`,
       as: 'FleetDisk.link',
+    },
+    // round 9: a SECOND TypeScript project holds the disk module in its program without it being among its assigned files.
+    {
+      name: 'a migration-project helper calling FleetDisk.link (round 9: a secondary project)',
+      file: `${MIGRATION}/src/fleet-link-repair.ts`,
+      code: `import type { FencedPath, RootLinkTarget } from '@ferretry/kernel/contract';\nimport type { FleetDisk } from '../../../${ADAPTERS}/fleet-disk.ts';\nexport async function restoreAsset(disk: FleetDisk, ${CALL}): Promise<void> {\n  await disk.link(at, target);\n}\n`,
+      as: 'FleetDisk.link',
+    },
+    {
+      name: 'a migration-project helper calling RootHandle.linkTo (round 9: a secondary project)',
+      file: `${MIGRATION}/src/handle-link-repair.ts`,
+      code: `${TYPES}export const restore = (fleet: RootHandle, ${CALL}) => fleet.linkTo(at, target);\n`,
+      as: 'linkTo',
     },
     {
       name: 'an any-typed receiver reading the operation by name',
@@ -718,6 +739,58 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
         })
       ).join('\n');
       expect(text).toContain(`${file} is a new implementation of RootHandle`);
+    });
+
+    // round 9: every production project is covered, not only the one that owns the allowed modules.
+    describe('a secondary TypeScript project (the migration) is covered like the root one', () => {
+      const KERNEL = `import type { FencedPath, RootHandle, RootLinkTarget, RootsPort } from '@ferretry/kernel/contract';\n`;
+      const FROM = `../../../${ADAPTERS}/fleet-disk.ts`;
+      test('a migration module calling FleetDisk.link is an importer and a holder', async () => {
+        const file = `${MIGRATION}/src/fleet-link-repair.ts`;
+        const text = (
+          await changesOf({
+            [file]: `${KERNEL}import type { FleetDisk } from '${FROM}';\nexport const restore = (disk: FleetDisk, ${CALL}) => disk.link(at, target);\n`,
+          })
+        ).join('\n');
+        expect(text).toContain(`${file} is a new module that imports an allowed module`);
+        expect(text).toContain(`${file} is a new module that holds a FleetDisk`);
+        expect(text).toContain(AFTER_MERGE_CARD);
+      });
+
+      test('a migration module asking roots.root("fleet") is an origin', async () => {
+        const file = `${MIGRATION}/src/review-origin.ts`;
+        const text = (
+          await changesOf({ [file]: `${KERNEL}export const open = (roots: RootsPort) => roots.root('fleet');\n` })
+        ).join('\n');
+        expect(text).toContain(`${file} is a new module that asks the kernel for a fleet or harness-home handle`);
+      });
+
+      test('a migration module receiving the handle from a root-project origin is a receiver', async () => {
+        const file = `${MIGRATION}/src/review-receiver.ts`;
+        const text = (
+          await changesOf({
+            [file]: `${KERNEL}export const open = (roots: RootsPort) => {\n  const fleet = roots.root('fleet');\n  return fleet;\n};\n`,
+          })
+        ).join('\n');
+        expect(text).toContain(`${file} is a new module that receives the fleet or harness-home handle`);
+      });
+
+      test('an abstract migration class implementing Pick<RootHandle, "linkTo"> is an implementation', async () => {
+        const file = `${MIGRATION}/src/review-class.ts`;
+        const text = (
+          await changesOf({
+            [file]: `${KERNEL}export abstract class SecondaryHandle implements Pick<RootHandle, 'linkTo'> {\n  abstract linkTo(at: FencedPath, target: RootLinkTarget): Promise<void>;\n}\n`,
+          })
+        ).join('\n');
+        expect(text).toContain(`${file} is a new implementation of RootHandle`);
+      });
+
+      test('ordinary migration code that reaches none of it changes nothing', async () => {
+        const changes = await changesOf({
+          [`${MIGRATION}/src/ordinary.ts`]: `${KERNEL}export const open = (roots: RootsPort) => roots.root('work');\nexport const sum = (a: number, b: number) => a + b;\n`,
+        });
+        expect(changes).toEqual([]);
+      });
     });
 
     test('a class implementing RootHandle is an implementation', async () => {
