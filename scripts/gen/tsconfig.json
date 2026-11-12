@@ -22,6 +22,7 @@
     "../validate/ports-pending.ts",
     "../validate/read-scoped.ts",
     "../validate/registries-fresh.ts",
+    "../validate/unwired-seams.ts",
     "../validate/words.ts"
   ],
   "exclude": ["./tests/.tmp/**", "./today/**"]
