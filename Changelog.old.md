@@ -1,3 +1,9 @@
+## [4.291.11](https://github.com/kirinnee/ferretry/compare/v4.291.10...v4.291.11) (2026-11-12)
+
+### Fixes
+
+* **ci:** accept GoReleaser's multi-line conflicts_with in the cask contract ([#1591](https://github.com/kirinnee/ferretry/issues/1591)) ([c396402](https://github.com/kirinnee/ferretry/commit/c3964024794f8e2523ad4402ed38bfedf137d362))
+
 ## [4.291.10](https://github.com/kirinnee/ferretry/compare/v4.291.9...v4.291.10) (2026-11-12)
 
 ### Fixes
