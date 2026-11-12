@@ -186,6 +186,9 @@ for (const text of ['Ask the on-call first', 'Ask  the on-call first', 'Ask\tthe
     const { host, ferret } = await boot(runner);
     const stored = JSON.parse(host.state('conversation').raw(QUESTION_STATE, ferret)!);
     stored.text = singleQuestion;
+    // Claude requires `header` in the AskUserQuestion payload (the recorded prompt asked for "Pool check") and the hook
+    // keeps it, so the stored question names the chip the pane draws; the chip is never guessed (rv6).
+    stored.header = 'Pool check';
     stored.options = singleOptions.map(label => ({ label }));
     host.state('conversation').plant(QUESTION_STATE, JSON.stringify(stored), ferret);
     try {

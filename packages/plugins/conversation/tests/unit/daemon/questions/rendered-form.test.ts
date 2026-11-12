@@ -48,10 +48,12 @@ const poolCheck: RenderedQuestion = {
 };
 
 const colour: RenderedQuestion = {
+  header: 'Colour',
   question: 'Which colour should the banner use?',
   options: [{ label: 'Red' }, { label: 'Blue' }],
 };
 const extras: RenderedQuestion = {
+  header: 'Extras',
   question: 'Which extras should ship with the banner?',
   multiSelect: true,
   options: [{ label: 'Shadow' }, { label: 'Border' }, { label: 'Icon' }],
@@ -109,6 +111,7 @@ describe('rendered question form', () => {
         submit: 4,
       });
       const single = bindQuestionForm(screenOnly('claude-2.1.281-single-multiselect'), {
+        header: 'Extras',
         question: 'Which extras should ship?',
         multiSelect: true,
         options: [{ label: 'Shadow' }, { label: 'Border' }],

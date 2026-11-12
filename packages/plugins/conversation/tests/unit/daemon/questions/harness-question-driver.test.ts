@@ -323,8 +323,13 @@ describe('tmux structured-question driver', () => {
       const banner: PendingQuestion = {
         toolUseId: 'question-banner',
         questions: [
-          { question: 'Which colour should the banner use?', options: [{ label: 'Red' }, { label: 'Blue' }] },
           {
+            header: 'Colour',
+            question: 'Which colour should the banner use?',
+            options: [{ label: 'Red' }, { label: 'Blue' }],
+          },
+          {
+            header: 'Extras',
             question: 'Which extras should ship with the banner?',
             multiSelect: true,
             options: [{ label: 'Shadow' }, { label: 'Border' }, { label: 'Icon' }],
@@ -366,6 +371,7 @@ describe('tmux structured-question driver', () => {
         toolUseId: 'question-extras',
         questions: [
           {
+            header: 'Extras',
             question: 'Which extras should ship?',
             multiSelect: true,
             options: [{ label: 'Shadow' }, { label: 'Border' }],

@@ -42,9 +42,9 @@ describe('the question text is its own, whatever it looks like', () => {
   for (const literal of ['☐ Include optional tests?', 'Question 1/2: should we deploy?', '← Which direction? →'])
     it(`binds ${literal} on the recorded Claude layout`, () => {
       should(bindQuestionForm(screen(drawnQuestion(literal)), { ...pending, question: literal })).not.be.undefined();
-      // A question that stored no header still has the harness's own chip set aside, in its one place.
+      // A question that stored no header has no chip set aside (rv6): the pane's chip is a heading it cannot name.
       const { header: _header, ...unnamed } = pending;
-      should(bindQuestionForm(screen(drawnQuestion(literal)), { ...unnamed, question: literal })).not.be.undefined();
+      should(bindQuestionForm(screen(drawnQuestion(literal)), { ...unnamed, question: literal })).be.undefined();
       const noChip = drawnQuestion(literal).replace(' ☐ Pool check\n\n', '');
       should(bindQuestionForm(screen(noChip), { ...unnamed, question: literal })).not.be.undefined();
     });
@@ -99,19 +99,18 @@ describe('only the exact decoration, in its own place, is set aside', () => {
     should(bindQuestionForm(form(' ☐ Deploy', ' ☐ Another', 'Deploy?'), deploy)).be.undefined();
   });
 
-  it('sets aside, for a question that stored no header, only the harness’s own chip in its one place', () => {
+  it('sets no chip aside for a question that stored no header: the header is part of the payload (rv6)', () => {
     const unnamed: RenderedQuestion = { question: 'Deploy?', options: deploy.options };
     should(bindQuestionForm(form('Deploy?'), unnamed)).not.be.undefined();
-    // First line, short label, blank line, then the question: the shape Claude draws.
-    should(bindQuestionForm(form(' ☐ Deploy', '', 'Deploy?'), unnamed)).not.be.undefined();
-    // A heading with nothing between it and the question, or a label no header could be, or a second one: a foreign heading.
+    // The shape Claude draws for a NAMED question — but this one has no stored name to compare it with.
+    should(bindQuestionForm(form(' ☐ Deploy', '', 'Deploy?'), unnamed)).be.undefined();
+    should(bindQuestionForm(form(' ☐ Approve all', '', 'Deploy?'), unnamed)).be.undefined();
     should(bindQuestionForm(form(' ☐ Approval required for a different operation', 'Deploy?'), unnamed)).be.undefined();
     should(bindQuestionForm(form(' ☐ Deploy', 'Deploy?'), unnamed)).be.undefined();
-    should(
-      bindQuestionForm(form(' ☐ Approval required for a different operation', '', 'Deploy?'), unnamed),
-    ).be.undefined();
     should(bindQuestionForm(form(' ☐ Deploy', '', ' ☐ Deploy', '', 'Deploy?'), unnamed)).be.undefined();
     should(bindQuestionForm(form('  Question 1/1', ' ☐ Deploy', '', 'Deploy?'), unnamed)).be.undefined();
+    // Nor is a strip read for a question that cannot name its tab.
+    should(bindQuestionForm(form('←  ☐ Deploy  ✔ Submit  →', 'Deploy?'), unnamed)).be.undefined();
   });
 
   it('refuses a strip or Codex header in a form that is not the harness’s, or that names another question', () => {
@@ -131,6 +130,7 @@ describe('only the exact decoration, in its own place, is set aside', () => {
     should(freeFormPageShown(page(' ☐ Deploy'), deploy)).be.true();
     should(freeFormPageShown(page(' ☐ Deploy'), unnamed)).be.false();
     should(freeFormPageShown(page(' ☐ Approval required for a different operation'), unnamed)).be.false();
+    should(freeFormPageShown(page(' ☐ Approve all'), unnamed)).be.false();
     should(freeFormPageShown(page(), unnamed)).be.true();
   });
 });

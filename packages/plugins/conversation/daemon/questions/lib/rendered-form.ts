@@ -96,8 +96,13 @@ interface Row {
 interface Block {
   readonly rows: readonly Row[];
   readonly submit?: { readonly line: number; readonly cursor: boolean };
-  /** The lines between the form's top border and its first row: where its question is drawn. */
+  /** The lines between the form's top border and its first row, searched upward until a rule or a strip: where a review is read. */
   readonly header: readonly string[];
+  /**
+   * The lines from the form's STRUCTURAL top down to its first row, or `undefined` when no top could be established
+   * ({@link formTop}). Question identity is read from this and only this: a form whose top is unknown is not read.
+   */
+  readonly form: readonly string[] | undefined;
 }
 
 const CURSOR = '[❯›>➜▶]';
@@ -112,6 +117,8 @@ const CHECKBOX = /^\[(?<mark>.)\]\s+/u;
 const RULE = /^\s*[─━═]{8,}\s*$/u;
 /** Codex's header, `Question 1/2 (2 unanswered)`, which is where its form begins: the whole line and nothing after it. */
 const CODEX_HEADER = /^\s*Question \d+\/\d+(?: \(\d+ unanswered\))?\s*$/u;
+/** Where Codex draws that header in every recorded pane (0.156.1, 0.164.0): two columns in, never at the edge. */
+const CODEX_FORM_HEADER = /^ {2}Question \d+\/\d+(?: \(\d+ unanswered\))?\s*$/u;
 /** The gutter a harness draws beside a quoted question, which is not part of its text. */
 const GUTTER = /^\s*[│┃▏▎▍]\s?/u;
 /** How far above its rows a form's header may be searched for, scrollback included. */
@@ -120,8 +127,6 @@ const HEADER_REACH = 200;
 const TAB_STRIP = /^\s*←\s+(?<tabs>.+?)\s+→\s*$/u;
 const TAB = /^(?<mark>[☐☒])\s+(?<label>.+)$/u;
 const SUBMIT_TAB = /^✔\s+Submit$/u;
-/** How long Claude lets a question's header be (it is a "very short label", at most 12 characters): the chip's longest label. */
-const CHIP_LABEL_MAX = 12;
 /** The mark a revisited tab puts after the row it was answered with. */
 const CHOSEN = /\s+✔$/u;
 
@@ -196,7 +201,12 @@ function lastBlock(screen: QuestionScreen): Block | undefined {
   let open = false;
   const close = (): void => {
     if (rows.length > 0 && (rows[0]?.line ?? -1) >= screen.visibleFrom)
-      found = { rows, ...(submit === undefined ? {} : { submit }), header: headerAbove(screen, rows[0]?.line ?? 0) };
+      found = {
+        rows,
+        ...(submit === undefined ? {} : { submit }),
+        header: headerAbove(screen, rows[0]?.line ?? 0),
+        form: formTop(screen, rows[0]?.line ?? 0),
+      };
     rows = [];
     submit = undefined;
     open = false;
@@ -270,39 +280,68 @@ function headerAbove(screen: QuestionScreen, first: number): readonly string[] {
 }
 
 /**
- * Whether the form's header is EXACTLY this question, read by position: at most [the tab strip] [Codex's `Question n/m`]
- * [the question's own chip], in that order from the top, and then the question's text, compared literally.
+ * Where the live form BEGINS, from the structure the harness draws — never from a line that merely looks like a header.
+ *
+ * Walking up from the first row, the form begins at:
+ *   - Claude's horizontal rule, the border it draws above the form (a rule that was not kept leaves a blank line, so
+ *     the strip below it is a top of its own); or
+ *   - the harness's exact opening form — Claude's tab strip, Codex's `  Question n/m` — that stands directly under a
+ *     blank line (or the rule), which is how every recorded pane draws it. A decoration-shaped line that sits directly
+ *     under some other text is not a top: it is a line of that text, and the text above it is part of what must be consumed.
+ *
+ * A run of such openings (a strip, a blank, a Codex header) is ONE top, so the first is not dropped. Where no top can be
+ * established within {@link HEADER_REACH} lines the answer is `undefined`, and a form with no known top is never read.
+ */
+function formTop(screen: QuestionScreen, first: number): readonly string[] | undefined {
+  const blank = (index: number): boolean => (screen.lines[index] ?? '').trim() === '';
+  const opening = (line: string): boolean =>
+    !GUTTER.test(line) && (CODEX_FORM_HEADER.test(line) || stripTabs(line) !== undefined);
+  let top: number | undefined;
+  for (let index = first - 1; index >= Math.max(0, first - HEADER_REACH); index--) {
+    const line = screen.lines[index] ?? '';
+    if (RULE.test(line)) return screen.lines.slice(index + 1, first);
+    if (blank(index)) continue;
+    if (opening(line)) {
+      // Anchored: the line above is blank. (Index 0 has nothing above it in the capture: unknown, so not a top.)
+      top = index > 0 && blank(index - 1) ? index : undefined;
+      continue;
+    }
+    if (top !== undefined) return screen.lines.slice(top, first);
+  }
+  return undefined;
+}
+
+/**
+ * Whether the form IS exactly this question, read by position: from the form's structural top down to the question, every
+ * line is consumed in order by [the tab strip that names the stored header] [Codex's `Question n/m`] [the own chip, equal
+ * to the stored header], and what is left is the question's text, compared literally and completely.
  *
  * A line is decoration because of WHERE it is and THAT it has the harness's exact form — never because its text looks
- * like decoration, so a question that begins `☐`, `Question 1/2:` or sits between arrows is still its own text. The chip is
- * the stored header (`☐ Header`, or cut with an ellipsis). A question that stored no header has nothing to compare a
- * chip with, so only the harness's own chip shape is set aside, and only in its one place: the very first line, a short
- * label ({@link CHIP_LABEL_MAX}), a blank line, then the question. Any other checkbox line above it is some other heading.
- * A header that merely contains the text — a permission prompt quoting it, a dialog that adds to it — is some other surface.
+ * like decoration, so a question that begins `☐`, `Question 1/2:` or sits between arrows is still its own text. A line that
+ * nothing consumes — a foreign heading, a second or misplaced chip, a longer body — leaves the form unread. A question
+ * that stored no header has nothing to compare a strip or a chip with, so NO chip is ever set aside for it: the header is
+ * part of the tool payload, and a heading it cannot name is some other heading. A header that merely contains the text — a
+ * permission prompt quoting it, a dialog that adds to it — is some other surface.
  */
-function headerIs(header: readonly string[], question: RenderedQuestion): boolean {
+function headerIs(form: readonly string[] | undefined, question: RenderedQuestion): boolean {
   const wanted = dense(question.question);
-  if (wanted === '') return false;
-  const entries = header.flatMap((line, index) =>
-    line.trim() === '' ? [] : [{ line, blankAfter: header[index + 1]?.trim() === '' }],
-  );
-  const lines = entries.map(entry => entry.line);
+  if (form === undefined || wanted === '') return false;
+  const lines = form.filter(line => line.trim() !== '');
+  const named = question.header;
   const isStrip = (line: string): boolean => {
     const tabs = stripTabs(line);
     return (
+      named !== undefined &&
       tabs !== undefined &&
-      (question.header === undefined ||
-        tabs.slice(0, -1).some(tab => tabNames(TAB.exec(tab)?.groups?.label ?? '', question.header)))
+      tabs.slice(0, -1).some(tab => tabNames(TAB.exec(tab)?.groups?.label ?? '', named))
     );
   };
   const isCodex = (line: string): boolean => !GUTTER.test(line) && CODEX_HEADER.test(line);
-  const isChip = (line: string, at: number): boolean => {
+  const isChip = (line: string): boolean => {
     const chip = GUTTER.test(line) ? undefined : TAB.exec(line.trim())?.groups;
-    if (chip === undefined) return false;
-    if (question.header !== undefined) return tabNames(chip.label ?? '', question.header);
-    return at === 0 && entries[at]?.blankAfter === true && dense(chip.label ?? '').length <= CHIP_LABEL_MAX;
+    return chip !== undefined && named !== undefined && tabNames(chip.label ?? '', named);
   };
-  const decorations: readonly ((line: string, at: number) => boolean)[] = [isStrip, isCodex, isChip];
+  const decorations: readonly ((line: string) => boolean)[] = [isStrip, isCodex, isChip];
   const body = (from: number): boolean =>
     dense(
       lines
@@ -314,7 +353,7 @@ function headerIs(header: readonly string[], question: RenderedQuestion): boolea
     body(from) ||
     decorations.slice(stage).some((is, offset) => {
       const line = lines[from];
-      return line !== undefined && is(line, from) && walk(from + 1, stage + offset + 1);
+      return line !== undefined && is(line) && walk(from + 1, stage + offset + 1);
     });
   return walk(0, 0);
 }
@@ -359,7 +398,7 @@ export function bindQuestionForm(
   held: readonly string[] = [],
 ): BoundQuestionForm | undefined {
   const block = lastBlock(screen);
-  if (block === undefined || !headerIs(block.header, question)) return undefined;
+  if (block === undefined || !headerIs(block.form, question)) return undefined;
   const options = question.options?.map(option => compact(option.label)) ?? [];
   if (options.length === 0) return undefined;
   const labels: string[] = [];
@@ -710,5 +749,5 @@ export function numberedFormShown(screen: QuestionScreen): boolean {
 /** Whether the live form's own header (not a row, not scrollback above its border) is exactly this question. */
 export function formHeaderShows(screen: QuestionScreen, question: RenderedQuestion): boolean {
   const block = lastBlock(screen);
-  return block !== undefined && headerIs(block.header, question);
+  return block !== undefined && headerIs(block.form, question);
 }
