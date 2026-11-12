@@ -506,18 +506,23 @@ export class FleetCatalogService {
       } catch (error) {
         throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));
       }
+      const current = async (): Promise<boolean> => {
+        // The manifest is derived: damage cannot veto replacement, but other read failures surface.
+        const published = await this.deps.publishedManifest?.().catch((error: unknown) => {
+          if (error instanceof FleetManifestUnreadableError) return undefined;
+          throw error;
+        });
+        return sameManifest(plan.manifest, published) && (await this.deps.wrappersCurrent?.(plan)) !== false;
+      };
+      // Keep an already-current fleet untouched, including its apply claim. A recovery that must
+      // write checks again once it holds the claim, since this first comparison can become stale.
+      if (await current()) return 'unchanged';
       try {
         await this.deps.provisioner.apply(plan, [], async () => {
           // A committed apply may have removed a runtime while this recovery waited for its claim.
           // Read the files afresh under that same claim and re-plan before touching derived output.
           if ((await this.#read(true)).revision !== reading.revision) throw stale;
-          // The manifest is derived: damage cannot veto replacement, but other read failures surface.
-          const published = await this.deps.publishedManifest?.().catch((error: unknown) => {
-            if (error instanceof FleetManifestUnreadableError) return undefined;
-            throw error;
-          });
-          if (sameManifest(plan.manifest, published) && (await this.deps.wrappersCurrent?.(plan)) !== false)
-            throw unchanged;
+          if (await current()) throw unchanged;
         });
       } catch (error) {
         if (error === stale) continue;

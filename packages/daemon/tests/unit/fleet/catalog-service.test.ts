@@ -134,6 +134,7 @@ interface World {
     credentials: () => Promise<FleetCredentialView[]>;
     signOut: (id: string) => Promise<Awaited<ReturnType<FleetCatalogServiceDeps['credentials']['signOut']>>>;
     preview: (plan: FleetApplyPlan) => Promise<unknown>;
+    claim: () => Promise<void>;
     apply: () => Promise<unknown>;
     documentError: unknown;
   };
@@ -148,6 +149,7 @@ function world(overrides: Partial<FleetCatalogServiceDeps> = {}): World {
     credentials: async () => [credentialRow('codex-slot')],
     signOut: async id => ({ outcome: 'signed-out', credential: credentialRow(id) }),
     preview: async plan => ({ ...plan, sharedHistory: [] }),
+    claim: async () => undefined,
     apply: async () => ({
       accountCount: 2,
       operationCount: 9,
@@ -177,6 +179,7 @@ function world(overrides: Partial<FleetCatalogServiceDeps> = {}): World {
       preview: async plan =>
         (await state.preview(plan)) as Awaited<ReturnType<FleetCatalogServiceDeps['provisioner']['preview']>>,
       apply: async (plan, documents = [], assertCurrent?: () => Promise<void>) => {
+        await state.claim();
         await assertCurrent?.();
         applied.push({ plan, documents });
         return (await state.apply()) as Awaited<ReturnType<FleetCatalogServiceDeps['provisioner']['apply']>>;
@@ -1559,7 +1562,7 @@ describe('FleetCatalogService with model catalogs (docs/model-catalog.md)', () =
     // Arrange
     let published: unknown;
     let ids: RuntimeIds | undefined;
-    const { service, applied } = world({
+    const { service, applied, state } = world({
       modelCatalogs: sources,
       publishedManifest: async () => published,
       ids: async () => ids,
@@ -1569,6 +1572,9 @@ describe('FleetCatalogService with model catalogs (docs/model-catalog.md)', () =
     const first = await service.republish();
     published = applied[0]?.plan.manifest;
     ids = (applied[0]?.plan as FleetModelApplyPlan | undefined)?.ids;
+    state.claim = async () => {
+      throw new Error('an unchanged fleet must not acquire an apply claim');
+    };
     const second = await service.republish();
 
     // Assert — no configuration file is written by either

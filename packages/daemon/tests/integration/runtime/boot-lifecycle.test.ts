@@ -6749,14 +6749,18 @@ describe('daemon boot lifecycle', () => {
      * THE USER HOME IS REPLACED TOO, and that one is not cosmetic: the harness homes the import reads
      * are derived from it, so without this every case below would import whoever ran the suite.
      */
-    async function harnessOnPath(home: string, kinds: readonly string[]): Promise<DaemonWorld> {
+    async function harnessOnPath(
+      home: string,
+      kinds: readonly string[],
+      notices?: BootNoticePort,
+    ): Promise<DaemonWorld> {
       const binary = join(home, 'harness-bin');
       await mkdir(binary, { recursive: true });
       for (const kind of kinds) {
         await writeFile(join(binary, kind), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
       }
       process.env.PATH = binary;
-      const seams = { userHome: join(home, 'user-home') };
+      const seams = { userHome: join(home, 'user-home'), ...(notices === undefined ? {} : { notices }) };
       const production = buildWorld({}, seams);
       return { ...buildIntegrationWorld(seams), harnesses: production.harnesses };
     }
@@ -6783,9 +6787,9 @@ describe('daemon boot lifecycle', () => {
       world: DaemonWorld,
       home: string,
       during: (base: string, headers: Record<string, string>) => Promise<T>,
+      said = recordingNotices(),
     ): Promise<{ readonly code: number; readonly answer: T; readonly said: ReturnType<typeof recordingNotices> }> {
       const cleanups: Array<() => void | Promise<void>> = [];
-      const said = recordingNotices();
       let release = (): void => {};
       const stopped = new Promise<void>(resolve => {
         release = resolve;
@@ -6813,7 +6817,8 @@ describe('daemon boot lifecycle', () => {
         // Arrange — only the launcher is replaced. Publication, boot and the start route are real.
         const { home } = await firstRunHome('fyd-manifest-regeneration', {});
         const launcher = new RecordingSessionLauncher();
-        const world = { ...(await harnessOnPath(home, ['claude'])), sessionLauncher: launcher };
+        const notices = recordingNotices();
+        const world = { ...(await harnessOnPath(home, ['claude'], notices.port)), sessionLauncher: launcher };
         await writeModelFiles(
           join(home, 'config'),
           parseAccountModel({
@@ -6839,22 +6844,31 @@ describe('daemon boot lifecycle', () => {
         await writeFile(manifestPath, damaged);
 
         // Act — /healthz precedes the boot republish; wait for that publication before starting.
-        const { code, answer, said } = await bootOnce(world, home, async (base, headers) => {
-          await waitFor(async () => {
-            const text = await readFile(manifestPath, 'utf8').catch(() => '');
-            try {
-              return FleetManifestSchema.safeParse(JSON.parse(text)).success;
-            } catch {
-              return false;
-            }
-          }, 'the boot to regenerate the fleet manifest');
-          const response = await fetch(`${base}/v1/sessions`, {
-            method: 'POST',
-            headers: { ...headers, 'content-type': 'application/json', 'x-fy-request-id': 'manifest-recovery-start' },
-            body: JSON.stringify({ agent: WRAPPER, mode: 'auto', prompt: 'start after regeneration', cwd: home }),
-          });
-          return { status: response.status, body: await response.json() };
-        });
+        const { code, answer, said } = await bootOnce(
+          world,
+          home,
+          async (base, headers) => {
+            await waitFor(async () => {
+              const text = await readFile(manifestPath, 'utf8').catch(() => '');
+              try {
+                return FleetManifestSchema.safeParse(JSON.parse(text)).success;
+              } catch {
+                return false;
+              }
+            }, 'the boot to regenerate the fleet manifest');
+            await waitFor(
+              async () => notices.stated.includes('fleet republished from configuration; agent harnesses ready'),
+              'the boot to report readiness after regeneration',
+            );
+            const response = await fetch(`${base}/v1/sessions`, {
+              method: 'POST',
+              headers: { ...headers, 'content-type': 'application/json', 'x-fy-request-id': 'manifest-recovery-start' },
+              body: JSON.stringify({ agent: WRAPPER, mode: 'auto', prompt: 'start after regeneration', cwd: home }),
+            });
+            return { status: response.status, body: await response.json() };
+          },
+          notices,
+        );
 
         // Assert
         should(code).equal(0);
