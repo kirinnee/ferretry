@@ -418,3 +418,9 @@ route	POST /v1/skill-installs/local/project/preview	removed	owner decision !A466
 route	POST /v1/skill-installs/local/runtime	removed	owner decision !A466 (2026-11-08): the local skill copy is gone from 5.0
 route	POST /v1/skill-installs/local/runtime/preview	removed	owner decision !A466 (2026-11-08): the local skill copy is gone from 5.0
 route	DELETE /v1/config/file	added	new in 5.0 (kernel batch #11): removes one declared config file for the CLI rm verbs over a config collection item; the same descriptor as PUT /v1/config/file, Gate admits it per file and a removal that loosens is held for the owner
+tool	account_propose	removed	not built on 5.0 and so not offered to agents until it is (lizzette 2026-11-11: M2 moves after merge); the parity row stays open
+tool	secure_copy	removed	not built on 5.0 and so not offered to agents until it is (lizzette 2026-11-11: M2 moves after merge); the parity row stays open
+tool	secure_list	removed	not built on 5.0 and so not offered to agents until it is (lizzette 2026-11-11: M2 moves after merge); the parity row stays open
+tool	secure_discard	removed	not built on 5.0 and so not offered to agents until it is (lizzette 2026-11-11: M2 moves after merge); the parity row stays open
+tool	secure_paste	removed	not built on 5.0 and so not offered to agents until it is (lizzette 2026-11-11: M2 moves after merge); the parity row stays open
+tool	task_plan	removed	not built on 5.0 and so not offered to agents until it is (lizzette 2026-11-11: M2 moves after merge); the parity row stays open

@@ -69,7 +69,7 @@ import kernelManifest, { PluginsConfig, type PluginsYaml } from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import { bindDirectory } from './bound-directory.ts';
-import { checkDirectory, gatedOverrides, gatedPaths, gatedWhich } from './paths.ts';
+import { checkDirectory, gatedOverrides, gatedPaths, gatedWhich, stateHomeHolding } from './paths.ts';
 import { type ExecutableProbe, handleReaders, locateCommand, whichCommand, whichForCommand } from './which.ts';
 import { currentActor, currentStanding, runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
@@ -789,26 +789,35 @@ async function bootLocked(
       },
     });
   };
-  const ownerPaths: Pick<PathsPort, 'home' | 'checkDirectory' | 'bindDirectory' | 'which'> = Object.freeze({
-    home: () => adapters.ownerHome?.() ?? process.env.HOME ?? '/',
-    checkDirectory: async (absolutePath: string) => await checkDirectory(adapters.fs, absolutePath),
-    bindDirectory: async (absolutePath: string) =>
-      await bindDirectory(
-        adapters.fs,
-        home,
-        { files: privateFiles, recheckMs: PRIVATE_RECHECK_MS, watch: watchPrivate },
-        absolutePath,
-      ),
-    // No probe wired (a test host that gave none): nothing is found, never a guess.
-    which: async (name: string, whichOptions?: { readonly directories?: readonly string[] }) =>
-      adapters.executable === undefined
-        ? undefined
-        : await whichCommand(
-            name,
-            { path: adapters.searchPath?.(), directories: whichOptions?.directories ?? [] },
-            adapters.executable,
-          ),
-  });
+  const ownerPaths: Pick<PathsPort, 'home' | 'checkDirectory' | 'bindDirectory' | 'stateHomeHolding' | 'which'> =
+    Object.freeze({
+      home: () => adapters.ownerHome?.() ?? process.env.HOME ?? '/',
+      checkDirectory: async (absolutePath: string) => await checkDirectory(adapters.fs, absolutePath),
+      bindDirectory: async (absolutePath: string) =>
+        await bindDirectory(
+          adapters.fs,
+          home,
+          { files: privateFiles, recheckMs: PRIVATE_RECHECK_MS, watch: watchPrivate },
+          absolutePath,
+        ),
+      // The fence is rebuilt on every ask, from the same home and private places every owner root is judged against.
+      stateHomeHolding: async (absolutePath: string) =>
+        await stateHomeHolding(
+          adapters.fs,
+          home,
+          { files: privateFiles, recheckMs: PRIVATE_RECHECK_MS, watch: watchPrivate },
+          absolutePath,
+        ),
+      // No probe wired (a test host that gave none): nothing is found, never a guess.
+      which: async (name: string, whichOptions?: { readonly directories?: readonly string[] }) =>
+        adapters.executable === undefined
+          ? undefined
+          : await whichCommand(
+              name,
+              { path: adapters.searchPath?.(), directories: whichOptions?.directories ?? [] },
+              adapters.executable,
+            ),
+    });
   /** A plugin's own `resolvers` section, read at each call (unset during build: nothing resolves yet). */
   const resolversOf =
     (id: string): ResolverOf =>

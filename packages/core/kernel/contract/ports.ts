@@ -1589,6 +1589,14 @@ export interface PathsPort {
    */
   bindDirectory(absolutePath: string): Promise<Result<BoundDirectory, BoundDirectoryRefusal>>;
   /**
+   * The state home `absolutePath` is in — the configured home's name — judged as every owner root judges: as named,
+   * on every link hop, by real path and by IDENTITY up to `/` (§7.7, S40–S47). `undefined` when it is outside the
+   * fence or not there. THROWS when the fence cannot be built (the caller refuses). Only for
+   * `permissions.checkDirectory`: it answers "is this inside the fence" for an absolute path, no wider than
+   * `checkDirectory`, which already answers whether any absolute path is a directory.
+   */
+  stateHomeHolding(absolutePath: string): Promise<string | undefined>;
+  /**
    * A bare executable NAME (`npx`, `claude`) resolved to the path a shell would run, under the kernel's control: only
    * for a manifest with `permissions.which`. The caller's `directories` (absolute; a harness's configured search
    * folders) are searched first, then the daemon's inherited `PATH`; an empty, relative or odd entry is never searched,

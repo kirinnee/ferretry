@@ -85,6 +85,7 @@ describe('TT kernel.paths.checkDirectory is gated by permissions.checkDirectory'
       ok: true as const,
       value: { realPath: '/x', insideStateHome: false, verify: async () => ({ ok: true as const, value: undefined }) },
     }),
+    stateHomeHolding: async () => undefined,
     which: async () => undefined,
     locate: async () => ({ kind: 'absent' as const }),
     whichFor: async () => ({ kind: 'unprovable' as const }),

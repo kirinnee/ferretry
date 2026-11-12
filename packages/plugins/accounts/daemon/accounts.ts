@@ -198,6 +198,8 @@ export function buildAccounts(
     tools: { account_hint: accountHintTool },
     provides: { accounts: port },
     core,
+    // The add-2fa-key stage store, for the `step-up.stages:add-2fa-key` provider (S90).
+    seeds,
     masks: {
       values: async () =>
         new Map([

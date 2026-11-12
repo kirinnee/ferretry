@@ -166,7 +166,7 @@ describe('the account routes through the kernel', () => {
     should(removed.json<{ defaults: { sites?: unknown } }>().defaults.sites ?? {}).eql({});
   });
 
-  it('S92 should refuse a seed while no device holds a passkey, and answer an unported tool as not built', async () => {
+  it('S92 should refuse a seed while no device holds a passkey, and offer no tool that is not built (M2)', async () => {
     const h = await host();
     await h.request('PUT', '/v1/accounts/GITHUB', { body: { label: 'GitHub' } });
     const seed = await h.request('POST', '/v1/accounts/GITHUB/factors/seed', {
@@ -175,10 +175,11 @@ describe('the account routes through the kernel', () => {
     should(seed.status).equal(409);
     should(seed.json<{ code: string }>().code).equal('passkey_required');
     should((await h.request('GET', '/v1/accounts/look-alike')).json()).match({ v: 1, groups: [] });
-    // A declared tool neither half answers yet says so, in the skeleton sentence.
-    const tool = await h.tool('secure_list', {}, { as: ferret('F1') });
-    should(tool.isError).be.true();
-    should(tool.text).containEql('not built yet');
+    // A tool that is not built is not offered at all (M2): the six wait for after merge, so a call finds no such tool.
+    await h.tool('secure_list', {}, { as: ferret('F1') }).then(
+      () => should.fail(undefined, undefined, 'secure_list is offered'),
+      error => should(String(error)).containEql('no agent tool secure_list'),
+    );
   });
 
   it('S99 should add, relabel and remove a 2FA key with no value and no passkey', async () => {

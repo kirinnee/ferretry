@@ -788,7 +788,7 @@ describe('what a ferret may learn about signing in (account.hint)', () => {
     expect(summaryText).toContain(`[${SI(2)}]: Sign in with Google via 'Google (kirin)'`);
     expect(summaryText).toContain('for vercel.com');
     expect(summaryText).toContain('<<<recipe\nContinue with Google, then [[GOOGLE]].\nrecipe>>>');
-    expect(summaryText).toContain('account_propose and the sign-in id');
+    expect(summaryText).not.toContain('account_propose');
     expect(summaryText).toContain('passkeys are off');
     expect(summaryText).toContain('Seen: vercel.com: password field (seen 3×, 2026-10-31).');
     expect(accountHintSummary('nothing.example', [])).toContain('No account for nothing.example');

@@ -1,7 +1,7 @@
 import { AskSources, AsksPort, type SourceKey } from '@ferretry/core-asks/contract';
 import { GatePort } from '@ferretry/core-gate/contract';
 import { accountDefaultsDifferences } from './contract/defaults-differences.ts';
-import { AccessPort, DevicesChanged } from '@ferretry/plugin-access/contract';
+import { AccessPort, DevicesChanged, StepUpStages } from '@ferretry/plugin-access/contract';
 import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
 import { FerretsChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { BoardPort } from '@ferretry/plugin-board/contract';
@@ -565,32 +565,11 @@ export default definePlugin({
         guard: NO_VALUE,
         summary: 'list the saved sign-ins for a place',
       }),
-      tool('account_propose', {
-        ...TOOL,
-        capability: USE.secrets,
-        guard: NO_VALUE,
-        summary: 'suggest a recipe or a standing rule for a sign-in; the owner decides',
-      }),
-      tool('secure_copy', {
-        ...TOOL,
-        capability: USE.terminal,
-        guard: NO_VALUE,
-        summary: 'copy a value into a sealed handle without seeing it',
-      }),
-      tool('secure_list', { ...TOOL, capability: USE.terminal, guard: NO_VALUE, summary: 'list your sealed copies' }),
-      tool('secure_discard', { ...TOOL, capability: USE.terminal, guard: NO_VALUE, summary: 'discard a sealed copy' }),
-      tool('secure_paste', {
-        ...TOOL,
-        capability: USE.terminal,
-        guard: NO_VALUE,
-        summary: 'paste a sealed copy into a verified target',
-      }),
-      tool('task_plan', {
-        ...TOOL,
-        capability: USE.terminal,
-        guard: NO_VALUE,
-        summary: 'ask the owner to approve planned sign-ins and pastes',
-      }),
+      // AFTER MERGE (lizzette 2026-11-11: M2 moves after merge): account_propose, secure_copy, secure_list, secure_discard,
+      // secure_paste and task_plan are declared here again once each is built. Until then they are NOT listed, because the
+      // CLI builds the agents' MCP tool list from this array and a listed tool that answers "not built" is a lie. Their
+      // shapes (capability USE.terminal, or USE.secrets for account_propose; guard NO_VALUE) are the v4 descriptors in
+      // docs/design/rebuild-parity.tsv T-0002 and T-0039…T-0043 (still open).
     ],
     cli: [
       verb('copy ls', { summary: 'list the secure copies a session holds' }),
@@ -699,6 +678,11 @@ export default definePlugin({
       /** The Vault's `push: true` raise and `input_wait` on a `pa_` id are answered here: an approval is a sign-in's. */
       { hook: InputPhoneApprovals, key: 'phone' },
       { hook: AskSources, key: 'sign-in-approval' satisfies string as SourceKey, schema: SignInApprovalRefSchema },
+      /** Access issues a passkey challenge for a staged act only through the plugin that staged it (G83): each act is Accounts'. */
+      { hook: StepUpStages, key: 'add-2fa-key' },
+      { hook: StepUpStages, key: 'approve-task-plan' },
+      { hook: StepUpStages, key: 'approve-sign-in-rule' },
+      { hook: StepUpStages, key: 'approve-paste-rule' },
     ],
   },
 });

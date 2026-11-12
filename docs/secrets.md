@@ -1282,7 +1282,7 @@ Every route is `caller: 'person'` ([grants.md](grants.md)).
 
 Each change is a kept `security.changed` record ([audit.md](audit.md)). None holds a username or a value.
 
-A ferret's suggestion of a rule (`account_propose` with `preapprove`) raises a card and a line in memory and nothing
+After merge (M2; the tool is not declared on 5.0 yet), a ferret's suggestion of a rule (`account_propose` with `preapprove`) raises a card and a line in memory and nothing
 else: [agent tools › Suggesting a standing rule](agent-tools.md#suggesting-a-standing-rule).
 
 ### The owner's command: `fy rules`

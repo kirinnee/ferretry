@@ -3443,7 +3443,7 @@ function storeTellOf(
     return `${request.agendaItemId} was interrupted while ${handle} was being saved as the secret ${key}; it may or may not hold it now. Ask the owner to check the secret in Settings before you use \${secret:${key}}.`;
   if (state === 'delivered')
     return `${request.agendaItemId}: ${handle} was saved as the secret ${key}. Use it as \${secret:${key}}; you can never read it.`;
-  return `${request.agendaItemId} ended without saving ${handle} (${state}${reason === undefined ? '' : `: ${reasonWords(reason, request.target.kind, unsettled)}`}). If you still need it saved, call secure_paste again or ask the owner.`;
+  return `${request.agendaItemId} ended without saving ${handle} (${state}${reason === undefined ? '' : `: ${reasonWords(reason, request.target.kind, unsettled)}`}). If you still need it saved, ask the owner.`;
 }
 
 /** What the ferret's view says once a task-plan line filled its card. */
