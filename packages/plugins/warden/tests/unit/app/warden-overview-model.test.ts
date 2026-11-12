@@ -29,6 +29,7 @@ import {
   wardenAgenda,
   wardenConfig,
   wardenInvestigation,
+  type OwnerWardenStatusView,
   wardenStatus,
 } from '../../support/app/warden.ts';
 
@@ -47,7 +48,7 @@ const stopped = (reason: 'disabled' | 'jev_cap' | 'investigation_cap' | 'no_logi
   ({ configured: true, active: false, reason }) as const;
 
 /** Both layers on: Jev in front of an investigation. */
-const jevStatus = (overrides: Partial<WardenStatusView> = {}): WardenStatusView =>
+const jevStatus = (overrides: Partial<WardenStatusView> = {}): OwnerWardenStatusView =>
   wardenStatus({
     config: wardenConfig({ layers: { jev: true, llm: true } }),
     triage: { jev: on, llm: on },

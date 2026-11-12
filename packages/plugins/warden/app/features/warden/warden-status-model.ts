@@ -113,8 +113,9 @@ export const wardenNeedsYouCount = (status: WardenStatusView): number => {
  * paced (reached for the day, or not reached).
  */
 export const wardenPacedUntil = (status: Pick<WardenStatusView, 'spend'>, cap: WardenCap): string | undefined => {
-  if (!(status.spend.capsPaced ?? []).includes(cap)) return undefined;
-  return status.spend.pacedUntil === undefined ? 'the next hour' : `${status.spend.pacedUntil.slice(11, 16)} UTC`;
+  const { spend } = status;
+  if (spend === undefined || !(spend.capsPaced ?? []).includes(cap)) return undefined;
+  return spend.pacedUntil === undefined ? 'the next hour' : `${spend.pacedUntil.slice(11, 16)} UTC`;
 };
 
 /** Why a layer the owner switched on is off right now, in a few words. */

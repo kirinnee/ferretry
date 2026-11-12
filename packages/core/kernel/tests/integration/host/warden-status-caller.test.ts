@@ -159,3 +159,136 @@ test('audit A fix 2 the owner reads every Jev check; a ferret reads only the che
     await host.stop();
   }
 });
+
+/**
+ * Audit A fix 3: a FERRET caller's status is lineage-only. Spend, savings, history and the action/revive totals are fleet
+ * aggregates of diagnostic activity ABOUT other targets, so a ferret gets none of them (the owner keeps all); it sees
+ * only whether Warden is capped, never an amount. A pack investigation has no target, so it belongs to no lineage.
+ * Checks are filtered to the lineage BEFORE the newest-N cut, so unrelated checks cannot hide a lead's own.
+ */
+const AGGREGATES = ['spend', 'savings', 'history', 'actionTotals', 'reviveTotals'] as const;
+
+const plantActivity = (host: Awaited<ReturnType<typeof world>>['host'], victim: string) => {
+  const day = host.clock.now().slice(0, 10);
+  const zeros = { auto: 0, jev: 0, llm: 0 };
+  host.state('warden').files.set(
+    'state.json',
+    JSON.stringify({
+      format: 1,
+      triageDay: { day, flags: 1, jevDecisions: 1, jevSkips: 1, jevUsd: 0.12345 },
+      costAverage: { count: 1, totalUsd: 0.77 },
+      investigations: [
+        {
+          id: 'inv-victim',
+          scope: 'session',
+          origin: 'owner',
+          targetId: victim,
+          startedAt: host.clock.now(),
+          finishedAt: host.clock.now(),
+          reportPath: 'reports/victim.md',
+          costUsd: 0.77,
+        },
+        {
+          id: 'inv-fleet',
+          scope: 'fleet',
+          origin: 'owner',
+          startedAt: host.clock.now(),
+          finishedAt: host.clock.now(),
+          reportPath: 'reports/fleet.md',
+          costUsd: 0.45678,
+        },
+      ],
+      daily: [
+        {
+          day,
+          flags: 1,
+          jevDecisions: 1,
+          investigations: 1,
+          jevUsd: 0.12345,
+          investigationUsd: 0.77,
+          moved: zeros,
+          cleared: zeros,
+          stopped: zeros,
+          asked: zeros,
+          acts: [{ action: 'revive', outcome: 'done', auto: 7, jev: 0, llm: 0 }],
+          reviveResults: { progressed: { auto: 7, jev: 0, llm: 0 }, stalled: zeros },
+        },
+      ],
+    }),
+  );
+};
+
+test('audit A fix 3 a ferret reads no fleet aggregate and no pack investigation; the owner keeps every one', async () => {
+  const { host, lead, victim, status } = await world();
+  try {
+    plantActivity(host, victim);
+    const own = await status(lead);
+    expect(own.status).toBe(200);
+    const body = own.json<Record<string, unknown> & Checks>();
+    for (const field of AGGREGATES) expect(body[field]).toBeUndefined();
+    // The targetless pack investigation belongs to no lineage; the victim's is outside this one.
+    expect(body.investigations).toEqual([]);
+    for (const figure of ['0.12345', '0.77', '0.45678', 'inv-fleet', 'reports/fleet.md'])
+      expect(own.body).not.toContain(figure);
+
+    const owner = (await status()).json<Record<string, unknown> & Checks>();
+    for (const field of AGGREGATES) expect(owner[field]).toBeDefined();
+    expect(owner.investigations.map(entry => entry.id).toSorted()).toEqual(['inv-fleet', 'inv-victim']);
+    expect((owner.spend as { jevUsd: number }).jevUsd).toBe(0.12345);
+  } finally {
+    await host.stop();
+  }
+});
+
+test('audit A fix 3 a ferret sees that Warden is capped, never an amount, limit or remaining budget', async () => {
+  const { host, lead, victim, status } = await world();
+  try {
+    plantActivity(host, victim);
+    // Today's Jev spend is past a tiny cap, which the owner sees as an amount and a ferret as a state only.
+    host.state('warden').files.set(
+      'state.json',
+      JSON.stringify({
+        format: 1,
+        triageDay: { day: host.clock.now().slice(0, 10), flags: 1, jevDecisions: 1, jevSkips: 1, jevUsd: 987.654 },
+      }),
+    );
+    const own = (await status(lead)).json<{ triage: { jev: { reason: string } } }>();
+    expect(JSON.stringify(own)).not.toContain('987.654');
+    expect(JSON.stringify(own)).not.toMatch(/CapUsd|remaining|pacedUntil|pendingInvestigations/u);
+    expect(own.triage.jev.reason).toBeDefined();
+  } finally {
+    await host.stop();
+  }
+});
+
+test("audit A fix 3 unrelated Jev checks cannot evict a lead's own check before the lineage filter", async () => {
+  const { host, lead, victim, status } = await world();
+  try {
+    const at = host.clock.now();
+    const check = (sessionId: string, costUsd: number) => ({
+      at,
+      sessionId,
+      anomalyKind: 'sus_thinking',
+      verdict: 'healthy',
+      confidence: 0.9,
+      costUsd,
+    });
+    const file = `jev-checks/${at.slice(0, 10)}.json`;
+    host.state('warden').files.set(file, JSON.stringify({ format: 1, checks: [check(lead, 0.0011)] }));
+    const before = (await status(lead)).json<Checks>().jevChecks;
+    expect(before).toHaveLength(1);
+    host.state('warden').files.set(
+      file,
+      JSON.stringify({
+        format: 1,
+        checks: [check(lead, 0.0011), ...Array.from({ length: 50 }, () => check(victim, 0.12345))],
+      }),
+    );
+    const after = await status(lead);
+    expect(after.json<Checks>().jevChecks).toEqual(before);
+    // The owner's view is still the newest fifty, whoever they were about.
+    expect((await status()).json<Checks>().jevChecks).toHaveLength(50);
+  } finally {
+    await host.stop();
+  }
+});

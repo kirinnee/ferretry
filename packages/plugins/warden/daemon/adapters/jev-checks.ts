@@ -40,7 +40,7 @@ export class StateWardenJevCheckLog implements WardenJevCheckLog {
     }
   }
 
-  async recent(limit: number): Promise<readonly WardenJevCheck[]> {
+  async recent(limit: number, keep?: (check: WardenJevCheck) => boolean): Promise<readonly WardenJevCheck[]> {
     const checks: WardenJevCheck[] = [];
     for (const name of jevCheckFilesNewestFirst((await this.days()).map(jevCheckFileName))) {
       if (checks.length >= limit) break;
@@ -50,7 +50,7 @@ export class StateWardenJevCheckLog implements WardenJevCheckLog {
       if (!read.ok) throw new Error(read.error.sentence);
       const parsed = ((read.value as DayDocument | undefined)?.checks ?? []).flatMap(entry => {
         const check = WardenJevCheckSchema.safeParse(entry);
-        return check.success ? [check.data] : [];
+        return check.success && (keep === undefined || keep(check.data)) ? [check.data] : [];
       });
       // A day file holds its checks oldest first; the newest are wanted first.
       checks.push(...parsed.toReversed());

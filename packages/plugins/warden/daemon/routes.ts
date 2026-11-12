@@ -47,19 +47,6 @@ function refuse(error: unknown): never {
   throw error;
 }
 
-/** The status a ferret may read: the Jev checks and investigations about ferrets `mayRead` allows. */
-function narrowedStatus(
-  view: ReturnType<typeof toWireStatus>,
-  mayRead: (ferret: FerretId) => boolean,
-): ReturnType<typeof toWireStatus> {
-  const { jevChecks, investigations, ...rest } = view;
-  return {
-    ...rest,
-    investigations: investigations.filter(entry => entry.target === undefined || mayRead(entry.target as FerretId)),
-    ...(jevChecks === undefined ? {} : { jevChecks: jevChecks.filter(check => mayRead(check.ferret as FerretId)) }),
-  };
-}
-
 /** Wraps a handler so every refusal the sweep can raise leaves as an `ApiError`. */
 const guarded =
   (handler: (call: CallContext) => Promise<PlainApiResponse>) =>
@@ -80,13 +67,18 @@ const first = (call: CallContext, name: string): string | undefined => call.requ
  */
 export function wardenRoutes(subsystem: WardenSubsystem, ferrets: Pick<FerretsApi, 'mayTouch'>) {
   return {
-    // The owner and a person read every check; a FERRET reads only those about itself and its helpers (`mayTouch`): a
-    // check and an investigation carry what Jev or a warden spent on one target, which is that lineage's figure alone.
+    // The owner and a person read the whole fleet. A FERRET reads its own lineage only (itself and its helpers,
+    // `mayTouch`): the checks and target investigations about them, filtered BEFORE the newest-N cut, and NO fleet
+    // aggregate (spend, savings, history, totals) nor targetless pack investigation, which belong to no lineage. It
+    // still sees whether Warden is capped or paused (`triage`), a state and never an amount.
     'GET /v1/warden/status': guarded(async call => {
       const caller = ferretOf(call);
-      const view = toWireStatus(await subsystem.status());
       return jsonResponse(
-        caller === undefined ? view : narrowedStatus(view, ferret => ferrets.mayTouch(caller, ferret)),
+        toWireStatus(
+          await subsystem.status(
+            caller === undefined ? undefined : { mayRead: ferret => ferrets.mayTouch(caller, ferret as FerretId) },
+          ),
+        ),
       );
     }),
     'GET /v1/warden/verdicts': guarded(async () => jsonResponse(toWireVerdicts(await subsystem.verdicts()))),

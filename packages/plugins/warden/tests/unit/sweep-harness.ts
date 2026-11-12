@@ -421,9 +421,12 @@ export function harness(
         if (options.jevChecksFail === 'append') throw new Error('disk full');
         jevChecks.push(check);
       },
-      recent: async limit => {
+      recent: async (limit, keep) => {
         if (options.jevChecksFail === 'recent') throw new Error('unreadable');
-        return jevChecks.toReversed().slice(0, limit);
+        return jevChecks
+          .toReversed()
+          .filter(check => keep === undefined || keep(check))
+          .slice(0, limit);
       },
     },
     nowMs: () => options.now?.() ?? NOW,

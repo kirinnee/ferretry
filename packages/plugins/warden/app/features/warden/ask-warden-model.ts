@@ -49,6 +49,8 @@ export const askWardenNote = (focus: AskWardenFocus, notes: string): string => {
  */
 export const askWardenCostLine = (status: WardenStatusView): string => {
   const { spend, savings } = status;
+  // A ferret's view carries no figures; the daemon still prices the run when it takes it.
+  if (spend === undefined || savings === undefined) return 'The cost is counted against the investigation cap.';
   const cost =
     savings.averageInvestigationUsd === undefined
       ? 'Cost unknown until one has been priced'
@@ -75,6 +77,8 @@ export const askWardenBlocker = (status: WardenStatusView): string | null => {
   if (login !== null) return `${login}. Choose one in Settings › Warden.`;
   const paced = wardenPacedUntil(status, 'investigation');
   if (paced !== undefined) return `This hour’s share of the investigation cap is spent. Try again at ${paced}.`;
+  if (status.spend === undefined)
+    return status.triage.llm.reason === 'investigation_cap' ? 'Today’s investigation cap is reached.' : null;
   if (status.spend.capsHit.includes('investigation'))
     return `Today’s ${usd(status.spend.investigationCapUsd)} investigation cap is reached. Raise it in Settings › Warden.`;
   return null;

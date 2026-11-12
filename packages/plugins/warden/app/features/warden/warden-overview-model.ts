@@ -149,8 +149,9 @@ export const wardenStatusLine = (status: WardenStatusView, now: number): WardenS
   if (layers.jev) parts.push(`Jev clears at ≥${status.config.guard.threshold.toFixed(2)}`);
   if (layers.llm) parts.push(`${investigatorLabel(status)} investigations`);
   parts.push(`every ${status.config.intervalMinutes} min`);
-  if (layers.jev || layers.llm) {
-    const { spend } = status;
+  // A ferret's view carries no spend (the fleet figures are the owner's): the line then says nothing of money.
+  const { spend } = status;
+  if (spend !== undefined && (layers.jev || layers.llm)) {
     const cap = (layers.jev ? spend.jevCapUsd : 0) + (layers.llm ? spend.investigationCapUsd : 0);
     parts.push(`${usd(spend.jevUsd + spend.investigationUsd)} of ${usd(cap)} today`);
   }

@@ -140,7 +140,7 @@ const unknownTiles = (): readonly StatTile[] =>
 
 export const wardenStats = (status: WardenStatusView, period: WardenPeriod, now: number): WardenStats => {
   const today = utcDay(now);
-  const { history } = status;
+  const history = status.history ?? [];
   if (period === 'today') {
     const day = history.find(entry => entry.day === today);
     return { period, tiles: day === undefined ? unknownTiles() : tilesFromDays([day]) };
@@ -169,6 +169,7 @@ export const spendUsd = (amount: number): string => (amount > 0 && amount < 0.01
  */
 export const spendTotals = (status: WardenStatusView): string | undefined => {
   const { spend, config } = status;
+  if (spend === undefined) return undefined;
   const parts = [
     ...(config.layers.jev ? [`Jev ${spendUsd(spend.jevUsd)}`] : []),
     ...(config.layers.llm ? [`LLM ${spendUsd(spend.investigationUsd)}`] : []),
@@ -199,7 +200,9 @@ const ratioOf = (spent: number, cap: number): number | undefined =>
 /** One compact line per layer the owner has switched on, from today's figures. */
 export const layerLines = (status: WardenStatusView): readonly LayerLine[] => {
   const { spend, savings, config } = status;
-  const today = status.history.find(entry => entry.day === spend.day);
+  // A ferret's view has no fleet figures to summarise.
+  if (spend === undefined || savings === undefined) return [];
+  const today = (status.history ?? []).find(entry => entry.day === spend.day);
   const decisions = today?.jevDecisions ?? savings.jevDecisions;
   const investigations = today?.investigations ?? savings.investigations;
   const lines: LayerLine[] = [];
@@ -307,7 +310,7 @@ const readoutFor = (day: WardenDayStats): string => {
  * when the daemon kept no day.
  */
 export const wardenDayChart = (status: WardenStatusView, now: number): WardenDayChart | undefined => {
-  const { history } = status;
+  const history = status.history ?? [];
   if (history.length === 0) return undefined;
   const today = utcDay(now);
   const byDay = new Map(history.map(entry => [entry.day, entry]));

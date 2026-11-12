@@ -378,12 +378,13 @@ export interface WardenStatusView {
   readonly failover?: WardenFailoverStatus;
   readonly login?: WardenLogin;
   readonly triage: WardenTriageStatus;
-  readonly spend: WardenSpend;
-  readonly savings: WardenSavings;
+  /** Absent in a FERRET's view: the fleet aggregates are the owner's, so a ferret sees only the `triage` state. */
+  readonly spend?: WardenSpend;
+  readonly savings?: WardenSavings;
   readonly investigations: readonly WardenInvestigation[];
   readonly actions: readonly WardenAction[];
   readonly blessings: readonly WardenBlessingView[];
-  readonly history: readonly WardenDayStats[];
+  readonly history?: readonly WardenDayStats[];
   readonly actionTotals?: readonly WardenActionTally[];
   readonly reviveTotals?: WardenReviveResults;
   readonly jevChecks?: readonly WardenJevCheck[];

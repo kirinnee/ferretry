@@ -44,6 +44,7 @@ import {
   WardenSweepLoop,
   WardenSweepService,
   type WardenSpawner,
+  type WardenStatusScope,
   wardenTriggerEnabled,
 } from './lib/index.ts';
 import { parseWardenConfigPatch } from './lib/config.ts';
@@ -78,7 +79,7 @@ export interface WardenHost {
 
 /** What the routes serve (today's `WardenSubsystem`, in the contract's words where they differ). */
 export interface WardenSubsystem {
-  status(): Promise<WardenStatusView>;
+  status(scope?: WardenStatusScope): Promise<WardenStatusView>;
   verdicts(): Promise<readonly WardenVerdict[]>;
   report(reportPath: string): Promise<string | undefined>;
   run(spawn: boolean): Promise<WardenRunView>;
@@ -338,9 +339,9 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   );
 
   return {
-    status: async () => {
+    status: async scope => {
       const due = loop.nextDueAtMs();
-      return await service.status(due === undefined ? undefined : isoFromMs(due));
+      return await service.status(due === undefined ? undefined : isoFromMs(due), scope);
     },
     verdicts: async () => await reader.readVerdicts(),
     report: async reportPath => await reader.readReportAt(posix.join(REPORTS_DIRECTORY, posix.basename(reportPath))),
