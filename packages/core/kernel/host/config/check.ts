@@ -161,6 +161,7 @@ function schemaIssues(
   path: string,
   error: z.ZodError,
   locate: (path: readonly PropertyKey[]) => TextPosition | undefined,
+  binary: string,
 ): RefusedConfigText {
   return {
     ok: false,
@@ -174,7 +175,8 @@ function schemaIssues(
         ...at(locate(site)),
         severity: 'error' as const,
         message: where === '' || issue.code === 'custom' ? message : `${where}: ${message}`,
-        fix: fixFor(issue, where),
+        // A schema that found a secret says what the kernel's own scan says to do about one (the owner stores it).
+        fix: issue.code === 'custom' && issue.params?.rawSecret === true ? rawSecretFix(binary) : fixFor(issue, where),
       };
     }),
   };
@@ -274,7 +276,7 @@ export function checkReadConfigText(
       ],
     };
   }
-  if (!parsed.success) return schemaIssues(path, parsed.error, read.read.locate);
+  if (!parsed.success) return schemaIssues(path, parsed.error, read.read.locate, binary);
   return { ok: true, value: parsed.data, written: read.read.value, text };
 }
 

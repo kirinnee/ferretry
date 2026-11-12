@@ -130,3 +130,17 @@ describe('storeInspectionWords — where a store was looked and what each place 
     );
   });
 });
+
+describe('classifyCredential — parsed file contents never masquerade as a verdict', () => {
+  it('should call a Claude object holding only a state field missing, whatever the state says', () => {
+    for (const state of ['valid', 'refreshable', 'unreadable', 'missing']) {
+      should(classifyCredential('claude', found({ state, fake: 'marker' }), NOW)).eql({ state: 'missing' });
+    }
+  });
+
+  it('should call a Codex object holding only a state field missing, whatever the state says', () => {
+    for (const state of ['valid', 'refreshable']) {
+      should(classifyCredential('codex', found({ state, fake: 'marker' }), NOW)).eql({ state: 'missing' });
+    }
+  });
+});

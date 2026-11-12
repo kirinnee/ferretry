@@ -37,6 +37,7 @@ import {
   CODEX_CREDENTIAL_STORE_FILE,
   CODEX_CREDENTIAL_STORE_KEY,
   type CodexStoreResolution,
+  credentialLaunchEnvironment,
   type CredentialStorePaths,
   type CredentialStoreResolution,
   HOST_CLAUDE_SECURE_STORAGE,
@@ -278,6 +279,12 @@ export class FleetCredentialCatalog {
  * Whether a sign-in left a usable login in its store — and, when it did not, what looking there found:
  * which places were checked and what each held, in words, never a value.
  */
+/** How a login's store takes part in a launch (see `launchStore`). Never a value. */
+export type LaunchStore =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'host'; readonly variables: Readonly<Record<string, string>> }
+  | { readonly kind: 'owned'; readonly variables: Readonly<Record<string, string>>; readonly usable: boolean };
+
 export type SignInCheck = { readonly signedIn: true } | { readonly signedIn: false; readonly finding: string };
 
 /** What a sign-in by credential id resolves to. */
@@ -658,6 +665,32 @@ export class FleetCredentialsService {
       );
     }
     return await this.checkForLaunch(id);
+  }
+
+  /**
+   * Inside Logins only: what a runtime on this login is launched with beyond its own config dir, and whether the login
+   * can be admitted to a launch at all.
+   *
+   * - A Ferretry-kept Claude login gets its one secure-storage variable (`credentialLaunchEnvironment`) and is
+   *   `usable` only when the store NOW holds material a harness can launch with: the file is there, is readable through
+   *   the owned store, and parses as the JSON object Claude keeps. This is a fresh look at the local store, deliberately
+   *   not the displayed status, which keeps its last-known state when the material cannot be read (a display choice, not
+   *   proof of a usable credential). Nothing is quoted from the material.
+   * - A host-kept Claude login gets the EMPTY selector and no look at all, as in v4: the real HOME is kept, so Claude
+   *   selects the person's own default store, which this build has no authority to read.
+   * - Every other login gets nothing here (an environment login's own `env` travels through the login kind's `env`,
+   *   and Codex's credential is a link in its home, not a variable).
+   */
+  async launchStore(id: string): Promise<LaunchStore> {
+    const entry = await this.deps.catalog.entry(id);
+    const { resolution } = entry;
+    if (resolution.store === 'host' && resolution.harness === 'claude')
+      return { kind: 'host', variables: { [CLAUDE_SECURE_STORAGE_VARIABLE]: HOST_CLAUDE_SECURE_STORAGE } };
+    const owned = stored(resolution);
+    if (owned?.harness !== 'claude' || owned.store !== 'ferretry') return { kind: 'none' };
+    const target = this.deps.catalog.signInTarget(entry);
+    const usable = target.kind === 'store' && (await target.check()).signedIn;
+    return { kind: 'owned', variables: credentialLaunchEnvironment(owned), usable };
   }
 
   /** Inside Logins only: the trusted Ferrets launch hook shares Check now's work, never its caller standing. */

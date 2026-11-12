@@ -521,14 +521,21 @@ export function harnessConformance(name: string, make: () => HarnessSubject | Pr
 export class FakeLoginKind implements LoginKind {
   readonly fields = [{ id: 'key', label: 'API key', secret: true }];
   readonly harnesses: readonly HarnessKey[] = ['claude-code'];
-  constructor(readonly key: LoginKindKey = 'api-key') {}
+  constructor(
+    readonly key: LoginKindKey = 'api-key',
+    private readonly names?: readonly string[],
+  ) {}
+  /** With no names given it holds every login, so a conformance run can ask about any name. */
+  holds(login: string) {
+    return this.names === undefined || this.names.includes(login);
+  }
   async signIn() {
     return { kind: 'done' as const };
   }
   async status() {
     return { state: 'signed-in' as const };
   }
-  async env(login: string) {
+  async env(login: string): Promise<Readonly<Record<string, string>>> {
     return { ANTHROPIC_API_KEY: `\${secret:LOGIN_${login.toUpperCase().replaceAll('-', '_')}}` };
   }
 }
