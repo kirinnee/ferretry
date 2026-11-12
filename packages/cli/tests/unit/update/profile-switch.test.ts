@@ -30,6 +30,13 @@ function harness(kind: string, options: { interactive?: boolean; answer?: string
 const daemon = { path: STORE_DAEMON, source: 'PATH' as const, version: '1.2.3' };
 
 describe('NixProfileSwitch', () => {
+  it('refuses an updater switch without a judged locked target', async () => {
+    const h = harness('nix-shell');
+    should(await h.switcher.install(undefined, true)).deepEqual({
+      failure: 'no locked Nix revision was judged; refusing to install',
+    });
+    should(h.host.trail).deepEqual([]);
+  });
   it('offers nothing for a daemon that is not a nix shell', async () => {
     const h = harness('nix-profile');
     should(await h.switcher.offer({ ...daemon, path: PROFILE_DAEMON })).be.undefined();

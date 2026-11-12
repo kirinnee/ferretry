@@ -231,6 +231,19 @@ describe('the update check', () => {
 });
 
 describe('starting an update', () => {
+  it('neither offers, auto-installs nor starts a newer major', async () => {
+    const nextMajor = { ...LATEST, version: '6.0.0' };
+    const w = world({ current: '5.0.3', answers: [{ kind: 'ok', release: nextMajor }] });
+    const { service, launched } = w;
+    await turnOn(w);
+    await service.tick();
+    should((await service.view()).available).be.false();
+    should((await refusal(service.start({ target: '6.0.0', when: 'now' }))).code).equal(
+      DAEMON_UPDATE_CODES.notAvailable,
+    );
+    should(launched).deepEqual([]);
+  });
+
   it('refuses a method that cannot update itself', async () => {
     const { service } = world({ facts: MODULE_FACTS });
     await service.tick();

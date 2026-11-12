@@ -1,3 +1,10 @@
+## [4.291.9](https://github.com/kirinnee/ferretry/compare/v4.291.8...v4.291.9) (2026-11-11)
+
+### Fixes
+
+* **fleet:** a profile's third-party model set applies; a move keeps only a picked model ([#1586](https://github.com/kirinnee/ferretry/issues/1586)) ([178624e](https://github.com/kirinnee/ferretry/commit/178624ecf7891b9ccacf35013ae01ee593c1a79d))
+* **fleet:** pin a login's literal env so a repo's .claude settings cannot blank it ([#1587](https://github.com/kirinnee/ferretry/issues/1587)) ([afec015](https://github.com/kirinnee/ferretry/commit/afec015e344b4ff305dd65eb948f196258c5cd26))
+
 ## [4.291.8](https://github.com/kirinnee/ferretry/compare/v4.291.7...v4.291.8) (2026-11-11)
 
 ### Fixes

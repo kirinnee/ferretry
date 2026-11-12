@@ -14,6 +14,7 @@ export const updateVerb: ShellVerb = async ctx => {
     {
       check: flags.check === true,
       to: text('to'),
+      major: flags.major === true,
       yes: flags.yes === true,
       whenIdle: flags['when-idle'] === true,
       switchToProfile: flags['switch-to-profile'] === true,
