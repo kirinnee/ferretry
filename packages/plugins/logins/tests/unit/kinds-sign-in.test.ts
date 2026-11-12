@@ -45,6 +45,8 @@ function world(started: HarnessLoginFlow, ...later: HarnessLoginFlow[]) {
       reads.push(flowId);
       return queue.shift() ?? started;
     },
+    credentialProblem: async () => undefined,
+    shareCredential: async () => undefined,
   });
   return { kinds, sleeps, reads };
 }
@@ -121,6 +123,8 @@ describe('a kind’s reads', () => {
       check: async () => view,
       startSignIn: async () => flow({}),
       signInStatus: async () => flow({}),
+      credentialProblem: async () => undefined,
+      shareCredential: async () => undefined,
     });
     const quota = kinds.anthropic.quota;
     if (quota === undefined) throw new Error('every kind reads a quota');
@@ -149,6 +153,8 @@ describe('a kind’s reads', () => {
       check: async id => sampleLogin(id),
       startSignIn: async () => flow({}),
       signInStatus: async () => flow({}),
+      credentialProblem: async () => undefined,
+      shareCredential: async () => undefined,
     });
     await expect(kinds.anthropic.status('work')).rejects.toThrow('there is no anthropic login named work');
   });

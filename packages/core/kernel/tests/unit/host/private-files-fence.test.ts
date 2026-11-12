@@ -325,11 +325,13 @@ describe('PF-links linkTo refuses a private file as the link target and as the l
     );
   });
 
-  test('PF-links an ordinary link target and place still work', async () => {
+  test('PF-links an ordinary link in an agent home is refused link_escape: it is a credential home, and nothing is made', async () => {
     const l = await layout();
     const root = makeRoot(l.home, REAL, 'agent-homes', { subfolder: 'F1' }, PRIVATE);
-    await root.linkTo(named(root, 'pointer'), { root, path: named(root, 'own.txt') });
-    expect(await root.lstat(named(root, 'pointer'))).toMatchObject({ kind: 'symlink' });
+    expect(await refusal(() => root.linkTo(named(root, 'pointer'), { root, path: named(root, 'own.txt') }))).toBe(
+      'refused:link_escape',
+    );
+    expect(await root.lstat(named(root, 'pointer'))).toBeUndefined();
   });
 });
 

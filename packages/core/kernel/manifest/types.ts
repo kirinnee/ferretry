@@ -275,6 +275,12 @@ export interface Permissions {
    */
   readonly shareTrees?: true;
   /**
+   * The sign-in file basenames it may hand to a receiving plugin through `kernel.roots.shareCredential` (Logins:
+   * `['auth.json']`, Codex's sign-in), by exact name, each one plain file name; `'*'`, a pattern or a path matches
+   * nothing. Only the plugin that may hold `credentials` can mint, whatever it declares. Absent: every mint is refused.
+   */
+  readonly shareCredentials?: readonly string[];
+  /**
    * It asks `kernel.processes` about this user's live processes and SIGTERMs one that runs from its own folder
    * (Runtimes: an ended Codex ferret's app-server pair). `environment` lists, by exact name, the variables `usersOf`
    * may match (`CODEX_HOME`); nothing else is matched, and `'*'` is a name that matches no variable. Absent: every

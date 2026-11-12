@@ -31,6 +31,8 @@ import type {
   RootPublished,
   RootPublishOptions,
   RootWriteOptions,
+  SharedCredential,
+  SharedCredentialSource,
   SharedTreeSource,
 } from '../contract/ports.ts';
 import type { FileIdentity, HostFs, OpenedDirectory, OpenedFile } from './adapters/node-fs.ts';
@@ -56,7 +58,27 @@ import {
 import { identityKey, type TruncationWatcher } from './fence-index.ts';
 import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from './internal-roots.ts';
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
-import { holdsPrivate, ownStateTree, receivingRoot, refuseShared, SharedTrees } from './shared-trees.ts';
+import {
+  credentialFileListed,
+  credentialFileRefusal,
+  credentialPlacement,
+  isCredentialFolder,
+  isCredentialReceiver,
+  isMintedInode,
+  placedLinkHolds,
+  credentialHomeLinkVerdict,
+  PlacedCredentialLinks,
+  placedLinkMoveVerdict,
+  SharedCredentials,
+} from './shared-credentials.ts';
+import {
+  holdsPrivate,
+  ownStateTree,
+  receivingRoot,
+  refuseShared,
+  SharedTreeError,
+  SharedTrees,
+} from './shared-trees.ts';
 import { type OwnFolderSpellings, PROCESS_FOLDER_ROOTS, processFolderAllowed } from './processes.ts';
 import { type ProjectUse, projectFilesScope, projectPathRefusal } from '../manifest/project-files.ts';
 import {
@@ -1278,6 +1300,28 @@ interface SharedEntry {
 /** Every shared tree the kernel minted (`RootsPort.share`), known by identity only. */
 const SHARED = new SharedTrees<SharedEntry>();
 
+/** The sign-in file a shared credential names, as the kernel reached it: its real path and the identity it had. */
+interface ReachedCredential {
+  readonly real: string;
+  readonly identity: FileIdentity;
+}
+
+/** One minted shared credential: how to reach its file again (the minter's own checks), and the name it keeps. */
+interface CredentialEntry {
+  readonly file: string;
+  /** The real path the file had when minted: the link's text, and what a later look must still find. */
+  readonly real: string;
+  readonly identity: FileIdentity;
+  readonly reach: () => Promise<ReachedCredential>;
+}
+
+/** Every shared credential the kernel minted (`RootsPort.shareCredential`), known by identity only and bound to a receiver. */
+const CREDENTIALS = new SharedCredentials<CredentialEntry>();
+
+/** Every credential link the kernel placed, by the link's own device and inode: a move of one is refused (`rename`). */
+const PLACED_LINKS = new PlacedCredentialLinks();
+const linkMark = (found: Pick<FileIdentity, 'device' | 'inode'>): string => `${found.device}:${found.inode}`;
+
 interface HandleSetup {
   readonly fs: HostFs;
   readonly home: string;
@@ -1644,7 +1688,15 @@ async function setModeChecked(scope: Scope, full: string, bits: number): Promise
  * folder is never replaced (the move fails). The window is the kernel's own two calls, inside folders only the
  * harness and the kernel write.
  */
-async function renameChecked(from: Checked, to: Checked): Promise<void> {
+async function renameChecked(
+  from: Checked,
+  to: Checked,
+  /**
+   * Asked of the entry about to move, as the held folder sees it, before anything is written: the last look the kernel takes
+   * (GAP, declared: the `rename(2)` after it is not conditional on what that look saw).
+   */
+  guard?: (found: FileIdentity) => void | Promise<void>,
+): Promise<void> {
   const fromParent = dirname(from.full);
   const toParent = dirname(to.full);
   const source = await openCheckedFolder(from.scope, fromParent);
@@ -1665,14 +1717,18 @@ async function renameChecked(from: Checked, to: Checked): Promise<void> {
       await refuseHeldName(from.scope, from.full);
       await refuseHeldName(to.scope, to.full);
       if (withoutPath && sourceSteps !== undefined && targetSteps !== undefined) {
-        if ((await sourceSteps.identity(sourceName)) === undefined) return refuse('outside');
+        const movingNow = await sourceSteps.identity(sourceName);
+        if (movingNow === undefined) return refuse('outside');
+        await guard?.(movingNow);
         if ((await targetSteps.identity(targetName)) !== undefined) return refuse('outside');
         await sourceSteps.renameInto(sourceName, target, targetName).catch(() => refuse('changed'));
         return;
       }
       const fromAt = await entry(from.scope, source, fromParent, sourceName);
       const toAt = await entry(to.scope, target, toParent, targetName);
-      if ((await from.scope.fs.identity(fromAt)) === undefined) return refuse('outside');
+      const movingNow = await from.scope.fs.identity(fromAt);
+      if (movingNow === undefined) return refuse('outside');
+      await guard?.(movingNow);
       if ((await to.scope.fs.identity(toAt)) !== undefined) return refuse('outside');
       await from.scope.fs.rename(fromAt, toAt).catch(() => refuse('changed'));
     } finally {
@@ -2223,6 +2279,12 @@ function rootHandle(setup: HandleSetup): RootHandle {
       // (A source whose root is unknown is refused too: the table only holds handles made for a root, so none is.)
       if (options?.link === true && (known.root === undefined || isOwnerRoot(known.root)))
         return refuse('not_declared');
+      // A link whose place or whose source is inside a credential home is refused before the disk is asked (one rule,
+      // `host/shared-credentials.ts`): a folder alias would carry a placed credential into another ferret's home.
+      if (options?.link === true) {
+        const verdict = credentialHomeLinkVerdict({ source: known.root, target: name });
+        if (verdict !== undefined) return refuse(verdict);
+      }
       const checkedSource = await openCheckedFolder(sourceFolder.scope, sourceFolder.full).catch((error: unknown) => {
         if (error instanceof RootError && error.refusal === 'not_a_file') refuse('outside');
         throw error;
@@ -2280,6 +2342,85 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const lexical = lexicalInRoot(home, root, ownerRoot, path);
       if (!lexical.ok) return refuse(lexical.error);
       return await privateChain(fs, home, lexical.value, setup.daemonUid);
+    },
+    linkCredential: async (credential, to) => {
+      // The destination first: an internal, writable root the kernel makes (`agent-homes`), before the credential is opened.
+      if (!receivingRoot(name)) return refuseShared('not_internal');
+      writable();
+      // Forged, rebuilt, revoked, already spent or in use (`not_shared`) or another plugin's (`not_receiver`): the table
+      // decides, never the caller. The first link that stays spends it; an attempt that made none gives it back.
+      const claim = CREDENTIALS.claim(credential, plugin);
+      const minted = claim.entry;
+      const place = async (): Promise<void> => {
+        // One ferret's home and nothing wider, and the link lands at `<that home>/<file>`: the receiver chooses neither the
+        // folder nor the name.
+        const root = base();
+        if (scopedParent === undefined || root === undefined) return refuse('outside');
+        const lexical = lexicalInRoot(home, root, ownerRoot, to);
+        if (!lexical.ok) return refuse(lexical.error);
+        if (!credentialPlacement(absolute(root, 'a root'), minted.file, lexical.value)) return refuse('outside');
+        // The file is judged again NOW, by the minter's own checks: it must be the very one minted (a rename-over, a
+        // re-sign-in or a swapped folder is `changed`, and the next launch mints afresh).
+        const lookAgain = async (): Promise<ReachedCredential> => {
+          const found = await minted.reach().catch((error: unknown) => {
+            if (error instanceof SharedTreeError || error instanceof RootError) return refuse('changed');
+            throw error;
+          });
+          // The very inode minted, at the very real path minted: the link's text is that path, nothing the caller names.
+          if (!isMintedInode(minted.identity, found.identity) || found.real !== minted.real) return refuse('changed');
+          return found;
+        };
+        const reached = await lookAgain();
+        const placed = await realParent(to, true);
+        // No link on the way: the folder `to` names, as this root names it, is the very folder reached.
+        if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
+          refuse('link_escape');
+        const made = await openFolderMaking(placed.scope, dirname(placed.full), 0o700, false);
+        try {
+          const leafAt = await entry(placed.scope, made.folder, made.real, basename(placed.full));
+          // THE exemption: the TARGET (a pinned sign-in file) is not asked of the private-place fence — only the identity
+          // the mint table holds is linked. The link's PLACE is fenced as for every link.
+          await refuseHeldName(placed.scope, join(made.real, basename(placed.full)));
+          if ((await fs.identity(leafAt)) !== undefined) refuse('outside');
+          await fs.symlink(reached.real, leafAt).catch(() => refuse('changed'));
+          // PROVED before it stays: the source is judged again by descriptor (no link on the way, the minted inode) and the
+          // link, followed, must land on that same real path. Anything else — a swap between the first look and the
+          // `symlink` call — takes the link back and refuses; no link that reaches an unminted file is ever left.
+          const held = await (async () => {
+            try {
+              // The link itself, looked at BEFORE the proof (the proof stays the last thing asked of the disk): what is
+              // recorded so a later move of it is told from any other name.
+              const itself = await fs.identity(leafAt);
+              const after = await lookAgain();
+              const landed = await fs.realpath(leafAt);
+              const there = await fs.identity(landed);
+              const holds =
+                there !== undefined &&
+                placedLinkHolds(
+                  { real: minted.real, ...minted.identity },
+                  { real: landed, device: there.device, inode: there.inode },
+                ) &&
+                isMintedInode(minted.identity, after.identity);
+              return holds && itself?.kind === 'link' ? itself : undefined;
+            } catch {
+              return undefined;
+            }
+          })();
+          if (held === undefined) {
+            await fs.unlink(leafAt).catch(() => undefined);
+            refuse('changed');
+          } else PLACED_LINKS.place(placed.full, linkMark(held));
+        } finally {
+          await made.folder.close();
+        }
+      };
+      try {
+        await place();
+      } catch (error) {
+        claim.release();
+        throw error;
+      }
+      claim.spend();
     },
     ensurePrivateDirectory: async path => {
       writable();
@@ -2387,6 +2528,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
         if (found !== undefined && found.kind !== 'link' && heldByFence(fence, [toComponent(found)])) refuse('fenced');
       }
       await removeChecked(scope, full, removeOptions?.onlyIfEmpty === true);
+      PLACED_LINKS.forgetUnder(full);
     },
     linkTo: async (at: FencedPath, target: RootLinkTarget) => {
       writable();
@@ -2394,11 +2536,26 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const known = HANDLES.get(target?.root ?? {});
       if (known === undefined || known.plugin !== plugin) return refuse('not_declared');
       const pointsAt = await known.linkTarget(target.path, target.dangling === true);
-      const placed = await realParent(at, true);
-      // No link on the way: the folder `at` names, as this root names it, is the very folder reached.
       const root = base() as string;
       const lexical = lexicalInRoot(home, root, ownerRoot, at);
       if (!lexical.ok) return refuse(lexical.error);
+      // A link whose place or whose target is inside a credential home is refused (one rule,
+      // `host/shared-credentials.ts`) BEFORE anything is resolved for creation: `realParent(at, true)` makes the scoped
+      // base of a not-yet-created agent home, so a refusal after it would leave that empty folder behind. The verdict is
+      // pure (the two roots' names), so it needs nothing from the disk; the name and target refusals above keep their precedence.
+      const homeVerdict = credentialHomeLinkVerdict({ source: known.root, target: name });
+      if (homeVerdict !== undefined) {
+        // The name that is a fenced file keeps its precedence (`fenced`, not `link_escape`), judged WITHOUT creating
+        // anything: only a place whose parent already exists is looked at, and any other answer is the verdict itself.
+        const existing = await realParent(at).catch((error: unknown) => {
+          if (error instanceof RootError && error.refusal === 'fenced') throw error;
+          return undefined;
+        });
+        if (existing !== undefined) await refuseHeldName(existing.scope, existing.full);
+        return refuse(homeVerdict);
+      }
+      const placed = await realParent(at, true);
+      // No link on the way: the folder `at` names, as this root names it, is the very folder reached.
       if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
         refuse('link_escape');
       const made = await openFolderMaking(placed.scope, dirname(placed.full), 0o700, false);
@@ -2430,7 +2587,37 @@ function rootHandle(setup: HandleSetup): RootHandle {
         if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
           refuse('link_escape');
       }
-      await pinning(target.full, async () => await renameChecked(source, target));
+      // A credential link the kernel placed is not moved, itself or inside a folder that goes (one rule, `host/shared-credentials.ts`):
+      // judged by what was recorded at link time and what the link is now, never by its name. The record is KEPT through
+      // the whole decision: the early look below may find the link swapped for something else, and the held-source look
+      // (`renameChecked`'s guard) must still know which link was placed, or a swap that is undone in between goes through.
+      const recorded = PLACED_LINKS.affected(source.full);
+      const stillPlaced = async (path: string, mark: string): Promise<boolean> => {
+        const now = await source.scope.fs.identity(path);
+        return now?.kind === 'link' && linkMark(now) === mark;
+      };
+      const carried: string[] = [];
+      for (const [path, mark] of recorded) if (await stillPlaced(path, mark)) carried.push(path);
+      const verdict = placedLinkMoveVerdict(carried);
+      if (verdict !== undefined) return refuse(verdict);
+      await pinning(
+        target.full,
+        async () =>
+          await renameChecked(source, target, async found => {
+            // The entry the held folder is about to move, looked at again: the very link placed is never carried off...
+            const movingMark = recorded.find(([path]) => path === source.full)?.[1];
+            if (movingMark !== undefined && found.kind === 'link' && linkMark(found) === movingMark)
+              refuse('link_escape');
+            // ...nor a folder holding a recorded link that is back (or still) there now.
+            const again: string[] = [];
+            for (const [path, mark] of recorded)
+              if (path !== source.full && (await stillPlaced(path, mark))) again.push(path);
+            const late = placedLinkMoveVerdict(again);
+            if (late !== undefined) refuse(late);
+          }),
+      );
+      // The move was made: what was recorded below the old name is no longer there.
+      PLACED_LINKS.forgetUnder(source.full);
     },
     unlink: async (linkName: FencedPath) => {
       writable();
@@ -2445,6 +2632,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
       if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
         refuse('link_escape');
       await unlinkChecked(placed);
+      PLACED_LINKS.forgetUnder(placed.full);
     },
     setMode: async (path: FencedPath, mode: number) => {
       if (setup.setMode !== true) return refuse('not_declared');
@@ -2648,6 +2836,8 @@ export interface RootsOptions {
   readonly daemonUid?: number | null;
   /** Whether the manifest declares `permissions.shareTrees` (`RootsPort.share`); absent, every share is refused. */
   readonly shareTrees?: boolean;
+  /** The manifest's `permissions.shareCredentials` (`RootsPort.shareCredential`); absent, every mint is refused. */
+  readonly shareCredentials?: readonly string[];
   /** The manifest's `permissions.projectFiles`, for the `project-files` root; absent, every name of it is refused. */
   readonly projectFiles?: readonly string[];
   /** The plugin's declared state files: a shared named tree must be one of its own opaque ones. */
@@ -2700,7 +2890,7 @@ export function rootsPortFor(
   options.onStop?.(() => {
     life.live = false;
   });
-  return {
+  const port: RootsPort = {
     harnessFile: absolutePath => {
       const refusal = harnessFileRefusal({
         plugin: layout.plugin,
@@ -2722,6 +2912,43 @@ export function rootsPortFor(
       const access = stateTreeAccess(fs, home, layout.plugin, base, immutable, privateFiles);
       await existingFolder(access, base as FencedPath);
       return SHARED.mint(basename(base), { source: access, from: base as FencedPath }, life);
+    },
+    shareCredential: async (source: SharedCredentialSource): Promise<SharedCredential> => {
+      // Declared by name in the manifest, held by the root's one owner (`ROOT_OWNERS`: Logins alone, whatever another
+      // manifest says), and declared as a root: the three together are what makes this Logins-only.
+      if (!credentialFileListed(options.shareCredentials, source?.file)) return refuseShared('not_permitted');
+      if (!mayHoldRoot(layout.plugin, 'credentials') || !allowed.has('credentials'))
+        return refuseShared('not_permitted');
+      if (!isCredentialFolder(source.folder) || !isCredentialReceiver(source.receiver)) return refuseShared('not_own');
+      const handle = port.root('credentials');
+      const known = HANDLES.get(handle) as SourceAccess;
+      const rootBase = internalRootBase(home, layout.plugin, 'credentials') as string;
+      const path = handle.resolve(`${source.folder}/${source.file}`);
+      if (!path.ok) return refuseShared('not_own');
+      const from = path.value;
+      /** The file as the minter's own handle reaches it: no link on the way, a regular file with one name. */
+      const reach = async (): Promise<ReachedCredential> => {
+        const checked = await known.realParent(from);
+        const lexical = lexicalInRoot(home, rootBase, false, from);
+        if (!lexical.ok) return refuseShared('not_own');
+        if (relative(checked.scope.base.real, checked.full) !== relative(absolute(rootBase, 'a root'), lexical.value))
+          return refuseShared('not_own');
+        const named = await checked.scope.fs.identity(checked.full);
+        if (named === undefined) return refuseShared('absent');
+        if (credentialFileRefusal(named) !== undefined) return refuseShared('not_own');
+        // Judged by DESCRIPTOR: the file is opened (`O_NOFOLLOW`, from its folder's descriptor, the folder itself walked
+        // down from the root without following a link) and the identity is the open descriptor's, not a path's.
+        const found = await withCheckedFile(checked.scope, checked.full, async file => file.identity);
+        if (credentialFileRefusal(found) !== undefined) return refuseShared('not_own');
+        return { real: checked.full, identity: found };
+      };
+      const reached = await reach();
+      return CREDENTIALS.mint(
+        source.file,
+        source.receiver,
+        { file: source.file, real: reached.real, identity: reached.identity, reach },
+        life,
+      );
     },
     root: (name, scope) => {
       if (!allowed.has(name)) throw new RootError('not_declared');
@@ -2818,6 +3045,7 @@ export function rootsPortFor(
       });
     },
   };
+  return port;
 }
 
 /**

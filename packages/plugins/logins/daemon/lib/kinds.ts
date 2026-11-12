@@ -8,13 +8,14 @@
  */
 import type {
   HarnessKey,
+  LoginCredentialAnswer,
   LoginField,
   LoginKind,
   LoginQuota,
   LoginStatus,
   SignInFlow,
 } from '@ferretry/core-ferrets/contract';
-import type { Clock } from '@ferretry/kernel/contract';
+import type { Clock, SharedCredential } from '@ferretry/kernel/contract';
 import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import type { LOGIN_KINDS, LoginFile, LoginView } from '../../contract/index.ts';
 import type { HarnessLoginFlow } from '../../contract/index.ts';
@@ -24,6 +25,14 @@ import { looksLikeRawSecret } from '../../contract/secret-shape.ts';
 
 type KindKey = (typeof LOGIN_KINDS)[number];
 
+/**
+ * The one sentence for a sign-in file the kernel will not share because it is not a plain file with one name: it says what
+ * to remove or redo, and names no path (the owner already sees the login).
+ */
+export function notPlainFileSentence(login: string): string {
+  return `the sign-in file of the login ${login} is not a plain file with a single name (another link to it exists, or it is itself a link); remove the extra link, or sign the login out and in again from Logins, then start the ferret again`;
+}
+
 /** What the kinds need of the rest of this half. */
 export interface LoginKindDeps {
   readonly clock: Pick<Clock, 'sleep'>;
@@ -32,6 +41,13 @@ export interface LoginKindDeps {
   check(id: string): Promise<LoginView>;
   startSignIn(id: string): Promise<HarnessLoginFlow>;
   signInStatus(flowId: string): Promise<HarnessLoginFlow>;
+  /** Why this login's sign-in FILE cannot be handed to a harness (not owned, no tokens), in one sentence; `undefined` when it can. */
+  credentialProblem(id: string): Promise<string | undefined>;
+  /**
+   * The kernel's shared credential for this login's sign-in file; `'not_own'` when the file is not a plain file with one
+   * name (something is linked to it, or it is a link); `undefined` when it could not be shared. Never renews.
+   */
+  shareCredential(id: string): Promise<SharedCredential | 'not_own' | undefined>;
   /**
    * How this login's store takes part in a launch: for a Ferretry-kept Claude login the one secure-storage variable
    * (naming its store directory) and whether the store NOW holds material that can be launched with; for a host-kept
@@ -177,6 +193,27 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
             } catch {
               return err(`the login ${login} could not be read, so the ferret was not started`);
             }
+          },
+        }
+      : {}),
+    // Only a Codex sign-in is a FILE a harness reads. Claude's reaches a ferret as environment (`env`/launch environment).
+    ...(key === 'openai'
+      ? {
+          credential: async (login: string, harness: HarnessKey): Promise<LoginCredentialAnswer> => {
+            const unavailable = (sentence: string): LoginCredentialAnswer => ({ kind: 'unavailable', sentence });
+            known(login, key);
+            if (harness !== harnessKey('codex')) return unavailable(`the login ${login} is spent by Codex only`);
+            // The store and the file's state come first; the status word is the cached reading, never a renewal.
+            const problem = await deps.credentialProblem(login);
+            if (problem !== undefined) return unavailable(problem);
+            const view = await viewOf(login, key);
+            if (view.status.word === 'needs_sign_in')
+              return unavailable(`the login ${login} needs signing in: ${view.status.explanation}`);
+            const credential = await deps.shareCredential(login);
+            if (credential === 'not_own') return unavailable(notPlainFileSentence(login));
+            if (credential === undefined)
+              return unavailable(`the sign-in file of the login ${login} could not be shared with Codex`);
+            return { kind: 'file', credential };
           },
         }
       : {}),

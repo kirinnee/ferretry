@@ -239,6 +239,15 @@ protocol/tests/unit/harness-login.test.ts
 protocol/tests/unit/models.test.ts
 ```
 
+### Ported since: the Codex section
+
+- `fleet/tests/contract/codex-credential-link.test.ts` is **ported** to
+  `packages/plugins/logins/tests/realworld/contract/codex-credential-link.test.ts` (with its `support/` and `run.sh pinned|latest|path`).
+  It is opt-in (`FY_HARNESS_CONTRACT=1`, set only by `run.sh`), uses fake tokens and loopback only, and makes its links with the
+  REAL kernel calls (`RootsPort.shareCredential` -> `RootHandle.linkCredential`) on a temporary FY_HOME. It adds the U3 claim
+  (the renewal lands under `sandbox_mode="workspace-write"`). Measured on codex-cli 0.166.0 (`run.sh path`). It is not in a
+  workflow job yet (a non-gating `realworld.yaml` job is britnee's call).
+
 ## Also copy (shared files; another port is the primary owner and splits them)
 
 0 files. Copy only the part this subsystem needs and say so in the commit.

@@ -1638,6 +1638,99 @@ readable by that runtime's agent. The refresh token and any client secret are NO
 rest in a separate sealed document only the sign-in service reads, so `use` and `${secret:…}` cannot
 reach them. **Sign out** deletes all of them.
 
+## A harness sign-in file in a ferret's home
+
+A Codex OAuth (or key) sign-in is not a vault secret either. Logins keeps the harness's own `auth.json` in its private
+`credentials` root; when a ferret starts on that login, Logins mints a one-file _shared credential_ bound to Codex and
+the kernel makes ONE symlink to it at `<the ferret's Codex home>/auth.json` (and Codex is launched with
+`cli_auth_credentials_store="file"`). No plugin and not the daemon reads the file through that link: the child process
+Codex reads it, and refreshes it in place, so the link keeps pointing at the one file. A login with no usable sign-in
+refuses the start with one sentence, before any pane exists. The residual is the same-user one: the agent runs as the
+same user and Codex's sandbox reads anywhere, so an agent's shell command can `cat` that file, exactly as in the old
+account model. The link outlives a revocation until the next launch of that ferret clears it, and two ferrets refreshing
+one login in the same instant can race on its single-use refresh token (both declared gaps).
+
+Every ferret on a login shares that ONE `auth.json`, and each runs as the same user, so **any ferret on a login can
+rewrite the shared file** and so change the account for every other ferret on it (or hard-link it, which makes the next
+start on that login refuse until the extra link is removed or the login is signed out and in again). This is the same-user
+residual above, not a new reach. The kernel hands the credential over once (it is single-use, and only the harness is
+given it), and it refuses to move the placed link, or a folder holding it, out of the ferret home it was linked into (`link_escape`; removing it stays allowed), but it cannot stop the agent that then holds the file. When the kernel refuses the link at the last step, the
+start fails with the general "could not prepare this ferret's home" sentence (`failed`), not `login_unavailable`.
+
+Two more rules keep that one link the only door, both enforced identically on the real roots port and the testing host:
+
+- **No other link reaches a credential home.** `linkTo` and `copyTree` in link mode refuse (`link_escape`, nothing written)
+  any link whose own place OR whose source is inside a credential home, which is the whole `agent-homes` root (every
+  ferret's Codex home, the folder that holds a placed credential, the folders above it and the ones about to) and the whole
+  `credentials` root (every login's store). So a folder alias of a ferret home (`f2` linked to `f1`) cannot give a second
+  ferret the credential, and neither can a link made before the credential is placed. The one rule is
+  `credentialHomeLinkVerdict` in `packages/core/kernel/host/shared-credentials.ts`. `linkCredential` is unaffected. This is
+  NOT the whole "any login's store" rule: the fleet folder and the host harness homes are not credential homes to it (see
+  **Declared exception** below), so the rule covers `agent-homes` and `credentials` only.
+  A refusal writes nothing, not even the scoped agent home a link was to land in: the verdict is judged before anything is
+  resolved for creation, on the real roots port and the testing host.
+- **The move check is armed against a swap.** The device and inode recorded when the link was placed are kept through the
+  whole move decision and asked again at the held-source look, for the link and for any folder that holds it, so a writer on
+  the same filesystem who swaps the link for a file across the first look and puts it back at the next call does not get it
+  moved. **Declared GAP:** after that last look the move is a plain `rename(2)`, which cannot be made conditional on what
+  the look saw (no compare-and-rename in the standard library), so a same-user writer who restores the link inside that
+  single window is not stopped. It needs a concurrent writer already holding the same user's filesystem, which is the
+  same-user residual above.
+
+**Declared exception: Runtimes' fleet credential store and the host harness homes (not implemented, pinned).** The
+credential-home rule above does not reach the `fleet` root (the fleet credential store, `fleet/credentials/<id>`, and
+Runtimes' runtime homes) or the `harness-home` root (the host's own Claude Code and Codex homes). Generic `linkTo` and
+`copyTree` link mode from and into them remain allowed, within the root-specific refusals that still apply (a `harness-home`
+is a read-only destination, and `copyTree` link mode FROM `harness-home` is `not_declared`; the host reach this exception
+accepts is `linkTo` FROM `harness-home` INTO `fleet`), for **Runtimes' provisioning only** (`FleetDisk` in
+`fleet-disk.ts` and `FileFleetProvisioner` in `file-provisioner.ts`), because Runtimes provisions fleet homes, host sources
+and not-yet-existing sign-in slots, none of which the dedicated `linkCredential` (scoped `agent-homes` only) can place. So a
+Runtimes link can reach a real fleet or host sign-in outside `linkCredential`: a link in the fleet assets to a login in
+`fleet/credentials`, or to a host `auth.json`, succeeds on the real port and the testing host. The review also observed that
+the kernel does not constrain `harness-home` to an actual harness folder: Runtimes can scope it to an arbitrary absolute folder
+and link an ordinary file from it into the fleet credential store. Reach is limited to the trusted provisioner: only Runtimes may
+hold either root (the kernel's ownership rule), a project file is never a link source, an `agent-homes` link is refused, no
+route or tool lets a ferret choose the operation, and a shell already running as the user can use the filesystem directly (the
+same-user residual above). The exception is pinned by a fitness test, `scripts/gen/tests/fleet-link-callers.test.ts`, which
+asks the **TypeScript type checker** (TypeScript 7's native checker, over every production module; the repo's tsconfig projects)
+and not the spelling, in two layers. **(1) No read:** it fails if any production module other than `fleet-disk.ts` reads,
+aliases or destructures `linkTo` or `copyTree` off a value the checker types as the kernel `RootHandle` (an alias of it, a
+union or intersection containing it, an interface extending it, a `Pick`/`Readonly`/spread/rest of it), whatever the key is
+spelled through: a constant, an imported dispatch table, a reassigned or shadowed key, a parameter typed `'linkTo'`. A key the
+checker cannot narrow to string literals, on a handle (or on an `any` a handle was put into), fails closed. A cast does not hide
+the handle (`(fleet as never as Record<string, Function>)[name]`). **The disk is held to the same rule by TYPE**: every member of
+`FleetDisk` that reaches a `RootHandle` link operation, directly or through another member or helper of `fleet-disk.ts`
+(today `linkTo` and `copyInto`), is a link operation, and a read of one off any value the checker types as `FleetDisk` —
+`host.disk.linkTo` through `Pick<AdapterHost, 'disk'>`, a wrapper's parameter, an alias, a destructuring, an element access, a
+class field — fails outside `fleet-disk.ts` and `file-provisioner.ts`, the one module that drives it. The test also fails if
+either allowed module stops reading (a stale allowance). **(2) The authority surface is pinned** in
+`scripts/gen/tests/fleet-link-callers.snapshot.json` — whole surfaces, not spellings: the exported names, kinds and class members of
+`fleet-disk.ts` and `file-provisioner.ts`; every module importing either, directly or through a re-export; the link-capable
+members of `FleetDisk` and every module that holds a value the checker types as `FleetDisk` (declares a field, parameter,
+variable or return of that type, or reads one: found from the class's references and every identifier named like such a carrier,
+verified by type); every module that asks the kernel for a `fleet` / `harness-home` handle — a `RootsPort.root` call is found by
+what it **resolves** to, so a destructuring, a rename, an element access, `.bind`/`.call`, or passing `roots.root` as a value
+is followed to the calls it ends in, and a root name the checker cannot narrow counts as a fleet root; every module that handle is
+then passed to (variables, assignments, call arguments, returns, object-literal properties and class fields); and **the complete
+member list (name and kind) of the `RootHandle` interface and of every object literal or class that implements it**, so a new,
+removed or renamed handle operation — whatever it is called — fails with a message saying a reviewer must approve it **and decide
+its guard**, because no scan can infer link semantics from an unlisted name. Every change fails naming &F3537 and saying a
+reviewer must approve the snapshot change (`FLEET_LINK_SNAPSHOT_UPDATE=1` rewrites it). That is what closes a helper exported from
+an allowed module, re-exported by a barrel and called by a new module — no read-based scan can see that. The test also fails if
+either root is ever held by a plugin other than Runtimes, so a future caller cannot slip in before the move. No directory is exempt:
+a new kernel module (a host helper, a worker-grants write handler) that calls `fleet.linkTo` fails like any other, and the kernel's
+own definitions pass because a definition is not a read. **Not caught (declared):** reflection (`Reflect.get`,
+`Object.entries`, `Object.getOwnPropertyDescriptor`, any call that names the operation only as data), and a handle put into an
+`any` by a route the check does not follow (a property, a return, a container) then indexed by a key that is not a string literal
+— an `any` nothing demonstrably handed a handle to is ordinary JSON indexing and is deliberately left alone. A handle or a disk in
+a container is not followed by the receiver and holder lists, but layer 1 reads the TYPE at every use, so any link read of it is
+still caught wherever it ends up. It costs about 27 s of the quick test tier (it opens the type checker once, reads every
+production module and derives the surface; measured 2026-11-12, Linux x64). It is to be **removed by the after-merge move** (&F3537,
+"Dedicated credential link operation"): Runtimes onto a dedicated credential operation, the fleet store becoming a credential home,
+and ordinary asset links that land in a runtime credential home becoming copies. The ruling that scopes it, quoted exactly:
+
+> "if the re-review proves only Runtimes' provisioning (fleet-disk.ts, file-provisioner.ts) reaches fleet.linkTo on the fleet root, ALSO add a fitness test that fails if any other module calls it there, so a future caller can't slip in before the after-merge move. Then fix4 is fine for merge; the last-look-to-rename race stays a declared GAP."
+
 ## Sign-in tokens the usage read sends
 
 A Claude Code or Codex sign-in is not a vault secret: it is the harness's own credential file or macOS

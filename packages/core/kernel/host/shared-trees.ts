@@ -19,7 +19,11 @@ export type SharedRefusal =
   /** The tree is not one the kernel minted (forged, copied, rebuilt from JSON) or its minter stopped. */
   | 'not_shared'
   /** The destination is not an internal, writable root. */
-  | 'not_internal';
+  | 'not_internal'
+  /** A shared credential was asked for by a plugin other than the one it was minted for. */
+  | 'not_receiver'
+  /** The credential's file is not there. */
+  | 'absent';
 
 export class SharedTreeError extends Error {
   constructor(readonly refusal: SharedRefusal) {

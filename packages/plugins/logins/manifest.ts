@@ -232,6 +232,9 @@ export default definePlugin({
   permissions: {
     // Logins' own sign-in stores (§7.7): the kernel gives this internal root to Logins alone.
     roots: ['credentials'],
+    // The one file Logins hands another plugin: Codex's `auth.json`, linked into a ferret's home by the kernel
+    // (`RootsPort.shareCredential`). Only the `credentials` root's owner can mint, and only to a receiver it names.
+    shareCredentials: ['auth.json'],
     // Fixed hosts: the two usage reads and the built-in presets' test hosts. A login's OWN gateway host (custom
     // endpoints, Azure resources) is a user value; the kernel's network allowlist cannot name it yet (GAP).
     network: [

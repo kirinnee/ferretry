@@ -26,6 +26,18 @@ import {
   takesUnlinks,
   unlinkNameRefusal,
 } from '../host/root-rules.ts';
+import {
+  credentialFileListed,
+  credentialFileRefusal,
+  credentialPlacement,
+  isCredentialFolder,
+  isCredentialReceiver,
+  credentialHomeLinkVerdict,
+  isMintedInode,
+  PlacedCredentialLinks,
+  placedLinkMoveVerdict,
+  SharedCredentials,
+} from '../host/shared-credentials.ts';
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { projectFilesScope } from '../manifest/project-files.ts';
@@ -1455,6 +1467,21 @@ async function start(world: World): Promise<TestHost> {
   const sharedTrees = new SharedTrees<{
     readonly files: () => readonly (readonly [string, string])[];
   }>();
+  /** Every credential a test plugin minted: the key of its file in the flat world and the stand-in inode it had. */
+  const sharedCredentials = new SharedCredentials<{
+    readonly file: string;
+    readonly inode: bigint;
+    readonly reach: () => { readonly key: string; readonly inode: bigint };
+  }>();
+  /** Every credential link a test plugin placed, marked by the text the link holds: as production, a move of one is refused. */
+  const placedCredentialLinks = new PlacedCredentialLinks();
+  /** Gives a NEW file of the flat world its own stand-in inode (an existing one keeps its inode: a write in place). */
+  const writingFile = (path: string): void => {
+    if (!world.roots.has(path)) {
+      nextInode += 1n;
+      inodes.set(path, nextInode);
+    }
+  };
   const rootsFor = (manifest: Manifest): KernelPorts['roots'] => {
     // As the real host: every tree a plugin minted is revoked when the host stops it.
     const life = { live: true };
@@ -1487,6 +1514,30 @@ async function start(world: World): Promise<TestHost> {
         if (files().length === 0 && state?.directories.has(folder) !== true)
           throw new Error(`no such folder ${folder}`);
         return sharedTrees.mint(folder.slice(folder.lastIndexOf('/') + 1), { files }, life);
+      },
+      // The same rules as production (`shareCredential` in `host/roots.ts`), over the flat world: only the `credentials` root's
+      // owner mints, only a listed basename, only a file with one name and no link on the way.
+      shareCredential: async source => {
+        if (!credentialFileListed(manifest.permissions?.shareCredentials, source?.file))
+          return refuseShared('not_permitted');
+        if (!mayHoldRoot(manifest.id, 'credentials') || !(manifest.permissions?.roots ?? []).includes('credentials'))
+          return refuseShared('not_permitted');
+        if (!isCredentialFolder(source.folder) || !isCredentialReceiver(source.receiver))
+          return refuseShared('not_own');
+        const key = `/credentials/${source.folder}/${source.file}`;
+        const reach = (): { readonly key: string; readonly inode: bigint } => {
+          if (testLinks.has(key) || testLinks.has(`/credentials/${source.folder}`)) return refuseShared('not_own');
+          if (!world.roots.has(key)) return refuseShared('absent');
+          const found = { kind: 'file', links: testHardLinks.has(key) ? 2 : 1 };
+          if (credentialFileRefusal(found) !== undefined) return refuseShared('not_own');
+          return { key, inode: inodes.get(key) ?? 0n };
+        };
+        return sharedCredentials.mint(
+          source.file,
+          source.receiver,
+          { file: source.file, inode: reach().inode, reach },
+          life,
+        );
       },
       root(name, scope) {
         if (!(manifest.permissions?.roots ?? []).includes(name) || !mayHoldRoot(manifest.id, name)) {
@@ -1612,8 +1663,10 @@ async function start(world: World): Promise<TestHost> {
             // The real host normalizes (`join`), so the root's own folder is spelled without a trailing slash.
             return { ok: true, value: (relative === '' ? prefix : `${prefix}/${relative}`) as never };
           },
+          // As production: a link on the way (the leaf's too) is followed and judged — one that reaches outside this root is
+          // `link_escape`, so no plugin reads through a link into another root (the placed sign-in link included).
           readText: async path => {
-            const text = world.roots.get(path);
+            const text = world.roots.get(followLinks(path));
             if (text === undefined) throw new Error(`no such file ${path}`);
             return text;
           },
@@ -1634,12 +1687,14 @@ async function start(world: World): Promise<TestHost> {
             if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
             if (writeOptions?.replaceExisting === true && !world.roots.has(path))
               throw new Error(`no such file ${path}`);
+            writingFile(path);
             world.roots.set(path, text);
           },
           writeBytes: async (path, bytes, writeOptions) => {
             if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
             if (writeOptions?.replaceExisting === true && !world.roots.has(path))
               throw new Error(`no such file ${path}`);
+            writingFile(path);
             world.roots.set(path, new TextDecoder().decode(bytes));
           },
           publish: async (path, bytes, publishOptions) => {
@@ -1687,6 +1742,38 @@ async function start(world: World): Promise<TestHost> {
             for (const [key, value] of files) world.roots.set(`${to}/${key}`, value);
             return copyOptions?.link === true ? 'linked' : 'copied';
           },
+          linkCredential: async (credential, to) => {
+            if (!receivingRoot(name)) return refuseShared('not_internal');
+            // As production: single-use. The first link that stays spends it; an attempt that made none gives it back.
+            const claim = sharedCredentials.claim(credential, manifest.id);
+            const minted = claim.entry;
+            try {
+              // One ferret's home and nothing wider; the link lands at `<that home>/<file>` and nowhere else.
+              if (prefix === undefined || scoped === undefined || scoped === '') throw new RootError('outside');
+              const place = ownPath(to);
+              if (!credentialPlacement(prefix, minted.file, place)) throw new RootError('outside');
+              // As production: no link on the way to the home (the root, the home or any folder between): `link_escape`.
+              const steps = prefix.split('/').map((_, at, all) => all.slice(0, at + 1).join('/'));
+              if (steps.some(step => step !== '' && testLinks.has(step))) throw new RootError('link_escape');
+              const reached = (() => {
+                try {
+                  return minted.reach();
+                } catch {
+                  throw new RootError('changed');
+                }
+              })();
+              if (!isMintedInode({ device: 1n, inode: minted.inode }, { device: 1n, inode: reached.inode }))
+                throw new RootError('changed');
+              if (world.roots.has(place) || testLinks.has(place) || testFolderExists(place))
+                throw new RootError('outside');
+              testLinks.set(place, reached.key);
+              placedCredentialLinks.place(place, reached.key);
+            } catch (error) {
+              claim.release();
+              throw error;
+            }
+            claim.spend();
+          },
           copyTree: async (source, from, to, copyOptions) => {
             // A SOURCE that is a project folder is gated by its own handle (the declared set, no link on the way), and no
             // link is ever made from one into another root: the same two refusals as production (`HANDLES.real`, `linkTarget`).
@@ -1699,6 +1786,9 @@ async function start(world: World): Promise<TestHost> {
               const sourceRoot = testHandles.get(source)?.root;
               if (projectSource !== undefined || (sourceRoot !== undefined && isOwnerRoot(sourceRoot)))
                 throw new RootError('not_declared');
+              // As production: a link whose place or whose source is inside a credential home is refused.
+              const homeVerdict = credentialHomeLinkVerdict({ source: sourceRoot, target: name });
+              if (homeVerdict !== undefined) throw new RootError(homeVerdict);
             }
             // the test roots are one flat map: copy (or, for a link, alias) every file under `from`
             const fromKey = projectSource === undefined ? from : projectFileKey(from);
@@ -1794,7 +1884,10 @@ async function start(world: World): Promise<TestHost> {
                 links: 1,
               };
             }),
-          stat: async path => (world.roots.has(path) ? fileStat(path) : undefined),
+          stat: async path => {
+            const reached = followLinks(path);
+            return world.roots.has(reached) ? fileStat(reached) : undefined;
+          },
           // The real host's rules over the flat test world, with the same refusals: the LEAF IS NEVER FOLLOWED (the parent
           // is opened first, then the entry goes by its own name; a link goes as a link and its target stays), and
           // `onlyIfEmpty` is `rmdir` (one step: refused `not_empty` when anything is inside, never recursing).
@@ -1834,10 +1927,12 @@ async function start(world: World): Promise<TestHost> {
             if (testLinks.has(place)) {
               testLinks.delete(place);
               testModes.delete(place);
+              placedCredentialLinks.forgetUnder(place);
               return;
             }
             if (world.roots.has(place)) {
               world.roots.delete(place);
+              inodes.delete(place);
               testModes.delete(place);
               return;
             }
@@ -1852,6 +1947,7 @@ async function start(world: World): Promise<TestHost> {
             for (const key of [...testLinks.keys()]) if (under(key)) testLinks.delete(key);
             for (const key of [...testModes.keys()]) if (under(key)) testModes.delete(key);
             for (const key of [...testMadeFolders]) if (under(key)) testMadeFolders.delete(key);
+            placedCredentialLinks.forgetUnder(place);
           },
           // The real host's rules (`host/root-rules.ts`) over the flat test world, with the same refusals.
           linkTo: async (at, target) => {
@@ -1860,6 +1956,9 @@ async function start(world: World): Promise<TestHost> {
             if (known === undefined || known.plugin !== manifest.id) throw new RootError('not_declared');
             // a project file is never the target of a link another root writes (`linkTarget` on the real host, BG-014 m1)
             if (known.root === 'project-files') throw new RootError('not_declared');
+            // As production: a link whose place or whose target is inside a credential home is refused.
+            const homeVerdict = credentialHomeLinkVerdict({ source: known.root, target: name });
+            if (homeVerdict !== undefined) throw new RootError(homeVerdict);
             const to = target.path as string;
             const within = known.prefix;
             if (within === undefined || to.split('/').includes('..') || (to !== within && !to.startsWith(`${within}/`)))
@@ -1907,6 +2006,15 @@ async function start(world: World): Promise<TestHost> {
             if (world.roots.has(target) || testLinks.has(target) || testFolderExists(target))
               throw new RootError('outside');
             if (target.startsWith(`${source}/`)) throw new RootError('changed');
+            // As production: a placed credential link (judged by what was recorded, not its name) is not moved, itself or
+            // inside a folder that goes.
+            const carried = placedCredentialLinks
+              .affected(source)
+              .filter(([path, mark]) => testLinks.get(path) === mark);
+            const verdict = placedLinkMoveVerdict(carried);
+            if (verdict !== undefined) throw new RootError(verdict);
+            // (The record of a link below `source` is dropped once the move is made: nothing is there any more.)
+            placedCredentialLinks.forgetUnder(source);
             // The flat world keeps files, links and modes in three maps keyed by full path: everything at `source`
             // or under it moves to the same place under `target`, a link as the text it holds.
             const under = (key: string): boolean => key === source || key.startsWith(`${source}/`);
@@ -1943,6 +2051,7 @@ async function start(world: World): Promise<TestHost> {
             if (steps.some(step => step !== '' && testLinks.has(step))) throw new RootError('link_escape');
             if (!testLinks.has(place)) throw new RootError('outside');
             testLinks.delete(place);
+            placedCredentialLinks.forgetUnder(place);
           },
           setMode: async (path, mode) => {
             if (manifest.permissions?.setMode !== true) throw new RootError('not_declared');

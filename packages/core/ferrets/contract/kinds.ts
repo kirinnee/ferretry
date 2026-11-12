@@ -4,6 +4,7 @@ import {
   type InstructionEntry,
   REFUSAL_CODES,
   type RefusalCode,
+  type SharedCredential,
   type SharedTree,
 } from '@ferretry/kernel/contract';
 import { z } from 'zod';
@@ -61,6 +62,14 @@ export interface LaunchSpec {
   readonly readable?: readonly FencedPath[];
   /** What `launch.parts` takers added for this ferret. */
   readonly parts: readonly LaunchPart[];
+  /**
+   * The login's sign-in FILE, shared with this harness (`LoginKind.credential`): Codex's `auth.json`, which the harness
+   * asks the kernel to link into its own home (`RootHandle.linkCredential`). Set by Ferrets from the login only, never by
+   * a `launch.parts` taker, so no plugin can put a credential into another's launch; and a taker is never handed it
+   * (`LaunchPartSource.parts` takes the spec without it). It is single-use in the kernel: the one link the harness makes
+   * spends it, and each launch mints its own. Absent: nothing to link.
+   */
+  readonly credential?: SharedCredential;
   /** The first message, when the owner gave one. */
   readonly prompt?: string;
   readonly harnessConversation?: string;
@@ -114,7 +123,7 @@ export interface LaunchPartSource {
    * addition (lessons, a skill) leaves this off and is skipped when it fails.
    */
   readonly required?: boolean;
-  parts(spec: Omit<LaunchSpec, 'parts'>): Promise<readonly LaunchPart[]>;
+  parts(spec: Omit<LaunchSpec, 'parts' | 'credential'>): Promise<readonly LaunchPart[]>;
 }
 
 /**
@@ -834,7 +843,23 @@ export interface LoginKind {
    * start, so no pane starts signed out. A kind with nothing to add leaves it out.
    */
   launchEnvironment?(login: string, harness: HarnessKey): Promise<Result<Readonly<Record<string, string>>, string>>;
+  /**
+   * For a login whose sign-in is a FILE the harness reads (Codex's `auth.json`): the file shared with that harness, or
+   * why it cannot be used. Absent on a kind that has none (an environment login). Never refreshes: a Codex refresh
+   * spends a single-use token, and the harness renews its own file in place.
+   */
+  credential?(login: string, harness: HarnessKey): Promise<LoginCredentialAnswer>;
 }
+
+/**
+ * What {@link LoginKind.credential} answers. `file` carries the kernel's unforgeable {@link SharedCredential} (never a
+ * path or a value); `unavailable` carries one plain sentence naming the login and the remedy, never a path or a token.
+ */
+export type LoginCredentialAnswer =
+  /** Nothing to place: this login arrives as environment, or this kind has no sign-in file. */
+  | { readonly kind: 'none' }
+  | { readonly kind: 'file'; readonly credential: SharedCredential }
+  | { readonly kind: 'unavailable'; readonly sentence: string };
 
 // ─── sitrep ───────────────────────────────────────────────────────────────────────────────────────────────────────
 

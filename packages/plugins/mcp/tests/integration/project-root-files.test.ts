@@ -88,6 +88,9 @@ function kernelRoot(
       calls.push('copyShared');
       return 'copied';
     },
+    linkCredential: async () => {
+      calls.push('linkCredential');
+    },
     ensurePrivateDirectory: record('ensurePrivateDirectory'),
     makeDirectory: record('makeDirectory'),
     list: record('list'),

@@ -180,6 +180,10 @@ export function registeredHarnessCases(): void {
         expect(command).toContain(index === 1 ? 'sandbox_mode="danger-full-access"' : 'sandbox_mode="workspace-write"');
         expect(command).toContain('projects={"/work/project"={trust_level="trusted"}}');
         expect(command).toContain('--no-alt-screen');
+        // File storage is forced on every launch: a sign-in kept in a keyring is one no link in this home could carry.
+        const store = command.indexOf('cli_auth_credentials_store="file"');
+        expect(store).toBeGreaterThan(0);
+        expect(command[store - 1]).toBe('-c');
         expect(command.find(arg => arg.startsWith('notice='))).toContain('hide_full_access_warning=true');
         expect(command.find(arg => arg.startsWith('notice='))).toContain('hide_gpt-5.1-codex-max_migration_prompt');
         expect(command).toContain(`${spec.home}/codex-correlation/unreachable`);

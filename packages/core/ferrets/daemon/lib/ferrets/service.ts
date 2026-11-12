@@ -1,7 +1,7 @@
 import { posix } from 'node:path';
 import type { AsksApi } from '@ferretry/core-asks/contract';
 import type { ChildEnvironment, VaultApi } from '@ferretry/core-vault/contract';
-import type { FencedPath, HookDecision, InstructionEntry } from '@ferretry/kernel/contract';
+import type { FencedPath, HookDecision, InstructionEntry, SharedCredential } from '@ferretry/kernel/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import { applicableInstructions, sectionDigests } from './launch-sections.ts';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
@@ -56,6 +56,7 @@ import type {
   LaunchPartSource,
   OpeningAttachmentsSource,
   LaunchSpec,
+  LoginCredentialAnswer,
   ManagedWorktreeSummary,
   PackId,
   QueueOutcome,
@@ -241,6 +242,15 @@ export interface FerretsPorts {
    * signed out. Unbound: none.
    */
   loginLaunchEnv?(login: string, harness: HarnessKey): Promise<Result<Readonly<Record<string, string>>, string>>;
+  /**
+   * The login's sign-in FILE for `harness` (`LoginKind.credential` of the kind that holds it): a kernel-shared credential
+   * the harness links into its home (`LaunchSpec.credential`), `none` when the login arrives as environment, or one
+   * sentence when the file cannot be used. `unavailable` refuses the start as `login_unavailable` BEFORE a token or a pane
+   * exists, so no ferret starts signed out. Asked on every launch (start, resume, revive): a credential is minted per
+   * launch and never kept. A port that throws is `unavailable` with a fixed sentence (a Logins error can sit beside a
+   * credential and is never quoted). Unbound: no credential.
+   */
+  loginCredential?(login: string, harness: HarnessKey): Promise<LoginCredentialAnswer>;
   vault: Pick<VaultApi, 'childEnvironment'>;
   asks: Pick<AsksApi, 'open'>;
 }
@@ -1776,6 +1786,8 @@ export class FerretsService implements FerretsApi {
     if (!login.ok) return failed('login_unavailable', login.error);
     const signedIn = await this.loginLaunchEnvironment(record);
     if (!signedIn.ok) return failed('login_unavailable', signedIn.error);
+    const credential = await this.loginCredential(record);
+    if (!credential.ok) return failed('login_unavailable', credential.error);
     const issued = issueToken(record.id, this.ports.now());
     this.tokens.add(issued.entry);
     await this.ports.saveTokens(this.tokens.snapshot());
@@ -1796,6 +1808,8 @@ export class FerretsService implements FerretsApi {
       ...(record.runtime === undefined ? {} : { runtime: record.runtime }),
       ...(record.login === undefined ? {} : { login: record.login }),
       ...(Object.keys(login.value).length === 0 ? {} : { loginEnv: login.value }),
+      // Set from the login only, never by a launch part: the spec field has no other writer.
+      ...(credential.value === undefined ? {} : { credential: credential.value }),
       ...launchOptions(this.registry.detailsOf(record.id)?.options),
       ...(ownCompactAt === undefined ? {} : { compactAt: ownCompactAt }),
       folder: record.folder as FencedPath,
@@ -1805,7 +1819,9 @@ export class FerretsService implements FerretsApi {
       ...(conversation === undefined ? {} : { harnessConversation: conversation }),
       ...(readable.length === 0 ? {} : { readable }),
     };
-    const collected = await this.collectParts(base);
+    // A `launch.parts` taker is handed the spec WITHOUT the sign-in credential: only the harness asks the kernel to link it.
+    const { credential: _kept, ...forTakers } = base;
+    const collected = await this.collectParts(forTakers);
     if (!collected.ok) return collected;
     const parts = collected.value;
     const spec: LaunchSpec = { ...base, parts };
@@ -2138,6 +2154,19 @@ export class FerretsService implements FerretsApi {
       .catch(() => err(`the login ${record.login} could not be read, so the ferret was not started`));
     if (!found.ok) return found;
     return ok(Object.fromEntries(Object.entries(found.value).filter(([name]) => loginEnvAllowed(name))));
+  }
+
+  /** The login's sign-in file for the ferret's harness, shared by the kernel, or why none can be used. None with no login. */
+  private async loginCredential(record: FerretRecord): Promise<Result<SharedCredential | undefined, string>> {
+    if (record.login === undefined || this.ports.loginCredential === undefined) return ok(undefined);
+    const answer = await this.ports.loginCredential(record.login, record.harness).catch(
+      (): LoginCredentialAnswer => ({
+        kind: 'unavailable',
+        sentence: `the login ${record.login} could not be checked, so the ferret was not started`,
+      }),
+    );
+    if (answer.kind === 'unavailable') return err(answer.sentence);
+    return ok(answer.kind === 'file' ? answer.credential : undefined);
   }
 
   /** What Ferretry sets so the ferret is signed in on its login (the Claude store variable), minus the reserved names. */

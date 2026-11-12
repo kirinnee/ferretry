@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { LOGIN_KINDS, type LoginFile } from '../../contract/index.ts';
 import type { LaunchStore } from '../../daemon/lib/credentials/credentials-service.ts';
-import { kindOf, loginKinds } from '../../daemon/lib/kinds.ts';
+import { kindOf, loginKinds, notPlainFileSentence } from '../../daemon/lib/kinds.ts';
 import { sampleLogin } from '../../contract/testing/index.ts';
 
 const RAW = 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789';
@@ -41,6 +41,8 @@ const kinds = loginKinds({
   signInStatus: async () => {
     throw new Error('not used');
   },
+  credentialProblem: async () => undefined,
+  shareCredential: async () => undefined,
 });
 
 describe('the five login kinds', () => {
@@ -88,6 +90,30 @@ describe('the five login kinds', () => {
     expect(await kinds.anthropic.env('work', 'claude-code')).toEqual({});
   });
 
+  test('F2: a sign-in file the kernel calls not_own is unavailable with the remedy sentence, and no path', async () => {
+    const wedged = loginKinds({
+      clock: { sleep: async () => undefined },
+      credentialProblem: async () => undefined,
+      shareCredential: async () => 'not_own',
+      launchStore: async () => ({ kind: 'none' as const }),
+      files: () => files,
+      view: async id => sampleLogin(id),
+      check: async id => sampleLogin(id),
+      startSignIn: async () => {
+        throw new Error('not used');
+      },
+      signInStatus: async () => {
+        throw new Error('not used');
+      },
+    });
+
+    const answer = await wedged.openai.credential?.('team', 'codex');
+
+    expect(answer).toEqual({ kind: 'unavailable', sentence: notPlainFileSentence('team') });
+    expect(answer?.kind === 'unavailable' ? answer.sentence : '').toContain('remove the extra link');
+    expect(JSON.stringify(answer)).not.toContain('/');
+  });
+
   test('a Claude login with no usable sign-in refuses with the sentence the check gave, not a signed-out pane', async () => {
     const signedOut = loginKinds({
       clock: { sleep: async () => undefined },
@@ -96,6 +122,8 @@ describe('the five login kinds', () => {
         variables: { CLAUDE_SECURESTORAGE_CONFIG_DIR: `${STORE}/work` },
         usable: true,
       }),
+      credentialProblem: async () => undefined,
+      shareCredential: async () => undefined,
       files: () => files,
       view: async id =>
         sampleLogin(id, {
@@ -158,6 +186,8 @@ describe('the five login kinds', () => {
       signInStatus: async () => {
         throw new Error('not used');
       },
+      credentialProblem: async () => undefined,
+      shareCredential: async () => undefined,
     });
 
     expect(await signedOut.anthropic.status('work')).toEqual({
