@@ -377,6 +377,7 @@ const REASON_SENTENCES: Readonly<Record<CredentialStatusReason, string>> = {
   refresh_revoked: 'This login was signed out somewhere else, or replaced. Sign in again.',
   refresh_rejected: 'The provider refused to renew this login. Sign in again.',
   store_unreachable: 'This login cannot be reached on this machine.',
+  secret_not_stored: 'A secret this login names is not stored yet. Store it with fy secret set, then test the login.',
   check_in_flight: 'A check is running now.',
 };
 

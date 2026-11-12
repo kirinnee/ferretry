@@ -397,6 +397,59 @@ describe('decideStorelessStatus', () => {
   });
 });
 
+describe('an environment login that names a secret', () => {
+  const login = {
+    harness: 'claude',
+    store: 'environment',
+    env: { ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_KEY}' },
+  } as const;
+
+  it('should be Ready when the vault holds every name it references', () => {
+    should(decideStorelessStatus(login, new Set(['ZAI_KEY', 'OTHER']))).containEql({
+      word: 'ready',
+      reason: 'from_environment',
+    });
+  });
+
+  it('should be Needs sign-in when a referenced name is not in the vault', () => {
+    should(decideStorelessStatus(login, new Set(['OTHER']))).containEql({
+      word: 'needs_sign_in',
+      reason: 'secret_not_stored',
+    });
+    should(decideStorelessStatus(login, new Set())).containEql({ word: 'needs_sign_in', reason: 'secret_not_stored' });
+  });
+
+  it('should judge nothing when the vault cannot be listed, or when the login names no secret', () => {
+    should(decideStorelessStatus(login, undefined).word).equal('ready');
+    should(
+      decideStorelessStatus({ harness: 'claude', store: 'environment', env: { A: 'https://x.example' } }, new Set())
+        .word,
+    ).equal('ready');
+  });
+
+  it('should be decided by the service from the vault names port, and never ask the vault for a value', async () => {
+    // Arrange
+    let names: ReadonlySet<string> | 'throw' = new Set<string>();
+    const world = harness();
+    const service = new CredentialStatusService({
+      ...world.ports,
+      secretNames: async () => {
+        if (names === 'throw') throw new Error('vault locked');
+        return names;
+      },
+    });
+    const subjectOf = { id: 'env', resolution: login };
+
+    // Act / Assert
+    should((await service.view(subjectOf)).status).containEql({ word: 'needs_sign_in', reason: 'secret_not_stored' });
+    names = new Set(['ZAI_KEY']);
+    should((await service.view(subjectOf)).status).containEql({ word: 'ready', reason: 'from_environment' });
+    names = 'throw';
+    should((await service.view(subjectOf)).status.word).equal('ready');
+    should(world.calls).deepEqual({ active: 0, refresh: 0 });
+  });
+});
+
 describe('folding', () => {
   it('should conclude only from accepted, scope-unavailable and rejected Claude reads', () => {
     should(foldClaudeSignal({}, 'accepted', NOW, 'f1')).deepEqual({
