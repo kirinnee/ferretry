@@ -30,7 +30,7 @@ import { CommandCache } from './adapters/command-cache.ts';
 import { PROVIDER_ANSWER_MS, withinMs } from './adapters/profile-components.ts';
 import { writeAllConfigWriter } from './adapters/config-write-all.ts';
 import { credentialMounts, FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
-import { readFleetManifest } from './adapters/manifest-file.ts';
+import { FleetManifestUnreadableError, manifestIsUnreadable, readFleetManifest } from './adapters/manifest-file.ts';
 import type { RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import type { AdapterHost } from './adapters/ports.ts';
 import { refuseBeforeWriting, runtimesConfigFiles } from './adapters/runtimes-config-files.ts';
@@ -89,6 +89,67 @@ async function publishedFleet(
   };
 }
 
+/**
+ * Whether the published manifest exists and cannot be read, in ONE publication read. It is the daemon's boot check: a
+ * manifest the last version wrote in a shape this one does not read is rebuilt from the configuration by a republish
+ * (derived data, never fatal), so every start does not stay refused until some other change happens to publish.
+ */
+/** The job that rebuilds an unreadable manifest: once after start, and whenever a launch reader meets the damage. */
+export const MANIFEST_REPAIR_JOB = 'runtimes.manifest-repair';
+
+/**
+ * Who owns the manifest repair: the repair job, from the moment an attempt begins until one succeeds. It spans the
+ * attempt that is RUNNING and the backoff that follows a failed one (the runner's retry timer is the job's own), so a
+ * reader's request has one answer in both states: the owner already has it. A request made while it is held must not
+ * run another attempt or leave another timer, so the traffic of refused starts adds no work and no timers.
+ */
+export class RepairOwner {
+  #held = false;
+
+  /** An attempt starts (the job's first act): the repair is now owned until {@link release}. */
+  begin(): void {
+    this.#held = true;
+  }
+
+  /** The manifest reads again: the repair is done, and the next damage is a new request. */
+  release(): void {
+    this.#held = false;
+  }
+
+  get held(): boolean {
+    return this.#held;
+  }
+}
+
+/**
+ * Asks for the repair job to run now (a launch reader met an unreadable manifest after a healthy start). It is the
+ * runner's own single-flight kick, never a call into the repair, and it asks only when nobody owns the repair: while an
+ * attempt runs or waits out its backoff the request coalesces into it (the attempt re-checks the manifest at its end, and
+ * a failed one is retried by the runner's own timer). A daemon whose job is not registered has nothing to ask.
+ */
+export function repairRequester(kernel: Pick<KernelPorts, 'jobs'>, owner: RepairOwner = new RepairOwner()): () => void {
+  return () => {
+    if (owner.held) return;
+    try {
+      kernel.jobs.kick(MANIFEST_REPAIR_JOB);
+    } catch {
+      // No such job on this daemon: the refusal already says to try again and to restart if it stays.
+    }
+  };
+}
+
+export function manifestUnreadableProbe(
+  kernel: Pick<KernelPorts, 'roots'>,
+  publication: FleetPublication = new FleetPublication(),
+): () => Promise<boolean> {
+  return async () => {
+    const fleet = kernel.roots.root('fleet');
+    const directory = fleetDirectory(fleet);
+    const files = rootHostFiles(fleetMounts(kernel.roots, fleet, directory));
+    return await publication.reading(async () => await manifestIsUnreadable(files, `${directory}/${MANIFEST_FILE}`));
+  };
+}
+
 /** What an ended Codex ferret's follow-up stands on, from the kernel's roots, processes and clock. */
 export function endedSeams(
   kernel: Pick<KernelPorts, 'roots' | 'processes' | 'clock'>,
@@ -124,29 +185,36 @@ export function endedSeams(
 export function launchFactsSource(
   kernel: Pick<KernelPorts, 'roots'>,
   publication: FleetPublication = new FleetPublication(),
+  requestRepair: () => void = () => {},
 ): RuntimeLaunchFactsSource {
   return {
     facts: async runtime => {
       const fleet = kernel.roots.root('fleet');
       const directory = fleetDirectory(fleet);
       const files = rootHostFiles(fleetMounts(kernel.roots, fleet, directory));
-      return await publication.reading(async () => {
-        const manifest = await readFleetManifest(files, `${directory}/${MANIFEST_FILE}`);
-        const published = manifest?.runtimes.find(row => row.name === runtime || row.id === runtime);
-        const account = manifest?.accounts.find(row => row.id === published?.id);
-        if (published === undefined || account === undefined) return undefined;
-        return {
-          kind: account.kind,
-          ...(typeof account.compactAt === 'number' ? { compactAt: account.compactAt } : {}),
-          windows: {
-            ...(account.defaultModel === null ? {} : { defaultModel: account.defaultModel }),
-            models: account.models.map(model => ({
-              id: model.id,
-              ...(model.context === undefined ? {} : { context: model.context }),
-            })),
-          },
-        };
-      });
+      try {
+        return await publication.reading(async () => {
+          const manifest = await readFleetManifest(files, `${directory}/${MANIFEST_FILE}`);
+          const published = manifest?.runtimes.find(row => row.name === runtime || row.id === runtime);
+          const account = manifest?.accounts.find(row => row.id === published?.id);
+          if (published === undefined || account === undefined) return undefined;
+          return {
+            kind: account.kind,
+            ...(typeof account.compactAt === 'number' ? { compactAt: account.compactAt } : {}),
+            windows: {
+              ...(account.defaultModel === null ? {} : { defaultModel: account.defaultModel }),
+              models: account.models.map(model => ({
+                id: model.id,
+                ...(model.context === undefined ? {} : { context: model.context }),
+              })),
+            },
+          };
+        });
+      } catch (error) {
+        // Asked AFTER the publication read is released: the repair publishes, and the read itself never does.
+        if (error instanceof FleetManifestUnreadableError) requestRepair();
+        throw error;
+      }
     },
   };
 }
@@ -286,6 +354,9 @@ export function fileAssembly(
     claudeStatusline: claudeStatuslineFor(CLIENT_NAME),
     configDirectory,
     publication,
+    say: sentence => {
+      ctx.kernel.log.warn(sentence);
+    },
   });
   const catalog: FleetCatalogServiceDeps = {
     ...unguarded,

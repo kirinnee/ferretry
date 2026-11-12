@@ -119,3 +119,66 @@ describe('job ownership across build and serving transitions', () => {
     await jobs.stop();
   });
 });
+
+describe('a failed job is retried by ONE timer', () => {
+  test('a kick while the retry is pending runs once now and replaces the timer; stop leaves none', async () => {
+    const clock = fixedClock();
+    const jobs = new JobRunner(clock, silentLog);
+    let ran = 0;
+    jobs.portFor('owner').add({
+      id: 'work',
+      schedule: { onceAfterStart: true },
+      run: async () => {
+        ran++;
+        throw new Error('fixture');
+      },
+    });
+    jobs.start();
+    await Promise.resolve();
+    await clock.advance(0);
+    await jobs.settle();
+    expect(ran).toBe(1);
+    expect(clock.pending()).toBe(1);
+
+    for (let kicks = 0; kicks < 8; kicks++) {
+      jobs.portFor('owner').kick('work');
+      await jobs.settle();
+    }
+
+    expect(ran).toBe(9);
+    expect(clock.pending()).toBe(1);
+    await jobs.stop();
+    expect(clock.pending()).toBe(0);
+  });
+
+  test('the superseded timer never fires a second run: only the newest backoff does', async () => {
+    const clock = fixedClock();
+    const jobs = new JobRunner(clock, silentLog);
+    let ran = 0;
+    jobs.portFor('owner').add({
+      id: 'work',
+      schedule: { onceAfterStart: true },
+      run: async () => {
+        ran++;
+        throw new Error('fixture');
+      },
+    });
+    jobs.start();
+    await Promise.resolve();
+    await clock.advance(0);
+    await jobs.settle();
+    jobs.portFor('owner').kick('work');
+    await jobs.settle();
+    expect(ran).toBe(2);
+
+    // The first failure's backoff was 1s, the second's is 5s: only the newer timer is left.
+    await clock.advance(1_000);
+    await jobs.settle();
+    expect(ran).toBe(2);
+    await clock.advance(4_000);
+    await jobs.settle();
+    expect(ran).toBe(3);
+    await jobs.stop();
+    expect(clock.pending()).toBe(0);
+  });
+});

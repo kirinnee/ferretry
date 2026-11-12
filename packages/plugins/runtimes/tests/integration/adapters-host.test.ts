@@ -60,7 +60,7 @@ describe('the fleet manifest reader', () => {
     should(found).be.undefined();
   });
 
-  it('should refuse text that is not JSON, naming the file', async () => {
+  it('should refuse text that is not JSON with a retryable sentence, naming the file', async () => {
     // Arrange
     const file = path.join(await temp(), 'manifest.json');
     await put(file, '{nope');
@@ -69,10 +69,10 @@ describe('the fleet manifest reader', () => {
     const act = readFleetManifest(nodeHostFiles, file);
 
     // Assert
-    await should(act).be.rejectedWith(`the fleet manifest at ${file} is not valid JSON`);
+    await should(act).be.rejectedWith(new RegExp(`^The fleet manifest at ${file} could not be read\\.`, 'u'));
   });
 
-  it('should refuse JSON that is not a manifest', async () => {
+  it('should refuse JSON that is not a manifest with a retryable sentence', async () => {
     // Arrange
     const file = path.join(await temp(), 'manifest.json');
     await put(file, '{"version":1}');
@@ -81,7 +81,7 @@ describe('the fleet manifest reader', () => {
     const act = readFleetManifest(nodeHostFiles, file);
 
     // Assert
-    await should(act).be.rejectedWith(`the fleet manifest at ${file} is not a fleet manifest`);
+    await should(act).be.rejectedWith(new RegExp(`^The fleet manifest at ${file} could not be read\\.`, 'u'));
   });
 
   it('should read a manifest', async () => {

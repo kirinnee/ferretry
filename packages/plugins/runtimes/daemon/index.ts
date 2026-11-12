@@ -35,7 +35,15 @@ import {
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { fleetHomes } from './adapters/fleet-home-reader.ts';
-import { endedSeams, fileAssembly, launchFactsSource } from './host-assembly.ts';
+import {
+  endedSeams,
+  fileAssembly,
+  launchFactsSource,
+  MANIFEST_REPAIR_JOB,
+  manifestUnreadableProbe,
+  RepairOwner,
+  repairRequester,
+} from './host-assembly.ts';
 import { LaunchGate, type RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import { FleetPublication } from './lib/service/publication.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
@@ -100,6 +108,13 @@ export interface RuntimesAssembly {
    * carries. Absent: a start of a runtime is refused rather than launched unchecked.
    */
   readonly launchFacts?: RuntimeLaunchFactsSource;
+  /**
+   * Whether the published fleet manifest exists and cannot be read. Asked once after start: when it is, the fleet is
+   * published again from the configuration (the manifest is derived data). Absent: nothing to repair.
+   */
+  readonly manifestUnreadable?: () => Promise<boolean>;
+  /** Who owns the manifest repair across its running and backoff states; readers ask through it (see {@link RepairOwner}). */
+  readonly repair?: RepairOwner;
 }
 
 export type RuntimesAssembler = (ctx: DaemonContext<typeof manifest>) => RuntimesAssembly;
@@ -205,6 +220,7 @@ export const hostAssembly: RuntimesAssembler = ctx => {
   // ONE publication gate: every apply (the catalogue's and the setup's share one provisioner) runs exclusively under
   // it, and every read of the published fleet (the ended-runtime seams, the manifest the republish compares) waits (S67).
   const publication = new FleetPublication();
+  const repair = new RepairOwner();
   // `build` touches nothing (it is also run against an inert kernel to compare it with the manifest): the fleet folder
   // is opened and its paths spelled on the first use of a service, never while the half is built.
   let said = false;
@@ -227,12 +243,19 @@ export const hostAssembly: RuntimesAssembler = ctx => {
     setup: deferred(() => assembled().setup),
     ended: deferred(() => assembled().ended),
     homes: onceHomes(() =>
-      fleetHomes(ctx.kernel.roots, publication, sentence => {
-        ctx.kernel.log.warn(sentence);
-      }),
+      fleetHomes(
+        ctx.kernel.roots,
+        publication,
+        sentence => {
+          ctx.kernel.log.warn(sentence);
+        },
+        repairRequester(ctx.kernel, repair),
+      ),
     ),
     profileEtag: async profile => await assembled().profileEtag(profile),
-    launchFacts: launchFactsSource(ctx.kernel, publication),
+    launchFacts: launchFactsSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),
+    manifestUnreadable: manifestUnreadableProbe(ctx.kernel, publication),
+    repair,
     probe: () => {
       assembled();
     },
@@ -366,6 +389,34 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         setTimer: (run, ms) => clock.after(milliseconds(ms), run),
       });
       void expiry.rearm();
+      // A manifest the previous version wrote in a shape this one does not read is derived data: rebuilt (the apply keeps
+      // the old file aside and says so), never left to refuse every start. It runs once after start AND whenever a launch
+      // reader meets the damage later (it asks through the runner's single-flight kick; a healthy manifest never publishes).
+      // A repair that did not succeed THROWS: the runner retries a failed job with its backoff until the manifest reads.
+      ctx.kernel.jobs.add({
+        id: MANIFEST_REPAIR_JOB,
+        schedule: { onceAfterStart: true },
+        run: async () => {
+          // ONE owner across running and backoff: held from here until the manifest reads (a failure THROWS and stays
+          // held, so the runner's retry is the only thing that runs the repair again while it is unreadable).
+          assembly.repair?.begin();
+          if (!(await assembly.manifestUnreadable?.())) {
+            assembly.repair?.release();
+            return;
+          }
+          const failure = await assembly.catalog.republish?.({ rebuild: true }).then(
+            () => undefined,
+            (error: unknown) => (error instanceof Error ? error.message : String(error)),
+          );
+          if (!(await assembly.manifestUnreadable?.())) {
+            assembly.repair?.release();
+            return;
+          }
+          const message = `the fleet manifest could not be read and could not be rebuilt yet: ${failure ?? 'the configuration could not be published'}`;
+          ctx.kernel.log.warn(message);
+          throw new Error(message);
+        },
+      });
       // A republish that cannot run (the model is not readable yet) is said once and never fails the event.
       const republishForBudget = async (): Promise<void> => {
         await assembly.catalog.republish?.().then(

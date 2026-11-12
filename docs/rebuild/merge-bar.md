@@ -66,6 +66,22 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
    model, and `instructions` must hold each document's text. One unreadable reference makes the WHOLE fleet
    configuration unreadable, and the converter once wrote instructions as `<name>.md` where 5.0 reads `<name>.yaml`. CASE 1
    (every login carried) is in; CASE 2 (logins held out of the preview) is a separate unit.
+10. **An unreadable derived fleet manifest is regenerated, never refuses every start**:
+    `packages/plugins/runtimes/tests/integration/daemon/manifest-regen.test.ts` — a `fleet/manifest.json` with an unknown key
+    on an account row (the v4 4.291.12 shape) or truncated JSON is rebuilt from the configuration once after the daemon
+    starts and by every apply, and ALSO when the damage happens after a healthy boot: a launch reader that meets it asks
+    the repair job to run (the read itself never publishes; a healthy manifest never causes a publish), so the next start
+    after a moment passes. A repair that fails throws, so the job runner retries it with its backoff until it works (proved
+    with the real runner over a driven clock); the repair has ONE owner across its running and backoff states, so refused
+    reads while it waits add neither an attempt nor a second retry timer. The start boundary (`LaunchGate.decide`) says the manifest is being rebuilt
+    and to try again. The damaged bytes are kept in ONE aside file beside it,
+    `manifest.json.unreadable` (owner-only, a self-describing JSON envelope named by a zod schema, at most 4 MiB of damage),
+    one aside file, created once (exclusively, only when the name is free), never replaced or deleted: the kernel gained
+    no delete operation for it and the aside is never published over. Anything already at that name (our own earlier
+    aside, a foreign file, a link, a folder, a hard-linked file) is left untouched, and the manifest is STILL regenerated.
+    One plain line per repair says what happened, and when the old file could not be kept aside it names the aside path
+    (the files are named, never their contents). A start resolves its runtime from the rebuilt file with the same
+    harness homes, and a valid manifest is left alone. Live v4 outage, 2026-11-12.
 
 ## After merge
 
@@ -79,6 +95,19 @@ What 5.0 merges without is [after-merge.json](after-merge.json): three counts an
   the (D) S render diff, launch renewal, the differential harness (moved here on !A481), the darwin smoke and the FFI
   descriptor verify line. An item enters after the baseline only by a named owner decision (`OWNER_MOVED_ITEMS` in the
   check).
+
+### Declared gaps
+
+- **The root writer's descriptor-less rename fallback** (`packages/core/kernel/host/roots.ts` 634-636, with
+  `host/adapters/node-fs.ts` 301-302 and 317-324). A `RootHandle.publish` and the other writes that rename onto a name
+  hold the parent folder through a descriptor. When the host has neither descriptor mechanism (no `descriptorFolder`,
+  and the C library's descriptor calls cannot be loaded, which `node-fs.ts` swallows on purpose), the root falls back
+  to an absolute pathname: the parent is checked, then the create or rename goes by path, so a parent that is swapped
+  for a link after the check could make the final call resolve through a different folder. It applies only on such a
+  host, and the fixed-leaf look-then-rename concession does not constrain it. It is pre-existing: the fallback is in the
+  root writer as of the 5.0 base and no manifest-regeneration change introduced it. The fleet manifest's aside no
+  longer publishes over an existing entry, so it is not made worse; the kernel is not changed here, and an after-merge
+  kernel card owns closing it.
 
 ### Honesty rules
 
