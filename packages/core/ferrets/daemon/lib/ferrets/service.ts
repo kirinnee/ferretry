@@ -12,6 +12,7 @@ import {
   type LaunchOrigin,
   birthOf,
   launchIsFenced,
+  originIsAgent,
 } from '../../../contract/index.ts';
 import type {
   DeliveryOutcome,
@@ -1078,9 +1079,11 @@ export class FerretsService implements FerretsApi {
   /**
    * Adopts a live process by its runner handle WITHOUT restarting it (spine D15): the runner confirms the handle is
    * a live ferret pane, and the record takes the handle and `working`. No token is issued: the adopted process keeps
-   * the bearer it was started with, which `tokens.json` already holds. It launches nothing, but it is the first sight of
-   * a record that never said who started it, so the admitted caller's origin (required, no default) is kept as that
-   * record's birth. A birth already on the record is NEVER rewritten: it is the one fact every later launch is fenced on.
+   * the bearer it was started with, which `tokens.json` already holds. It launches nothing, and it may only TIGHTEN the
+   * record's birth, never loosen it (the admitted caller's origin is required, no default):
+   *  - a birth already on the record is kept, whoever attaches: it is the one fact every later launch is fenced on;
+   *  - a record with no birth attached by an AGENT origin is stamped `agent`;
+   *  - a record with no birth attached by a PERSON or the DAEMON stays without one, so it stays fenced (a doubt fences).
    */
   async attach(ferret: FerretId, handle: RunnerHandle, origin: LaunchOrigin): Promise<Result<FerretId, StartFailure>> {
     const record = this.registry.get(ferret);
@@ -1096,7 +1099,7 @@ export class FerretsService implements FerretsApi {
       state: 'working',
       handle: adopted.value.handle,
       stateAt: this.ports.now(),
-      birth: record.birth ?? birthOf(origin),
+      ...(record.birth === undefined && originIsAgent(origin) ? { birth: birthOf(origin) } : {}),
     };
     await this.write(working, record.state, 'state');
     return ok(ferret);

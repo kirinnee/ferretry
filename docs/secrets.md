@@ -317,8 +317,9 @@ by everyone …`), nothing is written or narrowed, and the runner is not called.
   with a sentence naming the reason and the remedy: move it to a project folder). Only an owner-born or a daemon-born ferret
   (Packs' clean-up, the Lessons miner, in Ferretry's own folders) relaunches unfenced. The v4 → v5 conversion sets the birth from
   v4 data: a ferret with a lead, or one v4 stamped as created by another session or a warden, is `agent`; the rest are `person`.
-  An attach (an adoption of a live pane) launches nothing, but takes the caller's origin, required, and keeps it as the birth only
-  when the record has none; a stored birth is never rewritten. A port
+  An attach (an adoption of a live pane) launches nothing and takes the caller's origin, required, but may only **tighten** the
+  birth, never loosen it: a record that has a birth keeps it whoever attaches; a record with none is stamped `agent` when an
+  agent attaches it, and stays without one (so stays fenced) when a person or the daemon does. A port
   caller whose origin is missing or not a `LaunchOrigin` is refused before anything is asked. A **move**'s route is mounted but
   its relaunch dependencies are unbound on this base (503 `plugin_unavailable`); its relaunch binding already requires the
   route's origin and refuses to launch without one, so enabling its dependencies cannot open a gap.

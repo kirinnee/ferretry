@@ -501,7 +501,9 @@ export interface FerretsApi {
   ): Promise<Result<FerretId, StartFailure>>;
   /**
    * Adopts a live process by its runner handle without restarting it (spine D15). It launches nothing; `origin` (required,
-   * no default) is the admitted caller, kept as the record's birth only when the record has none.
+   * no default) is the admitted caller. An attach may only TIGHTEN the birth, never loosen it: a record that has a birth
+   * keeps it whoever attaches; a record with none is stamped `agent` by an agent origin and stays without one (so stays
+   * fenced) for a person or the daemon.
    */
   attach(ferret: FerretId, handle: RunnerHandle, origin: LaunchOrigin): Promise<Result<FerretId, StartFailure>>;
   /**
