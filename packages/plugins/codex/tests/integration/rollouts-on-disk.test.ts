@@ -3,6 +3,7 @@
  * and rollout files this test writes. Nothing here is a real harness home or a real sign-in document.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
+import { renameSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -48,7 +49,13 @@ async function world(secret?: string) {
     files: [CODEX_ROLLOUTS],
     fs: state.createNodeHostFs(),
   });
-  const time = { ms: 1_000_000, sleeps: 0, failSleep: false };
+  const time = {
+    ms: 1_000_000,
+    sleeps: 0,
+    failSleep: false,
+    onAfter: undefined as (() => void) | undefined,
+    onNow: undefined as (() => void) | undefined,
+  };
   const kernel = {
     roots,
     state: port,
@@ -57,8 +64,20 @@ async function world(secret?: string) {
         await fn({ text: s => (secret === undefined ? s : s.split(secret).join('******')) }),
     },
     clock: {
-      after: () => () => undefined,
-      now: () => instantFromEpochMs(time.ms),
+      after: () => {
+        // A hook the test arms to act at the instant a byte handle arms its idle timer, i.e. right after the open.
+        const act = time.onAfter;
+        time.onAfter = undefined;
+        act?.();
+        return () => undefined;
+      },
+      now: () => {
+        // A hook the test arms to act once, between a rollout being proved and its being opened (the proof reads the clock last).
+        const act = time.onNow;
+        time.onNow = undefined;
+        act?.();
+        return instantFromEpochMs(time.ms);
+      },
       sleep: async () => {
         time.sleeps += 1;
         if (time.failSleep) throw new Error('the clock stopped');
@@ -317,6 +336,50 @@ describe('G162 Codex rollouts: transcriptBytes is a windowed, unmasked byte hand
     await w.handle.close();
     await w.handle.close();
     await expect(w.handle.read(0, 4)).rejects.toThrow();
+  });
+
+  test('a rollout proved by a correlation line only in its TAIL is owned; one replaced right after the open is not handed over', async () => {
+    const w = await world();
+    await w.rollouts.launched(w.specOf('f1'));
+    const target = join(w.agent('f1'), 'sessions', 'rollout-a.jsonl');
+    const needle = `${w.agent('f1')}/codex-correlation/unreachable`;
+    // The header names the session but not the correlation; the correlation sits past the 32 KiB head, in the tail.
+    const tailOnly = `${line('session_meta', { id: 'native-a', cwd: '/work/project' })}${said('x'.repeat(40_000))}${line('event_msg', { note: needle })}`;
+    await writeFile(target, tailOnly);
+    const handle = await w.rollouts.bytes(F1);
+    expect(handle).toBeDefined();
+    expect(text(await handle!.read(0, 64))).toBe(tailOnly.slice(0, 64));
+
+    // The same file, but another inode takes the name the moment the descriptor is held: the opened object is judged
+    // by what it reads, finds the name no longer reaches it, and nothing is handed over.
+    w.rollouts.forget(F1);
+    w.time.onAfter = () => {
+      writeFileSync(`${target}.swap`, tailOnly);
+      renameSync(`${target}.swap`, target);
+    };
+    expect(await w.rollouts.bytes(F1)).toBeUndefined();
+    expect(w.time.onAfter).toBeUndefined();
+  });
+
+  test('a rollout whose opened head names ANOTHER session is closed and not handed over', async () => {
+    const w = await world();
+    await w.rollouts.launched(w.specOf('f1'));
+    const target = join(w.agent('f1'), 'sessions', 'rollout-a.jsonl');
+    await writeFile(target, `${header('native-a', w.agent('f1'))}${said('OWN')}`);
+    // The proof chooses native-a; before the open, another session's file (same ferret home, other id) takes the name.
+    w.time.onNow = () => {
+      writeFileSync(`${target}.swap`, `${header('native-b', w.agent('f1'))}${said('OTHER')}`);
+      renameSync(`${target}.swap`, target);
+    };
+    expect(await w.rollouts.bytes(F1)).toBeUndefined();
+    expect(w.time.onNow).toBeUndefined();
+  });
+
+  test('a damaged ownership record leaves no handle, and the failure is not passed on', async () => {
+    const w = await world();
+    await w.rollouts.launched(w.specOf('f1'));
+    await writeFile(join(w.parent, 'fy', 'state', 'codex', 'rollouts', 'f1.json'), '{ not json');
+    await expect(w.rollouts.bytes(F1)).resolves.toBeUndefined();
   });
 });
 

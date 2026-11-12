@@ -90,7 +90,7 @@ async function fixture(
     credentialProblem: id => source.problem(id),
     shareCredential: id => source.share(id),
   });
-  return { fyHome, base, codex, kinds, refreshes };
+  return { fyHome, base, codex, kinds, refreshes, source, store, logins };
 }
 
 describe('logins:openai credential()', () => {
@@ -200,5 +200,36 @@ describe('logins:openai credential()', () => {
         'the sign-in file of the login team is not a plain file with a single name (another link to it exists, or it is itself a link); remove the extra link, or sign the login out and in again from Logins, then start the ferret again',
     });
     expect(JSON.stringify(answer)).not.toContain(f.fyHome);
+  });
+});
+
+describe('codexCredentialSource asked directly, as the other callers of the port ask it', () => {
+  test('a Claude login in an owned store is not a Codex sign-in, and the kernel is not asked to share its file', async () => {
+    const f = await fixture();
+    expect(await f.source.problem('work')).toBe('the login work is not a Codex sign-in');
+  });
+
+  test('a host store is refused by the owned catalog: no problem sentence hides it, and nothing is shared for it', async () => {
+    const f = await fixture();
+    expect(await f.source.problem('mine')).toBe(
+      'the login mine cannot be used: this build can only read owned login stores',
+    );
+    expect(await f.source.share('mine')).toBeUndefined();
+    expect(await f.source.share('nobody')).toBeUndefined();
+  });
+
+  test('a host Codex store that the catalog did report as readable still cannot be used by this build', async () => {
+    const f = await fixture();
+    const hostCatalog = {
+      entry: async () =>
+        ({
+          resolution: { harness: 'codex', store: 'host', canonicalFile: join(f.fyHome, 'fixture-host', 'auth.json') },
+        }) as Awaited<ReturnType<Parameters<typeof codexCredentialSource>[0]['catalog']['entry']>>,
+    };
+    const source = codexCredentialSource({ catalog: hostCatalog, store: f.store, roots: f.logins });
+    expect(await source.problem('mine')).toBe(
+      'the login mine cannot be used: this build can only read owned login stores',
+    );
+    expect(await source.share('mine')).toBeUndefined();
   });
 });
