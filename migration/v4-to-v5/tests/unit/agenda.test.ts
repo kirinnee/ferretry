@@ -420,3 +420,91 @@ test('a home with no agenda converts to nothing, and a dry run writes nothing', 
   expect(report.note).toBe('dry run: nothing written');
   expect(await stat(join(f.to, 'state/asks')).catch(() => undefined)).toBeUndefined();
 });
+
+/**
+ * Audit A fix 8: what v5's REAL ferret-read classifier (`core/asks/daemon/lib/routes/ferret-reads.ts`, run in a
+ * subprocess that imports nothing from this tool) answers for every migrated item, live, resolved and archived.
+ */
+async function coversWithV5(ferret: string): Promise<Record<string, Record<string, string>>> {
+  const script = join(f.root, 'covers-v5.ts');
+  await writeFile(
+    script,
+    `
+const [repo, home, ferret] = process.argv.slice(2);
+const { coverOf } = await import(repo + '/packages/core/asks/daemon/lib/routes/ferret-reads.ts');
+const { Database } = await import('bun:sqlite');
+const { existsSync, readFileSync, readdirSync } = await import('node:fs');
+const reach = { mayTouch: async (caller, target) => caller === target, startedByWarden: async () => false };
+const ledger = JSON.parse(readFileSync(home + '/state/asks/ferrets/' + ferret + '/agenda.json', 'utf8'));
+const items = ledger.entries.map(entry => [entry.lifecycle + ' ' + entry.item.id, entry.item]);
+const versions = home + '/state/asks/versions';
+for (const name of existsSync(versions) ? readdirSync(versions) : []) {
+  const db = new Database(versions + '/' + name, { readonly: true });
+  for (const row of db.query('SELECT snapshot FROM versions').all()) items.push(['archived ' + name, JSON.parse(row.snapshot).item]);
+  db.close();
+}
+const result = {};
+for (const [label, item] of items) {
+  result[label] = {
+    ownerLineage: await coverOf(reach, ferret, ferret, item, async () => undefined),
+    foreignLineage: await coverOf(reach, 'foreign', ferret, item, async () => undefined),
+  };
+}
+console.log(JSON.stringify(result));
+`,
+  );
+  const child = Bun.spawn(['bun', script, REPO, f.to, ferret], { cwd: REPO, stdout: 'pipe', stderr: 'pipe' });
+  const [text, error] = [await new Response(child.stdout).text(), await new Response(child.stderr).text()];
+  if ((await child.exited) !== 0) throw new Error(error);
+  return JSON.parse(text) as Record<string, Record<string, string>>;
+}
+
+test('migrated v4 Warden notices — live, resolved and archived — are the Warden’s to a ferret reading them in v5', async () => {
+  // A real v4 board: the v4 engine raises each notice as the daemon, in v4's own raw grammar.
+  let ledger = emptyAgendaLedger('f1', AT);
+  const apply = (command: Parameters<typeof applyAgendaCommand>[1]) => {
+    const mutation = applyAgendaCommand(ledger, command);
+    if (!mutation.ok) throw new Error(mutation.error.message);
+    ledger = mutation.ledger;
+  };
+  const notice = (sourceRef: string, minute: number) =>
+    apply({
+      action: 'raise',
+      actor: { kind: 'daemon', cause: 'warden-escalation' },
+      at: at(minute),
+      request: {
+        source: 'question',
+        sourceRef,
+        subject: 'FAKE warden subject',
+        why: 'FAKE investigator reason',
+        howToResolve: 'FAKE investigator remedy',
+        context: 'FAKE investigator context',
+        notice: true,
+      },
+    } as never);
+  notice('warden:orphans', 0);
+  notice('warden-auto-move', 1);
+  apply({ action: 'resolve', actor: { kind: 'human' }, id: 'A2' as never, note: 'FAKE done', at: at(2) });
+  const v4 = document(ledger);
+  await putText('state/sessions/f1/agenda.json', `${JSON.stringify(v4, null, 2)}\n`);
+  // A third notice that left the board: only its archived version remains.
+  const a1 = item(v4, 'A1');
+  if (a1 === undefined) throw new Error('fixture');
+  const versionsDir = join(f.from, 'state/sessions/f1/agenda-versions');
+  await mkdir(versionsDir, { recursive: true });
+  archive(join(versionsDir, 'A9.sqlite'), [
+    { version: 1, at: at(0), by: 'daemon', change: 'created', lifecycle: 'active', item: { ...a1.item, id: 'A9' } },
+  ]);
+
+  expect((await agendaStep.run(f.ctx())).status).toBe('converted');
+
+  // The migration keeps the raw grammar (the classifier, not the migration, is what covers it).
+  const v5 = await readJson(out('f1', 'agenda.json'));
+  expect(item(v5, 'A1')?.item.sourceRef).toBe('warden:orphans');
+  expect(item(v5, 'A2')?.item.sourceRef).toBe('warden-auto-move');
+  expect(item(v5, 'A1')?.item.raisedBy).toBe('daemon');
+  const covers = await coversWithV5('f1');
+  expect(Object.keys(covers).sort()).toEqual(['active A1', 'addressed A2', 'archived f1~A9.sqlite']);
+  for (const [label, cover] of Object.entries(covers))
+    expect([label, cover]).toEqual([label, { ownerLineage: 'project', foreignLineage: 'omit' }]);
+});

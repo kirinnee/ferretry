@@ -27,14 +27,17 @@ import {
 } from '@ferretry/kernel/contract';
 import { parseBody } from './body.ts';
 import {
+  ABSENT,
   coverOf,
   EMPTY_CONVERSATION,
   type Cover,
   type FerretReach,
+  type FindRelative,
   ferretSnapshot,
   ferretVersion,
   projectItem,
   projectResolved,
+  type Relative,
 } from './ferret-reads.ts';
 import {
   type AgendaActor,
@@ -155,17 +158,32 @@ async function withReplies(replies: HeldReplies, sessionId: string, snapshot: Ag
  * that returns items answers through this or `coverOfItem`, so no route has a copy of the rule.
  */
 async function readableSnapshot(
+  agenda: AgendaService,
   reach: FerretReach | undefined,
   context: Call,
   snapshot: AgendaSnapshot,
 ): Promise<AgendaSnapshot> {
   const caller = ferretOf(context);
-  return caller === undefined ? snapshot : await ferretSnapshot(reach, caller, snapshot);
+  return caller === undefined
+    ? snapshot
+    : await ferretSnapshot(reach, caller, snapshot, () => agenda.emptyBoardAt(), keptItem(agenda, snapshot.sessionId));
 }
+
+/** An item that has left the board, as its newest kept version has it; `undefined` when none is kept or it cannot be read. */
+const keptItem =
+  (agenda: AgendaService, sessionId: string): FindRelative =>
+  async id => {
+    const kept = await agenda.versionsOf(sessionId, id as never);
+    const latest = kept.ok ? kept.value.versions.at(-1)?.version : undefined;
+    if (latest === undefined) return undefined;
+    const version = await agenda.versionOf(sessionId, id as never, latest);
+    return version.ok ? (version.value as { readonly item?: Relative }).item : undefined;
+  };
 
 /**
  * What the caller may read of ONE item: a person reads it plain; a ferret reads it per `coverOf`. The item is found on
- * the board, or, when it has left the board, in its newest kept version.
+ * the board, or, when it has left it, in its newest kept version. The items it was merged from or split off are found the
+ * same way (provenance is sticky: `ferret-reads.ts`).
  */
 async function coverOfItem(
   agenda: AgendaService,
@@ -177,18 +195,11 @@ async function coverOfItem(
   const caller = ferretOf(context);
   if (caller === undefined) return 'plain';
   const snapshot = await agenda.list(sessionId);
-  const found = snapshot.ok
-    ? ([...snapshot.value.items, ...snapshot.value.resolved].find(item => item.id === id) as
-        | Parameters<typeof coverOf>[3]
-        | undefined)
-    : undefined;
-  if (found !== undefined) return await coverOf(reach, caller, sessionId, found);
-  const kept = await agenda.versionsOf(sessionId, id as never);
-  const latest = kept.ok ? kept.value.versions.at(-1)?.version : undefined;
-  const version = latest === undefined ? undefined : await agenda.versionOf(sessionId, id as never, latest);
-  const item =
-    version?.ok === true ? (version.value as { readonly item?: Parameters<typeof coverOf>[3] }).item : undefined;
-  return item === undefined ? 'plain' : await coverOf(reach, caller, sessionId, item);
+  const onBoard = snapshot.ok ? [...snapshot.value.items, ...snapshot.value.resolved] : [];
+  const kept = keptItem(agenda, sessionId);
+  const find: FindRelative = async each => onBoard.find(row => row.id === each) ?? (await kept(each));
+  const item = await find(id);
+  return item === undefined ? 'plain' : await coverOf(reach, caller, sessionId, item, find);
 }
 
 const notThere = (): never => {
@@ -207,7 +218,7 @@ async function list(
     ? jsonResponse(
         servedAgendaListSnapshot(
           context,
-          await readableSnapshot(reach, context, await withReplies(replies, sessionId, result.value)),
+          await readableSnapshot(agenda, reach, context, await withReplies(replies, sessionId, result.value)),
         ),
       )
     : refusal(result.error);
@@ -249,8 +260,11 @@ async function listVersions(
 ): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const id = pathItemId(context);
-  if ((await coverOfItem(agenda, reach, context, sessionId, id)) === 'omit') return notThere();
-  const result = await agenda.versionsOf(sessionId, id, deviceOf(context));
+  // An item the ferret may not read is answered as an id that was never raised: the same status, the same bytes.
+  const hidden = (await coverOfItem(agenda, reach, context, sessionId, id)) === 'omit';
+  const result = hidden
+    ? { ok: true as const, value: ABSENT.versions() }
+    : await agenda.versionsOf(sessionId, id, deviceOf(context));
   if (!result.ok) return refusal(result.error);
   const { versions, seen } = result.value;
   const body: AgendaVersionList = {
@@ -272,7 +286,7 @@ async function getVersion(agenda: AgendaService, reach: FerretReach | undefined,
     throw new ApiError(400, 'the version in the path is not a version number', 'invalid');
   }
   const cover = await coverOfItem(agenda, reach, context, sessionId, id);
-  if (cover === 'omit') return notThere();
+  if (cover === 'omit') return refusal(ABSENT.version(id, version));
   const result = await agenda.versionOf(sessionId, id, version);
   return result.ok
     ? jsonResponse(cover === 'project' ? ferretVersion(result.value) : result.value)
@@ -441,7 +455,7 @@ async function apply(
   const notes = mutation.notes ?? [];
   const enrolled = mutation.change === 'created' ? await enrolledDevices(notifications) : undefined;
   return jsonResponse({
-    ...(await readableSnapshot(reach, context, await withReplies(replies, sessionId, mutation.snapshot))),
+    ...(await readableSnapshot(agenda, reach, context, await withReplies(replies, sessionId, mutation.snapshot))),
     ...(warnings.length === 0 ? {} : { warnings }),
     ...(notes.length === 0 ? {} : { notes: [...notes] }),
     ...(enrolled === undefined ? {} : { enrolled }),
@@ -506,7 +520,10 @@ export function agendaRoutes(
       if (item === undefined) return notThere();
       const caller = ferretOf(call);
       if (caller === undefined) return jsonResponse(item);
-      const cover = await coverOf(reach, caller, pathSessionId(call), item);
+      const kept = keptItem(agenda, pathSessionId(call));
+      const find: FindRelative = async each =>
+        [...snapshot.items, ...snapshot.resolved].find(row => row.id === each) ?? (await kept(each));
+      const cover = await coverOf(reach, caller, pathSessionId(call), item, find);
       if (cover === 'omit') return notThere();
       if (cover === 'plain') return jsonResponse(item);
       return jsonResponse(active === undefined ? projectResolved(item as never) : projectItem(active));
@@ -524,7 +541,7 @@ export function agendaRoutes(
       if (!query.success)
         throw new ApiError(400, 'conversation cursor must use nonnegative integers and a positive version', 'invalid');
       const cover = await coverOfItem(agenda, reach, call, pathSessionId(call), pathItemId(call));
-      if (cover === 'omit') return notThere();
+      if (cover === 'omit') return refusal(ABSENT.conversation(query.data.version));
       if (cover === 'project') return jsonResponse(EMPTY_CONVERSATION);
       const result = await agenda.conversationOf(
         pathSessionId(call),

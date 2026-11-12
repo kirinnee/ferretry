@@ -164,8 +164,12 @@ it is about cannot be done reliably, so a ferret receives none of it in any form
 - A report is read for a ferret only to find which of the caller's own ferrets a row is about: a fleet report contributes
   the rows whose target is in the lineage, a report whose file name puts it outside the lineage is not opened, and one
   that cannot be read and is not named for the lineage is simply not the ferret's. A **non-empty report named for the
-  lineage that does not parse is silently omitted** from a ferret's rows (no banner, no error); an **empty or unreadable**
-  one named for the lineage still fails `verdicts` and darkens the agenda, as it does for the owner.
+  lineage that does not parse reads as an `unknown` row** for the lineage's ferret (the file name still says whose it is;
+  nothing of its text is shown); an **empty or unreadable** one named for the lineage still fails `verdicts` and darkens
+  the agenda, as it does for the owner. **A line that looks like a heading** (`###`, `#`, an indented one) **inside a
+  fleet-report section the parser did not split on makes that section's row `unknown`** for a ferret, never a value taken
+  from the text after the line, so a foreign section's words cannot relabel a ferret's own row. The owner's read keeps the
+  parser's reading.
 - **`lastSweepAt` is the lineage's.** Each sweep records the instant it scanned each ferret (`scanned`, `warden/daemon/lib/scanned.ts`);
   a ferret is shown the newest such instant among its own lineage, and none when no sweep ever scanned it. The agenda's
   `no-sweep`, `clean-sweep` and overdue states for a ferret are computed from that, so a sweep that scanned nobody of its
@@ -185,10 +189,25 @@ authorization, not this rule). For a FERRET caller only, every Warden-sourced it
 as the fixed subject, why and how-to-resolve sentences, with its identity, class and times and **no** source reference,
 context, recommendation, note, answer or conversation; an item about **another** lineage is not there at all — the board
 lists the rest in their order with the count of what the ferret can see, and the item, its versions, one version and its
-conversation answer 404 as an item that does not exist. An item is the Warden's by its source (`daemon`, entry
-`f.<ferret>.warden…`, `warden…` or the Warden's hashed entry) or because a session the Warden started raised it; its
-target is the ferret its entry names, else the board it stands on. A lineage that cannot be read is no lineage (the item
-is omitted). An item the Warden did not raise is unchanged for everyone, and the owner and a device read every item whole.
+conversation answer **exactly as an id that was never raised** does: the same status, the same body (the id echoed back
+aside) and the same headers, on every one of those routes, so a ferret cannot tell an omitted Warden item from a number
+nobody used. The conversation is covered live, by explicit version and for an item that has left the board (read from its
+newest kept version). An item is the Warden's by its **shape** (`SOURCE_SHAPES` in `ferret-reads.ts`: one table, a test per
+row): the Asks port under source `daemon` (`ask:daemon:…`, `standing:daemon:…`), the raw grammar a **migrated v4 home**
+keeps byte for byte (`warden:…`, `warden-…`, `warden.…`, the hashed entry), or because a session the Warden started raised
+it. **A daemon-raised item whose shape the table does not list is the Warden's too** (fail closed), so a producer added
+later, or a v4 grammar nobody classified, is withheld until somebody decides otherwise. The daemon-raised shapes that are
+**not** the Warden's, and read as they always did, are another plugin's Asks source (`ask:<source>:…`, `standing:<source>:…`),
+a gate item and its follow-up (`gate:`, `gate-followup:`), a card's agenda (`card-agenda:`), and v4's `lanes:`,
+`handover:`, `budget:`, `prompt:` and `question:`. **Warden provenance is sticky**: an item counts as the Warden's when
+any item merged into it, or the item it was split from (to the end of the chain), is; a relative the store cannot produce
+counts as the Warden's. Its target is the ferret its entry names, else the board it stands on. A lineage that cannot be read
+is no lineage (the item is omitted). An item the Warden did not raise is unchanged for everyone, and the owner and a device
+read every item whole. A ferret's board `updatedAt` is the newest instant on the items it can read (an omitted item never
+moves it), or what an empty board answers when it can read none.
+**Declared residual:** ids are sequential and are not renumbered (references to them would break), so a ferret reading
+another lineage's board can see that an item number is missing (A1, A3) where a foreign Warden item was omitted; it can
+never see that item's source, target, words, cost or time.
 Declared limit: an item a session in the Warden's _descendants_ (not the investigator itself) raised is not recognised as
 the Warden's; the sentences are Asks' own copy of the Warden's no-class wording (a core package cannot import the
 plugin), held equal to it by a committed test.

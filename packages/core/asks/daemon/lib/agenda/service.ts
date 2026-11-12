@@ -259,6 +259,11 @@ export class AgendaService {
     };
   }
 
+  /** The instant an empty board answers as its `updatedAt`: now. A ferret's board with nothing it may read answers this. */
+  emptyBoardAt(): string {
+    return this.clock.now();
+  }
+
   async count(sessionId: string): Promise<AgendaQueryResult<number>> {
     const listed = await this.list(sessionId);
     return listed.ok ? { ok: true, value: listed.value.count } : listed;
@@ -564,10 +569,9 @@ export class AgendaService {
         : undefined;
     const selected = version ?? coldVersion;
     const historical = selected === undefined ? undefined : await this.versions.get(sessionId, id, selected);
-    if (version !== undefined && historical === undefined)
-      return { ok: false, error: { code: 'not-found', message: 'no such agenda version' } };
+    if (version !== undefined && historical === undefined) return { ok: false, error: noSuchConversation(version) };
     const item = historical?.item ?? current;
-    if (item === undefined) return { ok: false, error: { code: 'not-found', message: 'no such agenda item' } };
+    if (item === undefined) return { ok: false, error: noSuchConversation(version) };
     const full =
       selected === undefined
         ? (ledger?.conversations?.[id] ?? item.conversation ?? [])
@@ -622,9 +626,7 @@ export class AgendaService {
     } catch (error) {
       return { ok: false, error: versionsUnavailable(id, error) };
     }
-    return found === undefined
-      ? { ok: false, error: { code: 'not-found', message: `${id} has no version ${version} in this session` } }
-      : { ok: true, value: found };
+    return found === undefined ? { ok: false, error: noSuchVersion(id, version) } : { ok: true, value: found };
   }
 
   /** This device opened `id` at `version`. A device that has seen a later one keeps it; the mark that stands is answered. */
@@ -1016,3 +1018,18 @@ function invalidSession(sessionId: string): AgendaFailure | null {
 function versionsUnavailable(id: AgendaId, error: unknown): AgendaFailure {
   return { code: 'corrupt', message: `the versions of ${id} could not be read: ${String(error)}` };
 }
+
+/**
+ * What an item with no such version is answered: the one sentence `versionOf` gives an id that was never raised, and the
+ * one a ferret is given for a Warden item it may not read (`routes/ferret-reads.ts`), so the two are the same bytes.
+ */
+export const noSuchVersion = (id: AgendaId, version: number): AgendaFailure => ({
+  code: 'not-found',
+  message: `${id} has no version ${version} in this session`,
+});
+
+/** What `conversationOf` answers an item (or, with `version`, a version) that is not there; shared like {@link noSuchVersion}. */
+export const noSuchConversation = (version: number | undefined): AgendaFailure => ({
+  code: 'not-found',
+  message: version === undefined ? 'no such agenda item' : 'no such agenda version',
+});

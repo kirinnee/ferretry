@@ -18,7 +18,7 @@ import { daemonImplementations } from '../../../src/generated/plugins.ts';
 import { testHost } from '../../../testing/index.ts';
 
 /**
- * Audit A fix 7: the per-ferret Asks board reads are open to any ferret (`caller: any`, v4 parity), and a Warden notice
+ * Audit A fix 7 (and fix 8: a hidden item answers exactly like an absent id): the per-ferret Asks board reads are open to any ferret (`caller: any`, v4 parity), and a Warden notice
  * keeps the investigator's reason, context and remedy on the board it was raised on. A FERRET reads a Warden-sourced item
  * of its own lineage as fixed sentences, and one about another lineage not at all (the item, its versions, one version,
  * its conversation); the board's count and order show no gap. The owner and a paired device read everything, as before,
@@ -128,18 +128,25 @@ const world = async () => {
       raisedBy: { kind: 'daemon' },
       ferret,
     });
-  /** A notice the Warden did not raise: a plain daemon note with the same shape of words. */
-  const plain = async (ferret: string, entry: string) =>
-    await asks.notify({
-      source: 'daemon' as never,
-      entry: entry as never,
-      ref: { ferret },
-      subject: `Plain note ${entry}`,
-      why: 'A plain reason',
-      howToResolve: 'A plain remedy',
-      raisedBy: { kind: 'daemon' },
-      ferret,
+  /**
+   * An ask the Warden did not raise: the ferret's own, added on its own board. (A daemon item whose shape nobody listed is
+   * the Warden's to a ferret reader since fix 8, so a plain daemon note no longer stands for "not the Warden's".)
+   */
+  const plain = async (ferret: string, entry: string) => {
+    const added = await host.request('POST', `/v1/ferrets/${ferret}/agenda`, {
+      headers: { [CALLER_HEADER]: ferret },
+      body: {
+        action: 'add',
+        subject: `Plain note ${entry}`,
+        why: 'A plain reason',
+        howToResolve: 'A plain remedy',
+        premise: 'A plain premise',
+        context: 'A plain context',
+        ask: { kind: 'open-question' },
+      },
     });
+    expect([added.status, added.body]).toEqual([200, expect.anything()]);
+  };
   return { host, lead, helper, stranger, get, warden, plain };
 };
 
@@ -191,10 +198,17 @@ test('audit A fix 7 a ferret sees no Warden item of another lineage: not the boa
     expect(seen.items.map(item => item.subject)).toEqual(['Plain note plain-1', 'Plain note plain-2']);
     for (const text of HIDDEN) expect(board.body).not.toContain(text);
     expect(board.body).not.toContain(w.stranger.length > 0 && hidden !== undefined ? `"id":"${hidden.id}"` : 'x-none');
-    // Every route for the hidden item reads as an item that is not there.
-    for (const suffix of ROUTES) {
+    // Every route for the hidden item reads exactly as an id that was never raised: the same status and bytes.
+    const absentId = 'A99';
+    for (const suffix of [...ROUTES, '/versions/9', '/conversation?version=1']) {
       const read = await w.get('ferret', `/v1/ferrets/${w.stranger}/agenda/${hidden?.id}${suffix}`);
-      expect([suffix, read.status]).toEqual([suffix, 404]);
+      const absent = await w.get('ferret', `/v1/ferrets/${w.stranger}/agenda/${absentId}${suffix}`);
+      expect([suffix, read.status, read.body.replaceAll(hidden?.id ?? '', '<ID>')]).toEqual([
+        suffix,
+        absent.status,
+        absent.body.replaceAll(absentId, '<ID>'),
+      ]);
+      expect(read.status === 200 || read.status === 404).toBe(true);
       for (const text of HIDDEN) expect(read.body).not.toContain(text);
     }
     // A plain item of the same board is unchanged for the ferret: the same bytes the owner reads.
