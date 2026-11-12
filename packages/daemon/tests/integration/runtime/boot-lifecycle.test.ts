@@ -6819,7 +6819,8 @@ describe('daemon boot lifecycle', () => {
           parseAccountModel({
             version: 2,
             credentials: { you: { harness: 'claude', store: 'ferretry' } },
-            profiles: { default: { layers: [] } },
+            components: { settings: { base: { harness: 'claude', flags: ['--verbose'] } } },
+            profiles: { default: { layers: ['settings/base'] } },
             runtimes: { [WRAPPER]: { credential: 'you', profile: 'default', agent: true } },
           }),
         );
