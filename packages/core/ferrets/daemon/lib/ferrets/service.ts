@@ -13,6 +13,7 @@ import {
   birthOf,
   launchIsFenced,
   originIsAgent,
+  RUNTIME_START_DEADLINE_MS,
 } from '../../../contract/index.ts';
 import type {
   DeliveryOutcome,
@@ -171,6 +172,11 @@ export interface FerretsPorts {
    * `runtime.start`, `login`): switched off or over its budget is refused. Unbound only in a unit fixture.
    */
   loginStart?(login: string): Promise<LoginStartResolution>;
+  /**
+   * Runs `fire` once after `delayMs` on the kernel clock and returns how to cancel it. It bounds Runtimes' answers
+   * ({@link RUNTIME_START_DEADLINE_MS}); unbound only in a unit fixture whose answers settle, where nothing is bounded.
+   */
+  after?(delayMs: number, fire: () => void): () => void;
   launchParts(): readonly LaunchPartSource[];
   /** The ONE provider that plans the files a start was given (`start -f`); unbound or none: a start that carries attachments is refused. */
   openingAttachments?(): OpeningAttachmentsSource | undefined;
@@ -2241,6 +2247,26 @@ export class FerretsService implements FerretsApi {
   }
 
   /**
+   * `answer`, or `late` when it has not settled within {@link RUNTIME_START_DEADLINE_MS}. A late answer is dropped (the
+   * caller has already refused, so nothing launches on it) and the wait ends, so a serial queue held across it is released.
+   */
+  private async withinDeadline<T>(answer: Promise<T>, late: T): Promise<T> {
+    const after = this.ports.after;
+    if (after === undefined) return await answer;
+    let cancel: () => void = () => {};
+    const expired = new Promise<T>(resolve => {
+      cancel = after(RUNTIME_START_DEADLINE_MS, () => {
+        resolve(late);
+      });
+    });
+    try {
+      return await Promise.race([answer, expired]);
+    } finally {
+      cancel();
+    }
+  }
+
+  /**
    * The ONE resolution of a runtime into the harness and login a launch spends, used by a start AND by every relaunch of a
    * stored record (resume, restart, automatic resume, a move's target). The runtime IS the account (v4 parity): it names
    * its harness and its login, and Runtimes answers (via `ports.runtimeStart`). `undefined` when no runtime is named, or
@@ -2261,22 +2287,28 @@ export class FerretsService implements FerretsApi {
       // check of whether it may be spent at all, so a login switched off or over its budget is refused on this path too.
       const direct = asked.login ?? stored;
       if (direct !== undefined && this.ports.loginStart !== undefined) {
-        const spendable = await this.ports.loginStart(direct).catch(
-          (): LoginStartResolution => ({
-            ok: false,
-            sentence: `login ${direct} could not be checked, so the ferret was not started`,
-          }),
+        const spendable = await this.withinDeadline(
+          this.ports.loginStart(direct).catch(
+            (): LoginStartResolution => ({
+              ok: false,
+              sentence: `login ${direct} could not be checked, so the ferret was not started`,
+            }),
+          ),
+          { ok: false, sentence: `could not check login ${direct} in time; try again` },
         );
         if (!spendable.ok) return failed('refused', spendable.sentence);
       }
       return ok(undefined);
     }
     if (this.ports.runtimeStart === undefined) return ok(undefined);
-    const answer = await this.ports.runtimeStart(runtime).catch(
-      (): RuntimeStartResolution => ({
-        ok: false,
-        sentence: `runtime ${runtime} could not be checked, so the ferret was not started`,
-      }),
+    const answer = await this.withinDeadline(
+      this.ports.runtimeStart(runtime).catch(
+        (): RuntimeStartResolution => ({
+          ok: false,
+          sentence: `runtime ${runtime} could not be checked, so the ferret was not started`,
+        }),
+      ),
+      { ok: false, sentence: `could not check runtime ${runtime} in time; try again` },
     );
     if (!answer.ok) return failed('refused', answer.sentence);
     if (asked.harness !== undefined && asked.harness !== answer.harness)

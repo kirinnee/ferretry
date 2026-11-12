@@ -288,6 +288,14 @@ export interface RuntimeStartSource {
 export const RUNTIME_START_KEY = 'runtimes';
 
 /**
+ * How long Ferrets waits for Runtimes' `runtime.start` answer (`resolve` or `login`) before it refuses. A provide hook has
+ * no kernel bound of its own (the decide hooks' is 200 ms, `defineHook`'s default, and not exported), and an answer reads
+ * the login list, so this is longer than a decide's; it is still short enough that a resolver that never settles cannot
+ * hold a ferret's lifecycle queue (a resume that waits on it holds up the stop behind it).
+ */
+export const RUNTIME_START_DEADLINE_MS = 5_000;
+
+/**
  * Which harness and login a start that names a RUNTIME spends. On the security path: it decides which credential a
  * launch holds, so ONE named plugin provides it. Ferrets cannot reach Runtimes by port (Runtimes needs Ferrets), so it
  * asks through this hook; with no provider a start that names a runtime is refused rather than launched signed out.

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { ok } from '@ferretry/std';
-import { PERSON_ORIGIN, type RuntimeStartResolution } from '../../../../contract/index.ts';
+import { PERSON_ORIGIN, RUNTIME_START_DEADLINE_MS, type RuntimeStartResolution } from '../../../../contract/index.ts';
 import {
   emptyChildEnvironment,
   FakeHarness,
@@ -36,7 +36,33 @@ const rt: Resolve = async runtime =>
     ? { ok: true, harness: 'claude-code', login: 'oauth' }
     : { ok: false, sentence: `runtime ${runtime} was not started: no runtime ${runtime} exists on this machine` };
 
-function fixture(runtimeStart: Resolve | undefined = rt) {
+/** A driven timer: `after` records what it was asked and `advance` fires every timer due, as the kernel clock would. */
+function drivenClock() {
+  const timers = new Map<number, { readonly at: number; readonly fire: () => void }>();
+  let now = 0;
+  let next = 0;
+  return {
+    after: (delayMs: number, fire: () => void) => {
+      next += 1;
+      const id = next;
+      timers.set(id, { at: now + delayMs, fire });
+      return () => {
+        timers.delete(id);
+      };
+    },
+    advance: (ms: number) => {
+      now += ms;
+      for (const [id, timer] of [...timers]) {
+        if (timer.at > now) continue;
+        timers.delete(id);
+        timer.fire();
+      }
+    },
+    pending: () => timers.size,
+  };
+}
+
+function fixture(runtimeStart: Resolve | undefined = rt, after?: (delayMs: number, fire: () => void) => () => void) {
   const registry = new FerretRegistry([]);
   const harness = new FakeHarness('claude-code');
   const loginsAsked: string[] = [];
@@ -83,6 +109,7 @@ function fixture(runtimeStart: Resolve | undefined = rt) {
       return ok({});
     },
     ...(runtimeStart === undefined ? {} : { runtimeStart }),
+    ...(after === undefined ? {} : { after }),
     vault: { childEnvironment: async () => ok(emptyChildEnvironment()) },
     asks: { open: async () => [] },
   };
@@ -432,4 +459,90 @@ describe('a login that may not be spent is refused on every path', () => {
       }
     });
   }
+});
+
+/**
+ * Runtimes' `runtime.start` is a provide hook, so nothing but Ferrets bounds the wait. A resolver that never settles must
+ * neither launch nor hold the ferret's lifecycle queue (a resume waits inside it, and a stop queues behind a resume).
+ */
+describe('a Runtimes answer that never arrives is refused in time and releases the ferret’s queue', () => {
+  const settled = async <T>(work: Promise<T>): Promise<T | 'pending'> =>
+    await Promise.race([work, new Promise<'pending'>(resolve => setTimeout(() => resolve('pending'), 20))]);
+
+  test('a resume whose runtime resolver never settles is refused by name at the deadline, launches nothing, and a following stop settles', async () => {
+    const clock = drivenClock();
+    let hang = false;
+    const f = fixture(async runtime => {
+      if (hang) return await new Promise<RuntimeStartResolution>(() => {});
+      return rt(runtime);
+    }, clock.after);
+    const id = startedId(await f.service.start({ folder: '/work', runtime: 'rt', by: 'owner' }, PERSON_ORIGIN));
+    await f.service.stop(id, 'now');
+    const launches = f.harness.launched.length;
+    hang = true;
+
+    const resuming = f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
+    const stopping = f.service.stop(id, 'now');
+    expect(await settled(resuming)).toBe('pending');
+    expect(await settled(stopping)).toBe('pending');
+
+    clock.advance(RUNTIME_START_DEADLINE_MS);
+
+    const resumed = await resuming;
+    expect(resumed.ok).toBe(false);
+    expect(resumed.ok ? '' : resumed.error.reason).toBe('could not check runtime rt in time; try again');
+    expect(await settled(stopping)).not.toBe('pending');
+    expect(f.harness.launched).toHaveLength(launches);
+    expect(f.registry.get(id)?.state).toBe('stopped');
+    expect(clock.pending()).toBe(0);
+  });
+
+  test('a start whose runtime resolver never settles is refused at the deadline and writes nothing', async () => {
+    const clock = drivenClock();
+    const f = fixture(async () => await new Promise<RuntimeStartResolution>(() => {}), clock.after);
+
+    const starting = f.service.start({ folder: '/work', runtime: 'rt', by: 'owner' }, PERSON_ORIGIN);
+    expect(await settled(starting)).toBe('pending');
+    clock.advance(RUNTIME_START_DEADLINE_MS - 1);
+    expect(await settled(starting)).toBe('pending');
+    clock.advance(1);
+
+    const started = await starting;
+    expect(started.ok).toBe(false);
+    expect(started.ok ? '' : started.error.reason).toBe('could not check runtime rt in time; try again');
+    expect(f.registry.list()).toEqual([]);
+    expect(f.harness.launched).toEqual([]);
+  });
+
+  test('a direct login check that never settles is refused at the deadline, and a late answer launches nothing', async () => {
+    const clock = drivenClock();
+    let answer: (resolution: { ok: true }) => void = () => {};
+    const f = fixture(undefined, clock.after);
+    f.ports.loginStart = async () => await new Promise<{ ok: true }>(resolve => (answer = resolve));
+
+    const starting = f.service.start(
+      { folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' },
+      PERSON_ORIGIN,
+    );
+    expect(await settled(starting)).toBe('pending');
+    clock.advance(RUNTIME_START_DEADLINE_MS);
+
+    const started = await starting;
+    expect(started.ok).toBe(false);
+    expect(started.ok ? '' : started.error.reason).toBe('could not check login gw in time; try again');
+    answer({ ok: true });
+    await settled(Promise.resolve());
+    expect(f.registry.list()).toEqual([]);
+    expect(f.harness.launched).toEqual([]);
+  });
+
+  test('an answer inside the deadline is used and cancels the timer', async () => {
+    const clock = drivenClock();
+    const f = fixture(undefined, clock.after);
+
+    const started = await f.service.start({ folder: '/work', runtime: 'rt', by: 'owner' }, PERSON_ORIGIN);
+
+    expect(started.ok).toBe(true);
+    expect(clock.pending()).toBe(0);
+  });
 });

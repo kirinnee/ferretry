@@ -463,6 +463,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       if (decision === 'unanswered') throw noHelperAdmission();
       return decision;
     },
+    // Bounds Runtimes' answers below on the kernel clock (RUNTIME_START_DEADLINE_MS).
+    after: (delayMs, fire) => kernel.clock.after(milliseconds(delayMs), fire),
     // Which harness and login a runtime starts with: Runtimes alone answers. With no Runtimes a start that names a
     // runtime is refused here, never launched signed out.
     runtimeStart: async runtime => {
