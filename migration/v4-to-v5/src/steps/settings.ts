@@ -9,7 +9,7 @@
  * | `components/modelSets/<n>.yaml`        | `model-sets/<n>.yaml`                                               |
  * | `components/mcp/<n>.yaml`              | `mcp/<n>.yaml`                                                      |
  * | `components/skills/<n>.yaml`           | `skills/<n>.yaml`                                                   |
- * | `components/instructions/<n>.yaml`     | `instructions/<n>.md` (the document it points at, inside the assets) |
+ * | `components/instructions/<n>.yaml`     | `instructions/<n>.yaml` (`text:` = the document it points at, inside the assets) |
  * | `components/settings\|hooks/<n>.yaml`  | `{claude-code,codex}/{settings,hooks}/<n>.yaml` inline (file, env, -c, --disallowedTools); else NOT CARRIED, see `planHarnessComponent` |
  * | `logins/<id>.yaml`                     | `logins/<id>.yaml`                                                  |
  * | `presets/<id>.yaml`, `models/<id>.yaml`| `endpoints/<id>.yaml`, `models/<id>.yaml`                           |
@@ -30,13 +30,12 @@
  * file is read back as the v5 kernel reads it and parsed with the declared schema BEFORE anything is written. A value
  * that looks like a raw secret fails the step naming the file and key; `${secret:NAME}` references are kept verbatim.
  */
-import { INSTRUCTION_ITEMS_FOLDER } from '@ferretry/core-ferrets/contract';
 import { lstat, readFile } from 'node:fs/promises';
 import { componentFileSource, instructionsSource, MAX_COMPONENT_BYTES } from './component-files.ts';
 import { carryFlags, type FlagOutcome } from './component-flags.ts';
 import { carryAssetReferences, type CarriedAsset, v5AssetPath } from './component-assets.ts';
 import { join } from 'node:path';
-import { Document, isMap, isScalar, isSeq, Pair, type YAMLMap } from 'yaml';
+import { Document, isMap, isScalar, isSeq, Pair, parse, Scalar, type YAMLMap } from 'yaml';
 import type { KeptItem, NotCarried, StepReport } from '../report.ts';
 import {
   documentCredentialPaths,
@@ -79,6 +78,7 @@ const {
   AGENDA: AGENDA_CONFIG,
   CONVERSATION: CONVERSATION_CONFIG,
   ENDPOINTS: ENDPOINTS_CONFIG,
+  INSTRUCTION_ITEMS,
   LOGINS: LOGINS_CONFIG,
   MODELS: MODELS_CONFIG,
   MCP: MCP_CONFIG,
@@ -136,10 +136,6 @@ const STATIC_NOT_CARRIED: readonly NotCarried[] = [
     why: 'JSON daemon documents, not YAML config kinds: the Daemon settings step splits daemon.json (Gate, Connections, the harness files, Agenda), the Usage step takes the pricing and the Packs step reads routing.json',
   },
   {
-    what: 'instructions component harness and clonedFrom* fields',
-    why: 'a v5 instruction item is a plain markdown file with no fields',
-  },
-  {
     what: 'config/layout.yaml, config/layouts/, config/themes/',
     why: 'no v4 source: v4 kept no layout or theme on disk; v5 starts on its built-in layout',
   },
@@ -170,7 +166,6 @@ interface Uncarried {
 
 interface Plan {
   readonly files: Map<string, Planned>;
-  readonly instructions: { readonly name: string; readonly source: string; readonly from: string }[];
   /** Files under v4's `fleet/assets/` that a carried hooks or settings document points at, by path under it. */
   readonly assets: Map<string, CarriedAsset>;
   readonly waiting: string[];
@@ -200,7 +195,7 @@ function rename(map: YAMLMap, from: string, to: string, label: string): void {
 }
 
 /** v5 names a harness by its plugin id (`HarnessKeySchema`): v4 `claude` is `claude-code`; the `claude:` half key stays. */
-const HARNESS_FIELD = new Set(['login', 'preset', 'runtime', 'mcp', 'skills']);
+const HARNESS_FIELD = new Set(['login', 'preset', 'runtime', 'mcp', 'skills', 'instructions']);
 function harnessToV5(map: YAMLMap): void {
   const value = pairOf(map, 'harness')?.value;
   if (isScalar(value) && value.value === 'claude') value.value = 'claude-code';
@@ -459,13 +454,79 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
         plan.waiting.push(`${label} (its document is a hard link (v4 refused it), so it was never read)`);
       else if (source === undefined)
         plan.waiting.push(`${label} (its document is not a plain file inside fleet/assets/)`);
-      else plan.instructions.push({ name: address.name, source, from: label });
+      else await planInstruction(plan, address.name, label, source, map);
       return;
     }
     case 'settings':
     case 'hooks':
       return; // handled above (planHarnessComponent)
   }
+}
+
+/** The fields of a v4 instructions component that a v5 `instructions/<name>.yaml` also holds (v4's `file` becomes `text`). */
+const INSTRUCTION_FIELDS = ['description', 'harness', 'clonedFrom', 'clonedFromDaemon', 'clonedFromKey'] as const;
+
+/**
+ * A v4 instructions component → v5's `instructions/<name>.yaml`: the document it points at becomes `text:` (v5 holds the
+ * text in the item; it reads no `.md` there), with the fields v4 had (`harness`, `description`, clone origin).
+ *
+ * v5 refuses a text over its size limit or holding a control character, and a text that does not read back from the YAML
+ * byte for byte would reach the harness changed. Each is NOT CARRIED, by name, exactly like a settings component v5
+ * refuses: a profile that layers it is then pending (or loses the layer under `--drop-uncarried`), so no profile is ever
+ * left naming a component that is not there (which makes the WHOLE fleet configuration unreadable).
+ */
+async function planInstruction(plan: Plan, name: string, label: string, source: string, map: YAMLMap): Promise<void> {
+  const layer = `instructions/${name}`;
+  const refuse = (reason: string): void => {
+    plan.uncarried.push({ label, layer, reasons: [`its document is not carried: ${reason}`], flags: [], empty: false });
+  };
+  const bytes = await readFile(source).catch(() => {
+    throw new V4InputError(`${label}: its document cannot be read`);
+  });
+  let text: string;
+  try {
+    // `ignoreBOM: true` KEEPS an initial U+FEFF in the text (the default strips it). v4 read this document with
+    // `readFile(path, 'utf8')`, which keeps it, so the harness was handed it; dropping it here would change the document.
+    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    refuse('it is not valid UTF-8 text');
+    return;
+  }
+  const fields: Record<string, string> = {};
+  for (const key of INSTRUCTION_FIELDS) {
+    const value = pairOf(map, key)?.value;
+    if (isScalar(value) && typeof value.value === 'string') fields[key] = value.value;
+  }
+  const { description, harness, ...origin } = fields;
+  // A block scalar when it reads back exactly; else a double-quoted one (which escapes what a block cannot hold).
+  const attempts: readonly (Scalar.Type | undefined)[] = [undefined, Scalar.QUOTE_DOUBLE];
+  let problem: string | undefined;
+  for (const type of attempts) {
+    const item = new Document(
+      {
+        ...(description === undefined ? {} : { description }),
+        text,
+        ...(harness === undefined ? {} : { harness }),
+        ...origin,
+      },
+      YAML_OPTIONS,
+    );
+    if (type !== undefined) {
+      const node = item.createNode(text);
+      node.type = type;
+      item.set('text', node);
+    }
+    item.commentBefore = ` Carried from v4 ${label} by the v4 → v5 converter.`;
+    const written = item.toString({ lineWidth: 0 });
+    problem = v5ConfigProblem(INSTRUCTION_ITEMS, name, written);
+    if (problem === undefined && (parse(written, { version: '1.2' }) as { text?: unknown }).text !== text)
+      problem = 'its text does not read back from the YAML unchanged';
+    if (problem !== undefined) continue;
+    place(plan, INSTRUCTION_ITEMS, name, label, item);
+    count(plan, 'instruction documents');
+    return;
+  }
+  refuse(`v5 refuses it as an instructions item (${problem ?? 'unknown'})`);
 }
 
 const V5_HARNESS = { claude: 'claude-code', 'claude-code': 'claude-code', codex: 'codex' } as const;
@@ -719,7 +780,6 @@ export async function buildPlan(
   const listing = await listV4Config(ctx.v4.home, ctx.v4.configOverrides);
   const plan: Plan = {
     files: new Map(),
-    instructions: [],
     assets: new Map(),
     waiting: [],
     dropped: [],
@@ -898,13 +958,6 @@ export const settingsStep: Step = {
         await ctx.v5.config(planned.target, planned.name, planned.document.toString({ lineWidth: 0 }), [
           ...planned.from,
         ]);
-      for (const item of plan.instructions) {
-        const bytes = await readFile(item.source).catch(() => {
-          throw new V4InputError(`${item.from}: its document cannot be read`);
-        });
-        await ctx.v5.opaque(join('config', INSTRUCTION_ITEMS_FOLDER, `${item.name}.md`), bytes);
-        count(plan, 'instruction documents');
-      }
       // The bytes the checks read, never a second read of the path.
       for (const asset of plan.assets.values()) await ctx.v5.opaque(v5AssetPath(asset.rel), asset.bytes, asset.mode);
     } catch (error) {

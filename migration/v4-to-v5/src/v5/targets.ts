@@ -19,7 +19,13 @@ import { LESSONS_CONFIG } from '@ferretry/plugin-lessons/contract';
 import { ENDPOINTS_CONFIG, LOGINS_CONFIG, MODELS_CONFIG } from '@ferretry/plugin-logins/contract';
 import { MCP_CONFIG } from '@ferretry/plugin-mcp/contract';
 import { PACKS_CONFIG } from '@ferretry/plugin-packs/contract';
-import { MODEL_SET_ITEMS, PROFILE_ITEMS, RUNTIME_ITEMS, RUNTIMES_CONFIG } from '@ferretry/plugin-runtimes/contract';
+import {
+  INSTRUCTION_ITEMS,
+  MODEL_SET_ITEMS,
+  PROFILE_ITEMS,
+  RUNTIME_ITEMS,
+  RUNTIMES_CONFIG,
+} from '@ferretry/plugin-runtimes/contract';
 import { SKILLS_CONFIG } from '@ferretry/plugin-skills/contract';
 import { TerminalsConfigSchema } from '@ferretry/plugin-terminals/contract';
 import { USAGE_CONFIG } from '@ferretry/plugin-usage/contract';
@@ -63,6 +69,7 @@ export const CONFIG_TARGETS = {
   MCP: owned('mcp', MCP_CONFIG),
   PACKS: owned('packs', PACKS_CONFIG),
   RUNTIMES: owned('runtimes', RUNTIMES_CONFIG),
+  INSTRUCTION_ITEMS: owned('runtimes', INSTRUCTION_ITEMS),
   RUNTIME_ITEMS: owned('runtimes', RUNTIME_ITEMS),
   PROFILE_ITEMS: owned('runtimes', PROFILE_ITEMS),
   MODEL_SET_ITEMS: owned('runtimes', MODEL_SET_ITEMS),

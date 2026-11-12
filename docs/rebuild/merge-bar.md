@@ -58,6 +58,14 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
    `POST /v1/pair/code`: a `local-only` link on the port the daemon really bound must come back, and is cancelled
    (`DELETE /v1/pair/code/:pairingId`). A wildcard bind still refuses with `wildcard-bind`. Owner block !A472, 2026-11-12.
    No code is ever printed.
+9. **A converted home's fleet configuration loads** the way `fy runtimes` loads it:
+   `migration/v4-to-v5/tests/unit/converted-fleet-loads.test.ts` runs the real Settings and Logins steps over a v4-shaped
+   home that mirrors a real machine (profiles layering an instructions component, a model set and an MCP server; Claude
+   host-store, Ferretry-store and environment-preset logins; a Codex login), then reads the result through the kernel's
+   configuration service and `runtimesConfigFiles(...).load()`. `load()` must resolve, every v4 runtime must be in the
+   model, and `instructions` must hold each document's text. One unreadable reference makes the WHOLE fleet
+   configuration unreadable, and the converter once wrote instructions as `<name>.md` where 5.0 reads `<name>.yaml`. CASE 1
+   (every login carried) is in; CASE 2 (logins held out of the preview) is a separate unit.
 
 ## After merge
 
