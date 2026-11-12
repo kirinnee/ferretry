@@ -55,6 +55,8 @@ export interface BoundQuestionForm {
   readonly submit?: number;
   /** The row a revisited, already answered tab marks `✔` as its answer. */
   readonly chosen?: number;
+  /** The row accepted as the typed answer the caller had evidence this tab holds ({@link bindQuestionForm}'s `held`). */
+  readonly heldRow?: number;
 }
 
 export interface ReviewPage {
@@ -108,16 +110,18 @@ const SUBMIT_ROW = new RegExp(`^\\s*(?<cursor>${CURSOR})?\\s*Submit\\s*$`, 'u');
 const CHECKBOX = /^\[(?<mark>.)\]\s+/u;
 /** A full-width horizontal rule: the border Claude draws above and inside a form. */
 const RULE = /^\s*[─━═]{8,}\s*$/u;
-/** Codex's header, `Question 1/2 (2 unanswered)`, which is where its form begins. */
-const CODEX_HEADER = /^\s*Question \d+\/\d+\b/u;
+/** Codex's header, `Question 1/2 (2 unanswered)`, which is where its form begins: the whole line and nothing after it. */
+const CODEX_HEADER = /^\s*Question \d+\/\d+(?: \(\d+ unanswered\))?\s*$/u;
 /** The gutter a harness draws beside a quoted question, which is not part of its text. */
 const GUTTER = /^\s*[│┃▏▎▍]\s?/u;
 /** How far above its rows a form's header may be searched for, scrollback included. */
 const HEADER_REACH = 200;
-/** Claude's tab strip: `←  ☒ Colour  ☐ Extras  ✔ Submit  →`. Codex's `←/→ to navigate` hint never matches. */
+/** The arrows around a strip. Whether the line IS Claude's strip is {@link stripTabs}: the arrows alone are also a question. */
 const TAB_STRIP = /^\s*←\s+(?<tabs>.+?)\s+→\s*$/u;
 const TAB = /^(?<mark>[☐☒])\s+(?<label>.+)$/u;
 const SUBMIT_TAB = /^✔\s+Submit$/u;
+/** How long Claude lets a question's header be (it is a "very short label", at most 12 characters): the chip's longest label. */
+const CHIP_LABEL_MAX = 12;
 /** The mark a revisited tab puts after the row it was answered with. */
 const CHOSEN = /\s+✔$/u;
 
@@ -235,10 +239,24 @@ function lastBlock(screen: QuestionScreen): Block | undefined {
 }
 
 /**
+ * Claude's tab strip, positively read: the arrows around ticked-or-not tabs that END on `✔ Submit`. The tabs, or
+ * `undefined` for any other line — a question that merely sits between arrows is its text, not a strip.
+ */
+function stripTabs(line: string): readonly string[] | undefined {
+  if (GUTTER.test(line)) return undefined;
+  const tabs = TAB_STRIP.exec(line)
+    ?.groups?.tabs?.trim()
+    .split(/\s{2,}/u);
+  if (tabs === undefined || tabs.length < 2 || !SUBMIT_TAB.test(tabs.at(-1) ?? '')) return undefined;
+  return tabs.slice(0, -1).every(tab => TAB.test(tab)) ? tabs : undefined;
+}
+
+/**
  * The lines between a form's first row and its top: a rule, Codex's `Question n/m`, or Claude's tab
  * strip. The strip is a top of its own because the rule above it is not always kept: once a re-drawn
  * form has scrolled, the line above the strip can be anything the transcript printed — including a
- * prompt that quotes another of the form's questions.
+ * prompt that quotes another of the form's questions. Only the harness's exact forms end the search: a question
+ * whose own text begins like a header does not.
  */
 function headerAbove(screen: QuestionScreen, first: number): readonly string[] {
   const header: string[] = [];
@@ -246,27 +264,59 @@ function headerAbove(screen: QuestionScreen, first: number): readonly string[] {
     const line = screen.lines[index] ?? '';
     if (RULE.test(line)) break;
     header.unshift(line);
-    if (CODEX_HEADER.test(line) || TAB_STRIP.test(line)) break;
+    if (CODEX_HEADER.test(line) || stripTabs(line) !== undefined) break;
   }
   return header;
 }
 
 /**
- * Whether the form's header is EXACTLY this question: once the strip of tabs, Codex's `Question n/m` and the question's
- * own chip (`☐ Header`) are set aside, the question's text and nothing else. A header that merely contains the text —
- * a permission prompt quoting it, a dialog that adds to it — is some other surface.
+ * Whether the form's header is EXACTLY this question, read by position: at most [the tab strip] [Codex's `Question n/m`]
+ * [the question's own chip], in that order from the top, and then the question's text, compared literally.
+ *
+ * A line is decoration because of WHERE it is and THAT it has the harness's exact form — never because its text looks
+ * like decoration, so a question that begins `☐`, `Question 1/2:` or sits between arrows is still its own text. The chip is
+ * the stored header (`☐ Header`, or cut with an ellipsis). A question that stored no header has nothing to compare a
+ * chip with, so only the harness's own chip shape is set aside, and only in its one place: the very first line, a short
+ * label ({@link CHIP_LABEL_MAX}), a blank line, then the question. Any other checkbox line above it is some other heading.
+ * A header that merely contains the text — a permission prompt quoting it, a dialog that adds to it — is some other surface.
  */
 function headerIs(header: readonly string[], question: RenderedQuestion): boolean {
   const wanted = dense(question.question);
   if (wanted === '') return false;
-  const body = header
-    .map(line => line.replace(GUTTER, ''))
-    .filter(line => {
-      if (line.trim() === '' || TAB_STRIP.test(line) || CODEX_HEADER.test(line)) return false;
-      const chip = TAB.exec(line.trim())?.groups;
-      return chip === undefined || !tabNames(chip.label ?? '', question.header);
+  const entries = header.flatMap((line, index) =>
+    line.trim() === '' ? [] : [{ line, blankAfter: header[index + 1]?.trim() === '' }],
+  );
+  const lines = entries.map(entry => entry.line);
+  const isStrip = (line: string): boolean => {
+    const tabs = stripTabs(line);
+    return (
+      tabs !== undefined &&
+      (question.header === undefined ||
+        tabs.slice(0, -1).some(tab => tabNames(TAB.exec(tab)?.groups?.label ?? '', question.header)))
+    );
+  };
+  const isCodex = (line: string): boolean => !GUTTER.test(line) && CODEX_HEADER.test(line);
+  const isChip = (line: string, at: number): boolean => {
+    const chip = GUTTER.test(line) ? undefined : TAB.exec(line.trim())?.groups;
+    if (chip === undefined) return false;
+    if (question.header !== undefined) return tabNames(chip.label ?? '', question.header);
+    return at === 0 && entries[at]?.blankAfter === true && dense(chip.label ?? '').length <= CHIP_LABEL_MAX;
+  };
+  const decorations: readonly ((line: string, at: number) => boolean)[] = [isStrip, isCodex, isChip];
+  const body = (from: number): boolean =>
+    dense(
+      lines
+        .slice(from)
+        .map(line => line.replace(GUTTER, ''))
+        .join('\n'),
+    ) === wanted;
+  const walk = (from: number, stage: number): boolean =>
+    body(from) ||
+    decorations.slice(stage).some((is, offset) => {
+      const line = lines[from];
+      return line !== undefined && is(line, from) && walk(from + 1, stage + offset + 1);
     });
-  return dense(body.join('\n')) === wanted;
+  return walk(0, 0);
 }
 
 function shows(header: readonly string[], text: string): boolean {
@@ -301,6 +351,12 @@ export function bindQuestionForm(
   question: RenderedQuestion,
   /** The inline free-form row text was pasted into: it draws the typed text, so it is neither an option nor the placeholder. */
   typedRow?: number,
+  /**
+   * The typed answers this drive has evidence the tab holds (it asked for exactly that text, or the review page listed
+   * it): the one row, marked `✔`, that may stand in place of the free-form row. Without any, a row the stored question never
+   * listed is a foreign row, however it is marked.
+   */
+  held: readonly string[] = [],
 ): BoundQuestionForm | undefined {
   const block = lastBlock(screen);
   if (block === undefined || !headerIs(block.header, question)) return undefined;
@@ -321,11 +377,20 @@ export function bindQuestionForm(
       freeForm = { index, entry };
     } else labels.push(row.full);
   }
-  // The one row that is not an option: the free-form row, the row text was pasted into, or the typed answer a revisited tab holds.
-  const held = block.rows.findIndex(
-    (row, index) => row.chosen && labels[index] === row.full && !options.includes(row.full),
-  );
-  const extra = typedRow ?? freeForm?.index ?? (held < 0 ? undefined : held);
+  // The one row that is not an option: the free-form row, the row text was pasted into, or the typed answer a revisited tab
+  // holds — and that last only when the caller named the very text it holds.
+  const heldAt =
+    held.length === 0
+      ? -1
+      : block.rows.findIndex(
+          (row, index) =>
+            row.chosen &&
+            labels[index] === row.full &&
+            !options.includes(row.full) &&
+            held.some(text => holdsText(row.full, text)),
+        );
+  const heldRow = typedRow === undefined && freeForm === undefined && heldAt >= 0 ? heldAt : undefined;
+  const extra = typedRow ?? freeForm?.index ?? heldRow;
   const stored = extra === undefined ? options : options.filter(label => label !== FREE_FORM_LABEL);
   const drawn = extra === undefined ? labels : labels.filter((_, index) => index !== extra);
   if (drawn.length !== stored.length || !drawn.every((label, index) => label === stored[index])) return undefined;
@@ -339,6 +404,7 @@ export function bindQuestionForm(
     ...(freeForm === undefined ? {} : { freeForm }),
     ...(submit === undefined ? {} : { submit }),
     ...(chosen < 0 ? {} : { chosen }),
+    ...(heldRow === undefined ? {} : { heldRow }),
   };
 }
 
@@ -347,10 +413,15 @@ export function bindQuestionForm(
  *
  * When one question's text contains another's, both bind; the longer one is what the header shows.
  */
-export function boundQuestionIndex(screen: QuestionScreen, questions: readonly RenderedQuestion[]): number | undefined {
+export function boundQuestionIndex(
+  screen: QuestionScreen,
+  questions: readonly RenderedQuestion[],
+  /** The typed answers each question's tab is known to hold, by question index ({@link bindQuestionForm}'s `held`). */
+  held: readonly (readonly string[])[] = [],
+): number | undefined {
   let found: number | undefined;
   for (const [index, question] of questions.entries()) {
-    if (bindQuestionForm(screen, question) === undefined) continue;
+    if (bindQuestionForm(screen, question, undefined, held[index]) === undefined) continue;
     if (found === undefined || dense(question.question).length > dense(questions[found]?.question ?? '').length)
       found = index;
   }
@@ -370,10 +441,18 @@ export interface FormSurface {
   readonly freeForm: number | undefined;
   /** Whether a separate Submit row ends the page. */
   readonly submit: boolean;
+  /** The typed answer a held row of this surface was verified against; absent unless the form was bound with one. */
+  readonly held?: string;
 }
 
 export function surfaceOf(form: BoundQuestionForm): FormSurface {
-  return { labels: form.labels, freeForm: form.freeForm?.index, submit: form.submit !== undefined };
+  const held = form.heldRow === undefined ? undefined : form.labels[form.heldRow];
+  return {
+    labels: form.labels,
+    freeForm: form.freeForm?.index,
+    submit: form.submit !== undefined,
+    ...(held === undefined ? {} : { held }),
+  };
 }
 
 /** The text pasted into a form's inline free-form row: that row now draws it instead of its placeholder. */
@@ -391,6 +470,15 @@ function drawsTyped(drawn: string | undefined, text: string): boolean {
 }
 
 /**
+ * Whether a held row is the text the caller has evidence the tab holds: exactly it, or — when that evidence is itself a
+ * review page's listing, which cuts a long answer with an ellipsis — the start it kept.
+ */
+function holdsText(row: string, text: string): boolean {
+  const stem = dense(text);
+  return drawsTyped(row, text) || (stem.length > 1 && stem.endsWith('…') && dense(row).startsWith(stem.slice(0, -1)));
+}
+
+/**
  * Whether the pane still draws exactly the form {@link surfaceOf} described, for this question.
  *
  * Row for row: the same count, the same labels in the same order, the same free-form and Submit rows. After text was
@@ -402,7 +490,7 @@ export function surfaceStillShown(
   surface: FormSurface,
   typed?: TypedRow,
 ): boolean {
-  const form = bindQuestionForm(screen, question, typed?.index);
+  const form = bindQuestionForm(screen, question, typed?.index, surface.held === undefined ? [] : [surface.held]);
   if (form === undefined) return false;
   if (form.labels.length !== surface.labels.length || (form.submit !== undefined) !== surface.submit) return false;
   if (typed === undefined)
@@ -425,15 +513,12 @@ export function surfaceStillShown(
  * `✔`, in place of its `Type something.` row, and that one row is known too.
  */
 export function showsOnlyKnownRows(screen: QuestionScreen, question: RenderedQuestion, held?: string): boolean {
-  const form = bindQuestionForm(screen, question);
+  const form = bindQuestionForm(screen, question, undefined, held === undefined ? [] : [held]);
   if (form === undefined) return false;
   const options = (question.options ?? []).map(option => compact(option.label));
   // The free-form row is named FREE_FORM_LABEL and is the one row that is not an option; a foreign row keeps its own text.
   return form.labels.every(
-    (label, row) =>
-      options.includes(label) ||
-      row === form.freeForm?.index ||
-      (row === form.chosen && held !== undefined && drawsTyped(label, held)),
+    (label, row) => options.includes(label) || row === form.freeForm?.index || row === form.heldRow,
   );
 }
 
@@ -446,10 +531,8 @@ export function showsOnlyKnownRows(screen: QuestionScreen, question: RenderedQue
 export function bindTabStrip(screen: QuestionScreen, questions: readonly RenderedQuestion[]): TabStrip | undefined {
   const block = lastBlock(screen);
   if (block === undefined) return undefined;
-  const strip = block.header.findLast(line => TAB_STRIP.test(line));
-  const tabs = (strip === undefined ? undefined : TAB_STRIP.exec(strip)?.groups?.tabs)?.trim().split(/\s{2,}/u);
-  if (tabs === undefined || tabs.length !== questions.length + 1 || !SUBMIT_TAB.test(tabs.at(-1) ?? ''))
-    return undefined;
+  const tabs = block.header.map(stripTabs).findLast(found => found !== undefined);
+  if (tabs === undefined || tabs.length !== questions.length + 1) return undefined;
   const answered: boolean[] = [];
   for (const [index, question] of questions.entries()) {
     const tab = TAB.exec(tabs[index] ?? '')?.groups;
@@ -563,11 +646,8 @@ const PAGE_ENTRY = /^\s*(?:[❯›>]\s*)?type your (?:own )?answer\b[\s:：]*(?<
  * marker, in full or cut with an ellipsis. A dialog that merely quotes the question is not this page.
  */
 export function freeFormPageShown(screen: QuestionScreen, question: RenderedQuestion, typed?: string): boolean {
-  const content = screen.lines
-    .slice(screen.visibleFrom)
-    .filter(line => line.trim() !== '' && !RULE.test(line))
-    .map(line => line.replace(GUTTER, ''));
-  const entry = content.at(-1);
+  const content = screen.lines.slice(screen.visibleFrom).filter(line => line.trim() !== '' && !RULE.test(line));
+  const entry = content.at(-1)?.replace(GUTTER, '');
   if (entry === undefined || lastBlock(screen) !== undefined) return false;
   const marker = PAGE_ENTRY.exec(entry)?.groups;
   const heading = content.slice(0, -1);
@@ -600,6 +680,31 @@ export function formFrame(screen: QuestionScreen): FormFrame | undefined {
   const index =
     onRows === 1 ? block.rows.findIndex(row => row.cursor) : onSubmit && onRows === 0 ? block.rows.length : -1;
   return { rows: block.rows.length, cursors, cursor: cursors === 1 && index >= 0 ? index : undefined };
+}
+
+/** Key hints only a question form's own footer draws: a pane showing one is a form, whatever its cursor or top looks like. */
+const FORM_FOOTER =
+  /enter to (?:select|submit)|to (?:add|clear) notes|keys to navigate|to navigate questions|esc to cancel/iu;
+
+/**
+ * Whether the visible screen shows ANY numbered question surface: a numbered row that carries the selection marker, or
+ * numbered rows with a form's own key hints below them (a Submit row that holds the selection counts too). Complete or not — a form whose cursor is gone, or whose top (and
+ * so its first rows) has scrolled out of the capture, is still a form that owns the pane, and its footer is not a running turn.
+ */
+export function numberedFormShown(screen: QuestionScreen): boolean {
+  const visible = screen.lines.slice(screen.visibleFrom);
+  let last = -1;
+  let cursor = false;
+  for (const [index, line] of visible.entries()) {
+    const row = numbered(line);
+    if (row.number === 0) continue;
+    last = index;
+    cursor ||= row.cursor;
+  }
+  return (
+    (last >= 0 && (cursor || visible.slice(last + 1).some(line => FORM_FOOTER.test(line)))) ||
+    (formFrame(screen)?.cursors ?? 0) > 0
+  );
 }
 
 /** Whether the live form's own header (not a row, not scrollback above its border) is exactly this question. */

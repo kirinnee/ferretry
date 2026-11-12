@@ -5,6 +5,7 @@ import {
   type BoundQuestionForm,
   formFrame,
   freeFormPageShown,
+  numberedFormShown,
   bindQuestionForm,
   bindReviewPage,
   bindTabStrip,
@@ -227,12 +228,21 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
   ): Promise<Confirmation> {
     const total = pending.questions.length;
     const chosen = pending.questions.map(() => 0);
+    // The typed answer each tab is known to hold: the text this drive asked for, and whatever the review page listed for it.
+    // A `✔` row on a tab is its answer only when it is one of these; any other is a foreign row.
+    const holds = pending.questions.map((_, index) => {
+      const asked = answers[index];
+      return asked?.kind === 'other' ? [asked.text] : [];
+    });
     let state = first;
     let at = 0;
     for (let step = 0; step < total * 6 + 4; step++) {
       if (step > 0) state = await this.livePane(session, 'pane died while driving the question tabs');
       const screen = screenOf(state);
       const review = bindReviewPage(screen, pending.questions);
+      if (review !== undefined)
+        for (const [index, shown] of review.shown.entries())
+          if (shown !== undefined && !holds[index]?.includes(shown)) holds[index] = [shown, ...(holds[index] ?? [])];
       const answered = bindTabStrip(screen, pending.questions)?.answered ?? review?.shown.map(shown => !!shown);
       if (answered === undefined)
         throw atQuestion(
@@ -272,12 +282,12 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
         }
         await this.waitForTab(
           session,
-          pane => boundQuestionIndex(screenOf(pane), pending.questions) === wrong,
+          pane => boundQuestionIndex(screenOf(pane), pending.questions, holds) === wrong,
           atQuestion(pending, wrong, new StructuredQuestionDriveError('← did not bring its tab back')),
         );
         continue;
       }
-      const current = boundQuestionIndex(screen, pending.questions);
+      const current = boundQuestionIndex(screen, pending.questions, holds);
       const question = current === undefined ? undefined : pending.questions[current];
       const answer = current === undefined ? undefined : answers[current];
       if (current === undefined || question === undefined || answer === undefined)
@@ -291,13 +301,13 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
           ),
         );
       at = current;
-      const form = bindQuestionForm(screen, question) as BoundQuestionForm;
+      const form = bindQuestionForm(screen, question, undefined, holds[current]) as BoundQuestionForm;
       const moved = (pane: QuestionPaneState): boolean => {
         const next = screenOf(pane);
         const ticked = bindTabStrip(next, pending.questions)?.answered[current] === true;
         return (
           bindReviewPage(next, pending.questions) !== undefined ||
-          (ticked && boundQuestionIndex(next, pending.questions) !== current)
+          (ticked && boundQuestionIndex(next, pending.questions, holds) !== current)
         );
       };
       if (answered[current] === true && keeps(form, question, answer)) {
@@ -473,7 +483,8 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
       pane: QuestionPaneState,
       allowActiveWork: boolean,
     ): StructuredQuestionCancellation['confirmedBy'] | undefined => {
-      if (visible(pane) || pane.blocking !== undefined) return undefined;
+      // A numbered form on the pane — whole, cursorless or cropped — is a prompt still waiting, never a ready prompt or a turn.
+      if (visible(pane) || pane.blocking !== undefined || numberedFormShown(screenOf(pane))) return undefined;
       if (pane.promptReady) return 'prompt-ready';
       // Active-work text is meaningful only after this method positively bound the form and sent
       // Escape. Before that, the form's own "esc to interrupt" footer describes the blocked tool
@@ -509,7 +520,12 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
         });
       const confirmation = advanced(current, true);
       if (confirmation !== undefined) return { confirmedBy: confirmation, pane: current };
-      if (!visible(current) && current.blocking === undefined && current.visible !== before)
+      if (
+        !visible(current) &&
+        current.blocking === undefined &&
+        !numberedFormShown(screenOf(current)) &&
+        current.visible !== before
+      )
         return { confirmedBy: 'pane-advanced', pane: current };
     }
     throw new StructuredQuestionDriveError('Escape was sent, but the question pane did not visibly advance', 'none', {
@@ -694,9 +710,9 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
       if (reviewing && reviewMayFollow) return 'review';
       if (reviewing) continue;
       const anyQuestion = pending.questions.some(question => bindQuestionForm(screen, question) !== undefined);
-      // A numbered form that still holds the selection (another question, a permission prompt, a dialog — its footer may
-      // say "esc to interrupt") is the pane still BLOCKED, never a running turn or a ready prompt.
-      const blocked = (formFrame(screen)?.cursors ?? 0) > 0;
+      // A numbered form (another question, a permission prompt, a dialog — its footer may say "esc to interrupt") is the
+      // pane still BLOCKED, never a running turn or a ready prompt: whole, with its cursor gone, or cropped at the top.
+      const blocked = numberedFormShown(screen);
       if (blocked && !anyQuestion) other = true;
       if (!anyQuestion && !blocked && state.activeWork) return 'turn-started';
       if (!anyQuestion && !blocked && state.promptReady) return 'prompt-ready';
@@ -705,6 +721,7 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
       if (
         !anyQuestion &&
         state.visible !== before &&
+        !blocked &&
         formFrame(screen) === undefined &&
         (await this.tmux.completed?.(session, pending.toolUseId)) === true
       )

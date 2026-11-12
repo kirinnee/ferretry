@@ -117,10 +117,13 @@ export function refuseInput(
       expect.surface === undefined
         ? showsOnlyKnownRows(screen, question, expect.held)
         : surfaceStillShown(screen, question, expect.surface, expect.typed);
-    // The longer question wins when one question's text contains another's; typed text hides no header.
+    // The longer question wins when one question's text contains another's; typed text hides no header. A held row is
+    // known only by the text the drive verified it against.
+    const held = expect.surface?.held ?? expect.held;
+    const heldAt = questions.map((_, index) => (index === expect.index && held !== undefined ? [held] : []));
     const named =
       expect.typed === undefined
-        ? boundQuestionIndex(screen, questions) === expect.index
+        ? boundQuestionIndex(screen, questions, heldAt) === expect.index
         : formHeaderShows(screen, question);
     if (!shown || !named) return unbound('the form of the pending question');
   }

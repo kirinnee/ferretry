@@ -303,10 +303,47 @@ describe('rendered question form', () => {
       ).be.undefined();
     });
 
-    it('takes the typed answer a revisited tab holds as its one extra row, only when it is marked chosen', () => {
-      should(bind(drawn(['Yes', 'No', 'Ask the on-call first ✔']))?.chosen).equal(2);
-      should(bind(drawn(['Yes', 'No', 'Ask the on-call first']))).be.undefined();
-      should(bind(drawn(['Yes', 'No', 'Ask the on-call first ✔', 'Another ✔']))).be.undefined();
+    it('takes the typed answer a revisited tab holds as its one extra row, only for the text it is known to hold', () => {
+      const held = (visible: string, ...known: string[]) =>
+        bindQuestionForm(questionScreen(visible, visible), deploy, undefined, known);
+      should(held(drawn(['Yes', 'No', 'Ask the on-call first ✔']), 'Ask the on-call first')?.heldRow).equal(2);
+      should(held(drawn(['Yes', 'No', 'Ask the on-call first ✔']), 'Ask the on-call first')?.chosen).equal(2);
+      // Marked chosen is not enough: a row nobody has evidence for is a foreign row, however it is marked.
+      should(bind(drawn(['Yes', 'No', 'Ask the on-call first ✔']))).be.undefined();
+      should(bind(drawn(['Yes', 'No', 'Allow all future operations ✔']))).be.undefined();
+      should(held(drawn(['Yes', 'No', 'Allow all future operations ✔']), 'Ask the on-call first')).be.undefined();
+      should(held(drawn(['Yes', 'No', 'Ask the on-call first']), 'Ask the on-call first')).be.undefined();
+      should(
+        held(drawn(['Yes', 'No', 'Ask the on-call first ✔', 'Another ✔']), 'Ask the on-call first'),
+      ).be.undefined();
+      // A review page cuts a long answer with an ellipsis; what is left is still the start of the row.
+      should(held(drawn(['Yes', 'No', 'Ask the on-call first ✔']), 'Ask the on-…')?.heldRow).equal(2);
+    });
+
+    it('does not record a foreign row on the surface it verifies', () => {
+      const known = bindQuestionForm(
+        questionScreen(
+          drawn(['Yes', 'No', 'Ask the on-call first ✔']),
+          drawn(['Yes', 'No', 'Ask the on-call first ✔']),
+        ),
+        deploy,
+        undefined,
+        ['Ask the on-call first'],
+      ) as NonNullable<ReturnType<typeof bind>>;
+      const surface = surfaceOf(known);
+      should(surface.held).equal('Ask the on-call first');
+      const same = questionScreen(
+        drawn(['Yes', 'No', 'Ask the on-call first ✔']),
+        drawn(['Yes', 'No', 'Ask the on-call first ✔']),
+      );
+      should(surfaceStillShown(same, deploy, surface)).be.true();
+      const foreign = questionScreen(
+        drawn(['Yes', 'No', 'Allow all future operations ✔']),
+        drawn(['Yes', 'No', 'Allow all future operations ✔']),
+      );
+      should(surfaceStillShown(foreign, deploy, surface)).be.false();
+      const plain = bind(drawn(['Yes', 'No', 'Type something.'])) as NonNullable<ReturnType<typeof bind>>;
+      should(surfaceOf(plain).held).be.undefined();
     });
 
     it('lets a tab holding the typed answer be passed only for exactly that answer', () => {
@@ -406,12 +443,16 @@ describe('rendered question form', () => {
         freeForm: { index: 3, entry: 'inline' },
         chosen: 0,
       });
-      // Typed text replaces the free-form row, so there is no empty row left to type into.
-      should(bindQuestionForm(pane('typed-revisited'), socials)).deepEqual({
+      // Typed text replaces the free-form row, so there is no empty row left to type into — and it binds only as the
+      // text the tab is known to hold.
+      should(bindQuestionForm(pane('typed-revisited'), socials)).be.undefined();
+      should(bindQuestionForm(pane('typed-revisited'), socials, undefined, ['Something else'])).be.undefined();
+      should(bindQuestionForm(pane('typed-revisited'), socials, undefined, ['WFH, decide later'])).deepEqual({
         labels: ['Decline all 3', 'Accept all 3', 'Lunch only', 'WFH, decide later'],
         checked: [false, false, false, false],
         cursor: 0,
         chosen: 3,
+        heldRow: 3,
       });
     });
 

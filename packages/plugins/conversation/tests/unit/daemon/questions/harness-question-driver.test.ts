@@ -679,7 +679,9 @@ describe('a tabbed four-question form (Claude Code 2.1.281)', () => {
     should(pane.pasted).deepEqual(['Only if it is on Zoom']);
   });
 
-  it('pauses, sending nothing, when a tab already holds different typed text', async () => {
+  it('pauses, sending nothing, when a tab holds typed text this drive has no evidence for', async () => {
+    // The text on the tab is neither what was asked for nor what any review page listed: it is a foreign row, however it
+    // is marked, so the tab is not bound and no key reaches it.
     const pane = new ScriptedPane([recorded('typed-revisited')]);
     const { drive } = journalled(pane);
 
@@ -688,12 +690,20 @@ describe('a tabbed four-question form (Claude Code 2.1.281)', () => {
     );
 
     should(pane.keys).deepEqual([]);
-    should(paused.message).match(
-      /^stopped at question 1 of 4 \(Socials\): it already holds the typed answer «WFH, decide later»/u,
-    );
-    should(paused.progress).deepEqual({ stoppedAt: 0, answered: [true, false, false, false] });
+    should(pane.pasted).deepEqual([]);
+    should(paused.message).match(/the tab on screen is not one of the pending questions; no keys were sent to it/u);
     should(paused.acceptance).equal('none');
-    should(paused.diagnostics).match({ formOpen: true, reason: 'typed-answer-held' });
+    should(paused.diagnostics).match({ formOpen: true, reason: 'question-unbound' });
+  });
+
+  it('refuses a typed row on a tab when the answer asked for is an option', async () => {
+    const pane = new ScriptedPane([recorded('typed-revisited')]);
+    const { drive } = journalled(pane);
+
+    const paused = await pausedBy(drive.drive(ID, pending, pick('Accept all 3', 'Accept', 'Accept', 'Maybe')));
+
+    should(pane.keys).deepEqual([]);
+    should(paused.diagnostics).match({ reason: 'question-unbound' });
   });
 
   it('passes over a tab already holding the same typed text', async () => {
@@ -1090,6 +1100,66 @@ describe('a form whose cursor cannot be read is never typed into, the release Es
       const failure = await failureOf(driver(pane).cancel(ID, single));
 
       should(failure.diagnostics).match({ phase: 'cancel-preflight', reason: 'cursor-missing' });
+      should(pane.keys).deepEqual([]);
+    }
+  });
+});
+
+describe('no numbered surface is a success, whole, cursorless or cropped (rv5)', () => {
+  const FOOTER = '  tab to add notes | enter to submit answer | esc to interrupt';
+  const other = (cursor: boolean) =>
+    [
+      '  Question 1/1 (1 unanswered)',
+      '  An unrelated question still needs an answer?',
+      '',
+      `  ${cursor ? '›' : ' '} 1. Alpha                 first`,
+      '    2. Beta                  second',
+      '    3. Gamma                 third',
+      '',
+      FOOTER,
+    ].join('\n');
+  /** The same form scrolled until its first row is above the capture: row 2 is the first one shown. */
+  const cropped = other(false).split('\n').slice(4).join('\n').replace('    2.', '  › 2.');
+
+  it('does not call a cursorless or cropped numbered form a ready prompt or a running turn', async () => {
+    for (const [shown, extra] of [
+      [other(false), { promptReady: true }],
+      [other(false), {}],
+      [cropped, { promptReady: true }],
+      [cropped, {}],
+    ] as const) {
+      const pane = new ScriptedPane([frame(DEPLOY), frame(shown, extra)]);
+
+      const failure = await failureOf(driver(pane).drive(ID, single, yes));
+
+      should(failure.message).match(/different question or prompt that is still waiting/u);
+      should(pane.keys).deepEqual(['Enter']);
+    }
+  });
+
+  it('does not take a changed pane with a numbered form on it as the question ending', async () => {
+    const pane = new ScriptedPane([frame(DEPLOY), frame(cropped)]);
+    pane.completed = async () => true;
+
+    await failureOf(driver(pane).drive(ID, single, yes));
+  });
+
+  it('still counts a working turn or a ready prompt whose transcript merely lists things', async () => {
+    const listing =
+      'I made three changes:\n\n    1. the parser\n    2. the driver\n    3. the tests\n\n✻ Working… (esc to interrupt)';
+    const working = await driver(new ScriptedPane([frame(DEPLOY), frame(listing)])).drive(ID, single, yes);
+    should(working).deepEqual({ confirmedBy: 'turn-started' });
+    const ready = await driver(
+      new ScriptedPane([frame(DEPLOY), frame('    1. the parser\n    2. the driver\n\n> ', { promptReady: true })]),
+    ).drive(ID, single, yes);
+    should(ready).deepEqual({ confirmedBy: 'prompt-ready' });
+  });
+
+  it('does not release a failed answer as already advanced while a numbered form is on the pane', async () => {
+    for (const shown of [other(false), cropped]) {
+      const pane = new ScriptedPane([frame(shown, { promptReady: true })]);
+
+      await should(driver(pane).cancel(ID, single)).be.rejectedWith(/positively bound/u);
       should(pane.keys).deepEqual([]);
     }
   });

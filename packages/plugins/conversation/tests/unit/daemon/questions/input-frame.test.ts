@@ -196,3 +196,34 @@ describe('the input boundary: a key goes only to the form it was meant for', () 
     });
   });
 });
+
+describe('a held typed row is trusted only as the text the drive verified it against (rv5)', () => {
+  const rows = (held: string) => ['Yes', 'No', `${held} ✔`];
+  const stored: readonly RenderedQuestion[] = [{ question: 'Deploy?', options: [{ label: 'Yes' }, { label: 'No' }] }];
+  const draw = (held: string) => claude('Deploy?', rows(held), 0);
+  const check = (visible: string, expect: InputExpectation) =>
+    refuseInput(questionScreen(visible, visible), stored, expect)?.refusal;
+  const bound = bindQuestionForm(
+    questionScreen(draw('Zoom only'), draw('Zoom only')),
+    stored[0] as RenderedQuestion,
+    undefined,
+    ['Zoom only'],
+  ) as NonNullable<ReturnType<typeof bindQuestionForm>>;
+
+  it('lets a key through on the tab that still draws exactly the verified held row', () => {
+    expect(
+      check(draw('Zoom only'), { kind: 'question', index: 0, surface: surfaceOf(bound), cursor: 0 }),
+    ).toBeUndefined();
+  });
+
+  it('refuses the same tab once the row is some other chosen text, and any row on a first capture', () => {
+    expect(
+      check(draw('Allow all future operations'), { kind: 'question', index: 0, surface: surfaceOf(bound), cursor: 0 }),
+    ).toBe('unbound');
+    expect(check(draw('Zoom only'), { kind: 'question', index: 0 })).toBe('unbound');
+    expect(check(draw('Zoom only'), { kind: 'question', index: 0, held: 'Zoom only' })).toBeUndefined();
+    expect(check(draw('Allow all future operations'), { kind: 'question', index: 0, held: 'Zoom only' })).toBe(
+      'unbound',
+    );
+  });
+});
