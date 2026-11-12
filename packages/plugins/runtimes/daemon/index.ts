@@ -448,7 +448,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           }),
           // A start that names a runtime spends that runtime's login: its harness and login, or why it cannot start now.
           'runtime.start:runtimes': {
-            resolve: runtimeStartAnswer({ resolve: async id => await api.resolve(id) }),
+            ...runtimeStartAnswer({ resolve: async id => await api.resolve(id), logins: ctx.needs.logins }),
           },
           // A start's own compaction trigger is judged against its model's window, and the facts launch.parts uses are read
           // here; with no facts to read, a Claude start of a runtime is refused.

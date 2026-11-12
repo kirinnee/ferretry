@@ -212,6 +212,7 @@ export const fakeLaunchRoots = (source: LaunchRootsSource) =>
 /** What a fake Runtimes answers on `runtime.start`: any runtime resolves to Claude Code and the login `fake-login`. */
 const FAKE_RUNTIME_LOGIN = 'fake-login';
 export const fakeRuntimeStartAnswer: RuntimeStartSource = {
+  login: async () => ({ ok: true }),
   resolve: async () => ({ ok: true, harness: 'claude-code', login: FAKE_RUNTIME_LOGIN }),
 };
 

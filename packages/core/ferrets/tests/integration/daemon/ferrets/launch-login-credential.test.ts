@@ -9,6 +9,7 @@ import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { Harnesses, Logins, type LoginCredentialAnswer, type LoginKind, Runners } from '../../../../contract/index.ts';
 import { FakeHarness, FakeLoginKind, FakeRunner } from '../../../../contract/testing/index.ts';
 import ferrets from '../../../../daemon/index.ts';
+import { runtimesPlugin } from './runtimes-plugin.ts';
 
 /**
  * The daemon half of Ferrets, booted whole, binds `FerretsPorts.loginCredential` to the `logins:<kind>` provider that
@@ -104,7 +105,13 @@ async function boot() {
   });
   const endpoint = new PlainKind('endpoint', ['gw']);
   const host: TestHost = await testHost({
-    plugins: [ferrets, harnessPlugin(harness), runnerPlugin(new FakeRunner()), loginsPlugin(openai, endpoint)],
+    plugins: [
+      ferrets,
+      harnessPlugin(harness),
+      runnerPlugin(new FakeRunner()),
+      loginsPlugin(openai, endpoint),
+      runtimesPlugin(),
+    ],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
     everyDirectory: true,

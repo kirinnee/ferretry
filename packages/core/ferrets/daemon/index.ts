@@ -474,6 +474,16 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
           }
         : await found.resolve(runtime);
     },
+    // Whether a login named with no runtime may be spent: Runtimes alone answers, the same check a runtime's login passes.
+    loginStart: async login => {
+      const found = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
+      return found === 'unavailable'
+        ? {
+            ok: false,
+            sentence: `login ${login} cannot be started: the Runtimes plugin is not running, so it cannot be checked`,
+          }
+        : await found.login(login);
+    },
     launchParts: () => hooks.contributions(LaunchParts).map(contribution => contribution.item),
     // The kind that HOLDS the login answers (`LoginKind.holds`): no kind trial, no caught throw. Each failure is a
     // fixed sentence; a Logins error is never quoted, because it can sit beside a credential.

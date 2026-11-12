@@ -10,7 +10,11 @@ import { FAKE_REPLY, startFakeProvider, type FakeProvider } from './fake-provide
 import { writeStubBinaries } from './stub-binaries.ts';
 import { allowedCallHeaders } from '@ferretry/kernel/manifest';
 import type { FerretsClient } from '../../../../app/lib/client.ts';
-import { emptyNewFerretDraft, startFerret } from '../../../../app/features/new-ferret/new-ferret-draft.ts';
+import {
+  emptyNewFerretDraft,
+  startAttemptFor,
+  startFerret,
+} from '../../../../app/features/new-ferret/new-ferret-draft.ts';
 
 /**
  * THE MERGE-BAR LINE: A FERRET AUTHENTICATES END TO END (docs/rebuild/merge-bar.md, before-merge line 7).
@@ -591,6 +595,174 @@ describe('a start by runtime reaches the provider signed in (merge bar 9)', () =
     await expectSignedInOn(daemon, provider, id);
   });
 
+  /** The world above plus a second fake OAuth login `off` the owner switched off (valid sign-in material), and `rt-off` over it. */
+  const withSwitchedOffLogin = (home: string): Record<string, string> => {
+    const files = oauthWorld(home);
+    return {
+      ...files,
+      [join(home, 'config/logins/off.yaml')]: `${claudeLogin('ferretry')}disabled: {reason: owner-off}\n`,
+      [join(home, 'state/logins/credentials/off/.credentials.json')]: files[
+        join(home, 'state/logins/credentials/oauth/.credentials.json')
+      ] as string,
+      [join(home, 'config/runtimes/rt-off.yaml')]: 'login: off\nprofile: plain\nagent: true\n',
+    };
+  };
+
+  /** A stopped ferret as the v4 -> v5 converter writes it: a runtime, a harness, and NO login. */
+  const convertedRecord = (home: string): Record<string, string> => ({
+    ...oauthWorld(home),
+    [join(home, 'state/ferrets/tokens.json')]: JSON.stringify({ format: 1, tokens: [] }),
+    [join(home, 'state/ferrets/converted/ferret.json')]: JSON.stringify({
+      format: 1,
+      id: 'converted',
+      name: 'cedar',
+      role: 'lead',
+      birth: 'person',
+      harness: 'claude-code',
+      runner: 'tmux',
+      runtime: 'rt',
+      mode: 'interactive',
+      folder: join(home, '..', 'work'),
+      state: 'stopped',
+      createdAt: '2026-11-01T00:00:00Z',
+      stateAt: '2026-11-01T00:00:00Z',
+    }),
+  });
+
+  test('a converted ferret (a runtime, no login) RESUMES signed in on its runtime’s login: resume resolves the runtime like a start', async () => {
+    const provider = startFakeProvider(FAKE_TOKEN, { strict: true });
+    cleanups.push(() => provider.stop());
+    const daemon = await boot(provider, convertedRecord);
+
+    const resumed = await daemon.call('POST', '/v1/ferrets/converted/resume', { message: 'say hello' });
+
+    expect(resumed.status, resumed.text).toBeLessThan(300);
+    // The daemon cannot read a converted ferret's transcript back, so the proof is the launch's own facts and the strict
+    // provider seeing the signed-in credential on the request the resumed ferret made.
+    const launched = await launchedClaude(daemon);
+    expect(launched?.auth).toBe('oauth-file');
+    expect(launched?.envNames).toContain('CLAUDE_SECURESTORAGE_CONFIG_DIR');
+    expect(String(launched?.storeDir)).toMatch(/\/credentials\/oauth$/u);
+    const until = Date.now() + SEE_MS;
+    while (Date.now() < until && provider.seen.length === 0) await Bun.sleep(250);
+    expect(provider.seen.map(r => [r.path, r.authHeaders, r.tokenMatches])).toEqual([
+      ['/v1/messages', ['authorization'], true],
+    ]);
+  });
+
+  test('a converted ferret whose runtime cannot serve (its login needs sign-in) is NOT resumed signed out', async () => {
+    const provider = startFakeProvider(FAKE_TOKEN, { strict: true });
+    cleanups.push(() => provider.stop());
+    const daemon = await boot(provider, home => {
+      const files = convertedRecord(home);
+      const path = join(home, 'state/ferrets/converted/ferret.json');
+      return { ...files, [path]: (files[path] as string).replace('"runtime":"rt"', '"runtime":"rt-signedout"') };
+    });
+
+    const resumed = await daemon.call('POST', '/v1/ferrets/converted/resume', {});
+
+    expect(resumed.status).toBeGreaterThanOrEqual(400);
+    expect(resumed.text).toContain('rt-signedout');
+    expect(daemon.launches().filter(record => record.binary === 'claude')).toEqual([]);
+  });
+
+  test('a runtime is its own account: another login named beside it is refused, its own login starts', async () => {
+    const provider = startFakeProvider(FAKE_TOKEN, { strict: true });
+    cleanups.push(() => provider.stop());
+    const daemon = await boot(provider, withSwitchedOffLogin);
+    const start = async (body: Record<string, unknown>) =>
+      await daemon.call(
+        'POST',
+        '/v1/ferrets',
+        { folder: daemon.folder, mode: 'interactive', prompt: 'say hello', ...body },
+        { 'x-fy-request-id': crypto.randomUUID() },
+      );
+
+    const refused = await start({ runtime: 'rt', login: 'off' });
+
+    expect(refused.status).toBeGreaterThanOrEqual(400);
+    expect(refused.text).toContain('signs in with its own login, not off');
+    expect(daemon.launches().filter(record => record.binary === 'claude')).toEqual([]);
+    expect(JSON.parse((await daemon.call('GET', '/v1/ferrets')).text)).toEqual([]);
+
+    const started = await start({ runtime: 'rt', login: 'oauth' });
+    expect(started.status, started.text).toBeLessThan(300);
+    await expectSignedInOn(daemon, provider, (JSON.parse(started.text) as { id: string }).id);
+  });
+
+  test('a login the owner switched off is refused when named directly or through its runtime: nothing is spent', async () => {
+    const provider = startFakeProvider(FAKE_TOKEN, { strict: true });
+    cleanups.push(() => provider.stop());
+    const daemon = await boot(provider, withSwitchedOffLogin);
+
+    const direct = await fy(daemon, [
+      'start',
+      '--harness',
+      'claude-code',
+      '--login',
+      'off',
+      '--mode',
+      'interactive',
+      '--cwd',
+      daemon.folder,
+      'say hello',
+    ]);
+    const viaRuntime = await fy(daemon, [
+      'new',
+      '--runtime',
+      'rt-off',
+      '--mode',
+      'interactive',
+      '--cwd',
+      daemon.folder,
+      'say hello',
+    ]);
+
+    expect(direct.code).not.toBe(0);
+    expect(`${direct.out}\n${direct.err}`).toContain('login off is switched off (owner-off)');
+    expect(viaRuntime.code).not.toBe(0);
+    expect(`${viaRuntime.out}\n${viaRuntime.err}`).toContain('switched off');
+    expect(JSON.parse((await daemon.call('GET', '/v1/ferrets')).text)).toEqual([]);
+    expect(daemon.launches().filter(record => record.binary === 'claude')).toEqual([]);
+    expect(provider.seen).toEqual([]);
+  });
+
+  test("the app's new-ferret start whose reply was lost, then submitted again as the page does, starts ONE ferret", async () => {
+    const { provider, daemon } = await bootStrict();
+    const real = loopbackClient(daemon);
+    const lose = async (route: string, init?: Parameters<FerretsClient['call']>[1]) => {
+      await real.call(route, init);
+      throw new TypeError('fetch failed');
+    };
+    const draft = {
+      ...emptyNewFerretDraft,
+      runtime: 'rt',
+      folder: daemon.folder,
+      mode: 'interactive' as const,
+      prompt: 'say hello',
+    };
+    // The first attempt: BOTH sends reach the daemon but their answers are lost, and so is the recovery read.
+    let losing = 3;
+    const flaky: FerretsClient = {
+      call: (async (route: string, init?: Parameters<FerretsClient['call']>[1]) => {
+        if (losing > 0) {
+          losing -= 1;
+          return await lose(route, init);
+        }
+        return await real.call(route, init);
+      }) as FerretsClient['call'],
+    };
+    const attempt = startAttemptFor(draft);
+
+    await expect(startFerret(flaky, draft, attempt)).rejects.toThrow('fetch failed');
+    // The page keeps the attempt; the person presses Create again with the draft unchanged.
+    const id = await startFerret(flaky, draft, startAttemptFor(draft, attempt));
+
+    const listing = JSON.parse((await daemon.call('GET', '/v1/ferrets')).text) as { id: string }[];
+    expect(listing.map(ferret => ferret.id)).toEqual([id]);
+    await expectSignedInOn(daemon, provider, id);
+  });
+
   test('a runtime that does not exist, or whose login needs sign-in, is refused with a sentence naming it: no ferret, no signed-out launch', async () => {
     const { daemon } = await bootStrict();
     for (const runtime of ['no-such-runtime', 'rt-signedout']) {
@@ -644,7 +816,11 @@ function loopbackClient(daemon: Daemon): FerretsClient {
         ...(init?.body === undefined ? {} : { body: JSON.stringify(init.body) }),
       });
       const text = await response.text();
-      if (!response.ok) throw new Error(`${route} answered ${String(response.status)}: ${text}`);
+      // An answered refusal carries its status, as the shell's `DaemonCallError` does: it is not a lost answer.
+      if (!response.ok)
+        throw Object.assign(new Error(`${route} answered ${String(response.status)}: ${text}`), {
+          status: response.status,
+        });
       return JSON.parse(text) as Answer;
     },
   };
