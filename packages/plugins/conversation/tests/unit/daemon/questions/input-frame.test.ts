@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { type InputExpectation, refuseInput } from '../../../../daemon/questions/lib/input-frame.ts';
-import { questionScreen, type RenderedQuestion } from '../../../../daemon/questions/lib/rendered-form.ts';
+import {
+  bindQuestionForm,
+  questionScreen,
+  type RenderedQuestion,
+  surfaceOf,
+} from '../../../../daemon/questions/lib/rendered-form.ts';
 
 const RULE = '─'.repeat(40);
 
@@ -24,10 +29,30 @@ const questions: readonly RenderedQuestion[] = [
   { question: 'Deploy?', options: [{ label: 'Yes' }, { label: 'No' }, { label: 'Other' }] },
 ];
 
-const refusal = (visible: string, expect: InputExpectation) =>
-  refuseInput(questionScreen(visible, visible), questions, expect)?.refusal;
+const refusal = (visible: string, expect: InputExpectation, blocking?: 'permission' | 'dialog') =>
+  refuseInput(questionScreen(visible, visible), questions, expect, blocking)?.refusal;
 
-const form: InputExpectation = { kind: 'question', index: 0, rows: 3, cursor: 0 };
+/** The surface the drive verified: the form as it is first drawn. */
+const verified = surfaceOf(
+  bindQuestionForm(
+    questionScreen(claude('Deploy?', ['Yes', 'No', 'Other'], 0), claude('Deploy?', ['Yes', 'No', 'Other'], 0)),
+    questions[0] as RenderedQuestion,
+  ) as NonNullable<ReturnType<typeof bindQuestionForm>>,
+);
+const form: InputExpectation = { kind: 'question', index: 0, surface: verified, cursor: 0 };
+
+/** A permission prompt that quotes the question and offers its options among others, as a real one can. */
+const QUOTING = [
+  RULE,
+  'Bash command',
+  '',
+  '  printf Deploy?',
+  '',
+  'Do you want to proceed?',
+  '  1. Yes',
+  '❯ 2. Yes, and do not ask again',
+  '  3. No',
+].join('\n');
 
 describe('the input boundary: a key goes only to the form it was meant for', () => {
   it('lets a key through on the exact question form with its one cursor where the drive expects it', () => {
@@ -40,7 +65,39 @@ describe('the input boundary: a key goes only to the form it was meant for', () 
     expect(refusal(PERMISSION, { ...form, cursor: undefined })).toBe('unbound');
     expect(refusal(PERMISSION, { kind: 'cancel' })).toBe('unbound');
     expect(refusal(PERMISSION, { kind: 'review' })).toBe('unbound');
-    expect(refusal(PERMISSION, { kind: 'question', index: 0, typed: true, rows: 3 })).toBe('unbound');
+    expect(refusal(PERMISSION, { kind: 'question', index: 0, surface: verified, typed: { index: 2, text: 'x' } })).toBe(
+      'unbound',
+    );
+  });
+
+  it('never takes a pane the harness recognises as a permission prompt or dialog for the question form', () => {
+    const shown = claude('Deploy?', ['Yes', 'No', 'Other'], 0);
+    expect(refusal(shown, form, 'permission')).toBe('unbound');
+    expect(refusal(shown, form, 'dialog')).toBe('unbound');
+    expect(refusal(shown, { kind: 'cancel' }, 'permission')).toBe('unbound');
+    expect(refuseInput(questionScreen(shown, shown), questions, form, 'permission')?.message).toMatch(
+      /permission prompt, not the question/u,
+    );
+  });
+
+  it('binds the COMPLETE surface: a prompt quoting the question with the same options among others is not the form', () => {
+    expect(refusal(QUOTING, form)).toBe('unbound');
+    expect(refusal(QUOTING, { ...form, cursor: 1 })).toBe('unbound');
+    // Not for a key that moves between tabs, nor for the release Escape that follows nothing typed.
+    expect(refusal(QUOTING, { kind: 'question', index: 0 })).toBe('unbound');
+    expect(refusal(QUOTING, { kind: 'cancel' })).toBe('unbound');
+  });
+
+  it('refuses a form whose rows are the same options in another order or count', () => {
+    expect(refusal(claude('Deploy?', ['No', 'Yes', 'Other'], 0), form)).toBe('unbound');
+    expect(refusal(claude('Deploy?', ['Yes', 'No', 'Other', 'Maybe'], 0), form)).toBe('unbound');
+    expect(refusal(claude('Deploy?', ['Yes', 'No'], 0), form)).toBe('unbound');
+  });
+
+  it('lets a tab not yet seen be typed into only while it offers nothing but the question’s own rows', () => {
+    const open: InputExpectation = { kind: 'question', index: 0 };
+    expect(refusal(claude('Deploy?', ['Yes', 'No', 'Other'], 0), open)).toBeUndefined();
+    expect(refusal(claude('Deploy?', ['Yes', 'No', 'Yes, and do not ask again'], 0), open)).toBe('unbound');
   });
 
   it('refuses another question’s form, and a pane that shows no form at all', () => {
@@ -64,18 +121,47 @@ describe('the input boundary: a key goes only to the form it was meant for', () 
   });
 
   describe('once text is typed into the free-form row', () => {
-    const typed: InputExpectation = { kind: 'question', index: 0, rows: 3, cursor: 2, typed: true };
+    const typed: InputExpectation = {
+      kind: 'question',
+      index: 0,
+      surface: verified,
+      cursor: 2,
+      typed: { index: 2, text: 'Ask the on-call first' },
+    };
 
-    it('binds by the header and the row count, because that row now holds the typed text', () => {
+    it('binds the typed row to the typed text, because that row now draws it', () => {
       const shown = claude('Deploy?', ['Yes', 'No', 'Ask the on-call first'], 2);
-      expect(refusal(shown, { kind: 'question', index: 0, rows: 3, cursor: 2 })).toBe('unbound');
+      expect(refusal(shown, { kind: 'question', index: 0, surface: verified, cursor: 2 })).toBe('unbound');
       expect(refusal(shown, typed)).toBeUndefined();
     });
 
-    it('still refuses a permission prompt, a different row count and an unreadable cursor', () => {
+    it('accepts a long typed answer the pane cut with an ellipsis, and refuses a different one', () => {
+      expect(refusal(claude('Deploy?', ['Yes', 'No', 'Ask the on-…'], 2), typed)).toBeUndefined();
+      expect(refusal(claude('Deploy?', ['Yes', 'No', 'Something else'], 2), typed)).toBe('unbound');
+    });
+
+    it('still refuses a permission prompt, a different row count, a changed other row and an unreadable cursor', () => {
       expect(refusal(PERMISSION, typed)).toBe('unbound');
+      expect(refusal(QUOTING, typed)).toBe('unbound');
       expect(refusal(claude('Deploy?', ['Yes', 'No'], 1), typed)).toBe('unbound');
+      expect(refusal(claude('Deploy?', ['Yes', 'Maybe', 'Ask the on-call first'], 2), typed)).toBe('unbound');
       expect(refusal(claude('Deploy?', ['Yes', 'No', 'Ask the on-call first'], []), typed)).toBe('cursor-missing');
+    });
+  });
+
+  describe('the release Escape follows what the drive last typed into', () => {
+    const typedLast: Extract<InputExpectation, { kind: 'question' }> = {
+      kind: 'question',
+      index: 0,
+      surface: verified,
+      cursor: 2,
+      typed: { index: 2, text: 'Ask the on-call first' },
+    };
+
+    it('is allowed on that surface and refused on anything else, a quoting prompt included', () => {
+      const shown = claude('Deploy?', ['Yes', 'No', 'Ask the on-call first'], 2);
+      expect(refusal(shown, { kind: 'cancel', last: typedLast })).toBeUndefined();
+      expect(refusal(QUOTING, { kind: 'cancel', last: typedLast })).toBe('unbound');
     });
   });
 

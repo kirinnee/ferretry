@@ -6,6 +6,12 @@ import type { FerretHarness, FerretId, FormKey, RunnerFormCapture } from '@ferre
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import type { Instant } from '@ferretry/std';
 import { ok } from '@ferretry/std';
+import { DaemonCallError } from '@ferretry/app';
+import { render, run, runUntil } from '@ferretry/app/testing';
+import { createElement } from 'react';
+import { QuestionForm } from '../../../app/questions/question-form.tsx';
+import { QuestionDraftStore } from '../../../app/questions/question-form-model.ts';
+import { FORM_UNREADABLE } from '../../../daemon/questions/lib/answer-wording.ts';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import {
   ANSWERS_STATE,
@@ -88,6 +94,10 @@ class FormFerrets extends FakeFerrets {
    */
   replay: readonly { readonly visible: string; readonly history: string }[] | undefined;
   private page = 0;
+  /** A replayed pane that draws no selected-row marker at all, as a form whose selection cannot be read. */
+  hideCursor = false;
+  /** Text pasted on the current page: the inline row draws it where the recording shows its placeholder. */
+  private typed: string | undefined;
 
   private frame(): RunnerFormCapture {
     if (this.replay !== undefined) {
@@ -99,12 +109,23 @@ class FormFerrets extends FakeFerrets {
         dead: false,
         promptReady: false,
         activeWork,
-        visible: cursorAt(shown.visible, this.cursor),
-        history: cursorAt(shown.history, this.cursor),
+        visible: this.drawn(this.marked(shown.visible)),
+        history: this.drawn(this.marked(shown.history)),
       };
     }
     const visible = this.answered ? '> ' : claude(this.asks, this.rows, this.cursor);
     return { alive: true, dead: false, promptReady: this.answered, activeWork: false, visible, history: visible };
+  }
+
+  private marked(text: string): string {
+    return this.hideCursor ? text.replace(/^❯( +\d+\. )/gmu, ' $1') : cursorAt(text, this.cursor);
+  }
+
+  private drawn(text: string): string {
+    const typed = this.typed;
+    if (typed === undefined) return text;
+    const at = text.lastIndexOf('Type something.');
+    return at < 0 ? text : `${text.slice(0, at)}${typed}${text.slice(at + 'Type something.'.length)}`;
   }
 
   async harness(ferret: FerretId): Promise<FerretHarness | undefined> {
@@ -120,11 +141,15 @@ class FormFerrets extends FakeFerrets {
             this.answered = true;
             this.page += 1;
             this.cursor = 0;
+            this.typed = undefined;
           }
           return ok(undefined);
         },
         paste: async (text: string) => {
           this.pasted.push(text);
+          // The inline free-form row is itself the text field: it draws what was pasted into it.
+          if (this.replay === undefined) this.rows[this.cursor] = text;
+          else this.typed = text;
           return ok(undefined);
         },
       },
@@ -570,6 +595,79 @@ describe('a tabbed form of several questions', () => {
       ok: true,
       value: { toolUseId: pending.toolUseId },
     });
+    await w.host.stop();
+  });
+
+  test('an unreadable tabbed form is refused as unreadable, not paused, and the app tells the person to answer at the terminal', async () => {
+    // The recording with its native selected-row marker removed: the cursor cannot be read, so nothing may be typed.
+    const w = await world(f => {
+      f.replay = recorded('fresh');
+      f.hideCursor = true;
+    });
+    await writeAskedQuestion(w.state, new KeyedSerialExecutor(), 'f1', hookPayload, ASKED_AT, question.transcript);
+    const body = {
+      toolUseId: pending.toolUseId,
+      labels: [],
+      answers: [
+        { kind: 'selection', labels: ['Lunch only'] },
+        { kind: 'selection', labels: ['Decline'] },
+        { kind: 'other', text: 'Only if it is on Zoom' },
+        { kind: 'selection', labels: ['Maybe'] },
+      ],
+    };
+
+    // The daemon's own refusal, as the shell's client turns it into the error the form receives.
+    const daemonCall = async (): Promise<never> => {
+      const response = await w.answer(body, 'req-tabbed');
+      const reply = response.json<Record<string, unknown>>();
+      throw new DaemonCallError(response.status, String(reply.code), String(reply.error), reply);
+    };
+    const response = await w.answer(body, 'req-tabbed-direct');
+    expect(response.status).toBe(409);
+    const reply = response.json<{
+      code: string;
+      error: string;
+      detail: string;
+      stoppedAt: number;
+      answered: boolean[];
+    }>();
+    expect(reply.code).toBe('answer_form_unreadable');
+    expect(reply.error).toBe(FORM_UNREADABLE);
+    expect(reply.detail).toMatch(/cursor is not visible/u);
+    // The partial progress rides along; the question stays pending and nothing was typed, not even an Escape.
+    expect(reply.stoppedAt).toBe(0);
+    expect(reply.answered).toEqual([false, false, false, false]);
+    expect(w.ferrets.keys).toEqual([]);
+    expect(w.ferrets.pasted).toEqual([]);
+    expect(await w.state.read(QUESTION_STATE, 'f1')).toMatchObject({
+      ok: true,
+      value: { toolUseId: pending.toolUseId },
+    });
+
+    // And the app, given that very refusal, says so in words and offers the Console, not Resume.
+    const opened: string[] = [];
+    const form = render(
+      createElement(QuestionForm, {
+        api: { answer: daemonCall },
+        daemon: 'daemon-a',
+        drafts: new QuestionDraftStore(),
+        ferretId: 'f1',
+        onOpenConsole: () => opened.push('console'),
+        question: { toolUseId: 'stuck', questions: [{ question: 'Proceed?', options: [{ label: 'Yes' }] }] },
+      }),
+    );
+    run(() => form.root.findAllByType('input')[0]?.props.onChange());
+    await runUntil(
+      () => form.root.findByProps({ className: 'fy-question-submit' }).props.onClick(),
+      () => form.root.findAllByProps({ role: 'alert' }).length > 0,
+      'the refusal to be shown',
+    );
+    expect(form.root.findByProps({ role: 'alert' }).children.join('')).toBe(FORM_UNREADABLE);
+    expect(form.root.findAllByProps({ className: 'fy-question-console' })).toHaveLength(1);
+    expect(form.root.findAllByProps({ className: 'fy-question-resume' })).toHaveLength(0);
+    run(() => form.root.findByProps({ className: 'fy-question-console' }).props.onClick());
+    expect(opened).toEqual(['console']);
+    expect(w.ferrets.keys).toEqual([]);
     await w.host.stop();
   });
 

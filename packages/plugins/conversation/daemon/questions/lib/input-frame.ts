@@ -1,12 +1,15 @@
 import {
-  bindQuestionForm,
   bindReviewPage,
   boundQuestionIndex,
+  type FormSurface,
   formFrame,
   formHeaderShows,
   type QuestionScreen,
   type RenderedQuestion,
   screenShowsQuestion,
+  showsOnlyKnownRows,
+  surfaceStillShown,
+  type TypedRow,
 } from './rendered-form.ts';
 
 /**
@@ -18,6 +21,12 @@ import {
  * and where it expects the cursor, and this file decides — from a FRESH read of the pane taken immediately before the
  * input — whether the pane still shows exactly that. If it does not, nothing is typed.
  *
+ * FIRST WHAT KIND OF SURFACE IT IS, THEN WHICH FORM. A pane the harness's own recognisers read as a permission prompt or a
+ * dialog (`blocking`, decided by the runner that owns those readers) is never a question form, whatever text it shares
+ * with one. Only then is the pane compared with the COMPLETE surface the drive verified: the same ordered rows, the same
+ * free-form and Submit rows, the cursor where the drive left it and, after a paste, the typed text on its row. Text or
+ * option overlap binds nothing.
+ *
  * The same rule as a permission answer: a key moves a cursor only on a form that is positively the one asked about, and
  * Enter (any key) needs EXACTLY ONE cursor, read on the row expected. A new blocking prompt is never evidence that an
  * answer landed.
@@ -27,19 +36,26 @@ export type InputExpectation =
       readonly kind: 'question';
       /** Which pending question's form the pane must show. */
       readonly index: number;
-      /** How many numbered rows that form had when it was bound. */
-      readonly rows?: number | undefined;
+      /**
+       * Every row of the form as it was verified. Absent only for a tab whose rows were not seen beforehand (a Left from
+       * the review page): then the form must offer nothing but the question's own options and its free-form row.
+       */
+      readonly surface?: FormSurface | undefined;
       /** The row the cursor must be on, when the drive has moved it there itself. */
       readonly cursor?: number | undefined;
-      /** Text has been typed into the form's free-form row: its row is no longer its option text, so only the header binds. */
-      readonly typed?: boolean | undefined;
+      /** Text pasted into the inline free-form row: that one row must now draw it. */
+      readonly typed?: TypedRow | undefined;
     }
   | {
       readonly kind: 'review';
       readonly cursor?: number | undefined;
     }
-  /** The release Escape: any of the pending questions' forms, or their review page, with one cursor read. */
-  | { readonly kind: 'cancel' }
+  /**
+   * The release Escape: any of the pending questions' forms, or their review page, with one cursor read. Escape is an
+   * input like any other — on a permission prompt it DENIES — so a form counts only as the surface the drive last typed
+   * into (`last`, when it typed at all) or, with nothing typed yet, one that offers nothing but the question's own rows.
+   */
+  | { readonly kind: 'cancel'; readonly last?: Extract<InputExpectation, { readonly kind: 'question' }> | undefined }
   /** A free-form page opened by Enter on a plain `Other` row: the question's text, and no numbered form of anything else. */
   | { readonly kind: 'page'; readonly index: number };
 
@@ -56,11 +72,18 @@ export function refuseInput(
   screen: QuestionScreen,
   questions: readonly RenderedQuestion[],
   expect: InputExpectation,
+  /** What the runner's permission and dialog readers say the pane is: set, the pane is not a question form. */
+  blocking?: 'permission' | 'dialog' | undefined,
 ): InputRefusalDetail | undefined {
   const unbound = (what: string): InputRefusalDetail => ({
     refusal: 'unbound',
     message: `the pane no longer shows ${what}; nothing further was typed`,
   });
+  if (blocking !== undefined)
+    return {
+      refusal: 'unbound',
+      message: `the pane is showing a ${blocking === 'permission' ? 'permission prompt' : 'dialog'}, not the question; nothing further was typed`,
+    };
   const frame = formFrame(screen);
   if (expect.kind === 'page') {
     const question = questions[expect.index];
@@ -69,21 +92,29 @@ export function refuseInput(
     return undefined;
   }
   if (expect.kind === 'cancel') {
-    if (
-      !questions.some(question => bindQuestionForm(screen, question) !== undefined) &&
-      bindReviewPage(screen, questions) === undefined
-    )
+    const last = expect.last;
+    const formShown = questions.some((question, index) =>
+      last?.surface !== undefined && last.index === index
+        ? surfaceStillShown(screen, question, last.surface, last.typed)
+        : showsOnlyKnownRows(screen, question),
+    );
+    if (!formShown && bindReviewPage(screen, questions) === undefined)
       return unbound('a form of the pending questions');
   } else if (expect.kind === 'review') {
     if (bindReviewPage(screen, questions) === undefined) return unbound('the review page of the pending questions');
   } else {
     const question = questions[expect.index];
     if (question === undefined) return unbound('the pending question');
-    const bound =
-      expect.typed === true
-        ? formHeaderShows(screen, question.question) && (expect.rows === undefined || frame?.rows === expect.rows)
-        : bindQuestionForm(screen, question) !== undefined && boundQuestionIndex(screen, questions) === expect.index;
-    if (!bound) return unbound('the form of the pending question');
+    const shown =
+      expect.surface === undefined
+        ? showsOnlyKnownRows(screen, question)
+        : surfaceStillShown(screen, question, expect.surface, expect.typed);
+    // The longer question wins when one question's text contains another's; typed text hides no header.
+    const named =
+      expect.typed === undefined
+        ? boundQuestionIndex(screen, questions) === expect.index
+        : formHeaderShows(screen, question.question);
+    if (!shown || !named) return unbound('the form of the pending question');
   }
   if (frame === undefined || frame.cursors !== 1 || frame.cursor === undefined)
     return {

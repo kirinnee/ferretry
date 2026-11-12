@@ -80,6 +80,13 @@ export interface QuestionAnswerRequest {
   readonly caller?: string | undefined;
 }
 
+/**
+ * The last surface a drive was allowed to type into, per attempt (the same `PendingQuestion` object reaches the drive and
+ * the release that follows it), so the release Escape is bound to what the drive last saw rather than to any form that
+ * shares the question's text.
+ */
+const lastTyped = new WeakMap<PendingQuestion, Extract<InputExpectation, { readonly kind: 'question' }>>();
+
 const PROTECTED: ReadonlySet<SessionStatus> = new Set(['completed', 'stopped', 'failed', 'kill_failed']);
 
 /** The question as the structured-answer domain reads it: the first question and, for a tabbed form, the ones after it. */
@@ -163,8 +170,16 @@ export function buildQuestionAnswering(deps: QuestionAnsweringDeps) {
             'none',
             { phase: 'input-binding', reason: 'pane-dead' },
           );
-        const refusal = refuseInput(questionScreen(shown.visible, shown.history), pending.questions, expect);
-        if (refusal === undefined) return;
+        const refusal = refuseInput(
+          questionScreen(shown.visible, shown.history),
+          pending.questions,
+          expect.kind === 'cancel' ? { kind: 'cancel', last: lastTyped.get(pending) } : expect,
+          shown.blocking,
+        );
+        if (refusal === undefined) {
+          if (expect.kind === 'question') lastTyped.set(pending, expect);
+          return;
+        }
         // Only a cursor that is still where the last arrow was heading may heal; a replaced or unreadable form never does.
         if (refusal.refusal !== 'cursor-moved' || poll >= polls)
           throw new StructuredQuestionDriveError(refusal.message, 'none', {
@@ -201,6 +216,11 @@ export function buildQuestionAnswering(deps: QuestionAnsweringDeps) {
       });
     return {
       state: async ferret => await pane.state(ferret),
+      // The watch's own stamp for this question, else the transcript's result for it (see the form pane).
+      completed: async (ferret, id) => {
+        const stamp = await state.read(QUESTION_ANSWERED_STATE, ferret);
+        return (stamp.ok && stamp.value?.toolUseId === id) || (await pane.completed?.(ferret, id)) === true;
+      },
       sendKey: async (ferret, pressed, expect) =>
         await typeIfHeld(ferret, expect, async () => await pane.sendKey(ferret, pressed)),
       paste: async (ferret, text, expect) =>
@@ -418,7 +438,7 @@ export function buildQuestionAnswering(deps: QuestionAnsweringDeps) {
               error.failure.progress,
             );
           if (error instanceof StructuredQuestionAttemptUnreadable)
-            throw new SessionAnswerError('unreadable', FORM_UNREADABLE, undefined, error.message);
+            throw new SessionAnswerError('unreadable', FORM_UNREADABLE, undefined, error.message, error.progress);
           if (error instanceof StructuredQuestionAttemptFailed) {
             if (error.receipt === 'accepted')
               throw new SessionAnswerError('unconfirmed', ANSWER_NOT_DELIVERED, undefined, error.message);

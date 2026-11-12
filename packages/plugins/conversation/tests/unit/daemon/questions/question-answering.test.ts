@@ -42,6 +42,37 @@ describe('the harness form pane', () => {
     await expect(gone.state('f1')).rejects.toThrow(/no live agent/u);
   });
 
+  it('hands on the runner’s reading of a permission prompt or dialog, as the capture gave it', async () => {
+    const pane = harnessFormPane(
+      ferretsWith({
+        form: {
+          capture: async () => ok({ ...FRAME, blocking: 'permission' as const }),
+          key: async () => ok(undefined),
+          paste: async () => ok(undefined),
+        },
+      }),
+    );
+
+    expect((await pane.state('f1')).blocking).toBe('permission');
+  });
+
+  it('says a question is over only when the transcript carries its result by id, and an unreadable one proves nothing', async () => {
+    const reading = (read: () => Promise<unknown[]>) =>
+      harnessFormPane(ferretsWith({ transcript: { read } } as unknown as Partial<FerretHarness>));
+
+    const result = reading(async () => [{ tools: { results: ['t1'] } }]);
+    const call = reading(async () => [{ tools: { calls: ['t1'] } }]);
+    const broken = reading(async () => {
+      throw new Error('transcript unreadable');
+    });
+
+    expect(await result.completed?.('f1', 't1')).toBe(true);
+    expect(await result.completed?.('f1', 't2')).toBe(false);
+    // A call without its result is a question still open.
+    expect(await call.completed?.('f1', 't1')).toBe(false);
+    expect(await broken.completed?.('f1', 't1')).toBe(false);
+  });
+
   it('presses only the closed set of keys, and never asks the harness for any other', async () => {
     const pressed: FormKey[] = [];
     const pane = harnessFormPane(

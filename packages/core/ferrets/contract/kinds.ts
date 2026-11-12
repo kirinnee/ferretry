@@ -449,6 +449,11 @@ export interface RunnerFormCapture {
   readonly history: string;
   /** The harness is visibly mid-turn on the VISIBLE frame (terminals' `paneShowsActiveWork`, computed by the runner, which owns that fact). */
   readonly activeWork: boolean;
+  /**
+   * The runner's own permission-prompt and dialog readers say the VISIBLE frame is one of these, so it is not a question
+   * form whatever text it shares with one. A closed code, never the prompt's words. Absent when neither reader claims it.
+   */
+  readonly blocking?: 'permission' | 'dialog' | undefined;
 }
 
 /** How many of a frame's last lines {@link RunnerLook.status} carries (the live readout's status window). */

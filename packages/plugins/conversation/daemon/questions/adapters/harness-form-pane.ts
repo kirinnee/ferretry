@@ -29,19 +29,29 @@ const isFormKey = (key: string): key is FormKey => (FORM_KEYS as readonly string
  * may not touch this one, and only then does the driver run.
  */
 export function harnessFormPane(ferrets: Pick<FerretsApi, 'harness'>): StructuredQuestionPane {
-  const open = async (ferret: string): Promise<HarnessForm> => {
+  const seam = async (ferret: string): Promise<FerretHarness> => {
     if (ferrets.harness === undefined) throw new ApiError(503, FORM_OFF, 'plugin_unavailable');
     const id = tryParseSessionId(ferret);
     const harness: FerretHarness | undefined = id === undefined ? undefined : await ferrets.harness(id);
     if (harness === undefined) throw new ApiError(404, `no session ${ferret}`, 'not-found');
-    if (harness.form === undefined) throw new ApiError(503, FORM_OFF, 'plugin_unavailable');
-    return harness.form;
+    return harness;
+  };
+  const open = async (ferret: string): Promise<HarnessForm> => {
+    const form = (await seam(ferret)).form;
+    if (form === undefined) throw new ApiError(503, FORM_OFF, 'plugin_unavailable');
+    return form;
   };
   return {
     state: async (ferret): Promise<QuestionPaneState> => {
       const captured = await (await open(ferret)).capture();
       if (!captured.ok) throw refusalAnswer(captured.error, NO_PANE(ferret));
       return captured.value;
+    },
+    // The transcript names the call or its result by id: the one outside witness that the question is over. Unreadable
+    // proves nothing.
+    completed: async (ferret, toolUseId) => {
+      const entries = await (await seam(ferret)).transcript.read().catch(() => undefined);
+      return entries?.some(entry => entry.tools?.results?.includes(toolUseId) ?? false) ?? false;
     },
     sendKey: async (ferret, key) => {
       if (!isFormKey(key))

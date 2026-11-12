@@ -43,6 +43,8 @@ class ScriptedPane implements StructuredQuestionPane {
   /** The surface each key and paste named, in the order they were typed. */
   readonly expected: (InputExpectation | undefined)[] = [];
   private index = 0;
+  /** Evidence from outside the pane that the question is over; left out, the pane offers none. */
+  completed?: (session: string, toolUseId: string) => Promise<boolean>;
 
   constructor(
     private readonly states: readonly QuestionPaneState[],
@@ -108,6 +110,66 @@ describe('tmux structured-question driver', () => {
       /answer keys were sent, but the rendered form did not visibly advance/u,
     );
     should(pane.keys).deepEqual(['Enter']);
+  });
+
+  describe('a new blocking prompt, or any other changed pane, is not a confirmation', () => {
+    const PERMISSION = ['Bash command', '  rm -rf /work', 'Do you want to proceed?', '❯ 1. Yes', '  2. No'].join('\n');
+
+    it('stops at once, naming the prompt, when the runner reads the new pane as a permission prompt', async () => {
+      const pane = new ScriptedPane([frame(DEPLOY), frame(PERMISSION, { blocking: 'permission' })]);
+
+      const failure = await failureOf(driver(pane).drive(ID, single, yes));
+
+      should(failure.message).match(/now shows a permission prompt instead of taking the answer/u);
+      should(failure.diagnostics).match({ phase: 'confirm', reason: 'blocking-prompt' });
+      should(pane.keys).deepEqual(['Enter']);
+    });
+
+    it('does not take a dialog for an active turn or a ready prompt either', async () => {
+      const pane = new ScriptedPane([
+        frame(DEPLOY),
+        frame('Working (2s • Esc to interrupt)', { blocking: 'dialog', promptReady: true }),
+      ]);
+
+      const failure = await failureOf(driver(pane).drive(ID, single, yes));
+
+      should(failure.diagnostics).match({ reason: 'blocking-prompt' });
+    });
+
+    it('does not take a changed pane that is another numbered form, with or without outside evidence', async () => {
+      const other = frame(PERMISSION);
+      const pane = new ScriptedPane([frame(DEPLOY), other]);
+      pane.completed = async () => true;
+
+      await should(driver(pane).drive(ID, single, yes)).be.rejectedWith(/did not visibly advance/u);
+    });
+
+    it('does not take a changed pane for the answer without the question’s own end as evidence', async () => {
+      const pane = new ScriptedPane([frame(DEPLOY), frame('something else drew here')]);
+
+      await should(driver(pane).drive(ID, single, yes)).be.rejectedWith(/did not visibly advance/u);
+    });
+
+    it('takes a changed pane once the question is positively over, and asks about this question only', async () => {
+      const pane = new ScriptedPane([frame(DEPLOY), frame('something else drew here')]);
+      const asked: string[] = [];
+      pane.completed = async (_session, toolUseId) => {
+        asked.push(toolUseId);
+        return true;
+      };
+
+      const confirmation = await driver(pane).drive(ID, single, yes);
+
+      should(confirmation).deepEqual({ confirmedBy: 'pane-advanced' });
+      should(asked).deepEqual(['question-1']);
+    });
+
+    it('sends no release Escape into a blocking prompt that replaced the form', async () => {
+      const pane = new ScriptedPane([frame(PERMISSION, { blocking: 'permission' })]);
+
+      await should(driver(pane).cancel(ID, single)).be.rejected();
+      should(pane.keys).deepEqual([]);
+    });
   });
 
   it('classifies pane death before input as proven non-acceptance and pane death after input as ambiguous', async () => {
@@ -921,20 +983,23 @@ describe('tmux structured-question driver, page by page without a tab strip', ()
 describe('every native input names the form it is for', () => {
   const done = frame('> ', { promptReady: true });
 
-  it('names the question, its row count and the row the cursor must be on, at every arrow and at Enter', async () => {
+  const surface = (labels: readonly string[], freeForm?: number) => ({ labels, freeForm, submit: false });
+
+  it('names the question, its complete ordered rows and the row the cursor must be on, at every arrow and at Enter', async () => {
     const pane = new ScriptedPane([frame(DEPLOY), done]);
 
     await driver(pane).drive(ID, single, [{ kind: 'selection', labels: ['Other'] }]);
 
     should(pane.keys).deepEqual(['Down', 'Down', 'Enter']);
+    const rows = surface(['Yes', 'No', 'Other'], 2);
     should(pane.expected).deepEqual([
-      { kind: 'question', index: 0, rows: 3, cursor: 0, typed: false },
-      { kind: 'question', index: 0, rows: 3, cursor: 1, typed: false },
-      { kind: 'question', index: 0, rows: 3, cursor: 2, typed: false },
+      { kind: 'question', index: 0, surface: rows, cursor: 0, typed: undefined },
+      { kind: 'question', index: 0, surface: rows, cursor: 1, typed: undefined },
+      { kind: 'question', index: 0, surface: rows, cursor: 2, typed: undefined },
     ]);
   });
 
-  it('binds the paste to the untouched form and the Enter after it to the form as typed into', async () => {
+  it('binds the paste to the untouched form and the Enter after it to the form drawing the typed text', async () => {
     const pool: PendingQuestion = {
       toolUseId: 'question-pool',
       questions: [{ question: 'Deploy?', options: [{ label: 'Yes' }, { label: 'No' }] }],
@@ -944,11 +1009,12 @@ describe('every native input names the form it is for', () => {
     await driver(pane).drive(ID, pool, [{ kind: 'other', text: 'Ask first' }]);
 
     should(pane.pasted).deepEqual(['Ask first']);
+    const rows = surface(['Yes', 'No', 'Other'], 2);
     should(pane.expected).deepEqual([
-      { kind: 'question', index: 0, rows: 3, cursor: 0, typed: false },
-      { kind: 'question', index: 0, rows: 3, cursor: 1, typed: false },
-      { kind: 'question', index: 0, rows: 3, cursor: 2, typed: false },
-      { kind: 'question', index: 0, rows: 3, cursor: 2, typed: true },
+      { kind: 'question', index: 0, surface: rows, cursor: 0, typed: undefined },
+      { kind: 'question', index: 0, surface: rows, cursor: 1, typed: undefined },
+      { kind: 'question', index: 0, surface: rows, cursor: 2, typed: undefined },
+      { kind: 'question', index: 0, surface: rows, cursor: 2, typed: { index: 2, text: 'Ask first' } },
     ]);
   });
 

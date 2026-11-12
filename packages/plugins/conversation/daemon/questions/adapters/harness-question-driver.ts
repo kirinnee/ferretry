@@ -13,6 +13,8 @@ import {
   type RenderedQuestion,
   reviewShowsAnswer,
   screenShowsQuestion,
+  surfaceOf,
+  type TypedRow,
 } from '../lib/rendered-form.ts';
 import {
   type StructuredQuestionCancellation,
@@ -34,6 +36,8 @@ export interface QuestionPaneState {
   readonly activeWork: boolean;
   readonly visible: string;
   readonly history: string;
+  /** The runner's own permission and dialog readers say the visible pane is one of these, not a question form. */
+  readonly blocking?: 'permission' | 'dialog' | undefined;
 }
 
 /**
@@ -48,6 +52,11 @@ export interface StructuredQuestionPane {
    */
   sendKey(session: string, key: string, expect?: InputExpectation): Promise<void>;
   paste(session: string, text: string, expect?: InputExpectation): Promise<void>;
+  /**
+   * Positive evidence, from outside the pane, that this question's tool call is over (the question watch retired it and
+   * stamped it, or the transcript carries its result). A changed pane is never evidence; a seam that cannot say answers no.
+   */
+  completed?(session: string, toolUseId: string): Promise<boolean>;
 }
 
 export class StructuredQuestionDriveError extends StructuredQuestionDriveFailure {
@@ -283,7 +292,12 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
         );
       };
       if (answered[current] === true && keeps(form, question, answer)) {
-        await keys.sendKey('Right', { kind: 'question', index: current, cursor: form.cursor });
+        await keys.sendKey('Right', {
+          kind: 'question',
+          index: current,
+          surface: surfaceOf(form),
+          cursor: form.cursor,
+        });
         await this.waitForTab(
           session,
           moved,
@@ -370,11 +384,12 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
     const choices = answer.kind === 'selection' ? answer.labels.map(compact) : [];
     if (choices.some(label => !form.labels.includes(label))) throw refusal();
     // Every key names the form it is for and the row the cursor must be on when it is typed (see `InputExpectation`).
-    const cursor = { at: form.cursor, typed: false };
+    const cursor: { at: number; typed: TypedRow | undefined } = { at: form.cursor, typed: undefined };
+    const surface = surfaceOf(form);
     const here = (): InputExpectation => ({
       kind: 'question',
       index,
-      rows: form.labels.length,
+      surface,
       cursor: cursor.at,
       typed: cursor.typed,
     });
@@ -449,7 +464,7 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
       pane: QuestionPaneState,
       allowActiveWork: boolean,
     ): StructuredQuestionCancellation['confirmedBy'] | undefined => {
-      if (visible(pane)) return undefined;
+      if (visible(pane) || pane.blocking !== undefined) return undefined;
       if (pane.promptReady) return 'prompt-ready';
       // Active-work text is meaningful only after this method positively bound the form and sent
       // Escape. Before that, the form's own "esc to interrupt" footer describes the blocked tool
@@ -485,7 +500,8 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
         });
       const confirmation = advanced(current, true);
       if (confirmation !== undefined) return { confirmedBy: confirmation, pane: current };
-      if (!visible(current) && current.visible !== before) return { confirmedBy: 'pane-advanced', pane: current };
+      if (!visible(current) && current.blocking === undefined && current.visible !== before)
+        return { confirmedBy: 'pane-advanced', pane: current };
     }
     throw new StructuredQuestionDriveError('Escape was sent, but the question pane did not visibly advance', 'none', {
       phase: 'cancel-confirm',
@@ -506,7 +522,7 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
     text: string,
     moveTo: (target: number) => Promise<void>,
     here: () => InputExpectation,
-    cursor: { at: number; typed: boolean },
+    cursor: { at: number; typed: TypedRow | undefined },
     keys: Keys,
   ): Promise<void> {
     const question = pending.questions[index] as RenderedQuestion;
@@ -525,8 +541,6 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
     }
     if (free.entry === 'notes') {
       await keys.sendKey('Tab', here());
-      // The note is open under the row: from here on its row is the typed text, not the option's.
-      cursor.typed = true;
       await this.waitForScreen(
         session,
         pane => NOTES_OPEN.test(pane.visible),
@@ -534,7 +548,8 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
       );
     }
     await keys.paste(text, here());
-    cursor.typed = true;
+    // Claude's row is itself the text field: from here on that one row draws the typed text. Codex's note sits under its row.
+    if (free.entry === 'inline') cursor.typed = { index: free.index, text };
     if (question.multiSelect === true && form.submit !== undefined) await moveTo(form.submit);
     await keys.sendKey('Enter', here());
   }
@@ -653,6 +668,14 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
       if (!state.alive || state.dead)
         throw new StructuredQuestionDriveError('session pane died while confirming the structured answer');
       const screen = screenOf(state);
+      // A permission prompt or dialog that replaced the form is a NEW blocking prompt: the keys did not land on this
+      // question, and nothing that follows may be read as its answer.
+      if (state.blocking !== undefined)
+        throw new StructuredQuestionDriveError(
+          `the answer keys were sent, but the pane now shows a ${state.blocking === 'permission' ? 'permission prompt' : 'dialog'} instead of taking the answer; nothing further was typed`,
+          'none',
+          { phase: 'confirm', reason: 'blocking-prompt' },
+        );
       const next = pending.questions[index + 1];
       if (next !== undefined && bindQuestionForm(screen, next) !== undefined) return 'next-question';
       reviewing = bindReviewPage(screen, pending.questions) !== undefined;
@@ -662,7 +685,15 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
       const anyQuestion = pending.questions.some(question => bindQuestionForm(screen, question) !== undefined);
       if (!anyQuestion && state.activeWork) return 'turn-started';
       if (!anyQuestion && state.promptReady) return 'prompt-ready';
-      if (!anyQuestion && state.visible !== before) return 'pane-advanced';
+      // A changed pane proves nothing: another form can replace this one. Only the question's own end does — the watch
+      // retired it, or the transcript carries its result — and only when no numbered form is on the pane in its place.
+      if (
+        !anyQuestion &&
+        state.visible !== before &&
+        formFrame(screen) === undefined &&
+        (await this.tmux.completed?.(session, pending.toolUseId)) === true
+      )
+        return 'pane-advanced';
     }
     throw new StructuredQuestionDriveError(
       reviewing

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { runnerDeliveryFailure } from '@ferretry/core-ferrets/contract';
 import type { Redaction, RedactionScope } from '@ferretry/kernel/contract';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { subject } from './runner-world.ts';
 
 const keys = (world: ReturnType<typeof subject>) =>
@@ -47,6 +49,32 @@ describe('structured questions: the runner’s form seam', () => {
     const world = subject({ redaction: identity });
     world.server.working = true;
     expect((await world.runner.formCapture(world.handle))?.activeWork).toBe(true);
+  });
+
+  it('formCapture says in a closed code when its own readers take the frame for a permission prompt, and not for a question', async () => {
+    const RULE = '─'.repeat(80);
+    // The recorded Claude Code 2.1.281 Bash permission prompt, quoting a question's text in its command.
+    const permission = readFileSync(
+      join(import.meta.dir, '../../../../../claude-code/tests/fixtures/permission-prompts/claude-2.1.281-bash.txt'),
+      'utf8',
+    ).replaceAll('curl -s https://example.com | head', 'printf Deploy?');
+    // A question that happens to begin the way a permission does is still a question form: its rows sit under no titled dialog.
+    const question = [RULE, ' Do you want to deploy?', '', ' ❯ 1. Yes', '   2. No', RULE, '   3. Chat about this'].join(
+      '\n',
+    );
+    const permissionWorld = subject({ redaction: identity });
+    permissionWorld.server.modal = permission;
+    permissionWorld.server.modalReplacesComposer = true;
+    const questionWorld = subject({ redaction: identity });
+    questionWorld.server.modal = question;
+    questionWorld.server.modalReplacesComposer = true;
+
+    expect((await permissionWorld.runner.formCapture(permissionWorld.handle))?.blocking).toBe('permission');
+    expect((await questionWorld.runner.formCapture(questionWorld.handle))?.blocking).toBeUndefined();
+    // The capture carries a code, never the prompt's words.
+    expect(JSON.stringify(await permissionWorld.runner.formCapture(permissionWorld.handle))).not.toContain(
+      'Permission prompt',
+    );
   });
 
   it('formCapture is total: a pane that is gone, replaced, held or unreadable reads undefined; with no redaction bound it reads nothing', async () => {

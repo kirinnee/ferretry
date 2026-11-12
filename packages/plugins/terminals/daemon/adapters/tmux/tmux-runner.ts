@@ -44,6 +44,8 @@ import { isTmuxServerAbsent } from '../../lib/tmux/server-absent.ts';
 import { scriptLine } from '../../lib/tmux/script.ts';
 import { guardedWriteArguments, GUARD_REFUSED } from '../../lib/tmux/write-guard.ts';
 import { TERMINAL_TMUX_PREFIX } from '../../lib/terminal/runtime-policy.ts';
+import { paneBlockingDialog } from '../../lib/tmux/harness-dialog.ts';
+import { paneBlockingPermission } from '../../lib/tmux/permission-prompt.ts';
 import { LaunchGuardRefusal, RealHarnessRefusedError, type TmuxLaunchGuard } from '../../lib/tmux/harness-guard.ts';
 import { TMUX_PROGRAM } from './kernel-tmux-process.ts';
 import { captureFrame, ComposerUnconfirmedError, type DeliverySleep } from './composer-fill.ts';
@@ -243,6 +245,12 @@ export interface TmuxRunnerOptions {
    * hold refuses it), its screen masked inside one `Redaction.read` before it is parsed. Absent: `look` answers nothing.
    */
   readonly look?: { readonly act: ActRunner; readonly redaction: Redaction; readonly digest: FrameDigest };
+}
+
+/** Which of the harness's blocking surfaces a frame is: a tool-permission prompt, a dialog, or neither (a question form is neither). */
+function blockingOf(frame: string): 'permission' | 'dialog' | undefined {
+  if (paneBlockingPermission(frame) !== undefined) return 'permission';
+  return paneBlockingDialog(frame) !== undefined ? 'dialog' : undefined;
 }
 
 export class TmuxRunner implements Runner {
@@ -535,6 +543,7 @@ export class TmuxRunner implements Runner {
               activeWork: paneShowsActiveWork(shown),
               visible: state.visible,
               history: state.history,
+              ...(blockingOf(shown) === undefined ? {} : { blocking: blockingOf(shown) }),
             } satisfies RunnerFormCapture as never,
           };
         });

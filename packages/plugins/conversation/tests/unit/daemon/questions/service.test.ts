@@ -280,6 +280,40 @@ describe('structured question service', () => {
     should(recovery.cancellations).deepEqual([]);
   });
 
+  it('reports an unreadable tabbed form as unreadable, not paused, keeping its progress and sending nothing', async () => {
+    // The driver wraps a tabbed failure as paused; its cause is still that the selected row cannot be read.
+    const paused = new StructuredQuestionDrivePaused(
+      'stopped at question 1 of 2: the form cursor is not visible; a selection origin cannot be guessed',
+      { stoppedAt: 0, answered: [false, false] },
+      'none',
+      { phase: 'preflight', reason: 'cursor-missing' },
+    );
+    const { service, repository, recovery } = subject(pending, new Driver(Promise.reject(paused)));
+
+    const error = await service
+      .answer({
+        id: ID,
+        toolUseId: 'question-1',
+        labels: [],
+        answers: [
+          { kind: 'selection', labels: ['Yes'] },
+          { kind: 'selection', labels: ['Web'] },
+        ],
+      })
+      .catch((failure: unknown) => failure);
+
+    should(error).be.instanceOf(StructuredQuestionAttemptUnreadable);
+    should((error as StructuredQuestionAttemptUnreadable).progress).deepEqual({
+      stoppedAt: 0,
+      answered: [false, false],
+    });
+    should(error).match({ receipt: 'withdrawn' });
+    should(recovery.cancellations).deepEqual([]);
+    should(repository.failures).deepEqual([]);
+    should(repository.pauses).deepEqual([]);
+    should(repository.retentions).have.length(1);
+  });
+
   it('keeps the exact question bound when snapshot and cancellation both fail', async () => {
     const { service, repository, recovery } = subject(
       pending,

@@ -112,7 +112,7 @@ function refuse(error: unknown): never {
     ...(error.failure === 'already_answered' && error.answeredWith !== undefined
       ? { answeredWith: error.answeredWith }
       : {}),
-    ...(error.failure === 'paused' && error.progress !== undefined
+    ...((error.failure === 'paused' || error.failure === 'unreadable') && error.progress !== undefined
       ? { stoppedAt: error.progress.stoppedAt, answered: [...error.progress.answered] }
       : {}),
   };

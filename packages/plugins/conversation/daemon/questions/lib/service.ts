@@ -90,6 +90,11 @@ export class StructuredQuestionAttemptPaused extends StructuredQuestionAttemptFa
  * the form can be read) and stays `accepted` when an earlier key may have reached the form.
  */
 export class StructuredQuestionAttemptUnreadable extends StructuredQuestionAttemptFailed {
+  /** A tabbed drive's partial progress, kept with the refusal: those tabs stay answered on the pane. */
+  get progress(): StructuredQuestionProgress | undefined {
+    return this.failure instanceof StructuredQuestionDrivePaused ? this.failure.progress : undefined;
+  }
+
   constructor(message: string, failure: StructuredQuestionDriveFailure) {
     super(message, failure.acceptance === 'none' ? 'withdrawn' : 'accepted', failure);
     this.name = 'StructuredQuestionAttemptUnreadable';
@@ -285,18 +290,9 @@ export class StructuredQuestionService {
         snapshotError => ({ error: snapshotError instanceof Error ? snapshotError.message : String(snapshotError) }),
       );
       const questionText = pending.questions.map(question => question.question).join('\n\n');
-      if (failure instanceof StructuredQuestionDrivePaused) {
-        // Nothing was submitted and the form is still open with whatever was answered so far. Escape
-        // would discard those answers; the form stays pending, to be resumed or finished in the Console.
-        await this.repository.paused(input.id, pending, answers, {
-          failure,
-          ...('pane' in snapshot ? { snapshot: snapshot.pane } : { snapshotError: snapshot.error }),
-        });
-        throw new StructuredQuestionAttemptPaused(
-          `${failure.message}\n\nNothing was submitted; the form is still open. Answer again to resume it, or finish it in the terminal.\nPending question:\n${questionText}`,
-          failure,
-        );
-      }
+      // An unreadable cursor is decided BEFORE a tabbed drive's pause: a form whose selected row cannot be read cannot be
+      // resumed (a retry reads the same pane), so "resume" would be a false remedy. Whatever the drive had answered so far
+      // stays on the pane and is reported with the refusal; no key, paste or Escape is sent.
       if (failure.diagnostics.reason === 'cursor-missing') {
         // Lizzette's rule: a selection that cannot be read is never typed into, and Escape is a key too. The question is
         // kept exactly as it is; the owner is told the form could not be read safely and to answer it at the terminal.
@@ -306,6 +302,18 @@ export class StructuredQuestionService {
         });
         throw new StructuredQuestionAttemptUnreadable(
           `${failure.message}\n\nNothing was cancelled or released; the structured form remains bound. Pending question:\n${questionText}`,
+          failure,
+        );
+      }
+      if (failure instanceof StructuredQuestionDrivePaused) {
+        // Nothing was submitted and the form is still open with whatever was answered so far. Escape
+        // would discard those answers; the form stays pending, to be resumed or finished in the Console.
+        await this.repository.paused(input.id, pending, answers, {
+          failure,
+          ...('pane' in snapshot ? { snapshot: snapshot.pane } : { snapshotError: snapshot.error }),
+        });
+        throw new StructuredQuestionAttemptPaused(
+          `${failure.message}\n\nNothing was submitted; the form is still open. Answer again to resume it, or finish it in the terminal.\nPending question:\n${questionText}`,
           failure,
         );
       }

@@ -11,6 +11,9 @@ import {
   type RenderedQuestion,
   reviewShowsAnswer,
   screenShowsQuestion,
+  showsOnlyKnownRows,
+  surfaceOf,
+  surfaceStillShown,
 } from '../../../../daemon/questions/lib/rendered-form.ts';
 
 const FIXTURES = join(import.meta.dir, '../../../fixtures/question-forms');
@@ -372,5 +375,57 @@ describe('rendered question form', () => {
       should(reviewShowsAnswer('Only if it…', meet, { kind: 'other', text: 'Only if it is on Zoom' })).be.true();
       should(reviewShowsAnswer('Only if we…', meet, { kind: 'other', text: 'Only if it is on Zoom' })).be.false();
     });
+  });
+});
+
+describe('the complete surface of a bound form', () => {
+  const RULE = '─'.repeat(40);
+  const form = (rows: readonly string[], cursor = 0, asks = 'Deploy?'): string =>
+    [
+      RULE,
+      asks,
+      '',
+      ...rows.map((row, index) => `${index === cursor ? '❯' : ' '} ${index + 1}. ${row}`),
+      RULE,
+      '  9. Chat about this',
+    ].join('\n');
+  const deploy: RenderedQuestion = { question: 'Deploy?', options: [{ label: 'Yes' }, { label: 'No' }] };
+  const screen = (visible: string) => questionScreen(visible, visible);
+  const bound = surfaceOf(
+    bindQuestionForm(screen(form(['Yes', 'No', 'Type something.'])), deploy) as NonNullable<
+      ReturnType<typeof bindQuestionForm>
+    >,
+  );
+
+  it('names every row in order, the free-form row and whether a Submit row ends the page', () => {
+    should(bound).deepEqual({ labels: ['Yes', 'No', 'Other'], freeForm: 2, submit: false });
+  });
+
+  it('still shows the same rows wherever the cursor is, and nothing else', () => {
+    should(surfaceStillShown(screen(form(['Yes', 'No', 'Type something.'], 2)), deploy, bound)).be.true();
+    should(surfaceStillShown(screen(form(['No', 'Yes', 'Type something.'])), deploy, bound)).be.false();
+    should(surfaceStillShown(screen(form(['Yes', 'No'])), deploy, bound)).be.false();
+    should(surfaceStillShown(screen(form(['Yes', 'Yes, and do not ask again', 'No'])), deploy, bound)).be.false();
+    should(surfaceStillShown(screen(form(['Yes', 'No', 'Type something.'], 0, 'Ship it?')), deploy, bound)).be.false();
+  });
+
+  it('reads the typed text on its own row, whole or cut with an ellipsis, and nothing else', () => {
+    const typed = { index: 2, text: 'Ask first' };
+    should(surfaceStillShown(screen(form(['Yes', 'No', 'Ask first'], 2)), deploy, bound, typed)).be.true();
+    should(surfaceStillShown(screen(form(['Yes', 'No', 'Ask…'], 2)), deploy, bound, typed)).be.true();
+    should(surfaceStillShown(screen(form(['Yes', 'No', 'Type something.'], 2)), deploy, bound, typed)).be.false();
+    should(surfaceStillShown(screen(form(['Yes', 'No', 'Other words'], 2)), deploy, bound, typed)).be.false();
+    should(surfaceStillShown(screen(form(['Yes', 'Maybe', 'Ask first'], 2)), deploy, bound, typed)).be.false();
+    // An option labelled Other does not hide the typed row from the binder.
+    const withOther: RenderedQuestion = { ...deploy, options: [...(deploy.options ?? []), { label: 'Other' }] };
+    should(surfaceStillShown(screen(form(['Yes', 'No', 'Ask first'], 2)), withOther, bound, typed)).be.true();
+  });
+
+  it('accepts a tab whose rows were not seen only while every row is one of the question’s own', () => {
+    should(showsOnlyKnownRows(screen(form(['Yes', 'No', 'Type something.'])), deploy)).be.true();
+    should(showsOnlyKnownRows(screen(form(['No', 'Yes'])), deploy)).be.true();
+    should(showsOnlyKnownRows(screen(form(['Yes', 'Yes, and do not ask again', 'No'])), deploy)).be.false();
+    should(showsOnlyKnownRows(screen(form(['Yes', 'No', 'Type something.', 'More'])), deploy)).be.false();
+    should(showsOnlyKnownRows(screen('> '), deploy)).be.false();
   });
 });

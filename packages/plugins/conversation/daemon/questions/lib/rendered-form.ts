@@ -272,7 +272,12 @@ function rowIs(row: Row, label: string): boolean {
  * {@link FREE_FORM_LABEL}; any other row the transcript does not name keeps its own text, so it can
  * never be chosen by accident.
  */
-export function bindQuestionForm(screen: QuestionScreen, question: RenderedQuestion): BoundQuestionForm | undefined {
+export function bindQuestionForm(
+  screen: QuestionScreen,
+  question: RenderedQuestion,
+  /** The inline free-form row text was pasted into: it draws the typed text, so it is neither an option nor the placeholder. */
+  typedRow?: number,
+): BoundQuestionForm | undefined {
   const block = lastBlock(screen);
   if (block === undefined || !shows(block.header, question.question)) return undefined;
   const options = question.options?.map(option => compact(option.label)) ?? [];
@@ -280,6 +285,10 @@ export function bindQuestionForm(screen: QuestionScreen, question: RenderedQuest
   const labels: string[] = [];
   let freeForm: BoundQuestionForm['freeForm'];
   for (const [index, row] of block.rows.entries()) {
+    if (index === typedRow) {
+      labels.push(row.text);
+      continue;
+    }
     const option = options.find(label => label !== FREE_FORM_LABEL && rowIs(row, label));
     const entry = FREE_FORM_ROWS.find(candidate => candidate.pattern.test(row.text))?.entry;
     if (option !== undefined) labels.push(option);
@@ -288,7 +297,8 @@ export function bindQuestionForm(screen: QuestionScreen, question: RenderedQuest
       freeForm = { index, entry };
     } else labels.push(row.text);
   }
-  if (!options.every(label => labels.includes(label))) return undefined;
+  if (!options.every(label => labels.includes(label) || (typedRow !== undefined && label === FREE_FORM_LABEL)))
+    return undefined;
   const submit = block.submit === undefined ? undefined : block.rows.length;
   const onRow = block.rows.findIndex(row => row.cursor);
   const chosen = block.rows.findIndex(row => row.chosen);
@@ -315,6 +325,79 @@ export function boundQuestionIndex(screen: QuestionScreen, questions: readonly R
       found = index;
   }
   return found;
+}
+
+/**
+ * THE COMPLETE SURFACE A FORM WAS BOUND TO: its ordered rows exactly as verified (a free-form row named
+ * {@link FREE_FORM_LABEL}, a separate Submit row), not merely the options the transcript recorded. Every later input is
+ * typed only while the pane still draws this, row for row, so a different prompt that quotes the question's text or
+ * offers the same options among others of its own is not this form.
+ */
+export interface FormSurface {
+  /** Every navigable row in Up/Down order, as {@link BoundQuestionForm.labels}. */
+  readonly labels: readonly string[];
+  /** The row that takes free-form text, when the form has one. */
+  readonly freeForm: number | undefined;
+  /** Whether a separate Submit row ends the page. */
+  readonly submit: boolean;
+}
+
+export function surfaceOf(form: BoundQuestionForm): FormSurface {
+  return { labels: form.labels, freeForm: form.freeForm?.index, submit: form.submit !== undefined };
+}
+
+/** The text pasted into a form's inline free-form row: that row now draws it instead of its placeholder. */
+export interface TypedRow {
+  readonly index: number;
+  readonly text: string;
+}
+
+/** Whether a row draws this text: all of it, or the start of it cut with an ellipsis. */
+function drawsTyped(drawn: string | undefined, text: string): boolean {
+  const shown = dense((drawn ?? '').replace(CHOSEN, ''));
+  const wanted = dense(text);
+  if (shown === '' || wanted === '') return false;
+  return shown.endsWith('…') ? wanted.startsWith(shown.slice(0, -1)) && shown.length > 1 : shown === wanted;
+}
+
+/**
+ * Whether the pane still draws exactly the form {@link surfaceOf} described, for this question.
+ *
+ * Row for row: the same count, the same labels in the same order, the same free-form and Submit rows. After text was
+ * pasted into the inline free-form row that one row must draw the typed text; every other row is unchanged.
+ */
+export function surfaceStillShown(
+  screen: QuestionScreen,
+  question: RenderedQuestion,
+  surface: FormSurface,
+  typed?: TypedRow,
+): boolean {
+  const form = bindQuestionForm(screen, question, typed?.index);
+  if (form === undefined) return false;
+  if (form.labels.length !== surface.labels.length || (form.submit !== undefined) !== surface.submit) return false;
+  if (typed === undefined)
+    return (
+      form.freeForm?.index === surface.freeForm && form.labels.every((label, row) => label === surface.labels[row])
+    );
+  const row = lastBlock(screen)?.rows[typed.index];
+  return (
+    row !== undefined &&
+    drawsTyped([row.text, ...row.continuation.slice(0, 2)].join(' '), typed.text) &&
+    form.labels.every((label, row) => row === typed.index || label === surface.labels[row])
+  );
+}
+
+/**
+ * Whether every row of the live form is one the transcript recorded for this question or its free-form row. A form
+ * whose rows were not verified beforehand (a tab not yet seen) is typed into only when it offers nothing else.
+ */
+export function showsOnlyKnownRows(screen: QuestionScreen, question: RenderedQuestion): boolean {
+  const form = bindQuestionForm(screen, question);
+  if (form === undefined) return false;
+  const options = (question.options ?? []).map(option => compact(option.label));
+  // The free-form row is named FREE_FORM_LABEL and is the one row that is not an option; a foreign row keeps its own text.
+  const foreign = form.labels.filter((label, row) => !options.includes(label) && row !== form.freeForm?.index);
+  return foreign.length === 0 && form.labels.length <= options.length + 1;
 }
 
 /**
