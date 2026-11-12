@@ -1,5 +1,6 @@
 /** Turns a route key and the caller's `{ params, query, body }` into a daemon request. Pure. */
 import { parseRouteKey } from '@ferretry/kernel/contract';
+import { allowedCallHeaders, type PluginCallHeaders } from '@ferretry/kernel/manifest';
 import { EXIT, ShellError } from './errors.ts';
 
 export interface DaemonRequest {
@@ -7,12 +8,16 @@ export interface DaemonRequest {
   /** Path and query string, already encoded. */
   readonly path: string;
   readonly body?: unknown;
+  /** Only the closed list a half may set (`allowedCallHeaders`); the transport adds its own and never lets these override them. */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 export interface CallInit {
   readonly params?: Readonly<Record<string, string>>;
   readonly query?: Readonly<Record<string, string>>;
   readonly body?: unknown;
+  /** Allow-listed (`PluginCallHeaders`): forwarded as `allowedCallHeaders` filters them, anything else is dropped. */
+  readonly headers?: PluginCallHeaders;
   /** The caller stopped waiting: aborting ends the send in flight (and any wait for a restarting daemon). */
   readonly signal?: AbortSignal;
 }
@@ -39,10 +44,12 @@ export function buildRequest(routeKey: string, init: CallInit = {}): DaemonReque
   for (const name of Object.keys(params))
     if (!used.has(name)) throw new ShellError(`${routeKey} has no parameter "${name}"`, EXIT.usage);
   const query = new URLSearchParams(init.query ?? {}).toString();
+  const headers = allowedCallHeaders(init.headers);
   return {
     method,
     path: query === '' ? filled : `${filled}?${query}`,
     ...(init.body === undefined ? {} : { body: init.body }),
+    ...(headers === undefined ? {} : { headers }),
   };
 }
 

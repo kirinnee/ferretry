@@ -54,6 +54,7 @@ import { writeStubBinaries } from './stub-binaries.ts';
 const FAKE_TOKEN = 'fake-token';
 const SECRET_NAME = 'FAKE_PROVIDER_TOKEN';
 const FYD = join(import.meta.dir, '../../../../../kernel/host/fyd.ts');
+const FY = join(import.meta.dir, '../../../../../../cli/bin/fy.ts');
 const REPO = join(import.meta.dir, '../../../../../../..');
 const READY_MS = 90_000;
 const SEE_MS = 45_000;
@@ -418,6 +419,86 @@ describe('a ferret authenticates end to end (merge bar 7)', () => {
       ['/v1/responses', ['authorization'], true],
     ]);
     expect(pane).toContain(FAKE_REPLY);
+  });
+});
+
+/**
+ * THE MERGE-BAR LINE: THE REAL `fy` STARTS A FERRET (docs/rebuild/merge-bar.md, before-merge line 9; smoke step 2).
+ *
+ * The 5.0 preview answered `fy new` / `fy start` with "a start must carry x-fy-request-id" and no ferret was made:
+ * Ferrets' CLI half set the header, but the CLI shell's client had no `headers` on a call and dropped it. Every test
+ * above starts a ferret with a raw `POST /v1/ferrets` and a hand-written header, which is exactly the part that was
+ * broken, so none could see it. This one types the command: the real `fy` process (the production entry point, its
+ * real shell client and HTTP transport) against the real `fyd`, then reads the ferret back through `fy ps`.
+ * Same stand-in harness and fake provider as above; loopback only, fake values only.
+ */
+describe('the real fy starts a ferret on a real fyd (merge bar 9)', () => {
+  const fy = async (daemon: Daemon, args: readonly string[]) => {
+    const proc = Bun.spawn([process.execPath, FY, ...args], {
+      cwd: daemon.folder,
+      env: {
+        PATH: process.env.PATH ?? '/usr/bin:/bin',
+        HOME: join(daemon.home, '..', 'user-home'),
+        NO_COLOR: '1',
+        FY_HOME: daemon.home,
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+      timeout: 60_000,
+      killSignal: 'SIGKILL',
+    });
+    const [out, err, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return { code, out, err };
+  };
+
+  test('`fy start` makes a ferret, which `fy ps` lists, and the reply reaches it', async () => {
+    const provider = startFakeProvider(FAKE_TOKEN);
+    cleanups.push(() => provider.stop());
+    const daemon = await boot(provider, home => ({
+      [join(home, 'config/logins/oauth.yaml')]: claudeLogin('ferretry'),
+      [join(home, 'state/logins/credentials/oauth/.credentials.json')]: JSON.stringify({
+        claudeAiOauth: {
+          accessToken: FAKE_TOKEN,
+          refreshToken: 'fake-refresh',
+          expiresAt: 4_102_444_800_000,
+          scopes: ['user:inference'],
+        },
+      }),
+    }));
+
+    const started = await fy(daemon, [
+      'start',
+      '--harness',
+      'claude-code',
+      '--login',
+      'oauth',
+      '--mode',
+      'interactive',
+      '--cwd',
+      daemon.folder,
+      'say hello',
+    ]);
+
+    // The shell forwarded the request id: no refusal, an exit of 0 and a ferret id on the screen.
+    expect(`${started.out}\n${started.err}`.includes('x-fy-request-id')).toBe(false);
+    expect(started.code, `fy start: ${started.err}`).toBe(0);
+    // The headline names the ferret: `callsign (id)  state  harness ...`.
+    const id = /\(([^()\s]+)\)/u.exec(started.out)?.[1];
+    expect(typeof id).toBe('string');
+    const listed = await fy(daemon, ['ps']);
+    expect(listed.code).toBe(0);
+    expect(listed.out).toContain(id as string);
+    const until = Date.now() + SEE_MS;
+    let seen = '';
+    while (Date.now() < until && !seen.includes(FAKE_REPLY)) {
+      seen = (await daemon.call('GET', `/v1/ferrets/${id as string}/messages`)).text;
+      if (!seen.includes(FAKE_REPLY)) await Bun.sleep(500);
+    }
+    expect(seen).toContain(FAKE_REPLY);
   });
 });
 

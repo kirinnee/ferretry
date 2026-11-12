@@ -28,6 +28,23 @@ describe('sending a request to the daemon over HTTP', () => {
     });
   });
 
+  it('should put a half’s allow-listed headers on the wire, and never let them set the credential', async () => {
+    const daemon = standInDaemon(() => Response.json({ ok: true }));
+    const http = transport(daemon.url);
+
+    await http.send(
+      {
+        method: 'POST',
+        path: '/v1/ferrets',
+        body: {},
+        headers: { 'x-fy-request-id': 'req-1', authorization: 'Bearer smuggled' },
+      },
+      { repeatable: false },
+    );
+
+    should(daemon.seen[0]?.headers).match({ authorization: 'Bearer test-credential', 'x-fy-request-id': 'req-1' });
+  });
+
   it('should send no credential when there is none, and no body or content type for a bare GET', async () => {
     const daemon = standInDaemon(() => new Response(''));
     const http = transport(daemon.url, { authorization: async () => undefined });

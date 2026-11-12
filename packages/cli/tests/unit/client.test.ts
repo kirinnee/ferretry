@@ -39,6 +39,26 @@ describe('the guarded client', () => {
     should(transport.sent).deepEqual([{ method: 'GET', path: '/v1/cards/c%201?full=1' }]);
   });
 
+  it('should forward the request id and the agenda channel a half sets, and nothing else', async () => {
+    // Arrange
+    const { deps, transport } = depsOf(registry, healthy);
+    transport.replies.push({ status: 200, body: {} }, { status: 200, body: {} });
+    const forged = { 'x-fy-request-id': 'req-1', authorization: 'Bearer forged', 'x-fy-agenda-channel': '3' };
+
+    // Act
+    await pluginClient(deps, 'board').call('GET /v1/cards/:id', { params: { id: 'c1' }, headers: forged as never });
+    await pluginClient(deps, 'board').call('GET /v1/cards/:id', {
+      params: { id: 'c1' },
+      headers: { 'x-fy-agenda-channel': '2' },
+    });
+
+    // Assert
+    should(transport.sent.map(request => request.headers)).deepEqual([
+      { 'x-fy-request-id': 'req-1' },
+      { 'x-fy-agenda-channel': '2' },
+    ]);
+  });
+
   it('should read the inventory again after a read failed, so one bad read is not held for ever', async () => {
     // Arrange
     let reads = 0;

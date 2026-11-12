@@ -58,6 +58,12 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
    `POST /v1/pair/code`: a `local-only` link on the port the daemon really bound must come back, and is cancelled
    (`DELETE /v1/pair/code/:pairingId`). A wildcard bind still refuses with `wildcard-bind`. Owner block !A472, 2026-11-12.
    No code is ever printed.
+9. **The real `fy` starts a ferret on a real `fyd`**: the `merge bar 9` case in
+   `packages/core/ferrets/tests/integration/daemon/ferret-auth/ferret-auth.test.ts` (smoke step 2) types `fy start` against a
+   REAL `fyd` on a temp home and an ephemeral loopback port (stand-in harness, fake provider, no network), reads the
+   ferret back through `fy ps`, and sees the reply. The 5.0 preview refused every `fy new` / `fy start` with "a start must
+   carry x-fy-request-id" because the CLI shell dropped the header a half set; every other start test used a raw
+   `POST /v1/ferrets`. No credential is printed.
 
 ## After merge
 
