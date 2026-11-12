@@ -12,7 +12,7 @@ import { ensureInternalRootBases, nodeFs, rootsPortFor } from '@ferretry/kernel/
 import type { LoginFile } from '../../../contract/index.ts';
 import { sampleLogin } from '../../../contract/testing/index.ts';
 import { codexCredentialSource } from '../../../daemon/adapters/credentials/codex-credential.ts';
-import { OwnedLoginStore } from '../../../daemon/adapters/credentials/owned-store.ts';
+import { HOST_STORE_PENDING, OwnedLoginStore } from '../../../daemon/adapters/credentials/owned-store.ts';
 import { loginKinds } from '../../../daemon/lib/kinds.ts';
 
 const NOW = Date.parse('2026-10-16T09:00:00Z');
@@ -171,11 +171,11 @@ describe('logins:openai credential()', () => {
     expect(answer).toEqual({ kind: 'unavailable', sentence: 'the login team is spent by Codex only' });
   });
 
-  test('a host store is unavailable: this build reads owned stores only', async () => {
+  test('a host store is unavailable: a host store is not in 5.0 yet', async () => {
     const f = await fixture();
     const answer = await f.kinds.openai.credential?.('mine', 'codex');
     expect(answer?.kind).toBe('unavailable');
-    expect(answer?.kind === 'unavailable' ? answer.sentence : '').toContain('owned login stores');
+    expect(answer?.kind === 'unavailable' ? answer.sentence : '').toContain('is not in 5.0 yet');
   });
 
   test('a login of another kind is refused, and only the openai kind has a credential at all', async () => {
@@ -211,9 +211,7 @@ describe('codexCredentialSource asked directly, as the other callers of the port
 
   test('a host store is refused by the owned catalog: no problem sentence hides it, and nothing is shared for it', async () => {
     const f = await fixture();
-    expect(await f.source.problem('mine')).toBe(
-      'the login mine cannot be used: this build can only read owned login stores',
-    );
+    expect(await f.source.problem('mine')).toBe(`the login mine cannot be used: ${HOST_STORE_PENDING}`);
     expect(await f.source.share('mine')).toBeUndefined();
     expect(await f.source.share('nobody')).toBeUndefined();
   });
@@ -227,9 +225,7 @@ describe('codexCredentialSource asked directly, as the other callers of the port
         }) as Awaited<ReturnType<Parameters<typeof codexCredentialSource>[0]['catalog']['entry']>>,
     };
     const source = codexCredentialSource({ catalog: hostCatalog, store: f.store, roots: f.logins });
-    expect(await source.problem('mine')).toBe(
-      'the login mine cannot be used: this build can only read owned login stores',
-    );
+    expect(await source.problem('mine')).toBe(`the login mine cannot be used: ${HOST_STORE_PENDING}`);
     expect(await source.share('mine')).toBeUndefined();
   });
 });

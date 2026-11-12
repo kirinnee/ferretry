@@ -71,6 +71,66 @@
       "id": "links-keep-history-parse-worker",
       "what": "the harness conversation lists: the Conversations screen (list and preview), keep as a ferret and the harness history, which say \"Not in 5.0 yet\" in one sentence until Ferrets lists what a harness holds; and the transcript parse worker (the reader parses on the main thread, paced). Due 2026-11-27, card &F3447",
       "owner": "britnee"
+    },
+    {
+      "id": "moves-forks-handover-warden-auto-move",
+      "what": "moves, forks, handover and the Warden's automatic move of a ferret to another login; each answers \"Not in 5.0 yet\" (card &F3455) (due 2026-11-27)",
+      "owner": "britnee"
+    },
+    {
+      "id": "managed-worktrees",
+      "what": "managed worktrees: a daemon hosts none and says \"Not in 5.0 yet\" (card &F3451) (due 2026-11-27)",
+      "owner": "britnee"
+    },
+    {
+      "id": "live-model-chips",
+      "what": "live model chips: the chat shows no model chip that follows a switch; Runtimes says so (card &F3452) (due 2026-11-27)",
+      "owner": "britnee"
+    },
+    {
+      "id": "compact-at-send-retry",
+      "what": "compact-at renewal and a send's Retry: the person Retry route and ConversationApi.retrySend still answer 503, and the composer draws no Retry (card &F3456) (due 2026-11-27)",
+      "owner": "britnee"
+    },
+    {
+      "id": "pack-routing",
+      "what": "Pack routing: the model list, Jev's ranking and saving the routing prompt from the app say \"Not in 5.0 yet\" (card &F3457) (due 2026-11-27)",
+      "owner": "britnee"
+    },
+    {
+      "id": "cli-skeleton-verbs",
+      "what": "CLI skeleton verbs: the verbs that answer \"Not in 5.0 yet\" (card &F3458) (due 2026-11-27)",
+      "owner": "britnee"
+    },
+    {
+      "id": "hold-fyi-to-turn-end",
+      "what": "holding an fyi until the receiver's turn ends (and combining action sends): in 5.0 an fyi is typed at once (card &F3459) (due 2026-11-27)",
+      "owner": "britnee"
+    },
+    {
+      "id": "m2-unbuilt-agent-tools",
+      "what": "M2: the six agent tools no manifest declares yet: account_propose, secure_copy, secure_list, secure_discard, secure_paste and task_plan (card &F1787) (due 2026-11-27)",
+      "owner": "britnee"
+    },
+    {
+      "id": "host-store-codex-login",
+      "what": "host-store Codex login (store: host): a Codex login kept in the terminal's own folder cannot start a ferret. Migration step: list each Codex login by name; an old terminal sign-in keeps working (card &F3468) (due 2026-11-27)",
+      "owner": "britnee"
+    },
+    {
+      "id": "credential-link-operation",
+      "what": "a dedicated credential link operation, replacing the linkTo/copyTree refusals for credential homes (card &F3537) (due 2026-11-27)",
+      "owner": "britnee"
+    },
+    {
+      "id": "board-asks-read-performance",
+      "what": "board and Asks read performance (card &F3491) (due 2026-11-27)",
+      "owner": "britnee"
+    },
+    {
+      "id": "held-delivery-on-revive",
+      "what": "held messages delivered on revive (ports-pending, the Conversation send-path line, limit 1; card &F3456): 5.0 keeps no durable hold for a revive, so a held send is not delivered when its ferret is revived (due 2026-11-27)",
+      "owner": "britnee"
     }
   ]
 }

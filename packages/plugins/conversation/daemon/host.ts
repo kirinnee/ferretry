@@ -103,9 +103,9 @@ import { parseSessionId, type SessionId, tryParseSessionId } from './seams/ferre
 import type { ClockPort } from './seams/ports.ts';
 import type { SessionView } from './seams/protocol.ts';
 
-/** Said by every route that needs the ferret's terminal and is not connected to it: an explicit send retry, the compact-at setting. */
+/** Said by every route that needs the ferret's terminal and is not connected to it: an explicit send retry, the compact-at setting, a handover. Not in 5.0 yet (cards &F3456, &F3455). */
 const TERMINAL_PENDING =
-  "This needs the ferret's terminal, and Conversation is not connected to it yet. Drive the ferret from its terminal for now.";
+  'Not in 5.0 yet: typing a send again (Retry), the compact-at setting and a handover. Drive the ferret from its terminal for now.';
 
 const pending = (sentence: string = TERMINAL_PENDING): never => {
   throw new ApiError(503, sentence, 'conversation_terminal_unavailable');

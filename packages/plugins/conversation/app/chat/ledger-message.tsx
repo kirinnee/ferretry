@@ -53,6 +53,10 @@ import type { SendDismiss, SendExpand } from './settled-send-note.tsx';
 export const UNBOUND_SEND_COPY =
   'Ferretry can’t confirm this, because it can’t find this session’s transcript. Check the Console tab before sending it again.';
 
+/** Said under a send the agent may not have, where a Retry would sit. Typing a send again is not in 5.0 yet. */
+export const RETRY_PENDING_COPY =
+  'Not in 5.0 yet: typing this message again (Retry). If it is missing from the chat, send it again yourself.';
+
 export const RESEND_RISK_COPY =
   'The original may still have reached the agent. Sending again could make it read this twice — continue only if that is acceptable.';
 
@@ -574,6 +578,14 @@ function useLedgerActions({
             </button>
           </div>
         </div>
+      ) : null}
+      {onRetry === undefined && (retryable || unconfirmed) && !queueBacked && record.held !== true ? (
+        <p
+          className="mx-panel mb-2 mt-0 border-t border-border-soft pt-1.5 text-[11px] text-muted"
+          data-send-retry-pending=""
+        >
+          {RETRY_PENDING_COPY}
+        </p>
       ) : null}
       {unbound ? (
         <p

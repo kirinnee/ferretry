@@ -144,19 +144,6 @@ export const readHandoff = async (
     }),
   );
 
-export const retrySend = async (
-  client: Pick<PluginClient, 'call'>,
-  ferretId: string,
-  sendId: string,
-  force?: boolean,
-): Promise<SendRecord> =>
-  SendRecordSchema.parse(
-    await client.call('POST /v1/ferrets/:ferretId/sends/:sendId/retry', {
-      params: { ferretId, sendId },
-      body: force === true ? { force: true } : {},
-    }),
-  );
-
 export const cancelSend = async (
   client: Pick<PluginClient, 'call'>,
   ferretId: string,

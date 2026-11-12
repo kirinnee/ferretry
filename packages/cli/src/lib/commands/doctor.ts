@@ -110,8 +110,8 @@ export function diagnose(input: DoctorInput): readonly Finding[] {
   if (skeletons.length > 0)
     findings.push({
       state: 'warn',
-      title: 'not built yet',
-      detail: `${skeletons.join(', ')} answer "not built yet" in this build`,
+      title: 'not in 5.0 yet',
+      detail: `${skeletons.join(', ')} answer "Not in 5.0 yet" in this build`,
     });
   for (const conflict of input.conflicts)
     findings.push({

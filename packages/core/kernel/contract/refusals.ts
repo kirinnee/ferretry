@@ -19,5 +19,5 @@ export const KERNEL_REFUSALS = {
 export type KernelRefusalCode = (typeof KERNEL_REFUSALS)[keyof typeof KERNEL_REFUSALS]['code'];
 
 export function skeletonSentence(title: string): string {
-  return `${title} is not built yet in this version of Ferretry.`;
+  return `Not in 5.0 yet: ${title}.`;
 }

@@ -496,7 +496,10 @@ export class ManagedWorktreeService {
 
   #managedRoot(): string {
     if (this.managedRoot === undefined) {
-      throw new WorktreeError('no_managed_root', 'this daemon has no managed worktree root, so it hosts no checkouts');
+      throw new WorktreeError(
+        'no_managed_root',
+        'Not in 5.0 yet: managed worktrees. This daemon has no managed worktree root, so it hosts no checkouts.',
+      );
     }
     return this.managedRoot;
   }

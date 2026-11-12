@@ -54,11 +54,10 @@ import {
   type ChatRefreshEnvironment,
   queueWatcher,
   sendCanceller,
-  sendRetrier,
   sendSubmitter,
   startChatRefresh,
 } from './chat-refresh.ts';
-import type { SendCancel, SendRetry, SendSubmit } from './ledger-message.tsx';
+import type { SendCancel, SendSubmit } from './ledger-message.tsx';
 import { placeLedgerRows } from './ledger-placement.ts';
 import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse } from './send-ledger.ts';
 import { SessionChatPage } from './session-chat-page.tsx';
@@ -251,11 +250,6 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
   const toggleSend = useCallback<SendExpand>((record, open) => expandSend(record.sendId, open), [expandSend]);
   /** Asks for fresh evidence at once. Stable, so what is built over it is not rebuilt for nothing. */
   const refreshSends = useCallback(() => void refreshControl.current?.refresh(true), []);
-  /** A row's Retry, under the send's ORIGINAL id — see `sendRetrier`. */
-  const retrySend = useMemo<SendRetry>(
-    () => sendRetrier(client, ferretId, refreshSends),
-    [client, ferretId, refreshSends],
-  );
   /** A row's Cancel — takes the send back; the daemon says what that did on the agent's screen. */
   const cancelSend = useMemo<SendCancel>(
     () => sendCanceller(client, ferretId, refreshSends),
@@ -318,7 +312,6 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
             onExpand={toggleSend}
             {...(navigate === undefined ? {} : { onNavigate: (to: string) => navigate(to) })}
             onRefresh={refresh}
-            onRetry={retrySend}
             onSubmit={submitSend}
             {...(question === undefined ? {} : { question })}
             {...(readingPosition === undefined ? {} : { readingPosition })}

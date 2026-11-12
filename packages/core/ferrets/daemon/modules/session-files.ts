@@ -58,11 +58,7 @@ const NO_LAUNCHER = new Proxy({} as SessionLifecycleLauncher, {
     typeof member === 'symbol'
       ? undefined
       : () => {
-          throw new ApiError(
-            503,
-            `Launching a ferret pane (${member}) is not built yet in this version of Ferretry.`,
-            'plugin_unavailable',
-          );
+          throw new ApiError(503, `Not in 5.0 yet: launching a ferret pane (${member}).`, 'plugin_unavailable');
         },
 });
 

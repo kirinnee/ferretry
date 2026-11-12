@@ -146,11 +146,7 @@ describe('files API', () => {
   it('says a root walk that is not bound yet (503 plugin_unavailable) is unavailable on this machine, not a retry', async () => {
     resetFsProbes();
     const { scope } = setup({
-      changes: refusal(
-        503,
-        'plugin_unavailable',
-        'The ferret file browser is not built yet in this version of Ferretry.',
-      ),
+      changes: refusal(503, 'plugin_unavailable', 'Not in 5.0 yet: the ferret file browser.'),
     });
     await loadFsChanges(scope);
     expect(readFsProbe(scope).state).toBe('unsupported');

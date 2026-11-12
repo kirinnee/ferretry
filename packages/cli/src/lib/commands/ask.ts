@@ -1,6 +1,6 @@
 /**
  * `fy ask` (§2.2 Asks): lists and answers the asks waiting, whichever plugin raised them and whether or not the
- * Agenda plugin is on. It speaks only to the routes Asks declares; with none declared it says Asks is not built yet.
+ * Agenda plugin is on. It speaks only to the routes Asks declares; with none declared it says Not in 5.0 yet: Asks.
  *
  * ASSUMPTION, one place: the route keys below. Reconcile with the Asks manifest when its routes land.
  */

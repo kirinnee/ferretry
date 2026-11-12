@@ -26,6 +26,10 @@ import type { AnthropicUsageProbe } from './anthropic-usage-probe.ts';
 import type { CodexUsageProbe } from './codex-usage-probe.ts';
 
 /** The calls this store makes on the kernel's `credentials` root. No host-home or keychain authority exists here. */
+/** Said for a login kept in the person's own terminal sign-in folder (store: host): not in 5.0 yet. Their terminal's own sign-in is not touched and still works. */
+export const HOST_STORE_PENDING =
+  "using a login kept in your terminal's own sign-in folder (store: host) is not in 5.0 yet; the sign-in in your terminal itself still works";
+
 export type OwnedLoginRoot = Pick<RootHandle, 'resolve' | 'readText' | 'stat' | 'lstat' | 'ensurePrivateDirectory'>;
 
 const describe = (info: Pick<RootLstat, 'kind' | 'size' | 'modified' | 'mode' | 'links'>): string =>
@@ -87,7 +91,7 @@ export class OwnedLoginStore {
           return {
             harness: credential.harness,
             store: 'host',
-            unavailable: 'this build can only read owned login stores',
+            unavailable: HOST_STORE_PENDING,
           };
         // A login is one directory, never a path supplied by a configuration name.
         if (id.length === 0 || id === '.' || id === '..' || /[/\\\0]/u.test(id))

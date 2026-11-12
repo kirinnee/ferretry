@@ -1683,7 +1683,7 @@ export class FerretsService implements FerretsApi {
     if (this.ports.move === undefined)
       return err({
         code: 'plugin_unavailable',
-        reason: 'Moving a ferret is not built yet in this version of Ferretry.',
+        reason: 'Not in 5.0 yet: moving a ferret.',
       });
     try {
       await this.ports.move(ferret, runtime, options);

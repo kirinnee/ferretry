@@ -250,7 +250,7 @@ describe('boot (§7.6)', () => {
     const skeleton = await host.dispatch(request('GET', '/v1/voice'));
     expect(skeleton.status).toBe(503);
     expect(body(skeleton)).toEqual({
-      error: 'Voice is not built yet in this version of Ferretry.',
+      error: 'Not in 5.0 yet: Voice.',
       code: 'plugin_unavailable',
     });
     expect(admission.asked).toEqual(['route GET /v1/board', 'route GET /v1/agenda', 'route GET /v1/voice']);

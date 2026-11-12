@@ -13,7 +13,7 @@ export const unconfirmedSendOf = (cause: unknown): string | undefined =>
   cause instanceof DaemonCallError && cause.status === 409 ? unconfirmedSendId(cause.body) : undefined;
 
 /** What a person can do about an unconfirmed send, each acting on exactly that send. */
-export type UnconfirmedAction = 'submit' | 'clear' | 'retry';
+export type UnconfirmedAction = 'submit' | 'clear';
 
 /** What the notice says when a retry came back unconfirmed again. */
 export const STILL_UNCONFIRMED_LINE = 'Still not showing in the agent’s box. Open the terminal to check it.';

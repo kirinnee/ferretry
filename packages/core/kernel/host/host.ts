@@ -54,7 +54,7 @@ import type {
   WebSocketPort,
   WorkersPort,
 } from '../contract/ports.ts';
-import { KERNEL_REFUSALS } from '../contract/refusals.ts';
+import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type {
   DaemonContext,
@@ -370,7 +370,7 @@ function unavailablePort(title: string): unknown {
           : () => {
               throw new ApiError(
                 KERNEL_REFUSALS.pluginUnavailable.status,
-                `${title} is not built yet in this version of Ferretry.`,
+                skeletonSentence(title),
                 KERNEL_REFUSALS.pluginUnavailable.code,
               );
             },

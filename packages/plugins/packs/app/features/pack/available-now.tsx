@@ -70,7 +70,9 @@ export function AvailableNow({
         What runtimes here can start right now, ready first, then by quota left.
       </p>
       {available.length === 0 ? (
-        <p className="m-0 text-meta text-warn">No runtime on this machine offers a model right now.</p>
+        <p className="m-0 text-meta text-warn">
+          No runtime on this machine offers a model right now. Listing the models a runtime offers is not in 5.0 yet.
+        </p>
       ) : (
         <ul className="m-0 flex list-none flex-col p-0" aria-labelledby={headingId}>
           {available.map(option => (

@@ -14,7 +14,6 @@ import {
   RELAXED_REFRESH_MS,
   type ChatRefreshEnvironment,
   sendCanceller,
-  sendRetrier,
   sendSubmitter,
   startChatRefresh,
   transcriptEntriesFromLog,
@@ -740,25 +739,6 @@ const SEND_RECORD = {
   attachmentIds: [],
   fate: 'queued',
 };
-
-describe('sendRetrier', () => {
-  test('re-sends under the original id and refreshes, and does nothing without a client', async () => {
-    const calls: unknown[] = [];
-    let refreshed = 0;
-    const client = fakeClient({
-      'POST /v1/ferrets/:ferretId/sends/:sendId/retry': call => {
-        calls.push([call.params['ferretId'], call.params['sendId'], call.body]);
-        return SEND_RECORD;
-      },
-    });
-    const retry = sendRetrier(client, 's-1', () => (refreshed += 1));
-
-    expect(await retry({ sendId: 'send-1' }, true)).toBe(true);
-    expect(await sendRetrier(null, 's-1', () => (refreshed += 1))({ sendId: 'send-1' }, false)).toBe(false);
-    expect(calls).toEqual([['s-1', 'send-1', { force: true }]]);
-    expect(refreshed).toBe(1);
-  });
-});
 
 describe('transcriptEntriesFromLog · who a user record is from', () => {
   /** Aniya's transcript as the daemon renders it: the paste block Claude wrapped the peer send in. */

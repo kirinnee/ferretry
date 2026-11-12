@@ -192,7 +192,7 @@ it through `fy wait`), the board shows the state, and the card's history keeps e
 
 The one digest the owner has allowed (2026-11-03) is not the board's: it is made of messages a FERRET
 labelled `fyi` (`fy send --kind fyi`), which the queue holds and delivers with the receiver's other pending
-ferret messages ([rules](message-delivery.md#labels-and-combined-delivery)). The board's messages are the
+ferret messages (not in 5.0 yet: an `fyi` is typed at once for now) ([rules](message-delivery.md#labels-and-combined-delivery)). The board's messages are the
 daemon's, carry no label, and are never held or combined.
 
 The board types only what a ferret has to **act on**, each as a plain sentence with no tag in front and no

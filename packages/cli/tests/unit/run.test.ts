@@ -72,7 +72,7 @@ describe('runFy', () => {
   it('should answer a skeleton half with the not-built-yet sentence and exit 69', async () => {
     const { world, io } = fakeWorld({ registry: registryOf(skeletonEntry(boardManifest)) });
     should(await runFy(['board'], world)).equal(69);
-    should(io.stderr()).equal('Board is not built yet in this version of Ferretry.\n');
+    should(io.stderr()).equal('Not in 5.0 yet: Board.\n');
   });
 
   it('should hand a plugin verb events through the guarded connection, opened when it first listens', async () => {

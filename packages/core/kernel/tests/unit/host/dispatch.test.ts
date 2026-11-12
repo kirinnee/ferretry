@@ -104,7 +104,7 @@ describe('the dispatcher (§7.1, §7.6 step 6)', () => {
     const response = await dispatcher([skeleton]).dispatch(request('GET', '/v1/board'));
     expect(response.status).toBe(503);
     expect(body(response)).toEqual({
-      error: 'Board is not built yet in this version of Ferretry.',
+      error: 'Not in 5.0 yet: Board.',
       code: 'plugin_unavailable',
     });
   });

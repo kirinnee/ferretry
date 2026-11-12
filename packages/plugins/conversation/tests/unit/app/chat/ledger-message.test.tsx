@@ -3,6 +3,7 @@ import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import {
   LedgerMessage,
   RESEND_RISK_COPY,
+  RETRY_PENDING_COPY,
   runResendOnce,
   UNBOUND_SEND_COPY,
 } from '../../../../app/chat/ledger-message.tsx';
@@ -461,6 +462,22 @@ describe('LedgerMessage', () => {
     await click(buttonLabelled(row, 'Send again anyway'));
 
     expect(attempts).toEqual([['send-1', true]]);
+  });
+
+  test('with no retry served, a flagged send offers none and says typing it again is not in 5.0 yet', async () => {
+    for (const flagged of [
+      record({ fate: 'unaccounted', unaccountedReason: 'timeout' }),
+      record({ fate: 'timed_out', retryable: true }),
+    ]) {
+      const row = render(<LedgerMessage record={flagged} />);
+
+      expect(textOf(row)).toContain(RETRY_PENDING_COPY);
+      expect(RETRY_PENDING_COPY).toContain('Not in 5.0 yet');
+      expect(await actionKeys(row)).not.toContain('retry');
+      expect(await actionKeys(row)).not.toContain('send-again');
+    }
+    // A row that is merely still sending has nothing to retry, so it says nothing about it.
+    expect(textOf(render(<LedgerMessage record={record()} />))).not.toContain(RETRY_PENDING_COPY);
   });
 
   test('offers no resend for a send whose session has no provable transcript, and says why', async () => {

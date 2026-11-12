@@ -5,7 +5,7 @@ import {
   splitTranscriptImageMarkers,
   type TranscriptImageMarker,
 } from '../../contract/index.ts';
-import { cancelSend, retrySend, submitSend } from './chat-reads.ts';
+import { cancelSend, submitSend } from './chat-reads.ts';
 import type { FerretView } from '@ferretry/core-ferrets/contract';
 import { projectDeliveries } from './peer-delivery.ts';
 import { type TranscriptEntry } from './transcript-entries.ts';
@@ -1119,24 +1119,6 @@ export const startChatRefresh = (input: ChatRefreshInput): ChatRefreshControl =>
 export const queueWatcher =
   (control: { readonly current: Pick<ChatRefreshControl, 'watchQueue'> | null | undefined }) => (): (() => void) =>
     control.current?.watchQueue() ?? (() => undefined);
-
-/**
- * A ledger row's Retry, bound to one ferret: re-sends under the send's ORIGINAL id — which the daemon
- * types again only when it proved the message absent, or when the reader chose "send again anyway"
- * on an unconfirmed one — then asks for fresh evidence so the row moves at once.
- */
-export const sendRetrier =
-  (
-    client: Pick<PluginClient, 'call'> | null,
-    ferretId: string,
-    refresh: () => void,
-  ): ((record: { readonly sendId: string }, force: boolean) => Promise<boolean>) =>
-  async (record, force) => {
-    if (client === null) return false;
-    await retrySend(client, ferretId, record.sendId, force);
-    refresh();
-    return true;
-  };
 
 /**
  * A ledger row's Cancel, bound to one ferret: takes the send back (erasing it from the agent's composer

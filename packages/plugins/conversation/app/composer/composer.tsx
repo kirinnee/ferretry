@@ -1030,12 +1030,11 @@ export function Composer({
   const unconfirmedActions: readonly UnconfirmedAction[] = [
     ...(api.submitSend === undefined ? [] : (['submit'] as const)),
     ...(api.cancelSend === undefined ? [] : (['clear'] as const)),
-    ...(api.retrySend === undefined ? [] : (['retry'] as const)),
   ];
   const unconfirmedLock = useRef(false);
   /**
-   * "Send it", "Clear it" or "Retry" on the send the agent never showed as typed — each on that send's
-   * own id, so the daemon acts only on that message. Send it and a retry that went through finish the
+   * "Send it" or "Clear it" on the send the agent never showed as typed — each on that send's
+   * own id, so the daemon acts only on that message. Send it finishes the
    * send here as any delivered one does; Clear it takes it out of the agent's box and leaves the
    * person's text in the composer to edit or send again.
    */
@@ -1053,8 +1052,7 @@ export function Composer({
         setUnconfirmed(null);
         return;
       }
-      if (action === 'submit') await api.submitSend?.(ferretId, pending.sendId);
-      else await api.retrySend?.(ferretId, pending.sendId, true);
+      await api.submitSend?.(ferretId, pending.sendId);
       lastQueued.current = null;
       setUnconfirmed(null);
       finishSent(mark, sentScope, { words: draft.trim(), sendId: pending.sendId, disposition: 'delivered' });

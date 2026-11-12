@@ -60,7 +60,7 @@ describe('Settings › Pack mode', () => {
     expect(root.querySelector('[data-pack-outcome]')?.getAttribute('data-pack-outcome')).toBe('pending');
 
     expect(textOf(must(root.querySelector('[data-pack-jev-cap]'), 'cap'))).toBe('Daily cap: $0.25 (default $0.25)');
-    expect(textOf(root)).toContain('Jev is not wired in this build yet: nothing is ranked by it and nothing is spent');
+    expect(textOf(root)).toContain('Jev ranking is not in 5.0 yet: nothing is ranked by it and nothing is spent');
     const jev = must([...root.querySelectorAll<HTMLInputElement>('input[name="pack-decision"]')][1], 'jev');
     await click(jev);
     await waitFor(() => patches.length === 2, 'the decision save');

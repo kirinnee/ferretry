@@ -35,8 +35,7 @@ import type { SessionId } from './lib/session-id.ts';
  *             signals — the kernel has no signal capability for a pid; host.procWorkingDirectory — no cwd read.
  */
 
-const unavailable = (what: string): ApiError =>
-  new ApiError(503, `${what} is not built yet in this version of Ferretry.`, 'plugin_unavailable');
+const unavailable = (what: string): ApiError => new ApiError(503, `Not in 5.0 yet: ${what}.`, 'plugin_unavailable');
 
 /** An object whose every member is a function that refuses with 503 when CALLED; reading one touches nothing. */
 function unbound<T extends object>(what: string): T {

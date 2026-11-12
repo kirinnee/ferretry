@@ -132,7 +132,7 @@ describe('test host', () => {
     const answer = await host.request('GET', '/v1/later');
     expect(answer.status).toBe(503);
     expect(answer.json()).toEqual({
-      error: 'Later is not built yet in this version of Ferretry.',
+      error: 'Not in 5.0 yet: Later.',
       code: 'plugin_unavailable',
     });
   });

@@ -192,7 +192,7 @@ describe('daemon-less screens', () => {
     delete got.props;
     // No provider at all: the defence-in-depth branch must answer before anything reads the shell.
     const mounted = await mount(<ScreenView daemon="d1" screen={screen} params={{ tab: 'start' }} />);
-    expect(mounted.container.textContent).toContain('Landing is not built yet');
+    expect(mounted.container.textContent).toContain('Not in 5.0 yet: Landing');
     expect(got.props).toBeUndefined();
     await mounted.unmount();
   });
@@ -232,7 +232,7 @@ describe('daemon-less screens', () => {
       />,
     );
     await settle();
-    expect(mounted.container.textContent).toContain('Welcome is not built yet');
+    expect(mounted.container.textContent).toContain('Not in 5.0 yet: Welcome');
     await mounted.unmount();
   });
 });

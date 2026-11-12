@@ -67,7 +67,7 @@ export interface BuiltWorktrees {
 /** Operations for a daemon with no managed root: the service refuses before it would ever call one. */
 const NO_HOST_OPERATIONS: ManagedWorktreeOperations = new Proxy({} as ManagedWorktreeOperations, {
   get: () => async () => {
-    throw new WorktreeError('no_managed_root', 'this daemon hosts no managed worktrees');
+    throw new WorktreeError('no_managed_root', 'Not in 5.0 yet: managed worktrees. This daemon hosts none.');
   },
 });
 

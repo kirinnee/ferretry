@@ -382,7 +382,7 @@ function MoveToAnotherLogin({
     >
       <LayerRow
         title="Move the ferret to another login"
-        detail="Same chat, same card — only the login changes. It goes to a login of the same kind that is ready, switched on, under its budget and has quota left. Off: the Warden tells you and you move it."
+        detail="Not in 5.0 yet: nothing moves a ferret on its own, so this does nothing for now. When it is built: same chat, same card — only the login changes. It goes to a login of the same kind that is ready, switched on, under its budget and has quota left. Off: the Warden tells you and you move it."
         on={moving.enabled}
         onToggle={enabled => setMoving({ enabled })}
       >

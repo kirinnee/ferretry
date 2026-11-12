@@ -292,11 +292,7 @@ export type FileBrowserRouteKey = (typeof FILE_BROWSER_ROUTE_KEYS)[number];
 
 /** The spine's skeleton answer (D10), until the kernel's root walk is bound. */
 function notBuilt(): never {
-  throw new ApiError(
-    503,
-    'The ferret file browser is not built yet in this version of Ferretry.',
-    'plugin_unavailable',
-  );
+  throw new ApiError(503, 'Not in 5.0 yet: the ferret file browser.', 'plugin_unavailable');
 }
 
 /**

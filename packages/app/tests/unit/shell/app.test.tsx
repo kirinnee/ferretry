@@ -265,7 +265,7 @@ describe('the app shell', () => {
       />,
     );
     await settle();
-    expect(view.container.textContent).toContain('Agenda is not built yet in this version of Ferretry.');
+    expect(view.container.textContent).toContain('Not in 5.0 yet: Agenda.');
     await view.unmount();
   });
 

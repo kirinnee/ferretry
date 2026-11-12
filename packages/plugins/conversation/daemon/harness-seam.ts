@@ -74,8 +74,8 @@ export const NOT_READY_SENTENCES: Readonly<Record<PaneNotReadyReason, string>> =
 
 /**
  * Said when the message WAS typed and nothing proved it landed. It is never typed again: it may be in the agent's box
- * now, or still on its way there. Retry, Clear and Enter on a send are not served from here yet, so the person is sent
- * to the ferret's terminal.
+ * now, or still on its way there. Retry on a send is not in 5.0 yet (Clear and Enter are served), so the person is sent
+ * to the ferret's terminal if it must be typed again.
  */
 export const UNCONFIRMED_SENTENCE =
   "the message was typed into the agent's box, but the agent has not shown it there yet, so it was not typed again. It may still appear: check the ferret's terminal before sending it again";

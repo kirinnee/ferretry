@@ -77,13 +77,13 @@ describe('fy plugin', () => {
     should(io.stderr()).containEql('--with-dependents');
   });
 
-  it('should, once confirmed, say the write is not built yet instead of pretending', async () => {
+  it('should, once confirmed, say the write is not in 5.0 yet instead of pretending', async () => {
     const { world, io } = fakeWorld({
       registry: dependency(),
       inventory: inventoryOf({ id: 'base', contract: 'b' }, { id: 'top', contract: 't' }),
     });
     should(await runFy(['plugin', 'off', 'base', '--with-dependents'], world)).equal(69);
-    should(io.stderr()).containEql('not built yet');
+    should(io.stderr()).containEql('Not in 5.0 yet');
   });
 
   it('should refuse to turn a plugin on while what it needs is off, and a core piece either way', async () => {
@@ -102,10 +102,10 @@ describe('fy plugin', () => {
     should(coreWorld.io.stderr()).containEql('core piece');
   });
 
-  it('should say the data-plugin verbs are not built yet', async () => {
+  it('should say the data-plugin verbs are not in 5.0 yet', async () => {
     const { world, io } = fakeWorld();
     should(await runFy(['plugin', 'add', './x'], world)).equal(69);
-    should(io.stderr()).containEql('data plugins is not built yet');
+    should(io.stderr()).containEql('Not in 5.0 yet: Installing and checking data plugins');
   });
 });
 
@@ -228,7 +228,7 @@ describe('fy doctor', () => {
       conflicts: [{ line: 'doctor', owner: 'clash', keptFrom: 'shell' }],
     });
     const titles = findings.map(finding => finding.title);
-    should(titles).containEql('not built yet');
+    should(titles).containEql('not in 5.0 yet');
     should(titles).containEql('bad commands');
     should(titles).containEql('verb conflict');
     should(titles).containEql('daemon-only plugins');
@@ -492,10 +492,10 @@ describe('fy ask', () => {
     return fake;
   };
 
-  it('should say Asks is not built yet while it declares no routes', async () => {
+  it('should say Asks is not in 5.0 yet while it declares no routes', async () => {
     const { world, io } = fakeWorld();
     should(await runFy(['ask'], world)).equal(69);
-    should(io.stderr()).containEql('Asks is not built yet');
+    should(io.stderr()).containEql('Not in 5.0 yet: Asks');
   });
 
   it('should list the asks waiting, or say none are', async () => {

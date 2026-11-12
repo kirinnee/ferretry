@@ -51,6 +51,27 @@ export const OWNER_MOVED_ITEMS: readonly { readonly id: string; readonly decisio
     id: 'coverage-lag',
     decision: '!A484: the coverage lag (12 unit batches + 40 int files, #32 CI-only proof) moves after merge',
   },
+  {
+    id: 'moves-forks-handover-warden-auto-move',
+    decision: 'lizzette 2026-11-11 sweep ruling: moves/forks/handover/Warden auto-move after merge (&F3455)',
+  },
+  { id: 'managed-worktrees', decision: 'lizzette 2026-11-11 sweep ruling: managed worktrees after merge (&F3451)' },
+  { id: 'live-model-chips', decision: 'lizzette 2026-11-11 sweep ruling: live model chips after merge (&F3452)' },
+  {
+    id: 'compact-at-send-retry',
+    decision: 'lizzette 2026-11-11 sweep ruling: compact-at + send retry after merge (&F3456)',
+  },
+  { id: 'pack-routing', decision: 'lizzette 2026-11-11 sweep ruling: pack routing after merge (&F3457)' },
+  { id: 'cli-skeleton-verbs', decision: 'lizzette 2026-11-11 sweep ruling: CLI skeleton verbs after merge (&F3458)' },
+  { id: 'hold-fyi-to-turn-end', decision: 'lizzette 2026-11-11: hold-to-turn-end after merge (&F3459)' },
+  { id: 'm2-unbuilt-agent-tools', decision: 'lizzette 2026-11-11: M2 moves after merge' },
+  { id: 'host-store-codex-login', decision: 'lizzette 2026-11-11: host-store Codex after merge (&F3468)' },
+  {
+    id: 'credential-link-operation',
+    decision: 'lizzette 2026-11-12: dedicated credential link operation after merge (&F3537)',
+  },
+  { id: 'board-asks-read-performance', decision: 'lizzette 2026-11-11: board perf after merge (&F3491)' },
+  { id: 'held-delivery-on-revive', decision: 'lizzette 2026-11-12: held delivery on revive after merge (&F3456)' },
 ];
 
 export const COUNT_NAMES = ['parityOpen', 'portsPendingLines', 'guaranteesMissing'] as const;

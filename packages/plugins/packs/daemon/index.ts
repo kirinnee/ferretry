@@ -135,7 +135,7 @@ export default implementDaemon(manifest, {
       write: async () => {
         throw new ApiError(
           503,
-          'The configuration writer is not available to Pack mode yet; edit config/packs.yaml by hand.',
+          'Not in 5.0 yet: saving the routing prompt from here. Edit config/packs.yaml by hand.',
           'config_write_unavailable',
         );
       },

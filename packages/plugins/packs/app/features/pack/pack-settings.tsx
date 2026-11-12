@@ -34,7 +34,7 @@ const DECISIONS: readonly { readonly id: PackDecisionMode; readonly label: strin
   {
     id: 'jev',
     label: 'Jev decides',
-    hint: 'Jev reads the same routing prompt and ranks the models available now for each task. Jev is not wired in this build yet: nothing is ranked by it and nothing is spent, so the routing prompt’s order is used.',
+    hint: 'Jev reads the same routing prompt and ranks the models available now for each task. Jev ranking is not in 5.0 yet: nothing is ranked by it and nothing is spent, so the routing prompt’s order is used.',
   },
 ];
 

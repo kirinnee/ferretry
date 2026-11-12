@@ -197,6 +197,10 @@ once each (owner-approved 2026-11-03).
 | `action`  | After `actionWindowMs` (60 s) from its arrival, with every ferret message that arrived in that time.          |
 | `fyi`     | When the receiver ends a turn that began after it arrived, or after `fyiMaxHoldMs` (10 min), whichever first. |
 
+> **Not in 5.0 yet (due 2026-11-27, [`rebuild/after-merge.json`](rebuild/after-merge.json)):** holding an `fyi` until the
+> receiver's turn ends, and combining `action` messages for a minute. In 5.0 an `fyi` is typed at once, like an `action`; the
+> table above is the design it will be built to.
+
 These are never held, whatever label they carry or lack: **the owner's messages, the daemon's (Warden,
 Board, Agenda) and a ferret's `--now`**. A **question** (`--ask`, `--expect-reply`) is never held at all, as
 news or to be combined: the CLI makes it a blocker and refuses `--kind fyi` beside it, and the daemon treats

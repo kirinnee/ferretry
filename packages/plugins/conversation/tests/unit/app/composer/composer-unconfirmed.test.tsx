@@ -53,15 +53,15 @@ describe('the notice', () => {
   test('offers the taps it is given, in order, and names no terminal or session', () => {
     const taps: UnconfirmedAction[] = [];
     const view = render(
-      <UnconfirmedSendNotice actions={['submit', 'clear', 'retry']} busy={false} onAct={action => taps.push(action)} />,
+      <UnconfirmedSendNotice actions={['submit', 'clear']} busy={false} onAct={action => taps.push(action)} />,
     );
     const passive = render(<UnconfirmedSendNotice actions={[]} busy={false} failure="nope" onAct={() => undefined} />);
 
     const buttons = view.root.findAll(node => node.type === 'button');
     for (const button of buttons) run(() => button.props.onClick());
 
-    expect(buttons.map(button => [button.props.children].flat().join(''))).toEqual(['Send it', 'Clear it', 'Retry']);
-    expect(taps).toEqual(['submit', 'clear', 'retry']);
+    expect(buttons.map(button => [button.props.children].flat().join(''))).toEqual(['Send it', 'Clear it']);
+    expect(taps).toEqual(['submit', 'clear']);
     const words = (tree: ReactTestRenderer): string =>
       tree.root
         .findAll(node => node.type === 'p')
@@ -94,13 +94,12 @@ type Answer = 'ok' | 'unconfirmed' | Error;
 interface Calls {
   readonly submitted: string[];
   readonly cancelled: string[];
-  readonly retried: Array<readonly [string, boolean | undefined]>;
 }
 
 /** The shipped composer, with its first send answered `send_unconfirmed` and each tap answering `answer`. */
 const composerWith = async (answer: Answer, withActions = true) => {
   writeMdComposePref('off');
-  const calls: Calls = { submitted: [], cancelled: [], retried: [] };
+  const calls: Calls = { submitted: [], cancelled: [] };
   let sent = 0;
   const act = async (record: () => void): Promise<SendRecord> => {
     record();
@@ -119,8 +118,7 @@ const composerWith = async (answer: Answer, withActions = true) => {
           ? {
               submitSend: async (_id: string, sendId: string) => await act(() => calls.submitted.push(sendId)),
               cancelSend: async (_id: string, sendId: string) => await act(() => calls.cancelled.push(sendId)),
-              retrySend: async (_id: string, sendId: string, force?: boolean) =>
-                await act(() => calls.retried.push([sendId, force])),
+              retrySend: async () => await act(() => undefined),
             }
           : {}),
       }}
@@ -155,6 +153,7 @@ const composerWith = async (answer: Answer, withActions = true) => {
       view.root.findAll(node => node.type === 'section' && node.props['data-unconfirmed-send'] !== undefined).length >
       0,
     failure: () => lines('fy-occupied-composer__failure'),
+    hint: () => lines('fy-occupied-composer__hint'),
     error: () => lines('fy-composer-error'),
     buttons: () =>
       view.root.findAll(node => node.type === 'button' && node.props['data-unconfirmed-action'] !== undefined).length,
@@ -169,7 +168,7 @@ describe('the composer with an unconfirmed send', () => {
     expect(harness.shown()).toBe(true);
     expect(harness.error()).toBeNull();
     expect(harness.draft()).toBe('look thru the emails');
-    expect(harness.buttons()).toBe(3);
+    expect(harness.buttons()).toBe(2);
     run(() => harness.view.unmount());
   });
 
@@ -197,14 +196,14 @@ describe('the composer with an unconfirmed send', () => {
     run(() => harness.view.unmount());
   });
 
-  test('Retry forces the same send again, never a new one, and finishes it when it goes through', async () => {
+  test('draws no Retry: typing it again is not in 5.0 yet, and the notice says so', async () => {
     const harness = await composerWith('ok');
 
-    await harness.tap('retry');
-
-    expect(harness.calls.retried).toEqual([[SEND_ID, true]]);
-    expect(harness.sends()).toBe(1);
-    expect(harness.draft()).toBe('');
+    expect(harness.buttons()).toBe(2);
+    expect(
+      harness.view.root.findAll(node => node.type === 'button' && node.props['data-unconfirmed-action'] === 'retry'),
+    ).toHaveLength(0);
+    expect(harness.hint()).toContain('Typing it again (Retry) is not in 5.0 yet.');
     run(() => harness.view.unmount());
   });
 
@@ -214,15 +213,15 @@ describe('the composer with an unconfirmed send', () => {
     );
     const again = await composerWith('unconfirmed');
 
-    await refused.tap('retry');
-    await again.tap('retry');
+    await refused.tap('submit');
+    await again.tap('submit');
 
     expect(refused.failure()).toContain('press Enter instead');
     expect(again.failure()).toBe(STILL_UNCONFIRMED_LINE);
     for (const harness of [refused, again]) {
       expect(harness.shown()).toBe(true);
       expect(harness.draft()).toBe('look thru the emails');
-      expect(harness.buttons()).toBe(3);
+      expect(harness.buttons()).toBe(2);
     }
     run(() => {
       refused.view.unmount();

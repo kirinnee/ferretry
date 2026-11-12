@@ -2,9 +2,9 @@
  * THE UNCONFIRMED-SEND NOTICE — under the composer, when a message was typed into the agent's own box
  * and the agent never showed it there in time.
  *
- * The person's text stays in the composer above, so nothing is lost. Three taps, each on exactly that
- * send: "Send it" presses Enter on it in the agent's box, "Clear it" takes it back out, and "Retry"
- * types it again — which the daemon does only when it can prove no copy is sitting there. No session
+ * The person's text stays in the composer above, so nothing is lost. Two taps, each on exactly that
+ * send: "Send it" presses Enter on it in the agent's box and "Clear it" takes it back out. A "Retry"
+ * that types it again is not in 5.0 yet (the daemon answers 503), so none is drawn. No session
  * id and no terminal remedy: the person is in the app, and the app can do it.
  */
 
@@ -26,7 +26,6 @@ export interface UnconfirmedSendNoticeProps {
 const LABELS: Readonly<Record<UnconfirmedAction, string>> = {
   submit: 'Send it',
   clear: 'Clear it',
-  retry: 'Retry',
 };
 
 export function UnconfirmedSendNotice({ busy, failure, actions, onAct }: UnconfirmedSendNoticeProps) {
@@ -54,7 +53,7 @@ export function UnconfirmedSendNotice({ busy, failure, actions, onAct }: Unconfi
       <p className="fy-occupied-composer__hint">
         {actions.length === 0
           ? 'Check the agent’s box in the terminal before sending it again.'
-          : 'Send it presses Enter on it in the agent’s box. Clear it takes it out and keeps your text here. Retry types it again only if the box is empty.'}
+          : 'Send it presses Enter on it in the agent’s box. Clear it takes it out and keeps your text here. Typing it again (Retry) is not in 5.0 yet.'}
       </p>
       {failure === undefined ? null : (
         <p className="fy-occupied-composer__failure" role="alert">
