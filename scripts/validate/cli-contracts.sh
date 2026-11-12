@@ -331,13 +331,14 @@ homebrew-cask)
     .homebrew_casks[0].conflicts == [{cask: ($product + "@4")}] and
     $v4[0].conflicts == [{cask: $product}] and
     ($v4[0] | del(.name, .skip_upload, .conflicts)) == (.homebrew_casks[0] | del(.name, .conflicts))' >/dev/null
-  rg -q "^  conflicts_with cask: \"${product}@4\"$" "Casks/${product}.rb"
+  # GoReleaser writes conflicts_with as a one-line string or a multi-line array; accept both.
+  rg -Uq "^  conflicts_with cask: (\\[\\s*)?\"${product}@4\",?(\\s*\\])?$" "Casks/${product}.rb"
   # Before the release this file does not exist yet. Once GoReleaser commits it, every normal
   # validation run proves its version is still a v4 release, even on the v5 branch.
   if [ -f "Casks/${product}@4.rb" ]; then
     rg -q '^  version "4\.[0-9]+\.[0-9]+"$' "Casks/${product}@4.rb"
     rg -q "^cask \"${product}@4\" do$" "Casks/${product}@4.rb"
-    rg -q "^  conflicts_with cask: \"${product}\"$" "Casks/${product}@4.rb"
+    rg -Uq "^  conflicts_with cask: (\\[\\s*)?\"${product}\",?(\\s*\\])?$" "Casks/${product}@4.rb"
   fi
   ;;
 installer-checksum)
