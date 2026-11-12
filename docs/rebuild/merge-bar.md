@@ -64,9 +64,12 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
    starts and by every apply, and ALSO when the damage happens after a healthy boot: a launch reader that meets it asks
    the repair job to run (the read itself never publishes; a healthy manifest never causes a publish), so the next start
    after a moment passes. A repair that fails throws, so the job runner retries it with its backoff until it works (proved
-   with the real runner over a driven clock). The start boundary (`LaunchGate.decide`) says the manifest is being rebuilt
+   with the real runner over a driven clock); the repair has ONE owner across its running and backoff states, so refused
+   reads while it waits add neither an attempt nor a second retry timer. The start boundary (`LaunchGate.decide`) says the manifest is being rebuilt
    and to try again. The old file is kept beside it (owner-only, verified, at most the 3 most recent) and one plain line
-   says so (the file is named, never its contents); a start resolves its runtime from the rebuilt file with the same
+   says so (the file is named, never its contents). Pruning touches only copies this writer made (its exact name, one link,
+   contents that hash to the name's digest) and removes them by identity with a regular-file-only unlink, never a
+   recursive remove; a start resolves its runtime from the rebuilt file with the same
    harness homes, and a valid manifest is left alone. Live v4 outage, 2026-11-12.
 
 ## After merge
