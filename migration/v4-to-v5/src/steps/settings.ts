@@ -50,8 +50,12 @@ import {
 } from '../v4/config.ts';
 import { failureNote, V4InputError } from '../v4/documents.ts';
 import { PREVIEW_CODEX_RUNTIMES, PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
+import { loginShell } from './preview-logins.ts';
 import {
+  CODEX_HELD_SENTENCE,
   heldReason,
+  LOGIN_UNNAMED_HELD_SENTENCE,
+  holdsCodex,
   type ProfileScopes,
   previewProfileScopes,
   type RuntimeHarness,
@@ -375,6 +379,27 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
   if (address.kind === 'component' && (address.componentKind === 'settings' || address.componentKind === 'hooks')) {
     await planHarnessComponent(ctx, plan, file, document, address.componentKind, address.name);
     return;
+  }
+  // The preview carries a login only as a signed-out shell (see `./preview-logins.ts`); a Codex login stays held.
+  if (address.kind === 'login' && ctx.preview === true) {
+    const shell = loginShell(document, holdsCodex(ctx));
+    if (shell.kind === 'held') {
+      plan.dropped.push({
+        what: `login ${address.name}${shell.harness === 'codex' ? ' (Codex)' : ' (its harness is not named)'}`,
+        why: shell.harness === 'codex' ? CODEX_HELD_SENTENCE : LOGIN_UNNAMED_HELD_SENTENCE,
+      });
+      return;
+    }
+    if (shell.removed.length > 0)
+      plan.dropped.push({
+        what: `login ${address.name}: ${shell.removed.join(', ')}`,
+        why: 'a login is carried as a signed-out shell (harness, store, label, preset, env references): these fields are left behind',
+      });
+    if (shell.storeMoved)
+      plan.dropped.push({
+        what: `login ${address.name}: store host`,
+        why: "the preview's HOME is empty, so a host login would find no sign-in; it is written as a Ferretry-store login you sign in to",
+      });
   }
   // A plain key in a login's env is parked for the vault and written here as a reference; any other secret-shaped value
   // (and a key when no hold exists) still fails the step below, so nothing is ever left plain.
@@ -798,12 +823,15 @@ const scalarOf = (map: YAMLMap, key: string): string | undefined => {
 /**
  * Preview only: leaves out every runtime that is not provably a Claude Code one, and every profile that only such
  * runtimes use. Only a runtime PROVEN to be a Claude Code one is kept: its own `harness`, else the harness its login
- * names (the stage's map, `runtimeHarnessOf`; v4's own rule, never the runtime's name). The preview leaves every v4 login
- * file out, so a login the map does not know leaves the harness unknown, and an unknown one is held, said truthfully.
- * Each held runtime is listed by NAME.
+ * names (the stage's map, `runtimeHarnessOf`; v4's own rule, never the runtime's name). The preview carries each Claude
+ * login as a signed-out shell, so a login the map does not know leaves the harness unknown, and an unknown one is held,
+ * said truthfully; so is a runtime whose login was not carried. Each held runtime is listed by NAME.
  */
 function holdCodexRuntimes(plan: Plan, ctx: Pick<StepContext, 'previewLoginHarnesses'>, scopes: ProfileScopes): void {
   const planned = [...plan.files.entries()];
+  const carriedLogins = new Set(
+    planned.flatMap(([, file]) => (file.target === LOGINS_CONFIG && file.name !== undefined ? [file.name] : [])),
+  );
   const held = new Map<string, RuntimeHarness>();
   const profilesOf = new Map<string, { held: number; kept: number; codex: number }>();
   for (const [path, file] of planned) {
@@ -811,12 +839,12 @@ function holdCodexRuntimes(plan: Plan, ctx: Pick<StepContext, 'previewLoginHarne
     const map = file.document.contents;
     const own = scalarOf(map, 'harness');
     const profile = scalarOf(map, 'profile');
-    const harness = runtimeHarnessOf(
-      ctx,
-      own,
-      scalarOf(map, 'login'),
-      profile === undefined ? undefined : scopes.get(profile),
-    );
+    const login = scalarOf(map, 'login');
+    const decided = runtimeHarnessOf(ctx, own, login, profile === undefined ? undefined : scopes.get(profile));
+    // A Claude Code runtime whose login was not carried would make the whole fleet configuration unreadable: it is
+    // held by name. (A Codex, unknown or two-CLI one keeps its own reason.)
+    const harness: RuntimeHarness =
+      decided === 'claude-code' && login !== undefined && !carriedLogins.has(login) ? 'no-login' : decided;
     const isHeld = harness !== 'claude-code';
     if (profile !== undefined) {
       const tally = profilesOf.get(profile) ?? { held: 0, kept: 0, codex: 0 };
@@ -830,7 +858,7 @@ function holdCodexRuntimes(plan: Plan, ctx: Pick<StepContext, 'previewLoginHarne
     plan.files.delete(path);
     uncount(plan, 'runtimes');
     plan.dropped.push({
-      what: `runtime ${file.name}${harness === 'unknown' ? ' (its harness is unknown)' : harness === 'both' ? ' (its login drives both CLIs)' : ' (Codex)'}`,
+      what: `runtime ${file.name}${harness === 'unknown' ? ' (its harness is unknown)' : harness === 'both' ? ' (its login drives both CLIs)' : harness === 'no-login' ? ' (its login is not carried)' : ' (Codex)'}`,
       why: heldReason(harness),
     });
   }

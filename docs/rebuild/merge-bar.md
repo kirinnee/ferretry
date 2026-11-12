@@ -58,6 +58,12 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
    `POST /v1/pair/code`: a `local-only` link on the port the daemon really bound must come back, and is cancelled
    (`DELETE /v1/pair/code/:pairingId`). A wildcard bind still refuses with `wildcard-bind`. Owner block !A472, 2026-11-12.
    No code is ever printed.
+9. **The preview stage loads its whole fleet configuration** (case 2 of the converter's fleet-load check):
+   `migration/v4-to-v5/tests/unit/converted-fleet-loads-preview.test.ts` runs the preview stage (logins carried as
+   signed-out shells, Codex held) and reads its fleet configuration through the very path `fy runtimes` takes (the
+   kernel's `createConfigFiles` plus `runtimesConfigFiles(...).load()`). It must resolve, every carried runtime must be
+   in the model, and every runtime the preview did not carry must be named in the report's hold list with one plain
+   line; never `fleet_catalog_unreadable`. Lead ask, 2026-11-12.
 
 ## After merge
 

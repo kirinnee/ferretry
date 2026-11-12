@@ -11,6 +11,7 @@ import { previewAuthoredFiles, previewHeldFiles, v4HeldFiles } from '../src/step
 import type { LockProbe } from '../src/preflight.ts';
 import { type ConversionReport, summarise } from '../src/report.ts';
 import { PREVIEW_WORKSPACE } from '../src/v5/harness-paths.ts';
+import { HELD_SENTENCES } from '../src/steps/preview-hold.ts';
 import { CODEX_HELD_SENTENCE, previewShellEnv, ZDOT_FOLDER } from '../src/v5/preview-env.ts';
 import { type Spellings } from '../src/v4/homes.ts';
 import { gateFiles, gateForecast } from './gate.ts';
@@ -53,7 +54,7 @@ const isRealFolder = async (path: string): Promise<boolean> =>
  */
 export function heldSection(report: ConversionReport): string {
   const held = report.steps.flatMap(step =>
-    step.notCarried.filter(item => item.why === CODEX_HELD_SENTENCE).map(item => `  - ${item.what}: ${item.why}`),
+    step.notCarried.filter(item => HELD_SENTENCES.includes(item.why)).map(item => `  - ${item.what}: ${item.why}`),
   );
   return held.length === 0
     ? 'HELD OUT OF THE PREVIEW: nothing (no Codex runtime, ferret or route was found)'
@@ -118,7 +119,7 @@ export async function dryRun(
     '',
     'IN THE PREVIEW HOME EVERY FERRET IS STOPPED: no launch command, no terminal handle, no transcript pointer, no',
     'credential hash, no token ledger, no worktree ownership. The runtimes config says autoResume: false.',
-    'LOGINS ARE LEFT OUT OF THE COPY (config/logins is not copied): you add logins fresh in the preview. `prepare` (an agent never runs it) reads each config/logins/*.yaml ONCE, for its harness field (and whether it has both claude and codex halves) and nothing else, to know which runtimes are Claude Code ones; this dry run reads no login file. Do not add a Codex login or runtime to the preview yet.',
+    'LOGINS ARE CARRIED SIGNED OUT: each Claude config/logins/*.yaml becomes an empty shell (harness, store, label, preset, env references; store: host is written as store: ferretry; a plain key is never carried and the preview vault is empty), so every Claude Code runtime loads and shows "Needs sign-in". fleet/credentials (the sign-ins themselves) is never copied: you sign in fresh in the preview. A Codex login is held with the Codex runtimes. `prepare` (an agent never runs it) also reads each config/logins/*.yaml ONCE, for its harness field (and whether it has both claude and codex halves), to know which runtimes are Claude Code ones; this dry run reads no login file. Do not add a Codex login or runtime to the preview yet.',
     'LAST GATE: only fields that are EXECUTED or RESOLVED AS PATHS are checked (a ferret command, agent, folder, env and flags; every',
     'command, argument, env value, home and path of a runtime, profile, component, preset or MCP server). Free text (messages, events,',
     'prompts, notes) is neither gated nor redacted. A hit refuses the whole home, naming file and field, never the value. Spellings',

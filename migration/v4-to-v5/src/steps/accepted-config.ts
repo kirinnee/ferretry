@@ -278,7 +278,7 @@ async function notInEffect(ctx: StepContext): Promise<V4State> {
     if (loosens(address, entry?.text, text, budgeted)) hold(path, 'edit');
   }
   // An entry whose file is gone waits only when deleting it loosens; any other deletion v4 applied at once. The
-  // preview leaves `config/logins` out on purpose (the owner adds logins fresh), so a login entry is not a deletion there.
+  // preview carries a login only as a signed-out shell and holds a Codex one out, so a login entry is not a deletion there.
   for (const [path, entry] of Object.entries(accepted)) {
     if (files.has(path)) continue;
     const address = classifyV4ConfigPath(path);

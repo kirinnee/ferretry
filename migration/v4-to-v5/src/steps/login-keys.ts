@@ -382,10 +382,26 @@ export const loginKeysStep: Step = {
     const hold = ctx.loginKeys;
     const held = hold?.keys() ?? [];
     const named = held.map(
-      (key): KeptItem => ({ what: `${key.name} (login ${key.login}, variable ${key.variable})`, count: 1 }),
+      (key): KeptItem => ({
+        what: `${key.name} (login ${key.login}, variable ${key.variable})`,
+        count: 1,
+      }),
     );
     if (hold === undefined || held.length === 0)
       return { ...base, status: 'converted', note: 'no login holds a plain key', kept: [], sealed: [] };
+    if (ctx.preview === true) {
+      // The preview vault stays EMPTY: a plain key is never carried. The login file names ${secret:NAME}; the owner
+      // stores the secret with `fy secret set NAME`.
+      hold.clear();
+      const names = held.map(key => `${key.name} (login ${key.login}, variable ${key.variable})`).join(', ');
+      return {
+        ...base,
+        status: 'converted',
+        note: `preview: ${String(held.length)} plain key(s) were NOT carried and the preview vault stays empty; each login names a \${secret:NAME}: store it with fy secret set NAME: ${names}`,
+        kept: [],
+        sealed: [],
+      };
+    }
     const listed = held.map(key => `login ${key.login} variable ${key.variable}`).join(', ');
     if (!hold.vaultMoved) {
       // The vault step failed or did not run: sealing now would mint a key beside a vault v4 never handed over.

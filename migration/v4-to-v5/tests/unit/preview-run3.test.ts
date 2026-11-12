@@ -126,7 +126,10 @@ describe('problem 1: the harness comes from the login, through a stage map that 
     expect(JSON.stringify(done.report)).not.toContain(FAKE_KEY);
     expect(done.summary).not.toContain(FAKE_KEY);
     expect(await everything(f.to)).not.toContain(FAKE_KEY);
-    expect(existsSync(join(f.to, 'config/logins'))).toBe(false);
+    // The Claude logins are carried as signed-out shells; the Codex one is held; the plain key was never carried.
+    expect(existsSync(join(f.to, 'config/logins/a-login.yaml'))).toBe(true);
+    expect(existsSync(join(f.to, 'config/logins/h-login.yaml'))).toBe(true);
+    expect(existsSync(join(f.to, 'config/logins/b-login.yaml'))).toBe(false);
   });
 
   test('a login file that is not YAML, or names no harness, is left out and says nothing', async () => {

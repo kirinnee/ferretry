@@ -22,6 +22,22 @@ export const UNKNOWN_HELD_SENTENCE = `held: its harness is unknown (its runtime 
 /** Why a runtime on a login that drives both CLIs is held when its profile includes a model set without a harness. */
 export const BOTH_HELD_SENTENCE = `held: its login drives both CLIs and its profile includes a model set without a harness, which v4 scopes by model ids the preview does not read, so its harness is unknown and it is held like a Codex runtime. ${CODEX_HELD_SENTENCE.replace(/^held: /u, 'Why Codex is held: ')}`;
 
+/** Why a runtime is held when the login it names is not in the preview (a held Codex login, or one the preview cannot read). */
+export const NO_LOGIN_HELD_SENTENCE = `held: the login it names is not carried into the preview (it is a Codex login, or its file could not be read), and a runtime without its login would make the whole fleet configuration unreadable. ${CODEX_HELD_SENTENCE.replace(/^held: /u, 'Why Codex is held: ')}`;
+
+/** Why a login file is held when it does not name a harness the preview can prove is Claude Code. */
+export const LOGIN_UNNAMED_HELD_SENTENCE =
+  'held: the login file does not name its harness (or the file cannot be read), so it is not provably a Claude Code login; the runtimes that name it are held too. Add the login fresh';
+
+/** Every sentence that says a runtime (or what uses one) is held; the dry run and the report list a held item by these. */
+export const HELD_SENTENCES: readonly string[] = [
+  CODEX_HELD_SENTENCE,
+  UNKNOWN_HELD_SENTENCE,
+  BOTH_HELD_SENTENCE,
+  NO_LOGIN_HELD_SENTENCE,
+  LOGIN_UNNAMED_HELD_SENTENCE,
+];
+
 /** What the stage knows of one v4 login: its harness, and whether it drives both CLIs (halves for both). */
 export interface LoginHarness {
   readonly harness: 'claude' | 'codex';
@@ -29,11 +45,17 @@ export interface LoginHarness {
 }
 
 /** What a runtime is, as far as the preview can prove. `both`: a two-CLI login whose profile does not decide. */
-export type RuntimeHarness = 'claude-code' | 'codex' | 'unknown' | 'both';
+export type RuntimeHarness = 'claude-code' | 'codex' | 'unknown' | 'both' | 'no-login';
 
 /** Why a held runtime, or what uses one, is held. */
 export const heldReason = (harness: RuntimeHarness): string =>
-  harness === 'unknown' ? UNKNOWN_HELD_SENTENCE : harness === 'both' ? BOTH_HELD_SENTENCE : CODEX_HELD_SENTENCE;
+  harness === 'unknown'
+    ? UNKNOWN_HELD_SENTENCE
+    : harness === 'both'
+      ? BOTH_HELD_SENTENCE
+      : harness === 'no-login'
+        ? NO_LOGIN_HELD_SENTENCE
+        : CODEX_HELD_SENTENCE;
 
 /**
  * A profile's scope as v4 derives it (`profileScope`): the one CLI its layers are for (`claude`, `codex`), `generic`
