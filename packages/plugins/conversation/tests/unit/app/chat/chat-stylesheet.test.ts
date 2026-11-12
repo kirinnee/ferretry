@@ -82,6 +82,42 @@ describe("the chat's own stylesheet", () => {
       expect(rule(css, selector)).toContain('font-size: var(--text-xs);');
   });
 
+  it('draws a send’s time and receipt in the muted text token, which is at least 4.5:1 on the bubble in both studio themes', () => {
+    // `--faint` measured 4.34:1 (light) and 4.37:1 (dark) on the bubble: under AA for this small text.
+    expect(rule(css, '.fy-receipt-line .fy-receipt')).toContain('color: var(--fy-muted);');
+    expect(rule(css, '.fy-receipt-line .fy-handoff-via-button')).toContain('color: var(--fy-muted);');
+    const themes = readFileSync(join(import.meta.dir, '../../../../../../app/src/styles/themes.css'), 'utf8');
+    const linear = (channel: number): number => {
+      const unit = channel / 255;
+      return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
+    };
+    const luminance = (hex: string): number => {
+      const value = Number.parseInt(hex.slice(1), 16);
+      return 0.2126 * linear((value >> 16) & 255) + 0.7152 * linear((value >> 8) & 255) + 0.0722 * linear(value & 255);
+    };
+    const token = (block: string, name: string): string => {
+      const found = block.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6});`, 'u'))?.[1];
+      if (found === undefined) throw new Error(`no --${name} in the block`);
+      return found;
+    };
+    const blockOf = (opener: string): string => {
+      const start = themes.indexOf(opener);
+      expect(start).toBeGreaterThan(-1);
+      return themes.slice(start, themes.indexOf('\n}', start));
+    };
+    const light = blockOf(":root[data-theme='studio-light']");
+    const dark = blockOf(":root[data-theme='studio-dark']");
+    // Light's muted is the `:root` default (the first one the file declares); dark redeclares its own.
+    const pairs = [
+      ['studio-light', token(themes, 'muted'), token(light, 'bubble-bg')],
+      ['studio-dark', token(dark, 'muted'), token(dark, 'bubble-bg')],
+    ] as const;
+    for (const [, text, bubble] of pairs) {
+      const [bright, dim] = [luminance(text), luminance(bubble)].sort((a, b) => b - a) as [number, number];
+      expect((bright + 0.05) / (dim + 0.05)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
   it('leaves the rules other homes own to them', () => {
     for (const foreign of ['.fy-question-form', '.fy-remote-browser', '.fy-chat-search', '.fy-convo-row'])
       expect(css).not.toContain(foreign);

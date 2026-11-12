@@ -209,7 +209,7 @@
   align-items: center;
   background: transparent;
   border: 0;
-  color: var(--faint, var(--fy-muted));
+  color: var(--fy-muted);
   cursor: pointer;
   display: inline-flex;
   font-family: var(--font-ui, inherit);
@@ -263,7 +263,7 @@
   align-items: center;
   background: transparent;
   border: 0;
-  color: var(--faint, var(--fy-muted));
+  color: var(--fy-muted);
   display: inline-flex;
   font-family: var(--font-ui, inherit);
   font-size: var(--text-xs);
