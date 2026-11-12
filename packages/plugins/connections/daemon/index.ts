@@ -93,6 +93,18 @@ export function buildConnections(
     config?.relay === undefined || config.relay.length === 0
       ? [DISCOVERED_RELAY_CARRIER]
       : config.relay.map(entry => ({ kind: 'relay', ...entry }));
+  /**
+   * WHERE THIS DAEMON LISTENS, asked at the moment of use. The kernel binds AFTER every plugin is built, so a value
+   * captured at build would be the `connections.yaml` guess for ever. The listener the kernel really bound wins
+   * (`--port`, `FY_PORT` or the default, and `--host`); `direct` in the configuration answers only while nothing is bound.
+   */
+  const listening = (): { readonly host: string; readonly port: number | undefined } => {
+    const bound = ctx.kernel.bind.current();
+    return {
+      host: bound?.host ?? bindings?.host ?? config?.direct?.host ?? '127.0.0.1',
+      port: bound?.port ?? bindings?.port ?? config?.direct?.port,
+    };
+  };
   const scheduler = {
     after: (ms: number, fn: () => void) => ({ cancel: ctx.kernel.clock.after(milliseconds(ms), fn) }),
   };
@@ -123,7 +135,11 @@ export function buildConnections(
     published.tunnel(url);
     ctx.kernel.events.publish(CarriersChanged, { kinds: published.current().map(c => c.kind) });
   };
-  /** Today's `browserOrigins(config)`: what a passkey may name and what a tunnel upgrade's `Origin` may be. */
+  /**
+   * Today's `browserOrigins(config)`: what a passkey may name and what a tunnel upgrade's `Origin` may be. It is read
+   * from the CONFIGURED `direct` block only, never from the listener the kernel bound: where the daemon listens is a
+   * fact for the advertisement and the reachability check, and must not widen who a browser may speak as.
+   */
   const allowedOrigins = (): readonly string[] =>
     browserOrigins({
       corsOrigins: bindings?.corsOrigins ?? [HOSTED_APP_ORIGIN],
@@ -199,7 +215,7 @@ export function buildConnections(
       }
       for (const line of relayBootTrail(sources, started, {
         configFile: configFile.file,
-        host: bindings.host ?? config?.direct?.host ?? '127.0.0.1',
+        host: listening().host,
       }))
         ctx.kernel.log.info(line);
     },
@@ -224,7 +240,7 @@ export function buildConnections(
     title: 'How other devices reach this daemon',
     run: async () => {
       await initialise();
-      const host = bindings?.host ?? config?.direct?.host ?? '127.0.0.1';
+      const { host } = listening();
       const dialled = sources.find(source => dialledRelayUrl(source) !== undefined);
       const reachable = !isLoopbackHost(host) || dialled !== undefined;
       const lines = [
@@ -264,13 +280,14 @@ export function buildConnections(
         carriers,
         advertisement: (): ConnectionAdvertisement => {
           if (bindings === undefined) unavailable();
+          const at = listening();
           return {
             advertisement: decideAdvertisement({
-              host: bindings?.host ?? config?.direct?.host ?? '127.0.0.1',
-              port: bindings?.port ?? config?.direct?.port,
+              host: at.host,
+              ...(at.port === undefined ? {} : { port: at.port }),
               ...(bindings?.publicUrl === undefined ? {} : { operatorPublicUrl: bindings.publicUrl }),
             }),
-            ...(bindings?.port === undefined ? {} : { port: bindings.port }),
+            ...(at.port === undefined ? {} : { port: at.port }),
             appOrigin: HOSTED_APP_ORIGIN,
             allowedOrigins: allowedOrigins(),
             ...(() => {

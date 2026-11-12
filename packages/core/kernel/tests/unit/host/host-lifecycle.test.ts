@@ -741,6 +741,43 @@ describe('boot unwind (§7.6)', () => {
     expect(w.trace.slice(-3)).toEqual(['state:gate:stop', 'watch:stop', 'lock:stop']);
   });
 
+  test('kernel.bind is empty while plugins build, answers what the listener bound, and is empty again once stopped', async () => {
+    const w = await world();
+    let asked: (() => { host: string; port: number } | undefined) | undefined;
+    let atBuild: unknown = 'unread';
+    const reader = implementDaemon(gate, {
+      build: ctx => {
+        asked = () => ctx.kernel.bind.current();
+        atBuild = ctx.kernel.bind.current();
+        return { provides: { admission: recordingAdmission() } };
+      },
+    });
+    const host = await w.boot([reader], {
+      listen: async () => ({
+        addresses: ['fixture'],
+        bound: { host: '127.0.0.1', port: 7458 },
+        stop: async () => undefined,
+      }),
+    });
+    expect(atBuild).toBeUndefined();
+    expect(asked?.()).toEqual({ host: '127.0.0.1', port: 7458 });
+    await host.stop();
+    expect(asked?.()).toBeUndefined();
+  });
+
+  test('kernel.bind stays empty when the listener reports no TCP address', async () => {
+    const w = await world();
+    let asked: (() => unknown) | undefined;
+    const reader = implementDaemon(gate, {
+      build: ctx => {
+        asked = () => ctx.kernel.bind.current();
+        return { provides: { admission: recordingAdmission() } };
+      },
+    });
+    await w.boot([reader], { listen: async () => ({ addresses: ['fixture'], stop: async () => undefined }) });
+    expect(asked?.()).toBeUndefined();
+  });
+
   test('a listener throw releases sessions, build resources, state, watcher and lock', async () => {
     const w = await world();
     let live: RunningHost | undefined;

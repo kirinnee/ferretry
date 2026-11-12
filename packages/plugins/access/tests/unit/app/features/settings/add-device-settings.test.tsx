@@ -191,9 +191,9 @@ describe('AddDeviceCard', () => {
     should(marked(renderer, 'data-pair-url')).have.length(1);
     should(marked(renderer, 'data-pair-code')).have.length(1);
     expect(text(renderer)).toContain('Only a browser on this machine can redeem this link');
-    // Never a dead end: the audience arrives with the edit that widens it.
-    expect(text(renderer)).toContain('publicUrl');
-    expect(text(renderer)).toContain('to the address other devices reach this machine at');
+    // Never a dead end: the audience arrives with the supported way to pair a phone.
+    expect(text(renderer)).toContain('a loopback listener');
+    expect(text(renderer)).toContain('no separate public-address setting yet');
     // The heading and the disclosure must not send the reader looking for a phone that cannot use this.
     expect(text(renderer)).toContain('Open this on this machine');
     expect(text(renderer)).not.toContain('Show this to the device you are adding');

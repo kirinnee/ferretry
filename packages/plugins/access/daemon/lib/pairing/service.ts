@@ -317,17 +317,46 @@ interface PublishedCarrierView {
   current(): readonly DaemonCarrier[];
 }
 
+/** One moment's answer to "what do we hand out": the advertisement, and the rendezvous a fresh device can find itself. */
+export interface PairingReachDecision {
+  readonly advertisement: Advertisement;
+  /**
+   * The rendezvous a device that has never met this daemon can find FOR ITSELF, or nothing.
+   *
+   * IT IS PROVENANCE, NOT AN ADDRESS FROM THE CARRIER LIST, and that distinction is the whole value of
+   * the field. This used to be derived here as "the first published relay of any kind", which was
+   * wrong in exactly the case it mattered: an operator's own rendezvous is published and is NOT
+   * something a fresh phone can discover, so disclosing it beside a QR promised a first pairing that
+   * cannot happen. The composition root supplies this only for a DISCOVERED source — one this daemon
+   * read from the hosted directory advertisement, which is the same advertisement the scanning
+   * device's own build reads — so the claim is true by construction and a self-hosted deployment
+   * fails closed to nothing. That closed door is the declared GAP in `docs/relay-protocol.md` §13.
+   *
+   * IT NEVER REACHES THE LINK. The fragment is `v1;url=…;code=…;fp=…` and carries no rendezvous;
+   * this value exists so the HOST's own screens know a loopback-bound daemon is redeemable anyway and
+   * can draw the QR plus the metadata disclosure.
+   */
+  readonly discoveredRelayUrl?: string;
+}
+
 interface PairingServiceOptions {
   readonly daemonId: string;
   readonly daemonName: string;
   /**
-   * WHAT THIS DAEMON HANDS OUT, decided by the configuration and never by a caller.
+   * WHAT THIS DAEMON HANDS OUT, decided by the configuration and never by a caller — and ASKED AT EVERY MINT.
    *
    * An address alone is what this used to take, and an address alone cannot say whether the device
    * about to read it can dial it. The decision arrives already made, from one owner, so this service
    * has nothing to derive and no way to derive it differently.
+   *
+   * IT IS A FUNCTION, NOT A VALUE, because the facts behind it are not all known when this service is built:
+   * the kernel binds its listener after every plugin is built, and the owner of the decision may not be
+   * provided yet. A value read once at build froze the fallback in for the life of the process, and a daemon
+   * that was perfectly reachable answered every mint with "no port recorded". The discovered rendezvous
+   * (below) is part of the same decision and is read in the same breath, so a link and its disclosure never
+   * come from two different moments.
    */
-  readonly advertisement: Advertisement;
+  readonly reach: () => PairingReachDecision;
   /**
    * EVERY WAY THIS DAEMON CAN BE REACHED, handed to the device that just earned the right to reach it.
    *
@@ -348,23 +377,6 @@ interface PairingServiceOptions {
    * discovered halfway through a redemption either.
    */
   readonly carriers: PublishedCarrierView;
-  /**
-   * The rendezvous a device that has never met this daemon can find FOR ITSELF, or nothing.
-   *
-   * IT IS PROVENANCE, NOT AN ADDRESS FROM THE LIST ABOVE, and that distinction is the whole value of
-   * the field. This used to be derived here as "the first published relay of any kind", which was
-   * wrong in exactly the case it mattered: an operator's own rendezvous is published and is NOT
-   * something a fresh phone can discover, so disclosing it beside a QR promised a first pairing that
-   * cannot happen. The composition root supplies this only for a DISCOVERED source — one this daemon
-   * read from the hosted directory advertisement, which is the same advertisement the scanning
-   * device's own build reads — so the claim is true by construction and a self-hosted deployment
-   * fails closed to nothing. That closed door is the declared GAP in `docs/relay-protocol.md` §13.
-   *
-   * IT NEVER REACHES THE LINK. The fragment is `v1;url=…;code=…;fp=…` and carries no rendezvous;
-   * this value exists so the HOST's own screens know a loopback-bound daemon is redeemable anyway and
-   * can draw the QR plus the metadata disclosure.
-   */
-  readonly discoveredRelayUrl?: string;
   readonly clock: PairingClock;
   readonly cryptography: PairingCryptography;
   readonly devices: PairingDeviceStore;
@@ -427,7 +439,6 @@ const REFUSED = { kind: 'refused' } as const;
 export class PairingService {
   readonly daemonId: DaemonId;
   private readonly daemonName: string;
-  private readonly advertisement: Advertisement;
   private readonly pairingAppUrl: string;
   private readonly capabilities: readonly string[];
   private readonly rateLimiter: PairingRateLimiter;
@@ -459,7 +470,6 @@ export class PairingService {
     // one array and a redemption from another, which is the disagreement this whole feature exists to
     // end. What is wanted is the CHECK, not the result: `this.options.carriers` stays the one owner.
     PublishedCarriersSchema.parse(options.carriers.current());
-    this.advertisement = normalizedAdvertisement(options.advertisement);
     this.pairingAppUrl = new URL(options.pairingAppUrl ?? FERRETRY_PAIRING_APP_URL).toString();
     this.capabilities = [...(options.capabilities ?? ['daemon-api'])];
     this.rateLimiter = options.rateLimiter ?? new PairingRateLimiter(options.clock);
@@ -518,8 +528,10 @@ export class PairingService {
         readonly discoveredRelayUrl?: string;
       }
     | { readonly refusal: AdvertisementRefusal } {
-    if (this.advertisement.kind === 'none') return { refusal: this.advertisement.refusal };
-    const daemonUrl = this.advertisement.url;
+    const { advertisement: decided, discoveredRelayUrl } = this.options.reach();
+    const advertisement = normalizedAdvertisement(decided);
+    if (advertisement.kind === 'none') return { refusal: advertisement.refusal };
+    const daemonUrl = advertisement.url;
     return {
       daemonUrl,
       // Composed by the protocol's own writer rather than spelled here. The mint schema verifies this
@@ -534,11 +546,11 @@ export class PairingService {
       pairUrl: pairingLinkUrl(this.pairingAppUrl, { daemonUrl, code, daemonId: this.daemonId }),
       // The decision's vocabulary translated into the wire's, in the one place that crosses between
       // them: an address a different device can dial is an address any device can redeem.
-      reach: this.advertisement.kind === 'address' ? 'any-device' : 'local-only',
+      reach: advertisement.kind === 'address' ? 'any-device' : 'local-only',
       // Passed through from the composition root, never derived from `options.carriers`: only a
       // DISCOVERED rendezvous is something a fresh device can find, and this list cannot say which
-      // entry that is. See the option's own comment for why the difference is not cosmetic.
-      ...(this.options.discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl: this.options.discoveredRelayUrl }),
+      // entry that is. See {@link PairingReachDecision} for why the difference is not cosmetic.
+      ...(discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl }),
     };
   }
 

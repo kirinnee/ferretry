@@ -25,7 +25,7 @@ import {
   SocketEndpointSchema,
   TunnelOriginSchema,
 } from '@ferretry/plugin-connections/contract';
-import { type AdvertisementRefusal, WILDCARD_BIND_HOST } from '../contract/index.ts';
+import type { AdvertisementRefusal } from '../contract/index.ts';
 import type { IFyApiClient } from './shell-grants.ts';
 
 /** The one sentence every throwing stand-in answers with. */
@@ -318,37 +318,20 @@ export interface AdvertisementNotice {
   readonly remedy: string;
 }
 
-const CONFIG_DOCUMENT = '<FY_HOME>/config/daemon.json';
-const EXAMPLE_LAN_HOST = '192.168.1.10';
+/** Where 5.0 keeps the direct carrier's host and port (`direct`), spelled the way every other sentence spells it. */
+const CONNECTIONS_DOCUMENT = '<FY_HOME>/config/connections.yaml';
 
-function exampleReachableAddress(daemonUrl: string): string {
-  try {
-    const url = new URL(daemonUrl);
-    url.hostname = EXAMPLE_LAN_HOST;
-    return url.origin;
-  } catch {
-    return `http://${EXAMPLE_LAN_HOST}`;
-  }
-}
+const LOOPBACK_AND_RELAY =
+  'keep the daemon on a loopback listener and let it use a discovered relay, which is how a phone pairs';
 
-function advertiseRemedy(example: string): string {
-  return `set "publicUrl" in ${CONFIG_DOCUMENT} to the address other devices reach this machine at, e.g. ${example}, then restart the daemon`;
-}
+const NO_DIRECT_ROUTE =
+  '5.0 has no separate public-address setting yet, and the daemon refuses direct connections from other machines, so widening the listener does not give another device a direct route';
 
-function bindAndAdvertiseRemedy(example: string): string {
-  return (
-    `bind every interface by setting "host" to "${WILDCARD_BIND_HOST}" on the bind entry in "carriers" (or the top-level "host" if the document has no bind entry), which accepts connections from other ` +
-    `devices on your network, and ${advertiseRemedy(example)}. ` +
-    `Commands on this machine keep reaching it on loopback`
-  );
-}
-
-/** What to say beside a link whose DIRECT address only this machine's own browser can redeem. */
 export function localOnlyNotice(daemonUrl: string, discoveredRelayUrl?: string): AdvertisementNotice {
   if (discoveredRelayUrl === undefined) {
     return {
       audience: `Only a browser on this machine can redeem this link at ${daemonUrl}; no QR is drawn because another device cannot dial it.`,
-      remedy: bindAndAdvertiseRemedy(exampleReachableAddress(daemonUrl)),
+      remedy: `${LOOPBACK_AND_RELAY}; until a relay is discovered, pair from a browser on this machine. ${NO_DIRECT_ROUTE}`,
     };
   }
   return {
@@ -356,7 +339,7 @@ export function localOnlyNotice(daemonUrl: string, discoveredRelayUrl?: string):
       `A browser on this machine redeems this link at ${daemonUrl}; another device can redeem it through ` +
       `the rendezvous at ${discoveredRelayUrl}, which observes connection metadata such as timing and sizes ` +
       `but can never read the code or the exchange.`,
-    remedy: `for a direct connection that no rendezvous carries, ${bindAndAdvertiseRemedy(exampleReachableAddress(daemonUrl))}`,
+    remedy: `nothing to change: the daemon is on a loopback listener with a discovered relay, which is how a phone pairs. ${NO_DIRECT_ROUTE}`,
   };
 }
 
@@ -367,9 +350,9 @@ const REFUSAL_AUDIENCES: Readonly<Record<AdvertisementRefusal, string>> = {
 };
 
 const REFUSAL_REMEDIES: Readonly<Record<AdvertisementRefusal, string>> = {
-  'loopback-bind': bindAndAdvertiseRemedy(`http://${EXAMPLE_LAN_HOST}`),
-  'wildcard-bind': advertiseRemedy(`http://${EXAMPLE_LAN_HOST}:<the port this daemon bound>`),
-  'no-port': `start the daemon once so it records the port it takes, or write "port" on the bind entry in "carriers" of ${CONFIG_DOCUMENT} yourself (or the top-level "port" if the document has no bind entry); "publicUrl" cannot supply an address nothing has bound`,
+  'loopback-bind': `${LOOPBACK_AND_RELAY}; until a relay is discovered, pair from a browser on this machine. ${NO_DIRECT_ROUTE}`,
+  'wildcard-bind': `start the daemon on a loopback listener ("fyd --host 127.0.0.1") and let it use a discovered relay, which is how a phone pairs; a wildcard listener stays refused because ${NO_DIRECT_ROUTE}`,
+  'no-port': `start the daemon so it binds a port ("--port" or FY_PORT chooses it), or write "port" under "direct" in ${CONNECTIONS_DOCUMENT} yourself (a new "direct" block also needs "host"); "direct" answers only while nothing is bound, and the listener you start wins`,
 };
 
 /** What to say when there is no address to hand out at all, per reason. */

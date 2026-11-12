@@ -1,5 +1,5 @@
 import { relative } from 'node:path';
-import type { BinaryNames, ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
+import type { BinaryNames, BoundAddress, ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import type { Instant } from '@ferretry/std';
 import { decideHome } from '../contract/home.ts';
 import { milliseconds } from '@ferretry/std';
@@ -270,6 +270,8 @@ export interface HostAdapters {
 
 export interface Listening {
   readonly addresses: readonly string[];
+  /** The TCP host and port it bound, for plugins that hand the address out (`kernel.bind`). */
+  readonly bound?: BoundAddress;
   stop(): Promise<void>;
 }
 
@@ -480,6 +482,8 @@ async function bootLocked(
     daemonName: daemonNameFrom(adapters.hostname?.() ?? ''),
     binaries: options.binaries ?? PRODUCT_BINARIES,
   });
+  /** Set once the local listener has bound; cleared as it stops. Read lazily through `kernel.bind`. */
+  let listenerAt: BoundAddress | undefined;
   const websockets = adapters.websocket ?? noWebSockets();
   const sessionSigner = createIdentitySigner(identity);
 
@@ -931,6 +935,7 @@ async function bootLocked(
         onStop: lifecycle.onStop.bind(lifecycle),
         stopping: () => lifecycle.stopping(),
       }),
+      bind: { current: () => listenerAt },
       identity: identityPort,
       paths: gatedWhich(
         manifest.id,
@@ -1505,7 +1510,11 @@ async function bootLocked(
   if (options.listen !== undefined) {
     const listener = await options.listen(running);
     listening.push(listener);
-    own(() => listener.stop());
+    listenerAt = listener.bound;
+    own(() => {
+      listenerAt = undefined;
+      return listener.stop();
+    });
   }
   const carriers = new Map<string, AbortController>();
   const stopCarriers = (): void => {
@@ -1543,6 +1552,7 @@ async function bootLocked(
     stopping ??= (async () => {
       try {
         trace.push('stop:listen');
+        listenerAt = undefined;
         stopCarriers();
         for (const listener of [...listening].reverse()) await listener.stop().catch(() => undefined);
         sessionLayer.close();

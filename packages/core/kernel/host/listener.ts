@@ -224,6 +224,7 @@ export async function listenLocal(
     await options.write(runBindPath(options.home), `${JSON.stringify(bind)}\n`);
     return {
       addresses: [socketPath, recordedBindAddress(bind)],
+      bound: { host: bind.host, port: bind.port },
       stop: cleanup,
     };
   } catch (error) {

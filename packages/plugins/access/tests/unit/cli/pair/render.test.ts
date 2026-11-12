@@ -63,11 +63,11 @@ describe('pairing screen', () => {
     should(actual).containEql('http://127.0.0.1:7431');
     should(actual).containEql('Open this link in a browser on THIS machine');
     should(actual).containEql(LOCAL_LINK);
-    // Never a dead end: the audience comes with the change that widens it. Flattened, since the
+    // Never a dead end: the audience comes with the supported way to pair a phone. Flattened, since the
     // remedy's own wrapping is not what this test is about.
     const flattened = actual.replace(/\s+/gu, ' ');
-    should(flattened).containEql('publicUrl');
-    should(flattened).containEql('to the address other devices reach this machine at');
+    should(flattened).containEql('a loopback listener');
+    should(flattened).containEql('no separate public-address setting yet');
     // Everything the code needs to be used by hand is still on the screen.
     should(actual).containEql(`  ${CODE}`);
     should(actual).containEql('Expires in 2:00; the code works once.');
@@ -125,8 +125,8 @@ describe('pairing screen', () => {
     should(actual).not.containEql(QR.split('\n')[0]);
     should(actual.split('\n')[0]).containEql('binds every interface');
     const flattened = actual.replace(/\s+/gu, ' ');
-    should(flattened).containEql('publicUrl');
-    should(flattened).containEql('to the address other devices reach this machine at');
+    should(flattened).containEql('fyd --host 127.0.0.1');
+    should(flattened).containEql('no separate public-address setting yet');
     should(actual).containEql(`  ${CODE}`);
     should(actual).containEql('Expires in 2:00; the code works once.');
     // Same separation applies with no link on the screen at all.

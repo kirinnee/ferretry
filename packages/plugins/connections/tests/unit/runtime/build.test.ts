@@ -623,3 +623,104 @@ describe('the carrier set the daemon publishes (Appendix D, connections batch 3)
     expect(ConnectionsConfigSchema.safeParse({ direct: { host: '0.0.0.0', port: 7431 } }).success).toBe(true);
   });
 });
+
+describe('the advertisement follows the listener the kernel bound', () => {
+  const unbound: ConnectionBindings = { identity, openSession: (layer, key, peer) => layer.open(key, peer) };
+  const hosted = { read: async () => ({ kind: 'available', relayUrl: 'wss://hosted.example/fy' }) as const };
+  const via = (bind: () => { host: string; port: number } | undefined, config?: object) =>
+    testHost({
+      plugins: [
+        implementDaemon(manifest, {
+          build: ctx =>
+            buildConnections(ctx, { ...unbound, directory: hosted, ...kernelConnectionBindings(ctx.kernel) }),
+        }),
+      ],
+      bind,
+      ...(config === undefined ? {} : { config: { 'connections.yaml': config } }),
+    });
+
+  test('a loopback listener with no connections.yaml is a local-only address on the port it really bound', async () => {
+    const host = await via(() => ({ host: '127.0.0.1', port: 7458 }));
+    await host.runJob('relay-discovery');
+    const advertised = host.provided(ConnectionsPort).advertisement();
+    expect(advertised.advertisement).toEqual({ kind: 'local-only', url: 'http://127.0.0.1:7458' });
+    expect(advertised.port).toBe(7458);
+    expect(advertised.discoveredRelayUrl).toBe('wss://hosted.example/fy');
+    expect(advertised.allowedOrigins).toEqual([HOSTED_APP_ORIGIN]);
+    await host.stop();
+  });
+
+  test('the bound port wins over direct.port in the configuration, and the configuration answers only while nothing is bound', async () => {
+    let bound: { host: string; port: number } | undefined;
+    const host = await via(() => bound, { direct: { host: '127.0.0.1', port: 9999 } });
+    await host.runJob('relay-discovery');
+    expect(host.provided(ConnectionsPort).advertisement().advertisement).toEqual({
+      kind: 'local-only',
+      url: 'http://127.0.0.1:9999',
+    });
+    bound = { host: '127.0.0.1', port: 7458 };
+    expect(host.provided(ConnectionsPort).advertisement().advertisement).toEqual({
+      kind: 'local-only',
+      url: 'http://127.0.0.1:7458',
+    });
+    await host.stop();
+  });
+
+  test('it is read when asked, not when built: no port before the listener binds, an address after', async () => {
+    let bound: { host: string; port: number } | undefined;
+    const host = await via(() => bound);
+    expect(host.provided(ConnectionsPort).advertisement().advertisement).toEqual({
+      kind: 'none',
+      refusal: 'no-port',
+    });
+    bound = { host: '127.0.0.1', port: 51234 };
+    expect(host.provided(ConnectionsPort).advertisement().advertisement).toEqual({
+      kind: 'local-only',
+      url: 'http://127.0.0.1:51234',
+    });
+    await host.stop();
+  });
+
+  test('a wildcard listener still refuses with wildcard-bind, whatever the configuration says', async () => {
+    const host = await via(() => ({ host: '0.0.0.0', port: 7458 }), { direct: { host: '127.0.0.1', port: 7458 } });
+    expect(host.provided(ConnectionsPort).advertisement().advertisement).toEqual({
+      kind: 'none',
+      refusal: 'wildcard-bind',
+    });
+    await host.stop();
+  });
+
+  describe('the browser-origin allowlist is the configuration, never the listener', () => {
+    const HOSTED = [HOSTED_APP_ORIGIN];
+    const origins = async (bound: { host: string; port: number } | undefined, config?: object) => {
+      const host = await via(() => bound, config);
+      const allowed = host.provided(ConnectionsPort).advertisement().allowedOrigins;
+      await host.stop();
+      return allowed;
+    };
+    test.each([
+      ['a loopback listener', { host: '127.0.0.1', port: 7458 }],
+      ['a wildcard listener', { host: '0.0.0.0', port: 7458 }],
+      ['a concrete listener', { host: '192.0.2.7', port: 7458 }],
+      ['an ephemeral port', { host: '127.0.0.1', port: 51234 }],
+    ])('with no direct block, %s adds nothing to the hosted origin', async (_name, bound) => {
+      expect(await origins(bound)).toEqual(HOSTED);
+    });
+    test.each([
+      ['loopback', { host: '127.0.0.1', port: 7458 }],
+      ['wildcard', { host: '0.0.0.0', port: 7458 }],
+      ['concrete', { host: '192.0.2.7', port: 7458 }],
+    ])('a direct block that matches the %s listener is unchanged', async (_name, bound) => {
+      expect(await origins(bound, { direct: { host: bound.host, port: bound.port } })).toEqual([
+        ...HOSTED,
+        `http://${bound.host}:${String(bound.port)}`,
+      ]);
+    });
+    test('a direct block that differs from the listener is what stays allowed, not the listener', async () => {
+      expect(await origins({ host: '127.0.0.1', port: 7458 }, { direct: { host: '192.0.2.7', port: 9999 } })).toEqual([
+        ...HOSTED,
+        'http://192.0.2.7:9999',
+      ]);
+    });
+  });
+});

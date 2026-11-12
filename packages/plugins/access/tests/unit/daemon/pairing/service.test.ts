@@ -15,6 +15,7 @@ import {
   PAIRING_MAX_DEVICES,
   PairingRateLimiter,
   PairingService,
+  type PairingReachDecision,
   PushNewDeviceAlert,
 } from '../../../../daemon/lib/pairing/index.ts';
 import { toBase64Url } from '../../../../daemon/lib/proof/binary.ts';
@@ -233,6 +234,8 @@ function fixture(
     readonly compare?: (left: string, right: string) => boolean;
     /** The decision this daemon was built with. Dialable unless a case is about the other two. */
     readonly advertisement?: Advertisement;
+    /** The decision asked at EVERY mint, when a case is about the answer changing between two of them. */
+    readonly reach?: () => PairingReachDecision;
     readonly deviceState?: readonly RecordingDeviceState[];
     readonly connections?: DeviceConnectionRevoker;
     readonly audit?: RecordingAudit;
@@ -255,13 +258,17 @@ function fixture(
   const service = new PairingService({
     daemonId: DAEMON_ID,
     daemonName: 'workstation',
-    advertisement: options.advertisement ?? {
-      kind: 'address',
-      url: 'https://workstation.example.test',
-      origin: 'operator',
-    },
+    reach:
+      options.reach ??
+      (() => ({
+        advertisement: options.advertisement ?? {
+          kind: 'address',
+          url: 'https://workstation.example.test',
+          origin: 'operator',
+        },
+        ...(options.discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl: options.discoveredRelayUrl }),
+      })),
     carriers: { current: () => options.carriers ?? CARRIERS },
-    ...(options.discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl: options.discoveredRelayUrl }),
     clock,
     cryptography,
     devices,
@@ -435,6 +442,29 @@ describe('PairingService minting and status', () => {
     should(service.status(PAIRING_ID)).containDeep({ status: 'pending' });
   });
 
+  it('should ask for the advertisement at every mint, so a fact that arrives after build still makes a link', async () => {
+    // THE 5.0 PREVIEW BUG. The kernel binds after every plugin is built, so the first answer a build could get was
+    // "no port". A service that kept that answer minted codes with no link for the life of the process.
+    let decided: PairingReachDecision = { advertisement: { kind: 'none', refusal: 'no-port' } };
+    const { mint } = fixture({ reach: () => decided });
+
+    const before = mint();
+    decided = {
+      advertisement: { kind: 'local-only', url: 'http://127.0.0.1:7458' },
+      discoveredRelayUrl: 'wss://hosted.example.test/fy',
+    };
+    const after = mint();
+
+    should(before).containDeep({ refusal: 'no-port' });
+    should('pairUrl' in before).be.false();
+    should(after).containDeep({
+      reach: 'local-only',
+      daemonUrl: 'http://127.0.0.1:7458/',
+      discoveredRelayUrl: 'wss://hosted.example.test/fy',
+    });
+    should('pairUrl' in after).be.true();
+  });
+
   it('P91 should answer every caller identically, because the minter is not the redeemer', async () => {
     // THE TRAP. `ApiRequest.loopback` names who is MINTING, and the commonest case there is is
     // somebody standing at the machine minting a code to scan with their phone — minter local,
@@ -546,7 +576,9 @@ describe('PairingService redemption', () => {
       new PairingService({
         daemonId: DAEMON_ID,
         daemonName: 'workstation',
-        advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+        reach: () => ({
+          advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+        }),
         carriers: { current: () => [{ kind: 'direct', url: 'https://operator:hunter2@workstation.example.test' }] },
         clock: new FakeClock(),
         cryptography: new FakeCryptography(),
@@ -661,7 +693,9 @@ describe('PairingService redemption', () => {
     const service = new PairingService({
       daemonId: DAEMON_ID,
       daemonName: 'workstation',
-      advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+      reach: () => ({
+        advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+      }),
       carriers: { current: () => CARRIERS },
       clock: base.clock,
       cryptography: base.cryptography,
@@ -1961,7 +1995,9 @@ describe('PairingService rows the cases above do not name', () => {
       {
         daemonId: DAEMON_ID,
         daemonName: 'workstation',
-        advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+        reach: () => ({
+          advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+        }),
         carriers: { current: () => CARRIERS },
         clock: new FakeClock(),
         cryptography: new FakeCryptography(),
@@ -2001,7 +2037,9 @@ describe('PairingService rows the cases above do not name', () => {
       {
         daemonId: DAEMON_ID,
         daemonName: 'workstation',
-        advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+        reach: () => ({
+          advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+        }),
         carriers: { current: () => CARRIERS },
         clock: new FakeClock(),
         cryptography: new FakeCryptography(),
