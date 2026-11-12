@@ -1,5 +1,7 @@
-import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { contextFor } from '../gen/lib/check.ts';
 import { z } from '../../packages/core/kernel/node_modules/zod';
@@ -12,6 +14,7 @@ import {
   codeSeamsOf,
   routeRegex,
   parseUnwired,
+  readBaseUnwired,
   unwiredFindings,
   unwiredSeams,
 } from './unwired-seams.ts';
@@ -266,5 +269,68 @@ describe('unwired-seams: the whole-file code entry', () => {
     );
     expect(found).toHaveLength(1);
     expect(found[0]?.message).toContain('other-deps.ts:planner');
+  });
+});
+
+describe('unwired-seams: the base the list may not grow from', () => {
+  const git = (cwd: string, ...args: string[]): void => {
+    const run = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8' });
+    if (run.status !== 0) throw new Error(`git ${args.join(' ')}: ${run.stderr}`);
+  };
+  /** A throwaway repo whose one commit holds `ports-pending.json` with `text`, or nothing when `text` is undefined. */
+  const repoWith = (text: string | undefined): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'unwired-base-'));
+    git(dir, 'init', '-q');
+    writeFileSync(join(dir, text === undefined ? 'other.txt' : 'ports-pending.json'), text ?? 'x');
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'base');
+    return dir;
+  };
+  const sentence = (ref: string): string =>
+    `the base ${ref} cannot be read, so nothing proves the unwired list did not grow; fetch the base or pass a readable --base`;
+  const dirs: string[] = [];
+  afterAll(() => {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('a ref that does not exist fails closed with a plain sentence, not a first baseline', () => {
+    const dir = repoWith('{"unwired":[]}');
+    dirs.push(dir);
+    expect(() => readBaseUnwired(dir, 'definitely-missing-base')).toThrow(sentence('definitely-missing-base'));
+  });
+
+  test('a ref that exists but holds no ports-pending.json fails closed', () => {
+    const dir = repoWith(undefined);
+    dirs.push(dir);
+    expect(() => readBaseUnwired(dir, 'HEAD')).toThrow(sentence('HEAD'));
+  });
+
+  test('a readable base with an empty unwired list still reports growth', () => {
+    const dir = repoWith('{"unwired":[]}');
+    dirs.push(dir);
+    const base = readBaseUnwired(dir, 'HEAD');
+    expect(base).toEqual([]);
+    const everySeam = unwiredSeams(facts()).map(s => entry(s.seam));
+    const grew = unwiredFindings(facts(), everySeam, base);
+    expect(grew).toHaveLength(everySeam.length);
+    expect(grew.every(f => f.message.includes('was added; the list may only shrink'))).toBe(true);
+  });
+
+  test('a readable base with no unwired key is the one first baseline', () => {
+    const dir = repoWith('{"format":1,"pending":[]}');
+    dirs.push(dir);
+    expect(readBaseUnwired(dir, 'HEAD')).toBeUndefined();
+  });
+
+  test('a readable base with a list reads it as before', () => {
+    const dir = repoWith(JSON.stringify({ unwired: [{ seam: 'hook:a', card, why: 'x' }] }));
+    dirs.push(dir);
+    expect(readBaseUnwired(dir, 'HEAD')).toEqual([{ seam: 'hook:a', card, why: 'x' }]);
+  });
+
+  test('the check exits with the sentence when the named base is missing', async () => {
+    const root = join(import.meta.dir, '..', '..');
+    const found = await check.run(contextFor(root, { base: 'definitely-missing-dfinal-base' }));
+    expect(found.map(f => f.message)).toEqual([sentence('definitely-missing-dfinal-base')]);
   });
 });

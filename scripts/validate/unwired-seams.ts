@@ -385,13 +385,23 @@ export function parseUnwired(text: string, where: string): UnwiredEntry[] | unde
   });
 }
 
-function readBaseUnwired(root: string, ref: string): UnwiredEntry[] | undefined {
+/**
+ * The `"unwired"` list the base holds. `undefined` means ONE thing: the base was read and parsed and has no
+ * `unwired` key (the true first baseline). A base git cannot read (a bad ref, the file missing at an existing
+ * ref, any git error) throws, because comparing against nothing would let the list grow unchecked.
+ * `file:<path>` is the test spelling; an absent file there is "no baseline".
+ */
+export function readBaseUnwired(root: string, ref: string): UnwiredEntry[] | undefined {
   if (ref.startsWith('file:')) {
     const file = ref.slice(5);
     return existsSync(file) ? parseUnwired(readFileSync(file, 'utf8'), file) : undefined;
   }
   const shown = spawnSync('git', ['show', `${ref}:${PORTS_PENDING}`], { cwd: root, encoding: 'utf8' });
-  return shown.status === 0 ? parseUnwired(shown.stdout, `${ref}:${PORTS_PENDING}`) : undefined;
+  if (shown.status !== 0)
+    throw new Error(
+      `the base ${ref} cannot be read, so nothing proves the unwired list did not grow; fetch the base or pass a readable --base`,
+    );
+  return parseUnwired(shown.stdout, `${ref}:${PORTS_PENDING}`);
 }
 
 export const check: Check = {
