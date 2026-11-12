@@ -67,7 +67,7 @@ test('death cause: adopting a live process clears a stopped ferret’s end cause
   await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
   await f.service.stop(f.id, 'now', 'done', { kind: 'completed' });
   expect((await f.service.get(f.id))?.cause).toEqual({ kind: 'completed' });
-  const adopted = await f.service.attach(f.id, f.runner.adoptable(f.id));
+  const adopted = await f.service.attach(f.id, f.runner.adoptable(f.id), PERSON_ORIGIN);
   expect(adopted.ok).toBe(true);
   const summary = await f.service.get(f.id);
   expect(summary?.state).toBe('working');

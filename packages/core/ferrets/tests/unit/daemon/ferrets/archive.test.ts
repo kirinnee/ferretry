@@ -7,6 +7,7 @@ import {
   FerretsPort,
   FerretStateFile,
   type FerretSummary,
+  PERSON_ORIGIN,
 } from '../../../../contract/index.ts';
 import { ARCHIVE_PASS_JOB } from '../../../../daemon/modules/archive.ts';
 import {
@@ -542,7 +543,7 @@ describe('the session archive: a running ferret is never hidden from the live li
       // An adopted live pane writes only the record: with a document the revival cannot read, the archive flag stays.
       if (damage === 'config') h.state('ferrets').plant(FerretConfigFile, '{damaged', id);
       if (damage === 'state') h.state('ferrets').plant(FerretStateFile, '{damaged', id);
-      const attached = await h.provided(FerretsPort, 'board').attach(id, handle);
+      const attached = await h.provided(FerretsPort, 'board').attach(id, handle, PERSON_ORIGIN);
       expect(attached.ok).toBe(true);
       await settle(h);
       const record = JSON.parse(h.state('ferrets').raw(FerretFiles, id) as string) as { state: string };

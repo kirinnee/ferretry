@@ -9,6 +9,10 @@ describe('parseArgs', () => {
     should(parsed.options).deepEqual({ to: 'done', force: true });
   });
 
+  it('should read a trailing option with no value as a switch (the verb that needs a value says so)', () => {
+    should(parseArgs(['fixture prompt', '--compact-at']).options).deepEqual({ 'compact-at': true });
+  });
+
   it('should read --name=value, --no-name and repeats', () => {
     const parsed = parseArgs(['--label=a', '--label', 'b', '--no-color']);
     should(parsed.options).deepEqual({ label: ['a', 'b'], color: false });

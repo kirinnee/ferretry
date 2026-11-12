@@ -961,3 +961,39 @@ describe.each(LAUNCHING.map(row => [row.name, row] as const))(
     });
   },
 );
+
+// An EXPLICIT start compactAt is judged even when no runtime facts name the model's window (no runtime asked for, or one
+// that is not published): the conservative 200k window v4 used for a model that states none. Mounted start requests.
+describe.each([
+  { label: 'no runtime named', runtime: undefined },
+  { label: 'a runtime that is not published', runtime: 'not-published-runtime' },
+])('an explicit start compactAt with $label', ({ runtime }) => {
+  test('above the 200k unknown-window ceiling is refused before anything is written or started', async () => {
+    const runner = new RecordingRunner();
+    const h = await boot(runner);
+    try {
+      const answer = await start(h, { folder: await folder('unknown-runtime'), runtime, compactAt: 500_000 });
+      expect(answer.status).toBeGreaterThanOrEqual(400);
+      expect(answer.body).toContain(
+        "500k is larger than this model's 200k window, so it could never trigger. Pick 200k or less.",
+      );
+      expect(runner.starts).toBe(0);
+    } finally {
+      await h.stop();
+    }
+  });
+
+  test('within the ceiling still starts, and Auto is never judged', async () => {
+    const runner = new RecordingRunner();
+    const h = await boot(runner);
+    try {
+      const within = await start(h, { folder: await folder('unknown-within'), runtime, compactAt: 150_000 });
+      expect(within.status).toBeLessThan(300);
+      const auto = await start(h, { folder: await folder('unknown-auto'), runtime, compactAt: 'auto' });
+      expect(auto.status).toBeLessThan(300);
+      expect(runner.starts).toBe(2);
+    } finally {
+      await h.stop();
+    }
+  });
+});

@@ -213,12 +213,28 @@ describe('an agent’s resume binds its folder under the same state-home policy 
     expect(harness.launched).toHaveLength(2);
   });
 
-  test('the same swap does not stop the owner’s resume: only an agent is fenced out', async () => {
+  test('the same swap fences the OWNER’S resume of a helper an agent first started: the birth stays fenced whoever asks', async () => {
     const { h, runner, childId } = await stoppedHelper();
     h.setDirectory(PROJECT, `${STATE}/credentials`);
     const before = runner.starts;
 
     const resumed = await h.request('POST', `/v1/ferrets/${childId}/resume`, { body: {} });
+
+    expect(resumed.status).toBeGreaterThanOrEqual(400);
+    expect(resumed.body).toContain('state home');
+    expect(runner.starts).toBe(before);
+  });
+
+  test('the same swap does not stop the owner’s resume of a ferret the owner first started', async () => {
+    const { h, runner, leadId } = await stoppedHelper();
+    expect((await h.request('POST', `/v1/ferrets/${leadId}/stop`, { query: { how: 'now' }, body: {} })).status).toBe(
+      200,
+    );
+    await h.settle();
+    h.setDirectory(PROJECT, `${STATE}/credentials`);
+    const before = runner.starts;
+
+    const resumed = await h.request('POST', `/v1/ferrets/${leadId}/resume`, { body: {} });
 
     expect(resumed.status).toBe(200);
     expect(runner.starts).toBe(before + 1);

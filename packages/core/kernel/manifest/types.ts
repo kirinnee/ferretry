@@ -63,10 +63,18 @@ export interface ToolDecl<Name extends string = string> extends ToolDescriptor {
   readonly input?: z.ZodType;
 }
 
+/** One option a verb takes, as `fy <verb> --help` lists it: the flag as typed (`--compact-at <tokens|auto>`) and its sentence. */
+export interface VerbOptionDecl {
+  readonly flag: string;
+  readonly help: string;
+}
+
 /** A `fy` verb (code) or an alias to an existing verb (data). */
 export interface VerbDecl<Verb extends string = string> {
   readonly verb: Verb;
   readonly summary?: string;
+  /** The options `fy <verb> --help` lists under the summary (only the ones worth naming; the verb's parser owns the rest). */
+  readonly options?: readonly VerbOptionDecl[];
   /** Data plugins only: the verb line this alias runs (`card move --to done`). */
   readonly alias?: string;
 }

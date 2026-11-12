@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { FerretId } from '@ferretry/kernel/contract';
+import type { FerretBirth } from './ids.ts';
 
 /**
  * WHO a launch is for, as the admitted credential decided it — separate from the attribution a resume's turn names
@@ -37,3 +38,14 @@ export const AGENT_ORIGIN: LaunchOrigin = { kind: 'agent' };
 
 /** Whether the launch is fenced out of the state home: only an agent's is. */
 export const originIsAgent = (origin: LaunchOrigin): boolean => origin.kind === 'agent';
+
+/** The birth a record keeps for a start made under `origin`: the origin's own kind, nothing else. */
+export const birthOf = (origin: LaunchOrigin): FerretBirth => origin.kind;
+
+/**
+ * Whether a launch is FENCED out of the state home. It is when this call's origin is an agent, OR the ferret was first
+ * started by an agent, OR its birth is missing (a record that never said who started it, or one that cannot be read):
+ * a doubt fences, so only a recorded `person` or `daemon` birth under a non-agent call launches unfenced.
+ */
+export const launchIsFenced = (origin: LaunchOrigin, birth: FerretBirth | undefined): boolean =>
+  originIsAgent(origin) || birth === undefined || birth === 'agent';

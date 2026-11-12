@@ -144,6 +144,10 @@ export default implementCli(manifest, {
     const start = (role: 'start' | 'new') =>
       verb(async (invocation, presenter) => {
         refuseElsewhere(invocation, role === 'start' ? START_FLAGS_ELSEWHERE : NEW_FLAGS_ELSEWHERE, role);
+        // v4 declared `--compact-at <tokens|auto>` with a REQUIRED argument. The shell's parser reads a bare flag as a
+        // switch (`true`), which `text()` drops: say so here, before anything is read or sent, instead of starting without it.
+        if (typed(invocation, 'compact-at') && text(invocation, 'compact-at') === undefined)
+          throw new SessionCommandError('--compact-at: needs a value. Use auto, or a token count like 250k or 250000.');
         const mode = text(invocation, 'mode') ?? 'auto';
         if (mode !== 'auto' && mode !== 'interactive') throw new SessionCommandError('--mode is auto or interactive');
         const agent = text(invocation, 'agent', 'a', 'runtime');

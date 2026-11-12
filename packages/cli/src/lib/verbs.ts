@@ -2,7 +2,7 @@
  * The verb table: every verb line the registry's manifests declare, plus the shell's own, resolved by the
  * longest run of leading words (`card move` beats `card`). Pure.
  */
-import type { VerbDecl } from '@ferretry/kernel/manifest';
+import type { VerbDecl, VerbOptionDecl } from '@ferretry/kernel/manifest';
 import type { CommandRegistry, RegistryEntry } from './registry.ts';
 
 /** The shell owns exactly these verb lines (§1.4). A plugin may add others under the same first word. */
@@ -60,6 +60,8 @@ export interface VerbEntry {
   /** The plugin that declares it, or `shell` for the shell's own. */
   readonly owner: string;
   readonly summary?: string;
+  /** The options its `--help` lists. */
+  readonly options?: readonly VerbOptionDecl[];
   /** Data plugins only: the verb line this alias runs. */
   readonly alias?: string;
 }
@@ -108,6 +110,7 @@ export function buildVerbTable(registry: CommandRegistry): VerbTable {
         line: decl.verb,
         owner: plugin.id,
         ...(decl.summary === undefined ? {} : { summary: decl.summary }),
+        ...(decl.options === undefined ? {} : { options: decl.options }),
         ...(decl.alias === undefined ? {} : { alias: decl.alias }),
       });
     }

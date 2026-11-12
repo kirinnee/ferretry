@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import type { NotCarried, StepReport } from '../report.ts';
 import { CODEX_HELD_SENTENCE, heldReason, heldRuntimes, holdsCodex } from './preview-hold.ts';
 import { previewFolder, rewriteTranscript } from '../v5/harness-paths.ts';
-import { configs, json, paneFor, runtimeIds, runtimeName, State } from '../v4/ferrets.ts';
+import { configs, json, paneFor, runtimeIds, runtimeName, State, type V4Config } from '../v4/ferrets.ts';
 import type { Step } from './index.ts';
 import { type DetailsSource, prepareDetails } from './ferret-details.ts';
 import { prepareLedgers } from './ferret-ledgers.ts';
@@ -22,6 +22,18 @@ import { prepareLedgers } from './ferret-ledgers.ts';
 export const v5FerretName = (config: { id: string; name: string; teammate?: string }): string =>
   [config.teammate, config.name].find(name => name !== undefined && FerretNameSchema.safeParse(name).success) ??
   config.id;
+
+/**
+ * Who first started a v4 ferret, for the v5 record's `birth`. A ferret with a parent (started by another ferret) is an
+ * AGENT's; so is one v4's own spawn stamp says another session or a warden created. One with no parent and no such stamp
+ * was started by a person. Whatever cannot be told is an agent's: v5 fences an agent-born ferret on every relaunch.
+ */
+function v4Birth(config: V4Config): 'person' | 'agent' {
+  if (config.parent !== undefined) return 'agent';
+  const origin = config.provenance?.origin;
+  if (origin === undefined || origin === 'human') return 'person';
+  return 'agent';
+}
 
 export const ferretsStep: Step = {
   id: 'ferrets',
@@ -144,6 +156,7 @@ export const ferretsStep: Step = {
           name: v5FerretName(config),
           parent: config.parent,
           role: config.parent === undefined ? 'lead' : 'helper',
+          birth: v4Birth(config),
           harness: config.harness === 'claude' ? 'claude-code' : 'codex',
           runner: 'tmux',
           runtime,

@@ -18,6 +18,7 @@ import {
   Harnesses,
   Runners,
   FerretDetailsFile,
+  PERSON_ORIGIN,
 } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner, ferretId, T0 } from '../../../../contract/testing/index.ts';
 import ferrets from '../../../../daemon/index.ts';
@@ -266,11 +267,11 @@ describe('starting, tokens and attach', () => {
     const runner = new FakeRunner();
     const h = await host([{ ...record('lead'), state: 'stopped' }], { harness: new FakeHarness(), runner });
     const handle = runner.adoptable(ferretId('lead'));
-    const attached = await h.provided(FerretsPort).attach(ferretId('lead'), handle);
+    const attached = await h.provided(FerretsPort).attach(ferretId('lead'), handle, PERSON_ORIGIN);
     expect(attached.ok).toBe(true);
     expect(runner.starts).toBe(0);
     expect((await h.provided(FerretsPort).get(ferretId('lead')))?.state).toBe('working');
-    const gone = await h.provided(FerretsPort).attach(ferretId('lead'), '%99' as never);
+    const gone = await h.provided(FerretsPort).attach(ferretId('lead'), '%99' as never, PERSON_ORIGIN);
     expect(gone.ok).toBe(false);
   });
 

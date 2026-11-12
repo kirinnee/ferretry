@@ -75,6 +75,9 @@ export interface RuntimeLaunchFactsSource {
 
 const CLAUDE_CODE = 'claude-code';
 
+/** No window is declared anywhere: the launch falls back to v4's default for a model that states none. */
+const NO_WINDOWS: ModelWindows = { models: [] };
+
 /** What a `start.decide` checked and `launch.parts` is to use: the runtime asked for and the facts it was judged on. */
 interface CheckedLaunch {
   readonly runtime: string;
@@ -95,11 +98,18 @@ export class LaunchGate {
   readonly decide = async (input: StartDecideInput): Promise<HookDecision> => {
     // A decision supersedes whatever an earlier one left for this ferret: nothing checked is ever reused across launches.
     this.#checked.delete(input.ferret);
-    if (input.runtime === undefined) return { allow: true };
     // A START's own compaction trigger is judged against the window of the model it names, for EVERY harness (v4's
     // `checkCompactAt` on the plan's window, before anything was written). A relaunch carries none here (the later launch
-    // falls back to Auto), and a runtime that is not published has no window to judge.
+    // falls back to Auto). A runtime that is not named, or not published, has no declared window: an EXPLICIT value is then
+    // judged against the conservative 200k window v4 used for a model that states none (a `[1m]` selector still states 1M).
     const explicitCompactAt = input.by === 'resume' ? undefined : input.compactAt;
+    if (input.runtime === undefined) {
+      const refusal =
+        explicitCompactAt === undefined
+          ? undefined
+          : checkCompactAt(explicitCompactAt, launchContextWindow(input.model, NO_WINDOWS));
+      return refusal === undefined ? { allow: true } : { allow: false, reason: refusal };
+    }
     if (input.harness !== CLAUDE_CODE && explicitCompactAt === undefined) return { allow: true };
     let facts: RuntimeLaunchFacts | undefined;
     try {
@@ -115,8 +125,8 @@ export class LaunchGate {
               : `the published runtimes could not be read, so runtime ${input.runtime} was not started: its compaction trigger cannot be checked against its model`,
       };
     }
-    if (facts !== undefined && explicitCompactAt !== undefined) {
-      const refusal = checkCompactAt(explicitCompactAt, launchContextWindow(input.model, facts.windows));
+    if (explicitCompactAt !== undefined) {
+      const refusal = checkCompactAt(explicitCompactAt, launchContextWindow(input.model, facts?.windows ?? NO_WINDOWS));
       if (refusal !== undefined) return { allow: false, reason: refusal };
     }
     if (input.harness !== CLAUDE_CODE) return { allow: true };

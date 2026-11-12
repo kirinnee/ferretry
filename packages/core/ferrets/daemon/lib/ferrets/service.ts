@@ -6,7 +6,13 @@ import { ApiError } from '@ferretry/kernel/contract';
 import { applicableInstructions, sectionDigests } from './launch-sections.ts';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { KeyedSerialExecutor } from './serial.ts';
-import { LaunchRefusal, type LaunchOrigin, originIsAgent } from '../../../contract/index.ts';
+import {
+  type FerretBirth,
+  LaunchRefusal,
+  type LaunchOrigin,
+  birthOf,
+  launchIsFenced,
+} from '../../../contract/index.ts';
 import type {
   DeliveryOutcome,
   FerretChangedPayload,
@@ -788,7 +794,7 @@ export class FerretsService implements FerretsApi {
       return failed('harness_unavailable', 'no harness plugin is on');
     // The folder's identity is captured HERE, before any taker is asked, and re-verified as the last step before the
     // harness starts: a swap in between (a link into the state home put where the project was) cannot be launched in.
-    const bound = await this.bindLaunchFolder(folder.value, origin);
+    const bound = await this.bindLaunchFolder(folder.value, origin, birthOf(origin));
     if (!bound.ok) return bound;
     const role = request.role ?? (request.parent === undefined ? 'lead' : 'helper');
     const decision = await this.ports.decide({
@@ -830,6 +836,7 @@ export class FerretsService implements FerretsApi {
       role,
       harness: harnessKey,
       mode: request.options?.mode ?? 'auto',
+      birth: birthOf(origin),
       runner: 'tmux',
       ...(request.runtime === undefined ? {} : { runtime: request.runtime }),
       ...(request.login === undefined ? {} : { login: request.login }),
@@ -1012,7 +1019,7 @@ export class FerretsService implements FerretsApi {
     if (typeof retargeted === 'string') return failed('refused', retargeted);
     // The folder is bound NOW, and an agent's resume gets the verdict an agent's start gets: `verify()` below only proves
     // this binding held, which a folder already swapped into the state home satisfies.
-    const bound = await this.bindLaunchFolder(retargeted.folder, options.origin);
+    const bound = await this.bindLaunchFolder(retargeted.folder, options.origin, found.birth);
     if (!bound.ok) return bound;
     const decision = await this.ports.decide({
       ferret,
@@ -1071,9 +1078,11 @@ export class FerretsService implements FerretsApi {
   /**
    * Adopts a live process by its runner handle WITHOUT restarting it (spine D15): the runner confirms the handle is
    * a live ferret pane, and the record takes the handle and `working`. No token is issued: the adopted process keeps
-   * the bearer it was started with, which `tokens.json` already holds.
+   * the bearer it was started with, which `tokens.json` already holds. It launches nothing, but it is the first sight of
+   * a record that never said who started it, so the admitted caller's origin (required, no default) is kept as that
+   * record's birth. A birth already on the record is NEVER rewritten: it is the one fact every later launch is fenced on.
    */
-  async attach(ferret: FerretId, handle: RunnerHandle): Promise<Result<FerretId, StartFailure>> {
+  async attach(ferret: FerretId, handle: RunnerHandle, origin: LaunchOrigin): Promise<Result<FerretId, StartFailure>> {
     const record = this.registry.get(ferret);
     if (record === undefined) return failed('refused', `no ferret ${ferret}`);
     const runner = this.ports.runner();
@@ -1087,6 +1096,7 @@ export class FerretsService implements FerretsApi {
       state: 'working',
       handle: adopted.value.handle,
       stateAt: this.ports.now(),
+      birth: record.birth ?? birthOf(origin),
     };
     await this.write(working, record.state, 'state');
     return ok(ferret);
@@ -1630,21 +1640,29 @@ export class FerretsService implements FerretsApi {
   }
 
   /**
-   * Binds the launch folder, or refuses with a sentence. A launch FOR an agent never binds a folder inside the state home
-   * (it holds this machine's credentials). The origin is required: there is no caller that is not asked who it acts for.
+   * Binds the launch folder, or refuses with a sentence. A FENCED launch never binds a folder inside the state home (it
+   * holds this machine's credentials). A launch is fenced when this call's origin is an agent, OR the ferret was first
+   * started by an agent, OR its birth is missing: a ferret an agent started stays fenced on every relaunch, whoever
+   * triggers it (a person, the boot recovery, the Warden, a restart, a move). The origin AND the stored birth are
+   * required: there is no caller, and no record, that is not asked who it acts for.
    * Without the port nothing is carried.
    */
   private async bindLaunchFolder(
     folder: string,
     origin: LaunchOrigin,
+    birth: FerretBirth | undefined,
   ): Promise<Result<BoundLaunchFolder | undefined, StartFailure>> {
     if (this.ports.bindFolder === undefined) return ok(undefined);
     const bound = await this.ports.bindFolder(folder).catch(() => err('the launch folder could not be checked'));
     if (!bound.ok) return failed('folder', bound.error);
-    if (originIsAgent(origin) && bound.value.insideStateHome)
+    if (launchIsFenced(origin, birth) && bound.value.insideStateHome)
       return failed(
         'refused',
-        "a ferret never starts a session inside this daemon's state home: choose a project folder",
+        origin.kind === 'agent'
+          ? "a ferret never starts a session inside this daemon's state home: choose a project folder"
+          : birth === undefined
+            ? "this ferret's record does not say who first started it, so it is treated as started by another ferret and never launches inside this daemon's state home: move it to a project folder"
+            : "this ferret was first started by another ferret, so it never launches inside this daemon's state home, whoever asks: move it to a project folder",
       );
     return ok(bound.value);
   }

@@ -145,9 +145,26 @@ describe('LaunchGate.decide: a start’s OWN compaction trigger (v4 checkCompact
     should((await gate(SMALL).decide(input())).allow).be.true();
   });
 
-  it('should leave a start on no runtime, or an unpublished one, alone: there is no window to judge', async () => {
-    should((await gate(SMALL).decide(input({ compactAt: 500_000, runtime: undefined }))).allow).be.true();
-    should((await gate(undefined).decide(input({ compactAt: 500_000 }))).allow).be.true();
+  it('should judge an EXPLICIT start on no runtime, or an unpublished one, against the conservative 200k window', async () => {
+    const sentence = "500k is larger than this model's 200k window, so it could never trigger. Pick 200k or less.";
+    const noRuntime = await gate(SMALL).decide(input({ compactAt: 500_000, runtime: undefined }));
+    should(noRuntime.allow).be.false();
+    should(refusal(noRuntime)).equal(sentence);
+    const unpublished = await gate(undefined).decide(input({ compactAt: 500_000 }));
+    should(unpublished.allow).be.false();
+    should(refusal(unpublished)).equal(sentence);
+    // On another harness too, and for the 200k itself, auto and a [1m] selector (which states its own window) it allows.
+    should((await gate(undefined).decide(input({ harness: 'codex', compactAt: 500_000 }))).allow).be.false();
+    should((await gate(undefined).decide(input({ compactAt: 200_000 }))).allow).be.true();
+    should((await gate(undefined).decide(input({ compactAt: 'auto' }))).allow).be.true();
+    should((await gate(undefined).decide(input({ compactAt: 500_000, model: 'm[1m]' }))).allow).be.true();
+    should((await gate(SMALL).decide(input({ compactAt: 150_000, runtime: undefined }))).allow).be.true();
+  });
+
+  it('should still leave a relaunch and a start with no trigger alone when the runtime is unknown', async () => {
+    should((await gate(undefined).decide(input({ by: 'resume', compactAt: 500_000 }))).allow).be.true();
+    should((await gate(undefined).decide(input())).allow).be.true();
+    should((await gate(SMALL).decide(input({ runtime: undefined }))).allow).be.true();
   });
 
   it('should say so when the published runtimes cannot be read for a codex start that named a trigger', async () => {

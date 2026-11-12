@@ -366,19 +366,32 @@ describe('commands parity', () => {
       expect(negated.calls[0]?.init).toMatchObject({ body: { mode: 'interactive', fast: false, remoteControl: true } });
     });
 
-    test('V-0443 fy start refuses, by name and unsent, a flag whose job another plugin took (--compact-at, --detach) and a bad number or mode', async () => {
-      for (const options of [{ 'compact-at': '250k' }, { detach: true }] as Options[]) {
-        const refused = run({ answers: startAnswers });
-        expect(await refused.verb('start [prompt...]', ['x'], options)).toBe(2);
-        expect(refused.err.join('\n')).toContain(`--${Object.keys(options)[0]}`);
-        expect(refused.calls).toEqual([]);
-      }
+    test('V-0443 fy start refuses, by name and unsent, a flag whose job another plugin took (--detach) and a bad number or mode', async () => {
+      const detached = run({ answers: startAnswers });
+      expect(await detached.verb('start [prompt...]', ['x'], { detach: true })).toBe(2);
+      expect(detached.err.join('\n')).toContain('--detach');
+      expect(detached.calls).toEqual([]);
       const bad = run({ answers: startAnswers });
       expect(await bad.verb('start [prompt...]', ['x'], { cwd: '/abs', interval: 'banana' })).toBe(2);
       expect(await bad.verb('start [prompt...]', ['x'], { cwd: '/abs', mode: 'sideways' })).toBe(2);
       expect(await bad.verb('start [prompt...]', [], { cwd: '/abs' })).toBe(2);
       expect(bad.err.join('\n')).toContain('provide a prompt');
       expect(bad.calls).toEqual([]);
+    });
+
+    test('V-0443 fy start takes --compact-at <tokens|auto> (v4 parity): a valid value is sent, a bare, bad or too-small one is refused before any request', async () => {
+      const valid = run({ answers: startAnswers });
+      expect(await valid.verb('start [prompt...]', ['x'], { cwd: '/abs', 'compact-at': '250k' })).toBe(0);
+      expect(valid.calls[0]?.init).toMatchObject({ body: { compactAt: 250_000 } });
+      const auto = run({ answers: startAnswers });
+      expect(await auto.verb('start [prompt...]', ['x'], { cwd: '/abs', 'compact-at': 'auto' })).toBe(0);
+      expect(auto.calls[0]?.init).toMatchObject({ body: { compactAt: 'auto' } });
+      for (const bad of [true, 'banana', '10']) {
+        const refused = run({ answers: startAnswers });
+        expect(await refused.verb('start [prompt...]', ['x'], { cwd: '/abs', 'compact-at': bad } as Options)).toBe(2);
+        expect(refused.err.join('\n')).toContain('--compact-at:');
+        expect(refused.calls).toEqual([]);
+      }
     });
 
     test('V-0443 fy start --prompt-file reads the brief on the caller’s machine and sends its text AFTER the typed words; no path is sent to the daemon', async () => {

@@ -162,7 +162,12 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
       };
       return await service.resume(ferret, message, forwarded);
     },
-    attach: (ferret, handle) => service.attach(ferret, handle),
+    attach: async (ferret, handle, askedOrigin) => {
+      // Fail closed, as start and resume do: an attach whose origin was not stated is refused.
+      const stated = LaunchOriginSchema.safeParse(askedOrigin);
+      if (!stated.success) return refused(NO_ORIGIN);
+      return await service.attach(ferret, handle, stated.data);
+    },
     handle: ferret => service.handle(ferret),
     workFolder: ferret => service.workFolder(ferret),
     sitrep: ferret => service.sitrep(ferret),

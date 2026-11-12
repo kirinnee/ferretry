@@ -150,6 +150,10 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
   const { entry } = resolved;
   if (asksForHelp(resolved.rest)) {
     io.out(`${identity.binary} ${entry.words.join(' ')}${entry.summary === undefined ? '' : `: ${entry.summary}`}\n`);
+    if (entry.options !== undefined && entry.options.length > 0) {
+      io.out('\noptions:\n');
+      for (const option of entry.options) io.out(`  ${option.flag}\n      ${option.help}\n`);
+    }
     return EXIT.ok;
   }
   const invocation = parseArgs(resolved.rest);

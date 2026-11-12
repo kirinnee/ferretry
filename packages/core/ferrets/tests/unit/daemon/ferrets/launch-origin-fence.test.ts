@@ -3,6 +3,7 @@ import { err, ok } from '@ferretry/std';
 import {
   AGENT_ORIGIN,
   DAEMON_ORIGIN,
+  type FerretBirth,
   type FerretId,
   type LaunchOrigin,
   PERSON_ORIGIN,
@@ -19,6 +20,8 @@ import { additivesFixture } from './additives-fixture.ts';
  */
 const STATE_HOME: BoundLaunchFolder = { insideStateHome: true, verify: async () => ok(undefined) };
 const REFUSED = /never starts a session inside this daemon's state home/u;
+const REFUSED_AGENT_BORN = /was first started by another ferret, so it never launches inside this daemon's state home/u;
+const REFUSED_NO_BIRTH = /does not say who first started it/u;
 
 const agents: readonly [string, LaunchOrigin][] = [
   ['an agent with no ferret (the Warden)', AGENT_ORIGIN],
@@ -141,4 +144,112 @@ test('the ferret id in an agent origin names the caller and gates nothing', asyn
   insideStateHome(f);
   const named: FerretId = ferretId('someone-else');
   expect((await f.service.resume(f.id, undefined, { origin: { kind: 'agent', ferret: named } })).ok).toBe(false);
+});
+
+// ─── the BIRTH origin: a ferret first started by an agent is fenced on every relaunch, whoever triggers it ──────────────
+
+describe('a ferret first started by an agent', () => {
+  const everyone: readonly [string, LaunchOrigin][] = [...unfenced, ...agents];
+
+  for (const [who, origin] of unfenced)
+    test(`${who}: a resume into the state home is refused with the reason and the remedy, and nothing starts`, async () => {
+      const f = additivesFixture({ birth: 'agent' });
+      insideStateHome(f);
+      const resumed = await f.service.resume(f.id, undefined, { origin });
+      expect(resumed.ok).toBe(false);
+      if (!resumed.ok) expect(resumed.error.reason).toMatch(REFUSED_AGENT_BORN);
+      expect(f.runner.starts).toBe(0);
+    });
+
+  test('no attribution actor, automatic flag or ferret id in the origin lifts it', async () => {
+    const f = additivesFixture({ birth: 'agent' });
+    insideStateHome(f);
+    for (const [, origin] of everyone)
+      for (const actor of ['peer', 'warden', 'daemon', undefined] as const)
+        expect(
+          (
+            await f.service.resume(f.id, undefined, {
+              origin,
+              ...(actor === undefined ? {} : { actor }),
+              automatic: true,
+            })
+          ).ok,
+        ).toBe(false);
+    expect(f.runner.starts).toBe(0);
+  });
+
+  test('it launches in an ordinary project folder for a person, as before', async () => {
+    const f = additivesFixture({ birth: 'agent' });
+    expect((await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN })).ok).toBe(true);
+    expect(f.runner.starts).toBe(1);
+  });
+
+  test('a person’s move relaunch of it is fenced, and the old pane keeps running', async () => {
+    const f = additivesFixture({ birth: 'agent' });
+    await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
+    insideStateHome(f);
+    const before = f.runner.starts;
+    const policy = { automatic: false, dedupeSharedRecoveryScope: false, replaceLiveTerminal: true } as const;
+    const target = async () => ({ runtime: 'claude-two', harness: 'claude-code' as const, conversation: 'conv-fern' });
+    const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), target);
+    await expect(resume.resume({ origin: PERSON_ORIGIN, id: f.id as never, policy })).rejects.toThrow(
+      REFUSED_AGENT_BORN,
+    );
+    expect(f.runner.starts).toBe(before);
+    expect(f.registry.get(f.id)?.birth).toBe('agent');
+  });
+});
+
+describe('a record that does not say who first started it', () => {
+  for (const [who, origin] of unfenced)
+    test(`${who}: a resume into the state home is refused (a doubt fences), and nothing starts`, async () => {
+      const f = additivesFixture({ birth: 'missing' });
+      insideStateHome(f);
+      const resumed = await f.service.resume(f.id, undefined, { origin });
+      expect(resumed.ok).toBe(false);
+      if (!resumed.ok) expect(resumed.error.reason).toMatch(REFUSED_NO_BIRTH);
+      expect(f.runner.starts).toBe(0);
+    });
+});
+
+describe('the birth is stamped once, from the origin, and never rewritten', () => {
+  const births: readonly [string, LaunchOrigin, FerretBirth][] = [
+    ['a person', PERSON_ORIGIN, 'person'],
+    ['the daemon’s own start (Packs’ clean-up, the Lessons miner)', DAEMON_ORIGIN, 'daemon'],
+    ['an agent', AGENT_ORIGIN, 'agent'],
+    ['a ferret', { kind: 'agent', ferret: ferretId('lead') }, 'agent'],
+  ];
+  for (const [who, origin, birth] of births)
+    test(`${who}: a start is born ${birth}`, async () => {
+      const f = additivesFixture({ empty: true });
+      const started = await f.service.start({ folder: '/work', by: 'owner' }, origin);
+      expect(started.ok).toBe(true);
+      expect(f.registry.get(f.id)?.birth).toBe(birth);
+    });
+
+  test('a daemon-born ferret relaunches unfenced into the state home, for a person and for the daemon', async () => {
+    const f = additivesFixture({ birth: 'daemon' });
+    insideStateHome(f);
+    expect((await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN })).ok).toBe(true);
+  });
+
+  test('a relaunch under any origin carries the stored birth unchanged', async () => {
+    const f = additivesFixture({ birth: 'agent' });
+    await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
+    expect(f.registry.get(f.id)?.birth).toBe('agent');
+    const g = additivesFixture({ birth: 'person' });
+    await g.service.resume(g.id, undefined, { origin: DAEMON_ORIGIN });
+    expect(g.registry.get(g.id)?.birth).toBe('person');
+  });
+
+  test('an attach needs an origin; it keeps a missing birth from it and NEVER rewrites a stored one', async () => {
+    const stamped = additivesFixture({ birth: 'missing' });
+    expect((await stamped.service.attach(stamped.id, stamped.runner.adoptable(stamped.id), AGENT_ORIGIN)).ok).toBe(
+      true,
+    );
+    expect(stamped.registry.get(stamped.id)?.birth).toBe('agent');
+    const kept = additivesFixture({ birth: 'agent' });
+    expect((await kept.service.attach(kept.id, kept.runner.adoptable(kept.id), PERSON_ORIGIN)).ok).toBe(true);
+    expect(kept.registry.get(kept.id)?.birth).toBe('agent');
+  });
 });

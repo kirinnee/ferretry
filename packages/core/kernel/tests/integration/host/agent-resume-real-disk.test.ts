@@ -46,7 +46,7 @@ afterEach(async () => {
 const caller = 'x-test-caller';
 const asAgent = (ferret: string) => ({ [caller]: ferret });
 
-async function stoppedHelper() {
+async function stoppedHelper(options: { readonly stopLead?: boolean } = {}) {
   const runner = new FakeRunner();
   const harness = new FakeHarness();
   const disk = nodeFs(() => crypto.randomUUID());
@@ -99,6 +99,12 @@ async function stoppedHelper() {
   });
   expect(stopped.status).toBe(200);
   await h.settle();
+  if (options.stopLead === true) {
+    expect((await h.request('POST', `/v1/ferrets/${leadId}/stop`, { query: { how: 'now' }, body: {} })).status).toBe(
+      200,
+    );
+    await h.settle();
+  }
   await rename(project, `${project}-old`);
   await symlink(join(home, 'state'), project);
   return { h, runner, harness, leadId, childId };
@@ -119,11 +125,25 @@ test('an agent’s resume into a folder that is the state home at bind time is r
   }
 });
 
-test('the owner’s resume of the same folder is not fenced out, and launches in the state home as before', async () => {
-  const { h, runner, harness, childId } = await stoppedHelper();
+test('the owner’s resume of a ferret an AGENT first started is fenced too: the helper stays fenced whoever asks', async () => {
+  const { h, runner, childId } = await stoppedHelper();
   const before = runner.starts;
   try {
     const resumed = await h.request('POST', `/v1/ferrets/${childId}/resume`, { body: {} });
+
+    expect(resumed.status).toBeGreaterThanOrEqual(400);
+    expect(resumed.body).toContain('state home');
+    expect(runner.starts).toBe(before);
+  } finally {
+    await h.stop();
+  }
+});
+
+test('the owner’s resume of a ferret the OWNER started is not fenced out, and launches in the state home as before', async () => {
+  const { h, runner, harness, leadId } = await stoppedHelper({ stopLead: true });
+  const before = runner.starts;
+  try {
+    const resumed = await h.request('POST', `/v1/ferrets/${leadId}/resume`, { body: {} });
 
     expect(resumed.status).toBe(200);
     expect(runner.starts).toBe(before + 1);

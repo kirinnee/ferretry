@@ -310,7 +310,15 @@ by everyone …`), nothing is written or narrowed, and the runner is not called.
   token with a ferret behind it, the Warden), so a project swapped for a link into the state home before the relaunch is refused
   (`refused`, zero runner starts) and `verify()` is not the only defence. A queued restart keeps its origin in the queue, and an
   item queued without one drains as an agent's (fails closed). The Warden's own sweep and auto-revive have no person behind
-  them and run as an agent's; the boot auto-resume is the daemon's own recovery and, like a person's, is not fenced out. A port
+  them and run as an agent's. **A ferret first started by an agent is fenced on EVERY relaunch, whoever triggers it** (a person,
+  the boot auto-resume, the Warden, a restart or its drain, a move, a send that revives): its record keeps the BIRTH origin
+  (`birth`: `person`, `daemon` or `agent`) stamped once when it is created and carried unchanged by every later launch, and a
+  launch is fenced when the call's origin is an agent OR the stored birth is `agent` OR the birth is missing (a doubt fences,
+  with a sentence naming the reason and the remedy: move it to a project folder). Only an owner-born or a daemon-born ferret
+  (Packs' clean-up, the Lessons miner, in Ferretry's own folders) relaunches unfenced. The v4 → v5 conversion sets the birth from
+  v4 data: a ferret with a lead, or one v4 stamped as created by another session or a warden, is `agent`; the rest are `person`.
+  An attach (an adoption of a live pane) launches nothing, but takes the caller's origin, required, and keeps it as the birth only
+  when the record has none; a stored birth is never rewritten. A port
   caller whose origin is missing or not a `LaunchOrigin` is refused before anything is asked. A **move**'s route is mounted but
   its relaunch dependencies are unbound on this base (503 `plugin_unavailable`); its relaunch binding already requires the
   route's origin and refuses to launch without one, so enabling its dependencies cannot open a gap.
