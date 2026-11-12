@@ -118,6 +118,15 @@ let
     outputHash = "sha256-pi5vGovCeCJnIYAVjM5ZaxtinBrCS301tYuNXbdAbLI=";
     dontFixup = true;
 
+    # Read by scripts/validate/bun-deps-hash.sh, which fails a change to the install inputs that did not
+    # refresh `outputHash` in minutes instead of inside this build. Neither moves the store path.
+    passthru = {
+      inherit installDigest;
+      # The digest the committed `outputHash` was taken at: nix/bun-deps.inputs, refreshed in the same
+      # commit as `outputHash`.
+      pinnedInstallDigest = lib.removeSuffix "\n" (builtins.readFile "${src}/nix/bun-deps.inputs");
+    };
+
     buildPhase = ''
       export HOME="$TMPDIR/home"
       mkdir -p "$HOME"
@@ -235,6 +244,8 @@ let
 in
 {
   inherit fy fyd;
+  # The dependency derivation, exposed so scripts/validate/bun-deps-hash.sh can read its installDigest.
+  inherit bunDeps;
   default = pkgs.symlinkJoin {
     name = "ferretry";
     paths = [

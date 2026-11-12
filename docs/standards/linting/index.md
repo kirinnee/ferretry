@@ -52,6 +52,7 @@ and `a-route-agreement` serially (Knip needs more than 4GB). `treefmt` runs in Q
 | `a-no-raw-yaml`             | product code parses YAML only through the shared bounded reader (`@ferretry/std/yaml`), or a file `scripts/validate/raw-yaml-allowlist.txt` names with its reason |
 | `a-pending-tags`            | every `@pending`/`@public`, knip `ignore` and other keep-alive knip key is tied to an open gap, a kept row, a surface or an allow-list reason                     |
 | `a-hosted-app-origin`       | the hosted app's origin has one owner and every build route asks one script for it                                                                                |
+| `a-bun-deps-hash`           | the Bun install inputs match the digest pinned beside `outputHash`, so a stale hash fails in seconds, not in the Nix build                                        |
 | `a-release-guards`          | only main can tag, publish a release, touch Casks/ or run semantic-release; the preview deploys from rebuild/5.0 alone                                            |
 | `a-pages-config`            | the PWA build and the Pages deployment publish the same directory                                                                                                 |
 | `a-relay-config`            | relay code, bindings, discovery and deployment configuration agree                                                                                                |
