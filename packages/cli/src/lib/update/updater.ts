@@ -143,13 +143,19 @@ export class DaemonUpdater {
         throw new DaemonUpdateRefusedError(`cannot tell which version ${daemon.path} is; it did not answer --version`);
       }
       from = current;
-      const latest = await this.#latest(options.to, method);
+      const latest = await this.#latest(options.to, method, options.major !== true && this.#cannotPin(method));
       this.progress.succeed();
       if (options.check === true) {
         this.#reportCheck(daemon, method, plan, current, latest, options.json === true);
         return;
       }
-      if ('failure' in latest) throw new DaemonUpdateRefusedError(latest.failure);
+      if ('failure' in latest) {
+        const message =
+          this.#cannotPin(method) && options.major !== true && options.to === undefined
+            ? this.#managerRefusal(method, current, current, latest.failure)
+            : latest.failure;
+        throw new DaemonUpdateRefusedError(message);
+      }
       target = latest.release.version;
       const intent: UpdateIntent = { daemon, method, plan, current, target, running: health !== undefined, startedAt };
       const outcome = await this.#apply(intent, options);
@@ -163,6 +169,7 @@ export class DaemonUpdater {
   async #latest(
     to: string | undefined,
     method: InstallMethod,
+    requireRelease = false,
   ): Promise<{ readonly release: LatestRelease } | { readonly failure: string }> {
     if (to !== undefined) {
       if (!ProtocolVersionSchema.safeParse(to).success) return { failure: `${to} is not a version` };
@@ -171,6 +178,8 @@ export class DaemonUpdater {
       };
     }
     const answer = await this.deps.latest.latest();
+    if (requireRelease && answer.kind === 'failed')
+      return { failure: `could not learn the latest release: ${answer.reason}` };
     // A source-built install gets whatever the flake's main is, which is the newest tag, not the newest release.
     const tag =
       method.kind === 'nix-profile' || method.kind === 'nix-shell' ? await this.deps.latest.newestTag() : undefined;
@@ -227,7 +236,21 @@ export class DaemonUpdater {
     options: DaemonUpdateOptions,
   ): Promise<Omit<UpdateReport, 'from' | 'target' | 'finishedAt'>> {
     if (options.major !== true && isNewerMajorVersion(intent.current, intent.target)) {
-      throw new DaemonUpdateRefusedError(this.#majorUpdateMessage(intent.current, intent.target));
+      const message = this.#majorUpdateMessage(intent.current, intent.target);
+      throw new DaemonUpdateRefusedError(
+        this.#cannotPin(intent.method)
+          ? this.#managerRefusal(intent.method, intent.current, intent.target, message)
+          : message,
+      );
+    }
+    // These managers ignore --to. Check their unversioned source before even refreshing a service definition.
+    if (options.major !== true && options.to !== undefined && this.#cannotPin(intent.method)) {
+      const actual = await this.#latest(undefined, intent.method, true);
+      if ('failure' in actual || isNewerMajorVersion(intent.current, actual.release.version)) {
+        const reason =
+          'failure' in actual ? actual.failure : this.#majorUpdateMessage(intent.current, actual.release.version);
+        throw new DaemonUpdateRefusedError(this.#managerRefusal(intent.method, intent.current, intent.target, reason));
+      }
     }
     if (compareProtocolVersions(intent.target, intent.current) !== 1)
       return await this.#refreshDefinition(intent, options);
@@ -250,6 +273,20 @@ export class DaemonUpdater {
     const applied = await this.#upgradeStepped(intent, options);
     if (applied.kind === 'failed') return { outcome: 'failed', message: applied.message };
     return await this.#prove(intent, applied);
+  }
+
+  #cannotPin(method: InstallMethod): boolean {
+    return method.kind === 'homebrew' || method.kind === 'nix-profile' || method.kind === 'nix-shell';
+  }
+
+  #managerRefusal(method: InstallMethod, current: string, target: string, reason: string): string {
+    const major = current.split('.')[0];
+    const safeTarget = isNewerMajorVersion(current, target) ? current : target;
+    const route =
+      method.kind === 'homebrew'
+        ? `brew install --cask ${releaseTapName(this.deps.product)}/${this.deps.product}@${major}`
+        : `nix profile install github:${RELEASE_OWNER}/${this.deps.product}/v${safeTarget}`;
+    return `${reason}${reason.endsWith('.') ? '' : '.'} This install method cannot pin --to. Your daemon stays on ${current}. To stay on v${major}, run: ${route}`;
   }
 
   #majorUpdateMessage(current: string, target: string): string {

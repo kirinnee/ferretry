@@ -96,7 +96,9 @@ as a switch, not as an update.
 **v4.291.10 refuses an update to a newer major version.** This applies to the latest release and
 an explicit `fy daemon update --to 5.0.0`, including `--yes`. The refusal happens before a package
 manager, a binary swap or a restart runs, and leaves the daemon on its current version. v4 patch
-and minor updates continue as before. Install this guard **before** v5 is released: an older v4
+and minor updates continue as before. Homebrew and unversioned Nix sources also check what they
+would actually install, even with `--to` naming v4; an unreadable latest release refuses the update
+and names a pinned installation command. Install this guard **before** v5 is released: an older v4
 client has no such protection.
 
 v5 needs an explicit [v4 to v5 migration](https://github.com/kirinnee/ferretry/blob/main/docs/migration/v4-to-v5-prompt.md).
@@ -118,10 +120,10 @@ to v4 until migration is intended.
 
 ### Homebrew: the way back to v4
 
-The **4.291.10 release** also generates and commits `Casks/ferretry@4.rb`, with that release's archive
-URLs and SHA-256 checksums. GoReleaser publishes this second cask only for version `4.291.10`; later
-v4 and all v5 releases leave the committed cask frozen. The `homebrew-cask` validation contract
-checks that release gate and, once the generated file exists, its exact v4 version.
+Starting with the guarded v4 release, every **4.x release** generates and commits
+`Casks/ferretry@4.rb`, with that release's archive URLs and SHA-256 checksums. GoReleaser publishes
+this second cask only for major version 4; all v5 releases leave it untouched. The `homebrew-cask`
+validation contract checks the major gate and, once the generated file exists, that its version is 4.x.
 
 To replace an accidentally installed unversioned v5 cask with v4:
 
@@ -134,7 +136,7 @@ fy daemon restart
 
 The two casks install the same executable names, so remove the unversioned cask first. If migration
 already happened, restore the v4 home backup as the migration prompt explains before restarting v4.
-An unmigrated v4 home needs no conversion to run v4 again. The `@4` cask stays on 4.291.10;
+An unmigrated v4 home needs no conversion to run v4 again. The `@4` cask follows v4 patch and minor releases;
 `brew upgrade` of the plain `ferretry` cask continues to follow the latest major.
 
 ## Applying an update

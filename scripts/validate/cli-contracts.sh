@@ -322,17 +322,17 @@ homebrew-cask)
   # installs — in the generator above and the committed cask alike — never a download.
   # GoReleaser writes the dependency as a one-line string or, beside other formulae, a multi-line array.
   rg -Uq 'depends_on formula: (\[\s*("[^"]*",\s*)*)?"cloudflared"' "Casks/${product}.rb"
-  # The way back from v5 is generated WITH 4.291.10, never with guessed archive hashes. The
-  # exact-version upload gate prevents later releases (including v5) from replacing that cask.
+  # Every v4 release generates the way back from v5 with real archive hashes.
+  # The major gate prevents a v5 (or any other major) release from replacing that cask.
   yq -o=json '.' .goreleaser.yaml | jq -e --arg product "${product}" '
-    [.homebrew_casks[] | select(.name == ($product + "@4"))] as $frozen |
-    ($frozen | length) == 1 and
-    $frozen[0].skip_upload == "{{ ne .Version \"4.291.10\" }}" and
-    ($frozen[0] | del(.name, .skip_upload)) == (.homebrew_casks[0] | del(.name))' >/dev/null
+    [.homebrew_casks[] | select(.name == ($product + "@4"))] as $v4 |
+    ($v4 | length) == 1 and
+    $v4[0].skip_upload == "{{ ne .Major 4 }}" and
+    ($v4[0] | del(.name, .skip_upload)) == (.homebrew_casks[0] | del(.name))' >/dev/null
   # Before the release this file does not exist yet. Once GoReleaser commits it, every normal
-  # validation run proves its version is still the frozen v4 release, even on the v5 branch.
+  # validation run proves its version is still a v4 release, even on the v5 branch.
   if [ -f "Casks/${product}@4.rb" ]; then
-    rg -q '^  version "4\.291\.10"$' "Casks/${product}@4.rb"
+    rg -q '^  version "4\.[0-9]+\.[0-9]+"$' "Casks/${product}@4.rb"
     rg -q "^cask \"${product}@4\" do$" "Casks/${product}@4.rb"
   fi
   ;;

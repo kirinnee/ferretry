@@ -109,6 +109,66 @@ const RECOVERY =
   'To recover by hand run: brew update && brew upgrade --cask ferretry && fy daemon restart; if the tap is wedged: brew untap kirinnee/ferretry && brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry && brew reinstall --cask ferretry';
 
 describe('DaemonUpdater — major versions', () => {
+  for (const kind of ['homebrew', 'nix-profile', 'nix-shell']) {
+    const route =
+      kind === 'homebrew'
+        ? 'brew install --cask kirinnee/ferretry/ferretry@4'
+        : 'nix profile install github:kirinnee/ferretry/v4.291.10';
+
+    it(`checks what an unpinnable ${kind} would install even with --to naming v4`, async () => {
+      const latest = new FakeLatest({ kind: 'found', release: { version: '5.0.0', url: 'https://example.com/v5' } });
+      const h = harness(kind, { version: '4.290.8', latest });
+      h.host.running = '4.291.7';
+      h.packages.upgradeTo = '5.0.0';
+      await h.run({ yes: true, to: '4.291.10', switchToProfile: true, report: '/r.json' });
+      should(h.report()).match({ from: '4.291.7', target: '4.291.10', outcome: 'failed' });
+      should(h.report().message).containEql('Your daemon stays on 4.291.7.');
+      should(h.report().message).containEql(route);
+      should(h.report().message).containEql('5.0');
+      should(h.latest.calls).equal(1);
+      should(h.host.trail).deepEqual([]);
+      should(h.prompt.asked).deepEqual([]);
+      should(h.out.exitCode).equal(1);
+    });
+
+    it(`fails closed when the latest release is unreadable on ${kind}`, async () => {
+      const latest = new FakeLatest({ kind: 'failed', reason: 'offline' });
+      const h = harness(kind, { version: '4.291.7', latest });
+      await h.run({ yes: true, to: '4.291.10', switchToProfile: true, report: '/r.json' });
+      should(h.report()).match({ outcome: 'failed' });
+      should(h.report().message).containEql('could not learn the latest release: offline');
+      should(h.report().message).containEql('Your daemon stays on 4.291.7.');
+      should(h.report().message).containEql(route);
+      should(h.host.trail).deepEqual([]);
+      should(h.prompt.asked).deepEqual([]);
+    });
+
+    it(`allows --major to override the unpinnable ${kind} guard`, async () => {
+      const latest = new FakeLatest({ kind: 'found', release: { version: '5.0.0', url: 'https://example.com/v5' } });
+      const h = harness(kind, { version: '4.291.7', latest });
+      h.packages.upgradeTo = '5.0.0';
+      h.lifecycle.executables.add(PROFILE_DAEMON);
+      await h.run({ yes: true, to: '4.291.10', major: true, switchToProfile: true, report: '/r.json' });
+      should(h.report()).match({ outcome: 'succeeded' });
+      should(h.host.trail).containEql(
+        kind === 'homebrew'
+          ? 'brew:ferretry'
+          : kind === 'nix-profile'
+            ? 'nix-upgrade:ferretry'
+            : 'nix-install:github:kirinnee/ferretry',
+      );
+    });
+  }
+
+  it('keeps an explicit v4 update on a pinning install independent of latest v5', async () => {
+    const latest = new FakeLatest({ kind: 'found', release: { version: '5.0.0', url: 'https://example.com/v5' } });
+    const h = harness('standalone', { version: '4.291.7', latest });
+    h.standalone.delivers = '4.291.10';
+    await h.run({ yes: true, to: '4.291.10', report: '/r.json' });
+    should(h.report()).match({ outcome: 'succeeded' });
+    should(latest.calls).equal(0);
+  });
+
   for (const kind of ['homebrew', 'nix-profile', 'standalone']) {
     for (const explicit of [false, true]) {
       it(`refuses a newer major via ${kind}, ${explicit ? '--to' : 'latest'}, before changing anything`, async () => {
@@ -116,7 +176,7 @@ describe('DaemonUpdater — major versions', () => {
         const h = harness(kind, { version: '4.291.9', latest });
         await h.run({ yes: true, report: '/r.json', ...(explicit ? { to: '5.0.0' } : {}) });
         should(h.report()).match({ from: '4.291.9', target: '5.0.0', outcome: 'failed' });
-        should(h.report().message).equal(
+        should(h.report().message).startWith(
           '5.0 is a new major version. A v4 machine moves to it only through the migration: https://github.com/kirinnee/ferretry/blob/main/docs/migration/v4-to-v5-prompt.md. Your daemon stays on 4.291.9. The migration uses --major to allow this move.',
         );
         should(h.host.trail).deepEqual([]);
@@ -428,14 +488,16 @@ describe('DaemonUpdater — which version it offers', () => {
     }
   });
 
-  it('falls back to the tag when the release cannot be read, and fails when neither can', async () => {
+  it('fails closed when the release cannot be read even if a Nix tag is known', async () => {
     const failed = { kind: 'failed', reason: 'offline' } as const;
     const h = harness('nix-profile', { latest: new FakeLatest(failed, tag('1.3.0')) });
     await h.run();
-    should(h.report()).match({ target: '1.3.0', outcome: 'succeeded' });
+    should(h.report()).match({ outcome: 'failed' });
+    should(h.report().message).containEql('nix profile install github:kirinnee/ferretry/v1.2.3');
+    should(h.host.trail).deepEqual([]);
     const none = harness('nix-profile', { latest: new FakeLatest(failed, failed) });
     await none.run();
-    should(none.report().message).equal('could not learn the latest release: offline');
+    should(none.report().message).startWith('could not learn the latest release: offline');
   });
 
   it('never offers a tag to an install that downloads release assets', async () => {
@@ -448,10 +510,10 @@ describe('DaemonUpdater — which version it offers', () => {
     }
   });
 
-  it('does not look for a tag when the version was named', async () => {
+  it('checks the unversioned Nix source even when the version was named', async () => {
     const latest = new FakeLatest(release, tag('1.3.1'));
     await harness('nix-profile', { latest }).run({ yes: true, to: '1.3.0', report: '/r.json' });
-    should(latest.tagCalls).equal(0);
+    should(latest.tagCalls).equal(1);
   });
 });
 
@@ -622,13 +684,14 @@ describe('DaemonUpdater — what it checks first', () => {
   it('fails when the latest release cannot be learned', async () => {
     const h = harness('homebrew', { latest: new FakeLatest({ kind: 'failed', reason: 'could not reach GitHub' }) });
     await h.run();
-    should(h.report().message).equal('could not learn the latest release: could not reach GitHub');
+    should(h.report().message).startWith('could not learn the latest release: could not reach GitHub');
+    should(h.report().message).containEql('brew install --cask kirinnee/ferretry/ferretry@1');
   });
 
   it('takes an explicit version, and refuses one that is not a version', async () => {
     const h = harness('homebrew');
     await h.run({ yes: true, to: '1.3.0', report: '/r.json' });
-    should(h.latest.calls).equal(0);
+    should(h.latest.calls).equal(1);
     should(h.report().outcome).equal('succeeded');
     const bad = harness('homebrew');
     await bad.run({ yes: true, to: 'latest', report: '/r.json' });

@@ -109,8 +109,8 @@ homebrew_casks:
           if OS.mac?
             system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/fy", "#{staged_path}/fyd", "#{staged_path}/fyd-browser-worker"]
           end
-  # Generated from this release's archives with their real checksums. Publish exactly once:
-  # later v4 releases and every v5 release leave the committed Casks/ferretry@4.rb untouched.
+  # Every v4 release refreshes this cask from its real archives and checksums.
+  # Releases of every other major leave the committed Casks/ferretry@4.rb untouched.
   - <<: *release_cask
     name: ferretry@4
-    skip_upload: '{{ ne .Version "4.291.10" }}'
+    skip_upload: '{{ ne .Major 4 }}'
