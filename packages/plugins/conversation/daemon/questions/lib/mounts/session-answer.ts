@@ -25,6 +25,7 @@ export type SessionAnswerFailure =
   | 'unconfirmed'
   | 'released'
   | 'paused'
+  | 'unreadable'
   | 'failed';
 
 export class SessionAnswerError extends Error {
@@ -96,6 +97,9 @@ export const ANSWER_FAILURES: Readonly<
   // Nothing was submitted and the form is still open with what was answered so far: sending the same answer again
   // resumes it, which is the one refusal here where a retry is the remedy.
   paused: { status: 409, code: 'answer_paused' },
+  // The form's selected row could not be read exactly once, so nothing was typed at all. The question stays pending and
+  // the owner is told to answer it at the terminal.
+  unreadable: { status: 409, code: 'answer_form_unreadable' },
   failed: { status: 500, code: 'session_answer_failed' },
 };
 

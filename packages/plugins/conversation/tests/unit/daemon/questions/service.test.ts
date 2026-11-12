@@ -4,6 +4,7 @@ import should from 'should';
 import {
   StructuredQuestionAttemptFailed,
   StructuredQuestionAttemptPaused,
+  StructuredQuestionAttemptUnreadable,
   type StructuredQuestionCancellation,
   type StructuredQuestionDiagnosticPane,
   StructuredQuestionDriveFailure,
@@ -225,6 +226,58 @@ describe('structured question service', () => {
     should(repository.failures[0]?.[3]).match({ failure: { acceptance: 'none' } });
     should(recovery.snapshots).deepEqual([ID]);
     should(recovery.cancellations).have.length(1);
+  });
+
+  it('types nothing, not even the recovery Escape, when the form cursor cannot be read, and keeps the question', async () => {
+    const unreadable = new StructuredQuestionDriveFailure('the form cursor is not visible', 'none', {
+      phase: 'preflight',
+      reason: 'cursor-missing',
+    });
+    const { service, repository, recovery } = subject(pending, new Driver(Promise.reject(unreadable)));
+
+    const failure = await service
+      .answer({
+        id: ID,
+        toolUseId: 'question-1',
+        labels: [],
+        answers: [
+          { kind: 'selection', labels: ['Yes'] },
+          { kind: 'selection', labels: ['Web'] },
+        ],
+      })
+      .catch((error: unknown) => error);
+
+    should(failure).be.instanceOf(StructuredQuestionAttemptUnreadable);
+    // No key was sent, so the request may honestly start over once the form can be read.
+    should(failure).match({ receipt: 'withdrawn' });
+    should(recovery.cancellations).deepEqual([]);
+    should(repository.failures).deepEqual([]);
+    should(repository.retentions).have.length(1);
+    should((failure as Error).message).match(/Nothing was cancelled or released/u);
+  });
+
+  it('keeps an unreadable cursor met AFTER a key may have landed accepted, and still sends no Escape', async () => {
+    const unreadable = new StructuredQuestionDriveFailure('the form cursor is not visible', 'ambiguous', {
+      phase: 'drive',
+      reason: 'cursor-missing',
+    });
+    const { service, recovery } = subject(pending, new Driver(Promise.reject(unreadable)));
+
+    const failure = await service
+      .answer({
+        id: ID,
+        toolUseId: 'question-1',
+        labels: [],
+        answers: [
+          { kind: 'selection', labels: ['Yes'] },
+          { kind: 'selection', labels: ['Web'] },
+        ],
+      })
+      .catch((error: unknown) => error);
+
+    should(failure).be.instanceOf(StructuredQuestionAttemptUnreadable);
+    should(failure).match({ receipt: 'accepted' });
+    should(recovery.cancellations).deepEqual([]);
   });
 
   it('keeps the exact question bound when snapshot and cancellation both fail', async () => {

@@ -1,7 +1,9 @@
 import type { SessionId } from '../../seams/ferret-id.ts';
+import type { InputExpectation } from '../lib/input-frame.ts';
 import type { PendingQuestion, StructuredQuestionAnswer } from '../../seams/protocol.ts';
 import {
   type BoundQuestionForm,
+  formFrame,
   bindQuestionForm,
   bindReviewPage,
   bindTabStrip,
@@ -40,8 +42,12 @@ export interface QuestionPaneState {
  */
 export interface StructuredQuestionPane {
   state(session: string): Promise<QuestionPaneState>;
-  sendKey(session: string, key: string): Promise<void>;
-  paste(session: string, text: string): Promise<void>;
+  /**
+   * `expect` names the surface the key is meant for and where its cursor must be; an implementation that guards the
+   * input boundary re-reads the pane and types nothing unless it still shows exactly that.
+   */
+  sendKey(session: string, key: string, expect?: InputExpectation): Promise<void>;
+  paste(session: string, text: string, expect?: InputExpectation): Promise<void>;
 }
 
 export class StructuredQuestionDriveError extends StructuredQuestionDriveFailure {
@@ -59,8 +65,8 @@ type Confirmation = 'next-question' | 'turn-started' | 'prompt-ready' | 'pane-ad
 
 /** The two inputs a drive types, each marking that an answer may have reached the harness. */
 interface Keys {
-  readonly sendKey: (key: string) => Promise<void>;
-  readonly paste: (text: string) => Promise<void>;
+  readonly sendKey: (key: string, expect: InputExpectation) => Promise<void>;
+  readonly paste: (text: string, expect: InputExpectation) => Promise<void>;
 }
 
 const compact = (value: string): string => value.replace(/\s+/gu, ' ').trim();
@@ -102,14 +108,14 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
       session = await this.session(id);
       const pane = session;
       const keys: Keys = {
-        sendKey: async key => {
+        sendKey: async (key, expect) => {
           // Set before awaiting tmux: a command that loses its response may still have delivered input.
           mayHaveAccepted = true;
-          await this.tmux.sendKey(pane, key);
+          await this.tmux.sendKey(pane, key, expect);
         },
-        paste: async text => {
+        paste: async (text, expect) => {
           mayHaveAccepted = true;
-          await this.tmux.paste(pane, text);
+          await this.tmux.paste(pane, text, expect);
         },
       };
       const first = await this.tmux.state(session);
@@ -184,7 +190,7 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
         continue;
       }
       const review = await this.tmux.state(session);
-      confirmation = await this.submitReview(session, pending, answers, review, keys.sendKey);
+      confirmation = await this.submitReview(session, pending, answers, review, keys);
       await this.step(id, { step: 'submitted' });
     }
     return confirmation;
@@ -236,14 +242,16 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
         if (wrong < 0) {
           await this.step(id, { step: 'review-verified' });
           submitting();
-          const confirmation = await this.submitReview(session, pending, answers, state, keys.sendKey);
+          const confirmation = await this.submitReview(session, pending, answers, state, keys);
           await this.step(id, { step: 'submitted' });
           return confirmation;
         }
         at = wrong;
         await this.step(id, { step: 'revisited', questionIndex: wrong, shown: review.shown[wrong] });
         // The review is the tab after the last question.
-        for (let move = 0; move < total - wrong; move++) await keys.sendKey('Left');
+        // Each step is typed on the page it starts from: the review, then the tab before it, and so on.
+        for (let move = 0; move < total - wrong; move++)
+          await keys.sendKey('Left', move === 0 ? { kind: 'review' } : { kind: 'question', index: total - move });
         await this.waitForTab(
           session,
           pane => boundQuestionIndex(screenOf(pane), pending.questions) === wrong,
@@ -275,7 +283,7 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
         );
       };
       if (answered[current] === true && keeps(form, question, answer)) {
-        await keys.sendKey('Right');
+        await keys.sendKey('Right', { kind: 'question', index: current, cursor: form.cursor });
         await this.waitForTab(
           session,
           moved,
@@ -361,15 +369,26 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
       );
     const choices = answer.kind === 'selection' ? answer.labels.map(compact) : [];
     if (choices.some(label => !form.labels.includes(label))) throw refusal();
-    let at = form.cursor;
+    // Every key names the form it is for and the row the cursor must be on when it is typed (see `InputExpectation`).
+    const cursor = { at: form.cursor, typed: false };
+    const here = (): InputExpectation => ({
+      kind: 'question',
+      index,
+      rows: form.labels.length,
+      cursor: cursor.at,
+      typed: cursor.typed,
+    });
     const moveTo = async (target: number): Promise<void> => {
-      const key = target >= at ? 'Down' : 'Up';
-      for (let step = 0; step < Math.abs(target - at); step++) await keys.sendKey(key);
-      at = target;
+      const key = target >= cursor.at ? 'Down' : 'Up';
+      const steps = Math.abs(target - cursor.at);
+      for (let step = 0; step < steps; step++) {
+        await keys.sendKey(key, here());
+        cursor.at += key === 'Down' ? 1 : -1;
+      }
     };
     if (answer.kind === 'other') {
       if (form.freeForm === undefined) throw refusal();
-      await this.enterFreeForm(session, question, form, form.freeForm, answer.text, moveTo, keys);
+      await this.enterFreeForm(session, pending, index, form, form.freeForm, answer.text, moveTo, here, cursor, keys);
       return;
     }
     if (question.multiSelect === true) {
@@ -378,14 +397,14 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
       for (const [row, label] of form.labels.entries()) {
         if (choices.includes(label) === (form.checked[row] ?? false)) continue;
         await moveTo(row);
-        await keys.sendKey('Space');
+        await keys.sendKey('Space', here());
       }
       if (form.submit !== undefined) await moveTo(form.submit);
-      await keys.sendKey('Enter');
+      await keys.sendKey('Enter', here());
       return;
     }
     await moveTo(form.labels.indexOf(choices[0] ?? ''));
-    await keys.sendKey('Enter');
+    await keys.sendKey('Enter', here());
   }
 
   /**
@@ -446,9 +465,17 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
         'none',
         { phase: 'cancel-preflight', reason: 'question-unbound' },
       );
+    // Escape is an input like any other: a form whose selection cannot be read exactly once is not one to type into, so
+    // nothing is sent (not even this), the question is kept, and the owner is told to answer it at the terminal.
+    if (formFrame(screenOf(current))?.cursors !== 1)
+      throw new StructuredQuestionDriveError(
+        'the form cursor is not visible exactly once; refusing automatic Escape',
+        'none',
+        { phase: 'cancel-preflight', reason: 'cursor-missing' },
+      );
     const before = current.visible;
     // Exactly once. A failed tmux response is not permission to send another Escape.
-    await this.tmux.sendKey(session, 'Escape');
+    await this.tmux.sendKey(session, 'Escape', { kind: 'cancel' });
     for (let poll = 0; poll < this.polls; poll++) {
       await this.sleep(this.pollMs);
       current = await this.tmux.state(session);
@@ -472,37 +499,44 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
    */
   private async enterFreeForm(
     session: string,
-    question: RenderedQuestion,
+    pending: PendingQuestion,
+    index: number,
     form: BoundQuestionForm,
     free: NonNullable<BoundQuestionForm['freeForm']>,
     text: string,
     moveTo: (target: number) => Promise<void>,
+    here: () => InputExpectation,
+    cursor: { at: number; typed: boolean },
     keys: Keys,
   ): Promise<void> {
+    const question = pending.questions[index] as RenderedQuestion;
     await moveTo(free.index);
     if (free.entry === 'page') {
       const opened = (await this.tmux.state(session)).visible;
-      await keys.sendKey('Enter');
+      await keys.sendKey('Enter', here());
       await this.waitForScreen(
         session,
         pane => pane.visible !== opened && screenShowsQuestion(screenOf(pane), question.question),
         'selecting Other did not produce a bound free-form page',
       );
-      await keys.paste(text);
-      await keys.sendKey('Enter');
+      await keys.paste(text, { kind: 'page', index });
+      await keys.sendKey('Enter', { kind: 'page', index });
       return;
     }
     if (free.entry === 'notes') {
-      await keys.sendKey('Tab');
+      await keys.sendKey('Tab', here());
+      // The note is open under the row: from here on its row is the typed text, not the option's.
+      cursor.typed = true;
       await this.waitForScreen(
         session,
         pane => NOTES_OPEN.test(pane.visible),
         'Tab did not open a note under the free-form row',
       );
     }
-    await keys.paste(text);
+    await keys.paste(text, here());
+    cursor.typed = true;
     if (question.multiSelect === true && form.submit !== undefined) await moveTo(form.submit);
-    await keys.sendKey('Enter');
+    await keys.sendKey('Enter', here());
   }
 
   // read-scoped: none — reads the form capture the runner already masked inside its own Redaction.read, and never shows or returns it
@@ -557,7 +591,7 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
     pending: PendingQuestion,
     answers: readonly StructuredQuestionAnswer[],
     state: QuestionPaneState,
-    sendKey: (key: string) => Promise<void>,
+    keys: Keys,
   ): Promise<Confirmation> {
     const review = bindReviewPage(screenOf(state), pending.questions);
     if (review?.cursor === undefined)
@@ -576,8 +610,13 @@ export class HarnessQuestionDriver implements StructuredQuestionDriver {
         ),
       );
     const key = review.submit >= review.cursor ? 'Down' : 'Up';
-    for (let step = 0; step < Math.abs(review.submit - review.cursor); step++) await sendKey(key);
-    await sendKey('Enter');
+    let at = review.cursor;
+    const steps = Math.abs(review.submit - review.cursor);
+    for (let step = 0; step < steps; step++) {
+      await keys.sendKey(key, { kind: 'review', cursor: at });
+      at += key === 'Down' ? 1 : -1;
+    }
+    await keys.sendKey('Enter', { kind: 'review', cursor: at });
     return await this.waitForAdvance(session, pending, pending.questions.length - 1, state.visible, false);
   }
 

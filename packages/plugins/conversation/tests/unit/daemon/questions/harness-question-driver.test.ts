@@ -13,6 +13,7 @@ import {
   StructuredQuestionDrivePaused,
   type StructuredQuestionDriveStep,
 } from '../../../../daemon/questions/lib/service.ts';
+import type { InputExpectation } from '../../../../daemon/questions/lib/input-frame.ts';
 import { parseSessionId } from '../../../../daemon/seams/ferret-id.ts';
 
 const ID = parseSessionId('session-1');
@@ -39,6 +40,8 @@ const DEPLOY = claude('Deploy?', ['Yes', 'No', 'Other']);
 class ScriptedPane implements StructuredQuestionPane {
   readonly keys: string[] = [];
   readonly pasted: string[] = [];
+  /** The surface each key and paste named, in the order they were typed. */
+  readonly expected: (InputExpectation | undefined)[] = [];
   private index = 0;
 
   constructor(
@@ -53,13 +56,15 @@ class ScriptedPane implements StructuredQuestionPane {
     return state;
   }
 
-  async sendKey(_session: string, key: string): Promise<void> {
+  async sendKey(_session: string, key: string, expect?: InputExpectation): Promise<void> {
     this.keys.push(key);
+    this.expected.push(expect);
     if (this.keys.length === this.sendFailureAt) throw new Error('tmux lost the key response');
   }
 
-  async paste(_session: string, text: string): Promise<void> {
+  async paste(_session: string, text: string, expect?: InputExpectation): Promise<void> {
     this.pasted.push(text);
+    this.expected.push(expect);
   }
 }
 
@@ -910,5 +915,83 @@ describe('tmux structured-question driver, page by page without a tab strip', ()
 
     should(failure.message).equal('session pane died while opening free-form input');
     should(pane.pasted).deepEqual([]);
+  });
+});
+
+describe('every native input names the form it is for', () => {
+  const done = frame('> ', { promptReady: true });
+
+  it('names the question, its row count and the row the cursor must be on, at every arrow and at Enter', async () => {
+    const pane = new ScriptedPane([frame(DEPLOY), done]);
+
+    await driver(pane).drive(ID, single, [{ kind: 'selection', labels: ['Other'] }]);
+
+    should(pane.keys).deepEqual(['Down', 'Down', 'Enter']);
+    should(pane.expected).deepEqual([
+      { kind: 'question', index: 0, rows: 3, cursor: 0, typed: false },
+      { kind: 'question', index: 0, rows: 3, cursor: 1, typed: false },
+      { kind: 'question', index: 0, rows: 3, cursor: 2, typed: false },
+    ]);
+  });
+
+  it('binds the paste to the untouched form and the Enter after it to the form as typed into', async () => {
+    const pool: PendingQuestion = {
+      toolUseId: 'question-pool',
+      questions: [{ question: 'Deploy?', options: [{ label: 'Yes' }, { label: 'No' }] }],
+    };
+    const pane = new ScriptedPane([frame(claude('Deploy?', ['Yes', 'No', 'Type something.'])), done]);
+
+    await driver(pane).drive(ID, pool, [{ kind: 'other', text: 'Ask first' }]);
+
+    should(pane.pasted).deepEqual(['Ask first']);
+    should(pane.expected).deepEqual([
+      { kind: 'question', index: 0, rows: 3, cursor: 0, typed: false },
+      { kind: 'question', index: 0, rows: 3, cursor: 1, typed: false },
+      { kind: 'question', index: 0, rows: 3, cursor: 2, typed: false },
+      { kind: 'question', index: 0, rows: 3, cursor: 2, typed: true },
+    ]);
+  });
+
+  it('names a free-form page for the paste and the Enter that follow Enter on a plain Other row', async () => {
+    const implicit: PendingQuestion = {
+      toolUseId: 'question-other',
+      questions: [{ question: 'Deploy?', options: [{ label: 'Yes' }, { label: 'No' }] }],
+    };
+    const form = frame(claude('Deploy?', ['Yes', 'No', 'Other…']));
+    const page = frame([RULE, 'Deploy?', '', 'Type your answer: █'].join('\n'));
+    const pane = new ScriptedPane([form, form, page, done]);
+
+    await driver(pane).drive(ID, implicit, [{ kind: 'other', text: 'later' }]);
+
+    should(pane.expected.slice(-2)).deepEqual([
+      { kind: 'page', index: 0 },
+      { kind: 'page', index: 0 },
+    ]);
+  });
+});
+
+describe('a form whose cursor cannot be read is never typed into, the release Escape included', () => {
+  const noCursor = frame(DEPLOY.replace('❯', ' '));
+
+  it('sends nothing, and says why, when the drive meets a form with no cursor', async () => {
+    const pane = new ScriptedPane([noCursor]);
+
+    const failure = await failureOf(driver(pane).drive(ID, single, yes));
+
+    should(failure.diagnostics).match({ reason: 'cursor-missing' });
+    should(failure.acceptance).equal('none');
+    should(pane.keys).deepEqual([]);
+    should(pane.pasted).deepEqual([]);
+  });
+
+  it('refuses the recovery Escape on a bound form whose cursor is missing, or shown twice', async () => {
+    for (const shown of [noCursor, frame(claude('Deploy?', ['Yes', 'No', 'Other']).replace('  2. No', '❯ 2. No'))]) {
+      const pane = new ScriptedPane([shown]);
+
+      const failure = await failureOf(driver(pane).cancel(ID, single));
+
+      should(failure.diagnostics).match({ phase: 'cancel-preflight', reason: 'cursor-missing' });
+      should(pane.keys).deepEqual([]);
+    }
   });
 });

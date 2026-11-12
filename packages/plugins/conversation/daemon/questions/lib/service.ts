@@ -84,6 +84,18 @@ export class StructuredQuestionAttemptPaused extends StructuredQuestionAttemptFa
   }
 }
 
+/**
+ * The form's selection could not be read exactly once, so NOTHING more was typed — not even the recovery Escape — and the
+ * question stays pending. The receipt is `withdrawn` when no key had been sent (the same request may honestly start over once
+ * the form can be read) and stays `accepted` when an earlier key may have reached the form.
+ */
+export class StructuredQuestionAttemptUnreadable extends StructuredQuestionAttemptFailed {
+  constructor(message: string, failure: StructuredQuestionDriveFailure) {
+    super(message, failure.acceptance === 'none' ? 'withdrawn' : 'accepted', failure);
+    this.name = 'StructuredQuestionAttemptUnreadable';
+  }
+}
+
 /** The pane evidence retained with a failed answer. */
 export interface StructuredQuestionDiagnosticPane {
   /** The runner's reading of the visible frame: a turn is running. */
@@ -282,6 +294,18 @@ export class StructuredQuestionService {
         });
         throw new StructuredQuestionAttemptPaused(
           `${failure.message}\n\nNothing was submitted; the form is still open. Answer again to resume it, or finish it in the terminal.\nPending question:\n${questionText}`,
+          failure,
+        );
+      }
+      if (failure.diagnostics.reason === 'cursor-missing') {
+        // Lizzette's rule: a selection that cannot be read is never typed into, and Escape is a key too. The question is
+        // kept exactly as it is; the owner is told the form could not be read safely and to answer it at the terminal.
+        await this.repository.retained(input.id, pending, answers, {
+          failure,
+          ...('pane' in snapshot ? { snapshot: snapshot.pane } : { snapshotError: snapshot.error }),
+        });
+        throw new StructuredQuestionAttemptUnreadable(
+          `${failure.message}\n\nNothing was cancelled or released; the structured form remains bound. Pending question:\n${questionText}`,
           failure,
         );
       }

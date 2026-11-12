@@ -20,15 +20,19 @@ import {
 import {
   ANSWER_MAY_HAVE_LANDED,
   ANSWER_NOT_DELIVERED,
+  FORM_UNREADABLE,
   isQuestionScopedRequestId,
   RELOAD_THE_APP,
   answerPaused,
 } from '../lib/answer-wording.ts';
 import { StructuredAnswerCoordinator } from '../lib/coordinator.ts';
+import { type InputExpectation, refuseInput } from '../lib/input-frame.ts';
+import { questionScreen } from '../lib/rendered-form.ts';
 import { SessionAnswerError } from '../lib/mounts/session-answer.ts';
 import {
   StructuredQuestionAttemptFailed,
   StructuredQuestionAttemptPaused,
+  StructuredQuestionAttemptUnreadable,
   type StructuredQuestionFailureContext,
   StructuredQuestionRefused,
   StructuredQuestionService,
@@ -129,11 +133,52 @@ export function buildQuestionAnswering(deps: QuestionAnsweringDeps) {
    * nothing is typed. A writer cannot land a newer question between the check and the key, and the lane is held for one
    * key only, never across the drive (the answered stamp and the failure release take it too).
    *
+   * A DRIVE IS ALSO BOUND TO THE NATIVE FORM, FRAME BY FRAME. The stored question says nothing about what the pane shows
+   * now: a permission prompt, a dialog or the next question can replace the form while `question.json` is unchanged, and
+   * a key typed then is a key typed into that prompt. So in the same step, and before every key and paste, the pane is
+   * read again through the form seam and must still be the expected surface of THIS question (its form or review page,
+   * the free-form page it opened), with exactly one cursor read on the row the drive expects. Otherwise nothing is typed.
+   * The reading is of the pane after any earlier key, so a prompt that arrives between two keys stops the second.
+   * (A redraw that has not yet caught up with the last arrow is waited out; anything else refuses at once.)
+   *
    * Captures are reads and are not bound: a form that is already answered, retired by the watch, or replaced by the next
    * question is still read to confirm the answer; only input is refused.
    */
-  const boundPane = (toolUseId: string): StructuredQuestionPane => {
-    const typeIfHeld = async <T>(ferret: string, input: () => Promise<T>): Promise<T> =>
+  const boundPane = (pending: PendingQuestion): StructuredQuestionPane => {
+    const toolUseId = pending.toolUseId;
+    const polls = deps.polls ?? 12;
+    const pollMs = deps.pollMs ?? 250;
+    const formStillShown = async (ferret: string, expect: InputExpectation | undefined): Promise<void> => {
+      // An input that names no surface is bound to nothing, so it types nothing.
+      if (expect === undefined)
+        throw new StructuredQuestionDriveError('an input without an expected form was refused', 'none', {
+          phase: 'input-binding',
+          reason: 'input-unbound',
+        });
+      for (let poll = 0; ; poll++) {
+        const shown = await pane.state(ferret);
+        if (!shown.alive || shown.dead)
+          throw new StructuredQuestionDriveError(
+            'session pane is dead; nothing further was typed into the form',
+            'none',
+            { phase: 'input-binding', reason: 'pane-dead' },
+          );
+        const refusal = refuseInput(questionScreen(shown.visible, shown.history), pending.questions, expect);
+        if (refusal === undefined) return;
+        // Only a cursor that is still where the last arrow was heading may heal; a replaced or unreadable form never does.
+        if (refusal.refusal !== 'cursor-moved' || poll >= polls)
+          throw new StructuredQuestionDriveError(refusal.message, 'none', {
+            phase: 'input-binding',
+            reason: refusal.refusal === 'cursor-missing' ? 'cursor-missing' : 'input-unbound',
+          });
+        await deps.sleep(pollMs);
+      }
+    };
+    const typeIfHeld = async <T>(
+      ferret: string,
+      expect: InputExpectation | undefined,
+      input: () => Promise<T>,
+    ): Promise<T> =>
       await questionLane.run(ferret, async () => {
         const read = await state.read(QUESTION_STATE, ferret);
         if (!read.ok)
@@ -151,19 +196,22 @@ export function buildQuestionAnswering(deps: QuestionAnsweringDeps) {
               reason: read.value === undefined ? 'question-withdrawn' : 'question-replaced',
             },
           );
+        await formStillShown(ferret, expect);
         return await input();
       });
     return {
       state: async ferret => await pane.state(ferret),
-      sendKey: async (ferret, pressed) => await typeIfHeld(ferret, async () => await pane.sendKey(ferret, pressed)),
-      paste: async (ferret, text) => await typeIfHeld(ferret, async () => await pane.paste(ferret, text)),
+      sendKey: async (ferret, pressed, expect) =>
+        await typeIfHeld(ferret, expect, async () => await pane.sendKey(ferret, pressed)),
+      paste: async (ferret, text, expect) =>
+        await typeIfHeld(ferret, expect, async () => await pane.paste(ferret, text)),
     };
   };
 
   /** One driver per question: it types through the question's own bound pane. It keeps no other state. */
-  const driverFor = (toolUseId: string): HarnessQuestionDriver =>
+  const driverFor = (pending: PendingQuestion): HarnessQuestionDriver =>
     new HarnessQuestionDriver(
-      boundPane(toolUseId),
+      boundPane(pending),
       async id => key(id),
       deps.sleep,
       deps.polls,
@@ -179,7 +227,7 @@ export function buildQuestionAnswering(deps: QuestionAnsweringDeps) {
     );
   const driver = {
     drive: async (id: SessionId, question: PendingQuestion, answers: readonly StructuredQuestionAnswer[]) =>
-      await driverFor(question.toolUseId).drive(id, question, answers),
+      await driverFor(question).drive(id, question, answers),
   };
 
   const diagnostics = (context: StructuredQuestionFailureContext) => ({
@@ -266,7 +314,7 @@ export function buildQuestionAnswering(deps: QuestionAnsweringDeps) {
       // The frame is the form's own evidence: handed to the service for its decision, never stored or logged.
       snapshot: async id => await pane.state(key(id)),
       // The Escape is an input too: it is bound to this question, so a newer one's form is never cancelled by it.
-      cancel: async (id, question) => await driverFor(question.toolUseId).cancel(id, question),
+      cancel: async (id, question) => await driverFor(question).cancel(id, question),
     },
   );
 
@@ -369,6 +417,8 @@ export function buildQuestionAnswering(deps: QuestionAnsweringDeps) {
               error.message,
               error.failure.progress,
             );
+          if (error instanceof StructuredQuestionAttemptUnreadable)
+            throw new SessionAnswerError('unreadable', FORM_UNREADABLE, undefined, error.message);
           if (error instanceof StructuredQuestionAttemptFailed) {
             if (error.receipt === 'accepted')
               throw new SessionAnswerError('unconfirmed', ANSWER_NOT_DELIVERED, undefined, error.message);

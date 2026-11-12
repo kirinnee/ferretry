@@ -311,6 +311,7 @@ describe('QuestionForm', () => {
   test.each([
     ['answer_unconfirmed', 409],
     ['answer_released', 409],
+    ['answer_form_unreadable', 409],
     ['session_answer_failed', 500],
   ])('keeps a daemon-worded sentence for %s and still offers the Console', async (code, status) => {
     const form = await refusedWith(
@@ -321,6 +322,27 @@ describe('QuestionForm', () => {
     expect(form.root.findByProps({ role: 'alert' }).children.join('')).toBe("Couldn't answer automatically.");
     expect(form.root.findByType('pre').children.join('')).toBe(DRIVER_TEXT);
     expect(form.root.findAllByProps({ className: 'fy-question-console' })).toHaveLength(1);
+  });
+
+  const UNREADABLE_SENTENCE =
+    "Couldn't read this question's form safely, so nothing was sent. Answer it at the terminal (the Console tab).";
+
+  test('says in words that the form could not be read safely and to answer it at the terminal, and opens the Console', async () => {
+    const opened: string[] = [];
+    const form = await refusedWith(
+      httpError(UNREADABLE_SENTENCE, 409, 'answer_form_unreadable', {
+        error: UNREADABLE_SENTENCE,
+        detail: 'the form cursor is not visible exactly once; nothing further was typed',
+      }),
+      opened,
+    );
+
+    const shown = form.root.findByProps({ role: 'alert' }).children.join('');
+    expect(shown).toBe(UNREADABLE_SENTENCE);
+    expect(shown).not.toMatch(/answer_form_unreadable/u);
+    expect(form.root.findByType('pre').children.join('')).toMatch(/cursor is not visible/u);
+    run(() => form.root.findByProps({ className: 'fy-question-console' }).props.onClick());
+    expect(opened).toEqual(['console']);
   });
 
   test('offers no Console button where the host has none, or for a refusal that is not about the pane', async () => {

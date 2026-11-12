@@ -117,6 +117,7 @@ describe('POST answer, when it cannot be served', () => {
     ['unconfirmed', 409, 'answer_unconfirmed'],
     ['released', 409, 'answer_released'],
     ['paused', 409, 'answer_paused'],
+    ['unreadable', 409, 'answer_form_unreadable'],
     ['failed', 500, 'session_answer_failed'],
   ] as const)('answers %s as %i %s', async (failure, status, code) => {
     const refusal = await post(failing(new SessionAnswerError(failure, 'words')));

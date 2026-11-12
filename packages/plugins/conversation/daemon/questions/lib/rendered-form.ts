@@ -436,3 +436,34 @@ export function reviewShowsAnswer(
 export function screenShowsQuestion(screen: QuestionScreen, question: string): boolean {
   return shows(screen.lines.slice(screen.visibleFrom), question);
 }
+
+/**
+ * The live form block as an INPUT BOUNDARY reads it, before any text identifies which question it is.
+ *
+ * `cursors` counts every row that carries the selection marker (a Submit row included): exactly one is a cursor that is
+ * positively read, none or several is an unknown selection, and an unknown selection is never typed into. `rows` counts
+ * the numbered rows (the Submit row is not one). `undefined` when the screen shows no numbered form at all.
+ */
+export interface FormFrame {
+  readonly rows: number;
+  readonly cursors: number;
+  /** The navigation index of the one cursor, or `undefined` unless exactly one is shown. */
+  readonly cursor: number | undefined;
+}
+
+export function formFrame(screen: QuestionScreen): FormFrame | undefined {
+  const block = lastBlock(screen);
+  if (block === undefined) return undefined;
+  const onRows = block.rows.filter(row => row.cursor).length;
+  const onSubmit = block.submit?.cursor === true;
+  const cursors = onRows + (onSubmit ? 1 : 0);
+  const index =
+    onRows === 1 ? block.rows.findIndex(row => row.cursor) : onSubmit && onRows === 0 ? block.rows.length : -1;
+  return { rows: block.rows.length, cursors, cursor: cursors === 1 && index >= 0 ? index : undefined };
+}
+
+/** Whether the live form's own header (not a row, not scrollback above its border) names this question. */
+export function formHeaderShows(screen: QuestionScreen, question: string): boolean {
+  const block = lastBlock(screen);
+  return block !== undefined && shows(block.header, question);
+}

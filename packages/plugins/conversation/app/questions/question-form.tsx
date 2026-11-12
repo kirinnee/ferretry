@@ -84,7 +84,12 @@ const QUESTION_ALREADY_ANSWERED = 'question_already_answered';
  * The refusals that mean the daemon tried the native form and could not answer it. The person can
  * still answer — in the agent's own pane, or in prose — so that is what they are told.
  */
-const UNDELIVERED = new Set(['answer_unconfirmed', 'answer_released', 'session_answer_failed']);
+const UNDELIVERED = new Set([
+  'answer_unconfirmed',
+  'answer_released',
+  'answer_form_unreadable',
+  'session_answer_failed',
+]);
 const COULD_NOT_ANSWER = "Couldn't answer automatically — answer in the Console tab or type your choice in chat.";
 
 /**

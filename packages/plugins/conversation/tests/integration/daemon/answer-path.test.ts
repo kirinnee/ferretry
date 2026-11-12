@@ -53,6 +53,22 @@ const question: Question = {
   transcript: '/transcripts/f1.jsonl',
 };
 
+/** A recorded page with its cursor marker moved to the `cursor`th row of the last numbered run (row 1 is what was recorded). */
+function cursorAt(text: string, cursor: number): string {
+  const lines = text.split('\n');
+  const row = /^[❯ ] (\d+)\. /u;
+  const first = lines.findLastIndex(line => /^[❯ ] 1\. /u.test(line));
+  if (first < 0) return text;
+  // The rows run to the rule under them; a row's description lines sit between them.
+  let index = 0;
+  for (let at = first; at < lines.length && !/^─{5,}/u.test(lines[at] ?? ''); at++) {
+    if (!row.test(lines[at] ?? '')) continue;
+    lines[at] = (lines[at] ?? '').replace(/^[❯ ]/u, index === cursor ? '❯' : ' ');
+    index += 1;
+  }
+  return lines.join('\n');
+}
+
 /** A pane that shows the form, moves its cursor on Up/Down, and drops to a prompt on Enter (the answer took). */
 class FormFerrets extends FakeFerrets {
   readonly keys: FormKey[] = [];
@@ -65,19 +81,27 @@ class FormFerrets extends FakeFerrets {
   /** A pane that shows the form and ignores Enter, so the answer never visibly takes. */
   stuck = false;
   /**
-   * Whole recorded panes, replayed one per capture (the last one stays): for a tabbed form, whose redraws are a recording
-   * rather than something this class can compute. Keys are only noted. Left out, the pane draws the single form above.
+   * Whole recorded panes, ONE PER PAGE (the last one stays): for a tabbed form, whose pages are a recording rather than
+   * something this class can compute. Enter turns the page; Up and Down move the cursor within it (the recording shows it on
+   * row 1, so the marker is redrawn where the keys have put it, as the real form does); reads change nothing. Left out, the
+   * pane draws the single form above.
    */
   replay: readonly { readonly visible: string; readonly history: string }[] | undefined;
-  private replayed = 0;
+  private page = 0;
 
   private frame(): RunnerFormCapture {
     if (this.replay !== undefined) {
-      const shown = this.replay[Math.min(this.replayed, this.replay.length - 1)];
-      this.replayed += 1;
+      const shown = this.replay[Math.min(this.page, this.replay.length - 1)];
       if (shown === undefined) throw new Error('the replay holds no pane');
       const activeWork = /esc to interrupt|\(\d+s\s*[·•]/iu.test(shown.visible);
-      return { alive: true, dead: false, promptReady: false, activeWork, ...shown };
+      return {
+        alive: true,
+        dead: false,
+        promptReady: false,
+        activeWork,
+        visible: cursorAt(shown.visible, this.cursor),
+        history: cursorAt(shown.history, this.cursor),
+      };
     }
     const visible = this.answered ? '> ' : claude(this.asks, this.rows, this.cursor);
     return { alive: true, dead: false, promptReady: this.answered, activeWork: false, visible, history: visible };
@@ -92,7 +116,11 @@ class FormFerrets extends FakeFerrets {
           this.keys.push(key);
           if (key === 'Down') this.cursor = Math.min(this.cursor + 1, this.rows.length - 1);
           if (key === 'Up') this.cursor = Math.max(this.cursor - 1, 0);
-          if (key === 'Enter' && !this.stuck) this.answered = true;
+          if (key === 'Enter' && !this.stuck) {
+            this.answered = true;
+            this.page += 1;
+            this.cursor = 0;
+          }
           return ok(undefined);
         },
         paste: async (text: string) => {
@@ -479,10 +507,13 @@ describe('a drive stays bound to its own question', () => {
  */
 describe('a tabbed form of several questions', () => {
   const TABS = join(import.meta.dir, '../../fixtures/question-forms/claude-2.1.281-tabs4');
+  // The recording is a series of reads; some are repeat reads of one page (2 and 3, 4 and 5, 6 and 7, 8 and 9 are the same page).
+  const PAGE_STARTS = [0, 1, 3, 5, 7, 9];
   const recorded = (run: string) =>
     readdirSync(join(TABS, run))
       .filter(file => file.endsWith('.txt'))
       .sort()
+      .filter((_, index) => PAGE_STARTS.includes(index))
       .map(file => {
         const history = readFileSync(join(TABS, run, file), 'utf8');
         return { visible: `${history.split('\n').slice(0, -1).slice(-24).join('\n')}\n`, history };

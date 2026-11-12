@@ -9,6 +9,14 @@
 export const ANSWER_NOT_DELIVERED =
   "Couldn't answer automatically. Answer it in the Console tab, or type your choice in chat.";
 
+/**
+ * For a form whose selected row could not be read exactly once: nothing was typed (no key, no paste, not even a recovery
+ * Escape), the question is still pending, and the terminal is the way on. A sentence, because a bare code tells a person
+ * nothing they can do.
+ */
+export const FORM_UNREADABLE =
+  "Couldn't read this question's form safely, so nothing was sent. Answer it at the terminal (the Console tab).";
+
 /** For an earlier attempt that may have reached the form: answering again could answer something else. */
 export const ANSWER_MAY_HAVE_LANDED =
   'An earlier answer may already have reached this question. Check the Console tab before answering again.';
