@@ -411,7 +411,7 @@ describe('the investigation budget', () => {
 });
 
 describe('what a verdict does', () => {
-  it('should nudge on NUDGE, in the report’s words, and record it', async () => {
+  it('should nudge on NUDGE with the fixed sentence for the flag, and record it', async () => {
     // Arrange
     const subject = harness({
       config: enabled(),
@@ -429,9 +429,11 @@ describe('what a verdict does', () => {
         action: 'nudge',
         sessionId: 's1',
         detail:
-          'The Warden checked on you: it went quiet. If you are blocked, say exactly what you need; otherwise carry on and post a short status.',
+          'The Warden checked on you (it asked a question and nobody has answered). If you are blocked, say exactly what you need; otherwise carry on and post a short status.',
       },
     ]);
+    // The owner's list still reads the investigator's own words.
+    should(subject.state().actions?.[0]?.detail).containEql('it went quiet');
     should(subject.state().actions?.[0]).match({ action: 'nudge', outcome: 'done', by: 'warden', reportPath: '/r.md' });
     should(subject.state().investigations?.[0]).match({ id: 'w0', finishedAt: at(0), verdict: 'nudged' });
   });
@@ -472,8 +474,46 @@ describe('what a verdict does', () => {
     await subject.service.run({ force: false });
 
     // Assert
-    should(subject.remedies).deepEqual([{ action: 'stop', sessionId: 's1', detail: 'Warden verdict: looping' }]);
+    should(subject.remedies).deepEqual([
+      { action: 'stop', sessionId: 's1', detail: 'Warden verdict (it asked a question and nobody has answered)' },
+    ]);
     should(journalTypes(subject)).containEql('fleet.warden_acted');
+  });
+
+  it('should type nothing the investigator wrote into the ferret’s own session, whatever the act', async () => {
+    // Arrange: every act, with a recommendation that names a stranger and a cost
+    const prose = 'other-9 burned $0.45678 on the migration';
+    const allowed = enabled({
+      mayActAlone: { nudge: true, resume: true, restart: true, failover: true, stop: true, closeLeftovers: true },
+    });
+    const typed: string[] = [];
+    for (const [verdict, action] of [
+      ['NUDGE', `NUDGE — ${prose}`],
+      ['KILL', `STOP — ${prose}`],
+      ['RESUME', `RESUME — ${prose}`],
+      ['RESUME', `RESTART — ${prose}`],
+    ] as const) {
+      const subject = harness({
+        config: allowed,
+        fleet: [session({ id: 's1', status: 'running' })],
+        reports: { '/r.md': report(verdict, action) },
+        state: finished(),
+      });
+
+      // Act
+      await subject.service.run({ force: false });
+
+      // Assert
+      should(subject.remedies).have.length(1);
+      typed.push(String(subject.remedies[0]?.detail));
+      should(subject.state().actions?.[0]?.detail).containEql('other-9');
+    }
+    for (const line of typed) {
+      should(line).not.match(/other-9|0\.45678|migration/u);
+      // A resume or restart with no focus card is handed the resume domain's own default turn (empty here).
+      if (line !== '') should(line).containEql('it asked a question and nobody has answered');
+    }
+    should(typed.filter(line => line !== '')).have.length(2);
   });
 
   it('should restart a frozen ferret on RESTART, and hold it when the owner did not allow restarts', async () => {

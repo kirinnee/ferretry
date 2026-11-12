@@ -1,13 +1,15 @@
-import type { FerretSummary } from '@ferretry/core-ferrets/contract';
+import type { FerretId, FerretSummary } from '@ferretry/core-ferrets/contract';
+import { ferretOf } from '@ferretry/core-gate/contract';
 import { type ApiResponse, errorResponse, jsonResponse, textResponse } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import type { LoginId } from '@ferretry/plugin-logins/contract';
-import { instantFromEpochMs, milliseconds } from '@ferretry/std';
+import { type Instant, instantFromEpochMs, milliseconds } from '@ferretry/std';
 import { platform } from 'node:os';
 import manifest from '../manifest.ts';
 import {
   BudgetReached,
   type BudgetsView,
+  type FerretBudgetsView,
   INSIGHTS_STATE,
   LoginIdSchema,
   InsightsChanged,
@@ -87,10 +89,12 @@ export default implementDaemon(manifest, {
     const nowMs = (): number => kernel.clock.nowMs();
 
     // ── what a ferret's harness says it spent ────────────────────────────────────────────────────────────────────────
-    // Ferrets offers no accessor for a harness's usage reader to another plugin yet (a declared GAP in the port's
-    // report), so no ferret can be asked: every amount reads PARTIAL and every insight row reads "unknown". An
-    // unreadable ferret is never counted as a free one.
-    const turnUsage: TurnUsageSource = { turns: async () => undefined };
+    // Ferrets owns which harness a ferret runs and reads that harness's usage (token counts only, never transcript text).
+    // `undefined` is PARTIAL (an unknown ferret, a harness that is off, a reader that threw): an unreadable ferret is
+    // never counted as a free one.
+    const turnUsage: TurnUsageSource = {
+      turns: async (ferret, since) => await needs.ferrets.turnUsage(ferret as FerretId, since as Instant | undefined),
+    };
 
     // ── pricing: the owner's rate catalog, plus list prices once Logins publishes them whole ──────────────────────────────
     const pricingConfiguration = new StatePricingConfiguration(kernel.state);
@@ -337,6 +341,24 @@ export default implementDaemon(manifest, {
       }),
     });
 
+    /**
+     * What a FERRET may know of the budgets: for each budgeted login its own lineage (itself and its helpers) runs on,
+     * whether it is paused. Every measured figure is a sum over all ferrets on the login, so none of them is returned.
+     */
+    const ferretBudgetsView = async (caller: FerretId): Promise<FerretBudgetsView> => {
+      const used = new Set(
+        (await needs.ferrets.list().catch(() => []))
+          .filter(ferret => ferret.login !== undefined && needs.ferrets.mayTouch(caller, ferret.id))
+          .map(ferret => ferret.login),
+      );
+      return {
+        budgets: Object.keys(kernel.config.file(USAGE_CONFIG)?.budgets ?? {}).flatMap(name => {
+          const login = LoginIdSchema.safeParse(name);
+          return login.success && used.has(name) ? [{ login: login.data, paused: pauseOf(name) !== undefined }] : [];
+        }),
+      };
+    };
+
     // ── jobs ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
     kernel.jobs.add({
       id: 'usage-restore',
@@ -389,13 +411,25 @@ export default implementDaemon(manifest, {
             : unrouted(call.request.method, call.request.path),
         // The app polls this while a quota is on screen: somebody is looking, so a due provider quota may be read.
         'GET /v1/usage': async () => jsonResponse(await feedView(feed)),
-        'GET /v1/usage/budgets': async () => jsonResponse(budgetsView()),
-        'GET /v1/usage/insights': async call =>
-          insightsAnswer(
+        // The owner and a person read every login's measured budget; a FERRET reads only whether its own logins are paused.
+        'GET /v1/usage/budgets': async call => {
+          const caller = ferretOf(call);
+          return jsonResponse(caller === undefined ? budgetsView() : await ferretBudgetsView(caller));
+        },
+        // The owner and a person read the whole fleet; a FERRET reads its own lineage only (itself and its helpers, the
+        // same `mayTouch` rule Ferrets applies to every other per-ferret read). The caller is the standing Gate admitted,
+        // never a header or a query value.
+        'GET /v1/usage/insights': async call => {
+          const caller = ferretOf(call);
+          return insightsAnswer(
             { index: () => ingestion.read() },
             call.request,
             (await needs.logins.list().catch(() => undefined))?.machine ?? null,
-          ),
+            caller === undefined
+              ? undefined
+              : { mayRead: ferret => needs.ferrets.mayTouch(caller, ferret as FerretId) },
+          );
+        },
         'GET /v1/usage/pricing': async () => await pricingRoutes.view(),
         'PATCH /v1/usage/pricing': async call => await pricingRoutes.patch(call.request),
         'POST /v1/usage/pricing/sync/preview': async call => await pricingRoutes.preview(call.request),

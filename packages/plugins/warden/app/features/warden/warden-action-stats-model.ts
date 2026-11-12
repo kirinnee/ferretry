@@ -203,7 +203,7 @@ const reviveSuccess = (history: readonly WardenDayStats[]): ReviveSuccess => {
 };
 
 export const wardenActionStats = (status: WardenStatusView, now: number): WardenActionStats => {
-  const history = status.history;
+  const history = status.history ?? [];
   const today = utcDay(now);
   return {
     recorded: tallied(history).length > 0,
@@ -253,7 +253,7 @@ export const wardenActionChart = (
   now: number,
   filterKey: ActionFilterKey,
 ): ActionChart | undefined => {
-  const { history } = status;
+  const history = status.history ?? [];
   if (tallied(history).length === 0) return undefined;
   const filter = filterOf(filterKey);
   const today = utcDay(now);

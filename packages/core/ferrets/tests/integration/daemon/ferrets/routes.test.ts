@@ -227,7 +227,7 @@ describe('starting, tokens and attach', () => {
     expect(runner.starts).toBe(1);
   });
 
-  test('G12 a ferret helper start passes the state-home fence in a project folder and then waits for Packs', async () => {
+  test("G12 a ferret helper start is judged by the kernel's state-home fence, then waits for Packs' admission", async () => {
     const h = await host([record('lead')], { harness: new FakeHarness(), runner: new FakeRunner() });
     const started = await postStart(h, { ...as('lead'), body: { folder: '/work/b' } });
     expect(started.status).toBe(503);

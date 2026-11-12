@@ -1,3 +1,4 @@
+import { LaunchRoots } from '@ferretry/core-ferrets/contract';
 import { appAction, definePlugin, route, screen, verb } from '@ferretry/kernel/manifest';
 import {
   filesystemConfigure,
@@ -33,6 +34,10 @@ export default definePlugin({
   words: [{ word: 'project', means: 'a repository Ferretry knows by name', insteadOf: ['repo'] }],
 
   provides: { projects: ProjectsPort },
+
+  // The one taker of `launch.roots`: which folders are known projects decides whether a governed device's start is an
+  // ordinary act or terminal access. It grants nothing itself.
+  hooks: { takes: [{ hook: LaunchRoots, key: 'projects' }] },
 
   actions: {
     routes: [

@@ -1672,6 +1672,8 @@ async function start(world: World): Promise<TestHost> {
             if (prefix === undefined || relative.startsWith('/') || relative.split('/').includes('..'))
               return { ok: false, error: 'outside' };
             // The real host normalizes (`join`), so the root's own folder is spelled without a trailing slash.
+            // The scope's own folder is its prefix, never `prefix/`: production names a home with no trailing slash, and
+            // Ferrets refuses a home that is not canonical (a real harness's `homeFor` returns exactly this).
             return { ok: true, value: (relative === '' ? prefix : `${prefix}/${relative}`) as never };
           },
           // As production: a link on the way (the leaf's too) is followed and judged — one that reaches outside this root is
@@ -1895,9 +1897,14 @@ async function start(world: World): Promise<TestHost> {
                 links: 1,
               };
             }),
+          // A file, or a folder the test world holds something under (a made folder, a file, a link), as the real root's
+          // `stat` says; a link on the way is followed and judged first, as `readText` does.
           stat: async path => {
             const reached = followLinks(path);
-            return world.roots.has(reached) ? fileStat(reached) : undefined;
+            if (world.roots.has(reached)) return fileStat(reached);
+            return testFolderExists(reached.replace(/\/+$/u, ''))
+              ? { kind: 'directory' as const, size: 0, modified: clock.now(), mode: 0o700, links: 1 }
+              : undefined;
           },
           // The real host's rules over the flat test world, with the same refusals: the LEAF IS NEVER FOLLOWED (the parent
           // is opened first, then the entry goes by its own name; a link goes as a link and its target stays), and

@@ -168,6 +168,7 @@ export default implementDaemon(manifest, {
           undefined,
           cardAskAnswers(agenda, () => sources(CARD_SOURCE), now),
           sourceAnswers(agenda, sources, now),
+          context.reach,
         ),
       },
       provides: {

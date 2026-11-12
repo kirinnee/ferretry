@@ -180,6 +180,7 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
       return await service.systemCallsign(prefix);
     },
     agentControl: ferret => service.agentControl(ferret),
+    turnUsage: (ferret, since) => service.turnUsage(ferret, since),
     harness: (ferret, caller) => service.harness(ferret, caller),
     turns: (ferret, caller) => service.turns(ferret, caller),
     prompt: (ferret, caller) => service.prompt(ferret, caller),

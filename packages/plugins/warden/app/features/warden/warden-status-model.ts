@@ -109,18 +109,40 @@ export const wardenNeedsYouCount = (status: WardenStatusView): number => {
 };
 
 /**
+ * What the strip says of the flags, in whose voice. The owner is told who needs THEM; a ferret's view (the only one
+ * that carries `wardenRunning`) is about its own work, so it is never told that nobody needs "you".
+ */
+export const wardenNeedsLabel = (status: WardenStatusView, needs: number, reporting: boolean): string => {
+  const ferretView = status.wardenRunning !== undefined;
+  if (needs > 0) return ferretView ? `${needs} flagged for your work` : `${needs} need you`;
+  if (!reporting) return 'no evidence yet';
+  return ferretView ? 'no flags for your work' : 'nobody needs you';
+};
+
+/**
  * When a cap reached only for this hour is back, `07:00 UTC` — or undefined when the cap is not
  * paced (reached for the day, or not reached).
  */
 export const wardenPacedUntil = (status: Pick<WardenStatusView, 'spend'>, cap: WardenCap): string | undefined => {
-  if (!(status.spend.capsPaced ?? []).includes(cap)) return undefined;
-  return status.spend.pacedUntil === undefined ? 'the next hour' : `${status.spend.pacedUntil.slice(11, 16)} UTC`;
+  const { spend } = status;
+  if (spend === undefined || !(spend.capsPaced ?? []).includes(cap)) return undefined;
+  return spend.pacedUntil === undefined ? 'the next hour' : `${spend.pacedUntil.slice(11, 16)} UTC`;
 };
 
 /** Why a layer the owner switched on is off right now, in a few words. */
 const LAYER_OFF: Readonly<Record<Exclude<WardenTriageReason, 'configured' | 'disabled'>, string>> = {
   jev_cap: 'Jev cap hit',
   investigation_cap: 'LLM cap hit',
+  no_login: 'no login',
+};
+
+/**
+ * The same, for a view with NO amounts (a ferret's): it cannot tell the day's cap from this hour's share, so it says
+ * only what is true of either — paused — and never that a cap is "hit".
+ */
+const LAYER_PAUSED: Readonly<Record<keyof typeof LAYER_OFF, string>> = {
+  jev_cap: 'Jev paused',
+  investigation_cap: 'full checks paused',
   no_login: 'no login',
 };
 
@@ -142,6 +164,6 @@ export const wardenTriageLabel = (status: WardenStatusView): string => {
   const off = [triage.jev, triage.llm]
     .map(layer => layer.reason)
     .filter((reason): reason is keyof typeof LAYER_OFF => reason in LAYER_OFF)
-    .map(reason => paced(reason) ?? LAYER_OFF[reason]);
+    .map(reason => paced(reason) ?? (status.spend === undefined ? LAYER_PAUSED : LAYER_OFF)[reason]);
   return off.length === 0 ? label : `${label} (${off.join(', ')})`;
 };

@@ -28,6 +28,7 @@ import type {
   SitrepLine,
   BoundTranscriptReader,
   HarnessTranscriptBytes,
+  TurnUsage,
 } from './kinds.ts';
 import type { AgentControl, LimitsFile } from './state.ts';
 
@@ -166,6 +167,7 @@ export type StartFailure =
   | { readonly code: 'refused' | 'unservable_model'; readonly reason: string } // a start.decide taker said no, or a test-mode runner refused a real harness (`real_harness`) (`unservable_model`: what the start asked of its model cannot be given)
   | { readonly code: 'folder'; readonly reason: string } // WorkFolders refused the folder
   | { readonly code: 'harness_unavailable' | 'runner_unavailable' | 'login_unavailable'; readonly reason: string }
+  | { readonly code: 'state_home' | 'state_home_unresolved'; readonly reason: string } // a ferret's start in (or through a link to) the state home, or the fence could not be built (an agent start only)
   | { readonly code: 'failed'; readonly reason: string };
 
 /**
@@ -610,6 +612,13 @@ export interface FerretsApi {
    * daemon does not know may control nothing.
    */
   agentControl(ferret: FerretId): Promise<AgentControl>;
+  /**
+   * What a ferret spent, turn by turn, read through ITS harness (`Harness.usage`; Ferrets owns which harness a ferret
+   * runs, so Usage never reaches one). Token counts only, never transcript text. `undefined` means PARTIAL: the ferret is
+   * unknown, its harness is off, or the reader threw. It is never counted as zero; an empty list is a ferret that spent
+   * nothing yet.
+   */
+  turnUsage(ferret: FerretId, since?: Instant): Promise<readonly TurnUsage[] | undefined>;
   /**
    * The harness seam (decision #18, additive): deliver, interrupt and the transcript of one ferret. `undefined` for a
    * ferret this daemon does not know. With `caller` (a ferret acting), only itself and its helpers are reachable, by

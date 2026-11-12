@@ -31,6 +31,8 @@ import {
   ArchiveKeeps,
   FerretLaunchSectionsFiles,
   Harnesses,
+  LAUNCH_ROOTS_KEY,
+  LaunchRoots,
   Logins,
   type LoginKind,
   LaunchParts,
@@ -518,6 +520,9 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         },
       });
     },
+    // The folder the ferret will really work in, judged by the kernel's identity fence (a work folder or a link swapped
+    // in after the route's check lands here).
+    stateHomeHolding: async path => await kernel.paths.stateHomeHolding(path),
     delivered: ferret => wakeTurnWatch?.(ferret),
     changed: payload => {
       followStatus(payload.ferret, payload.state, 'lifecycle');
@@ -683,14 +688,18 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
 
   /**
-   * Whether the folder a ferret is started in lies inside the state home, by the kernel's bound directory (identity up
-   * every folder and through links, the same fence the owner roots use). A folder that is not a directory is not inside
-   * anything (the start refuses it as a folder); a fence the kernel cannot compute fails closed for an agent with
-   * today's 503 `state_home_unresolved`, and never with a lexical stand-in. The file browser needs none: the pin a
-   * work root hands out judges every walk beneath it against the kernel's fence itself (S40, S47).
+   * Whether the folder a ferret is started in lies inside the state home, by BOTH of the kernel's fences: the name-and-link
+   * fence (`stateHomeHolding`: as named, on every link hop, by real path and by identity up to `/`) and the bound directory
+   * (`bindDirectory`: the identity the launch will hold, the same fence the owner roots use). Either one holding refuses.
+   * A folder that is not a directory is not inside anything by the bound directory (the start refuses it as a folder); a
+   * fence the kernel cannot compute, from either, fails closed for an agent with today's 503 `state_home_unresolved`, and
+   * never with a lexical stand-in or a fallback to "not inside". The file browser needs none: the pin a work root hands out
+   * judges every walk beneath it against the kernel's fence itself (S40, S47).
    */
   const stateHomeReach: StateHomeLaunchReach = {
     holding: async path => {
+      const named = await kernel.paths.stateHomeHolding(path);
+      if (named !== undefined) return named;
       const bound = await kernel.paths.bindDirectory(path);
       if (!bound.ok) {
         if (bound.error.reason === 'not_a_directory' || bound.error.reason === 'not_absolute') return undefined;
@@ -698,6 +707,17 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       }
       return bound.value.insideStateHome ? bound.value.realPath : undefined;
     },
+  };
+
+  /**
+   * The folders a governed device may start a ferret in as an ordinary act (v4 `knownLaunchRoots`): the projects the
+   * owner registered, then the managed worktree root. With Projects off the list is empty, so a governed start is
+   * terminal access (`terminal.use`): narrower, never wider. A throw from Projects is NOT an empty list: it propagates.
+   */
+  const knownLaunchRoots = async (): Promise<readonly string[]> => {
+    const found = hooks.provider(LaunchRoots, LAUNCH_ROOTS_KEY);
+    const projects = found === 'unavailable' ? [] : await found.roots();
+    return worktrees.managedRoot === undefined ? projects : [...projects, worktrees.managedRoot];
   };
 
   /** S47: an agent reaches only its own ferret and its helpers'; a person is unaffected. */
@@ -1116,7 +1136,13 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
 
   const startFailure = (failure: { readonly code: string; readonly reason: string }): never => {
     const status =
-      failure.code === 'refused' || failure.code === 'unservable_model' ? 409 : failure.code === 'folder' ? 400 : 503;
+      failure.code === 'refused' || failure.code === 'unservable_model'
+        ? 409
+        : failure.code === 'folder'
+          ? 400
+          : failure.code === 'state_home'
+            ? 403
+            : 503;
     throw new ApiError(status, failure.reason, failure.code);
   };
 
@@ -1243,10 +1269,12 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
             'only the Warden starts a ferret under its own label; leave --label out',
             'owner_only',
           );
-        // An agent never starts inside the state home: 403 there, 503 where the kernel cannot tell.
+        // An agent never starts inside the state home (the kernel's name-and-link fence AND its bound-directory identity):
+        // 403 there, 503 where the kernel cannot tell. A person is unaffected.
         await stateHomeLaunchRefusal(callerIsAgent(call), stateHomeReach, parsed.folder);
-        // Project catalogs and the managed-root launch seam are unbound; a governed start fails closed without them.
-        await terminalLaunchRefusal(call, parsed, undefined);
+        // What counts as a known project: Projects' registered folders plus the managed worktree root. Read at each start;
+        // a throw from Projects answers 503 `launch_roots_unavailable` (it cannot classify), never "outside".
+        await terminalLaunchRefusal(call, parsed, knownLaunchRoots);
         let startedFerret: FerretId | undefined;
         const start = async (): Promise<ApiResponse> => {
           const started = await service.start(

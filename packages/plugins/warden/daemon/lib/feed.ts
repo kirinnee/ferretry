@@ -70,6 +70,11 @@ export interface WardenInvestigationListInput {
   readonly live: (wardenId: string) => boolean;
   /** What Jev has said so far about a queued flag (`jev-checks.ts` {@link jevBeforeInvestigation}). */
   readonly jevFor?: (anomaly: WardenAnomaly) => WardenJevBefore | undefined;
+  /**
+   * Which investigations a reader may see, decided BEFORE the newest-N cut so that records the reader may not see can
+   * never push the ones it may out of the list. Absent: all.
+   */
+  readonly keep?: (entry: WardenInvestigation) => boolean;
 }
 
 const optionalJev = (jev: WardenJevBefore | undefined): { readonly jev?: WardenJevBefore } =>
@@ -107,7 +112,8 @@ export function investigationList(input: WardenInvestigationListInput): readonly
     ...(record.model === undefined ? {} : { model: record.model }),
     ...optionalJev(record.jev),
   }));
-  return [...queued, ...started].slice(0, WARDEN_STATUS_LIST_LIMIT);
+  const keep = input.keep;
+  return [...queued, ...started].filter(entry => keep === undefined || keep(entry)).slice(0, WARDEN_STATUS_LIST_LIMIT);
 }
 
 /** Keep today's investigations and the newest `limit` beyond them. Newest first in, newest first out. */

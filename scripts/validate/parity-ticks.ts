@@ -32,6 +32,7 @@ import {
   type ChangeRecord,
   PARITY_CHANGES,
   TODAY_ROUTES,
+  isRestoredAct,
   isTightening,
   movedPairs,
   readChanges,
@@ -153,7 +154,7 @@ function judge(was: DescriptorRow, now: DescriptorRow, recorded: boolean): Route
   const diffs = fieldDiffs(was, now);
   if (diffs.length === 0) return proven;
   if (!recorded) return { kind: 'unrecorded', text: `route changed with no record: ${showDiffs(diffs)}` };
-  const loose = diffs.filter(d => !isTightening(d, was, now));
+  const loose = diffs.filter(d => !isTightening(d, was, now) && !isRestoredAct(d, now));
   return loose.length === 0
     ? proven
     : { kind: 'loosened', text: `a recorded change is not a tightening: ${showDiffs(loose)}` };

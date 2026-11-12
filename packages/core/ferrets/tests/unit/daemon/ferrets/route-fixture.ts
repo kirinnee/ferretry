@@ -12,6 +12,9 @@ import {
   type FerretId,
   type FerretRecord,
   Harnesses,
+  LAUNCH_ROOTS_KEY,
+  LaunchRoots,
+  type LaunchRootsSource,
   OPENING_ATTACHMENTS_KEY,
   OpeningAttachments,
   type OpeningAttachmentsSource,
@@ -159,6 +162,10 @@ export async function host(
     readonly directories?: Readonly<Record<string, string>>;
     /** More plugins on the host (a fake taker of a Ferrets hook). */
     readonly plugins?: Parameters<typeof testHost>[0]['plugins'];
+    /** What the kernel's state-home fence answers for a folder (the home's name, or none); it may throw. */
+    readonly stateHomeHolding?: Parameters<typeof testHost>[0]['stateHomeHolding'];
+    /** A real-disk state home the kernel's production fence judges (links, identity). */
+    readonly stateHome?: string;
   } = {},
 ): Promise<TestHost> {
   const plugins = [
@@ -177,8 +184,25 @@ export async function host(
     ...(extra.spawn === undefined ? {} : { spawn: extra.spawn }),
     ...(extra.fenceHome === undefined ? {} : { fenceHome: extra.fenceHome }),
     ...(extra.directories === undefined ? {} : { directories: extra.directories }),
+    ...(extra.stateHomeHolding === undefined ? {} : { stateHomeHolding: extra.stateHomeHolding }),
+    ...(extra.stateHome === undefined ? {} : { stateHome: extra.stateHome }),
   });
   if (records.length === 0) return first;
   for (const each of records) first.state('ferrets').plant(FerretFiles, JSON.stringify(each), each.id);
   return await first.restart();
 }
+
+/** A stand-in for Projects (the one named taker of `launch.roots`): lists `source`'s roots as the known projects. */
+export const fakeLaunchRoots = (source: LaunchRootsSource) =>
+  implementDaemon(
+    definePlugin({
+      id: 'projects',
+      title: 'Projects (fake)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: LaunchRoots, key: LAUNCH_ROOTS_KEY }] },
+    }),
+    { build: () => ({ hooks: { 'launch.roots:projects': source } }) },
+  );

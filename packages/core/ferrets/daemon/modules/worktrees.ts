@@ -59,6 +59,8 @@ export interface WorktreesNeeds {
 
 export interface BuiltWorktrees {
   readonly service: ManagedWorktreeService;
+  /** Where managed checkouts live; `undefined` while this daemon hosts none. */
+  readonly managedRoot: string | undefined;
   readonly routes: { readonly [K in WorktreeRouteKey]: RouteHandler };
 }
 
@@ -98,5 +100,5 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
     { next: needs.newId },
     io?.managedRoot,
   );
-  return { service, routes: worktreeRoutes(service) };
+  return { service, managedRoot: io?.managedRoot, routes: worktreeRoutes(service) };
 }

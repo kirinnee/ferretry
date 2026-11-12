@@ -22,6 +22,15 @@ import { isTimeZone } from '../lib/analytics/time-zone.ts';
 /** The parameters this route takes. `session` scopes it to one ferret; `tz` is the IANA zone days are read in. */
 const PARAMETERS = ['q', 'session', 'tz'] as const;
 
+/**
+ * Whose rows a caller may read. Absent for the owner and a person (the whole fleet); present for a FERRET, which reads
+ * its own lineage only: itself and its descendants (Ferrets' `mayTouch`). Decided at this external boundary: the
+ * internal `turnUsage` port has no caller to ask.
+ */
+export interface InsightsLineage {
+  mayRead(ferret: string): boolean;
+}
+
 /** The index as the route needs it, read per request. */
 export interface InsightsSubsystem {
   index(): AnalyticsIndexRead;
@@ -98,14 +107,48 @@ export function insightsForPort(
   }
 }
 
-/** `GET /v1/usage/insights`. */
-export function insightsAnswer(subsystem: InsightsSubsystem, request: ApiRequest, machine: string | null): ApiResponse {
+/**
+ * The index a lineage-bound caller may query: only the rows of ferrets it may touch, and the index's own counts of the
+ * fleet narrowed to them, so neither a row, an aggregate nor a count says anything about a ferret outside the lineage.
+ */
+function narrowedTo(read: AnalyticsIndexRead, lineage: InsightsLineage): AnalyticsIndexRead {
+  const rows = read.rows.filter(row => lineage.mayRead(row.id));
+  const withTokens = rows.filter(row => row.inputTokens !== null).length;
+  return {
+    ...read,
+    rows,
+    // Every figure is recomputed from the authorized rows. The daemon-wide refresh state (pending sources, source errors,
+    // refreshing, last refresh time) cannot be told per lineage, so it is OMITTED rather than carried or zeroed.
+    status: {
+      schemaVersion: read.status.schemaVersion,
+      sessions: rows.length,
+      tokenSessions: withTokens,
+      transcriptSources: rows.length,
+      indexedTranscriptSources: withTokens,
+    },
+  };
+}
+
+/**
+ * `GET /v1/usage/insights`. A ferret caller (`lineage`) naming a ferret outside its lineage is refused (403, like every
+ * `mayTouch` route); an unscoped query is NARROWED to its lineage rather than refused, because "my fleet" is an honest
+ * question and the narrowed answer holds nothing the caller could not ask for by name.
+ */
+export function insightsAnswer(
+  subsystem: InsightsSubsystem,
+  request: ApiRequest,
+  machine: string | null,
+  lineage?: InsightsLineage,
+): ApiResponse {
   const source = queryText(request);
   const timeZone = timeZoneOf(request);
+  const session = queryValues(request, 'session')[0];
+  if (lineage !== undefined && session !== undefined && !lineage.mayRead(session))
+    throw new ApiError(403, 'a ferret reads the usage of itself and its own helpers only', 'forbidden');
   try {
     // Parsed BEFORE the index is read: a malformed query must not cost a full read of the store first.
     parseAnalyticsQuery(source);
-    const read = subsystem.index();
+    const read = lineage === undefined ? subsystem.index() : narrowedTo(subsystem.index(), lineage);
     const response: AnalyticsResponse = queryAnalyticsRecords(read.rows, source, {
       index: read.status,
       now: read.now,

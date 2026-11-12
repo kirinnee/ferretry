@@ -16,6 +16,7 @@ import type { AgendaSnapshot } from './snapshot/agenda.ts';
  * (today's `protocol/src/lib/agenda*.ts`). One copy, here; the daemon's `lib/protocol` files re-export it.
  */
 export * from './context.ts';
+export * from './ferret-notice.ts';
 export * from './snapshot/account-ids.ts';
 export * from './snapshot/agenda.ts';
 export * from './snapshot/agenda-card-asks.ts';

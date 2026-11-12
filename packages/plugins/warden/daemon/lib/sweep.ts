@@ -66,6 +66,7 @@ import type {
   WardenFailoverStatus,
   WardenGuardConfig,
   WardenInvestigateView,
+  WardenInvestigation,
   WardenInvestigationOrigin,
   WardenJevBefore,
   WardenJevCheck,
@@ -139,6 +140,7 @@ import {
   withDailyRollup,
 } from './daily.ts';
 import type { WardenAnomaly, WardenDetectResult } from './detect.ts';
+import type { WardenReadScope } from './ferret-view.ts';
 import { detectAnomalies, fingerprintAnomalies, isWardenScannableStatus } from './detect.ts';
 import {
   planWardenEscalations,
@@ -163,6 +165,7 @@ import {
 } from './failover.ts';
 import { blessingViews, investigationList, retainRecords, WARDEN_STATUS_LIST_LIMIT } from './feed.ts';
 import { type WardenFocusCard, wardenResumeMessage } from './focus-card.ts';
+import { wardenFixedNudge, wardenFixedResumeReason, wardenFixedStopReason } from './ferret-sentences.ts';
 import {
   capSkipKey,
   JEV_CHECKS_SHOWN,
@@ -213,7 +216,6 @@ import {
   WARDEN_SWEEP_ORIGIN,
   type WardenVerdictAct,
   wardenActDetail,
-  wardenNudgeMessage,
 } from './remedy.ts';
 import {
   detectOverdueReports,
@@ -268,6 +270,7 @@ import {
   type WardenRuntimeState,
   wardenMayStop,
 } from './state.ts';
+import { scannedAfter, sweptField } from './scanned.ts';
 import { DEFAULT_TICK_SECONDS } from './sus.ts';
 import { instantMs } from './time.ts';
 import {
@@ -368,7 +371,10 @@ export interface WardenSpawner {
 export interface WardenArtifacts {
   writeProvenance(reportPath: string, provenance: WardenSpawnProvenance): Promise<void>;
   readReport(reportPath: string): Promise<string | undefined>;
-  /** The newest report, for the status surface: its identity and its first lines. */
+  /**
+   * The newest report, for the status surface: its identity and its first lines. The owner's: a ferret is never shown
+   * report text, so this takes no scope.
+   */
   latest(): Promise<{ readonly reportId: string; readonly head: string } | undefined>;
   /** Absolute path for a report written at `at`, optionally about `targetId`. */
   reportPath(at: string, targetId?: string): string;
@@ -423,7 +429,8 @@ interface WardenJournal {
  * sweep is told it is blind and reconciles nothing that pass.
  */
 interface WardenVerdictReader {
-  recent(): Promise<readonly WardenEscalationVerdict[] | undefined>;
+  /** A scope reads only the reports attributable to its lineage (filtered before anything is read). */
+  recent(scope?: WardenReadScope): Promise<readonly WardenEscalationVerdict[] | undefined>;
 }
 
 /** How the daemon's raise or refresh landed. */
@@ -839,6 +846,15 @@ function wireAnomaly(anomaly: WardenAnomaly): WireWardenAnomaly {
  * first's already-spent spawn gap. The mount owns that chain because it also owns
  * the timer that fires the periodic run.
  */
+/**
+ * A scoped read narrows ROWS, before every cut: a FERRET reads only its own lineage's (Ferrets' `mayTouch`,
+ * {@link WardenReadScope}), so an unrelated record can never evict one it may read. WHICH FIELDS a ferret is told, and
+ * the lineage filter once more, belong to `ferretWardenView` (`ferret-view.ts`) at the route spine; a scoped answer
+ * is still the owner-shaped view and is never served as it is.
+ */
+/** The status the owner and a person read: the whole fleet, spend and savings included. */
+export type WardenOwnerStatusView = WardenStatusView & Required<Pick<WardenStatusView, 'spend' | 'savings'>>;
+
 export class WardenSweepService {
   private readonly ports: WardenSweepPorts;
   /** Why the machine item was last refused, until it lands again: said once, not on every sweep that repeats it. */
@@ -894,7 +910,9 @@ export class WardenSweepService {
    * sweep has completed, which is what lets a caller tell "nothing has run" from
    * "a sweep ran and found nothing".
    */
-  async status(nextSweepAt?: string): Promise<WardenStatusView> {
+  async status(nextSweepAt?: string): Promise<WardenOwnerStatusView>;
+  async status(nextSweepAt: string | undefined, scope: WardenReadScope | undefined): Promise<WardenStatusView>;
+  async status(nextSweepAt?: string, scope?: WardenReadScope): Promise<WardenStatusView> {
     const stored = await this.storedConfig();
     const state = parseWardenRuntimeState(await this.ports.state.read());
     const fleet = await this.ports.fleet.fleet();
@@ -908,7 +926,10 @@ export class WardenSweepService {
     const resolved = await this.resolveLogin(stored.config);
     const budget = this.budget(stored.config, state, nowMs, resolved.usable);
     const history = wardenHistory(state, nowMs);
-    const jevChecks = await this.ports.jevChecks.recent(JEV_CHECKS_SHOWN).catch(() => undefined);
+    // A scoped reader's checks are narrowed to its lineage BEFORE the newest-N cut (see `WardenJevCheckLog.recent`).
+    const jevChecks = await this.ports.jevChecks
+      .recent(JEV_CHECKS_SHOWN, scope === undefined ? undefined : check => scope.mayRead(check.sessionId))
+      .catch(() => undefined);
     const investigators = new Map(
       (state.investigations ?? []).flatMap(record =>
         record.wardenName === undefined ? [] : [[record.id, record.wardenName] as const],
@@ -916,13 +937,14 @@ export class WardenSweepService {
     );
     return {
       config: stored.config,
-      ...(state.lastSweepAt === undefined ? {} : { lastSweepAt: state.lastSweepAt }),
+      ...sweptField(state, scope),
       ...(nextSweepAt === undefined ? {} : { nextSweepAt }),
       ...wireFlags(state.lastAnomalies ?? []),
       fingerprint: state.lastFingerprint ?? '',
       ...(liveWarden === undefined ? {} : { liveWarden }),
       ...(state.lastSpawnAt === undefined ? {} : { lastSpawnAt: state.lastSpawnAt }),
-      ...(await this.latestReportField()),
+      // A report's head is the owner's: a ferret is never shown report text, so it is not even read for one.
+      ...(scope === undefined ? await this.latestReportField() : {}),
       failover: await this.failoverStatus(stored.config, resolved.accounts, state.failover ?? {}),
       login: resolved.login,
       triage: budget.status,
@@ -934,6 +956,14 @@ export class WardenSweepService {
           meta: state.queueMeta ?? {},
           records: state.investigations ?? [],
           live: wardenId => liveIds.has(wardenId),
+          // A scoped reader's list is its lineage's targets only: a targetless (pack) investigation belongs to no
+          // lineage. Narrowed before the cut.
+          ...(scope === undefined
+            ? {}
+            : {
+                keep: (entry: WardenInvestigation) =>
+                  entry.targetSession !== undefined && scope.mayRead(entry.targetSession),
+              }),
           // A queued flag says what Jev has done about it so far, as its investigation will once it starts.
           jevFor: anomaly =>
             jevBeforeInvestigation({
@@ -947,7 +977,10 @@ export class WardenSweepService {
           return wardenName === undefined ? entry : { ...entry, wardenName };
         }),
       ],
-      actions: (state.actions ?? []).slice(0, WARDEN_STATUS_LIST_LIMIT).map(action => ({ ...action })),
+      actions: (state.actions ?? [])
+        .filter(action => scope === undefined || scope.mayRead(action.sessionId))
+        .slice(0, WARDEN_STATUS_LIST_LIMIT)
+        .map(action => ({ ...action })),
       blessings: [...blessingViews(state.blessings ?? {}, nowMs)],
       history: [...history],
       actionTotals: [...sumActionTallies(history)],
@@ -963,27 +996,36 @@ export class WardenSweepService {
    * (`reconcileEscalations`) and answered in the unified Agenda inbox. What could not be read is said
    * out loud as a degraded view rather than read as "nothing waits".
    */
-  async agenda(): Promise<WireAgendaView> {
+  async agenda(scope?: WardenReadScope): Promise<WireAgendaView> {
     const stored = await this.storedConfig();
     const state = parseWardenRuntimeState(await this.ports.state.read());
     const fleet = await this.ports.fleet.fleet();
+    // A scoped reader's boards are its lineage's only, so a stranger's unreadable board is not its banner either.
     const live = fleet.filter(
-      session => !isTerminalStatus(session.state.status) && session.config.label !== WARDEN_LABEL,
+      session =>
+        !isTerminalStatus(session.state.status) &&
+        session.config.label !== WARDEN_LABEL &&
+        (scope === undefined || scope.mayRead(session.config.id)),
     );
     const read = await Promise.all(
       live.map(async session => await this.ports.feed.board(session.config.id).catch(() => undefined)),
     );
     const boards = read.filter((board): board is AgendaBoardInput => board !== undefined);
-    const reports = await this.ports.verdicts.recent().catch(() => undefined);
+    // A scoped reader's "could not be read" is about ITS reports only: another lineage's report, readable or not, is
+    // not a reason for its banner.
+    const reports = await this.ports.verdicts.recent(scope).catch(() => undefined);
     return buildWardenAgendaView({
       now: this.ports.nowMs(),
       sessions: fleet,
       boards,
       unreadBoards: read.length - boards.length,
       reportsUnreadable: reports === undefined,
-      ...(state.lastSweepAt === undefined ? {} : { lastSweepAt: state.lastSweepAt }),
+      // A scoped reader's "last swept" is the latest sweep that scanned its own lineage, so a sweep that looked at
+      // nobody of its own can neither show nor change its outcome (no-sweep, clean-sweep, overdue).
+      ...sweptField(state, scope),
       ...(state.failover?.exhaustedSince === undefined ? {} : { exhaustedSince: state.failover.exhaustedSince }),
       sweepIntervalMinutes: stored.config.intervalMinutes,
+      ...(scope === undefined ? {} : { mayRead: (sessionId: string) => scope.mayRead(sessionId) }),
     });
   }
 
@@ -1244,6 +1286,7 @@ export class WardenSweepService {
     state = {
       ...state,
       lastSweepAt: at,
+      scanned: scannedAfter(state.scanned, fleet, scannable, at),
       lastAnomalies: flagged,
       triageDay: { ...today, flags: today.flags + newFlagCount(state.lastAnomalies ?? [], flagged) },
     };
@@ -2066,6 +2109,8 @@ export class WardenSweepService {
           detail: (result, error) => jevActDetail(act.action, act.reason, outcome.confidence, result, error),
           nudge: jevNudgeMessage(outcome.message ?? ''),
           stopReason: `${sure}: ${act.reason}`,
+          // Jev judges ONE flag from that ferret's own facts, so its words are about the ferret it is told to.
+          resumeReason: act.reason,
         },
       );
       next = await this.noteJevCheck(done.state, check(done.done));
@@ -2530,8 +2575,11 @@ export class WardenSweepService {
     }
     const done = await this.carryOut(state, targetId, act, base, {
       detail: (outcome, error) => wardenActDetail(act, outcome, error),
-      nudge: wardenNudgeMessage(act.reason),
-      stopReason: `Warden verdict: ${act.reason}`,
+      // Everything TYPED INTO the ferret's own session is a fixed sentence for the flag's class: the investigator's
+      // reason is a model's prose about a report that may name other ferrets, and what a ferret is shown is not its.
+      nudge: wardenFixedNudge(record.kinds[0]),
+      stopReason: wardenFixedStopReason(record.kinds[0]),
+      resumeReason: wardenFixedResumeReason(record.kinds[0]),
     });
     return done.state;
   }
@@ -2550,6 +2598,7 @@ export class WardenSweepService {
       readonly detail: (outcome: 'done' | 'failed', error?: string) => string;
       readonly nudge: string;
       readonly stopReason: string;
+      readonly resumeReason: string;
     },
   ): Promise<{ readonly state: WardenRuntimeState; readonly done: boolean }> {
     // Read the fleet afresh: the sweep's snapshot is older than the verdict, and nothing else stands in
@@ -2566,7 +2615,7 @@ export class WardenSweepService {
         // The ferret started again carries on with its card (`focus-card.ts`). Only an auto one is handed
         // a turn: an interactive one is somebody's terminal, and keeps the resume domain's own behaviour.
         const card = target.config.mode === 'auto' ? await this.focusCard(targetId) : undefined;
-        const message = card === undefined ? undefined : wardenResumeMessage(act.action, act.reason, card);
+        const message = card === undefined ? undefined : wardenResumeMessage(act.action, words.resumeReason, card);
         // No person is behind a sweep's act: it runs as the Warden's own, an agent's origin.
         if (act.action === 'resume') await this.ports.remedies.resume(targetId, message, WARDEN_SWEEP_ORIGIN);
         else await this.ports.remedies.restart(targetId, message, WARDEN_SWEEP_ORIGIN);

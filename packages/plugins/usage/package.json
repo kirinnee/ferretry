@@ -23,6 +23,7 @@
     "@ferretry/plugin-logins": "workspace:*",
     "@ferretry/plugin-conversation": "workspace:*",
     "@ferretry/core-ferrets": "workspace:*",
+    "@ferretry/core-gate": "workspace:*",
     "@ferretry/core-vault": "workspace:*",
     "react": "^19.0.0",
     "lucide-react": "^0.468.0",

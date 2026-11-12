@@ -43,8 +43,11 @@ export const JEV_CHECKS_SHOWN = 50;
 /** Where Jev's checks are written: one JSON line each, appended, rotated by the day. */
 export interface WardenJevCheckLog {
   append(check: WardenJevCheck): Promise<void>;
-  /** The newest checks first, at most `limit`. Empty when none were ever written. */
-  recent(limit: number): Promise<readonly WardenJevCheck[]>;
+  /**
+   * The newest checks first, at most `limit`. Empty when none were ever written. `keep` narrows BEFORE the cut, so the
+   * limit counts only checks the reader may see: others' checks can neither fill it nor push a visible one out.
+   */
+  recent(limit: number, keep?: (check: WardenJevCheck) => boolean): Promise<readonly WardenJevCheck[]>;
 }
 
 const DAY_FILE = /^(\d{4}-\d{2}-\d{2})\.jsonl$/u;

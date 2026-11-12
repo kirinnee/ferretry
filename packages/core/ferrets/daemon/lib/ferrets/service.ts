@@ -64,6 +64,7 @@ import type {
   RunnerHandle,
   Sitrep,
   SitrepLine,
+  TurnUsage,
   SitrepLineSource,
   StartDecideInput,
   StartFailure,
@@ -100,6 +101,7 @@ import {
 import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../tokens/tokens.ts';
 import type { SessionSpawnRequest } from '../session/provenance/types.ts';
 import { type LaunchEnvironmentRecord, recordedSwitches } from '../agent-control/launch-environment.ts';
+import { STATE_HOME_UNRESOLVED, stateHomeSentence } from '../route-security/state-home.ts';
 
 /**
  * THE FERRETS PORT (§2.2): who each ferret is and its state, and the launch pipeline. Starting and stopping are
@@ -169,6 +171,12 @@ export interface FerretsPorts {
    * whether it lies inside the state home. Unbound, the identity is not carried (a unit fixture); the daemon always binds.
    */
   bindFolder?(path: string): Promise<Result<BoundLaunchFolder, string>>;
+  /**
+   * The state home a folder is in (the kernel's identity fence: name, link hops, real path), `undefined` when it is in
+   * none; it throws when the fence cannot be built. Asked for a start BY A FERRET, on the folder the ferret will really
+   * work in (v4 `refuseStateHomeStart`). Unbound: an agent start is refused (fail closed).
+   */
+  stateHomeHolding?(path: string): Promise<string | undefined>;
   changed(payload: FerretChangedPayload): void;
   /** Ferrets typed into this ferret's pane (a delivery or a queued line landed): the turn watch looks again soon. */
   delivered?(ferret: FerretId): void;
@@ -819,6 +827,17 @@ export class FerretsService implements FerretsApi {
     return ok({ prompt: `${prompt}\n${planned.value.section}`, files });
   }
 
+  /** An agent may start nothing in the state home; a fence that cannot be built refuses too (never a lexical guess). */
+  private async stateHomeRefusal(folder: string): Promise<Result<never, StartFailure> | undefined> {
+    if (this.ports.stateHomeHolding === undefined) return failed('state_home_unresolved', STATE_HOME_UNRESOLVED);
+    try {
+      const home = await this.ports.stateHomeHolding(folder);
+      return home === undefined ? undefined : failed('state_home', stateHomeSentence(home));
+    } catch {
+      return failed('state_home_unresolved', STATE_HOME_UNRESOLVED);
+    }
+  }
+
   private async startNamed(
     id: FerretId,
     name: string,
@@ -833,6 +852,10 @@ export class FerretsService implements FerretsApi {
       return failed('folder', 'the work folder must be an absolute path with no . or .. segment');
     const folder = request.workFolder === undefined ? anchor : this.ports.folder(request.workFolder);
     if (!folder.ok) return failed('folder', folder.error);
+    if (request.by === 'ferret') {
+      const fenced = await this.stateHomeRefusal(folder.value);
+      if (fenced !== undefined) return fenced;
+    }
     const harnessKey = request.harness ?? this.ports.harnessKeys()[0];
     if (harnessKey === undefined || !(HARNESS_KEYS as readonly string[]).includes(harnessKey))
       return failed('harness_unavailable', 'no harness plugin is on');
@@ -1219,6 +1242,22 @@ export class FerretsService implements FerretsApi {
     await this.ports.ready?.();
     if (this.registry.get(ferret) === undefined) return NO_AGENT_CONTROL;
     return effectiveAgentControl(this.ports.limits?.());
+  }
+
+  /**
+   * What a ferret spent, read through the harness its record names. `undefined` (PARTIAL, never zero) for a ferret this
+   * daemon does not know, a harness that is off, and a reader that throws: its error text can carry a path or a line of
+   * the transcript, so none is passed on.
+   */
+  async turnUsage(ferret: FerretId, since?: Instant): Promise<readonly TurnUsage[] | undefined> {
+    await this.ports.ready?.();
+    const record = this.registry.get(ferret);
+    if (record === undefined) return undefined;
+    try {
+      return await this.ports.harness(record.harness)?.usage.turns(ferret, since);
+    } catch {
+      return undefined;
+    }
   }
 
   /**

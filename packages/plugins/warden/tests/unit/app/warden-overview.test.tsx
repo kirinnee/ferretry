@@ -21,6 +21,7 @@ import {
   wardenConfig,
   wardenFailover,
   wardenInvestigation,
+  type OwnerWardenStatusView,
   wardenStatus,
 } from '../../support/app/warden.ts';
 
@@ -128,7 +129,7 @@ const known = [
   ferretView('sess-c', { config: { name: 'kamila' } }),
 ];
 
-const actionsStatus = (): WardenStatusView =>
+const actionsStatus = (): OwnerWardenStatusView =>
   wardenStatus({
     lastSweepAt: '2026-07-31T11:59:00.000Z',
     history: history(),

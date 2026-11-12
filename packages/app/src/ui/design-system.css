@@ -1271,6 +1271,17 @@ body {
   border-color: var(--accent-strong);
   color: var(--accent-fg);
 }
+/* A disabled FILLED button is the one place the global 55% fade fails: the accent fill at 55% under white label
+   measured 2.4:1 in the light default theme (under the 3:1 a control's label needs). It is flat instead, in the
+   surface's own ink, so it reads as unavailable by shape and by the not-allowed cursor, never by being faint. */
+.kt-btn[data-variant='primary']:disabled,
+.kt-btn[data-variant='primary']:disabled:hover {
+  opacity: 1;
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  box-shadow: none;
+  color: var(--fg-soft);
+}
 .kt-btn[data-variant='danger'] {
   border-color: var(--err);
   color: var(--err);

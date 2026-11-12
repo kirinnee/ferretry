@@ -118,11 +118,6 @@ export function mayActAlone(act: WardenVerdictAct, permissions: WardenMayActAlon
   return permissions[act.action];
 }
 
-/** The message a nudge types into the ferret, in the Warden's voice and the investigation's words. */
-export function wardenNudgeMessage(reason: string): string {
-  return `The Warden checked on you: ${reason.trim().replace(/\.$/u, '')}. If you are blocked, say exactly what you need; otherwise carry on and post a short status.`;
-}
-
 const PAST: Readonly<Record<WardenVerdictAct['action'], string>> = {
   nudge: 'Nudged',
   resume: 'Resumed',

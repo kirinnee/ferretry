@@ -65,7 +65,11 @@ export const wardenAction = (overrides: Partial<WardenAction> = {}): WardenActio
   ...overrides,
 });
 
-export const wardenStatus = (overrides: Partial<WardenStatusView> = {}): WardenStatusView => {
+/** The OWNER's status (the whole fleet): spend, savings and history present, as the model tests read them. */
+export type OwnerWardenStatusView = WardenStatusView &
+  Required<Pick<WardenStatusView, 'spend' | 'savings' | 'history'>>;
+
+export const wardenStatus = (overrides: Partial<WardenStatusView> = {}): OwnerWardenStatusView => {
   const config = wardenConfig(overrides.config);
   return {
     config,

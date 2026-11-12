@@ -177,6 +177,19 @@ interface AnomalyBlock {
   readonly block: string;
 }
 
+/** What a reader may ask of the parse. */
+export interface ParseWardenReportsOptions {
+  /**
+   * For a reader that shows a row to someone who may read only part of a fleet report: a section that holds a line
+   * looking like a heading the parser did not split on (`###`, `#`, an indented one) is `unknown`, never what the text
+   * after that line says. The owner's read leaves it off and is unchanged.
+   */
+  readonly failClosedHeadings?: boolean;
+}
+
+/** Whether a section holds, after its own heading line, a line that starts like a markdown heading. */
+const hasUnsplitHeading = (section: string): boolean => /^[ \t]*#/m.test(section.slice(section.indexOf('\n') + 1));
+
 /** Split a fleet-triage report into its per-anomaly blocks. */
 function anomalyBlocks(content: string): readonly AnomalyBlock[] {
   const blocks: AnomalyBlock[] = [];
@@ -300,6 +313,7 @@ export const DEFAULT_VERDICT_LIMIT = 20;
 export function parseWardenReports(
   files: readonly WardenReportFile[],
   limit = DEFAULT_VERDICT_LIMIT,
+  options: ParseWardenReportsOptions = {},
 ): readonly WardenVerdict[] {
   if (limit <= 0) return [];
   const sorted = files.toSorted((left, right) =>
@@ -333,6 +347,19 @@ export function parseWardenReports(
       });
     } else {
       for (const anomaly of blocks) {
+        if (options.failClosedHeadings === true && hasUnsplitHeading(anomaly.block)) {
+          // A line that looks like a heading sits inside this section but was not split on, so whose words follow it
+          // is unknown: nothing after it may label this row.
+          entries.push({
+            at,
+            targetSession: anomaly.session,
+            ...(anomaly.teammate === undefined ? {} : { teammate: anomaly.teammate }),
+            ...(anomaly.label === undefined ? {} : { label: anomaly.label }),
+            verdict: 'unknown',
+            reportPath: file.path,
+          });
+          continue;
+        }
         const blockMarker = structuredVerdict(anomaly.block);
         // A single-anomaly report may legitimately keep its marker above the
         // block. A multi-anomaly report must not: copying one global action

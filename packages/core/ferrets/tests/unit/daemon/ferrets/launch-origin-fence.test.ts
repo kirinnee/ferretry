@@ -34,6 +34,9 @@ const unfenced: readonly [string, LaunchOrigin][] = [
 
 const insideStateHome = (f: ReturnType<typeof additivesFixture>): void => {
   f.ports.bindFolder = async () => ok(STATE_HOME);
+  // The name-and-link fence (stateHomeHolding, audit A) finds no home by NAME here: these cases drive the bound
+  // directory's identity fence and the launch ORIGIN; the name fence is bound only so a by:ferret start is asked, not refused unbound.
+  f.ports.stateHomeHolding = async () => undefined;
 };
 
 describe('start', () => {

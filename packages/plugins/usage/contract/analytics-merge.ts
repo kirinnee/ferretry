@@ -178,9 +178,16 @@ function mergeIndex(left: AnalyticsIndexStatus, right: AnalyticsIndexStatus): An
     tokenSessions: left.tokenSessions + right.tokenSessions,
     transcriptSources: left.transcriptSources + right.transcriptSources,
     indexedTranscriptSources: left.indexedTranscriptSources + right.indexedTranscriptSources,
-    pendingTranscriptSources: left.pendingTranscriptSources + right.pendingTranscriptSources,
-    sourceErrors: left.sourceErrors + right.sourceErrors,
-    refreshing: left.refreshing || right.refreshing,
+    // A side that does not report one (a lineage-narrowed answer) leaves the sum unknown, so it is absent, never a low count.
+    ...(left.pendingTranscriptSources === undefined || right.pendingTranscriptSources === undefined
+      ? {}
+      : { pendingTranscriptSources: left.pendingTranscriptSources + right.pendingTranscriptSources }),
+    ...(left.sourceErrors === undefined || right.sourceErrors === undefined
+      ? {}
+      : { sourceErrors: left.sourceErrors + right.sourceErrors }),
+    ...(left.refreshing === undefined || right.refreshing === undefined
+      ? {}
+      : { refreshing: left.refreshing || right.refreshing }),
     ...(lastTokenRefreshAt === undefined ? {} : { lastTokenRefreshAt }),
   };
 }

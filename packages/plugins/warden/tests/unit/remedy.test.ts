@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { DEFAULT_WARDEN_CONFIG } from '../../daemon/lib/protocol.ts';
 import should from 'should';
-import { mayActAlone, verdictAct, wardenActDetail, wardenNudgeMessage } from '../../daemon/lib/index.ts';
+import { mayActAlone, verdictAct, wardenActDetail } from '../../daemon/lib/index.ts';
 
 describe('the act a verdict asks for', () => {
   it('should ask for nothing without an explicit verdict marker', () => {
@@ -77,16 +77,6 @@ describe('what the Warden may do alone', () => {
 });
 
 describe('what the Warden says', () => {
-  it('should nudge in the investigation’s words', () => {
-    // Act
-    const actual = wardenNudgeMessage('it has not posted for 20 minutes.');
-
-    // Assert
-    should(actual).equal(
-      'The Warden checked on you: it has not posted for 20 minutes. If you are blocked, say exactly what you need; otherwise carry on and post a short status.',
-    );
-  });
-
   it.each([
     [{ action: 'nudge', reason: 'quiet.' }, 'done', undefined, 'Nudged: quiet.'],
     [

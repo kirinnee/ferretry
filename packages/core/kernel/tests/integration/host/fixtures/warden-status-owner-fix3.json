@@ -1,0 +1,824 @@
+{
+  "baseline": {
+    "config": {
+      "enabled": true,
+      "revive": {
+        "enabled": true,
+        "windowMinutes": 15,
+        "cooldownMinutes": 30,
+        "waveSize": 3,
+        "waveGapSeconds": 10,
+        "breakerMinutes": 30
+      },
+      "autoMove": {
+        "enabled": false,
+        "when": ["rate_limited", "budget_exceeded"],
+        "targets": [],
+        "forceStopBackground": false,
+        "waitMinutes": 10,
+        "maxMovesPerHour": 1,
+        "minHeadroomPercent": 20
+      },
+      "layers": {
+        "jev": false,
+        "llm": false
+      },
+      "guard": {
+        "threshold": 0.7,
+        "model": "jev-latest",
+        "usdPerMillionInputTokens": 0.042
+      },
+      "caps": {
+        "jevUsdPerDay": 0.5,
+        "investigationUsdPerDay": 2,
+        "maxInvestigationsPerHour": 6
+      },
+      "mayActAlone": {
+        "nudge": true,
+        "resume": true,
+        "restart": true,
+        "failover": true,
+        "stop": false,
+        "closeLeftovers": true
+      },
+      "jevActs": {
+        "nudge": 0.7,
+        "resume": 0.7,
+        "restart": 0.7,
+        "stop": 0.8
+      },
+      "events": {
+        "turnEnd": true,
+        "question": true,
+        "paneDied": true
+      },
+      "investigation": {
+        "effort": "low"
+      },
+      "accounts": [],
+      "failover": {
+        "policy": "fallback",
+        "failureThreshold": 2,
+        "cooldownMinutes": 30
+      },
+      "providerOutage": {
+        "minDistinctFerrets": 2,
+        "persistenceSweeps": 2,
+        "tailLines": 24
+      },
+      "intervalMinutes": 2,
+      "unattendedMinutes": 30,
+      "minSpawnGapMinutes": 15,
+      "susThinkingSeconds": 900,
+      "susSubprocessSeconds": 600,
+      "maxAssignedWardens": 1,
+      "assignedCooldownMinutes": 30,
+      "blessMinutes": 15
+    },
+    "flags": [],
+    "fingerprint": "",
+    "triage": {
+      "jev": {
+        "configured": false,
+        "active": false,
+        "reason": "configured"
+      },
+      "llm": {
+        "configured": false,
+        "active": false,
+        "reason": "configured"
+      }
+    },
+    "spend": {
+      "day": "2026-11-06",
+      "jevUsd": 0,
+      "jevCapUsd": 0.5,
+      "investigationUsd": 0,
+      "investigationCapUsd": 2,
+      "pendingInvestigations": 0,
+      "capsHit": [],
+      "investigationsLastHour": 0,
+      "maxInvestigationsPerHour": 6
+    },
+    "savings": {
+      "day": "2026-11-06",
+      "flags": 0,
+      "jevDecisions": 0,
+      "jevSkips": 0,
+      "investigations": 0
+    },
+    "investigations": [],
+    "actions": [],
+    "blessings": [],
+    "history": [
+      {
+        "day": "2026-11-06",
+        "flags": 0,
+        "jevDecisions": 0,
+        "investigations": 0,
+        "jevUsd": 0,
+        "investigationUsd": 0,
+        "moved": {
+          "auto": 0,
+          "jev": 0,
+          "llm": 0
+        },
+        "cleared": {
+          "auto": 0,
+          "jev": 0,
+          "llm": 0
+        },
+        "stopped": {
+          "auto": 0,
+          "jev": 0,
+          "llm": 0
+        },
+        "asked": {
+          "auto": 0,
+          "jev": 0,
+          "llm": 0
+        }
+      }
+    ],
+    "actionTotals": [],
+    "reviveTotals": {
+      "progressed": {
+        "auto": 0,
+        "jev": 0,
+        "llm": 0
+      },
+      "stalled": {
+        "auto": 0,
+        "jev": 0,
+        "llm": 0
+      }
+    },
+    "jevChecks": [],
+    "failover": {
+      "policy": "fallback",
+      "failureThreshold": 2,
+      "cooldownMinutes": 30,
+      "accounts": []
+    },
+    "login": {
+      "source": "not_set",
+      "unknown": [],
+      "available": ["claude-code"]
+    }
+  },
+  "populated": {
+    "config": {
+      "enabled": true,
+      "revive": {
+        "enabled": true,
+        "windowMinutes": 15,
+        "cooldownMinutes": 30,
+        "waveSize": 3,
+        "waveGapSeconds": 10,
+        "breakerMinutes": 30
+      },
+      "autoMove": {
+        "enabled": false,
+        "when": ["rate_limited", "budget_exceeded"],
+        "targets": [],
+        "forceStopBackground": false,
+        "waitMinutes": 10,
+        "maxMovesPerHour": 1,
+        "minHeadroomPercent": 20
+      },
+      "layers": {
+        "jev": false,
+        "llm": false
+      },
+      "guard": {
+        "threshold": 0.7,
+        "model": "jev-latest",
+        "usdPerMillionInputTokens": 0.042
+      },
+      "caps": {
+        "jevUsdPerDay": 0.5,
+        "investigationUsdPerDay": 2,
+        "maxInvestigationsPerHour": 6
+      },
+      "mayActAlone": {
+        "nudge": true,
+        "resume": true,
+        "restart": true,
+        "failover": true,
+        "stop": false,
+        "closeLeftovers": true
+      },
+      "jevActs": {
+        "nudge": 0.7,
+        "resume": 0.7,
+        "restart": 0.7,
+        "stop": 0.8
+      },
+      "events": {
+        "turnEnd": true,
+        "question": true,
+        "paneDied": true
+      },
+      "investigation": {
+        "effort": "low"
+      },
+      "accounts": [],
+      "failover": {
+        "policy": "fallback",
+        "failureThreshold": 2,
+        "cooldownMinutes": 30
+      },
+      "providerOutage": {
+        "minDistinctFerrets": 2,
+        "persistenceSweeps": 2,
+        "tailLines": 24
+      },
+      "intervalMinutes": 2,
+      "unattendedMinutes": 30,
+      "minSpawnGapMinutes": 15,
+      "susThinkingSeconds": 900,
+      "susSubprocessSeconds": 600,
+      "maxAssignedWardens": 1,
+      "assignedCooldownMinutes": 30,
+      "blessMinutes": 15
+    },
+    "lastSweepAt": "2026-11-06T09:00:00.000Z",
+    "flags": [
+      {
+        "kind": "sus_thinking",
+        "ferret": "fixed-victim",
+        "state": "working",
+        "detail": "fixed fixture"
+      }
+    ],
+    "fingerprint": "fixed-fingerprint",
+    "lastSpawnAt": "2026-11-06T09:00:00.000Z",
+    "lastReport": {
+      "reportId": "2026-11-06T09-00-00-000Z.md",
+      "head": "# fixed report\nVERDICT: cleared"
+    },
+    "triage": {
+      "jev": {
+        "configured": false,
+        "active": false,
+        "reason": "configured"
+      },
+      "llm": {
+        "configured": false,
+        "active": false,
+        "reason": "configured"
+      }
+    },
+    "spend": {
+      "day": "2026-11-06",
+      "jevUsd": 0.12345,
+      "jevCapUsd": 0.5,
+      "investigationUsd": 1.22678,
+      "investigationCapUsd": 2,
+      "pendingInvestigations": 0,
+      "capsHit": ["investigation"],
+      "capsPaced": ["investigation"],
+      "pacedUntil": "2026-11-06T10:00:00.000Z",
+      "investigationsLastHour": 2,
+      "maxInvestigationsPerHour": 6
+    },
+    "savings": {
+      "day": "2026-11-06",
+      "flags": 1,
+      "jevDecisions": 1,
+      "jevSkips": 1,
+      "investigations": 2,
+      "averageInvestigationUsd": 0.77,
+      "savedUsd": 0.64655
+    },
+    "investigations": [
+      {
+        "id": "inv-fixed",
+        "state": "done",
+        "scope": "ferret",
+        "origin": "owner",
+        "target": "fixed-victim",
+        "warden": "inv-fixed",
+        "startedAt": "2026-11-06T09:00:00.000Z",
+        "finishedAt": "2026-11-06T09:00:00.000Z",
+        "reportPath": "reports/fixed.md",
+        "costUsd": 0.77
+      },
+      {
+        "id": "inv-pack",
+        "state": "done",
+        "scope": "pack",
+        "origin": "owner",
+        "warden": "inv-pack",
+        "startedAt": "2026-11-06T09:00:00.000Z",
+        "finishedAt": "2026-11-06T09:00:00.000Z",
+        "reportPath": "reports/pack.md",
+        "costUsd": 0.45678
+      }
+    ],
+    "actions": [
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-victim",
+        "action": "revive",
+        "outcome": "done",
+        "by": "jev",
+        "detail": "fixed fixture"
+      }
+    ],
+    "blessings": [
+      {
+        "ferret": "fixed-victim",
+        "kinds": ["sus_thinking"],
+        "expiresAt": "2099-01-01T00:00:00.000Z",
+        "by": "jev",
+        "streak": 17
+      }
+    ],
+    "history": [
+      {
+        "day": "2026-11-06",
+        "flags": 1,
+        "jevDecisions": 1,
+        "investigations": 2,
+        "jevUsd": 0.12345,
+        "investigationUsd": 1.22678,
+        "moved": {
+          "auto": 0,
+          "jev": 0,
+          "llm": 0
+        },
+        "cleared": {
+          "auto": 0,
+          "jev": 0,
+          "llm": 0
+        },
+        "stopped": {
+          "auto": 0,
+          "jev": 0,
+          "llm": 0
+        },
+        "asked": {
+          "auto": 0,
+          "jev": 0,
+          "llm": 0
+        },
+        "acts": [
+          {
+            "auto": 7,
+            "jev": 0,
+            "llm": 0,
+            "action": "revive",
+            "outcome": "done"
+          }
+        ],
+        "reviveResults": {
+          "progressed": {
+            "auto": 7,
+            "jev": 0,
+            "llm": 0
+          },
+          "stalled": {
+            "auto": 0,
+            "jev": 0,
+            "llm": 0
+          }
+        }
+      }
+    ],
+    "actionTotals": [
+      {
+        "auto": 7,
+        "jev": 0,
+        "llm": 0,
+        "action": "revive",
+        "outcome": "done"
+      }
+    ],
+    "reviveTotals": {
+      "progressed": {
+        "auto": 7,
+        "jev": 0,
+        "llm": 0
+      },
+      "stalled": {
+        "auto": 0,
+        "jev": 0,
+        "llm": 0
+      }
+    },
+    "jevChecks": [
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-54",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-53",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-52",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-51",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-50",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-49",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-48",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-47",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-46",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-45",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-44",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-43",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-42",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-41",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-40",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-39",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-38",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-37",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-36",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-35",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-34",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-33",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-32",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-31",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-30",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-29",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-28",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-27",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-26",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-25",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-24",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-23",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-22",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-21",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-20",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-19",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-18",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-17",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-16",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-15",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-14",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-13",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-12",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-11",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-10",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-9",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-8",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-7",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-6",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      },
+      {
+        "at": "2026-11-06T09:00:00.000Z",
+        "ferret": "fixed-target-5",
+        "anomalyKind": "sus_thinking",
+        "verdict": "healthy",
+        "confidence": 0.9,
+        "costUsd": 0.0011
+      }
+    ],
+    "failover": {
+      "policy": "fallback",
+      "failureThreshold": 2,
+      "cooldownMinutes": 30,
+      "accounts": []
+    },
+    "login": {
+      "source": "not_set",
+      "unknown": [],
+      "available": ["claude-code"]
+    }
+  }
+}

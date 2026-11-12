@@ -373,17 +373,20 @@ export interface WardenStatusView {
   readonly flags: readonly WardenFlag[];
   readonly fingerprint: string;
   readonly liveWarden?: string;
+  /** A ferret's view only: some Warden is investigating (its id is not the ferret's to know). */
+  readonly wardenRunning?: boolean;
   readonly lastSpawnAt?: string;
   readonly lastReport?: { readonly reportId: string; readonly head: string };
   readonly failover?: WardenFailoverStatus;
   readonly login?: WardenLogin;
   readonly triage: WardenTriageStatus;
-  readonly spend: WardenSpend;
-  readonly savings: WardenSavings;
+  /** Absent in a FERRET's view: the fleet aggregates are the owner's, so a ferret sees only the `triage` state. */
+  readonly spend?: WardenSpend;
+  readonly savings?: WardenSavings;
   readonly investigations: readonly WardenInvestigation[];
   readonly actions: readonly WardenAction[];
   readonly blessings: readonly WardenBlessingView[];
-  readonly history: readonly WardenDayStats[];
+  readonly history?: readonly WardenDayStats[];
   readonly actionTotals?: readonly WardenActionTally[];
   readonly reviveTotals?: WardenReviveResults;
   readonly jevChecks?: readonly WardenJevCheck[];

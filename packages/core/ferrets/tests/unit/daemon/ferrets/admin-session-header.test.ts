@@ -45,8 +45,9 @@ test('G12 the ferret behind a call: its own token, or the admin token naming it;
 
 test('G12 admin token + header naming ferret F starting a child is F’s helper: a helper start is not the owner’s', async () => {
   const h = await host([record('lead')], { harness: new FakeHarness(), runner: new FakeRunner(), standing });
-  // An agent's start is judged as an agent's (the state-home fence admits a project folder, then a helper needs
-  // Packs' admission), for the parent left out and for the caller's own id alike — never the owner's path.
+  // An agent's start passes the kernel's state-home fence (a project folder), then waits on Packs' admission as a
+  // helper (the same answer a ferret's own token gets), for the parent left out and for the caller's own id alike —
+  // never the owner's path.
   for (const [n, body] of [{ folder: '/work/b' }, { folder: '/work/b', parent: 'lead' }].entries()) {
     const answer = await start(
       h,

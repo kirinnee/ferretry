@@ -17,6 +17,7 @@
     "./cli": "./cli/index.ts"
   },
   "dependencies": {
+    "@ferretry/core-ferrets": "workspace:*",
     "@ferretry/kernel": "workspace:*",
     "@ferretry/std": "workspace:*",
     "zod": "4.4.3",

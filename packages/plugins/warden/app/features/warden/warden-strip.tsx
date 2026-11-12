@@ -22,6 +22,7 @@ import {
   wardenAccountTitle,
   wardenFlagDigest,
   wardenExhaustionLabel,
+  wardenNeedsLabel,
   wardenNeedsYouCount,
   wardenTriageLabel,
 } from './warden-status-model.ts';
@@ -69,7 +70,7 @@ export function WardenStrip({ status, now = Date.now() }: WardenStripProps) {
       </span>
       <Dot />
       <span className={cn(healthy ? 'text-ok' : 'font-medium text-warn')}>
-        {needs > 0 ? `${needs} need you` : reporting ? 'nobody needs you' : 'no evidence yet'}
+        {wardenNeedsLabel(status, needs, reporting)}
       </span>
       {!digest.clean && (
         <>
@@ -79,7 +80,7 @@ export function WardenStrip({ status, now = Date.now() }: WardenStripProps) {
           </span>
         </>
       )}
-      {status.liveWarden !== undefined && (
+      {(status.liveWarden !== undefined || status.wardenRunning === true) && (
         <>
           <Dot />
           <span className="text-muted">investigating</span>

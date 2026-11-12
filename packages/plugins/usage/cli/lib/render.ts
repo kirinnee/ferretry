@@ -126,8 +126,8 @@ function rawRow(result: AnalyticsRawSession): string[] {
 
 /** How complete the token index is behind the numbers just printed. */
 function indexFooter(index: AnalyticsResponse['index']): string {
-  const pending = index.pendingTranscriptSources === 0 ? '' : ` (${index.pendingTranscriptSources} pending)`;
-  const errors = index.sourceErrors === 0 ? '' : `, ${index.sourceErrors} errors`;
+  const pending = !index.pendingTranscriptSources ? '' : ` (${index.pendingTranscriptSources} pending)`;
+  const errors = !index.sourceErrors ? '' : `, ${index.sourceErrors} errors`;
   return (
     `Token index: ${index.tokenSessions}/${index.sessions} sessions known; ` +
     `${index.indexedTranscriptSources}/${index.transcriptSources} transcript sources indexed${pending}${errors}.`

@@ -59,13 +59,25 @@ export class FileWardenArtifacts implements WardenArtifacts {
    * Newest is decided by modification time through the same ordering the verdict
    * list uses, so "the latest report" means the same thing on both surfaces — a
    * filename sort would disagree the moment a report was rewritten.
+   *
+   * The owner's and a person's: a FERRET is never shown report text, so the route does not ask for it.
    */
   async latest(): Promise<{ readonly reportId: string; readonly head: string } | undefined> {
     const files = await this.files.listFiles(this.reportsDirectory);
+    const newest = await this.newestOf(files);
+    if (newest === undefined) return undefined;
+    return {
+      reportId: basename(newest.path),
+      head: newest.content.split('\n').slice(0, REPORT_HEAD_LINES).join('\n'),
+    };
+  }
+
+  private async newestOf(
+    files: Awaited<ReturnType<WardenReportFileSystem['listFiles']>>,
+  ): Promise<{ readonly path: string; readonly content: string } | undefined> {
     const newest = reportsWorthReading(files, 1)[0];
     if (newest === undefined) return undefined;
     const content = await this.reader.readReport(newest.path);
-    if (content === undefined) return undefined;
-    return { reportId: basename(newest.path), head: content.split('\n').slice(0, REPORT_HEAD_LINES).join('\n') };
+    return content === undefined ? undefined : { path: newest.path, content };
   }
 }
