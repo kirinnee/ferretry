@@ -301,6 +301,43 @@ test('decision 18: the transcript is read through the ferret’s harness', async
   expect(await f.seam.transcript.find('e1')).toEqual(entry);
 });
 
+test('decision 18: readCovering is the harness’s own when it has one, bound to this ferret', async () => {
+  const f = await running();
+  const since = '2026-11-07T00:00:00.000Z' as never;
+  const entry = { id: 'e1', at: since, role: 'assistant' as const, text: 'hi' };
+  const asked: unknown[][] = [];
+  (f.harness as { transcript: unknown }).transcript = {
+    read: async () => [],
+    readCovering: async (...args: unknown[]) => {
+      asked.push(args);
+      return { entries: [entry], covered: false };
+    },
+    follow: async function* () {},
+    find: async () => undefined,
+  };
+  expect(await f.seam.transcript.readCovering?.(since)).toEqual({ entries: [entry], covered: false });
+  expect(asked).toEqual([[f.id, since]]);
+});
+
+test('decision 18: a harness with no readCovering reads the whole conversation, so the read is always covered', async () => {
+  const f = await running();
+  const entry = { id: 'e1', at: '2026-11-07T00:00:00.000Z' as never, role: 'assistant' as const, text: 'hi' };
+  const reads: unknown[][] = [];
+  (f.harness as { transcript: unknown }).transcript = {
+    read: async (...args: unknown[]) => {
+      reads.push(args);
+      return [entry];
+    },
+    follow: async function* () {},
+    find: async () => undefined,
+  };
+  expect(await f.seam.transcript.readCovering?.('2026-11-06T00:00:00.000Z' as never)).toEqual({
+    entries: [entry],
+    covered: true,
+  });
+  expect(reads).toEqual([[f.id]]);
+});
+
 test('decision 18: a ferret’s own seam reads only ITS OWN transcript, never another ferret’s', async () => {
   const f = additivesFixture();
   const stranger = ferretId('stranger');

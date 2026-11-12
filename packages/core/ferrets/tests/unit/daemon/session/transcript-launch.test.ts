@@ -6,6 +6,7 @@ import {
   harnessHomeFromWrapper,
   isCodexCorrelationPair,
   relaunchCommand,
+  transcriptLaunchArguments,
 } from '../../../../daemon/lib/session/peers/transcript-launch.ts';
 
 describe('the launch arguments a harness is given', () => {
@@ -85,5 +86,39 @@ describe('the harness home a wrapper script declares', () => {
     expect(harnessHomeFromWrapper('export CODEX_HOME=~/.codex', 'codex', {})).toBeUndefined();
     expect(harnessHomeFromWrapper('export CODEX_HOME=relative/codex', 'codex', env)).toBeUndefined();
     expect(harnessHomeFromWrapper('export CODEX_HOME=~other/codex', 'codex', env)).toBeUndefined();
+  });
+});
+
+describe('the transcript arguments a relaunch must carry', () => {
+  type Provenance = Parameters<typeof transcriptLaunchArguments>[1];
+  const provenance = (more: { harnessSessionId?: string; correlationToken?: string }): Provenance =>
+    ({ v: 1, home: '/harness/home', identity: 'established', ...more }) as unknown as Provenance;
+
+  test('a Claude session is relaunched on the id its start minted, and a fresh one takes nothing', () => {
+    expect(transcriptLaunchArguments('claude', provenance({ harnessSessionId: 'abc-123' }))).toEqual([
+      '--session-id',
+      'abc-123',
+    ]);
+    expect(transcriptLaunchArguments('claude', provenance({}))).toEqual([]);
+    expect(transcriptLaunchArguments('claude', undefined)).toEqual([]);
+  });
+
+  test('a Codex session whose thread is known resumes it, and a fresh one takes nothing', () => {
+    expect(transcriptLaunchArguments('codex', provenance({ harnessSessionId: 'thread-1' }))).toEqual([
+      'resume',
+      'thread-1',
+    ]);
+    expect(transcriptLaunchArguments('codex', provenance({}))).toEqual([]);
+    expect(transcriptLaunchArguments('codex', undefined)).toEqual([]);
+  });
+
+  test('a Codex session with a correlation token declares it again, after the resume when both are known', () => {
+    expect(transcriptLaunchArguments('codex', provenance({ correlationToken: 'tok-1' }))).toEqual([
+      '--add-dir',
+      'tok-1/codex-correlation/unreachable',
+    ]);
+    expect(
+      transcriptLaunchArguments('codex', provenance({ harnessSessionId: 'thread-1', correlationToken: 'tok-1' })),
+    ).toEqual(['resume', 'thread-1', '--add-dir', 'tok-1/codex-correlation/unreachable']);
   });
 });

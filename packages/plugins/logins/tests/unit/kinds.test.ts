@@ -197,3 +197,115 @@ describe('the five login kinds', () => {
     expect(await kinds.anthropic.status('work')).toEqual({ state: 'signed-in' });
   });
 });
+
+describe('the launch and credential answers when the store or the share cannot deliver', () => {
+  const needsSignIn = (id: string) =>
+    sampleLogin(id, {
+      status: {
+        word: 'needs_sign_in',
+        label: 'Sign in',
+        reason: 'access_expired_no_refresh',
+        explanation: 'The access token has expired.',
+        lastCheckInconclusive: false,
+      },
+    });
+  const kindsWith = (more: Partial<Parameters<typeof loginKinds>[0]>) =>
+    loginKinds({
+      clock: { sleep: async () => undefined },
+      launchStore: async () => ({ kind: 'none' as const }),
+      files: () => files,
+      view: async id => sampleLogin(id),
+      check: async id => sampleLogin(id),
+      startSignIn: async () => {
+        throw new Error('not used');
+      },
+      signInStatus: async () => {
+        throw new Error('not used');
+      },
+      credentialProblem: async () => undefined,
+      shareCredential: async () => undefined,
+      ...more,
+    });
+
+  test('a signed-in Claude login whose store holds nothing a harness can launch with refuses, quoting nothing', async () => {
+    const unusable = kindsWith({
+      launchStore: async (): Promise<LaunchStore> => ({
+        kind: 'owned',
+        variables: { CLAUDE_SECURESTORAGE_CONFIG_DIR: `${STORE}/work` },
+        usable: false,
+      }),
+    });
+
+    expect(await unusable.anthropic.launchEnvironment?.('work', 'claude-code')).toEqual({
+      ok: false,
+      error: 'the login work has sign-in material this build cannot use, so the ferret was not started',
+    });
+  });
+
+  test('a Claude login whose store cannot be asked refuses with a fixed sentence, never the failure', async () => {
+    const broken = kindsWith({
+      launchStore: async () => {
+        throw new Error(`cannot open ${STORE}/work`);
+      },
+    });
+
+    const answered = await broken.anthropic.launchEnvironment?.('work', 'claude-code');
+
+    expect(answered).toEqual({ ok: false, error: 'the login work could not be read, so the ferret was not started' });
+    expect(JSON.stringify(answered)).not.toContain(STORE);
+  });
+
+  test('a Codex login the status says needs signing in is unavailable with the explanation, and nothing is shared', async () => {
+    let shared = 0;
+    const signedOut = kindsWith({
+      view: async id => needsSignIn(id),
+      shareCredential: async () => {
+        shared += 1;
+        return undefined;
+      },
+    });
+
+    expect(await signedOut.openai.credential?.('team', 'codex')).toEqual({
+      kind: 'unavailable',
+      sentence: 'the login team needs signing in: The access token has expired.',
+    });
+    expect(shared).toBe(0);
+  });
+
+  test('a Codex sign-in the kernel would not share is unavailable in a sentence naming the login', async () => {
+    const refused = kindsWith({ shareCredential: async () => undefined });
+
+    expect(await refused.openai.credential?.('team', 'codex')).toEqual({
+      kind: 'unavailable',
+      sentence: 'the sign-in file of the login team could not be shared with Codex',
+    });
+  });
+});
+
+describe('a signed-in Codex login whose file the kernel shares', () => {
+  test('answers the shared credential itself, untouched, after the store and the status agree it is a sign-in', async () => {
+    const shared = { credential: 'auth.json' } as unknown as Awaited<
+      ReturnType<Parameters<typeof loginKinds>[0]['shareCredential']>
+    >;
+    const sharing = loginKinds({
+      clock: { sleep: async () => undefined },
+      launchStore: async () => ({ kind: 'none' as const }),
+      files: () => files,
+      view: async id => sampleLogin(id),
+      check: async id => sampleLogin(id),
+      startSignIn: async () => {
+        throw new Error('not used');
+      },
+      signInStatus: async () => {
+        throw new Error('not used');
+      },
+      credentialProblem: async () => undefined,
+      shareCredential: async () => shared,
+    });
+
+    const answer = await sharing.openai.credential?.('team', 'codex');
+
+    expect(answer?.kind).toBe('file');
+    expect(answer?.kind === 'file' ? answer.credential : undefined).toBe(shared as never);
+  });
+});

@@ -388,4 +388,24 @@ describe('FolderClaudeSettingsFiles', () => {
     // Act / Assert
     await should(adapterOf().variables(directory)).rejectedWith(/second name.*cannot be checked/u);
   });
+
+  it('should refuse, saying why, when .claude is a file, so the settings files under it cannot be looked at', async () => {
+    // Arrange: `.claude` exists but is not a folder. A name that is there is not "no settings file": whatever Claude Code
+    // makes of it, this adapter cannot tell it from a hidden one.
+    const directory = await tempDirectory('folder-claude-settings');
+    await writeFile(join(directory, '.claude'), 'not a folder');
+
+    // Act / Assert: named by its path, with the reason in a few words, never answered as an empty result.
+    await should(adapterOf().variables(directory)).rejectedWith(
+      /the settings file .*\.claude\/settings\.json cannot be looked at \(.+\), so its Claude settings cannot be checked/u,
+    );
+  });
+
+  it('should treat a missing .claude folder as no settings files at all', async () => {
+    // Arrange: a folder with no `.claude`: the one case where a failed look is simply "nothing there".
+    const directory = await tempDirectory('folder-claude-settings');
+
+    // Act / Assert
+    should(await adapterOf().variables(directory)).deepEqual([]);
+  });
 });
