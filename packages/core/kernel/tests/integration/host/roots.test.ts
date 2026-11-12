@@ -214,14 +214,14 @@ describe('HH writeBytes, a fenced tree copy or link, and the credentials root', 
     );
   });
 
-  test('copyTree with link makes one link to the source folder; a handle of another plugin is refused', async () => {
+  test('copyTree with link into an agent home (a credential home) is refused and nothing is made; a handle of another plugin is refused', async () => {
     const { home, homesRoot, downloads, at } = await homes();
     await mkdir(`${home}/state/skills/downloads/skill`, { recursive: true });
     await homesRoot.makeDirectory(at(homesRoot, ''));
-    await homesRoot.copyTree(downloads, at(downloads, 'skill'), at(homesRoot, 'linked'), { link: true });
-    expect(await readlink(`${home}/state/skills/agent-homes/f1/linked`)).toBe(
-      await realpath(`${home}/state/skills/downloads/skill`),
-    );
+    await expect(
+      homesRoot.copyTree(downloads, at(downloads, 'skill'), at(homesRoot, 'linked'), { link: true }),
+    ).rejects.toMatchObject({ refusal: 'link_escape' });
+    await expect(readlink(`${home}/state/skills/agent-homes/f1/linked`)).rejects.toThrow();
     const other = rootsPortFor(
       fs,
       { home, plugin: 'mcp', worktrees: `${home}-worktrees` },

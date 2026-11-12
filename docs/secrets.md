@@ -1469,6 +1469,23 @@ residual above, not a new reach. The kernel hands the credential over once (it i
 given it), and it refuses to move the placed link, or a folder holding it, out of the ferret home it was linked into (`link_escape`; removing it stays allowed), but it cannot stop the agent that then holds the file. When the kernel refuses the link at the last step, the
 start fails with the general "could not prepare this ferret's home" sentence (`failed`), not `login_unavailable`.
 
+Two more rules keep that one link the only door, both enforced identically on the real roots port and the testing host:
+
+- **No other link reaches a credential home.** `linkTo` and `copyTree` in link mode refuse (`link_escape`, nothing written)
+  any link whose own place OR whose source is inside a credential home, which is the whole `agent-homes` root (every
+  ferret's Codex home, the folder that holds a placed credential, the folders above it and the ones about to) and the whole
+  `credentials` root (every login's store). So a folder alias of a ferret home (`f2` linked to `f1`) cannot give a second
+  ferret the credential, and neither can a link made before the credential is placed. The one rule is
+  `credentialHomeLinkVerdict` in `packages/core/kernel/host/shared-credentials.ts`. `linkCredential` is unaffected, and
+  the fleet folder (Runtimes' own runtime homes and their credential links) is not a credential home in this sense.
+- **The move check is armed against a swap.** The device and inode recorded when the link was placed are kept through the
+  whole move decision and asked again at the held-source look, for the link and for any folder that holds it, so a writer on
+  the same filesystem who swaps the link for a file across the first look and puts it back at the next call does not get it
+  moved. **Declared GAP:** after that last look the move is a plain `rename(2)`, which cannot be made conditional on what
+  the look saw (no compare-and-rename in the standard library), so a same-user writer who restores the link inside that
+  single window is not stopped. It needs a concurrent writer already holding the same user's filesystem, which is the
+  same-user residual above.
+
 ## Sign-in tokens the usage read sends
 
 A Claude Code or Codex sign-in is not a vault secret: it is the harness's own credential file or macOS

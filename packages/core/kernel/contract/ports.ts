@@ -810,7 +810,9 @@ export interface RootHandle {
   /**
    * Brings a folder from one of THIS plugin's root handles (`source`, maybe this one) to `to` in this root: a copy
    * (each file read off the disk, never through a link: a link inside is skipped, a file with a second hard link is
-   * skipped, modes kept) or, with `link`, one link at `to` to the source folder's real path. Both ends are fenced.
+   * skipped, modes kept) or, with `link`, one link at `to` to the source folder's real path. Both ends are fenced. A link is
+   * refused `link_escape`, nothing written, when `to` or the source is inside a credential home (the `agent-homes` and
+   * `credentials` roots: a folder alias would carry a placed sign-in into another ferret's home).
    */
   copyTree(source: RootHandle, from: FencedPath, to: FencedPath, options?: TreeCopyOptions): Promise<void>;
   /**
@@ -872,6 +874,8 @@ export interface RootHandle {
    * history) whose text is the REAL path of `target` in one of THIS plugin's own root handles — the rule `copyTree`'s
    * `link` keeps for a folder, for a file too. Only into an internal, writable root that takes links (`fleet`,
    * `agent-homes`); any other root refuses `read_only`, and another plugin's handle (or a look-alike) `not_declared`.
+   * Refused `link_escape` too, nothing written, when `at` or `target` is inside a credential home (the `agent-homes` and
+   * `credentials` roots): the dedicated `linkCredential` is the one way a sign-in is linked.
    * `at`'s folder must exist and be reached with no link on the way inside the root (`link_escape`); the link is made
    * through that folder's checked, no-follow descriptor, and refused when anything (a link included) is at the name.
    * A child that follows the link is the harness; the kernel's own reads still never follow it out of the root.

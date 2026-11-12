@@ -28,6 +28,7 @@ import {
   credentialPlacement,
   isCredentialFolder,
   isCredentialReceiver,
+  credentialHomeLinkVerdict,
   isMintedInode,
   PlacedCredentialLinks,
   placedLinkMoveVerdict,
@@ -1706,6 +1707,9 @@ async function start(world: World): Promise<TestHost> {
               const sourceRoot = testHandles.get(source)?.root;
               if (projectSource !== undefined || (sourceRoot !== undefined && isOwnerRoot(sourceRoot)))
                 throw new RootError('not_declared');
+              // As production: a link whose place or whose source is inside a credential home is refused.
+              const homeVerdict = credentialHomeLinkVerdict({ source: sourceRoot, target: name });
+              if (homeVerdict !== undefined) throw new RootError(homeVerdict);
             }
             // the test roots are one flat map: copy (or, for a link, alias) every file under `from`
             const fromKey = projectSource === undefined ? from : projectFileKey(from);
@@ -1818,6 +1822,9 @@ async function start(world: World): Promise<TestHost> {
             if (known === undefined || known.plugin !== manifest.id) throw new RootError('not_declared');
             // a project file is never the target of a link another root writes (`linkTarget` on the real host, BG-014 m1)
             if (known.root === 'project-files') throw new RootError('not_declared');
+            // As production: a link whose place or whose target is inside a credential home is refused.
+            const homeVerdict = credentialHomeLinkVerdict({ source: known.root, target: name });
+            if (homeVerdict !== undefined) throw new RootError(homeVerdict);
             const to = target.path as string;
             const within = known.prefix;
             if (within === undefined || to.split('/').includes('..') || (to !== within && !to.startsWith(`${within}/`)))
@@ -1872,6 +1879,8 @@ async function start(world: World): Promise<TestHost> {
               .filter(([path, mark]) => testLinks.get(path) === mark);
             const verdict = placedLinkMoveVerdict(carried);
             if (verdict !== undefined) throw new RootError(verdict);
+            // (The record of a link below `source` is dropped once the move is made: nothing is there any more.)
+            placedCredentialLinks.forgetUnder(source);
             // The flat world keeps files, links and modes in three maps keyed by full path: everything at `source`
             // or under it moves to the same place under `target`, a link as the text it holds.
             const under = (key: string): boolean => key === source || key.startsWith(`${source}/`);

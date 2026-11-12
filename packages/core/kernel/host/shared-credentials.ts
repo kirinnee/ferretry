@@ -14,7 +14,7 @@
  * The rules here are pure and shared by the real roots port (`./roots.ts`) and the testing host (`../testing/host.ts`).
  */
 import { posix } from 'node:path';
-import type { SharedCredential } from '../contract/ports.ts';
+import type { RootName, SharedCredential } from '../contract/ports.ts';
 import { isPlainFileName } from './root-rules.ts';
 import { refuseShared } from './shared-trees.ts';
 
@@ -169,4 +169,31 @@ export class PlacedCredentialLinks {
  */
 export function placedLinkMoveVerdict(placed: readonly unknown[]): 'link_escape' | undefined {
   return placed.length === 0 ? undefined : 'link_escape';
+}
+
+/**
+ * The roots that are CREDENTIAL HOMES: `agent-homes` (each ferret's own harness home, where a shared sign-in is placed and
+ * which the harness then reads as its config home) and `credentials` (every login's store). Whatever sits in one of them may
+ * hold or reach a sign-in, so the whole root is judged as one place rather than guessed at folder by folder: a folder that
+ * holds a placed credential, one that is about to, and every folder above either are all inside it.
+ */
+const CREDENTIAL_HOME_ROOTS: ReadonlySet<RootName> = new Set(['agent-homes', 'credentials']);
+
+/** Whether a name in the root `name` is inside a credential home (see {@link CREDENTIAL_HOME_ROOTS}). */
+export function inCredentialHome(name: RootName | undefined): boolean {
+  return name !== undefined && CREDENTIAL_HOME_ROOTS.has(name);
+}
+
+/**
+ * The rule for a LINK written by anything but `linkCredential` (`linkTo`, `copyTree` in link mode): `link_escape` when
+ * the link's own place (`target`) or the thing it points at (`source`) is inside a credential home, so a second ferret
+ * can never be handed the placed credential through an alias of its folder, and nothing is written. `undefined`: the rule
+ * has nothing to say (the dedicated `linkCredential` is the one way a credential is linked, with its own checks). A root
+ * that is not known (`undefined`) is judged by the caller's other refusals, never granted here.
+ */
+export function credentialHomeLinkVerdict(ends: {
+  readonly source: RootName | undefined;
+  readonly target: RootName | undefined;
+}): 'link_escape' | undefined {
+  return inCredentialHome(ends.source) || inCredentialHome(ends.target) ? 'link_escape' : undefined;
 }

@@ -29,6 +29,8 @@ import { type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
 import { ensureInternalRootBases, RootError, rootsPortFor } from '../../../host/roots.ts';
 import {
   credentialFileListed,
+  credentialHomeLinkVerdict,
+  inCredentialHome,
   PlacedCredentialLinks,
   placedLinkMoveVerdict,
 } from '../../../host/shared-credentials.ts';
@@ -548,5 +550,25 @@ describe('placed credential links (the pure move rule)', () => {
   test('the verdict is link_escape whenever a placed link would be carried, and silent otherwise', () => {
     expect(placedLinkMoveVerdict([])).toBeUndefined();
     expect(placedLinkMoveVerdict(['/h/f1/auth.json'])).toBe('link_escape');
+  });
+});
+
+describe('the credential-home link rule', () => {
+  test('a link whose place or source is in agent-homes or credentials is link_escape, any other pair is silent', () => {
+    for (const home of ['agent-homes', 'credentials'] as const) {
+      expect(credentialHomeLinkVerdict({ source: home, target: 'fleet' })).toBe('link_escape');
+      expect(credentialHomeLinkVerdict({ source: 'fleet', target: home })).toBe('link_escape');
+      expect(credentialHomeLinkVerdict({ source: home, target: home })).toBe('link_escape');
+    }
+    expect(credentialHomeLinkVerdict({ source: 'fleet', target: 'fleet' })).toBeUndefined();
+    expect(credentialHomeLinkVerdict({ source: 'harness-home', target: 'fleet' })).toBeUndefined();
+    expect(credentialHomeLinkVerdict({ source: undefined, target: 'fleet' })).toBeUndefined();
+  });
+
+  test('inCredentialHome names exactly the two roots', () => {
+    expect(inCredentialHome('agent-homes')).toBe(true);
+    expect(inCredentialHome('credentials')).toBe(true);
+    expect(inCredentialHome('fleet')).toBe(false);
+    expect(inCredentialHome(undefined)).toBe(false);
   });
 });

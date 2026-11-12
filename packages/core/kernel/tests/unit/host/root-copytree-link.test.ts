@@ -146,15 +146,24 @@ describe('BG-004 X1 copyTree {link:true} INTO a root', () => {
     }
   });
 
-  test('BG-004 X1 into fleet and agent-homes still makes a link to the REAL path of the source folder (the positive control)', async () => {
+  test('BG-004 X1 into fleet still makes a link to the REAL path of the source folder (the positive control)', async () => {
     const f = await fresh();
-    for (const kind of ['fleet', 'agent-homes'] as const) {
-      const into = f.handles[kind];
-      await into.copyTree(f.handles.downloads, at(f.handles.downloads, 'pack'), at(into, 'linked'), { link: true });
-      const planted = kind === 'fleet' ? `${f.home}/fleet/linked` : `${f.home}/state/runtimes/agent-homes/linked`;
-      expect((await lstat(planted)).isSymbolicLink()).toBe(true);
-      expect(await readlink(planted)).toBe(`${f.home}/state/runtimes/downloads/pack`);
-    }
+    const into = f.handles.fleet;
+    await into.copyTree(f.handles.downloads, at(f.handles.downloads, 'pack'), at(into, 'linked'), { link: true });
+    const planted = `${f.home}/fleet/linked`;
+    expect((await lstat(planted)).isSymbolicLink()).toBe(true);
+    expect(await readlink(planted)).toBe(`${f.home}/state/runtimes/downloads/pack`);
+  });
+
+  test('into agent-homes (a credential home) the link is refused link_escape and nothing is planted', async () => {
+    const f = await fresh();
+    const into = f.handles['agent-homes'];
+    expect(
+      await refusalOf(() =>
+        into.copyTree(f.handles.downloads, at(f.handles.downloads, 'pack'), at(into, 'linked'), { link: true }),
+      ),
+    ).toBe('link_escape');
+    await expect(lstat(`${f.home}/state/runtimes/agent-homes/linked`)).rejects.toThrow();
   });
 });
 

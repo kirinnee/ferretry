@@ -147,12 +147,12 @@ describe('RootHandle.linkTo', () => {
     expect(await refusalOf(() => downloads.linkTo(at(downloads, 'x'), target))).toBe('read_only');
     const worktrees = f.runtimes.root('worktrees');
     expect(await refusalOf(() => worktrees.linkTo(at(worktrees, 'x'), target))).toBe('read_only');
+    // An agent home is a credential home: no link is written into it by `linkTo` (the dedicated `linkCredential` is the one
+    // way a sign-in lands there), and nothing is planted.
     const homes = f.runtimes.root('agent-homes', { subfolder: 'ferret-a' });
     await homes.makeDirectory(at(homes, '.claude'));
-    await homes.linkTo(at(homes, '.claude/.credentials.json'), target);
-    expect(await readlink(`${f.home}/state/runtimes/agent-homes/ferret-a/.claude/.credentials.json`)).toBe(
-      `${f.owner}/.claude/.credentials.json`,
-    );
+    expect(await refusalOf(() => homes.linkTo(at(homes, '.claude/.credentials.json'), target))).toBe('link_escape');
+    await expect(lstat(`${f.home}/state/runtimes/agent-homes/ferret-a/.claude/.credentials.json`)).rejects.toThrow();
   });
 
   test('a link on the way to the name is refused, even one that stays inside the root', async () => {

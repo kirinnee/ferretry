@@ -65,6 +65,7 @@ import {
   isCredentialReceiver,
   isMintedInode,
   placedLinkHolds,
+  credentialHomeLinkVerdict,
   PlacedCredentialLinks,
   placedLinkMoveVerdict,
   SharedCredentials,
@@ -1664,8 +1665,11 @@ async function setModeChecked(scope: Scope, full: string, bits: number): Promise
 async function renameChecked(
   from: Checked,
   to: Checked,
-  /** Asked of the entry about to move, as the held folder sees it, before anything is written. */
-  guard?: (found: FileIdentity) => void,
+  /**
+   * Asked of the entry about to move, as the held folder sees it, before anything is written: the last look the kernel takes
+   * (GAP, declared: the `rename(2)` after it is not conditional on what that look saw).
+   */
+  guard?: (found: FileIdentity) => void | Promise<void>,
 ): Promise<void> {
   const fromParent = dirname(from.full);
   const toParent = dirname(to.full);
@@ -1689,7 +1693,7 @@ async function renameChecked(
       if (withoutPath && sourceSteps !== undefined && targetSteps !== undefined) {
         const movingNow = await sourceSteps.identity(sourceName);
         if (movingNow === undefined) return refuse('outside');
-        guard?.(movingNow);
+        await guard?.(movingNow);
         if ((await targetSteps.identity(targetName)) !== undefined) return refuse('outside');
         await sourceSteps.renameInto(sourceName, target, targetName).catch(() => refuse('changed'));
         return;
@@ -1698,7 +1702,7 @@ async function renameChecked(
       const toAt = await entry(to.scope, target, toParent, targetName);
       const movingNow = await from.scope.fs.identity(fromAt);
       if (movingNow === undefined) return refuse('outside');
-      guard?.(movingNow);
+      await guard?.(movingNow);
       if ((await to.scope.fs.identity(toAt)) !== undefined) return refuse('outside');
       await from.scope.fs.rename(fromAt, toAt).catch(() => refuse('changed'));
     } finally {
@@ -2241,6 +2245,12 @@ function rootHandle(setup: HandleSetup): RootHandle {
       // (A source whose root is unknown is refused too: the table only holds handles made for a root, so none is.)
       if (options?.link === true && (known.root === undefined || isOwnerRoot(known.root)))
         return refuse('not_declared');
+      // A link whose place or whose source is inside a credential home is refused before the disk is asked (one rule,
+      // `host/shared-credentials.ts`): a folder alias would carry a placed credential into another ferret's home.
+      if (options?.link === true) {
+        const verdict = credentialHomeLinkVerdict({ source: known.root, target: name });
+        if (verdict !== undefined) return refuse(verdict);
+      }
       const checkedSource = await openCheckedFolder(sourceFolder.scope, sourceFolder.full).catch((error: unknown) => {
         if (error instanceof RootError && error.refusal === 'not_a_file') refuse('outside');
         throw error;
@@ -2496,6 +2506,10 @@ function rootHandle(setup: HandleSetup): RootHandle {
       try {
         const leafAt = await entry(placed.scope, made.folder, made.real, basename(placed.full));
         await refuseHeldName(placed.scope, join(made.real, basename(placed.full)));
+        // A link whose place or whose target is inside a credential home is refused (one rule,
+        // `host/shared-credentials.ts`) before anything is written; the name and target refusals above keep their precedence.
+        const homeVerdict = credentialHomeLinkVerdict({ source: known.root, target: name });
+        if (homeVerdict !== undefined) return refuse(homeVerdict);
         if ((await fs.identity(leafAt)) !== undefined) refuse('outside');
         await fs.symlink(pointsAt, leafAt).catch(() => refuse('changed'));
       } finally {
@@ -2522,24 +2536,36 @@ function rootHandle(setup: HandleSetup): RootHandle {
           refuse('link_escape');
       }
       // A credential link the kernel placed is not moved, itself or inside a folder that goes (one rule, `host/shared-credentials.ts`):
-      // judged by what was recorded at link time and what the link is now, never by its name.
-      const carried: string[] = [];
-      for (const [path, mark] of PLACED_LINKS.affected(source.full)) {
+      // judged by what was recorded at link time and what the link is now, never by its name. The record is KEPT through
+      // the whole decision: the early look below may find the link swapped for something else, and the held-source look
+      // (`renameChecked`'s guard) must still know which link was placed, or a swap that is undone in between goes through.
+      const recorded = PLACED_LINKS.affected(source.full);
+      const stillPlaced = async (path: string, mark: string): Promise<boolean> => {
         const now = await source.scope.fs.identity(path);
-        if (now?.kind === 'link' && linkMark(now) === mark) carried.push(path);
-        else PLACED_LINKS.forgetUnder(path);
-      }
+        return now?.kind === 'link' && linkMark(now) === mark;
+      };
+      const carried: string[] = [];
+      for (const [path, mark] of recorded) if (await stillPlaced(path, mark)) carried.push(path);
       const verdict = placedLinkMoveVerdict(carried);
       if (verdict !== undefined) return refuse(verdict);
-      const recorded = PLACED_LINKS.affected(source.full).find(([path]) => path === source.full)?.[1];
       await pinning(
         target.full,
         async () =>
-          await renameChecked(source, target, found => {
-            // The entry the held folder is about to move, looked at again: the very link placed is never carried off.
-            if (recorded !== undefined && found.kind === 'link' && linkMark(found) === recorded) refuse('link_escape');
+          await renameChecked(source, target, async found => {
+            // The entry the held folder is about to move, looked at again: the very link placed is never carried off...
+            const movingMark = recorded.find(([path]) => path === source.full)?.[1];
+            if (movingMark !== undefined && found.kind === 'link' && linkMark(found) === movingMark)
+              refuse('link_escape');
+            // ...nor a folder holding a recorded link that is back (or still) there now.
+            const again: string[] = [];
+            for (const [path, mark] of recorded)
+              if (path !== source.full && (await stillPlaced(path, mark))) again.push(path);
+            const late = placedLinkMoveVerdict(again);
+            if (late !== undefined) refuse(late);
           }),
       );
+      // The move was made: what was recorded below the old name is no longer there.
+      PLACED_LINKS.forgetUnder(source.full);
     },
     unlink: async (linkName: FencedPath) => {
       writable();
