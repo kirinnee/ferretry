@@ -15,9 +15,6 @@ import type { SecretName } from '@ferretry/protocol';
 import should from 'should';
 import {
   FleetLaunchEnvironment,
-  FolderSettingsOverrideError,
-  FolderSettingsUnreadableError,
-  type FolderSettingsVariables,
   type LaunchAccountInventory,
   type LaunchSecretValues,
   launchEnvironment,
@@ -254,166 +251,16 @@ describe('launchEnvironment', () => {
   });
 });
 
-describe('FleetLaunchEnvironment — a folder that would blank the login', () => {
-  const secretAccount = account({
-    secretEnv: { ANTHROPIC_AUTH_TOKEN: '${secret:LOGE_KEY}' },
-    claudeEnvOverrides: ['ANTHROPIC_AUTH_TOKEN'],
-  });
-  const folder = (...files: { file: string; names: readonly string[] }[]): FolderSettingsVariables => ({
-    variables: async () => files,
-  });
-
-  it('should refuse the start, naming the file and the key but never a value', async () => {
-    // Arrange
-    const secrets = store({ LOGE_KEY: 'fixture-value' });
-    const launcher = new FleetLaunchEnvironment(
-      inventory(secretAccount),
-      secrets,
-      undefined,
-      undefined,
-      folder({ file: '.claude/settings.local.json', names: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'] }),
-    );
-
-    // Act
-    const refused = await launcher.forWrapper(secretAccount.wrapper, '/work/pe').then(
-      () => undefined,
-      (error: unknown) => error as Error,
-    );
-
-    // Assert
-    should(refused).be.instanceOf(FolderSettingsOverrideError);
-    should(refused?.message).containEql('.claude/settings.local.json');
-    should(refused?.message).containEql('ANTHROPIC_AUTH_TOKEN');
-    should(refused?.message).not.containEql('fixture-value');
-    should(secrets.opened).equal(0);
-  });
-
-  it('should refuse the start, with the reason, when the folder’s settings cannot be looked for', async () => {
-    // Arrange: the adapter could not complete its walk to the repository root.
-    const secrets = store({ LOGE_KEY: 'fixture-value' });
-    const launcher = new FleetLaunchEnvironment(inventory(secretAccount), secrets, undefined, undefined, {
-      variables: async () => {
-        throw new FolderSettingsUnreadableError('looking for the repository failed at /work/.git (EACCES)');
-      },
+describe('project settings with a secret-backed login', () => {
+  for (const mode of ['auto', 'interactive'] as const) {
+    it(`should start a ${mode} runtime in a project setting a secret-backed key`, async () => {
+      // The folder may set ANTHROPIC_AUTH_TOKEN itself. Resolution must not refuse it:
+      // Claude will apply .claude/settings.local.json above this process environment.
+      const login = account({ mode, secretEnv: { ANTHROPIC_AUTH_TOKEN: '${secret:PROJECT_TEST_KEY}' } });
+      const launcher = new FleetLaunchEnvironment(inventory(login), store({ PROJECT_TEST_KEY: 'fixture-token' }));
+      should(await launcher.forWrapper(login.wrapper, '/work/project-with-local-settings')).deepEqual({
+        ANTHROPIC_AUTH_TOKEN: 'fixture-token',
+      });
     });
-
-    // Act
-    const refused = await launcher.forWrapper(secretAccount.wrapper, '/work/pe').then(
-      () => undefined,
-      (error: unknown) => error as Error,
-    );
-
-    // Assert
-    should(refused).be.instanceOf(FolderSettingsUnreadableError);
-    should(refused?.name).equal('FolderSettingsUnreadableError');
-    should(refused?.message).containEql('EACCES');
-    should(refused?.message).not.containEql('fixture-value');
-    should(secrets.opened).equal(0);
-  });
-
-  it('should start when the folder sets only variables the login pins itself', async () => {
-    // Arrange
-    const launcher = new FleetLaunchEnvironment(
-      inventory(secretAccount),
-      store({ LOGE_KEY: 'fixture-value' }),
-      undefined,
-      undefined,
-      folder({ file: '.claude/settings.json', names: ['ANTHROPIC_BASE_URL'] }),
-    );
-
-    // Act / Assert
-    should(await launcher.forWrapper(secretAccount.wrapper, '/work/pe')).deepEqual({
-      ANTHROPIC_AUTH_TOKEN: 'fixture-value',
-    });
-  });
-
-  it('should not look at a folder for an account that takes nothing from the store', async () => {
-    // Arrange
-    const launcher = new FleetLaunchEnvironment(
-      inventory(account()),
-      store(),
-      undefined,
-      undefined,
-      folder({ file: '.claude/settings.json', names: ['ANTHROPIC_AUTH_TOKEN'] }),
-    );
-
-    // Act / Assert
-    should(await launcher.forWrapper(account().wrapper, '/work/pe')).deepEqual({});
-  });
-
-  it('should refuse a folder that blanks a variable the login takes from the environment by bare reference', async () => {
-    // Arrange: nothing in the secret store; the login's token is a bare reference resolved when the wrapper runs.
-    const referenced = account({ claudeEnvOverrides: ['ANTHROPIC_AUTH_TOKEN'] });
-    const secrets = store();
-    const launcher = new FleetLaunchEnvironment(
-      inventory(referenced),
-      secrets,
-      undefined,
-      undefined,
-      folder({ file: '/work/.claude/settings.local.json', names: ['ANTHROPIC_AUTH_TOKEN'] }),
-    );
-
-    // Act
-    const refused = await launcher.forWrapper(referenced.wrapper, '/work/pe/child').then(
-      () => undefined,
-      (error: unknown) => error as Error,
-    );
-
-    // Assert: named by its path and key, and the store was never opened for it.
-    should(refused).be.instanceOf(FolderSettingsOverrideError);
-    should(refused?.message).containEql('/work/.claude/settings.local.json');
-    should(refused?.message).containEql('ANTHROPIC_AUTH_TOKEN');
-    should(secrets.opened).equal(0);
-  });
-
-  it('should start, with nothing to resolve, when the folder sets only other variables than the referenced ones', async () => {
-    // Arrange
-    const referenced = account({ claudeEnvOverrides: ['ANTHROPIC_AUTH_TOKEN'] });
-    const launcher = new FleetLaunchEnvironment(
-      inventory(referenced),
-      store(),
-      undefined,
-      undefined,
-      folder({ file: '.claude/settings.json', names: ['SOMETHING_ELSE'] }),
-    );
-
-    // Act / Assert
-    should(await launcher.forWrapper(referenced.wrapper, '/work/pe')).deepEqual({});
-  });
-
-  it('should let a project override a plain env secret binding and never inspect its settings', async () => {
-    const plain = account({ secretEnv: { ANTHROPIC_AUTH_TOKEN: '${secret:LOGE_KEY}' } });
-    const launcher = new FleetLaunchEnvironment(
-      inventory(plain),
-      store({ LOGE_KEY: 'fixture-value' }),
-      undefined,
-      undefined,
-      {
-        variables: async () => {
-          throw new Error('plain env leaves project settings alone');
-        },
-      },
-    );
-
-    should(await launcher.forWrapper(plain.wrapper, '/work/pe')).deepEqual({ ANTHROPIC_AUTH_TOKEN: 'fixture-value' });
-  });
-
-  it('should let project settings set other secret-backed variables alongside an explicit claude.env override', async () => {
-    const mixed = account({
-      secretEnv: { ANTHROPIC_AUTH_TOKEN: '${secret:LOGE_KEY}', OTHER_TOKEN: '${secret:OTHER_KEY}' },
-      claudeEnvOverrides: ['ANTHROPIC_AUTH_TOKEN'],
-    });
-    const launcher = new FleetLaunchEnvironment(
-      inventory(mixed),
-      store({ LOGE_KEY: 'fixture-value', OTHER_KEY: 'other-fixture' }),
-      undefined,
-      undefined,
-      folder({ file: '.claude/settings.local.json', names: ['OTHER_TOKEN'] }),
-    );
-
-    should(await launcher.forWrapper(mixed.wrapper, '/work/pe')).deepEqual({
-      ANTHROPIC_AUTH_TOKEN: 'fixture-value',
-      OTHER_TOKEN: 'other-fixture',
-    });
-  });
+  }
 });

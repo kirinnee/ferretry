@@ -39,7 +39,6 @@ import {
   type FleetManifestModelCatalog,
   type HarnessKind,
 } from '../manifest.ts';
-import { overlayWithPins, pinnableLoginEnvironment, secretBackedOverlayKeys } from './login-pins.ts';
 import { loginModelCatalog, type ModelCatalogSources } from '../models/catalog.ts';
 import {
   CODEX_CATALOG_FORMAT,
@@ -195,8 +194,6 @@ interface PlannedRuntime {
   /** The runtime's own `compactAt`, else its profile's. Absent is `auto`. */
   readonly compactAt?: CompactAt;
   readonly secretEnv: Readonly<Record<string, string>>;
-  /** Explicit `claude.env` keys that cannot be pinned because their effective value is a reference. */
-  readonly claudeEnvOverrides: readonly string[];
   /** Why it cannot launch, when it cannot. */
   readonly blocked?: string;
 }
@@ -414,29 +411,6 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     for (const [variable, reason] of Object.entries(REFUSED_LAUNCH_VARIABLES)) {
       if (variable in env) problems.push({ runtime: name, message: `it may not set ${variable}: ${reason}` });
     }
-    // Project settings win over plain login env and catalog tier slots. Only an explicit claude.env
-    // key opts into --settings precedence, at the effective launch value (a profile still wins a clash).
-    // References stay process-only; publish those explicit keys so a conflicting project refuses early.
-    const profileSettingsFlag = resolved.flags.some(
-      ({ flag }) => flag === '--settings' || flag.startsWith('--settings='),
-    );
-    const overrides = Object.fromEntries(
-      Object.keys(
-        harness === 'claude' && credential.store === 'environment' ? (credential.claude?.env ?? {}) : {},
-      ).flatMap(variable => (variable in env ? [[variable, env[variable] as string]] : [])),
-    );
-    const pins = pinnableLoginEnvironment(overrides);
-    if (!runtime.agent && Object.keys(pins).length > 0 && profileSettingsFlag) {
-      problems.push({
-        runtime: name,
-        message:
-          "its profile passes its own --settings, and Claude Code honours only one, so the login's claude.env cannot be pinned against a folder's settings; remove --settings from the profile",
-      });
-    }
-    const overlay =
-      harness === 'claude' && !(profileSettingsFlag && !runtime.agent)
-        ? overlayWithPins(fixed?.claudeSettingsOverlay, pins)
-        : fixed?.claudeSettingsOverlay;
     env[CREDENTIAL_ENV] = runtime.credential;
     env[RUNTIME_NAME_ENV] = name;
     env[STATE_HOME_ENV] = layout.stateHome;
@@ -461,14 +435,14 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         absent: adapted.absent,
         settings: adapted.settings,
         claudeJson: adapted.claudeJson,
-        overlay,
+        overlay: fixed?.claudeSettingsOverlay,
         credentialLink: codexCredentialLink(home, store),
         layout,
       }),
     );
 
     const fixedSettingsArgs =
-      overlay === undefined
+      fixed?.claudeSettingsOverlay === undefined
         ? []
         : ['--settings', joinPath(joinPath(home, RUNTIME_STATE_DIRECTORY), FIXED_SETTINGS_FILE)];
     const { models, modelCatalog, defaultModel } = publishedModels(derived);
@@ -487,9 +461,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         args: [
           ...credentialLaunchArguments(store, defaultModel !== null),
           ...(codexCatalog === undefined ? [] : codexCatalogArguments(codexCatalogPath)),
-          ...(launch === undefined
-            ? [...resolved.flags.map(flag => flag.flag), ...fixedSettingsArgs]
-            : [...launch.args, ...fixedSettingsArgs]),
+          ...(launch === undefined ? resolved.flags.map(flag => flag.flag) : [...launch.args, ...fixedSettingsArgs]),
         ],
         defaultModel: defaultModel ?? undefined,
         seedFirstRun: runtime.agent && harness === 'claude',
@@ -519,9 +491,6 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       secretEnv: sorted(
         Object.fromEntries(Object.entries(env).filter(([, value]) => secretReferencesIn(value).length > 0)),
       ),
-      claudeEnvOverrides: Object.keys(overrides)
-        .filter(variable => !(variable in pins))
-        .sort(),
       ...(blocked === undefined ? {} : { blocked }),
     });
   }
@@ -561,7 +530,6 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         available: reason === undefined,
         unavailableReason: reason ?? null,
         secretEnv: runtime.secretEnv,
-        ...(runtime.claudeEnvOverrides.length === 0 ? {} : { claudeEnvOverrides: runtime.claudeEnvOverrides }),
       };
     }),
     runtimes: planned.map(runtime => ({
@@ -603,29 +571,6 @@ interface ConfigDirectoryInput {
   readonly codexCatalog: string | undefined;
   readonly credentialLink: ReturnType<typeof codexCredentialLink>;
   readonly layout: FleetLayout;
-}
-
-/**
- * The write of `fixed.json`. THE SECRET RULE lives here as a throw: the daemon copies this file inline
- * into argv for a fast or compact start, so a value the secret store (or the environment) resolves must
- * never reach it. The filter in `./login-pins.ts` should have kept such a key out; reaching here is a bug,
- * and silently dropping it would hide one. Names the key, never a value.
- */
-export function fixedSettingsOperation(state: string, overlay: SettingsObject): FleetWriteOperation {
-  const leaking = secretBackedOverlayKeys(overlay);
-  if (leaking.length > 0) {
-    throw new FleetMaterialiseError([
-      {
-        message: `${FIXED_SETTINGS_FILE} may not hold a value that names a secret or another variable (${leaking.join(', ')}): the file is shown in argv`,
-      },
-    ]);
-  }
-  return {
-    kind: 'file',
-    path: joinPath(state, FIXED_SETTINGS_FILE),
-    content: serializeSettings(overlay, 'json'),
-    mode: PRIVATE_FILE_MODE,
-  };
 }
 
 /**
@@ -694,7 +639,14 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       replaceKeys: Object.keys(input.claudeJson),
     });
   }
-  if (input.overlay !== undefined) operations.push(fixedSettingsOperation(state, input.overlay));
+  if (input.overlay !== undefined) {
+    operations.push({
+      kind: 'file',
+      path: joinPath(state, FIXED_SETTINGS_FILE),
+      content: serializeSettings(input.overlay, 'json'),
+      mode: PRIVATE_FILE_MODE,
+    });
+  }
   if (input.codexCatalog !== undefined) {
     operations.push({
       kind: 'file',

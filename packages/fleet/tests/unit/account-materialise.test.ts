@@ -5,7 +5,6 @@ import { EMPTY_RUNTIME_IDS, type RuntimeIds } from '../../src/lib/account/ids.ts
 import {
   FIXED_SETTINGS_FILE,
   FleetMaterialiseError,
-  fixedSettingsOperation,
   MATERIALISED_RECORD_FILE,
   type MaterialiseInput,
   materialiseFleet,
@@ -1035,25 +1034,6 @@ describe('materialiseFleet', () => {
         },
       });
 
-    for (const agent of [true, false]) {
-      it(`should keep catalog tier slots in process env as before 1587 (${agent ? 'agent' : 'interactive'})`, () => {
-        const model = modelOf({
-          credentials: glmModel({}).credentials,
-          runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent } },
-        });
-
-        const result = plan(model, { modelCatalogs: sources });
-        const fixed = at(result, `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`);
-
-        should(wrapperOf(result, 'claude-default')).containEql("export ANTHROPIC_DEFAULT_OPUS_MODEL='glm-5.3'");
-        if (agent) should(JSON.parse((fixed[0] as { content: string }).content)).not.have.property('env');
-        else {
-          should(fixed).be.empty();
-          should(wrapperOf(result, 'claude-default')).not.containEql('--settings');
-        }
-      });
-    }
-
     it("should offer the login's catalog, launch on its default and pin the tier slots over a stale copy", () => {
       // Act — the login file still holds the tier pin an older preset copied into it
       const result = plan(glmModel({ ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-4.6' }), { modelCatalogs: sources });
@@ -1187,281 +1167,38 @@ describe('materialiseFleet', () => {
       });
     });
   });
-
-  describe("a login's environment against a folder's own settings (v4 hotfix)", () => {
-    const OVERLAY = `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`;
-    const LOGE = {
-      ANTHROPIC_BASE_URL: 'https://loge.example/anthropic',
-      ANTHROPIC_AUTH_TOKEN: 'loge-internal',
-    };
-
-    const logeModel = (agent: boolean, env: Record<string, string> = LOGE, pin = true): AccountModel =>
-      modelOf({
-        credentials: {
-          loge: {
-            harness: 'claude',
-            store: 'environment',
-            env,
-            claude: { env: pin ? { ...env, ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k3' } : {} },
-          },
-        },
-        runtimes: { 'claude-loge': { credential: 'loge', profile: 'default', agent } },
-      });
-
-    const overlayOf = (result: FleetModelApplyPlan): Record<string, unknown> => {
-      const operation = only(result, OVERLAY);
-      if (operation.kind !== 'file') throw new Error('fixed.json is not a file');
-      return JSON.parse(operation.content) as Record<string, unknown>;
-    };
-
-    /** Claude's documented order for one variable: the highest-precedence settings file that sets it wins. */
-    const effectiveEnv = (
-      process: Record<string, string>,
-      ...settingsLowToHigh: readonly Record<string, string>[]
-    ): Record<string, string> => Object.assign({}, process, ...settingsLowToHigh);
-
-    const repoBlanks = { ANTHROPIC_BASE_URL: '', ANTHROPIC_AUTH_TOKEN: '', ANTHROPIC_DEFAULT_OPUS_MODEL: '' };
-
-    for (const agent of [true, false]) {
-      it(`should let project settings override plain login env (${agent ? 'agent' : 'interactive'} runtime)`, () => {
-        const result = plan(logeModel(agent, LOGE, false));
-        const overlay = agent ? overlayOf(result) : {};
-
-        should(overlay).not.have.property('env');
-        should(effectiveEnv(LOGE, repoBlanks, (overlay.env ?? {}) as Record<string, string>).ANTHROPIC_BASE_URL).equal(
-          '',
-        );
-        should(wrapperOf(result, 'claude-loge')).containEql(
-          "export ANTHROPIC_BASE_URL='https://loge.example/anthropic'",
-        );
-        if (!agent) {
-          should(at(result, OVERLAY)).be.empty();
-          should(wrapperOf(result, 'claude-loge')).not.containEql('--settings');
-        }
-      });
-
-      it(`should keep a repo's blank settings from overriding the login (${agent ? 'agent' : 'interactive'} runtime)`, () => {
-        // Act
-        const result = plan(logeModel(agent));
-        const pinned = overlayOf(result).env as Record<string, string>;
-
-        // Assert — a local file blanking the variables, then Ferretry's --settings file on top.
-        const effective = effectiveEnv({ ...LOGE }, {}, {}, repoBlanks, pinned);
-        should(effective.ANTHROPIC_BASE_URL).equal('https://loge.example/anthropic');
-        should(effective.ANTHROPIC_AUTH_TOKEN).equal('loge-internal');
-        should(effective.ANTHROPIC_DEFAULT_OPUS_MODEL).equal('kimi-k3');
-        should(wrapperOf(result, 'claude-loge')).containEql(`'--settings' '${OVERLAY}'`);
-      });
-
-      it(`should pin only explicit keys when plain env and claude.env are mixed (${agent ? 'agent' : 'interactive'})`, () => {
-        const model = modelOf({
-          credentials: {
-            loge: {
-              harness: 'claude',
-              store: 'environment',
-              env: LOGE,
-              claude: { env: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k3' } },
-            },
-          },
-          runtimes: { 'claude-loge': { credential: 'loge', profile: 'default', agent } },
-        });
-
-        const result = plan(model);
-        const pinned = overlayOf(result).env as Record<string, string>;
-
-        should(pinned).eql({ ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k3' });
-        should(effectiveEnv(LOGE, repoBlanks, pinned)).match({
-          ANTHROPIC_BASE_URL: '',
-          ANTHROPIC_AUTH_TOKEN: '',
-          ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k3',
-        });
-      });
-    }
-
-    it('should write an env-only file for an interactive runtime and keep the fixed layer out of it', () => {
-      // Act
-      const overlay = overlayOf(plan(logeModel(false)));
-
-      // Assert
-      should(Object.keys(overlay)).eql(['env']);
-    });
-
-    it('should leave a Claude runtime with nothing to pin without a settings file', () => {
-      // Act
-      const result = plan(modelOf());
-
-      // Assert
-      should(at(result, `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`)).be.empty();
-      should(wrapperOf(result, 'claude-default')).not.containEql('--settings');
-    });
-
-    it('should not pin a variable that names a secret, nor one that names another variable', () => {
-      // Act
-      const result = plan(
-        logeModel(true, {
-          ...LOGE,
-          ANTHROPIC_AUTH_TOKEN: '${secret:LOGE_KEY}',
-          ANTHROPIC_CUSTOM_HEADERS: '$FROM_HOST',
-        }),
-      );
-
-      // Assert — the base URL is pinned, and neither of the others reaches the file.
-      const overlay = overlayOf(result);
-      should(overlay.env).eql({
-        ANTHROPIC_BASE_URL: 'https://loge.example/anthropic',
-        ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k3',
-      });
-      const text = (only(result, OVERLAY) as { content: string }).content;
-      should(text).not.containEql('${secret:');
-      should(text).not.containEql('FROM_HOST');
-      // The secret stays process environment: the manifest still names it.
-      should(JSON.stringify(result.manifest)).containEql('LOGE_KEY');
-    });
-
-    it('should refuse to write a settings file that holds a secret reference', () => {
-      // Act / Assert
-      const error = (() => {
-        try {
-          fixedSettingsOperation('/fy/fleet/homes/x/.fy', { env: { ANTHROPIC_AUTH_TOKEN: '${secret:LOGE_KEY}' } });
-        } catch (thrown) {
-          return thrown as FleetMaterialiseError;
-        }
-        throw new Error('expected a refusal');
-      })();
-      should(error).be.instanceOf(FleetMaterialiseError);
-      should(error.message).containEql('ANTHROPIC_AUTH_TOKEN');
-      should(error.message).not.containEql('LOGE_KEY');
-      should(() => fixedSettingsOperation('/s', { hooks: { x: '${secret:K}' } })).throw(FleetMaterialiseError);
-      should(() => fixedSettingsOperation('/s', { env: { A: '$HOST_TOKEN' } })).throw(FleetMaterialiseError);
-      should(() => fixedSettingsOperation('/s', { env: { A: 'literal' } })).not.throw();
-    });
-
-    it('should refuse an interactive runtime whose profile already passes its own --settings', () => {
-      // Arrange
-      const model = modelOf({
-        credentials: { loge: { harness: 'claude', store: 'environment', claude: { env: LOGE } } },
-        components: { ...COMPONENTS, settings: { own: { harness: 'claude', flags: ['--settings=/x.json'] } } },
-        profiles: { default: { layers: [...DEFAULT_LAYERS, 'settings/own'] } },
-        runtimes: { 'claude-loge': { credential: 'loge', profile: 'default' } },
-      });
-
-      // Act
-      const error = failure(() => plan(model));
-
-      // Assert
-      should(error.problems[0]?.message).containEql('honours only one');
-    });
-
-    const withoutLiteralPins: Record<string, string>[] = [{}, { ANTHROPIC_AUTH_TOKEN: '${secret:LOGE_KEY}' }];
-    for (const claudeEnv of withoutLiteralPins) {
-      it('should keep an interactive profile’s own --settings when there are no literal claude.env pins', () => {
-        const model = modelOf({
-          credentials: { loge: { harness: 'claude', store: 'environment', env: LOGE, claude: { env: claudeEnv } } },
-          components: { ...COMPONENTS, settings: { own: { harness: 'claude', flags: ['--settings=/x.json'] } } },
-          profiles: { default: { layers: [...DEFAULT_LAYERS, 'settings/own'] } },
-          runtimes: { 'claude-loge': { credential: 'loge', profile: 'default' } },
-        });
-
-        const result = plan(model);
-
-        should(at(result, OVERLAY)).be.empty();
-        should(wrapperOf(result, 'claude-loge')).containEql("'--settings=/x.json'");
-        should(wrapperOf(result, 'claude-loge')).not.containEql(OVERLAY);
-      });
-    }
-
-    describe('profile precedence and what is left to the process environment', () => {
-      const withProfileEnv = (profileEnv: Record<string, string>, env: Record<string, string> = LOGE): AccountModel =>
-        modelOf({
-          credentials: { loge: { harness: 'claude', store: 'environment', claude: { env } } },
-          components: {
-            ...COMPONENTS,
-            settings: { tuning: { harness: 'claude', env: profileEnv, file: 'claude.json' } },
-          },
-          profiles: { default: { layers: [...DEFAULT_LAYERS, 'settings/tuning'] } },
-          runtimes: { 'claude-loge': { credential: 'loge', profile: 'default', agent: true } },
-        });
-
-      it('should pin the profile’s value for a variable both it and the login set, as the wrapper exports it', () => {
-        // Act
-        const result = plan(withProfileEnv({ ANTHROPIC_BASE_URL: 'https://profile.example/anthropic' }), {
-          bodies: { settings: { tuning: {} } },
-        });
-
-        // Assert — the pin and the process environment agree, so --settings cannot hand the login's value back.
-        should((overlayOf(result).env as Record<string, string>).ANTHROPIC_BASE_URL).equal(
-          'https://profile.example/anthropic',
-        );
-        should(wrapperOf(result, 'claude-loge')).containEql(
-          "export ANTHROPIC_BASE_URL='https://profile.example/anthropic'",
-        );
-        should((overlayOf(result).env as Record<string, string>).ANTHROPIC_AUTH_TOKEN).equal('loge-internal');
-      });
-
-      it('should not pin a login literal a profile overrides with a reference, and publish the name', () => {
-        // Act
-        const result = plan(withProfileEnv({ ANTHROPIC_AUTH_TOKEN: '$HOST_TOKEN' }), {
-          bodies: { settings: { tuning: {} } },
-        });
-
-        // Assert — the login's own literal would otherwise win over the profile's reference.
-        const overlay = overlayOf(result);
-        should(Object.keys(overlay.env as object)).not.containEql('ANTHROPIC_AUTH_TOKEN');
-        should(JSON.stringify(overlay)).not.containEql('loge-internal');
-        should(JSON.stringify(overlay)).not.containEql('HOST_TOKEN');
-        should(result.manifest.accounts[0]?.claudeEnvOverrides).eql(['ANTHROPIC_AUTH_TOKEN']);
-      });
-
-      it('should not pin a variable only the profile sets', () => {
-        // Act
-        const result = plan(withProfileEnv({ LOG_LEVEL: 'debug' }), { bodies: { settings: { tuning: {} } } });
-
-        // Assert
-        should(Object.keys(overlayOf(result).env as object)).not.containEql('LOG_LEVEL');
-      });
-
-      it('should publish the name of every bare reference left to the process environment, never a value', () => {
-        // Act
+});
+describe('project .claude/settings.local.json environment precedence', () => {
+  for (const agent of [true, false]) {
+    for (const source of ['env', 'claude.env'] as const) {
+      it(`should let settings.local.json override login ${source} (${agent ? 'agent' : 'interactive'})`, () => {
+        const loginEnv = { ANTHROPIC_BASE_URL: 'https://login.example/anthropic' };
         const result = plan(
-          logeModel(true, {
-            ...LOGE,
-            ANTHROPIC_AUTH_TOKEN: '$HOST_TOKEN',
-            ANTHROPIC_CUSTOM_HEADERS: '${HOST_HEADERS}',
-            AWS_SECRET_ACCESS_KEY: '${secret:AWS_KEY}',
+          modelOf({
+            credentials: {
+              project: {
+                harness: 'claude',
+                store: 'environment',
+                ...(source === 'env' ? { env: loginEnv } : { claude: { env: loginEnv } }),
+              },
+            },
+            runtimes: { 'claude-project': { credential: 'project', profile: 'default', agent } },
           }),
         );
-
-        // Only explicit claude.env references need a folder override check; secret bindings still resolve normally.
-        const account = result.manifest.accounts[0];
-        should(account?.claudeEnvOverrides).eql([
-          'ANTHROPIC_AUTH_TOKEN',
-          'ANTHROPIC_CUSTOM_HEADERS',
-          'AWS_SECRET_ACCESS_KEY',
-        ]);
-        should(Object.keys(account?.secretEnv ?? {})).containEql('AWS_SECRET_ACCESS_KEY');
-        should(JSON.stringify(result.manifest)).not.containEql('HOST_TOKEN');
-      });
-
-      it('should publish no claudeEnvOverrides for a login that references nothing', () => {
-        // Act
-        const result = plan(logeModel(true));
-
-        // Assert
-        should(result.manifest.accounts[0]).not.have.property('claudeEnvOverrides');
-      });
-
-      it('should not require overrides for references in plain login env or profile-only env', () => {
-        const result = plan(withProfileEnv({ PROFILE_TOKEN: '${secret:PROFILE_KEY}' }), {
-          bodies: { settings: { tuning: {} } },
-        });
-        const plain = plan(
-          logeModel(true, { ANTHROPIC_AUTH_TOKEN: '$HOST_TOKEN', AWS_SECRET_ACCESS_KEY: '${secret:AWS_KEY}' }, false),
+        // A repo local file outranks process env; Ferretry must not reassert it via --settings.
+        const local = JSON.parse(`{"env":{"ANTHROPIC_BASE_URL":"https://project.example/anthropic"}}`);
+        const fixed = at(result, `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`)[0];
+        const settings = fixed?.kind === 'file' ? JSON.parse(fixed.content) : {};
+        should({ ...loginEnv, ...local.env, ...settings.env }.ANTHROPIC_BASE_URL).equal(local.env.ANTHROPIC_BASE_URL);
+        should(settings).not.have.property('env');
+        should(wrapperOf(result, 'claude-project')).containEql(
+          'export ANTHROPIC_BASE_URL=' + shellQuote(loginEnv.ANTHROPIC_BASE_URL),
         );
-
-        should(result.manifest.accounts[0]).not.have.property('claudeEnvOverrides');
-        should(plain.manifest.accounts[0]).not.have.property('claudeEnvOverrides');
-        should(Object.keys(plain.manifest.accounts[0]?.secretEnv ?? {})).containEql('AWS_SECRET_ACCESS_KEY');
+        if (!agent) {
+          should(fixed).equal(undefined);
+          should(wrapperOf(result, 'claude-project')).not.containEql('--settings');
+        }
       });
-    });
-  });
+    }
+  }
 });

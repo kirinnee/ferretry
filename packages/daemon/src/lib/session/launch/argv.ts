@@ -22,16 +22,9 @@
  *      `--settings` overlay as fast mode, see {@link overlayLaunchArguments});
  *   8. the owner's free-form harness flags, LAST, so an explicitly supplied flag still wins.
  *
- * THE ARGV NEVER CARRIES A CREDENTIAL. A login's literal environment (`ANTHROPIC_AUTH_TOKEN`, an API key, a cloud
- * credential) is pinned in its fixed `--settings` file, and fast mode or a compaction trigger REPLACES that file
- * with an overlay. An overlay with an `env` in it is therefore never written inline: it goes to a per-launch file
- * and the argv names only its PATH (see {@link launchOverlayFile}), because the argv shows up in `ps`, in the
- * pane's command line and in the session document's recorded `command`.
- *
  * Pure: strings in, strings out. Which values go in is the relaunch service's decision.
  */
 
-import { createHash } from 'node:crypto';
 import type { HarnessKind } from '@ferretry/fleet';
 import type { CompactAt, TranscriptProvenance } from '@ferretry/protocol';
 import { handoffReadArguments } from '../send/handoff.ts';
@@ -70,11 +63,6 @@ export interface LaunchArgvParts {
    * and has to carry it along. Empty when the login has no such file.
    */
   readonly fixedSettings?: string;
-  /**
-   * The absolute path of the per-launch overlay file the caller wrote for {@link launchOverlayFile}. Required exactly
-   * when that function names a file; an overlay that carries an `env` is refused without it, never inlined.
-   */
-  readonly overlayFile?: string;
   readonly harnessFlags: readonly string[];
 }
 
@@ -113,98 +101,12 @@ const CLAUDE_COMPACT_KEY = 'autoCompactWindow';
 
 /** A fixed settings file that is not a JSON object cannot be carried into a replacement overlay. */
 export class FixedSettingsUnreadableError extends Error {
-  constructor(
-    message = 'the login’s fixed settings file is not a JSON object, so fast mode or a compaction trigger cannot be added to its launch',
-  ) {
-    super(message);
-    this.name = 'FixedSettingsUnreadableError';
-  }
-}
-
-/**
- * The overlay carries an `env` and no file was prepared for it. Refused rather than inlined: the argv would show
- * a credential. A subclass of {@link FixedSettingsUnreadableError}, so every caller already refuses it the same way.
- */
-export class LaunchOverlayFileRequiredError extends FixedSettingsUnreadableError {
   constructor() {
     super(
-      'the login’s fixed settings carry its environment, which may not be written into a command line, and no per-launch settings file was prepared for it',
+      'the login’s fixed settings file is not a JSON object, so fast mode or a compaction trigger cannot be added to its launch',
     );
-    this.name = 'LaunchOverlayFileRequiredError';
+    this.name = 'FixedSettingsUnreadableError';
   }
-}
-
-/** A per-launch Claude settings file: the file NAME it must have and the text it holds. The caller writes it. */
-export interface LaunchOverlayFile {
-  readonly name: string;
-  readonly content: string;
-}
-
-/**
- * The name of a per-launch overlay file: `launch-<digest of the login's fixed settings>[-c<tokens>][-f<0|1>].json`.
- * Content-addressed, so the same launch always names the same file (a revive, a Restart and a move all rebuild it,
- * and a running process's recorded path stays what a rebuild would write), and the facts that make a launch
- * different are in the name — which is what the stale-settings comparison reads back.
- */
-const OVERLAY_FILE_NAME = /^(.*[\\/])?launch-([0-9a-f]{24})(?:-c(\d+))?(?:-f[01])?\.json$/u;
-
-/** Whether the file name says it is one of ours; the adapter's sweep uses the same shape. */
-export const isLaunchOverlayFileName = (name: string): boolean =>
-  /^launch-[0-9a-f]{24}(?:-c\d+)?(?:-f[01])?\.json$/u.test(name);
-
-/** The login's fixed settings as an object; empty when it has none. Throws when there is a file and it is not one. */
-function fixedSettingsObject(fixedSettings: string | undefined): Record<string, unknown> {
-  const text = fixedSettings?.trim() ?? '';
-  if (text === '') return {};
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new FixedSettingsUnreadableError();
-  }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new FixedSettingsUnreadableError();
-  return parsed as Record<string, unknown>;
-}
-
-/** Whether a settings object carries an environment: the one key whose values can be credentials. */
-function carriesEnvironment(settings: Record<string, unknown>): boolean {
-  const env = settings.env;
-  return typeof env === 'object' && env !== null && !Array.isArray(env) && Object.keys(env).length > 0;
-}
-
-/** The merged Claude overlay: the fixed file's own settings with fast mode and the compaction trigger on top. */
-const mergedOverlay = (
-  base: Record<string, unknown>,
-  wanted: { readonly fast?: boolean | undefined; readonly compactAt?: number | undefined },
-): Record<string, unknown> => ({
-  ...base,
-  ...(wanted.fast === undefined ? {} : { fastMode: wanted.fast }),
-  ...(wanted.compactAt === undefined ? {} : { [CLAUDE_COMPACT_KEY]: wanted.compactAt }),
-});
-
-/**
- * The per-launch file a Claude launch needs, or nothing when it needs none: only a launch that names fast mode or a
- * compaction trigger AND whose fixed settings carry an `env`. Every other overlay holds nothing but harmless
- * settings and stays inline, as it always was.
- *
- * Pure. The caller writes the file (private, atomically) and hands its absolute path back as
- * {@link LaunchArgvParts.overlayFile}.
- */
-export function launchOverlayFile(
-  harness: HarnessKind,
-  wanted: { readonly fast?: boolean | undefined; readonly compactAt?: number | undefined },
-  fixedSettings: string | undefined,
-): LaunchOverlayFile | undefined {
-  if (harness !== 'claude' || (wanted.fast === undefined && wanted.compactAt === undefined)) return undefined;
-  const base = fixedSettingsObject(fixedSettings);
-  if (!carriesEnvironment(base)) return undefined;
-  const digest = createHash('sha256').update(JSON.stringify(base), 'utf8').digest('hex').slice(0, 24);
-  return {
-    name: `launch-${digest}${wanted.compactAt === undefined ? '' : `-c${wanted.compactAt}`}${
-      wanted.fast === undefined ? '' : wanted.fast ? '-f1' : '-f0'
-    }.json`,
-    content: JSON.stringify(mergedOverlay(base, wanted)),
-  };
 }
 
 /**
@@ -227,7 +129,6 @@ function overlayLaunchArguments(
   harness: HarnessKind,
   wanted: { readonly fast?: boolean | undefined; readonly compactAt?: number | undefined },
   fixedSettings: string | undefined,
-  overlayFile: string | undefined,
 ): readonly string[] {
   const { fast, compactAt } = wanted;
   if (fast === undefined && compactAt === undefined) return [];
@@ -238,13 +139,27 @@ function overlayLaunchArguments(
         : ['-c', `${CODEX_TIER_KEY}=${tomlBasicString(fast ? CODEX_TIER.fast : CODEX_TIER.standard)}`]),
       ...(compactAt === undefined ? [] : ['-c', `${CODEX_COMPACT_KEY}=${compactAt}`]),
     ];
-  const base = fixedSettingsObject(fixedSettings);
-  // A credential never rides the argv: with an environment in the overlay, only the path of its file does.
-  if (carriesEnvironment(base)) {
-    if (overlayFile === undefined) throw new LaunchOverlayFileRequiredError();
-    return ['--settings', overlayFile];
+  const text = fixedSettings?.trim() ?? '';
+  let base: Record<string, unknown> = {};
+  if (text !== '') {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new FixedSettingsUnreadableError();
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
+      throw new FixedSettingsUnreadableError();
+    base = parsed as Record<string, unknown>;
   }
-  return ['--settings', JSON.stringify(mergedOverlay(base, { fast, compactAt }))];
+  return [
+    '--settings',
+    JSON.stringify({
+      ...base,
+      ...(fast === undefined ? {} : { fastMode: fast }),
+      ...(compactAt === undefined ? {} : { [CLAUDE_COMPACT_KEY]: compactAt }),
+    }),
+  ];
 }
 
 /** The whole argv, in the order the file comment states. */
@@ -256,12 +171,7 @@ export function buildLaunchArgv(parts: LaunchArgvParts): readonly string[] {
     ...handoffReadArguments(parts.harness, parts.readableFolders),
     ...modelArguments(parts.model),
     ...effortLaunchArguments(parts.harness, parts.effort),
-    ...overlayLaunchArguments(
-      parts.harness,
-      { fast: parts.fast, compactAt: parts.compactAt },
-      parts.fixedSettings,
-      parts.overlayFile,
-    ),
+    ...overlayLaunchArguments(parts.harness, { fast: parts.fast, compactAt: parts.compactAt }, parts.fixedSettings),
     ...parts.harnessFlags,
   ];
 }
@@ -359,9 +269,7 @@ export function launchedCompactAt(command: readonly string[]): CompactAt {
     const next = command[index + 1];
     if (next === undefined) break;
     if (command[index] === '--settings') {
-      const file = OVERLAY_FILE_NAME.exec(next);
-      const value =
-        file === null ? inlineOverlay(next)?.[CLAUDE_COMPACT_KEY] : file[3] === undefined ? undefined : Number(file[3]);
+      const value = inlineOverlay(next)?.[CLAUDE_COMPACT_KEY];
       launched = typeof value === 'number' ? value : 'auto';
     }
     if (command[index] === '-c' && next.startsWith(`${CODEX_COMPACT_KEY}=`)) {
@@ -390,18 +298,6 @@ export function settingsArguments(argv: readonly string[]): readonly string[] {
     const next = argv[index + 1];
     if (token === '--settings' && next !== undefined && INLINE_SETTINGS.test(next)) {
       kept.push(...overlaySettings(next));
-      index += 1;
-      continue;
-    }
-    // A per-launch overlay FILE stands for the same thing: its digest names the login's fixed settings, its
-    // `-c` suffix the compaction trigger, and its `-f` suffix fast mode, which is a run fact and left out.
-    const file = token === '--settings' && next !== undefined ? OVERLAY_FILE_NAME.exec(next) : null;
-    if (file !== null && next !== undefined) {
-      kept.push(
-        ...(file[3] === undefined ? [] : [`--compact-at=${file[3]}`]),
-        '--settings',
-        `${file[1] ?? ''}launch-${file[2]}.json`,
-      );
       index += 1;
       continue;
     }

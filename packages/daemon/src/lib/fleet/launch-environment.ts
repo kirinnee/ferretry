@@ -59,48 +59,6 @@ export interface ProjectLaunchEnvironment {
   forLaunch(agent: string, cwd: string): Promise<Readonly<Record<string, string>>>;
 }
 
-/**
- * The environment variables the Claude settings files that apply to a launch folder set, by file: the folder's own
- * two, the repository root's local file, the main checkout's in a worktree. `file` is a path (relative to the folder
- * when inside it). NAMES ONLY: the value of a project's setting is not this daemon's business and never leaves the
- * adapter.
- */
-export interface FolderSettingsVariables {
-  variables(cwd: string): Promise<readonly { readonly file: string; readonly names: readonly string[] }[]>;
-}
-
-/**
- * Raised when folder settings conflict with a login's explicit `claude.env` override that needs a reference.
- *
- * Claude Code ranks a project's `env` above the process environment the secret reaches it through (and a
- * secret may not be pinned into a `--settings` file), so the deliberate override cannot be honoured.
- * Said at the start instead, naming the file and the key — never the value. Plain login env is allowed
- * to lose to project settings.
- */
-export class FolderSettingsOverrideError extends Error {
-  constructor(
-    readonly file: string,
-    readonly variable: string,
-    readonly runtime: string,
-  ) {
-    super(
-      `this folder's settings file ${file} sets ${variable}, which conflicts with runtime ${runtime}'s explicit login claude.env override (it takes ${variable} from the secret store or the host environment). Remove ${variable} from ${file}, or move the login's variable to plain env so project settings can win.`,
-    );
-    this.name = 'FolderSettingsOverrideError';
-  }
-}
-
-/**
- * Raised when the settings a launch folder's repository keeps cannot be looked for, so the start is refused rather than
- * going ahead unchecked: a settings file that was never read could be the one that blanks the login.
- */
-export class FolderSettingsUnreadableError extends Error {
-  constructor(reason: string) {
-    super(reason);
-    this.name = 'FolderSettingsUnreadableError';
-  }
-}
-
 /** The published accounts, as the daemon's existing inventory already answers them. */
 export interface LaunchAccountInventory {
   accounts(): Promise<readonly FleetManifestAccount[]>;
@@ -142,35 +100,23 @@ export class FleetLaunchEnvironment implements AccountLaunchEnvironment {
     private readonly secrets: LaunchSecretValues,
     private readonly renewal?: LaunchSecretRenewal,
     private readonly project?: ProjectLaunchEnvironment,
-    private readonly folderSettings?: FolderSettingsVariables,
   ) {}
 
   async forWrapper(wrapper: string, cwd?: string): Promise<Readonly<Record<string, string>>> {
     const [own, project] = await Promise.all([
-      this.#account(wrapper, cwd),
+      this.#account(wrapper),
       cwd === undefined || this.project === undefined ? {} : this.project.forLaunch(wrapper, cwd),
     ]);
     // The profile's own bindings win a same-named variable: a project server's is derived, theirs is chosen.
     return { ...project, ...own };
   }
 
-  async #account(wrapper: string, cwd?: string): Promise<Readonly<Record<string, string>>> {
+  async #account(wrapper: string): Promise<Readonly<Record<string, string>>> {
     const name = wrapperNameOf(wrapper);
     const account = (await this.inventory.accounts()).find(
       published => wrapperNameOf(published.wrapper) === name || published.wrapper === wrapper,
     );
-    if (account === undefined) return {};
-    // Only an explicit claude.env override opts into a refusal. Plain login env and profile bindings
-    // stay process-only and may lose to a project's settings, even when they reference the secret store.
-    const secretNames = Object.keys(account.secretEnv);
-    const taken = new Set(account.claudeEnvOverrides ?? []);
-    if (account.kind === 'claude' && taken.size > 0 && cwd !== undefined && this.folderSettings !== undefined) {
-      for (const { file, names } of await this.folderSettings.variables(cwd)) {
-        const clash = names.find(variable => taken.has(variable));
-        if (clash !== undefined) throw new FolderSettingsOverrideError(file, clash, name);
-      }
-    }
-    if (secretNames.length === 0) return {};
+    if (account === undefined || Object.keys(account.secretEnv).length === 0) return {};
     // Opened only now, and only for an account that declared it needs something. A fleet nobody
     // gave a profile to never touches the store at all.
     // Renewal on USE: the only moment an MCP token is refreshed is the moment a launch needs it.
