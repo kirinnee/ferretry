@@ -223,7 +223,7 @@ function acknowledgingProvisioner(
 ): FleetCatalogServiceDeps['provisioner'] {
   return {
     preview: async plan => await inner.preview(plan),
-    apply: async (plan, documents = []) => {
+    apply: async (plan, documents = [], assertCurrent) => {
       const configFiles = documents.filter(document => !relative(configDirectory, document.path).startsWith('..'));
       for (const document of configFiles) {
         const path = relative(configDirectory, document.path);
@@ -231,7 +231,7 @@ function acknowledgingProvisioner(
         else config.acknowledge(path, document.content);
       }
       try {
-        const result = await inner.apply(plan, documents);
+        const result = await inner.apply(plan, documents, assertCurrent);
         if (result.unreadableManifestBackup !== undefined) manifestRegenerated?.(result.unreadableManifestBackup);
         return result;
       } finally {

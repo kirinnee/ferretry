@@ -4,6 +4,7 @@ import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, wri
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
+import { fleetApplyLockFor } from '../../src/adapters/apply-lock.ts';
 import { FileFleetProvisioner } from '../../src/adapters/file-provisioner.ts';
 import { isMutationReservedName } from '../../src/adapters/mutation-journal.ts';
 import type { FleetManifest } from '../../src/lib/manifest.ts';
@@ -43,6 +44,35 @@ const manifest = (): FleetManifest => ({
 });
 
 describe('FileFleetProvisioner', () => {
+  it('should check plan freshness under the apply claim and release it on refusal without mutating', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const manifestPath = path.join(root, 'manifest.json');
+    const original = '{invalid JSON';
+    await writeFile(manifestPath, original);
+    const plan: FleetApplyPlan = { manifest: manifest(), manifestPath, operations: [] };
+    const subject = new FileFleetProvisioner([root]);
+    const lock = fleetApplyLockFor(manifestPath);
+    const stale = new Error('configuration changed while recovery waited');
+    let claimed = false;
+
+    // Act
+    const error = await subject
+      .apply(plan, [], async () => {
+        claimed = (await stat(lock.path)).isDirectory();
+        throw stale;
+      })
+      .catch((thrown: unknown) => thrown);
+
+    // Assert — no manifest backup or replacement, and another apply can still acquire the claim.
+    should(error).equal(stale);
+    should(claimed).be.true();
+    should(await readFile(manifestPath, 'utf8')).equal(original);
+    should(await readdir(root)).deepEqual(['manifest.json']);
+    await subject.apply(plan);
+    should(JSON.parse(await readFile(manifestPath, 'utf8'))).deepEqual(plan.manifest);
+  });
+
   for (const damaged of [
     '{not JSON',
     JSON.stringify({

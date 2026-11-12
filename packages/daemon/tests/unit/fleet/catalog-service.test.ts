@@ -176,7 +176,8 @@ function world(overrides: Partial<FleetCatalogServiceDeps> = {}): World {
     provisioner: {
       preview: async plan =>
         (await state.preview(plan)) as Awaited<ReturnType<FleetCatalogServiceDeps['provisioner']['preview']>>,
-      apply: async (plan, documents = []) => {
+      apply: async (plan, documents = [], assertCurrent?: () => Promise<void>) => {
+        await assertCurrent?.();
         applied.push({ plan, documents });
         return (await state.apply()) as Awaited<ReturnType<FleetCatalogServiceDeps['provisioner']['apply']>>;
       },
@@ -1432,6 +1433,72 @@ describe('component content and the draft-profile preview', () => {
 
 describe('FleetCatalogService with model catalogs (docs/model-catalog.md)', () => {
   const sources = async () => ({ catalogs: builtInModelCatalogs(), presets: builtInPresets() });
+
+  for (const readable of [false, true]) {
+    it(`should ${readable ? 'leave a committed removal unchanged' : 'recover the removed fleet'} when recovery waits for an apply claim`, async () => {
+      // Arrange — recovery waits while a reviewed removal commits its configuration and ids.
+      const waiting = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      let wait = true;
+      let published: unknown;
+      let ids: RuntimeIds | undefined;
+      const cached = configReading(MODEL(), 'rev-1');
+      const current = world({
+        document: async fresh => (fresh === true ? current.state.reading : cached),
+        modelCatalogs: sources,
+        ids: async () => ids,
+        publishedManifest: async () => {
+          if (published === undefined) throw new FleetManifestUnreadableError(LAYOUT.manifestPath, 'invalid JSON');
+          return published;
+        },
+        provisioner: {
+          preview: async plan => ({ ...plan, sharedHistory: [] }),
+          apply: async (plan, documents = [], assertCurrent?: () => Promise<void>) => {
+            if (documents.length === 0 && wait) {
+              wait = false;
+              waiting.resolve();
+              await release.promise;
+            }
+            await assertCurrent?.();
+            current.applied.push({ plan, documents });
+            ids = (plan as FleetModelApplyPlan).ids;
+            if (documents.length > 0) {
+              const model = MODEL();
+              current.state.reading = configReading(
+                parseAccountModel({ ...model, runtimes: { 'claude-default': model.runtimes['claude-default'] } }),
+                'rev-2',
+              );
+            }
+            published = readable ? plan.manifest : undefined;
+            return {
+              accountCount: plan.manifest.accounts.length,
+              operationCount: plan.operations.length,
+              manifestPath: plan.manifestPath,
+              prunedWrappers: [],
+              sharedHistory: [],
+            };
+          },
+        },
+      });
+      const removal = await current.service.propose({ kind: 'runtime.remove', name: 'codex-default' });
+
+      // Act
+      const recovery = current.service.republish();
+      await waiting.promise;
+      await current.service.apply(removal.id, governance);
+      release.resolve();
+      const outcome = await recovery;
+
+      // Assert — neither the manifest nor ids nor wrappers may resurrect the removed runtime.
+      should(outcome).equal(readable ? 'unchanged' : 'applied');
+      should(current.applied).have.length(readable ? 1 : 2);
+      for (const { plan } of current.applied) {
+        should(plan.manifest.accounts.map(account => account.wrapper)).deepEqual(['/state/fleet/bin/claude-default']);
+        should(Object.keys((plan as FleetModelApplyPlan).ids.runtimes)).deepEqual(['claude-default']);
+        should(plan.operations.some(operation => operation.path === '/state/fleet/bin/codex-default')).be.false();
+      }
+    });
+  }
 
   it('should regenerate when the published manifest cannot be parsed', async () => {
     // Arrange

@@ -67,6 +67,33 @@ const watch = (fingerprints: () => Promise<string>, onChange: () => Promise<void
 };
 
 describe('watchConfigFiles', () => {
+  it('should reload a change committed during boot republish before the watcher was armed', async () => {
+    // Arrange — the tree was read for boot, then a removal landed during the initial publication.
+    const beforePublish = 'with-runtime';
+    const timers = new FakeTimers();
+    let changes = 0;
+    const stop = watchConfigFiles({
+      initialFingerprint: beforePublish,
+      fingerprint: async () => 'runtime-removed',
+      onChange: async () => {
+        changes += 1;
+      },
+      onError: error => {
+        throw error;
+      },
+      timers,
+    });
+
+    // Act — no event is available for the edit that preceded the watch.
+    await flush();
+    timers.settle();
+    await flush();
+    stop();
+
+    // Assert
+    should(changes).equal(1);
+  });
+
   it('should say the tree may have changed as soon as a polled fingerprint moves', async () => {
     // Arrange
     let fingerprint = 'a';

@@ -336,7 +336,11 @@ export class FileFleetProvisioner implements FleetProvisioner {
    * migration that follows has its own boundary and never rolls the fleet back, so a failure there
    * is reported as the different thing it is — a fleet that landed with a later step outstanding.
    */
-  async apply(plan: FleetApplyPlan, documents: readonly FleetDocumentWrite[] = []): Promise<FleetApplyResult> {
+  async apply(
+    plan: FleetApplyPlan,
+    documents: readonly FleetDocumentWrite[] = [],
+    assertCurrent?: () => Promise<void>,
+  ): Promise<FleetApplyResult> {
     // One apply at a time per state home. Two overlapping applies capture each other's writes as
     // "the state before", so their rollbacks undo one another and neither report is true. The queue
     // orders callers inside this one object; the lock file orders this object against a separate
@@ -353,6 +357,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     const guarded = async (): Promise<FleetApplyResult> => {
       const token = await lock.acquire();
       try {
+        await assertCurrent?.();
         const result = await this.applyExclusively(plan, documents);
         const lockResidue = await lock.release(token);
         return lockResidue === undefined ? result : { ...result, lockResidue };

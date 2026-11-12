@@ -196,7 +196,12 @@ export const ABSENT_DOCUMENT_REVISION = 'absent';
 
 export interface FleetProvisioner {
   preview(plan: FleetApplyPlan): Promise<FleetApplyPreview>;
-  apply(plan: FleetApplyPlan, documents?: readonly FleetDocumentWrite[]): Promise<FleetApplyResult>;
+  /** `assertCurrent` runs under the exclusive apply claim, before preflight or any mutation. */
+  apply(
+    plan: FleetApplyPlan,
+    documents?: readonly FleetDocumentWrite[],
+    assertCurrent?: () => Promise<void>,
+  ): Promise<FleetApplyResult>;
 }
 
 /**

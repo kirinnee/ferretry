@@ -6294,10 +6294,13 @@ function createConfigFilesSubsystem(input: {
     agentControl: input.agentControl,
     identities: input.identities,
     arm: async () => {
+      // The watch's first read must detect edits committed while the initial republish was waiting.
+      const initialFingerprint = await input.service.fingerprint();
       await input.service.load();
       await input.service.publishSchemas(configJsonSchemaFiles());
       await input.afterLoad?.();
       return watchConfigFiles({
+        initialFingerprint,
         fingerprint: async () => await input.service.fingerprint(),
         // At once, not after the debounce: readers stop answering from a load the tree has moved past.
         onEvent: () => input.service.invalidate(),

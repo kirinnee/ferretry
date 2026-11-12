@@ -480,43 +480,52 @@ export class FleetCatalogService {
    * Answers what it did. A machine with no fleet yet, or one wired without catalogs, has nothing to do.
    */
   async republish(): Promise<'applied' | 'unchanged' | 'skipped'> {
-    const reading = await this.#read();
-    const sources = await this.#modelCatalogs();
-    if (reading.format === 'none' || sources.modelCatalogs === undefined) return 'skipped';
-    let plan: FleetModelApplyPlan;
-    try {
-      plan = materialiseFleet({
-        model: reading.model,
-        layout: this.deps.layout,
-        ids: (await this.deps.ids()) ?? EMPTY_RUNTIME_IDS,
-        mint: () => this.deps.mint(),
-        generatedAt: new Date(this.deps.now()).toISOString(),
-        bodies: await this.#bodies(reading.model),
-        claudeStatusline: this.deps.claudeStatusline,
-        fyCommand: this.deps.fyCommand,
-        harnessCommands: harnessCommandsOf(this.deps.locate),
-        ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
-        acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
-        ...this.#budgetHolds(),
-        ...sources,
-      });
-    } catch (error) {
-      throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));
+    const stale = new Error('configuration changed before republish acquired its apply claim');
+    const unchanged = new Error('the fleet is already current');
+    for (;;) {
+      const reading = await this.#read(true);
+      const sources = await this.#modelCatalogs();
+      if (reading.format === 'none' || sources.modelCatalogs === undefined) return 'skipped';
+      let plan: FleetModelApplyPlan;
+      try {
+        plan = materialiseFleet({
+          model: reading.model,
+          layout: this.deps.layout,
+          ids: (await this.deps.ids()) ?? EMPTY_RUNTIME_IDS,
+          mint: () => this.deps.mint(),
+          generatedAt: new Date(this.deps.now()).toISOString(),
+          bodies: await this.#bodies(reading.model),
+          claudeStatusline: this.deps.claudeStatusline,
+          fyCommand: this.deps.fyCommand,
+          harnessCommands: harnessCommandsOf(this.deps.locate),
+          ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
+          acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
+          ...this.#budgetHolds(),
+          ...sources,
+        });
+      } catch (error) {
+        throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));
+      }
+      try {
+        await this.deps.provisioner.apply(plan, [], async () => {
+          // A committed apply may have removed a runtime while this recovery waited for its claim.
+          // Read the files afresh under that same claim and re-plan before touching derived output.
+          if ((await this.#read(true)).revision !== reading.revision) throw stale;
+          // The manifest is derived: damage cannot veto replacement, but other read failures surface.
+          const published = await this.deps.publishedManifest?.().catch((error: unknown) => {
+            if (error instanceof FleetManifestUnreadableError) return undefined;
+            throw error;
+          });
+          if (sameManifest(plan.manifest, published) && (await this.deps.wrappersCurrent?.(plan)) !== false)
+            throw unchanged;
+        });
+      } catch (error) {
+        if (error === stale) continue;
+        if (error === unchanged) return 'unchanged';
+        throw new FleetCatalogRefusal('fleet_change_failed', errorMessage(error));
+      }
+      return 'applied';
     }
-    // The manifest is derived, so an older or damaged publication cannot veto its replacement.
-    // Other read failures still surface rather than being mistaken for a schema mismatch.
-    const published = await this.deps.publishedManifest?.().catch((error: unknown) => {
-      if (error instanceof FleetManifestUnreadableError) return undefined;
-      throw error;
-    });
-    if (sameManifest(plan.manifest, published) && (await this.deps.wrappersCurrent?.(plan)) !== false)
-      return 'unchanged';
-    try {
-      await this.deps.provisioner.apply(plan, []);
-    } catch (error) {
-      throw new FleetCatalogRefusal('fleet_change_failed', errorMessage(error));
-    }
-    return 'applied';
   }
 
   /** `POST /v1/fleet/profiles/preview`: a profile's layers before they are saved. Writes nothing. */
