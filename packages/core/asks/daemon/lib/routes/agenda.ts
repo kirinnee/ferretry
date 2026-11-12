@@ -169,15 +169,22 @@ async function readableSnapshot(
     : await ferretSnapshot(reach, caller, snapshot, () => agenda.emptyBoardAt(), keptItem(agenda, snapshot.sessionId));
 }
 
-/** An item that has left the board, as its newest kept version has it; `undefined` when none is kept or it cannot be read. */
+/**
+ * An item that has left the board, as its newest kept version has it. `undefined` ONLY when the store says it kept none (an id
+ * never raised). A store that fails, or a newest snapshot that cannot be read, THROWS: that is "cannot tell", never "absent",
+ * so no caller may classify it plain or fall back to an older snapshot.
+ */
 const keptItem =
   (agenda: AgendaService, sessionId: string): FindRelative =>
   async id => {
     const kept = await agenda.versionsOf(sessionId, id as never);
+    // A refused session (unknown, reserved) is the route's own refusal; only a store that failed is "cannot tell".
+    if (!kept.ok && kept.error.code === 'corrupt') throw new Error('the kept versions cannot be read');
     const latest = kept.ok ? kept.value.versions.at(-1)?.version : undefined;
     if (latest === undefined) return undefined;
     const version = await agenda.versionOf(sessionId, id as never, latest);
-    return version.ok ? (version.value as { readonly item?: Relative }).item : undefined;
+    if (!version.ok) throw new Error('the newest kept version cannot be read');
+    return (version.value as { readonly item?: Relative }).item;
   };
 
 /**
@@ -198,7 +205,9 @@ async function coverOfItem(
   const onBoard = snapshot.ok ? [...snapshot.value.items, ...snapshot.value.resolved] : [];
   const kept = keptItem(agenda, sessionId);
   const find: FindRelative = async each => onBoard.find(row => row.id === each) ?? (await kept(each));
-  const item = await find(id);
+  // An id the store never kept is plain (the reference answer); one it cannot read is withheld like a hidden item.
+  const item = await find(id).catch(() => 'unreadable' as const);
+  if (item === 'unreadable') return 'omit';
   return item === undefined ? 'plain' : await coverOf(reach, caller, sessionId, item, find);
 }
 
