@@ -1,3 +1,15 @@
+## [4.291.12](https://github.com/kirinnee/ferretry/compare/v4.291.11...v4.291.12) (2026-11-12)
+
+### Fixes
+
+* **fleet:** let project .claude settings win over a login's env again ([#1592](https://github.com/kirinnee/ferretry/issues/1592)) ([4ac1dcd](https://github.com/kirinnee/ferretry/commit/4ac1dcd8bac8f069c62e2fce3419a78db5cbc9c8))
+
+## [4.291.11](https://github.com/kirinnee/ferretry/compare/v4.291.10...v4.291.11) (2026-11-12)
+
+### Fixes
+
+* **ci:** accept GoReleaser's multi-line conflicts_with in the cask contract ([#1591](https://github.com/kirinnee/ferretry/issues/1591)) ([c396402](https://github.com/kirinnee/ferretry/commit/c3964024794f8e2523ad4402ed38bfedf137d362))
+
 ## [4.291.10](https://github.com/kirinnee/ferretry/compare/v4.291.9...v4.291.10) (2026-11-12)
 
 ### Fixes

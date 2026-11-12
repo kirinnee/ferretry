@@ -526,6 +526,25 @@ describe('config files: live reading and watching', () => {
     expect(h.log.lines.some(line => line.includes('listener bug'))).toBe(true);
   });
 
+  test('an edit landing between boot reload and the watcher being armed is reloaded, not taken as the baseline', async () => {
+    // #1593 (v4 4.291.13): the first fingerprint was the baseline, so an edit made while boot published its schemas
+    // (after the reload, before startWatching) was never seen. The baseline is the tree as the boot reload read it.
+    const h = configHarness();
+    h.fs.seed(h.path('updates.yaml'), 'limit: 5\n');
+    await h.files.reload();
+    expect(limitOf(h)).toBe(5);
+    h.fs.seed(h.path('updates.yaml'), 'limit: 4\n');
+    const stop = h.files.startWatching();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    h.clock.advance(100);
+    h.clock.advance(1_000);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    h.clock.advance(400);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(limitOf(h)).toBe(4);
+    stop();
+  });
+
   test('startWatching reloads after the tree has been quiet, and stops when told', async () => {
     const h = configHarness();
     await h.files.write('updates', updatesDef, undefined, 'limit: 5\n');

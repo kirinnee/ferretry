@@ -1,3 +1,15 @@
+## [4.291.13](https://github.com/kirinnee/ferretry/compare/v4.291.12...v4.291.13) (2026-11-12)
+
+### Fixes
+
+* **daemon:** regenerate an unreadable fleet manifest instead of refusing every start ([#1593](https://github.com/kirinnee/ferretry/issues/1593)) ([dd9e63b](https://github.com/kirinnee/ferretry/commit/dd9e63b26082f475191e19d6625929035863d34a))
+
+## [4.291.12](https://github.com/kirinnee/ferretry/compare/v4.291.11...v4.291.12) (2026-11-12)
+
+### Fixes
+
+* **fleet:** let project .claude settings win over a login's env again ([#1592](https://github.com/kirinnee/ferretry/issues/1592)) ([4ac1dcd](https://github.com/kirinnee/ferretry/commit/4ac1dcd8bac8f069c62e2fce3419a78db5cbc9c8))
+
 ## [4.291.11](https://github.com/kirinnee/ferretry/compare/v4.291.10...v4.291.11) (2026-11-12)
 
 ### Fixes

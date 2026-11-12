@@ -1511,8 +1511,14 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     return [...found];
   };
 
+  /** The tree as boot's first reload found it, taken before that reload read a file: the watcher's baseline. */
+  let bootFingerprint: string | undefined;
+
   const startWatching = (events?: ConfigTreeEvents): (() => void) =>
     watchConfigFiles({
+      // An edit made after the boot reload and before this watch is armed (the schemas are published between) is a
+      // change, not the baseline: without this the watcher's first read would absorb it and it would never load.
+      ...(bootFingerprint === undefined ? {} : { initialFingerprint: bootFingerprint }),
       fingerprint,
       onChange: async () => await serial(load),
       onError: error =>
@@ -1568,7 +1574,11 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     held: () => heldOf(settled),
     confirm,
     discard,
-    reload: async () => await serial(load),
+    reload: async () =>
+      await serial(async () => {
+        bootFingerprint ??= await fingerprint();
+        await load();
+      }),
     onStateChange: listener => {
       const entry = (plugin: string, move: ConfigFileMove): void => listener(plugin, move);
       moveListeners.add(entry);
