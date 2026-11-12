@@ -115,8 +115,17 @@ let
     outputHashAlgo = "sha256";
     # When a build reports a hash mismatch here, the install inputs changed what it installs: take the
     # `got:` hash. It is the same on every builder, so a mismatch is never fixed by rerunning.
-    outputHash = "sha256-pi5vGovCeCJnIYAVjM5ZaxtinBrCS301tYuNXbdAbLI=";
+    outputHash = "sha256-6RfDOsXQhauNSlgjEASN5E0kTC8tew1hGXYhyQE7sGQ=";
     dontFixup = true;
+
+    # Read by scripts/validate/bun-deps-hash.sh, which fails a change to the install inputs that did not
+    # refresh `outputHash` in minutes instead of inside this build. Neither moves the store path.
+    passthru = {
+      inherit installDigest;
+      # The digest the committed `outputHash` was taken at: nix/bun-deps.inputs, refreshed in the same
+      # commit as `outputHash`.
+      pinnedInstallDigest = lib.removeSuffix "\n" (builtins.readFile "${src}/nix/bun-deps.inputs");
+    };
 
     buildPhase = ''
       export HOME="$TMPDIR/home"
@@ -235,6 +244,8 @@ let
 in
 {
   inherit fy fyd;
+  # The dependency derivation, exposed so scripts/validate/bun-deps-hash.sh can read its installDigest.
+  inherit bunDeps;
   default = pkgs.symlinkJoin {
     name = "ferretry";
     paths = [

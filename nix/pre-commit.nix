@@ -165,6 +165,21 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # A change to what `bun install` reads, committed without refreshing `outputHash`, otherwise fails
+    # only ten minutes into Quick Checks' Nix build. This asks Nix for nix/ferretry.nix's own
+    # `installDigest` and compares it with the pin in nix/bun-deps.inputs. It needs `nix` and `jq` from
+    # the devshell PATH (the same Nix that runs the build), which a bun-script entry keeps, and it runs
+    # in seconds. The files regex is only a trigger, so it is deliberately broad: any manifest, the
+    # lockfile, anything vendored, all of nix/.
+    a-bun-deps-hash = {
+      enable = true;
+      name = "Bun install digest pin";
+      entry = bun-script "scripts/validate/bun-deps-hash.sh";
+      files = "^(bun\\.lock|flake\\.(nix|lock)|nix/.*|scripts/validate/bun-deps-hash\\.sh|(.*/)?package\\.json|(.*/)?vendor/.*)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     # The hosted relay is the one subsystem whose configuration meets its code only in production:
     # no test reads a wrangler config or a workflow's shell. Includes the adapter sources because
     # the gate cross-checks the routes and Durable Object classes they declare against the two.
