@@ -280,10 +280,11 @@ test('R206 a discovery failure on a loopback bind says the consequence and the r
   await half!.hooks['carriers:relay'].start({} as SessionLayer, new AbortController().signal);
   const trail = host.logs.map(entry => entry.message);
   expect(trail[0]).toBe('no relay carrier — no relay could be discovered: the relay directory is unavailable');
-  expect(trail[1]).toContain('bound to 127.0.0.1 and dials no relay, so NO other device can reach it');
-  expect(trail[2]).toContain('to pair: set "host" to "0.0.0.0"');
-  expect(trail[3]).toContain('a restart asks the relay directory again');
-  expect(trail).toHaveLength(4);
+  expect(trail[1]).toContain('another device cannot pair yet; this daemon is bound to 127.0.0.1');
+  expect(trail[2]).toBe('Keep the daemon on a loopback listener ("fyd --host 127.0.0.1").');
+  expect(trail[3]).toContain('Restart to ask the hosted relay directory again');
+  expect(trail.slice(1).join('\n')).not.toMatch(/carriers|publicUrl|0\.0\.0\.0/u);
+  expect(trail).toHaveLength(5);
   expect(host.provided(ConnectionsPort).carriers()).toEqual([{ kind: 'direct', url: 'https://box.example' }]);
   await host.stop();
 });
@@ -299,8 +300,10 @@ test('R206 a relay switched off in the configuration names that switch once, wit
   expect(trail.filter(line => line.startsWith('no relay carrier — '))).toEqual([
     "no relay carrier — the configured relay https://mine.example is switched off in this daemon's configuration",
   ]);
-  expect(trail.some(line => line.includes('reachable only from this machine’s own network'))).toBe(true);
-  expect(trail.some(line => line.includes('is what this daemon dials — correct it or remove it'))).toBe(true);
+  expect(trail.some(line => line.includes('refuses direct connections from other machines'))).toBe(true);
+  expect(
+    trail.some(line => line.includes('correct or remove the top-level "relay" entry in config/connections.yaml')),
+  ).toBe(true);
   await host.stop();
 });
 describe('the carrier set is the daemon’s answer', () => {
