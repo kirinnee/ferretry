@@ -7,6 +7,7 @@ import {
   movedModel,
   movedModelSource,
   pickedModelSource,
+  plannedModelSource,
   relaunchModelSource,
 } from '../../../../../daemon/lib/session/launch/index.ts';
 import { launchConfig, launchState } from './support.ts';
@@ -322,5 +323,15 @@ describe('relaunchModelSource (B191/B4, probe P3) and pickedModelSource (B191/B5
     should(pickedModelSource('claude-opus-5', 'claude-opus-5')).equal('account-default');
     should(pickedModelSource('claude-sonnet-5', 'claude-opus-5')).equal('requested');
     should(pickedModelSource('claude-sonnet-5', undefined)).equal('requested');
+  });
+});
+
+describe('plannedModelSource (#1586)', () => {
+  it('should record only a requested model as requested, and anything else the planner says as the default', () => {
+    // Act / Assert
+    should(plannedModelSource('requested')).equal('requested');
+    should(plannedModelSource('account-default')).equal('account-default');
+    should(plannedModelSource('harness')).equal('account-default');
+    should(plannedModelSource('unknown')).equal('account-default');
   });
 });

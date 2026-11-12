@@ -2,9 +2,11 @@ import { posix } from 'node:path';
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import { absolute } from '../host/fence-guard.ts';
+import { insideFence } from '../contract/home.ts';
 import { isKernelMadeRoot } from '../host/internal-roots.ts';
 import {
   DEFAULT_COPY_ENTRIES,
+  internalRootRelative,
   isOwnerRoot,
   isReadOnlyRoot,
   mayHoldRoot,
@@ -13,6 +15,8 @@ import {
 } from '../host/roots.ts';
 import {
   anchorWalk,
+  chainFault,
+  chainProblem,
   harnessFileRefusal,
   permittedMode,
   renameNamesRefusal,
@@ -225,6 +229,11 @@ export interface TestHostOptions {
   /** The kernel home the test roots' fence is judged against (`harnessFile` refuses a path in it). Default: `/test-home`. */
   readonly fenceHome?: string;
   /**
+   * The daemon's uid, which `RootHandle.checkPrivateChain` compares each folder's owner with. Default `1000` (a folder with
+   * no stated owner is owned by it); `null` is "not known", so every chain check fails closed (`unknown_owner`).
+   */
+  readonly daemonUid?: number | null;
+  /**
    * A host that cannot reach an entry through a held folder (macOS whose C library or working-directory bracket could
    * not be loaded): the `project-files` root, an owner's root, refuses every remove AND every write `no_descriptor_reach`, as the real
    * host does there. Default: it has reach, as macOS does when both load (a remove goes through the folder's descriptor).
@@ -240,6 +249,18 @@ export interface TestHostOptions {
   readonly linkedProjectFolders?: ReadonlyMap<string, string>;
   /** The directories `kernel.paths.checkDirectory` accepts: the absolute path asked → its real path. Default: none. */
   readonly directories?: Readonly<Record<string, string>>;
+  /**
+   * Every absolute path is a directory that is its own real path, outside the state home, unless `directories` /
+   * `setDirectory` says otherwise: for a test that starts ferrets in folders it does not care about. Default: off (a
+   * path no one named is not a directory).
+   */
+  readonly everyDirectory?: boolean;
+  /**
+   * Backs a `harness-home` handle scoped to an ABSOLUTE folder (what a launch folder's settings are read through) with
+   * this function instead of the flat test world, which keeps no per-folder files: `diskFolders` over a temp folder gives
+   * the real root rules over real files. Default: the flat world, as every other root.
+   */
+  readonly harnessHomeFolders?: (folder: string) => RootHandle;
   /** The absolute paths `kernel.paths.which` finds executable. Default: none. */
   readonly executables?: readonly string[];
   /** The `PATH` `kernel.paths.which` searches after the caller's own folders. Default: none. */
@@ -371,6 +392,22 @@ export interface TestHost {
   putRootLink(name: RootName, relative: string): void;
   /** A file with a second name planted at `relative` of the test root `name` (see {@link TestHost.putRootLink}). */
   putRootHardLink(name: RootName, relative: string, text: string): void;
+  /**
+   * States what the test world's chain check finds at a folder at or above the base of an internal root, by its path
+   * RELATIVE to the home (`''` is the home, `state`, `state/<plugin>`, `state/<plugin>/agent-homes`): its mode, its
+   * owner or that it is a link. A folder never stated is a real folder of the daemon's own at `0o700`. Mirrors
+   * `chmod`/`chown`/`ln -s` on the real disk for `RootHandle.checkPrivateChain`.
+   */
+  setHomeFolder(component: string, facts: TestFolderFacts): void;
+  /**
+   * Re-points (or, with `undefined`, removes) a directory `kernel.paths.checkDirectory` / `bindDirectory` accepts: the
+   * test world's `rename` and `ln -s`. A bound folder whose path now reaches another real path is `changed` at `verify`.
+   */
+  setDirectory(absolutePath: string, realPath: string | undefined): void;
+  /** Another directory now lies at `realPath` (removed and made again): a bound folder there is `changed` at `verify`. */
+  replaceDirectory(realPath: string): void;
+  /** The same for a folder BELOW the base of the test root `name` (`relative` as `putRoot` spells it): mode, owner, link. */
+  setRootFolder(name: RootName, relative: string, facts: TestFolderFacts): void;
   stop(): Promise<void>;
 }
 
@@ -1326,6 +1363,35 @@ async function start(world: World): Promise<TestHost> {
   const testLinks = new Map<string, string>();
   /** `setMode`'s modes in the test world, by path; a path never set keeps the default (`0o600` for a file). */
   const testModes = new Map<string, number>();
+  /** The directories `kernel.paths.checkDirectory` accepts (`options.directories`, then `setDirectory`): the path asked → its real path. */
+  const testDirectories = new Map<string, string>(Object.entries(options.directories ?? {}));
+  /** Which directory a real path is, for `bindDirectory`'s identity: `replaceDirectory` moves it on. */
+  const testDirectoryGenerations = new Map<string, number>();
+  const testRealPath = (requested: string): string | undefined =>
+    testDirectories.has(requested)
+      ? testDirectories.get(requested)
+      : options.everyDirectory === true
+        ? requested
+        : undefined;
+  const checkTestDirectory = (absolutePath: string) => {
+    const requested = absolutePath.trim();
+    if (!requested.startsWith('/'))
+      return err({
+        reason: 'not_absolute' as const,
+        message: `session working directory must be absolute: ${JSON.stringify(absolutePath)}`,
+      });
+    const real = testRealPath(requested);
+    return real === undefined
+      ? err({
+          reason: 'not_a_directory' as const,
+          message: `session working directory is not a directory: ${requested}`,
+        })
+      : ok({ realPath: real });
+  };
+  /** `setHomeFolder` / `setRootFolder`: what the chain check finds at a folder, by home-relative path or flat world key. */
+  const testChainFacts = new Map<string, TestFolderFacts>();
+  /** The uid the chain check compares owners with (`TestHostOptions.daemonUid`; default `1000`, `null` unknown). */
+  const chainUid = options.daemonUid === undefined ? 1000 : (options.daemonUid ?? undefined);
   /** Files of the test world that have a second name (`TestHost.putRootHardLink`), by key. */
   const testHardLinks = new Set<string>();
   /** Folders `makeDirectory` made, so an EMPTY folder exists in the flat test world (a rmdir has something to remove). */
@@ -1422,6 +1488,12 @@ async function start(world: World): Promise<TestHost> {
           if (name === 'project-files') throw new RootError('not_declared');
           throw new Error(`${manifest.id}: root ${name} is not declared`);
         }
+        if (
+          name === 'harness-home' &&
+          options.harnessHomeFolders !== undefined &&
+          scope?.subfolder?.startsWith('/') === true
+        )
+          return options.harnessHomeFolders(scope.subfolder);
         // A `within` anchor is judged by the one rule production reads (`anchorWalk`): the folder itself or an ancestor of
         // it, compared by component, on a root that takes an absolute folder. Anything else names no folder here either.
         // The world holds no real disk folders for an absolute scope, so the lstat walk itself is production's alone.
@@ -1531,7 +1603,8 @@ async function start(world: World): Promise<TestHost> {
           resolve(relative) {
             if (prefix === undefined || relative.startsWith('/') || relative.split('/').includes('..'))
               return { ok: false, error: 'outside' };
-            return { ok: true, value: `${prefix}/${relative}` as never };
+            // The real host normalizes (`join`), so the root's own folder is spelled without a trailing slash.
+            return { ok: true, value: (relative === '' ? prefix : `${prefix}/${relative}`) as never };
           },
           readText: async path => {
             const text = world.roots.get(path);
@@ -1626,7 +1699,62 @@ async function start(world: World): Promise<TestHost> {
             for (const [key, text] of [...world.roots])
               if (key.startsWith(`${fromKey}/`)) world.roots.set(`${to}${key.slice(fromKey.length)}`, text);
           },
-          ensurePrivateDirectory: async () => {},
+          ensurePrivateDirectory: async path => {
+            testMadeFolders.add(ownPath(path));
+          },
+          // The real host's rule (`chainFault`) over the flat test world: a folder at or above the base of an internal root
+          // is a real folder unless `setHomeFolder` says otherwise; one below it exists as the flat world says it does.
+          checkPrivateChain: async path => {
+            const place = ownPath(path);
+            const home = internalRootRelative(manifest.id, name);
+            if (home === undefined) return err(chainProblem('(outside the home)', 'outside_home'));
+            const entryOf = (
+              facts: TestFolderFacts | undefined,
+              found: { readonly kind: 'file' | 'directory' | 'link' } | undefined,
+              stated: number | undefined,
+            ) =>
+              found === undefined
+                ? undefined
+                : {
+                    kind: facts?.link === true ? ('link' as const) : found.kind,
+                    owner: facts?.owner ?? chainUid ?? 0,
+                    mode: facts?.mode ?? stated ?? 0o700,
+                  };
+            const upper = home.split('/');
+            const chain: { readonly component: string; readonly entry: ReturnType<typeof entryOf> }[] = [
+              { component: '.', entry: entryOf(testChainFacts.get(''), { kind: 'directory' }, undefined) },
+              ...upper.map((_, index) => {
+                const component = upper.slice(0, index + 1).join('/');
+                return {
+                  component,
+                  entry: entryOf(testChainFacts.get(component), { kind: 'directory' }, undefined),
+                };
+              }),
+            ];
+            const lower = place
+              .slice(`/${name}`.length)
+              .split('/')
+              .filter(part => part !== '' && part !== '.');
+            for (let depth = 1; depth <= lower.length; depth += 1) {
+              const key = `/${name}/${lower.slice(0, depth).join('/')}`;
+              const found = testLinks.has(key)
+                ? { kind: 'link' as const }
+                : world.roots.has(key)
+                  ? { kind: 'file' as const }
+                  : testFolderExists(key)
+                    ? { kind: 'directory' as const }
+                    : undefined;
+              chain.push({
+                component: `${home}/${lower.slice(0, depth).join('/')}`,
+                entry: entryOf(testChainFacts.get(key), found, testModes.get(key)),
+              });
+            }
+            for (const { component, entry } of chain) {
+              const fault = chainFault(entry, chainUid);
+              if (fault !== undefined) return err(chainProblem(component, fault, entry));
+            }
+            return ok(undefined);
+          },
           lstat: async path => {
             if (testLinks.has(path)) return { kind: 'symlink', size: 0, modified: clock.now(), mode: 0o777, links: 1 };
             if (world.roots.has(path)) return fileStat(path);
@@ -2029,21 +2157,47 @@ async function start(world: World): Promise<TestHost> {
                   (options.executables ?? []).includes(path),
                 );
               },
-              // The test world keeps no disk: a directory is one the test named in `options.directories` (its real path).
-              checkDirectory: async (absolutePath: string) => {
+              // The test world keeps no disk: a directory is one the test named in `options.directories` (its real path),
+              // moved by `setDirectory` and replaced by `replaceDirectory`.
+              checkDirectory: async (absolutePath: string) => checkTestDirectory(absolutePath),
+              // The real rule (`host/bound-directory.ts`) over the test world: the real path, which directory it is (a
+              // generation per real path) and whether the fence holds it are asked again at `verify`.
+              bindDirectory: async (absolutePath: string) => {
                 const requested = absolutePath.trim();
-                if (!requested.startsWith('/'))
+                const checked = checkTestDirectory(absolutePath);
+                if (!checked.ok) return err(checked.error);
+                const look = () => {
+                  const real = testRealPath(requested);
+                  return real === undefined
+                    ? undefined
+                    : {
+                        real,
+                        generation: testDirectoryGenerations.get(real) ?? 0,
+                        inside: insideFence(options.fenceHome ?? '/test-home', real),
+                      };
+                };
+                const captured = look();
+                if (captured === undefined)
                   return err({
-                    reason: 'not_absolute' as const,
-                    message: `session working directory must be absolute: ${JSON.stringify(absolutePath)}`,
+                    reason: 'not_a_directory' as const,
+                    message: `session working directory is not a directory: ${requested}`,
                   });
-                const real = options.directories?.[requested];
-                return real === undefined
-                  ? err({
-                      reason: 'not_a_directory' as const,
-                      message: `session working directory is not a directory: ${requested}`,
-                    })
-                  : ok({ realPath: real });
+                return ok({
+                  realPath: captured.real,
+                  insideStateHome: captured.inside,
+                  verify: async () => {
+                    const now = look();
+                    return now !== undefined &&
+                      now.real === captured.real &&
+                      now.generation === captured.generation &&
+                      now.inside === captured.inside
+                      ? ok(undefined)
+                      : err({
+                          reason: 'changed' as const,
+                          message: `the launch folder ${requested} is no longer what was checked, so nothing was started in it`,
+                        });
+                  },
+                });
               },
             }),
           ),
@@ -2490,6 +2644,19 @@ async function start(world: World): Promise<TestHost> {
       world.roots.set(rootKey(name, relative), text);
       testHardLinks.add(rootKey(name, relative));
     },
+    setHomeFolder(component, facts) {
+      testChainFacts.set(component, facts);
+    },
+    setDirectory(absolutePath, realPath) {
+      if (realPath === undefined) testDirectories.delete(absolutePath);
+      else testDirectories.set(absolutePath, realPath);
+    },
+    replaceDirectory(realPath) {
+      testDirectoryGenerations.set(realPath, (testDirectoryGenerations.get(realPath) ?? 0) + 1);
+    },
+    setRootFolder(name, relative, facts) {
+      testChainFacts.set(rootKey(name, relative), facts);
+    },
     async stop() {
       if (stopController.signal.aborted) return;
       stopController.abort();
@@ -2497,4 +2664,11 @@ async function start(world: World): Promise<TestHost> {
     },
   };
   return host;
+}
+
+/** What a test says about a folder for `checkPrivateChain`: any of its mode, its owner, or that it is a link. */
+interface TestFolderFacts {
+  readonly mode?: number;
+  readonly owner?: number;
+  readonly link?: true;
 }

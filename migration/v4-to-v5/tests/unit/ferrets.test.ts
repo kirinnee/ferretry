@@ -235,3 +235,33 @@ test('the v5 name is the v4 callsign; the title is the fallback, then the id', a
   expect(String((await record('titled')).name)).toBe('Fake Old Title');
   expect(String((await record('odd')).name)).toBe('odd');
 });
+
+// ─── birth: who first started a v4 ferret decides whether v5 fences its relaunches ────────────────────────────────────
+
+const spawnStamp = (origin: 'human' | 'session' | 'warden') =>
+  origin === 'warden'
+    ? ({ v: 1, at: AT, origin, warden: 'overseer', wardenLineage: true, lineageSource: 'self_label' } as const)
+    : ({ v: 1, at: AT, origin, wardenLineage: false, lineageSource: 'none' } as const);
+
+test('birth: a v4 ferret with a lead (started by another ferret) is an AGENT’s', async () => {
+  await f.session('lead');
+  await f.session('helper', { parent: 'lead' });
+  expect((await ferretsStep.run(f.ctx())).status).toBe('converted');
+  expect((await record('helper')).birth).toBe('agent');
+});
+
+test('birth: a v4 ferret with no lead and no other spawn stamp is a PERSON’s', async () => {
+  await f.session('solo');
+  await f.session('asked', { provenance: spawnStamp('human') });
+  expect((await ferretsStep.run(f.ctx())).status).toBe('converted');
+  expect((await record('solo')).birth).toBe('person');
+  expect((await record('asked')).birth).toBe('person');
+});
+
+test('birth: whatever v4 says another session or a warden created, even with no lead named, is an AGENT’s', async () => {
+  await f.session('by-session', { provenance: spawnStamp('session') });
+  await f.session('by-warden', { provenance: spawnStamp('warden') });
+  expect((await ferretsStep.run(f.ctx())).status).toBe('converted');
+  expect((await record('by-session')).birth).toBe('agent');
+  expect((await record('by-warden')).birth).toBe('agent');
+});

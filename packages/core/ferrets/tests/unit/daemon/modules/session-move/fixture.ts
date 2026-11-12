@@ -54,7 +54,6 @@ export function sessionMoveNeedsForTest(overrides: Partial<SessionMoveNeeds> = {
     rolloutFormat: refusing('rolloutFormat'),
     locateHarness: () => undefined,
     readableHandoffs: () => [],
-    fixedSettings: async () => undefined,
     paneIdentity: async () => undefined,
     persistedReasoningEffort: async () => undefined,
     contextWindowForSession: () => 200_000,

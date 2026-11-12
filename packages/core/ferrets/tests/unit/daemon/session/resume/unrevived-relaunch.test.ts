@@ -87,6 +87,20 @@ describe('restoring the fields a move restamped', () => {
     });
   });
 
+  it('should put back the model provenance the migration restamped, present or absent', () => {
+    // A refused move must not leave the session claiming the target's provenance for the source's model.
+    should(
+      restoreRestamped(
+        { model: 'kimi-k3', launchModelSource: 'requested' },
+        { model: 'opus', launchModelSource: 'account-default' },
+      ),
+    ).eql({ model: 'kimi-k3', launchModelSource: 'requested' });
+    should(restoreRestamped({ model: 'opus' }, { model: 'kimi-k3', launchModelSource: 'requested' })).eql({
+      model: 'opus',
+    });
+    should(RESTAMPED_RECORD_KEYS).containEql('launchModelSource');
+  });
+
   it('should only ever touch the keys the move restamps', () => {
     should(RESTAMPED_RECORD_KEYS).containEql('agent').and.not.containEql('capabilityHash');
     should(RESTAMPED_RECORD_KEYS).not.containEql('name');

@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { describe, expect, test } from 'bun:test';
 import { AGENT_CONTROL_KINDS, AgentControlPort, type AgentControlKind } from '@ferretry/kernel/contract';
 import {
@@ -202,7 +203,7 @@ describe('the launch environment instructions reads is PERSISTED, through one re
   test('T-0036 restart: a fresh service over the same state answers exactly what the first did', async () => {
     const state = persisted();
     const first = launching(state, TOLD, 'auto');
-    expect((await first.service.resume(first.id)).ok).toBe(true);
+    expect((await first.service.resume(first.id, undefined, { origin: PERSON_ORIGIN })).ok).toBe(true);
     const before = (await instructionsAnswer(first.id, id => first.store.read(id), 'fy')).text;
     expect(before).toContain('✓ Pack mode: on');
     expect(before).toContain('✗ Hypermedia: off');
@@ -216,7 +217,7 @@ describe('the launch environment instructions reads is PERSISTED, through one re
   test('T-0036 a launch records the switches only: never the token or the ferret id, and never details.json', async () => {
     const state = persisted();
     const f = launching(state, { ...TOLD, SOME_SECRET_LOOKING_NAME: 'x' }, 'interactive');
-    await f.service.resume(f.id);
+    await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
     expect(state.held.get(f.id)).toEqual(TOLD);
     expect(JSON.stringify([...state.held.values()])).not.toContain('FY_SESSION_TOKEN');
     expect(state.record.writes).toEqual([f.id]);
@@ -247,7 +248,7 @@ describe('the launch environment instructions reads is PERSISTED, through one re
     const refused = persisted();
     const a = launching(refused, TOLD);
     a.ports.vault.childEnvironment = async () => err({ unknown: ['GONE'] } as never);
-    expect((await a.service.resume(a.id).catch(() => undefined))?.ok).toBe(false);
+    expect((await a.service.resume(a.id, undefined, { origin: PERSON_ORIGIN }).catch(() => undefined))?.ok).toBe(false);
     expect(refused.held.size).toBe(0);
 
     const failing = persisted();
@@ -257,6 +258,6 @@ describe('the launch environment instructions reads is PERSISTED, through one re
         throw new Error('disk full');
       },
     };
-    expect((await b.service.resume(b.id)).ok).toBe(true);
+    expect((await b.service.resume(b.id, undefined, { origin: PERSON_ORIGIN })).ok).toBe(true);
   });
 });

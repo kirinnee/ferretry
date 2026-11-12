@@ -1,4 +1,10 @@
-import type { FerretId, FerretsApi, FerretSummary, PackId } from '@ferretry/core-ferrets/contract';
+import {
+  type FerretId,
+  type FerretsApi,
+  type FerretSummary,
+  DAEMON_ORIGIN,
+  type PackId,
+} from '@ferretry/core-ferrets/contract';
 import { PACK_CLEAN_UP_PACK } from '../../contract/index.ts';
 import { depthOf, packEligibleInLineage, type ParentFacts, runningChildCount } from '../lib/admission.ts';
 import type { CleanUpStartRequest } from '../lib/cleanup/service.ts';
@@ -36,20 +42,24 @@ export class PackFerrets {
     request: CleanUpStartRequest,
   ): Promise<{ readonly id: string; readonly name?: string | undefined }> {
     const ferrets = this.ferrets();
-    const started = await ferrets.start({
-      role: 'helper',
-      by: 'pack',
-      pack: (request.pack || PACK_CLEAN_UP_PACK) as PackId,
-      harness: request.harness,
-      runtime: request.runtime,
-      folder: request.cwd,
-      prompt: request.prompt,
-      options: {
-        title: request.name,
-        mode: request.mode,
-        ...(request.model === undefined ? {} : { model: request.model }),
+    // The clean-up builder runs in a Ferretry folder the service chose, never a caller's: the daemon's own start.
+    const started = await ferrets.start(
+      {
+        role: 'helper',
+        by: 'pack',
+        pack: (request.pack || PACK_CLEAN_UP_PACK) as PackId,
+        harness: request.harness,
+        runtime: request.runtime,
+        folder: request.cwd,
+        prompt: request.prompt,
+        options: {
+          title: request.name,
+          mode: request.mode,
+          ...(request.model === undefined ? {} : { model: request.model }),
+        },
       },
-    });
+      DAEMON_ORIGIN,
+    );
     if (!started.ok) throw new Error(started.error.reason);
     const ferret = await ferrets.get(started.value);
     return { id: started.value, ...(ferret === undefined ? {} : { name: ferret.name }) };

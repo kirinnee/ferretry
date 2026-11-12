@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../ferrets/contract/index.ts';
 import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { FakeAsks } from '../../../../asks/contract/testing/index.ts';
@@ -68,6 +69,7 @@ const wardenPlugin = implementDaemon(
 
 async function boot(packs: boolean, runner: FakeRunner): Promise<TestHost> {
   return await testHost({
+    everyDirectory: true,
     plugins: [
       real('ferrets'),
       ...(packs ? [real('packs')] : []),
@@ -133,7 +135,7 @@ describe('G12 helper admission through the daemon: the real Packs answers start.
     await second.settle();
     const resumed = await second
       .provided(FerretsPort, 'warden')
-      .resume(ferretId(childId), 'carry on', { automatic: true, actor: 'warden' });
+      .resume(ferretId(childId), 'carry on', { origin: PERSON_ORIGIN, automatic: true, actor: 'warden' });
     expect(resumed.ok).toBe(true);
   });
 

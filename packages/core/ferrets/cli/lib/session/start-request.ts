@@ -1,14 +1,14 @@
 import { isAbsolute, resolve } from 'node:path';
-import { FERRET_CARD_ID_PATTERN, type InitialAttachment } from '../../../contract/index.ts';
+import { FERRET_CARD_ID_PATTERN, type InitialAttachment, parseCompactAt } from '../../../contract/index.ts';
 import { SessionCommandError } from './errors.ts';
 import type { SessionEnvironment, StartBody } from './ports.ts';
 
 /**
- * Today's `fy start` flags whose value has no field in Ferrets' start (§2.2): where a conversation compacts is the
- * Conversation's, and a detached start has no 5.0 meaning (a start always waits for the launch). A typed one is
- * refused by name rather than sent and dropped, because a flag that was accepted and ignored is worse than a refusal.
+ * Today's `fy start` flags whose value has no field in Ferrets' start (§2.2): a detached start has no 5.0 meaning (a
+ * start always waits for the launch). A typed one is refused by name rather than sent and dropped, because a flag that
+ * was accepted and ignored is worse than a refusal.
  */
-export const START_FLAGS_ELSEWHERE: readonly string[] = ['compact-at', 'detach'];
+export const START_FLAGS_ELSEWHERE: readonly string[] = ['detach'];
 
 /**
  * A value at or below this many seconds looks like someone reaching for a readiness wait ("give it
@@ -48,6 +48,11 @@ export interface StartFlags extends StartNumericFlags {
   readonly effort?: string;
   /** Only set when the caller typed `--fast`/`--no-fast`; unset leaves the harness's own default (off). */
   readonly fast?: boolean;
+  /**
+   * What was typed after `--compact-at` (`auto`, `250k`, `250000`): parsed in {@link buildStartRequest} so a bad value is
+   * refused in plain words before anything is sent (v4's grammar).
+   */
+  readonly compactAt?: string;
   /** Only set when the caller actually passed `--rc`/`--no-rc`; unset leaves the daemon default. */
   readonly remoteControl?: boolean;
   readonly harnessFlags?: readonly string[];
@@ -118,6 +123,8 @@ export function startWarnings(flags: StartNumericFlags): readonly string[] {
  */
 export function buildStartRequest(flags: StartFlags, environment: SessionEnvironment): StartBody {
   assertNumericFlags(flags);
+  const compactAt = flags.compactAt === undefined ? undefined : parseCompactAt(flags.compactAt);
+  if (compactAt?.ok === false) throw new SessionCommandError(`--compact-at: ${compactAt.reason}`);
   const prompt = flags.prompt?.trim() ?? '';
   if (prompt === '' && flags.mode !== 'interactive')
     throw new SessionCommandError(
@@ -154,6 +161,7 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
     ...(flags.model === undefined ? {} : { model: flags.model }),
     ...(flags.effort === undefined ? {} : { effort: flags.effort }),
     ...(flags.fast === undefined ? {} : { fast: flags.fast }),
+    ...(compactAt?.ok === true ? { compactAt: compactAt.value } : {}),
     ...(flags.remoteControl === undefined ? {} : { remoteControl: flags.remoteControl }),
     ...(flags.auto === true ? { auto: true } : {}),
     ...(flags.harnessFlags === undefined || flags.harnessFlags.length === 0

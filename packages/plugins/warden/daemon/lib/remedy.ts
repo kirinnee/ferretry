@@ -16,6 +16,7 @@
  * Pure: the act itself is the caller's, through {@link WardenRemedyPort}.
  */
 
+import { AGENT_ORIGIN, type LaunchOrigin } from '@ferretry/core-ferrets/contract';
 import type { WardenActionKind, WardenMayActAlone } from './protocol.ts';
 import type { WardenRecommendation, WardenVerdictKind } from './verdicts.ts';
 
@@ -39,6 +40,13 @@ export interface WardenLeftoverClose {
   readonly leftAlone: readonly WardenLeftAlone[];
 }
 
+/**
+ * Who a Warden act is FOR when no person asked for it: the sweep and the auto-revive run unattended, so they are an
+ * AGENT's launches and bind their folder under the state-home policy. A remedy always takes the origin of whatever asked
+ * for it, so a person-triggered act would have to say so.
+ */
+export const WARDEN_SWEEP_ORIGIN: LaunchOrigin = AGENT_ORIGIN;
+
 /** Carrying out a verdict. Each method throws when the act did not take. */
 export interface WardenRemedyPort {
   nudge(sessionId: string, message: string): Promise<void>;
@@ -46,9 +54,9 @@ export interface WardenRemedyPort {
    * Resume the ferret. `message`, when given, is the turn it is handed instead of the resume domain's default
    * one: the Warden gives one only to a ferret with a focus card, naming the card (`focus-card.ts`).
    */
-  resume(sessionId: string, message?: string): Promise<void>;
+  resume(sessionId: string, message: string | undefined, origin: LaunchOrigin): Promise<void>;
   /** Relaunch a dead or frozen process with its conversation intact, even over a pane that looks alive. */
-  restart(sessionId: string, message?: string): Promise<void>;
+  restart(sessionId: string, message: string | undefined, origin: LaunchOrigin): Promise<void>;
   stop(sessionId: string, reason: string): Promise<void>;
   failover(sessionId: string, agent: string): Promise<void>;
   /**

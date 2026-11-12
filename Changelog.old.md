@@ -1,3 +1,28 @@
+## [4.291.8](https://github.com/kirinnee/ferretry/compare/v4.291.7...v4.291.8) (2026-11-11)
+
+### Fixes
+
+* **fleet:** make launcher guards parse under every POSIX shell ([#1585](https://github.com/kirinnee/ferretry/issues/1585)) ([b7c4566](https://github.com/kirinnee/ferretry/commit/b7c45665b849a7e852433a0d2f1c02bd88a61a86))
+
+## [4.291.7](https://github.com/kirinnee/ferretry/compare/v4.291.6...v4.291.7) (2026-11-11)
+
+### Fixes
+
+* **daemon:** stop board reads thrashing the session document cache ([#1584](https://github.com/kirinnee/ferretry/issues/1584)) ([f9108fb](https://github.com/kirinnee/ferretry/commit/f9108fbf467b5dc3c6204d439028dfd6e180fd5b))
+
+## [4.291.6](https://github.com/kirinnee/ferretry/compare/v4.291.5...v4.291.6) (2026-11-11)
+
+### Fixes
+
+* **daemon:** index the board once per GitHub watch tick ([#1582](https://github.com/kirinnee/ferretry/issues/1582)) ([58cd647](https://github.com/kirinnee/ferretry/commit/58cd647ae654b487e06dd7bba5113c4cfcfb46c8))
+* **daemon:** stop a compaction from stranding sends and pinning the turn at working ([#1583](https://github.com/kirinnee/ferretry/issues/1583)) ([40fa77d](https://github.com/kirinnee/ferretry/commit/40fa77d712b430fe1e0d319f197b586c2e225709))
+
+## [4.291.5](https://github.com/kirinnee/ferretry/compare/v4.291.4...v4.291.5) (2026-11-06)
+
+### Performance
+
+* **daemon,pwa:** page the session queue read and stop polling it every tick ([#1572](https://github.com/kirinnee/ferretry/issues/1572)) ([c78e04f](https://github.com/kirinnee/ferretry/commit/c78e04f6c5548d30b057909274d87db693f9118b))
+
 ## [4.291.4](https://github.com/kirinnee/ferretry/compare/v4.291.3...v4.291.4) (2026-11-06)
 
 ### Fixes

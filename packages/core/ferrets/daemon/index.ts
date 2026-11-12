@@ -49,6 +49,7 @@ import {
   FerretLaunchEnvironmentFiles,
   FerretSummaryFiles,
   FerretWaitFiles,
+  DAEMON_ORIGIN,
 } from '../contract/index.ts';
 import { SubtreeService } from './lib/session/pack/subtree.ts';
 import manifest from '../manifest.ts';
@@ -110,6 +111,7 @@ import { movesDeps } from './moves-deps.ts';
 import { fleetEventsAccept, followableFerret, HistoryEventSource } from './modules/fleet-events.ts';
 import { ferretsPort } from './lib/ferrets/port.ts';
 import { ferretsMoveResume, movedTarget } from './lib/ferrets/move-resume.ts';
+import { callerIsAgent, launchOriginOf } from './lib/ferrets/launch-origin.ts';
 import type { ResumeActor } from './lib/session/resume/types.ts';
 import { SessionStateSchema } from './lib/protocol/session.ts';
 import { promptOf } from './lib/ferrets/prompt.ts';
@@ -138,15 +140,6 @@ export const TURN_WATCH_JOB = 'ferrets.turn-watch';
  */
 export function callerFerret(call: CallContext): FerretId | undefined {
   return ferretOf(call);
-}
-
-/** Whether the caller is an agent (a ferret's token, the warden, or the admin token with a ferret behind it). */
-function callerIsAgent(call: CallContext): boolean {
-  const credential = call.credential;
-  if (credential === undefined) return false;
-  if (credential.tokenClass === 'ferret' || credential.tokenClass === 'warden') return true;
-  if (credential.tokenClass === 'device') return false;
-  return call.actor !== 'admin-ui' && call.actor !== 'admin-cli';
 }
 
 /**
@@ -459,6 +452,19 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       if (!path.startsWith('/')) return err('the folder must be an absolute path');
       return ok(path as FencedPath);
     },
+    // The launch folder's identity, captured where it is first checked and re-verified as the last step before the
+    // harness starts (the kernel's bound directory).
+    bindFolder: async path => {
+      const bound = await kernel.paths.bindDirectory(path);
+      if (!bound.ok) return err(bound.error.message);
+      return ok({
+        insideStateHome: bound.value.insideStateHome,
+        verify: async () => {
+          const held = await bound.value.verify();
+          return held.ok ? ok(undefined) : err(held.error.message);
+        },
+      });
+    },
     delivered: ferret => wakeTurnWatch?.(ferret),
     changed: payload => {
       followStatus(payload.ferret, payload.state, 'lifecycle');
@@ -511,6 +517,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         ...(options.note === undefined ? {} : { note: options.note }),
         ...(options.actor === undefined ? {} : { actor: options.actor }),
         ...(options.movedBy === undefined ? {} : { movedBy: options.movedBy }),
+        origin: options.origin,
       }),
     // What the pane is asking (`FerretsApi.prompt`, U4): the turn watch's record, masked again on the way out.
     promptState: async ferret => {
@@ -623,12 +630,22 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
 
   /**
-   * The kernel gives a plugin no state-home identity or link-hop reach yet, so the launch refusal (the folder a ferret
-   * is started in) fails closed for an agent with today's 503 `state_home_unresolved`, and never with a lexical
-   * stand-in. The file browser needs none: the pin a work root hands out judges every walk beneath it against the
-   * kernel's fence itself (S40, S47).
+   * Whether the folder a ferret is started in lies inside the state home, by the kernel's bound directory (identity up
+   * every folder and through links, the same fence the owner roots use). A folder that is not a directory is not inside
+   * anything (the start refuses it as a folder); a fence the kernel cannot compute fails closed for an agent with
+   * today's 503 `state_home_unresolved`, and never with a lexical stand-in. The file browser needs none: the pin a
+   * work root hands out judges every walk beneath it against the kernel's fence itself (S40, S47).
    */
-  const stateHomeReach: StateHomeLaunchReach | undefined = undefined;
+  const stateHomeReach: StateHomeLaunchReach = {
+    holding: async path => {
+      const bound = await kernel.paths.bindDirectory(path);
+      if (!bound.ok) {
+        if (bound.error.reason === 'not_a_directory' || bound.error.reason === 'not_absolute') return undefined;
+        throw new Error(bound.error.message);
+      }
+      return bound.value.insideStateHome ? bound.value.realPath : undefined;
+    },
+  };
 
   /** S47: an agent reaches only its own ferret and its helpers'; a person is unaffected. */
   const agentMayReach = (call: CallContext, target: FerretId): void => {
@@ -777,7 +794,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     // summary, so it is bounded as Runtimes' own refusal is.
     resume: async (ferret, message, expect) => {
       const resumed = await service
-        .resume(ferret, message, { actor: 'daemon', automatic: true, expect })
+        .resume(ferret, message, { actor: 'daemon', automatic: true, expect, origin: DAEMON_ORIGIN })
         .catch((error: unknown) => {
           throw new Error(boundedReason(error instanceof Error ? error.message : String(error)));
         });
@@ -911,7 +928,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       outdated: outdatedFor,
       stop: async (ferret, reason) => await service.stop(ferret, 'polite', reason),
       // The daemon's own restart: its turn is drawn as Ferretry's Restart, never as the owner's words.
-      resume: async ferret => await service.resume(ferret, undefined, { actor: 'daemon' }),
+      resume: async (ferret, origin) => await service.resume(ferret, undefined, { actor: 'daemon', origin }),
       history: appendHistory,
       // An entry that does not parse is dropped on its own; the rest survive, and a queue that cannot be read is empty.
       loadQueue: async () => {
@@ -1173,18 +1190,22 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
             'only the Warden starts a ferret under its own label; leave --label out',
             'owner_only',
           );
-        // No identity/link-hop state-home reach is available in this kernel yet. Never replace it with a lexical fence.
+        // An agent never starts inside the state home: 403 there, 503 where the kernel cannot tell.
         await stateHomeLaunchRefusal(callerIsAgent(call), stateHomeReach, parsed.folder);
         // Project catalogs and the managed-root launch seam are unbound; a governed start fails closed without them.
         await terminalLaunchRefusal(call, parsed, undefined);
         let startedFerret: FerretId | undefined;
         const start = async (): Promise<ApiResponse> => {
-          const started = await service.start({
-            ...parsed,
-            // A ferret's start is its helper: the parent is the caller, never a value from the request.
-            ...(own === undefined ? {} : { parent: own }),
-            by: own === undefined ? 'owner' : 'ferret',
-          });
+          const started = await service.start(
+            {
+              ...parsed,
+              // A ferret's start is its helper: the parent is the caller, never a value from the request.
+              ...(own === undefined ? {} : { parent: own }),
+              by: own === undefined ? 'owner' : 'ferret',
+            },
+            // Who the start is FOR is the admitted credential's, as the state-home check above judged it.
+            launchOriginOf(call),
+          );
           if (!started.ok) return startFailure(started.error);
           startedFerret = started.value;
           return jsonResponse({ id: started.value }, 201);
@@ -1256,6 +1277,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         const resumed = await service.resume(id, message, {
           confirmRestore: confirmRestore(call, callerIsAgent(call)),
           actor: resumeActorOf(call),
+          origin: launchOriginOf(call),
         });
         if (!resumed.ok) return startFailure(resumed.error);
         return jsonResponse({ id: resumed.value });

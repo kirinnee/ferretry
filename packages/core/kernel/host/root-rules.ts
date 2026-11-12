@@ -5,7 +5,7 @@
  */
 import { posix } from 'node:path';
 import { insideFence } from '../contract/home.ts';
-import type { RootName } from '../contract/ports.ts';
+import type { DirectoryChainFault, DirectoryChainProblem, RootName } from '../contract/ports.ts';
 
 /**
  * The roots a link may be WRITTEN into: internal, writable, made by the kernel, and holding a harness's home (a runtime
@@ -163,4 +163,50 @@ export function anchorWalk(folder: string, within: string): readonly string[] | 
   if (below === undefined || anchor === undefined || anchor.length > below.length) return undefined;
   if (anchor.some((part, index) => part !== below[index])) return undefined;
   return below.slice(anchor.length).map((_, index) => `/${below.slice(0, anchor.length + index + 1).join('/')}`);
+}
+
+/** What the chain policy needs of one folder on the way: the entry itself (`lstat`), nothing else. */
+export interface ChainEntry {
+  readonly kind: 'file' | 'directory' | 'link' | 'other';
+  readonly owner: number;
+  readonly mode: number;
+}
+
+/**
+ * The directory-chain policy (`RootHandle.checkPrivateChain`, v4's launch-overlay `#ensureDirectory` as a kernel fact),
+ * for ONE folder: `undefined` entry is missing; a link is refused whatever it points at; anything but a folder is not a
+ * folder; an owner other than `uid` (or no known `uid`: nothing is proved) is refused; and a mode with a group or other
+ * WRITE bit is refused. Read bits are none of its business (`0755` passes). One fact, read by the real roots port and
+ * by the testing host.
+ */
+export function chainFault(entry: ChainEntry | undefined, uid: number | undefined): DirectoryChainFault | undefined {
+  if (entry === undefined) return 'missing';
+  if (entry.kind === 'link') return 'link';
+  if (entry.kind !== 'directory') return 'not_directory';
+  if (uid === undefined) return 'unknown_owner';
+  if (entry.owner !== uid) return 'foreign_owner';
+  if ((entry.mode & 0o022) !== 0) return 'writable_by_others';
+  return undefined;
+}
+
+/** The plain sentence for a refused component (home-relative; `.` is the home): names the folder and the fix, no secret. */
+export function chainProblem(
+  component: string,
+  fault: DirectoryChainFault,
+  entry?: Pick<ChainEntry, 'mode'>,
+): DirectoryChainProblem {
+  const named = component === '.' ? 'the home' : component;
+  const sentences: Readonly<Record<DirectoryChainFault, string>> = {
+    missing: `${named} is missing, so no credential file is written under it`,
+    not_directory: `${named} is not a plain directory, so no credential file is written under it`,
+    link: `${named} is a symbolic link, so no credential file is written under it`,
+    foreign_owner: `${named} is owned by another user, so no credential file is written under it`,
+    writable_by_others: `${named} is writable by its group or by everyone${
+      entry === undefined ? '' : ` (mode ${(entry.mode & 0o777).toString(8)})`
+    }, so no credential file is written under it; make it private (mode 700)`,
+    unknown_owner: `the daemon's own user could not be determined, so ${named} cannot be proved private and no credential file is written under it`,
+    unreadable: `${named} could not be inspected, so no credential file is written under it`,
+    outside_home: 'this folder is not below the home, so its folders are not judged here',
+  };
+  return { fault, component, reason: sentences[fault] };
 }

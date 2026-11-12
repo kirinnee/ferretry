@@ -54,6 +54,7 @@ const runnerPlugin = (runner: FakeRunner) =>
 
 async function boot(conversation: boolean, runner: FakeRunner): Promise<TestHost> {
   return await testHost({
+    everyDirectory: true,
     plugins: [
       real('ferrets'),
       ...(conversation ? [real('conversation')] : []),

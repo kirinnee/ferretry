@@ -1,3 +1,4 @@
+import { AGENT_ORIGIN, type FerretId, type LaunchOrigin, PERSON_ORIGIN } from '../../../../../contract/index.ts';
 import { describe, it } from 'bun:test';
 import type { LaunchInstructionSectionId } from '../../../../../daemon/lib/protocol/session.ts';
 import type { RestartQueueEntry } from '../../../../../contract/index.ts';
@@ -22,6 +23,8 @@ interface World {
   restarted: string[];
   /** Who each restart was asked by, in the order they ran. */
   askedBy: Array<string | undefined>;
+  /** The origin each restart ran as, in the order they ran. */
+  origins: LaunchOrigin[];
   gaveUp: Array<[string, string]>;
   queue: RestartQueueEntry[];
   saves: number;
@@ -40,6 +43,7 @@ const world = (subjects: RestartSubject[], stale: World['stale'] = {}): World =>
   broken: new Map(),
   restarted: [],
   askedBy: [],
+  origins: [],
   gaveUp: [],
   queue: [],
   saves: 0,
@@ -64,7 +68,8 @@ const make = (w: World): RestartService => {
       if (id === 'throws') throw new Error('unreadable');
       return w.stale[id] ?? [];
     },
-    restart: async (id, requestedBy) => {
+    restart: async (id, origin, requestedBy) => {
+      w.origins.push(origin);
       w.askedBy.push(requestedBy);
       w.attempts.push(w.clock.now - Date.parse(AT));
       if (w.busy.has(id)) throw new RestartBusy();
@@ -107,7 +112,7 @@ describe('RestartService.restart', () => {
       b: ['tools'],
       d: ['tools'],
     });
-    const result = await make(w).restart({ scope: 'outdated' });
+    const result = await make(w).restart({ scope: 'outdated' }, PERSON_ORIGIN);
     should(result).eql({
       restarted: [{ id: 'a', name: 'Wren' }],
       queued: [{ id: 'b', reason: 'mid-turn' }],
@@ -115,19 +120,19 @@ describe('RestartService.restart', () => {
       failed: [],
     });
     should(w.restarted).eql(['a']);
-    should(w.queue).eql([{ id: 'b', since: AT, reason: 'mid-turn', onlyIfOutdated: true }]);
+    should(w.queue).eql([{ id: 'b', since: AT, reason: 'mid-turn', onlyIfOutdated: true, origin: PERSON_ORIGIN }]);
   });
 
   it('should treat an unreadable outdated answer as current', async () => {
     const w = world([idle('throws')]);
-    const result = await make(w).restart({ scope: 'outdated' });
+    const result = await make(w).restart({ scope: 'outdated' }, PERSON_ORIGIN);
     should(result.restarted).eql([]);
   });
 
   it('should queue a refused ferret as in-flight with the one fixed sentence, whatever the inventory knew', async () => {
     const w = world([idle('a', 'Wren')]);
     w.busy.add('a');
-    const result = await make(w).restart({ scope: 'all' });
+    const result = await make(w).restart({ scope: 'all' }, PERSON_ORIGIN);
     should(result.queued).eql([{ id: 'a', name: 'Wren', reason: 'in-flight', detail: RESTART_BUSY_DETAIL }]);
     should(RESTART_BUSY_DETAIL).equal('A restart now would lose work that is still in flight.');
     should(w.queue[0]?.onlyIfOutdated).be.false();
@@ -136,23 +141,23 @@ describe('RestartService.restart', () => {
   it('should keep the first since when a ferret is queued again', async () => {
     const w = world([working('a')]);
     w.queue = [{ id: 'a', since: '2026-10-29T00:00:00.000Z', reason: 'mid-turn', onlyIfOutdated: false }];
-    await make(w).restart({ scope: 'ids', ids: ['a'] });
+    await make(w).restart({ scope: 'ids', ids: ['a'] }, PERSON_ORIGIN);
     should(w.queue[0]?.since).equal('2026-10-29T00:00:00.000Z');
   });
 
   it('should queue the caller instead of restarting it mid-turn', async () => {
     const w = world([idle('me', 'Me'), idle('x')], { me: ['notify'], x: ['notify'] });
-    const result = await make(w).restart({ scope: 'outdated', caller: 'me' });
+    const result = await make(w).restart({ scope: 'outdated', caller: 'me' }, PERSON_ORIGIN);
     should(result.restarted).eql([{ id: 'x' }]);
     should(result.queued).eql([{ id: 'me', name: 'Me', reason: 'own-session' }]);
   });
 
   it('should find a ferret by callsign, preferring the running one, and name it once', async () => {
     const w = world([{ ...stopped('old'), name: 'Wren' }, idle('new', 'Wren')]);
-    const result = await make(w).restart({ scope: 'ids', ids: [':wren', 'WREN', 'new'] });
+    const result = await make(w).restart({ scope: 'ids', ids: [':wren', 'WREN', 'new'] }, PERSON_ORIGIN);
     should(result.restarted).eql([{ id: 'new', name: 'Wren' }]);
     const only = world([{ ...stopped('old'), name: 'Wren' }]);
-    should((await make(only).restart({ scope: 'ids', ids: ['wren'] })).skipped).eql([
+    should((await make(only).restart({ scope: 'ids', ids: ['wren'] }, PERSON_ORIGIN)).skipped).eql([
       { id: 'old', name: 'Wren', reason: 'not-running' },
     ]);
   });
@@ -160,7 +165,7 @@ describe('RestartService.restart', () => {
   it('should report ids that are missing or not running, and failures without stopping the rest', async () => {
     const w = world([stopped('s'), idle('bad', 'Bad'), idle('ok')]);
     w.broken.set('bad', 'cannot resume');
-    const result = await make(w).restart({ scope: 'ids', ids: ['nope', 's', 'bad', 'ok'] });
+    const result = await make(w).restart({ scope: 'ids', ids: ['nope', 's', 'bad', 'ok'] }, PERSON_ORIGIN);
     should(result).eql({
       restarted: [{ id: 'ok' }],
       queued: [],
@@ -191,23 +196,23 @@ describe('RestartService.restart', () => {
       },
       now: () => AT,
     });
-    const result = await service.restart({ scope: 'all' });
+    const result = await service.restart({ scope: 'all' }, PERSON_ORIGIN);
     should(result.failed).eql([{ id: 'a', reason: 'plain text' }]);
     const ok = make(w);
     w.queue = [{ id: 'a', since: AT, reason: 'mid-turn', onlyIfOutdated: false }];
-    await ok.restart({ scope: 'all' });
+    await ok.restart({ scope: 'all' }, PERSON_ORIGIN);
     should(w.queue).eql([]);
   });
 
   it('should answer a retried request id from memory and forget the oldest after the cap', async () => {
     const w = world([idle('a')]);
     const service = make(w);
-    const first = await service.restart({ scope: 'all' }, 'r-1');
-    const again = await service.restart({ scope: 'all' }, 'r-1');
+    const first = await service.restart({ scope: 'all' }, PERSON_ORIGIN, 'r-1');
+    const again = await service.restart({ scope: 'all' }, PERSON_ORIGIN, 'r-1');
     should(again).equal(first);
     should(w.restarted).eql(['a']);
-    for (let n = 0; n < 70; n += 1) await service.restart({ scope: 'ids', ids: ['zzz'] }, `fill-${n}`);
-    await service.restart({ scope: 'all' }, 'r-1');
+    for (let n = 0; n < 70; n += 1) await service.restart({ scope: 'ids', ids: ['zzz'] }, PERSON_ORIGIN, `fill-${n}`);
+    await service.restart({ scope: 'all' }, PERSON_ORIGIN, 'r-1');
     should(w.restarted).eql(['a', 'a']);
   });
 });
@@ -230,17 +235,51 @@ describe('RestartService.status and cancel', () => {
   });
 });
 
+describe('RestartService origin', () => {
+  it('should run an immediate restart as the origin it was admitted for', async () => {
+    const w = world([idle('a')]);
+    await make(w).restart({ scope: 'ids', ids: ['a'] }, { kind: 'agent', ferret: 's-7' as FerretId });
+    should(w.origins).eql([{ kind: 'agent', ferret: 's-7' }]);
+  });
+
+  it('should keep the origin on a queued restart and drain it as that origin', async () => {
+    const w = world([working('a')]);
+    const service = make(w);
+    await service.restart({ scope: 'ids', ids: ['a'] }, AGENT_ORIGIN);
+    should(w.queue[0]?.origin).eql({ kind: 'agent' });
+    w.subjects = [idle('a')];
+    await service.drain();
+    should(w.origins).eql([{ kind: 'agent' }]);
+  });
+
+  it('should drain a person’s queued restart as a person’s, from the stored origin', async () => {
+    const w = world([working('a')]);
+    const service = make(w);
+    await service.restart({ scope: 'ids', ids: ['a'] }, PERSON_ORIGIN);
+    w.subjects = [idle('a')];
+    await make(w).drain();
+    should(w.origins).eql([{ kind: 'person' }]);
+  });
+
+  it('should fail closed as an AGENT when a queued item carries no origin (queued before it was kept)', async () => {
+    const w = world([idle('a')]);
+    w.queue = [{ id: 'a', since: AT, reason: 'mid-turn', onlyIfOutdated: false }];
+    await make(w).drain();
+    should(w.origins).eql([{ kind: 'agent' }]);
+  });
+});
+
 describe('RestartService requester', () => {
   it('should hand the requester to an immediate restart', async () => {
     const w = world([idle('a')]);
-    await make(w).restart({ scope: 'ids', ids: ['a'] }, undefined, 'session:s-7');
+    await make(w).restart({ scope: 'ids', ids: ['a'] }, PERSON_ORIGIN, undefined, 'session:s-7');
     should(w.askedBy).eql(['session:s-7']);
   });
 
   it('should keep the requester on a queued restart and name it when the drain runs it', async () => {
     const w = world([working('a')]);
     const service = make(w);
-    await service.restart({ scope: 'ids', ids: ['a'] }, undefined, 'session:s-7');
+    await service.restart({ scope: 'ids', ids: ['a'] }, PERSON_ORIGIN, undefined, 'session:s-7');
     should(w.queue[0]?.requestedBy).equal('session:s-7');
     w.subjects = [idle('a')];
     await service.drain();
@@ -249,7 +288,7 @@ describe('RestartService requester', () => {
 
   it('should leave the requester out when nobody named one', async () => {
     const w = world([working('a')]);
-    await make(w).restart({ scope: 'ids', ids: ['a'] });
+    await make(w).restart({ scope: 'ids', ids: ['a'] }, PERSON_ORIGIN);
     should('requestedBy' in (w.queue[0] ?? {})).be.false();
   });
 });
@@ -384,7 +423,7 @@ describe('RestartService.drain stall budget', () => {
     const service = make(w);
     await service.drain();
     w.busy.delete('a');
-    await service.restart({ scope: 'ids', ids: ['a'] });
+    await service.restart({ scope: 'ids', ids: ['a'] }, PERSON_ORIGIN);
     should(w.restarted).eql(['a']);
     should(w.queue).eql([]);
     should(RESTART_RETRY_BASE_MS).be.below(RESTART_RETRY_CAP_MS);

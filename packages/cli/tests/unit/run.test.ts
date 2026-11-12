@@ -295,6 +295,38 @@ describe('runFy', () => {
     should(io.stdout()).equal('fy card move: move a card\n');
   });
 
+  it('should list a verb’s declared options under its summary for --help, and print nothing for a verb that declares none', async () => {
+    const withOptions = definePlugin({
+      id: 'sized',
+      title: 'Sized',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: ['command'],
+      actions: {
+        cli: [
+          verb('size', {
+            summary: 'size a thing',
+            options: [
+              {
+                flag: '--at <tokens|auto>',
+                help: "squeeze it at this many tokens (e.g. 250k); auto leaves the thing's own trigger",
+              },
+            ],
+          }),
+          verb('plain', { summary: 'a verb with no options' }),
+        ],
+      },
+    });
+    const { world, io } = fakeWorld({ registry: registryOf(skeletonEntry(withOptions)) });
+    should(await runFy(['size', '--help'], world)).equal(0);
+    should(io.stdout()).equal(
+      "fy size: size a thing\n\noptions:\n  --at <tokens|auto>\n      squeeze it at this many tokens (e.g. 250k); auto leaves the thing's own trigger\n",
+    );
+    should(await runFy(['plain', '-h'], world)).equal(0);
+    should(io.stdout().endsWith('fy plain: a verb with no options\n')).be.true();
+  });
+
   it('should run an alias as the verb it names, with the arguments carried over', async () => {
     const calls: { args?: readonly string[] } = {};
     const aliasPlugin = definePlugin({

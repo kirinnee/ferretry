@@ -1,6 +1,7 @@
 import { ApiError } from '@ferretry/kernel/contract';
 import { err, type Result } from '@ferretry/std';
 import {
+  LaunchOriginSchema,
   type FerretId,
   FerretIdSchema,
   type FerretsApi,
@@ -44,6 +45,7 @@ const isMover = (movedBy: unknown): boolean =>
     (movedBy.startsWith(SESSION_MOVER) && FerretIdSchema.safeParse(movedBy.slice(SESSION_MOVER.length)).success));
 const NOT_A_MOVER = 'a move names who moved it as owner, session:<ferret id> or warden';
 
+const NO_ORIGIN = 'a launch must say who it is for: its origin is missing or not one of person, daemon or agent';
 const NOT_THE_WARDEN = 'only the Warden is recorded as the Warden';
 const NOT_THE_WARDEN_LABEL = 'only the Warden starts a ferret under its own label';
 const NOT_THE_WARDEN_PARENT = 'only the Warden names a parent in its own tree';
@@ -107,7 +109,12 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
     mayTouch: (caller, target) => service.mayTouch(caller, target),
     children: ferret => service.children(ferret),
     harnesses: () => service.harnesses(),
-    start: async (asked): Promise<Result<FerretId, StartFailure>> => {
+    start: async (asked, askedOrigin): Promise<Result<FerretId, StartFailure>> => {
+      // Fail closed: a launch whose origin was not stated (a plugin's cast) is refused, never taken as a person's. The
+      // origin is read ONCE into a fresh object, as the request is.
+      const stated = LaunchOriginSchema.safeParse(askedOrigin);
+      if (!stated.success) return refused(NO_ORIGIN);
+      const origin = stated.data;
       // Read every member once into a fresh object: the checks and the service see the same values, so a getter cannot
       // answer one thing to the check and another to the service.
       // `options` is read ONCE into a local, and the copy is built from that local alone.
@@ -132,25 +139,35 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
       // Every start admitted here for a consumer other than the Warden is told to the service as outside the Warden's
       // tree, so the spawn stamp refuses if lineage resolves true after all (the checks above and the stamp read the
       // ancestry separately, and a resume of the parent can strengthen its stamp in between).
-      return await service.start(request, warden ? undefined : { notInWardenTree: true });
+      return await service.start(request, origin, warden ? undefined : { notInWardenTree: true });
     },
     stop: (ferret, how, reason) => service.stop(ferret, how, reason),
     resume: async (ferret, message, options) => {
+      // Read once, as the rest of the options are: the check and the forward see the same origin.
+      const stated = LaunchOriginSchema.safeParse(options.origin);
+      if (!stated.success) return refused(NO_ORIGIN);
+      const origin = stated.data;
       // Read once: the check and the forward see the same value. `'warden'` is the Warden's alone; `'peer'` is
       // caller-stated attribution (it changes no policy), so any consumer may say it.
-      const actor = options?.actor;
+      const actor = options.actor;
       if (actor === 'warden' && !warden) return refused(NOT_THE_WARDEN);
       // Only what the port declares: automated recovery, the turn author's attribution, who must be told what the
       // resume decided, and who must be told what it typed for the message.
       const forwarded = {
-        ...(options?.automatic === true ? { automatic: true } : {}),
+        origin,
+        ...(options.automatic === true ? { automatic: true } : {}),
         ...(actor === 'warden' || actor === 'peer' ? { actor } : {}),
-        ...(options?.decided === undefined ? {} : { decided: options.decided }),
-        ...(options?.onCarried === undefined ? {} : { onCarried: options.onCarried }),
+        ...(options.decided === undefined ? {} : { decided: options.decided }),
+        ...(options.onCarried === undefined ? {} : { onCarried: options.onCarried }),
       };
-      return await service.resume(ferret, message, Object.keys(forwarded).length === 0 ? undefined : forwarded);
+      return await service.resume(ferret, message, forwarded);
     },
-    attach: (ferret, handle) => service.attach(ferret, handle),
+    attach: async (ferret, handle, askedOrigin) => {
+      // Fail closed, as start and resume do: an attach whose origin was not stated is refused.
+      const stated = LaunchOriginSchema.safeParse(askedOrigin);
+      if (!stated.success) return refused(NO_ORIGIN);
+      return await service.attach(ferret, handle, stated.data);
+    },
     handle: ferret => service.handle(ferret),
     workFolder: ferret => service.workFolder(ferret),
     sitrep: ferret => service.sitrep(ferret),
@@ -167,12 +184,14 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
     turns: (ferret, caller) => service.turns(ferret, caller),
     prompt: (ferret, caller) => service.prompt(ferret, caller),
     move: async (ferret, runtime, asked, caller): Promise<Result<FerretSummary, MoveFailure>> => {
-      const options = asked === undefined ? undefined : { ...asked };
-      if ((options?.actor === 'warden' || options?.movedBy === 'warden') && !warden) return refused(NOT_THE_WARDEN);
+      const options = { ...asked };
+      const stated = LaunchOriginSchema.safeParse(options.origin);
+      if (!stated.success) return refused(NO_ORIGIN);
+      if ((options.actor === 'warden' || options.movedBy === 'warden') && !warden) return refused(NOT_THE_WARDEN);
       // `movedBy` is journalled as the history's account of who moved the ferret, so it is one of the three spellings
       // the journal reads, never free text ('Warden', 'warden ', 'session:<anything>').
-      if (options?.movedBy !== undefined && !isMover(options.movedBy)) return refused(NOT_A_MOVER);
-      return await service.move(ferret, runtime, options, caller);
+      if (options.movedBy !== undefined && !isMover(options.movedBy)) return refused(NOT_A_MOVER);
+      return await service.move(ferret, runtime, { ...options, origin: stated.data }, caller);
     },
   };
 }

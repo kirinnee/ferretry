@@ -9,7 +9,7 @@
  * (4) a link at any level, (5) a hard-linked file.
  * The flat world keeps files, links, hard links and modes by key; a name is at `/project-files<absolute path>`.
  */
-import type { Instant } from '@ferretry/std';
+import { err, type Instant } from '@ferretry/std';
 import { relative } from 'node:path';
 import type { FencedPath } from '../contract/bound.ts';
 import {
@@ -21,7 +21,7 @@ import {
   type RootStat,
 } from '../contract/ports.ts';
 import { lexicalInRoot, RootError } from '../host/roots.ts';
-import { permittedMode, spellingHolds } from '../host/root-rules.ts';
+import { chainProblem, permittedMode, spellingHolds } from '../host/root-rules.ts';
 import { refuseShared } from '../host/shared-trees.ts';
 import { type ProjectUse, projectPathRefusal } from '../manifest/project-files.ts';
 
@@ -305,6 +305,8 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
     unlink: async () => {
       throw new RootError('read_only');
     },
+    // A project folder lies outside the home: it has no chain to judge (the real host's answer for any root outside it).
+    checkPrivateChain: async () => err(chainProblem('(outside the home)', 'outside_home')),
     setMode: async (path, mode) => {
       if (!twin.setModeDeclared) throw new RootError('not_declared');
       const bits = permittedMode(false, mode);

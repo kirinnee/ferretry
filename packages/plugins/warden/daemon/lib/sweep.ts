@@ -210,6 +210,7 @@ import {
   type WardenLeftAlone,
   verdictAct,
   type WardenRemedyPort,
+  WARDEN_SWEEP_ORIGIN,
   type WardenVerdictAct,
   wardenActDetail,
   wardenNudgeMessage,
@@ -2566,8 +2567,9 @@ export class WardenSweepService {
         // a turn: an interactive one is somebody's terminal, and keeps the resume domain's own behaviour.
         const card = target.config.mode === 'auto' ? await this.focusCard(targetId) : undefined;
         const message = card === undefined ? undefined : wardenResumeMessage(act.action, act.reason, card);
-        if (act.action === 'resume') await this.ports.remedies.resume(targetId, message);
-        else await this.ports.remedies.restart(targetId, message);
+        // No person is behind a sweep's act: it runs as the Warden's own, an agent's origin.
+        if (act.action === 'resume') await this.ports.remedies.resume(targetId, message, WARDEN_SWEEP_ORIGIN);
+        else await this.ports.remedies.restart(targetId, message, WARDEN_SWEEP_ORIGIN);
       } else await this.ports.remedies.stop(targetId, words.stopReason);
     } catch (error) {
       const message = failureMessage(error);

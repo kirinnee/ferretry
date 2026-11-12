@@ -27,6 +27,32 @@ export type CompactAt = z.infer<typeof CompactAtSchema>;
  */
 export const COMPACT_AT_PRESETS = [200_000, 250_000, 400_000] as const;
 
+/** What a person typed (`auto`, `250k`, `250000`, `1m`, `0.4m`) as a value, or the reason it is not one. */
+export type CompactAtParse =
+  | { readonly ok: true; readonly value: CompactAt }
+  | { readonly ok: false; readonly reason: string };
+
+const COMPACT_AT_WORDS = /^(?<number>\d+(?:\.\d+)?)\s*(?<unit>[km]?)$/iu;
+
+/**
+ * Reads what was typed after `--compact-at` (v4's `parseCompactAt`, word for word): `auto`, or a token count with an
+ * optional `k` or `m` unit, at or above the floor. A value it cannot read is refused in plain words, so a surface can say
+ * so before sending it.
+ */
+export function parseCompactAt(text: string): CompactAtParse {
+  const trimmed = text.trim().toLowerCase().replaceAll(',', '').replaceAll('_', '');
+  if (trimmed === 'auto') return { ok: true, value: 'auto' };
+  const match = COMPACT_AT_WORDS.exec(trimmed);
+  const number = match?.groups?.number;
+  if (match === null || number === undefined)
+    return { ok: false, reason: `“${text.trim()}” is not a size. Use auto, or a token count like 250k or 250000.` };
+  const unit = match.groups?.unit ?? '';
+  const tokens = Math.round(Number(number) * (unit === 'm' ? 1_000_000 : unit === 'k' ? 1_000 : 1));
+  if (!Number.isSafeInteger(tokens)) return { ok: false, reason: `“${text.trim()}” is not a size.` };
+  const floor = compactAtFloorRefusal(tokens);
+  return floor === undefined ? { ok: true, value: tokens } : { ok: false, reason: floor };
+}
+
 /**
  * The refusal for a value below the floor, in plain words; `undefined` when it clears it.
  * @pending ferrets: Actions rows still to port: compact-at
@@ -40,6 +66,7 @@ export function compactAtFloorRefusal(tokens: number): string | undefined {
 /**
  * Whether a value fits this model: at or above the floor and no larger than its context window. `window` is absent
  * when the daemon cannot say, in which case only the floor is checked. Returns the refusal, or `undefined`.
+ * @pending ferrets: Actions rows still to port: compact-at
  */
 export function checkCompactAt(value: CompactAt, window: number | undefined): string | undefined {
   if (value === 'auto') return undefined;
@@ -60,7 +87,10 @@ export function formatTokens(tokens: number): string {
   return tokens.toLocaleString('en-US');
 }
 
-/** `Auto` or `250k`, as a surface labels the value. */
+/**
+ * `Auto` or `250k`, as a surface labels the value.
+ * @pending ferrets: Actions rows still to port: compact-at
+ */
 export function describeCompactAt(value: CompactAt): string {
   return value === 'auto' ? 'Auto' : formatTokens(value);
 }

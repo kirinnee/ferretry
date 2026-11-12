@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { expect, test } from 'bun:test';
 import { ApiError } from '@ferretry/kernel/contract';
 import type { RunnerHandle } from '../../../../contract/index.ts';
@@ -18,7 +19,7 @@ test('mayTouch, children and harnesses answer from the registry and the harness 
 
 test('a start naming a parent that is not a ferret is refused, and nothing is started', async () => {
   const f = additivesFixture({ empty: true });
-  const answer = await f.service.start({ folder: '/work', by: 'owner', parent: ferretId('ghost') });
+  const answer = await f.service.start({ folder: '/work', by: 'owner', parent: ferretId('ghost') }, PERSON_ORIGIN);
   expect(answer).toEqual({
     ok: false,
     error: { code: 'refused', reason: 'no ferret ghost to be the lead of this one' },
@@ -29,7 +30,7 @@ test('a start naming a parent that is not a ferret is refused, and nothing is st
 test('a start with no harness plugin on is refused as harness_unavailable', async () => {
   const f = additivesFixture({ empty: true });
   f.ports.harnessKeys = () => [];
-  const answer = await f.service.start({ folder: '/work', by: 'owner' });
+  const answer = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
   expect(answer).toEqual({ ok: false, error: { code: 'harness_unavailable', reason: 'no harness plugin is on' } });
   expect(f.runner.starts).toBe(0);
 });
@@ -42,7 +43,9 @@ test('a confirmed restore whose tokens cannot be saved puts the cut-off back and
     saves += 1;
     if (saves === 1) throw new Error('disk full');
   };
-  await expect(f.service.resume(f.id, undefined, { confirmRestore: () => {} })).rejects.toThrow('disk full');
+  await expect(f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN, confirmRestore: () => {} })).rejects.toThrow(
+    'disk full',
+  );
   expect(f.tokens.isCutOff(f.id)).toBe(true);
   expect(saves).toBe(2);
   expect(f.runner.starts).toBe(0);
@@ -54,7 +57,7 @@ test('a cut-off that lands while the start gate is deciding refuses the relaunch
     f.tokens.cutOff(f.id, T0);
     return { allow: true };
   };
-  const answer = await f.service.resume(f.id);
+  const answer = await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
   expect(answer).toEqual({
     ok: false,
     error: { code: 'refused', reason: 'the owner cut off this ferret; a confirmed owner resume is required' },
@@ -68,7 +71,7 @@ test('a cut-off that lands while deciding refuses a live-pane replacement before
     f.tokens.cutOff(f.id, T0);
     return { allow: true };
   };
-  const answer = await f.service.resume(f.id, undefined, { replaceLiveTerminal: true });
+  const answer = await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN, replaceLiveTerminal: true });
   expect(answer).toEqual({
     ok: false,
     error: { code: 'refused', reason: 'the owner cut off this ferret; a confirmed owner resume is required' },
@@ -121,7 +124,7 @@ test('a move whose mover fails for any other reason rejects as it came', async (
   f.ports.move = async () => {
     throw new Error('mover broke');
   };
-  await expect(f.service.move(f.id, 'other-runtime')).rejects.toThrow('mover broke');
+  await expect(f.service.move(f.id, 'other-runtime', { origin: PERSON_ORIGIN })).rejects.toThrow('mover broke');
 });
 
 test('a launch lets the harness use every runner member, not only start and resume', async () => {
@@ -132,7 +135,7 @@ test('a launch lets the harness use every runner member, not only start and resu
     aliveAnswer = await runner.alive('no-such-pane' as RunnerHandle);
     return await original(spec, runner, env);
   };
-  const answer = await f.service.resume(f.id);
+  const answer = await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
   expect(answer.ok).toBe(true);
   expect(aliveAnswer).toBe(false);
   expect(f.runner.starts).toBe(1);
@@ -145,7 +148,7 @@ test('a harness that names no conversation leaves the launched record without on
     const started = await original(spec, runner, env);
     return started.ok ? { ok: true, value: { running: started.value.running } } : started;
   };
-  const answer = await f.service.start({ folder: '/work', by: 'owner' });
+  const answer = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
   expect(answer.ok).toBe(true);
   expect(f.registry.get(f.id)?.state).toBe('working');
   expect(f.registry.get(f.id)?.harnessConversation).toBeUndefined();
@@ -156,7 +159,7 @@ test('a start whose assigned task cannot be written is not started, and the pane
     empty: true,
     session: { ...quietSession, assign: async () => await Promise.reject(new Error('disk full')) },
   });
-  const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'do the thing' });
+  const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'do the thing' }, PERSON_ORIGIN);
   expect(answer).toEqual({
     ok: false,
     error: { code: 'failed', reason: "this ferret's assigned task could not be written, so it was not started" },
@@ -169,7 +172,7 @@ test('a start with a task but no first-turn effect record is refused, quoting no
     empty: true,
     session: { ...quietSession, assign: async () => 'read turn-001.md' },
   });
-  const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'do the thing' });
+  const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'do the thing' }, PERSON_ORIGIN);
   expect(answer).toEqual({
     ok: false,
     error: {

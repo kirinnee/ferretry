@@ -1,6 +1,8 @@
 import { defineEvent, definePort, type FerretId, type RefusalCode } from '@ferretry/kernel/contract';
 import type { JsonValue, Result } from '@ferretry/std';
 import { z } from 'zod';
+import type { LaunchOrigin } from './launch-origin.ts';
+import { CompactAtSchema } from './view/compact-at.ts';
 import {
   FerretCardIdSchema,
   type FerretRole,
@@ -99,6 +101,12 @@ export const StartOptionsSchema = z.strictObject({
   effort: z.string().min(1).optional(),
   /** Launch in the harness's fast mode. Refused when the chosen model has none; omitted leaves it off. */
   fast: z.boolean().optional(),
+  /**
+   * Where this ferret's harness compacts its own conversation, in tokens, or `auto` (docs/compact-at.md). Its OWN value:
+   * it overrides the login's default on every launch, and `auto` suppresses a numeric default. A value larger than the
+   * launch model's window is not used (the launch falls back to Auto), as v4's `resolveCompactAt` did.
+   */
+  compactAt: CompactAtSchema.optional(),
   /** `auto` for an autonomous teammate (needs a prompt), `interactive` for a human terminal. */
   mode: z.enum(['auto', 'interactive']).optional(),
   /**
@@ -185,6 +193,12 @@ export interface ManagedWorktreeSummary {
  * Ferrets' own service.
  */
 export interface ResumeOptions {
+  /**
+   * Who the revive is FOR, as the admitted credential decided it (required, no default): this is AUTHORITY, unlike
+   * {@link actor}, which only names the turn's author. An agent's revive binds its folder under the state-home policy; the
+   * Warden's own is an agent's unless a person asked for it.
+   */
+  readonly origin: LaunchOrigin;
   /**
    * Automated recovery rather than a person asking (the Warden's revive, a restart drain): recorded with the
    * `session.resumed` event so history tells the two apart.
@@ -424,6 +438,12 @@ export interface MoveFailure {
 
 /** What a move may carry beyond where it goes (today's move request, minus what only the route sets). */
 export interface MoveOptions {
+  /**
+   * Who the move's relaunch is FOR, as the admitted credential decided it (required, no default): an agent's relaunch
+   * never binds a folder inside the daemon's state home. Unlike {@link actor} and {@link movedBy}, which name who to credit,
+   * this is authority.
+   */
+  readonly origin: LaunchOrigin;
   readonly model?: string;
   readonly allowContextDowngrade?: boolean;
   readonly forceInflight?: boolean;
@@ -463,16 +483,27 @@ export interface FerretsApi {
   children(ferret: FerretId): readonly FerretId[];
   /** The harness keys currently provided under `harnesses` (a plugin off is absent). */
   harnesses(): readonly HarnessKey[];
-  start(request: StartRequest): Promise<Result<FerretId, StartFailure>>;
+  /**
+   * Starts a ferret FOR `origin`: who the start is for, as the admitted credential decided it (required, no default). An
+   * agent's start never binds a folder inside the daemon's state home.
+   */
+  start(request: StartRequest, origin: LaunchOrigin): Promise<Result<FerretId, StartFailure>>;
   /** Stops a ferret; `reason` is recorded in its history (today's default: "stopped by client"). */
   stop(ferret: FerretId, how: 'polite' | 'now', reason?: string): Promise<void>;
   /**
    * Revives a stopped ferret with its conversation. `message` is recorded in its history; delivering it into the
    * conversation is the Conversation's.
    */
-  resume(ferret: FerretId, message?: string, options?: ResumeOptions): Promise<Result<FerretId, StartFailure>>;
-  /** Adopts a live process by its runner handle without restarting it (spine D15). */
-  attach(ferret: FerretId, handle: RunnerHandle): Promise<Result<FerretId, StartFailure>>;
+  resume(
+    ferret: FerretId,
+    message: string | undefined,
+    options: ResumeOptions,
+  ): Promise<Result<FerretId, StartFailure>>;
+  /**
+   * Adopts a live process by its runner handle without restarting it (spine D15). It launches nothing; `origin` (required,
+   * no default) is the admitted caller, kept as the record's birth only when the record has none.
+   */
+  attach(ferret: FerretId, handle: RunnerHandle, origin: LaunchOrigin): Promise<Result<FerretId, StartFailure>>;
   /**
    * The runner handle of a running ferret (Terminals: its tmux pane id), as `ferret.json` keeps it, so a harness finds
    * the ferret's pane after a daemon restart. `undefined` for a stopped or unknown ferret. Not a secret.
@@ -541,7 +572,7 @@ export interface FerretsApi {
   move?(
     ferret: FerretId,
     runtime: string,
-    options?: MoveOptions,
+    options: MoveOptions,
     caller?: FerretId,
   ): Promise<Result<FerretSummary, MoveFailure>>;
 }

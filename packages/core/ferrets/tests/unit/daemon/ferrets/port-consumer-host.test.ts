@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { expect, test } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeGate, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
@@ -81,15 +82,20 @@ test('KCB-S a non-warden consumer naming the Warden through the Ferrets port is 
   const warden = host.provided(FerretsPort, 'warden');
   expect(board).not.toBe(warden);
 
-  expect(await board.resume(stopped.id, undefined, { automatic: true, actor: 'warden' })).toEqual({
+  expect(
+    await board.resume(stopped.id, undefined, { origin: PERSON_ORIGIN, automatic: true, actor: 'warden' }),
+  ).toEqual({
     ok: false,
     error: { code: 'refused', reason: 'only the Warden is recorded as the Warden' },
   });
-  expect(await board.move!(stopped.id, 'codex-two', { movedBy: 'warden' })).toMatchObject({
+  expect(await board.move!(stopped.id, 'codex-two', { origin: PERSON_ORIGIN, movedBy: 'warden' })).toMatchObject({
     ok: false,
     error: { code: 'refused' },
   });
-  expect(await board.start({ folder: '/work', by: 'warden' })).toMatchObject({ ok: false, error: { code: 'refused' } });
+  expect(await board.start({ folder: '/work', by: 'warden' }, PERSON_ORIGIN)).toMatchObject({
+    ok: false,
+    error: { code: 'refused' },
+  });
   await expect(board.systemCallsign!('warden')).rejects.toMatchObject({ status: 403 });
 
   expect(await warden.systemCallsign!('warden')).toMatch(/^warden-[0-9a-f]{6}$/u);

@@ -30,7 +30,10 @@ overrides a login default, and `inherit` drops the ferret's own value so the def
 The value that would be **in force** is checked, not only one a person typed. A login default larger than a
 ferret's model window is not used: the launch falls back to Auto rather than refuse to start, and the ferret's
 compact-at answer says so. A request that would leave a ferret on such a value — a number above the window, or
-`inherit` onto a default the model cannot honour — is refused.
+`inherit` onto a default the model cannot honour — is refused. A **start**'s own number above its model's window is refused the same way, before anything is written
+(`fy start --compact-at 500k` on a 128k model); only a login default, or a value on a later relaunch after the model changed,
+falls back to Auto. `--compact-at` takes `auto`, or a count such as `250k`, `1m`, `0.4m` or `250000` (v4's grammar); one
+it cannot read is refused before anything is sent.
 
 A refused value says which rule it broke and what is allowed. The config check (`fy config check`) applies the
 floor to YAML; the window is checked when a ferret is started or changed, because it depends on the model.

@@ -40,6 +40,9 @@ export function gatedPaths(plugin: string, declared: boolean, base: PathsPort): 
     checkDirectory: async () => {
       throw new Error(`${plugin} did not declare permissions.checkDirectory, so it probes no absolute path.`);
     },
+    bindDirectory: async () => {
+      throw new Error(`${plugin} did not declare permissions.checkDirectory, so it binds no absolute path.`);
+    },
     // Gated on their own permission ({@link gatedWhich}), never by this one.
     which: base.which,
     locate: base.locate,
@@ -60,6 +63,7 @@ export function gatedWhich(plugin: string, declared: boolean, base: PathsPort): 
   return Object.freeze({
     home: base.home,
     checkDirectory: base.checkDirectory,
+    bindDirectory: base.bindDirectory,
     which: refused,
     locate: refused,
     whichFor: refused,

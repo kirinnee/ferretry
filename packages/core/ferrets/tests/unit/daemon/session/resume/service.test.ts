@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../../contract/index.ts';
 import { describe, it } from 'bun:test';
 import type { QueueAuthor, SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
@@ -254,7 +255,12 @@ describe('session resume service', () => {
     const world = build(target(), NO_PANE);
 
     // Act
-    const actual = await world.service.resume({ id: ID, message: 'carry on', actor: 'admin-cli' });
+    const actual = await world.service.resume({
+      origin: PERSON_ORIGIN,
+      id: ID,
+      message: 'carry on',
+      actor: 'admin-cli',
+    });
 
     // Assert
     should(actual.disposition).equal('revived');
@@ -269,8 +275,8 @@ describe('session resume service', () => {
     const warden = build(target(), NO_PANE);
     const owner = build(target(), NO_PANE);
 
-    await warden.service.resume({ id: ID, message: 'carry on', actor: 'warden' });
-    await owner.service.resume({ id: ID, message: 'carry on', actor: 'admin-cli' });
+    await warden.service.resume({ origin: PERSON_ORIGIN, id: ID, message: 'carry on', actor: 'warden' });
+    await owner.service.resume({ origin: PERSON_ORIGIN, id: ID, message: 'carry on', actor: 'admin-cli' });
 
     should(warden.turns.authors).deepEqual([{ kind: 'ferretry', feature: 'Warden' }]);
     should(owner.turns.authors).deepEqual([{ kind: 'owner' }]);
@@ -282,7 +288,7 @@ describe('session resume service', () => {
     const world = build(target(), NO_PANE);
 
     // Act
-    const actual = await world.service.resume({ id: ID, message: 'carry on', actor: 'peer' });
+    const actual = await world.service.resume({ origin: PERSON_ORIGIN, id: ID, message: 'carry on', actor: 'peer' });
 
     // Assert — the message went to the turn file; the pane was typed the pointer at it.
     should(world.launcher.delivered).have.length(1);
@@ -301,7 +307,7 @@ describe('session resume service', () => {
     world.launcher.launched = launched;
 
     // Act
-    await world.service.resume({ id: ID, message: 'carry on', actor: 'admin-cli' });
+    await world.service.resume({ origin: PERSON_ORIGIN, id: ID, message: 'carry on', actor: 'admin-cli' });
 
     // Assert
     const resumed = world.repository.transitions.find(change => change.event === 'session.resumed');
@@ -313,7 +319,7 @@ describe('session resume service', () => {
     const world = build(target(), LIVE);
 
     // Act
-    await world.service.resume({ id: ID, message: 'again', actor: 'admin-cli' });
+    await world.service.resume({ origin: PERSON_ORIGIN, id: ID, message: 'again', actor: 'admin-cli' });
 
     // Assert
     should(world.monitors.calls).deepEqual(['stop', 'start']);
@@ -328,7 +334,7 @@ describe('session resume service', () => {
     const world = build(target(), LIVE);
 
     // Act
-    await world.service.resume({ id: ID, actor: 'admin-cli' });
+    await world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' });
 
     // Assert
     should(world.repository.events[0]).equal('session.composer_discarded');
@@ -339,7 +345,12 @@ describe('session resume service', () => {
     const world = build(target({ status: 'running' }), LIVE);
 
     // Act
-    const actual = await world.service.resume({ id: ID, message: 'one more thing', actor: 'admin-cli' });
+    const actual = await world.service.resume({
+      origin: PERSON_ORIGIN,
+      id: ID,
+      message: 'one more thing',
+      actor: 'admin-cli',
+    });
 
     // Assert
     should(actual.disposition).equal('sent');
@@ -354,7 +365,7 @@ describe('session resume service', () => {
     const world = build(target({ mode: 'interactive' }), NO_PANE);
 
     // Act
-    const actual = await world.service.resume({ id: ID, actor: 'admin-ui' });
+    const actual = await world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-ui' });
 
     // Assert
     should(actual.disposition).equal('revived');
@@ -369,7 +380,7 @@ describe('session resume service', () => {
     const world = build(target({ pendingQuestion: { toolUseId: 'tool-1' } }), NO_PANE);
 
     // Act
-    await world.service.resume({ id: ID, actor: 'admin-cli' });
+    await world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' });
 
     // Assert
     should(world.repository.events[0]).equal('session.question_cancelled');
@@ -380,7 +391,9 @@ describe('session resume service', () => {
     const world = build(undefined, NO_PANE);
 
     // Act / Assert
-    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(ResumeRefused);
+    await should(world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' })).be.rejectedWith(
+      ResumeRefused,
+    );
   });
 
   it('should report a still-launching session as pending rather than failed', async () => {
@@ -388,7 +401,9 @@ describe('session resume service', () => {
     const world = build(target(), NO_PANE, [], new FakeGate(true, false));
 
     // Act / Assert
-    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(/pending, not failed/u);
+    await should(world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' })).be.rejectedWith(
+      /pending, not failed/u,
+    );
   });
 
   it('should proceed once an in-flight first launch settles', async () => {
@@ -396,7 +411,7 @@ describe('session resume service', () => {
     const world = build(target(), NO_PANE, [], new FakeGate(true, true));
 
     // Act
-    const actual = await world.service.resume({ id: ID, actor: 'admin-cli' });
+    const actual = await world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' });
 
     // Assert
     should(actual.disposition).equal('revived');
@@ -408,7 +423,7 @@ describe('session resume service', () => {
     const world = build(target({ status: 'kill_failed' }), NO_PANE, [], gate);
 
     // Act
-    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejected();
+    await should(world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' })).be.rejected();
 
     // Assert
     should(gate.registrations).equal(1);
@@ -421,6 +436,7 @@ describe('session resume service', () => {
 
     // Act
     const failure = world.service.resume({
+      origin: PERSON_ORIGIN,
       id: ID,
       policy: { automatic: true, dedupeSharedRecoveryScope: false, expectedStatus: 'retrying' },
     });
@@ -437,7 +453,9 @@ describe('session resume service', () => {
     const world = build(target({ label: 'my-batch' }), NO_PANE, [sibling]);
 
     // Act / Assert
-    await should(world.service.resume({ id: ID, actor: 'warden' })).be.rejectedWith(ReviveDedupeConflict);
+    await should(world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'warden' })).be.rejectedWith(
+      ReviveDedupeConflict,
+    );
   });
 
   it('should preserve a harness the failure probe proves survived', async () => {
@@ -448,7 +466,7 @@ describe('session resume service', () => {
     world.launcher.exitPane = { alive: true, dead: false, promptReady: true };
 
     // Act
-    const actual = await world.service.resume({ id: ID, message: 'go', actor: 'admin-cli' });
+    const actual = await world.service.resume({ origin: PERSON_ORIGIN, id: ID, message: 'go', actor: 'admin-cli' });
 
     // Assert
     should(actual.disposition).equal('preserved');
@@ -469,7 +487,9 @@ describe('session resume service', () => {
     world.launcher.exitPane = { alive: true, dead: false, promptReady: true };
 
     // Act / Assert
-    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(UnregisteredResumeReplacement);
+    await should(world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' })).be.rejectedWith(
+      UnregisteredResumeReplacement,
+    );
     should(world.launcher.calls).containEql('confirmExit');
     should(world.launcher.calls).containEql('kill:failed resume cleanup');
     should(world.repository.events).containEql('session.failed');
@@ -484,6 +504,7 @@ describe('session resume service', () => {
 
     // Act
     const actual = await world.service.resume({
+      origin: PERSON_ORIGIN,
       id: ID,
       policy: { automatic: true, dedupeSharedRecoveryScope: false, expectedStatus: 'retrying' },
     });
@@ -502,6 +523,7 @@ describe('session resume service', () => {
 
     // Act
     const failure = world.service.resume({
+      origin: PERSON_ORIGIN,
       id: ID,
       policy: { automatic: true, dedupeSharedRecoveryScope: false, expectedStatus: 'retrying' },
     });
@@ -519,7 +541,9 @@ describe('session resume service', () => {
     world.launcher.confirmError = new Error('probe failed too');
 
     // Act / Assert
-    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(/launch failed/u);
+    await should(world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' })).be.rejectedWith(
+      /launch failed/u,
+    );
     should(world.repository.events).containEql('session.failed');
   });
 
@@ -530,7 +554,9 @@ describe('session resume service', () => {
     world.launcher.cleanupFails = true;
 
     // Act / Assert
-    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(/launch failed/u);
+    await should(world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' })).be.rejectedWith(
+      /launch failed/u,
+    );
     should(world.repository.events).containEql('session.failed');
   });
 
@@ -539,7 +565,7 @@ describe('session resume service', () => {
     const world = build(target(), NO_PANE);
 
     // Act
-    await world.service.resume({ id: ID, message: 'go', actor: 'admin-cli' });
+    await world.service.resume({ origin: PERSON_ORIGIN, id: ID, message: 'go', actor: 'admin-cli' });
 
     // Assert
     should(world.turns.cleared).equal(1);
@@ -551,8 +577,9 @@ describe('session resume service', () => {
     const scheduled = build(target({ status: 'retrying', retryAttempt: 2, transientRetryBudget: 3 }), NO_PANE);
 
     // Act
-    await operator.service.resume({ id: ID, actor: 'admin-cli' });
+    await operator.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' });
     await scheduled.service.resume({
+      origin: PERSON_ORIGIN,
       id: ID,
       policy: { automatic: true, dedupeSharedRecoveryScope: false, expectedStatus: 'retrying' },
     });
@@ -577,7 +604,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     const world = build(advisory(), LIVE);
 
     // Act
-    const actual = await world.service.resume({ id: ID, actor: 'admin-cli' });
+    const actual = await world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' });
 
     // Assert
     should(actual.disposition).equal('revived');
@@ -597,7 +624,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     const world = build(advisory(), LIVE);
 
     // Act
-    await world.service.resume({ id: ID, actor: 'admin-ui' });
+    await world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-ui' });
 
     // Assert — attribution, not authorization: the action bit decided, this only records who.
     should(world.answerAgenda.acknowledged).deepEqual(['admin-ui']);
@@ -610,7 +637,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     const world = build(advisory(), LIVE);
 
     // Act
-    const actual = await world.service.resume({ id: ID, actor: 'admin-cli' });
+    const actual = await world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' });
 
     // Assert
     should(actual.disposition).equal('revived');
@@ -622,7 +649,12 @@ describe('session resume answer-advisory acknowledgement', () => {
     const world = build(advisory(), LIVE);
 
     // Act
-    const actual = await world.service.resume({ id: ID, message: 'answer it in prose', actor: 'admin-cli' });
+    const actual = await world.service.resume({
+      origin: PERSON_ORIGIN,
+      id: ID,
+      message: 'answer it in prose',
+      actor: 'admin-cli',
+    });
 
     // Assert
     should(actual.disposition).equal('sent');
@@ -636,7 +668,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     const world = build(advisory({ status: 'stopped' }), NO_PANE);
 
     // Act
-    const actual = await world.service.resume({ id: ID, actor: 'peer' });
+    const actual = await world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'peer' });
 
     // Assert
     should(actual.disposition).equal('revived');
@@ -650,7 +682,11 @@ describe('session resume answer-advisory acknowledgement', () => {
     const world = build(advisory({ status: 'stopped' }), NO_PANE);
 
     // Act
-    await world.service.resume({ id: ID, policy: { automatic: false, dedupeSharedRecoveryScope: false } });
+    await world.service.resume({
+      origin: PERSON_ORIGIN,
+      id: ID,
+      policy: { automatic: false, dedupeSharedRecoveryScope: false },
+    });
 
     // Assert
     should(world.answerAgenda.acknowledged).deepEqual([]);
@@ -666,6 +702,7 @@ describe('session resume answer-advisory acknowledgement', () => {
 
     // Act
     await world.service.resume({
+      origin: PERSON_ORIGIN,
       id: ID,
       actor: 'peer',
       policy: { automatic: false, dedupeSharedRecoveryScope: false, humanOperator: true },
@@ -683,6 +720,7 @@ describe('session resume answer-advisory acknowledgement', () => {
 
     // Act
     await world.service.resume({
+      origin: PERSON_ORIGIN,
       id: ID,
       policy: { automatic: false, dedupeSharedRecoveryScope: false, humanOperator: true },
     });
@@ -699,6 +737,7 @@ describe('session resume answer-advisory acknowledgement', () => {
 
     // Act
     await world.service.resume({
+      origin: PERSON_ORIGIN,
       id: ID,
       actor: 'admin-cli',
       policy: { automatic: false, dedupeSharedRecoveryScope: false, humanOperator: false },
@@ -716,6 +755,7 @@ describe('session resume answer-advisory acknowledgement', () => {
 
     // Act
     await world.service.resume({
+      origin: PERSON_ORIGIN,
       id: ID,
       actor: 'admin-ui',
       policy: { automatic: false, dedupeSharedRecoveryScope: false, humanOperator: true },
@@ -733,6 +773,7 @@ describe('session resume answer-advisory acknowledgement', () => {
 
     // Act
     await world.service.resume({
+      origin: PERSON_ORIGIN,
       id: ID,
       policy: { automatic: true, dedupeSharedRecoveryScope: false, expectedStatus: 'retrying' },
     });
@@ -747,7 +788,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     const world = build(advisory({ status: 'stopped', needsHumanKind: UNCONFIRMED }), NO_PANE);
 
     // Act
-    await world.service.resume({ id: ID, actor: 'admin-cli' });
+    await world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' });
 
     // Assert
     should(world.answerAgenda.acknowledged).deepEqual([]);
@@ -760,7 +801,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     world.launcher.cleanupFails = true;
 
     // Act / Assert
-    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejected();
+    await should(world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' })).be.rejected();
     should(world.answerAgenda.acknowledged).deepEqual([]);
     should(world.repository.events).not.containEql('session.resumed');
   });
@@ -771,7 +812,9 @@ describe('session resume answer-advisory acknowledgement', () => {
     world.launcher.relaunchError = new Error('tmux refused the pane');
 
     // Act / Assert
-    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(/tmux refused the pane/u);
+    await should(world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' })).be.rejectedWith(
+      /tmux refused the pane/u,
+    );
     should(world.answerAgenda.acknowledged).deepEqual([]);
     should(world.repository.events).containEql('session.failed');
   });
@@ -782,7 +825,9 @@ describe('session resume answer-advisory acknowledgement', () => {
     world.launcher.deliverError = new Error('injection timed out');
 
     // Act / Assert
-    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(/injection timed out/u);
+    await should(world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' })).be.rejectedWith(
+      /injection timed out/u,
+    );
     should(world.answerAgenda.acknowledged).deepEqual([]);
   });
 
@@ -794,7 +839,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     world.launcher.exitPane = LIVE;
 
     // Act
-    const actual = await world.service.resume({ id: ID, actor: 'admin-cli' });
+    const actual = await world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' });
 
     // Assert
     should(actual.disposition).equal('preserved');
@@ -810,7 +855,9 @@ describe('session resume answer-advisory acknowledgement', () => {
     world.launcher.relaunchError = new UnregisteredResumeReplacement('replacement registration failed');
 
     // Act / Assert
-    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(UnregisteredResumeReplacement);
+    await should(world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' })).be.rejectedWith(
+      UnregisteredResumeReplacement,
+    );
     should(world.answerAgenda.acknowledged).deepEqual([]);
     should(world.repository.events).containEql('session.failed');
   });
@@ -822,7 +869,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     world.answerAgenda.failure = new Error('answer ledger is unwritable');
 
     // Act
-    const failure = world.service.resume({ id: ID, actor: 'admin-cli' });
+    const failure = world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' });
 
     // Assert
     await should(failure).be.rejectedWith(ResumeAcknowledgementFailed);
@@ -847,7 +894,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     world.repository.failEvent = 'session.resumed';
 
     // Act
-    const failure = world.service.resume({ id: ID, actor: 'admin-cli' });
+    const failure = world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' });
 
     // Assert
     await should(failure).be.rejectedWith(/the journal refused session\.resumed/u);
@@ -867,7 +914,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     world.launcher.cleanupFails = true;
 
     // Act
-    const failure = world.service.resume({ id: ID, actor: 'admin-cli' });
+    const failure = world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' });
 
     // Assert
     await should(failure).be.rejectedWith(/pane is already gone/u);
@@ -886,7 +933,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     world.repository.failEvent = 'session.resumed';
 
     // Act
-    const failure = world.service.resume({ id: ID, actor: 'admin-cli' });
+    const failure = world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' });
 
     // Assert
     await should(failure).be.rejectedWith(ResumeAcknowledgementFailed);
@@ -900,7 +947,9 @@ describe('session resume answer-advisory acknowledgement', () => {
     const world = build(advisory({ pendingQuestion: { toolUseId: 'tool-2' } }), LIVE);
 
     // Act / Assert
-    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(/answer or abandon/u);
+    await should(world.service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' })).be.rejectedWith(
+      /answer or abandon/u,
+    );
     should(world.answerAgenda.acknowledged).deepEqual([]);
     should(world.launcher.calls).deepEqual([]);
   });
@@ -942,7 +991,7 @@ describe('session resume answer-advisory acknowledgement', () => {
 
     // Act — start the dismissal, let it reach the append, then queue a projection that installs a
     // byte-identical advisory for the SAME tool under a different request id.
-    const dismissal = service.resume({ id: ID, actor: 'admin-cli' });
+    const dismissal = service.resume({ origin: PERSON_ORIGIN, id: ID, actor: 'admin-cli' });
     await drain();
     should(trace).deepEqual(['append']);
     const projection = serial.run(ID, async () => {

@@ -21,7 +21,8 @@ import {
   type SharedDraftSent,
 } from '../../../seams/protocol.ts';
 import { DraftSentSchema } from '../../../../contract/index.ts';
-import { ferretOf } from '@ferretry/core-gate/contract';
+import { ferretOf, isFerretCall } from '@ferretry/core-gate/contract';
+import { type FerretId, type LaunchOrigin, PERSON_ORIGIN } from '@ferretry/core-ferrets/contract';
 import { parseBody } from '../../../seams/api.ts';
 import { ApiError } from '../../../seams/api.ts';
 import { type ApiResponse, decodeParameter, headerValue } from '../../../seams/api.ts';
@@ -132,6 +133,8 @@ interface SendInput {
   readonly sendId: string;
   /** The SESSION that made this call, derived from the credential — never from the body. */
   readonly senderSessionId?: string | undefined;
+  /** Who the send is FOR, from the admitted credential (never the body): a revive it causes launches as this origin. */
+  readonly origin: LaunchOrigin;
 }
 
 /** The HTTP status and code each refusal answers with. */
@@ -242,6 +245,10 @@ async function send(
       // A label is a ferret's: the owner's and the daemon's messages are never held, so one is not honoured.
       ...(sender === undefined || request.label === undefined ? {} : { label: request.label }),
       ...(sender === undefined ? {} : { senderSessionId: sender }),
+      // The credential decides whether a revive this send causes is an agent's: a Warden token has no sender yet is one.
+      origin: isFerretCall(context)
+        ? { kind: 'agent', ...(sender === undefined ? {} : { ferret: sender as FerretId }) }
+        : PERSON_ORIGIN,
     })
     .catch(refuse);
   // Only once the send is accepted, and never at the send's expense: a draft that moved on, or a clearer

@@ -154,6 +154,13 @@ const accountShape = {
    * overwhelming case — a fleet that uses no profile publishes `{}` everywhere and nothing reads it.
    */
   secretEnv: z.record(NonEmptyString, SecretTemplateSchema).default({}),
+  /**
+   * The NAMES of the variables whose whole value is a bare `$OTHER` reference, resolved from the host's
+   * environment or its secrets file when the wrapper runs. Names only, never a value, and never pinned in a
+   * `--settings` file. Published for the same reader as `secretEnv`: the start-time refusal of a folder
+   * whose own Claude settings would override them (`docs/secrets.md`). Absent is none.
+   */
+  referencedEnv: z.array(NonEmptyString).optional(),
 };
 
 /**

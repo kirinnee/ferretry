@@ -1,3 +1,29 @@
+## [4.291.9](https://github.com/kirinnee/ferretry/compare/v4.291.8...v4.291.9) (2026-11-11)
+
+### Fixes
+
+* **fleet:** a profile's third-party model set applies; a move keeps only a picked model ([#1586](https://github.com/kirinnee/ferretry/issues/1586)) ([178624e](https://github.com/kirinnee/ferretry/commit/178624ecf7891b9ccacf35013ae01ee593c1a79d))
+* **fleet:** pin a login's literal env so a repo's .claude settings cannot blank it ([#1587](https://github.com/kirinnee/ferretry/issues/1587)) ([afec015](https://github.com/kirinnee/ferretry/commit/afec015e344b4ff305dd65eb948f196258c5cd26))
+
+## [4.291.8](https://github.com/kirinnee/ferretry/compare/v4.291.7...v4.291.8) (2026-11-11)
+
+### Fixes
+
+* **fleet:** make launcher guards parse under every POSIX shell ([#1585](https://github.com/kirinnee/ferretry/issues/1585)) ([b7c4566](https://github.com/kirinnee/ferretry/commit/b7c45665b849a7e852433a0d2f1c02bd88a61a86))
+
+## [4.291.7](https://github.com/kirinnee/ferretry/compare/v4.291.6...v4.291.7) (2026-11-11)
+
+### Fixes
+
+* **daemon:** stop board reads thrashing the session document cache ([#1584](https://github.com/kirinnee/ferretry/issues/1584)) ([f9108fb](https://github.com/kirinnee/ferretry/commit/f9108fbf467b5dc3c6204d439028dfd6e180fd5b))
+
+## [4.291.6](https://github.com/kirinnee/ferretry/compare/v4.291.5...v4.291.6) (2026-11-11)
+
+### Fixes
+
+* **daemon:** index the board once per GitHub watch tick ([#1582](https://github.com/kirinnee/ferretry/issues/1582)) ([58cd647](https://github.com/kirinnee/ferretry/commit/58cd647ae654b487e06dd7bba5113c4cfcfb46c8))
+* **daemon:** stop a compaction from stranding sends and pinning the turn at working ([#1583](https://github.com/kirinnee/ferretry/issues/1583)) ([40fa77d](https://github.com/kirinnee/ferretry/commit/40fa77d712b430fe1e0d319f197b586c2e225709))
+
 ## [4.291.5](https://github.com/kirinnee/ferretry/compare/v4.291.4...v4.291.5) (2026-11-06)
 
 ### Performance

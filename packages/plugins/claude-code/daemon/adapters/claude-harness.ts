@@ -23,7 +23,7 @@ import type {
   UpdateResult,
   UsageReader,
 } from '@ferretry/core-ferrets/contract';
-import { materializeSkills } from '@ferretry/core-ferrets/contract';
+import { LaunchRefusal, materializeSkills } from '@ferretry/core-ferrets/contract';
 import type {
   ChildEnvironment,
   Clock,
@@ -155,6 +155,9 @@ export class ClaudeHarness implements Harness {
   /** The home written from ONE read of this plugin's configuration, the same read the argv and the record are built from. */
   private async prepareHomeFrom(spec: LaunchSpec, inputs: LaunchSettingsInputs): Promise<HomePlan> {
     const home = await this.ensureHome(spec);
+    // The launch-settings file below holds the login's pinned environment: no credential is written under a folder chain
+    // another user could rewrite (v4's checked directory chain, now the kernel's rule).
+    await this.requirePrivateChain(home);
     // The selected skills: Skills' shared folders linked into `skills/`, the rest of that folder swept (one link rule).
     await materializeSkills(home, spec.parts, []);
     const text = homeText({
@@ -165,6 +168,7 @@ export class ClaudeHarness implements Harness {
       settings: inputs.settings as never,
       hooks: inputs.hooks as never,
       effort: spec.effort,
+      fast: spec.options?.fast,
     });
     const files: FencedPath[] = [];
     const write = async (name: string, content: string): Promise<void> => {
@@ -345,6 +349,8 @@ export class ClaudeHarness implements Harness {
       this.fenced(home.resolve(HOME_FILES.conversation)),
       `${JSON.stringify({ format: 1, id: conversation.id, cwd: spec.folder })}\n`,
     );
+    // Checked again immediately before the runner is asked: a folder made writable since the write is seen here.
+    await this.requirePrivateChain(home);
     const started = await runner.start(spec2);
     if (!started.ok) return started;
     this.deps.panes.remember(spec.ferret, started.value.handle);
@@ -363,6 +369,16 @@ export class ClaudeHarness implements Harness {
     const homes = this.deps.roots.root('agent-homes');
     await homes.ensurePrivateDirectory(this.fenced(homes.resolve(spec.ferret)));
     return home;
+  }
+
+  /**
+   * Refuses the launch, with the kernel's sentence, when any folder from FY_HOME down to the ferret's home is a link, is
+   * owned by someone else or is writable by its group or everyone. Nothing is changed or narrowed: a check, not a lock
+   * (docs/secrets.md names what that leaves).
+   */
+  private async requirePrivateChain(home: RootHandle): Promise<void> {
+    const verdict = await home.checkPrivateChain(this.fenced(home.resolve('.')));
+    if (!verdict.ok) throw new LaunchRefusal(`the ferret was not started: ${verdict.error.reason}`);
   }
 
   /**

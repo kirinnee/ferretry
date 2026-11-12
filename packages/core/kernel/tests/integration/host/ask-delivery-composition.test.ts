@@ -57,6 +57,7 @@ const world = async () => {
       { build: () => ({ hooks: hooks as never }) },
     );
   const h = await testHost({
+    everyDirectory: true,
     plugins: [
       real('asks'),
       real('ferrets'),

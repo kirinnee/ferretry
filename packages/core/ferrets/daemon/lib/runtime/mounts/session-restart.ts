@@ -9,6 +9,8 @@ import {
 import { type CallContext, headerValue, jsonResponse, type RouteHandler } from '@ferretry/kernel/contract';
 import { parseBody } from '../../http/body.ts';
 import { ferretOf } from '@ferretry/core-gate/contract';
+import { launchOriginOf } from '../../ferrets/launch-origin.ts';
+import type { LaunchOrigin } from '../../../../contract/index.ts';
 
 /**
  * Restarting the ferrets whose instructions are out of date: `POST`, `GET` and `DELETE /v1/restarts`
@@ -24,7 +26,12 @@ import { ferretOf } from '@ferretry/core-gate/contract';
  * `noStore` because every answer describes live sessions.
  */
 export interface SessionRestartSubsystem {
-  restart(request: RestartRequest, requestId?: string, requestedBy?: string): Promise<RestartResult>;
+  restart(
+    request: RestartRequest,
+    origin: LaunchOrigin,
+    requestId?: string,
+    requestedBy?: string,
+  ): Promise<RestartResult>;
   status(): Promise<RestartStatus>;
   cancel(): Promise<RestartCancelResult>;
   /** One pass over the waiting restarts. It serves no route: a timer calls it. */
@@ -51,7 +58,9 @@ export function sessionRestartRoutes(subsystem: SessionRestartSubsystem): {
     'POST /v1/restarts': async context => {
       const request = await parseBody(context.request, RestartRequestSchema);
       const id = headerValue(context.request, FY_REQUEST_ID_HEADER)?.trim();
-      return jsonResponse(await subsystem.restart(request, id === '' ? undefined : id, requestedBy(context)));
+      return jsonResponse(
+        await subsystem.restart(request, launchOriginOf(context), id === '' ? undefined : id, requestedBy(context)),
+      );
     },
     'GET /v1/restarts': async () => jsonResponse(await subsystem.status()),
     'DELETE /v1/restarts': async () => jsonResponse(await subsystem.cancel()),

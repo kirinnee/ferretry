@@ -82,6 +82,10 @@ export const FerretEndCauseSchema = z.discriminatedUnion('kind', [
 ]);
 export type FerretEndCause = z.infer<typeof FerretEndCauseSchema>;
 
+/** Who first started a ferret: the kind of the launch origin it was born under (`LaunchOrigin.kind`). */
+export const FerretBirthSchema = z.enum(['person', 'daemon', 'agent']);
+export type FerretBirth = z.infer<typeof FerretBirthSchema>;
+
 /** `state/ferrets/<ferret>/ferret.json`: who a ferret is. Turn, usage and transcript facts are other owners'. */
 export const FerretRecordSchema = z.strictObject({
   format: z.literal(1),
@@ -107,6 +111,12 @@ export const FerretRecordSchema = z.strictObject({
   stateAt: InstantSchema,
   /** Why it ended; present only while `state` is `stopped` (a start or resume clears it). */
   cause: FerretEndCauseSchema.optional(),
+  /**
+   * WHO FIRST STARTED this ferret (`person`, `daemon` or `agent`), stamped once when the record is born and carried
+   * unchanged by every later launch (resume, restart, move, revive, boot recovery). A ferret first started by an agent
+   * is fenced out of the state home on every relaunch, whoever triggers it; a record with NO birth is fenced too.
+   */
+  birth: FerretBirthSchema.optional(),
   /** Who caused it to exist and whether it descends from a warden (today's `SessionConfig.provenance`). */
   provenance: SessionProvenanceSchema.optional(),
   /** Target-only lineage back to the transfer decision that created this fresh ferret (today's `transferredFrom`). */

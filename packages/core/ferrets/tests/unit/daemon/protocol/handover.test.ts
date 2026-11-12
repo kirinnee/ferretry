@@ -976,6 +976,33 @@ describe('session handover protocol', () => {
     should(issuesFor({})).be.empty();
   });
 
+  it('should carry the model provenance from the resolved replacement into the plan, and refuse a disagreement', () => {
+    // Arrange
+    const issuesFor = (override: Record<string, unknown>): readonly string[] => {
+      const result = handover.SessionHandoverReceiptSchema.safeParse({ ...receipt, ...override });
+      return result.success ? [] : result.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`);
+    };
+    const agreeing = (source: 'requested' | 'account-default') => ({
+      resolvedTarget: {
+        replacement: { ...resolvedReplacement, modelSource: source },
+        coordinator: resolvedCoordinator,
+      },
+      plan: { ...plan, target: { ...plan.target, modelSource: source } },
+    });
+
+    // Act + Assert
+    should(issuesFor(agreeing('account-default'))).be.empty();
+    should(issuesFor(agreeing('requested'))).be.empty();
+    should(
+      issuesFor({
+        ...agreeing('requested'),
+        plan: { ...plan, target: { ...plan.target, modelSource: 'account-default' } },
+      }),
+    ).containEql(
+      'resolvedTarget.replacement.modelSource: resolvedTarget.replacement.modelSource must agree with plan.target.modelSource',
+    );
+  });
+
   it('should require the written-ahead ids and board invitation/grant ids on the ladder', () => {
     // Act + Assert
     assertRejects([

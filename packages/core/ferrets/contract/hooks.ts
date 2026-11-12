@@ -1,5 +1,6 @@
 import { defineHook, type FerretId } from '@ferretry/kernel/contract';
 import { z } from 'zod';
+import { CompactAtSchema } from './view/compact-at.ts';
 import {
   FerretIdSchema,
   FerretRoleSchema,
@@ -76,6 +77,12 @@ export const StartDecideInputSchema = z.strictObject({
   model: z.string().min(1).optional(),
   /** The start asked for the harness's fast mode (`options.fast`); absent when it did not. */
   fast: z.boolean().optional(),
+  /**
+   * The compaction trigger the START named (`options.compactAt`); absent when it named none, and ALWAYS absent on a resume
+   * (a relaunch falls back to Auto for a value its model cannot honour, as v4 did). A taker that knows the model's window
+   * refuses a number larger than it before anything is written, as v4's start did.
+   */
+  compactAt: CompactAtSchema.optional(),
 });
 export type StartDecideInput = z.infer<typeof StartDecideInputSchema>;
 

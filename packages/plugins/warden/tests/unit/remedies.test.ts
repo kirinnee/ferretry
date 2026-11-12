@@ -1,3 +1,4 @@
+import { AGENT_ORIGIN, PERSON_ORIGIN } from '@ferretry/core-ferrets/contract';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { entryId, FakeAsks, sourceKey } from '@ferretry/core-asks/contract/testing';
@@ -14,10 +15,11 @@ import { err, ok, type Result } from '@ferretry/std';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
 import { createWardenRemedies, RESTART_STOP_REASON } from '../../daemon/remedies.ts';
+import { WARDEN_SWEEP_ORIGIN } from '../../daemon/lib/index.ts';
 
 /** Ferrets' fake with the additives it does not model: the options a resume carries, what it decided, and the move. */
 class AdditiveFerrets extends FakeFerrets {
-  readonly resumeOptions: (ResumeOptions | undefined)[] = [];
+  readonly resumeOptions: Omit<ResumeOptions, 'decided'>[] = [];
   readonly moves: { ferret: FerretId; runtime: string; options?: MoveOptions; caller?: FerretId }[] = [];
   refuseMove: MoveFailure | undefined;
 
@@ -25,12 +27,12 @@ class AdditiveFerrets extends FakeFerrets {
   beforeResume: ((ferret: FerretId) => void) | undefined;
 
   /** Models Ferrets' `decided` answer as its service gives it: a stopped ferret relaunches, any other is left running. */
-  override async resume(ferret: FerretId, message?: string, options?: ResumeOptions) {
-    const { decided, ...recorded } = options ?? {};
-    this.resumeOptions.push(options === undefined ? undefined : recorded);
+  override async resume(ferret: FerretId, message: string | undefined, options: ResumeOptions) {
+    const { decided, ...recorded } = options;
+    this.resumeOptions.push(recorded);
     this.beforeResume?.(ferret);
     const before = (await this.get(ferret))?.state;
-    const resumed = await super.resume(ferret, message);
+    const resumed = await super.resume(ferret, message, options);
     if (resumed.ok) decided?.(before === 'stopped' ? 'relaunching' : 'running');
     return resumed;
   }
@@ -110,7 +112,7 @@ describe('the Warden restarts a ferret (today’s authorizeResume under the auto
     ferrets.add({ id: ferretId('f1'), state: 'working' });
 
     // Act
-    await remedies.restart('f1');
+    await remedies.restart('f1', undefined, AGENT_ORIGIN);
 
     // Assert
     should(ferrets.stops).eql([{ ferret: 'f1', how: 'now', reason: RESTART_STOP_REASON }]);
@@ -125,7 +127,7 @@ describe('the Warden restarts a ferret (today’s authorizeResume under the auto
     await askQuestion(asks, 'f1');
 
     // Act
-    const refused = await remedies.restart('f1').catch((error: Error) => error);
+    const refused = await remedies.restart('f1', undefined, AGENT_ORIGIN).catch((error: Error) => error);
 
     // Assert
     should(refused).be.an.Error();
@@ -144,7 +146,7 @@ describe('the Warden restarts a ferret (today’s authorizeResume under the auto
     ferrets.add({ id: ferretId('f2'), state: 'working', label: 'batch-7', folder: '/work/repo/' });
 
     // Act
-    const refused = await remedies.restart('f1').catch((error: Error) => error);
+    const refused = await remedies.restart('f1', undefined, AGENT_ORIGIN).catch((error: Error) => error);
 
     // Assert
     should((refused as Error).message).startWith('automatic revive suppressed for session f1: live session f2');
@@ -159,7 +161,7 @@ describe('the Warden restarts a ferret (today’s authorizeResume under the auto
     ferrets.add({ id: ferretId('f3'), state: 'working', folder: '/work/repo' });
 
     // Act
-    await remedies.restart('f1');
+    await remedies.restart('f1', undefined, AGENT_ORIGIN);
 
     // Assert
     should(ferrets.resumes).eql([{ ferret: 'f1' }]);
@@ -174,8 +176,8 @@ describe('the auto-revive resume', () => {
     ferrets.add({ id: ferretId('f2'), state: 'working', label: 'b', folder: '/w' });
 
     // Act
-    const refused = await resume('f1', 'carry on');
-    const unknown = await resume('nobody', 'carry on');
+    const refused = await resume('f1', 'carry on', AGENT_ORIGIN);
+    const unknown = await resume('nobody', 'carry on', AGENT_ORIGIN);
 
     // Assert
     should(refused.ok).be.false();
@@ -190,7 +192,7 @@ describe('the auto-revive resume', () => {
     await askQuestion(asks, 'f1');
 
     // Act
-    const revived = await resume('f1', 'carry on');
+    const revived = await resume('f1', 'carry on', AGENT_ORIGIN);
 
     // Assert
     should(revived).eql({ ok: true });
@@ -216,7 +218,7 @@ describe('M2 a Warden resume hands its message over once: as the relaunch’s tu
     ferrets.add({ id: ferretId('f1'), state: 'stopped' });
 
     // Act
-    const revived = await resume('f1', 'carry on');
+    const revived = await resume('f1', 'carry on', AGENT_ORIGIN);
 
     // Assert: Ferrets writes it as the turn and types its pointer; nothing is sent a second time.
     should(revived).eql({ ok: true });
@@ -234,9 +236,9 @@ describe('M2 a Warden resume hands its message over once: as the relaunch’s tu
     ferrets.add({ id: ferretId('f3'), state: 'working' });
 
     // Act: a resume of a stopped ferret and a restart both relaunch; a resume of a running one relaunches nothing.
-    await remedies.resume('f1', 'carry on');
-    await remedies.restart('f2', 'carry on');
-    await remedies.resume('f3', 'carry on');
+    await remedies.resume('f1', 'carry on', AGENT_ORIGIN);
+    await remedies.restart('f2', 'carry on', AGENT_ORIGIN);
+    await remedies.resume('f3', 'carry on', AGENT_ORIGIN);
 
     // Assert
     should(acted).eql(['f1 resume done', 'f2 restart done', 'f3 resume done']);
@@ -252,7 +254,7 @@ describe('M2 a Warden resume hands its message over once: as the relaunch’s tu
     ferrets.add({ id: ferretId('f1'), state: 'working' });
 
     // Act
-    const revived = await resume('f1', 'carry on');
+    const revived = await resume('f1', 'carry on', AGENT_ORIGIN);
 
     // Assert
     should(revived.ok).be.true();
@@ -270,7 +272,7 @@ describe('m2 the Warden hands its notice over by what Ferrets did, never by its 
     ferrets.beforeResume = ferret => ferrets.setState(ferret, 'working');
 
     // Act
-    const revived = await resume('f1', 'carry on');
+    const revived = await resume('f1', 'carry on', AGENT_ORIGIN);
 
     // Assert: Ferrets left it running (no turn carried the words), so the Warden says them, once.
     should(revived.ok).be.true();
@@ -286,7 +288,7 @@ describe('m2 the Warden hands its notice over by what Ferrets did, never by its 
     ferrets.beforeResume = ferret => ferrets.setState(ferret, 'stopped');
 
     // Act
-    await remedies.resume('f1', 'carry on');
+    await remedies.resume('f1', 'carry on', AGENT_ORIGIN);
 
     // Assert: the relaunch’s turn carried the words; nothing is said a second time, nothing is journalled.
     should(ferrets.resumes).eql([{ ferret: 'f1', message: 'carry on' }]);
@@ -303,7 +305,7 @@ describe('a resume Ferrets did not answer cleanly', () => {
     ferrets.resume = async () => await Promise.reject(new Error('the runner went away'));
 
     // Act
-    const revived = await resume('f1', 'carry on');
+    const revived = await resume('f1', 'carry on', AGENT_ORIGIN);
 
     // Assert: fail closed — counted as a revive
     should(revived.ok).be.true();
@@ -317,7 +319,7 @@ describe('a resume Ferrets did not answer cleanly', () => {
     ferrets.resume = async () => err({ code: 'failed', reason: 'no login' } as never);
 
     // Act
-    const refused = await resume('f1', 'carry on');
+    const refused = await resume('f1', 'carry on', AGENT_ORIGIN);
 
     // Assert
     should(refused).eql({ ok: false, reason: 'revive refused: no login' });
@@ -333,7 +335,7 @@ describe('a resume Ferrets did not answer cleanly', () => {
     };
 
     // Act
-    const revived = await resume('f1', 'carry on');
+    const revived = await resume('f1', 'carry on', AGENT_ORIGIN);
 
     // Assert: counted (cooldown, crash_repeat and the breaker see it), with the reason in its caveat; nothing said.
     should(revived.ok).be.true();
@@ -353,8 +355,8 @@ describe('a resume Ferrets did not answer cleanly', () => {
     };
 
     // Act
-    const before = await resume('f1', 'carry on');
-    const running = await resume('f2', 'carry on');
+    const before = await resume('f1', 'carry on', AGENT_ORIGIN);
+    const running = await resume('f2', 'carry on', AGENT_ORIGIN);
 
     // Assert: nothing started, so neither is a revive.
     should(before).eql({ ok: false, reason: 'revive refused: not now' });
@@ -372,8 +374,8 @@ describe('a resume Ferrets did not answer cleanly', () => {
     };
 
     // Act
-    const resumed = await remedies.resume('f1', 'carry on').catch((error: unknown) => error);
-    const restarted = await remedies.restart('f2', 'carry on').catch((error: unknown) => error);
+    const resumed = await remedies.resume('f1', 'carry on', AGENT_ORIGIN).catch((error: unknown) => error);
+    const restarted = await remedies.restart('f2', 'carry on', AGENT_ORIGIN).catch((error: unknown) => error);
 
     // Assert: the remedy rows stay `failed` (more honest than today's `done`), with the relaunch named in the error.
     should((resumed as Error).message).eql(
@@ -395,16 +397,33 @@ describe('the Warden’s resumes are automatic and its own (ResumeOptions.automa
     ferrets.add({ id: ferretId('f3'), state: 'stopped' });
 
     // Act
-    await remedies.resume('f1');
-    await remedies.restart('f2');
-    await resume('f3', 'carry on');
+    await remedies.resume('f1', undefined, AGENT_ORIGIN);
+    await remedies.restart('f2', undefined, AGENT_ORIGIN);
+    await resume('f3', 'carry on', AGENT_ORIGIN);
 
     // Assert
     should(ferrets.resumeOptions).eql([
-      { automatic: true, actor: 'warden' },
-      { automatic: true, actor: 'warden' },
-      { automatic: true, actor: 'warden' },
+      { origin: AGENT_ORIGIN, automatic: true, actor: 'warden' },
+      { origin: AGENT_ORIGIN, automatic: true, actor: 'warden' },
+      { origin: AGENT_ORIGIN, automatic: true, actor: 'warden' },
     ]);
+  });
+
+  it('should run every resume as the origin of whatever asked for it: a person asks as a person, the sweep as an agent', async () => {
+    // Arrange
+    const { ferrets, remedies, resume } = subject();
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+    ferrets.add({ id: ferretId('f2'), state: 'working' });
+    ferrets.add({ id: ferretId('f3'), state: 'stopped' });
+
+    // Act
+    await remedies.resume('f1', undefined, PERSON_ORIGIN);
+    await remedies.restart('f2', undefined, PERSON_ORIGIN);
+    await resume('f3', 'carry on', WARDEN_SWEEP_ORIGIN);
+
+    // Assert
+    should(ferrets.resumeOptions.map(options => options.origin)).eql([PERSON_ORIGIN, PERSON_ORIGIN, AGENT_ORIGIN]);
+    should(WARDEN_SWEEP_ORIGIN).eql({ kind: 'agent' });
   });
 });
 
@@ -418,7 +437,9 @@ describe('the Warden moves a ferret to another login (a failover, through Ferret
     await remedies.failover('f1', 'claude-b');
 
     // Assert
-    should(ferrets.moves).eql([{ ferret: 'f1', runtime: 'claude-b', options: { movedBy: 'warden' } }]);
+    should(ferrets.moves).eql([
+      { ferret: 'f1', runtime: 'claude-b', options: { movedBy: 'warden', origin: AGENT_ORIGIN } },
+    ]);
     should(acted).eql(['f1 failover done']);
   });
 
@@ -459,7 +480,7 @@ describe('D2 #19 every word the Warden types is Conversation’s warden caller, 
     const { ferrets, conversation, resume } = subject();
     const seen = callers(conversation);
     ferrets.add({ id: ferretId('f1'), state: 'working' });
-    await resume('f1', 'carry on');
+    await resume('f1', 'carry on', AGENT_ORIGIN);
     should(seen.map(entry => entry.caller)).eql([{ kind: 'warden' }]);
   });
 });

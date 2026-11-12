@@ -1,6 +1,7 @@
 import type { SessionLaunchInstructions } from '../../protocol/session.ts';
 import type { SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
+import type { LaunchOrigin } from '../../../../contract/launch-origin.ts';
 import {
   authorizeResume,
   type PaneDisposition,
@@ -58,6 +59,8 @@ export interface SessionResumePorts {
 
 export interface ResumeRequest {
   readonly id: SessionId;
+  /** Who the relaunch is FOR, from the admitted credential: required, so no caller launches without saying. */
+  readonly origin: LaunchOrigin;
   readonly message?: string | undefined;
   readonly actor?: ResumeActor | undefined;
   /**

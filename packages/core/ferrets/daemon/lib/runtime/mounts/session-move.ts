@@ -9,6 +9,8 @@ import {
   jsonResponse,
   type RouteHandler,
 } from '@ferretry/kernel/contract';
+import { launchOriginOf } from '../../ferrets/launch-origin.ts';
+import type { LaunchOrigin } from '../../../../contract/launch-origin.ts';
 import { parseBody, parseOptionalBody } from '../../http/body.ts';
 import { ferretSummaryOfSessionView } from '../../moves/ferret-view.ts';
 import { FY_REQUEST_ID_HEADER } from '../../protocol/headers.ts';
@@ -149,6 +151,11 @@ export interface SessionMoveSubsystem {
       readonly actor?: 'warden';
       /** Who asked, as the journal records it: `owner`, `session:<id>` of the calling ferret, or `warden` for its own moves. */
       readonly movedBy?: string;
+      /**
+       * Who the relaunch is FOR, from the admitted credential (never a field of the request body): required, so a mount
+       * that does not say who is asking does not compile, and the relaunch binds its folder as that origin.
+       */
+      readonly origin: LaunchOrigin;
     },
   ): Promise<SessionView>;
   /**
@@ -292,6 +299,7 @@ async function move(
     forceInflight: request.forceInflight,
     ...(request.conversation === undefined ? {} : { conversation: request.conversation }),
     movedBy: moverOf(context),
+    origin: launchOriginOf(context),
   };
   // The fingerprint is the PARSED target, not the raw bytes: the start's digest has to hash the bytes
   // because a third party presents it later as proof, whereas this only ever compares two requests

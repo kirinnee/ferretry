@@ -135,6 +135,10 @@ describe('which: gated by permissions.which', () => {
   const base = {
     home: () => '/h',
     checkDirectory: async () => ({ ok: true as const, value: { realPath: '/x' } }),
+    bindDirectory: async () => ({
+      ok: true as const,
+      value: { realPath: '/x', insideStateHome: false, verify: async () => ({ ok: true as const, value: undefined }) },
+    }),
     which: async () => '/usr/bin/npx',
     locate: async () => ({ kind: 'absent' as const }),
     whichFor: async () => ({ kind: 'unprovable' as const }),

@@ -415,8 +415,25 @@ export default definePlugin({
       }),
       verb('ps', { summary: 'list ferrets' }),
       verb('status [id]', { summary: 'show one ferret in detail, or with --subtree a table of its helpers' }),
-      verb('start [prompt...]', { summary: 'start a ferret on one of your agent runtimes' }),
-      verb('new [words...]', { summary: 'start a helper ferret (Pack mode)' }),
+      verb('start [prompt...]', {
+        summary: 'start a ferret on one of your agent runtimes',
+        options: [
+          {
+            flag: '--compact-at <tokens|auto>',
+            // v4 4.291.9's sentence, ASCII apostrophes and all.
+            help: "squeeze this ferret's conversation at this many tokens (e.g. 250k); auto leaves the harness's own trigger",
+          },
+        ],
+      }),
+      verb('new [words...]', {
+        summary: 'start a helper ferret (Pack mode)',
+        options: [
+          {
+            flag: '--compact-at <tokens|auto>',
+            help: 'squeeze its conversation at this many tokens (e.g. 250k); auto leaves the default',
+          },
+        ],
+      }),
       verb('stop', { summary: 'stop ferrets in bulk, selected by lineage or pack' }),
       verb('stop orphan <session>', { summary: 'stop one ferret and leave its helpers running' }),
       verb('stop cascade <session>', { summary: 'stop a ferret and every transitive helper' }),

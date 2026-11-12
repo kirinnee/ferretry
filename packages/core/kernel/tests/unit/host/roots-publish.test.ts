@@ -774,3 +774,98 @@ describe('RootHandle.syncDirectory at the open', () => {
       await root.syncDirectory(at(root, 'd'));
     });
 });
+
+/**
+ * The create is EXCLUSIVE and never follows a link (`O_CREAT | O_EXCL | O_NOFOLLOW`), and each claim is proved by a
+ * name planted where the create would land: a stranger's file (a create without `O_EXCL` overwrites it), and a link
+ * (a create without BOTH flags writes through it to the file it points at, or makes the file it points at). The
+ * create REFUSES, it does not look for another name, and what it found is left exactly as it was.
+ * `O_NOFOLLOW` alone is not separable from `O_EXCL` for a create: `O_CREAT | O_EXCL` already refuses any existing name,
+ * a link included (POSIX open(2)), so the link cases fail only when both flags are gone.
+ */
+describe('a create that finds something at its name', () => {
+  test('publish refuses a stranger file at the temp name and leaves it, and the name, alone', async () => {
+    const { root, work } = await world();
+    await mkdir(`${work}/d`);
+    await writeFile(`${work}/d/.x.json.t1.tmp`, 'stranger');
+
+    expect(await refusalOf(async () => await root.publish(at(root, 'd/x.json'), encoder.encode('mine')))).not.toBe(
+      'resolved',
+    );
+
+    expect(await readFile(`${work}/d/.x.json.t1.tmp`, 'utf8')).toBe('stranger');
+    expect(await readdir(`${work}/d`)).toEqual(['.x.json.t1.tmp']);
+  });
+
+  test('publish never writes through a link planted at the temp name, live or dangling', async () => {
+    const { root, work, parent } = await world();
+    await mkdir(`${work}/d`);
+    await writeFile(`${parent}/outside.txt`, 'protected');
+    await symlink(`${parent}/outside.txt`, `${work}/d/.live.json.t1.tmp`);
+    // the temp names are numbered across calls: the first publish takes t1, the second t2
+    await symlink(`${parent}/never-made.txt`, `${work}/d/.dangling.json.t2.tmp`);
+
+    for (const name of ['live.json', 'dangling.json'])
+      expect(await refusalOf(async () => await root.publish(at(root, `d/${name}`), encoder.encode('mine')))).not.toBe(
+        'resolved',
+      );
+
+    expect(await readFile(`${parent}/outside.txt`, 'utf8')).toBe('protected');
+    expect(await readdir(parent)).not.toContain('never-made.txt');
+    expect((await lstat(`${work}/d/.live.json.t1.tmp`)).isSymbolicLink()).toBe(true);
+    expect((await lstat(`${work}/d/.dangling.json.t2.tmp`)).isSymbolicLink()).toBe(true);
+    expect((await readdir(`${work}/d`)).sort()).toEqual(['.dangling.json.t2.tmp', '.live.json.t1.tmp']);
+  });
+
+  test('an exclusive write refuses a file, a live link and a dangling link at the name, and changes nothing', async () => {
+    const { root, work, parent } = await world();
+    await writeFile(`${parent}/outside.txt`, 'protected');
+    await writeFile(`${work}/file.json`, 'standing');
+    await symlink(`${parent}/outside.txt`, `${work}/live.json`);
+    await symlink(`${parent}/never-made.txt`, `${work}/dangling.json`);
+
+    for (const name of ['file.json', 'live.json', 'dangling.json'])
+      expect(await refusalOf(async () => await root.writeText(at(root, name), 'mine', { exclusive: true }))).not.toBe(
+        'resolved',
+      );
+
+    expect(await readFile(`${work}/file.json`, 'utf8')).toBe('standing');
+    expect(await readFile(`${parent}/outside.txt`, 'utf8')).toBe('protected');
+    expect(await readdir(parent)).not.toContain('never-made.txt');
+    expect((await lstat(`${work}/live.json`)).isSymbolicLink()).toBe(true);
+    expect((await lstat(`${work}/dangling.json`)).isSymbolicLink()).toBe(true);
+  });
+
+  test('a replacing write refuses a stranger file or a link planted at its temp name and leaves both alone', async () => {
+    const { root, work, parent } = await world();
+    await writeFile(`${parent}/outside.txt`, 'protected');
+    await writeFile(`${work}/file.json`, 'standing');
+    await writeFile(`${work}/.file.json.t1.tmp`, 'stranger');
+    await writeFile(`${work}/link.json`, 'standing');
+    // the temp names are numbered across calls: the first write takes t1, the second t2
+    await symlink(`${parent}/outside.txt`, `${work}/.link.json.t2.tmp`);
+
+    for (const name of ['file.json', 'link.json'])
+      expect(await refusalOf(async () => await root.writeText(at(root, name), 'mine'))).not.toBe('resolved');
+
+    expect(await readFile(`${work}/.file.json.t1.tmp`, 'utf8')).toBe('stranger');
+    expect(await readFile(`${parent}/outside.txt`, 'utf8')).toBe('protected');
+    expect((await lstat(`${work}/.link.json.t2.tmp`)).isSymbolicLink()).toBe(true);
+    expect(await readFile(`${work}/file.json`, 'utf8')).toBe('standing');
+    expect(await readFile(`${work}/link.json`, 'utf8')).toBe('standing');
+  });
+
+  test('a replacing write never writes through a planted link: what it points at is untouched and never made', async () => {
+    const { root, work, parent } = await world();
+    await writeFile(`${parent}/outside.txt`, 'protected');
+    await symlink(`${parent}/outside.txt`, `${work}/live.json`);
+    await symlink(`${parent}/never-made.txt`, `${work}/dangling.json`);
+
+    // a live link is replaced by the new file, a dangling one is refused: either way nothing is followed
+    for (const name of ['live.json', 'dangling.json'])
+      await refusalOf(async () => await root.writeText(at(root, name), 'mine'));
+
+    expect(await readFile(`${parent}/outside.txt`, 'utf8')).toBe('protected');
+    expect(await readdir(parent)).not.toContain('never-made.txt');
+  });
+});

@@ -32,6 +32,11 @@ export interface LaunchSpec {
   readonly login?: string;
   readonly model?: string;
   readonly effort?: string;
+  /**
+   * This ferret's OWN compaction choice, in tokens or `auto` (its session config, else its start options). A
+   * `launch.parts` taker resolves it against the login's default and the model's window; ABSENT means the login's default.
+   */
+  readonly compactAt?: 'auto' | number;
   /** The work folder, fenced (`WorkFolders`). */
   readonly folder: FencedPath;
   /** The ferret's home under the harness's own `agent-homes` root: the harness's `homeFor` answer, unchanged. */
@@ -80,11 +85,43 @@ export type LaunchPart =
   | { readonly kind: 'shell'; readonly name: string; readonly env: Readonly<Record<string, string>> }
   | { readonly kind: 'instruction'; readonly id: string; readonly text: string }
   /** Names and `${secret:NAME}` references only; never a value. */
-  | { readonly kind: 'env'; readonly env: Readonly<Record<string, string>> };
+  | { readonly kind: 'env'; readonly env: Readonly<Record<string, string>> }
+  /**
+   * Literal environment a login PINS into the harness's own settings file (Claude: the `--settings` overlay), because a
+   * project's settings outrank the process environment but not that file (#1587). LITERALS ONLY, never a `${secret:NAME}`
+   * or another variable: the value goes into a private file in the ferret's home and never into an argv.
+   */
+  | { readonly kind: 'pin'; readonly env: Readonly<Record<string, string>> }
+  /**
+   * Where the harness squeezes its own conversation, in tokens (a login's `compactAt`, once it is a number: `auto` adds
+   * nothing). The Claude harness writes it into its private settings file as `autoCompactWindow`.
+   */
+  | { readonly kind: 'compact'; readonly at: number };
 
 /** What a `launch.parts` taker contributes: a source asked per launch (a contribute item is static; the parts are not). */
 export interface LaunchPartSource {
+  /**
+   * A launch cannot be judged safe without this source's answer (a login's pinned environment is one): when it throws,
+   * the launch is refused with nothing started, instead of the source being skipped. A source that is only an
+   * addition (lessons, a skill) leaves this off and is skipped when it fails.
+   */
+  readonly required?: boolean;
   parts(spec: Omit<LaunchSpec, 'parts'>): Promise<readonly LaunchPart[]>;
+}
+
+/**
+ * A launch refused with the sentence a person reads: thrown by a harness (its home's directory chain is unsafe) or by a
+ * required launch-part source. The message must be plain words: never a value read from a file, an environment or a
+ * secret. Any other failure on the launch path is refused with a generic sentence instead, because a port's error text
+ * can carry launch values.
+ */
+export class LaunchRefusal extends Error {
+  override readonly name: string = 'LaunchRefusal';
+}
+
+/** A required {@link LaunchPartSource} refusing the launch (see {@link LaunchRefusal}). */
+export class LaunchPartsRefusal extends LaunchRefusal {
+  override readonly name = 'LaunchPartsRefusal';
 }
 
 /**

@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { describe, expect, test } from 'bun:test';
 import type { RedactionScope } from '@ferretry/kernel/contract';
 import { type Duration, milliseconds, ok } from '@ferretry/std';
@@ -92,7 +93,7 @@ function fixture() {
   };
   const service = new FerretsService(registry, new FerretTokenDirectory(), ports);
   const live = async (status: string): Promise<RunnerHandle> => {
-    await service.resume(id);
+    await service.resume(id, undefined, { origin: PERSON_ORIGIN });
     const handle = (await service.handle(id)) as RunnerHandle;
     runner.screens.set(handle, { frame: 'f', working: false, atPrompt: true, permission: false, status });
     events.length = 0;
@@ -119,7 +120,9 @@ describe('F-0326 every stop keeps the last screen, masked, before the pane goes'
   test('F-0326 a pane a move replaces is kept before it is stopped', async () => {
     const f = fixture();
     await f.live('before the move');
-    expect((await f.service.resume(f.id, undefined, { replaceLiveTerminal: true })).ok).toBe(true);
+    expect((await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN, replaceLiveTerminal: true })).ok).toBe(
+      true,
+    );
     expect(f.events.slice(0, 3)).toEqual(['look', 'kept', 'stop:now']);
     expect(f.stored).toEqual(['before the move']);
   });

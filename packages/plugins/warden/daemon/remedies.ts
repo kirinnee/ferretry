@@ -1,9 +1,14 @@
 import type { AsksApi } from '@ferretry/core-asks/contract';
-import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
+import type { FerretId, FerretsApi, LaunchOrigin } from '@ferretry/core-ferrets/contract';
 import type { BrowsersApi, LeftoverBrowsersClosed } from '@ferretry/plugin-browsers/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import { hasOpenQuestion } from './fleet.ts';
-import { leftAloneUnproved, type WardenRemedyPort, type WardenResumeOutcome } from './lib/index.ts';
+import {
+  leftAloneUnproved,
+  WARDEN_SWEEP_ORIGIN,
+  type WardenRemedyPort,
+  type WardenResumeOutcome,
+} from './lib/index.ts';
 import { authorizeWardenResume, WardenResumeRefused } from './resume-guard.ts';
 
 /** What the remedies act through: Ferrets and Conversation, never around them; Asks to know a pending question. */
@@ -40,7 +45,7 @@ export const RESTART_STOP_REASON = 'restarted by the Warden: the process looked 
 export interface WardenRemedies {
   readonly remedies: WardenRemedyPort;
   /** An automatic resume (today's `resume` with actor `warden`): refused where today's `authorizeResume` refuses. */
-  readonly resume: (ferret: string, message?: string) => Promise<WardenResumeOutcome>;
+  readonly resume: (ferret: string, message: string | undefined, origin: LaunchOrigin) => Promise<WardenResumeOutcome>;
 }
 
 export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
@@ -83,11 +88,14 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
     ferret: string,
     message: string | undefined,
     what: string,
+    origin: LaunchOrigin,
   ): Promise<string | undefined> => {
     // Every resume the Warden makes is automated recovery, not a person asking: Ferrets records it as such, and the
     // turn it writes is from the Warden.
     let relaunched: boolean | undefined;
     const resumed = await ferrets.resume(ferret as FerretId, message, {
+      // Who asked for this resume is the caller's to say: Ferrets fences an agent's launch out of the state home.
+      origin,
       automatic: true,
       actor: 'warden',
       decided: disposition => {
@@ -120,21 +128,21 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
 
   const remedies: WardenRemedyPort = {
     nudge: async (ferret, message) => await act(ferret, 'nudge', async () => await say(ferret, message)),
-    resume: async (ferret, message) =>
+    resume: async (ferret, message, origin) =>
       await act(ferret, 'resume', async () => {
         await authorize(ferret);
-        await resumeOrThrow(ferret, message, 'resume');
+        await resumeOrThrow(ferret, message, 'resume', origin);
       }),
     // A restart replaces a process that only looks alive: stop it for real, then resume the conversation. Today this
     // was ONE resume that replaced the live pane under the automatic policy (`replaceLiveTerminal`); Ferrets has no
     // such resume (GAP(ferrets): `ResumeOptions` has no `replaceLiveTerminal`; a live pane is replaced only by a move, whose
     // in-flight gate a stuck process must not meet), so today's refusals are checked first, before the stop.
-    restart: async (ferret, message) =>
+    restart: async (ferret, message, origin) =>
       await act(ferret, 'restart', async () => {
         await authorize(ferret);
         await ferrets.stop(ferret as FerretId, 'now', RESTART_STOP_REASON);
         // Stopped just now, so the resume relaunches it and its turn carries the message (Ferrets says so).
-        await resumeOrThrow(ferret, message, 'restart');
+        await resumeOrThrow(ferret, message, 'restart', origin);
       }),
     stop: async (ferret, reason) =>
       await act(ferret, 'stop', async () => await ferrets.stop(ferret as FerretId, 'polite', reason)),
@@ -145,7 +153,7 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
     failover: async (ferret, agent) =>
       await act(ferret, 'failover', async () => {
         if (ferrets.move === undefined) throw new Error('Moving a ferret to another account is not available here.');
-        const moved = await ferrets.move(ferret as FerretId, agent, { movedBy: 'warden' });
+        const moved = await ferrets.move(ferret as FerretId, agent, { movedBy: 'warden', origin: WARDEN_SWEEP_ORIGIN });
         if (!moved.ok) throw new Error(`the move was refused: ${moved.error.reason}`);
       }),
     // Today's remedy, through Browsers: the pane's tree is read again at this moment (through Terminals), nothing is
@@ -176,7 +184,7 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
   return {
     remedies,
     // Total, as the auto-revive wants it: a refusal is `{ ok: false }`, never a throw.
-    resume: async (ferret, message) => {
+    resume: async (ferret, message, origin) => {
       // Fail closed: once Ferrets was asked to start the ferret, anything but its own refusal counts as a revive, so
       // the cooldown, `crash_repeat` and the breaker apply to it. Only the guard (before the call) or a refusal
       // Ferrets answered before it committed a relaunch leaves nothing started.
@@ -184,7 +192,7 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
       try {
         await authorize(ferret);
         asked = true;
-        const unsent = await resumeOrThrow(ferret, message, 'revive');
+        const unsent = await resumeOrThrow(ferret, message, 'revive', origin);
         return unsent === undefined ? { ok: true } : { ok: true, caveat: `It could not be told why: ${unsent}.` };
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);

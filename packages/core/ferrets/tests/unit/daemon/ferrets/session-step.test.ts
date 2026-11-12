@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { describe, expect, test } from 'bun:test';
 import { ok } from '@ferretry/std';
 import type { FerretRecord } from '../../../../contract/index.ts';
@@ -99,7 +100,7 @@ describe('a launch settles the ferret’s session folder and spawn stamp first',
   test('a start makes the folder private, then stamps, then asks the harness', async () => {
     const log: string[] = [];
     const f = fixture(recorder(log), [], log);
-    const started = await f.service.start({ folder: '/work', by: 'owner' });
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
     expect(started.ok).toBe(true);
     expect(log).toEqual(['prepare f1', 'stamp f1', 'prepareHome', 'runner.start']);
   });
@@ -107,7 +108,7 @@ describe('a launch settles the ferret’s session folder and spawn stamp first',
   test('a resume makes the folder private and carries the stamp, and stamps nothing new', async () => {
     const log: string[] = [];
     const f = fixture(recorder(log), [stopped('old')], log);
-    const resumed = await f.service.resume(ferretId('old'));
+    const resumed = await f.service.resume(ferretId('old'), undefined, { origin: PERSON_ORIGIN });
     expect(resumed.ok).toBe(true);
     expect(log.slice(0, 2)).toEqual(['prepare old', 'carry old']);
     expect(log.some(line => line.startsWith('stamp'))).toBe(false);
@@ -116,7 +117,7 @@ describe('a launch settles the ferret’s session folder and spawn stamp first',
   test('a start whose folder cannot be made private launches nothing and quotes nothing of the failure', async () => {
     const log: string[] = [];
     const f = fixture(recorder(log, 'prepare'), [], log);
-    const started = await f.service.start({ folder: '/work', by: 'owner' });
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
     expect(started.ok).toBe(false);
     if (!started.ok) {
       expect(started.error.reason).toContain('could not be made private');
@@ -129,7 +130,7 @@ describe('a launch settles the ferret’s session folder and spawn stamp first',
   test('a start whose stamp cannot be recorded is refused before anything is launched', async () => {
     const log: string[] = [];
     const f = fixture(recorder(log, 'stamp'), [], log);
-    const started = await f.service.start({ folder: '/work', by: 'owner' });
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
     expect(started.ok).toBe(false);
     if (!started.ok) expect(started.error.reason).not.toContain('FIXTURE_SECRET');
     expect(log).toEqual(['prepare f1', 'stamp f1']);
@@ -163,7 +164,7 @@ describe('a launch settles the ferret’s session folder and spawn stamp first',
         },
       };
       const f = fixture(session, [], log, { openingAttachments: attachments });
-      const started = await f.service.start(withFiles);
+      const started = await f.service.start(withFiles, PERSON_ORIGIN);
       expect(started.ok).toBe(false);
       if (!started.ok) {
         expect(started.error.reason).toBe("this ferret's attachments folder could not be named, so it was not started");
@@ -184,7 +185,7 @@ describe('a launch settles the ferret’s session folder and spawn stamp first',
         },
       };
       const f = fixture(session, [], log, { openingAttachments: attachments });
-      const started = await f.service.start(withFiles);
+      const started = await f.service.start(withFiles, PERSON_ORIGIN);
       expect(started.ok).toBe(false);
       if (!started.ok) {
         expect(started.error.reason).toBe("this ferret's attachments could not be written, so it was not started");
@@ -198,7 +199,7 @@ describe('a launch settles the ferret’s session folder and spawn stamp first',
   test('a resume whose stamp cannot be carried still resumes: the stamp on disk is left exactly as it was', async () => {
     const log: string[] = [];
     const f = fixture(recorder(log, 'carry'), [stopped('old')], log);
-    const resumed = await f.service.resume(ferretId('old'));
+    const resumed = await f.service.resume(ferretId('old'), undefined, { origin: PERSON_ORIGIN });
     expect(resumed.ok).toBe(true);
     expect(log).toContain('runner.start');
   });
@@ -218,8 +219,10 @@ describe('ci-lane-s F1 (row 55) a start the port admitted as outside the Warden�
     const requests: unknown[] = [];
     const f = fixture(stamping(requests));
 
-    expect((await f.service.start({ folder: '/work', by: 'owner' }, { notInWardenTree: true })).ok).toBe(true);
-    expect((await f.service.start({ folder: '/work', by: 'owner' })).ok).toBe(true);
+    expect((await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN, { notInWardenTree: true })).ok).toBe(
+      true,
+    );
+    expect((await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN)).ok).toBe(true);
 
     expect(requests).toEqual([
       { id: 'f1', requestedByHuman: true, notInWardenTree: true },
@@ -237,7 +240,7 @@ describe('ci-lane-s F1 (row 55) a start the port admitted as outside the Warden�
     };
     const f = fixture(session, [], log);
 
-    const started = await f.service.start({ folder: '/work', by: 'owner' }, { notInWardenTree: true });
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN, { notInWardenTree: true });
 
     expect(started.ok).toBe(false);
     if (!started.ok)

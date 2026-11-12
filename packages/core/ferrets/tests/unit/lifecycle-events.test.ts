@@ -13,6 +13,7 @@ import {
   type FerretState,
   Harnesses,
   Runners,
+  PERSON_ORIGIN,
 } from '../../contract/index.ts';
 import { FakeHarness, FakeRunner, ferretId, T0 } from '../../contract/testing/index.ts';
 import ferrets from '../../daemon/index.ts';
@@ -64,6 +65,7 @@ const planted = (id: string, state: FerretState): FerretRecord => ({
 
 async function host(records: readonly FerretRecord[] = [], runner = new FakeRunner()): Promise<TestHost> {
   const first = await testHost({
+    everyDirectory: true,
     plugins: [ferrets, harnessPlugin(new FakeHarness()), runnerPlugin(runner)],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
@@ -134,7 +136,9 @@ describe('every ferret lifecycle path publishes its state', () => {
     const runner = new FakeRunner();
     const h = await host([planted('lead', 'stopped')], runner);
     const before = changes(h, 'lead').length;
-    const attached = await h.provided(FerretsPort).attach(ferretId('lead'), runner.adoptable(ferretId('lead')));
+    const attached = await h
+      .provided(FerretsPort)
+      .attach(ferretId('lead'), runner.adoptable(ferretId('lead')), PERSON_ORIGIN);
     expect(attached.ok).toBe(true);
     expect(states(h, 'lead').slice(before)).toEqual(['working']);
     await h.stop();

@@ -4,7 +4,6 @@ import {
   type SessionState,
   SessionStateSchema,
 } from '../../../../../daemon/lib/protocol/session.ts';
-import type { CoreAccount } from '../../../../../daemon/lib/session/peers/core.ts';
 
 /** When every fixture session was created. */
 const CREATED = '2027-01-15T08:00:00.000Z';
@@ -42,25 +41,4 @@ export function launchConfig(overrides: Readonly<Record<string, unknown>> = {}):
 /** One session state, through the protocol schema. */
 export function launchState(overrides: Readonly<Record<string, unknown>> = {}): SessionState {
   return SessionStateSchema.parse({ id: 's1', status: 'running', turn: 1, lastActivityAt: CREATED, ...overrides });
-}
-
-/** A published Claude account serving two models. */
-export function launchAccount(overrides: Partial<CoreAccount> = {}): CoreAccount {
-  return {
-    id: '00000000-0000-4000-8000-000000000b07',
-    agent: 'claude-auto-boot',
-    kind: 'claude',
-    mode: 'auto',
-    wrapper: '/fleet/bin/claude-auto-boot',
-    home: '/fleet/homes/boot',
-    displayName: 'Boot',
-    defaultModel: 'claude-opus-5',
-    models: [
-      { id: 'claude-opus-5', available: true },
-      { id: 'claude-sonnet-5', available: true },
-    ],
-    available: true,
-    unavailableReason: null,
-    ...overrides,
-  } as CoreAccount;
 }

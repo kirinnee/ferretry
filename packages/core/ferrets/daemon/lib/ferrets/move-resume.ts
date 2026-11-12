@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { FerretId, FerretRecord, StartFailure } from '../../../contract/index.ts';
+import { type FerretId, type FerretRecord, LaunchOriginSchema, type StartFailure } from '../../../contract/index.ts';
 import type { Result } from '@ferretry/std';
 import { ResumeRefused } from '../session/resume/types.ts';
 import type { ResumeOutcome, ResumeRequest } from '../session/resume/service.ts';
@@ -7,7 +7,11 @@ import type { ResumeTarget, ServiceResumeOptions } from './service.ts';
 
 /** What the move's relaunch needs of Ferrets: its own resume, and the record to describe the outcome with. */
 interface ResumingService {
-  resume(ferret: FerretId, message?: string, options?: ServiceResumeOptions): Promise<Result<FerretId, StartFailure>>;
+  resume(
+    ferret: FerretId,
+    message: string | undefined,
+    options: ServiceResumeOptions,
+  ): Promise<Result<FerretId, StartFailure>>;
 }
 
 /** What a move restamps on the session's `config.json` that names where it relaunches (the moves module's own record). */
@@ -62,8 +66,15 @@ export function ferretsMoveResume(
   return {
     resume: async request => {
       const ferret = request.id as unknown as FerretId;
+      const stated = LaunchOriginSchema.safeParse(request.origin);
+      if (!stated.success)
+        throw new ResumeRefused('the move did not say who it is relaunching for, so nothing was launched');
+      const origin = stated.data;
       const replaceLiveTerminal = request.policy?.replaceLiveTerminal ?? false;
       const resumed = await service.resume(ferret, request.message, {
+        // Who the relaunch is FOR, carried from the route that admitted the move. A request with no origin (an unbound or
+        // hand-built caller) is refused before anything launches: the move never launches as nobody.
+        origin,
         automatic: request.policy?.automatic ?? false,
         replaceLiveTerminal,
         ...(replaceLiveTerminal ? { target: await targetOf(ferret) } : {}),

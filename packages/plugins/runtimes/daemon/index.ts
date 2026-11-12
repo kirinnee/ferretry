@@ -35,7 +35,9 @@ import {
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { fleetHomes } from './adapters/fleet-home-reader.ts';
-import { endedSeams, fileAssembly } from './host-assembly.ts';
+import { endedSeams, fileAssembly, launchFactsSource } from './host-assembly.ts';
+import { FolderClaudeSettingsFiles } from './adapters/folder-claude-settings-file.ts';
+import { LaunchGate, type RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import { FleetPublication } from './lib/service/publication.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
 import type { FleetCatalogService } from './lib/service/catalog-service.ts';
@@ -94,6 +96,11 @@ export interface RuntimesAssembly {
    * that fail. Absent: nothing to probe, which `fy doctor` says.
    */
   readonly probe?: () => void;
+  /**
+   * The published runtimes' launch facts (`lib/launch-gate.ts`): what a Claude start is checked against and what its
+   * login pins. Absent: a start of a runtime is refused rather than launched unchecked.
+   */
+  readonly launchFacts?: RuntimeLaunchFactsSource;
 }
 
 export type RuntimesAssembler = (ctx: DaemonContext<typeof manifest>) => RuntimesAssembly;
@@ -226,6 +233,7 @@ export const hostAssembly: RuntimesAssembler = ctx => {
       }),
     ),
     profileEtag: async profile => await assembled().profileEtag(profile),
+    launchFacts: launchFactsSource(ctx.kernel, publication),
     probe: () => {
       assembled();
     },
@@ -386,6 +394,22 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         launchFailed: failure => events.publish(RuntimesLaunchFailed, failure),
       });
 
+      // What the launch gate reads: the published runtimes. Absent facts refuse a start of a runtime (fail closed).
+      const launchFacts: RuntimeLaunchFactsSource = assembly.launchFacts ?? {
+        facts: async () => {
+          throw new Error('the published runtimes are not available on this daemon');
+        },
+      };
+
+      // ONE gate: its `start.decide` keeps the facts it checked and its `launch.parts` pins from exactly those.
+      const launchGate = new LaunchGate({
+        source: launchFacts,
+        folderSettings: new FolderClaudeSettingsFiles(
+          folder => ctx.kernel.roots.root('harness-home', { subfolder: folder }),
+          ctx.kernel.paths.home(),
+        ),
+      });
+
       return {
         routes: {
           ...fleetCatalogRoutes(assembly.catalog),
@@ -417,6 +441,8 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         },
         // Logins asks which runtimes use a login before it removes one (`logins.used-by`).
         hooks: {
+          // The login's literal environment, pinned into the harness's private settings file (#1587).
+          'launch.parts': () => [{ id: 'runtimes-login-pins', item: launchGate.parts }],
           'logins.used-by:runtimes': loginUsers(() => config.collection(runtimeItems)),
           // Whether an automatic resume may spend (W2-a): the switch, then the ferret's runtime, each a no when in doubt.
           'auto-resume.decide': autoResumeAnswer({
@@ -426,7 +452,11 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
               ),
             resolve: async id => await api.resolve(id),
           }),
+          // #1587: a Claude start, restart, revive, move or adoption whose folder's own settings would blank the runtime's
+          // login is refused before anything is written; with no facts to check against, a start of a runtime is refused.
+          'start.decide': launchGate.decide,
         },
+
         subscribers: {
           'ferrets.changed': async change => await ending.onChanged(change),
           // A login switched off or on, or its `until` moved: the expiry timer reads the logins again.

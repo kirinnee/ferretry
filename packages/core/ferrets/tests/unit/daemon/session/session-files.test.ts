@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { chmod, lstat, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -493,7 +494,7 @@ describe('unbuilt adapters: provenance', () => {
       asks: { open: async () => [] },
       session: subject.port,
     });
-    return { resumed: await service.resume(child.id), storage };
+    return { resumed: await service.resume(child.id, undefined, { origin: PERSON_ORIGIN }), storage };
   }
 
   test('unbuilt adapters: a resume takes label and parent from the session document, so a warden parent the registry does not name still shields the child', async () => {

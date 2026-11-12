@@ -4,6 +4,7 @@ import type { ActRunner, HoldDecision } from '@ferretry/kernel/contract';
 import { testActRunner, TestMintedIds } from '@ferretry/kernel/testing';
 import type {
   DeliveryOutcome,
+  FerretBirth,
   FerretRecord,
   FerretsApi,
   LimitsFile,
@@ -80,6 +81,8 @@ export interface AdditivesOptions {
   readonly state?: FerretRecord['state'];
   /** Seed no ferret at all (start tests). */
   readonly empty?: boolean;
+  /** Who first started the seeded ferret: a person by default; `'missing'` seeds a record that never said (an older one). */
+  readonly birth?: FerretBirth | 'missing';
   /** Bind a QUEUEING act runner (one serial queue per pane) and a runner that acts per write, as the real ones do. */
   readonly queueing?: { readonly held: Set<string>; readonly code?: 'held' | 'quarantined' | 'input_pending' };
   /** The ferret's session files, when a test binds them (unbound by default, as before). */
@@ -100,6 +103,7 @@ export function additivesFixture(options: AdditivesOptions = {}) {
     runner: 'tmux',
     folder: '/work',
     state: options.state ?? 'stopped',
+    ...(options.birth === 'missing' ? {} : { birth: options.birth ?? 'person' }),
     createdAt: T0,
     stateAt: T0,
   };

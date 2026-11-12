@@ -4,8 +4,10 @@ import { LoginPaused, LoginResumed, UsagePort } from '@ferretry/plugin-usage/con
 import {
   AutoResumeDecide,
   FerretsChanged,
+  LaunchParts,
   MOVE_ACCOUNT_SLOT,
   NEW_FERRET_ACCOUNT_SLOT,
+  StartDecide,
 } from '@ferretry/core-ferrets/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import {
@@ -266,7 +268,13 @@ export default definePlugin({
   // component provides Runtimes' read of it, so Runtimes reads no other plugin's config. Taking a hook is an edge from the
   // offerer, so Runtimes starts before each owner; Runtimes needs none of them, so there is no cycle.
   hooks: {
-    takes: [{ hook: LoginsUsedBy, key: 'runtimes' }, { hook: AutoResumeDecide }],
+    takes: [
+      { hook: LoginsUsedBy, key: 'runtimes' },
+      { hook: AutoResumeDecide },
+      // #1587: refuses a Claude start whose folder would blank the login, and pins the login's literal environment.
+      { hook: StartDecide },
+      { hook: LaunchParts },
+    ],
     offers: [
       { hook: ProfileMcpSource },
       { hook: ProfileSkillsSource },
@@ -282,7 +290,8 @@ export default definePlugin({
 
   permissions: {
     // `fleet`: the wrappers, one harness home per runtime, `manifest.json`, `ids.json` (writable, Runtimes alone).
-    // `harness-home`: the machine's own Claude Code and Codex homes, READ-ONLY, for the first-run scan.
+    // `harness-home`: the machine's own Claude Code and Codex homes, READ-ONLY, for the first-run scan; also, scoped to one folder at
+    // a time, the launch folder and its ancestors for the folder-settings check (`folder-claude-settings-file.ts`).
     roots: ['fleet', 'harness-home'],
     network: [],
     spawn: ['brew', 'apt-get', 'npm'],

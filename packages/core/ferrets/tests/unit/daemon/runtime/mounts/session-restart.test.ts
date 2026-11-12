@@ -1,11 +1,13 @@
 import { describe, it } from 'bun:test';
-import { ferretStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
+import { ferretActor } from '@ferretry/core-gate/contract';
+import { deviceStanding, ferretStanding, ownerStanding, wardenStanding } from '@ferretry/core-gate/contract/testing';
 import type { CallStanding } from '@ferretry/kernel/contract';
 import { FY_REQUEST_ID_HEADER } from '../../../../../daemon/lib/protocol/headers.ts';
 import {
   RestartCancelResultSchema,
   RestartResultSchema,
   RestartStatusSchema,
+  type LaunchOrigin,
   type RestartRequest,
 } from '../../../../../contract/index.ts';
 import should from 'should';
@@ -20,7 +22,9 @@ import { refusalOf } from '../../support/calls.ts';
 class FakeRestart implements SessionRestartSubsystem {
   readonly calls: Array<readonly [RestartRequest, string | undefined]> = [];
   readonly movers: Array<string | undefined> = [];
-  async restart(body: RestartRequest, requestId?: string, requestedBy?: string) {
+  readonly origins: LaunchOrigin[] = [];
+  async restart(body: RestartRequest, origin: LaunchOrigin, requestId?: string, requestedBy?: string) {
+    this.origins.push(origin);
     this.calls.push([body, requestId]);
     this.movers.push(requestedBy);
     return { restarted: [{ id: 'a' }], queued: [{ id: 'b', reason: 'mid-turn' as const }], skipped: [], failed: [] };
@@ -68,6 +72,25 @@ describe('the restart mount', () => {
     await dispatch(subsystem, 'POST', human, '{"scope":"all"}');
     await dispatch(subsystem, 'POST', ferretStanding(ferretId('s-7')), '{"scope":"all"}');
     should(subsystem.movers).eql(['owner', 'session:s-7']);
+  });
+
+  it('should carry the ORIGIN the credential decided, apart from the journal’s words', async () => {
+    const subsystem = new FakeRestart();
+    const adminForFerret: CallStanding = { ...ownerStanding(), actor: ferretActor(ferretId('s-9')) };
+    await dispatch(subsystem, 'POST', human, '{"scope":"all"}');
+    await dispatch(subsystem, 'POST', deviceStanding('phone'), '{"scope":"all"}');
+    await dispatch(subsystem, 'POST', ferretStanding(ferretId('s-7')), '{"scope":"all"}');
+    await dispatch(subsystem, 'POST', adminForFerret, '{"scope":"all"}');
+    await dispatch(subsystem, 'POST', wardenStanding(ferretId('w-1')), '{"scope":"all"}');
+    should(subsystem.origins).eql([
+      { kind: 'person' },
+      { kind: 'person' },
+      { kind: 'agent', ferret: 's-7' },
+      { kind: 'agent', ferret: 's-9' },
+      { kind: 'agent' },
+    ]);
+    // The Warden's token is journalled as the owner (no ferret behind it), yet it is an agent: the words are not authority.
+    should(subsystem.movers[4]).equal('owner');
   });
 
   it('should run without a request id', async () => {

@@ -9,9 +9,11 @@ import {
   type SessionHandoverRequest,
 } from '../../../../../contract/handover.ts';
 import should from 'should';
+import { z } from 'zod';
 import manifest from '../../../../../manifest.ts';
 import { HandoverError } from '../../../../../daemon/lib/moves/handover/types.ts';
 import {
+  publicHandoverReceipt,
   type SessionHandoverSubsystem,
   sessionHandoverRoutes,
 } from '../../../../../daemon/lib/runtime/mounts/session-handover.ts';
@@ -117,6 +119,7 @@ class FakeSessionHandover implements SessionHandoverSubsystem {
   constructor(
     private readonly refusals: Readonly<Record<string, HandoverError>> = {},
     private readonly phase: SessionHandoverReceipt['phase'] = 'requested',
+    private readonly decorate: (receipt: SessionHandoverReceipt) => SessionHandoverReceipt = receipt => receipt,
   ) {}
 
   async begin(sessionId: string, request: SessionHandoverRequest, requestId: string): Promise<SessionHandoverReceipt> {
@@ -145,7 +148,7 @@ class FakeSessionHandover implements SessionHandoverSubsystem {
   private answer(sessionId: string, phase?: SessionHandoverReceipt['phase']): SessionHandoverReceipt {
     const refusal = this.refusals[sessionId];
     if (refusal !== undefined) throw refusal;
-    return handoverReceipt(phase ?? this.phase);
+    return this.decorate(handoverReceipt(phase ?? this.phase));
   }
 }
 
@@ -258,7 +261,94 @@ function cancelRequest(sessionId: string, headers: Readonly<Record<string, strin
   };
 }
 
+/**
+ * The nested handover schemas as they stood BEFORE `modelSource` existed, copied here as fixtures: an
+ * older client parses a receipt with exactly these strict objects, so a key they do not name is a throw.
+ * They are deliberately not imported — the point is that the shipped schemas moved and these did not.
+ */
+const OldHarness = z.enum(['claude', 'codex']);
+const OldResolvedAccount = z.strictObject({
+  accountId: z.string().min(1),
+  agent: z.string().min(1),
+  harness: OldHarness,
+  model: z.string().min(1).nullable(),
+  effort: z.string().min(1).nullable(),
+  contextWindow: z.number().int().positive(),
+});
+const OldResolvedTarget = z.strictObject({
+  replacement: OldResolvedAccount,
+  coordinator: OldResolvedAccount.nullable(),
+});
+const OldTransferTarget = z.strictObject({
+  accountId: z.string().min(1),
+  agent: z.string().min(1),
+  harness: OldHarness,
+  model: z.string().min(1).nullable(),
+  effort: z.string().min(1).nullable(),
+  contextWindow: z.number().int().positive(),
+});
+
+/** A durable receipt that carries `modelSource` on the replacement, the coordinator and the plan target. */
+function withModelSource(receipt: SessionHandoverReceipt): SessionHandoverReceipt {
+  const modelSource = 'account-default' as const;
+  return SessionHandoverReceiptSchema.parse({
+    ...receipt,
+    resolvedTarget: {
+      replacement: { ...receipt.resolvedTarget.replacement, modelSource },
+      coordinator: receipt.resolvedTarget.coordinator && { ...receipt.resolvedTarget.coordinator, modelSource },
+    },
+    plan: { ...receipt.plan, target: { ...receipt.plan.target, modelSource } },
+  });
+}
+
 describe('the session handover mount', () => {
+  it('should answer every public receipt without modelSource, so an older strict client still parses it', async () => {
+    // Arrange: the durable receipt DOES carry the provenance, so the strip is the projection's doing.
+    const durable = withModelSource(handoverReceipt());
+    should(durable.plan.target.modelSource).equal('account-default');
+    should(durable.resolvedTarget.coordinator?.modelSource).equal('account-default');
+    const subject = dispatcher(new FakeSessionHandover({}, 'requested', withModelSource));
+    const routes = [
+      ['begin', 202, beginRequest('s1')],
+      ['read', 200, getRequest('s1')],
+      ['cancel', 202, cancelRequest('s1')],
+    ] as const;
+
+    for (const [route, status, call] of routes) {
+      // Act
+      const response = await subject.dispatch(call);
+
+      // Assert
+      should(response.status).equal(status);
+      const body = JSON.parse(response.body);
+      should(OldResolvedTarget.safeParse(body.resolvedTarget).success).equal(true, `${route}: old resolvedTarget`);
+      should(OldTransferTarget.safeParse(body.plan.target).success).equal(true, `${route}: old plan.target`);
+      should(JSON.stringify(body)).not.containEql('modelSource');
+      // The rest of the receipt is untouched, and the current schema still reads what it is served.
+      SessionHandoverReceiptSchema.parse({
+        ...body,
+        resolvedTarget: durable.resolvedTarget,
+        plan: durable.plan,
+      });
+    }
+  });
+
+  it('should keep modelSource on the durable receipt, because only the response is projected', () => {
+    // Arrange
+    const durable = withModelSource(handoverReceipt());
+
+    // Act
+    const served = publicHandoverReceipt(durable);
+
+    // Assert
+    should(durable.resolvedTarget.replacement.modelSource).equal('account-default');
+    should(durable.plan.target.modelSource).equal('account-default');
+    should(served.resolvedTarget.replacement).not.have.property('modelSource');
+    should(served.resolvedTarget.coordinator).not.have.property('modelSource');
+    should(served.plan.target).not.have.property('modelSource');
+    should(served.resolvedTarget.replacement.accountId).equal(durable.resolvedTarget.replacement.accountId);
+  });
+
   it('should begin a handover and answer 202 with the receipt at its first phase', async () => {
     // Arrange
     const subsystem = new FakeSessionHandover();

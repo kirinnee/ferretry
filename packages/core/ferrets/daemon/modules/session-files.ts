@@ -175,6 +175,14 @@ export class SessionFiles {
           return resolved.value;
         });
       },
+      // The ferret's own compaction choice (`config.json` `compactAt`): a damaged or absent document says none.
+      compactAt: async ferret => {
+        const document = await this.deps.storage.readConfig(parseSessionId(ferret)).catch(() => undefined);
+        const parsed = SessionConfigSchema.shape.compactAt.safeParse(
+          (document as { compactAt?: unknown } | undefined)?.compactAt,
+        );
+        return parsed.success ? parsed.data : undefined;
+      },
       // Claude Code's question hook records the question it asks here (`FY_QUESTION_FILE`, today's `questionAsked`):
       // inside the ferret's own folder on the sessions root, never in its work tree.
       questionFile: async ferret => {

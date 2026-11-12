@@ -65,6 +65,7 @@ function home(files: Readonly<Record<string, Entry>>, refused: readonly string[]
     setMode: () => Promise.reject(new Error('the fixture has no setMode')),
     rename: () => Promise.reject(new Error('the fixture has no rename')),
     unlink: () => Promise.reject(new Error('the fixture has no unlink')),
+    checkPrivateChain: () => Promise.reject(new Error('the fixture has no chain check')),
   };
 }
 

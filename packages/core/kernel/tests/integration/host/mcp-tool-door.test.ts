@@ -53,6 +53,7 @@ const runnerPlugin = (runner: FakeRunner) =>
 
 async function boot(): Promise<{ readonly host: TestHost; readonly id: string }> {
   const host = await testHost({
+    everyDirectory: true,
     plugins: [real('ferrets'), harnessPlugin(new FakeHarness()), runnerPlugin(new FakeRunner())],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },

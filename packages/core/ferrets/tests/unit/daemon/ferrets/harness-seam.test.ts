@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { describe, expect, test } from 'bun:test';
 import { targetRef } from '@ferretry/core-vault/contract';
 import type { HarnessDeliveryFailure, RunnerDeliveryFailure } from '../../../../contract/index.ts';
@@ -6,7 +7,7 @@ import { ActingRunner, additivesFixture, type AdditivesOptions } from './additiv
 
 async function running(options: AdditivesOptions = {}, mode?: 'auto' | 'interactive') {
   const f = additivesFixture(options);
-  await f.service.resume(f.id);
+  await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
   if (mode !== undefined) f.registry.put({ ...f.registry.get(f.id)!, mode });
   const handle = (await f.service.handle(f.id))!;
   const seam = (await f.service.harness(f.id))!;
@@ -171,7 +172,7 @@ describe('ruling #45 (b): a long queued message with nowhere to be written is re
         queued: async () => await Promise.reject(new Error('disk full')),
       },
     });
-    await f.service.resume(f.id);
+    await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
     const seam = (await f.service.harness(f.id))!;
     const answer = await seam.queue(`FIXTURE_MESSAGE ${'y'.repeat(1_500)}`, { sendId: 'send-1' });
     expect(answer).toEqual({ ok: false, error: { refused: 'plugin_unavailable' } });
