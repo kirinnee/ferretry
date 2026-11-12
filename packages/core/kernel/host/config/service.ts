@@ -1511,6 +1511,13 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     return [...found];
   };
 
+  /**
+   * The baseline when boot could not fingerprint the tree. No real fingerprint can equal it (the real ones are
+   * `claim:size:mtime:inode` lines), so the watcher's first read differs from it and reloads once: a file that could
+   * not be statted, or an edit made after boot, is then loaded rather than absorbed as the baseline.
+   */
+  const UNKNOWN_BOOT_FINGERPRINT = '\u0000unknown-boot-fingerprint';
+
   /** The tree as boot's first reload found it, taken before that reload read a file: the watcher's baseline. */
   let bootFingerprint: string | undefined;
 
@@ -1576,7 +1583,10 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     discard,
     reload: async () =>
       await serial(async () => {
-        bootFingerprint ??= await fingerprint();
+        // A tree that cannot be fingerprinted must not fail the reload: `load` reads each file on its own and keeps the
+        // last good version of one it cannot read. The failure is not logged (nothing here names file contents); the
+        // watcher reports its own fingerprint failures.
+        bootFingerprint ??= await fingerprint().catch(() => UNKNOWN_BOOT_FINGERPRINT);
         await load();
       }),
     onStateChange: listener => {
