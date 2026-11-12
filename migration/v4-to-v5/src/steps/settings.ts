@@ -510,7 +510,9 @@ async function planInstruction(plan: Plan, name: string, label: string, source: 
   });
   let text: string;
   try {
-    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    // `ignoreBOM: true` KEEPS an initial U+FEFF in the text (the default strips it). v4 read this document with
+    // `readFile(path, 'utf8')`, which keeps it, so the harness was handed it; dropping it here would change the document.
+    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
     refuse('it is not valid UTF-8 text');
     return;
