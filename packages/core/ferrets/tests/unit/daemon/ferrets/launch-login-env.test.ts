@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { err, ok } from '@ferretry/std';
-import type { LaunchPart } from '../../../../contract/index.ts';
+import { type LaunchPart, PERSON_ORIGIN } from '../../../../contract/index.ts';
 import {
   emptyChildEnvironment,
   FakeHarness,
@@ -80,7 +80,10 @@ describe('a ferret launch carries its login’s environment', () => {
       }),
     });
 
-    const started = await f.service.start({ folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' });
+    const started = await f.service.start(
+      { folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' },
+      PERSON_ORIGIN,
+    );
 
     expect(started.ok).toBe(true);
     expect(f.asked).toHaveLength(1);
@@ -92,7 +95,7 @@ describe('a ferret launch carries its login’s environment', () => {
   test('the spec carries the login env as its own field, and none of it is a launch part', async () => {
     const f = fixture({ loginEnv: env({ ANTHROPIC_BASE_URL: 'https://gateway.example.test' }) });
 
-    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' });
+    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' }, PERSON_ORIGIN);
 
     expect(f.harness.launched[0]?.loginEnv).toEqual({ ANTHROPIC_BASE_URL: 'https://gateway.example.test' });
     expect(f.harness.launched[0]?.parts).toEqual([]);
@@ -107,7 +110,7 @@ describe('a ferret launch carries its login’s environment', () => {
       ],
     });
 
-    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' });
+    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' }, PERSON_ORIGIN);
 
     expect(f.asked[0]?.FOO).toBe('login');
     expect(f.asked[0]?.GITHUB_TOKEN).toBe('${secret:GH_TOKEN}');
@@ -127,7 +130,7 @@ describe('a ferret launch carries its login’s environment', () => {
       }),
     });
 
-    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' });
+    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' }, PERSON_ORIGIN);
 
     const names = Object.keys(f.asked[0] ?? {});
     expect(names).not.toContain('HOME');
@@ -149,8 +152,8 @@ describe('a ferret launch carries its login’s environment', () => {
       },
     });
 
-    await f.service.start({ folder: '/work', harness: 'claude-code', by: 'owner' });
-    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'oauth', by: 'owner' });
+    await f.service.start({ folder: '/work', harness: 'claude-code', by: 'owner' }, PERSON_ORIGIN);
+    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'oauth', by: 'owner' }, PERSON_ORIGIN);
 
     expect(asks).toBe(1);
     expect(f.harness.launched[0]?.loginEnv).toBeUndefined();
@@ -161,7 +164,10 @@ describe('a ferret launch carries its login’s environment', () => {
   test('an unknown login fails closed with a sentence, before a token is issued or anything is launched', async () => {
     const f = fixture({ loginEnv: async login => err(`there is no login named ${login}`) });
 
-    const started = await f.service.start({ folder: '/work', harness: 'claude-code', login: 'ghost', by: 'owner' });
+    const started = await f.service.start(
+      { folder: '/work', harness: 'claude-code', login: 'ghost', by: 'owner' },
+      PERSON_ORIGIN,
+    );
 
     expect(started.ok).toBe(false);
     if (started.ok) return;
@@ -174,7 +180,10 @@ describe('a ferret launch carries its login’s environment', () => {
   test('a ${secret:X} the Vault does not know is the existing login_unavailable refusal', async () => {
     const f = fixture({ loginEnv: env({ ANTHROPIC_AUTH_TOKEN: '${secret:MISSING}' }), unknownSecrets: ['MISSING'] });
 
-    const started = await f.service.start({ folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' });
+    const started = await f.service.start(
+      { folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' },
+      PERSON_ORIGIN,
+    );
 
     expect(started.ok).toBe(false);
     if (started.ok) return;
@@ -191,7 +200,7 @@ describe('a ferret launch carries its login’s environment', () => {
       },
     });
 
-    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' });
+    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' }, PERSON_ORIGIN);
 
     expect(seen).toEqual(['claude-code']);
   });
@@ -203,7 +212,10 @@ describe('a ferret launch carries the environment Ferretry sets for its login’
   test('the store variable reaches the Vault by name and value, with the real HOME untouched', async () => {
     const f = fixture({ loginLaunchEnv: env({ [STORE]: '/fy/state/logins/credentials/work' }) });
 
-    const started = await f.service.start({ folder: '/work', harness: 'claude-code', login: 'work', by: 'owner' });
+    const started = await f.service.start(
+      { folder: '/work', harness: 'claude-code', login: 'work', by: 'owner' },
+      PERSON_ORIGIN,
+    );
 
     expect(started.ok).toBe(true);
     expect(f.asked[0]?.[STORE]).toBe('/fy/state/logins/credentials/work');
@@ -220,7 +232,7 @@ describe('a ferret launch carries the environment Ferretry sets for its login’
       ],
     });
 
-    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'work', by: 'owner' });
+    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'work', by: 'owner' }, PERSON_ORIGIN);
 
     expect(f.asked[0]?.[STORE]).toBe('/the/store');
   });
@@ -236,7 +248,7 @@ describe('a ferret launch carries the environment Ferretry sets for its login’
       }),
     });
 
-    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'work', by: 'owner' });
+    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'work', by: 'owner' }, PERSON_ORIGIN);
 
     const names = Object.keys(f.asked[0] ?? {});
     for (const reserved of ['HOME', 'CLAUDE_CONFIG_DIR', 'CODEX_HOME']) expect(names).not.toContain(reserved);
@@ -249,7 +261,10 @@ describe('a ferret launch carries the environment Ferretry sets for its login’
       loginLaunchEnv: async login => err(`the login ${login} is signed out, so the ferret was not started`),
     });
 
-    const started = await f.service.start({ folder: '/work', harness: 'claude-code', login: 'work', by: 'owner' });
+    const started = await f.service.start(
+      { folder: '/work', harness: 'claude-code', login: 'work', by: 'owner' },
+      PERSON_ORIGIN,
+    );
 
     expect(started.ok).toBe(false);
     if (started.ok) return;
@@ -268,7 +283,7 @@ describe('a ferret launch carries the environment Ferretry sets for its login’
       },
     });
 
-    await f.service.start({ folder: '/work', harness: 'claude-code', by: 'owner' });
+    await f.service.start({ folder: '/work', harness: 'claude-code', by: 'owner' }, PERSON_ORIGIN);
 
     expect(asks).toBe(0);
   });
