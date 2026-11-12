@@ -135,16 +135,20 @@ export function buildConnections(
     published.tunnel(url);
     ctx.kernel.events.publish(CarriersChanged, { kinds: published.current().map(c => c.kind) });
   };
-  /** Today's `browserOrigins(config)`: what a passkey may name and what a tunnel upgrade's `Origin` may be. */
-  const allowedOrigins = (): readonly string[] => {
-    const at = listening();
-    return browserOrigins({
+  /**
+   * Today's `browserOrigins(config)`: what a passkey may name and what a tunnel upgrade's `Origin` may be. It is read
+   * from the CONFIGURED `direct` block only, never from the listener the kernel bound: where the daemon listens is a
+   * fact for the advertisement and the reachability check, and must not widen who a browser may speak as.
+   */
+  const allowedOrigins = (): readonly string[] =>
+    browserOrigins({
       corsOrigins: bindings?.corsOrigins ?? [HOSTED_APP_ORIGIN],
-      host: at.host,
+      host: bindings?.host ?? config?.direct?.host ?? '127.0.0.1',
       ...(bindings?.publicUrl === undefined ? {} : { publicUrl: bindings.publicUrl }),
-      ...(at.port === undefined ? {} : { port: at.port }),
+      ...((bindings?.port ?? config?.direct?.port) === undefined
+        ? {}
+        : { port: (bindings?.port ?? config?.direct?.port) as number }),
     });
-  };
   const other =
     supplied ??
     (bindings === undefined

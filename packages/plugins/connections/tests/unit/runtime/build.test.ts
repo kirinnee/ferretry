@@ -646,7 +646,7 @@ describe('the advertisement follows the listener the kernel bound', () => {
     expect(advertised.advertisement).toEqual({ kind: 'local-only', url: 'http://127.0.0.1:7458' });
     expect(advertised.port).toBe(7458);
     expect(advertised.discoveredRelayUrl).toBe('wss://hosted.example/fy');
-    expect(advertised.allowedOrigins).toContain('http://127.0.0.1:7458');
+    expect(advertised.allowedOrigins).toEqual([HOSTED_APP_ORIGIN]);
     await host.stop();
   });
 
@@ -688,5 +688,39 @@ describe('the advertisement follows the listener the kernel bound', () => {
       refusal: 'wildcard-bind',
     });
     await host.stop();
+  });
+
+  describe('the browser-origin allowlist is the configuration, never the listener', () => {
+    const HOSTED = [HOSTED_APP_ORIGIN];
+    const origins = async (bound: { host: string; port: number } | undefined, config?: object) => {
+      const host = await via(() => bound, config);
+      const allowed = host.provided(ConnectionsPort).advertisement().allowedOrigins;
+      await host.stop();
+      return allowed;
+    };
+    test.each([
+      ['a loopback listener', { host: '127.0.0.1', port: 7458 }],
+      ['a wildcard listener', { host: '0.0.0.0', port: 7458 }],
+      ['a concrete listener', { host: '192.0.2.7', port: 7458 }],
+      ['an ephemeral port', { host: '127.0.0.1', port: 51234 }],
+    ])('with no direct block, %s adds nothing to the hosted origin', async (_name, bound) => {
+      expect(await origins(bound)).toEqual(HOSTED);
+    });
+    test.each([
+      ['loopback', { host: '127.0.0.1', port: 7458 }],
+      ['wildcard', { host: '0.0.0.0', port: 7458 }],
+      ['concrete', { host: '192.0.2.7', port: 7458 }],
+    ])('a direct block that matches the %s listener is unchanged', async (_name, bound) => {
+      expect(await origins(bound, { direct: { host: bound.host, port: bound.port } })).toEqual([
+        ...HOSTED,
+        `http://${bound.host}:${String(bound.port)}`,
+      ]);
+    });
+    test('a direct block that differs from the listener is what stays allowed, not the listener', async () => {
+      expect(await origins({ host: '127.0.0.1', port: 7458 }, { direct: { host: '192.0.2.7', port: 9999 } })).toEqual([
+        ...HOSTED,
+        'http://192.0.2.7:9999',
+      ]);
+    });
   });
 });

@@ -19,7 +19,7 @@ import { PairingCodeMintResponseSchema } from '../../../../contract/index.ts';
  *
  * Loopback only, fake values only. The hosted relay directory is never asked: the configuration names one relay
  * explicitly (a relay SOURCE on, so the box is "loopback + relay"), and an explicit relay is never discovered. The
- * rendezvous itself is therefore not reachable from here and nothing depends on it.
+ * rendezvous is a loopback port nothing listens on (`ws://127.0.0.1:9`), so no name is resolved and no packet leaves this machine; nothing depends on it.
  *
  * A PAIRING CODE IS A LIVE CREDENTIAL: nothing below prints one, a failure message never carries a response body, and
  * every code minted is cancelled (or superseded, then cancelled) before the daemon is stopped.
@@ -59,7 +59,8 @@ async function boot(options: {
       createdAt: new Date().toISOString(),
     }),
     // A relay source ON, named explicitly so no directory is asked. NO `direct` block: the port must come from the listener.
-    [join(home, 'config/connections.yaml')]: 'relay:\n  - url: wss://relay.invalid/fy\n    enabled: true\n',
+    [join(home, 'config/connections.yaml')]:
+      'relay:\n  - url: ws://127.0.0.1:9/fy\n    enabled: true\n    reconnectSeconds: 3600\n',
   };
   for (const [path, text] of Object.entries(files)) {
     await mkdir(join(path, '..'), { recursive: true });

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import { ADVERTISEMENT_REFUSALS, WILDCARD_BIND_HOST } from '../../../contract/index.ts';
+import { ADVERTISEMENT_REFUSALS } from '../../../contract/index.ts';
+import {
+  localOnlyNotice as appLocalOnlyNotice,
+  refusalNotice as appRefusalNotice,
+} from '../../../app/shell-pairing.ts';
 import {
   callDaemon,
   FyHttpError,
@@ -79,39 +83,54 @@ describe('readInvocation', () => {
 });
 
 describe('the remedy sentences', () => {
+  /** Every sentence an operator can be handed, for every reason and both local-only shapes. */
+  const everyRemedy = (): readonly string[] => [
+    ...ADVERTISEMENT_REFUSALS.map(reason => refusalNotice(reason).remedy),
+    localOnlyNotice('http://127.0.0.1:7431').remedy,
+    localOnlyNotice('http://127.0.0.1:7431', 'wss://relay.example').remedy,
+  ];
+
   it('P84 should have one remedy per reason, no two the same', () => {
     const remedies = ADVERTISEMENT_REFUSALS.map(reason => refusalNotice(reason).remedy);
     expect(new Set(remedies).size).toBe(ADVERTISEMENT_REFUSALS.length);
-    expect(localOnlyNotice('http://127.0.0.1:7431').remedy).toBe(
-      refusalNotice('loopback-bind').remedy.replace('http://192.168.1.10', 'http://192.168.1.10:7431'),
-    );
+    expect(localOnlyNotice('http://127.0.0.1:7431').remedy).toBe(refusalNotice('loopback-bind').remedy);
   });
 
-  it('P85 should bind every interface and set publicUrl for a local-only daemon, naming the exposure and keeping loopback', () => {
+  it('P85 should name the loopback listener with a discovered relay as the way to pair a phone, and invent no public address', () => {
     const { audience, remedy } = localOnlyNotice('http://127.0.0.1:7431');
     expect(audience).toContain('no QR is drawn');
-    expect(remedy).toContain(`"host" to "${WILDCARD_BIND_HOST}"`);
-    expect(remedy).toContain('accepts connections from other devices on your network');
-    expect(remedy).toContain('"publicUrl"');
-    expect(remedy).toContain('restart the daemon');
-    expect(remedy).toContain('keep reaching it on loopback');
+    expect(remedy).toContain('keep the daemon on a loopback listener and let it use a discovered relay');
+    expect(remedy).toContain('5.0 has no separate public-address setting yet');
+    expect(remedy).toContain('does not give another device a direct route');
+    // With a relay already discovered there is nothing to change.
+    expect(localOnlyNotice('http://127.0.0.1:7431', 'wss://relay.example').remedy).toContain('nothing to change');
   });
 
-  it('P86 should ask a wildcard bind for publicUrl alone, and a missing port for a start or a written port', () => {
+  it('P86 should ask a wildcard bind for a loopback listener and a missing port for a start or a written port', () => {
     const wildcard = refusalNotice('wildcard-bind').remedy;
-    expect(wildcard).toContain('"publicUrl"');
-    expect(wildcard).not.toContain(WILDCARD_BIND_HOST);
+    expect(wildcard).toContain('"fyd --host 127.0.0.1"');
+    expect(wildcard).toContain('a wildcard listener stays refused');
+    expect(wildcard).toContain('5.0 has no separate public-address setting yet');
     const noPort = refusalNotice('no-port').remedy;
-    expect(noPort).toContain('start the daemon so it binds a port');
+    expect(noPort).toContain('start the daemon so it binds a port ("--port" or FY_PORT chooses it)');
     expect(noPort).toContain('config/connections.yaml');
-    expect(noPort).not.toContain('daemon.json');
-    expect(noPort).not.toContain('bind entry');
     expect(noPort).toContain('write "port" under "direct"');
-    expect(noPort).toContain('"publicUrl" cannot supply an address nothing has bound');
+    expect(noPort).toContain('a new "direct" block also needs "host"');
+    expect(noPort).toContain('"direct" answers only while nothing is bound');
   });
 
-  it("P87 should carry this daemon's own port in the example, never the compiled-in default", () => {
-    expect(localOnlyNotice('http://127.0.0.1:51234').remedy).toContain('http://192.168.1.10:51234');
-    expect(localOnlyNotice('http://127.0.0.1:51234').remedy).not.toContain(':7431');
+  it('P87 should never send an operator to a v4 spelling or a setting 5.0 does not have', () => {
+    for (const remedy of everyRemedy()) {
+      for (const stale of ['publicUrl', 'daemon.json', 'carriers', 'bind entry', 'bind every interface', '0.0.0.0'])
+        expect(remedy).not.toContain(stale);
+    }
+  });
+
+  it('P88 should say the same sentences in the browser as at the terminal', () => {
+    for (const reason of ADVERTISEMENT_REFUSALS) expect(appRefusalNotice(reason)).toEqual(refusalNotice(reason));
+    for (const relay of [undefined, 'wss://relay.example'])
+      expect(appLocalOnlyNotice('http://127.0.0.1:7431', relay)).toEqual(
+        localOnlyNotice('http://127.0.0.1:7431', relay),
+      );
   });
 });
