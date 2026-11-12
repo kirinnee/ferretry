@@ -323,7 +323,7 @@ function missingResult(
   };
 }
 
-/** The one batch that says a file is not available (a `missingResult` always carries it from a state not yet missing). */
+/** The one batch that says a file is not available, for a read that has no cursor to move. */
 function missingBatch(parser: TranscriptParser, file: string): TranscriptBatch {
   return batchOf(
     parser,
@@ -920,11 +920,7 @@ export class BytesTranscriptSource implements TranscriptSource {
         [sourceIssue(this.parser, file, 'source-read-failed', 'transcript file metadata could not be read')],
       );
     }
-    if (info === undefined)
-      return (
-        missingResult(this.parser, file, unpositionedState({ initialized: false, availability: 'unknown' })).batch ??
-        missingBatch(this.parser, file)
-      );
+    if (info === undefined) return missingBatch(this.parser, file);
     if (!info.isFile) {
       return batchOf(
         this.parser,
@@ -981,7 +977,7 @@ export class BytesTranscriptSource implements TranscriptSource {
       );
     }
     if (afterInfo === undefined) {
-      return missingResult(this.parser, file, unpositionedState()).batch ?? missingBatch(this.parser, file);
+      return missingBatch(this.parser, file);
     }
     if (!afterInfo.isFile || afterInfo.identity !== info.identity || afterInfo.size < read.bytes.byteLength) {
       if (canRetryIdentityChange) {

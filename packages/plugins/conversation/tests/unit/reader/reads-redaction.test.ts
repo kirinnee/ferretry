@@ -164,3 +164,37 @@ describe('a log search cannot tell whether a secret appears (the probe of review
     expect(all.truncated).toBe(false);
   });
 });
+
+describe('every kind of event a log prints is masked before it is rendered', () => {
+  const event = (value: Record<string, unknown>): TranscriptEvent =>
+    ({ harness: 'claude', timestamp: INSTANT, ...value }) as unknown as TranscriptEvent;
+  const events: TranscriptEvent[] = [
+    event({
+      kind: 'attachment',
+      attachment: { kind: 'remote-control', url: `https://example.test/join?key=${SECRET}` },
+    }),
+    event({ kind: 'attachment', attachment: { kind: 'file', name: 'notes.txt', mediaType: 'text/plain' } }),
+    event({ kind: 'error', error: { message: `the call failed for ${SECRET}`, code: 'E_FAIL', recoverable: true } }),
+    event({ kind: 'settings', settings: { model: `model-${SECRET}`, reasoningEffort: 'high' } }),
+  ];
+  const reads = (redactor: TranscriptReadRedactor): TranscriptReadService =>
+    new TranscriptReadService(
+      { tail: async () => ({ kind: 'read', events }) },
+      { read: async () => ({ kind: 'unreadable' }) },
+      CODEC,
+      redactor,
+      { page: async () => ({ kind: 'unreadable' }) },
+      { search: async () => ({ kind: 'unreadable' }) },
+    );
+
+  test('a remote-control link, an error message and the settings carry no secret, and a file attachment is left as it is', async () => {
+    const text = await reads(masking()).logs('s1', undefined);
+
+    expect(text).not.toContain(SECRET);
+    expect(text).toContain('remote-control https://example.test/join?key=[redacted:TOKEN]');
+    expect(text).toContain('E_FAIL: the call failed for [redacted:TOKEN]');
+    expect(text).toContain('"model":"model-[redacted:TOKEN]"');
+    expect(text).toContain('attachment');
+    expect(text).toContain('file');
+  });
+});
