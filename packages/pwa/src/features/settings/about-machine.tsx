@@ -37,6 +37,7 @@ import {
   jobWords,
   keepRunningWords,
   refusalWords,
+  requiresMajorMigration,
   shouldPoll,
   updateHeadline,
   versionPairWords,
@@ -93,6 +94,7 @@ function UpdateAction({
   onUpdate,
 }: Pick<AboutMachinePanelProps, 'view' | 'busy' | 'restarting' | 'write' | 'onUpdate'>) {
   const plan = view.plan;
+  if (requiresMajorMigration(view)) return null;
   if (plan.kind === 'self') {
     if (!view.available) return null;
     const pending = view.job !== null && view.job.state !== 'finished';
@@ -175,7 +177,7 @@ function AboutMachinePanel({
           </h3>
           <p className="mb-0 mt-1 text-cell leading-base text-muted">{checkWords(view.check, now)}</p>
         </div>
-        {view.available ? <Badge tone="accent">Update available</Badge> : null}
+        {view.available && !requiresMajorMigration(view) ? <Badge tone="accent">Update available</Badge> : null}
       </div>
 
       <dl className="m-0 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-cell">

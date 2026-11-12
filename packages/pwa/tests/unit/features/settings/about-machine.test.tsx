@@ -100,6 +100,24 @@ const buttonNamed = (container: HTMLElement, name: string): HTMLButtonElement =>
   );
 
 describe('AboutMachineSurface', () => {
+  it('shows the migration line without an update button, badge or bypass steps for a newer major', async () => {
+    const check = updateView().check;
+    if (check.state !== 'ok') throw new Error('fixture needs a known release');
+    const container = await show(
+      new FakeMachine(
+        updateView({
+          current: '4.291.9',
+          available: true,
+          check: { ...check, latest: { ...check.latest, version: '5.0.0' } },
+        }),
+      ),
+    );
+    expect(container.textContent).toContain('5.0 is out: it needs the migration, not an update');
+    expect(container.querySelector('[data-about-update]')).toBeNull();
+    expect(container.querySelector('[data-about-steps]')).toBeNull();
+    expect(container.textContent).not.toContain('Update available');
+  });
+
   it('shows the machine, the app, the install method and the update', async () => {
     const container = await show(new FakeMachine(updateView()));
     const text = container.textContent ?? '';

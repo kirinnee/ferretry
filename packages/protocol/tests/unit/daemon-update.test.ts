@@ -361,6 +361,13 @@ describe('latest release', () => {
     should(isUpdateAvailable('4.28.0', undefined)).be.false();
   });
 
+  it('offers only updates within the installed major version', () => {
+    should(isUpdateAvailable('4.291.9', { ...latest, version: '5.0.0' })).be.false();
+    should(isUpdateAvailable('4.291.9', { ...latest, version: '5.0.0-rc.1' })).be.false();
+    should(isUpdateAvailable('4.291.9', { ...latest, version: '4.291.10' })).be.true();
+    should(isUpdateAvailable('4.291.9', { ...latest, version: '4.292.0' })).be.true();
+  });
+
   it('keeps the last good answer through a failed check', () => {
     should(knownLatestRelease({ state: 'never' })).be.undefined();
     should(knownLatestRelease(view.check)).deepEqual(latest);

@@ -12,7 +12,7 @@
 
 import { z } from 'zod';
 import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
-import { compareProtocolVersions, ProtocolVersionSchema } from './version-skew.ts';
+import { compareProtocolVersions, isNewerMajorVersion, ProtocolVersionSchema } from './version-skew.ts';
 
 /**
  * The GitHub account that publishes releases. The repository is the PRODUCT name, which callers pass
@@ -443,10 +443,10 @@ export function parseGitHubNewestTag(product: string, value: unknown): LatestRel
   return { version: newest, url: `https://github.com/${RELEASE_OWNER}/${product}/releases/tag/v${newest}` };
 }
 
-/** Whether `latest` is newer than `current`. Versions that do not parse are never "newer". */
+/** Whether a newer release is available within this major. New majors require migration. */
 export function isUpdateAvailable(current: string, latest: LatestRelease | undefined): boolean {
   if (latest === undefined) return false;
-  return compareProtocolVersions(latest.version, current) === 1;
+  return compareProtocolVersions(latest.version, current) === 1 && !isNewerMajorVersion(current, latest.version);
 }
 
 // ---------------------------------------------------------------------------------------------------

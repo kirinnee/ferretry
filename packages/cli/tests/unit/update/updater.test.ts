@@ -108,6 +108,61 @@ const BREW_REFRESH = 'brew-refresh:kirinnee/ferretry:https://github.com/kirinnee
 const RECOVERY =
   'To recover by hand run: brew update && brew upgrade --cask ferretry && fy daemon restart; if the tap is wedged: brew untap kirinnee/ferretry && brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry && brew reinstall --cask ferretry';
 
+describe('DaemonUpdater — major versions', () => {
+  for (const kind of ['homebrew', 'nix-profile', 'standalone']) {
+    for (const explicit of [false, true]) {
+      it(`refuses a newer major via ${kind}, ${explicit ? '--to' : 'latest'}, before changing anything`, async () => {
+        const latest = new FakeLatest({ kind: 'found', release: { version: '5.0.0', url: 'https://example.com/v5' } });
+        const h = harness(kind, { version: '4.291.9', latest });
+        await h.run({ yes: true, report: '/r.json', ...(explicit ? { to: '5.0.0' } : {}) });
+        should(h.report()).match({ from: '4.291.9', target: '5.0.0', outcome: 'failed' });
+        should(h.report().message).equal(
+          '5.0 is a new major version. A v4 machine moves to it only through the migration: https://github.com/kirinnee/ferretry/blob/main/docs/migration/v4-to-v5-prompt.md. Your daemon stays on 4.291.9. The migration uses --major to allow this move.',
+        );
+        should(h.host.trail).deepEqual([]);
+        should(h.prompt.asked).deepEqual([]);
+        should(h.out.exitCode).equal(1);
+      });
+    }
+  }
+
+  it('keeps patch updates within v4 working', async () => {
+    const h = harness('homebrew', { version: '4.291.9' });
+    h.packages.upgradeTo = '4.291.10';
+    await h.run({ yes: true, to: '4.291.10', report: '/r.json' });
+    should(h.report()).match({ from: '4.291.9', target: '4.291.10', outcome: 'succeeded' });
+    should(h.host.trail).deepEqual([BREW_REFRESH, 'brew:ferretry', 'restart']);
+  });
+
+  it('allows the migration to explicitly opt in with --major', async () => {
+    const h = harness('homebrew', { version: '4.291.9' });
+    h.packages.upgradeTo = '5.0.0';
+    await h.run({ yes: true, to: '5.0.0', major: true, report: '/r.json' });
+    should(h.report()).match({ from: '4.291.9', target: '5.0.0', outcome: 'succeeded' });
+    should(h.host.trail).deepEqual([BREW_REFRESH, 'brew:ferretry', 'restart']);
+  });
+
+  it('refuses a newer Nix tag even when the latest published release is still v4', async () => {
+    const latest = new FakeLatest(
+      { kind: 'found', release: { version: '4.291.10', url: 'https://example.com/v4' } },
+      { kind: 'found', release: { version: '5.0.0', url: 'https://example.com/v5' } },
+    );
+    const h = harness('nix-profile', { version: '4.291.9', latest });
+    await h.run();
+    should(h.report()).match({ target: '5.0.0', outcome: 'failed' });
+    should(h.host.trail).deepEqual([]);
+  });
+
+  it('reports a newer major as unavailable in --check without applying anything', async () => {
+    const h = harness('homebrew', { version: '4.291.9' });
+    await h.run({ check: true, to: '5.0.0', json: true });
+    should(JSON.parse(h.out.lines.at(-1)?.replace(/^ok: /u, '') ?? 'null')).match({ available: false });
+    await h.run({ check: true, to: '5.0.0' });
+    should(h.out.lines.at(-1)).containEql('5.0 is a new major version.');
+    should(h.host.trail).deepEqual([]);
+  });
+});
+
 describe('DaemonUpdater — Homebrew', () => {
   it('upgrades the cask, restarts, and proves the new version serves', async () => {
     const h = harness('homebrew');

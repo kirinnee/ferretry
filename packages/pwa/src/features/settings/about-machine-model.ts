@@ -11,6 +11,7 @@ import {
   type DaemonUpdateView,
   describeInstallMethod,
   INSTALL_METHOD_LABELS,
+  isNewerMajorVersion,
   knownLatestRelease,
   type LatestRelease,
   type UpdateCheck,
@@ -32,9 +33,17 @@ export function ageWords(at: string, now: number): string {
 /** The headline: is there something newer, and from what to what. */
 export function updateHeadline(view: DaemonUpdateView): string {
   const latest = knownLatestRelease(view.check);
+  if (requiresMajorMigration(view) && latest !== undefined)
+    return `${latest.version.split('.').slice(0, 2).join('.')} is out: it needs the migration, not an update`;
   if (view.available && latest !== undefined) return `Update available ${view.current} → ${latest.version}`;
   if (latest === undefined) return `Version ${view.current}`;
   return `Up to date — version ${view.current}`;
+}
+
+/** Also protects a newer app reading an older daemon that still offers a major as an update. */
+export function requiresMajorMigration(view: DaemonUpdateView): boolean {
+  const latest = knownLatestRelease(view.check);
+  return latest !== undefined && isNewerMajorVersion(view.current, latest.version);
 }
 
 /** How the machine was installed: the short label, then the detail that lets a person recognise it. */

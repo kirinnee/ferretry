@@ -91,6 +91,52 @@ as a switch, not as an update.
   `FY_UPDATE_CHECK=off` in the daemon's environment switches the check off — which is also how a
   suite that boots a real daemon stays off the network.
 
+## Major versions
+
+**v4.291.10 refuses an update to a newer major version.** This applies to the latest release and
+an explicit `fy daemon update --to 5.0.0`, including `--yes`. The refusal happens before a package
+manager, a binary swap or a restart runs, and leaves the daemon on its current version. v4 patch
+and minor updates continue as before. Install this guard **before** v5 is released: an older v4
+client has no such protection.
+
+v5 needs an explicit [v4 to v5 migration](https://github.com/kirinnee/ferretry/blob/main/docs/migration/v4-to-v5-prompt.md).
+It refuses an unmigrated v4 home, and Homebrew cannot automatically restore the previous cask if
+that new daemon will not start. The updater therefore **refuses**, rather than selecting an older
+v4 release: Homebrew and Nix install what their current source holds, regardless of `--to`.
+
+The migration can explicitly allow the move with `fy daemon update --major --yes --to 5.0.0`.
+`--major` only removes this version guard; consent, install-method checks and health checks still
+apply. Use it as part of the migration instructions, after preparing the home. The app never passes
+this override: a newer major has no update badge, button or automatic installation. Its About panel
+says “5.0 is out: it needs the migration, not an update”.
+
+**Package managers bypass this guard.** Plain `brew upgrade`, `brew upgrade --cask ferretry` and
+tools such as topgrade still move the unversioned cask to v5. So do `nix profile upgrade` (including
+`--all`), a home-manager/nix-darwin/NixOS flake-input update followed by a switch, `apt upgrade`,
+`dnf upgrade`, and re-running `install.sh`. None calls the guarded updater. Keep those sources pinned
+to v4 until migration is intended.
+
+### Homebrew: the way back to v4
+
+The **4.291.10 release** also generates and commits `Casks/ferretry@4.rb`, with that release's archive
+URLs and SHA-256 checksums. GoReleaser publishes this second cask only for version `4.291.10`; later
+v4 and all v5 releases leave the committed cask frozen. The `homebrew-cask` validation contract
+checks that release gate and, once the generated file exists, its exact v4 version.
+
+To replace an accidentally installed unversioned v5 cask with v4:
+
+```bash
+brew uninstall --cask ferretry
+brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry
+brew install --cask kirinnee/ferretry/ferretry@4
+fy daemon restart
+```
+
+The two casks install the same executable names, so remove the unversioned cask first. If migration
+already happened, restore the v4 home backup as the migration prompt explains before restarting v4.
+An unmigrated v4 home needs no conversion to run v4 again. The `@4` cask stays on 4.291.10;
+`brew upgrade` of the plain `ferretry` cask continues to follow the latest major.
+
 ## Applying an update
 
 `fy daemon update` is the one implementation. The app's **Update** button asks the daemon, which

@@ -3,6 +3,8 @@ import {
   compareProtocolVersions,
   describeInstallMethod,
   type InstallMethod,
+  isNewerMajorVersion,
+  isUpdateAvailable,
   type LatestRelease,
   ProtocolVersionSchema,
   planUpdate,
@@ -35,6 +37,8 @@ export interface DaemonUpdateOptions {
   readonly check?: boolean;
   /** The version to update to; the latest release when absent. */
   readonly to?: string;
+  /** Allow a newer major only as part of its migration. `--yes` does not imply this. */
+  readonly major?: boolean;
   /** Skip the "update now?" confirmation. */
   readonly yes?: boolean;
   /** Wait until no ferret is mid-turn. Without it the update goes ahead: ferrets keep running. */
@@ -189,7 +193,7 @@ export class DaemonUpdater {
     json: boolean,
   ): void {
     const release = 'release' in latest ? latest.release : undefined;
-    const available = release !== undefined && compareProtocolVersions(release.version, current) === 1;
+    const available = isUpdateAvailable(current, release);
     if (json) {
       this.deps.out.success(
         JSON.stringify(
@@ -210,6 +214,8 @@ export class DaemonUpdater {
     }
     const lines = [`${this.deps.daemonName} ${current}, installed via ${describeInstallMethod(method)}`];
     if (release === undefined) lines.push(`latest: unknown (${'failure' in latest ? latest.failure : ''})`);
+    else if (isNewerMajorVersion(current, release.version))
+      lines.push(this.#majorUpdateMessage(current, release.version));
     else if (available) lines.push(`update available: ${current} → ${release.version} (${release.url})`);
     else lines.push(`up to date (latest is ${release.version})`);
     lines.push(...renderPlan(plan, this.deps.clientName));
@@ -220,6 +226,9 @@ export class DaemonUpdater {
     intent: UpdateIntent,
     options: DaemonUpdateOptions,
   ): Promise<Omit<UpdateReport, 'from' | 'target' | 'finishedAt'>> {
+    if (options.major !== true && isNewerMajorVersion(intent.current, intent.target)) {
+      throw new DaemonUpdateRefusedError(this.#majorUpdateMessage(intent.current, intent.target));
+    }
     if (compareProtocolVersions(intent.target, intent.current) !== 1)
       return await this.#refreshDefinition(intent, options);
     if (intent.plan.kind === 'manual') {
@@ -241,6 +250,13 @@ export class DaemonUpdater {
     const applied = await this.#upgradeStepped(intent, options);
     if (applied.kind === 'failed') return { outcome: 'failed', message: applied.message };
     return await this.#prove(intent, applied);
+  }
+
+  #majorUpdateMessage(current: string, target: string): string {
+    const from = current.split('.')[0];
+    const to = target.split('.')[0];
+    const migration = `https://github.com/${RELEASE_OWNER}/${this.deps.product}/blob/main/docs/migration/v${from}-to-v${to}-prompt.md`;
+    return `${target.split('.').slice(0, 2).join('.')} is a new major version. A v${from} machine moves to it only through the migration: ${migration}. Your daemon stays on ${current}. The migration uses --major to allow this move.`;
   }
 
   async #consentToSwitch(explanation: string, options: DaemonUpdateOptions): Promise<boolean> {

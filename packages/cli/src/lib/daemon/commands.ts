@@ -86,6 +86,7 @@ export function registerDaemonCommands(
     .description('update the daemon the way this host installed it, restart it, and roll back if it does not come up')
     .option('--check', 'only report the install method, the latest release and what updating takes')
     .option('--to <version>', 'update to this version rather than the latest release')
+    .option('--major', 'allow a newer major version as part of its migration; --yes alone never allows it')
     .option('-y, --yes', 'skip the confirmation; required when not on a terminal')
     .option('--when-idle', 'wait until no ferret is mid-turn before restarting; without it, ferrets keep running')
     .option(
