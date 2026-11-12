@@ -23,6 +23,11 @@
  * - an `any`/`unknown` receiver reading the operation by name, and — FAIL CLOSED — an `any` receiver with a non-literal key
  *   when a handle was put into it (`const h: any = fleet`, or a parameter typed `any` that a call passes a handle for).
  *
+ * The same is asked of `FleetDisk` (Runtimes' `fleet-disk.ts`), by TYPE: its link-capable members (every member that reaches a
+ * `RootHandle` link operation, directly or through another member or helper of the module, `./fleet-link-disk.ts`) are link
+ * operations exactly like the handle's, reported as `FleetDisk.<member>`. A `Pick<AdapterHost, 'disk'>`, `host.disk.linkTo`, a
+ * wrapper, an alias and a destructuring are the same value to the checker, so they are all seen.
+ *
  * NOT caught (declared): reflection (`Reflect.get`, `Object.entries`, `Object.getOwnPropertyDescriptor`) — a name that is
  * never a typed key — and a handle that reaches an `any` some other way (a property, a return, a container) and is then
  * indexed by a key that is not an operation's name.
@@ -36,6 +41,7 @@ import {
   type SourceFile,
   SyntaxKind,
 } from 'typescript/unstable/ast';
+import { linkCapableMembers } from './fleet-link-disk.ts';
 import { type ProductionProgram } from './fleet-link-program.ts';
 
 export const LINK_OPERATIONS: ReadonlySet<string> = new Set(['linkTo', 'copyTree']);
@@ -44,14 +50,23 @@ export const UNRESOLVED_OPERATION = 'computed-key-on-RootHandle';
 
 const KERNEL_PORTS = '/packages/core/kernel/contract/ports.ts';
 const ROOT_HANDLE = 'RootHandle';
+/** The second authority module and its class: the disk Runtimes' provisioner links through. */
+export const FLEET_DISK_MODULE = '/packages/plugins/runtimes/daemon/adapters/fleet-disk.ts';
+export const FLEET_DISK_CLASS = 'FleetDisk';
 
-/** What the checker knows about the kernel `RootHandle`: its type and where its two operations are declared. */
+/** What the checker knows about one link authority (the kernel `RootHandle`, Runtimes' `FleetDisk`): its type and its operations. */
 export interface HandleFacts {
   readonly project: Project;
   readonly handle: Type;
   /** `path#index` of each declaration of each operation on the interface. */
   readonly declarations: ReadonlyMap<string, ReadonlySet<string>>;
   readonly operationTypes: ReadonlyMap<string, Type>;
+  /** The operation names. */
+  readonly operations: ReadonlySet<string>;
+  /** What a reach is reported as: `linkTo` for the handle, `FleetDisk.linkTo` for the disk. */
+  readonly prefix: string;
+  /** What a computed key that cannot be narrowed is reported as. */
+  readonly unresolved: string;
 }
 
 /** The constituents of a union or intersection type. */
@@ -86,7 +101,71 @@ export async function handleFactsOf(project: Project): Promise<HandleFacts | und
     const type = await project.checker.getTypeOfSymbol(member);
     if (type !== undefined) operationTypes.set(operation, type);
   }
-  return { project, handle, declarations, operationTypes };
+  return {
+    project,
+    handle,
+    declarations,
+    operationTypes,
+    operations: LINK_OPERATIONS,
+    prefix: '',
+    unresolved: UNRESOLVED_OPERATION,
+  };
+}
+
+/** The disk's facts, with `operations` its link-capable members. */
+async function diskFactsOf(
+  project: Project,
+  files: readonly string[],
+  root: HandleFacts,
+  rootOracle: HandleOracle,
+): Promise<HandleFacts | undefined> {
+  const file = files.find(name => name.replaceAll('\\', '/').endsWith(FLEET_DISK_MODULE));
+  const sf = file === undefined ? undefined : await project.program.getSourceFile(file);
+  if (file === undefined || sf === undefined) return undefined;
+  const reads: Node[] = [];
+  for (const candidate of candidatesIn(sf, file, LINK_OPERATIONS))
+    if (candidate.named !== undefined && (await judgeOne(root, rootOracle, candidate)).length > 0)
+      reads.push(candidate.named.name);
+  const declaration = sf.statements.find(
+    statement =>
+      statement.kind === SyntaxKind.ClassDeclaration &&
+      textOf(asNode((statement as unknown as { name?: unknown }).name)) === FLEET_DISK_CLASS,
+  );
+  if (declaration === undefined) throw new Error(`${file} no longer declares the ${FLEET_DISK_CLASS} class`);
+  const operations = linkCapableMembers(sf, declaration, reads);
+  if (operations.size === 0)
+    throw new Error(`${FLEET_DISK_CLASS} has no member that reaches a link operation: this guard has nothing to guard`);
+  const symbol = await project.checker.getSymbolAtLocation(asNode((declaration as unknown as { name: unknown }).name));
+  if (symbol === undefined) throw new Error(`the checker has no symbol for ${FLEET_DISK_CLASS}`);
+  const type = await project.checker.getDeclaredTypeOfSymbol(symbol);
+  const declarations = new Map<string, Set<string>>();
+  const operationTypes = new Map<string, Type>();
+  for (const operation of operations) {
+    const member = await project.checker.getPropertyOfType(type, operation);
+    if (member === undefined) continue;
+    declarations.set(operation, new Set(member.declarations.map(d => `${d.path}#${d.index}`)));
+    const memberType = await project.checker.getTypeOfSymbol(member);
+    if (memberType !== undefined) operationTypes.set(operation, memberType);
+  }
+  return {
+    project,
+    handle: type,
+    declarations,
+    operationTypes,
+    operations,
+    prefix: `${FLEET_DISK_CLASS}.`,
+    unresolved: `computed-key-on-${FLEET_DISK_CLASS}`,
+  };
+}
+
+/** The link-capable members of the disk, for the pinned surface. */
+export async function diskOperationsOf(program: ProductionProgram): Promise<string[]> {
+  const root = program.projects[0];
+  if (root === undefined) return [];
+  const facts = await handleFactsOf(root.project);
+  if (facts === undefined) return [];
+  const disk = await diskFactsOf(root.project, root.files, facts, new HandleOracle(facts));
+  return [...(disk?.operations ?? [])].sort();
 }
 
 /** Answers "is this a handle?" for types, once per type. */
@@ -107,7 +186,7 @@ export class HandleOracle {
   }
 
   async #decide(type: Type, depth: number): Promise<boolean> {
-    const { project, handle, declarations, operationTypes } = this.#facts;
+    const { project, handle, declarations, operationTypes, operations } = this.#facts;
     if (type.id === handle.id) return true;
     if (
       depth > 8 ||
@@ -122,7 +201,7 @@ export class HandleOracle {
       const constraint = await project.checker.getBaseConstraintOfType(type);
       return constraint !== undefined && constraint.id !== type.id ? this.isHandle(constraint, depth + 1) : false;
     }
-    for (const operation of LINK_OPERATIONS) {
+    for (const operation of operations) {
       const member = await project.checker.getPropertyOfType(type, operation);
       if (member === undefined) continue;
       const own = declarations.get(operation);
@@ -203,7 +282,7 @@ function layersOf(expression: Node): Node[] {
 const isStringKey = (node: Node): boolean =>
   node.kind === SyntaxKind.StringLiteral || node.kind === SyntaxKind.NoSubstitutionTemplateLiteral;
 
-interface Candidate {
+export interface Candidate {
   readonly file: string;
   readonly line: number;
   /** A key spelled out as `linkTo`/`copyTree`. */
@@ -232,7 +311,7 @@ class Lines {
 }
 
 /** Every place in one source file where an operation is, or could be, named. */
-function candidatesIn(sf: SourceFile, file: string): Candidate[] {
+export function candidatesIn(sf: SourceFile, file: string, names: ReadonlySet<string>): Candidate[] {
   const lines = new Lines(sf.text);
   const out: Candidate[] = [];
   const lineOf = (node: Node): number => lines.at(node.getStart(sf));
@@ -254,20 +333,19 @@ function candidatesIn(sf: SourceFile, file: string): Candidate[] {
       const inner = (key as unknown as { expression: Node }).expression;
       if (isStringKey(inner)) {
         const text = textOf(inner);
-        if (text !== undefined && LINK_OPERATIONS.has(text)) named(node, text, inner, receivers, access);
+        if (text !== undefined && names.has(text)) named(node, text, inner, receivers, access);
       } else if (inner.kind !== SyntaxKind.NumericLiteral) computed(node, inner, receivers);
       return;
     }
     const text = textOf(key);
-    if (text !== undefined && LINK_OPERATIONS.has(text)) named(node, text, key, receivers, access);
+    if (text !== undefined && names.has(text)) named(node, text, key, receivers, access);
   };
   const walk = (node: Node): void => {
     switch (node.kind) {
       case SyntaxKind.PropertyAccessExpression: {
         const access = node as PropertyAccessExpression;
         const text = textOf(access.name);
-        if (text !== undefined && LINK_OPERATIONS.has(text))
-          named(node, text, access.name, layersOf(access.expression), node);
+        if (text !== undefined && names.has(text)) named(node, text, access.name, layersOf(access.expression), node);
         break;
       }
       case SyntaxKind.ElementAccessExpression: {
@@ -276,8 +354,7 @@ function candidatesIn(sf: SourceFile, file: string): Candidate[] {
         if (key.kind === SyntaxKind.NumericLiteral) break;
         if (isStringKey(key)) {
           const text = textOf(key);
-          if (text !== undefined && LINK_OPERATIONS.has(text))
-            named(node, text, key, layersOf(access.expression), node);
+          if (text !== undefined && names.has(text)) named(node, text, key, layersOf(access.expression), node);
         } else computed(node, key, layersOf(access.expression));
         break;
       }
@@ -326,12 +403,14 @@ export interface Reach {
 
 const isAnyLike = (type: Type): boolean => (type.flags & TypeFlags.AnyOrUnknown) !== 0;
 
-async function judge(
-  facts: HandleFacts | undefined,
-  oracle: HandleOracle | undefined,
-  candidate: Candidate,
-): Promise<string[]> {
-  if (facts === undefined || oracle === undefined) return [];
+/** One link authority and the oracle that recognises its values. */
+interface Authority {
+  readonly facts: HandleFacts;
+  readonly oracle: HandleOracle;
+}
+
+/** What one authority makes of one candidate: the operations (reported with the authority's prefix) it is a read of. */
+async function judgeOne(facts: HandleFacts, oracle: HandleOracle, candidate: Candidate): Promise<string[]> {
   const { project } = facts;
   const types = (await project.checker.getTypeAtLocation(candidate.receivers)).filter(
     (t): t is Type => t !== undefined,
@@ -341,10 +420,12 @@ async function judge(
   const loose = types.some(isAnyLike);
   if (candidate.named !== undefined) {
     const { operation, name, access } = candidate.named;
-    if (handle || loose) return [operation];
+    if (!facts.operations.has(operation)) return [];
+    const reported = `${facts.prefix}${operation}`;
+    if (handle || loose) return [reported];
     const member = await project.checker.getSymbolAtLocation(name);
     const own = facts.declarations.get(operation);
-    if (member?.declarations.some(d => own?.has(`${d.path}#${d.index}`))) return [operation];
+    if (member?.declarations.some(d => own?.has(`${d.path}#${d.index}`))) return [reported];
     if (access !== undefined) {
       const memberType = await project.checker.getTypeAtLocation(access);
       const wanted = facts.operationTypes.get(operation);
@@ -353,7 +434,7 @@ async function judge(
         wanted !== undefined &&
         (await project.checker.isTypeAssignableTo(memberType, wanted))
       )
-        return [operation];
+        return [reported];
     }
     return [];
   }
@@ -363,9 +444,16 @@ async function judge(
   if (!handle && !loose) return [];
   const keyType = await project.checker.getTypeAtLocation(candidate.key);
   const keys = keyType === undefined ? { names: [], unresolved: true } : await keyNamesOf(project, keyType);
-  const hit = keys.names.filter(name => LINK_OPERATIONS.has(name));
+  const hit = keys.names.filter(name => facts.operations.has(name)).map(name => `${facts.prefix}${name}`);
   if (!keys.unresolved) return hit;
-  return handle || laundered ? [...hit, UNRESOLVED_OPERATION] : hit;
+  return handle || laundered ? [...hit, facts.unresolved] : hit;
+}
+
+async function judge(authorities: readonly Authority[], candidate: Candidate): Promise<string[]> {
+  const out = new Set<string>();
+  for (const { facts, oracle } of authorities)
+    for (const operation of await judgeOne(facts, oracle, candidate)) out.add(operation);
+  return [...out];
 }
 
 /**
@@ -420,6 +508,13 @@ export async function reachesIn(program: ProductionProgram): Promise<Map<string,
         `the kernel contract (${KERNEL_PORTS}) is not part of the root TypeScript project: nothing to scan for`,
       );
     const oracle = facts === undefined ? undefined : new HandleOracle(facts);
+    const authorities: Authority[] = [];
+    if (facts !== undefined && oracle !== undefined) {
+      authorities.push({ facts, oracle });
+      const disk = await diskFactsOf(project, files, facts, oracle);
+      if (disk !== undefined) authorities.push({ facts: disk, oracle: new HandleOracle(disk) });
+    }
+    const names = new Set(authorities.flatMap(({ facts: each }) => [...each.operations]));
     let pending: Candidate[] = [];
     const flush = async (): Promise<void> => {
       const batch = pending;
@@ -427,7 +522,7 @@ export async function reachesIn(program: ProductionProgram): Promise<Map<string,
       // Types of every receiver in one round trip; the oracle answers repeated types from memory.
       await Promise.all(
         batch.map(async candidate => {
-          for (const operation of await judge(facts, oracle, candidate)) {
+          for (const operation of await judge(authorities, candidate)) {
             const rel = program.rel(candidate.file);
             found.set(rel, [...(found.get(rel) ?? []), `${rel}:${candidate.line} ${operation}`]);
           }
@@ -437,7 +532,7 @@ export async function reachesIn(program: ProductionProgram): Promise<Map<string,
     for (const file of files) {
       const sf = await project.program.getSourceFile(file);
       if (sf === undefined) continue;
-      pending.push(...candidatesIn(sf, file));
+      pending.push(...candidatesIn(sf, file, names));
       if (pending.length >= 250) await flush();
     }
     await flush();

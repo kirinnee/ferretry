@@ -12,13 +12,18 @@
  *
  * 1. no production module other than Runtimes' `fleet-disk.ts` reads `linkTo` or `copyTree` off a kernel `RootHandle`
  *    (read, aliased, destructured, spread, reached through a type alias, a dispatch table, a constant, a reassigned or
- *    shadowed key, or an unresolvable computed key — which fails closed). `file-provisioner.ts` is the second authority
- *    module but holds no such read: it links through `FleetDisk.linkTo`, so it is pinned by layer 2 and not allowed a read;
- * 2. the AUTHORITY SURFACE is pinned (`fleet-link-callers.snapshot.json`): the exports of both Runtimes authority
- *    modules, every module importing them (directly or through a re-export), every module that asks the kernel for a
- *    `fleet` / `harness-home` handle and every module that handle is passed to. A new export, importer, origin or
- *    receiver fails, naming &F3537, until a reviewer approves the snapshot change — this is what closes a helper exported
- *    from an allowed module and called from a new one, which no read-based scan can see;
+ *    shadowed key, or an unresolvable computed key — which fails closed); and no module other than `fleet-disk.ts` and
+ *    `file-provisioner.ts` reads a LINK-CAPABLE member of `FleetDisk` (`linkTo`, `copyInto`: every member that reaches the
+ *    handle's operations) off any value the checker types as `FleetDisk` — `host.disk.linkTo` through `Pick<AdapterHost,
+ *    'disk'>`, a wrapper, an alias, a destructuring;
+ * 2. the AUTHORITY SURFACE is pinned (`fleet-link-callers.snapshot.json`) — whole surfaces, not spellings: the exports of
+ *    both Runtimes authority modules, every module importing them (directly or through a re-export), the disk's link-capable
+ *    members and every module that holds a value typed `FleetDisk`, every module that asks the kernel for a `fleet` /
+ *    `harness-home` handle (`RootsPort.root`, found by what the call RESOLVES to, however it is spelled), every module that
+ *    handle is passed to, and the COMPLETE member list of `RootHandle` and of every implementation of it. Any change fails,
+ *    naming &F3537, until a reviewer approves the snapshot change (and, for a handle operation, decides its guard) — this is
+ *    what closes a helper exported from an allowed module and called from a new one, and a new handle operation, which no
+ *    read-based scan can see;
  * 3. the allowed module really does read (a stale allowance would hide a removal, and the after-merge move must delete it);
  * 4. `fleet` and `harness-home` are held by no plugin but Runtimes, by the kernel's ownership rule and by every manifest;
  * 5. the scanner itself catches each ordinary shape of a stray caller (isolated fixture workspaces, below) and ignores the
@@ -27,13 +32,16 @@
  * The scanner is `../lib/fleet-link-scan.ts`, the surface `../lib/fleet-link-authority.ts`; their docs say what they
  * do not follow (reflection, a handle put in a container).
  *
- * RUNTIME (measured 2026-11-12, Linux x64): one run opens the TypeScript 7 checker over ~4,300 production modules once
- * (~2 s), scans them (~9 s) and derives the surface (~9 s); each fixture workspace adds ~2-3 s (it type-checks the real
- * kernel contract). The timeouts below are those figures with a generous margin: a Bun test defaults to 5 s.
+ * RUNTIME (measured 2026-11-12, Linux x64): the whole file takes ~27 s (round 7: ~17 s). One run opens the TypeScript 7
+ * checker over ~4,300 production modules once (~2 s), scans them for both authorities (~10 s) and derives the surface
+ * (~15 s: origins by reference, the disk's holders, the handle's API); each fixture workspace adds ~2-3 s (it type-checks
+ * the real kernel contract; the three that change the contract hold their own copy of it). The timeouts below are those
+ * figures with a generous margin: a Bun test defaults to 5 s. A whole-tree identifier sweep was measured and rejected
+ * (~34 s, and the checker panics on some tuple types), which is why the disk's holders are found from references.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { mayHoldRoot } from '../../../packages/core/kernel/host/roots.ts';
@@ -51,16 +59,22 @@ const FLEET_DISK = 'packages/plugins/runtimes/daemon/adapters/fleet-disk.ts';
 const FILE_PROVISIONER = 'packages/plugins/runtimes/daemon/adapters/file-provisioner.ts';
 /** The ONLY module that may read a link operation off a `RootHandle`. Remove it at &F3537. */
 const RUNTIMES_PROVISIONING: ReadonlySet<string> = new Set([FLEET_DISK]);
+/** The modules that may call the disk's link-capable members: the disk itself and the provisioner that drives it. */
+const DISK_CALLERS: ReadonlySet<string> = new Set([FLEET_DISK, FILE_PROVISIONER]);
 /** The modules whose exported surface is pinned: the provisioning reads and the provisioner that drives them. */
 const AUTHORITY_MODULES: readonly string[] = [FLEET_DISK, FILE_PROVISIONER];
 
-/** Measured: ~20 s for the real tree, ~3 s per fixture workspace (see the file header). */
+/** Measured: ~25 s for the real tree, ~3 s per fixture workspace (see the file header). */
 const REAL_TREE_MS = 180_000;
 const FIXTURE_MS = 60_000;
 
+/** A `file:line operation` that is allowed: the RootHandle operations in the disk, the disk's own in the disk and the provisioner. */
+const allowedRead = (rel: string, place: string): boolean =>
+  place.split(' ').at(-1)?.startsWith('FleetDisk.') === true ? DISK_CALLERS.has(rel) : RUNTIMES_PROVISIONING.has(rel);
+
 /** Every `file:line operation` reached outside the allowed modules. */
 const strays = (found: ReadonlyMap<string, string[]>): string[] =>
-  [...found].filter(([rel]) => !RUNTIMES_PROVISIONING.has(rel)).flatMap(([, places]) => places);
+  [...found].flatMap(([rel, places]) => places.filter(place => !allowedRead(rel, place)));
 
 interface Scanned {
   readonly reaches: Map<string, string[]>;
@@ -92,12 +106,17 @@ describe('the fleet and harness-home link exception (declared; to be removed at 
     ).toEqual([]);
   });
 
-  test('the allowed module still makes the calls (a stale allowance is removed with the move)', () => {
+  test('the allowed modules still make the calls (a stale allowance is removed with the move)', () => {
     for (const allowed of RUNTIMES_PROVISIONING)
       expect(
         real.reaches.has(allowed),
         `${allowed} no longer reads linkTo or copyTree: delete it from RUNTIMES_PROVISIONING (${AFTER_MERGE_CARD})`,
       ).toBe(true);
+    const disk = (real.reaches.get(FILE_PROVISIONER) ?? []).map(place => place.split(' ').at(-1));
+    expect(
+      disk,
+      `${FILE_PROVISIONER} no longer reads a link-capable FleetDisk member: delete it from DISK_CALLERS (${AFTER_MERGE_CARD})`,
+    ).toEqual(expect.arrayContaining(['FleetDisk.linkTo', 'FleetDisk.copyInto']));
   });
 
   test('the authority surface is exactly the approved snapshot', async () => {
@@ -148,9 +167,20 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
   async function workspace(
     extra: Readonly<Record<string, string>> = {},
     replace: Readonly<Record<string, string>> = {},
+    ownContract: Readonly<Record<string, string>> | undefined = undefined,
   ): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), 'fleet-link-fixture-'));
     made.push(dir);
+    // A fixture that changes the kernel contract itself holds its own copy of it (`ownContract`: file → replacement text).
+    const contractDir = join('packages', 'core', 'kernel', 'contract');
+    if (ownContract !== undefined) {
+      await mkdir(join(dir, contractDir), { recursive: true });
+      for (const name of await readdir(join(ROOT, contractDir))) {
+        if (!name.endsWith('.ts')) continue;
+        const text = ownContract[name] ?? (await readFile(join(ROOT, contractDir, name), 'utf8'));
+        await writeFile(join(dir, contractDir, name), text);
+      }
+    }
     const files: Record<string, string> = {
       'package.json': JSON.stringify({ name: 'fixture', workspaces: ['packages/core/*', 'packages/plugins/*'] }),
       'tsconfig.json': JSON.stringify({
@@ -159,7 +189,11 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
           noUnusedLocals: false,
           noUnusedParameters: false,
           typeRoots: [join(ROOT, 'node_modules', '@types')],
-          paths: { '@ferretry/kernel/contract': [join(ROOT, 'packages/core/kernel/contract/index.ts')] },
+          paths: {
+            '@ferretry/kernel/contract': [
+              join(ownContract === undefined ? ROOT : dir, 'packages/core/kernel/contract/index.ts'),
+            ],
+          },
         },
         include: ['packages/**/*.ts'],
         exclude: [],
@@ -183,6 +217,12 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
     }
     return dir;
   }
+
+  /** The interface the real adapters reach the disk through (`adapters/ports.ts`: `AdapterHost.disk`). */
+  const PORTS = {
+    [`${ADAPTERS}/ports.ts`]: `import type { FleetDisk } from './fleet-disk.ts';\nexport interface AdapterHost {\n  readonly disk: FleetDisk;\n  readonly name: string;\n}\n`,
+  };
+  const DISK = `import type { FleetDisk } from './fleet-disk.ts';\nimport type { AdapterHost } from './ports.ts';\n`;
 
   /** The ordinary contract module an alias or a dispatch table would live in. */
   const HANDLES = {
@@ -343,6 +383,43 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
       code: `${TYPES}function pick(holder: any, name: string) {\n  return holder[name];\n}\nexport const run = (fleet: RootHandle, name: string) => pick(fleet, name);\n`,
       as: UNRESOLVED_OPERATION,
     },
+    // cc7 F1 (round 8): the disk is a link authority of its own, reached by its TYPE and not by what it is called.
+    {
+      name: 'a helper extracted through Pick<AdapterHost, "disk"> calling disk.link (cc7 F1)',
+      file: `${ADAPTERS}/repair-worker.ts`,
+      code: `${DISK}import type { FencedPath, RootLinkTarget } from '@ferretry/kernel/contract';\nexport async function repair(host: Pick<AdapterHost, 'disk'>, ${CALL}): Promise<void> {\n  await host.disk.link(at, target);\n}\n`,
+      as: 'FleetDisk.link',
+    },
+    {
+      name: 'a FleetDisk parameter calling copy',
+      file: `${ADAPTERS}/disk-helper.ts`,
+      code: `import type { FleetDisk } from './fleet-disk.ts';\nimport type { FencedPath } from '@ferretry/kernel/contract';\nexport const copyOut = (disk: FleetDisk, from: import('@ferretry/kernel/contract').RootHandle, at: FencedPath) => disk.copy(from, at);\n`,
+      as: 'FleetDisk.copy',
+    },
+    {
+      name: 'an alias of the disk operation, then called',
+      file: `${ADAPTERS}/disk-alias.ts`,
+      code: `${DISK}export const take = (host: AdapterHost) => {\n  const relink = host.disk.link;\n  return relink;\n};\n`,
+      as: 'FleetDisk.link',
+    },
+    {
+      name: 'a destructuring of the disk operation from an interface property',
+      file: `${ADAPTERS}/disk-destructure.ts`,
+      code: `${DISK}export const take = ({ disk }: AdapterHost) => {\n  const { link } = disk;\n  return link;\n};\n`,
+      as: 'FleetDisk.link',
+    },
+    {
+      name: 'an element access of the disk operation, literal and computed',
+      file: `${ADAPTERS}/disk-element.ts`,
+      code: `${DISK}export const take = (host: AdapterHost, key: string) => [host.disk['copy'], (host.disk as never as Record<string, unknown>)[key]];\n`,
+      as: 'FleetDisk.copy',
+    },
+    {
+      name: 'a class field holding the disk, read through this',
+      file: `${ADAPTERS}/disk-holder.ts`,
+      code: `import type { FleetDisk } from './fleet-disk.ts';\nexport class Holder {\n  constructor(private readonly disk: FleetDisk) {}\n  go(at: string) {\n    return this.disk.link(at as never, undefined as never);\n  }\n}\n`,
+      as: 'FleetDisk.link',
+    },
     {
       name: 'an any-typed receiver reading the operation by name',
       file: 'packages/plugins/other/daemon/any-literal.ts',
@@ -371,7 +448,7 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
 
   let reached: Map<string, string[]>;
   beforeAll(async () => {
-    const extra: Record<string, string> = { ...HANDLES, ...CONTROLS };
+    const extra: Record<string, string> = { ...HANDLES, ...PORTS, ...CONTROLS };
     for (const stray of STRAYS) extra[stray.file] = stray.code;
     const program = await openProductionProgram(await workspace(extra));
     try {
@@ -390,14 +467,15 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
   test('the authority module’s own reads are the only reads outside the strays, and the controls are not flagged', () => {
     const stray = new Set(STRAYS.map(entry => entry.file));
     const unexpected = [...reached]
-      .filter(([rel]) => !RUNTIMES_PROVISIONING.has(rel) && !stray.has(rel))
-      .flatMap(([, places]) => places);
+      .filter(([rel]) => !stray.has(rel))
+      .flatMap(([rel, places]) => places.filter(place => !allowedRead(rel, place)));
     expect(unexpected, 'ordinary code was reported as a link caller').toEqual([]);
     expect(reached.has(FLEET_DISK)).toBe(true);
   });
 
   describe('the authority surface (closes a helper exported from an allowed module and called elsewhere)', () => {
     const HANDLE_FLOW = {
+      ...PORTS,
       [`${ADAPTERS}/index.ts`]: `export * from './fleet-disk.ts';\n`,
       'packages/plugins/runtimes/daemon/wiring.ts': `import { FleetDisk } from './adapters/index.ts';\nexport const make = (fleet: import('@ferretry/kernel/contract').RootHandle) => new FleetDisk(fleet);\n`,
       'packages/plugins/runtimes/daemon/start.ts': `${TYPES}import { adopt } from './adopt.ts';\nexport const start = (roots: RootsPort) => {\n  const fleet = roots.root('fleet');\n  adopt(fleet);\n  return roots.root('work');\n};\n`,
@@ -409,8 +487,9 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
     const surfaceOf = async (
       extra: Record<string, string>,
       replace: Record<string, string> = {},
+      ownContract: Record<string, string> | undefined = undefined,
     ): Promise<AuthoritySurface> => {
-      const program = await openProductionProgram(await workspace({ ...HANDLE_FLOW, ...extra }, replace));
+      const program = await openProductionProgram(await workspace({ ...HANDLE_FLOW, ...extra }, replace, ownContract));
       try {
         return await authoritySurface(program, AUTHORITY_MODULES);
       } finally {
@@ -429,7 +508,11 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
         'FileFleetProvisioner.constructor',
         'FileFleetProvisioner: class',
       ]);
-      expect(baseline.importers).toEqual([`${ADAPTERS}/index.ts`, 'packages/plugins/runtimes/daemon/wiring.ts']);
+      expect(baseline.importers).toEqual([
+        `${ADAPTERS}/index.ts`,
+        `${ADAPTERS}/ports.ts`,
+        'packages/plugins/runtimes/daemon/wiring.ts',
+      ]);
       expect(baseline.handleOrigins).toEqual(['packages/plugins/runtimes/daemon/start.ts']);
       expect(baseline.handleReceivers).toEqual([
         'packages/plugins/runtimes/daemon/adopt.ts',
@@ -476,8 +559,10 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
         },
       );
       const changes = describeSurfaceChange(baseline, surface, AFTER_MERGE_CARD);
-      expect(changes).toHaveLength(1);
-      expect(changes[0]).toContain('gained the export FleetDisk.relink');
+      // The new method is a new export AND a new link-capable member of the disk (it reaches the handle's linkTo).
+      expect(changes).toHaveLength(2);
+      expect(changes.some(change => change.includes('gained the export FleetDisk.relink'))).toBe(true);
+      expect(changes.some(change => change.includes('FleetDisk gained the link-capable member relink'))).toBe(true);
     });
 
     test('a module importing an allowed module directly fails the pin', async () => {
@@ -504,6 +589,145 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
       );
       expect(text).toContain('holder.ts is a new module that receives the fleet or harness-home handle');
       expect(text).not.toContain('unrelated.ts');
+    });
+
+    // ─── round 8: pin whole surfaces, not spellings ─────────────────────────────────────────────────────────────
+    const changesOf = async (
+      extra: Record<string, string>,
+      replace: Record<string, string> = {},
+      ownContract: Record<string, string> | undefined = undefined,
+    ): Promise<string[]> =>
+      describeSurfaceChange(baseline, await surfaceOf(extra, replace, ownContract), AFTER_MERGE_CARD);
+
+    test('the baseline holds the disk where the fixture holds it', () => {
+      expect(baseline.diskHolders).toEqual([
+        FILE_PROVISIONER,
+        FLEET_DISK,
+        `${ADAPTERS}/ports.ts`,
+        'packages/plugins/runtimes/daemon/wiring.ts',
+      ]);
+      expect(baseline.handleApi.members).toContain('linkTo: method');
+      expect(baseline.handleApi.members).toContain('copyTree: method');
+    });
+
+    test('a helper extracted through Pick<AdapterHost, "disk"> is a new module that holds the disk (cc7 F1)', async () => {
+      const text = (
+        await changesOf({
+          [`${ADAPTERS}/repair-worker.ts`]: `${'import type { AdapterHost } from "./ports.ts";'}\nexport const repair = (host: Pick<AdapterHost, 'disk'>, ...args: Parameters<AdapterHost['disk']['link']>) => host.disk.link(...args);\n`,
+        })
+      ).join('\n');
+      expect(text).toContain('repair-worker.ts is a new module that holds a FleetDisk');
+      expect(text).toContain(AFTER_MERGE_CARD);
+    });
+
+    test('a module holding the disk only through an interface property, a return or a parameter is pinned', async () => {
+      const text = (
+        await changesOf({
+          [`${ADAPTERS}/by-return.ts`]: `import type { AdapterHost } from './ports.ts';\nexport const pick = (host: AdapterHost) => host.disk;\n`,
+          [`${ADAPTERS}/by-param.ts`]: `import type { FleetDisk } from './fleet-disk.ts';\nexport const take = (_disk: FleetDisk) => 1;\n`,
+          [`${ADAPTERS}/by-interface.ts`]: `import type { FleetDisk } from './fleet-disk.ts';\nexport interface Bag {\n  readonly store: FleetDisk;\n}\n`,
+        })
+      ).join('\n');
+      for (const file of ['by-return.ts', 'by-param.ts', 'by-interface.ts'])
+        expect(text, file).toContain(`${file} is a new module that holds a FleetDisk`);
+    });
+
+    // cc7 F2: a RootsPort.root call is found by what it RESOLVES to, not by how the callee is spelled.
+    const ORIGINS: Readonly<Record<string, string>> = {
+      'destructured-alias': `export const open = (roots: RootsPort) => {\n  const { root: openRoot } = roots;\n  return openRoot('fleet');\n};\n`,
+      'parameter-destructuring': `export const open = ({ root }: RootsPort) => root('harness-home');\n`,
+      'renamed-value': `export const open = (roots: RootsPort) => {\n  const take = roots.root;\n  return take('fleet');\n};\n`,
+      'element-access': `export const open = (roots: RootsPort) => roots['root']('fleet');\n`,
+      'computed-element-access': `export const open = (roots: RootsPort, key: string) => (roots as never as Record<string, Function>)[key]?.('fleet');\n`,
+      bind: `export const open = (roots: RootsPort) => roots.root.bind(roots)('fleet');\n`,
+      'call-apply': `export const open = (roots: RootsPort) => [roots.root.call(roots, 'fleet'), roots.root.apply(roots, ['fleet'])];\n`,
+      'passed-as-a-value': `const run = (make: RootsPort['root']) => make('fleet');\nexport const open = (roots: RootsPort) => run(roots.root);\n`,
+      'no-argument-spread': `export const open = (roots: RootsPort, ...args: Parameters<RootsPort['root']>) => roots.root(...args);\n`,
+      'optional-call': `export const open = (roots: RootsPort | undefined) => roots?.root('fleet');\n`,
+      'pick-of-the-port': `export const open = (roots: Pick<RootsPort, 'root'>) => roots.root('fleet');\n`,
+    };
+    for (const [name, code] of Object.entries(ORIGINS))
+      test(`a RootsPort.root origin written as ${name} is an origin (cc7 F2)`, async () => {
+        const file = `packages/plugins/other/daemon/origin-${name}.ts`;
+        const text = (await changesOf({ [file]: `${TYPES}${code}` })).join('\n');
+        expect(text).toContain(
+          `origin-${name}.ts is a new module that asks the kernel for a fleet or harness-home handle`,
+        );
+      });
+
+    test('an ordinary root name stays out of the pin however the call is written', async () => {
+      const changes = await changesOf({
+        'packages/plugins/other/daemon/work-roots.ts': `${TYPES}export const open = ({ root }: RootsPort, roots: RootsPort) => [root('work'), roots['root']('imports'), roots.root.bind(roots)('work')];\n`,
+      });
+      expect(changes.filter(change => change.includes('work-roots.ts') && change.includes('asks the kernel'))).toEqual(
+        [],
+      );
+    });
+
+    // cc7 F3: the handle's whole API is pinned, so a new operation needs a reviewer and a guard decision.
+    const ALIAS_CONTRACT = (ports: string): Record<string, string> => ({
+      'ports.ts': ports.replace(
+        'export interface RootHandle {',
+        'export interface RootHandle {\n  linkAlias?(at: FencedPath, target: RootLinkTarget): Promise<void>;',
+      ),
+    });
+    test('a new optional member on RootHandle fails the pin and says a reviewer decides its guard (cc7 F3)', async () => {
+      const ports = await readFile(join(ROOT, 'packages/core/kernel/contract/ports.ts'), 'utf8');
+      const own = await changesOf({}, {}, { 'ports.ts': ports });
+      expect(own, 'an unchanged copy of the contract is no change').toEqual([]);
+      const changes = await changesOf({}, {}, ALIAS_CONTRACT(ports));
+      const api = changes.filter(change => change.includes('linkAlias'));
+      expect(api.length).toBeGreaterThan(0);
+      for (const change of api) {
+        expect(change).toContain('RootHandle');
+        expect(change).toContain(AFTER_MERGE_CARD);
+        expect(change).toContain('reviewer must approve');
+        expect(change).toContain('decide its guard');
+      }
+    });
+
+    test('a removed or renamed member of RootHandle fails the pin', async () => {
+      const ports = await readFile(join(ROOT, 'packages/core/kernel/contract/ports.ts'), 'utf8');
+      const renamed = {
+        'ports.ts': ports.replace(
+          '  unlink(name: FencedPath): Promise<void>;',
+          '  unlinkName(name: FencedPath): Promise<void>;',
+        ),
+      };
+      const text = (await changesOf({}, {}, renamed)).join('\n');
+      expect(text).toContain('lost the member unlink');
+      expect(text).toContain('gained the member unlinkName');
+    });
+
+    test('an implementation of RootHandle with a member the interface does not declare fails the pin (cc7 F3)', async () => {
+      const file = 'packages/core/kernel/host/roots-twin.ts';
+      const text = (
+        await changesOf({
+          [file]: `${TYPES}export const twin = {\n  linkTo: async (_at: FencedPath, _target: RootLinkTarget) => undefined,\n  copyTree: async () => undefined,\n  linkAlias: async (_at: FencedPath, _target: RootLinkTarget) => undefined,\n} as unknown as RootHandle;\n`,
+        })
+      ).join('\n');
+      expect(text).toContain(`${file} is a new implementation of RootHandle`);
+      expect(text).toContain('decide its guard');
+    });
+
+    test('an implementation that spreads another handle and adds a member is pinned too', async () => {
+      const file = 'packages/core/kernel/host/roots-wrapper.ts';
+      const text = (
+        await changesOf({
+          [file]: `${TYPES}export const wrap = (inner: RootHandle): RootHandle => ({ ...inner, linkTo: async (at, target) => inner.linkTo(at, target) });\n`,
+        })
+      ).join('\n');
+      expect(text).toContain(`${file} is a new implementation of RootHandle`);
+    });
+
+    test('a class implementing RootHandle is an implementation', async () => {
+      const file = 'packages/core/kernel/host/roots-class.ts';
+      const text = (
+        await changesOf({
+          [file]: `${TYPES}export abstract class Twin implements Pick<RootHandle, 'linkTo'> {\n  abstract linkTo(at: FencedPath, target: RootLinkTarget): Promise<void>;\n  relink() {}\n}\n`,
+        })
+      ).join('\n');
+      expect(text).toContain(`${file} is a new implementation of RootHandle`);
     });
   });
 });

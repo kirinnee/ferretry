@@ -1510,22 +1510,34 @@ aliases or destructures `linkTo` or `copyTree` off a value the checker types as 
 union or intersection containing it, an interface extending it, a `Pick`/`Readonly`/spread/rest of it), whatever the key is
 spelled through: a constant, an imported dispatch table, a reassigned or shadowed key, a parameter typed `'linkTo'`. A key the
 checker cannot narrow to string literals, on a handle (or on an `any` a handle was put into), fails closed. A cast does not hide
-the handle (`(fleet as never as Record<string, Function>)[name]`). `file-provisioner.ts` is the second authority module but
-reads no operation (it links through `FleetDisk.linkTo`), so it holds no allowance; the test also fails if the allowed module
-stops reading (a stale allowance). **(2) The authority surface is pinned** in `scripts/gen/tests/fleet-link-callers.snapshot.json`:
-the exported names, kinds and class members of `fleet-disk.ts` and `file-provisioner.ts`; every module importing either, directly
-or through a re-export; every module that asks the kernel for a `fleet` / `harness-home` handle (`RootsPort.root(name)`, where a
-`name` the checker cannot narrow counts); and every module that handle is then passed to (variables, assignments, call arguments,
-returns, object-literal properties and class fields). A new export, importer, origin or receiver fails with a message naming
-&F3537 and saying a reviewer must approve the snapshot change (`FLEET_LINK_SNAPSHOT_UPDATE=1` rewrites it). That is what closes a helper exported from an allowed module,
-re-exported by a barrel and called by a new module — no read-based scan can see that. The test also fails if either root is
-ever held by a plugin other than Runtimes, so a future caller cannot slip in before the move. No directory is exempt: a new
-kernel module (a host helper, a worker-grants write handler) that calls `fleet.linkTo` fails like any other, and the kernel's own
-definitions pass because a definition is not a read. **Not caught (declared):** reflection (`Reflect.get`,
-`Object.entries`, `Object.getOwnPropertyDescriptor`), a handle reaching an `any` through a property, a return or a container and
-then indexed by a key that is not an operation's name, and a handle put in a container (`array.push`, `map.set`) which the
-receiver list does not follow (layer 1 still catches any read of it, wherever it ends up). It costs about 20 s of the quick test
-tier (it opens the type checker once and reads every production module). It is to be **removed by the after-merge move** (&F3537,
+the handle (`(fleet as never as Record<string, Function>)[name]`). **The disk is held to the same rule by TYPE**: every member of
+`FleetDisk` that reaches a `RootHandle` link operation, directly or through another member or helper of `fleet-disk.ts`
+(today `linkTo` and `copyInto`), is a link operation, and a read of one off any value the checker types as `FleetDisk` —
+`host.disk.linkTo` through `Pick<AdapterHost, 'disk'>`, a wrapper's parameter, an alias, a destructuring, an element access, a
+class field — fails outside `fleet-disk.ts` and `file-provisioner.ts`, the one module that drives it. The test also fails if
+either allowed module stops reading (a stale allowance). **(2) The authority surface is pinned** in
+`scripts/gen/tests/fleet-link-callers.snapshot.json` — whole surfaces, not spellings: the exported names, kinds and class members of
+`fleet-disk.ts` and `file-provisioner.ts`; every module importing either, directly or through a re-export; the link-capable
+members of `FleetDisk` and every module that holds a value the checker types as `FleetDisk` (declares a field, parameter,
+variable or return of that type, or reads one: found from the class's references and every identifier named like such a carrier,
+verified by type); every module that asks the kernel for a `fleet` / `harness-home` handle — a `RootsPort.root` call is found by
+what it **resolves** to, so a destructuring, a rename, an element access, `.bind`/`.call`, or passing `roots.root` as a value
+is followed to the calls it ends in, and a root name the checker cannot narrow counts as a fleet root; every module that handle is
+then passed to (variables, assignments, call arguments, returns, object-literal properties and class fields); and **the complete
+member list (name and kind) of the `RootHandle` interface and of every object literal or class that implements it**, so a new,
+removed or renamed handle operation — whatever it is called — fails with a message saying a reviewer must approve it **and decide
+its guard**, because no scan can infer link semantics from an unlisted name. Every change fails naming &F3537 and saying a
+reviewer must approve the snapshot change (`FLEET_LINK_SNAPSHOT_UPDATE=1` rewrites it). That is what closes a helper exported from
+an allowed module, re-exported by a barrel and called by a new module — no read-based scan can see that. The test also fails if
+either root is ever held by a plugin other than Runtimes, so a future caller cannot slip in before the move. No directory is exempt:
+a new kernel module (a host helper, a worker-grants write handler) that calls `fleet.linkTo` fails like any other, and the kernel's
+own definitions pass because a definition is not a read. **Not caught (declared):** reflection (`Reflect.get`,
+`Object.entries`, `Object.getOwnPropertyDescriptor`, any call that names the operation only as data), and a handle put into an
+`any` by a route the check does not follow (a property, a return, a container) then indexed by a key that is not a string literal
+— an `any` nothing demonstrably handed a handle to is ordinary JSON indexing and is deliberately left alone. A handle or a disk in
+a container is not followed by the receiver and holder lists, but layer 1 reads the TYPE at every use, so any link read of it is
+still caught wherever it ends up. It costs about 27 s of the quick test tier (it opens the type checker once, reads every
+production module and derives the surface; measured 2026-11-12, Linux x64). It is to be **removed by the after-merge move** (&F3537,
 "Dedicated credential link operation"): Runtimes onto a dedicated credential operation, the fleet store becoming a credential home,
 and ordinary asset links that land in a runtime credential home becoming copies. The ruling that scopes it, quoted exactly:
 
