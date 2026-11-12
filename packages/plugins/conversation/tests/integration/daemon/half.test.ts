@@ -142,20 +142,28 @@ describe('the merged half', () => {
       clock: fixedClock('2026-11-06T09:00:00Z'),
     });
 
-  test('the pending question reads as none, and a transcript says the harness is not connected yet', async () => {
+  test('the pending question reads as none, and a transcript says no transcript is proved yet', async () => {
     const host = await boot();
     const question = await host.request('GET', '/v1/ferrets/f1/question', { as: owner() });
     expect(question.status).toBe(200);
     expect(question.json()).toEqual({ question: null });
     const logs = await host.request('GET', '/v1/ferrets/f1/logs', { as: owner() });
-    expect(logs.status).toBe(503);
-    expect(logs.json()).toMatchObject({ code: 'conversation_harness_unavailable' });
+    expect(logs.status).toBe(409);
+    expect(logs.json()).toMatchObject({ code: 'no_transcript' });
   });
 
-  test('a render saved is served back, and a link listing says the harness is not connected yet', async () => {
+  test('a render saved is served back, and a link listing and its preview say plainly that they are not in 5.0 yet', async () => {
     const host = await boot();
     const links = await host.request('GET', '/v1/links/conversations', { as: owner() });
     expect(links.status).toBe(503);
+    // One fixed sentence, never a raw error: the app draws `error` as it is.
+    expect(links.json()).toMatchObject({
+      code: 'conversation_harness_unavailable',
+      error: expect.stringContaining('Not in 5.0 yet'),
+    });
+    const preview = await host.request('GET', '/v1/links/conversations/claude-code/abc/preview', { as: owner() });
+    expect(preview.status).toBe(503);
+    expect(preview.json()).toMatchObject({ error: (links.json() as { error: string }).error });
     const unknown = await host.request('GET', '/v1/renders/rd_000000000000000000000000/meta', { as: owner() });
     expect([400, 404]).toContain(unknown.status);
   });

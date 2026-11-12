@@ -125,6 +125,13 @@ export interface SendRecord {
   readonly path: SendPath;
   readonly message: string;
   readonly matchText?: string | undefined;
+  /**
+   * The earliest instant a transcript input may count as proof this send was delivered, with NO clock-skew slack. Written
+   * ONLY by a person's Retry of an update-unconfirmed send, at the moment that Retry was accepted, and moved by nothing
+   * else: an input from before it is the history that left the send unconfirmed. Absent for every other send, whose
+   * evidence window opens `matchSlackMs` before its acceptance. The daemon's own bookkeeping: it never leaves the daemon.
+   */
+  readonly evidenceNotBefore?: string | undefined;
   /** The turn this send STARTS, when it starts one. Absent for a native-queue ride. */
   readonly turn?: number | undefined;
   readonly attachmentIds?: readonly string[] | undefined;
@@ -198,6 +205,7 @@ export type SendSettlement = Partial<
   Pick<
     SendRecord,
     | 'fate'
+    | 'acceptedAt'
     | 'fateAt'
     | 'evidence'
     | 'unaccountedReason'
@@ -205,6 +213,7 @@ export type SendSettlement = Partial<
     | 'queueProof'
     | 'attempt'
     | 'attemptAt'
+    | 'evidenceNotBefore'
     | 'deadlineAt'
     | 'retryable'
     | 'typedNotSent'
@@ -311,6 +320,16 @@ export function isUnconfirmedTyping(record: Pick<SendRecord, 'fate' | 'unaccount
     record?.fate === 'unaccounted' &&
     (record.unaccountedReason === 'landing_unconfirmed' || record.unaccountedReason === 'typed_not_submitted')
   );
+}
+
+/**
+ * Whether the v4 → 5.0 conversion marked this send: its ledger claim could not be proved to name the transcript input
+ * 5.0 emits, so ANY input might be one an earlier send already used. The mark is a durable disposition, not a state the
+ * send path may move out of: only a person's own Retry (`SessionSendService.reattempt`, `by: 'person'`) clears it, as a
+ * fresh send. Every automatic act — the tracker's look, a daemon retype, the Warden's Enter — refuses such a row.
+ */
+export function isUpdateUnconfirmed(record: Pick<SendRecord, 'unaccountedReason'> | undefined): boolean {
+  return record?.unaccountedReason === 'update_unconfirmed';
 }
 
 /** One durable state change a send or an interrupt makes, named by the event it journals. */

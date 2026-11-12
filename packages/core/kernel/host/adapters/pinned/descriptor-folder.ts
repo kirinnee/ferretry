@@ -12,6 +12,8 @@ export interface HeldIdentity {
   readonly mtimeMs: number;
   readonly mtimeNs: bigint;
   readonly ctimeNs: bigint;
+  /** The creation time to the nanosecond, where the host knows it (Linux `statx`, macOS): it tells two files apart that were given one inode in turn. */
+  readonly birthNs?: bigint;
   readonly mode: number;
   readonly owner: number;
   readonly group: number;
@@ -73,6 +75,8 @@ export interface HeldFile {
   readAt(position: number, length: number): Promise<Uint8Array>;
   /** The file's size now (`fstat` of this descriptor). */
   size(): Promise<number>;
+  /** What this descriptor is now (`fstat`): its size, times and identity. */
+  stat(): Promise<HeldIdentity>;
   /** `fsync` of this descriptor. */
   sync(): Promise<void>;
   /** `fchmod` of this descriptor. */
@@ -283,6 +287,7 @@ async function openFileBelow(
       return buffer.subarray(0, count);
     },
     size: async () => Number((await fstatOf(fd)).size),
+    stat: async () => await identityOf(fd),
     sync: async () => await settle(done => fsync(fd, done)),
     chmod: async mode => await settle(done => fchmod(fd, mode, done)),
     close: closeOnce(fd),

@@ -303,6 +303,7 @@ describe('launchCommand', () => {
 });
 
 describe('transcript', () => {
+  const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
   const user = JSON.stringify({
     type: 'user',
     uuid: 'u1',
@@ -328,7 +329,7 @@ describe('transcript', () => {
   });
 
   it('reads conversation records and skips every other kind of line', () => {
-    const entries = parseEntries([user, '{"type":"summary"}', 'not json', assistant, '', tool].join('\n'));
+    const entries = parseEntries(bytes([user, '{"type":"summary"}', 'not json', assistant, '', tool].join('\n')));
     should(entries.map(entry => [entry.id, entry.role, entry.text])).eql([
       ['u1', 'user', 'hello'],
       ['a1', 'assistant', 'hi there'],
@@ -355,15 +356,31 @@ describe('transcript', () => {
         ...extra,
       });
 
-    it('should read a held and a released prompt as system entries named by their place, never as a message', () => {
-      const entries = parseEntries(
-        [user, queueOp('enqueue', 'FIXTURE held'), queueOp('remove', 'FIXTURE held')].join('\n'),
-      );
+    it('should read a held and a released prompt as system entries named by their byte offset, never as a message', () => {
+      const held = queueOp('enqueue', 'FIXTURE held');
+      const entries = parseEntries(bytes([user, held, queueOp('remove', 'FIXTURE held')].join('\n')));
+      const second = user.length + 1;
+      const third = second + held.length + 1;
       should(entries.map(entry => [entry.id, entry.role, entry.text, entry.data])).eql([
         ['u1', 'user', 'hello', undefined],
-        ['queue-operation:1', 'system', 'FIXTURE held', { proof: 'queue-operation', operation: 'enqueue' }],
-        ['queue-operation:2', 'system', 'FIXTURE held', { proof: 'queue-operation', operation: 'remove' }],
+        [`queue-operation:${second}`, 'system', 'FIXTURE held', { proof: 'queue-operation', operation: 'enqueue' }],
+        [`queue-operation:${third}`, 'system', 'FIXTURE held', { proof: 'queue-operation', operation: 'remove' }],
       ]);
+    });
+
+    it('should name a record without an id the same way whichever window reads it, whatever bytes precede the window', () => {
+      const drain = drained({ uuid: undefined });
+      // An invalid byte decodes to a 3-byte character: a count over decoded text would drift with where the window starts.
+      const file = Buffer.concat([
+        Buffer.from(`${user}\n`),
+        Buffer.from([0xff, 0xfe, 0xff, 0x0a]),
+        Buffer.from(`${queueOp('enqueue', 'FIXTURE held')}\n${drain}\n`),
+      ]);
+      const whole = parseEntries(file);
+      const from = user.length + 1 + 4;
+      const cut = parseEntries(file.subarray(from), from);
+      should(whole.slice(1).map(entry => entry.id)).eql(cut.map(entry => entry.id));
+      should(new Set(whole.map(entry => entry.id)).size).equal(3);
     });
 
     it('should skip a queue record it cannot use: another operation, no text, or no time', () => {

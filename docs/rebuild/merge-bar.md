@@ -24,22 +24,26 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
    v4 home on the preview.
 4. **The preview smoke list** (rules of !A469), each step pass or fail:
 
-   | #   | Step                                                        |
-   | --- | ----------------------------------------------------------- |
-   | 1   | pair a fresh browser (on the owner's screen)                |
-   | 2   | start, send, `--wait`, resume and stop a ferret             |
-   | 3   | a peer send                                                 |
-   | 4   | board card create, move and link                            |
-   | 5   | agenda ask and answer                                       |
-   | 6   | secrets set, used in a child, never readable                |
-   | 7   | a config edit that loosens is held, then the owner confirms |
-   | 8   | terminals open, type and close (own tmux socket)            |
-   | 9   | browsers open, navigate and close                           |
-   | 10  | catalogs install                                            |
-   | 11  | `fy check`                                                  |
-   | 12  | a daemon restart keeps the ferrets                          |
-   | 13  | answer a permission prompt and a dialog from the app        |
-   | 14  | the same on a Codex ferret (if the Codex sign-in lands)     |
+   | #   | Step                                                                        |
+   | --- | --------------------------------------------------------------------------- |
+   | 1   | pair a fresh browser (on the owner's screen)                                |
+   | 2   | start, send, `--wait`, resume and stop a ferret                             |
+   | 3   | a peer send                                                                 |
+   | 4   | board card create, move and link                                            |
+   | 5   | agenda ask and answer                                                       |
+   | 6   | secrets set, used in a child, never readable                                |
+   | 7   | a config edit that loosens is held, then the owner confirms                 |
+   | 8   | terminals open, type and close (own tmux socket)                            |
+   | 9   | browsers open, navigate and close                                           |
+   | 10  | catalogs install                                                            |
+   | 11  | `fy check`                                                                  |
+   | 12  | a daemon restart keeps the ferrets                                          |
+   | 13  | answer a permission prompt and a dialog from the app                        |
+   | 14  | the same on a Codex ferret (if the Codex sign-in lands)                     |
+   | 15  | the chat view of a running ferret: its tool calls, thinking and older pages |
+   | 16  | `/messages` of that ferret: rows, then a cursor to the end                  |
+   | 17  | log search inside that ferret finds a word and masks a secret               |
+   | 18  | a transcript image from that chat opens                                     |
 
 5. **CI green**, including the coverage ledgers, `fy check`, the nix build and the release guards.
 6. **No paid macOS run** (owner, !A480). The darwin smoke and the FFI descriptor verify line are after-merge items.

@@ -14,6 +14,7 @@ import {
   type SendVerdict,
 } from './tracking.ts';
 import {
+  isUpdateUnconfirmed,
   type SendHeldAt,
   type SendLedger,
   type SendNoticeOwed,
@@ -215,6 +216,10 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
    */
   private watches(record: SendRecord, now: number): boolean {
     if (record.held === true) return false;
+    // The v4 → 5.0 conversion could not prove which transcript input such a send's ledger claimed, so ANY input
+    // might be the one an earlier send already used: the transcript neither confirms it, nor expires and retypes it.
+    // Only a person's own Retry (which clears the reason) makes it a send the tracker watches again.
+    if (isUpdateUnconfirmed(record)) return false;
     if (isOpenSend(record)) return true;
     const age = now - Date.parse(record.acceptedAt);
     // Text of ours SEEN sitting in the composer stays watched past the hold ceiling (B144): a turn longer

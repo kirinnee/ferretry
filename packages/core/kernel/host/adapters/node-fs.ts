@@ -46,6 +46,8 @@ export interface FileIdentity {
   readonly mtimeNs: bigint;
   /** The status-change time to the nanosecond: it moves on every create, rename and remove in a folder, and cannot be set back. */
   readonly ctimeNs: bigint;
+  /** The creation time to the nanosecond, where the host knows it (`0n` is not a time): it tells two files apart that were given one inode in turn. */
+  readonly birthNs?: bigint;
   /** The permission bits. */
   readonly mode: number;
   readonly owner: number;
@@ -62,6 +64,8 @@ export interface OpenedFile {
    * descriptor.
    */
   readWindow(offset: number, length: number): Promise<{ readonly bytes: Uint8Array; readonly size: number }>;
+  /** What THIS descriptor is now (`fstat`): size and times, whatever the name reaches. */
+  stat(): Promise<FileIdentity>;
   /** `fsync` of THIS descriptor: what was read from it is on the disk, not only in the page cache. */
   sync(): Promise<void>;
   /** Sets this file's permission bits through the descriptor (`fchmod`), never by name (`RootHandle.setMode`). */
@@ -204,6 +208,7 @@ function fileIdentityOf(entry: BigIntStats): FileIdentity {
     mtimeMs: Number(entry.mtimeMs),
     mtimeNs: entry.mtimeNs,
     ctimeNs: entry.ctimeNs,
+    birthNs: entry.birthtimeNs,
     mode: Number(entry.mode & 0o7777n),
     owner: Number(entry.uid),
     group: Number(entry.gid),
@@ -359,6 +364,7 @@ export function nodeFs(
           buffer.length === 0 ? { bytesRead: 0 } : await handle.read(buffer, 0, buffer.length, from);
         return { bytes: buffer.subarray(0, bytesRead), size };
       },
+      stat: async () => fileIdentityOf(await handle.stat({ bigint: true })),
       sync: async () => await handle.sync(),
       chmod: async mode => await handle.chmod(mode),
       close: async () => await handle.close(),
@@ -374,6 +380,7 @@ export function nodeFs(
       const wanted = Math.max(0, Math.min(length, size - from));
       return { bytes: wanted === 0 ? new Uint8Array(0) : await file.readAt(from, wanted), size };
     },
+    stat: async () => await file.stat(),
     sync: async () => await file.sync(),
     chmod: async mode => await file.chmod(mode),
     close: async () => await file.close(),

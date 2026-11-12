@@ -38,6 +38,7 @@ import {
   type ComposerDraftOutcome,
   type ComposerSubmitOutcome,
   dispositionOf,
+  isUpdateUnconfirmed,
   isUnconfirmedTyping,
   type PeerWaitEnder,
   ReviveRefusedForSend,
@@ -314,9 +315,20 @@ export type StrandedEnterOutcome = ComposerSubmitOutcome | 'refused';
  * is ending; clearing it earlier would leave the previous turn's `done` free to certify the one that
  * is just starting.
  */
+/**
+ * What every refusal of a key for an update-unconfirmed send says. The v4 → 5.0 conversion could not prove whether the
+ * agent got it, and the mark leaves ONE act that may press a key for it: a PERSON's Retry (`reattempt`, `by: 'person'`).
+ */
+function updateUnconfirmedRefusal(sendId: string): SendRefused {
+  return new SendRefused(
+    `send ${sendId} was sent before this update and Ferretry can't tell whether the agent got it; only a person's Retry sends it again`,
+  );
+}
+
 /** The fields a re-attempt overwrites, as they stood before it, so a refused one can put them back. */
 function restorable(record: SendRecord): SendSettlement {
   return {
+    acceptedAt: record.acceptedAt,
     fate: record.fate,
     attempt: record.attempt,
     attemptAt: record.attemptAt,
@@ -329,6 +341,7 @@ function restorable(record: SendRecord): SendSettlement {
     submitNudges: record.submitNudges,
     busyTyped: record.busyTyped,
     untyped: record.untyped,
+    evidenceNotBefore: record.evidenceNotBefore,
   };
 }
 
@@ -432,6 +445,9 @@ export class SessionSendService {
         );
       if (current.held === true || current.path === 'revive' || current.path === 'revive-queue')
         throw new SendRefused(`send ${sendId} rides a revive; revive the session to deliver it`);
+      // The update's mark is cleared by a PERSON's Retry alone; nothing automatic is consent to resend this send.
+      const leftByUpdate = isUpdateUnconfirmed(current);
+      if (leftByUpdate && options.by !== 'person') throw updateUnconfirmedRefusal(sendId);
       const target = await this.require(id);
       authorizeSend(target, []);
       const observed = await this.ports.terminal.observe(id);
@@ -462,7 +478,9 @@ export class SessionSendService {
       }
       if (where === 'composer')
         throw new SendRetypeWithheld(
-          `send ${sendId} is typed in the agent's composer and not sent; press Enter instead`,
+          leftByUpdate
+            ? `send ${sendId} is typed in the agent's composer; Ferretry will not press Enter for a send it can't confirm. Clear the draft, then send the message again yourself`
+            : `send ${sendId} is typed in the agent's composer and not sent; press Enter instead`,
           'held',
         );
       if (where === 'unreadable' && options.force !== true)
@@ -486,10 +504,15 @@ export class SessionSendService {
         );
       // A send nothing was typed for yet keeps its attempt number: this is its FIRST typing.
       const attempt = current.untyped === true ? (current.attempt ?? 1) : (current.attempt ?? 1) + 1;
+      const now = this.ports.clock.now();
       const next = await this.ports.ledger.settle(id, sendId, {
         fate: 'accepted',
         attempt,
-        attemptAt: this.ports.clock.now(),
+        attemptAt: now,
+        // A person's Retry of an update-unconfirmed send is a FRESH send: the historical input that left it unconfirmed
+        // is exactly the one it must not confirm from. The floor is written HERE and nowhere else (a later Enter, a
+        // queue, a resubmit or a Warden retry never moves it), and the tracker honours it with no clock-skew slack.
+        ...(leftByUpdate ? { acceptedAt: now, evidenceNotBefore: now } : {}),
         fateAt: undefined,
         deadlineAt: undefined,
         unaccountedReason: undefined,
@@ -547,8 +570,10 @@ export class SessionSendService {
    */
   async releaseHeld(id: SessionId): Promise<number> {
     if (this.ports.gate.launching(id)) await this.ports.gate.awaitSettled(id, this.settings.controlLaunchWaitMs);
+    // An update-unconfirmed row rides held too (the conversion keeps its fate), but releasing it types it: only a
+    // person's Retry may, so it is never selected here.
     const held = (await this.ports.ledger.list(id)).filter(
-      record => record.held === true && record.fate === 'accepted',
+      record => record.held === true && record.fate === 'accepted' && !isUpdateUnconfirmed(record),
     );
     if (held.length === 0) return 0;
     // A revived Codex 0.166 parks its resume turn and the launch settles at once; the held sends wait for the
@@ -566,6 +591,8 @@ export class SessionSendService {
       const outcome = await this.ports.serial.run(id, async () => {
         const current = (await this.ports.ledger.list(id)).find(entry => entry.sendId === record.sendId);
         if (current?.held !== true || current.fate !== 'accepted') return undefined;
+        // Re-read under the lock, before any transport: the mark may have arrived since the selection.
+        if (isUpdateUnconfirmed(current)) return undefined;
         const target = await this.require(id);
         const pane = await this.ports.terminal.observe(id);
         // Parked again between the wait and the lock: leave it held, nothing typed.
@@ -894,13 +921,14 @@ export class SessionSendService {
     await this.ports.ledger.settle(id, record.sendId, {
       fate: 'unaccounted',
       fateAt: this.ports.clock.now(),
-      unaccountedReason: 'landing_unconfirmed',
+      // The update's mark is a durable disposition: an ordinary landing outcome never replaces it.
+      ...(isUpdateUnconfirmed(record) ? {} : { unaccountedReason: 'landing_unconfirmed' as const }),
       deadlineAt: undefined,
       retryable: undefined,
     });
     await this.ports.repository.journal(id, 'control.send_unaccounted', {
       sendId: record.sendId,
-      reason: 'landing_unconfirmed',
+      reason: isUpdateUnconfirmed(record) ? 'update_unconfirmed' : 'landing_unconfirmed',
       attempt: record.attempt ?? 1,
     });
     this.ports.tracking.track(id);
@@ -968,6 +996,9 @@ export class SessionSendService {
         throw new SendRefused(`session ${id} has no send ${sendId}`);
       if (current.fate === 'delivered' || current.fate === 'cancelled')
         throw new SendRefused(`send ${sendId} is ${current.fate}; there is nothing to submit`);
+      // THE ONE GUARD for every caller (the route, the Warden's port, a composer act): an Enter is a key, and only a
+      // person's Retry may press one for a send the update left unconfirmed. Refused before the pane is even read.
+      if (isUpdateUnconfirmed(current)) throw updateUnconfirmedRefusal(sendId);
       // Codex parks a submission made during its startup and has already accepted it: the composer shows the
       // text, but Enter is not ours to press (the terminal refuses too; this says why).
       this.refuseWhileParked(id, await this.ports.terminal.observe(id));
@@ -1066,6 +1097,9 @@ export class SessionSendService {
     limit: number,
     observed?: SendPaneObservation,
   ): Promise<{ readonly outcome: StrandedEnterOutcome; readonly record: SendRecord }> {
+    // A send the update left unconfirmed is a person's to retry: no automatic Enter is pressed for it, and no Enter
+    // here is consent to resend it (`isUpdateUnconfirmed`).
+    if (isUpdateUnconfirmed(record)) return { outcome: 'refused', record };
     const records = await this.ports.ledger.list(id);
     const text = strandableText(record, records);
     if (text === undefined || (record.submitNudges ?? 0) >= limit) return { outcome: 'refused', record };
@@ -1102,6 +1136,9 @@ export class SessionSendService {
         throw new SendRefused(`session ${id} is showing a prompt ("${pane.blockingPrompt}"); answer it first`);
       if (pane.draft === undefined) return 'absent' as const;
       if (!sameComposerText(pane.draft, draft)) return 'changed' as const;
+      // The same guard as a send's own Enter: a draft that IS an update-unconfirmed send's text is that send in the
+      // box, and an Enter here would send it without the person's Retry.
+      if (action === 'submit') await this.refuseFlaggedDraft(id, pane.draft);
       const result: ComposerDraftOutcome =
         action === 'submit'
           ? await this.ports.terminal
@@ -1120,6 +1157,16 @@ export class SessionSendService {
     // An Enter may have answered an open send whose text the person had typed; its fate is looked for.
     if (outcome === 'submitted') this.ports.tracking.track(id);
     return outcome;
+  }
+
+  /** Refuses an Enter for a composer draft that shows an update-unconfirmed send's text, before any key. */
+  private async refuseFlaggedDraft(id: SessionId, draft: string): Promise<void> {
+    const flagged = (await this.ports.ledger.list(id)).find(record => {
+      if (!isUpdateUnconfirmed(record)) return false;
+      const text = record.matchText ?? record.message;
+      return sameComposerText(draft, text) || showsOwnText(draft, text);
+    });
+    if (flagged !== undefined) throw updateUnconfirmedRefusal(flagged.sendId);
   }
 
   /**
@@ -1268,7 +1315,8 @@ export class SessionSendService {
       typedNotSent: undefined,
       deadlineAt: undefined,
       attemptAt: this.ports.clock.now(),
-      ...(record.fate === 'unaccounted'
+      // The update's mark is not reopened by an Enter: the old claim still cannot be told from this send's input.
+      ...(record.fate === 'unaccounted' && !isUpdateUnconfirmed(record)
         ? { fate: 'accepted', fateAt: undefined, unaccountedReason: undefined, retryable: undefined }
         : {}),
     });

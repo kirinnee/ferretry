@@ -181,11 +181,7 @@
       "ignore": [
         "app/render/fy-render-workspace-media.ts",
         "app/render/workspace-path.ts",
-        "daemon/questions/lib/projection.ts",
-        "daemon/reader/lib/session/conversation-index.ts",
-        "daemon/reader/lib/session/reader.ts",
-        "daemon/reader/lib/session/tail-cache.ts",
-        "daemon/reader/lib/session/log-page.ts"
+        "daemon/questions/lib/projection.ts"
       ]
     },
     "packages/plugins/mcp": {

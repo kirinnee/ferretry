@@ -414,7 +414,7 @@ function OwnMessageRow({
       {children ?? <EntryBody entry={entry} prose={<OwnWords text={entry.text} />} speaker="user" />}
       <MessageFooter
         answered={answered}
-        clock={clockOfInstant(record?.acceptedAt) ?? clockOfInstant(entry.at)}
+        clock={clockOfInstant(record?.acceptedAt, { now: Date.now() }) ?? clockOfInstant(entry.at, { now: Date.now() })}
         lead={viaTurnFile ? <HandoffVia onToggle={() => setViaOpen(current => !current)} open={viaOpen} /> : undefined}
         leadDetail={viaTurnFile && viaOpen ? <HandoffViaDetail /> : undefined}
         receipt={receipt}

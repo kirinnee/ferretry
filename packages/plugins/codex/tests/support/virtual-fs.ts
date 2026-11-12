@@ -108,6 +108,7 @@ export class VirtualFs {
             const start = offset < 0 ? Math.max(0, bytes.length + offset) : offset;
             return { bytes: bytes.slice(start, start + length), size: bytes.length };
           },
+          stat: async () => identity,
           sync: unused,
           chmod: unused,
           close: async () => undefined,

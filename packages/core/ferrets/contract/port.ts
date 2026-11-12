@@ -27,6 +27,7 @@ import type {
   RunnerHandle,
   SitrepLine,
   BoundTranscriptReader,
+  HarnessTranscriptBytes,
 } from './kinds.ts';
 import type { AgentControl, LimitsFile } from './state.ts';
 
@@ -406,6 +407,12 @@ export interface FerretHarness {
    */
   readonly form?: HarnessForm;
   readonly transcript: BoundTranscriptReader;
+  /**
+   * Additive (G162): the seam's own ferret's transcript as raw bytes ({@link HarnessTranscriptBytes}), UNMASKED, for
+   * the ONE reader that parses records itself (Conversation's). Rejects 503 `plugin_unavailable` while the ferret's
+   * harness is off; `undefined` when the harness proves none or offers no bytes. Bound: names no other ferret.
+   */
+  transcriptBytes?(): Promise<HarnessTranscriptBytes | undefined>;
 }
 
 /**

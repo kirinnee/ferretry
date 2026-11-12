@@ -739,6 +739,33 @@ export type RootPublished =
   | { readonly outcome: 'published'; readonly identity: RootIdentity }
   | { readonly outcome: 'exists' };
 
+/**
+ * One regular file opened ONCE and held (`RootHandle.openBytes`): every read and stat goes through that descriptor
+ * (`pread`, `fstat`), never the pathname, so the bytes and the metadata it answers are the held object's and no other's.
+ * A held descriptor pins its inode, so the inode number cannot be freed and handed to another file while this is open.
+ * The caller closes it.
+ */
+export interface RootOpenedBytes {
+  /** The device and inode of the object held (from the descriptor, never from a name). */
+  readonly identity: RootIdentity;
+  /**
+   * The held object's creation time to the nanosecond, where the host reports one: with the identity it tells two files
+   * apart that were given the same inode number in turn. `undefined` where the host knows none.
+   */
+  readonly birthNs: bigint | undefined;
+  /** `length` bytes from `offset` (`length` at most {@link MAX_ROOT_WINDOW_BYTES}), fewer where the file ends: `pread` on the descriptor. */
+  read(offset: number, length: number): Promise<Uint8Array>;
+  /** The held object's size and modification time now (`fstat` on the descriptor). */
+  stat(): Promise<{ readonly size: number; readonly mtimeMs: number }>;
+  /**
+   * Whether the NAME still reaches the held object: the leaf looked at without following a link (`lstat`) through the
+   * fenced folder, a regular file with the held device and inode. `false` once it is gone, replaced or a link.
+   */
+  stillNames(): Promise<boolean>;
+  /** Lets the descriptor go. Idempotent; a read after it is refused. */
+  close(): Promise<void>;
+}
+
 /** {@link RootHandle.readDurable}: the bytes, and the identity of the file they were read from. */
 export interface RootDurableRead {
   readonly bytes: Uint8Array;
@@ -805,6 +832,14 @@ export interface RootHandle {
    * rollout tail window): fenced exactly as `readBytes`.
    */
   readTail(path: FencedPath, maxBytes: number): Promise<RootTail>;
+  /**
+   * Opens the file at the name ONCE and keeps the descriptor ({@link RootOpenedBytes}): fenced exactly as `readBytes`,
+   * and the leaf is looked at without following a link, so a link at the name (inside the root too) is refused
+   * `not_a_file`, and the descriptor must be the very object the name reaches (else `changed`). `undefined` when nothing
+   * is at the name. The caller closes the result. Optional only so a test double of a root need not implement it: every
+   * root the kernel makes does.
+   */
+  openBytes?(path: FencedPath): Promise<RootOpenedBytes | undefined>;
   /** Atomic replace by default; `exclusive` creates only (today's worktree registry write, `wx`). */
   writeText(path: FencedPath, text: string, options?: RootWriteOptions): Promise<void>;
   /** The same, for bytes. */

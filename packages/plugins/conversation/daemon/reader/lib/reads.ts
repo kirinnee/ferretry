@@ -380,6 +380,47 @@ function body(event: TranscriptEvent, images: readonly RecordImage[] = [], mark:
 }
 
 /**
+ * The event with every string its rendering will print masked ON ITS OWN, before anything is serialised.
+ *
+ * Rendering a tool call stringifies its input as JSON, and JSON ESCAPES a quote, a backslash or a newline: a secret that
+ * holds one no longer occurs literally in the rendered line, so a redactor run over the rendered text cannot find it
+ * and the escaped spelling would be returned intact. Masking the structured value first (as `transcriptEvents` does)
+ * leaves nothing to escape. Rendering also indents the lines of a multi-line body, which breaks a literal match of a
+ * secret that holds a newline the same way. Only what `body` prints is carried through.
+ */
+function maskedEvent(event: TranscriptEvent, scrub: TranscriptReadScrub): TranscriptEvent {
+  switch (event.kind) {
+    case 'message':
+    case 'reasoning':
+      return { ...event, text: scrub.text(event.text) };
+    case 'tool-call':
+      return {
+        ...event,
+        call: { ...event.call, name: scrub.text(event.call.name), input: scrub.data(event.call.input) } as never,
+      };
+    case 'tool-result':
+      return {
+        ...event,
+        result: {
+          ...event.result,
+          content: scrub.data(event.result.content),
+          ...(event.result.text === undefined ? {} : { text: scrub.text(event.result.text) }),
+        } as never,
+      };
+    case 'attachment':
+      return event.attachment.kind === 'remote-control'
+        ? { ...event, attachment: { ...event.attachment, url: scrub.text(event.attachment.url) } }
+        : event;
+    case 'error':
+      return { ...event, error: { ...event.error, message: scrub.text(event.error.message) } };
+    case 'settings':
+      return { ...event, settings: scrub.data(event.settings) as never };
+    default:
+      return event;
+  }
+}
+
+/**
  * A transcript tail as plain text, one event per line.
  *
  * Multi-line bodies are indented under their own header rather than flattened, so a code block an
@@ -638,7 +679,7 @@ export class TranscriptReadService {
       const scrubbedBody = (event: TranscriptEvent): string => {
         let held = scrubbed.get(event);
         if (held === undefined) {
-          held = scrub.text(body(event));
+          held = scrub.text(body(maskedEvent(event, scrub)));
           scrubbed.set(event, held);
         }
         return held;
@@ -701,15 +742,24 @@ export class TranscriptReadService {
     options: { readonly partialFirstRecord: boolean },
   ): Promise<string> {
     const markers: string[] = [];
-    const lifted = renderTranscript(events, {
-      ...options,
-      mark: image => {
-        markers.push(imageMarker(image));
-        return `${NUL}fy-image-${spell(markers.length - 1)}${NUL}`;
-      },
-    });
-    if (markers.length === 0) return await this.redactor.redact(lifted);
-    const scrubbed = await this.redactor.redact(lifted);
+    // ONE Vault read for the whole render: each event is masked while it is still structured (`maskedEvent`), the text
+    // is rendered, and the rendered text is masked again for a value that only exists across the rendering (a header
+    // and a body) — all through the SAME `scrub`, so the page opens the Vault once, not once per step.
+    const scrubbed = await this.redactor.batch(scrub =>
+      scrub.text(
+        renderTranscript(
+          events.map(event => maskedEvent(event, scrub)),
+          {
+            ...options,
+            mark: image => {
+              markers.push(imageMarker(image));
+              return `${NUL}fy-image-${spell(markers.length - 1)}${NUL}`;
+            },
+          },
+        ),
+      ),
+    );
+    if (markers.length === 0) return scrubbed;
     return scrubbed.replace(LIFTED_MARKER, (whole, index: string) => markers[unspell(index)] ?? whole);
   }
 

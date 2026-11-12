@@ -1,8 +1,11 @@
 /** Codex rollout IO, through the two declared roots only. No sign-in document is opened. */
+import { createHash } from 'node:crypto';
+import { openTranscriptBytes } from '@ferretry/core-ferrets/contract';
 import type {
   FoundConversation,
   Harness,
   HarnessTailRecord,
+  HarnessTranscriptBytes,
   LaunchSpec,
   TranscriptEntry,
   TurnUsage,
@@ -30,6 +33,15 @@ const PROOF_REUSE_MS = 5_000;
 /** How much of the end of a rollout one tail read takes: a turn's records are near the end. */
 const TAIL_READ_BYTES = 512 * 1024;
 const decoder = new TextDecoder();
+/** The value with every string in it passed through `mask` (keys and shape untouched). */
+const scrubStrings = (value: unknown, mask: (text: string) => string): unknown => {
+  if (typeof value === 'string') return mask(value);
+  if (Array.isArray(value)) return value.map(item => scrubStrings(item, mask));
+  if (typeof value === 'object' && value !== null)
+    return Object.fromEntries(Object.entries(value).map(([name, each]) => [name, scrubStrings(each, mask)]));
+  return value;
+};
+const sha256Hex = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
 interface Rollout {
   readonly id: string;
@@ -175,6 +187,15 @@ export class CodexRollouts {
       const stat = await root.stat(known.file).catch(() => undefined);
       if (stat?.kind === 'file') return { root, rollout: { ...known, size: stat.size, modified: stat.modified } };
     }
+    const fresh = await this.proveAfresh(ferret);
+    return fresh === undefined ? undefined : { root: fresh.root, rollout: fresh.rollout };
+  }
+
+  /** The proof itself, from the binding and the files on disk, never from the remembered one (which it replaces). */
+  private async proveAfresh(
+    ferret: FerretId,
+  ): Promise<{ readonly root: RootHandle; readonly rollout: Rollout; readonly binding: Binding } | undefined> {
+    const root = this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` });
     this.#proved.forget(ferret);
     const binding = await this.binding(ferret);
     if (binding === undefined) return undefined;
@@ -196,7 +217,7 @@ export class CodexRollouts {
     if (chosen === undefined) return undefined;
     // A proof older than PROOF_REUSE_MS is proved again before it is used, so it is dead weight: dropped here.
     this.#proved.remember(ferret, chosen, Date.parse(this.kernel.clock.now()));
-    return { root, rollout: chosen };
+    return { root, rollout: chosen, binding };
   }
 
   private async owned(ferret: FerretId): Promise<OwnedRollout | undefined> {
@@ -212,6 +233,51 @@ export class CodexRollouts {
     if (found === undefined) return undefined;
     return { file: found.rollout.file, size: found.rollout.size, mtimeMs: Date.parse(found.rollout.modified) };
   };
+
+  /**
+   * The proved rollout as a windowed, UNMASKED byte handle (`Harness.transcriptBytes`, G162): read in windows, an opaque
+   * token and no path, bound to the ONE object it opened. Its one consumer (Conversation's reader) masks every answer it
+   * cuts from these bytes.
+   *
+   * NEVER the remembered proof (that is a filename, and a name can be given to another file within its window): the
+   * ownership is proved afresh, the file is opened, and the proof is then CHECKED ON THE OPENED OBJECT itself (its
+   * header names the proved conversation and, until the harness has recorded the native id, its correlation marker is
+   * in the head or tail), so a file swapped in between the proof and the open is never handed over as the ferret's.
+   * Once held, a later replacement is caught by the handle on every read.
+   */
+  readonly bytes: NonNullable<Harness['transcriptBytes']> = async ferret => {
+    try {
+      const found = await this.proveAfresh(ferret);
+      if (found === undefined) return undefined;
+      const handle = await openTranscriptBytes(found.root, found.rollout.file, 'codex', sha256Hex, {
+        clock: this.kernel.clock,
+      });
+      if (handle === undefined) return undefined;
+      if (await this.#ownsOpened(handle, found.rollout, found.binding)) return handle;
+      await handle.close();
+      return undefined;
+    } catch {
+      // A rollout the root refuses (a link put where the file was) is no proved transcript; the refusal is not passed on.
+      return undefined;
+    }
+  };
+
+  /** Whether the object a handle holds is the rollout the proof chose: judged on what the DESCRIPTOR reads, not on a name. */
+  async #ownsOpened(handle: HarnessTranscriptBytes, rollout: Rollout, binding: Binding): Promise<boolean> {
+    try {
+      const head = decoder.decode(await handle.read(0, HEAD_BYTES));
+      if (metadata(head)?.id !== rollout.id) return false;
+      if (binding.native !== undefined) return true;
+      const needle = `${binding.home}/codex-correlation/unreachable`;
+      if (head.includes(needle)) return true;
+      const size = (await handle.stat())?.size ?? 0;
+      if (size <= HEAD_BYTES) return false;
+      const tail = decoder.decode(await handle.read(Math.max(HEAD_BYTES, size - TAIL_BYTES), TAIL_BYTES));
+      return tail.includes(needle);
+    } catch {
+      return false;
+    }
+  }
 
   /** The newest `limit` records of the proved rollout, without their text (`Harness.transcriptTail`). */
   readonly tail: NonNullable<Harness['transcriptTail']> = async (ferret, limit) => {
@@ -282,8 +348,16 @@ export class CodexRollouts {
       const start = after === undefined ? 0 : entries.findIndex(entry => entry.id === after) + 1;
       if (after !== undefined && start === 0) return [];
       const page = entries.slice(start, limit === undefined ? undefined : start + Math.max(0, limit));
-      return await this.kernel.redaction.read(
-        scope => JSON.parse(scope.text(JSON.stringify(page))) as TranscriptEntry[],
+      // Each string is masked ON ITS OWN, never the page's JSON: a secret holding a quote, a backslash, a newline or a
+      // control character is ESCAPED by JSON.stringify and so would not match its own words (ports-pending, G162).
+      return await this.kernel.redaction.read(scope =>
+        page.map(
+          (entry): TranscriptEntry => ({
+            ...entry,
+            ...(entry.text === undefined ? {} : { text: scope.text(entry.text) }),
+            ...(entry.data === undefined ? {} : { data: scrubStrings(entry.data, scope.text) as JsonValue }),
+          }),
+        ),
       );
     },
     find: async (ferret, id) => (await this.transcript.read(ferret)).find(entry => entry.id === id),

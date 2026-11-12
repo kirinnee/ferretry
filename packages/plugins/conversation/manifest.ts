@@ -125,8 +125,9 @@ export default definePlugin({
       }),
       route('GET /v1/ferrets/:ferretId/sends/:sendId', { ...FERRET, ...READ, ...SECRETS }),
       route('GET /v1/ferrets/:ferretId/handoffs/:name', { ...FERRET, ...READ, ...SECRETS }),
+      // A person's alone: a retry is the one act that clears an update-unconfirmed send's mark and types it again.
       route('POST /v1/ferrets/:ferretId/sends/:sendId/retry', {
-        ...FERRET,
+        ...PERSON,
         audit: { record: SEND_RETRIED_AUDIT },
         ...ACK,
       }),

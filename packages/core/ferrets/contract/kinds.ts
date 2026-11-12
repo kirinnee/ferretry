@@ -584,8 +584,24 @@ export interface TranscriptEntry {
   readonly tools?: { readonly calls?: readonly string[]; readonly results?: readonly string[] };
 }
 
+/**
+ * What a read of a transcript that may have been CUT to its newest part (a long conversation) can promise: the entries it
+ * holds, and whether it provably reaches back to the instant the caller needs. A cut read that does not is unproved for
+ * any question about what is NOT there (a send is absent): it may only say what it found.
+ */
+export interface TranscriptCoverage {
+  readonly entries: readonly TranscriptEntry[];
+  /** `true` when nothing was cut, or the oldest complete record read is not newer than `since`. */
+  readonly covered: boolean;
+}
+
 export interface TranscriptReader {
   read(ferret: FerretId, after?: string, limit?: number): Promise<readonly TranscriptEntry[]>;
+  /**
+   * Additive (G162, the send tracker's evidence): {@link read} plus whether the read reaches back to `since`. Absent: the
+   * harness reads the whole conversation, so a read is always covered.
+   */
+  readCovering?(ferret: FerretId, since: Instant): Promise<TranscriptCoverage>;
   follow(ferret: FerretId, signal: AbortSignal): AsyncIterable<TranscriptEntry>;
   find(ferret: FerretId, entry: string): Promise<TranscriptEntry | undefined>;
 }
@@ -596,6 +612,8 @@ export interface TranscriptReader {
  */
 export interface BoundTranscriptReader {
   read(after?: string, limit?: number): Promise<readonly TranscriptEntry[]>;
+  /** {@link TranscriptReader.readCovering}, for this ferret. Absent: the harness reads the whole conversation. */
+  readCovering?(since: Instant): Promise<TranscriptCoverage>;
   follow(signal: AbortSignal): AsyncIterable<TranscriptEntry>;
   find(entry: string): Promise<TranscriptEntry | undefined>;
 }
@@ -702,6 +720,58 @@ export type HarnessTranscriptTail =
   | { readonly kind: 'unreadable' }
   | { readonly kind: 'read'; readonly records: readonly HarnessTailRecord[] };
 
+/**
+ * Rejected by {@link HarnessTranscriptBytes.read} when the file the handle was opened on is no longer the transcript the
+ * harness proved to be the ferret's (replaced, rotated or gone). The reader drops its handle and asks again.
+ */
+export class HarnessTranscriptReplaced extends Error {
+  override readonly name = 'HarnessTranscriptReplaced';
+  constructor(message = 'the proved transcript was replaced') {
+    super(message);
+  }
+}
+
+/**
+ * The transcript a harness PROVED to be one ferret's own, as RAW bytes, for the one reader that parses records itself
+ * (Conversation's transcript reader, G162). UNMASKED: it is evidence, not an answer. Its ONE consumer, Conversation's
+ * reader, masks every answer it cuts from these bytes through the kernel's read-scoped redaction (Conversation's
+ * `reads.ts`), exactly as v4's reader masked what it read from the file. No other plugin calls `transcriptBytes`
+ * (a consumer-check test pins it), and it never names the file's path.
+ */
+export interface HarnessTranscriptBytes {
+  /** Which parser speaks these bytes. */
+  readonly format: 'claude' | 'codex';
+  /**
+   * Opaque. A digest of the path and of the OPENED object (device, inode and, where the host reports one, its creation
+   * time): the same for every handle on one generation of the file, and different for every replacement generation,
+   * including a file recreated under a reused inode number. A host that reports no creation time cannot offer the first
+   * half: its token is fixed for ONE handle and never repeats for another open, so a consumer that compares tokens across
+   * handles there sees a change and starts over, and never mistakes a replacement for the same file.
+   */
+  readonly file: string;
+  /** The file's size and modification time when the handle was opened. */
+  readonly size: number;
+  readonly mtimeMs: number;
+  /**
+   * At most `length` bytes from `offset` (`length` at most the kernel's `MAX_ROOT_WINDOW_BYTES`), fewer only where the
+   * file ends. Read from the ONE descriptor the handle holds (never a pathname), so the bytes are the proved object's;
+   * rejects {@link HarnessTranscriptReplaced} when the name no longer reaches that object (replaced, a link put there, or
+   * gone), before or after the read.
+   */
+  read(offset: number, length: number): Promise<Uint8Array>;
+  /**
+   * The held object's size and mtime now (`fstat` of the descriptor), or `undefined` once the name is gone or no longer
+   * reaches it (replaced).
+   */
+  stat(): Promise<{ readonly size: number; readonly mtimeMs: number } | undefined>;
+  /**
+   * Lets the descriptor go. Idempotent. The single consumer calls it when it is done; a handle left open closes itself
+   * after a minute unused. A read after it fails (an `Error`, not {@link HarnessTranscriptReplaced}) and a stat answers
+   * `undefined`.
+   */
+  close(): Promise<void>;
+}
+
 // ─── launch settings (W2-c): whether a relaunch would run a ferret on other harness settings ──────────────────────────
 
 /**
@@ -783,6 +853,12 @@ export interface Harness {
    * instants, never message text. Ferrets asks only when the stamp moved. Absent: see {@link transcriptStamp}.
    */
   transcriptTail?(ferret: FerretId, limit: number): Promise<HarnessTranscriptTail>;
+  /**
+   * Additive (G162, Conversation's transcript reader): the transcript this harness proved to be the ferret's own, as a
+   * windowed, UNMASKED byte handle ({@link HarnessTranscriptBytes}) that carries an opaque token and never a path.
+   * `undefined` while no transcript is proved. Absent: this harness offers entries only ({@link transcript}).
+   */
+  transcriptBytes?(ferret: FerretId): Promise<HarnessTranscriptBytes | undefined>;
   /**
    * Additive (W2-c, RULING #27 Q9): whether a relaunch of this ferret would run on other settings of this harness's own
    * than its last start or resume did. The harness records what it launched under (in its own state, never in the

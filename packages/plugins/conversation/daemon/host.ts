@@ -96,6 +96,7 @@ import {
 import { startupParkedPending } from './delivery/lib/service.ts';
 import { type DeliveredAttachment, deliveredFilename, messageWithAttachments } from './attachments/lib/delivery.ts';
 import { harnessSendTerminal } from './send-terminal.ts';
+import { harnessFamily } from './seams/harness-family.ts';
 import { KeyedSerialExecutor } from './seams/keyed-serial-executor.ts';
 import { type MountRoute, routeTable, socketTable } from './seams/api.ts';
 import { parseSessionId, type SessionId, tryParseSessionId } from './seams/ferret-id.ts';
@@ -171,14 +172,6 @@ const sendActRefusal = (error: unknown): never => {
  * in `reason`, and a sentence may quote a prompt or a person's words, so it is not here.
  */
 const JOURNAL_LOG_KEYS = ['sendId', 'outcome', 'effect', 'from', 'by', 'turn', 'direct', 'proof'] as const;
-
-/**
- * Ferrets' harness key as the send policy and the transcript observers name the family: `claude-code` is `claude`. A
- * harness this build knows nothing about is NO family: it gets no inline paste and no transcript evidence, so nothing is
- * pasted whole or typed again on a guess.
- */
-const harnessFamily = (key: string): 'claude' | 'codex' | undefined =>
-  key === 'claude-code' ? 'claude' : key === 'codex' ? 'codex' : undefined;
 
 /** A ferret's lifecycle state, as the session status the interrupt's refusals are written against. */
 const statusOf = (ferret: FerretSummary): SessionStatus => {

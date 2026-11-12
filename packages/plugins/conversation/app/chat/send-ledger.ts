@@ -228,6 +228,7 @@ const REASONS: ReadonlySet<string> = new Set<SendUnaccountedReason>([
   'landing_unconfirmed',
   'typed_not_submitted',
   'not_delivered',
+  'update_unconfirmed',
 ]);
 const CANCEL_EFFECTS: ReadonlySet<string> = new Set<SendCancelEffect>([
   'cleared',

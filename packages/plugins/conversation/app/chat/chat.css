@@ -209,7 +209,7 @@
   align-items: center;
   background: transparent;
   border: 0;
-  color: var(--faint, var(--fy-muted));
+  color: var(--fy-muted);
   cursor: pointer;
   display: inline-flex;
   font-family: var(--font-ui, inherit);
@@ -263,10 +263,10 @@
   align-items: center;
   background: transparent;
   border: 0;
-  color: var(--faint, var(--fy-muted));
+  color: var(--fy-muted);
   display: inline-flex;
   font-family: var(--font-ui, inherit);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
   gap: 3px;
   line-height: 16px;
@@ -297,8 +297,8 @@ button.fy-receipt {
   border: var(--stroke) solid var(--border);
   border-radius: var(--radius-badge);
   color: var(--fy-muted);
-  font-size: 10.5px;
-  line-height: 14px;
+  font-size: var(--text-xs);
+  line-height: 16px;
   padding: 0 4px;
 }
 .fy-receipt-chip[data-send-chip='failed'] {
@@ -311,9 +311,29 @@ button.fy-receipt {
 }
 .fy-receipt-detail {
   color: var(--fy-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   margin: 2px 0 0;
   text-align: right;
+}
+/* A send the 5.0 update marked says, in plain words and at the normal badge size, that the reader must go and look
+   (`MIGRATION_NOTE`). Warn text on the warn tint is AA in every theme (checked by `chat-stylesheet.test.ts`); it is
+   never a chip or a mark alone, and never hidden behind a tap. */
+.fy-receipt-note {
+  background: var(--warn-bg);
+  border: var(--stroke) solid var(--warn-border);
+  border-radius: var(--radius-badge);
+  color: var(--warn);
+  font-size: var(--text-sm);
+  line-height: 16px;
+  margin: 3px 0 0 auto;
+  padding: 1px 6px;
+  text-align: left;
+  width: fit-content;
+}
+.fy-receipt-note[data-side='other'] {
+  margin-left: 0;
+  margin-right: auto;
+  text-align: left;
 }
 /* The same foot on the other side of the conversation sits at the message's left edge. */
 .fy-receipt-line[data-side='other'] {

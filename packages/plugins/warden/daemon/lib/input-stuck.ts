@@ -111,6 +111,9 @@ export function stuckSendOf(
     if (send.held === true || send.untyped === true || REVIVE_PATHS.has(send.path) || !UNSETTLED.has(send.fate))
       continue;
     if (send.typedNotSent !== true) continue;
+    // The update left this send unconfirmed (its old claim could not be matched to 5.0's input): it is a person's to
+    // retry, and nothing automatic — this Enter included — counts as consent to resend it.
+    if (send.unaccountedReason === 'update_unconfirmed') continue;
     const typed = typedAtMs(send);
     if (!Number.isFinite(typed) || nowMs - typed < stuckMs || nowMs - typed > STUCK_INPUT_HORIZON_MS) continue;
     if (newest === undefined || typed > typedAtMs(newest)) newest = send;

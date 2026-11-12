@@ -59,7 +59,7 @@ describe('the one-line note for a terminal send', () => {
     );
     const note = must(view.container.querySelector<HTMLElement>('[data-settled-note]'), 'the note');
     expect(note.dataset.settledNote).toBe('cancelled');
-    expect(note.textContent).toBe(`Cancelled·hi there·${clockOfInstant(SENT)?.short}`);
+    expect(note.textContent).toBe(`Cancelled·hi there·${clockOfInstant(SENT, { now: Date.now() })?.short}`);
     await click(view, '.fy-settled-open');
     await click(view, '[data-settled-dismiss]');
     expect(opened).toEqual([['send-1', true]]);

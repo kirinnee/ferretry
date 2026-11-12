@@ -258,7 +258,7 @@ route	GET /v1/ferrets/:ferretId/sends/:sendId	added	session routes renamed /v1/s
 route	GET /v1/sessions/:sessionId/handoffs/:name	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/ferrets/:ferretId/handoffs/:name	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/sends/:sendId/retry	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
-route	POST /v1/ferrets/:ferretId/sends/:sendId/retry	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/sends/:sendId/retry	moved-changed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); 5.0 makes the retry a person's alone (caller any → person), because it is the one act that clears an update-unconfirmed send and types it again; a tightening only
 route	POST /v1/sessions/:sessionId/sends/:sendId/cancel	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/sends/:sendId/cancel	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/sends/:sendId/enter	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged

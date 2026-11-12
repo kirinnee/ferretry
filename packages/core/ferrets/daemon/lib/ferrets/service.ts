@@ -1550,8 +1550,22 @@ export class FerretsService implements FerretsApi {
       // Bound to the ferret this seam was opened for: there is no target to name, so it cannot read another ferret's.
       transcript: {
         read: async (after, limit) => await reader().read(ferret, after, limit),
+        readCovering: async since => {
+          const current = reader();
+          return current.readCovering === undefined
+            ? { entries: await current.read(ferret), covered: true }
+            : await current.readCovering(ferret, since);
+        },
         follow: signal => reader().follow(ferret, signal),
         find: async entry => await reader().find(ferret, entry),
+      },
+      // G162: resolved on every call like the reader, so an off harness is a 503 and an entries-only one has no bytes.
+      transcriptBytes: async () => {
+        const record = this.registry.get(ferret);
+        const harness = record === undefined ? undefined : this.ports.harness(record.harness);
+        if (harness === undefined)
+          throw new ApiError(503, 'the harness that wrote this conversation is off', 'plugin_unavailable');
+        return await harness.transcriptBytes?.(ferret);
       },
     };
   }

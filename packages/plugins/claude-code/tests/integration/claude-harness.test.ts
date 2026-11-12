@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { LaunchSpec, Runner } from '@ferretry/core-ferrets/contract';
+import {
+  HarnessTranscriptReplaced,
+  type LaunchSpec,
+  type Runner,
+  type TranscriptEntry,
+} from '@ferretry/core-ferrets/contract';
 import { FakeRunner, harnessConformance } from '@ferretry/core-ferrets/contract/testing';
 import type { FerretId, SpawnResult, StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
@@ -39,7 +44,10 @@ beforeEach(async () => {
   ])
     await chmod(join(fixture, folder), 0o700);
 });
+/** Every byte handle a test opened: the single consumer closes them, and so does the test (a descriptor is never left to the GC). */
+const heldHandles: { close(): Promise<void> }[] = [];
 afterEach(async () => {
+  for (const held of heldHandles.splice(0)) await held.close();
   await rm(fixture, { recursive: true, force: true });
 });
 const T = '2026-11-01T10:00:00.000Z' as Instant;
@@ -97,7 +105,7 @@ function build(
         } as SpawnResult;
       },
     } as never,
-    clock: { sleep: async () => {} } as never,
+    clock: { sleep: async () => {}, after: () => () => {} } as never,
     redaction: {
       read: async (fn: (scope: unknown) => unknown) =>
         await fn({
@@ -120,6 +128,12 @@ function build(
     newConversationId: () => 'conv-1',
     historyHome: async () => HISTORY,
   });
+  const openBytes = harness.transcriptBytes.bind(harness);
+  harness.transcriptBytes = async ferret => {
+    const handle = await openBytes(ferret);
+    if (handle !== undefined) heldHandles.push(handle);
+    return handle;
+  };
   return { harness, roots, writeHome, tmux, panes };
 }
 
@@ -806,6 +820,275 @@ describe('ClaudeHarness', () => {
     const decided = await harness.transcriptTail(FERRET, 10);
     expect(decided.kind === 'read' && decided.records.some(record => record.kind === 'turn')).toBe(true);
     expect(decided.kind === 'read' && decided.records.every(record => record.kind !== 'work')).toBe(true);
+  });
+
+  describe('G162 transcriptBytes: a windowed, unmasked byte handle over the proved transcript', () => {
+    const TRANSCRIPT = 'projects/-work/conv-1.jsonl';
+    const line = (n: number) =>
+      `${JSON.stringify({ type: 'user', uuid: `u${n}`, timestamp: T, message: { content: `m${n}` } })}\n`;
+    const open = async (text = `${line(1)}${line(2)}`) => {
+      const built = build();
+      await built.harness.start(spec(), runner({}), {} as never);
+      await built.writeHome(TRANSCRIPT, text);
+      const handle = await built.harness.transcriptBytes(FERRET);
+      if (handle === undefined) throw new Error('the transcript is proved');
+      return { ...built, handle, text };
+    };
+    const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+
+    test('a ferret with no binding, or a binding that is not a conversation id in an absolute folder, has no bytes', async () => {
+      const { harness, writeHome } = build();
+      expect(await harness.transcriptBytes(FERRET)).toBeUndefined();
+      await writeHome('conversation.json', JSON.stringify({ format: 1, id: '../../etc/passwd', cwd: '/work' }));
+      expect(await harness.transcriptBytes(FERRET)).toBeUndefined();
+      await writeHome('conversation.json', JSON.stringify({ format: 1, id: 'conv-1', cwd: 'relative' }));
+      expect(await harness.transcriptBytes(FERRET)).toBeUndefined();
+      // A binding that proves a file that is not there proves nothing.
+      await writeHome('conversation.json', JSON.stringify({ format: 1, id: 'conv-1', cwd: '/work' }));
+      expect(await harness.transcriptBytes(FERRET)).toBeUndefined();
+    });
+
+    test('the handle reads the assigned conversation UNMASKED, with a stable token and the file’s size', async () => {
+      const { harness, handle } = await open(`${line(1)}SECRET\n`);
+      expect(handle.format).toBe('claude');
+      expect(handle.size).toBe(`${line(1)}SECRET\n`.length);
+      expect(handle.mtimeMs).toBeGreaterThan(0);
+      expect(text(await handle.read(0, handle.size))).toContain('SECRET');
+      expect((await harness.transcriptBytes(FERRET))?.file).toBe(handle.file);
+      expect(handle.file).toMatch(/^[0-9a-f]{22}$/);
+    });
+
+    test('the token changes when the file is replaced', async () => {
+      const { harness, handle, writeHome } = await open();
+      await writeHome(TRANSCRIPT, line(9));
+      const again = await harness.transcriptBytes(FERRET);
+      expect(again?.file).not.toBe(handle.file);
+    });
+
+    test('a read past the end is short, and one wholly past it is empty', async () => {
+      const { handle, text: whole } = await open();
+      expect(text(await handle.read(whole.length - 5, 100))).toBe(whole.slice(-5));
+      expect((await handle.read(whole.length + 10, 100)).length).toBe(0);
+      expect((await handle.read(0, 0)).length).toBe(0);
+    });
+
+    test('a read is clamped to the 4 MiB window', async () => {
+      const { handle } = await open('x'.repeat(5 * 1024 * 1024));
+      expect((await handle.read(0, 5 * 1024 * 1024)).length).toBe(4 * 1024 * 1024);
+      expect((await handle.read(4 * 1024 * 1024, 5 * 1024 * 1024)).length).toBe(1024 * 1024);
+    });
+
+    test('a negative, fractional or huge offset or length is refused, naming no path', async () => {
+      const { handle } = await open();
+      for (const [offset, length] of [
+        [-1, 10],
+        [0, -1],
+        [1.5, 10],
+        [0, 2.5],
+        [2 ** 60, 10],
+        [0, 2 ** 60],
+        [Number.NaN, 10],
+        [Number.POSITIVE_INFINITY, 10],
+      ] as const) {
+        const failure = await handle.read(offset, length).catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(RangeError);
+        expect(String((failure as Error).message)).not.toContain(fixture);
+      }
+    });
+
+    test('the handle and every error it raises carry no path', async () => {
+      const { handle, writeHome } = await open();
+      const shown = JSON.stringify(
+        Object.fromEntries(Object.entries(handle).filter(([, v]) => typeof v !== 'function')),
+      );
+      for (const secret of [fixture, HOME, 'conv-1', 'projects', 'agent-homes']) expect(shown).not.toContain(secret);
+      await writeHome(TRANSCRIPT, line(9));
+      const replaced = await handle.read(0, 10).catch((error: unknown) => error);
+      expect(replaced).toBeInstanceOf(HarnessTranscriptReplaced);
+      const said = `${(replaced as Error).message} ${(replaced as Error).stack ?? ''}`;
+      for (const secret of [fixture, HOME, 'conv-1.jsonl', 'agent-homes']) expect(said).not.toContain(secret);
+    });
+
+    test('a file replaced after the proof is refused: by a new file, by a symlink put in its place, and by removal', async () => {
+      const { handle, writeHome } = await open();
+      expect((await handle.stat())?.size).toBe(handle.size);
+      // A new file at the same name (an atomic replace): another inode.
+      await writeHome(TRANSCRIPT, line(9));
+      await expect(handle.read(0, 10)).rejects.toBeInstanceOf(HarnessTranscriptReplaced);
+      expect(await handle.stat()).toBeUndefined();
+
+      // A symlink at the name, to a file outside the home that holds bytes of its own.
+      const reopened = await open();
+      const outside = join(fixture, 'outside.jsonl');
+      await writeFile(outside, 'OUTSIDE-BYTES\n');
+      const target = join(HOME, TRANSCRIPT);
+      await rm(target);
+      await symlink(outside, target);
+      const failure = await reopened.handle.read(0, 100).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(HarnessTranscriptReplaced);
+      expect(await reopened.handle.stat()).toBeUndefined();
+      // Opening afresh over the link proves nothing either.
+      expect(await reopened.harness.transcriptBytes(FERRET)).toBeUndefined();
+
+      // Gone.
+      await rm(target);
+      const gone = await open();
+      await rm(join(HOME, TRANSCRIPT));
+      await expect(gone.handle.read(0, 10)).rejects.toBeInstanceOf(HarnessTranscriptReplaced);
+      expect(await gone.handle.stat()).toBeUndefined();
+    });
+  });
+
+  describe('G162: entries() reads the NEWEST 8 MiB of a long transcript, never its first', () => {
+    const MIB = 1024 * 1024;
+    const OLD_AT = '2026-11-10T00:00:00.000Z';
+    const NEW_AT = '2026-11-11T00:00:00.000Z';
+    const user = (uuid: string, at: string, text: string): string =>
+      `${JSON.stringify({ type: 'user', uuid, timestamp: at, message: { content: text } })}\n`;
+    const pad = (megabytes: number): string =>
+      `${JSON.stringify({ type: 'system', subtype: 'x', uuid: 's', timestamp: OLD_AT, pad: 'p'.repeat(megabytes * MIB) })}\n`;
+
+    test('a delivered input after 9 MiB is in the entries, and the cut-off oldest one is not', async () => {
+      const { harness, writeHome } = build();
+      await harness.start(spec(), runner({}), {} as never);
+      await writeHome(
+        'projects/-work/conv-1.jsonl',
+        user('u1', OLD_AT, 'OLDEST') + pad(9) + user('u2', NEW_AT, 'NEWEST'),
+      );
+      const texts = (await harness.transcript.read(FERRET)).map(entry => entry.text);
+      expect(texts).toContain('NEWEST');
+      expect(texts).not.toContain('OLDEST');
+    });
+
+    test('the first line of a cut window is the end of a record and is dropped; a record that begins ON the window start is kept', async () => {
+      const { harness, writeHome } = build();
+      await harness.start(spec(), runner({}), {} as never);
+      const last = user('u3', NEW_AT, 'THIRD');
+      const first = user('u1', OLD_AT, 'OLDEST');
+      const middleOf = (text: number): string => user('u2', NEW_AT, 'M'.repeat(text));
+      // The middle record is sized so that it and the last one are EXACTLY the window (8 MiB): the window starts on its
+      // first byte, the byte before it ends a record, and it is kept.
+      const fit = 8 * MIB - Buffer.byteLength(last) - Buffer.byteLength(middleOf(0));
+      await writeHome('projects/-work/conv-1.jsonl', first + middleOf(fit) + last);
+      expect((await harness.transcript.read(FERRET)).map(entry => entry.id)).toEqual(['u2', 'u3']);
+      // One byte more and the window starts INSIDE the middle record: that half record is dropped, never parsed.
+      await writeHome('projects/-work/conv-1.jsonl', first + middleOf(fit + 1) + last);
+      expect((await harness.transcript.read(FERRET)).map(entry => entry.id)).toEqual(['u3']);
+    });
+
+    test('a window that does not reach back to the asked instant is NOT covered; a whole small file always is', async () => {
+      const { harness, writeHome } = build();
+      await harness.start(spec(), runner({}), {} as never);
+      await writeHome(
+        'projects/-work/conv-1.jsonl',
+        user('u1', OLD_AT, 'OLDEST') + pad(9) + user('u2', NEW_AT, 'NEWEST'),
+      );
+      const cut = await harness.transcript.readCovering!(FERRET, OLD_AT as Instant);
+      expect(cut.entries.map(entry => entry.text)).toEqual(['NEWEST']);
+      // The oldest complete record read is NEWER than the instant the caller needs: what lies before it is unknown.
+      expect(cut.covered).toBe(false);
+      // The window's oldest record is not newer than an instant after it: the read covers that.
+      expect((await harness.transcript.readCovering!(FERRET, '2026-11-12T00:00:00.000Z' as Instant)).covered).toBe(
+        true,
+      );
+      // A file under the window is read whole, so it covers everything, with the ordinals and ids it always had.
+      await writeHome('projects/-work/conv-1.jsonl', user('u1', OLD_AT, 'ONLY'));
+      const whole = await harness.transcript.readCovering!(FERRET, '2020-01-01T00:00:00.000Z' as Instant);
+      expect(whole.covered).toBe(true);
+      expect(whole.entries.map(entry => entry.id)).toEqual(['u1']);
+    });
+
+    test('a cut window whose only record is partial reads no entry and is not covered', async () => {
+      const { harness, writeHome } = build();
+      await harness.start(spec(), runner({}), {} as never);
+      await writeHome('projects/-work/conv-1.jsonl', pad(9));
+      const cut = await harness.transcript.readCovering!(FERRET, NEW_AT as Instant);
+      expect(cut.entries).toEqual([]);
+      expect(cut.covered).toBe(false);
+    });
+
+    describe('a record without a uuid keeps ONE identity whichever window reads it (rv2 P1)', () => {
+      const queueOp = (): string =>
+        `${JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: NEW_AT, content: 'HELD PROMPT' })}\n`;
+      const drain = (text: string): string =>
+        `${JSON.stringify({
+          type: 'attachment',
+          timestamp: NEW_AT,
+          attachment: { type: 'queued_command', commandMode: 'prompt', origin: { kind: 'human' }, prompt: text },
+        })}\n`;
+      const idsOf = async (harness: ReturnType<typeof build>['harness']): Promise<Record<string, string>> =>
+        Object.fromEntries((await harness.transcript.read(FERRET)).map(entry => [entry.text ?? entry.id, entry.id]));
+
+      test('a drain and a queue record keep their ids when an append first pushes the file past 8 MiB', async () => {
+        const { harness, writeHome } = build();
+        await harness.start(spec(), runner({}), {} as never);
+        const path = 'projects/-work/conv-1.jsonl';
+        // 7 MiB in front of the records (a whole read), then 2 MiB more after them (a cut read that still holds them).
+        const head = pad(7) + queueOp() + drain('DRAINED PROMPT');
+        await writeHome(path, head);
+        const whole = await idsOf(harness);
+        expect(Object.keys(whole).sort()).toEqual(['DRAINED PROMPT', 'HELD PROMPT']);
+        await writeHome(path, head + pad(2));
+        const cut = await idsOf(harness);
+        expect(cut).toEqual(whole);
+      });
+
+      test('the ids do not depend on where the window starts: two cut windows of one growing file agree', async () => {
+        const { harness, writeHome } = build();
+        await harness.start(spec(), runner({}), {} as never);
+        const path = 'projects/-work/conv-1.jsonl';
+        const head = pad(5) + drain('DRAINED PROMPT') + pad(2) + queueOp();
+        await writeHome(path, head + pad(2));
+        const first = await idsOf(harness);
+        // Growth moves the window start; the records are still inside it.
+        await writeHome(path, head + pad(2) + user('u9', NEW_AT, 'later'));
+        const second = await idsOf(harness);
+        expect(second['DRAINED PROMPT']).toBe(first['DRAINED PROMPT']);
+        expect(second['HELD PROMPT']).toBe(first['HELD PROMPT']);
+      });
+
+      test('a drain without a uuid is named `queued-prompt:<byte offset of its line>`, the key the v4 converter rewrites a claim to', async () => {
+        const { harness, writeHome } = build();
+        await harness.start(spec(), runner({}), {} as never);
+        const prefix = `${JSON.stringify({ type: 'system', pad: 'p'.repeat(200) })}\n`;
+        await writeHome('projects/-work/conv-1.jsonl', prefix + drain('ONE DRAIN'));
+        const entry = (await harness.transcript.read(FERRET)).find(each => each.text === 'ONE DRAIN');
+        // the one-time home conversion turns v4's `<path>#<start>#<end>` into this exact spelling.
+        expect(entry?.id).toBe(`queued-prompt:${Buffer.byteLength(prefix)}`);
+      });
+
+      test('two identical drains stay two records', async () => {
+        const { harness, writeHome } = build();
+        await harness.start(spec(), runner({}), {} as never);
+        await writeHome('projects/-work/conv-1.jsonl', drain('SAME') + drain('SAME'));
+        const ids = (await harness.transcript.read(FERRET)).map(entry => entry.id);
+        expect(new Set(ids).size).toBe(2);
+      });
+
+      test('one delivered input confirms at most ONE send, across the 8 MiB transition (positive control)', async () => {
+        const { harness, writeHome } = build();
+        await harness.start(spec(), runner({}), {} as never);
+        const path = 'projects/-work/conv-1.jsonl';
+        const message = 'repeat this exact queued message';
+        const head = pad(7) + drain(message);
+        await writeHome(path, head);
+        // The Conversation side, over the real harness's own reader: the delivery matcher claims a record by its entry id.
+        const reader = (): Promise<readonly TranscriptEntry[]> => harness.transcript.read(FERRET);
+        const claimed = new Set<string>();
+        const claim = async (): Promise<boolean> => {
+          const found = (await reader()).find(entry => entry.text === message && !claimed.has(entry.id));
+          if (found === undefined) return false;
+          claimed.add(found.id);
+          return true;
+        };
+        expect(await claim()).toBe(true);
+        // Control: below the limit the same record cannot confirm a second send.
+        expect(await claim()).toBe(false);
+        await writeHome(path, head + pad(2));
+        // Across the limit it still cannot: it is the same record under the same key.
+        expect(await claim()).toBe(false);
+      });
+    });
   });
 
   test('dialogs.current finds nothing on an empty pane and answer refuses a prompt that is gone', async () => {

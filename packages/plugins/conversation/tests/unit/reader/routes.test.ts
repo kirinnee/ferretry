@@ -42,8 +42,7 @@ const reader = (current: () => TranscriptEntry[], known = true) =>
       redact: async text => text.replaceAll('hunter2', '[redacted]'),
       batch: async work => work({ text: text => text.replaceAll('hunter2', '[redacted]'), data: value => value }),
     },
-    history: {} as never,
-    locate: { locate: async () => undefined },
+    bytes: async () => 'unsupported',
     now: () => 0,
   });
 

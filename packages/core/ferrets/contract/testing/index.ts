@@ -21,6 +21,8 @@ import {
   type HarnessLaunchSettings,
   type HarnessStop,
   type HarnessTailRecord,
+  type HarnessTranscriptBytes,
+  HarnessTranscriptReplaced,
   type HarnessTranscriptStamp,
   type HarnessTranscriptTail,
   type RunnerDelivery,
@@ -410,6 +412,19 @@ export class FakeHarness implements Harness {
   turnStop: HarnessStop | undefined = { key: 'Escape', safeWhenIdle: true };
   /** The transcript this fake proves for a ferret (U5): a test sets one to prove it; a ferret with none has no transcript. */
   readonly transcripts = new Map<FerretId, { stamp: HarnessTranscriptStamp; records: readonly HarnessTailRecord[] }>();
+  /**
+   * The raw transcript bytes this fake proves for a ferret (G162): a test sets one to prove it. Setting another array
+   * REPLACES the file, so a handle opened on the old one rejects `HarnessTranscriptReplaced`. Set `format` for codex.
+   */
+  readonly bytes = new Map<FerretId, Uint8Array>();
+  /** Which parser speaks the fake's bytes. */
+  bytesFormat: 'claude' | 'codex' = 'claude';
+  /** Every ferret `transcriptBytes` was asked about, in order. */
+  readonly bytesAsked: FerretId[] = [];
+  /** Every ferret whose handle was closed, in order (a handle's `close()` is idempotent in the real harnesses, not here). */
+  readonly bytesClosed: FerretId[] = [];
+  readonly #bytesTokens = new WeakMap<Uint8Array, string>();
+  #bytesOpened = 0;
   /** How many times each half of the transcript was asked for, so a test sees what a sample cost. */
   readonly stamped: FerretId[] = [];
   readonly tailed: FerretId[] = [];
@@ -429,6 +444,32 @@ export class FakeHarness implements Harness {
   async transcriptStamp(ferret: FerretId): Promise<HarnessTranscriptStamp | undefined> {
     this.stamped.push(ferret);
     return this.transcripts.get(ferret)?.stamp;
+  }
+  async transcriptBytes(ferret: FerretId): Promise<HarnessTranscriptBytes | undefined> {
+    this.bytesAsked.push(ferret);
+    const opened = this.bytes.get(ferret);
+    if (opened === undefined) return undefined;
+    let file = this.#bytesTokens.get(opened);
+    if (file === undefined) {
+      this.#bytesOpened += 1;
+      file = `fake-${ferret}-${this.#bytesOpened}`;
+      this.#bytesTokens.set(opened, file);
+    }
+    const still = (): boolean => this.bytes.get(ferret) === opened;
+    return {
+      format: this.bytesFormat,
+      file,
+      size: opened.length,
+      mtimeMs: 1,
+      read: async (offset, length) => {
+        if (!still()) throw new HarnessTranscriptReplaced();
+        return opened.slice(offset, offset + length);
+      },
+      stat: async () => (still() ? { size: opened.length, mtimeMs: 1 } : undefined),
+      close: async () => {
+        this.bytesClosed.push(ferret);
+      },
+    };
   }
   async transcriptTail(ferret: FerretId, limit: number): Promise<HarnessTranscriptTail> {
     this.tailed.push(ferret);

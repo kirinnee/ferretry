@@ -18,6 +18,7 @@ export * from './hooks.ts';
 export * from './ids.ts';
 export * from './kinds.ts';
 export * from './launch-origin.ts';
+export * from './transcript-bytes.ts';
 export * from './port.ts';
 export * from './records.ts';
 export * from './skill-home.ts';

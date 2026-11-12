@@ -335,6 +335,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     transcript: rollouts.transcript,
     transcriptStamp: rollouts.stamp,
     transcriptTail: rollouts.tail,
+    transcriptBytes: rollouts.bytes,
     usage: rollouts.usage,
     conversations: rollouts.conversations,
   };

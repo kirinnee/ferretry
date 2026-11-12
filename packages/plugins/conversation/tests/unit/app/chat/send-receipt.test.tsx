@@ -284,7 +284,7 @@ describe('the reader’s own row', () => {
     const row = render(
       <TranscriptRow entry={{ at: AT, id: 'u', kind: 'user', text: 'ship it', label: 'You · 01:45:44' }} />,
     );
-    expect(row.root.findByType('time').children).toEqual([clockOfInstant(AT)?.short ?? '']);
+    expect(row.root.findByType('time').children).toEqual([clockOfInstant(AT, { now: Date.now() })?.short ?? '']);
     expect(row.root.findAllByType('time')).toHaveLength(1);
   });
 });

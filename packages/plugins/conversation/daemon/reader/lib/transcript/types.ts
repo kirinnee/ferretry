@@ -380,7 +380,7 @@ export interface TranscriptParser {
   createInputObserver(): TranscriptInputObserver;
 }
 
-interface TranscriptFileCursor {
+export interface TranscriptFileCursor {
   readonly identity?: string;
   readonly byteOffset: number;
   readonly pendingBytes: number;
@@ -411,11 +411,11 @@ export interface TranscriptBatch {
   readonly rawRecords?: readonly TranscriptRawRecord[];
 }
 
-interface TranscriptReadOptions {
+export interface TranscriptReadOptions {
   readonly sessionId?: string;
 }
 
-interface TranscriptFollowOptions extends TranscriptReadOptions {
+export interface TranscriptFollowOptions extends TranscriptReadOptions {
   readonly pollIntervalMs?: number;
   readonly startAt?: 'beginning' | 'end';
   readonly signal?: AbortSignal;
