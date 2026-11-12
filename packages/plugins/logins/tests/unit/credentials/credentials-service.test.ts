@@ -595,3 +595,49 @@ describe('attributedTranscripts — only a session this daemon launched on the l
     should(attributedTranscripts({ usedBy: [] }, sessions)).eql([]);
   });
 });
+
+describe('FleetCredentialsService — launchStore', () => {
+  it('should hand a host-kept Claude login the EMPTY selector without looking at any store', async () => {
+    let inspected = 0;
+    const { service } = serviceOf(
+      {},
+      {
+        inspect: async () => {
+          inspected += 1;
+          return { reading: { state: 'valid' }, checked: [] };
+        },
+      },
+    );
+
+    should(await service.launchStore('claude-you')).eql({
+      kind: 'host',
+      variables: { [CLAUDE_SECURE_STORAGE_VARIABLE]: '' },
+    });
+    should(inspected).equal(0);
+  });
+
+  it('should name nothing for a Codex login or an environment login: their credential is not a Claude store', async () => {
+    const { service } = serviceOf();
+
+    should(await service.launchStore('codex-team')).eql({ kind: 'none' });
+    should(await service.launchStore('glm')).eql({ kind: 'none' });
+  });
+
+  it('should give a Ferretry-kept Claude login its store variable, usable only while the store NOW holds a login', async () => {
+    const inspections: CredentialStoreInspection[] = [
+      { reading: { state: 'valid' }, checked: [] },
+      { reading: { state: 'missing' }, checked: [{ location: 'the file /x.json', found: 'nothing' }] },
+    ];
+    const { service } = serviceOf({}, { inspect: async () => inspections.shift() as CredentialStoreInspection });
+    const variables = { [CLAUDE_SECURE_STORAGE_VARIABLE]: '/fy/fleet/credentials/claude-work' };
+
+    should(await service.launchStore('claude-work')).eql({ kind: 'owned', variables, usable: true });
+    should(await service.launchStore('claude-work')).eql({ kind: 'owned', variables, usable: false });
+  });
+
+  it('should refuse a login nobody wrote', async () => {
+    const { service } = serviceOf();
+
+    await should(service.launchStore('ghost')).rejected();
+  });
+});

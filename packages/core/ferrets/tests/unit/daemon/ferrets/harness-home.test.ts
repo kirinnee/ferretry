@@ -2,7 +2,14 @@ import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { describe, expect, test } from 'bun:test';
 import type { FencedPath, FerretId } from '@ferretry/kernel/contract';
 import { ok } from '@ferretry/std';
-import type { FerretRecord, Harness, HarnessKey, LaunchSpec, RunSpec } from '../../../../contract/index.ts';
+import {
+  type FerretRecord,
+  type Harness,
+  type HarnessKey,
+  LaunchRefusal,
+  type LaunchSpec,
+  type RunSpec,
+} from '../../../../contract/index.ts';
 import {
   emptyChildEnvironment,
   FakeHarness,
@@ -381,6 +388,24 @@ describe('S42 each harness supplies its own per-ferret home', () => {
     expect(started.error).toEqual({
       code: 'failed',
       reason: "the claude-code harness could not prepare this ferret's home, so it was not started",
+    });
+    expect(f.runner.starts).toBe(0);
+    expect(f.tokens.holds(ferretId('f1'))).toBe(false);
+    expect(f.registry.get(ferretId('f1'))?.state).toBe('stopped');
+  });
+
+  test('S42 a prepareHome that REFUSES the launch says why in its own words, and still stops the start', async () => {
+    const harness = new FakeHarness('claude-code', CLAUDE_HOMES);
+    harness.prepareHome = async () => {
+      throw new LaunchRefusal('the home’s settings name a login this ferret may not use');
+    };
+    const f = fixture([harness]);
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
+    expect(started.ok).toBe(false);
+    if (started.ok) return;
+    expect(started.error).toEqual({
+      code: 'failed',
+      reason: 'the home’s settings name a login this ferret may not use',
     });
     expect(f.runner.starts).toBe(0);
     expect(f.tokens.holds(ferretId('f1'))).toBe(false);

@@ -7,7 +7,11 @@ import { describe, it } from 'bun:test';
 import { LaunchPartsRefusal, type LaunchSpec, type StartDecideInput } from '@ferretry/core-ferrets/contract';
 import should from 'should';
 import { FolderSettingsUnreadableError } from '../../../daemon/lib/folder-settings.ts';
-import { LaunchGate, type RuntimeLaunchFactsSource } from '../../../daemon/lib/launch-gate.ts';
+import {
+  FixedSettingsDamagedError,
+  LaunchGate,
+  type RuntimeLaunchFactsSource,
+} from '../../../daemon/lib/launch-gate.ts';
 
 const FACTS = {
   runtime: 'work',
@@ -76,6 +80,22 @@ describe('LaunchGate.decide', () => {
 
     should(answer.allow).be.false();
     should((answer as { reason: string }).reason).containEql('could not be read');
+  });
+
+  it('should say the damaged fixed settings in their own words, rather than that the runtimes could not be read', async () => {
+    const answer = await new LaunchGate({
+      source: {
+        facts: async () => {
+          throw new FixedSettingsDamagedError('it is not valid JSON');
+        },
+      },
+      folderSettings: folderWith(),
+    }).decide(input());
+
+    should(answer.allow).be.false();
+    should((answer as { reason: string }).reason).equal(
+      'the login’s fixed settings (fixed.json) could not be read: it is not valid JSON, so runtime work was not started',
+    );
   });
 
   it('should let an error that is not a folder refusal fail the decision (the kernel reads a throw as no)', async () => {
