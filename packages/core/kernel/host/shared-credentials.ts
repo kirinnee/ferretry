@@ -187,9 +187,12 @@ export function inCredentialHome(name: RootName | undefined): boolean {
 /**
  * The rule for a LINK written by anything but `linkCredential` (`linkTo`, `copyTree` in link mode): `link_escape` when
  * the link's own place (`target`) or the thing it points at (`source`) is inside a credential home, so a second ferret
- * can never be handed the placed credential through an alias of its folder, and nothing is written. `undefined`: the rule
- * has nothing to say (the dedicated `linkCredential` is the one way a credential is linked, with its own checks). A root
- * that is not known (`undefined`) is judged by the caller's other refusals, never granted here.
+ * can never be handed the placed credential through an alias of its folder, and nothing is written.
+ * `undefined`: the rule has nothing to say (the dedicated `linkCredential` is the one way a credential is linked, with its
+ * own checks). A root that is not known (`undefined`) is judged by the caller's other refusals, never granted here.
+ * DECLARED EXCEPTION: `fleet` and `harness-home` are not credential homes to this rule; Runtimes' provisioning alone may link
+ * from and into them until the after-merge move (&F3537), pinned by `scripts/gen/tests/fleet-link-callers.test.ts`
+ * (`docs/secrets.md`, "Declared exception").
  */
 export function credentialHomeLinkVerdict(ends: {
   readonly source: RootName | undefined;

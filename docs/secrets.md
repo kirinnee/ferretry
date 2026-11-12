@@ -1476,8 +1476,11 @@ Two more rules keep that one link the only door, both enforced identically on th
   ferret's Codex home, the folder that holds a placed credential, the folders above it and the ones about to) and the whole
   `credentials` root (every login's store). So a folder alias of a ferret home (`f2` linked to `f1`) cannot give a second
   ferret the credential, and neither can a link made before the credential is placed. The one rule is
-  `credentialHomeLinkVerdict` in `packages/core/kernel/host/shared-credentials.ts`. `linkCredential` is unaffected, and
-  the fleet folder (Runtimes' own runtime homes and their credential links) is not a credential home in this sense.
+  `credentialHomeLinkVerdict` in `packages/core/kernel/host/shared-credentials.ts`. `linkCredential` is unaffected. This is
+  NOT the whole "any login's store" rule: the fleet folder and the host harness homes are not credential homes to it (see
+  **Declared exception** below), so the rule covers `agent-homes` and `credentials` only.
+  A refusal writes nothing, not even the scoped agent home a link was to land in: the verdict is judged before anything is
+  resolved for creation, on the real roots port and the testing host.
 - **The move check is armed against a swap.** The device and inode recorded when the link was placed are kept through the
   whole move decision and asked again at the held-source look, for the link and for any folder that holds it, so a writer on
   the same filesystem who swaps the link for a file across the first look and puts it back at the next call does not get it
@@ -1485,6 +1488,26 @@ Two more rules keep that one link the only door, both enforced identically on th
   the look saw (no compare-and-rename in the standard library), so a same-user writer who restores the link inside that
   single window is not stopped. It needs a concurrent writer already holding the same user's filesystem, which is the
   same-user residual above.
+
+**Declared exception: Runtimes' fleet credential store and the host harness homes (not implemented, pinned).** The
+credential-home rule above does not reach the `fleet` root (the fleet credential store, `fleet/credentials/<id>`, and
+Runtimes' runtime homes) or the `harness-home` root (the host's own Claude Code and Codex homes). Generic `linkTo` and
+`copyTree` link mode from and into them remain allowed, for **Runtimes' provisioning only** (`FleetDisk` in
+`fleet-disk.ts` and `FileFleetProvisioner` in `file-provisioner.ts`), because Runtimes provisions fleet homes, host sources
+and not-yet-existing sign-in slots, none of which the dedicated `linkCredential` (scoped `agent-homes` only) can place. So a
+Runtimes link can reach a real fleet or host sign-in outside `linkCredential`: a link in the fleet assets to a login in
+`fleet/credentials`, or to a host `auth.json`, succeeds on the real port and the testing host. The review also observed that
+the kernel does not constrain `harness-home` to an actual harness folder: Runtimes can scope it to an arbitrary absolute folder
+and link an ordinary file from it into the fleet credential store. Reach is limited to the trusted provisioner: only Runtimes may
+hold either root (the kernel's ownership rule), a project file is never a link source, an `agent-homes` link is refused, no
+route or tool lets a ferret choose the operation, and a shell already running as the user can use the filesystem directly (the
+same-user residual above). The exception is pinned by a fitness test, `scripts/gen/tests/fleet-link-callers.test.ts`: it fails if
+any production module other than those two calls (or aliases) `linkTo` or `copyTree`, and if either root is ever held by a plugin
+other than Runtimes, so a future caller cannot slip in before the move. It is to be **removed by the after-merge move** (&F3537,
+"Dedicated credential link operation"): Runtimes onto a dedicated credential operation, the fleet store becoming a credential home,
+and ordinary asset links that land in a runtime credential home becoming copies. The ruling that scopes it, quoted exactly:
+
+> "if the re-review proves only Runtimes' provisioning (fleet-disk.ts, file-provisioner.ts) reaches fleet.linkTo on the fleet root, ALSO add a fitness test that fails if any other module calls it there, so a future caller can't slip in before the after-merge move. Then fix4 is fine for merge; the last-look-to-rename race stays a declared GAP."
 
 ## Sign-in tokens the usage read sends
 

@@ -2495,21 +2495,32 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const known = HANDLES.get(target?.root ?? {});
       if (known === undefined || known.plugin !== plugin) return refuse('not_declared');
       const pointsAt = await known.linkTarget(target.path, target.dangling === true);
-      const placed = await realParent(at, true);
-      // No link on the way: the folder `at` names, as this root names it, is the very folder reached.
       const root = base() as string;
       const lexical = lexicalInRoot(home, root, ownerRoot, at);
       if (!lexical.ok) return refuse(lexical.error);
+      // A link whose place or whose target is inside a credential home is refused (one rule,
+      // `host/shared-credentials.ts`) BEFORE anything is resolved for creation: `realParent(at, true)` makes the scoped
+      // base of a not-yet-created agent home, so a refusal after it would leave that empty folder behind. The verdict is
+      // pure (the two roots' names), so it needs nothing from the disk; the name and target refusals above keep their precedence.
+      const homeVerdict = credentialHomeLinkVerdict({ source: known.root, target: name });
+      if (homeVerdict !== undefined) {
+        // The name that is a fenced file keeps its precedence (`fenced`, not `link_escape`), judged WITHOUT creating
+        // anything: only a place whose parent already exists is looked at, and any other answer is the verdict itself.
+        const existing = await realParent(at).catch((error: unknown) => {
+          if (error instanceof RootError && error.refusal === 'fenced') throw error;
+          return undefined;
+        });
+        if (existing !== undefined) await refuseHeldName(existing.scope, existing.full);
+        return refuse(homeVerdict);
+      }
+      const placed = await realParent(at, true);
+      // No link on the way: the folder `at` names, as this root names it, is the very folder reached.
       if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
         refuse('link_escape');
       const made = await openFolderMaking(placed.scope, dirname(placed.full), 0o700, false);
       try {
         const leafAt = await entry(placed.scope, made.folder, made.real, basename(placed.full));
         await refuseHeldName(placed.scope, join(made.real, basename(placed.full)));
-        // A link whose place or whose target is inside a credential home is refused (one rule,
-        // `host/shared-credentials.ts`) before anything is written; the name and target refusals above keep their precedence.
-        const homeVerdict = credentialHomeLinkVerdict({ source: known.root, target: name });
-        if (homeVerdict !== undefined) return refuse(homeVerdict);
         if ((await fs.identity(leafAt)) !== undefined) refuse('outside');
         await fs.symlink(pointsAt, leafAt).catch(() => refuse('changed'));
       } finally {

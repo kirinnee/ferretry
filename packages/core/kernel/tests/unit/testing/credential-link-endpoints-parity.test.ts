@@ -248,6 +248,21 @@ for (const [host, build] of HOSTS)
         }
       });
 
+      test('a refused link into a scope that does not exist yet leaves the scoped folder itself absent', async () => {
+        const side = await build();
+        try {
+          const all = side.codex.root('agent-homes');
+          await all.makeDirectory(resolved(all, 'source'));
+          const into = side.codex.root('agent-homes', { subfolder: 'not-created-yet' });
+          expect(await refusalOf(async () => await link(into, 'alias', all, 'source'))).toBe('link_escape');
+          // Refused means nothing was written: not the link, and not the scoped home the link was to land in.
+          expect(await all.lstat(resolved(all, 'not-created-yet'))).toBeUndefined();
+          expect(await all.lstat(resolved(all, 'not-created-yet/alias'))).toBeUndefined();
+        } finally {
+          await side.stop();
+        }
+      });
+
       test('a link between folders that are not credential homes is still made (the fleet)', async () => {
         const side = await build();
         try {
