@@ -306,9 +306,6 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
     unlink: async () => {
       throw new RootError('read_only');
     },
-    unlinkFile: async () => {
-      throw new RootError('read_only');
-    },
     // A project folder lies outside the home: it has no chain to judge (the real host's answer for any root outside it).
     checkPrivateChain: async () => err(chainProblem('(outside the home)', 'outside_home')),
     setMode: async (path, mode) => {

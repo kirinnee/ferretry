@@ -1775,27 +1775,6 @@ async function unlinkChecked(at: Checked): Promise<void> {
   }
 }
 
-/**
- * {@link RootHandle.unlinkFile}: the name is looked at through its checked folder, never followed, and removed with
- * `unlink` only while it is still a regular file with the identity the caller selected. Nothing else is
- * ever removed: a folder swapped in is refused, not walked.
- */
-async function unlinkFileChecked(at: Checked, expected: RootIdentity): Promise<void> {
-  const parent = dirname(at.full);
-  const folder = await openCheckedFolder(at.scope, parent);
-  try {
-    const leaf = await entry(at.scope, folder, parent, basename(at.full));
-    await refuseHeldName(at.scope, join(parent, basename(at.full)));
-    const found = await at.scope.fs.identity(leaf);
-    if (found === undefined) return;
-    if (found.kind !== 'file') return refuse('not_a_file');
-    if (found.device !== expected.device || found.inode !== expected.inode) return refuse('changed');
-    await at.scope.fs.unlink(leaf).catch(() => refuse('changed'));
-  } finally {
-    await folder.close();
-  }
-}
-
 /** What a harness file handle needs: the disk, the home it must stay out of, and the one file it names. */
 interface HarnessFileSetup {
   readonly fs: HostFs;
@@ -2725,19 +2704,6 @@ function rootHandle(setup: HandleSetup): RootHandle {
         refuse('link_escape');
       await unlinkChecked(placed);
       PLACED_LINKS.forgetUnder(placed.full);
-    },
-    unlinkFile: async (path: FencedPath, expected: RootIdentity) => {
-      writable();
-      if (!takesUnlinks(name)) return refuse('read_only');
-      const refused = unlinkNameRefusal(path);
-      if (refused !== undefined) return refuse(refused);
-      const placed = await realParent(path);
-      const root = base() as string;
-      const lexical = lexicalInRoot(home, root, ownerRoot, path);
-      if (!lexical.ok) return refuse(lexical.error);
-      if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
-        refuse('link_escape');
-      await unlinkFileChecked(placed, expected);
     },
     setMode: async (path: FencedPath, mode: number) => {
       if (setup.setMode !== true) return refuse('not_declared');

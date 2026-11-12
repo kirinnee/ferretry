@@ -160,6 +160,15 @@ export class FleetDisk {
     if (outcome.outcome === 'exists') throw new AlreadyExistsError(path);
   }
 
+  /**
+   * Writes `bytes` at `path` through the same root writer as {@link create} (a private temporary, then a rename onto the
+   * name), but REPLACING what is there: a link at the name is replaced itself, never followed. The caller decides that
+   * what is there is its own; nothing is ever removed, and a folder at the name is refused by the root.
+   */
+  async replace(path: string, bytes: Uint8Array, mode: number): Promise<void> {
+    await this.fleet.publish(this.fenced(path), bytes, { mode });
+  }
+
   /** `mkdir -p` in the fleet folder; each folder it makes gets `mode`. */
   async makeFolder(path: string, mode: number): Promise<void> {
     await this.fleet.makeDirectory(this.fenced(path), { mode });
@@ -182,22 +191,6 @@ export class FleetDisk {
   /** Removes the entry, a tree whole, never following a link. */
   async remove(path: string): Promise<void> {
     await this.fleet.remove(this.fenced(path));
-  }
-
-  /**
-   * Removes ONE regular file, and only while it is still the file `identity` (as {@link identity} spelled it) names and
-   * has no second name. A folder, a link or anything else at the name is refused and left as it was: this never recurses
-   * (the housekeeping door; {@link remove} is the one that walks a tree).
-   */
-  async unlinkFile(path: string, identity: string): Promise<void> {
-    const [device, inode] = identity.split(':');
-    if (device === undefined || inode === undefined) throw new Error(`not an identity: ${identity}`);
-    await this.fleet.unlinkFile(this.fenced(path), { device: BigInt(device), inode: BigInt(inode) });
-  }
-
-  /** Removes the SYMLINK at `path` and nothing else (what it points at is untouched); a file or folder there is refused and left alone. */
-  async unlinkLink(path: string): Promise<void> {
-    await this.fleet.unlink(this.fenced(path));
   }
 
   /** Narrows (or keeps) the permission bits of an existing file or folder, through a descriptor opened without following a link. */

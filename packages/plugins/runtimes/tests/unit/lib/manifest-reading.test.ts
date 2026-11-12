@@ -6,14 +6,15 @@ import { describe, expect, it } from 'bun:test';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import {
   FleetManifestUnreadableError,
-  KEPT_MANIFEST_INFIX,
-  keptCopyDigest,
-  keptManifestName,
-  MAX_KEPT_UNREADABLE_MANIFESTS,
+  KEPT_ASIDE_SUFFIX,
+  KeptAsideSchema,
+  keptAsideName,
+  keptAsideText,
+  MAX_KEPT_DAMAGE_BYTES,
   manifestRebuiltSentence,
   manifestUnreadableSentence,
+  readKeptAside,
   readManifestText,
-  surplusKeptCopies,
 } from '../../../daemon/lib/manifest-reading.ts';
 
 const manifest = buildFleetManifest({
@@ -64,17 +65,16 @@ describe('readManifestText', () => {
 });
 
 describe('the words about an unreadable manifest', () => {
-  it('names the file kept aside by a short digest, so the same damage is kept once', () => {
-    expect(keptManifestName('/fleet/manifest.json', 'abcdef0123456789ffff')).toBe(
-      '/fleet/manifest.json.unreadable-abcdef012345',
-    );
+  it('names ONE fixed aside file beside the manifest, whatever the damage', () => {
+    expect(KEPT_ASIDE_SUFFIX).toBe('.unreadable');
+    expect(keptAsideName('/fleet/manifest.json')).toBe('/fleet/manifest.json.unreadable');
   });
 
   it('says in one line that it is being rebuilt and where the old file is, or that it could not be kept', () => {
-    const kept = manifestRebuiltSentence('/fleet/manifest.json', '/fleet/manifest.json.unreadable-abc');
+    const kept = manifestRebuiltSentence('/fleet/manifest.json', '/fleet/manifest.json.unreadable');
     expect(kept).toContain('/fleet/manifest.json could not be read');
     expect(kept).toContain('rebuilt from the configuration');
-    expect(kept).toContain('/fleet/manifest.json.unreadable-abc (owner-only)');
+    expect(kept).toContain('/fleet/manifest.json.unreadable (owner-only)');
     expect(manifestRebuiltSentence('/fleet/manifest.json', undefined)).toContain('could not be kept aside');
     expect(kept).not.toContain('\n');
   });
@@ -86,70 +86,48 @@ describe('the words about an unreadable manifest', () => {
   });
 });
 
-describe('surplusKeptCopies', () => {
-  const prefix = `manifest.json${KEPT_MANIFEST_INFIX}`;
-  const nameOf = (digest: string): string => `${prefix}${digest.padEnd(12, '0')}`;
-  const copy = (digest: string, modified: string, links = 1) => ({ name: nameOf(digest), modified, links });
+describe('the aside envelope', () => {
+  const damaged = new TextEncoder().encode('{"version":2,"secretish":"DAMAGED-CONTENT"}');
+  const digest = 'ab'.repeat(32);
+  const at = new Date('2027-01-15T08:00:00.000Z');
 
-  it('keeps a small fixed number of the most recent copies and names the older ones for removal', () => {
-    expect(MAX_KEPT_UNREADABLE_MANIFESTS).toBe(3);
-    const copies = [
-      copy('a', '2027-01-01T00:00:01.000Z'),
-      copy('b', '2027-01-01T00:00:02.000Z'),
-      copy('c', '2027-01-01T00:00:03.000Z'),
-      copy('d', '2027-01-01T00:00:04.000Z'),
-      copy('e', '2027-01-01T00:00:05.000Z'),
-    ];
-    expect(surplusKeptCopies(copies, prefix, nameOf('c'))).toEqual([nameOf('b'), nameOf('a')]);
+  it('is named by a strict zod schema and round-trips the damaged bytes exactly', () => {
+    const text = keptAsideText(damaged, digest, at);
+    const envelope = readKeptAside(text);
+    expect(envelope).toEqual({
+      keptBy: 'ferretry',
+      kind: 'unreadable-fleet-manifest',
+      keptAt: '2027-01-15T08:00:00.000Z',
+      sha256: digest,
+      bytes: Buffer.from(damaged).toString('base64'),
+    });
+    expect(Buffer.from(envelope?.bytes ?? '', 'base64')).toEqual(Buffer.from(damaged));
+    expect(text.endsWith('\n')).toBe(true);
+    expect(KeptAsideSchema.safeParse(JSON.parse(text)).success).toBe(true);
   });
 
-  it('never names the protected copy, even when it is the oldest', () => {
-    const copies = [
-      copy('a', '2027-01-01T00:00:01.000Z'),
-      copy('b', '2027-01-01T00:00:02.000Z'),
-      copy('c', '2027-01-01T00:00:03.000Z'),
-      copy('d', '2027-01-01T00:00:04.000Z'),
-    ];
-    expect(surplusKeptCopies(copies, prefix, nameOf('a'))).toEqual([nameOf('b')]);
+  it('is only ours when every field is exactly right: nothing foreign, extra, missing or malformed parses', () => {
+    const good = JSON.parse(keptAsideText(damaged, digest, at)) as Record<string, unknown>;
+    const without = (key: string) => Object.fromEntries(Object.entries(good).filter(([name]) => name !== key));
+    for (const odd of [
+      { ...good, keptBy: 'someone' },
+      { ...good, kind: 'something-else' },
+      { ...good, keptAt: 'yesterday' },
+      { ...good, sha256: 'ABC' },
+      { ...good, sha256: 'AB'.repeat(32) },
+      { ...good, bytes: 'not base64!!' },
+      { ...good, bytes: 5 },
+      { ...good, extra: true },
+      without('bytes'),
+      without('keptBy'),
+    ])
+      expect(readKeptAside(JSON.stringify(odd))).toBeUndefined();
+    for (const text of ['', 'not json', '[]', 'null', '{"keptBy":"ferretry"}'])
+      expect(readKeptAside(text)).toBeUndefined();
   });
 
-  it('breaks a tie of age by name, so the choice is the same every time', () => {
-    const same = '2027-01-01T00:00:01.000Z';
-    const copies = ['d', 'a', 'c', 'b'].map(digest => copy(digest, same));
-    expect(surplusKeptCopies(copies, prefix, undefined, 2)).toEqual([nameOf('c'), nameOf('d')]);
-  });
-
-  it('chooses nothing that does not begin with the prefix, and nothing when there are few copies', () => {
-    const others = [
-      { name: 'manifest.json', modified: '2027-01-01T00:00:01.000Z', links: 1 },
-      { name: 'other.json.unreadable-a', modified: '2027-01-01T00:00:01.000Z', links: 1 },
-    ];
-    expect(surplusKeptCopies(others, prefix, undefined, 0)).toEqual([]);
-    expect(surplusKeptCopies([copy('a', '2027-01-01T00:00:01.000Z')], prefix, nameOf('a'))).toEqual([]);
-    expect(surplusKeptCopies([], prefix, undefined)).toEqual([]);
-  });
-
-  it('chooses and counts only the exact grammar of this writer: 12 lowercase hex digits and nothing after', () => {
-    const stamp = '2027-01-01T00:00:01.000Z';
-    const odd = [
-      `${prefix}owner-notes`,
-      `${prefix}0123456789AB`,
-      `${prefix}0123456789a`,
-      `${prefix}0123456789abc`,
-      `${prefix}0123456789ab.bak`,
-      `${prefix}`,
-    ].map(name => ({ name, modified: stamp, links: 1 }));
-    expect(surplusKeptCopies(odd, prefix, undefined, 0)).toEqual([]);
-    expect(keptCopyDigest(nameOf('a'), prefix)).toBe('a00000000000');
-    expect(keptCopyDigest(`${prefix}owner-notes`, prefix)).toBeUndefined();
-    expect(keptCopyDigest('manifest.json', prefix)).toBeUndefined();
-  });
-
-  it('never chooses or counts an entry with a second name', () => {
-    const stamp = '2027-01-01T00:00:01.000Z';
-    const copies = [copy('a', stamp, 2), copy('b', stamp), copy('c', stamp), copy('d', stamp), copy('e', stamp)];
-    expect(surplusKeptCopies(copies, prefix, undefined, 3)).toEqual([nameOf('e')]);
-    expect(surplusKeptCopies(copies, prefix, undefined, 0)).not.toContain(nameOf('a'));
+  it('keeps at most 4 MiB of damage', () => {
+    expect(MAX_KEPT_DAMAGE_BYTES).toBe(4 * 1024 * 1024);
   });
 });
 

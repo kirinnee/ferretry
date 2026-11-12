@@ -66,10 +66,12 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
    after a moment passes. A repair that fails throws, so the job runner retries it with its backoff until it works (proved
    with the real runner over a driven clock); the repair has ONE owner across its running and backoff states, so refused
    reads while it waits add neither an attempt nor a second retry timer. The start boundary (`LaunchGate.decide`) says the manifest is being rebuilt
-   and to try again. The old file is kept beside it (owner-only, verified, at most the 3 most recent) and one plain line
-   says so (the file is named, never its contents). Pruning touches only copies this writer made (its exact name, one link,
-   contents that hash to the name's digest) and removes them by identity with a regular-file-only unlink, never a
-   recursive remove; a start resolves its runtime from the rebuilt file with the same
+   and to try again. The damaged bytes are kept in ONE aside file beside it,
+   `manifest.json.unreadable` (owner-only, a self-describing JSON envelope named by a zod schema, at most 4 MiB of damage),
+   created when the name is free and replaced only when it is a single-link regular file holding our own envelope, so it
+   carries the latest damage; it is never deleted and the kernel gained no delete operation for it. Anything else at that
+   name (a foreign file, a link, a folder, a hard-linked file) is left untouched, and the manifest is STILL regenerated.
+   One plain line per repair says what happened (the files are named, never their contents). A start resolves its runtime from the rebuilt file with the same
    harness homes, and a valid manifest is left alone. Live v4 outage, 2026-11-12.
 
 ## After merge

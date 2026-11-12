@@ -8,6 +8,7 @@
  *
  * Generic on purpose: no key of an earlier or later version is named anywhere. The schema stays strict for what is written.
  */
+import { z } from 'zod';
 import { type FleetManifest, FleetManifestSchema } from './manifest.ts';
 
 /** The manifest's text, judged: nothing there, a manifest, or something that is not one. */
@@ -29,54 +30,54 @@ export function readManifestText(text: string | undefined): ManifestReading {
   return parsed.success ? { kind: 'readable', manifest: parsed.data } : { kind: 'unreadable' };
 }
 
-/** What follows the manifest's own file name in the name of a copy kept aside: only files with this infix are ever pruned. */
-export const KEPT_MANIFEST_INFIX = '.unreadable-';
+/** What follows the manifest's own file name in the name of the ONE file a damaged manifest is kept aside in. */
+export const KEPT_ASIDE_SUFFIX = '.unreadable';
 
-/** How many copies of unreadable manifests stay aside: the most recent few. Older damage is evidence nobody asked to keep. */
-export const MAX_KEPT_UNREADABLE_MANIFESTS = 3;
+/** The largest damaged manifest that is kept aside: a bigger one is not kept (and the manifest is still rebuilt). */
+export const MAX_KEPT_DAMAGE_BYTES = 4 * 1024 * 1024;
 
-/** How many hex digits of the contents' SHA-256 end a kept copy's name. */
-export const KEPT_DIGEST_LENGTH = 12;
-
-/** The name an unreadable manifest is kept under: the file's own name and a short digest of what it held, so it is kept once. */
-export function keptManifestName(manifestPath: string, digest: string): string {
-  return `${manifestPath}${KEPT_MANIFEST_INFIX}${digest.slice(0, KEPT_DIGEST_LENGTH)}`;
+/** The fixed name the damaged manifest is kept under: ONE file per manifest, replaced only while it is ours, never deleted. */
+export function keptAsideName(manifestPath: string): string {
+  return `${manifestPath}${KEPT_ASIDE_SUFFIX}`;
 }
 
 /**
- * The digest a name carries when it has EXACTLY the shape {@link keptManifestName} writes (`prefix` and then
- * {@link KEPT_DIGEST_LENGTH} lowercase hex digits, nothing after), else `undefined`. This is half of "a copy we made":
- * the other half is that the file's contents hash to that digest (see {@link surplusKeptCopies}'s caller), since the
- * name IS the digest of the contents. A note a person named `manifest.json.unreadable-owner-notes` is neither.
+ * What the aside file holds: a self-describing envelope that says whose it is, so a later repair can tell its own file
+ * from anything a person or another program put at the name. `bytes` is the damaged file, base64: it is data for a
+ * person to recover from, and is never logged or printed.
  */
-export function keptCopyDigest(name: string, prefix: string): string | undefined {
-  if (!name.startsWith(prefix)) return undefined;
-  const digest = name.slice(prefix.length);
-  return new RegExp(`^[0-9a-f]{${KEPT_DIGEST_LENGTH}}$`).test(digest) ? digest : undefined;
+export const KeptAsideSchema = z.strictObject({
+  keptBy: z.literal('ferretry'),
+  kind: z.literal('unreadable-fleet-manifest'),
+  keptAt: z.iso.datetime(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  bytes: z.base64(),
+});
+
+export type KeptAside = z.infer<typeof KeptAsideSchema>;
+
+/** The text of the aside file for a damaged manifest: the envelope, pretty-printed, one trailing newline. */
+export function keptAsideText(damaged: Uint8Array, sha256: string, keptAt: Date): string {
+  const envelope: KeptAside = {
+    keptBy: 'ferretry',
+    kind: 'unreadable-fleet-manifest',
+    keptAt: keptAt.toISOString(),
+    sha256,
+    bytes: Buffer.from(damaged).toString('base64'),
+  };
+  return `${JSON.stringify(envelope, null, 2)}\n`;
 }
 
-/**
- * The names (of `candidates`, the regular files of the fleet folder whose contents were already proved to hash to the
- * digest in their name) to remove so that at most {@link MAX_KEPT_UNREADABLE_MANIFESTS} copies stay: those named
- * exactly as this writer names them ({@link keptCopyDigest}) and holding their only name (`links === 1`), oldest first.
- * The copy just kept (`protect`) is never among them. Anything else — another spelling, a second hard link — is neither
- * chosen nor counted, so nothing the person or another version put there is touched.
- */
-export function surplusKeptCopies(
-  candidates: readonly { readonly name: string; readonly modified: string; readonly links: number }[],
-  prefix: string,
-  protect: string | undefined,
-  limit: number = MAX_KEPT_UNREADABLE_MANIFESTS,
-): readonly string[] {
-  const others = candidates
-    .filter(entry => keptCopyDigest(entry.name, prefix) !== undefined && entry.links === 1 && entry.name !== protect)
-    .toSorted((left, right) =>
-      left.modified === right.modified ? left.name.localeCompare(right.name) : left.modified < right.modified ? 1 : -1,
-    )
-    .map(entry => entry.name);
-  // The protected copy takes one of the places; the newest of the others fill the rest.
-  const room = Math.max(0, protect === undefined ? limit : limit - 1);
-  return others.slice(room);
+/** The envelope a text holds when it is OURS (strict shape, every field), else `undefined`. A foreign or damaged file is not. */
+export function readKeptAside(text: string): KeptAside | undefined {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  const parsed = KeptAsideSchema.safeParse(payload);
+  return parsed.success ? parsed.data : undefined;
 }
 
 /** The manifest exists and is not one. Retryable: the daemon rebuilds it. The message names the file, never its contents. */

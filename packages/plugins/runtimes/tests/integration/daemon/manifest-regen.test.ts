@@ -8,19 +8,7 @@
  * its runtime from the rebuilt file with the same homes as before.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import {
-  chmod,
-  link,
-  lstat,
-  mkdir,
-  readdir,
-  readFile,
-  stat,
-  symlink,
-  unlink,
-  utimes,
-  writeFile,
-} from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, readdir, readFile, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
@@ -43,7 +31,7 @@ import {
   repairRequester,
 } from '../../../daemon/host-assembly.ts';
 import { hostAssembly, runtimesDaemon } from '../../../daemon/index.ts';
-import { KEPT_DIGEST_LENGTH, MAX_KEPT_UNREADABLE_MANIFESTS } from '../../../daemon/lib/manifest-reading.ts';
+import { type KeptAside, MAX_KEPT_DAMAGE_BYTES, readKeptAside } from '../../../daemon/lib/manifest-reading.ts';
 import { LaunchGate } from '../../../daemon/lib/launch-gate.ts';
 import type { FleetManifest } from '../../../daemon/lib/manifest.ts';
 import type { FleetApplyPlan } from '../../../daemon/lib/provisioning.ts';
@@ -94,7 +82,7 @@ const withUnknownKey = (): string =>
 const truncated = (): string => `${JSON.stringify(manifest()).slice(0, 60)}${MARKER}`;
 
 const kept = async (world: FleetWorld): Promise<string[]> =>
-  (await readdir(world.fleet)).filter(name => name.startsWith('manifest.json.unreadable-')).toSorted();
+  (await readdir(world.fleet)).filter(name => name.startsWith('manifest.json.unreadable')).toSorted();
 
 const manifestPathOf = (world: FleetWorld): string => join(world.fleet, 'manifest.json');
 
@@ -116,8 +104,9 @@ describe('the provisioner rebuilds an unreadable manifest and keeps the old file
       expect(rebuilt.accounts).toHaveLength(1);
       expect(rebuilt.accounts[0]).not.toHaveProperty('claudeEnvOverrides');
       const copies = await kept(world);
-      expect(copies).toHaveLength(1);
-      expect(await readFile(join(world.fleet, copies[0] ?? ''), 'utf8')).toBe(damage());
+      expect(copies).toEqual(['manifest.json.unreadable']);
+      const envelope = readKeptAside(await readFile(join(world.fleet, copies[0] ?? ''), 'utf8'));
+      expect(Buffer.from(envelope?.bytes ?? '', 'base64').toString('utf8')).toBe(damage());
       expect((await stat(join(world.fleet, copies[0] ?? ''))).mode & 0o777).toBe(0o600);
       expect(said).toHaveLength(1);
       expect(said[0]).toContain(manifestPathOf(world));
@@ -198,7 +187,7 @@ describe('the provisioner rebuilds an unreadable manifest and keeps the old file
     await writeFile(manifestPathOf(world), truncated());
     const said: string[] = [];
     const disk = faultingDisk(world.disk, async (call, args) => {
-      if (call === 'create' && String(args[0]).includes('.unreadable-')) throw new Error('disk refused the copy');
+      if (call === 'create' && String(args[0]).endsWith('.unreadable')) throw new Error('disk refused the copy');
     });
 
     await world.provisioner({ disk, say: sentence => said.push(sentence) }).apply(planFor(world));
@@ -235,171 +224,249 @@ describe('the provisioner rebuilds an unreadable manifest and keeps the old file
   });
 });
 
-describe('the copies kept aside are bounded and verified', () => {
-  const copyOf = async (world: FleetWorld): Promise<string> => join(world.fleet, (await kept(world))[0] ?? 'never');
+describe('the ONE aside file: created when free, replaced only when ours, never deleted', () => {
+  const asidePath = (world: FleetWorld): string => join(world.fleet, 'manifest.json.unreadable');
+  /** What the aside holds, parsed by the production schema, and the damaged bytes it carries decoded. */
+  const asideHolds = async (world: FleetWorld): Promise<{ readonly damaged: string; readonly envelope: KeptAside }> => {
+    const envelope = readKeptAside(await readFile(asidePath(world), 'utf8'));
+    if (envelope === undefined) throw new Error('the aside is not our envelope');
+    return { damaged: Buffer.from(envelope.bytes, 'base64').toString('utf8'), envelope };
+  };
+  const ourEnvelope = (damaged: string): string =>
+    `${JSON.stringify({
+      keptBy: 'ferretry',
+      kind: 'unreadable-fleet-manifest',
+      keptAt: '2027-01-01T00:00:00.000Z',
+      sha256: createHash('sha256').update(damaged).digest('hex'),
+      bytes: Buffer.from(damaged).toString('base64'),
+    })}\n`;
+  const repair = async (world: FleetWorld, damage: string, say?: (sentence: string) => void): Promise<void> => {
+    await writeFile(manifestPathOf(world), damage);
+    await world.provisioner(say === undefined ? {} : { say }).apply(planFor(world));
+  };
+  const regenerated = async (world: FleetWorld): Promise<void> => {
+    expect(JSON.parse(await readFile(manifestPathOf(world), 'utf8'))).toMatchObject({ version: 1 });
+  };
 
-  it('keeps at most the most recent few copies across many different damages, never touching anything else', async () => {
+  it('is a self-describing envelope with the damage, its digest and a time, owner-only, under the fixed name', async () => {
     const world = await fleetWorld();
-    const outside = join(world.person, 'fixture-evidence');
-    await writeFile(outside, 'safe fixture marker');
-    const stranger = join(world.fleet, 'manifest.json.unreadable-not-ours');
-    await symlink(outside, stranger);
-    const unrelated = join(world.fleet, 'other.json.unreadable-0123456789ab');
-    await writeFile(unrelated, 'someone else');
+    await repair(world, withUnknownKey());
+
+    const { damaged, envelope } = await asideHolds(world);
+    expect(damaged).toBe(withUnknownKey());
+    expect(envelope).toMatchObject({ keptBy: 'ferretry', kind: 'unreadable-fleet-manifest' });
+    expect(envelope.sha256).toBe(createHash('sha256').update(withUnknownKey()).digest('hex'));
+    expect(Number.isNaN(Date.parse(envelope.keptAt))).toBe(false);
+    expect((await stat(asidePath(world))).mode & 0o777).toBe(0o600);
+    expect(await kept(world)).toEqual(['manifest.json.unreadable']);
+  });
+
+  it('eight distinct damages leave exactly one aside file, and it carries the latest damage', async () => {
+    const world = await fleetWorld();
+    const said: string[] = [];
     const payloads = Array.from({ length: 8 }, (_, n) => `${truncated()}-${n}`);
 
-    for (const [n, payload] of payloads.entries()) {
-      await writeFile(manifestPathOf(world), payload);
-      await world.provisioner().apply(planFor(world));
-      // Distinct, increasing ages: "the most recent" is then decided by time, not by chance.
-      for (const name of await kept(world)) {
-        if (name === 'manifest.json.unreadable-not-ours') continue;
-        if ((await readFile(join(world.fleet, name), 'utf8')) === payload)
-          await utimes(join(world.fleet, name), 1_000 + n, 1_000 + n);
-      }
+    for (const payload of payloads) await repair(world, payload, sentence => said.push(sentence));
+
+    expect(await kept(world)).toEqual(['manifest.json.unreadable']);
+    expect((await asideHolds(world)).damaged).toBe(payloads[7] ?? 'never');
+    expect(said).toHaveLength(8); // exactly one line per repair
+    for (const sentence of said) {
+      expect(sentence).toContain(asidePath(world));
+      expect(sentence).not.toContain(MARKER);
+      expect(sentence).not.toContain(Buffer.from(truncated()).toString('base64').slice(0, 20));
+      expect(sentence).not.toContain('\n');
     }
-
-    const left = await kept(world);
-    expect(left).toHaveLength(MAX_KEPT_UNREADABLE_MANIFESTS + 1); // three real copies and the symlink that is not ours
-    const bodies = await Promise.all(
-      left
-        .filter(name => name !== 'manifest.json.unreadable-not-ours')
-        .map(async name => await readFile(join(world.fleet, name), 'utf8')),
-    );
-    expect(bodies.toSorted()).toEqual(payloads.slice(-MAX_KEPT_UNREADABLE_MANIFESTS).toSorted());
-    expect((await lstat(stranger)).isSymbolicLink()).toBe(true);
-    expect(await readFile(outside, 'utf8')).toBe('safe fixture marker');
-    expect(await readFile(unrelated, 'utf8')).toBe('someone else');
+    await regenerated(world);
   });
 
-  it('still rebuilds when the older copies cannot be listed', async () => {
+  it('does not rewrite an aside that already holds this damage and is private', async () => {
     const world = await fleetWorld();
-    await writeFile(manifestPathOf(world), truncated());
-    let armed = false;
-    const disk = faultingDisk(world.disk, async (call, args) => {
-      if (call === 'create' && String(args[0]).includes('.unreadable-')) armed = true;
-      if (call === 'entries' && armed && String(args[0]) === world.fleet) {
-        armed = false;
-        throw new Error('disk refused the listing');
-      }
-    });
+    await repair(world, truncated());
+    const before = await stat(asidePath(world));
 
-    await world.provisioner({ disk }).apply(planFor(world));
+    await repair(world, truncated());
 
-    expect(await kept(world)).toHaveLength(1);
-    expect(JSON.parse(await readFile(manifestPathOf(world), 'utf8'))).toMatchObject({ version: 1 });
+    expect((await stat(asidePath(world))).ino).toBe(before.ino);
   });
 
-  it('keeps the existing copy of the same damage when it is verified: a regular, owner-only file holding the same bytes', async () => {
+  it('replaces our own aside that is not private (so the line is true), keeping one file', async () => {
     const world = await fleetWorld();
-    await writeFile(manifestPathOf(world), truncated());
-    await world.provisioner().apply(planFor(world));
-    const copy = await copyOf(world);
-    const before = await stat(copy);
-    await writeFile(manifestPathOf(world), truncated());
+    await repair(world, truncated());
+    await chmod(asidePath(world), 0o644);
     const said: string[] = [];
 
-    await world.provisioner({ say: sentence => said.push(sentence) }).apply(planFor(world));
+    await repair(world, truncated(), sentence => said.push(sentence));
 
-    expect((await stat(copy)).ino).toBe(before.ino);
+    expect((await stat(asidePath(world))).mode & 0o777).toBe(0o600);
     expect(said[0]).toContain('(owner-only)');
+    expect(await kept(world)).toEqual(['manifest.json.unreadable']);
   });
 
-  it('does not call an existing world-readable copy owner-only: it is replaced by a private one', async () => {
+  it('never replaces a foreign file at the name: it stays as it was, the line says so, and the manifest is rebuilt', async () => {
     const world = await fleetWorld();
-    await writeFile(manifestPathOf(world), truncated());
-    await world.provisioner().apply(planFor(world));
-    const copy = await copyOf(world);
-    await chmod(copy, 0o644);
-    await writeFile(manifestPathOf(world), truncated());
+    await writeFile(asidePath(world), 'fixture notes that are not ours', { mode: 0o640 });
     const said: string[] = [];
 
-    await world.provisioner({ say: sentence => said.push(sentence) }).apply(planFor(world));
+    await repair(world, truncated(), sentence => said.push(sentence));
+    await repair(world, `${truncated()}-again`, sentence => said.push(sentence));
 
-    expect((await stat(copy)).mode & 0o777).toBe(0o600);
-    expect(await readFile(copy, 'utf8')).toBe(truncated());
-    expect(said[0]).toContain('(owner-only)');
+    expect(await readFile(asidePath(world), 'utf8')).toBe('fixture notes that are not ours');
+    expect((await stat(asidePath(world))).mode & 0o777).toBe(0o640);
+    expect(said).toHaveLength(2);
+    for (const sentence of said) expect(sentence).toContain('could not be kept aside');
+    await regenerated(world);
+    expect(await kept(world)).toEqual(['manifest.json.unreadable']);
   });
 
-  it('replaces an existing entry of that name that holds other bytes', async () => {
+  it.each([
+    ['JSON that is not an envelope', JSON.stringify({ hello: 'world' })],
+    ['an envelope of someone else', ourEnvelope(truncated()).replace('"ferretry"', '"another-tool"')],
+    ['an envelope with an extra field', ourEnvelope(truncated()).replace('"keptBy"', '"extra":1,"keptBy"')],
+    ['a truncated envelope', ourEnvelope(truncated()).slice(0, 40)],
+    ['an empty file', ''],
+  ])('leaves %s at the name untouched and still rebuilds the manifest', async (_name, text) => {
     const world = await fleetWorld();
-    await writeFile(manifestPathOf(world), truncated());
-    await world.provisioner().apply(planFor(world));
-    const copy = await copyOf(world);
-    await writeFile(copy, 'not what was there', { mode: 0o600 });
-    await writeFile(manifestPathOf(world), truncated());
-
-    await world.provisioner().apply(planFor(world));
-
-    expect(await readFile(copy, 'utf8')).toBe(truncated());
-  });
-
-  it('replaces a link at that name without following or changing what it points at', async () => {
-    const world = await fleetWorld();
-    await writeFile(manifestPathOf(world), truncated());
-    await world.provisioner().apply(planFor(world));
-    const copy = await copyOf(world);
-    const target = join(world.person, 'fixture-evidence');
-    await writeFile(target, 'safe fixture marker');
-    await unlink(copy);
-    await symlink(target, copy);
-    await writeFile(manifestPathOf(world), truncated());
-
-    await world.provisioner().apply(planFor(world));
-
-    expect(await readFile(target, 'utf8')).toBe('safe fixture marker');
-    expect((await lstat(copy)).isFile()).toBe(true);
-    expect(await readFile(copy, 'utf8')).toBe(truncated());
-  });
-
-  it('replaces a copy that has a second name, leaving the other name as it was', async () => {
-    const world = await fleetWorld();
-    await writeFile(manifestPathOf(world), truncated());
-    await world.provisioner().apply(planFor(world));
-    const copy = await copyOf(world);
-    const other = join(world.person, 'fixture-second-name');
-    await link(copy, other);
-    await writeFile(manifestPathOf(world), truncated());
-
-    await world.provisioner().apply(planFor(world));
-
-    expect((await stat(copy)).nlink).toBe(1);
-    expect(await readFile(other, 'utf8')).toBe(truncated());
-  });
-
-  it('says no private copy was kept when something that is not a file holds the name', async () => {
-    const world = await fleetWorld();
-    await writeFile(manifestPathOf(world), truncated());
-    await world.provisioner().apply(planFor(world));
-    const copy = await copyOf(world);
-    await unlink(copy);
-    await mkdir(copy);
-    await writeFile(manifestPathOf(world), truncated());
+    await writeFile(asidePath(world), text, { mode: 0o600 });
     const said: string[] = [];
 
-    await world.provisioner({ say: sentence => said.push(sentence) }).apply(planFor(world));
+    await repair(world, `${truncated()}-different`, sentence => said.push(sentence));
 
+    expect(await readFile(asidePath(world), 'utf8')).toBe(text);
+    expect(said).toHaveLength(1);
     expect(said[0]).toContain('could not be kept aside');
-    expect(said[0]).not.toContain('owner-only');
-    expect((await lstat(copy)).isDirectory()).toBe(true);
+    await regenerated(world);
   });
 
-  it('says no private copy was kept when an unverified one cannot be replaced', async () => {
+  it('replaces our own envelope holding older damage, keeping the single file', async () => {
+    const world = await fleetWorld();
+    await writeFile(asidePath(world), ourEnvelope('older damage of ours'), { mode: 0o600 });
+
+    await repair(world, truncated());
+
+    expect((await asideHolds(world)).damaged).toBe(truncated());
+    expect(await kept(world)).toEqual(['manifest.json.unreadable']);
+  });
+
+  it('leaves a symlink at the name alone (and what it points at), and still rebuilds', async () => {
+    const world = await fleetWorld();
+    const target = join(world.person, 'fixture-evidence');
+    await writeFile(target, ourEnvelope('looks like ours, but it is behind a link'));
+    await symlink(target, asidePath(world));
+    const said: string[] = [];
+
+    await repair(world, truncated(), sentence => said.push(sentence));
+
+    expect((await lstat(asidePath(world))).isSymbolicLink()).toBe(true);
+    expect(await readFile(target, 'utf8')).toBe(ourEnvelope('looks like ours, but it is behind a link'));
+    expect(said[0]).toContain('could not be kept aside');
+    await regenerated(world);
+  });
+
+  it('leaves a folder at the name alone, with what is in it, and still rebuilds', async () => {
+    const world = await fleetWorld();
+    await mkdir(asidePath(world));
+    await writeFile(join(asidePath(world), 'keep'), 'a folder of someone else');
+    const said: string[] = [];
+
+    await repair(world, truncated(), sentence => said.push(sentence));
+
+    expect((await lstat(asidePath(world))).isDirectory()).toBe(true);
+    expect(await readFile(join(asidePath(world), 'keep'), 'utf8')).toBe('a folder of someone else');
+    expect(said[0]).toContain('could not be kept aside');
+    await regenerated(world);
+  });
+
+  it('leaves a hard-linked file at the name alone, even if it holds our envelope, and still rebuilds', async () => {
+    const world = await fleetWorld();
+    const other = join(world.person, 'fixture-second-name');
+    await writeFile(other, ourEnvelope('older damage of ours'), { mode: 0o600 });
+    await link(other, asidePath(world));
+    const said: string[] = [];
+
+    await repair(world, truncated(), sentence => said.push(sentence));
+
+    expect((await lstat(asidePath(world))).nlink).toBe(2);
+    expect(await readFile(other, 'utf8')).toBe(ourEnvelope('older damage of ours'));
+    expect(said[0]).toContain('could not be kept aside');
+    await regenerated(world);
+  });
+
+  it('a foreign file that arrives at the name between the look and the create is left as it was', async () => {
     const world = await fleetWorld();
     await writeFile(manifestPathOf(world), truncated());
-    await world.provisioner().apply(planFor(world));
-    const copy = await copyOf(world);
-    await chmod(copy, 0o644);
-    await writeFile(manifestPathOf(world), truncated());
-    const said: string[] = [];
+    let arrived = false;
     const disk = faultingDisk(world.disk, async (call, args) => {
-      if (call === 'unlinkFile' && String(args[0]) === copy) throw new Error('disk refused the removal');
+      if (call !== 'create' || arrived || String(args[0]) !== asidePath(world)) return;
+      arrived = true;
+      await writeFile(asidePath(world), 'a file that arrived first');
     });
+    const said: string[] = [];
 
     await world.provisioner({ disk, say: sentence => said.push(sentence) }).apply(planFor(world));
 
+    expect(arrived).toBe(true);
+    expect(await readFile(asidePath(world), 'utf8')).toBe('a file that arrived first');
     expect(said[0]).toContain('could not be kept aside');
-    expect(said[0]).not.toContain('owner-only');
+    await regenerated(world);
+  });
+
+  it('does not keep a damaged manifest over 4 MiB, says so once, and still rebuilds', async () => {
+    const world = await fleetWorld();
+    expect(MAX_KEPT_DAMAGE_BYTES).toBe(4 * 1024 * 1024);
+    const said: string[] = [];
+
+    await repair(world, 'x'.repeat(MAX_KEPT_DAMAGE_BYTES + 1), sentence => said.push(sentence));
+
+    expect(await kept(world)).toEqual([]);
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain('could not be kept aside');
+    await regenerated(world);
+  });
+
+  it('keeps a damaged manifest of exactly 4 MiB, and recognises its own envelope of that size next time', async () => {
+    const world = await fleetWorld();
+    const biggest = 'y'.repeat(MAX_KEPT_DAMAGE_BYTES);
+
+    await repair(world, biggest);
+    expect((await asideHolds(world)).damaged).toBe(biggest);
+    await repair(world, `${truncated()}-after-the-big-one`);
+
+    expect((await asideHolds(world)).damaged).toBe(`${truncated()}-after-the-big-one`);
+    expect(await kept(world)).toEqual(['manifest.json.unreadable']);
+  });
+
+  it('never deletes a file: no unlink, no removal of anything with the aside name, across many repairs and occupants', async () => {
+    const world = await fleetWorld();
+    const calls: string[] = [];
+    const fleet = world.disk.fleet;
+    const spied = new Proxy(fleet, {
+      get(target, property) {
+        const value = Reflect.get(target, property, target);
+        if (typeof value !== 'function' || typeof property !== 'string') return value;
+        return (...args: unknown[]) => {
+          if (property === 'remove' || property.startsWith('unlink')) calls.push(`${property} ${String(args[0])}`);
+          return value.apply(target, args);
+        };
+      },
+    });
+    Object.defineProperty(world.disk, 'fleet', { value: spied });
+    const said: string[] = [];
+
+    for (let n = 0; n < 4; n++) await repair(world, `${truncated()}-${n}`, sentence => said.push(sentence));
+    await chmod(asidePath(world), 0o644);
+    await repair(world, `${truncated()}-3`, sentence => said.push(sentence)); // ours but not private: replaced
+    await unlink(asidePath(world));
+    await mkdir(asidePath(world)); // a folder is left, never walked
+    await repair(world, `${truncated()}-folder`, sentence => said.push(sentence));
+
+    // The apply's own scratch (stage, backup, lock) is removed by the journal as ever; nothing else, and never the aside.
+    expect(calls.filter(call => !call.startsWith('remove ') || !/\/\.fy-fleet-[^/]*(\/[^/]*)?$/.test(call))).toEqual(
+      [],
+    );
+    expect(calls.filter(call => call.includes('.unreadable'))).toEqual([]);
+    expect(calls.filter(call => call.startsWith('unlink'))).toEqual([]);
+    expect(said).toHaveLength(6);
   });
 });
 
@@ -901,150 +968,7 @@ describe('the repair requester', () => {
   });
 });
 
-// ── fix2: pruning touches only what this writer made; housekeeping never recurses; one repair owner ──────────────────
-
-const digestOf = (body: string): string => createHash('sha256').update(body).digest('hex').slice(0, KEPT_DIGEST_LENGTH);
-
-describe('pruning only ever touches files this writer made itself', () => {
-  const repairThrice = async (world: FleetWorld, tag: string): Promise<void> => {
-    for (let n = 0; n < 4; n++) {
-      await writeFile(manifestPathOf(world), `${truncated()}-${tag}-${n}`);
-      await world.provisioner().apply(planFor(world));
-    }
-  };
-
-  it('keeps an owner note that only shares the prefix, however many repairs follow', async () => {
-    const world = await fleetWorld();
-    const note = join(world.fleet, 'manifest.json.unreadable-owner-notes');
-    await writeFile(note, 'fixture notes, not generated evidence');
-    await utimes(note, 1, 1);
-
-    await repairThrice(world, 'note');
-
-    expect(await readFile(note, 'utf8')).toBe('fixture notes, not generated evidence');
-    expect((await kept(world)).filter(name => name !== 'manifest.json.unreadable-owner-notes')).toHaveLength(
-      MAX_KEPT_UNREADABLE_MANIFESTS,
-    );
-  });
-
-  it.each([
-    ['whose contents hash to the digest', (body: string) => body],
-    ['whose contents do not', () => 'someone else is holding this'],
-  ])('keeps a digest-named file with a second name, %s', async (_name, contents) => {
-    const world = await fleetWorld();
-    const body = 'fixture evidence with a second name';
-    const alias = join(world.fleet, `manifest.json.unreadable-${digestOf(body)}`);
-    const other = join(world.person, 'fixture-evidence-alias');
-    await writeFile(other, contents(body));
-    await link(other, alias);
-    await utimes(alias, 1, 1);
-
-    await repairThrice(world, 'alias');
-
-    expect((await lstat(alias)).nlink).toBe(2);
-    expect(await readFile(other, 'utf8')).toBe(contents(body));
-  });
-
-  it('keeps a digest-named single-link file whose contents do not match the digest', async () => {
-    const world = await fleetWorld();
-    const foreign = join(world.fleet, 'manifest.json.unreadable-0123456789ab');
-    await writeFile(foreign, 'not the bytes that name digests', { mode: 0o600 });
-    await utimes(foreign, 1, 1);
-
-    await repairThrice(world, 'mismatch');
-
-    expect(await readFile(foreign, 'utf8')).toBe('not the bytes that name digests');
-    expect((await kept(world)).filter(name => name !== 'manifest.json.unreadable-0123456789ab')).toHaveLength(
-      MAX_KEPT_UNREADABLE_MANIFESTS,
-    );
-  });
-
-  it('still prunes its own old copies: the name is the digest of the contents and the file has one name', async () => {
-    const world = await fleetWorld();
-    const body = 'an old copy this writer made';
-    const old = join(world.fleet, `manifest.json.unreadable-${digestOf(body)}`);
-    await writeFile(old, body, { mode: 0o600 });
-    await utimes(old, 1, 1);
-
-    await repairThrice(world, 'own');
-
-    expect(await lstat(old).catch(() => undefined)).toBeUndefined();
-    expect(await kept(world)).toHaveLength(MAX_KEPT_UNREADABLE_MANIFESTS);
-  });
-});
-
-describe('housekeeping removes a regular file by its identity and never walks a folder', () => {
-  /** Swaps the entry named `victim` for a folder holding a file, the first time the disk is asked to unlink it. */
-  const swapForFolder = (world: FleetWorld, victim: string) => {
-    let swapped = false;
-    return {
-      swapped: () => swapped,
-      disk: faultingDisk(world.disk, async (call, args) => {
-        if (call !== 'unlinkFile' || swapped || String(args[0]) !== victim) return;
-        swapped = true;
-        await unlink(victim);
-        await mkdir(victim);
-        await writeFile(join(victim, 'keep'), 'a folder of someone else');
-      }),
-    };
-  };
-
-  it('a folder swapped in at a surplus copy before its unlink is left whole, and the apply still succeeds', async () => {
-    const world = await fleetWorld();
-    const body = 'an old copy this writer made';
-    const old = join(world.fleet, `manifest.json.unreadable-${digestOf(body)}`);
-    await writeFile(old, body, { mode: 0o600 });
-    await utimes(old, 1, 1);
-    const swap = swapForFolder(world, old);
-    await writeFile(manifestPathOf(world), truncated());
-
-    for (let n = 0; n < 4; n++) {
-      await writeFile(manifestPathOf(world), `${truncated()}-swap-${n}`);
-      await world.provisioner({ disk: swap.disk }).apply(planFor(world));
-    }
-
-    expect(swap.swapped()).toBe(true);
-    expect((await lstat(old)).isDirectory()).toBe(true);
-    expect(await readFile(join(old, 'keep'), 'utf8')).toBe('a folder of someone else');
-    expect(JSON.parse(await readFile(manifestPathOf(world), 'utf8'))).toMatchObject({ version: 1 });
-  });
-
-  it('a folder swapped in at the copy name before the EEXIST replacement is left whole and no private copy is claimed', async () => {
-    const world = await fleetWorld();
-    await writeFile(manifestPathOf(world), truncated());
-    await world.provisioner().apply(planFor(world));
-    const copy = join(world.fleet, (await kept(world))[0] ?? 'never');
-    await chmod(copy, 0o644);
-    const swap = swapForFolder(world, copy);
-    await writeFile(manifestPathOf(world), truncated());
-    const said: string[] = [];
-
-    await world.provisioner({ disk: swap.disk, say: sentence => said.push(sentence) }).apply(planFor(world));
-
-    expect(swap.swapped()).toBe(true);
-    expect((await lstat(copy)).isDirectory()).toBe(true);
-    expect(await readFile(join(copy, 'keep'), 'utf8')).toBe('a folder of someone else');
-    expect(said[0]).toContain('could not be kept aside');
-  });
-
-  it('the housekeeping never asks for the recursive remove', async () => {
-    const world = await fleetWorld();
-    const removed: string[] = [];
-    const disk = faultingDisk(world.disk, async (call, args) => {
-      if (call === 'remove') removed.push(String(args[0]));
-    });
-    for (let n = 0; n < 6; n++) {
-      await writeFile(manifestPathOf(world), `${truncated()}-plain-${n}`);
-      await world.provisioner({ disk }).apply(planFor(world));
-    }
-    const copy = join(world.fleet, (await kept(world))[0] ?? 'never');
-    await chmod(copy, 0o644);
-    await writeFile(manifestPathOf(world), await readFile(copy, 'utf8'));
-    await world.provisioner({ disk }).apply(planFor(world));
-
-    expect(removed.filter(path => path.includes('.unreadable-'))).toEqual([]);
-  });
-});
+// ── fix2/fix3: one repair owner ──────────────────────────────────────────────────────────────────────────────────────
 
 describe('ONE repair owner across running and backoff', () => {
   it('refused reads while a failed repair waits for its retry run no attempt and leave no second timer', async () => {

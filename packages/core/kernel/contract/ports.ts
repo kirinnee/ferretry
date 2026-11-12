@@ -998,17 +998,6 @@ export interface RootHandle {
    * removal is `changed`; no refusal carries a path or content.
    */
   unlink(name: FencedPath): Promise<void>;
-  /**
-   * Removes ONE regular file with `unlink(2)` and nothing else, and only if the name still reaches the very file the
-   * caller looked at: its device and inode must equal `expected` (a caller reads them with {@link fileIdentity} when it
-   * selects the entry). A folder, a link, a device node or any other object at the name is refused and left as
-   * it was (`not_a_file`), and a name that now reaches another object is `changed`. A file with a second name loses
-   * THIS name only (the other name and the bytes stay), so a caller that must not touch such a file checks its link count; it NEVER recurses and never follows a link. A name that is already gone is a no-op. Only inside an
-   * internal, writable root that takes links (`fleet`, `agent-homes`); any other root refuses `read_only`. The name is
-   * fenced and every parent is opened without following a link (`link_escape`); no refusal carries a path or content.
-   * It is the housekeeping door: `remove` walks a folder whole, so it must never be used for a name chosen earlier.
-   */
-  unlinkFile(path: FencedPath, expected: RootIdentity): Promise<void>;
 }
 
 export interface RootsPort {

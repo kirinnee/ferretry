@@ -3,13 +3,12 @@ import path from 'node:path';
 import { z } from 'zod';
 import { FleetManifestSchema } from '../lib/manifest.ts';
 import {
-  KEPT_DIGEST_LENGTH,
-  KEPT_MANIFEST_INFIX,
-  keptCopyDigest,
-  keptManifestName,
+  keptAsideName,
+  keptAsideText,
+  MAX_KEPT_DAMAGE_BYTES,
   manifestRebuiltSentence,
+  readKeptAside,
   readManifestText,
-  surplusKeptCopies,
 } from '../lib/manifest-reading.ts';
 import {
   ABSENT_DOCUMENT_REVISION,
@@ -67,6 +66,12 @@ const DEFAULT_FOLDER_MODE = 0o777;
 
 /** The largest file the provisioner reads whole to judge it (a wrapper, a settings file, a record, a document). */
 const MAX_READ_BYTES = 4 * 1024 * 1024;
+
+/**
+ * The largest aside file read back to judge it: the envelope of a damaged file of at most
+ * {@link MAX_KEPT_DAMAGE_BYTES}, in base64 (4/3) with its few fixed fields.
+ */
+const MAX_ASIDE_FILE_BYTES = Math.ceil((MAX_KEPT_DAMAGE_BYTES * 4) / 3) + 4096;
 
 const MaterialisedRecordSchema = z.strictObject({
   version: z.literal(1),
@@ -149,6 +154,8 @@ export class FileFleetProvisioner implements FleetProvisioner {
     private readonly publishing?: <T>(mutate: () => Promise<T>) => Promise<T>,
     /** Told, in one plain line, that an unreadable manifest is being rebuilt (the file is named, its contents never). */
     private readonly say?: (sentence: string) => void,
+    /** The time an aside file records as `keptAt`. */
+    private readonly now: () => Date = () => new Date(),
   ) {}
 
   async preview(plan: FleetApplyPlan): Promise<FleetApplyPreview> {
@@ -767,98 +774,60 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
   /**
    * A manifest on disk that is not one is derived data this apply writes again, so it never refuses the apply. Before it
-   * is replaced a COPY is kept once beside it (named by a digest of what it held, owner-only), so a person can still look
-   * at what the last version wrote. A copy rather than a move: the original stays in place until the apply's own journal
-   * replaces it, so no reader sees the gap and a rolled-back apply leaves it exactly as it was. Best-effort: a copy that
-   * cannot be kept is said, and the manifest is still rebuilt.
+   * is replaced the damaged bytes are kept ONCE, in ONE fixed aside file beside it (a self-describing envelope, owner-only),
+   * so a person can still look at what the last version wrote. A copy rather than a move: the original stays in place until
+   * the apply's own journal replaces it, so no reader sees the gap and a rolled-back apply leaves it exactly as it was.
+   * Nothing is ever deleted: the aside is created when the name is free, and replaced only while it is single-link regular
+   * file holding OUR envelope (so it carries the latest damage); anything else at the name is left as it is. Best-effort:
+   * a copy that cannot be kept is said once, and the manifest is still rebuilt.
    */
   private async keepUnreadableManifest(manifestPath: string): Promise<void> {
     const entry = await this.disk.lstat(manifestPath);
     if (entry?.kind !== 'file') return;
     let bytes: Uint8Array | undefined;
     try {
-      bytes = await this.disk.readBytes(manifestPath, MAX_READ_BYTES);
+      // A read stops at its limit without saying so: one byte more than the bound tells a file that is too big (not kept,
+      // and never a truncated copy of it) from one that just fits.
+      bytes = await this.disk.readBytes(manifestPath, MAX_KEPT_DAMAGE_BYTES + 1);
+      if (bytes.length > MAX_KEPT_DAMAGE_BYTES) bytes = undefined;
     } catch {
       bytes = undefined;
     }
     if (bytes !== undefined && readManifestText(new TextDecoder().decode(bytes)).kind !== 'unreadable') return;
-    let keptAt: string | undefined;
-    if (bytes !== undefined) {
-      keptAt = await this.keepCopy(keptManifestName(manifestPath, sha256(bytes)), bytes);
-      if (keptAt !== undefined) await this.pruneKeptCopies(manifestPath, keptAt);
-    }
+    const keptAt = bytes === undefined ? undefined : await this.keepAside(keptAsideName(manifestPath), bytes);
     this.say?.(manifestRebuiltSentence(manifestPath, keptAt));
   }
 
   /**
-   * The owner-only copy at `target`, or `undefined` when no VERIFIED private copy could be kept. A name that is taken is
-   * not proof of a copy: it counts only when it is a regular file, this file's only name, mode 0600, holding exactly
-   * these bytes. Anything else at the name (a link, a wider mode, other bytes) is taken out of the way — a link itself,
-   * never what it points at — and the copy is made again, exclusively. A directory at the name is left alone.
+   * The aside file's path once it holds `damaged`, or `undefined` when it could not be kept. Written through the one
+   * root writer (a private temporary, then a name): created exclusively when the name is free, replaced by rename only
+   * when what is there is a single-link regular file that parses as our envelope. A foreign file, a link, a folder, a
+   * hard-linked file or anything unparsable is untouched. No call here removes anything.
    */
-  private async keepCopy(target: string, bytes: Uint8Array): Promise<string | undefined> {
+  private async keepAside(target: string, damaged: Uint8Array): Promise<string | undefined> {
     try {
-      await this.disk.create(target, bytes, 0o600);
-      return target;
-    } catch (error) {
-      if (!(error instanceof AlreadyExistsError)) return undefined;
-    }
-    try {
+      const digest = sha256(damaged);
+      const text = keptAsideText(damaged, digest, this.now());
       const existing = await this.disk.lstat(target);
-      if (existing === undefined || (existing.kind !== 'file' && existing.kind !== 'symlink')) return undefined;
-      if (
-        existing.kind === 'file' &&
-        existing.links === 1 &&
-        (existing.mode & 0o7777) === 0o600 &&
-        existing.size === bytes.length &&
-        sha256(await this.disk.readBytes(target, MAX_READ_BYTES)) === sha256(bytes)
-      )
-        return target;
-      // Out of the way by the one regular-file / link door bound to what was just looked at, never a recursive remove:
-      // an entry swapped for a folder since the look is refused (and left alone), not walked.
-      if (existing.kind === 'symlink') await this.disk.unlinkLink(target);
-      else await this.disk.unlinkFile(target, await this.requireIdentity(target));
-      await this.disk.create(target, bytes, 0o600);
+      if (existing === undefined) {
+        try {
+          await this.disk.create(target, Buffer.from(text), 0o600);
+          return target;
+        } catch (error) {
+          if (!(error instanceof AlreadyExistsError)) return undefined;
+          // Something arrived at the name since the look: judge it as any other occupant below.
+        }
+      }
+      const occupant = await this.disk.lstat(target);
+      if (occupant?.kind !== 'file' || occupant.links !== 1 || occupant.size > MAX_ASIDE_FILE_BYTES) return undefined;
+      const ours = readKeptAside(new TextDecoder().decode(await this.disk.readBytes(target, MAX_ASIDE_FILE_BYTES)));
+      if (ours === undefined) return undefined;
+      // Already holding this very damage and private: nothing to write. Otherwise the latest damage replaces it.
+      if (ours.sha256 !== digest || (occupant.mode & 0o7777) !== 0o600)
+        await this.disk.replace(target, Buffer.from(text), 0o600);
       return target;
     } catch {
       return undefined;
-    }
-  }
-
-  /** The identity of the entry at `target` now; a name that vanished is a failure of the replacement (nothing to bind to). */
-  private async requireIdentity(target: string): Promise<string> {
-    const identity = await this.disk.identity(target);
-    if (identity === undefined) throw new Error(`${target} is gone`);
-    return identity;
-  }
-
-  /** Keeps at most a few copies of unreadable manifests: older ones go, `keptAt` never, and only our own regular files. */
-  private async pruneKeptCopies(manifestPath: string, keptAt: string): Promise<void> {
-    try {
-      const directory = path.dirname(manifestPath);
-      const prefix = `${path.basename(manifestPath)}${KEPT_MANIFEST_INFIX}`;
-      const own: { name: string; modified: string; links: number; identity: string }[] = [];
-      for (const entry of await this.disk.entries(directory)) {
-        // Only what this writer made: its exact name, a regular file with its only name, and — the marker — contents
-        // whose SHA-256 begins with the digest in the name (the name IS that digest, so the marker adds no secret and
-        // costs one bounded read). A note, a hard-linked alias or a file of other bytes under such a name is not ours.
-        const digest = keptCopyDigest(entry.name, prefix);
-        if (digest === undefined || entry.kind !== 'file' || entry.links !== 1) continue;
-        const target = path.join(directory, entry.name);
-        const identity = await this.disk.identity(target);
-        const contents = await this.disk.readBytes(target, MAX_READ_BYTES).catch(() => undefined);
-        if (identity === undefined || contents === undefined) continue;
-        if (sha256(contents).slice(0, KEPT_DIGEST_LENGTH) !== digest) continue;
-        own.push({ name: entry.name, modified: String(entry.modified), links: entry.links, identity });
-      }
-      for (const name of surplusKeptCopies(own, prefix, path.basename(keptAt))) {
-        const chosen = own.find(copy => copy.name === name);
-        if (chosen === undefined) continue;
-        // One failure to remove a copy (it changed since it was chosen) leaves THAT copy and goes on with the rest.
-        await this.disk.unlinkFile(path.join(directory, name), chosen.identity).catch(() => undefined);
-      }
-    } catch {
-      // Best-effort housekeeping: a copy that cannot be pruned is a copy too many, never a failed apply.
     }
   }
 
