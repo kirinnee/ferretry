@@ -15,7 +15,7 @@ import {
   readsAgendaHeaders,
 } from '../protocol/agenda.ts';
 import { agendaListSnapshot } from '../protocol/agenda-list.ts';
-import { type ApiActor, isHumanAdminActor, parseActor } from '@ferretry/core-gate/contract';
+import { type ApiActor, ferretOf, isHumanAdminActor, parseActor } from '@ferretry/core-gate/contract';
 import {
   ApiError,
   type ApiResponse,
@@ -26,6 +26,16 @@ import {
   type RouteHandler,
 } from '@ferretry/kernel/contract';
 import { parseBody } from './body.ts';
+import {
+  coverOf,
+  EMPTY_CONVERSATION,
+  type Cover,
+  type FerretReach,
+  ferretSnapshot,
+  ferretVersion,
+  projectItem,
+  projectResolved,
+} from './ferret-reads.ts';
 import {
   type AgendaActor,
   type AgendaFailure,
@@ -139,11 +149,67 @@ async function withReplies(replies: HeldReplies, sessionId: string, snapshot: Ag
   };
 }
 
-async function list(agenda: AgendaService, replies: HeldReplies, context: Call): Promise<ApiResponse> {
+/**
+ * A board as the CALLER reads it. The owner and a device read it whole. A FERRET reads every Warden-sourced item through
+ * the one projection (`ferret-reads.ts`): its own lineage's as fixed sentences, another lineage's not at all. Every route
+ * that returns items answers through this or `coverOfItem`, so no route has a copy of the rule.
+ */
+async function readableSnapshot(
+  reach: FerretReach | undefined,
+  context: Call,
+  snapshot: AgendaSnapshot,
+): Promise<AgendaSnapshot> {
+  const caller = ferretOf(context);
+  return caller === undefined ? snapshot : await ferretSnapshot(reach, caller, snapshot);
+}
+
+/**
+ * What the caller may read of ONE item: a person reads it plain; a ferret reads it per `coverOf`. The item is found on
+ * the board, or, when it has left the board, in its newest kept version.
+ */
+async function coverOfItem(
+  agenda: AgendaService,
+  reach: FerretReach | undefined,
+  context: Call,
+  sessionId: string,
+  id: string,
+): Promise<Cover> {
+  const caller = ferretOf(context);
+  if (caller === undefined) return 'plain';
+  const snapshot = await agenda.list(sessionId);
+  const found = snapshot.ok
+    ? ([...snapshot.value.items, ...snapshot.value.resolved].find(item => item.id === id) as
+        | Parameters<typeof coverOf>[3]
+        | undefined)
+    : undefined;
+  if (found !== undefined) return await coverOf(reach, caller, sessionId, found);
+  const kept = await agenda.versionsOf(sessionId, id as never);
+  const latest = kept.ok ? kept.value.versions.at(-1)?.version : undefined;
+  const version = latest === undefined ? undefined : await agenda.versionOf(sessionId, id as never, latest);
+  const item =
+    version?.ok === true ? (version.value as { readonly item?: Parameters<typeof coverOf>[3] }).item : undefined;
+  return item === undefined ? 'plain' : await coverOf(reach, caller, sessionId, item);
+}
+
+const notThere = (): never => {
+  throw new ApiError(404, 'agenda item not found', 'not-found');
+};
+
+async function list(
+  agenda: AgendaService,
+  replies: HeldReplies,
+  reach: FerretReach | undefined,
+  context: Call,
+): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const result = await agenda.list(sessionId);
   return result.ok
-    ? jsonResponse(servedAgendaListSnapshot(context, await withReplies(replies, sessionId, result.value)))
+    ? jsonResponse(
+        servedAgendaListSnapshot(
+          context,
+          await readableSnapshot(reach, context, await withReplies(replies, sessionId, result.value)),
+        ),
+      )
     : refusal(result.error);
 }
 
@@ -176,9 +242,14 @@ const deviceOf = (context: Call): string =>
   context.credential?.tokenClass === 'device' ? String(context.credential.principal.holder) : 'host';
 
 /** `GET …/agenda/:id/versions`: every version kept of an item, oldest first, and this device's last seen. */
-async function listVersions(agenda: AgendaService, context: Call): Promise<ApiResponse> {
+async function listVersions(
+  agenda: AgendaService,
+  reach: FerretReach | undefined,
+  context: Call,
+): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const id = pathItemId(context);
+  if ((await coverOfItem(agenda, reach, context, sessionId, id)) === 'omit') return notThere();
   const result = await agenda.versionsOf(sessionId, id, deviceOf(context));
   if (!result.ok) return refusal(result.error);
   const { versions, seen } = result.value;
@@ -193,15 +264,19 @@ async function listVersions(agenda: AgendaService, context: Call): Promise<ApiRe
 }
 
 /** `GET …/agenda/:id/versions/:version`: one version of an item in full. */
-async function getVersion(agenda: AgendaService, context: Call): Promise<ApiResponse> {
+async function getVersion(agenda: AgendaService, reach: FerretReach | undefined, context: Call): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const id = pathItemId(context);
   const version = Number(decodeParameter(context.params.get('version') ?? ''));
   if (!Number.isSafeInteger(version) || version < 1) {
     throw new ApiError(400, 'the version in the path is not a version number', 'invalid');
   }
+  const cover = await coverOfItem(agenda, reach, context, sessionId, id);
+  if (cover === 'omit') return notThere();
   const result = await agenda.versionOf(sessionId, id, version);
-  return result.ok ? jsonResponse(result.value) : refusal(result.error);
+  return result.ok
+    ? jsonResponse(cover === 'project' ? ferretVersion(result.value) : result.value)
+    : refusal(result.error);
 }
 
 /** `PUT …/agenda/:id/seen`: this device opened the item at this version. */
@@ -231,6 +306,7 @@ async function apply(
   gates: AgendaGatePort | undefined,
   context: Call,
   sources?: SourceAnswers,
+  reach?: FerretReach,
 ): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const request = await parseBody(context.request, AgendaActionRequestSchema);
@@ -365,7 +441,7 @@ async function apply(
   const notes = mutation.notes ?? [];
   const enrolled = mutation.change === 'created' ? await enrolledDevices(notifications) : undefined;
   return jsonResponse({
-    ...(await withReplies(replies, sessionId, mutation.snapshot)),
+    ...(await readableSnapshot(reach, context, await withReplies(replies, sessionId, mutation.snapshot))),
     ...(warnings.length === 0 ? {} : { warnings }),
     ...(notes.length === 0 ? {} : { notes: [...notes] }),
     ...(enrolled === undefined ? {} : { enrolled }),
@@ -408,6 +484,8 @@ export function agendaRoutes(
   /** The card asks an answer may move a card through; absent, a card ask is answered like any other choice. */
   gates?: AgendaGatePort,
   sources?: SourceAnswers,
+  /** Who is in whose lineage and who the Warden started; absent, a ferret reads no Warden item at all. */
+  reach?: FerretReach,
 ) {
   // Every ferret agenda route passes here, including future item reads. Refuse the reserved ledger before parsing
   // a body or cursor, consulting gates, delivering replies, or touching any service.
@@ -423,13 +501,19 @@ export function agendaRoutes(
       if (!result.ok) return refusal(result.error);
       const snapshot = result.value;
       const id = pathItemId(call);
-      const item = snapshot.items.find(item => item.id === id) ?? snapshot.resolved.find(item => item.id === id);
-      if (item === undefined) throw new ApiError(404, 'agenda item not found', 'not-found');
-      return jsonResponse(item);
+      const active = snapshot.items.find(item => item.id === id);
+      const item = active ?? snapshot.resolved.find(item => item.id === id);
+      if (item === undefined) return notThere();
+      const caller = ferretOf(call);
+      if (caller === undefined) return jsonResponse(item);
+      const cover = await coverOf(reach, caller, pathSessionId(call), item);
+      if (cover === 'omit') return notThere();
+      if (cover === 'plain') return jsonResponse(item);
+      return jsonResponse(active === undefined ? projectResolved(item as never) : projectItem(active));
     }),
-    'GET /v1/ferrets/:ferretId/agenda': guarded(async call => await list(agenda, replies, call)),
+    'GET /v1/ferrets/:ferretId/agenda': guarded(async call => await list(agenda, replies, reach, call)),
     'POST /v1/ferrets/:ferretId/agenda': guarded(
-      async call => await apply(agenda, notifications, replies, config, gates, call, sources),
+      async call => await apply(agenda, notifications, replies, config, gates, call, sources, reach),
     ),
     'GET /v1/ferrets/:ferretId/agenda/:id/conversation': guarded(async call => {
       const query = AgendaConversationQuerySchema.safeParse({
@@ -439,6 +523,9 @@ export function agendaRoutes(
       });
       if (!query.success)
         throw new ApiError(400, 'conversation cursor must use nonnegative integers and a positive version', 'invalid');
+      const cover = await coverOfItem(agenda, reach, call, pathSessionId(call), pathItemId(call));
+      if (cover === 'omit') return notThere();
+      if (cover === 'project') return jsonResponse(EMPTY_CONVERSATION);
       const result = await agenda.conversationOf(
         pathSessionId(call),
         pathItemId(call),
@@ -448,8 +535,10 @@ export function agendaRoutes(
       );
       return result.ok ? jsonResponse(AgendaConversationPageSchema.parse(result.value)) : refusal(result.error);
     }),
-    'GET /v1/ferrets/:ferretId/agenda/:id/versions': guarded(async call => await listVersions(agenda, call)),
-    'GET /v1/ferrets/:ferretId/agenda/:id/versions/:version': guarded(async call => await getVersion(agenda, call)),
+    'GET /v1/ferrets/:ferretId/agenda/:id/versions': guarded(async call => await listVersions(agenda, reach, call)),
+    'GET /v1/ferrets/:ferretId/agenda/:id/versions/:version': guarded(
+      async call => await getVersion(agenda, reach, call),
+    ),
     'PUT /v1/ferrets/:ferretId/agenda/:id/seen': guarded(async call => await markSeen(agenda, call)),
     'POST /v1/ferrets/:ferretId/agenda/replies': guarded(async call => await sendReplies(agenda, replies, call)),
   } as const;

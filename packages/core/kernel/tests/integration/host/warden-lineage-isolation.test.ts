@@ -394,3 +394,28 @@ for (const who of ['asOwner', 'asDevice'] as const) {
     }
   });
 }
+
+// ─── audit A fix 7: the scope narrows a fleet report BEFORE the limit ────────────────────────────────────────────────
+
+test('audit A fix 7 many foreign sections ahead of the lead’s own do not evict its row from the verdicts, and the owner’s list is cut as before', async () => {
+  const w = await world();
+  try {
+    const foreign = Array.from({ length: 30 }, (_, index) => `## Anomaly: stranger-${index}\nVERDICT: LEAVE\n`).join(
+      '\n',
+    );
+    put(
+      w,
+      `${stamp(9)}.md`,
+      `# Warden sweep (2026-11-06T09:00:00.000Z)\n\n${foreign}\n## Anomaly: ${w.lead} — Caller\nVERDICT: NEEDS_HUMAN\n`,
+    );
+    const rows = (await w.read('verdicts')).json<Record<string, unknown>[]>();
+    expect(rows.map(row => row.target)).toEqual([w.lead]);
+    expect(rows[0]).toMatchObject({ verdict: 'needs_human' });
+    // The owner reads the first twenty of the whole report, as before: the lead's row is past the cut.
+    const owner = (await w.asOwner('verdicts')).json<Record<string, unknown>[]>();
+    expect(owner).toHaveLength(20);
+    expect(owner.map(row => row.target)).not.toContain(w.lead);
+  } finally {
+    await w.host.stop();
+  }
+});

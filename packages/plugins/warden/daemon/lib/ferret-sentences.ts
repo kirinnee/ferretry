@@ -11,6 +11,7 @@
  * Every table is a TOTAL record over its enum, so a classification added later without a sentence is a compile error
  * rather than a silent hole. Pure: no inputs but the classification.
  */
+import { FERRET_NOTICE_SENTENCES } from '@ferretry/core-asks/contract';
 import type { WardenActionKindSchema, WardenAnomalyKindSchema, WardenVerdictKindSchema } from '../../contract/index.ts';
 import type { z } from 'zod';
 
@@ -99,9 +100,11 @@ export function escalationSentences(kind: AnomalyKind | undefined): {
   readonly howToResolve: string;
 } {
   return {
-    subject: kind === undefined ? 'The Warden has a flag on your work.' : anomalySentence(kind),
-    why: `The Warden asked the owner to look at this. ${WHY_PRIVATE}`,
-    howToResolve: 'Nothing to answer here: the owner decides. Carry on with your work.',
+    // The no-class case and the two shared sentences are the contract's: Asks says the same ones when a ferret reads a
+    // Warden notice off a board.
+    subject: kind === undefined ? FERRET_NOTICE_SENTENCES.subject : anomalySentence(kind),
+    why: FERRET_NOTICE_SENTENCES.why,
+    howToResolve: FERRET_NOTICE_SENTENCES.howToResolve,
   };
 }
 

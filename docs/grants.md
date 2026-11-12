@@ -146,9 +146,21 @@ it is about cannot be done reliably, so a ferret receives none of it in any form
   sentence for that classification (`warden/daemon/lib/ferret-sentences.ts`, a total table, so a new class without a
   sentence does not compile). A blessing carries its kinds, who gave it and when it ends, and nothing a model wrote.
 - What the Warden **types into a ferret's own session** after an investigation's verdict (the nudge, the stop reason,
-  the resume or restart turn) is that same fixed sentence, not the investigator's reason. (Jev judges one flag from that
-  ferret's own facts and is not report prose; its words are unchanged, and a ferret's action rows still show the fixed
-  sentence for them.) The owner's actions list keeps the investigator's own words.
+  the resume or restart turn) is that same fixed sentence, not the investigator's reason. The owner's actions list keeps
+  the investigator's own words.
+- **Jev's words, honestly.** What Jev types into a ferret (its nudge, the stop reason, the resume or restart turn) is
+  **static text**, not model prose: a nudge is one of a fixed library (`NUDGE_MESSAGES`) Jev only chooses among, and the
+  reason is a leaf sentence of the decision tree (`jev-tree.ts`); a check's `why` is an enum. A committed test
+  (`warden/tests/unit/sweep-jev-ferret-text.test.ts`) feeds Jev a flag whose detail names a peer and the state it ended in
+  and shows that neither the peer, the state nor any of the detector's words reach a ferret's view or any text typed into
+  its session, for a nudge, a stop, a restart and a resume. What **does** enter Jev's _input_ is the detector's sentence
+  (the flag's detail, which for `peer_wait_unanswerable` names another session); that is a declared fact about the
+  daemon's own prompt, not a ferret-visible one. A **failover** types no text (it names a login), so it has no sentence to
+  carry; it is not run by that test.
+- **A flag's detail is the owner's.** The detector writes a flag's `detail` as a sentence about the flag and some name
+  ANOTHER session (`peer_wait_unanswerable` the peer and its state; the stuck inbox and input kinds who sent; an orphaned
+  card the card and its ferret). A ferret reads, in `status` and `run`, the one fixed sentence for the flag's kind
+  instead. The owner and a device keep the detail.
 - A report is read for a ferret only to find which of the caller's own ferrets a row is about: a fleet report contributes
   the rows whose target is in the lineage, a report whose file name puts it outside the lineage is not opened, and one
   that cannot be read and is not named for the lineage is simply not the ferret's. A **non-empty report named for the
@@ -162,9 +174,24 @@ it is about cannot be done reliably, so a ferret receives none of it in any form
   exhausted" state carries no timestamp (that instant belongs to whichever lineage's investigation failed). On a ferret's
   view the strip reads "no flags for your work", not "nobody needs you".
 
-The owner and a device keep today's semantics byte for byte, an unreadable report included. What this does **not** cover
-is the Warden's notifications as they sit on the Agenda boards (owner Inbox text built from the investigator's reason): they
-are the owner's, and who may read a board is Agenda's rule, not this one.
+The owner and a device keep today's semantics byte for byte, an unreadable report included.
+
+**The Warden's notices on an Asks board are projected the same way for a ferret.** A Warden notice keeps the
+investigator's reason, context and remedy on the board it was raised on, and the per-ferret board reads
+(`GET /v1/ferrets/:ferretId/agenda`, `…/agenda/:id`, `…/versions`, `…/versions/:version`, `…/conversation`, and the board a
+write answers with) are `caller: any`. **Who may read a board in general is unchanged** (v4 parity; that is Asks'
+authorization, not this rule). For a FERRET caller only, every Warden-sourced item is read through one projection
+(`asks/daemon/lib/routes/ferret-reads.ts`, used by every one of those routes): an item about the caller's own lineage reads
+as the fixed subject, why and how-to-resolve sentences, with its identity, class and times and **no** source reference,
+context, recommendation, note, answer or conversation; an item about **another** lineage is not there at all — the board
+lists the rest in their order with the count of what the ferret can see, and the item, its versions, one version and its
+conversation answer 404 as an item that does not exist. An item is the Warden's by its source (`daemon`, entry
+`f.<ferret>.warden…`, `warden…` or the Warden's hashed entry) or because a session the Warden started raised it; its
+target is the ferret its entry names, else the board it stands on. A lineage that cannot be read is no lineage (the item
+is omitted). An item the Warden did not raise is unchanged for everyone, and the owner and a device read every item whole.
+Declared limit: an item a session in the Warden's _descendants_ (not the investigator itself) raised is not recognised as
+the Warden's; the sentences are Asks' own copy of the Warden's no-class wording (a core package cannot import the
+plugin), held equal to it by a committed test.
 
 **Updating the daemon is `fleet`.** Reading `GET /v1/daemon/update` is `use`; starting an update and
 changing automatic install are `configure`, and a governed device also gives a passkey step-up for that

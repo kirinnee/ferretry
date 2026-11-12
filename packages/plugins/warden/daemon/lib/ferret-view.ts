@@ -29,7 +29,7 @@ import {
   WardenVerdictsViewSchema,
   WardenAgendaViewSchema,
 } from '../../contract/index.ts';
-import { actionSentence, escalationSentences, verdictSentence } from './ferret-sentences.ts';
+import { actionSentence, anomalySentence, escalationSentences, verdictSentence } from './ferret-sentences.ts';
 import type { z } from 'zod';
 
 /** Whose records a ferret may read: Ferrets' `mayTouch` for the caller. Absent means the owner or a person. */
@@ -54,6 +54,13 @@ const pick = <T extends object>(row: T, keys: readonly string[]): Record<string,
 
 // ─── flags ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * A flag's classification and identity. Not here, on purpose: `detail`. The detector writes it as a sentence about the
+ * flag, and some of them name ANOTHER session and its state (`peer_wait_unanswerable`: the peer, and that it is
+ * terminal; the stuck inbox/input kinds name who sent; an orphaned card names the card and its ferret). Whose facts a
+ * sentence holds cannot be proved, so a ferret reads the one fixed sentence for the flag's kind instead
+ * (`anomalySentence`); the owner keeps the detail.
+ */
 const FLAG_FIELDS = [
   'kind',
   'ferret',
@@ -64,7 +71,6 @@ const FLAG_FIELDS = [
   'name',
   'label',
   'state',
-  'detail',
   'since',
   'idleMinutes',
   'assignedWarden',
@@ -80,7 +86,9 @@ const FLAG_FIELDS = [
  */
 function ferretFlag(flag: WardenFlag, scope: WardenReadScope): WardenFlag | undefined {
   if (flag.affectedFerrets === undefined)
-    return scope.mayRead(flag.ferret) ? WardenFlagSchema.parse(pick(flag, FLAG_FIELDS)) : undefined;
+    return scope.mayRead(flag.ferret)
+      ? WardenFlagSchema.parse({ ...pick(flag, FLAG_FIELDS), detail: anomalySentence(flag.kind) })
+      : undefined;
   const mine = flag.affectedFerrets.filter(id => scope.mayRead(id));
   const anchor = mine[0];
   if (anchor === undefined) return undefined;

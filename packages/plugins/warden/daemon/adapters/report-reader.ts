@@ -133,8 +133,10 @@ export class WardenReportReader {
         throw new Error('a Warden report could not be read');
       for (const { report } of loaded) {
         if (report === undefined) continue;
+        // Parse the WHOLE report, narrow it to the lineage, and only then cut: a fleet report whose many foreign
+        // sections come first must not push the caller's own row out of a limit that counts what it may read.
         rows.push(
-          ...parseWardenReports([report], limit).filter(
+          ...parseWardenReports([report], Number.POSITIVE_INFINITY).filter(
             verdict => verdict.targetSession !== undefined && scope.mayRead(verdict.targetSession),
           ),
         );

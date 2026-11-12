@@ -8,6 +8,10 @@ import type {
 } from '../lib/agenda/service.ts';
 import type { AgendaHomeResolver } from '../lib/agenda/home.ts';
 import type { SubFerretDirectory } from '../lib/sub-ferret/index.ts';
+import type { FerretReach } from '../lib/routes/ferret-reads.ts';
+
+/** Deepest lead chain the lineage walk follows (Ferrets' own bound); a longer one is not a lineage. */
+const MAX_LINEAGE_DEPTH = 16;
 
 /** Where one half of the context is read from: the `agenda.context:<key>` provider, or none while its plugin is off. */
 export type AgendaContextSource = (
@@ -22,6 +26,8 @@ export interface BoundAgendaContext {
   readonly cards: AgendaCardLanes;
   readonly homes: AgendaHomeResolver;
   readonly gates: AgendaGateAsking;
+  /** Lineage and the Warden's own sessions, for what a ferret may read of a Warden notice. */
+  readonly reach: FerretReach;
 }
 
 /**
@@ -81,6 +87,21 @@ export function agendaContext(source: AgendaContextSource, warn: (message: strin
           .catch(() => false)) ?? false,
     },
     homes,
+    reach: {
+      // The same rule as Ferrets' `mayTouch`: the ferret itself, or a ferret whose lead chain reaches it. A chain that
+      // cannot be read is not a lineage.
+      mayTouch: async (caller, target) => {
+        const found = ferrets();
+        if (found === undefined) return false;
+        let current: string | undefined = target;
+        for (let depth = 0; current !== undefined && depth <= MAX_LINEAGE_DEPTH; depth += 1) {
+          if (current === caller) return true;
+          current = await found.leadOf(current);
+        }
+        return false;
+      },
+      startedByWarden: async ferret => (await ferrets()?.get(ferret))?.origin === 'warden',
+    },
     gates: {
       asking: async task => {
         const found = board();

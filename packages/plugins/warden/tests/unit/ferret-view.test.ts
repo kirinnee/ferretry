@@ -179,6 +179,53 @@ describe('ferretStatusView is deny by default', () => {
   });
 });
 
+describe('audit A fix 7: a flag’s detail never carries another session to a ferret', () => {
+  // The detector's own sentence for a peer wait names the PEER and the state it ended in (`detect.ts`).
+  const PEER_DETAIL = `parked awaiting a reply from zed-peer-91, which is failed and can never reply`;
+  const peerFlag = (extra: Record<string, unknown> = {}) =>
+    flag(MINE, { kind: 'peer_wait_unanswerable', assignedWarden: true, detail: PEER_DETAIL, ...extra });
+
+  test('a ferret reads the fixed sentence for the flag kind, never the peer’s name or state', () => {
+    const status = ferretStatusView({ ...ownerStatus(), flags: [peerFlag()] }, scope);
+    const run = ferretRunView({ sweptAt: AT, flags: [peerFlag()] } as Parameters<typeof ferretRunView>[0], scope);
+    for (const flags of [status.flags, run.flags]) {
+      expect(flags).toHaveLength(1);
+      expect(flags[0]?.detail).toBe('The Warden flagged this ferret: it is waiting on a peer that cannot answer.');
+      expect(JSON.stringify(flags)).not.toMatch(/zed-peer-91|failed|can never reply/u);
+      // Its classification, identity and times are still there.
+      expect(flags[0]).toMatchObject({ kind: 'peer_wait_unanswerable', ferret: MINE, assignedWarden: true });
+    }
+  });
+
+  test('every kind has a fixed sentence and none of the detector’s own words survive', () => {
+    for (const kind of [
+      'dead_monitor',
+      'unattended_question',
+      'abandoned_wreckage',
+      'quota_reset_passed',
+      'declared_wait_overdue',
+      'peer_wait_unanswerable',
+      'sus_thinking',
+      'sus_subprocess',
+      'agent_frozen',
+      'bootstrap_degraded',
+      'provider_unavailable',
+      'owner_request',
+      'orphaned_card',
+      'report_overdue',
+      'input_stuck',
+      'inbox_stuck',
+    ] as const) {
+      const [kept] = ferretStatusView(
+        { ...ownerStatus(), flags: [flag(MINE, { kind, detail: `names ${STRANGER} and zed-peer-91` })] },
+        scope,
+      ).flags;
+      expect(kept?.detail).toStartWith('The Warden flagged this ferret: ');
+      expect(kept?.detail).not.toMatch(/other-9|zed-peer-91/u);
+    }
+  });
+});
+
 describe('the other Warden reads are deny by default too', () => {
   test('a verdict keeps its lineage rows and an allowlist of fields', () => {
     const view = ferretVerdictsView(
@@ -377,7 +424,12 @@ describe('the other Warden reads are deny by default too', () => {
       } as unknown as Parameters<typeof ferretRunView>[0],
       scope,
     );
-    expect(view).toEqual({ sweptAt: AT, flags: [flag(MINE)] });
+    expect(view).toEqual({
+      sweptAt: AT,
+      flags: [
+        { ...flag(MINE), detail: 'The Warden flagged this ferret: it has been thinking for an unusually long time.' },
+      ],
+    });
   });
 
   test('an agenda says the accounts are exhausted but not since when: that instant is some lineage’s failure', () => {

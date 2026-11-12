@@ -117,6 +117,38 @@ describe('the warden report reader', () => {
   });
 });
 
+describe('audit A fix 7: a scope is applied before the limit', () => {
+  /** One fleet report: `foreign` sections about strangers, THEN the caller's own. */
+  const fleetReport = (foreign: number) =>
+    [
+      '# Warden sweep (2026-11-06T09:00:00.000Z)',
+      ...Array.from({ length: foreign }, (_, index) => `## Anomaly: other-${index}\nVERDICT: LEAVE`),
+      '## Anomaly: mine-1\nVERDICT: NEEDS_HUMAN',
+    ].join('\n\n');
+  const report = `${DIR}/2026-11-06T09-00-00-000Z.md`;
+  const mine = { mayRead: (id: string) => id === 'mine-1' };
+
+  test('foreign sections ahead of the caller’s own cannot evict its row from the limit', async () => {
+    const reader = new WardenReportReader(folder({ [report]: fleetReport(30) }).files, DIR);
+
+    const rows = await reader.readVerdicts(20, mine);
+
+    expect(rows.map(row => row.targetSession)).toEqual(['mine-1']);
+    expect(rows[0]?.verdict).toBe('needs_human');
+  });
+
+  test('the limit still counts what the caller may read, and the owner’s list is cut as before', async () => {
+    const reader = new WardenReportReader(folder({ [report]: fleetReport(30) }).files, DIR);
+
+    const everyone = await reader.readVerdicts(20, { mayRead: () => true });
+    const owner = await reader.readVerdicts(20);
+
+    expect(everyone).toHaveLength(20);
+    expect(owner).toHaveLength(20);
+    expect(owner.map(row => row.targetSession)).not.toContain('mine-1');
+  });
+});
+
 describe('the warden report artifacts', () => {
   test('a sidecar is written pretty-printed beside the report and read back with it', async () => {
     const { files, written } = folder({});
