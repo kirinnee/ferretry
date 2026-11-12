@@ -61,7 +61,8 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
 9. **The real `fy` starts a ferret on a real `fyd`**: the `merge bar 9` case in
    `packages/core/ferrets/tests/integration/daemon/ferret-auth/ferret-auth.test.ts` (smoke step 2) types `fy start` against a
    REAL `fyd` on a temp home and an ephemeral loopback port (stand-in harness, fake provider, no network), reads the
-   ferret back through `fy ps`, and sees the reply. The 5.0 preview refused every `fy new` / `fy start` with "a start must
+   ferret back through `fy ps`, and sees the reply; a second case types `fy new --runtime rt` (the command the owner uses)
+   over a temporary runtime config in the same temp home and checks the daemon lists the ferret under that runtime. The 5.0 preview refused every `fy new` / `fy start` with "a start must
    carry x-fy-request-id" because the CLI shell dropped the header a half set; every other start test used a raw
    `POST /v1/ferrets`. No credential is printed.
 

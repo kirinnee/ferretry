@@ -455,11 +455,21 @@ describe('the real fy starts a ferret on a real fyd (merge bar 9)', () => {
     return { code, out, err };
   };
 
-  test('`fy start` makes a ferret, which `fy ps` lists, and the reply reaches it', async () => {
+  /** The daemon's own record of the ferret `id`: it started, and under which runtime. */
+  const startedFerret = async (daemon: Daemon, id: string) => {
+    const listing = JSON.parse((await daemon.call('GET', '/v1/ferrets')).text) as { id: string; runtime?: string }[];
+    return listing.find(ferret => ferret.id === id);
+  };
+
+  /** Boots the real fyd on a fake OAuth login (and a runtime `rt` over it), runs the real `fy` with `args`, and proves the ferret. */
+  const startsAFerret = async (args: (daemon: Daemon) => readonly string[], proof: 'reply' | 'listed' = 'reply') => {
     const provider = startFakeProvider(FAKE_TOKEN);
     cleanups.push(() => provider.stop());
     const daemon = await boot(provider, home => ({
       [join(home, 'config/logins/oauth.yaml')]: claudeLogin('ferretry'),
+      // A runtime is one login plus one profile: the file `fy new --runtime rt` names.
+      [join(home, 'config/profiles/plain.yaml')]: 'contents: []\n',
+      [join(home, 'config/runtimes/rt.yaml')]: 'credential: oauth\nprofile: plain\n',
       [join(home, 'state/logins/credentials/oauth/.credentials.json')]: JSON.stringify({
         claudeAiOauth: {
           accessToken: FAKE_TOKEN,
@@ -470,18 +480,7 @@ describe('the real fy starts a ferret on a real fyd (merge bar 9)', () => {
       }),
     }));
 
-    const started = await fy(daemon, [
-      'start',
-      '--harness',
-      'claude-code',
-      '--login',
-      'oauth',
-      '--mode',
-      'interactive',
-      '--cwd',
-      daemon.folder,
-      'say hello',
-    ]);
+    const started = await fy(daemon, args(daemon));
 
     // The shell forwarded the request id: no refusal, an exit of 0 and a ferret id on the screen.
     expect(`${started.out}\n${started.err}`.includes('x-fy-request-id')).toBe(false);
@@ -492,6 +491,12 @@ describe('the real fy starts a ferret on a real fyd (merge bar 9)', () => {
     const listed = await fy(daemon, ['ps']);
     expect(listed.code).toBe(0);
     expect(listed.out).toContain(id as string);
+    if (proof === 'listed') {
+      // The runtime path: the start is what is under test here (the header the shell forwards), so the daemon's own record
+      // of the ferret is the proof; the reply needs the runtime's launch wrapper, which is not part of this case.
+      expect((await startedFerret(daemon, id as string))?.runtime).toBe('rt');
+      return;
+    }
     const until = Date.now() + SEE_MS;
     let seen = '';
     while (Date.now() < until && !seen.includes(FAKE_REPLY)) {
@@ -499,7 +504,27 @@ describe('the real fy starts a ferret on a real fyd (merge bar 9)', () => {
       if (!seen.includes(FAKE_REPLY)) await Bun.sleep(500);
     }
     expect(seen).toContain(FAKE_REPLY);
-  });
+  };
+
+  test('`fy start` makes a ferret, which `fy ps` lists, and the reply reaches it', () =>
+    startsAFerret(daemon => [
+      'start',
+      '--harness',
+      'claude-code',
+      '--login',
+      'oauth',
+      '--mode',
+      'interactive',
+      '--cwd',
+      daemon.folder,
+      'say hello',
+    ]));
+
+  test('`fy new --runtime rt` (the command the owner types) makes a ferret the same way, over a temporary runtime config', () =>
+    startsAFerret(
+      daemon => ['new', '--runtime', 'rt', '--mode', 'interactive', '--cwd', daemon.folder, 'say hello'],
+      'listed',
+    ));
 });
 
 // THE REAL BINARY, for (b) only. Measured (claude 2.1.317, strace, a loopback server): with ANTHROPIC_BASE_URL and
