@@ -223,6 +223,7 @@ describe('launchFactsSource', () => {
       secretEnvNames: ['ANTHROPIC_API_KEY'],
       referencedEnv: ['OTHER_KEY'],
       pins: { ANTHROPIC_BASE_URL: 'https://gateway.invalid' },
+      windows: { defaultModel: 'm', models: [{ id: 'm' }] },
     };
     should(await facts.facts('work')).deepEqual(expected);
     should(await facts.facts(CLAUDE_ID)).deepEqual(expected);
