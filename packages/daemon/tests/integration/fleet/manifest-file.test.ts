@@ -77,7 +77,9 @@ describe('readFleetManifest', () => {
     const raised = await readFleetManifest(files, paths.fleetManifest).catch((error: unknown) => error);
 
     // Assert
-    should((raised as Error).message).equal(`the fleet manifest at ${paths.fleetManifest} is not valid JSON`);
+    should((raised as Error).message).equal(
+      `the fleet manifest at ${paths.fleetManifest} is present but cannot be read: it is not valid JSON`,
+    );
   });
 
   it('should refuse JSON that is not a fleet manifest, naming it', async () => {
@@ -89,6 +91,8 @@ describe('readFleetManifest', () => {
     const raised = await readFleetManifest(files, paths.fleetManifest).catch((error: unknown) => error);
 
     // Assert
-    should((raised as Error).message).equal(`the fleet manifest at ${paths.fleetManifest} is not a fleet manifest`);
+    should((raised as Error).message).equal(
+      `the fleet manifest at ${paths.fleetManifest} is present but cannot be read: it is not a fleet manifest`,
+    );
   });
 });

@@ -337,6 +337,8 @@ export interface FleetApplyResult {
   readonly accountCount: number;
   readonly operationCount: number;
   readonly manifestPath: string;
+  /** The previous unparseable publication retained beside the regenerated manifest. */
+  readonly unreadableManifestBackup?: string;
   /** Managed wrappers removed because no account or command claims them any more. */
   readonly prunedWrappers: readonly string[];
   /** Exact moves, links, merges and preserved collisions completed for each enabled harness. */

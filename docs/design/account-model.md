@@ -727,6 +727,8 @@ Validation, each with a sentence naming the field (the existing style in `config
 | `ids.json`                      | runtime name → opaque id (R6)                                                                            | Ferretry                      |
 | `manifest.json`                 | published runtimes: `{id, name, harness, credential, profile, agent, wrapper, models, defaultModel}`     | Ferretry                      |
 
+An unreadable `manifest.json` is regenerated from configuration on boot or apply; the newest unreadable copy is kept beside it as `manifest.json.unreadable-<stamp>`.
+
 What the config no longer says: route UUIDs (→ `ids.json`), `wrapper:` and `home:` (derived from the
 runtime name and id), `mode:` and `variants` (→ the agent flag and the fixed layer), `identity:` (→
 `credential:`), `sharedHistory:` (always on), `shared:` names (→ components). There is no copy of a

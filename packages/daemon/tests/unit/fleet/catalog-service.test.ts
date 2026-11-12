@@ -34,6 +34,7 @@ import {
 import should from 'should';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import { ApiError } from '../../../src/lib/api/error.ts';
+import { FleetManifestUnreadableError } from '../../../src/lib/core/inventory.ts';
 import {
   type AccountDocumentReading,
   countRunningSessions,
@@ -1431,6 +1432,41 @@ describe('component content and the draft-profile preview', () => {
 
 describe('FleetCatalogService with model catalogs (docs/model-catalog.md)', () => {
   const sources = async () => ({ catalogs: builtInModelCatalogs(), presets: builtInPresets() });
+
+  it('should regenerate when the published manifest cannot be parsed', async () => {
+    // Arrange
+    const { service, applied } = world({
+      modelCatalogs: sources,
+      publishedManifest: async () => {
+        throw new FleetManifestUnreadableError(LAYOUT.manifestPath, 'unrecognized account key');
+      },
+    });
+
+    // Act
+    const outcome = await service.republish();
+
+    // Assert
+    should(outcome).equal('applied');
+    should(applied).have.length(1);
+    should(applied[0]?.documents).deepEqual([]);
+  });
+
+  it('should still report an unexpected manifest read failure without applying', async () => {
+    // Arrange
+    const { service, applied } = world({
+      modelCatalogs: sources,
+      publishedManifest: async () => {
+        throw new Error('disk unavailable');
+      },
+    });
+
+    // Act
+    const error = await service.republish().catch((thrown: unknown) => thrown);
+
+    // Assert
+    should(error).have.property('message', 'disk unavailable');
+    should(applied).have.length(0);
+  });
 
   it("should list each runtime's catalog models, by tier, beside its model set", async () => {
     // Arrange

@@ -11262,6 +11262,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           configDirectory: paths.config,
           pinned: stateHomeKeys(paths),
           publication: fleetPublication,
+          manifestRegenerated: backup =>
+            bootNotices.state(
+              `unreadable fleet manifest regenerated from configuration; previous file kept at ${backup}`,
+            ),
         }),
         modelCatalogs: async () => await models.provides.catalogs.sources(),
         publishedManifest: async () => await publishedManifest(),
@@ -12317,9 +12321,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             // Credentials the edit added or removed open or close their watches.
             await fleetReading.configLoaded();
             await fleetCatalog.republish().then(
-              outcome => {
-                if (outcome === 'applied')
-                  bootNotices.state('model catalogs moved what runtimes offer; fleet republished');
+              async outcome => {
+                if (outcome === 'applied') {
+                  // The early boot preflight read the old publication. Report the repaired fleet
+                  // now, so its earlier refusal does not remain the daemon's last readiness word.
+                  const harnesses = await readHarnesses(accounts, executables, harnessDiscovery);
+                  bootNotices.step('harnesses checked after fleet republish', harnessPreflightSummary(harnesses));
+                  bootNotices.state(
+                    harnesses.ready
+                      ? 'fleet republished from configuration; agent harnesses ready'
+                      : harnessAbsentWarning(harnesses, CLIENT_NAME),
+                  );
+                }
               },
               (error: unknown) =>
                 bootNotices.state(

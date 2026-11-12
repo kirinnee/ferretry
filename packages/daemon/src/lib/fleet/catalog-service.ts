@@ -81,6 +81,7 @@ import type {
 import { FleetCatalogInstallChangeSchema } from '@ferretry/protocol';
 import type { CallerGovernance, CapabilityPresentation } from '../api/capability.ts';
 import { ApiError } from '../api/error.ts';
+import { FleetManifestUnreadableError } from '../core/inventory.ts';
 import {
   type CatalogFacts,
   componentCatalog,
@@ -502,10 +503,13 @@ export class FleetCatalogService {
     } catch (error) {
       throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));
     }
-    if (
-      sameManifest(plan.manifest, await this.deps.publishedManifest?.()) &&
-      (await this.deps.wrappersCurrent?.(plan)) !== false
-    )
+    // The manifest is derived, so an older or damaged publication cannot veto its replacement.
+    // Other read failures still surface rather than being mistaken for a schema mismatch.
+    const published = await this.deps.publishedManifest?.().catch((error: unknown) => {
+      if (error instanceof FleetManifestUnreadableError) return undefined;
+      throw error;
+    });
+    if (sameManifest(plan.manifest, published) && (await this.deps.wrappersCurrent?.(plan)) !== false)
       return 'unchanged';
     try {
       await this.deps.provisioner.apply(plan, []);

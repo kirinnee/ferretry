@@ -393,6 +393,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     const prunedWrappers: string[] = [];
     const skipped: SkippedDestination[] = [];
     let operationCount = 0;
+    let unreadableManifestBackup: string | undefined;
     let stage = 'the configuration and asset documents';
 
     // Everything a reader could catch moved aside — the documents, the operations, the manifest and a
@@ -430,7 +431,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
         stage = `the fleet manifest ${plan.manifestPath}`;
         const mark = journal.beginOperation();
-        await this.writeManifest(plan, journal);
+        unreadableManifestBackup = await this.writeManifest(plan, journal);
         await journal.sealOperation(mark);
       } catch (error) {
         throw await this.rollback(journal, stage, error);
@@ -442,6 +443,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     const backupResidue = await journal.discard();
     // A function, because a shared-history migration this host cannot make safely is skipped below and joins it.
     const residue = () => ({
+      ...(unreadableManifestBackup === undefined ? {} : { unreadableManifestBackup }),
       ...(backupResidue.length === 0 ? {} : { backupResidue }),
       ...(skipped.length === 0 ? {} : { skipped: [...skipped] }),
     });
@@ -1051,12 +1053,33 @@ export class FileFleetProvisioner implements FleetProvisioner {
     }
   }
 
-  private async writeManifest(plan: FleetApplyPlan, journal: FileMutationJournal): Promise<void> {
+  private async writeManifest(plan: FleetApplyPlan, journal: FileMutationJournal): Promise<string | undefined> {
     await this.assertWritablePath(plan.manifestPath);
     const content = `${JSON.stringify(plan.manifest, null, 2)}\n`;
     await journal.captureDirectory(path.dirname(plan.manifestPath));
     await journal.capture(plan.manifestPath);
+    // Inspect the captured original, through its checked folder, inside the same rollback boundary
+    // as the replacement. Every apply repairs derived output; no retired field gets special treatment.
+    const backup = await journal.withBackup(plan.manifestPath, async (folder, original) => {
+      const information = await folder.describe(original);
+      if (information?.kind !== 'file') return undefined;
+      const previous = await readFolderFile(folder, original);
+      if (FleetManifestSchema.safeParse(safeJson(previous.toString('utf8'))).success) return undefined;
+      const prefix = `${path.basename(plan.manifestPath)}.unreadable-`;
+      const preserved = path.join(path.dirname(plan.manifestPath), `${prefix}${Date.now()}-${randomUUID()}`);
+      await journal.capture(preserved);
+      await this.writeFileAtomically(preserved, previous, 0o600, journal);
+      // Keep only this newest unreadable publication. Capturing the older copies makes removal
+      // transactional too: if the new manifest cannot land, the old evidence is restored.
+      for (const name of await folder.list()) {
+        if (!name.startsWith(prefix) || name === path.basename(preserved)) continue;
+        if ((await folder.describe(name))?.kind !== 'file') continue;
+        await journal.capture(path.join(path.dirname(plan.manifestPath), name));
+      }
+      return preserved;
+    });
     await this.writeFileAtomically(plan.manifestPath, content, 0o600, journal);
+    return backup;
   }
 
   /**
@@ -1066,7 +1089,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
    */
   private async writeFileAtomically(
     destination: string,
-    content: string,
+    content: string | Buffer,
     mode: number,
     journal: FileMutationJournal,
   ): Promise<void> {
