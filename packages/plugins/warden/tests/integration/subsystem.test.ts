@@ -38,7 +38,7 @@ function warden(options: { readonly config?: unknown; readonly written?: ConfigW
     usage: () => undefined,
     board: () => undefined,
   });
-  return { ...fake, ferrets, conversation, asks, subsystem, routes: wardenRoutes(subsystem) };
+  return { ...fake, ferrets, conversation, asks, subsystem, routes: wardenRoutes(subsystem, ferrets) };
 }
 
 /**

@@ -461,6 +461,28 @@ describe('merging analytics answers across machines', () => {
       should(mergeAnalyticsResponses([windowless, left]).index.lastTokenRefreshAt).equal('2026-10-02T00:00:00.000Z');
     });
 
+    it('should leave the daemon-wide refresh state absent when any part omits it, never a low sum', () => {
+      // Arrange
+      const narrowed: AnalyticsIndexStatus = {
+        schemaVersion: INDEX.schemaVersion,
+        sessions: 0,
+        tokenSessions: 0,
+        transcriptSources: 0,
+        indexedTranscriptSources: 0,
+      };
+      const whole = rawAnswer([raw('a')], 10, { index: { ...INDEX, pendingTranscriptSources: 2, sourceErrors: 1 } });
+      const lineage = rawAnswer([raw('b')], 10, { index: narrowed });
+
+      // Act
+      const merged = mergeAnalyticsResponses([whole, lineage]);
+
+      // Assert
+      should(merged.index.pendingTranscriptSources).be.undefined();
+      should(merged.index.sourceErrors).be.undefined();
+      should(merged.index.refreshing).be.undefined();
+      should(mergeAnalyticsResponses([lineage, whole]).index).deepEqual(merged.index);
+    });
+
     it('should order raw ties by id and then by machine, and unknown metrics last', () => {
       // Arrange
       const order = compareAnalyticsRawSessions('cost_usd');

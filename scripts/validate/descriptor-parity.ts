@@ -54,8 +54,9 @@ const MINIMUM_RANK: Readonly<Record<string, number>> = { none: 0, authenticated:
 /**
  * A difference that can only REFUSE more callers than today: minimum rank up, caller any → person, a capability
  * added, `noStore` or `privilegedOnly` added, a `catalog` resolver added (it names where the handler already read the
- * catalog from), `consultsGrants` added (it only gives the handler the grant standing to ask; without it the call has none,
- * and a handler that needs the decision can only refuse). Anything else is not one, so a record can never bless a loosening.
+ * catalog from). `consultsGrants` added is NOT one: it hands the handler a grant standing it can act on, and a handler that
+ * fails closed without one can succeed with it, so it is judged only through `RESTORED_ACTS`. Anything else is not
+ * a tightening, so a record can never bless a loosening.
  */
 export function isTightening(diff: FieldDiff, was: DescriptorRow, now: DescriptorRow): boolean {
   switch (diff.field) {
@@ -69,12 +70,84 @@ export function isTightening(diff: FieldDiff, was: DescriptorRow, now: Descripto
     case 'capability':
     case 'noStore':
     case 'privilegedOnly':
-    case 'consultsGrants':
     case 'catalog':
       return diff.before === '∅' && diff.after !== '∅';
     default:
       return false;
   }
+}
+
+/**
+ * One named, bounded exception to "a recorded difference must be a tightening": a change that ENABLES an act but only
+ * restores what 4.x did. It is exactly one `field` addition on exactly one 5.0 route, never a rule over a field, and it is
+ * honoured only while `proof` (a live test in that file with that exact title) exists; `check` fails when the proof is gone
+ * or the route no longer differs, so an entry cannot outlive its reason.
+ */
+export interface RestoredAct {
+  readonly table: string;
+  /** The 5.0 route key. */
+  readonly key: string;
+  readonly field: string;
+  readonly reason: string;
+  readonly proof: { readonly file: string; readonly title: string };
+}
+
+export const RESTORED_ACTS: readonly RestoredAct[] = [
+  {
+    table: 'route',
+    key: 'POST /v1/ferrets',
+    field: 'consultsGrants',
+    reason:
+      "4.x asked the terminal.use grant decision itself for a start outside every project; 5.0 reads it through Gate, which gives a call that standing only when the route asks. Without it every such start answered 503 launch_gate_unavailable. It enables the granted device's start, and only that: an ungranted device and a relayed caller stay refused",
+    proof: {
+      file: 'packages/core/gate/tests/unit/daemon/launch-roots-caller.test.ts',
+      title:
+        'B2 consultsGrants on POST /v1/ferrets restores the terminal.use decision: a granted device reaches it, an ungranted device and a relayed caller stay refused',
+    },
+  },
+];
+
+/** Whether `diff` is an addition a `RESTORED_ACTS` entry names for this very route. */
+export function isRestoredAct(
+  diff: FieldDiff,
+  now: DescriptorRow,
+  acts: readonly RestoredAct[] = RESTORED_ACTS,
+): boolean {
+  return (
+    diff.before === '∅' &&
+    diff.after !== '∅' &&
+    acts.some(act => act.table === now.table && act.key === now.key && act.field === diff.field)
+  );
+}
+
+/** Findings for an entry whose proof test is missing or dead, or whose route no longer carries the addition. */
+export function restoredActFindings(
+  root: string,
+  next: readonly DescriptorRow[],
+  acts: readonly RestoredAct[] = RESTORED_ACTS,
+): Finding[] {
+  const check = 'descriptor-parity';
+  const out: Finding[] = [];
+  for (const act of acts) {
+    const where = `${act.table} ${act.key}`;
+    const file = join(root, act.proof.file);
+    const proved = existsSync(file) && readFileSync(file, 'utf8').includes(`test('${act.proof.title}'`);
+    if (!proved)
+      out.push({
+        check,
+        where,
+        message: `restored ${act.field} names a proof that does not exist: ${act.proof.file} "${act.proof.title}"`,
+      });
+    const row = next.find(r => r.table === act.table && r.key === act.key);
+    const declared = row === undefined ? undefined : (row as unknown as Record<string, unknown>)[act.field];
+    if (declared === undefined || declared === false)
+      out.push({
+        check,
+        where,
+        message: `restored ${act.field} is no longer declared on this route; remove it from RESTORED_ACTS`,
+      });
+  }
+  return out;
 }
 
 export interface MovedPair {
@@ -234,7 +307,11 @@ export const check: Check = {
     const model = await ctx.model();
     const next = model.loaded.flatMap(s => rowsOf(s.manifest));
     const result = parity(today, next, changes);
-    const findings = [...result.findings, ...movedFindings(today, next, changes)];
+    const findings = [
+      ...result.findings,
+      ...movedFindings(today, next, changes),
+      ...restoredActFindings(ctx.root, next),
+    ];
     if (result.unresolved > 0)
       console.error(`descriptor-parity: ${result.unresolved} unresolved field(s) in today's table were not compared`);
     if (process.argv.includes('--report')) {

@@ -67,7 +67,7 @@ export default implementDaemon(manifest, {
     });
 
     return {
-      routes: wardenRoutes(subsystem),
+      routes: wardenRoutes(subsystem, ferrets),
       provides: {
         warden: {
           flags: async () => wardenFlags(await subsystem.status()).map(toWireFlag),

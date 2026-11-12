@@ -19,8 +19,18 @@ The index holds every stopped ferret's exact token figures, so who asks decides 
 - **A ferret** queries its own lineage only: itself and its descendants, the same `mayTouch` rule every other per-ferret
   read uses. Naming a ferret outside it with `session=` is refused (403 `forbidden`). An **unscoped** query (no
   `session`, any aggregate or raw list) is **narrowed**, not refused: the rows are filtered to the lineage before the
-  query runs, and the index counts (`scope.indexed`, `index.sessions`) are narrowed with them, so nothing in the answer
-  says anything about a ferret outside it. Narrowing was chosen over refusing because "my fleet" is an honest question.
+  query runs, and every index figure the answer carries is **recomputed from those rows** (`scope.indexed`,
+  `index.sessions`, `tokenSessions`, `transcriptSources`, and `indexedTranscriptSources`, which is the lineage's
+  known-token count), so nothing in the answer says anything about a ferret outside it. The daemon's refresh state is
+  about the whole fleet and cannot be told per lineage, so for a ferret it is **omitted**: `pendingTranscriptSources`,
+  `sourceErrors`, `refreshing` and `lastTokenRefreshAt` are absent (a reader treats absent as "not reported", never as
+  zero). The owner and a person still read them. Two ferrets with the same lineage rows therefore get the identical answer
+  whatever happens to anybody else's transcript. Narrowing was chosen over refusing because "my fleet" is an honest question.
+
+The same scope rule covers the neighbouring figures a ferret can reach. `GET /v1/usage/budgets` gives a ferret only
+`{ login, paused }` for the budgeted logins its own lineage runs on, because a spent amount, an unpriced count or a threshold
+level is a sum over every ferret on the login. `GET /v1/warden/status` lists only the checks whose target is in the
+caller's lineage.
 
 The caller is the standing Gate admitted, never a header or a query value. It is enforced at the `GET /v1/usage/insights`
 route; the in-process `UsageApi.insights` has no caller and is not a route.
@@ -359,7 +369,8 @@ commutative, associative):
   instead of silently describing only the machines that sent it;
 - rates are weighted by sessions; `scope` counts add; `scope.window` spans the earliest `from` to the
   latest `to`; the index account adds, `schemaVersion` is the **oldest** in the fleet, and `refreshing`
-  is true if any machine is;
+  is true if any machine is (a machine that omits `pendingTranscriptSources`, `sourceErrors` or `refreshing` leaves the merged
+  figure absent: an unknown part is never a low sum);
 - a ratio metric is read **after** the merge, from the merged numerator and denominator, and is null
   unless both cover the same sessions (equal `total`);
 - raw answers concatenate under the one shared ordering (`compareAnalyticsRawSessions`), cut to the

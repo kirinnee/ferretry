@@ -53,7 +53,7 @@ const runCall = (standing: CallStanding, body?: unknown): CallContext => ({
 describe('R-0408 the run handler', () => {
   test('R-0408 a ferret admitted at operator is refused a run that starts investigators, 403 owner_only', async () => {
     const { subsystem, runs } = recordingSubsystem();
-    const run = wardenRoutes(subsystem)['POST /v1/warden/run'];
+    const run = wardenRoutes(subsystem, { mayTouch: () => true })['POST /v1/warden/run'];
 
     const refused = await run(runCall(ferretStanding('f1' as FerretId), { spawn: true })).catch(
       (error: unknown) => error,
@@ -70,7 +70,7 @@ describe('R-0408 the run handler', () => {
 
   test('R-0408 a ferret may still ask for a sweep that only looks (spawn false, or no body)', async () => {
     const { subsystem, runs } = recordingSubsystem();
-    const run = wardenRoutes(subsystem)['POST /v1/warden/run'];
+    const run = wardenRoutes(subsystem, { mayTouch: () => true })['POST /v1/warden/run'];
 
     const looked = await run(runCall(ferretStanding('f1' as FerretId), { spawn: false }));
     const bare = await run(runCall(ferretStanding('f1' as FerretId)));
@@ -82,7 +82,7 @@ describe('R-0408 the run handler', () => {
 
   test('R-0408 the owner may run a sweep that starts investigators', async () => {
     const { subsystem, runs } = recordingSubsystem();
-    const run = wardenRoutes(subsystem)['POST /v1/warden/run'];
+    const run = wardenRoutes(subsystem, { mayTouch: () => true })['POST /v1/warden/run'];
 
     const answered = await run(runCall(ownerStanding(), { spawn: true }));
 

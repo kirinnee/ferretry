@@ -37,8 +37,13 @@ const real = (id: string) => {
 /** A harness whose usage reader answers the turns each ferret was given, by id. */
 class SpendingHarness extends FakeHarness {
   readonly spent = new Map<string, readonly TurnUsage[]>();
+  /** Ferrets whose usage reader fails: the index counts them pending, which is daemon-wide evidence. */
+  readonly unreadable = new Set<string>();
   override readonly usage: UsageReader = {
-    turns: async (ferret): Promise<readonly TurnUsage[]> => this.spent.get(String(ferret)) ?? [],
+    turns: async (ferret): Promise<readonly TurnUsage[]> => {
+      if (this.unreadable.has(String(ferret))) throw new Error('transcript unreadable');
+      return this.spent.get(String(ferret)) ?? [];
+    },
   };
 }
 
@@ -52,7 +57,7 @@ const turn = (inputTokens: number, outputTokens: number): TurnUsage => ({
 
 const CALLER_HEADER = 'x-test-caller';
 
-const world = async () => {
+const world = async (unreadableVictim = false) => {
   const harness = new SpendingHarness();
   const host = await testHost({
     plugins: [
@@ -115,6 +120,7 @@ const world = async () => {
   harness.spent.set(helper, [turn(200, 20)]);
   harness.spent.set(grandHelper, [turn(300, 30)]);
   harness.spent.set(victim, [turn(1200, 300)]);
+  if (unreadableVictim) harness.unreadable.add(victim);
   await host.runJob('usage-ingest');
   const insights = async (caller: string | undefined, query: Record<string, string>) =>
     await host.request('GET', '/v1/usage/insights', {
@@ -197,6 +203,51 @@ test('M4 an aggregate by a ferret sums only its own lineage; a helper never sees
     expect(asHelper.json<Raw>().results.map(row => row.id)).not.toContain(lead);
     expect((await insights(helper, { q: '{}', session: lead })).status).toBe(403);
     expect((await insights(helper, { q: '{}', session: helper })).status).toBe(200);
+  } finally {
+    await host.stop();
+  }
+});
+
+test('audit A fix 2 the index evidence a ferret reads is the same whether or not an unrelated ferret transcript is readable', async () => {
+  const normal = await world(false);
+  const broken = await world(true);
+  try {
+    const ok = (await normal.insights(normal.lead, { q: '{}' })).json<{
+      index: Record<string, unknown>;
+      scope: unknown;
+    }>();
+    const bad = (await broken.insights(broken.lead, { q: '{}' })).json<{
+      index: Record<string, unknown>;
+      scope: unknown;
+    }>();
+    expect(bad.index).toEqual(ok.index);
+    expect(bad.scope).toEqual(ok.scope);
+    // Recomputed from the three authorized rows; the daemon-wide refresh state is not represented per lineage, so it is absent.
+    expect(ok.index).toEqual({
+      schemaVersion: expect.any(Number),
+      sessions: 3,
+      tokenSessions: 3,
+      transcriptSources: 3,
+      indexedTranscriptSources: 3,
+    });
+    // The owner still reads the daemon-wide state, and it does see the unreadable ferret.
+    const owner = (await broken.insights(undefined, { q: '{}' })).json<{ index: Record<string, unknown> }>();
+    expect(owner.index.pendingTranscriptSources).toBe(1);
+    expect(owner.index.refreshing).toBe(false);
+  } finally {
+    await normal.host.stop();
+    await broken.host.stop();
+  }
+});
+
+test('audit A fix 2 a ferret index counts its own lineage known tokens, not a global count capped by its size', async () => {
+  const { host, lead, insights } = await world();
+  try {
+    // An unscoped query narrowed to the lead's lineage: three sessions, all with tokens.
+    const answer = (await insights(lead, { q: '{}' })).json<{
+      index: { indexedTranscriptSources: number; tokenSessions: number };
+    }>();
+    expect(answer.index.indexedTranscriptSources).toBe(answer.index.tokenSessions);
   } finally {
     await host.stop();
   }

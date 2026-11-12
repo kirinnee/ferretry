@@ -78,7 +78,9 @@ export default definePlugin({
         caller: 'any',
         noStore: true,
         audit: { skip: 'a read of budget standing' },
-        guard: none('login ids, dollars and reset times only'),
+        guard: none(
+          'a ferret reads whether its own logins are paused; the owner reads login ids, dollars and reset times',
+        ),
       }),
       route('GET /v1/usage/insights', {
         minimum: 'operator',

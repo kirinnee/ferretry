@@ -265,9 +265,13 @@ export const AnalyticsIndexStatusSchema = z.object({
   tokenSessions: NonNegativeIntegerSchema,
   transcriptSources: NonNegativeIntegerSchema,
   indexedTranscriptSources: NonNegativeIntegerSchema,
-  pendingTranscriptSources: NonNegativeIntegerSchema,
-  sourceErrors: NonNegativeIntegerSchema,
-  refreshing: z.boolean(),
+  /**
+   * The next three describe the daemon's own refresh work across EVERY ferret, so they are absent from an answer narrowed to
+   * one lineage (a ferret's), where they could only say something about sessions outside it.
+   */
+  pendingTranscriptSources: NonNegativeIntegerSchema.optional(),
+  sourceErrors: NonNegativeIntegerSchema.optional(),
+  refreshing: z.boolean().optional(),
   lastTokenRefreshAt: InstantSchema.optional(),
 });
 export type AnalyticsIndexStatus = z.infer<typeof AnalyticsIndexStatusSchema>;

@@ -5,7 +5,8 @@ import {
   type PlainApiResponse,
   textResponse,
 } from '@ferretry/kernel/contract';
-import { isFerretCall, OWNER_ONLY_CODE } from '@ferretry/core-gate/contract';
+import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
+import { ferretOf, isFerretCall, OWNER_ONLY_CODE } from '@ferretry/core-gate/contract';
 import {
   WardenSettingsPatchSchema,
   WardenInvestigateRequestSchema,
@@ -46,6 +47,19 @@ function refuse(error: unknown): never {
   throw error;
 }
 
+/** The status a ferret may read: the Jev checks and investigations about ferrets `mayRead` allows. */
+function narrowedStatus(
+  view: ReturnType<typeof toWireStatus>,
+  mayRead: (ferret: FerretId) => boolean,
+): ReturnType<typeof toWireStatus> {
+  const { jevChecks, investigations, ...rest } = view;
+  return {
+    ...rest,
+    investigations: investigations.filter(entry => entry.target === undefined || mayRead(entry.target as FerretId)),
+    ...(jevChecks === undefined ? {} : { jevChecks: jevChecks.filter(check => mayRead(check.ferret as FerretId)) }),
+  };
+}
+
 /** Wraps a handler so every refusal the sweep can raise leaves as an `ApiError`. */
 const guarded =
   (handler: (call: CallContext) => Promise<PlainApiResponse>) =>
@@ -64,9 +78,17 @@ const first = (call: CallContext, name: string): string | undefined => call.requ
  * agenda, run) declare `guard: 'secrets'` in the manifest, so the host redacts their bodies; the sweep also scrubs what
  * it sends to a model.
  */
-export function wardenRoutes(subsystem: WardenSubsystem) {
+export function wardenRoutes(subsystem: WardenSubsystem, ferrets: Pick<FerretsApi, 'mayTouch'>) {
   return {
-    'GET /v1/warden/status': guarded(async () => jsonResponse(toWireStatus(await subsystem.status()))),
+    // The owner and a person read every check; a FERRET reads only those about itself and its helpers (`mayTouch`): a
+    // check and an investigation carry what Jev or a warden spent on one target, which is that lineage's figure alone.
+    'GET /v1/warden/status': guarded(async call => {
+      const caller = ferretOf(call);
+      const view = toWireStatus(await subsystem.status());
+      return jsonResponse(
+        caller === undefined ? view : narrowedStatus(view, ferret => ferrets.mayTouch(caller, ferret)),
+      );
+    }),
     'GET /v1/warden/verdicts': guarded(async () => jsonResponse(toWireVerdicts(await subsystem.verdicts()))),
     'GET /v1/warden/report': guarded(async call => {
       const reportPath = first(call, 'path');

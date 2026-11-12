@@ -3,7 +3,16 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { DescriptorRow } from '../../packages/core/kernel/testing/parity.ts';
-import { movedFindings, movedPairs, readChanges } from './descriptor-parity.ts';
+import {
+  type RestoredAct,
+  RESTORED_ACTS,
+  isRestoredAct,
+  isTightening,
+  movedFindings,
+  movedPairs,
+  readChanges,
+  restoredActFindings,
+} from './descriptor-parity.ts';
 import { junitCases } from './guarantees.ts';
 import {
   FROZEN_IDS,
@@ -225,13 +234,83 @@ describe('parity-ticks: a route also needs descriptor-parity', () => {
     expect(run([R], ctx(named, bare))[0]).toContain('no record');
   });
 
-  test('a recorded consultsGrants added is a tightening: it only gives the handler the grant standing to ask', () => {
+  test('a recorded consultsGrants added is NOT a tightening: it hands the handler a standing it can act on', () => {
     const records = new Map([['route\tGET /v1/a', rec('changed')]]);
     const consulting = { ...todayRow('GET /v1/a'), consultsGrants: true };
-    const ok = () => routeWorld([todayRow('GET /v1/a')], [consulting], records);
-    expect(run([R], ctx(named, ok))).toEqual([]);
+    const recorded = () => routeWorld([todayRow('GET /v1/a')], [consulting], records);
+    expect(run([R], ctx(named, recorded))[0]).toContain('not a tightening: consultsGrants ∅ → true');
     const bare = () => routeWorld([todayRow('GET /v1/a')], [consulting], new Map());
     expect(run([R], ctx(named, bare))[0]).toContain('no record');
+    const was = todayRow('GET /v1/a');
+    expect(isTightening({ field: 'consultsGrants', before: '∅', after: 'true' }, was, consulting)).toBe(false);
+  });
+
+  describe('a named restored act: the one bounded exception', () => {
+    const POST = routeRow('R-0001', 'POST /v1/sessions');
+    const moved = () =>
+      routeWorld(
+        [todayRow('POST /v1/sessions')],
+        [{ ...todayRow('POST /v1/ferrets'), consultsGrants: true }],
+        new Map([
+          ['route\tPOST /v1/sessions', rec('removed')],
+          ['route\tPOST /v1/ferrets', rec('moved-changed')],
+        ]),
+      );
+
+    test('POST /v1/ferrets may add consultsGrants (it restores v4) and nothing else on it is excused', () => {
+      expect(run([POST], ctx(named, moved))).toEqual([]);
+      const widened = () =>
+        routeWorld(
+          [todayRow('POST /v1/sessions')],
+          [{ ...todayRow('POST /v1/ferrets'), consultsGrants: true, minimum: 'authenticated' }],
+          new Map([
+            ['route\tPOST /v1/sessions', rec('removed')],
+            ['route\tPOST /v1/ferrets', rec('moved-changed')],
+          ]),
+        );
+      expect(run([POST], ctx(named, widened))[0]).toContain('not a tightening: minimum operator → authenticated');
+    });
+
+    test('the SAME addition on any other route still fails', () => {
+      const other = routeRow('R-0001', 'POST /v1/widgets');
+      const world = () =>
+        routeWorld(
+          [todayRow('POST /v1/widgets')],
+          [{ ...todayRow('POST /v1/widgets'), consultsGrants: true }],
+          new Map([['route\tPOST /v1/widgets', rec('changed')]]),
+        );
+      expect(run([other], ctx(named, world))[0]).toContain('not a tightening: consultsGrants ∅ → true');
+      const now = { ...todayRow('POST /v1/ferrets'), consultsGrants: true };
+      const diff = { field: 'consultsGrants' as const, before: '∅', after: 'true' };
+      expect(isRestoredAct(diff, now)).toBe(true);
+      expect(isRestoredAct(diff, { ...now, key: 'POST /v1/widgets' })).toBe(false);
+      expect(isRestoredAct(diff, { ...now, key: 'PATCH /v1/ferrets' })).toBe(false);
+      // Only an ADDITION of that field is excused: a removal or a change of value is not.
+      expect(isRestoredAct({ ...diff, before: 'true', after: '∅' }, now)).toBe(false);
+      // The exception names one field: another field on the same route is not excused.
+      expect(isRestoredAct({ field: 'minimum', before: 'operator', after: 'authenticated' }, now)).toBe(false);
+    });
+
+    test('the exception holds only while its proof test exists and the route still declares the field', () => {
+      const act: RestoredAct = RESTORED_ACTS[0] as RestoredAct;
+      const rowNow = { ...todayRow(act.key), consultsGrants: true };
+      const proof = `test('${act.proof.title}', () => {})`;
+      const alive = fixture({ [act.proof.file]: proof });
+      expect(restoredActFindings(alive, [rowNow])).toEqual([]);
+      const gone = fixture({});
+      expect(restoredActFindings(gone, [rowNow])[0]?.message).toContain('names a proof that does not exist');
+      const dead = fixture({ [act.proof.file]: `test.skip('${act.proof.title}', () => {})` });
+      expect(restoredActFindings(dead, [rowNow])[0]?.message).toContain('names a proof that does not exist');
+      expect(restoredActFindings(alive, [todayRow(act.key)])[0]?.message).toContain('no longer declared');
+    });
+
+    test('the shipped exception list is exactly the one recorded, and its proof exists in this repository', () => {
+      expect(RESTORED_ACTS.map(act => `${act.table} ${act.key} ${act.field}`)).toEqual([
+        'route POST /v1/ferrets consultsGrants',
+      ]);
+      const root = join(import.meta.dir, '..', '..');
+      expect(restoredActFindings(root, [{ ...todayRow('POST /v1/ferrets'), consultsGrants: true }])).toEqual([]);
+    });
   });
 
   test('a moved route passes only with both halves recorded, and a recorded difference must be a tightening', () => {

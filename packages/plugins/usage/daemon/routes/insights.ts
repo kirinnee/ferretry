@@ -117,12 +117,14 @@ function narrowedTo(read: AnalyticsIndexRead, lineage: InsightsLineage): Analyti
   return {
     ...read,
     rows,
+    // Every figure is recomputed from the authorized rows. The daemon-wide refresh state (pending sources, source errors,
+    // refreshing, last refresh time) cannot be told per lineage, so it is OMITTED rather than carried or zeroed.
     status: {
-      ...read.status,
+      schemaVersion: read.status.schemaVersion,
       sessions: rows.length,
       tokenSessions: withTokens,
       transcriptSources: rows.length,
-      indexedTranscriptSources: Math.min(read.status.indexedTranscriptSources, rows.length),
+      indexedTranscriptSources: withTokens,
     },
   };
 }

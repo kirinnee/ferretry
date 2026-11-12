@@ -9,6 +9,7 @@ import manifest from '../manifest.ts';
 import {
   BudgetReached,
   type BudgetsView,
+  type FerretBudgetsView,
   INSIGHTS_STATE,
   LoginIdSchema,
   InsightsChanged,
@@ -340,6 +341,24 @@ export default implementDaemon(manifest, {
       }),
     });
 
+    /**
+     * What a FERRET may know of the budgets: for each budgeted login its own lineage (itself and its helpers) runs on,
+     * whether it is paused. Every measured figure is a sum over all ferrets on the login, so none of them is returned.
+     */
+    const ferretBudgetsView = async (caller: FerretId): Promise<FerretBudgetsView> => {
+      const used = new Set(
+        (await needs.ferrets.list().catch(() => []))
+          .filter(ferret => ferret.login !== undefined && needs.ferrets.mayTouch(caller, ferret.id))
+          .map(ferret => ferret.login),
+      );
+      return {
+        budgets: Object.keys(kernel.config.file(USAGE_CONFIG)?.budgets ?? {}).flatMap(name => {
+          const login = LoginIdSchema.safeParse(name);
+          return login.success && used.has(name) ? [{ login: login.data, paused: pauseOf(name) !== undefined }] : [];
+        }),
+      };
+    };
+
     // ── jobs ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
     kernel.jobs.add({
       id: 'usage-restore',
@@ -392,7 +411,11 @@ export default implementDaemon(manifest, {
             : unrouted(call.request.method, call.request.path),
         // The app polls this while a quota is on screen: somebody is looking, so a due provider quota may be read.
         'GET /v1/usage': async () => jsonResponse(await feedView(feed)),
-        'GET /v1/usage/budgets': async () => jsonResponse(budgetsView()),
+        // The owner and a person read every login's measured budget; a FERRET reads only whether its own logins are paused.
+        'GET /v1/usage/budgets': async call => {
+          const caller = ferretOf(call);
+          return jsonResponse(caller === undefined ? budgetsView() : await ferretBudgetsView(caller));
+        },
         // The owner and a person read the whole fleet; a FERRET reads its own lineage only (itself and its helpers, the
         // same `mayTouch` rule Ferrets applies to every other per-ferret read). The caller is the standing Gate admitted,
         // never a header or a query value.
