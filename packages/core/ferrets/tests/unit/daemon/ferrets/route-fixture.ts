@@ -153,6 +153,10 @@ export async function host(
     readonly pinner?: Parameters<typeof testHost>[0]['pinner'];
     /** Answers the Git the file browser runs. */
     readonly spawn?: Parameters<typeof testHost>[0]['spawn'];
+    /** The state home the kernel's fence guards (a path in the test world); default the test host's own. */
+    readonly fenceHome?: string;
+    /** Directories the kernel binds (the path asked → its real path), over `everyDirectory`. */
+    readonly directories?: Readonly<Record<string, string>>;
     /** More plugins on the host (a fake taker of a Ferrets hook). */
     readonly plugins?: Parameters<typeof testHost>[0]['plugins'];
   } = {},
@@ -164,12 +168,15 @@ export async function host(
     ...(extra.plugins ?? []),
   ];
   const first = await testHost({
+    everyDirectory: true,
     plugins,
     gate: new StandInAdmission(extra.standing ?? standingFor),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
     ...(extra.config === undefined ? {} : { config: extra.config }),
     ...(extra.pinner === undefined ? {} : { pinner: extra.pinner }),
     ...(extra.spawn === undefined ? {} : { spawn: extra.spawn }),
+    ...(extra.fenceHome === undefined ? {} : { fenceHome: extra.fenceHome }),
+    ...(extra.directories === undefined ? {} : { directories: extra.directories }),
   });
   if (records.length === 0) return first;
   for (const each of records) first.state('ferrets').plant(FerretFiles, JSON.stringify(each), each.id);

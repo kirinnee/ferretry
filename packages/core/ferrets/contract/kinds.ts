@@ -105,11 +105,17 @@ export interface LaunchPartSource {
 }
 
 /**
- * A required {@link LaunchPartSource} refusing the launch, with the sentence a person reads. The message must be plain
- * words: never a value read from a file, an environment or a secret. Any other failure of a required source is refused
- * with a generic sentence instead, because a port's error text can carry launch values.
+ * A launch refused with the sentence a person reads: thrown by a harness (its home's directory chain is unsafe) or by a
+ * required launch-part source. The message must be plain words: never a value read from a file, an environment or a
+ * secret. Any other failure on the launch path is refused with a generic sentence instead, because a port's error text
+ * can carry launch values.
  */
-export class LaunchPartsRefusal extends Error {
+export class LaunchRefusal extends Error {
+  override readonly name: string = 'LaunchRefusal';
+}
+
+/** A required {@link LaunchPartSource} refusing the launch (see {@link LaunchRefusal}). */
+export class LaunchPartsRefusal extends LaunchRefusal {
   override readonly name = 'LaunchPartsRefusal';
 }
 

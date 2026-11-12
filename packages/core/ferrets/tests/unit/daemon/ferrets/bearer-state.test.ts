@@ -23,6 +23,7 @@ test('S47 R-0364 a persisted live digest cannot authenticate a stopped or absent
     },
   });
   let h = await testHost({
+    everyDirectory: true,
     plugins: [watched],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },

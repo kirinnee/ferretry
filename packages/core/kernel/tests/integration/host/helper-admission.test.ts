@@ -68,6 +68,7 @@ const wardenPlugin = implementDaemon(
 
 async function boot(packs: boolean, runner: FakeRunner): Promise<TestHost> {
   return await testHost({
+    everyDirectory: true,
     plugins: [
       real('ferrets'),
       ...(packs ? [real('packs')] : []),

@@ -163,6 +163,7 @@ afterEach(async () => {
 
 async function boot(runner: RecordingRunner): Promise<TestHost> {
   const h = await testHost({
+    everyDirectory: true,
     // The launch folder's settings are read through the kernel's own `harness-home` rules, here over real temp files.
     harnessHomeFolders: await diskFolders(await mkdtemp(join(fixture, 'roots-'))),
     plugins: [real('ferrets'), real('runtimes'), real('claude-code'), runnerPlugin(runner), faultPlugin()],
@@ -629,3 +630,91 @@ describe('#1586 model provenance across a lifecycle sequence, on the real path',
     await h.stop();
   });
 });
+
+/** The folders between FY_HOME and a ferret's home, as the testing host names them (home-relative; `''` is FY_HOME). */
+const CHAIN: readonly (readonly [string, string])[] = [
+  ['FY_HOME', ''],
+  ['state', 'state'],
+  ['the plugin’s state folder', 'state/claude-code'],
+  ['agent-homes', 'state/claude-code/agent-homes'],
+];
+
+describe.each(LAUNCHING.map(row => [row.name, row] as const))(
+  '#1587 the directory chain and the bound folder, on the one launch path: %s',
+  (name, row) => {
+    test.each(CHAIN)(
+      'a %s writable by everyone (0777) refuses the launch with its reason, and the runner is not called',
+      async (_label, component) => {
+        const runner = new RecordingRunner();
+        const h = await boot(runner);
+
+        // A revive judges the chain at its resume; a start and an adoption at the start.
+        const result = await row.drive(h, runner, `chain-${randomUUID()}`, async () => {
+          h.setHomeFolder(component, { mode: 0o777 });
+        });
+
+        expect(result.status).toBeGreaterThanOrEqual(400);
+        expect(result.body).toContain('writable by its group or by everyone');
+        expect(result.launches).toBe(0);
+        await h.stop();
+      },
+    );
+
+    test('a folder owned by another user, or replaced by a link, in the chain refuses too', async () => {
+      for (const facts of [{ owner: 4242 }, { link: true as const }]) {
+        const runner = new RecordingRunner();
+        const h = await boot(runner);
+
+        const result = await row.drive(h, runner, `chain-${randomUUID()}`, async () => {
+          h.setHomeFolder('state/claude-code', facts);
+        });
+
+        expect(result.status).toBeGreaterThanOrEqual(400);
+        expect(result.launches).toBe(0);
+        await h.stop();
+      }
+    });
+
+    // The launch folder's identity is bound where it is first checked and re-verified as the last step before the harness.
+    // Fault injection runs when \`launch.parts\` is asked: after \`start.decide\` has judged the folder, before the harness.
+    const SWAPS: readonly (readonly [string, (h: TestHost, folder: string) => void])[] = [
+      [
+        'a link into the state home put where the project was',
+        (h, folder) => h.setDirectory(folder, '/test-home/state'),
+      ],
+      ['a different directory put at the same path', (h, folder) => h.replaceDirectory(folder)],
+      ['a link to another directory put where the project was', (h, folder) => h.setDirectory(folder, '/elsewhere')],
+    ];
+    test.each(SWAPS)('%s after the folder was checked starts nothing', async (_label, swap) => {
+      let h: TestHost | undefined;
+      let where = '';
+      const underTest = name === 'revive' ? 2 : 1;
+      atLaunch = launch => {
+        if (launch === underTest && h !== undefined) swap(h, where);
+      };
+      const runner = new RecordingRunner();
+      h = await boot(runner);
+
+      const result = await row.drive(h, runner, `swap-${randomUUID()}`, async directory => {
+        where = directory;
+      });
+
+      expect(launchesAsked).toBe(underTest);
+      expect(result.status).toBeGreaterThanOrEqual(400);
+      expect(result.body).toContain('no longer what was checked');
+      expect(result.launches).toBe(0);
+      await h.stop();
+    });
+
+    test('an unchanged folder launches (the verify is not a refusal in disguise)', async () => {
+      const runner = new RecordingRunner();
+      const h = await boot(runner);
+
+      const result = await row.drive(h, runner, `same-${randomUUID()}`, async () => undefined);
+
+      expect(result.status).toBeLessThan(300);
+      expect(result.launches).toBe(1);
+      await h.stop();
+    });
+  },
+);

@@ -64,6 +64,7 @@ const planted = (id: string, state: FerretState): FerretRecord => ({
 
 async function host(records: readonly FerretRecord[] = [], runner = new FakeRunner()): Promise<TestHost> {
   const first = await testHost({
+    everyDirectory: true,
     plugins: [ferrets, harnessPlugin(new FakeHarness()), runnerPlugin(runner)],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },

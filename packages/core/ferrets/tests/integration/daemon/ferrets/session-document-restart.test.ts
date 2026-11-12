@@ -97,6 +97,7 @@ const admitting = () => {
 
 async function boot(packs: ReturnType<typeof admitting>['plugin']): Promise<TestHost> {
   return await testHost({
+    everyDirectory: true,
     plugins: [ferrets, harnessPlugin(new FakeHarness()), runnerPlugin(new FakeRunner()), packs, wardenPlugin],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },

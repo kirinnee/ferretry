@@ -48,6 +48,7 @@ const runnerPlugin = (runner: FakeRunner) =>
 
 async function boot(runner: FakeRunner): Promise<TestHost> {
   return await testHost({
+    everyDirectory: true,
     plugins: [ferrets, harnessPlugin(new FakeHarness()), runnerPlugin(runner)],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },

@@ -150,6 +150,7 @@ async function host(standing: () => CallStanding = () => ownerStanding(), more: 
   const vault = new RecordingVault();
   const harness = new FakeHarness();
   const h = await testHost({
+    everyDirectory: true,
     plugins: [ferrets, harnessPlugin(harness), runnerPlugin(runner), listenerPlugin(heard), ...more],
     gate: new StandInAdmission(standing),
     fakes: { gate: new FakeGate(), vault, asks: new FakeAsks() },

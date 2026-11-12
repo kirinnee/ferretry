@@ -289,6 +289,24 @@ new-session -c` and the pane then starts in that directory (measured; the sessio
   goes stale when the descriptor closes). macOS has no such path, so the kernel's `kernel.spawn` pin (`RootHandle.pin`: a held directory the child starts inside, installed for
   the instant of the spawn) is the existing way. Neither is wired into the runner here; this is declared, not scheduled.
 
+**Where both are wired (the one launch path).**
+
+- **The chain** is checked by the Claude Code harness (`ClaudeHarness`) on every credential-bearing launch — a start, a stop/resume
+  and an adoption (a move launches nothing yet) — twice: right after it makes the ferret's home and before it writes any file of it
+  (`launch-settings.json` among them), and again immediately before the runner is asked to start the process. An unsafe folder anywhere
+  from `FY_HOME` down refuses the launch with the kernel's sentence (`the ferret was not started: state is writable by its group or
+by everyone …`), nothing is written or narrowed, and the runner is not called. The harness raises that as a `LaunchRefusal`, the
+  only harness error whose text Ferrets shows; any other failure there is still the generic "could not prepare this ferret's home".
+- **The folder** is bound by Ferrets where it first checks it (`startNamed` and `resume`, before `start.decide` is asked), carried
+  to `launchAttempt`, and `verify()`-ed as the LAST step before the harness is asked to start (after the home is prepared and
+  the child environment is resolved). A change refuses the launch (`409 refused`, "no longer what was checked") and nothing is spawned.
+  An **agent's** start of a folder inside the state home is refused `403 state_home` at the route (`stateHomeReach` now answers from
+  `bindDirectory`, so an ordinary agent start in a project works, and a fence the kernel cannot compute is `503 state_home_unresolved`)
+  and again by the service. A resume has no caller to tell an agent from a person, so it only re-verifies the folder it bound.
+- **Tests:** the launch-wiring table drives each of those through the real Ferrets, Runtimes and Claude Code halves for a start, a
+  stop/resume and an adoption (four ancestors at `0777`, a foreign owner, a link, and three kinds of folder swap), and removing the
+  `verify()` or either chain check turns them red.
+
 ### What a ferret's `fy` presents
 
 A ferret's `fy` and its MCP server (`fy mcp serve`) present the **ferret's own credential**, not the host

@@ -29,6 +29,15 @@ beforeEach(async () => {
   await mkdir(HOME, { recursive: true });
   await mkdir(join(fixture, 'fy-home/state/claude-code/agent-homes/f2'), { recursive: true });
   await mkdir(HISTORY, { recursive: true });
+  // A real FY_HOME is private (the daemon makes it 0700); a temp folder made under a group-writable umask is not, and the
+  // launch refuses to put a credential under a chain another user could rewrite.
+  for (const folder of [
+    'fy-home',
+    'fy-home/state',
+    'fy-home/state/claude-code',
+    'fy-home/state/claude-code/agent-homes',
+  ])
+    await chmod(join(fixture, folder), 0o700);
 });
 afterEach(async () => {
   await rm(fixture, { recursive: true, force: true });
@@ -236,6 +245,71 @@ describe('ClaudeHarness', () => {
       await harness.start(spec({ parts: [] }), runner(started), {} as never);
 
       expect(JSON.parse(await readFile(join(HOME, 'launch-settings.json'), 'utf8')).env).toBeUndefined();
+    });
+  });
+
+  describe('the checked directory chain (v4 parity): no credential under a folder another user could rewrite', () => {
+    const ANCESTORS = [
+      ['FY_HOME', 'fy-home'],
+      ['state', 'fy-home/state'],
+      ['the plugin’s state folder', 'fy-home/state/claude-code'],
+      ['agent-homes', 'fy-home/state/claude-code/agent-homes'],
+    ] as const;
+
+    for (const [label, relative] of ANCESTORS) {
+      test(`a ${label} writable by everyone (0777) refuses the launch, writes nothing and calls no runner`, async () => {
+        const { harness } = build();
+        const ancestor = join(fixture, relative);
+        await chmod(ancestor, 0o777);
+        const started: { command?: readonly string[] } = {};
+
+        await expect(
+          harness.start(spec({ parts: [{ kind: 'pin', env: { A: 'fixture-pin' } }] }), runner(started), {} as never),
+        ).rejects.toThrow(/writable by its group or by everyone/u);
+
+        expect(started.command).toBeUndefined();
+        expect(await listing(HOME)).toEqual([]);
+        // Nothing is narrowed behind the person's back: the check refuses, it does not repair.
+        expect((await lstat(ancestor)).mode & 0o777).toBe(0o777);
+      });
+    }
+
+    test('the same refusal comes from prepareHome, before any file of the home is written', async () => {
+      const { harness } = build();
+      await chmod(join(fixture, 'fy-home/state'), 0o770);
+
+      await expect(harness.prepareHome(spec())).rejects.toThrow(/state is writable by its group or by everyone/u);
+
+      expect(await listing(HOME)).toEqual([]);
+    });
+
+    test('a chain made writable AFTER the files were written is caught again immediately before the runner', async () => {
+      const inner = new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]);
+      // The launch records its settings between the home's write and the runner call: the window being closed.
+      const state = Object.assign(Object.create(inner), {
+        write: async (...args: Parameters<typeof inner.write>) => {
+          await chmod(join(fixture, 'fy-home/state/claude-code/agent-homes'), 0o777);
+          return await inner.write(...args);
+        },
+      }) as typeof inner;
+      const { harness } = build({ state });
+      const started: { command?: readonly string[] } = {};
+
+      await expect(harness.start(spec(), runner(started), {} as never)).rejects.toThrow(
+        /agent-homes is writable by its group or by everyone/u,
+      );
+
+      expect(started.command).toBeUndefined();
+    });
+
+    test('a healthy private chain launches', async () => {
+      const { harness } = build();
+      const started: { command?: readonly string[] } = {};
+
+      const result = await harness.start(spec(), runner(started), {} as never);
+
+      expect(result.ok).toBe(true);
+      expect(started.command).toBeDefined();
     });
   });
 

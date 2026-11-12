@@ -250,6 +250,12 @@ export interface TestHostOptions {
   /** The directories `kernel.paths.checkDirectory` accepts: the absolute path asked → its real path. Default: none. */
   readonly directories?: Readonly<Record<string, string>>;
   /**
+   * Every absolute path is a directory that is its own real path, outside the state home, unless `directories` /
+   * `setDirectory` says otherwise: for a test that starts ferrets in folders it does not care about. Default: off (a
+   * path no one named is not a directory).
+   */
+  readonly everyDirectory?: boolean;
+  /**
    * Backs a `harness-home` handle scoped to an ABSOLUTE folder (what a launch folder's settings are read through) with
    * this function instead of the flat test world, which keeps no per-folder files: `diskFolders` over a temp folder gives
    * the real root rules over real files. Default: the flat world, as every other root.
@@ -1361,6 +1367,12 @@ async function start(world: World): Promise<TestHost> {
   const testDirectories = new Map<string, string>(Object.entries(options.directories ?? {}));
   /** Which directory a real path is, for `bindDirectory`'s identity: `replaceDirectory` moves it on. */
   const testDirectoryGenerations = new Map<string, number>();
+  const testRealPath = (requested: string): string | undefined =>
+    testDirectories.has(requested)
+      ? testDirectories.get(requested)
+      : options.everyDirectory === true
+        ? requested
+        : undefined;
   const checkTestDirectory = (absolutePath: string) => {
     const requested = absolutePath.trim();
     if (!requested.startsWith('/'))
@@ -1368,7 +1380,7 @@ async function start(world: World): Promise<TestHost> {
         reason: 'not_absolute' as const,
         message: `session working directory must be absolute: ${JSON.stringify(absolutePath)}`,
       });
-    const real = testDirectories.get(requested);
+    const real = testRealPath(requested);
     return real === undefined
       ? err({
           reason: 'not_a_directory' as const,
@@ -1687,7 +1699,9 @@ async function start(world: World): Promise<TestHost> {
             for (const [key, text] of [...world.roots])
               if (key.startsWith(`${fromKey}/`)) world.roots.set(`${to}${key.slice(fromKey.length)}`, text);
           },
-          ensurePrivateDirectory: async () => {},
+          ensurePrivateDirectory: async path => {
+            testMadeFolders.add(ownPath(path));
+          },
           // The real host's rule (`chainFault`) over the flat test world: a folder at or above the base of an internal root
           // is a real folder unless `setHomeFolder` says otherwise; one below it exists as the flat world says it does.
           checkPrivateChain: async path => {
@@ -2153,7 +2167,7 @@ async function start(world: World): Promise<TestHost> {
                 const checked = checkTestDirectory(absolutePath);
                 if (!checked.ok) return err(checked.error);
                 const look = () => {
-                  const real = testDirectories.get(requested);
+                  const real = testRealPath(requested);
                   return real === undefined
                     ? undefined
                     : {

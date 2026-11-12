@@ -90,6 +90,7 @@ async function host(
     ...(extra.runner === undefined ? [] : [runnerPlugin(extra.runner)]),
   ];
   const first = await testHost({
+    everyDirectory: true,
     plugins,
     gate: new StandInAdmission(standingFor),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
@@ -225,13 +226,14 @@ describe('starting, tokens and attach', () => {
     expect(runner.starts).toBe(1);
   });
 
-  test('G12 a ferret helper start waits for the identity-based state-home fence', async () => {
+  test('G12 a ferret helper start passes the state-home fence in a project folder and then waits for Packs', async () => {
     const h = await host([record('lead')], { harness: new FakeHarness(), runner: new FakeRunner() });
     const started = await postStart(h, { ...as('lead'), body: { folder: '/work/b' } });
     expect(started.status).toBe(503);
-    expect(started.json<{ code: string }>().code).toBe('state_home_unresolved');
+    expect(started.json<{ code: string }>().code).toBe('helper_admission_unavailable');
     const named = await postStart(h, { ...as('lead'), body: { folder: '/work/c', parent: 'lead' } });
     expect(named.status).toBe(503);
+    expect(named.json<{ code: string }>().code).toBe('helper_admission_unavailable');
   });
 
   test('G12 another parent is refused; owner helper starts await definite Packs admission', async () => {

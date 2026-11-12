@@ -459,6 +459,19 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       if (!path.startsWith('/')) return err('the folder must be an absolute path');
       return ok(path as FencedPath);
     },
+    // The launch folder's identity, captured where it is first checked and re-verified as the last step before the
+    // harness starts (the kernel's bound directory).
+    bindFolder: async path => {
+      const bound = await kernel.paths.bindDirectory(path);
+      if (!bound.ok) return err(bound.error.message);
+      return ok({
+        insideStateHome: bound.value.insideStateHome,
+        verify: async () => {
+          const held = await bound.value.verify();
+          return held.ok ? ok(undefined) : err(held.error.message);
+        },
+      });
+    },
     delivered: ferret => wakeTurnWatch?.(ferret),
     changed: payload => {
       followStatus(payload.ferret, payload.state, 'lifecycle');
@@ -623,12 +636,22 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
 
   /**
-   * The kernel gives a plugin no state-home identity or link-hop reach yet, so the launch refusal (the folder a ferret
-   * is started in) fails closed for an agent with today's 503 `state_home_unresolved`, and never with a lexical
-   * stand-in. The file browser needs none: the pin a work root hands out judges every walk beneath it against the
-   * kernel's fence itself (S40, S47).
+   * Whether the folder a ferret is started in lies inside the state home, by the kernel's bound directory (identity up
+   * every folder and through links, the same fence the owner roots use). A folder that is not a directory is not inside
+   * anything (the start refuses it as a folder); a fence the kernel cannot compute fails closed for an agent with
+   * today's 503 `state_home_unresolved`, and never with a lexical stand-in. The file browser needs none: the pin a
+   * work root hands out judges every walk beneath it against the kernel's fence itself (S40, S47).
    */
-  const stateHomeReach: StateHomeLaunchReach | undefined = undefined;
+  const stateHomeReach: StateHomeLaunchReach = {
+    holding: async path => {
+      const bound = await kernel.paths.bindDirectory(path);
+      if (!bound.ok) {
+        if (bound.error.reason === 'not_a_directory' || bound.error.reason === 'not_absolute') return undefined;
+        throw new Error(bound.error.message);
+      }
+      return bound.value.insideStateHome ? bound.value.realPath : undefined;
+    },
+  };
 
   /** S47: an agent reaches only its own ferret and its helpers'; a person is unaffected. */
   const agentMayReach = (call: CallContext, target: FerretId): void => {
@@ -1173,7 +1196,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
             'only the Warden starts a ferret under its own label; leave --label out',
             'owner_only',
           );
-        // No identity/link-hop state-home reach is available in this kernel yet. Never replace it with a lexical fence.
+        // An agent never starts inside the state home: 403 there, 503 where the kernel cannot tell.
         await stateHomeLaunchRefusal(callerIsAgent(call), stateHomeReach, parsed.folder);
         // Project catalogs and the managed-root launch seam are unbound; a governed start fails closed without them.
         await terminalLaunchRefusal(call, parsed, undefined);

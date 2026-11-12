@@ -121,6 +121,7 @@ export async function archiveWorld(options: ArchiveWorldOptions = {}) {
   const runner = new FakeRunner();
   const harness = new FakeHarness();
   const h = await testHost({
+    everyDirectory: true,
     plugins: [
       ferrets,
       harnessPlugin(harness),
