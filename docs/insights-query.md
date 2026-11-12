@@ -11,6 +11,20 @@ The code: the grammar is `packages/protocol/src/lib/analytics-query.ts`, the wir
 `packages/daemon/src/lib/analytics/results.ts` over rows that `usage-fold.ts` and `session-record.ts`
 derive.
 
+## Who may read whose figures
+
+The index holds every stopped ferret's exact token figures, so who asks decides what the query is over:
+
+- **The owner and a person** (the admin token with no ferret behind it, a device) query the whole fleet.
+- **A ferret** queries its own lineage only: itself and its descendants, the same `mayTouch` rule every other per-ferret
+  read uses. Naming a ferret outside it with `session=` is refused (403 `forbidden`). An **unscoped** query (no
+  `session`, any aggregate or raw list) is **narrowed**, not refused: the rows are filtered to the lineage before the
+  query runs, and the index counts (`scope.indexed`, `index.sessions`) are narrowed with them, so nothing in the answer
+  says anything about a ferret outside it. Narrowing was chosen over refusing because "my fleet" is an honest question.
+
+The caller is the standing Gate admitted, never a header or a query value. It is enforced at the `GET /v1/usage/insights`
+route; the in-process `UsageApi.insights` has no caller and is not a route.
+
 ## At a glance
 
 ```text

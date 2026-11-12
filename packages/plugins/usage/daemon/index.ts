@@ -1,4 +1,5 @@
 import type { FerretId, FerretSummary } from '@ferretry/core-ferrets/contract';
+import { ferretOf } from '@ferretry/core-gate/contract';
 import { type ApiResponse, errorResponse, jsonResponse, textResponse } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import type { LoginId } from '@ferretry/plugin-logins/contract';
@@ -392,12 +393,20 @@ export default implementDaemon(manifest, {
         // The app polls this while a quota is on screen: somebody is looking, so a due provider quota may be read.
         'GET /v1/usage': async () => jsonResponse(await feedView(feed)),
         'GET /v1/usage/budgets': async () => jsonResponse(budgetsView()),
-        'GET /v1/usage/insights': async call =>
-          insightsAnswer(
+        // The owner and a person read the whole fleet; a FERRET reads its own lineage only (itself and its helpers, the
+        // same `mayTouch` rule Ferrets applies to every other per-ferret read). The caller is the standing Gate admitted,
+        // never a header or a query value.
+        'GET /v1/usage/insights': async call => {
+          const caller = ferretOf(call);
+          return insightsAnswer(
             { index: () => ingestion.read() },
             call.request,
             (await needs.logins.list().catch(() => undefined))?.machine ?? null,
-          ),
+            caller === undefined
+              ? undefined
+              : { mayRead: ferret => needs.ferrets.mayTouch(caller, ferret as FerretId) },
+          );
+        },
         'GET /v1/usage/pricing': async () => await pricingRoutes.view(),
         'PATCH /v1/usage/pricing': async call => await pricingRoutes.patch(call.request),
         'POST /v1/usage/pricing/sync/preview': async call => await pricingRoutes.preview(call.request),
