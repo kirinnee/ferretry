@@ -246,9 +246,14 @@ for (const [spelling, claimKey] of Object.entries(KEYS)) {
       expect((await w.row()).evidenceNotBefore).toBeUndefined();
 
       const held = await world(claimKey, { heldAt: 'composer' });
-      await expect(held.service.reattempt(F1, 'send-1', { by: 'person', force: true })).rejects.toBeInstanceOf(
-        SendRetypeWithheld,
+      const refused = await held.service.reattempt(F1, 'send-1', { by: 'person', force: true }).then(
+        () => undefined,
+        (error: unknown) => error,
       );
+      expect(refused).toBeInstanceOf(SendRetypeWithheld);
+      // It points at the action that works today (Retry is not wired), in plain words.
+      expect((refused as Error).message).toContain('Clear the draft, then send the message again yourself');
+      expect((refused as Error).message).not.toContain('Retry');
       expect((await held.row()).evidenceNotBefore).toBeUndefined();
       expect((await held.row()).unaccountedReason).toBe('update_unconfirmed');
     });

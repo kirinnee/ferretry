@@ -327,7 +327,7 @@ button.fy-receipt {
   line-height: 16px;
   margin: 3px 0 0 auto;
   padding: 1px 6px;
-  text-align: right;
+  text-align: left;
   width: fit-content;
 }
 .fy-receipt-note[data-side='other'] {

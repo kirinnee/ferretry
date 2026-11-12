@@ -35,7 +35,7 @@ export interface SendReceipt {
   readonly chip?: string;
   /**
    * A plain sentence drawn under the message, always visible: the update marked this send, whatever else it is. It is
-   * the row's own context ("kept safely …", "taken back …") followed by the migration sentence. A chip and a mark
+   * the row's own context ("taken back …") followed by the migration sentence; a held marked row says it will not be sent. A chip and a mark
    * cannot carry "go and look" for a message that may or may not have arrived.
    */
   readonly note?: string;

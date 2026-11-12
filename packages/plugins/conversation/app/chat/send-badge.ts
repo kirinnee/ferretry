@@ -99,6 +99,20 @@ const queueBadge = (record: LedgerSendRecord): SendBadge | undefined => {
   }
 };
 
+/** What the 5.0 update left unsaid about a send it marked, in the words every such row ends with. */
+const UPDATE_NOTE = 'unconfirmed — check the chat';
+
+/** Whether the v4 → 5.0 conversion marked this send: its old delivery claim could not be tied to what 5.0 reads. */
+export const isUpdateUnconfirmed = (record: Pick<LedgerSendRecord, 'unaccountedReason'>): boolean =>
+  record.unaccountedReason === 'update_unconfirmed';
+
+/**
+ * What a HELD send the update marked says. Nothing delivers it when the session is revived (a revive skips a marked
+ * row: Ferretry cannot tell whether the old copy already arrived), so the row must not promise that. It keeps the
+ * migration sentence's words, so the amber note below the message reads as one note.
+ */
+const HELD_UPDATE_NOTE = `${UPDATE_NOTE} (sent before the update). Ferretry will not send this message on its own. If it is missing from the chat, send it again yourself.`;
+
 /**
  * The chip for a send. Every word is a claim the daemon has PROVEN:
  *
@@ -163,6 +177,8 @@ const badgeOf = (record: LedgerSendRecord): SendBadge => {
       tone: WAITING_TONE,
       detail: 'it is sitting in the agent’s composer; press Enter to send it or cancel it',
     };
+  if (record.held === true && isUpdateUnconfirmed(record))
+    return { label: 'unconfirmed', tone: QUIET_TONE, detail: HELD_UPDATE_NOTE };
   if (record.held === true)
     return {
       label: 'held for revive',
@@ -185,17 +201,11 @@ const badgeOf = (record: LedgerSendRecord): SendBadge => {
   };
 };
 
-/** What the 5.0 update left unsaid about a send it marked, in the words every such row ends with. */
-const UPDATE_NOTE = 'unconfirmed — check the chat';
-
-/** Whether the v4 → 5.0 conversion marked this send: its old delivery claim could not be tied to what 5.0 reads. */
-export const isUpdateUnconfirmed = (record: Pick<LedgerSendRecord, 'unaccountedReason'>): boolean =>
-  record.unaccountedReason === 'update_unconfirmed';
-
 /**
- * The chip for a send. A send the update marked says so WHATEVER its state: a held or cancelled one keeps its own
- * context (`kept safely …`, `taken back …`) and ends with the migration sentence, so no marked row is left explaining
- * only part of what is known. The unconfirmed state itself already says it.
+ * The chip for a send. A send the update marked says so WHATEVER its state: a cancelled one keeps its own context
+ * (`taken back …`) and ends with the migration sentence, so no marked row is left explaining only part of what is
+ * known. A HELD marked row is not "kept safely": nothing delivers it, so it says that instead ({@link HELD_UPDATE_NOTE}).
+ * The unconfirmed state itself already says it.
  */
 export const sendBadge = (record: LedgerSendRecord): SendBadge => {
   const badge = badgeOf(record);

@@ -501,7 +501,7 @@ describe('LedgerMessage', () => {
       [
         'one held for a revive',
         { fate: 'accepted', held: true },
-        `kept safely; it will be delivered when this session is revived; ${MIGRATION}`,
+        'unconfirmed — check the chat (sent before the update). Ferretry will not send this message on its own. If it is missing from the chat, send it again yourself.',
       ],
       [
         'a cancelled one',
@@ -526,12 +526,24 @@ describe('LedgerMessage', () => {
         expect(textOf(drawn)).not.toContain('update_unconfirmed');
       });
 
-    test('a held marked row says in words that it is held, not only with a clock', () => {
-      const drawn = render(
-        <LedgerMessage onRetry={async () => true} record={record({ fate: 'accepted', held: true, ...marked })} />,
-      );
+    test('a held marked row says plainly that it will not be sent, and never promises a revive delivers it', () => {
+      const held = record({ fate: 'accepted', held: true, ...marked });
+      const drawn = render(<LedgerMessage onRetry={async () => true} record={held} />);
       const note = drawn.root.find(node => node.props['data-migration-note'] === '');
-      expect(textOfNode(note)).toContain('kept safely; it will be delivered when this session is revived');
+      const said = textOfNode(note);
+      expect(said).toContain('Ferretry will not send this message on its own.');
+      expect(said).toContain('If it is missing from the chat, send it again yourself.');
+      expect(said).toContain('(sent before the update)');
+      expect(said).not.toContain('kept safely');
+      expect(said).not.toContain('revived');
+      expect(said).not.toContain('Retry');
+      expect(sendBadge(held).label).toBe('unconfirmed');
+    });
+
+    test('an UNmarked held row still says it is kept and delivered on revive (a revive does deliver it)', () => {
+      const held = record({ fate: 'accepted', held: true });
+      expect(sendBadge(held).label).toBe('held for revive');
+      expect(sendBadge(held).detail).toBe('kept safely; it will be delivered when this session is revived');
     });
 
     test('a plain marked row says it once: the amber note, with no grey “unconfirmed” chip beside it', () => {

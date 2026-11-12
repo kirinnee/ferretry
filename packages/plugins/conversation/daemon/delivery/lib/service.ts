@@ -479,7 +479,7 @@ export class SessionSendService {
       if (where === 'composer')
         throw new SendRetypeWithheld(
           leftByUpdate
-            ? `send ${sendId} is typed in the agent's composer; Ferretry will not press Enter for a send it can't confirm. Clear it from the composer, then Retry`
+            ? `send ${sendId} is typed in the agent's composer; Ferretry will not press Enter for a send it can't confirm. Clear the draft, then send the message again yourself`
             : `send ${sendId} is typed in the agent's composer and not sent; press Enter instead`,
           'held',
         );
