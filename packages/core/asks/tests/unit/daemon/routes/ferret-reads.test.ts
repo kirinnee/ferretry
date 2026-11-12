@@ -6,6 +6,7 @@ import {
   type FerretReach,
   ferretSnapshot,
   isWardenShaped,
+  projectResolved,
   SOURCE_SHAPES,
 } from '../../../../daemon/lib/routes/ferret-reads.ts';
 
@@ -200,5 +201,67 @@ describe('a board as a ferret reads it', () => {
     expect(Object.keys(projected)).not.toContain('context');
     // A plain item is the same object, untouched.
     expect(shown.items[0]).toBe(snapshot.items[0]);
+  });
+});
+
+describe('a resolved Warden item as a ferret reads it', () => {
+  const resolvedRow = {
+    id: 'R1',
+    source: 'question',
+    sourceRef: 'ask:daemon:f.lead.warden:ask:x',
+    subject: 'planted subject sentence',
+    why: 'planted report sentence',
+    context: 'planted context sentence',
+    howToResolve: 'planted remedy sentence',
+    waitingSince: '2026-11-06T09:00:00.000Z',
+    kind: 'notice',
+    stage: 2,
+    raisedBy: 'daemon',
+    raisedBySession: null,
+    resolvedAt: '2026-11-06T10:00:00.000Z',
+    resolutionNote: 'planted resolution note',
+    disposition: 'dismissed',
+    response: { text: 'planted answer text' },
+    zzNewField: 'planted new field',
+  };
+
+  test('projectResolved keeps only the listed fields, nulls the ref and note, and carries the fixed sentences', () => {
+    const shown = projectResolved(resolvedRow as never) as unknown as Record<string, unknown>;
+
+    expect(shown).toMatchObject({
+      id: 'R1',
+      source: 'question',
+      waitingSince: '2026-11-06T09:00:00.000Z',
+      kind: 'notice',
+      stage: 2,
+      raisedBy: 'daemon',
+      raisedBySession: null,
+      resolvedAt: '2026-11-06T10:00:00.000Z',
+      disposition: 'dismissed',
+      sourceRef: null,
+      resolutionNote: null,
+      ...FERRET_NOTICE_SENTENCES,
+    });
+    expect(Object.keys(shown)).not.toContain('response');
+    expect(Object.keys(shown)).not.toContain('zzNewField');
+    expect(JSON.stringify(shown)).not.toMatch(/planted|ask:daemon/u);
+  });
+
+  test('a ferret reading its own lineage’s resolved notice gets the projection, never the Warden’s prose', async () => {
+    const board = {
+      v: 1,
+      sessionId: 'lead',
+      items: [],
+      resolved: [resolvedRow],
+      count: 0,
+      parseErrors: 0,
+      updatedAt: '2026-11-06T10:00:00.000Z',
+    } as unknown as AgendaSnapshot;
+
+    const shown = await ferretSnapshot(reach, 'lead', board, EMPTY_AT, NO_KIN);
+
+    expect(shown.resolved).toHaveLength(1);
+    expect(shown.resolved[0]).toEqual(projectResolved(resolvedRow as never));
+    expect(JSON.stringify(shown)).not.toMatch(/planted/u);
   });
 });
