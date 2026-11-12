@@ -31,14 +31,6 @@ export interface LaunchSpec {
   readonly harness: HarnessKey;
   readonly runtime?: string;
   readonly login?: string;
-  /**
-   * The environment the ferret's login defines for this harness (`LoginKind.env`), set by Ferrets only and absent when
-   * the ferret has no login or its login defines none. Names, literal settings and `${secret:NAME}` references only:
-   * a raw secret never enters (the kind drops it), and Ferrets drops `HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `FY_*`.
-   * It is already in the launch's child environment, under every `launch.parts` env and below `FY_*`; a harness reads
-   * it only to learn WHICH literal values the child holds (the Claude overlay pins them), never to put one there.
-   */
-  readonly loginEnv?: Readonly<Record<string, string>>;
   readonly model?: string;
   readonly effort?: string;
   /**
@@ -104,12 +96,6 @@ export type LaunchPart =
   /** Names and `${secret:NAME}` references only; never a value. */
   | { readonly kind: 'env'; readonly env: Readonly<Record<string, string>> }
   /**
-   * Literal environment a login PINS into the harness's own settings file (Claude: the `--settings` overlay), because a
-   * project's settings outrank the process environment but not that file (#1587). LITERALS ONLY, never a `${secret:NAME}`
-   * or another variable: the value goes into a private file in the ferret's home and never into an argv.
-   */
-  | { readonly kind: 'pin'; readonly env: Readonly<Record<string, string>> }
-  /**
    * Where the harness squeezes its own conversation, in tokens (a login's `compactAt`, once it is a number: `auto` adds
    * nothing). The Claude harness writes it into its private settings file as `autoCompactWindow`.
    */
@@ -118,7 +104,7 @@ export type LaunchPart =
 /** What a `launch.parts` taker contributes: a source asked per launch (a contribute item is static; the parts are not). */
 export interface LaunchPartSource {
   /**
-   * A launch cannot be judged safe without this source's answer (a login's pinned environment is one): when it throws,
+   * A launch cannot be judged right without this source's answer (a login's compaction trigger is one): when it throws,
    * the launch is refused with nothing started, instead of the source being skipped. A source that is only an
    * addition (lessons, a skill) leaves this off and is skipped when it fails.
    */

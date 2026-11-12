@@ -158,8 +158,8 @@ export class ClaudeHarness implements Harness {
   /** The home written from ONE read of this plugin's configuration, the same read the argv and the record are built from. */
   private async prepareHomeFrom(spec: LaunchSpec, inputs: LaunchSettingsInputs): Promise<HomePlan> {
     const home = await this.ensureHome(spec);
-    // The launch-settings file below holds the login's pinned environment: no credential is written under a folder chain
-    // another user could rewrite (v4's checked directory chain, now the kernel's rule).
+    // Nothing is written into a home under a folder chain another user could rewrite (v4's checked directory chain, now the
+    // kernel's rule).
     await this.requirePrivateChain(home);
     // The selected skills: Skills' shared folders linked into `skills/`, the rest of that folder swept (one link rule).
     await materializeSkills(home, spec.parts, []);
@@ -172,7 +172,6 @@ export class ClaudeHarness implements Harness {
       hooks: inputs.hooks as never,
       effort: spec.effort,
       fast: spec.options?.fast,
-      loginEnv: spec.loginEnv,
     });
     const files: FencedPath[] = [];
     const write = async (name: string, content: string): Promise<void> => {

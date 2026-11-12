@@ -40,15 +40,6 @@
  *   source, so it did not count, and an agent nobody watches sat on the dialog with every message
  *   failing. A `--settings` file IS the flag source, so naming the same mode there removes the
  *   condition; {@link CLAUDE_PROMPTS_SEEN} records the dialog as seen as well, and either alone holds.
- * - The overlay ALSO pins an environment login's NON-secret variables under `env` (B190, `./materialise.ts`).
- *   That covers a person running the runtime's bin wrapper. A daemon-started ferret launches through the
- *   claude-code harness instead, which reads neither this file nor the login's environment (separate fix,
- *   tracked in ports-pending.json).
- *   Claude Code lets a `--settings` value beat the same key in a repository's own
- *   `.claude/settings.local.json`, while the process environment loses to it, so a repo that blanked
- *   `ANTHROPIC_BASE_URL` signed the runtime out. A value naming `${secret:…}` is never pinned: it would show
- *   in `ps` if a launch copied this file inline (v4's fast mode did; kept as a precaution), so it stays process
- *   environment (docs/secrets.md). Interactive Claude runtimes get an env-only overlay for the same reason.
  * - Remote Control is forced OFF at startup (`remoteControlAtStartup: false`, also in the overlay).
  *   Claude Code 2.1.281 starts the bridge in a session when ANY of these is true, in this order:
  *   the `--rc` flag; an explicit `remoteControlAtStartup` from policy, FLAG, then user settings (and
@@ -63,12 +54,6 @@
  *   Claude Code 2.1.281 writes an `AskUserQuestion` call to its transcript only once the form is answered,
  *   so the daemon, which reads the transcript, never saw an open question; the hook hands it the call as
  *   it is asked. Fast mode's replacement overlay copies the whole file, hooks included.
- * - The overlay ALSO pins the login's LITERAL environment (`env`, `claude.env`, the catalog's model pins) —
- *   `./login-pins.ts`. Claude ranks a folder's `.claude/settings*.json` `env` above the process
- *   environment, so a repo could blank a runtime's base URL; a `--settings` file outranks the folder.
- *   Interactive runtimes get an env-only file for the same reason. A value naming a secret never goes in
- *   it; a fast or compact launch writes the merged overlay to a per-launch file rather than inline, so a
- *   literal credential never reaches an argv either: docs/secrets.md.
  * - Codex's one-shot notices (the full-access warning, the rate-limit model nudge, the model
  *   migration prompts) are hidden with ONE `-c notice={…}` inline table, which merges with
  *   `config.toml`'s own `[notice]` like the trust table does.

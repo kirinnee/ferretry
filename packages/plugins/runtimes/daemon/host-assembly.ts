@@ -22,7 +22,6 @@ import type { ConfigPort, KernelPorts, RootHandle, RootsPort } from '@ferretry/k
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { UsageApi } from '@ferretry/plugin-usage/contract';
 import { milliseconds } from '@ferretry/std';
-import { z } from 'zod';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
 import { PROFILE_COMPONENTS_KEY, PROFILE_ITEMS } from '../contract/index.ts';
 import { applyClaimFor } from './adapters/apply-claim.ts';
@@ -32,8 +31,7 @@ import { PROVIDER_ANSWER_MS, withinMs } from './adapters/profile-components.ts';
 import { writeAllConfigWriter } from './adapters/config-write-all.ts';
 import { credentialMounts, FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
 import { readFleetManifest } from './adapters/manifest-file.ts';
-import { FIXED_SETTINGS_FILE, pinnableLoginEnvironment, RUNTIME_STATE_DIRECTORY } from './lib/account/materialise.ts';
-import { FixedSettingsDamagedError, type RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
+import type { RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import type { AdapterHost } from './adapters/ports.ts';
 import { refuseBeforeWriting, runtimesConfigFiles } from './adapters/runtimes-config-files.ts';
 import { fleetMounts, harnessMounts, rootHostFiles } from './adapters/root-host-files.ts';
@@ -118,11 +116,10 @@ export function endedSeams(
 }
 
 /**
- * What a launch of a published runtime needs of it (`lib/launch-gate.ts`): its kind, the names its login leaves to the
- * process environment (the manifest), its compaction trigger and the literals it pins (its `fixed.json`, read through
- * the `fleet` root). EVERY fact is read inside ONE publication read ({@link FleetPublication.reading}), so the manifest
- * and the fixed settings are the same committed generation: an apply cannot remove `fixed.json` between the two reads
- * and turn a login that pins into one that pins nothing. A runtime matches by name or by id.
+ * What a launch of a published runtime needs of it (`lib/launch-gate.ts`): its kind, its compaction trigger and the
+ * model windows that cap it, all from the published manifest in ONE publication read ({@link FleetPublication.reading}),
+ * so an apply cannot land between two reads. A runtime matches by name or by id. It reads no login environment and no
+ * `fixed.json`: a project's own Claude settings win over a login's variables (docs/secrets.md).
  */
 export function launchFactsSource(
   kernel: Pick<KernelPorts, 'roots'>,
@@ -138,16 +135,8 @@ export function launchFactsSource(
         const published = manifest?.runtimes.find(row => row.name === runtime || row.id === runtime);
         const account = manifest?.accounts.find(row => row.id === published?.id);
         if (published === undefined || account === undefined) return undefined;
-        const text =
-          account.kind === 'claude'
-            ? await files.readText(`${account.home}/${RUNTIME_STATE_DIRECTORY}/${FIXED_SETTINGS_FILE}`)
-            : undefined;
         return {
-          runtime: published.name,
           kind: account.kind,
-          secretEnvNames: Object.keys(account.secretEnv),
-          referencedEnv: account.referencedEnv ?? [],
-          pins: account.kind === 'claude' ? pinsOf(text) : {},
           ...(typeof account.compactAt === 'number' ? { compactAt: account.compactAt } : {}),
           windows: {
             ...(account.defaultModel === null ? {} : { defaultModel: account.defaultModel }),
@@ -160,31 +149,6 @@ export function launchFactsSource(
       });
     },
   };
-}
-
-/**
- * What a PRESENT `fixed.json` must be: a JSON object, whose `env`, when it has one, is an object of text values (v4's
- * `fixedSettingsObject` refused the rest). Other keys are the harness's own and are left alone.
- */
-const FixedSettingsSchema = z.looseObject({ env: z.record(z.string(), z.string()).optional() });
-
-/**
- * The literal `env` of a `fixed.json` text, once more through the pin filter: a reference or a secret is never a pin.
- * An ABSENT file (`undefined`) or a document with no `env` is the deliberate "pins nothing"; a PRESENT file of the wrong
- * shape is damaged and refuses, with a sentence that never repeats what the file holds.
- */
-function pinsOf(text: string | undefined): Readonly<Record<string, string>> {
-  if (text === undefined) return {};
-  let document: unknown;
-  try {
-    document = JSON.parse(text);
-  } catch {
-    throw new FixedSettingsDamagedError('it is not valid JSON');
-  }
-  const parsed = FixedSettingsSchema.safeParse(document);
-  if (!parsed.success)
-    throw new FixedSettingsDamagedError('it must be a JSON object whose env, when present, holds only text values');
-  return pinnableLoginEnvironment(parsed.data.env ?? {});
 }
 
 /** The harness homes a first run may read and a component may come from: the person's own, by the OS's home. */

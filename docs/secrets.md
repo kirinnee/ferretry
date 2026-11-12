@@ -408,56 +408,40 @@ Anywhere else, or inside a longer value, it is plain text.
 
 ### A login's variables and a repository's own Claude settings
 
-A Claude runtime on an environment login pins that login's **non-secret** variables (`ANTHROPIC_BASE_URL`,
-the catalog's `ANTHROPIC_DEFAULT_*_MODEL`, a literal `ANTHROPIC_AUTH_TOKEN`) under `env` in its
-`--settings` file (`<home>/.fy/fixed.json`). Claude Code lets that file beat a repository's
-`.claude/settings.local.json`, which the process environment does not, so a repo that blanks a provider
-variable can no longer start the runtime signed out when a person runs the runtime's bin wrapper. A
-ferret the daemon starts goes through the claude-code harness instead, which gets the same pins as a `pin` launch part and writes
-them into its own `--settings` file (below).
+**A project's own `.claude` settings win over a login's environment** (as in v4 before 4.291.9; owner decision, !A500). Claude Code
+ranks a repository's `.claude/settings*.json` `env` above the process environment, and a `--settings` file above the repository, so the
+only way a login's value could beat a repository's is by being written into a `--settings` file. Ferretry never does that:
 
-Only a value that is a plain literal is pinned, and it is pinned at the value the runtime's process environment ends
-with: a variable both the login and the profile set is pinned at the **profile's** value, the one the wrapper
-exports, so `--settings` cannot hand the login's value back over it (#1587); if the profile's value is a reference, the key is
-not pinned at all. A key the profile's settings document sets under `env` (which lands in the runtime's
-`settings.json`, and which `--settings` would otherwise beat) is never pinned, and a variable only the profile sets
-is the person's tuning and keeps its process-environment precedence. An `env` a person wrote into that home's
-`settings.json` by hand is not seen, and a pin of the same key still beats it. `FY_*` names are never pinned. An
-indirect `$NAME` / `${NAME}` is not pinned either (`--settings` env is not shell-expanded; the wrapper resolves it
-at exec). The keys pinned are the login's own variables (an environment login) and the catalog's model pins (any login).
+- A login's variables (`env`, `claude.env`, the catalog's `ANTHROPIC_DEFAULT_*_MODEL` tier slots) are **process environment only**. A
+  runtime's wrapper exports them; a ferret the daemon starts gets them in its child environment (below). Nothing of them goes into
+  `fixed.json`, into the `launch-settings.json` of a ferret's home, or into an argv.
+- `<home>/.fy/fixed.json` is the **fixed layer** and nothing else: for an agent runtime, the permission mode and the prompts it skips,
+  the hooks and the like (`plugins/runtimes/daemon/lib/account/fixed-layer.ts`). It has no `env`. An interactive Claude runtime gets no
+  `--settings` from Ferretry at all, so its profile may pass its own.
+- A start is **never refused over a key a folder sets**, a `${secret:…}` key and a bare `$OTHER` key included. Nothing reads a
+  launch folder's settings or its repository layout. The price is the plain one: a repository that sets or blanks a provider variable
+  in its own `.claude/settings*.json` replaces the login's value in that folder, and a ferret started there can sit on "Not logged in"
+  until the repository's entry is removed. That is what the owner chose.
+- A manifest an earlier version wrote may still carry `referencedEnv` (v4 4.291.9 to 4.291.11 published it for the refusal this
+  version no longer has); it is read and ignored, never written.
 
-**A value that names `${secret:…}` (or the optional `${secret?:…}`) never goes into that file, any settings file, or a command line.** It stays
-process environment, which the wrapper resolves from the store when it execs. Why a command line counts: if a launch copies `fixed.json` **inline** into
-`--settings '<json>'` (v4's fast mode and compaction point did; 5.0 writes both into the private file below and has no such reader, and the rule is kept
-as a precaution), that argv shows in `ps` and in the session's saved command. The rule is enforced
-twice in code: only values with no reference are pinned, and the write of `fixed.json` (`fixedSettingsOperation`) throws
-`FleetMaterialiseError`, naming the key and never a value, if a value that names a secret or another variable ever
-reaches it, never quietly trimming it. A **literal** credential written in a login's YAML (an internal
-gateway's `ANTHROPIC_AUTH_TOKEN`) is pinned: it is already plain text in the configuration, and so it would show
-in `ps` if a launch ever copied the file inline. A real key belongs in the secret store.
+**A value that names `${secret:…}` (or the optional `${secret?:…}`) is never written into a settings file or a command line.** It stays
+process environment, which the wrapper (or, for a ferret, the Vault's `childEnvironment`) resolves into one child when it execs.
 
-**A literal credential never reaches an argv, a ferret's pins are in its own private settings file, and there is ONE launch path (#1587).**
-A ferret the daemon starts, restarts, revives, moves or adopts is launched by exactly one thing,
-`FerretsService.launchAttempt` → the harness → the runner. For a Claude ferret:
+**A literal credential never reaches an argv, and there is ONE launch path.** A ferret the daemon starts, restarts, revives, moves or
+adopts is launched by exactly one thing, `FerretsService.launchAttempt` → the harness → the runner. For a Claude ferret:
 
-- **The pins.** Runtimes takes `launch.parts` and, for a Claude start on a published runtime, contributes a `pin` part: the literal
-  `env` of that runtime's `fixed.json` (`plugins/runtimes/daemon/lib/launch-gate.ts`, `LaunchGate`), filtered once more through the
-  same rule that wrote the file (a value that names a secret or another variable is never a pin). The Claude harness merges the pins
-  into the `env` of the `launch-settings.json` it writes in the ferret's own home, which `--settings` names, so a folder's own `env`
-  cannot replace them. **The facts are read once per launch and cannot be lost after the folder was judged.** `start.decide` reads the
-  published manifest AND the runtime's `fixed.json` inside ONE publication read (so an apply cannot remove the file between the two), judges
-  the folder on them, and keeps that snapshot for the ferret; `launch.parts` pins from exactly that snapshot and reads nothing again. The
-  source is **required** (`LaunchPartSource.required`): if a launch reaches it with no checked snapshot, or it fails for any reason, Ferrets
-  refuses the launch with nothing started rather than skipping it (a source that is only an addition, such as lessons, is still skipped when it
-  fails). A `fixed.json` that is already unreadable refuses at `start.decide`, and so does one that is **present but the wrong shape**: it must
-  be a JSON object whose `env`, when it has one, is an object of text values (`null`, an array, a number, `{"env":[]}` and
-  `{"env":{"X":42}}` all refuse, as v4's `fixedSettingsObject` did). The refusal names `fixed.json` and the shape expected, never a
-  value from it, and nothing is started on a start, a resume or an adoption. A `fixed.json` that is **absent**, or has no `env`, is a login that pins
-  nothing, which is what an apply that publishes no overlay leaves; under the publication read an apply cannot be half-way through removing it.
-- **Fast mode and compaction ride the same file.** A start that names `fast` writes `fastMode` into `launch-settings.json` (the start's
-  options are kept, so a stop/resume writes it again), and the compaction trigger reaches it as `autoCompactWindow` through a `compact`
-  launch part, on a start, a resume and an adoption alike. Neither is ever in an argv. The trigger is v4's `resolveCompactAt`, decided
-  once in the Runtimes launch gate from the checked snapshot: **a ferret's own value** (its session config's `compactAt`, else the
+- **The Runtimes launch gate.** Runtimes takes `start.decide` and `launch.parts` (`plugins/runtimes/daemon/lib/launch-gate.ts`,
+  `LaunchGate`). It is about **compaction only**: `start.decide` judges a start's own `compactAt` against its model's window and reads the
+  published manifest ONCE (one publication read), and `launch.parts` contributes the login's compaction trigger from exactly that
+  snapshot, reading nothing again. It reads no `fixed.json`, no folder and no login environment. The source is **required**
+  (`LaunchPartSource.required`): if a launch reaches it with no checked snapshot, or it fails for any reason, Ferrets refuses the launch with
+  nothing started rather than skipping it (a source that is only an addition, such as lessons, is still skipped when it fails). Published
+  runtimes that cannot be read refuse the start of a Claude ferret that names one.
+- **Fast mode and compaction ride the harness's private settings file.** A start that names `fast` writes `fastMode` into `launch-settings.json`
+  (the start's options are kept, so a stop/resume writes it again), and the compaction trigger reaches it as `autoCompactWindow` through a
+  `compact` launch part, on a start, a resume and an adoption alike. Neither is ever in an argv. The trigger is v4's `resolveCompactAt`,
+  decided once in the Runtimes launch gate from the checked snapshot: **a ferret's own value** (its session config's `compactAt`, else the
   `compactAt` its start asked for, kept in its details) **overrides the login's default**, and an own `auto` suppresses a numeric
   default; **a login default, or a value on a LATER launch, larger than the model's context window falls back to Auto** (nothing is written, and
   an oversized own value is dropped to Auto, not to the login's default). A start's OWN number larger than its model's window is
@@ -469,45 +453,23 @@ could never trigger. Pick 128k or less.`) by the Runtimes launch gate on `start.
 - **The credential is never in an argv.** The command is `env CLAUDE_CONFIG_DIR=<home> … claude --settings <home>/launch-settings.json …`:
   it names a path, never a value, so `ps`, the pane's command line and the session document's recorded `command` hold none. The file
   is written through the kernel's `agent-homes` root: `0600`, inside the ferret's `0700` home, and a link or a file the root refuses fails the launch
-  (the same checks as every other file of the home). It is rewritten by every launch, so a start, a restart, a revive, a move and an adoption all give a ferret
-  the pins of the runtime it is on NOW; it lives and goes with the ferret's home, which is why there is no sweep of launch files and no
-  live-session guard for one.
+  (the same checks as every other file of the home). It is rewritten by every launch and holds no login environment; it lives and goes with
+  the ferret's home, which is why there is no sweep of launch files and no live-session guard for one.
 - **No inline overlay anywhere.** v4's fast-mode and compaction `--settings '<json>'` overlay, its per-launch file adapter, its argv
-  builder and its launch service were deleted with this change: nothing in 5.0 builds a second argv. **A move launches nothing yet:** its
+  builder and its launch service were deleted: nothing in 5.0 builds a second argv. **A move launches nothing yet:** its
   route is still a 503 skeleton on this base (`moves-deps.ts`). With a request id and a record that has a complete legacy lifecycle it answers
   `503 plugin_unavailable` at the unbound account resolution; a freshly started record has no lifecycle command and answers
   `409 session_unusable` first; without a request id it is `400 missing_request_id`. The launch-wiring table pins each answer and zero launches,
   so the day the route is bound its relaunch must go through `launchAttempt` and the same checks.
-- A pinned **literal** credential written in a login's YAML (an internal gateway's `ANTHROPIC_AUTH_TOKEN`) is plain text in the
+- A **literal** credential written in a login's YAML (an internal gateway's `ANTHROPIC_AUTH_TOKEN`) is plain text in the
   configuration already; a real key belongs in the secret store.
-
-**A variable left to the process environment cannot be pinned, so a folder that sets one refuses the start.** A
-`${secret:…}` variable or a bare `$OTHER` reference (`referencedEnv` in the manifest, names only) stays process environment,
-and a repository's own `env` outranks it. Runtimes takes `start.decide`, which Ferrets asks before it writes anything for every start
-and every resume (a restart, a revive, a move's relaunch and an adoption among them), and refuses a Claude start on a published
-runtime whose folder sets one, naming the settings file and the key (never a value): remove it there, or keep that key out of
-the secret store (`assertFolderLeavesLoginAlone`, `plugins/runtimes/daemon/lib/folder-settings.ts`). `FolderClaudeSettingsFiles`
-(`plugins/runtimes/daemon/adapters/folder-claude-settings-file.ts`) reads every
-settings file Claude Code reads for the launch folder — its own `.claude/settings.json` and `settings.local.json`, and the local
-file at the git root (the **main checkout's** root, in a linked worktree; not when the root is the home directory) — and returns
-**names only**.
-
-- **It fails closed.** A layout that cannot be proved refuses the start with the reason: a missing launch folder, a `.git` that is a
-  symlink, a `.git` file whose `gitdir`, back-link and `commondir` do not prove one another (a linked worktree is accepted only when
-  they do), a settings file that is a symlink or has a second hard link (Claude Code follows it; the kernel never does, so a file
-  it could not read is refused rather than skipped), or a directory it cannot search. The walk up from the real folder has no depth cap.
-  Published runtimes that cannot be read refuse the start of a ferret that names one, and an answer that does not arrive in the
-  kernel's decide bound is a no.
-- **Every read goes through the kernel.** The adapter takes a `harness-home` root scoped to each folder it looks in (read-only, no
-  link followed out of the folder, the daemon's own home refused) and touches no file system of its own.
-- **GAP — the harness still does not resolve the login's process-environment variables.** A launched ferret gets the pins above, but
-  the variables a login leaves to the process environment (`${secret:…}`, `$OTHER`) are not yet resolved into its child environment
-  by Ferrets (`ports-pending.json`, the `cross: ferrets` line), and the `apiKeyHelper` alternative (the wrapper exports the value as a
-  Ferretry-owned variable and `fixed.json` carries only command text) was designed and **not built**: it needs a contract test
-  against the installed Claude Code first. The refusal above is what keeps a repository from blanking such a variable meanwhile.
-- **GAP — managed policy and intermediate parents are not checked.** Only the files Claude Code documents reading are. Ownership
-  exceptions Claude applies to the root location are not modelled.
-- **An interactive runtime whose profile passes its own `--settings` is refused at apply** (Claude Code honours only one, so the login cannot be pinned against a folder's settings): the sentence names the runtime and the remedy, remove `--settings` from the profile (v4 #1587). An agent runtime launches through the harness and is not affected.
+- **Tests that prove the rule:** `account-materialise.test.ts` (no `env` in `fixed.json`, no `--settings` for an interactive runtime, tier
+  slots and a `${secret:}` key left to the process environment), `launch-gate.test.ts` and `host-assembly.test.ts` (the gate reads no
+  folder and no `fixed.json`), `login-env-not-pinned.test.ts` and `claude-harness.test.ts` (the harness's file holds no `env`), and the
+  launch-wiring table (a folder that sets a store-held key, a symlinked `.git` or an unprovable worktree is not refused).
+- **GAP — the harness does not resolve a login's bare `$OTHER` variables.** A launched ferret gets the login's literals and `${secret:…}`
+  references resolved into its child environment, but a bare `$OTHER` reference is not yet resolved by Ferrets (`ports-pending.json`, the
+  `cross: ferrets` line).
 
 `config/daemon.json` may carry a `secretEnvironment` block of reusable recipes:
 
@@ -561,21 +523,11 @@ A ferret started on a login launches with that login's environment, and an agent
   v4), and a host login that is not actually signed in shows up as a signed-out pane, not a refusal. Codex's `auth.json` is a
   link in its home, not a variable, and is not done here (v4 linked the host's `auth.json` into the runtime home; that
   needs a kernel- or Logins-owned credential-link operation and stays a declared gap).
-- **The Claude overlay pin (B190).** Claude applies a settings file's `env` over the process environment, so a cloned
-  repository's `.claude/settings.local.json` could blank `ANTHROPIC_BASE_URL`. The harness therefore writes the login's
-  **literal** provider values into the `env` of `launch-settings.json` in the agent home (`--settings`, which outranks the
-  repository's files). That file is plain text, so what it may hold is narrow: never a `${secret:…}` / `${secret?:…}` reference,
-  never `$NAME` / `${NAME}` (a settings file does not expand them), never `FY_*`, `HOME`, `CLAUDE_CONFIG_DIR` or the
-  secure-storage variable, and a key only when no env part sets it to something else **and the merged settings document does
-  not set it in its own `env`** (that block lands in the home's `settings.json`, which `--settings` outranks, so a pin
-  would put the login above the document). The fixed layer wins over a pin, and building an overlay that would hold `${secret`
-  throws.
-- **The reference guard is on the overlay only, on purpose.** A `${secret:NAME}` is a name, not a value. A Claude settings
-  item, MCP config or instruction legitimately carries one and reaches its file in the agent home as that literal reference,
-  which nothing resolves (the Vault resolves a reference only into a child's environment); the guard exists for the one file
-  the login itself writes into. It is not extended to the other home files.
-- **Residual.** Secret-backed keys (an `ANTHROPIC_AUTH_TOKEN` held as `${secret:NAME}`) are pinned nowhere, so they exist only in the
-  child's environment and a repository's settings file can still blank one. That is the cost of never putting a secret in a file.
+- **Not pinned in a file.** A project's own `.claude` settings win over the login's environment (see "A login's variables and a
+  repository's own Claude settings"): the login's values are in the child's environment only, and the `launch-settings.json` the harness
+  writes into the agent home carries no `env`.
+- **A `${secret:NAME}` in a Claude settings item, MCP config or instruction** reaches its file in the agent home as that literal reference,
+  which nothing resolves (the Vault resolves a reference only into a child's environment): a reference is a name, not a value.
 
 ### The stored-login rule is a declared heuristic
 

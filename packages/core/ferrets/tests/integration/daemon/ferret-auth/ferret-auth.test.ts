@@ -304,7 +304,50 @@ describe('a ferret authenticates end to end (merge bar 7)', () => {
     expect(pane).toContain(FAKE_REPLY);
   });
 
-  test('(d) Claude env login in a project whose .claude/settings.local.json blanks ANTHROPIC_BASE_URL: the login still wins, and no credential is in an argv (#1587)', async () => {
+  /** Starts a ferret on `login` without waiting for a reply, and returns once the stand-in claude has been launched. */
+  const startAndLaunch = async (daemon: Daemon, login: string) => {
+    const started = await daemon.call(
+      'POST',
+      '/v1/ferrets',
+      { harness: 'claude-code', login, folder: daemon.folder, prompt: 'say hello', mode: 'interactive' },
+      { 'x-fy-request-id': crypto.randomUUID() },
+    );
+    // A project's own settings are never a reason to refuse the start.
+    expect(started.status, `start: ${started.text}`).toBeLessThan(300);
+    const until = Date.now() + SEE_MS;
+    while (Date.now() < until) {
+      const launched = daemon.launches().filter(record => record.binary === 'claude');
+      if (launched.length > 0) return launched.at(-1);
+      await Bun.sleep(250);
+    }
+    throw new Error('the stand-in claude was never launched');
+  };
+
+  /** What no launch may hold: the credential, in an argv, a pane's recorded start command, a process listing or a file. */
+  const expectNoCredentialAnywhere = (daemon: Daemon, argv: unknown) => {
+    expect(JSON.stringify(argv)).not.toContain(FAKE_TOKEN);
+    const tmux = Bun.which('tmux') ?? 'tmux';
+    const paneCommands = spawnSync(
+      tmux,
+      ['-S', join(daemon.home, 'state/terminals/tmux.sock'), 'list-panes', '-a', '-F', '#{pane_start_command}'],
+      { encoding: 'utf8' },
+    ).stdout;
+    expect(paneCommands).toContain('--settings');
+    expect(paneCommands).not.toContain(FAKE_TOKEN);
+    expect(spawnSync('ps', ['-eo', 'args'], { encoding: 'utf8' }).stdout).not.toContain(FAKE_TOKEN);
+    const homes = join(daemon.home, 'state/claude-code/agent-homes');
+    const ferretHome = readdirSync(homes)
+      .map(name => join(homes, name))
+      .find(path => existsSync(join(path, 'launch-settings.json')));
+    expect(ferretHome).toBeDefined();
+    const overlay = join(ferretHome as string, 'launch-settings.json');
+    // No login environment is pinned in the ferret's private settings file: a project's own settings win over it.
+    expect(JSON.parse(readFileSync(overlay, 'utf8')).env).toBeUndefined();
+    expect(readFileSync(overlay, 'utf8')).not.toContain(FAKE_TOKEN);
+    expect(statSync(overlay).mode & 0o777).toBe(0o600);
+  };
+
+  test('(d) Claude env login in a project whose .claude/settings.local.json blanks ANTHROPIC_BASE_URL: the PROJECT wins, the start is not refused, and no credential is in an argv (!A500)', async () => {
     const provider = startFakeProvider(FAKE_TOKEN);
     cleanups.push(() => provider.stop());
     const daemon = await boot(provider, () => ({}), FAKE_TOKEN, undefined, {
@@ -320,38 +363,42 @@ describe('a ferret authenticates end to end (merge bar 7)', () => {
       JSON.stringify({ env: { ANTHROPIC_BASE_URL: '' } }),
     );
 
-    const pane = await startAndSee(daemon, 'claude-code', 'envblank');
+    const launched = await startAndLaunch(daemon, 'envblank');
 
-    // 1. The provider was reached at the LOGIN's base URL, with the login's token (the pin outranks the project).
+    // 1. The project's blank beat the login's base URL (the login's value is in the process environment only), so the
+    //    provider was never reached.
+    expect(launched?.baseUrl).toBeNull();
+    await Bun.sleep(1_000);
+    expect(provider.seen).toEqual([]);
+    // 2. Still no credential anywhere, and no pin in the ferret's private settings file.
+    expectNoCredentialAnywhere(daemon, launched?.argv);
+  });
+
+  test('(d2) Claude env login whose store-held token the project also sets: not refused, the project’s value wins, no credential in an argv (!A500)', async () => {
+    const provider = startFakeProvider(FAKE_TOKEN);
+    cleanups.push(() => provider.stop());
+    const daemon = await boot(provider, () => ({}), FAKE_TOKEN, undefined, {
+      'logins/envtoken.yaml': claudeLogin('environment', {
+        ANTHROPIC_BASE_URL: provider.url,
+        ANTHROPIC_AUTH_TOKEN: `\${secret:${SECRET_NAME}}`,
+      }),
+    });
+    await mkdir(join(daemon.folder, '.claude'), { recursive: true });
+    await writeFile(
+      join(daemon.folder, '.claude/settings.json'),
+      JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'project-token' } }),
+    );
+
+    const launched = await startAndLaunch(daemon, 'envtoken');
+
+    // The base URL is the login's (the project did not set it); the token the provider sees is the project's.
+    expect(launched?.baseUrl).toBe(provider.url);
+    const until = Date.now() + SEE_MS;
+    while (provider.seen.length === 0 && Date.now() < until) await Bun.sleep(250);
     expect(provider.seen.map(r => [r.path, r.authHeaders, r.tokenMatches])).toEqual([
-      ['/v1/messages', ['authorization'], true],
+      ['/v1/messages', ['authorization'], false],
     ]);
-    const launched = daemon.launches().filter(record => record.binary === 'claude');
-    expect(launched.at(-1)?.baseUrl).toBe(provider.url);
-    // 2. No credential in the argv the stand-in was given, in the pane's recorded start command, or in any process's.
-    expect(JSON.stringify(launched.at(-1)?.argv)).not.toContain(FAKE_TOKEN);
-    expect(launched.at(-1)?.argvFlags).toContain('--settings');
-    const tmux = Bun.which('tmux') ?? 'tmux';
-    const paneCommands = spawnSync(
-      tmux,
-      ['-S', join(daemon.home, 'state/terminals/tmux.sock'), 'list-panes', '-a', '-F', '#{pane_start_command}'],
-      { encoding: 'utf8' },
-    ).stdout;
-    expect(paneCommands).toContain('--settings');
-    expect(paneCommands).not.toContain(FAKE_TOKEN);
-    expect(spawnSync('ps', ['-eo', 'args'], { encoding: 'utf8' }).stdout).not.toContain(FAKE_TOKEN);
-    // 3. The pin lives in the ferret's private settings file, the token in none.
-    const homes = join(daemon.home, 'state/claude-code/agent-homes');
-    const ferretHome = readdirSync(homes)
-      .map(name => join(homes, name))
-      .find(path => existsSync(join(path, 'launch-settings.json')));
-    expect(ferretHome).toBeDefined();
-    const overlay = join(ferretHome as string, 'launch-settings.json');
-    expect(JSON.parse(readFileSync(overlay, 'utf8')).env).toEqual({ ANTHROPIC_BASE_URL: provider.url });
-    expect(readFileSync(overlay, 'utf8')).not.toContain(FAKE_TOKEN);
-    expect(statSync(overlay).mode & 0o777).toBe(0o600);
-    // 4. The reply is read back from the transcript (the existing cases stop here too until the reader is merged).
-    expect(pane).toContain(FAKE_REPLY);
+    expectNoCredentialAnywhere(daemon, launched?.argv);
   });
 
   test('(c) Codex login: a fake auth.json where Logins stores it reaches the ferret', async () => {
