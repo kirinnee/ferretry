@@ -71,7 +71,7 @@ describe('sendBadge', () => {
     expect(sendBadge(record({ attempt: 2 })).detail).toContain('sending again (2 attempts)');
     expect(sendBadge(record({ fate: 'queued' })).label).toBe('queued');
     expect(sendBadge(record({ fate: 'queued' })).detail).toContain('its own queue');
-    expect(sendBadge(record({ held: true })).label).toBe('held for revive');
+    expect(sendBadge(record({ held: true })).label).toBe('held');
     expect(sendBadge(record({ fate: 'delivered' }))).toMatchObject({
       label: 'delivered',
       tone: expect.stringContaining('ok'),
@@ -540,10 +540,21 @@ describe('LedgerMessage', () => {
       expect(sendBadge(held).label).toBe('unconfirmed');
     });
 
-    test('an UNmarked held row still says it is kept and delivered on revive (a revive does deliver it)', () => {
+    test('an UNmarked held row says it will not be sent on its own and promises nothing about a revive', () => {
+      // Whether a revive really leaves such a row held is proved against the composed host (harness-seam.test.ts,
+      // "an ordinary held row stays held when a revive happens"); this only pins the words.
       const held = record({ fate: 'accepted', held: true });
-      expect(sendBadge(held).label).toBe('held for revive');
-      expect(sendBadge(held).detail).toBe('kept safely; it will be delivered when this session is revived');
+      expect(sendBadge(held).label).toBe('held');
+      expect(sendBadge(held).detail).toBe(
+        'held from before the update. Ferretry will not send this message on its own. If it is missing from the chat, send it again yourself.',
+      );
+      for (const promise of ['kept safely', 'delivered', 'revived', 'Retry'])
+        expect(sendBadge(held).detail).not.toContain(promise);
+      // Each kind stays distinct: the unmarked row never carries the marked row's suffix, and the marked row's own note is unchanged.
+      expect(sendBadge(held).detail).not.toContain('sent before the update');
+      const drawn = render(<LedgerMessage onRetry={async () => true} record={held} />);
+      expect(textOf(drawn)).toContain('Ferretry will not send this message on its own.');
+      expect(textOf(drawn)).not.toContain('revived');
     });
 
     test('a plain marked row says it once: the amber note, with no grey “unconfirmed” chip beside it', () => {
