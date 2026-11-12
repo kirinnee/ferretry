@@ -4,10 +4,10 @@ import { join } from 'node:path';
 import should from 'should';
 import { type HarnessDialog, type HarnessDialogOption, HarnessDialogSchema } from '../../../contract/index.ts';
 import {
-  DIALOG_KEYS,
   dialogCursorMoves,
   paneBlockingDialog,
   parseHarnessDialog,
+  readHarnessDialogFrame,
 } from '../../../daemon/lib/pane/harness-dialog.ts';
 
 /**
@@ -305,23 +305,23 @@ describe('dialogCursorMoves', () => {
   const dialog = parsed('claude-2.1.220-settings-error');
 
   it('moves down by the distance to a row below the cursor', () => {
-    should(dialogCursorMoves(dialog, 3)).equal(DIALOG_KEYS.down + DIALOG_KEYS.down);
+    should(dialogCursorMoves(dialog, 3)).eql(['Down', 'Down']);
   });
 
   it('moves up by the distance to a row above the cursor', () => {
-    should(dialogCursorMoves({ ...dialog, selected: 3 }, 1)).equal(DIALOG_KEYS.up + DIALOG_KEYS.up);
+    should(dialogCursorMoves({ ...dialog, selected: 3 }, 1)).eql(['Up', 'Up']);
   });
 
   it('moves nowhere when the cursor is already on the row', () => {
-    should(dialogCursorMoves(dialog, 1)).equal('');
+    should(dialogCursorMoves(dialog, 1)).eql([]);
   });
 
   it('answers nothing for a row the dialog does not list', () => {
     should(dialogCursorMoves(dialog, 4)).be.undefined();
   });
 
-  it('sends the bytes a terminal sends for each key', () => {
-    should(DIALOG_KEYS).deepEqual({ up: '\u001b[A', down: '\u001b[B', enter: '\r', escape: '\u001b' });
+  it('moves with the closed form keys alone, never a digit', () => {
+    should(dialogCursorMoves(dialog, 2)).eql(['Down']);
   });
 });
 
@@ -394,5 +394,117 @@ describe('the usage-limit dialog', () => {
 
     // Assert
     should(dialog?.kind).not.equal('usage-limit');
+  });
+});
+
+describe('parseHarnessDialog — one cursor row or no dialog to answer', () => {
+  it('reads no dialog when two rows show a cursor', () => {
+    const frame = fixture('claude-2.1.220-settings-error');
+    const both = frame.replace(/^(\s*)\s\s(?=2\.)/mu, '$1❯ ');
+
+    should(both).not.equal(frame);
+    should(parseHarnessDialog(both)).be.undefined();
+  });
+
+  it('reads no dialog when no row shows a cursor', () => {
+    const frame = fixture('claude-2.1.220-settings-error');
+
+    should(parseHarnessDialog(frame.replace(/^(\s*)❯\s(?=1\.)/mu, '$1  '))).be.undefined();
+  });
+});
+
+describe('readHarnessDialogFrame — a dialog whose cursor cannot be read is still a dialog', () => {
+  const frame = fixture('claude-2.1.220-settings-error');
+  const bare = frame.replace(/^(\s*)❯\s(?=1\.)/mu, '$1  ');
+  const both = frame.replace(/^(\s*)\s\s(?=2\.)/mu, '$1❯ ');
+
+  it('names the same dialog under the same id with the cursor missing, with no selected row', () => {
+    const read = readHarnessDialogFrame(frame);
+    const unread = readHarnessDialogFrame(bare);
+
+    should(read?.cursorRead).be.true();
+    should(unread?.cursorRead).be.false();
+    should(unread?.dialog.selected).be.undefined();
+    should(unread?.names).containEql(read?.dialog.id);
+    should(unread?.dialog.options).eql(read?.dialog.options);
+  });
+
+  it('names the same dialog with two cursors, and still reads no dialog through parseHarnessDialog', () => {
+    const unread = readHarnessDialogFrame(both);
+
+    should(unread?.cursorRead).be.false();
+    should(unread?.names).containEql(parseHarnessDialog(frame)?.id);
+    should(parseHarnessDialog(both)).be.undefined();
+    should(parseHarnessDialog(bare)).be.undefined();
+    should(paneBlockingDialog(bare)).be.undefined();
+  });
+
+  it('names a Codex dialog with no cursor under its own id: the harness is not guessed from a glyph that is not there', () => {
+    const codex = readFileSync(
+      join(import.meta.dir, '../../fixtures/codex-harness-dialogs/codex-0.156.1-hooks-review.txt'),
+      'utf8',
+    );
+    const read = readHarnessDialogFrame(codex);
+    const unread = readHarnessDialogFrame(codex.replace(/^(\s*)›\s(?=\d\.)/mu, '$1  '));
+
+    should(read?.dialog.harness).equal('codex');
+    should(unread?.cursorRead).be.false();
+    should(unread?.names).containEql(read?.dialog.id);
+    should(unread?.names).containEql(read && read.names[1]);
+  });
+
+  it('reads nothing from a frame with no dialog in it', () => {
+    should(readHarnessDialogFrame('❯ \n  ? for shortcuts')).be.undefined();
+  });
+});
+
+describe('readHarnessDialogFrame — every shipped dialog fixture, cursor removed, is still its dialog', () => {
+  const CODEX = join(import.meta.dir, '../../fixtures/codex-harness-dialogs');
+  /** The frame with its LAST cursor glyph blanked: the cursor row is the lowest line that draws one. */
+  const unmark = (frame: string): string => {
+    const lines = frame.split('\n');
+    const at = lines.findLastIndex(line => /^\s*[❯›>]\s/u.test(line));
+    return lines.map((line, index) => (index === at ? line.replace(/^(\s*)[❯›>]\s/u, '$1  ') : line)).join('\n');
+  };
+  const shipped = [
+    ...readdirSync(DIALOGS).map(file => join(DIALOGS, file)),
+    ...readdirSync(CODEX).map(file => join(CODEX, file)),
+  ];
+
+  it('names every fixture that draws a cursor row under the same id, with no selected row', () => {
+    const checked: string[] = [];
+    for (const path of shipped) {
+      const frame = readFileSync(path, 'utf8');
+      const read = readHarnessDialogFrame(frame);
+      if (read === undefined || !read.cursorRead || read.dialog.options.length === 0) continue;
+      const bare = unmark(frame);
+      if (bare === frame) continue;
+      const unread = readHarnessDialogFrame(bare);
+      should({ path, cursorRead: unread?.cursorRead }).eql({ path, cursorRead: false });
+      should(unread?.dialog.selected).be.undefined();
+      should(unread?.names).containEql(read.dialog.id);
+      should(unread?.dialog.options).eql(read.dialog.options);
+      checked.push(path);
+    }
+    should(checked.length).be.above(8);
+  });
+
+  it('keeps the unnumbered Claude 2.1.281 MCP list: same id, no guessed row, never an answerable dialog', () => {
+    const frame = fixture('claude-2.1.281-mcp-servers');
+    const bare = unmark(frame);
+    const unread = readHarnessDialogFrame(bare);
+
+    should(unread?.cursorRead).be.false();
+    should(unread?.dialog.kind).equal('mcp-servers');
+    should(unread?.dialog.selected).be.undefined();
+    should(unread?.names).containEql(parseHarnessDialog(frame)?.id);
+    should(parseHarnessDialog(bare)).be.undefined();
+    should(paneBlockingDialog(bare)).be.undefined();
+  });
+
+  it('still reads nothing from an unnumbered, markerless list whose header names no dialog', () => {
+    const frame = [RULE, '  Pick one', '', '    A', '    B', '', '  Enter to confirm · Esc to cancel'].join('\n');
+
+    should(readHarnessDialogFrame(frame)).be.undefined();
   });
 });

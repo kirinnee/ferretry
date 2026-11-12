@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { FormKey } from '@ferretry/core-ferrets/contract';
 import should from 'should';
 import type { HarnessDialogAnswerRequest } from '../../../contract/index.ts';
 import { DialogAnswerError, DialogAnswerService, type FerretDialogPane } from '../../../daemon/lib/dialog/service.ts';
@@ -9,7 +10,7 @@ import { parseHarnessDialog, recordedDialogId } from '../../../daemon/lib/pane/h
 /**
  * Answering a harness's own dialog for someone who is not at the terminal.
  *
- * The pane is a fake that serves captured frames and records every byte written, so each test states
+ * The pane is a fake that serves captured frames and records every key pressed, so each test states
  * what was typed — and, more often, that nothing was.
  */
 
@@ -29,10 +30,10 @@ const THIRD = REVIEW.replace('❯ 1. Fix with Claude', '  1. Fix with Claude').r
 );
 const IDLE = '❯ \n  ? for shortcuts';
 
-const DOWN = '\u001b[B';
-const UP = '\u001b[A';
-const ENTER = '\r';
-const ESC = '\u001b';
+const DOWN = 'Down';
+const UP = 'Up';
+const ENTER = 'Enter';
+const ESC = 'Escape';
 
 const idOf = (pane: string): string =>
   (parseHarnessDialog(pane) as NonNullable<ReturnType<typeof parseHarnessDialog>>).id;
@@ -58,9 +59,9 @@ class ScriptedPane implements FerretDialogPane {
     return frame;
   }
 
-  async write(_ferretId: string, bytes: Uint8Array): Promise<number> {
-    this.writes.push(new TextDecoder().decode(bytes));
-    return bytes.length;
+  async key(_ferretId: string, key: FormKey): Promise<void> {
+    this.writes.push(key);
+    await Promise.resolve();
   }
 }
 
@@ -166,8 +167,8 @@ describe('DialogAnswerService.answer — a choice', () => {
     await new DialogAnswerService(up, recordingSleep().sleep, TIMING).answer('s1', choice(THIRD, 1));
 
     // Assert
-    should(down.writes).eql([DOWN + DOWN, ENTER]);
-    should(up.writes).eql([UP + UP, ENTER]);
+    should(down.writes).eql([DOWN, DOWN, ENTER]);
+    should(up.writes).eql([UP, UP, ENTER]);
   });
 
   it('never presses Enter when the cursor does not arrive, and says the dialog did not clear', async () => {
@@ -181,7 +182,7 @@ describe('DialogAnswerService.answer — a choice', () => {
 
     // Assert
     should(result).eql({ dialogId: idOf(REVIEW), cleared: false });
-    should(pane.writes).eql([DOWN + DOWN]);
+    should(pane.writes).eql([DOWN, DOWN]);
     should(slept).eql([10, 10, 10]);
   });
 
@@ -386,11 +387,10 @@ describe('DialogAnswerService — one answer at a time per ferret', () => {
       return this.shown;
     }
 
-    async write(_ferretId: string, bytes: Uint8Array): Promise<number> {
-      const text = new TextDecoder().decode(bytes);
-      this.writes.push(text);
-      if (text === ENTER) this.shown = IDLE;
-      return bytes.length;
+    async key(_ferretId: string, key: FormKey): Promise<void> {
+      this.writes.push(key);
+      if (key === ENTER) this.shown = IDLE;
+      await Promise.resolve();
     }
   }
 
@@ -447,10 +447,9 @@ describe('DialogAnswerService — one answer at a time per ferret', () => {
         if (ferretId === 'a') await held;
         return shown.get(ferretId) as string;
       },
-      async write(ferretId, bytes) {
-        writes.push(`${ferretId}:${new TextDecoder().decode(bytes) === ENTER ? 'enter' : 'key'}`);
+      async key(ferretId, key) {
+        writes.push(`${ferretId}:${key === ENTER ? 'enter' : 'key'}`);
         shown.set(ferretId, IDLE);
-        return bytes.length;
       },
     };
     const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
@@ -470,5 +469,126 @@ describe('DialogAnswerService — one answer at a time per ferret', () => {
     release();
     should((await a).cleared).be.true();
     should(writes).eql(['b:enter', 'a:enter']);
+  });
+});
+
+describe('DialogAnswerService — an unknown cursor is never confirmed', () => {
+  it('types nothing on a frame with no cursor, the zero-move choice included', async () => {
+    const bare = REVIEW.replace('❯ 1. Fix with Claude', '  1. Fix with Claude');
+    const pane = new ScriptedPane([bare]);
+    const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const error = await refusalOf(service.answer('s1', choice(REVIEW, 1)));
+
+    should(error.refusal).equal('cursor_unknown');
+    should(error.message).containEql('could not be read safely');
+    should(error.message).containEql('nothing was sent');
+    should(error.message).containEql('answer it at the terminal');
+    should(pane.writes).eql([]);
+  });
+
+  it('refuses a missing cursor under the recorded id too, and Esc as well: nothing is typed', async () => {
+    const bare = REVIEW.replace('❯ 1. Fix with Claude', '  1. Fix with Claude');
+    const pane = new ScriptedPane([bare]);
+    const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const byRecorded = await refusalOf(
+      service.answer('s1', {
+        kind: 'choice',
+        dialogId: recordedDialogId(parseHarnessDialog(REVIEW) as never),
+        number: 2,
+      }),
+    );
+    const escaped = await refusalOf(service.answer('s1', pressEsc(REVIEW)));
+
+    should([byRecorded.refusal, escaped.refusal]).eql(['cursor_unknown', 'cursor_unknown']);
+    should(pane.writes).eql([]);
+  });
+
+  it('refuses two cursor rows as an unknown cursor, not as gone', async () => {
+    const both = REVIEW.replace(/^(\s*)\s\s(?=2\.)/mu, '$1❯ ');
+    should(both).not.equal(REVIEW);
+    const pane = new ScriptedPane([both]);
+    const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const error = await refusalOf(service.answer('s1', choice(REVIEW, 1)));
+
+    should(error.refusal).equal('cursor_unknown');
+    should(pane.writes).eql([]);
+  });
+
+  it('keeps the gone answer for a dialog that really changed, and for a frame that is no dialog', async () => {
+    const service = (frame: string) =>
+      new DialogAnswerService(new ScriptedPane([frame]), recordingSleep().sleep, TIMING);
+
+    const other = await refusalOf(service(TWO).answer('s1', choice(REVIEW, 1)));
+    const idle = await refusalOf(service(IDLE).answer('s1', choice(REVIEW, 1)));
+
+    should([other.refusal, idle.refusal]).eql(['gone', 'gone']);
+  });
+
+  it('never presses Enter when the redraw after an arrow shows no cursor: refused as an unknown cursor', async () => {
+    const bare = REVIEW.replace('❯ 1. Fix with Claude', '  1. Fix with Claude');
+    const pane = new ScriptedPane([THIRD, bare]);
+    const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const error = await refusalOf(service.answer('s1', choice(REVIEW, 1)));
+
+    should(error.refusal).equal('cursor_unknown');
+    should(error.message).containEql('could not be read safely');
+    should(pane.writes).eql([UP, UP]);
+  });
+});
+
+describe('DialogAnswerService — an unnumbered list with no cursor is still the dialog, never a guessed row', () => {
+  const original = fixture('claude-2.1.281-mcp-servers');
+  const bare = original.replace(/^(\s*)❯\s/mu, '$1  ');
+
+  it('refuses a missing cursor as cursor_unknown with the safe-read sentence, typing nothing', async () => {
+    should(bare).not.equal(original);
+    const pane = new ScriptedPane([bare]);
+    const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const error = await refusalOf(service.answer('s1', choice(original, 1)));
+    const escaped = await refusalOf(
+      new DialogAnswerService(new ScriptedPane([bare]), recordingSleep().sleep, TIMING).answer(
+        's1',
+        pressEsc(original),
+      ),
+    );
+
+    should(error.refusal).equal('cursor_unknown');
+    should(error.message).containEql('could not be read safely');
+    should(error.message).containEql('answer it at the terminal');
+    should(escaped.refusal).equal('cursor_unknown');
+    should(pane.writes).eql([]);
+  });
+
+  it('never presses Enter when the cursor is lost after the arrows: cursor_unknown', async () => {
+    const pane = new ScriptedPane([original, bare]);
+    const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const error = await refusalOf(service.answer('s1', choice(original, 1)));
+
+    should(error.refusal).equal('cursor_unknown');
+    should(error.message).containEql('could not be read safely');
+    should(pane.writes).eql([UP, UP]);
+  });
+
+  it('keeps the gone answer when the frame is another dialog or no dialog', async () => {
+    const other = await refusalOf(
+      new DialogAnswerService(new ScriptedPane([REVIEW]), recordingSleep().sleep, TIMING).answer(
+        's1',
+        choice(original, 1),
+      ),
+    );
+    const idle = await refusalOf(
+      new DialogAnswerService(new ScriptedPane([IDLE]), recordingSleep().sleep, TIMING).answer(
+        's1',
+        choice(original, 1),
+      ),
+    );
+
+    should([other.refusal, idle.refusal]).eql(['gone', 'gone']);
   });
 });

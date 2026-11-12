@@ -37,13 +37,15 @@ export const PermissionRequestSchema = z
     detail: z.string().min(1).max(300).optional(),
     question: z.string().min(1).max(300),
     options: z.array(PermissionOptionSchema).min(2).max(9),
-    /** The `number` of the option the harness's cursor is on. */
-    selected: z.number().int().min(1).max(9),
+    /** The `number` of the option the harness's cursor is on; absent when the frame did not show exactly one cursor. */
+    selected: z.number().int().min(1).max(9).optional(),
   })
   .refine(request => request.options.every((option, index) => option.number === index + 1), {
     message: 'options are numbered 1..n in order',
   })
-  .refine(request => request.selected <= request.options.length, { message: 'the selection is one of the options' });
+  .refine(request => request.selected === undefined || request.selected <= request.options.length, {
+    message: 'the selection is one of the options',
+  });
 export type PermissionRequest = z.infer<typeof PermissionRequestSchema>;
 
 export const PermissionAnswerRequestSchema = z.discriminatedUnion('kind', [

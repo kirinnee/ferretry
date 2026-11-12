@@ -2,6 +2,8 @@ import { describe, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import should from 'should';
+import { KeyPane, withCursor } from '../../support/key-pane.ts';
+import type { FormKey } from '@ferretry/core-ferrets/contract';
 import type { PermissionAnswerRequest } from '../../../contract/index.ts';
 import { parsePermissionPrompt, recordedPermissionId } from '../../../daemon/lib/pane/permission-prompt.ts';
 import {
@@ -13,7 +15,7 @@ import {
 /**
  * Answering a harness permission prompt for someone who is not at the terminal.
  *
- * The pane is a fake that serves captured frames and records every byte written, so each test states
+ * The pane is a fake that serves captured frames and records every key pressed, so each test states
  * what was typed — and, more often, that nothing was.
  */
 
@@ -48,9 +50,9 @@ class ScriptedPane implements FerretPane {
     return frame;
   }
 
-  async write(_ferretId: string, bytes: Uint8Array): Promise<number> {
-    this.writes.push(new TextDecoder().decode(bytes));
-    return bytes.length;
+  async key(_ferretId: string, key: FormKey): Promise<void> {
+    this.writes.push(key);
+    await Promise.resolve();
   }
 }
 
@@ -82,7 +84,7 @@ describe('PermissionAnswerService.answer, by the id Ferrets recorded', () => {
 
   it('answers the prompt the recorded id names (the card holds it), and reports it under that id', async () => {
     // Arrange
-    const pane = new ScriptedPane([BASH, BASH, IDLE]);
+    const pane = new KeyPane(BASH, IDLE);
     const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
 
     // Act
@@ -90,7 +92,7 @@ describe('PermissionAnswerService.answer, by the id Ferrets recorded', () => {
 
     // Assert
     should(result).eql({ requestId: recorded(BASH), cleared: true });
-    should(pane.writes).eql(['2']);
+    should(pane.keys).eql(['Down', 'Enter']);
   });
 
   it('still refuses as gone, typing nothing, when the recorded id is another prompt’s', async () => {
@@ -108,9 +110,9 @@ describe('PermissionAnswerService.answer, by the id Ferrets recorded', () => {
 });
 
 describe('PermissionAnswerService.answer', () => {
-  it('types exactly the digit of the chosen row, then reads until the prompt is gone', async () => {
+  it('moves the cursor to the chosen row, checks it arrived, presses Enter, then reads until the prompt is gone', async () => {
     // Arrange
-    const pane = new ScriptedPane([BASH, BASH, IDLE]);
+    const pane = new KeyPane(BASH, IDLE);
     const { sleep, slept } = recordingSleep();
     const service = new PermissionAnswerService(pane, sleep, TIMING);
 
@@ -119,7 +121,7 @@ describe('PermissionAnswerService.answer', () => {
 
     // Assert
     should(result).eql({ requestId: idOf(BASH), cleared: true });
-    should(pane.writes).eql(['2']);
+    should(pane.keys).eql(['Down', 'Enter']);
     should(pane.captures).equal(3);
     should(slept).eql([10, 10]);
   });
@@ -134,7 +136,7 @@ describe('PermissionAnswerService.answer', () => {
 
     // Assert
     should(result.cleared).be.true();
-    should(pane.writes).eql(['\u001b']);
+    should(pane.writes).eql(['Escape']);
   });
 
   it('refuses as gone, and types nothing, when the pane now shows a different request', async () => {
@@ -192,7 +194,7 @@ describe('PermissionAnswerService.answer', () => {
 
     // Assert
     should(result).eql({ requestId: idOf(BASH), cleared: false });
-    should(pane.writes).eql(['1']);
+    should(pane.writes).eql(['Enter']);
     should(slept).eql([10, 10, 10]);
     should(pane.captures).equal(4);
   });
@@ -221,7 +223,7 @@ describe('PermissionAnswerService.answer', () => {
 
     // Assert
     should(result.cleared).be.true();
-    should(pane.writes).eql(['1']);
+    should(pane.writes).eql(['Enter']);
   });
 
   it('lets a capture that throws BEFORE the key fail the answer, with nothing typed', async () => {
@@ -241,6 +243,55 @@ describe('PermissionAnswerService.answer', () => {
   });
 });
 
+describe('PermissionAnswerService — the cursor is checked before Enter', () => {
+  it('moves up as well as down: choice 1 from a cursor on row 3 presses Up twice', async () => {
+    // Arrange
+    const pane = new KeyPane(withCursor(BASH, 3), IDLE);
+    const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    // Act
+    const result = await service.answer('s1', choice(BASH, 1));
+
+    // Assert
+    should(result.cleared).be.true();
+    should(pane.keys).eql(['Up', 'Up', 'Enter']);
+  });
+
+  it('never presses Enter when the cursor does not arrive on the chosen row', async () => {
+    // Arrange
+    const pane = new KeyPane(BASH, IDLE);
+    pane.moves = false;
+    const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    // Act
+    const error = await refusalOf(service.answer('s1', choice(BASH, 3)));
+
+    // Assert: refused with words for the owner, and Enter never pressed
+    should(error.refusal).equal('cursor_unknown');
+    should(error.message).match(/nothing was confirmed/u);
+    should(pane.keys).eql(['Down', 'Down']);
+  });
+
+  it('never presses Enter when another prompt replaced the request while the cursor moved', async () => {
+    // Arrange: the first Down lands on the next permission prompt.
+    const pane = new KeyPane(BASH, WRITE);
+    pane.clears = true;
+    const press = pane.key.bind(pane);
+    pane.key = async (ferretId, key) => {
+      await press(ferretId, key);
+      pane.frame = WRITE;
+    };
+    const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    // Act
+    const error = await refusalOf(service.answer('s1', choice(BASH, 2)));
+
+    // Assert
+    should(error.refusal).equal('gone');
+    should(pane.keys).eql(['Down']);
+  });
+});
+
 describe('PermissionAnswerService — one answer at a time per ferret', () => {
   /** A pane that shows the prompt until the first key lands, then shows nothing. */
   class AnsweredOnce implements FerretPane {
@@ -253,10 +304,10 @@ describe('PermissionAnswerService — one answer at a time per ferret', () => {
       return this.shown;
     }
 
-    async write(_ferretId: string, bytes: Uint8Array): Promise<number> {
-      this.writes.push(new TextDecoder().decode(bytes));
+    async key(_ferretId: string, key: FormKey): Promise<void> {
+      this.writes.push(key);
       this.shown = IDLE;
-      return bytes.length;
+      await Promise.resolve();
     }
   }
 
@@ -276,7 +327,7 @@ describe('PermissionAnswerService — one answer at a time per ferret', () => {
     should(first.status === 'fulfilled' && first.value.cleared).be.true();
     should(second.status).equal('rejected');
     should(second.status === 'rejected' && (second.reason as PermissionAnswerError).refusal).equal('gone');
-    should(pane.writes).eql(['1']);
+    should(pane.writes).eql(['Enter']);
   });
 
   it('does not let a failure in the first block the second', async () => {
@@ -294,7 +345,7 @@ describe('PermissionAnswerService — one answer at a time per ferret', () => {
     should(first.status).equal('rejected');
     should(second.status).equal('fulfilled');
     should(second.status === 'fulfilled' && second.value.cleared).be.true();
-    should(pane.writes).eql(['1']);
+    should(pane.writes).eql(['Enter']);
   });
 
   it('does not serialize two different ferrets against each other', async () => {
@@ -313,10 +364,9 @@ describe('PermissionAnswerService — one answer at a time per ferret', () => {
         if (ferretId === 'a') await held;
         return shown.get(ferretId) as string;
       },
-      async write(ferretId, bytes) {
-        writes.push(`${ferretId}:${new TextDecoder().decode(bytes)}`);
+      async key(ferretId, key) {
+        writes.push(`${ferretId}:${key}`);
         shown.set(ferretId, IDLE);
-        return bytes.length;
       },
     };
     const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
@@ -327,14 +377,80 @@ describe('PermissionAnswerService — one answer at a time per ferret', () => {
       aSettled = true;
       return result;
     });
-    const b = await service.answer('b', choice(BASH, 2));
+    const b = await service.answer('b', deny(BASH));
 
     // Assert
     should(b.cleared).be.true();
     should(aSettled).be.false();
-    should(writes).eql(['b:2']);
+    should(writes).eql(['b:Escape']);
     release();
     should((await a).cleared).be.true();
-    should(writes).eql(['b:2', 'a:1']);
+    should(writes).eql(['b:Escape', 'a:Enter']);
+  });
+});
+
+/** The same frame with its cursor glyph undrawn (a redraw that lost the marker); labels and identity kept. */
+const markerless = (frame: string): string => frame.replace(/^(\s*)[❯›>]\s(?=[1-9][.)])/gmu, '$1  ');
+
+describe('PermissionAnswerService — an unknown cursor is never confirmed', () => {
+  it('refuses a choice on a frame with no cursor marker: nothing typed, no Enter, the zero-move path included', async () => {
+    // Arrange: the live list is on row 2; the captured frame shows no cursor. Choosing row 1 must not press Enter.
+    const frame = markerless(BASH);
+    const pane = new ScriptedPane([frame]);
+    const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    // Act
+    const error = await refusalOf(service.answer('s1', choice(BASH, 1)));
+
+    // Assert
+    should(error.refusal).equal('cursor_unknown');
+    should(error.message).match(/could not be read safely/u);
+    should(pane.writes).eql([]);
+  });
+
+  it('refuses a choice when two rows show a cursor: ambiguous, nothing typed', async () => {
+    const both = BASH.replace(/^(\s*)\s\s(?=2[.)])/mu, '$1❯ ');
+    should(parsePermissionPrompt(both)?.selected).be.undefined();
+    const pane = new ScriptedPane([both]);
+    const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const error = await refusalOf(service.answer('s1', choice(BASH, 1)));
+
+    should(error.refusal).equal('cursor_unknown');
+    should(pane.writes).eql([]);
+  });
+
+  it('never presses Enter after a dropped arrow when the redraw shows no cursor: markerless is no evidence', async () => {
+    // Arrange: cursor on 3, choose 1; the first Up is lost and the pane redraws without its marker.
+    const pane = new ScriptedPane([withCursor(BASH, 3), markerless(BASH)]);
+    const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    // Act
+    const error = await refusalOf(service.answer('s1', choice(BASH, 1)));
+
+    // Assert
+    should(error.refusal).equal('cursor_unknown');
+    should(error.message).match(/could not be read safely/u);
+    should(pane.writes).eql(['Up', 'Up']);
+  });
+
+  it('still refuses an unlisted choice as invalid, not as an unknown cursor', async () => {
+    const pane = new ScriptedPane([markerless(BASH)]);
+    const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const error = await refusalOf(service.answer('s1', choice(BASH, 9)));
+
+    should(error.refusal).equal('invalid_choice');
+    should(pane.writes).eql([]);
+  });
+
+  it('denies with Escape alone even when the cursor is unknown: a refusal needs no cursor', async () => {
+    const pane = new ScriptedPane([markerless(BASH), IDLE]);
+    const service = new PermissionAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    const result = await service.answer('s1', deny(BASH));
+
+    should(result.cleared).be.true();
+    should(pane.writes).eql(['Escape']);
   });
 });

@@ -9,6 +9,8 @@ import {
   HarnessDialogAnswerResultSchema,
 } from '../../contract/index.ts';
 import { DialogAnswerService } from '../../daemon/lib/dialog/service.ts';
+import type { FormKey } from '@ferretry/core-ferrets/contract';
+import { withCursor } from '../support/key-pane.ts';
 import { parseHarnessDialog } from '../../daemon/lib/pane/harness-dialog.ts';
 import { parsePermissionPrompt } from '../../daemon/lib/pane/permission-prompt.ts';
 import { PermissionAnswerService } from '../../daemon/lib/permission/service.ts';
@@ -24,7 +26,7 @@ const IDLE = '❯ \n  ? for shortcuts';
 const TIMING = { settleReads: 3, settleMs: 1 } as const;
 const sleep = async (): Promise<void> => {};
 
-/** A pane that serves frames in order (the last repeats) and records every byte typed. */
+/** A pane that serves frames in order (the last repeats) and records every key pressed. */
 class Pane {
   readonly writes: string[] = [];
   captures = 0;
@@ -34,9 +36,8 @@ class Pane {
     this.captures += 1;
     return frame;
   }
-  async write(_ferret: string, bytes: Uint8Array): Promise<number> {
-    this.writes.push(new TextDecoder().decode(bytes));
-    return bytes.length;
+  async key(_ferret: string, key: FormKey): Promise<void> {
+    this.writes.push(key);
   }
 }
 
@@ -102,14 +103,14 @@ function remoteDevice(fresh: boolean) {
 describe('the permission answer route', () => {
   const requestId = (frame: string): string => parsePermissionPrompt(frame)?.id as string;
 
-  test('G31 the answer is one key into the pane that still shows the prompt, and its result never carries the choice', async () => {
-    const pane = new Pane([BASH, BASH, IDLE]);
+  test('G31 the answer moves the cursor, checks it arrived, presses Enter, and its result never carries the choice', async () => {
+    const pane = new Pane([BASH, withCursor(BASH, 2), IDLE]);
     const route = permissionRoute(new PermissionAnswerService(pane, sleep, TIMING));
 
     const response = body(await route(call({ kind: 'choice', requestId: requestId(BASH), number: 2 })));
 
     expect(response.status).toBe(200);
-    expect(pane.writes).toEqual(['2']);
+    expect(pane.writes).toEqual(['Down', 'Enter']);
     expect(PermissionAnswerResultSchema.safeParse(response.json).success).toBe(true);
     expect(Object.keys(response.json).sort()).toEqual(['cleared', 'requestId']);
     expect(response.json.cleared).toBe(true);
@@ -141,7 +142,7 @@ describe('the permission answer route', () => {
 
     await route(call({ kind: 'deny', requestId: requestId(BASH) }));
 
-    expect(pane.writes).toEqual(['\u001b']);
+    expect(pane.writes).toEqual(['Escape']);
   });
 
   test('G31 a pane that cannot be read is a 409 console_input_failed, not a crash', async () => {
@@ -151,7 +152,7 @@ describe('the permission answer route', () => {
           capture: async () => {
             throw new Error('no pane');
           },
-          write: async () => 0,
+          key: async () => {},
         },
         sleep,
         TIMING,
@@ -193,7 +194,7 @@ describe('the ferret id in the path and a pane that fails', () => {
           capture: async () => {
             throw new Error('no pane');
           },
-          write: async () => 0,
+          key: async () => {},
         },
         sleep,
         TIMING,
@@ -205,7 +206,7 @@ describe('the ferret id in the path and a pane that fails', () => {
           capture: async () => {
             throw Object.assign(new Error('that ferret has no pane'), { name: 'PaneUnknown' });
           },
-          write: async () => 0,
+          key: async () => {},
         },
         sleep,
         TIMING,
@@ -224,7 +225,7 @@ describe('the ferret id in the path and a pane that fails', () => {
           capture: async () => {
             throw 'the pane library threw a bare string';
           },
-          write: async () => 0,
+          key: async () => {},
         },
         sleep,
         TIMING,
@@ -254,7 +255,7 @@ describe('the harness-dialog answer route', () => {
     const response = body(await route(call({ kind: 'choice', dialogId: dialogId(SETTINGS), number: 2 })));
 
     expect(response.status).toBe(200);
-    expect(pane.writes).toEqual(['\u001b[B', '\r']);
+    expect(pane.writes).toEqual(['Down', 'Enter']);
     expect(HarnessDialogAnswerResultSchema.safeParse(response.json).success).toBe(true);
     expect(Object.keys(response.json).sort()).toEqual(['cleared', 'dialogId']);
   });
@@ -266,6 +267,19 @@ describe('the harness-dialog answer route', () => {
     const error = await refused(route(call({ kind: 'escape', dialogId: dialogId(SETTINGS) })));
 
     expect(error).toMatchObject({ status: 409, code: 'harness_dialog_gone' });
+    expect(pane.writes).toEqual([]);
+  });
+
+  test('G32 a dialog whose cursor cannot be read is a 409 dialog_cursor_unknown that says so, and nothing is typed', async () => {
+    const bare = SETTINGS.replace('❯ 1. Fix with Claude', '  1. Fix with Claude');
+    const pane = new Pane([bare]);
+    const route = dialogRoute(new DialogAnswerService(pane, sleep, TIMING));
+
+    const error = await refused(route(call({ kind: 'choice', dialogId: dialogId(SETTINGS), number: 1 })));
+
+    expect(error).toMatchObject({ status: 409, code: 'dialog_cursor_unknown' });
+    expect((error as unknown as Error).message).toContain('could not be read safely');
+    expect((error as unknown as Error).message).toContain('nothing was sent');
     expect(pane.writes).toEqual([]);
   });
 
@@ -355,7 +369,7 @@ describe.each([
     const response = body(await makeRoute(pane)(rawCall(JSON.stringify(valid))));
 
     expect(response.status).toBe(200);
-    expect(pane.writes).toEqual(['\u001b']);
+    expect(pane.writes).toEqual(['Escape']);
   });
 });
 

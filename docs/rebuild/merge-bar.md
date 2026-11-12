@@ -38,6 +38,8 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
    | 10  | catalogs install                                            |
    | 11  | `fy check`                                                  |
    | 12  | a daemon restart keeps the ferrets                          |
+   | 13  | answer a permission prompt and a dialog from the app        |
+   | 14  | the same on a Codex ferret (if the Codex sign-in lands)     |
 
 5. **CI green**, including the coverage ledgers, `fy check`, the nix build and the release guards.
 6. **No paid macOS run** (owner, !A480). The darwin smoke and the FFI descriptor verify line are after-merge items.

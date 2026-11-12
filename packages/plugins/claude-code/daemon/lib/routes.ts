@@ -29,6 +29,7 @@ function ferretId(call: Parameters<RouteHandler>[0]): string {
 
 /** The pane could not be found or read or typed into: the answer was not sent. */
 function paneRefusal(error: unknown): never {
+  if (error instanceof ApiError) throw error;
   if (error instanceof Error && error.name === 'PaneUnknown') throw new ApiError(409, error.message, 'pane_unknown');
   if (error instanceof Error) throw new ApiError(409, error.message, 'console_input_failed');
   throw error;
@@ -62,7 +63,9 @@ export function permissionRoute(permission: PermissionAnswerService): RouteHandl
       if (error instanceof PermissionAnswerError)
         throw error.refusal === 'gone'
           ? new ApiError(409, error.message, 'permission_prompt_gone')
-          : new ApiError(400, error.message, 'invalid_permission_choice');
+          : error.refusal === 'cursor_unknown'
+            ? new ApiError(409, error.message, 'permission_cursor_unknown')
+            : new ApiError(400, error.message, 'invalid_permission_choice');
       return paneRefusal(error);
     }
   };
@@ -79,7 +82,9 @@ export function dialogRoute(dialog: DialogAnswerService): RouteHandler {
       if (error instanceof DialogAnswerError)
         throw error.refusal === 'gone'
           ? new ApiError(409, error.message, 'harness_dialog_gone')
-          : new ApiError(400, error.message, 'invalid_dialog_choice');
+          : error.refusal === 'cursor_unknown'
+            ? new ApiError(409, error.message, 'dialog_cursor_unknown')
+            : new ApiError(400, error.message, 'invalid_dialog_choice');
       return paneRefusal(error);
     }
   };
