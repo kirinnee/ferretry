@@ -133,4 +133,23 @@ describe('a send naming a file, through the real Ferrets and Conversation', () =
     expect(runner.deliveries).toHaveLength(typedBefore);
     expect(h.rootText('sessions', `${mine}/attachments/${theirs}/secret.png`)).toBeUndefined();
   });
+
+  test('an attachments anchor whose chain is writable by others refuses the send 400 with v4’s words, before anything is typed', async () => {
+    const runner = new FakeRunner();
+    const h = await boot(runner);
+    const id = await startFerret(h, '/work/a');
+    const attachment = await upload(h, id, 'shot.png', 'FIXTURE-PNG-BYTES');
+    const typedBefore = runner.deliveries.length;
+    // the kernel's chain check (RootHandle.checkPrivateChain) finds a folder above the anchor open to its group
+    h.setHomeFolder('state/ferrets', { mode: 0o770 });
+
+    const sent = await send(h, id, { message: 'see the picture', attachmentIds: [attachment] });
+
+    expect(sent.status).toBe(400);
+    expect(sent.json<{ error: string }>().error).toBe(
+      'an attached file could not be handed to the agent: they could not be written',
+    );
+    expect(runner.deliveries).toHaveLength(typedBefore);
+    expect(h.rootText('sessions', `${id}/attachments/${attachment}/shot.png`)).toBeUndefined();
+  });
 });
