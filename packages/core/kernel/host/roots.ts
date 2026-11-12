@@ -381,6 +381,11 @@ interface Scope {
    */
   readonly descent?: string;
   /**
+   * A `sessions` handle scoped to `<ferret>/attachments` only: every folder BELOW the descent anchor (a send's per-id
+   * folder) must be owned by whoever owns the anchor (the daemon), so a folder another account planted there is refused.
+   */
+  readonly ownedBelow?: true;
+  /**
    * `imports` with a `within` anchor only: the REAL path of the anchor. Every folder a READ reaches (the scoped folder
    * and any folder inside it) is opened from the anchor's descriptor down, each from its parent's, with
    * `O_DIRECTORY | O_NOFOLLOW`, and the file is opened from its folder's descriptor (`openFile`), so a folder swapped
@@ -633,7 +638,11 @@ async function ensureScopedBase(
   try {
     for (const segment of missing) {
       const at = await entry(scope, folder, parent, segment);
-      await fs.mkdir(at, 0o700).catch(() => refuse('changed'));
+      // Another send may be making the same folder at the same moment (a ferret's first two sends): that is not a change
+      // under us. The no-follow open below and the check after it still prove whatever is there is a real folder.
+      await fs.mkdir(at, 0o700).catch((error: unknown) => {
+        if (errnoOf(error) !== 'EEXIST') return refuse('changed');
+      });
       // Creating a folder is not atomic with persisting its name: the folder it was made in is synced through the
       // descriptor already proven, parent first, so the new entry is durable before anything is made or written below
       // it (a ferret's `sessions/<ferret>` holds its effect ledger and credential). A filesystem that cannot sync a
@@ -734,12 +743,15 @@ async function openFolderBelow(
     if (named === undefined || !same(folder.identity, named)) refuse('changed');
     // No path and no C calls reach this open folder: the leaf would be acted on by a path a link could redirect.
     if (folder.entryPath('') === undefined && folder.at === undefined) refuse('no_descriptor_reach');
+    const anchorOwner = folder.identity.owner;
     for (const segment of segments) {
       const child = await folder
         .openChild(segment, make ? { mode } : undefined)
         .catch((error: unknown) => refuseChild(error));
       await folder.close();
       folder = child.folder;
+      if (scope.ownedBelow === true && (folder.identity.kind !== 'directory' || folder.identity.owner !== anchorOwner))
+        refuse('outside');
       parent = join(parent, segment);
       if (child.created) created.push(parent);
     }
@@ -1278,6 +1290,8 @@ interface HandleSetup {
   readonly within?: string;
   readonly anchor: string | undefined;
   readonly scopedParent: string | undefined;
+  /** A `sessions` handle scoped to `<ferret>/attachments`: its per-id folders are reached by a no-follow descriptor descent. */
+  readonly attachmentsScope?: true;
   readonly check: (path: string) => Result<FencedPath, FolderRefusal> | undefined;
   readonly immutable: () => Promise<readonly string[]>;
   readonly random: () => string;
@@ -1861,6 +1875,13 @@ function rootHandle(setup: HandleSetup): RootHandle {
   const readOnly = READ_ONLY_ROOTS.has(name);
   const projectRoot = name === 'project-files';
   /**
+   * A `sessions` handle scoped to one ferret's `attachments` folder (a send's files): the folder itself is the descent
+   * anchor, and every per-id folder below it is made and opened from its parent's descriptor without following a link
+   * (`openFolderBelow`), as a `project-files` write is. A link at any level below the anchor is refused (`linkFree`),
+   * and one swapped in after the look reaches nothing.
+   */
+  const attachmentsScope = setup.attachmentsScope === true;
+  /**
    * `project-files` only (K3): the name is inside the plugin's declared relative set for this use, judged lexically
    * BEFORE the disk is asked (the same order as the testing host): the folder is one this handle was scoped to, the
    * path is plain and inside it (and outside the fence by name), and the set reaches it. Any other root: no rule here.
@@ -1884,7 +1905,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
     path: FencedPath,
     resolved: { readonly full: string; readonly base: CheckedBase },
   ): void => {
-    if (!projectRoot) return;
+    if (!projectRoot && !attachmentsScope) return;
     const lexical = lexicalInRoot(home, root, ownerRoot, path);
     if (!lexical.ok) throw new RootError(lexical.error);
     if (relative(resolved.base.real, resolved.full) !== relative(absolute(root, 'a root'), lexical.value))
@@ -2003,6 +2024,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
         immutable,
         ...(projectRoot ? { literal: true as const } : {}),
         ...(descent === undefined ? {} : { descent }),
+        ...(attachmentsScope ? { descent: resolved.value.base.real, ownedBelow: true as const } : {}),
         ...(anchorReal === undefined ? {} : { heldFrom: anchorReal }),
       },
     };
@@ -2758,6 +2780,9 @@ export function rootsPortFor(
         ...(within === undefined ? {} : { within }),
         anchor,
         scopedParent,
+        ...(name === 'sessions' && subfolder?.endsWith(SESSION_ATTACHMENTS) === true && base() !== undefined
+          ? { attachmentsScope: true as const }
+          : {}),
         check,
         immutable,
         random,

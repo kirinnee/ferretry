@@ -1367,6 +1367,38 @@ describe('FerretHarness.deliverFiles hands a send its files through the ferretâ€
     expect((await stat(`${w.folderOf(id)}/attachments/att_aaa`)).mode & 0o777).toBe(0o700);
   });
 
+  test('a per-id folder that is a link to another attachment refuses and the other attachment is untouched', async () => {
+    const w = await world();
+    const id = await started(w);
+    const root = `${w.folderOf(id)}/attachments`;
+    await mkdir(`${root}/att_second`, { recursive: true });
+    await writeFile(`${root}/att_second/same.txt`, 'FIXTURE-SECOND');
+    await symlink(`${root}/att_second`, `${root}/att_first`);
+    const harness = (await w.service.harness(id as never))!;
+
+    await expect(
+      harness.deliverFiles!([{ name: 'same.txt', folder: 'att_first', contents: bytes('FIXTURE-FIRST') }]),
+    ).rejects.toThrow();
+
+    expect(await readFile(`${root}/att_second/same.txt`, 'utf8')).toBe('FIXTURE-SECOND');
+    expect(await readdir(`${root}/att_second`)).toEqual(['same.txt']);
+  });
+
+  test('two sends of files to the same new per-id folder at once both land', async () => {
+    const w = await world();
+    const id = await started(w);
+    const harness = (await w.service.harness(id as never))!;
+
+    const [first, second] = await Promise.all([
+      harness.deliverFiles!([{ name: 'a.txt', folder: 'att_shared', contents: bytes('FIXTURE-A') }]),
+      harness.deliverFiles!([{ name: 'b.txt', folder: 'att_shared', contents: bytes('FIXTURE-B') }]),
+    ]);
+
+    expect(await readFile(first![0]!, 'utf8')).toBe('FIXTURE-A');
+    expect(await readFile(second![0]!, 'utf8')).toBe('FIXTURE-B');
+    expect((await readdir(`${w.folderOf(id)}/attachments/att_shared`)).sort()).toEqual(['a.txt', 'b.txt']);
+  });
+
   test('a folder that is not a bare name writes NOTHING', async () => {
     const w = await world();
     const id = await started(w);
