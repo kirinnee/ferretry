@@ -130,6 +130,7 @@ async function boot(withLogins = true) {
     ],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault, asks: new FakeAsks() },
+    everyDirectory: true,
   });
   return { host, harness };
 }
@@ -285,6 +286,7 @@ describe('a ferret on an environment login reaches the login’s endpoint', () =
         ],
         gate: new StandInAdmission(() => ownerStanding()),
         fakes: { gate: new FakeGate(), vault, asks: new FakeAsks() },
+        everyDirectory: true,
       });
 
       const started = await start(host, 'local');
@@ -323,6 +325,7 @@ describe('a ferret on an environment login reaches the login’s endpoint', () =
         plugins: [ferrets, harnessPlugin(harness), runnerPlugin(new FakeRunner())],
         gate: new StandInAdmission(() => ownerStanding()),
         fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
+        everyDirectory: true,
       });
 
       await start(host);
@@ -366,6 +369,7 @@ describe('a ferret on an environment login reaches the login’s endpoint', () =
         ],
         gate: new StandInAdmission(() => ownerStanding()),
         fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
+        everyDirectory: true,
       });
 
       await start(host, 'personal');
