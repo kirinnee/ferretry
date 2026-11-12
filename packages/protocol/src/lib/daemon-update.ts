@@ -182,7 +182,10 @@ export function classifyNixStorePath(facts: NixPathFacts): NixInstallMethod {
 export function classifyInstallMethod(facts: InstallFacts): InstallMethod {
   if (!facts.compiled) return { kind: 'unknown', reason: 'this is a development build run from source' };
   const resolved = facts.resolvedPath;
-  if (resolved.includes(`/Caskroom/${facts.product}/`)) return { kind: 'homebrew', cask: facts.product };
+  const cask = resolved.split('/Caskroom/')[1]?.split('/')[0];
+  if (cask === facts.product || cask === `${facts.product}@4`) {
+    return { kind: 'homebrew', cask: `${releaseTapName(facts.product)}/${cask}` };
+  }
   if (facts.systemPackage !== undefined) return { kind: 'system-package', manager: facts.systemPackage };
   if (isNixStoreFile(resolved)) return classifyNixStorePath(facts);
   return { kind: 'standalone', directory: parentDirectory(resolved) };

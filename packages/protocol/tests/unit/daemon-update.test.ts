@@ -96,6 +96,13 @@ describe('classifyInstallMethod', () => {
     should(classify({ compiled: false }).kind).equal('unknown');
   });
 
+  it('recognises the pinned v4 Homebrew cask and preserves its full name', () => {
+    should(classify({ resolvedPath: '/opt/homebrew/Caskroom/ferretry@4/4.291.10/fyd' })).deepEqual({
+      kind: 'homebrew',
+      cask: 'kirinnee/ferretry/ferretry@4',
+    });
+  });
+
   it('recognises a Homebrew cask by its Caskroom', () => {
     should(
       classify({
@@ -103,7 +110,7 @@ describe('classifyInstallMethod', () => {
         launchedPath: '/opt/homebrew/bin/fyd',
         resolvedPath: '/opt/homebrew/Caskroom/ferretry/4.28.0/fyd',
       }),
-    ).deepEqual({ kind: 'homebrew', cask: 'ferretry' });
+    ).deepEqual({ kind: 'homebrew', cask: 'kirinnee/ferretry/ferretry' });
   });
 
   it('recognises a file a system package manager owns', () => {

@@ -10,6 +10,8 @@ import type {
   IStandaloneReleasePort,
   IUpdateLifecyclePort,
   LatestReleaseAnswer,
+  LockedNixTarget,
+  PackageVersion,
   StagedRelease,
   StandaloneRefusal,
 } from '../../../src/lib/update/ports';
@@ -30,6 +32,8 @@ function factsFor(kind: string, daemonPath: string): InstallFacts {
     platform: 'linux',
   };
   switch (kind) {
+    case 'homebrew-v4':
+      return { ...base, platform: 'darwin', resolvedPath: '/opt/homebrew/Caskroom/ferretry@4/4.291.10/fyd' };
     case 'homebrew':
       return { ...base, platform: 'darwin', resolvedPath: '/opt/homebrew/Caskroom/ferretry/1.2.3/fyd' };
     case 'nix-profile':
@@ -117,6 +121,8 @@ export class FakeHost {
 export class FakePackages implements IPackageManagerPort {
   /** What each upgrade sets the daemon path to; `undefined` leaves it alone. */
   upgradeTo: string | undefined = '1.3.0';
+  sourceVersion: string | undefined;
+  sourceFailure: string | undefined;
   failures = new Set<string>();
   /** What each command tells an observer, in order, before it finishes. */
   activities: UpdateActivity[] = [];
@@ -148,12 +154,36 @@ export class FakePackages implements IPackageManagerPort {
     return this.#ran(`brew-refresh:${tap}:${url}`, () => undefined);
   }
 
+  brewCaskVersion(): Promise<PackageVersion> {
+    return Promise.resolve(
+      this.sourceFailure === undefined
+        ? { version: this.sourceVersion ?? this.upgradeTo ?? '1.3.0' }
+        : { failure: this.sourceFailure },
+    );
+  }
+
+  nixResolve(flake: string): Promise<LockedNixTarget | { readonly failure: string }> {
+    return Promise.resolve(
+      this.sourceFailure === undefined
+        ? {
+            source: flake,
+            reference: `${flake}/${'a'.repeat(40)}`,
+            version: this.sourceVersion ?? this.upgradeTo ?? '1.3.0',
+          }
+        : { failure: this.sourceFailure },
+    );
+  }
+
   brewUpgrade(cask: string, observer?: UpdateObserver): Promise<CommandOutcome> {
     this.#tell(observer);
     return this.#ran(`brew:${cask}`, () => this.#upgrade());
   }
 
-  nixProfileUpgrade(element: string, observer?: UpdateObserver): Promise<CommandOutcome> {
+  nixProfileUpgrade(
+    element: string,
+    _target: LockedNixTarget | undefined,
+    observer?: UpdateObserver,
+  ): Promise<CommandOutcome> {
     this.#tell(observer);
     return this.#ran(`nix-upgrade:${element}`, () => this.#upgrade());
   }
@@ -162,7 +192,7 @@ export class FakePackages implements IPackageManagerPort {
     return this.#ran('nix-rollback', () => this.host.versions.set(this.daemonPath, this.#previous));
   }
 
-  nixProfileInstall(flake: string): Promise<CommandOutcome> {
+  nixProfileInstall(flake: string, _observer?: UpdateObserver, _target?: LockedNixTarget): Promise<CommandOutcome> {
     return this.#ran(`nix-install:${flake}`, () => this.host.versions.set(PROFILE_DAEMON, this.upgradeTo));
   }
 }

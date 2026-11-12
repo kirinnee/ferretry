@@ -9,6 +9,7 @@ import {
   ProtocolVersionSchema,
   planUpdate,
   RELEASE_OWNER,
+  releaseFlakeReference,
   releaseTapName,
   releaseTapUrl,
   UPDATE_HEALTH_TIMEOUT_MS,
@@ -27,6 +28,7 @@ import type {
   IPackageManagerPort,
   IStandaloneReleasePort,
   IUpdateLifecyclePort,
+  LockedNixTarget,
 } from './ports.ts';
 import { isYes, lastLine, lastLines, type NixProfileSwitch } from './profile-switch.ts';
 import { stepObserver } from './step-observer.ts';
@@ -93,6 +95,8 @@ interface UpdateIntent {
   readonly current: string;
   readonly target: string;
   readonly running: boolean;
+  /** The manager metadata bound to this installation, independent of GitHub latest. */
+  readonly artifact?: { readonly version: string; readonly nix?: LockedNixTarget };
   /** When the command began, for the time the finished update reports. */
   readonly startedAt: number;
 }
@@ -143,7 +147,7 @@ export class DaemonUpdater {
         throw new DaemonUpdateRefusedError(`cannot tell which version ${daemon.path} is; it did not answer --version`);
       }
       from = current;
-      const latest = await this.#latest(options.to, method, options.major !== true && this.#cannotPin(method));
+      const latest = await this.#latest(options.to);
       this.progress.succeed();
       if (options.check === true) {
         this.#reportCheck(daemon, method, plan, current, latest, options.json === true);
@@ -157,7 +161,14 @@ export class DaemonUpdater {
         throw new DaemonUpdateRefusedError(message);
       }
       target = latest.release.version;
-      const intent: UpdateIntent = { daemon, method, plan, current, target, running: health !== undefined, startedAt };
+      let intent: UpdateIntent = { daemon, method, plan, current, target, running: health !== undefined, startedAt };
+      // Refuse a known newer major immediately. The @4 cask may still have a v4 patch to offer.
+      if (options.to !== undefined || method.kind !== 'homebrew' || !method.cask.endsWith('@4'))
+        this.#guardTarget(intent, options);
+      if (this.#cannotPin(method) && compareProtocolVersions(target, current) === 1) {
+        intent = await this.#prepareManager(intent, options);
+        target = intent.target;
+      }
       const outcome = await this.#apply(intent, options);
       await this.#finish(options, { from, target, ...outcome });
     } catch (error: unknown) {
@@ -166,11 +177,7 @@ export class DaemonUpdater {
     }
   }
 
-  async #latest(
-    to: string | undefined,
-    method: InstallMethod,
-    requireRelease = false,
-  ): Promise<{ readonly release: LatestRelease } | { readonly failure: string }> {
+  async #latest(to: string | undefined): Promise<{ readonly release: LatestRelease } | { readonly failure: string }> {
     if (to !== undefined) {
       if (!ProtocolVersionSchema.safeParse(to).success) return { failure: `${to} is not a version` };
       return {
@@ -178,19 +185,57 @@ export class DaemonUpdater {
       };
     }
     const answer = await this.deps.latest.latest();
-    if (requireRelease && answer.kind === 'failed')
-      return { failure: `could not learn the latest release: ${answer.reason}` };
-    // A source-built install gets whatever the flake's main is, which is the newest tag, not the newest release.
-    const tag =
-      method.kind === 'nix-profile' || method.kind === 'nix-shell' ? await this.deps.latest.newestTag() : undefined;
-    if (
-      tag?.kind === 'found' &&
-      (answer.kind === 'failed' || compareProtocolVersions(tag.release.version, answer.release.version) === 1)
-    ) {
-      return { release: tag.release };
-    }
     if (answer.kind === 'failed') return { failure: `could not learn the latest release: ${answer.reason}` };
     return { release: answer.release };
+  }
+
+  #guardTarget(intent: UpdateIntent, options: DaemonUpdateOptions): void {
+    if (options.major === true || !isNewerMajorVersion(intent.current, intent.target)) return;
+    const reason = this.#majorUpdateMessage(intent.current, intent.target);
+    throw new DaemonUpdateRefusedError(
+      this.#cannotPin(intent.method)
+        ? this.#managerRefusal(intent.method, intent.current, intent.target, reason)
+        : reason,
+    );
+  }
+
+  /** Resolve the exact manager source before any prompts or host installation. */
+  async #prepareManager(intent: UpdateIntent, options: DaemonUpdateOptions): Promise<UpdateIntent> {
+    const { method } = intent;
+    const packages = this.deps.packages;
+    let artifact: NonNullable<UpdateIntent['artifact']>;
+    if (method.kind === 'homebrew') {
+      const tap = releaseTapName(this.deps.product);
+      if (options.json !== true)
+        this.deps.out.warn(`refreshing the Homebrew tap ${tap} so brew can see ${intent.target} (brew update)`);
+      const refreshed = await packages.brewRefresh(
+        tap,
+        releaseTapUrl(this.deps.product),
+        stepObserver(this.progress, intent.target),
+      );
+      if (refreshed.code !== 0)
+        throw new DaemonUpdateRefusedError(
+          failedCommand('brew update', refreshed.stderr, refreshed.code, this.#brewRecovery(method.cask)).message,
+        );
+      const found = await packages.brewCaskVersion(method.cask);
+      if ('failure' in found)
+        throw new DaemonUpdateRefusedError(this.#managerRefusal(method, intent.current, intent.target, found.failure));
+      artifact = found;
+    } else {
+      const found = await packages.nixResolve(
+        releaseFlakeReference(this.deps.product),
+        method.kind === 'nix-profile' ? method.element : undefined,
+      );
+      if ('failure' in found)
+        throw new DaemonUpdateRefusedError(this.#managerRefusal(method, intent.current, intent.target, found.failure));
+      artifact = { version: found.version, nix: found };
+    }
+    if (!ProtocolVersionSchema.safeParse(artifact.version).success)
+      throw new DaemonUpdateRefusedError(
+        this.#managerRefusal(method, intent.current, intent.target, 'could not parse the package source version'),
+      );
+    this.#guardTarget({ ...intent, target: artifact.version }, options);
+    return { ...intent, artifact, target: options.to === undefined ? artifact.version : intent.target };
   }
 
   #reportCheck(
@@ -235,23 +280,7 @@ export class DaemonUpdater {
     intent: UpdateIntent,
     options: DaemonUpdateOptions,
   ): Promise<Omit<UpdateReport, 'from' | 'target' | 'finishedAt'>> {
-    if (options.major !== true && isNewerMajorVersion(intent.current, intent.target)) {
-      const message = this.#majorUpdateMessage(intent.current, intent.target);
-      throw new DaemonUpdateRefusedError(
-        this.#cannotPin(intent.method)
-          ? this.#managerRefusal(intent.method, intent.current, intent.target, message)
-          : message,
-      );
-    }
-    // These managers ignore --to. Check their unversioned source before even refreshing a service definition.
-    if (options.major !== true && options.to !== undefined && this.#cannotPin(intent.method)) {
-      const actual = await this.#latest(undefined, intent.method, true);
-      if ('failure' in actual || isNewerMajorVersion(intent.current, actual.release.version)) {
-        const reason =
-          'failure' in actual ? actual.failure : this.#majorUpdateMessage(intent.current, actual.release.version);
-        throw new DaemonUpdateRefusedError(this.#managerRefusal(intent.method, intent.current, intent.target, reason));
-      }
-    }
+    this.#guardTarget(intent, options);
     if (compareProtocolVersions(intent.target, intent.current) !== 1)
       return await this.#refreshDefinition(intent, options);
     if (intent.plan.kind === 'manual') {
@@ -272,7 +301,7 @@ export class DaemonUpdater {
     await this.#confirm(intent, options);
     const applied = await this.#upgradeStepped(intent, options);
     if (applied.kind === 'failed') return { outcome: 'failed', message: applied.message };
-    return await this.#prove(intent, applied);
+    return await this.#prove(intent, applied, options);
   }
 
   #cannotPin(method: InstallMethod): boolean {
@@ -286,7 +315,8 @@ export class DaemonUpdater {
       method.kind === 'homebrew'
         ? `brew install --cask ${releaseTapName(this.deps.product)}/${this.deps.product}@${major}`
         : `nix profile install github:${RELEASE_OWNER}/${this.deps.product}/v${safeTarget}`;
-    return `${reason}${reason.endsWith('.') ? '' : '.'} This install method cannot pin --to. Your daemon stays on ${current}. To stay on v${major}, run: ${route}`;
+    const stays = reason.includes(`Your daemon stays on ${current}.`) ? '' : ` Your daemon stays on ${current}.`;
+    return `${reason}${reason.endsWith('.') ? '' : '.'}${stays} To stay on v${major}, run: ${route}`;
   }
 
   #majorUpdateMessage(current: string, target: string): string {
@@ -340,6 +370,7 @@ export class DaemonUpdater {
     }
     await this.#passMidTurn(options);
     await this.#ask(`Restart ${this.deps.daemonName} to rewrite its service definition (${stale})?`, options);
+    this.#guardRestart(intent, intent.daemon.path, options);
     await this.deps.lifecycle.restart();
     return {
       outcome: 'succeeded',
@@ -390,15 +421,18 @@ export class DaemonUpdater {
     switch (method.kind) {
       case 'homebrew': {
         const recovery = this.#brewRecovery(method.cask);
-        const tap = releaseTapName(this.deps.product);
-        if (options.json !== true) {
-          this.deps.out.warn(`refreshing the Homebrew tap ${tap} so brew can see ${intent.target} (brew update)`);
-        }
+        // Consent / --when-idle may have waited. Read local metadata again, never refresh it here.
+        const found = await packages.brewCaskVersion(method.cask);
+        if ('failure' in found)
+          throw new DaemonUpdateRefusedError(
+            this.#managerRefusal(method, intent.current, intent.target, found.failure),
+          );
+        this.#guardTarget({ ...intent, target: found.version }, options);
+        if (found.version !== intent.artifact?.version)
+          throw new DaemonUpdateRefusedError(
+            'the local Homebrew cask changed while waiting; no upgrade or restart ran. Run the update again',
+          );
         const observe = stepObserver(this.progress, intent.target);
-        const refreshed = await packages.brewRefresh(tap, releaseTapUrl(this.deps.product), observe);
-        if (refreshed.code !== 0) {
-          return failedCommand('brew update', refreshed.stderr, refreshed.code, recovery);
-        }
         const outcome = await packages.brewUpgrade(method.cask, observe);
         if (outcome.code !== 0) {
           return failedCommand(`brew upgrade --cask ${method.cask}`, outcome.stderr, outcome.code, recovery);
@@ -411,7 +445,11 @@ export class DaemonUpdater {
         };
       }
       case 'nix-profile': {
-        const outcome = await packages.nixProfileUpgrade(method.element, stepObserver(this.progress, intent.target));
+        const outcome = await packages.nixProfileUpgrade(
+          method.element,
+          intent.artifact?.nix,
+          stepObserver(this.progress, intent.target),
+        );
         if (outcome.code !== 0) {
           return failedCommand(`nix profile upgrade ${method.element}`, outcome.stderr, outcome.code);
         }
@@ -447,13 +485,16 @@ export class DaemonUpdater {
       default: {
         // Only `nix-shell` reaches here: every other method is `manual`, refused before this.
         this.progress.start('Installing into the nix profile');
-        const switched = await this.deps.switcher.install();
+        const switched = await this.deps.switcher.install(intent.artifact?.nix, true);
         if ('failure' in switched) return { kind: 'failed', message: switched.failure };
         return {
           kind: 'applied',
           daemonPath: switched.path,
           undo: async () => {
-            if (intent.running) await this.deps.lifecycle.installAt(daemon.path);
+            if (intent.running) {
+              this.#guardRestart(intent, daemon.path, options);
+              await this.deps.lifecycle.installAt(daemon.path);
+            }
             return undefined;
           },
         };
@@ -461,20 +502,50 @@ export class DaemonUpdater {
     }
   }
 
-  /** Prove the target version (or a newer one) is installed and, when a daemon was running, that it serves. */
+  #guardRestart(intent: UpdateIntent, path: string, options: DaemonUpdateOptions): void {
+    const installed = this.#guardInstalled(intent, path, options);
+    if (installed === undefined || !ProtocolVersionSchema.safeParse(installed).success)
+      throw new DaemonUpdateRefusedError(`cannot read the installed version at ${path}; refusing to restart`);
+  }
+
+  /** Check fresh executable bytes immediately before every restart, including definition repair. */
+  #guardInstalled(intent: UpdateIntent, path: string, options: DaemonUpdateOptions): string | undefined {
+    const installed = this.deps.lifecycle.versionOf(path);
+    if (installed !== undefined && options.major !== true && isNewerMajorVersion(intent.current, installed)) {
+      const recovery =
+        intent.method.kind === 'homebrew'
+          ? `brew install --cask ${releaseTapName(this.deps.product)}/${this.deps.product}@${intent.current.split('.')[0]}`
+          : intent.method.kind === 'nix-profile' || intent.method.kind === 'nix-shell'
+            ? 'nix profile rollback'
+            : 'restore the previous binaries';
+      throw new DaemonUpdateRefusedError(
+        `The installed ${this.deps.daemonName} is ${installed}, a newer major than ${intent.current}. No restart ran; ${intent.running ? 'the running daemon was left up' : 'the daemon remains stopped'}. Recover with: ${recovery}. The migration uses --major to allow this move.`,
+      );
+    }
+    return installed;
+  }
+
+  /** Prove the judged artifact is installed and, when a daemon was running, that it serves. */
   async #prove(
     intent: UpdateIntent,
     applied: Extract<Applied, { kind: 'applied' }>,
+    options: DaemonUpdateOptions,
   ): Promise<Omit<UpdateReport, 'from' | 'target' | 'finishedAt'>> {
     const name = this.deps.daemonName;
-    const installed = this.deps.lifecycle.versionOf(applied.daemonPath);
-    // The package manager may build something newer than the release that was offered; that is still an update.
+    const installed = this.#guardInstalled(intent, applied.daemonPath, options);
+    // Managers must deliver the judged version; standalone releases retain the same-major >= target rule.
     const order = installed === undefined ? undefined : compareProtocolVersions(installed, intent.target);
-    if (installed === undefined || order === undefined || order < 0) {
+    if (
+      installed === undefined ||
+      order === undefined ||
+      order < 0 ||
+      (intent.artifact !== undefined && installed !== intent.artifact.version)
+    ) {
       return await this.#rollBack(
         intent,
         applied,
-        `the upgrade left ${name} at ${installed ?? 'an unknown version'}, not ${intent.target}`,
+        `the upgrade left ${name} at ${installed ?? 'an unknown version'}, not ${intent.artifact?.version ?? intent.target}`,
+        options,
       );
     }
     const newer = installed === intent.target ? '' : ` (newer than the ${intent.target} release you were offered)`;
@@ -485,19 +556,30 @@ export class DaemonUpdater {
           : `run ${this.deps.clientName} daemon install from a new shell to point the service at ${applied.daemonPath}`;
       return { outcome: 'succeeded', message: `${name} updated to ${installed}${newer}; it was not running — ${next}` };
     }
-    const failure = await this.#restartInto(intent, applied.daemonPath, installed);
-    if (failure !== undefined) return await this.#rollBack(intent, applied, failure);
+    const failure = await this.#restartInto(intent, applied.daemonPath, installed, options);
+    if (failure !== undefined) return await this.#rollBack(intent, applied, failure, options);
     const took = formatElapsed(this.deps.clock.now() - intent.startedAt);
     return { outcome: 'succeeded', message: `${name} updated ${intent.current} → ${installed}${newer} in ${took}` };
   }
 
   /** Restart onto the new executable and wait for it to report the target; answers why not. */
-  async #restartInto(intent: UpdateIntent, daemonPath: string, installed: string): Promise<string | undefined> {
+  async #restartInto(
+    intent: UpdateIntent,
+    daemonPath: string,
+    installed: string,
+    options: DaemonUpdateOptions,
+  ): Promise<string | undefined> {
     try {
       if (daemonPath === intent.daemon.path) {
-        await this.deps.lifecycle.restart({ ferretsKeepRunning: await this.#midTurn() });
-      } else await this.deps.lifecycle.installAt(daemonPath);
+        const ferretsKeepRunning = await this.#midTurn();
+        this.#guardRestart(intent, daemonPath, options);
+        await this.deps.lifecycle.restart({ ferretsKeepRunning });
+      } else {
+        this.#guardRestart(intent, daemonPath, options);
+        await this.deps.lifecycle.installAt(daemonPath);
+      }
     } catch (error: unknown) {
+      if (error instanceof DaemonUpdateRefusedError) throw error;
       return `the new ${this.deps.daemonName} did not start: ${errorText(error)}`;
     }
     return (await this.#serves(installed))
@@ -527,6 +609,7 @@ export class DaemonUpdater {
     intent: UpdateIntent,
     applied: Extract<Applied, { kind: 'applied' }>,
     why: string,
+    options: DaemonUpdateOptions,
   ): Promise<Omit<UpdateReport, 'from' | 'target' | 'finishedAt'>> {
     this.progress.start(`Rolling back to ${intent.current}`);
     const cannot = await applied.undo();
@@ -537,7 +620,10 @@ export class DaemonUpdater {
       return { outcome: 'rolled-back', message: `${why}; ${intent.current} is back in place` };
     }
     try {
-      if (applied.daemonPath === intent.daemon.path) await this.deps.lifecycle.restart();
+      if (applied.daemonPath === intent.daemon.path) {
+        this.#guardRestart(intent, applied.daemonPath, options);
+        await this.deps.lifecycle.restart();
+      }
     } catch (error: unknown) {
       return {
         outcome: 'failed',
@@ -589,7 +675,12 @@ export function renderPlan(plan: UpdatePlan, clientName: string): string[] {
   ];
 }
 
-function failedCommand(command: string, stderr: string, code: number, hint?: string): Applied {
+function failedCommand(
+  command: string,
+  stderr: string,
+  code: number,
+  hint?: string,
+): Extract<Applied, { kind: 'failed' }> {
   const what = `${command} failed, and nothing changed: ${lastLines(stderr, 3) ?? `exit ${String(code)}`}`;
   return {
     kind: 'failed',
