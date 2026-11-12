@@ -92,6 +92,17 @@ describe('the daemon tokens', () => {
     expect(await tokens.load()).toEqual({ admin: 'minted-1', warden: 'minted-2' });
   });
 
+  test('with no minting injected, each token is a fresh 32-byte base64url secret, stored with a newline and read back', async () => {
+    const disk = folder();
+    const tokens = new StateTokens(disk.port(FILES), { admin: AdminTokenFile, warden: WardenTokenFile });
+    const first = await tokens.load();
+    expect(first.admin).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(first.warden).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(first.admin).not.toBe(first.warden);
+    expect(await disk.fs.readText('/home/test/state/gate/admin-token')).toBe(`${first.admin}\n`);
+    expect(await tokens.load()).toEqual(first);
+  });
+
   test('a blank token file is minted again: an empty secret authenticates nothing', async () => {
     const disk = folder();
     await disk.fs.writeAtomic('/home/test/state/gate/admin-token', '\n', 0o600);

@@ -55,6 +55,8 @@ class SendFerrets extends FakeFerrets {
   readonly files: { readonly sendId: string; readonly payload: string }[] = [];
   markersCleared = 0;
   busy = false;
+  /** The person's own unsent words the composer holds: every typing is refused around them (409 `composer_occupied`). */
+  occupiedBy: string | undefined;
   /** What the harness plugin reads of the conversation. */
   transcript: TranscriptEntry[] = [];
   /** Whether Ferrets offers a writer at all, and whether a write fails. */
@@ -117,6 +119,8 @@ class SendFerrets extends FakeFerrets {
     if ((await this.get(ferret)) === undefined) return undefined;
     return {
       deliver: async (delivery: RunnerDelivery) => {
+        if (this.occupiedBy !== undefined)
+          return err({ refused: 'composer_occupied' as const, draft: this.occupiedBy });
         if (this.busy) return err({ refused: 'not_ready' as const, why: 'busy' as const });
         this.typed.push(delivery.text);
         return ok('turn-started' as const);
@@ -1192,6 +1196,79 @@ describe('m3 a harness this build does not know is trusted with nothing', () => 
 
     expect(await stored('s-mystery-2')).toMatchObject({ fate: 'unaccounted' });
     expect(ferrets.typed).toEqual(['FIXTURE mystery']);
+    await host.stop();
+  });
+});
+
+describe('ask.delivery:ferret answers an agenda ask through this same send path', () => {
+  const delivery = (built: { half?: { hooks: Record<string, unknown> } }) =>
+    built.half?.hooks['ask.delivery:ferret'] as {
+      send(ferret: string, message: string, sendId: string): Promise<void>;
+      composer(ferret: string): Promise<string>;
+      receipt(ferret: string, sendId: string): Promise<{ state: string; reason?: string }>;
+    };
+
+  test('an answer is typed as the owner’s own queued words, the composer never holds it back, and a repeat types nothing', async () => {
+    const { host, ferrets, built } = await conversation();
+    const hook = delivery(built);
+
+    await hook.send('f1', 'yes, go', 'ask-1');
+    await hook.send('f1', 'yes, go', 'ask-1');
+
+    expect(ferrets.typed).toEqual(['yes, go']);
+    expect(await hook.composer('f1')).toBe('empty');
+    await host.stop();
+  });
+
+  test('a receipt is pending while nothing is recorded or the send is still on its way, and delivered on proof', async () => {
+    const { host, ferrets, built } = await conversation();
+    const hook = delivery(built);
+    expect(await hook.receipt('f1', 'ask-none')).toEqual({ state: 'pending' });
+
+    await hook.send('f1', 'FIXTURE answer', 'ask-2');
+    expect(await hook.receipt('f1', 'ask-2')).toEqual({ state: 'pending' });
+
+    ferrets.transcript = [userEntry('FIXTURE answer')];
+    expect(await hook.receipt('f1', 'ask-2')).toEqual({ state: 'delivered' });
+    await host.stop();
+  });
+
+  test('a receipt for a send that could not be proven is failed, with the reason the ledger gives, or else with its fate', async () => {
+    const { host, ferrets, built, advance } = await conversation(f => {
+      f.add({ id: F2, state: 'idle', harness: 'mystery' as never });
+    });
+    const hook = delivery(built);
+
+    ferrets.transcript = [otherEntry];
+    await hook.send('f1', 'FIXTURE lost', 'ask-lost');
+    await hook.send('f2', 'FIXTURE mystery', 'ask-mystery');
+    await advance(180_000, 5_000);
+
+    expect(await hook.receipt('f1', 'ask-lost')).toEqual({ state: 'failed', reason: 'timed_out' });
+    expect(await hook.receipt('f2', 'ask-mystery')).toMatchObject({ state: 'failed' });
+    await host.stop();
+  });
+
+  test('an answer to a ferret that does not exist throws a plain error, never "try again"', async () => {
+    const { host, built } = await conversation();
+    const hook = delivery(built);
+
+    const failure = await hook.send('nobody', 'hello', 'ask-3').catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).name).not.toBe('AskNotTypedError');
+    await host.stop();
+  });
+
+  test('an answer that was not typed (the composer is occupied) says so, so Asks holds it and tries again', async () => {
+    const { host, ferrets, built } = await conversation();
+    ferrets.occupiedBy = 'the owner is half way through typing this';
+    const hook = delivery(built);
+
+    const failure = await hook.send('f1', 'yes', 'ask-4').catch((error: unknown) => error);
+
+    expect((failure as Error).name).toBe('AskNotTypedError');
+    expect(ferrets.typed).toEqual([]);
     await host.stop();
   });
 });

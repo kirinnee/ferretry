@@ -239,6 +239,19 @@ const SLIM_SERVE = {
   instructions: 'contract/tools-server.ts',
 } as const;
 
+/** The one file that imports the slim entry: where a repo says it has an agent tool door at all. */
+const SLIM_CONSUMER = 'packages/cli/bin/mcp-serve.ts';
+
+/**
+ * The slim entry is generated for a repo that has its consumer (`SLIM_CONSUMER`) and for no other: a repo without the
+ * `fy mcp serve` binary has nothing that would import it, so asking it for the serve plugin would fail a repo that
+ * never wanted one. A repo WITH the consumer still requires the plugin: `slimEntry` throws when it is missing, so the
+ * real tree cannot lose `mcp` quietly.
+ */
+function slimFiles(model: Model): readonly (readonly [string, string])[] {
+  return existsSync(join(model.ws.root, SLIM_CONSUMER)) ? [[GENERATED.slim, slimEntry(model)]] : [];
+}
+
 /**
  * `packages/cli/src/generated/slim.ts`: the facts the agent tool door's guard reads (`src/lib/entry/tool-door.ts`) and
  * the loaders of the serve module. The tool facts are exactly what `surfacesOf(registry)` reads: the Kernel and every
@@ -427,7 +440,7 @@ function hashesJson(model: Model): string {
 
 /** The global registries, keyed by root-relative path. */
 export function generateGlobal(model: Model): ReadonlyMap<string, string> {
-  return new Map([
+  return new Map<string, string>([
     [
       GENERATED.plugins,
       halfRegistry(model, GENERATED.plugins, 'daemon', 'DaemonImplementation', 'daemonImplementations'),
@@ -435,7 +448,7 @@ export function generateGlobal(model: Model): ReadonlyMap<string, string> {
     [GENERATED.glossary, glossary(model)],
     [GENERATED.clientBinary, clientBinary(model)],
     [GENERATED.commands, commandsRegistry(model)],
-    [GENERATED.slim, slimEntry(model)],
+    ...slimFiles(model),
     [GENERATED.surfaces, surfacesRegistry(model)],
     [GENERATED.pluginStyles, pluginStyles(model)],
     [GENERATED.hooks, hooksMarkdown(model)],
