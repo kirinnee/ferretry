@@ -106,3 +106,24 @@ test('V-0250 manual update remains a shell verb when Updates is absent from the 
   expect(called).toBe(true);
   expect(f.connects).toEqual([]);
 });
+
+test.each<{ argv: string[]; major: boolean }>([
+  { argv: ['update', '--yes', '--to', '6.0.0'], major: false },
+  { argv: ['update', '--yes'], major: false },
+  { argv: ['update', '--major', '--to', '6.0.0'], major: true },
+])('V-0250 fy update reads --major as a plain boolean and --yes never implies it: $argv', async ({ argv, major }) => {
+  const f = fakeWorld();
+  let flags: Record<string, unknown> | undefined;
+  expect(
+    await runFy(argv, {
+      ...f.world,
+      update: async received => {
+        flags = { ...received };
+        return 0;
+      },
+    }),
+  ).toBe(0);
+  expect(flags?.major).toBe(major);
+  expect(flags?.yes === true).toBe(argv.includes('--yes'));
+  expect(flags?.to).toBe(argv.includes('--to') ? '6.0.0' : undefined);
+});

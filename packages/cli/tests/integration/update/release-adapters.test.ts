@@ -117,6 +117,12 @@ describe('the package-manager commands an update runs', () => {
   const TAP = 'kirinnee/ferretry';
   const URL = 'https://github.com/kirinnee/ferretry';
   const NIX = 'nix --extra-experimental-features nix-command flakes';
+  const LOCKED = {
+    source: 'github:kirinnee/ferretry',
+    reference: `github:kirinnee/ferretry/${'a'.repeat(40)}`,
+    version: '4.291.10',
+    profile: { attribute: 'packages.x86_64-linux.default', priority: 5 },
+  };
 
   function fakeBrew(
     taps: string,
@@ -139,14 +145,15 @@ describe('the package-manager commands an update runs', () => {
     const { ran, managers } = fakeBrew(`homebrew/core\n${TAP}\n`);
     await managers.brewRefresh(TAP, URL);
     await managers.brewUpgrade('ferretry');
-    await managers.nixProfileUpgrade('ferretry');
+    await managers.nixProfileUpgrade('ferretry', LOCKED);
     await managers.nixProfileRollback();
     await managers.nixProfileInstall('github:kirinnee/ferretry');
     should(ran).eql([
       'brew tap',
       'brew update',
-      'brew upgrade --cask ferretry',
-      `${NIX} profile upgrade --refresh ferretry`,
+      'env HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade --cask ferretry',
+      `${NIX} profile install --no-update-lock-file --priority 6 ${LOCKED.reference}#packages.x86_64-linux.default`,
+      `${NIX} profile remove ferretry`,
       `${NIX} profile rollback`,
       `${NIX} profile install --refresh github:kirinnee/ferretry`,
     ]);
@@ -186,10 +193,12 @@ describe('the package-manager commands an update runs', () => {
       return await Promise.resolve({ code: 1, stdout: '', stderr: `${lines.join('\n')}\n` });
     });
     const seen: string[] = [];
-    const outcome = await managers.nixProfileUpgrade('ferretry', activity => {
+    const outcome = await managers.nixProfileUpgrade('ferretry', LOCKED, activity => {
       seen.push(JSON.stringify(activity));
     });
-    should(argvs[0]?.join(' ')).equal(`${NIX} profile upgrade --refresh --log-format internal-json -v ferretry`);
+    should(argvs[0]?.join(' ')).equal(
+      `${NIX} profile install --no-update-lock-file --priority 6 --log-format internal-json -v ${LOCKED.reference}#packages.x86_64-linux.default`,
+    );
     should(seen[0]).equal('{"phase":"preparing"}');
     should(seen.some(line => line.includes('"packages":{"done":0,"expected":3}'))).be.true();
     should(outcome.code).equal(1);

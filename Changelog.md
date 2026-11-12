@@ -1,3 +1,10 @@
+## [4.291.10](https://github.com/kirinnee/ferretry/compare/v4.291.9...v4.291.10) (2026-11-12)
+
+### Fixes
+
+* **fleet:** pin only a login's claude.env so project settings win by default ([#1590](https://github.com/kirinnee/ferretry/issues/1590)) ([ac97c73](https://github.com/kirinnee/ferretry/commit/ac97c73c468e5e7bd1ee95bd15ad1adc6477f5e4))
+* **update:** require migration before moving to a new major ([#1589](https://github.com/kirinnee/ferretry/issues/1589)) ([876764a](https://github.com/kirinnee/ferretry/commit/876764a0dec7bb8fb7933bf6a8c71cec0e87811b))
+
 ## [4.291.9](https://github.com/kirinnee/ferretry/compare/v4.291.8...v4.291.9) (2026-11-11)
 
 ### Fixes
