@@ -19,12 +19,19 @@
  * v4 already, so there is no runtime uuid to re-key here (M7 applies to routing and usage rows).
  */
 import { LOGINS_CREDENTIALS, LOGINS_MODELS, LoginIdSchema, ModelsStateSchema } from '@ferretry/plugin-logins/contract';
-import { chmod, lstat, mkdir, readdir } from 'node:fs/promises';
+import { chmod, mkdir, readdir } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { KeptItem, StepReport } from '../report.ts';
 import { moveSealedTree, SealedUnreadableError } from '../sealed.ts';
 import { failureNote, isRecord, readV4Json, V4InputError } from '../v4/documents.ts';
-import { V4_CREDENTIALS, V4_MODEL_CATALOG, V4_PASSIVE_USAGE, V4LoginId, V4ModelCatalog } from '../v4/logins.ts';
+import {
+  hasCredentialsRoot,
+  V4_CREDENTIALS,
+  V4_MODEL_CATALOG,
+  V4_PASSIVE_USAGE,
+  V4LoginId,
+  V4ModelCatalog,
+} from '../v4/logins.ts';
 import { codexHostLogins, HOST_CODEX_MOVED } from './host-logins.ts';
 import type { Step } from './index.ts';
 
@@ -85,11 +92,8 @@ export const loginsStep: Step = {
     try {
       const credentialsFrom = join(home, V4_CREDENTIALS);
       const credentialsTo = ctx.v5.resolve(V5_CREDENTIALS);
-      const root = await lstat(credentialsFrom).catch((error: NodeJS.ErrnoException) => {
-        if (error.code === 'ENOENT') return undefined;
-        throw new V4InputError(`${V4_CREDENTIALS}: cannot be inspected`);
-      });
-      if (root !== undefined && !root.isDirectory()) throw new V4InputError(`${V4_CREDENTIALS}: is not a folder`);
+      // `fleet` and `fleet/credentials` are each lstatted: a link in either is refused, never resolved.
+      const present = await hasCredentialsRoot(home);
 
       // Codex logins v4 kept in the terminal's own folder (the Settings step wrote them `store: ferretry`): each gets an
       // EMPTY private folder here, and v4's folder of that name (only usage.json, or a link out) is not moved or followed.
@@ -98,7 +102,7 @@ export const loginsStep: Step = {
       let logins = 0;
       let links = 0;
       let usageLeft = 0;
-      for (const name of root === undefined ? [] : (await readdir(credentialsFrom)).sort()) {
+      for (const name of present ? (await readdir(credentialsFrom)).sort() : []) {
         const where = `${V4_CREDENTIALS}/${name}`;
         if (!V4LoginId.safeParse(name).success) throw new V4InputError(`${where}: is not a v4 login id`);
         if (!LoginIdSchema.safeParse(name).success)

@@ -28,7 +28,7 @@ import { join } from 'node:path';
 import type { KeptItem, StepReport } from '../report.ts';
 import { pathSegment } from '../key-path.ts';
 import { failureNote, readV4Json, V4InputError } from '../v4/documents.ts';
-import { V4_CREDENTIALS, V4_PASSIVE_USAGE } from '../v4/logins.ts';
+import { hasCredentialsRoot, V4_CREDENTIALS, V4_PASSIVE_USAGE } from '../v4/logins.ts';
 import {
   canonicalRateRow,
   V4_ANALYTICS_INDEX,
@@ -55,17 +55,29 @@ async function lenient(home: string, path: string): Promise<unknown> {
   }
 }
 
-/** How many logins hold a passive reading. `lstat` only: the file sits in a sign-in folder and is never opened. */
-async function passiveReadings(home: string): Promise<number> {
+/**
+ * How many logins hold a passive reading, and how many login folders are links. `lstat` only: the file sits in a sign-in
+ * folder and is never opened. Each `fleet/credentials/<login>` is lstatted FIRST and only a real folder is looked
+ * inside: a link there points at the terminal's own sign-in folder (a `store: host` login), and is neither statted
+ * through, read nor read as a link (`readlink`), so its target is not even named.
+ */
+async function passiveReadings(home: string): Promise<{ readings: number; links: number }> {
+  const none = { readings: 0, links: 0 };
+  if (!(await hasCredentialsRoot(home).catch(() => false))) return none;
   const root = join(home, V4_CREDENTIALS);
-  const facts = await lstat(root).catch(() => undefined);
-  if (facts === undefined || !facts.isDirectory()) return 0;
-  let count = 0;
+  let readings = 0;
+  let links = 0;
   for (const login of await readdir(root)) {
+    const folder = await lstat(join(root, login)).catch(() => undefined);
+    if (folder === undefined) continue;
+    if (!folder.isDirectory()) {
+      if (folder.isSymbolicLink()) links++;
+      continue;
+    }
     const reading = await lstat(join(root, login, V4_PASSIVE_USAGE)).catch(() => undefined);
-    if (reading?.isFile() === true) count++;
+    if (reading?.isFile() === true) readings++;
   }
-  return count;
+  return { readings, links };
 }
 
 export const usageStep: Step = {
@@ -76,7 +88,7 @@ export const usageStep: Step = {
     V4_BUDGET_HOLDS,
     V4_BUDGET_TOLD,
     `${V4_DAEMON_CONFIG} (analyticsPricing, analyticsPricingSources)`,
-    `${V4_CREDENTIALS}/<login>/${V4_PASSIVE_USAGE} (lstat only, never opened)`,
+    `${V4_CREDENTIALS}/<login>/${V4_PASSIVE_USAGE} (lstat only, never opened; a login folder that is a link is not looked inside)`,
   ],
   sealed: [],
   notCarried: [
@@ -170,8 +182,10 @@ export const usageStep: Step = {
       }
 
       const passive = await passiveReadings(home);
-      if (passive > 0)
-        notes.push(`${String(passive)} passive usage reading(s) not carried (read again on the next turn)`);
+      if (passive.readings > 0)
+        notes.push(`${String(passive.readings)} passive usage reading(s) not carried (read again on the next turn)`);
+      if (passive.links > 0)
+        notes.push(`${String(passive.links)} login folder(s) not carried: the login folder is a link`);
       return { ...base, status: 'converted', ...(notes.length > 0 ? { note: notes.join('; ') } : {}), kept };
     } catch (error) {
       return { ...base, status: 'failed', note: failureNote(error, 'cannot convert the usage files'), kept: [] };

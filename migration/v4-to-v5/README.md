@@ -143,14 +143,14 @@ Projects keep every id exactly; v4's bare array gains the `{format: 1, projects}
 memory under `format: 1` (v5's schema is still the condensed `looseObject`, so the sections keep v4's names), moves
 blessings to `remembered.json`, rewrites each `reportPath` into the new home, copies reports unopened and turns each
 `jev-checks/<day>.jsonl` into `{format: 1, day, checks}`; the per-assignment stop capability is a secret and is
-dropped. Logins moves each `fleet/credentials/<login>/` whole with `moveSealedTree` (lstat and folder listings only;
+dropped. Logins moves each `fleet/credentials/<login>/` whole (except a Codex `store: host` login, below) with `moveSealedTree` (lstat and folder listings only;
 a file this user may not read fails the step by path, never hard-linked, so the backup stays its own file; a link is
 made again, never followed) and turns
 `state/model-catalog.json` into `models.json` `published`. A v4 login id with capitals fails the step: v5 login ids
 are lowercase. A Codex login with `store: host` (the terminal's own folder, which 5.0 cannot start Codex from) is written
 `store: ferretry` under the same name by the Settings step and gets an EMPTY 0700 folder here: nothing of the terminal's sign-in
 (`~/.claude*`, `~/.codex*`, the keychain) is read, listed or linked, and the report says "moved to Ferretry's own sign-in; needs
-one sign-in: fy login signin <name>". A Claude `store: host` login is left as it is (5.0 starts it from the terminal).
+one sign-in: fy login signin <name>". A Claude `store: host` login keeps its terminal sign-in and configuration as they are (5.0 starts it from the terminal); a login folder that is a link is never followed by any step (Usage skips it and says so).
 `config/warden.yaml` and `config/logins/*.yaml` belong to the Settings step.
 
 Settings (`src/steps/settings.ts`) turns each v4 `config/*.yaml` into the v5 plugin config file that owns it: runtimes

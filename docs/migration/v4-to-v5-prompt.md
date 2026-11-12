@@ -130,7 +130,10 @@ bun src/main.ts --from "$B" --to "$H"                # writes the new home at H
    4. `fy config check` passes, and `fy secret run NAME -- true` succeeds.
 6. **Logins. Tell the owner this before starting v5; the checks come in §8.9.**
    1. **Which are listed.** The converter moves every v4 login folder (`fleet/credentials/<name>/`) to
-      `state/logins/credentials/<name>/` whole and unopened, **keeping its name**. After v5 starts, `fy login ls` lists
+      `state/logins/credentials/<name>/` whole and unopened, **keeping its name**. The one exception is a Codex login kept
+      in the terminal's own folder (`store: host`): its v4 folder is not moved or followed (it may even be a link into the
+      terminal's folder) and the name gets a new, empty folder owned by Ferretry (§5.6.4). A login folder that is a link
+      is never followed by any step. After v5 starts, `fy login ls` lists
       every login by that name, Claude Code and Codex together, with whether each works. Every login Ferretry keeps itself
       that needs a sign-in is repeated under "Needs sign-in:", each with its exact command. A login kept in the terminal's
       own folder (`store: host`) is never in that section (§5.6.4).
@@ -150,8 +153,8 @@ bun src/main.ts --from "$B" --to "$H"                # writes the new home at H
         (Codex shows a code and a page to open), then `fy login check <name>`. Until then `fy login ls` lists it under
         "Needs sign-in:". You never see the sign-in.
       - **A Claude login (`harness: claude`) stays `store: host`, with no step.** 5.0 starts a Claude ferret from the
-        terminal's own sign-in as v4 did, and `fy login ls` shows it as shared with the terminal. Nothing is created or
-        moved for it. Signing it in or out happens with `claude` in the terminal.
+        terminal's own sign-in as v4 did, and `fy login ls` shows it as shared with the terminal. Its terminal sign-in and
+        configuration are untouched (v4's folder of that name, which held at most `usage.json`, moves as an empty one). Signing it in or out happens with `claude` in the terminal.
       - The terminal's own sign-in (`~/.claude*`, `~/.codex*`, the keychain) is never read or changed, and keeps working.
 
 ## 6. What is kept, item by item
@@ -172,7 +175,7 @@ Tell the owner this list before starting v5, and say which items the summary sho
 | Changes you had confirmed that loosen a setting (e.g. skipping agent permissions, a raised cap)                                    | **Kept**            | your v4 confirmations move with them, so v5 does not ask again. If v4 was still waiting for you to confirm a change when it stopped, none are carried and v5 asks again (the summary names the file)                                                                                         |
 | MCP server sign-ins (OAuth)                                                                                                        | **Kept**            | the sign-in records move, and the sealed refresh tokens move byte for byte with the vault key that opens them                                                                                                                                                                                |
 | Security log (pairings, grants, secrets used)                                                                                      | **Kept**            | the v4 logs are merged into one v5 log, names and ids only                                                                                                                                                                                                                                   |
-| Harness sign-ins                                                                                                                   | **Kept**            | the sign-in folders move whole; never read                                                                                                                                                                                                                                                   |
+| Harness sign-ins                                                                                                                   | **Kept**            | the owned sign-in folders move whole, never read; a Codex `store: host` login gets a new empty owned folder (sign in once), and a Claude one stays in the terminal                                                                                                                           |
 | Secrets                                                                                                                            | **Kept**            | the sealed vault and its key move byte for byte; no existing value is ever opened. A key v4 had saved in plain text in a login file is sealed into the vault as `LOGIN_<ID>_<VAR>` and the login file names it with `${secret:…}` (listed by name in the summary)                            |
 | Paired phones and browsers, passkeys, unlock settings, push                                                                        | **Kept**            | the daemon identity, device public keys, grants, passkey ids and push keys move as they are                                                                                                                                                                                                  |
 | Admin and warden tokens                                                                                                            | **Kept**            | moved byte for byte, never opened; `fy` keeps working without signing in again                                                                                                                                                                                                               |

@@ -2,16 +2,68 @@
  * Codex logins v4 kept in the terminal's own folder (`store: host`) are written `store: ferretry` under the same name
  * with an EMPTY private folder; a Claude `store: host` login and a `store: ferretry` login are not touched. Everything
  * here is a temp folder with FAKE bytes; the user home is a temp folder holding planted `.claude/` and `.codex/` canaries
- * that are made unreadable and unlistable (mode 0), so a converter that opened, listed or followed either would fail,
- * and whose modes and times are checked to be unchanged.
+ * (mode 0). A TRIPWIRE stands in for `node:fs` and `node:fs/promises` while a conversion runs: every call whose
+ * path is those folders, or BELOW a v4 login folder that is a link out to it, is recorded and fails. That
+ * catches stat, lstat, open, readdir and readlink as well as reads, whether or not the converter swallows the error.
  */
-import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
+import * as realFs from 'node:fs';
+import * as realPromises from 'node:fs/promises';
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { loginsStep, V5_CREDENTIALS } from '../../src/steps/logins.ts';
-import { settingsStep } from '../../src/steps/settings.ts';
+import { join, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { LockProbe } from '../../src/preflight.ts';
 import { fixture } from './ferret-fixture.ts';
+
+/** What the tripwire guards and what it caught. Armed only around a conversion, so the test's own setup is not seen. */
+const wire = { armed: false, whole: [] as string[], below: [] as string[], hits: [] as string[] };
+
+function guarded(name: string, call: (...args: unknown[]) => unknown) {
+  return (...args: unknown[]) => {
+    if (wire.armed)
+      for (const arg of name.startsWith('symlink') ? args.slice(1) : args) {
+        const text =
+          arg instanceof URL ? fileURLToPath(arg) : typeof arg === 'string' || Buffer.isBuffer(arg) ? String(arg) : '';
+        if (text === '') continue;
+        const path = resolve(text);
+        const hit =
+          wire.whole.some(base => path === base || path.startsWith(base + sep)) ||
+          wire.below.some(base => path.startsWith(base + sep));
+        if (hit) {
+          wire.hits.push(name);
+          throw new Error(`TRIPWIRE: ${name} reached the planted terminal folder`);
+        }
+      }
+    return call(...args);
+  };
+}
+
+function tripwire(real: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(real))
+    out[name] = typeof value === 'function' && /^[a-z]/u.test(name) ? guarded(name, value as never) : value;
+  return { ...out, default: out };
+}
+mock.module('node:fs/promises', () => tripwire({ ...realPromises }));
+mock.module('node:fs', () => tripwire({ ...realFs }));
+
+const { convert } = await import('../../src/convert.ts');
+const { loginsStep, V5_CREDENTIALS } = await import('../../src/steps/logins.ts');
+const { settingsStep } = await import('../../src/steps/settings.ts');
+const { usageStep } = await import('../../src/steps/usage.ts');
 
 let f: Awaited<ReturnType<typeof fixture>>;
 let userHome = '';
@@ -20,6 +72,7 @@ beforeEach(async () => {
   userHome = await mkdtemp(join(tmpdir(), 'fy-userhome-'));
 });
 afterEach(async () => {
+  wire.armed = false;
   // A mode-0 canary must not stop the temp folders from being removed.
   for (const path of ['.claude', '.codex', '.claude/.credentials.json', '.codex/auth.json'])
     await chmod(join(userHome, path), 0o700).catch(() => undefined);
@@ -57,19 +110,21 @@ async function plant() {
     await chmod(join(userHome, path), 0o000);
 }
 
-const facts = async () =>
-  Promise.all(
-    ['.claude', '.codex'].map(async path => {
-      const s = await lstat(join(userHome, path));
-      return [s.mode, s.atimeMs, s.mtimeMs, s.ctimeMs, s.ino];
-    }),
-  );
+/** Arms the tripwire on the planted terminal folders (by both spellings of the home) and on everything below each v4 login link. */
+async function arm() {
+  const homes = [userHome, await realpath(userHome)];
+  // The terminals' own sign-in folders and account file; the rest of the home (service definitions) is read by design.
+  wire.whole = homes.flatMap(home => ['.claude', '.codex', '.claude.json'].map(name => join(home, name)));
+  wire.below = [join(f.from, 'fleet/credentials/codex-you'), join(f.from, 'fleet/credentials/claude-link')];
+  wire.hits = [];
+  wire.armed = true;
+}
 
 const ctx = () => ({ ...f.ctx(), host: { homeDirectory: userHome, env: {} } });
 
 test('a Codex store: host login is written store: ferretry under the same name; Claude host and owned logins are unchanged', async () => {
   await plant();
-  const before = await facts();
+  await arm();
   const settings = await settingsStep.run(ctx());
   expect(settings.status).toBe('converted');
   const text = (name: string) => readFile(join(f.to, 'config/logins', `${name}.yaml`), 'utf8');
@@ -107,8 +162,45 @@ test('a Codex store: host login is written store: ferretry under the same name; 
     count: 1,
   });
   expect(JSON.stringify([settings, logins])).not.toContain(FAKE_CANARY);
-  // The canary was never read, listed, changed or followed (it is mode 0, so any attempt would also have failed).
-  expect(await facts()).toEqual(before);
+  // Nothing reached the planted folders: not read, listed, statted, opened or followed (the tripwire saw no call).
+  expect(wire.hits).toEqual([]);
+});
+
+const notHeld: LockProbe = { held: async () => false };
+
+test('the WHOLE conversion never reaches the terminal folders through a login folder that is a link, Usage included', async () => {
+  await plant();
+  // Usage reads fleet/credentials/<login>/usage.json: v4's Codex host folder is a link out, and so is a second login's.
+  await writeFile(join(f.from, 'layout-version'), '2\n', { mode: 0o600 });
+  await mkdir(join(f.from, 'state/sessions'), { recursive: true });
+  await symlink(join(userHome, '.claude'), join(f.from, 'fleet/credentials/claude-link'));
+  await arm();
+  const result = await convert({
+    from: f.from,
+    to: f.to,
+    dryRun: false,
+    lock: notHeld,
+    now: () => new Date('2026-11-07T01:00:00.000Z'),
+    host: { homeDirectory: userHome, env: {} },
+  });
+  expect(result.kind).toBe('done');
+  expect(wire.hits).toEqual([]);
+  if (result.kind !== 'done') return;
+  const step = (id: string) => result.report.steps.find(s => s.id === id);
+  expect(step('usage')?.status).toBe('converted');
+  expect(step('usage')?.note).toContain('login folder(s) not carried: the login folder is a link');
+  expect(step('logins')?.status).toBe('converted');
+});
+
+test('a link in fleet itself is refused by Logins and skipped by Usage, never resolved', async () => {
+  await mkdir(join(f.root, 'elsewhere/credentials/one'), { recursive: true });
+  await symlink(join(f.root, 'elsewhere'), join(f.from, 'fleet'));
+  const logins = await loginsStep.run(ctx());
+  expect(logins.status).toBe('failed');
+  expect(logins.note).toContain('fleet: is not a folder');
+  const usage = await usageStep.run(ctx());
+  expect(usage.status).toBe('converted');
+  expect(usage.note).toBeUndefined();
 });
 
 test('a dry run writes no folder and no config but still names the login', async () => {
