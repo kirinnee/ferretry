@@ -161,6 +161,16 @@ export class DaemonUpdater {
         throw new DaemonUpdateRefusedError(message);
       }
       target = latest.release.version;
+      if (
+        method.kind === 'homebrew' &&
+        method.cask === `${releaseTapName(this.deps.product)}/${this.deps.product}@4` &&
+        (options.major === true || options.to !== undefined) &&
+        isNewerMajorVersion('4.0.0', target)
+      ) {
+        throw new DaemonUpdateRefusedError(
+          `The ${this.deps.product}@4 package stays on v4. To move to ${target.split('.').slice(0, 2).join('.')} after preparing the home, run: brew uninstall --cask ${this.deps.product}@4 && brew install --cask ${releaseTapName(this.deps.product)}/${this.deps.product}`,
+        );
+      }
       let intent: UpdateIntent = { daemon, method, plan, current, target, running: health !== undefined, startedAt };
       // Refuse a known newer major immediately. The @4 cask may still have a v4 patch to offer.
       if (options.to !== undefined || method.kind !== 'homebrew' || !method.cask.endsWith('@4'))

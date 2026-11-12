@@ -11,6 +11,9 @@ function resolve(
 }
 
 describe('daemon binary resolution', () => {
+  it('keeps the stable Homebrew PATH link for service definitions across cask swaps', () => {
+    should(resolve(undefined, '/opt/homebrew/bin/fyd')).deepEqual({ path: '/opt/homebrew/bin/fyd', source: 'PATH' });
+  });
   it('should prefer a pinned executable over anything on PATH', () => {
     // Act
     const actual = resolve('/opt/fyd-0.175.3', '/usr/local/bin/fyd');

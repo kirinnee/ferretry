@@ -74,14 +74,15 @@ export class CommandPackageManagers implements IPackageManagerPort {
         source = parsed.originalUrl;
         profileTarget = { attribute: parsed.attrPath, priority: parsed.priority };
       }
-      // Only this product's source has the VERSION/build contract we know how to judge.
+      // A bare product source or one of our own immutable revision pins can advance.
+      // Tags, forks and other sources are explicit pins whose intent this updater cannot change.
       const suffix = source.slice(flake.length);
-      if (!source.startsWith(flake) || (suffix !== '' && !/^\/[A-Za-z0-9._/-]+$/u.test(suffix)))
-        return { failure: 'cannot verify this Nix profile source; refusing to install' };
-      if (/\/[a-f0-9]{40}$/u.test(source))
+      if (!source.startsWith(flake) || (suffix !== '' && !/^\/[a-f0-9]{40}$/u.test(suffix)))
         return {
-          failure: 'this Nix profile source is pinned to a revision; change its pin explicitly before updating',
+          failure:
+            'this Nix profile source is explicitly pinned or unsupported; change its source explicitly before updating',
         };
+      source = flake;
       const metadata = await this.run([...NIX, 'flake', 'metadata', '--refresh', '--json', source]);
       if (metadata.code !== 0) return { failure: 'could not resolve the refreshed Nix revision' };
       const locked = z

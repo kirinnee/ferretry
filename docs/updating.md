@@ -142,11 +142,13 @@ Then `nix profile remove <old-element>` switches to the new artifact. If removal
 rolled back. After a successful switch, one `nix profile rollback` restores the old element's precedence
 from the intermediate generation. A shell switch installs the locked reference directly.
 
-**Nix updates now leave an explicitly pinned profile element.** Plain `nix profile upgrade` cannot
-advance that element, and a later `fy daemon update` refuses that existing revision pin. This is
-intentional: changing a pin needs an explicit source replacement, following the migration when moving
-to v5. Inspect `nix profile list` to find the element before replacing it; do not remove other packages.
-This differs from the old updater, which kept following an unlocked source indefinitely.
+**Nix updates leave a revision-pinned profile element, and guarded updates remain repeatable.**
+Plain `nix profile upgrade` cannot advance that immutable reference. `fy daemon update` and app updates
+recognise `github:kirinnee/ferretry/<40-hex-revision>` as the updater's own pin: they resolve the product
+flake again, read and guard the next revision's version, then replace the element by the same safe
+sequence. A second v4 patch update works just like the first; a v5 candidate still requires the migration.
+Tags, other repositories and unsupported sources remain explicit user pins and refuse an automatic
+source change.
 
 Immediately before every restart, including service-definition repair and rollback, the updater reads
 the installed executable's version again. Without `--major`, an unexpectedly installed newer major is
@@ -159,15 +161,15 @@ health check; a newer major can never pass merely by being greater than the requ
 
 Starting with the guarded v4 release, every **4.x release** generates and commits
 `Casks/ferretry@4.rb`, with that release's archive URLs and SHA-256 checksums. GoReleaser publishes
-this second cask only for major version 4; all v5 releases leave it untouched. The `homebrew-cask`
+this second cask only for major version 4; all v5 releases leave it untouched. Both casks declare
+mutual conflicts because each links `fy`, `fyd` and `fyd-browser-worker`; they cannot be installed together. The `homebrew-cask`
 validation contract checks the major gate and, once the generated file exists, that its version is 4.x.
 
 To replace an accidentally installed unversioned v5 cask with v4:
 
 ```bash
-brew uninstall --cask ferretry
 brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry
-brew install --cask kirinnee/ferretry/ferretry@4
+brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4
 fy daemon restart
 ```
 
@@ -175,6 +177,29 @@ The two casks install the same executable names, so remove the unversioned cask 
 already happened, restore the v4 home backup as the migration prompt explains before restarting v4.
 An unmigrated v4 home needs no conversion to run v4 again. The `@4` cask follows v4 patch and minor releases;
 `brew upgrade` of the plain `ferretry` cask continues to follow the latest major.
+
+A `ferretry@4` package cannot deliver v5. Both `fy daemon update --major --to 5.0.0` and a latest-v5
+update with `--major` refuse before refreshing or changing anything. After preparing the home as
+the migration explains, switch the cask explicitly:
+
+```bash
+brew uninstall --cask ferretry@4 && brew install --cask kirinnee/ferretry/ferretry
+fy daemon restart
+```
+
+On a normal Homebrew install, the v4 launchd plist records the selected PATH link, usually
+`/opt/homebrew/bin/fyd`, without resolving it into a versioned Caskroom path. The cask swap relinks
+that stable path. `fy daemon restart` resolves the installed daemon again, rewrites the plist and
+runs `launchctl bootout` then `bootstrap`, so launchd reloads the new executable. A legacy plist
+that names a versioned Caskroom path is rewritten by the same restart. If `FY_DAEMON_BIN` was also
+manually pinned to that removed Caskroom version, override it with the stable link while repairing:
+
+```bash
+FY_DAEMON_BIN="$(brew --prefix)/bin/fyd" fy daemon restart
+```
+
+This path/reload behavior is covered by binary-resolution and launchd-supervisor tests with fakes;
+it does not require a still-existing old Caskroom executable.
 
 ## Applying an update
 

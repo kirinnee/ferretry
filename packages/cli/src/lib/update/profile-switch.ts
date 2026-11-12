@@ -25,7 +25,7 @@ export const isYes = (answer: string): boolean => /^y(es)?$/iu.test(answer.trim(
  * WHY: a unit file must name an absolute path, and a `nix shell` path is one garbage collection can
  * delete and no update ever moves. A profile gives a STABLE path — `~/.nix-profile/bin/<daemon>` is a
  * link that follows the profile. Guarded updates replace its element with a locked revision;
- * a revision pin must be changed explicitly before a later update (docs/updating.md).
+ * the guarded updater recognises its own pin on later updates (docs/updating.md).
  *
  * NEVER SILENT. Both callers ask first: `fy daemon install` at a terminal, and `fy daemon update` only
  * with `--switch-to-profile` or a yes. Nothing here rewrites a service definition; the caller installs

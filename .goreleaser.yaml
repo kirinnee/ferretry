@@ -89,6 +89,8 @@ release:
 homebrew_casks:
   - &release_cask
     name: ferretry
+    conflicts:
+      - cask: ferretry@4
     ids: [archive]
     binaries: [fy, fyd, fyd-browser-worker]
     repository:
@@ -113,4 +115,6 @@ homebrew_casks:
   # Releases of every other major leave the committed Casks/ferretry@4.rb untouched.
   - <<: *release_cask
     name: ferretry@4
+    conflicts:
+      - cask: ferretry
     skip_upload: '{{ ne .Major 4 }}'

@@ -148,8 +148,12 @@ export function packageArtifactCases(): void {
         ],
       ],
       [
-        'pinned source',
-        [ok({ elements: { ferretry: { originalUrl: REFERENCE, attrPath: 'packages.x86_64-linux.default' } } })],
+        'tag pin',
+        [
+          ok({
+            elements: { ferretry: { originalUrl: `${SOURCE}/v4.291.10`, attrPath: 'packages.x86_64-linux.default' } },
+          }),
+        ],
       ],
       ['failed revision', [profile(), failed]],
       ['missing revision', [profile(), ok({ locked: {} })]],
@@ -162,6 +166,7 @@ export function packageArtifactCases(): void {
         const { manager, ran } = fake([...answers]);
         should(await manager.nixResolve(SOURCE, 'ferretry')).have.property('failure');
         should(ran.some(argv => argv.includes('upgrade') || argv.includes('install'))).be.false();
+        if (name === 'tag pin' || name === 'unknown source') should(ran.length).equal(1);
       });
     }
   });

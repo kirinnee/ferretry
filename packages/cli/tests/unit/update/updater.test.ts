@@ -1,4 +1,6 @@
 import { describe, it } from 'bun:test';
+import { CommandPackageManagers } from '../../../src/adapters/update/package-managers';
+import type { IPackageManagerPort } from '../../../src/lib/update/ports';
 import { UpdateReportSchema } from '@ferretry/protocol';
 import should from 'should';
 import type { IDaemonPrompt } from '../../../src/lib/daemon/ports';
@@ -52,6 +54,7 @@ function harness(
     answers?: string[];
     latest?: FakeLatest;
     progress?: IProgress;
+    managers?: IPackageManagerPort;
   } = {},
 ) {
   const daemonPath = DEFAULT_PATHS[kind] ?? '/usr/bin/fyd';
@@ -83,7 +86,7 @@ function harness(
   const updater = new DaemonUpdater({
     facts,
     latest,
-    packages,
+    packages: options.managers ?? packages,
     standalone,
     lifecycle,
     updateView: view,
@@ -102,7 +105,7 @@ function harness(
   });
   const run = (flags: DaemonUpdateOptions = { yes: true, report: '/r.json' }) => updater.update(flags);
   const report = () => UpdateReportSchema.parse(JSON.parse(reports.written.get('/r.json') ?? 'null'));
-  return { host, packages, standalone, lifecycle, out, prompt, reports, view, clock, latest, run, report };
+  return { facts, host, packages, standalone, lifecycle, out, prompt, reports, view, clock, latest, run, report };
 }
 
 const BREW_REFRESH = 'brew-refresh:kirinnee/ferretry:https://github.com/kirinnee/ferretry';
@@ -110,6 +113,91 @@ const RECOVERY =
   'To recover by hand run: brew update && brew upgrade --cask kirinnee/ferretry/ferretry && fy daemon restart; if the tap is wedged: brew untap kirinnee/ferretry && brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry && brew reinstall --cask kirinnee/ferretry/ferretry';
 
 describe('DaemonUpdater — artifact binding', () => {
+  for (const explicit of [true, false]) {
+    it(`refuses an @4 package major migration before any change (${explicit ? '--to' : 'latest'})`, async () => {
+      const latest = new FakeLatest({ kind: 'found', release: { version: '5.0.0', url: 'https://example.com/v5' } });
+      const h = harness('homebrew-v4', { version: '4.291.9', latest });
+      h.packages.upgradeTo = '4.291.10';
+      await h.run({ yes: true, major: true, report: '/r.json', ...(explicit ? { to: '5.0.0' } : {}) });
+      should(h.report().outcome).equal('failed');
+      should(h.report().message).equal(
+        'The ferretry@4 package stays on v4. To move to 5.0 after preparing the home, run: brew uninstall --cask ferretry@4 && brew install --cask kirinnee/ferretry/ferretry',
+      );
+      should(h.host.trail).deepEqual([]);
+      should(h.prompt.asked).deepEqual([]);
+      should(h.host.running).equal('4.291.9');
+    });
+  }
+
+  it('applies two consecutive v4 updates from updater-owned locked Nix elements and refuses the next major', async () => {
+    const source = 'github:kirinnee/ferretry';
+    let original = `${source}/${'0'.repeat(40)}`;
+    let element = 'ferretry';
+    let priority = 5;
+    let candidate = { version: '4.291.10', rev: 'a'.repeat(40) };
+    let staged = '';
+    const ran: string[][] = [];
+    let host: FakeHost;
+    const managers = new CommandPackageManagers(async argv => {
+      ran.push([...argv]);
+      const command = argv.slice(3, 5).join(' ');
+      const ok = (value: unknown) => ({ code: 0, stdout: JSON.stringify(value), stderr: '' });
+      if (command === 'profile list')
+        return ok({
+          elements: { [element]: { originalUrl: original, attrPath: 'packages.x86_64-linux.default', priority } },
+        });
+      if (command === 'flake metadata')
+        return ok({ locked: { type: 'github', owner: 'kirinnee', repo: 'ferretry', rev: candidate.rev } });
+      if (argv[3] === 'eval') return { code: 0, stdout: candidate.version, stderr: '' };
+      if (command === 'profile install') {
+        staged = argv.at(-1)?.split('#')[0] ?? '';
+        return ok(null);
+      }
+      if (command === 'profile remove') {
+        original = staged;
+        element = element === 'ferretry' ? 'ferretry-1' : 'ferretry';
+        priority += 1;
+        host.versions.set(PROFILE_DAEMON, candidate.version);
+        return ok(null);
+      }
+      throw new Error(`unexpected command ${argv.join(' ')}`);
+    });
+    const latest = new FakeLatest();
+    latest.latest = () =>
+      Promise.resolve({
+        kind: 'found',
+        release: {
+          version: candidate.version.startsWith('5.') ? '4.291.12' : candidate.version,
+          url: 'https://example.com/release',
+        },
+      });
+    const h = harness('nix-profile', { version: '4.291.9', latest, managers });
+    host = h.host;
+    const facts = h.facts.facts.bind(h.facts);
+    h.facts.facts = async daemon => ({ ...(await facts(daemon)), nixProfileElement: element });
+    await h.run();
+    should(h.report()).match({ from: '4.291.9', target: '4.291.10', outcome: 'succeeded' });
+    should(original).equal(`${source}/${candidate.rev}`);
+    candidate = { version: '4.291.11', rev: 'b'.repeat(40) };
+    await h.run();
+    should(h.report()).match({ from: '4.291.10', target: '4.291.11', outcome: 'succeeded' });
+    should(original).equal(`${source}/${candidate.rev}`);
+    const installs = ran.filter(argv => argv.slice(3, 5).join(' ') === 'profile install');
+    should(installs.map(argv => argv.at(-1))).deepEqual([
+      `${source}/${'a'.repeat(40)}#packages.x86_64-linux.default`,
+      `${source}/${'b'.repeat(40)}#packages.x86_64-linux.default`,
+    ]);
+    should(
+      ran.filter(argv => argv.slice(3, 5).join(' ') === 'flake metadata').every(argv => argv.at(-1) === source),
+    ).be.true();
+    candidate = { version: '5.0.0', rev: 'c'.repeat(40) };
+    await h.run();
+    should(h.report().outcome).equal('failed');
+    should(h.host.running).equal('4.291.11');
+    should(ran.filter(argv => argv.slice(3, 5).join(' ') === 'profile install').length).equal(2);
+    should(h.lifecycle.restarts).have.length(2);
+  });
+
   it('refuses an unparseable manager source before prompting', async () => {
     const h = harness('nix-profile');
     h.packages.sourceVersion = 'dev';
