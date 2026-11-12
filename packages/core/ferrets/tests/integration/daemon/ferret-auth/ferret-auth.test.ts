@@ -430,7 +430,7 @@ describe('a ferret authenticates end to end (merge bar 7)', () => {
 });
 
 /**
- * THE MERGE-BAR LINE: A START BY RUNTIME REACHES THE PROVIDER SIGNED IN (docs/rebuild/merge-bar.md, before-merge line 9;
+ * THE MERGE-BAR LINE: A START BY RUNTIME REACHES THE PROVIDER SIGNED IN (docs/rebuild/merge-bar.md, before-merge line 11;
  * smoke step 2).
  *
  * The 5.0 preview answered `fy new` / `fy start` with "a start must carry x-fy-request-id" and no ferret was made, and
@@ -452,7 +452,7 @@ describe('a ferret authenticates end to end (merge bar 7)', () => {
  * launch gets no reply. Each case reads the reply back and checks the non-secret login facts of the launch (its auth kind
  * and the credential store the login names; never a value). Same stand-in harness; loopback only, fake values only.
  */
-describe('a start by runtime reaches the provider signed in (merge bar 9)', () => {
+describe('a start by runtime reaches the provider signed in (merge bar 11)', () => {
   const fy = async (daemon: Daemon, args: readonly string[]) => {
     const proc = Bun.spawn([process.execPath, FY, ...args], {
       cwd: daemon.folder,

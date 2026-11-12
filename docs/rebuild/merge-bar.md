@@ -82,7 +82,7 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
     One plain line per repair says what happened, and when the old file could not be kept aside it names the aside path
     (the files are named, never their contents). A start resolves its runtime from the rebuilt file with the same
     harness homes, and a valid manifest is left alone. Live v4 outage, 2026-11-12.
-11. **A start by runtime reaches the provider signed in**: the `merge bar 9` cases in
+11. **A start by runtime reaches the provider signed in**: the `merge bar 11` cases in
     `packages/core/ferrets/tests/integration/daemon/ferret-auth/ferret-auth.test.ts` (smoke step 2) start a ferret on a
     REAL `fyd` on a temp home and an ephemeral loopback port (stand-in harness, no network) whose runtime `rt` is
     configured from FILES ONLY (`login: oauth`, a real profile; no `fy runtime add`, no apply, nothing published). The fake
