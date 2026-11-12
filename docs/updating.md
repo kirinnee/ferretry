@@ -153,9 +153,15 @@ source change.
 Immediately before every restart, including service-definition repair and rollback, the updater reads
 the installed executable's version again. Without `--major`, an unexpectedly installed newer major is
 refused without restarting: the running daemon stays up, and the message names
-`brew install --cask kirinnee/ferretry/ferretry@4` or `nix profile rollback` as the way back. An unreadable
+`brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4 && fy daemon restart`
+or `nix profile rollback` as the way back. An unreadable
 version also refuses a restart. Manager installs must report exactly the judged version in the final
 health check; a newer major can never pass merely by being greater than the requested version.
+
+Another process can refresh the Homebrew tap in the instant between the final local version check
+and `brew upgrade`. In that remaining race, brew can still install 5.0, just as a manual
+`brew upgrade` can. The updater does not restart it: it leaves the running daemon up and prints
+`brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4 && fy daemon restart`.
 
 ### Homebrew: the way back to v4
 

@@ -330,7 +330,9 @@ describe('DaemonUpdater — artifact binding', () => {
       should(h.host.running).equal('4.291.9');
       should(h.host.trail.some(step => step === 'restart' || step.startsWith('install:'))).be.false();
       should(h.report().message).containEql(
-        kind === 'homebrew' ? 'brew install --cask kirinnee/ferretry/ferretry@4' : 'nix profile rollback',
+        kind === 'homebrew'
+          ? 'brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4 && fy daemon restart'
+          : 'nix profile rollback',
       );
     });
   }

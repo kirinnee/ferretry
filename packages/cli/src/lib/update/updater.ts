@@ -524,7 +524,7 @@ export class DaemonUpdater {
     if (installed !== undefined && options.major !== true && isNewerMajorVersion(intent.current, installed)) {
       const recovery =
         intent.method.kind === 'homebrew'
-          ? `brew install --cask ${releaseTapName(this.deps.product)}/${this.deps.product}@${intent.current.split('.')[0]}`
+          ? `brew uninstall --cask ${this.deps.product} && brew install --cask ${releaseTapName(this.deps.product)}/${this.deps.product}@${intent.current.split('.')[0]} && ${this.deps.clientName} daemon restart`
           : intent.method.kind === 'nix-profile' || intent.method.kind === 'nix-shell'
             ? 'nix profile rollback'
             : 'restore the previous binaries';
