@@ -5,7 +5,13 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { type ChildEnvironment, SECRET_REFERENCE_SOURCE } from '@ferretry/core-vault/contract';
-import type { FencedPath, FerretId, FolderRefusal, WorkFolders } from '@ferretry/kernel/contract';
+import {
+  ApiError,
+  type FencedPath,
+  type FerretId,
+  type FolderRefusal,
+  type WorkFolders,
+} from '@ferretry/kernel/contract';
 import { err, type Instant, instantFromEpochMs, ok, type Result } from '@ferretry/std';
 import type { FerretState, FerretSummary, HarnessKey, LoginKindKey, PackId } from '../ids.ts';
 import {
@@ -44,7 +50,15 @@ import {
   type StartRefusal,
   type Started,
 } from '../kinds.ts';
-import type { FerretsApi, ManagedWorktreeSummary, ResumeOptions, Sitrep, StartFailure, StartRequest } from '../port.ts';
+import type {
+  FerretPrompt,
+  FerretsApi,
+  ManagedWorktreeSummary,
+  ResumeOptions,
+  Sitrep,
+  StartFailure,
+  StartRequest,
+} from '../port.ts';
 import { type AgentControl, DEFAULT_AGENT_CONTROL, NO_AGENT_CONTROL } from '../state.ts';
 
 /** 2026-11-07T12:00:00Z. */
@@ -746,6 +760,18 @@ export class FakeFerrets implements FerretsApi {
   }
   async managedWorktrees(): Promise<readonly ManagedWorktreeSummary[]> {
     return this.#worktrees;
+  }
+  readonly #prompts = new Map<FerretId, FerretPrompt>();
+  /** TEST ONLY: what a ferret's pane is asking, as the real service serves it (already masked). */
+  setPrompt(ferret: FerretId, prompt: FerretPrompt): void {
+    this.#prompts.set(ferret, prompt);
+  }
+  /** As the real service: `undefined` for an unknown ferret, a 403 for a caller that may not touch it, `{}` when nothing is recorded. */
+  async prompt(ferret: FerretId, caller?: FerretId): Promise<FerretPrompt | undefined> {
+    if (!this.#ferrets.has(ferret)) return undefined;
+    if (caller !== undefined && !this.mayTouch(caller, ferret))
+      throw new ApiError(403, `a ferret acts only on itself and its helpers, and ${ferret} is neither`, 'forbidden');
+    return this.#prompts.get(ferret) ?? {};
   }
   readonly #controls = new Map<FerretId, Partial<AgentControl>>();
   /** TEST ONLY: what one ferret may control, over today's defaults. */

@@ -377,6 +377,8 @@ export interface FerretSessionPort {
 /** One file of a start's opening attachments, as the ferret's `attachments/` folder holds it. */
 export interface OpeningFile {
   readonly name: string;
+  /** A bare folder name inside `attachments/` that holds the file (a send's per-attachment folder); none for a start's. */
+  readonly folder?: string;
   readonly contents: Uint8Array | string;
 }
 
@@ -1491,7 +1493,9 @@ export class FerretsService implements FerretsApi {
             deliverFiles: async (files: readonly HarnessFile[]): Promise<readonly string[]> => {
               const folder = await attachmentsFolder(ferret);
               await attach(ferret, files);
-              return files.map(file => posix.join(folder, file.name));
+              return files.map(file =>
+                posix.join(folder, ...(file.folder === undefined ? [] : [file.folder]), file.name),
+              );
             },
           }),
       // ── the structured-question acts (additive). The writes are the runner's own guarded ones (not wrapped in a second

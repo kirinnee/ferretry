@@ -6,7 +6,8 @@ import {
   parseBody,
   type RouteHandler,
 } from '@ferretry/kernel/contract';
-import { claimOwnerOnly } from '@ferretry/core-gate/contract';
+import { claimOwnerOnly, ferretOf } from '@ferretry/core-gate/contract';
+import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
 import type { z } from 'zod';
 import {
   HARNESS_UPDATE_CODES,
@@ -31,6 +32,23 @@ function paneRefusal(error: unknown): never {
   if (error instanceof Error && error.name === 'PaneUnknown') throw new ApiError(409, error.message, 'pane_unknown');
   if (error instanceof Error) throw new ApiError(409, error.message, 'console_input_failed');
   throw error;
+}
+
+/**
+ * What the ferret is stopped on: Ferrets' record of its pane (`FerretsApi.prompt`), served as it is — the permission
+ * request and the harness dialog as data, every string masked by Ferrets inside one `Redaction.read`. The caller is
+ * passed through, so a ferret reading another's prompt is refused 403 by Ferrets' own rule; a ferret this daemon does
+ * not know is 404. A pane that records nothing is `{}`. It reads and answers nothing on the pane.
+ */
+export function promptRoute(ferrets: Pick<FerretsApi, 'prompt'>): RouteHandler {
+  return async call => {
+    const id = ferretId(call);
+    if (ferrets.prompt === undefined)
+      throw new ApiError(503, 'this daemon cannot say what a ferret is stopped on', 'plugin_unavailable');
+    const found = await ferrets.prompt(id as FerretId, ferretOf(call));
+    if (found === undefined) throw new ApiError(404, `no ferret ${id}`, 'not_found');
+    return jsonResponse(found);
+  };
 }
 
 /** Answering the permission prompt on one ferret's own pane. GOVERNED AS THE CONSOLE IS (G31): see the manifest. */

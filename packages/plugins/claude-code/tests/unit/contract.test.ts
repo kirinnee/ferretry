@@ -21,10 +21,11 @@ describe('claude-code contract', () => {
     expect(result.ok).toBe(true);
   });
 
-  test('the manifest declares its four routes, the harness take and the start.decide take', () => {
+  test('the manifest declares its five routes, the harness take and the start.decide take', () => {
     expect(manifest.actions.routes.map(route => route.key)).toEqual([
       'GET /v1/claude-code/update',
       'POST /v1/claude-code/update',
+      'GET /v1/ferrets/:ferretId/prompt',
       'POST /v1/ferrets/:ferretId/permission',
       'POST /v1/ferrets/:ferretId/dialog',
     ]);
@@ -34,6 +35,21 @@ describe('claude-code contract', () => {
       'runtimes.components.settings.claude',
       'runtimes.components.hooks.claude',
     ]);
+  });
+
+  test('the prompt read is terminal/use, any caller, masked by the kernel guard, uncached and not audited as an act', () => {
+    const prompt = manifest.actions.routes.find(route => route.key === 'GET /v1/ferrets/:ferretId/prompt');
+    expect(String(prompt?.capability?.capability)).toBe('terminal');
+    expect(prompt?.capability?.axis).toBe('use');
+    expect(prompt?.minimum).toBe('operator');
+    expect(prompt?.caller).toBe('any');
+    expect(prompt?.noStore).toBe(true);
+    expect(prompt?.guard as unknown).toBe('secrets');
+    expect(prompt?.audit as unknown).toEqual({ skip: expect.stringContaining('a read') });
+  });
+
+  test('the prompt read goes through Ferrets: this plugin needs the Ferrets port and nothing else', () => {
+    expect(Object.keys(manifest.needs ?? {})).toEqual(['ferrets']);
   });
 
   test('G31 (declaration only) the permission answer is terminal/use, a person act, audited as input and never with the choice', () => {

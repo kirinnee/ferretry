@@ -305,6 +305,7 @@
         "@ferretry/plugin-runtimes": "workspace:*",
         "@ferretry/std": "workspace:*",
         "react": "^19.0.0",
+        "react-dom": "^19.0.0",
         "zod": "4.4.3",
       },
       "devDependencies": {

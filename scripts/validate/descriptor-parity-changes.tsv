@@ -49,6 +49,7 @@ route	POST /v1/sessions/:sessionId/mcp/project/preview	removed	session routes re
 route	POST /v1/sessions/:sessionId/permission	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/claude-code/update	added	harness update split per harness plugin (fy harness <key> update, design §1.4); descriptor fields unchanged
 route	POST /v1/claude-code/update	added	harness update split per harness plugin (fy harness <key> update, design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/prompt	added	new in 5.0: the app's read of what a ferret's pane is stopped on (Ferrets' masked record, FerretsApi.prompt) so the permission and dialog cards can draw; v4 drew them from the session view's permissionRequest and harnessDialog fields
 route	POST /v1/ferrets/:ferretId/permission	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/dialog	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/codex/update	added	harness update split per harness plugin (fy harness <key> update, design §1.4); descriptor fields unchanged

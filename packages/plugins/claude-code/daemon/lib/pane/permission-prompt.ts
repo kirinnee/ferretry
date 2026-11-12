@@ -125,6 +125,21 @@ function optionKind(label: string): PermissionOptionKind {
  * FNV-1a over the text, twice with different offsets: sixteen hex digits, stable across runs. Also the
  * id of a harness dialog (`./harness-dialog.ts`).
  */
+/** The harness as the runner's look and Ferrets' state document spell it (`claude`, `codex`), which is what their id digests. */
+const recordedHarness = (harness: 'claude-code' | 'codex'): 'claude' | 'codex' =>
+  harness === 'claude-code' ? 'claude' : 'codex';
+
+/**
+ * The id the runner's own look gives THE SAME prompt, which is the id Ferrets records and the app's card answers with.
+ * A runner reads the screen without this plugin and spells the harness as the state document does (`claude`), and the
+ * id is a digest of that spelling, so the same prompt has two ids. An answer may name either; both mean this prompt.
+ * Rebuilt from the fields a person decides on, in the order the digest was taken.
+ */
+export function recordedPermissionId(request: PermissionRequest): string {
+  const { id: _id, harness, selected: _selected, ...rest } = request;
+  return promptDigest(JSON.stringify({ harness: recordedHarness(harness), ...rest }));
+}
+
 export function promptDigest(text: string): string {
   const half = (offset: number): string => {
     let hash = offset;

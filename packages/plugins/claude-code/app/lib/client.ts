@@ -12,8 +12,8 @@ export class AnswerRefusal extends Error {
   }
 }
 
-/** The generated client, narrowed to the one call the answers make. */
-export type ClaudeCodeClient = Pick<PluginClient, 'call'>;
+/** The generated client, narrowed to what the cards use: the calls, and the wake-up when a ferret changes. */
+export type ClaudeCodeClient = Pick<PluginClient, 'call' | 'subscribe'>;
 
 /** Whether a thrown thing is the generated client's refusal (a status and the daemon's code), not a bug. */
 export const refusedWith = (error: unknown, status: number, code: string): error is Error =>

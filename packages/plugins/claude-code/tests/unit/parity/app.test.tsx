@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { CONVERSATION_ABOVE_COMPOSER_SLOT } from '../../../../conversation/contract/slots.ts';
 import app from '../../../app/index.ts';
 import manifest from '../../../manifest.ts';
 
@@ -23,6 +24,16 @@ describe('app parity', () => {
     const above = (ids: readonly string[] | undefined) => ids?.filter(id => id !== 'onboarding-step');
     expect(above(manifest.ui?.panels?.map(panel => panel.id))).toEqual(['permission-request', 'harness-dialog']);
     expect(above(Object.keys(half?.panels ?? {}))).toEqual(['permission-request', 'harness-dialog']);
+  });
+
+  test('G31 G32 both cards are contributed to the slot Conversation offers above its composer', () => {
+    const slots = (manifest.ui?.panels ?? [])
+      .filter(panel => panel.id !== 'onboarding-step')
+      .map(panel => [panel.id, panel.slot]);
+    expect(slots).toEqual([
+      ['permission-request', CONVERSATION_ABOVE_COMPOSER_SLOT],
+      ['harness-dialog', CONVERSATION_ABOVE_COMPOSER_SLOT],
+    ]);
   });
 
   test('S14 the first-run step panel is contributed to the onboarding.step slot, beside the two cards', () => {

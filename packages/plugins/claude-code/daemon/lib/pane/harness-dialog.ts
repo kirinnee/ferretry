@@ -270,6 +270,15 @@ export function parseHarnessDialog(pane: string): HarnessDialog | undefined {
   };
 }
 
+/**
+ * The id the runner's own look gives THE SAME dialog (see `recordedPermissionId`): the harness spelled `claude`, as
+ * Ferrets records it, digested in the order the fields were taken. An answer may name either id.
+ */
+export function recordedDialogId(dialog: HarnessDialog): string {
+  const { id: _id, harness, selected: _selected, ...rest } = dialog;
+  return promptDigest(JSON.stringify({ harness: harness === 'claude-code' ? 'claude' : 'codex', ...rest }));
+}
+
 /** The bytes a terminal sends for the keys an answer presses. */
 export const DIALOG_KEYS = { up: '\u001b[A', down: '\u001b[B', enter: '\r', escape: '\u001b' } as const;
 

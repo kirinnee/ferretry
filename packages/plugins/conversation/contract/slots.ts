@@ -7,13 +7,24 @@
  *                                 are a tool row's shell calls whose WHOLE script is one plain command of a program named `fy`
  *                                 (no pipe, list, redirect, subshell or expansion), and their text answers; never another script or tool.
  *   - `conversation.row-actions`  in an assistant message's footer: Voice offers "Read aloud" on the message.
+ *   - `conversation.above-composer` directly above the composer: Claude Code's permission and harness-dialog cards.
  */
 
 export const CONVERSATION_ROW_SLOT = 'conversation.row' as const;
 export const CONVERSATION_ROW_ACTIONS_SLOT = 'conversation.row-actions' as const;
+/**
+ * Directly above the composer, in the chat: the cards of what the ferret is stopped on (Claude Code's permission prompt
+ * and harness dialog). The chat mounts every panel contributed here once, with the ferret as its `subject` and no other
+ * prop; a panel draws nothing when the ferret is stopped on nothing.
+ */
+export const CONVERSATION_ABOVE_COMPOSER_SLOT = 'conversation.above-composer' as const;
 
 /** Every slot the chat offers, in one list a test can pair against the panels other plugins contribute. */
-export const CONVERSATION_SLOTS = [CONVERSATION_ROW_SLOT, CONVERSATION_ROW_ACTIONS_SLOT] as const;
+export const CONVERSATION_SLOTS = [
+  CONVERSATION_ROW_SLOT,
+  CONVERSATION_ROW_ACTIONS_SLOT,
+  CONVERSATION_ABOVE_COMPOSER_SLOT,
+] as const;
 export type ConversationSlot = (typeof CONVERSATION_SLOTS)[number];
 
 /**

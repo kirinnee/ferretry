@@ -36,6 +36,8 @@
     // Conversation's fy-render browser tests need playwright-core, the Vite harness and the built sandbox shell, which the
     // test tier has not got; they are never run locally (app/NEEDS-APP-SHELL.txt).
     "packages/plugins/conversation/tests/integration/app",
-    "packages/plugins/conversation/tests/realworld/app"
+    "packages/plugins/conversation/tests/realworld/app",
+    // Claude Code's card screenshots (the same browser harness): they need playwright-core, which only the app package has.
+    "packages/plugins/claude-code/tests/integration/app"
   ]
 }

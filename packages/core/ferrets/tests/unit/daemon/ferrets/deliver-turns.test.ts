@@ -1,6 +1,6 @@
 import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { RootHandle } from '@ferretry/kernel/contract';
 import { diskPaths, diskSessionsRoot, type MemoryStateFolder } from '@ferretry/kernel/testing';
@@ -100,6 +100,8 @@ async function world(
       const disk = await diskSessionsRoot(parent, id);
       made[id] = disk.root;
       where[id] = disk.folder;
+      // The scope a send's file writer holds: the ferret's `attachments` folder alone, on the same real home.
+      made[`${id}/attachments`] = (await diskSessionsRoot(parent, `${id}/attachments`)).root;
     }
     handles = made;
     folders = where;
@@ -1328,6 +1330,111 @@ describe('FerretHarness.deliverFiles hands a send its files through the ferretâ€
     const [path] = await mine.deliverFiles!([{ name: 'mine.txt', contents: bytes('FIXTURE') }]);
     expect(path).toBe(`${w.folderOf(a)}/attachments/mine.txt`);
     await expect(readdir(`${w.folderOf(b)}/attachments`)).rejects.toThrow();
+  });
+
+  test('an attachments folder that is a link to a sibling inside the session refuses with nothing written', async () => {
+    const w = await world();
+    const id = await started(w);
+    await mkdir(`${w.folderOf(id)}/turns`, { recursive: true });
+    await symlink(`${w.folderOf(id)}/turns`, `${w.folderOf(id)}/attachments`);
+    const harness = (await w.service.harness(id as never))!;
+
+    await expect(harness.deliverFiles!([{ name: 'sent.txt', contents: bytes('FIXTURE-SEND') }])).rejects.toThrow();
+    await expect(
+      harness.deliverFiles!([{ name: 'sent.txt', folder: 'att_one', contents: bytes('FIXTURE-SEND') }]),
+    ).rejects.toThrow();
+
+    expect(await readdir(`${w.folderOf(id)}/turns`)).toEqual([]);
+  });
+
+  test('an attachments folder that is a link out of the session refuses with nothing written', async () => {
+    const w = await world();
+    const id = await started(w);
+    const outside = await mkdtemp(`${tmpdir()}/deliver-outside-`);
+    parents.push(outside);
+    await symlink(outside, `${w.folderOf(id)}/attachments`);
+    const harness = (await w.service.harness(id as never))!;
+
+    await expect(harness.deliverFiles!([{ name: 'sent.txt', contents: bytes('FIXTURE-SEND') }])).rejects.toThrow();
+
+    expect(await readdir(outside)).toEqual([]);
+  });
+
+  test('a missing attachments folder is made a real 0700 directory, never a link', async () => {
+    const w = await world();
+    const id = await started(w);
+    const harness = (await w.service.harness(id as never))!;
+
+    await harness.deliverFiles!([{ name: 'sent.txt', contents: bytes('FIXTURE-SEND') }]);
+
+    expect((await lstat(`${w.folderOf(id)}/attachments`)).isDirectory()).toBe(true);
+  });
+
+  test('files of one name in different folders are different paths, and neither overwrites the other', async () => {
+    const w = await world();
+    const id = await started(w);
+    const harness = (await w.service.harness(id as never))!;
+
+    const paths = await harness.deliverFiles!([
+      { name: 'same.txt', folder: 'att_aaa', contents: bytes('FIXTURE-COLLISION-53803') },
+      { name: 'same.txt', folder: 'att_bbb', contents: bytes('FIXTURE-COLLISION-62595') },
+    ]);
+
+    expect(paths).toEqual([
+      `${w.folderOf(id)}/attachments/att_aaa/same.txt`,
+      `${w.folderOf(id)}/attachments/att_bbb/same.txt`,
+    ]);
+    expect(await readFile(paths[0]!, 'utf8')).toBe('FIXTURE-COLLISION-53803');
+    expect(await readFile(paths[1]!, 'utf8')).toBe('FIXTURE-COLLISION-62595');
+    expect((await stat(`${w.folderOf(id)}/attachments/att_aaa`)).mode & 0o777).toBe(0o700);
+  });
+
+  test('a per-id folder that is a link to another attachment refuses and the other attachment is untouched', async () => {
+    const w = await world();
+    const id = await started(w);
+    const root = `${w.folderOf(id)}/attachments`;
+    await mkdir(`${root}/att_second`, { recursive: true });
+    await writeFile(`${root}/att_second/same.txt`, 'FIXTURE-SECOND');
+    await symlink(`${root}/att_second`, `${root}/att_first`);
+    const harness = (await w.service.harness(id as never))!;
+
+    await expect(
+      harness.deliverFiles!([{ name: 'same.txt', folder: 'att_first', contents: bytes('FIXTURE-FIRST') }]),
+    ).rejects.toThrow();
+
+    expect(await readFile(`${root}/att_second/same.txt`, 'utf8')).toBe('FIXTURE-SECOND');
+    expect(await readdir(`${root}/att_second`)).toEqual(['same.txt']);
+  });
+
+  test('two sends of files to the same new per-id folder at once both land', async () => {
+    const w = await world();
+    const id = await started(w);
+    const harness = (await w.service.harness(id as never))!;
+
+    const [first, second] = await Promise.all([
+      harness.deliverFiles!([{ name: 'a.txt', folder: 'att_shared', contents: bytes('FIXTURE-A') }]),
+      harness.deliverFiles!([{ name: 'b.txt', folder: 'att_shared', contents: bytes('FIXTURE-B') }]),
+    ]);
+
+    expect(await readFile(first![0]!, 'utf8')).toBe('FIXTURE-A');
+    expect(await readFile(second![0]!, 'utf8')).toBe('FIXTURE-B');
+    expect((await readdir(`${w.folderOf(id)}/attachments/att_shared`)).sort()).toEqual(['a.txt', 'b.txt']);
+  });
+
+  test('a folder that is not a bare name writes NOTHING', async () => {
+    const w = await world();
+    const id = await started(w);
+    const harness = (await w.service.harness(id as never))!;
+
+    for (const folder of ['..', '.', 'a/b', '../turns', '', 'a\\b', 'nul\0'])
+      await expect(
+        harness.deliverFiles!([
+          { name: 'fine.png', contents: bytes('FIXTURE') },
+          { name: 'x.png', folder, contents: bytes('FIXTURE') },
+        ]),
+      ).rejects.toThrow();
+
+    await expect(readdir(`${w.folderOf(id)}/attachments`)).rejects.toThrow();
   });
 
   test('a daemon whose session files are unbound offers no writer, so a send that names a file is refused, never dropped', async () => {

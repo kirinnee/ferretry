@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import should from 'should';
 import type { HarnessDialogAnswerRequest } from '../../../contract/index.ts';
 import { DialogAnswerError, DialogAnswerService, type FerretDialogPane } from '../../../daemon/lib/dialog/service.ts';
-import { parseHarnessDialog } from '../../../daemon/lib/pane/harness-dialog.ts';
+import { parseHarnessDialog, recordedDialogId } from '../../../daemon/lib/pane/harness-dialog.ts';
 
 /**
  * Answering a harness's own dialog for someone who is not at the terminal.
@@ -92,6 +92,37 @@ describe('the frames these tests stand on', () => {
     should(idOf(THIRD)).equal(idOf(REVIEW));
     should(parseHarnessDialog(THIRD)?.selected).equal(3);
     should(idOf(TWO)).not.equal(idOf(REVIEW));
+  });
+});
+
+describe('DialogAnswerService.answer, by the id Ferrets recorded', () => {
+  const recorded = (pane: string): string =>
+    recordedDialogId(parseHarnessDialog(pane) as NonNullable<ReturnType<typeof parseHarnessDialog>>);
+
+  it('answers the dialog the recorded id names (the card holds it), moving the cursor and waiting for it as ever', async () => {
+    // Arrange
+    const pane = new ScriptedPane([REVIEW, REVIEW, MOVED, IDLE]);
+    const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    // Act
+    const result = await service.answer('s1', { kind: 'choice', dialogId: recorded(REVIEW), number: 2 });
+
+    // Assert
+    should(result).eql({ dialogId: recorded(REVIEW), cleared: true });
+    should(pane.writes).eql([DOWN, ENTER]);
+  });
+
+  it('refuses as gone, typing nothing, when the recorded id is another dialog’s', async () => {
+    // Arrange
+    const pane = new ScriptedPane([TWO]);
+    const service = new DialogAnswerService(pane, recordingSleep().sleep, TIMING);
+
+    // Act
+    const error = await refusalOf(service.answer('s1', { kind: 'escape', dialogId: recorded(REVIEW) }));
+
+    // Assert
+    should(error.refusal).equal('gone');
+    should(pane.writes).eql([]);
   });
 });
 

@@ -63,6 +63,21 @@ export const PermissionAnswerResultSchema = z.strictObject({
 });
 export type PermissionAnswerResult = z.infer<typeof PermissionAnswerResultSchema>;
 
+// ─── what the ferret is stopped on (GET /v1/ferrets/:ferretId/prompt) ────────────────────────────────────────────
+
+/**
+ * The answer of the prompt read: Ferrets' `FerretPrompt` as it is served, already masked. `permissionRequest` and
+ * `dialog` ride as data, narrowed by the reader with {@link PermissionRequestSchema} / {@link HarnessDialogSchema}, so a
+ * shape drift on either side draws NO card instead of a wrong one. `{}` is a ferret stopped on nothing.
+ */
+export const FerretPromptReadSchema = z.looseObject({
+  turnState: z.enum(['working', 'your-turn', 'needs-input']).optional(),
+  prompt: z.string().optional(),
+  permissionRequest: z.unknown().optional(),
+  dialog: z.unknown().optional(),
+});
+export type FerretPromptRead = z.infer<typeof FerretPromptReadSchema>;
+
 // ─── harness dialog (POST /v1/ferrets/:ferretId/dialog) ──────────────────────────────────────────────────────────
 
 export const HarnessDialogKindSchema = z.enum([

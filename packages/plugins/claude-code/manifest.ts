@@ -14,7 +14,7 @@ import {
   ClaudeCodeUpdateFinished,
 } from './contract/index.ts';
 import { audit, cap } from '@ferretry/core-gate/contract';
-import { Harnesses, StartDecide } from '@ferretry/core-ferrets/contract';
+import { FerretsPort, Harnesses, StartDecide } from '@ferretry/core-ferrets/contract';
 import {
   PROFILE_COMPONENTS_KEY,
   ProfileClaudeHooksSource,
@@ -37,6 +37,8 @@ export default definePlugin({
   kinds: ['harness', 'command', 'view'],
   words: CLAUDE_CODE_WORDS,
 
+  // The prompt read below is Ferrets' own (`FerretsApi.prompt`): the pane's recorded permission request and dialog, masked.
+  needs: { ferrets: FerretsPort },
   provides: { claudeCode: ClaudeCodePort },
 
   actions: {
@@ -56,6 +58,17 @@ export default definePlugin({
         noStore: true,
         audit: { skip: 'not recorded today (docs/audit.md has no update row); the install log is the job report' },
         guard: { none: 'install facts and versions only' },
+      }),
+      // What the ferret is stopped on (Ferrets' record of its pane), for the two cards. A ferret reads only its own and its
+      // helpers' (Ferrets' `mayTouch`). The body is built from text Ferrets masked inside one `Redaction.read`, and is
+      // withheld by the kernel's final check if Vault cannot vouch for it. Answering stays the two POSTs below.
+      route('GET /v1/ferrets/:ferretId/prompt', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: cap('terminal', 'use'),
+        noStore: true,
+        audit: { skip: 'a read; the pane prompt is not recorded (docs/audit.md)' },
+        guard: 'secrets',
       }),
       route('POST /v1/ferrets/:ferretId/permission', {
         minimum: 'operator',
@@ -111,10 +124,12 @@ export default definePlugin({
   },
 
   ui: {
-    // The permission card and the harness-dialog card draw above the composer, for either harness.
+    // The permission card and the harness-dialog card draw above the composer, for either harness. The slot is
+    // Conversation's (its contract names it, `CONVERSATION_ABOVE_COMPOSER_SLOT`); written out here because this plugin
+    // imports nothing of Conversation, and the shell's slot test pairs the two names.
     panels: [
-      panel('bottom', { id: 'permission-request', order: 20 }),
-      panel('bottom', { id: 'harness-dialog', order: 30 }),
+      panel('conversation.above-composer', { id: 'permission-request', order: 20 }),
+      panel('conversation.above-composer', { id: 'harness-dialog', order: 30 }),
       // The first-run step's body (Onboarding's steps screen offers this slot): the same view as the Settings tab.
       panel('onboarding.step', { id: 'onboarding-step', order: 20 }),
     ],

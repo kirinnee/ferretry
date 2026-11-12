@@ -670,6 +670,11 @@ describe('K1 the testing host refuses an owned root to a plugin that does not ow
           scoped.set('whole', ctx.kernel.roots.root('sessions'));
           scoped.set('nested', ctx.kernel.roots.root('sessions', { subfolder: 'a/b' }));
           scoped.set('upper', ctx.kernel.roots.root('sessions', { subfolder: 'AAA-1' }));
+          scoped.set('attach', ctx.kernel.roots.root('sessions', { subfolder: 'aaa-1/attachments' }));
+          scoped.set('turns', ctx.kernel.roots.root('sessions', { subfolder: 'aaa-1/turns' }));
+          scoped.set('deeper', ctx.kernel.roots.root('sessions', { subfolder: 'aaa-1/attachments/x' }));
+          scoped.set('bare', ctx.kernel.roots.root('sessions', { subfolder: '/attachments' }));
+          scoped.set('upAttach', ctx.kernel.roots.root('sessions', { subfolder: 'AAA-1/attachments' }));
           scoped.set('homeA', ctx.kernel.roots.root('agent-homes', { subfolder: 'aaa-1' }));
           scoped.set('homeB', ctx.kernel.roots.root('agent-homes', { subfolder: 'bbb-2' }));
           scoped.set('homeUp', ctx.kernel.roots.root('agent-homes', { subfolder: '../x' }));
@@ -696,8 +701,13 @@ describe('K1 the testing host refuses an owned root to a plugin that does not ow
     await homeA.writeText(resolved(homeA, 'x.json'), 'a');
     await expect(homeB.readText(resolved(homeB, 'x.json'))).rejects.toThrow();
     // production's refusals: the whole base, a nested path, an upper-case id, a traversing agent-homes scope
-    for (const key of ['whole', 'nested', 'upper', 'homeUp'])
+    for (const key of ['whole', 'nested', 'upper', 'homeUp', 'turns', 'deeper', 'bare', 'upAttach'])
       expect(handle(key).resolve('environment.json')).toEqual({ ok: false, error: 'outside' });
+    // a ferret's own `attachments` folder is the one nested scope, and a file written through it is that folder's alone
+    const attach = handle('attach');
+    await attach.writeText(resolved(attach, 'shot.txt'), 'in-attachments');
+    expect(await attach.readText(resolved(attach, 'shot.txt'))).toBe('in-attachments');
+    await expect(a.readText(resolved(a, 'shot.txt'))).rejects.toThrow();
     await host.stop();
   });
 
@@ -713,4 +723,193 @@ describe('K1 the testing host refuses an owned root to a plugin that does not ow
       await host.stop();
     });
   }
+});
+
+describe('K1 the sessions root scoped to <ferret>/attachments: every component below it is no-follow and descriptor-bound', () => {
+  const ATTACHMENTS = 'state/ferrets/sessions/f1/attachments';
+  const scoped = async (observe?: (fs: HostFs, home: string) => HostFs) => {
+    const f = await fresh();
+    await ensureInternalRootBases(f.fs, { home: f.home, plugin: 'ferrets' }, ['sessions']);
+    const attachments = `${f.home}/${ATTACHMENTS}`;
+    await mkdir(attachments, { recursive: true, mode: 0o700 });
+    const disk = observe === undefined ? f.fs : observe(f.fs, f.home);
+    const root = rootsPortFor(
+      disk,
+      { home: f.home, plugin: 'ferrets', worktrees: `${f.home}-worktrees` },
+      ['sessions'],
+      () => undefined,
+    ).root('sessions', { subfolder: 'f1/attachments' });
+    return { ...f, attachments, root };
+  };
+
+  test('a per-id folder that is a link to a sibling attachment refuses and the sibling is untouched', async () => {
+    const s = await scoped();
+    await mkdir(`${s.attachments}/att_second`);
+    await writeFile(`${s.attachments}/att_second/same.txt`, 'FIXTURE-SECOND');
+    await symlink(`${s.attachments}/att_second`, `${s.attachments}/att_first`);
+    await expect(
+      s.root.publish(resolved(s.root, 'att_first/same.txt'), encoder.encode('FIXTURE-FIRST')),
+    ).rejects.toThrow();
+    expect(await readFile(`${s.attachments}/att_second/same.txt`, 'utf8')).toBe('FIXTURE-SECOND');
+    expect(await readdir(`${s.attachments}/att_second`)).toEqual(['same.txt']);
+  });
+
+  test('a per-id folder that is a link out of the session refuses and the outside folder is untouched', async () => {
+    const s = await scoped();
+    const outside = `${s.parent}/outside`;
+    await mkdir(outside);
+    await symlink(outside, `${s.attachments}/att_first`);
+    await expect(s.root.publish(resolved(s.root, 'att_first/x.txt'), encoder.encode('FIXTURE'))).rejects.toThrow();
+    expect(await readdir(outside)).toEqual([]);
+  });
+
+  test('a dangling link or a plain file at the per-id name refuses with nothing written', async () => {
+    const s = await scoped();
+    await symlink(`${s.parent}/nowhere`, `${s.attachments}/att_dangling`);
+    await writeFile(`${s.attachments}/att_file`, 'FIXTURE-FILE');
+    for (const id of ['att_dangling', 'att_file'])
+      await expect(s.root.publish(resolved(s.root, `${id}/x.txt`), encoder.encode('FIXTURE'))).rejects.toThrow();
+    expect(await readFile(`${s.attachments}/att_file`, 'utf8')).toBe('FIXTURE-FILE');
+    await expect(readdir(`${s.parent}/nowhere`)).rejects.toThrow();
+  });
+
+  test('a per-id folder swapped for a sibling link after resolution must refuse', async () => {
+    const { rename } = await import('node:fs/promises');
+    let triggered = false;
+    const s = await scoped((fs, home) => {
+      const attachments = `${home}/${ATTACHMENTS}`;
+      return {
+        ...fs,
+        realpath: async path => {
+          if (!triggered && path === `${attachments}/att_first`) {
+            triggered = true;
+            await rename(path, `${home}/held`);
+            await symlink(`${attachments}/att_second`, path);
+          }
+          return await fs.realpath(path);
+        },
+      };
+    });
+    await mkdir(`${s.attachments}/att_first`);
+    await mkdir(`${s.attachments}/att_second`);
+    await writeFile(`${s.attachments}/att_second/same.txt`, 'FIXTURE-SECOND');
+    const result = await s.root.publish(resolved(s.root, 'att_first/same.txt'), encoder.encode('FIXTURE-FIRST')).then(
+      value => ({ value }),
+      (error: unknown) => ({ error }),
+    );
+    expect(triggered).toBe(true);
+    expect(await readFile(`${s.attachments}/att_second/same.txt`, 'utf8')).toBe('FIXTURE-SECOND');
+    expect(result).toHaveProperty('error');
+  });
+
+  test('a per-id folder swapped for a sibling link after the walk began (at the anchor look) must refuse', async () => {
+    const { rename } = await import('node:fs/promises');
+    let triggered = false;
+    const s = await scoped((fs, home) => {
+      const attachments = `${home}/${ATTACHMENTS}`;
+      return {
+        ...fs,
+        identity: async path => {
+          const answer = await fs.identity(path);
+          if (!triggered && path === attachments) {
+            triggered = true;
+            await rename(`${attachments}/att_first`, `${home}/held`);
+            await symlink(`${attachments}/att_second`, `${attachments}/att_first`);
+          }
+          return answer;
+        },
+      };
+    });
+    await mkdir(`${s.attachments}/att_first`);
+    await mkdir(`${s.attachments}/att_second`);
+    await writeFile(`${s.attachments}/att_second/same.txt`, 'FIXTURE-SECOND');
+    const result = await s.root.publish(resolved(s.root, 'att_first/same.txt'), encoder.encode('FIXTURE-FIRST')).then(
+      value => ({ value }),
+      (error: unknown) => ({ error }),
+    );
+    expect(triggered).toBe(true);
+    expect(await readFile(`${s.attachments}/att_second/same.txt`, 'utf8')).toBe('FIXTURE-SECOND');
+    expect(result).toHaveProperty('error');
+  });
+
+  test('a missing per-id folder is made a real 0700 directory below the attachments folder', async () => {
+    const s = await scoped();
+    await s.root.publish(resolved(s.root, 'att_new/shot.txt'), encoder.encode('FIXTURE'), { mode: 0o600 });
+    expect((await lstat(`${s.attachments}/att_new`)).isDirectory()).toBe(true);
+    expect(await modeOf(`${s.attachments}/att_new`)).toBe(0o700);
+    expect(await modeOf(`${s.attachments}/att_new/shot.txt`)).toBe(0o600);
+  });
+
+  test('two sends creating the same per-id folder at once both land, each file whole', async () => {
+    const s = await scoped();
+    for (let round = 0; round < 8; round += 1) {
+      const id = `att_race${String(round)}`;
+      await Promise.all(
+        ['a.txt', 'b.txt', 'c.txt'].map(
+          async name => await s.root.publish(resolved(s.root, `${id}/${name}`), encoder.encode(`FIXTURE-${name}`)),
+        ),
+      );
+      expect((await readdir(`${s.attachments}/${id}`)).sort()).toEqual(['a.txt', 'b.txt', 'c.txt']);
+      expect(await readFile(`${s.attachments}/${id}/b.txt`, 'utf8')).toBe('FIXTURE-b.txt');
+    }
+  });
+
+  test('the same file name published twice in one id folder leaves exactly one whole file', async () => {
+    const s = await scoped();
+    await Promise.all([
+      s.root.publish(resolved(s.root, 'att_one/same.txt'), encoder.encode('FIXTURE-ONE')),
+      s.root.publish(resolved(s.root, 'att_one/same.txt'), encoder.encode('FIXTURE-ONE')),
+    ]);
+    expect(await readdir(`${s.attachments}/att_one`)).toEqual(['same.txt']);
+    expect(await readFile(`${s.attachments}/att_one/same.txt`, 'utf8')).toBe('FIXTURE-ONE');
+  });
+
+  test('a name spelled with .., a slash or a NUL names nothing outside its folder', async () => {
+    const s = await scoped();
+    await writeFile(`${s.attachments}/keep.txt`, 'FIXTURE-KEEP');
+    for (const spelling of ['att_a/../keep.txt', '../keep.txt', 'att_a/../../x.txt', '/att_a/x.txt', 'att_a/x\0.txt']) {
+      const named = s.root.resolve(spelling);
+      if (named.ok) await expect(s.root.publish(named.value, encoder.encode('FIXTURE-BAD'))).rejects.toThrow();
+    }
+    expect(await readFile(`${s.attachments}/keep.txt`, 'utf8')).toBe('FIXTURE-KEEP');
+    expect((await readdir(s.attachments)).sort()).toEqual(['keep.txt']);
+    expect(await readdir(`${s.home}/state/ferrets/sessions/f1`)).toEqual(['attachments']);
+  });
+
+  test('a very long name is refused cleanly or stays inside its folder, never above it', async () => {
+    const s = await scoped();
+    const long = `${'x'.repeat(300)}.txt`;
+    await s.root.publish(resolved(s.root, `att_long/${long}`), encoder.encode('FIXTURE')).catch(() => undefined);
+    expect((await readdir(s.attachments)).filter(name => name !== 'att_long')).toEqual([]);
+    expect(await readdir(`${s.home}/state/ferrets/sessions/f1`)).toEqual(['attachments']);
+  });
+
+  test('composed and decomposed spellings of one name stay inside their folder', async () => {
+    const s = await scoped();
+    const composed = 'café.txt';
+    const decomposed = 'café.txt';
+    for (const name of [composed, decomposed]) {
+      const named = s.root.resolve(`att_u/${name}`);
+      if (named.ok) await s.root.publish(named.value, encoder.encode('FIXTURE')).catch(() => undefined);
+    }
+    expect((await readdir(s.attachments)).sort()).toEqual(['att_u']);
+    expect(await readdir(`${s.home}/state/ferrets/sessions/f1`)).toEqual(['attachments']);
+  });
+});
+
+describe('K1 the sessions root scoped to <ferret>/attachments: a ferret’s first sends race to make its folders', () => {
+  test('three sends at once into a ferret with no attachments folder yet all land in real 0700 folders', async () => {
+    const f = await fresh();
+    await ensureInternalRootBases(f.fs, { home: f.home, plugin: 'ferrets' }, ['sessions']);
+    const root = f.port('ferrets').root('sessions', { subfolder: 'f1/attachments' });
+    await Promise.all(
+      ['a', 'b', 'c'].map(
+        async name => await root.publish(resolved(root, `att_one/${name}.txt`), encoder.encode(`FIXTURE-${name}`)),
+      ),
+    );
+    const attachments = `${f.home}/state/ferrets/sessions/f1/attachments`;
+    expect((await readdir(`${attachments}/att_one`)).sort()).toEqual(['a.txt', 'b.txt', 'c.txt']);
+    expect(await modeOf(attachments)).toBe(0o700);
+    expect(await modeOf(`${attachments}/att_one`)).toBe(0o700);
+  });
 });

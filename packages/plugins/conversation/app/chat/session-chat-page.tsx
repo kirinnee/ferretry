@@ -18,7 +18,7 @@ import { type ChatScrollSlot, LiveStreamIndicator, type LiveStreamIndicatorProps
 import { ReferenceSurfaceProvider, TERMINAL_STATUSES, statusMark, useLiveActivity } from '@ferretry/app';
 import type { LiveActivityFeed } from '@ferretry/app';
 import type { FerretLiveActivity, FerretView } from '@ferretry/core-ferrets/contract';
-import type { ComposerAccount } from '../../contract/index.ts';
+import { CONVERSATION_ABOVE_COMPOSER_SLOT, type ComposerAccount } from '../../contract/index.ts';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AttachmentGalleryProvider } from '../composer/attachment-gallery.tsx';
@@ -286,6 +286,8 @@ export function SessionChatPage({
       </div>
       <div className="fy-chat-input" data-safe-bottom="" data-session-input="">
         <div className="fy-chat-input__column">
+          {/* What the ferret is stopped on (Claude Code's permission and dialog cards): drawn by their plugin, above the composer. */}
+          <PanelSlot daemon={daemonId} slot={CONVERSATION_ABOVE_COMPOSER_SLOT} subject={ferretId} />
           {question !== null && canControl ? (
             <QuestionForm
               api={questionApi}

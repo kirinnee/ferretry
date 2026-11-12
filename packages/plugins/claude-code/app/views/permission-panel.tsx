@@ -1,12 +1,26 @@
 /**
- * The permission card's panel above the composer. GAP, said out loud: the ferret is the panel's `subject`, but the
- * Ferrets contract gives the app no read of "what the ferret is stopped on", so there is nothing to draw the card
- * from yet; the panel stays empty until that read exists. The card itself (`./prompt-cards.tsx`) is complete.
+ * The permission card's panel above the composer (slot `conversation.above-composer`, the ferret as its `subject`). It
+ * reads what the ferret is stopped on from the daemon's prompt route and draws the card for a tool-permission prompt,
+ * and nothing otherwise. The card (`./prompt-cards.tsx`) answers through the existing permission route.
  */
 
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
+import type { ClaudeCodeClient } from '../lib/client.ts';
+import { PermissionCard } from './prompt-cards.tsx';
+import { useStoppedOn } from './use-stopped-on.ts';
 
-export const createPanel = (_client: unknown): AppComponent<PanelProps> =>
-  function PermissionPanel() {
-    return null;
+export const createPanel = (client: ClaudeCodeClient): AppComponent<PanelProps> =>
+  function PermissionPanel({ subject }: PanelProps) {
+    const { stoppedOn, agentName, refresh } = useStoppedOn(client, subject);
+    if (subject === undefined || stoppedOn.permission === undefined) return null;
+    return (
+      <PermissionCard
+        agentName={agentName}
+        client={client}
+        ferret={subject}
+        key={stoppedOn.permission.id}
+        onSettled={refresh}
+        request={stoppedOn.permission}
+      />
+    );
   };
