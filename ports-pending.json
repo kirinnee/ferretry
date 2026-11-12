@@ -371,7 +371,7 @@
     },
     {
       "seam": "code:packages/core/ferrets/daemon/moves-deps.ts:*",
-      "card": "&F1787",
+      "card": "&F3455",
       "why": "Move, fork and handover answer 503 until their ports are bound (R-0341, R-0344, R-0345, R-0346, R-0355, R-0356)."
     }
   ]
