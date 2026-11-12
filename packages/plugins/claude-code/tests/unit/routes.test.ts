@@ -126,6 +126,18 @@ describe('the permission answer route', () => {
     expect(pane.writes).toEqual([]);
   });
 
+  test('G31 a prompt whose cursor cannot be read is a 409 permission_cursor_unknown and nothing is typed', async () => {
+    const bare = BASH.replace(/^(\s*)❯\s(?=1\.)/mu, '$1  ');
+    expect(parsePermissionPrompt(bare)?.selected).toBeUndefined();
+    const pane = new Pane([bare]);
+    const route = permissionRoute(new PermissionAnswerService(pane, sleep, TIMING));
+
+    const error = await refused(route(call({ kind: 'choice', requestId: requestId(BASH), number: 1 })));
+
+    expect(error).toMatchObject({ status: 409, code: 'permission_cursor_unknown' });
+    expect(pane.writes).toEqual([]);
+  });
+
   test('G31 a choice the prompt does not list is 400 and nothing typed', async () => {
     const pane = new Pane([BASH]);
     const route = permissionRoute(new PermissionAnswerService(pane, sleep, TIMING));

@@ -411,6 +411,47 @@ describe('question.json, the one writer and its readers', () => {
     expect(await readAskedQuestion(state, 'f2', TRANSCRIPT)).toBeUndefined();
   });
 
+  test('a tabbed form is read back whole: the later questions follow the first, with their headers and kinds', async () => {
+    const state = world();
+    const [first] = envelope.tool_input.questions;
+    const tabbed = JSON.stringify({
+      ...envelope,
+      tool_use_id: 'toolu_tabs',
+      tool_input: {
+        questions: [
+          first,
+          {
+            question: 'Which extras?',
+            header: 'Extras',
+            multiSelect: true,
+            options: [{ label: 'Shadow' }, { label: 'Icon' }],
+          },
+          { question: 'Ship it?', options: [{ label: 'Yes' }] },
+        ],
+      },
+    });
+    const written = await writeAskedQuestion(state, lane, 'f1', tabbed, AT, TRANSCRIPT);
+    expect(written?.more).toHaveLength(2);
+
+    const asked = await readAskedQuestion(state, 'f1', TRANSCRIPT);
+
+    expect(asked?.questions).toHaveLength(3);
+    expect(asked?.questions[1]).toEqual({
+      question: 'Which extras?',
+      header: 'Extras',
+      options: [{ label: 'Shadow' }, { label: 'Icon' }],
+      multiple: true,
+    });
+    expect(asked?.questions[2]).toEqual({ question: 'Ship it?', options: [{ label: 'Yes' }], multiple: false });
+    expect(asked?.input).toMatchObject({
+      questions: [
+        { question: first?.question },
+        { question: 'Which extras?', header: 'Extras', multiSelect: true },
+        { question: 'Ship it?', multiSelect: false },
+      ],
+    });
+  });
+
   test('a question with no header and options with no description is stored without them', async () => {
     const state = world();
     const written = await writeAskedQuestion(state, lane, 'f1', bare, AT, TRANSCRIPT);
