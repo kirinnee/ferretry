@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
 import { FleetManifestSchema } from '../lib/manifest.ts';
+import { keptManifestName, manifestRebuiltSentence, readManifestText } from '../lib/manifest-reading.ts';
 import {
   ABSENT_DOCUMENT_REVISION,
   type FleetApplyCommittedState,
@@ -138,6 +139,8 @@ export class FileFleetProvisioner implements FleetProvisioner {
      * the commit or at the rollback of a failure. Absent, the mutation simply runs.
      */
     private readonly publishing?: <T>(mutate: () => Promise<T>) => Promise<T>,
+    /** Told, in one plain line, that an unreadable manifest is being rebuilt (the file is named, its contents never). */
+    private readonly say?: (sentence: string) => void,
   ) {}
 
   async preview(plan: FleetApplyPlan): Promise<FleetApplyPreview> {
@@ -211,6 +214,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     // Everything a reader could catch moved aside — the documents, the operations, the manifest and a rollback of any
     // of them — and nothing after the commit, which leaves every published name in place.
     const mutate = async (): Promise<void> => {
+      await this.keepUnreadableManifest(plan.manifestPath);
       try {
         for (const document of documents) {
           const mark = journal.beginOperation();
@@ -751,6 +755,37 @@ export class FileFleetProvisioner implements FleetProvisioner {
     } catch (error) {
       throw new Error(`refusing to merge settings over ${backup}: it could not be parsed (${reasonOf(error)})`);
     }
+  }
+
+  /**
+   * A manifest on disk that is not one is derived data this apply writes again, so it never refuses the apply. Before it
+   * is replaced a COPY is kept once beside it (named by a digest of what it held, owner-only), so a person can still look
+   * at what the last version wrote. A copy rather than a move: the original stays in place until the apply's own journal
+   * replaces it, so no reader sees the gap and a rolled-back apply leaves it exactly as it was. Best-effort: a copy that
+   * cannot be kept is said, and the manifest is still rebuilt.
+   */
+  private async keepUnreadableManifest(manifestPath: string): Promise<void> {
+    const entry = await this.disk.lstat(manifestPath);
+    if (entry?.kind !== 'file') return;
+    let bytes: Uint8Array | undefined;
+    try {
+      bytes = await this.disk.readBytes(manifestPath, MAX_READ_BYTES);
+    } catch {
+      bytes = undefined;
+    }
+    if (bytes !== undefined && readManifestText(new TextDecoder().decode(bytes)).kind !== 'unreadable') return;
+    let keptAt: string | undefined;
+    if (bytes !== undefined) {
+      const target = keptManifestName(manifestPath, sha256(bytes));
+      try {
+        await this.disk.create(target, bytes, 0o600);
+        keptAt = target;
+      } catch (error) {
+        // The same damage kept by an earlier apply is the one copy wanted; anything else leaves no copy.
+        if (error instanceof AlreadyExistsError) keptAt = target;
+      }
+    }
+    this.say?.(manifestRebuiltSentence(manifestPath, keptAt));
   }
 
   private async writeManifest(plan: FleetApplyPlan, journal: MutationJournal): Promise<void> {

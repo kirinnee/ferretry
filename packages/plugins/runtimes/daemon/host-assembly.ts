@@ -30,7 +30,7 @@ import { CommandCache } from './adapters/command-cache.ts';
 import { PROVIDER_ANSWER_MS, withinMs } from './adapters/profile-components.ts';
 import { writeAllConfigWriter } from './adapters/config-write-all.ts';
 import { credentialMounts, FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
-import { readFleetManifest } from './adapters/manifest-file.ts';
+import { manifestIsUnreadable, readFleetManifest } from './adapters/manifest-file.ts';
 import type { RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import type { AdapterHost } from './adapters/ports.ts';
 import { refuseBeforeWriting, runtimesConfigFiles } from './adapters/runtimes-config-files.ts';
@@ -86,6 +86,23 @@ async function publishedFleet(
   return {
     directory,
     manifest: await publication.reading(async () => await readFleetManifest(files, `${directory}/${MANIFEST_FILE}`)),
+  };
+}
+
+/**
+ * Whether the published manifest exists and cannot be read, in ONE publication read. It is the daemon's boot check: a
+ * manifest the last version wrote in a shape this one does not read is rebuilt from the configuration by a republish
+ * (derived data, never fatal), so every start does not stay refused until some other change happens to publish.
+ */
+export function manifestUnreadableProbe(
+  kernel: Pick<KernelPorts, 'roots'>,
+  publication: FleetPublication = new FleetPublication(),
+): () => Promise<boolean> {
+  return async () => {
+    const fleet = kernel.roots.root('fleet');
+    const directory = fleetDirectory(fleet);
+    const files = rootHostFiles(fleetMounts(kernel.roots, fleet, directory));
+    return await publication.reading(async () => await manifestIsUnreadable(files, `${directory}/${MANIFEST_FILE}`));
   };
 }
 
@@ -286,6 +303,9 @@ export function fileAssembly(
     claudeStatusline: claudeStatuslineFor(CLIENT_NAME),
     configDirectory,
     publication,
+    say: sentence => {
+      ctx.kernel.log.warn(sentence);
+    },
   });
   const catalog: FleetCatalogServiceDeps = {
     ...unguarded,

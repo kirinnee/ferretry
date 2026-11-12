@@ -26,7 +26,7 @@ import {
 import type { ClaudeStatuslineCommand } from '../lib/account/adapt.ts';
 import type { AdapterHost, ConfigFilesPort, HostFiles, SharedHistoryPooling } from './ports.ts';
 import { FileFleetProvisioner } from './file-provisioner.ts';
-import { readFleetManifest } from './manifest-file.ts';
+import { readPublishedManifest } from './manifest-file.ts';
 
 /** The fleet's folder of its own records (`setup/import.json`, `setup/clone-base.json`). */
 const SETUP_FOLDER = 'setup';
@@ -167,6 +167,8 @@ export interface FileFleetCatalogOptions {
    * Required, so no composition can apply a fleet its readers are not kept out of.
    */
   readonly publication: FleetPublication;
+  /** Says one plain line (the daemon log): an unreadable manifest is being rebuilt. */
+  readonly say?: (sentence: string) => void;
 }
 
 /**
@@ -301,6 +303,7 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
         // Exclusive around the file mutation ONLY — after the claim is held, before the configuration is reloaded,
         // since a load can republish and that must queue behind this apply rather than run inside it (S67).
         async mutate => await options.publication.publishing(mutate),
+        options.say,
       ),
       options.configWriter,
       options.config,
@@ -308,9 +311,11 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
       host.disk,
     ),
     layout,
-    // The published manifest, read between applies (S67): the republish asks whether anything would change.
+    // The published manifest, read between applies (S67): the republish asks whether anything would change. A manifest
+    // that cannot be read counts as not published — it is derived data, so the republish writes it again instead of
+    // being refused by the very file it replaces.
     publishedManifest: async () =>
-      await options.publication.reading(async () => await readFleetManifest(host.files, layout.manifestPath)),
+      await options.publication.reading(async () => await readPublishedManifest(host.files, layout.manifestPath)),
     mint: () => crypto.randomUUID(),
     mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),
     now: host.now,

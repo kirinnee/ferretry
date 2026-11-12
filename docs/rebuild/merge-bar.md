@@ -58,6 +58,13 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
    `POST /v1/pair/code`: a `local-only` link on the port the daemon really bound must come back, and is cancelled
    (`DELETE /v1/pair/code/:pairingId`). A wildcard bind still refuses with `wildcard-bind`. Owner block !A472, 2026-11-12.
    No code is ever printed.
+9. **An unreadable derived fleet manifest is regenerated, never refuses every start**:
+   `packages/plugins/runtimes/tests/integration/daemon/manifest-regen.test.ts` — a `fleet/manifest.json` with an unknown key
+   on an account row (the v4 4.291.12 shape) or truncated JSON is rebuilt from the configuration once after the daemon
+   starts and by every apply, the old file is kept once beside it (owner-only) and one plain line says so (the file is named,
+   never its contents), a start resolves its runtime from the rebuilt file with the same harness homes, and a valid
+   manifest is left alone. Until it is rebuilt, a reader refuses with a retryable sentence, never a permanent one. Live
+   v4 outage, 2026-11-12.
 
 ## After merge
 

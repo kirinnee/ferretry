@@ -267,6 +267,14 @@ describe('republishing the configuration as it already is', () => {
     should(await world().service.republish()).equal('skipped');
   });
 
+  it('should rebuild an unreadable manifest on a machine wired without catalogs when asked to, and only then', async () => {
+    const asked = world();
+    should(await asked.service.republish({ rebuild: true })).equal('applied');
+    should(asked.applied).have.length(1);
+    should(await world().service.republish({})).equal('skipped');
+    should(await world({ format: 'none' }).service.republish({ rebuild: true })).equal('skipped');
+  });
+
   it('should publish when nothing is published yet, and leave a manifest that already says the same', async () => {
     const plans: { manifest: { generatedAt: string } }[] = [];
     const first = world({

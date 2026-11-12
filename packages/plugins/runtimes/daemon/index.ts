@@ -35,7 +35,7 @@ import {
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { fleetHomes } from './adapters/fleet-home-reader.ts';
-import { endedSeams, fileAssembly, launchFactsSource } from './host-assembly.ts';
+import { endedSeams, fileAssembly, launchFactsSource, manifestUnreadableProbe } from './host-assembly.ts';
 import { LaunchGate, type RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import { FleetPublication } from './lib/service/publication.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
@@ -100,6 +100,11 @@ export interface RuntimesAssembly {
    * carries. Absent: a start of a runtime is refused rather than launched unchecked.
    */
   readonly launchFacts?: RuntimeLaunchFactsSource;
+  /**
+   * Whether the published fleet manifest exists and cannot be read. Asked once after start: when it is, the fleet is
+   * published again from the configuration (the manifest is derived data). Absent: nothing to repair.
+   */
+  readonly manifestUnreadable?: () => Promise<boolean>;
 }
 
 export type RuntimesAssembler = (ctx: DaemonContext<typeof manifest>) => RuntimesAssembly;
@@ -233,6 +238,7 @@ export const hostAssembly: RuntimesAssembler = ctx => {
     ),
     profileEtag: async profile => await assembled().profileEtag(profile),
     launchFacts: launchFactsSource(ctx.kernel, publication),
+    manifestUnreadable: manifestUnreadableProbe(ctx.kernel, publication),
     probe: () => {
       assembled();
     },
@@ -366,6 +372,20 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         setTimer: (run, ms) => clock.after(milliseconds(ms), run),
       });
       void expiry.rearm();
+      // A manifest the previous version wrote in a shape this one does not read is derived data: rebuilt once after start
+      // (the apply keeps the old file aside and says so), never left to refuse every start. Nothing else is republished.
+      ctx.kernel.jobs.add({
+        id: 'runtimes.manifest-repair',
+        schedule: { onceAfterStart: true },
+        run: async () => {
+          if (!(await assembly.manifestUnreadable?.())) return;
+          await assembly.catalog.republish?.({ rebuild: true }).catch((error: unknown) => {
+            ctx.kernel.log.warn(
+              `the fleet manifest could not be read and could not be rebuilt yet: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
+        },
+      });
       // A republish that cannot run (the model is not readable yet) is said once and never fails the event.
       const republishForBudget = async (): Promise<void> => {
         await assembly.catalog.republish?.().then(
