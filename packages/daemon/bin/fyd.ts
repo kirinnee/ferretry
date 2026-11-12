@@ -6294,10 +6294,13 @@ function createConfigFilesSubsystem(input: {
     agentControl: input.agentControl,
     identities: input.identities,
     arm: async () => {
+      // The watch's first read must detect edits committed while the initial republish was waiting.
+      const initialFingerprint = await input.service.fingerprint();
       await input.service.load();
       await input.service.publishSchemas(configJsonSchemaFiles());
       await input.afterLoad?.();
       return watchConfigFiles({
+        initialFingerprint,
         fingerprint: async () => await input.service.fingerprint(),
         // At once, not after the debounce: readers stop answering from a load the tree has moved past.
         onEvent: () => input.service.invalidate(),
@@ -11262,6 +11265,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           configDirectory: paths.config,
           pinned: stateHomeKeys(paths),
           publication: fleetPublication,
+          manifestRegenerated: backup =>
+            bootNotices.state(
+              `unreadable fleet manifest regenerated from configuration; previous file kept at ${backup}`,
+            ),
         }),
         modelCatalogs: async () => await models.provides.catalogs.sources(),
         publishedManifest: async () => await publishedManifest(),
@@ -12316,16 +12323,26 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             analytics.provides.ingestion.pricingChanged();
             // Credentials the edit added or removed open or close their watches.
             await fleetReading.configLoaded();
-            await fleetCatalog.republish().then(
-              outcome => {
-                if (outcome === 'applied')
-                  bootNotices.state('model catalogs moved what runtimes offer; fleet republished');
-              },
-              (error: unknown) =>
+            await fleetCatalog
+              .republish()
+              .then(async outcome => {
+                if (outcome === 'applied') {
+                  // The early boot preflight read the old publication. Report the repaired fleet
+                  // now, so its earlier refusal does not remain the daemon's last readiness word.
+                  const harnesses = await readHarnesses(accounts, executables, harnessDiscovery);
+                  bootNotices.step('harnesses checked after fleet republish', harnessPreflightSummary(harnesses));
+                  bootNotices.state(
+                    harnesses.ready
+                      ? 'fleet republished from configuration; agent harnesses ready'
+                      : harnessAbsentWarning(harnesses, CLIENT_NAME),
+                  );
+                }
+              })
+              .catch((error: unknown) =>
                 bootNotices.state(
                   `could not republish the fleet for its model catalogs: ${error instanceof Error ? error.message : String(error)}`,
                 ),
-            );
+              );
             await disableExpiry.rearm();
             // A budget written, raised or lowered is judged at once rather than at the next minute.
             void usageBuilt.provides.budgets.current()?.tick();

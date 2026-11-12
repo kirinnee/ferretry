@@ -196,7 +196,12 @@ export const ABSENT_DOCUMENT_REVISION = 'absent';
 
 export interface FleetProvisioner {
   preview(plan: FleetApplyPlan): Promise<FleetApplyPreview>;
-  apply(plan: FleetApplyPlan, documents?: readonly FleetDocumentWrite[]): Promise<FleetApplyResult>;
+  /** `assertCurrent` runs under the exclusive apply claim, before preflight or any mutation. */
+  apply(
+    plan: FleetApplyPlan,
+    documents?: readonly FleetDocumentWrite[],
+    assertCurrent?: () => Promise<void>,
+  ): Promise<FleetApplyResult>;
 }
 
 /**
@@ -337,6 +342,8 @@ export interface FleetApplyResult {
   readonly accountCount: number;
   readonly operationCount: number;
   readonly manifestPath: string;
+  /** The previous unparseable publication retained beside the regenerated manifest. */
+  readonly unreadableManifestBackup?: string;
   /** Managed wrappers removed because no account or command claims them any more. */
   readonly prunedWrappers: readonly string[];
   /** Exact moves, links, merges and preserved collisions completed for each enabled harness. */

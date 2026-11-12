@@ -8,7 +8,7 @@
  * the fleet library's own parse, and the inventory stays the one reader of what can be launched.
  */
 import { type FleetManifest, FleetManifestSchema } from '@ferretry/fleet';
-import type { FileSystemPort } from '../../lib/index.ts';
+import { FleetManifestUnreadableError, type FileSystemPort } from '../../lib/index.ts';
 
 /**
  * The manifest, or `undefined` when no apply has published one yet. Throws, naming the file, when it
@@ -21,9 +21,9 @@ export async function readFleetManifest(files: FileSystemPort, path: string): Pr
   try {
     payload = JSON.parse(text);
   } catch {
-    throw new Error(`the fleet manifest at ${path} is not valid JSON`);
+    throw new FleetManifestUnreadableError(path, 'it is not valid JSON');
   }
   const parsed = FleetManifestSchema.safeParse(payload);
-  if (!parsed.success) throw new Error(`the fleet manifest at ${path} is not a fleet manifest`);
+  if (!parsed.success) throw new FleetManifestUnreadableError(path, 'it is not a fleet manifest');
   return parsed.data;
 }

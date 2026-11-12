@@ -201,6 +201,8 @@ export interface FileFleetCatalogOptions {
    * Required, so no composition can apply a fleet its readers are not kept out of.
    */
   readonly publication: FleetPublication;
+  /** Report a derived manifest repaired by any apply, including the boot republish. */
+  readonly manifestRegenerated?: (backup: string) => void;
 }
 
 /**
@@ -217,10 +219,11 @@ function acknowledgingProvisioner(
   inner: FleetCatalogServiceDeps['provisioner'],
   config: Pick<ConfigFilesService, 'acknowledge' | 'acknowledgeRemoval' | 'load'>,
   configDirectory: string,
+  manifestRegenerated?: (backup: string) => void,
 ): FleetCatalogServiceDeps['provisioner'] {
   return {
     preview: async plan => await inner.preview(plan),
-    apply: async (plan, documents = []) => {
+    apply: async (plan, documents = [], assertCurrent) => {
       const configFiles = documents.filter(document => !relative(configDirectory, document.path).startsWith('..'));
       for (const document of configFiles) {
         const path = relative(configDirectory, document.path);
@@ -228,7 +231,9 @@ function acknowledgingProvisioner(
         else config.acknowledge(path, document.content);
       }
       try {
-        return await inner.apply(plan, documents);
+        const result = await inner.apply(plan, documents, assertCurrent);
+        if (result.unreadableManifestBackup !== undefined) manifestRegenerated?.(result.unreadableManifestBackup);
+        return result;
       } finally {
         if (configFiles.length > 0) await config.load();
       }
@@ -321,6 +326,7 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
       ),
       options.config,
       options.configDirectory,
+      options.manifestRegenerated,
     ),
     layout,
     mint: () => crypto.randomUUID(),

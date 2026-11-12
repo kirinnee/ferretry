@@ -43,6 +43,8 @@ export interface ConfigTreeEvents {
 }
 
 export interface ConfigWatchOptions {
+  /** A fingerprint taken before boot's initial load/publication, so an intervening edit is a change. */
+  readonly initialFingerprint?: string;
   /** A value that changes whenever any file in the tree does. */
   fingerprint(): Promise<string>;
   /**
@@ -61,11 +63,11 @@ export interface ConfigWatchOptions {
   readonly debounceMs?: number;
 }
 
-/** Start watching. Answers the stop. The first fingerprint is the baseline, not a change. */
+/** Start watching. Answers the stop. Without an initial fingerprint, the first read is the baseline. */
 export function watchConfigFiles(options: ConfigWatchOptions): () => void {
   const { timers, events } = options;
   const watched = new Map<string, { close(): void }>();
-  let last: string | undefined;
+  let last = options.initialFingerprint;
   let pending: unknown;
   let stopped = false;
   let busy = false;

@@ -1,9 +1,10 @@
 import { afterEach, describe, it, spyOn } from 'bun:test';
 import * as fs from 'node:fs/promises';
-import { chmod, lstat, mkdir, mkdtemp, readFile, rm, stat, symlink } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
+import { fleetApplyLockFor } from '../../src/adapters/apply-lock.ts';
 import { FileFleetProvisioner } from '../../src/adapters/file-provisioner.ts';
 import { isMutationReservedName } from '../../src/adapters/mutation-journal.ts';
 import type { FleetManifest } from '../../src/lib/manifest.ts';
@@ -43,6 +44,69 @@ const manifest = (): FleetManifest => ({
 });
 
 describe('FileFleetProvisioner', () => {
+  it('should check plan freshness under the apply claim and release it on refusal without mutating', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const manifestPath = path.join(root, 'manifest.json');
+    const original = '{invalid JSON';
+    await writeFile(manifestPath, original);
+    const plan: FleetApplyPlan = { manifest: manifest(), manifestPath, operations: [] };
+    const subject = new FileFleetProvisioner([root]);
+    const lock = fleetApplyLockFor(manifestPath);
+    const stale = new Error('configuration changed while recovery waited');
+    let claimed = false;
+
+    // Act
+    const error = await subject
+      .apply(plan, [], async () => {
+        claimed = (await stat(lock.path)).isDirectory();
+        throw stale;
+      })
+      .catch((thrown: unknown) => thrown);
+
+    // Assert — no manifest backup or replacement, and another apply can still acquire the claim.
+    should(error).equal(stale);
+    should(claimed).be.true();
+    should(await readFile(manifestPath, 'utf8')).equal(original);
+    should(await readdir(root)).deepEqual(['manifest.json']);
+    await subject.apply(plan);
+    should(JSON.parse(await readFile(manifestPath, 'utf8'))).deepEqual(plan.manifest);
+  });
+
+  for (const damaged of [
+    '{not JSON',
+    JSON.stringify({
+      ...manifest(),
+      accounts: manifest().accounts.map(account => ({ ...account, claudeEnvOverrides: {} })),
+    }),
+  ]) {
+    it(`should regenerate and retain only the newest unreadable manifest (${damaged.startsWith('{not') ? 'invalid JSON' : 'old schema'})`, async () => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const manifestPath = path.join(root, 'manifest.json');
+      const plan: FleetApplyPlan = { manifest: manifest(), manifestPath, operations: [] };
+      const subject = new FileFleetProvisioner([root]);
+      await writeFile(manifestPath, damaged);
+      await writeFile(`${manifestPath}.unreadable-older`, 'older damaged publication');
+
+      // Act
+      const result = await subject.apply(plan);
+
+      // Assert
+      const backups = (await readdir(root)).filter(name => name.startsWith('manifest.json.unreadable-'));
+      should(backups).have.length(1);
+      should(result.unreadableManifestBackup).equal(path.join(root, backups[0] as string));
+      should(await readFile(result.unreadableManifestBackup as string, 'utf8')).equal(damaged);
+      should((await stat(result.unreadableManifestBackup as string)).mode & 0o777).equal(0o600);
+      should(JSON.parse(await readFile(manifestPath, 'utf8'))).deepEqual(plan.manifest);
+
+      // A readable publication never produces another backup.
+      const again = await subject.apply(plan);
+      should(again.unreadableManifestBackup).be.undefined();
+      should((await readdir(root)).filter(name => name.startsWith('manifest.json.unreadable-'))).deepEqual(backups);
+    });
+  }
+
   it('should create the fleet root itself, because a first run has nothing else to create', async () => {
     // Arrange
     const parent = await temporaryDirectory();

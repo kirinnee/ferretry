@@ -3,7 +3,12 @@ import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { buildFleetManifest, RETIRED_FLEET_CONFIG_SENTENCE } from '@ferretry/fleet';
+import {
+  buildFleetManifest,
+  FleetManifestSchema,
+  parseAccountModel,
+  RETIRED_FLEET_CONFIG_SENTENCE,
+} from '@ferretry/fleet';
 import {
   AnalyticsPricingViewSchema,
   AnalyticsResponseSchema,
@@ -118,6 +123,7 @@ import { deviceSession, newTestDevice, pairOverSession, TestSession } from '../.
 import { OS_CHOSEN_PORT, recordedPort } from '../support/os-port.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 import { waitFor, waitForValue } from '../support/wait-for.ts';
+import { writeModelFiles } from '../fleet/config-files-fixture.ts';
 import { FakeHostedService, fakeCloudflared, removeTempDirectories } from '../tunnel/support.ts';
 
 /**
@@ -6743,14 +6749,18 @@ describe('daemon boot lifecycle', () => {
      * THE USER HOME IS REPLACED TOO, and that one is not cosmetic: the harness homes the import reads
      * are derived from it, so without this every case below would import whoever ran the suite.
      */
-    async function harnessOnPath(home: string, kinds: readonly string[]): Promise<DaemonWorld> {
+    async function harnessOnPath(
+      home: string,
+      kinds: readonly string[],
+      notices?: BootNoticePort,
+    ): Promise<DaemonWorld> {
       const binary = join(home, 'harness-bin');
       await mkdir(binary, { recursive: true });
       for (const kind of kinds) {
         await writeFile(join(binary, kind), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
       }
       process.env.PATH = binary;
-      const seams = { userHome: join(home, 'user-home') };
+      const seams = { userHome: join(home, 'user-home'), ...(notices === undefined ? {} : { notices }) };
       const production = buildWorld({}, seams);
       return { ...buildIntegrationWorld(seams), harnesses: production.harnesses };
     }
@@ -6777,9 +6787,9 @@ describe('daemon boot lifecycle', () => {
       world: DaemonWorld,
       home: string,
       during: (base: string, headers: Record<string, string>) => Promise<T>,
+      said = recordingNotices(),
     ): Promise<{ readonly code: number; readonly answer: T; readonly said: ReturnType<typeof recordingNotices> }> {
       const cleanups: Array<() => void | Promise<void>> = [];
-      const said = recordingNotices();
       let release = (): void => {};
       const stopped = new Promise<void>(resolve => {
         release = resolve;
@@ -6801,6 +6811,90 @@ describe('daemon boot lifecycle', () => {
     }
 
     const nothing = async (): Promise<undefined> => undefined;
+
+    for (const damage of ['4.291.11 accounts', 'invalid JSON'] as const) {
+      it(`should regenerate ${damage} on boot, report readiness and start a session`, async () => {
+        // Arrange — only the launcher is replaced. Publication, boot and the start route are real.
+        const { home } = await firstRunHome('fyd-manifest-regeneration', {});
+        const launcher = new RecordingSessionLauncher();
+        const notices = recordingNotices();
+        const world = { ...(await harnessOnPath(home, ['claude'], notices.port)), sessionLauncher: launcher };
+        await writeModelFiles(
+          join(home, 'config'),
+          parseAccountModel({
+            version: 2,
+            credentials: { you: { harness: 'claude', store: 'ferretry' } },
+            components: { settings: { base: { harness: 'claude', flags: ['--verbose'] } } },
+            profiles: { default: { layers: ['settings/base'] } },
+            runtimes: { [WRAPPER]: { credential: 'you', profile: 'default', agent: true } },
+          }),
+        );
+        await seedFleet(home);
+        const manifestPath = join(home, 'fleet', 'manifest.json');
+        const old = JSON.parse(await readFile(manifestPath, 'utf8'));
+        const damaged =
+          damage === 'invalid JSON'
+            ? '{not JSON'
+            : JSON.stringify({
+                ...old,
+                accounts: old.accounts.map((account: object, index: number) =>
+                  index === 0 ? { ...account, claudeEnvOverrides: { LEGACY_FLAG: '1' } } : account,
+                ),
+              });
+        await writeFile(manifestPath, damaged);
+
+        // Act — /healthz precedes the boot republish; wait for that publication before starting.
+        const { code, answer, said } = await bootOnce(
+          world,
+          home,
+          async (base, headers) => {
+            await waitFor(async () => {
+              const text = await readFile(manifestPath, 'utf8').catch(() => '');
+              try {
+                return FleetManifestSchema.safeParse(JSON.parse(text)).success;
+              } catch {
+                return false;
+              }
+            }, 'the boot to regenerate the fleet manifest');
+            await waitFor(
+              async () => notices.stated.includes('fleet republished from configuration; agent harnesses ready'),
+              'the boot to report readiness after regeneration',
+            );
+            const response = await fetch(`${base}/v1/sessions`, {
+              method: 'POST',
+              headers: { ...headers, 'content-type': 'application/json', 'x-fy-request-id': 'manifest-recovery-start' },
+              body: JSON.stringify({ agent: WRAPPER, mode: 'auto', prompt: 'start after regeneration', cwd: home }),
+            });
+            return { status: response.status, body: await response.json() };
+          },
+          notices,
+        );
+
+        // Assert
+        should(code).equal(0);
+        should(answer.status).equal(201);
+        SessionViewSchema.parse(answer.body);
+        should(launcher.launched).have.length(1);
+        const text = await readFile(manifestPath, 'utf8');
+        FleetManifestSchema.parse(JSON.parse(text));
+        should(text).not.containEql('claudeEnvOverrides');
+        const backups = (await readdir(join(home, 'fleet'))).filter(name =>
+          name.startsWith('manifest.json.unreadable-'),
+        );
+        should(backups).have.length(1);
+        should(await readFile(join(home, 'fleet', backups[0] as string), 'utf8')).equal(damaged);
+        should(said.stated).containEql('fleet republished from configuration; agent harnesses ready');
+        should(said.stated.filter(message => message.startsWith('unreadable fleet manifest regenerated'))).have.length(
+          1,
+        );
+        should(
+          said.steps.some(
+            message =>
+              message.startsWith('harnesses checked after fleet republish — claude:') && message.includes(WRAPPER),
+          ),
+        ).be.true();
+      });
+    }
 
     /** What `GET /v1/fleet/machine` says about the live daemon, so a case can read "not set up". */
     const machineView = async (
