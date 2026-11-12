@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { expect, test } from 'bun:test';
 import { FERRET_READABLE_FOLDERS, FerretsPort, FerretTokensFile } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner, ferretId } from '../../../../contract/testing/index.ts';
@@ -47,7 +48,7 @@ test('a resume hands the same own folders again', async () => {
   const h = await host([{ ...record('lead'), state: 'stopped' as const }], { harness, runner: new FakeRunner() });
 
   // Act
-  const resumed = await h.provided(FerretsPort).resume(ferretId('lead'), 'carry on');
+  const resumed = await h.provided(FerretsPort).resume(ferretId('lead'), 'carry on', { origin: PERSON_ORIGIN });
 
   // Assert
   expect(resumed.ok).toBe(true);

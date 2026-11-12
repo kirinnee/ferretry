@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
@@ -174,7 +175,7 @@ describe('ruling #31b: the session-document writer, across a daemon restart', ()
     await second.settle();
     const resumed = await second
       .provided(FerretsPort, 'warden')
-      .resume(ferretId(childId), 'carry on', { automatic: true, actor: 'warden' });
+      .resume(ferretId(childId), 'carry on', { origin: PERSON_ORIGIN, automatic: true, actor: 'warden' });
     expect(resumed.ok).toBe(true);
     expect(helperAsks()).toHaveLength(2);
     expect(helperAsks()[1]).toMatchObject({ ferret: childId, parent: lead, role: 'helper', by: 'resume' });

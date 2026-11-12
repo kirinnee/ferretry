@@ -49,6 +49,7 @@ import {
   FerretLaunchEnvironmentFiles,
   FerretSummaryFiles,
   FerretWaitFiles,
+  DAEMON_ORIGIN,
 } from '../contract/index.ts';
 import { SubtreeService } from './lib/session/pack/subtree.ts';
 import manifest from '../manifest.ts';
@@ -110,6 +111,7 @@ import { movesDeps } from './moves-deps.ts';
 import { fleetEventsAccept, followableFerret, HistoryEventSource } from './modules/fleet-events.ts';
 import { ferretsPort } from './lib/ferrets/port.ts';
 import { ferretsMoveResume, movedTarget } from './lib/ferrets/move-resume.ts';
+import { callerIsAgent, launchOriginOf } from './lib/ferrets/launch-origin.ts';
 import type { ResumeActor } from './lib/session/resume/types.ts';
 import { SessionStateSchema } from './lib/protocol/session.ts';
 import { promptOf } from './lib/ferrets/prompt.ts';
@@ -138,15 +140,6 @@ export const TURN_WATCH_JOB = 'ferrets.turn-watch';
  */
 export function callerFerret(call: CallContext): FerretId | undefined {
   return ferretOf(call);
-}
-
-/** Whether the caller is an agent (a ferret's token, the warden, or the admin token with a ferret behind it). */
-function callerIsAgent(call: CallContext): boolean {
-  const credential = call.credential;
-  if (credential === undefined) return false;
-  if (credential.tokenClass === 'ferret' || credential.tokenClass === 'warden') return true;
-  if (credential.tokenClass === 'device') return false;
-  return call.actor !== 'admin-ui' && call.actor !== 'admin-cli';
 }
 
 /**
@@ -524,6 +517,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         ...(options.note === undefined ? {} : { note: options.note }),
         ...(options.actor === undefined ? {} : { actor: options.actor }),
         ...(options.movedBy === undefined ? {} : { movedBy: options.movedBy }),
+        origin: options.origin,
       }),
     // What the pane is asking (`FerretsApi.prompt`, U4): the turn watch's record, masked again on the way out.
     promptState: async ferret => {
@@ -800,7 +794,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     // summary, so it is bounded as Runtimes' own refusal is.
     resume: async (ferret, message, expect) => {
       const resumed = await service
-        .resume(ferret, message, { actor: 'daemon', automatic: true, expect })
+        .resume(ferret, message, { actor: 'daemon', automatic: true, expect, origin: DAEMON_ORIGIN })
         .catch((error: unknown) => {
           throw new Error(boundedReason(error instanceof Error ? error.message : String(error)));
         });
@@ -934,7 +928,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       outdated: outdatedFor,
       stop: async (ferret, reason) => await service.stop(ferret, 'polite', reason),
       // The daemon's own restart: its turn is drawn as Ferretry's Restart, never as the owner's words.
-      resume: async ferret => await service.resume(ferret, undefined, { actor: 'daemon' }),
+      resume: async (ferret, origin) => await service.resume(ferret, undefined, { actor: 'daemon', origin }),
       history: appendHistory,
       // An entry that does not parse is dropped on its own; the rest survive, and a queue that cannot be read is empty.
       loadQueue: async () => {
@@ -1202,12 +1196,16 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         await terminalLaunchRefusal(call, parsed, undefined);
         let startedFerret: FerretId | undefined;
         const start = async (): Promise<ApiResponse> => {
-          const started = await service.start({
-            ...parsed,
-            // A ferret's start is its helper: the parent is the caller, never a value from the request.
-            ...(own === undefined ? {} : { parent: own }),
-            by: own === undefined ? 'owner' : 'ferret',
-          });
+          const started = await service.start(
+            {
+              ...parsed,
+              // A ferret's start is its helper: the parent is the caller, never a value from the request.
+              ...(own === undefined ? {} : { parent: own }),
+              by: own === undefined ? 'owner' : 'ferret',
+            },
+            // Who the start is FOR is the admitted credential's, as the state-home check above judged it.
+            launchOriginOf(call),
+          );
           if (!started.ok) return startFailure(started.error);
           startedFerret = started.value;
           return jsonResponse({ id: started.value }, 201);
@@ -1279,7 +1277,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         const resumed = await service.resume(id, message, {
           confirmRestore: confirmRestore(call, callerIsAgent(call)),
           actor: resumeActorOf(call),
-          byAgent: callerIsAgent(call),
+          origin: launchOriginOf(call),
         });
         if (!resumed.ok) return startFailure(resumed.error);
         return jsonResponse({ id: resumed.value });

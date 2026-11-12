@@ -11,6 +11,7 @@ import {
 } from '../../../../../contract/move.ts';
 import { FerretSummarySchema } from '../../../../../contract/ids.ts';
 import { ferretId } from '../../../../../contract/testing/index.ts';
+import type { LaunchOrigin } from '../../../../../contract/launch-origin.ts';
 import manifest from '../../../../../manifest.ts';
 import { FY_REQUEST_ID_HEADER } from '../../../../../daemon/lib/protocol/headers.ts';
 import {
@@ -250,6 +251,7 @@ describe('the session move mount', () => {
           allowContextDowngrade: false,
           forceInflight: false,
           movedBy: 'owner',
+          origin: { kind: 'person' },
         },
       ],
     ]);
@@ -269,6 +271,8 @@ describe('the session move mount', () => {
 
     // Assert
     should(mover.moves.map(([, sent]) => sent.movedBy)).deepEqual(['owner', 'session:s9']);
+    // The origin is the credential's own, apart from the journal's words above.
+    should(mover.moves.map(([, sent]) => sent.origin)).deepEqual([{ kind: 'person' }, { kind: 'agent', ferret: 's9' }]);
     should(moverOf(ferretStanding(ferretId('s9')))).equal('session:s9');
     should(moverOf({})).equal('owner');
     should(moverOf(owner)).equal('owner');
@@ -670,6 +674,7 @@ describe('the session move mount, replayed', () => {
         readonly model?: string;
         readonly allowContextDowngrade: boolean;
         readonly forceInflight: boolean;
+        readonly origin: LaunchOrigin;
       },
     ): Promise<SessionView> {
       const outcome = this.outcomes[Math.min(this.calls, this.outcomes.length - 1)];

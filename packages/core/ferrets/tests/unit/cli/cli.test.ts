@@ -17,6 +17,10 @@ class ShellRefusal extends Error {
   readonly exitCode = 69;
 }
 
+/** The body a recorded start request carried. */
+const sentBody = (call: Call | undefined): Record<string, unknown> | undefined =>
+  (call?.init as { body?: Record<string, unknown> } | undefined)?.body;
+
 function run(
   answers: Readonly<Record<string, unknown>> = {},
   fail?: Error,
@@ -102,8 +106,8 @@ describe('the ferrets cli half', () => {
         headers: { 'x-fy-request-id': expect.any(String) },
       },
     });
-    expect(await verb('start [prompt...]', ['x'], { 'compact-at': '250k', detach: true })).toBe(2);
-    expect(err.at(-1)).toContain('--compact-at, --detach');
+    expect(await verb('start [prompt...]', ['x'], { detach: true })).toBe(2);
+    expect(err.at(-1)).toContain('--detach');
     expect(await verb('start [prompt...]', ['x'], { mode: 'sideways' })).toBe(2);
     expect(calls).toHaveLength(2);
   });
@@ -154,6 +158,46 @@ describe('the ferrets cli half', () => {
     expect(await verb('start [prompt...]', ['go'], { cwd: '/abs', interval: 'banana' })).toBe(2);
     expect(err.at(-1)).toContain('--interval must be an integer of at least 1');
     expect(calls).toHaveLength(2);
+  });
+
+  test.each([
+    ['start [prompt...]', 'start'],
+    ['new [words...]', 'new'],
+  ])(
+    'V-0443 %s takes --compact-at in v4’s grammar (250k, 1m, 250000, auto) and sends it as the ferret’s own compactAt',
+    async verbWord => {
+      for (const [typed, sent] of [
+        ['125k', 125_000],
+        ['250000', 250_000],
+        ['0.4m', 400_000],
+        ['1,000k', 1_000_000],
+        ['Auto', 'auto'],
+      ] as const) {
+        const { verb, calls } = run({ [FERRET_ROUTES.start]: { id: 'lead' }, [FERRET_ROUTES.get]: ferret });
+        expect(await verb(verbWord, ['go'], { runtime: 'claude-alpha', cwd: '/abs', 'compact-at': typed })).toBe(0);
+        expect(sentBody(calls[0])?.compactAt).toBe(sent);
+      }
+    },
+  );
+
+  test.each(['start [prompt...]', 'new [words...]'])(
+    'V-0443 %s refuses a --compact-at it cannot read or that is below the floor, in plain words, before any request',
+    async verbWord => {
+      const { verb, calls, err } = run();
+      expect(await verb(verbWord, ['go'], { runtime: 'claude-alpha', cwd: '/abs', 'compact-at': 'banana' })).toBe(2);
+      expect(err.at(-1)).toContain(
+        '--compact-at: “banana” is not a size. Use auto, or a token count like 250k or 250000.',
+      );
+      expect(await verb(verbWord, ['go'], { runtime: 'claude-alpha', cwd: '/abs', 'compact-at': '50k' })).toBe(2);
+      expect(err.at(-1)).toContain('--compact-at: 50k is too small: the lowest is 100k.');
+      expect(calls).toHaveLength(0);
+    },
+  );
+
+  test('V-0443 a start that types no --compact-at sends none', async () => {
+    const { verb, calls } = run({ [FERRET_ROUTES.start]: { id: 'lead' }, [FERRET_ROUTES.get]: ferret });
+    expect(await verb('start [prompt...]', ['go'], { cwd: '/abs' })).toBe(0);
+    expect(sentBody(calls[0])).not.toHaveProperty('compactAt');
   });
 
   test('V-0334 new sends today’s model routing; it names a runtime or passes --auto, never both', async () => {

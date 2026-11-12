@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { describe, expect, test } from 'bun:test';
 import type { InstructionEntry } from '@ferretry/kernel/contract';
 import { ok } from '@ferretry/std';
@@ -82,7 +83,7 @@ const stopped: FerretRecord = {
 describe('R-0128 the launch record of what a ferret was told', () => {
   test('R-0128 a launch whose write lands records what it told, and forgets nothing', async () => {
     const f = fixture([stopped], () => false);
-    const resumed = await f.service.resume(ferretId('old'));
+    const resumed = await f.service.resume(ferretId('old'), undefined, { origin: PERSON_ORIGIN });
     if (!resumed.ok) throw new Error(resumed.error.reason);
     expect([...f.kept.keys()]).toEqual([ferretId('old')]);
     expect(Object.keys(f.kept.get(ferretId('old')) ?? {})).toEqual(['board']);
@@ -93,7 +94,7 @@ describe('R-0128 the launch record of what a ferret was told', () => {
     const f = fixture([stopped], () => true);
     // What an EARLIER launch told this ferret, still on disk.
     f.kept.set(ferretId('old'), { board: 'aaaa1111' });
-    const resumed = await f.service.resume(ferretId('old'));
+    const resumed = await f.service.resume(ferretId('old'), undefined, { origin: PERSON_ORIGIN });
     // The launch itself still succeeds: the record is advice.
     if (!resumed.ok) throw new Error(resumed.error.reason);
     expect(f.forgotten).toEqual([ferretId('old')]);

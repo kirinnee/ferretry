@@ -102,6 +102,69 @@ describe('LaunchGate.decide', () => {
   });
 });
 
+describe('LaunchGate.decide: a start’s OWN compaction trigger (v4 checkCompactAt)', () => {
+  const SMALL = { ...FACTS, windows: { defaultModel: 'm', models: [{ id: 'm', context: 128_000 }] } };
+  const refusal = (answer: Awaited<ReturnType<LaunchGate['decide']>>) => (answer as { reason: string }).reason;
+
+  it('should refuse a number larger than the model’s window with v4’s sentence, before anything is written', async () => {
+    const answer = await gate(SMALL).decide(input({ compactAt: 200_000 }));
+
+    should(answer.allow).be.false();
+    should(refusal(answer)).equal(
+      "200k is larger than this model's 128k window, so it could never trigger. Pick 128k or less.",
+    );
+  });
+
+  it('should judge the model the start NAMED, and a [1m] selector as 1M', async () => {
+    should((await gate(SMALL).decide(input({ compactAt: 400_000, model: 'm[1m]' }))).allow).be.true();
+    should((await gate(FACTS).decide(input({ compactAt: 2_000_000 }))).allow).be.false();
+  });
+
+  it('should accept a number equal to the window, and auto', async () => {
+    should((await gate(SMALL).decide(input({ compactAt: 128_000 }))).allow).be.true();
+    should((await gate(SMALL).decide(input({ compactAt: 'auto' }))).allow).be.true();
+  });
+
+  it('should judge an unstated window against the 200k default', async () => {
+    const unstated = { ...FACTS, windows: { defaultModel: 'm', models: [{ id: 'm' }] } };
+    should((await gate(unstated as never).decide(input({ compactAt: 200_000 }))).allow).be.true();
+    should((await gate(unstated as never).decide(input({ compactAt: 200_001 }))).allow).be.false();
+  });
+
+  it('should refuse on another harness too, where the old gate said nothing', async () => {
+    const answer = await gate({ ...SMALL, kind: 'codex' } as never).decide(
+      input({ harness: 'codex', compactAt: 500_000 }),
+    );
+
+    should(answer.allow).be.false();
+    should(refusal(answer)).containEql('larger than this model');
+  });
+
+  it('should never refuse a RELAUNCH: a resume carries no explicit trigger, and any other falls back to Auto at launch', async () => {
+    should((await gate(SMALL).decide(input({ by: 'resume', compactAt: 500_000 }))).allow).be.true();
+    should((await gate(SMALL).decide(input())).allow).be.true();
+  });
+
+  it('should leave a start on no runtime, or an unpublished one, alone: there is no window to judge', async () => {
+    should((await gate(SMALL).decide(input({ compactAt: 500_000, runtime: undefined }))).allow).be.true();
+    should((await gate(undefined).decide(input({ compactAt: 500_000 }))).allow).be.true();
+  });
+
+  it('should say so when the published runtimes cannot be read for a codex start that named a trigger', async () => {
+    const answer = await new LaunchGate({
+      source: {
+        facts: async () => {
+          throw new Error('damaged');
+        },
+      },
+      folderSettings: folderWith(),
+    }).decide(input({ harness: 'codex', compactAt: 200_000 }));
+
+    should(answer.allow).be.false();
+    should(refusal(answer)).containEql('compaction trigger cannot be checked');
+  });
+});
+
 describe('LaunchGate.parts', () => {
   it('should be a required source, so Ferrets refuses a launch it cannot answer', () => {
     should(gate(FACTS).parts.required).be.true();

@@ -5,6 +5,7 @@ import {
   type FerretId,
   type FerretState,
   type FerretWaiting,
+  type LaunchOrigin,
   type StartFailure,
   type RestartCancelResult,
   type RestartQueueEntry,
@@ -41,7 +42,8 @@ export interface FerretRestartHost {
    */
   outdated(ferret: FerretId): Promise<readonly LaunchInstructionSectionId[]>;
   stop(ferret: FerretId, reason: string): Promise<void>;
-  resume(ferret: FerretId): Promise<Result<FerretId, StartFailure>>;
+  /** Resumes the ferret FOR `origin`: the one the restart was admitted for, never one the host makes up. */
+  resume(ferret: FerretId, origin: LaunchOrigin): Promise<Result<FerretId, StartFailure>>;
   history(ferret: FerretId, type: string, data: Readonly<Record<string, unknown>>): Promise<void>;
   loadQueue(): Promise<readonly RestartQueueEntry[]>;
   saveQueue(entries: readonly RestartQueueEntry[]): Promise<void>;
@@ -69,10 +71,10 @@ function restartPorts(host: FerretRestartHost): RestartPorts {
       return found === undefined ? undefined : subjectOf(found);
     },
     outdated: async id => await host.outdated(id as FerretId),
-    restart: async (id, requestedBy) => {
+    restart: async (id, origin, requestedBy) => {
       const ferret = id as FerretId;
       await host.stop(ferret, 'restart');
-      const resumed = await host.resume(ferret);
+      const resumed = await host.resume(ferret, origin);
       if (!resumed.ok) throw new Error(resumed.error.reason);
       await host.history(ferret, 'session.restarted', requestedBy === undefined ? {} : { requestedBy });
     },
@@ -100,9 +102,14 @@ export class FerretRestarts implements SessionRestartSubsystem {
     private readonly authority: FerretRestartAuthority,
   ) {}
 
-  async restart(request: RestartRequest, requestId?: string, requestedBy?: string): Promise<RestartResult> {
+  async restart(
+    request: RestartRequest,
+    origin: LaunchOrigin,
+    requestId?: string,
+    requestedBy?: string,
+  ): Promise<RestartResult> {
     const caller = calledBy(requestedBy);
-    if (caller === undefined) return await this.service.restart(request, requestId, requestedBy);
+    if (caller === undefined) return await this.service.restart(request, origin, requestId, requestedBy);
     // A ferret restarts itself and its helpers; the whole fleet is a person's. The ferret it says it is, is the ferret
     // its credential names, never the one the body claims.
     if (request.scope !== 'ids')
@@ -127,7 +134,7 @@ export class FerretRestarts implements SessionRestartSubsystem {
         );
       resolved.push(target);
     }
-    return await this.service.restart({ ...request, ids: resolved, caller }, requestId, requestedBy);
+    return await this.service.restart({ ...request, ids: resolved, caller }, origin, requestId, requestedBy);
   }
 
   async status(): Promise<RestartStatus> {

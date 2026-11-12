@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LaunchOriginSchema } from './launch-origin.ts';
 import { InstantSchema, NonNegativeIntegerSchema } from './view/common.ts';
 import { LaunchInstructionSectionIdSchema } from './view/ferret-view.ts';
 
@@ -73,6 +74,12 @@ export const RestartQueueEntrySchema = z.strictObject({
   onlyIfOutdated: z.boolean(),
   /** Who asked, as a move's `by` names them: `owner`, or `session:<id>`. Absent on a request queued before it was kept. */
   requestedBy: z.string().min(1).optional(),
+  /**
+   * Who the restart is FOR, as the admitted credential decided it when the request was taken (never from `requestedBy`,
+   * which is only the journal's words). The drain launches as this origin. Absent (queued before it was kept): an agent,
+   * which fails closed.
+   */
+  origin: LaunchOriginSchema.optional(),
 });
 export type RestartQueueEntry = z.infer<typeof RestartQueueEntrySchema>;
 

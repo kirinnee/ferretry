@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -184,18 +185,21 @@ const turnFile = (w: World, id: string, turn: number) =>
   `${w.folderOf(id)}/turns/turn-${String(turn).padStart(3, '0')}.md`;
 
 async function started(w: World, prompt?: string, extra: Record<string, unknown> = {}): Promise<string> {
-  const result = await w.service.start({
-    folder: '/work',
-    by: 'owner',
-    ...(prompt === undefined ? {} : { prompt }),
-    ...extra,
-  });
+  const result = await w.service.start(
+    {
+      folder: '/work',
+      by: 'owner',
+      ...(prompt === undefined ? {} : { prompt }),
+      ...extra,
+    },
+    PERSON_ORIGIN,
+  );
   if (!result.ok) throw new Error(`start refused: ${result.error.reason}`);
   return result.value;
 }
 
 const revive = async (w: World, id: string, message?: string, actor?: ResumeActor) =>
-  await w.service.resume(id as never, message, actor === undefined ? undefined : { actor });
+  await w.service.resume(id as never, message, { origin: PERSON_ORIGIN, ...(actor === undefined ? {} : { actor }) });
 
 describe('GAP(deliver) a revive writes the numbered turn, clears the markers and types its pointer', () => {
   test('GAP(deliver) a revive writes its turn and counts it BEFORE the relaunch, so a failed relaunch keeps its document and the retry takes the next number', async () => {
@@ -432,12 +436,16 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
     const port = ferretsPort(w.service, 'warden');
     await w.service.stop(id as never, 'now');
 
-    expect((await port.resume(id as never, 'Carry on.', { automatic: true, actor: 'warden' })).ok).toBe(true);
+    expect(
+      (await port.resume(id as never, 'Carry on.', { origin: PERSON_ORIGIN, automatic: true, actor: 'warden' })).ok,
+    ).toBe(true);
     await w.service.stop(id as never, 'now');
     // Only `warden` and `peer` are forwarded: anything else a caller puts there names nobody.
-    expect((await port.resume(id as never, 'Again.', { actor: 'admin-ui' } as never)).ok).toBe(true);
+    expect((await port.resume(id as never, 'Again.', { origin: PERSON_ORIGIN, actor: 'admin-ui' } as never)).ok).toBe(
+      true,
+    );
     await w.service.stop(id as never, 'now');
-    expect((await port.resume(id as never, 'A peer woke it.', { actor: 'peer' })).ok).toBe(true);
+    expect((await port.resume(id as never, 'A peer woke it.', { origin: PERSON_ORIGIN, actor: 'peer' })).ok).toBe(true);
 
     const turns = await w.files.port.turns?.(id as never, { strict: true });
     expect(turns?.map(turn => turn.by)).toEqual([
@@ -526,7 +534,7 @@ describe('F-0344 todayâ€™s deliverFirstTurn: a start types its assigned taskâ€™s
       await w.files.port.prepare(IDS[0] as never);
       await prepare(w);
 
-      const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' });
+      const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' }, PERSON_ORIGIN);
 
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error.reason).toBe(reason);
@@ -543,7 +551,7 @@ describe('F-0344 todayâ€™s deliverFirstTurn: a start types its assigned taskâ€™s
       throw new Error('FIXTURE_SECRET pane refused');
     };
 
-    const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' });
+    const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' }, PERSON_ORIGIN);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -579,7 +587,7 @@ describe('GAP(deliver) settleStartup: a pane that dies while its harness is stil
       const w = await world();
       w.runner.settled = died(parked);
 
-      const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' });
+      const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' }, PERSON_ORIGIN);
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
@@ -649,7 +657,7 @@ describe('GAP(deliver) settleStartup: a pane that dies while its harness is stil
         screen.includes('workspace routing') ? 'Codex needs a network connection to start.' : undefined,
     });
 
-    const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' });
+    const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' }, PERSON_ORIGIN);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -679,7 +687,7 @@ describe('GAP(deliver) settleStartup: a pane that dies while its harness is stil
       w.runner.lastScreen = async () => 'FIXTURE_SECRET screen';
       Object.assign(w.harness, { startFailure: explain });
 
-      const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' });
+      const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' }, PERSON_ORIGIN);
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
@@ -697,10 +705,10 @@ describe('m2 a resume tells its caller what it decided, under the ferretâ€™s own
     const told: string[] = [];
     const decided = (disposition: string) => void told.push(disposition);
 
-    await w.service.resume(id as never, 'Again.', { decided });
+    await w.service.resume(id as never, 'Again.', { origin: PERSON_ORIGIN, decided });
     await w.service.stop(id as never, 'now');
-    await w.service.resume(id as never, 'Again.', { decided });
-    await w.service.resume('mw7bp88g-0000ffff' as never, 'Again.', { decided });
+    await w.service.resume(id as never, 'Again.', { origin: PERSON_ORIGIN, decided });
+    await w.service.resume('mw7bp88g-0000ffff' as never, 'Again.', { origin: PERSON_ORIGIN, decided });
 
     expect(told).toEqual(['running', 'relaunching']);
   });
@@ -711,6 +719,7 @@ describe('m2 a resume tells its caller what it decided, under the ferretâ€™s own
     await w.service.stop(id as never, 'now');
 
     const resumed = await w.service.resume(id as never, undefined, {
+      origin: PERSON_ORIGIN,
       decided: () => {
         throw new Error('the caller broke');
       },
@@ -730,6 +739,7 @@ describe('M3 a resume tells its caller what it typed for the message (ResumeOpti
     const told: { text: string; turn: number; file: string }[] = [];
 
     const resumed = await w.service.resume(id as never, 'Carry on.', {
+      origin: PERSON_ORIGIN,
       onCarried: typed => {
         // Told AFTER the pointer reached the pane, never before.
         expect(w.runner.deliveries).toHaveLength(typedBefore + 1);
@@ -747,7 +757,7 @@ describe('M3 a resume tells its caller what it typed for the message (ResumeOpti
     const id = await started(w);
     const told: unknown[] = [];
 
-    await w.service.resume(id as never, 'Again.', { onCarried: typed => void told.push(typed) });
+    await w.service.resume(id as never, 'Again.', { origin: PERSON_ORIGIN, onCarried: typed => void told.push(typed) });
 
     expect(told).toEqual([]);
   });
@@ -759,7 +769,10 @@ describe('M3 a resume tells its caller what it typed for the message (ResumeOpti
     w.runner.refuseStarts = 1;
     const told: unknown[] = [];
 
-    const resumed = await w.service.resume(id as never, 'Again.', { onCarried: typed => void told.push(typed) });
+    const resumed = await w.service.resume(id as never, 'Again.', {
+      origin: PERSON_ORIGIN,
+      onCarried: typed => void told.push(typed),
+    });
 
     expect(resumed.ok).toBe(false);
     expect(told).toEqual([]);
@@ -771,6 +784,7 @@ describe('M3 a resume tells its caller what it typed for the message (ResumeOpti
     await w.service.stop(id as never, 'now');
 
     const resumed = await w.service.resume(id as never, 'Again.', {
+      origin: PERSON_ORIGIN,
       onCarried: () => {
         throw new Error('the caller broke');
       },
@@ -1060,7 +1074,7 @@ describe('ruling #31b: the start writes the session document, and strict ancestr
     expect(before.storage.findSession(leadId)).toBeDefined();
     expect(await before.storage.readConfig(leadId)).toBeUndefined();
     // Today's rule, kept: with an indexed ferret holding no document, a child's stamp cannot be proved.
-    const refused = await before.service.start({ folder: '/work', by: 'owner', parent: lead as never });
+    const refused = await before.service.start({ folder: '/work', by: 'owner', parent: lead as never }, PERSON_ORIGIN);
     expect(refused.ok).toBe(false);
 
     // A daemon restart: the boot backfill documents the lead, and the strict ancestry then accepts a child of it.
@@ -1078,7 +1092,7 @@ describe('ruling #31b: the start writes the session document, and strict ancestr
     // Damaged on disk as a crash or a hand edit would leave it (the store itself refuses to write such a document).
     w.state.plant(FerretConfigFile, '{"format": 1, "label": "FIXTURE_SECRET-', lead);
 
-    const child = await w.service.start({ folder: '/work', by: 'owner', parent: lead as never });
+    const child = await w.service.start({ folder: '/work', by: 'owner', parent: lead as never }, PERSON_ORIGIN);
 
     expect(child.ok).toBe(false);
     if (!child.ok) {
@@ -1098,7 +1112,7 @@ describe('KCB-S B1 a non-warden consumer cannot stamp a ferret into the Wardenâ€
   async function wardenTree(w: World) {
     const warden = ferretsPort(w.service, 'warden');
     const start = async (extra: Record<string, unknown>) => {
-      const result = await warden.start({ folder: '/work', by: 'warden', ...extra } as never);
+      const result = await warden.start({ folder: '/work', by: 'warden', ...extra } as never, PERSON_ORIGIN);
       if (!result.ok) throw new Error(`start refused: ${result.error.reason}`);
       return result.value as string;
     };
@@ -1128,7 +1142,9 @@ describe('KCB-S B1 a non-warden consumer cannot stamp a ferret into the Wardenâ€
     const packs = ferretsPort(w.service, 'packs');
 
     for (const parent of [child, grandchild])
-      expect(await packs.start({ folder: '/work', by: 'pack', parent: parent as never })).toEqual(REFUSED);
+      expect(await packs.start({ folder: '/work', by: 'pack', parent: parent as never }, PERSON_ORIGIN)).toEqual(
+        REFUSED,
+      );
 
     expect(w.registry.list()).toHaveLength(records);
     expect(w.runner.starts).toBe(starts);
@@ -1141,7 +1157,10 @@ describe('KCB-S B1 a non-warden consumer cannot stamp a ferret into the Wardenâ€
   test('J-0057 KCB-S B1 a packs start under an ordinary lead still starts', async () => {
     const w = await world();
     const lead = await started(w);
-    const result = await ferretsPort(w.service, 'packs').start({ folder: '/work', by: 'pack', parent: lead as never });
+    const result = await ferretsPort(w.service, 'packs').start(
+      { folder: '/work', by: 'pack', parent: lead as never },
+      PERSON_ORIGIN,
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       const stamped = SessionConfigSchema.parse(await w.storage.readConfig(parseSessionId(result.value)));
@@ -1157,9 +1176,12 @@ describe('KCB-S B1 a non-warden consumer cannot stamp a ferret into the Wardenâ€
     // The ancestor documents cannot be read for the check (the same strict snapshot the stamp takes).
     w.state.plant(FerretConfigFile, '{"format": 1, "label": "FIXTURE_SECRET-', lead);
 
-    expect(await ferretsPort(w.service, 'packs').start({ folder: '/work', by: 'pack', parent: lead as never })).toEqual(
-      REFUSED,
-    );
+    expect(
+      await ferretsPort(w.service, 'packs').start(
+        { folder: '/work', by: 'pack', parent: lead as never },
+        PERSON_ORIGIN,
+      ),
+    ).toEqual(REFUSED);
     expect(w.runner.starts).toBe(starts);
     expect(w.registry.list()).toHaveLength(records);
   });
@@ -1324,12 +1346,15 @@ describe('V-0443 a start carries its attachments with the opening message', () =
     ];
     for (const [, source, prompt, reason] of cases) {
       const w = await world([], undefined, true, source);
-      const result = await w.service.start({
-        folder: '/work',
-        by: 'owner',
-        ...(prompt === undefined ? {} : { prompt }),
-        options: { ...attached, ...(prompt === undefined ? { mode: 'interactive' as const } : {}) },
-      });
+      const result = await w.service.start(
+        {
+          folder: '/work',
+          by: 'owner',
+          ...(prompt === undefined ? {} : { prompt }),
+          options: { ...attached, ...(prompt === undefined ? { mode: 'interactive' as const } : {}) },
+        },
+        PERSON_ORIGIN,
+      );
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.error.code).toBe('refused');

@@ -1,17 +1,21 @@
 import { ApiError, type KernelPorts, type RouteHandler, type SocketAccept } from '@ferretry/kernel/contract';
 import { type AskId, AskIdSchema, type AsksApi } from '@ferretry/core-asks/contract';
-import type {
-  FerretsApi,
-  FerretSummary,
-  FerretTurnAuthor,
-  QueueOutcome,
-  SitrepLineSource,
+import {
+  AGENT_ORIGIN,
+  type FerretsApi,
+  type FerretSummary,
+  type FerretTurnAuthor,
+  type LaunchOrigin,
+  PERSON_ORIGIN,
+  type QueueOutcome,
+  type SitrepLineSource,
 } from '@ferretry/core-ferrets/contract';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { Instant } from '@ferretry/std';
 import { err, milliseconds, ok } from '@ferretry/std';
 import {
   type ConversationApi,
+  type ConversationCaller,
   type ConversationRefusal,
   MessageBeforeSend,
   PEER_MESSAGE_LABELS,
@@ -192,6 +196,11 @@ const statusOf = (ferret: FerretSummary): SessionStatus => {
  * changes WHEN a message goes (held to the turn's end); `action` and `blocker` type at once, as the seam does.
  */
 interface UnwiredSend {
+  /**
+   * Who a revive this send causes is FOR: the admitted credential's, never the sender's attribution. Required, so a caller
+   * that does not say who is sending does not compile.
+   */
+  readonly origin: LaunchOrigin;
   readonly attachmentIds?: readonly string[] | undefined;
   readonly label?: unknown;
   readonly now?: boolean | undefined;
@@ -206,6 +215,17 @@ const payloadOf = (message: string): string => {
     return sendRefusal(error);
   }
 };
+
+/**
+ * Who a send on the PORT is for: the owner is a person; a ferret, and the Warden speaking, are agents (the Warden has no
+ * ferret behind it). The caller the kernel bound the port to is the only source: a request field names nothing here.
+ */
+const originOfCaller = (caller: ConversationCaller): LaunchOrigin =>
+  caller.kind === 'owner'
+    ? PERSON_ORIGIN
+    : caller.kind === 'ferret'
+      ? { kind: 'agent', ferret: caller.ferret }
+      : AGENT_ORIGIN;
 
 /** A triage label a peer's banner can carry (the route and the port parse it; anything else carries none). */
 const bannerLabel = (label: unknown): PeerMessageLabel | undefined =>
@@ -536,7 +556,7 @@ export function buildConversationA(deps: {
    * interrupt gate is closed, as it presses a stop key. A field is refused only when it asks for something: the CLI always sends `now: false`
    * and a label (`action` by default), and those type exactly as the seam types.
    */
-  const mayGo = (request: UnwiredSend): void => {
+  const mayGo = (request: Omit<UnwiredSend, 'origin'>): void => {
     if (!gate.send) pending(SEND_UNAVAILABLE);
     // A send-now presses a stop key: with the interrupt gate closed (a stop could quit the agent) it presses nothing, so
     // it types nothing either.
@@ -774,6 +794,8 @@ export function buildConversationA(deps: {
     const told: { typed?: { readonly text: string; readonly turn: number } } = {};
     const resumed = await ferrets
       .resume(ferret, text, {
+        // The origin of the send itself: the credential's, carried from the route or the port, so a revive keeps it.
+        origin: request.origin,
         onCarried: typed => {
           told.typed = typed;
         },
@@ -1126,6 +1148,8 @@ export function buildConversationA(deps: {
             ...(request.label === undefined ? {} : { label: request.label }),
             ...(request.now === undefined ? {} : { now: request.now }),
             ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
+            // Who the send is for follows the caller the port was given: the owner is a person; a ferret and the Warden are agents.
+            origin: originOfCaller(caller),
             // The route and the port follow one rule: a ferret is the message's SENDER, never a different target's rule.
             ...(caller.kind === 'ferret' ? { senderSessionId: caller.ferret } : {}),
             ...(caller.kind === 'warden' ? { warden: true as const } : {}),

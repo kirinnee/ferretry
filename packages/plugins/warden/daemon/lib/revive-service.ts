@@ -21,7 +21,9 @@
  * already spent the cooldown of those it revived and will not revive them twice.
  */
 
+import type { LaunchOrigin } from '@ferretry/core-ferrets/contract';
 import type { WardenAction, WardenConfig } from './protocol.ts';
+import { WARDEN_SWEEP_ORIGIN } from './remedy.ts';
 import {
   breakerVerdict,
   causeKey,
@@ -69,7 +71,7 @@ export interface WardenReviveNotice {
 export interface WardenRevivePorts {
   readonly events: WardenReviveEvents;
   /** Start the session again with `message` as its turn. Total: a refusal is `{ok:false}`, never a throw. */
-  resume(sessionId: string, message: string): Promise<WardenResumeOutcome>;
+  resume(sessionId: string, message: string, origin: LaunchOrigin): Promise<WardenResumeOutcome>;
   /** Whether the daemon's tmux server answers. */
   tmuxReady(): Promise<boolean>;
   sleep(ms: number): Promise<void>;
@@ -286,6 +288,8 @@ export class WardenReviveService {
     const outcome = await this.ports.resume(
       planned.id,
       reviveMessage(planned.cause, planned.diedAt, planned.mode, card),
+      // Nobody asked for this revive: the Warden did, unattended, so it is an agent's launch.
+      WARDEN_SWEEP_ORIGIN,
     );
     const key = deathKey(planned);
     if (!outcome.ok) {

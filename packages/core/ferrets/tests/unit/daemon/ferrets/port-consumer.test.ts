@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { expect, test } from 'bun:test';
 import { ok } from '@ferretry/std';
 import type { FerretId, FerretsApi } from '../../../../contract/index.ts';
@@ -50,31 +51,37 @@ const REFUSED_RESUME = {
 test('KCB-S resume actor warden is refused from a non-warden consumer, and nothing is resumed', async () => {
   const w = spy();
   for (const consumer of ['board', 'lessons', 'usage', ''])
-    expect(await w.port(consumer).resume(F1, 'carry on', { automatic: true, actor: 'warden' })).toEqual(REFUSED_RESUME);
+    expect(
+      await w.port(consumer).resume(F1, 'carry on', { origin: PERSON_ORIGIN, automatic: true, actor: 'warden' }),
+    ).toEqual(REFUSED_RESUME);
   expect(w.reached).toEqual([]);
 });
 
 test('KCB-S resume actor warden is accepted from the Warden, and a plain resume from anyone', async () => {
   const w = spy();
-  expect((await w.port('warden').resume(F1, 'carry on', { automatic: true, actor: 'warden' })).ok).toBe(true);
-  expect((await w.port('board').resume(F1, 'carry on', { automatic: true })).ok).toBe(true);
+  expect(
+    (await w.port('warden').resume(F1, 'carry on', { origin: PERSON_ORIGIN, automatic: true, actor: 'warden' })).ok,
+  ).toBe(true);
+  expect((await w.port('board').resume(F1, 'carry on', { origin: PERSON_ORIGIN, automatic: true })).ok).toBe(true);
   expect(w.reached.map(r => [r.member, r.args[2]])).toEqual([
-    ['resume', { automatic: true, actor: 'warden' }],
-    ['resume', { automatic: true }],
+    ['resume', { origin: PERSON_ORIGIN, automatic: true, actor: 'warden' }],
+    ['resume', { origin: PERSON_ORIGIN, automatic: true }],
   ]);
 });
 
 test('KCB-S resume actor peer is forwarded from any consumer, unbound, while warden from the same consumer is refused', async () => {
   const w = spy();
   for (const consumer of ['board', 'lessons', 'warden'])
-    expect((await w.port(consumer).resume(F1, 'carry on', { actor: 'peer' })).ok).toBe(true);
+    expect((await w.port(consumer).resume(F1, 'carry on', { origin: PERSON_ORIGIN, actor: 'peer' })).ok).toBe(true);
   expect(w.reached.map(r => [r.member, r.args[2]])).toEqual([
-    ['resume', { actor: 'peer' }],
-    ['resume', { actor: 'peer' }],
-    ['resume', { actor: 'peer' }],
+    ['resume', { origin: PERSON_ORIGIN, actor: 'peer' }],
+    ['resume', { origin: PERSON_ORIGIN, actor: 'peer' }],
+    ['resume', { origin: PERSON_ORIGIN, actor: 'peer' }],
   ]);
   w.reached.length = 0;
-  expect(await w.port('board').resume(F1, 'carry on', { actor: 'warden' })).toEqual(REFUSED_RESUME);
+  expect(await w.port('board').resume(F1, 'carry on', { origin: PERSON_ORIGIN, actor: 'warden' })).toEqual(
+    REFUSED_RESUME,
+  );
   expect(w.reached).toEqual([]);
 });
 
@@ -86,13 +93,18 @@ test('KCB-S a start under the Warden label is refused from a non-warden consumer
   } as const;
   for (const consumer of ['board', 'packs', 'lessons', ''])
     for (const label of ['fleet-warden', '  fleet-warden  '])
-      expect(await w.port(consumer).start({ folder: '/work', by: 'owner', options: { label } })).toEqual(refusal);
+      expect(await w.port(consumer).start({ folder: '/work', by: 'owner', options: { label } }, PERSON_ORIGIN)).toEqual(
+        refusal,
+      );
   expect(w.reached).toEqual([]);
 
-  expect((await w.port('warden').start({ folder: '/work', by: 'owner', options: { label: 'fleet-warden' } })).ok).toBe(
-    true,
-  );
-  expect((await w.port('board').start({ folder: '/work', by: 'owner', options: { label: 'my-label' } })).ok).toBe(true);
+  expect(
+    (await w.port('warden').start({ folder: '/work', by: 'owner', options: { label: 'fleet-warden' } }, PERSON_ORIGIN))
+      .ok,
+  ).toBe(true);
+  expect(
+    (await w.port('board').start({ folder: '/work', by: 'owner', options: { label: 'my-label' } }, PERSON_ORIGIN)).ok,
+  ).toBe(true);
   expect(w.reached).toHaveLength(2);
 });
 
@@ -105,8 +117,12 @@ test('J-0057 KCB-S a packs start with an ordinary parent is admitted, and the se
   const lead = 'lead' as FerretId;
   const w = spy({ lead: { id: lead, label: 'my-lead', provenance: { wardenLineage: false } }, bare: { id: 'bare' } });
   for (const consumer of ['packs', 'board', 'lessons', ''])
-    expect((await w.port(consumer).start({ folder: '/work', by: 'ferret', parent: lead })).ok).toBe(true);
-  expect((await w.port('packs').start({ folder: '/work', by: 'pack', parent: 'bare' as FerretId })).ok).toBe(true);
+    expect((await w.port(consumer).start({ folder: '/work', by: 'ferret', parent: lead }, PERSON_ORIGIN)).ok).toBe(
+      true,
+    );
+  expect(
+    (await w.port('packs').start({ folder: '/work', by: 'pack', parent: 'bare' as FerretId }, PERSON_ORIGIN)).ok,
+  ).toBe(true);
   expect(w.reached.map(r => (r.args[0] as { parent?: string }).parent)).toEqual([lead, lead, lead, lead, 'bare']);
 });
 
@@ -118,22 +134,24 @@ test('KCB-S a start under a Warden-labelled or Warden-lineage parent is refused 
   });
   for (const consumer of ['board', 'packs', 'lessons', ''])
     for (const parent of ['labelled', 'padded', 'stamped'] as const)
-      expect(await w.port(consumer).start({ folder: '/work', by: 'owner', parent: parent as FerretId })).toEqual(
-        PARENT_REFUSAL,
-      );
+      expect(
+        await w.port(consumer).start({ folder: '/work', by: 'owner', parent: parent as FerretId }, PERSON_ORIGIN),
+      ).toEqual(PARENT_REFUSAL);
   expect(w.reached).toEqual([]);
 
   for (const parent of ['labelled', 'stamped'] as const)
-    expect((await w.port('warden').start({ folder: '/work', by: 'owner', parent: parent as FerretId })).ok).toBe(true);
+    expect(
+      (await w.port('warden').start({ folder: '/work', by: 'owner', parent: parent as FerretId }, PERSON_ORIGIN)).ok,
+    ).toBe(true);
   expect(w.reached.map(r => (r.args[0] as { parent?: string }).parent)).toEqual(['labelled', 'stamped']);
 });
 
 test('KCB-S a start under a parent that cannot be read is refused from a non-warden consumer (fail closed), and nothing is started', async () => {
   const w = spy({ broken: new Error('registry unavailable') });
   for (const parent of ['broken', 'unknown'] as const)
-    expect(await w.port('packs').start({ folder: '/work', by: 'pack', parent: parent as FerretId })).toEqual(
-      PARENT_REFUSAL,
-    );
+    expect(
+      await w.port('packs').start({ folder: '/work', by: 'pack', parent: parent as FerretId }, PERSON_ORIGIN),
+    ).toEqual(PARENT_REFUSAL);
   expect(w.reached).toEqual([]);
 });
 
@@ -144,25 +162,29 @@ test('KCB-S B1 a start under a parent the session documents put in the Warden’
     { stamped: true },
   );
   for (const consumer of ['board', 'packs', 'lessons', ''])
-    expect(await w.port(consumer).start({ folder: '/work', by: 'owner', parent: 'stamped' as FerretId })).toEqual(
-      PARENT_REFUSAL,
-    );
+    expect(
+      await w.port(consumer).start({ folder: '/work', by: 'owner', parent: 'stamped' as FerretId }, PERSON_ORIGIN),
+    ).toEqual(PARENT_REFUSAL);
   expect(w.reached).toEqual([]);
   expect(w.asked).toEqual(['stamped', 'stamped', 'stamped', 'stamped']);
 
   // The Warden asks nobody and starts; an ordinary parent is admitted after the same check says no.
   w.asked.length = 0;
-  expect((await w.port('warden').start({ folder: '/work', by: 'owner', parent: 'stamped' as FerretId })).ok).toBe(true);
+  expect(
+    (await w.port('warden').start({ folder: '/work', by: 'owner', parent: 'stamped' as FerretId }, PERSON_ORIGIN)).ok,
+  ).toBe(true);
   expect(w.asked).toEqual([]);
-  expect((await w.port('packs').start({ folder: '/work', by: 'pack', parent: 'plain' as FerretId })).ok).toBe(true);
+  expect(
+    (await w.port('packs').start({ folder: '/work', by: 'pack', parent: 'plain' as FerretId }, PERSON_ORIGIN)).ok,
+  ).toBe(true);
   expect(w.asked).toEqual(['plain']);
 });
 
 test('KCB-S B1 a start under a parent whose session documents cannot be read is refused from a non-warden consumer (fail closed), and nothing is started', async () => {
   const w = spy({ torn: { id: 'torn', label: 'helper' } }, { torn: new Error('damaged ancestor') });
-  expect(await w.port('packs').start({ folder: '/work', by: 'pack', parent: 'torn' as FerretId })).toEqual(
-    PARENT_REFUSAL,
-  );
+  expect(
+    await w.port('packs').start({ folder: '/work', by: 'pack', parent: 'torn' as FerretId }, PERSON_ORIGIN),
+  ).toEqual(PARENT_REFUSAL);
   expect(w.reached).toEqual([]);
   expect(w.asked).toEqual(['torn']);
 });
@@ -177,7 +199,7 @@ test('KCB-S a start and a move forward a rebuilt copy, so a getter cannot answer
     },
   };
   const asked = { folder: '/work', by: 'owner' as const, options };
-  expect((await w.port('board').start(asked)).ok).toBe(true);
+  expect((await w.port('board').start(asked, PERSON_ORIGIN)).ok).toBe(true);
   const sent = w.reached[0]!.args[0] as { options: { label: string } };
   expect(sent).not.toBe(asked);
   expect(sent.options).not.toBe(options);
@@ -186,6 +208,7 @@ test('KCB-S a start and a move forward a rebuilt copy, so a getter cannot answer
 
   let moveReads = 0;
   const moveOptions = {
+    origin: PERSON_ORIGIN,
     get movedBy() {
       return ++moveReads === 1 ? 'owner' : 'warden';
     },
@@ -209,7 +232,7 @@ test('KCB-S a start reads options once, so a getter on options itself cannot ans
       return ++reads === 1 ? first : { label: 'fleet-warden' };
     },
   };
-  expect((await w.port('board').start(asked)).ok).toBe(true);
+  expect((await w.port('board').start(asked, PERSON_ORIGIN)).ok).toBe(true);
   const sent = w.reached[0]!.args[0] as { options: { label: string } };
   expect(reads).toBe(1);
   expect(sent.options).not.toBe(first);
@@ -224,7 +247,7 @@ test('KCB-S a start reads options once, so a getter on options itself cannot ans
       return ++reads2 === 1 ? first : undefined;
     },
   };
-  expect((await w.port('board').start(vanishing)).ok).toBe(true);
+  expect((await w.port('board').start(vanishing, PERSON_ORIGIN)).ok).toBe(true);
   const sent2 = w.reached[1]!.args[0] as { options: { label: string } };
   expect(reads2).toBe(1);
   expect(sent2.options).not.toBe(first);
@@ -235,9 +258,9 @@ test('KCB-S move actor warden and movedBy warden are refused from a non-warden c
   const w = spy();
   const board = w.port('board');
   const answers = [
-    await board.move!(F1, 'codex-two', { actor: 'warden' }),
-    await board.move!(F1, 'codex-two', { movedBy: 'warden' }),
-    await board.move!(F1, 'codex-two', { actor: 'warden', movedBy: 'warden', note: 'x' }),
+    await board.move!(F1, 'codex-two', { origin: PERSON_ORIGIN, actor: 'warden' }),
+    await board.move!(F1, 'codex-two', { origin: PERSON_ORIGIN, movedBy: 'warden' }),
+    await board.move!(F1, 'codex-two', { origin: PERSON_ORIGIN, actor: 'warden', movedBy: 'warden', note: 'x' }),
   ];
   for (const answer of answers) expect(answer).toEqual(REFUSED_RESUME);
   expect(w.reached).toEqual([]);
@@ -245,9 +268,9 @@ test('KCB-S move actor warden and movedBy warden are refused from a non-warden c
 
 test('KCB-S move by the Warden reaches the service, and another consumer’s own attribution (owner, session) still does', async () => {
   const w = spy();
-  await w.port('warden').move!(F1, 'codex-two', { actor: 'warden', movedBy: 'warden' });
-  await w.port('board').move!(F1, 'codex-two', { movedBy: 'session:lead' });
-  await w.port('board').move!(F1, 'codex-two');
+  await w.port('warden').move!(F1, 'codex-two', { origin: PERSON_ORIGIN, actor: 'warden', movedBy: 'warden' });
+  await w.port('board').move!(F1, 'codex-two', { origin: PERSON_ORIGIN, movedBy: 'session:lead' });
+  await w.port('board').move!(F1, 'codex-two', { origin: PERSON_ORIGIN });
   expect(w.reached.map(r => r.member)).toEqual(['move', 'move', 'move']);
 });
 
@@ -267,7 +290,7 @@ test('KCB-S2 F2 (row 17) a move names who moved it only as owner, session:<ferre
   ];
   for (const consumer of ['board', 'warden'])
     for (const movedBy of odd)
-      expect(await w.port(consumer).move!(F1, 'codex-two', { movedBy })).toEqual({
+      expect(await w.port(consumer).move!(F1, 'codex-two', { origin: PERSON_ORIGIN, movedBy })).toEqual({
         ok: false,
         error: { code: 'refused', reason: 'a move names who moved it as owner, session:<ferret id> or warden' },
       });
@@ -277,16 +300,20 @@ test('KCB-S2 F2 (row 17) a move names who moved it only as owner, session:<ferre
   const cast = [42, { startsWith: () => true, slice: () => 'abc' }, new String('owner')];
   for (const consumer of ['board', 'warden'])
     for (const movedBy of cast)
-      expect(await w.port(consumer).move!(F1, 'codex-two', { movedBy: movedBy as unknown as string })).toEqual({
+      expect(
+        await w.port(consumer).move!(F1, 'codex-two', { origin: PERSON_ORIGIN, movedBy: movedBy as unknown as string }),
+      ).toEqual({
         ok: false,
         error: { code: 'refused', reason: 'a move names who moved it as owner, session:<ferret id> or warden' },
       });
   expect(w.reached).toEqual([]);
 
   // The three spellings go through; 'warden' only from the Warden (unchanged).
-  expect((await w.port('board').move!(F1, 'codex-two', { movedBy: 'owner' })).ok).toBe(true);
-  expect((await w.port('board').move!(F1, 'codex-two', { movedBy: 'session:mw7bp88g-50e00159' })).ok).toBe(true);
-  expect((await w.port('warden').move!(F1, 'codex-two', { movedBy: 'warden' })).ok).toBe(true);
+  expect((await w.port('board').move!(F1, 'codex-two', { origin: PERSON_ORIGIN, movedBy: 'owner' })).ok).toBe(true);
+  expect(
+    (await w.port('board').move!(F1, 'codex-two', { origin: PERSON_ORIGIN, movedBy: 'session:mw7bp88g-50e00159' })).ok,
+  ).toBe(true);
+  expect((await w.port('warden').move!(F1, 'codex-two', { origin: PERSON_ORIGIN, movedBy: 'warden' })).ok).toBe(true);
   expect(w.reached.map(r => (r.args[2] as { movedBy: string }).movedBy)).toEqual([
     'owner',
     'session:mw7bp88g-50e00159',
@@ -311,14 +338,15 @@ test('ci-lane-s F1 (row 55) a start through the port as a non-warden consumer is
   const ordinary = { folder: '/work', by: 'ferret' as const, parent: 'lead' as FerretId };
   for (const consumer of ['packs', 'board', 'lessons', '']) {
     w.reached.length = 0;
-    expect((await w.port(consumer).start(ordinary)).ok).toBe(true);
+    expect((await w.port(consumer).start(ordinary, PERSON_ORIGIN)).ok).toBe(true);
     // the start is also admitted as such when it names no parent (a label alone could mark the tree)
-    expect((await w.port(consumer).start({ folder: '/work', by: 'owner' })).ok).toBe(true);
-    expect(w.reached.map(r => r.args[1])).toEqual([{ notInWardenTree: true }, { notInWardenTree: true }]);
+    expect((await w.port(consumer).start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN)).ok).toBe(true);
+    expect(w.reached.map(r => r.args[2])).toEqual([{ notInWardenTree: true }, { notInWardenTree: true }]);
+    expect(w.reached.map(r => r.args[1])).toEqual([PERSON_ORIGIN, PERSON_ORIGIN]);
   }
   w.reached.length = 0;
-  expect((await w.port('warden').start(ordinary)).ok).toBe(true);
-  expect(w.reached.map(r => r.args[1])).toEqual([undefined]);
+  expect((await w.port('warden').start(ordinary, PERSON_ORIGIN)).ok).toBe(true);
+  expect(w.reached.map(r => r.args[2])).toEqual([undefined]);
 });
 
 test('KCB-S systemCallsign draws only the prefix of the consumer’s own kind', async () => {
@@ -355,14 +383,18 @@ test('KCB-S a start by warden, pack or board is accepted only from that plugin; 
     ['board', 'board'],
   ] as const;
   for (const [plugin, by] of bound) {
-    expect((await w.port(plugin).start(request(by))).ok).toBe(true);
+    expect((await w.port(plugin).start(request(by), PERSON_ORIGIN)).ok).toBe(true);
     for (const other of ['board', 'packs', 'warden', 'lessons'].filter(id => id !== plugin))
-      expect(await w.port(other).start(request(by))).toMatchObject({ ok: false, error: { code: 'refused' } });
+      expect(await w.port(other).start(request(by), PERSON_ORIGIN)).toMatchObject({
+        ok: false,
+        error: { code: 'refused' },
+      });
   }
   expect(w.reached).toHaveLength(bound.length);
   w.reached.length = 0;
 
   for (const consumer of ['board', 'lessons', 'warden'])
-    for (const by of ['owner', 'ferret'] as const) expect((await w.port(consumer).start(request(by))).ok).toBe(true);
+    for (const by of ['owner', 'ferret'] as const)
+      expect((await w.port(consumer).start(request(by), PERSON_ORIGIN)).ok).toBe(true);
   expect(w.reached).toHaveLength(6);
 });

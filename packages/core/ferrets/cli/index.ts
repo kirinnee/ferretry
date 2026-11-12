@@ -71,10 +71,10 @@ const SESSION_USAGE = [
 
 /**
  * The flags of `fy new` that are not Ferrets' start: continuing an existing conversation (`--continue`, `--since`)
- * and where it compacts are the Conversation's, a scratch-folder override is not a field of the start, and a start's idempotency key and attachments are `fy start`'s alone. The model routing (`--model`, `--effort`, `--auto`), `--card` and
+ * are the Conversation's, a scratch-folder override is not a field of the start, and a start's idempotency key and attachments are `fy start`'s alone. The model routing (`--model`, `--effort`, `--auto`), `--card` and
  * `--name <title>` are sent with the start.
  */
-const NEW_FLAGS_ELSEWHERE = ['continue', 'since', 'allow-scratch', 'compact-at', 'request-id', 'file', 'f'];
+const NEW_FLAGS_ELSEWHERE = ['continue', 'since', 'allow-scratch', 'request-id', 'file', 'f'];
 
 /**
  * How a refused flag is named back to the caller: a flag with a short spelling is named by both (`-f/--file`), whichever
@@ -179,6 +179,7 @@ export default implementCli(manifest, {
         const effort = text(invocation, 'effort');
         const fast = choice(invocation, 'fast');
         const remoteControl = choice(invocation, 'rc');
+        const compactAt = text(invocation, 'compact-at');
         const harnessFlags = listOf(invocation, 'harness-flag');
         const numbers = {
           interval: count(invocation, 'interval'),
@@ -198,6 +199,7 @@ export default implementCli(manifest, {
           ...(effort === undefined ? {} : { effort }),
           ...(fast === undefined ? {} : { fast }),
           ...(remoteControl === undefined ? {} : { remoteControl }),
+          ...(compactAt === undefined ? {} : { compactAt }),
           ...(harnessFlags.length === 0 ? {} : { harnessFlags }),
           ...(auto ? { auto: true } : {}),
           ...Object.fromEntries(Object.entries(numbers).filter(([, value]) => value !== undefined)),

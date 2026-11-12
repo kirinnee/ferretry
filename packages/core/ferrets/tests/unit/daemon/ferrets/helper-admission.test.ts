@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { expect, test } from 'bun:test';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { FerretsPort, FerretTokensFile, StartDecide } from '../../../../contract/index.ts';
@@ -54,11 +55,14 @@ test('G12 R-0332 helper starts fail closed when Packs is absent, including the p
   const h = await host([record('lead')], { harness: new FakeHarness(), runner, plugins: [portConsumer('packs')] });
   expectUnanswered(await childStart(h));
   await expect(
-    h.provided(FerretsPort, 'packs').start({
-      folder: '/work/child',
-      parent: ferretId('lead'),
-      by: 'pack',
-    }),
+    h.provided(FerretsPort, 'packs').start(
+      {
+        folder: '/work/child',
+        parent: ferretId('lead'),
+        by: 'pack',
+      },
+      PERSON_ORIGIN,
+    ),
   ).rejects.toMatchObject({ status: 503, code: 'helper_admission_unavailable' });
   expect(runner.starts).toBe(0);
   expect((await h.request('GET', '/v1/ferrets')).json<unknown[]>()).toHaveLength(1);
@@ -145,12 +149,13 @@ test("G12 R-0332 a start cast to by:'resume' through the provided port is refuse
   const packs = fakePacks();
   const h = await host([record('lead')], { harness: new FakeHarness(), runner, plugins: [packs.plugin] });
   const port = h.provided(FerretsPort);
-  const cast = (by: string) => port.start({ folder: '/work/child', parent: ferretId('lead'), by: by as 'pack' });
+  const cast = (by: string) =>
+    port.start({ folder: '/work/child', parent: ferretId('lead'), by: by as 'pack' }, PERSON_ORIGIN);
 
   // Act
   const resumeCast = await cast('resume');
   const unknown = await cast('nobody');
-  const lead = await port.start({ folder: '/work/lead', by: 'resume' as 'owner' });
+  const lead = await port.start({ folder: '/work/lead', by: 'resume' as 'owner' }, PERSON_ORIGIN);
 
   // Assert: the port's own refusal shape, nothing asked, nothing written or launched.
   for (const answer of [resumeCast, unknown, lead]) {
@@ -218,7 +223,7 @@ test('G12 a Warden resume of a child goes through the same admission (Packs abse
     runner,
     plugins: [packs.plugin, portConsumer('warden')],
   });
-  const warden = { automatic: true, actor: 'warden' } as const;
+  const warden = { origin: PERSON_ORIGIN, automatic: true, actor: 'warden' } as const;
 
   // Act
   const refused = absent.provided(FerretsPort, 'warden').resume(ferretId('child'), 'carry on', warden);
@@ -326,7 +331,11 @@ test('G12 R-0332 a resume whose Packs hangs is refused at the bound, so a stop q
 
   // Act: a Warden revive waits on Packs; a stop of the same ferret queues behind it.
   const settled: string[] = [];
-  const resumed = port.resume(ferretId('child'), 'carry on', { automatic: true, actor: 'warden' });
+  const resumed = port.resume(ferretId('child'), 'carry on', {
+    origin: PERSON_ORIGIN,
+    automatic: true,
+    actor: 'warden',
+  });
   const resumeEnded = resumed.then(
     () => settled.push('resume'),
     () => settled.push('resume'),

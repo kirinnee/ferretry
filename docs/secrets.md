@@ -302,11 +302,18 @@ by everyone …`), nothing is written or narrowed, and the runner is not called.
   the child environment is resolved). A change refuses the launch (`409 refused`, "no longer what was checked") and nothing is spawned.
   An **agent's** start of a folder inside the state home is refused `403 state_home` at the route (`stateHomeReach` now answers from
   `bindDirectory`, so an ordinary agent start in a project works, and a fence the kernel cannot compute is `503 state_home_unresolved`)
-  and again by the service. A **resume** has a caller too: the route passes whether it is an agent (`byAgent`, from the credential, not the
-  attribution-only `actor`), and the folder the resume binds NOW is judged by the same state-home policy as an agent's start, so a project
-  swapped for a link into the state home before the resume is refused (`403`-class `refused`, zero runner starts) and `verify()` is
-  not the only defence. A person's or the daemon's own resume is not fenced out. A **move**'s relaunch is not covered (its route is an
-  unbound skeleton on this base and carries no caller into the service): the day it is bound it must pass the caller the same way.
+  and again by the service. **Every entry that can launch a process takes the launch's ORIGIN**, a required parameter with no default
+  (`LaunchOrigin`: `person`, `daemon` or `agent`), derived only from the admitted credential and never from an attribution field
+  (`actor`, `requestedBy`, `movedBy`, `by`), so a caller that forgets to say who it acts for does not compile: start, resume,
+  an immediate or a queued restart, the consumer port the Warden and the Conversation use, an adoption and a move's relaunch.
+  The folder the launch binds NOW is judged by the same state-home policy for every **agent** origin (a ferret's token, the admin
+  token with a ferret behind it, the Warden), so a project swapped for a link into the state home before the relaunch is refused
+  (`refused`, zero runner starts) and `verify()` is not the only defence. A queued restart keeps its origin in the queue, and an
+  item queued without one drains as an agent's (fails closed). The Warden's own sweep and auto-revive have no person behind
+  them and run as an agent's; the boot auto-resume is the daemon's own recovery and, like a person's, is not fenced out. A port
+  caller whose origin is missing or not a `LaunchOrigin` is refused before anything is asked. A **move**'s route is mounted but
+  its relaunch dependencies are unbound on this base (503 `plugin_unavailable`); its relaunch binding already requires the
+  route's origin and refuses to launch without one, so enabling its dependencies cannot open a gap.
 - **Tests:** the launch-wiring table drives each of those through the real Ferrets, Runtimes and Claude Code halves for a start, a
   stop/resume and an adoption (four ancestors at `0777`, a foreign owner, a link, and three kinds of folder swap), and removing the
   `verify()` or either chain check turns them red.
@@ -443,8 +450,11 @@ A ferret the daemon starts, restarts, revives, moves or adopts is launched by ex
   launch part, on a start, a resume and an adoption alike. Neither is ever in an argv. The trigger is v4's `resolveCompactAt`, decided
   once in the Runtimes launch gate from the checked snapshot: **a ferret's own value** (its session config's `compactAt`, else the
   `compactAt` its start asked for, kept in its details) **overrides the login's default**, and an own `auto` suppresses a numeric
-  default; **a value larger than the launch model's context window falls back to Auto** (nothing is written, and an oversized own value
-  is dropped to Auto, not to the login's default). The window is v4's: a `[1m]` selector states 1M, else the model's declared `context`
+  default; **a login default, or a value on a LATER launch, larger than the model's context window falls back to Auto** (nothing is written, and
+  an oversized own value is dropped to Auto, not to the login's default). A start's OWN number larger than its model's window is
+  not that: it is **refused before anything is written** with v4's sentence (`200k is larger than this model's 128k window, so it
+could never trigger. Pick 128k or less.`) by the Runtimes launch gate on `start.decide`, for every harness; an unstated window is
+  judged against the 200k default. The window is v4's: a `[1m]` selector states 1M, else the model's declared `context`
   in the published manifest, else 200k; the model is the one the launch names, else the login's default model. A session config that is
   unreadable or holds a value outside the floor says "none recorded".
 - **The credential is never in an argv.** The command is `env CLAUDE_CONFIG_DIR=<home> … claude --settings <home>/launch-settings.json …`:

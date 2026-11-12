@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { expect, test } from 'bun:test';
 import type { LimitsFile } from '../../../../contract/index.ts';
 import { ferretsPort } from '../../../../daemon/lib/ferrets/port.ts';
@@ -5,11 +6,15 @@ import { additivesFixture } from './additives-fixture.ts';
 
 test('through the port, a live ferret keeps its pane and runtime even when a plugin passes the move’s options anyway', async () => {
   const f = additivesFixture();
-  await f.service.resume(f.id);
+  await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
   const before = (await f.service.handle(f.id))!;
   const port = ferretsPort(f.service, 'board');
   // A plugin that builds or spreads the options at runtime gets past the types; the port drops what is not its own.
-  const sneaky = { replaceLiveTerminal: true, target: { runtime: 'codex-two', harness: 'codex' } };
+  const sneaky = {
+    origin: PERSON_ORIGIN,
+    replaceLiveTerminal: true,
+    target: { runtime: 'codex-two', harness: 'codex' },
+  };
   const answer = await (port.resume as unknown as (...args: unknown[]) => Promise<{ ok: boolean }>)(
     f.id,
     undefined,
@@ -49,7 +54,7 @@ test('KCB-F effectiveLimits answers limits.yaml as in effect, read fresh', async
 test('through the port, automatic still reaches a stopped ferret’s resume, and the service’s other methods are bound', async () => {
   const f = additivesFixture();
   const port = ferretsPort(f.service, 'board');
-  expect((await port.resume(f.id, undefined, { automatic: true })).ok).toBe(true);
+  expect((await port.resume(f.id, undefined, { origin: PERSON_ORIGIN, automatic: true })).ok).toBe(true);
   expect(f.history.at(-1)).toMatchObject({ type: 'session.resumed', data: { automatic: true } });
   expect((await port.get(f.id))?.id).toBe(f.id);
 });
@@ -69,18 +74,19 @@ test('M3 through the port, the callbacks a resume may carry reach the service, a
   const onCarried = () => undefined;
 
   await (port.resume as unknown as (...args: unknown[]) => Promise<unknown>)('f1', 'hi', {
+    origin: PERSON_ORIGIN,
     decided,
     onCarried,
     confirmRestore: () => undefined,
   });
-  await port.resume('f1' as never, 'hi');
+  await port.resume('f1' as never, 'hi', { origin: PERSON_ORIGIN });
 
-  expect(seen).toEqual([{ decided, onCarried }, undefined]);
+  expect(seen).toEqual([{ origin: PERSON_ORIGIN, decided, onCarried }, { origin: PERSON_ORIGIN }]);
 });
 
 test('through the port, stop’s 4th cause argument is ignored: a plugin cannot stamp an end cause', async () => {
   const f = additivesFixture();
-  await f.service.resume(f.id);
+  await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
   const port = ferretsPort(f.service, 'board') as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
   await port.stop!(f.id, 'now', 'x', { kind: 'completed' });
   expect(f.registry.get(f.id)?.state).toBe('stopped');

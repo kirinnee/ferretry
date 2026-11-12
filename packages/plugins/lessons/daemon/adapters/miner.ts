@@ -1,5 +1,5 @@
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
-import type { FerretId, FerretSummary, FerretsApi } from '@ferretry/core-ferrets/contract';
+import { DAEMON_ORIGIN, type FerretId, type FerretSummary, type FerretsApi } from '@ferretry/core-ferrets/contract';
 import type { RootsPort } from '@ferretry/kernel/contract';
 import { LESSONS_MINER_GAP, type LessonsConfig, type RunManifest } from '../../contract/index.ts';
 import {
@@ -198,15 +198,19 @@ export class LessonsMiner implements ScanMinerPort {
     const { store, ferrets } = this.deps;
     const folder = this.folderFor(run);
     await store.writeDigests(run, digests);
-    const started = await ferrets.start({
-      name: LESSONS_MINER_NAME,
-      runtime: agent,
-      role: 'lead',
-      folder,
-      prompt: this.prompt(digests, minerOutputPath(folder, run)),
-      by: 'owner',
-      ...(model === undefined ? {} : { options: { model } }),
-    });
+    // Ferretry's own helper, in the folder Ferretry chose for the run: no caller's folder is bound, so this is the daemon's start.
+    const started = await ferrets.start(
+      {
+        name: LESSONS_MINER_NAME,
+        runtime: agent,
+        role: 'lead',
+        folder,
+        prompt: this.prompt(digests, minerOutputPath(folder, run)),
+        by: 'owner',
+        ...(model === undefined ? {} : { options: { model } }),
+      },
+      DAEMON_ORIGIN,
+    );
     if (!started.ok) throw new Error(`the lesson miner could not start: ${started.error.reason}`);
     return started.value;
   }

@@ -41,7 +41,7 @@ import {
   type StartRefusal,
   type Started,
 } from '../kinds.ts';
-import type { FerretsApi, ManagedWorktreeSummary, Sitrep, StartFailure, StartRequest } from '../port.ts';
+import type { FerretsApi, ManagedWorktreeSummary, ResumeOptions, Sitrep, StartFailure, StartRequest } from '../port.ts';
 import { type AgentControl, DEFAULT_AGENT_CONTROL, NO_AGENT_CONTROL } from '../state.ts';
 
 /** 2026-11-07T12:00:00Z. */
@@ -659,7 +659,11 @@ export class FakeFerrets implements FerretsApi {
     this.stops.push({ ferret, how, ...(reason === undefined ? {} : { reason }) });
     this.setState(ferret, 'stopped');
   }
-  async resume(ferret: FerretId, message?: string): Promise<Result<FerretId, StartFailure>> {
+  async resume(
+    ferret: FerretId,
+    message: string | undefined,
+    _options: ResumeOptions,
+  ): Promise<Result<FerretId, StartFailure>> {
     if (!this.#ferrets.has(ferret)) return err({ code: 'failed', reason: 'no such ferret' });
     this.resumes.push({ ferret, ...(message === undefined ? {} : { message }) });
     this.setState(ferret, 'starting');

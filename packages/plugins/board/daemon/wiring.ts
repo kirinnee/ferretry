@@ -3,6 +3,7 @@ import {
   FerretIdSchema,
   type FerretsApi,
   type FerretStartedPayload,
+  PERSON_ORIGIN,
   type SitrepLine,
 } from '@ferretry/core-ferrets/contract';
 import { ProjectIdSchema } from '@ferretry/plugin-projects/contract';
@@ -375,7 +376,8 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     stuck: async () => new Map(),
     exclusive: async (id, work) => await serial.run(`board:start:${id}`, work),
     start: async ({ card, folder, name, prompt }) => {
-      const started = await ferrets.start({ folder, name, prompt, by: 'board' });
+      // Only the owner reaches this (`startOnCard` refuses any other caller before the port is asked), so it is a person's start.
+      const started = await ferrets.start({ folder, name, prompt, by: 'board' }, PERSON_ORIGIN);
       if (!started.ok) throw new CardStartRefused(started.error.reason);
       const ferret = started.value;
       // The new ferret holds the card from the first turn: assigned as the owner's act, and its focus.

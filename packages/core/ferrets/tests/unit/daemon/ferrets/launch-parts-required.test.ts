@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { describe, expect, test } from 'bun:test';
 import { ok } from '@ferretry/std';
 import {
@@ -83,7 +84,7 @@ describe('a required launch-part source', () => {
   test('a refusal with a sentence refuses a start with that sentence, and nothing is prepared, started or left holding a token', async () => {
     const f = fixture([throwing(new LaunchPartsRefusal('the login settings were not checked'), true)]);
 
-    const started = await f.service.start({ folder: '/work', by: 'owner' });
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
 
     expect(started.ok).toBe(false);
     if (started.ok) return;
@@ -97,7 +98,7 @@ describe('a required launch-part source', () => {
   test('any other failure refuses with a generic sentence that carries none of the error text', async () => {
     const f = fixture([throwing(new Error(`read ${SECRET} failed`), true)]);
 
-    const started = await f.service.start({ folder: '/work', by: 'owner' });
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
 
     expect(started.ok).toBe(false);
     if (started.ok) return;
@@ -110,7 +111,7 @@ describe('a required launch-part source', () => {
   test('it refuses a resume the same way, and the stopped ferret is not relaunched', async () => {
     const f = fixture([throwing(new Error('boom'), true)], [stopped('f9')]);
 
-    const resumed = await f.service.resume(ferretId('f9'), undefined, undefined);
+    const resumed = await f.service.resume(ferretId('f9'), undefined, { origin: PERSON_ORIGIN });
 
     expect(resumed.ok).toBe(false);
     if (resumed.ok) return;
@@ -125,7 +126,7 @@ describe('a required launch-part source', () => {
       answering([{ kind: 'instruction', id: 'i', text: 'hello' }]),
     ]);
 
-    const started = await f.service.start({ folder: '/work', by: 'owner' });
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
 
     expect(started.ok).toBe(true);
     expect(f.harness.launched[0]?.parts).toEqual([{ kind: 'instruction', id: 'i', text: 'hello' }]);
@@ -134,7 +135,7 @@ describe('a required launch-part source', () => {
   test('a required source that answers is used like any other', async () => {
     const f = fixture([{ required: true, parts: async () => [{ kind: 'pin', env: { A: 'b' } }] }]);
 
-    const started = await f.service.start({ folder: '/work', by: 'owner' });
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
 
     expect(started.ok).toBe(true);
     expect(f.harness.launched[0]?.parts).toEqual([{ kind: 'pin', env: { A: 'b' } }]);

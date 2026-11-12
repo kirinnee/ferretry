@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../contract/index.ts';
 /**
  * Parity rows J-0001, J-0260 (docs/design/rebuild-parity.tsv): the turn watch, mounted in Ferrets (U4); J-0240: the live
  * readout and the transcript signal on `GET /v1/events`, mounted in Ferrets (U5).
@@ -428,7 +429,9 @@ describe('the live readout and the transcript signal (U5, G161)', () => {
     const { h, runner, harness } = await host(() => standing, [admitting()]);
     const a = await start(h, 'ada');
     const b = await start(h, 'bea');
-    const started = await h.provided(FerretsPort, 'packs').start({ folder: '/work/cleo', parent: a, by: 'pack' });
+    const started = await h
+      .provided(FerretsPort, 'packs')
+      .start({ folder: '/work/cleo', parent: a, by: 'pack' }, PERSON_ORIGIN);
     if (!started.ok) throw new Error('the helper starts');
     const helper = started.value;
     const handleOf = async (id: FerretId) => (await h.provided(FerretsPort).handle(id)) as RunnerHandle;
@@ -610,8 +613,8 @@ describe('pack starts (J-0057 J-0084)', () => {
       pack: 'pack-1' as PackId,
       prompt: 'tidy the notes',
     };
-    const first = await h.provided(FerretsPort, 'packs').start(request);
-    const second = await h.provided(FerretsPort, 'packs').start(request);
+    const first = await h.provided(FerretsPort, 'packs').start(request, PERSON_ORIGIN);
+    const second = await h.provided(FerretsPort, 'packs').start(request, PERSON_ORIGIN);
     if (!first.ok || !second.ok) throw new Error('both pack starts are admitted');
     expect(first.value).not.toBe(second.value);
     const helpers = packs.asked.filter(asked => asked.parent === lead);
@@ -628,7 +631,7 @@ describe('pack starts (J-0057 J-0084)', () => {
     const port = h.provided(FerretsPort, 'packs');
     const callsign = (await port.systemCallsign?.('pack')) ?? '';
     expect(callsign).toBe('pack-000001');
-    const started = await port.start({ folder: '/work/cleanup', by: 'pack', name: callsign });
+    const started = await port.start({ folder: '/work/cleanup', by: 'pack', name: callsign }, PERSON_ORIGIN);
     if (!started.ok) throw new Error('the clean-up starts');
     expect(await port.get(started.value)).toMatchObject({ name: 'pack-000001', role: 'lead' });
     expect(await port.systemCallsign?.('pack')).toBe('pack-000002');

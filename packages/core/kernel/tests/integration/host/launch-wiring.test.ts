@@ -657,9 +657,58 @@ describe.each(LAUNCHING.map(row => [row.name, row] as const))(
       expect(await run(200_000, 1_000_000, { compactAt: 'auto' })).toBeUndefined();
     });
 
-    test('a ferret’s own number gives Auto when it is larger than the window; the account default is not used in its place', async () => {
-      expect(await run(100_000, 128_000, { compactAt: 500_000 })).toBeUndefined();
-    });
+    if (row.name === 'revive') {
+      test('a ferret’s own number the model can no longer honour gives Auto on a LATER relaunch; the account default is not used in its place', async () => {
+        startExtras = { compactAt: 250_000 };
+        const runner = new RecordingRunner();
+        const h = await boot(runner);
+        publish(h, 100_000, 1_000_000);
+        // Planted after the stop and before the resume: the model's window shrinks under the ferret's own 250k.
+        const result = await row.drive(h, runner, `shrunk-${randomUUID()}`, async () => {
+          publish(h, 100_000, 128_000);
+        });
+        expect(result.status).toBeLessThan(300);
+        expect(result.launches).toBe(1);
+        expect(windowAt(h, result.ferret as string)).toBeUndefined();
+        await h.stop();
+      });
+    } else {
+      // v4's `checkCompactAt` on the plan's window, before the callsign was kept or anything written: an EXPLICIT start
+      // value the model cannot honour is a refusal, not a quiet Auto. (The default and a relaunch still fall back.)
+      test.each([500_000, 128_001])(
+        'a start’s OWN number of %i larger than the 128k window is REFUSED with v4’s sentence, and nothing launches',
+        async own => {
+          startExtras = { compactAt: own };
+          const runner = new RecordingRunner();
+          const h = await boot(runner);
+          publish(h, 100_000, 128_000);
+          const result = await row.drive(h, runner, `oversized-${randomUUID()}`, async () => undefined);
+          expect(result.status).toBe(409);
+          expect(result.launches).toBe(0);
+          expect(result.body).toContain(
+            `${own === 500_000 ? '500k' : '128,001'} is larger than this model's 128k window, so it could never trigger. Pick 128k or less.`,
+          );
+          await h.stop();
+        },
+      );
+
+      test('an explicit start value that EQUALS the window, or auto, is not refused', async () => {
+        expect(await run(100_000, 128_000, { compactAt: 128_000 })).toBe(128_000);
+        expect(await run(100_000, 128_000, { compactAt: 'auto' })).toBeUndefined();
+      });
+
+      test('an explicit start value on a model with NO stated window is judged against the 200k default', async () => {
+        expect(await run(100_000, undefined, { compactAt: 200_000 })).toBe(200_000);
+        startExtras = { compactAt: 200_001 };
+        const runner = new RecordingRunner();
+        const h = await boot(runner);
+        publish(h, 100_000, undefined);
+        const refused = await row.drive(h, runner, `unknown-${randomUUID()}`, async () => undefined);
+        expect(refused.status).toBe(409);
+        expect(refused.launches).toBe(0);
+        await h.stop();
+      });
+    }
 
     test('a ferret’s own number applies where the account default is Auto', async () => {
       expect(await run('auto', 1_000_000, { compactAt: 250_000 })).toBe(250_000);

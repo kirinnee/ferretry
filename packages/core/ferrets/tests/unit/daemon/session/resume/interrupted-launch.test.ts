@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../../contract/index.ts';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
@@ -365,7 +366,7 @@ describe('InterruptedLaunchReconciler', () => {
     // Act
     await reconciler.reconcile();
     const after = runningChildCount(PARENT, children());
-    const revived = await resume.resume({ id: RESUMING, actor: 'admin-cli' });
+    const revived = await resume.resume({ origin: PERSON_ORIGIN, id: RESUMING, actor: 'admin-cli' });
 
     // Assert
     should(before).equal(2);

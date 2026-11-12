@@ -942,6 +942,8 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
         // Neither an expected status nor the dedupe heuristic: an operator asked for THIS session by
         // id, and the preflight above is the guard a move has.
         policy: { automatic: false, dedupeSharedRecoveryScope: false, replaceLiveTerminal: true },
+        // Who the relaunch is FOR: the route's admitted credential, carried to the one launch.
+        origin: request.origin,
         // A move the Warden made is drawn as Ferretry · Warden on the turn it hands over, and opens with why.
         ...(request.actor === undefined ? {} : { actor: request.actor }),
         message:

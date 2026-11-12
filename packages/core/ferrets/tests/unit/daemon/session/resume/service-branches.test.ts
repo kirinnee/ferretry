@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../../contract/index.ts';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
@@ -68,7 +69,7 @@ describe('session resume of a leftover pane whose process is already gone', () =
     );
 
     // Act
-    const actual = await service.resume({ id: ID, message: 'carry on', actor: 'admin-cli' });
+    const actual = await service.resume({ origin: PERSON_ORIGIN, id: ID, message: 'carry on', actor: 'admin-cli' });
 
     // Assert
     should(actual.disposition).equal('revived');

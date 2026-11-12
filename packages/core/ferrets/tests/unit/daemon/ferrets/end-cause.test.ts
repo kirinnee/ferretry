@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { expect, test } from 'bun:test';
 import {
   type FerretChangedPayload,
@@ -27,17 +28,17 @@ test('death cause: today’s words parse, anything else does not', () => {
 
 test('death cause: a stopped ferret says it was stopped; resuming clears it; a running ferret has none', async () => {
   const f = additivesFixture();
-  await f.service.resume(f.id);
+  await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
   expect((await f.service.get(f.id))?.cause).toBeUndefined();
   await f.service.stop(f.id, 'now');
   expect((await f.service.get(f.id))?.cause).toEqual({ kind: 'stopped' });
-  await f.service.resume(f.id);
+  await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
   expect((await f.service.get(f.id))?.cause).toBeUndefined();
 });
 
 test('death cause: signal done ends the ferret as completed', async () => {
   const f = additivesFixture();
-  await f.service.resume(f.id);
+  await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
   await f.service.stop(f.id, 'now', 'done', { kind: 'completed' });
   expect((await f.service.get(f.id))?.cause).toEqual({ kind: 'completed' });
 });
@@ -45,14 +46,14 @@ test('death cause: signal done ends the ferret as completed', async () => {
 test('death cause: a launch that failed ends as start_failed', async () => {
   const f = additivesFixture();
   f.ports.runner = () => undefined;
-  const failed = await f.service.resume(f.id);
+  const failed = await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
   expect(failed.ok).toBe(false);
   expect((await f.service.get(f.id))?.cause).toEqual({ kind: 'start_failed' });
 });
 
 test('death cause: the summary schema carries it, and a later cause replaces the earlier one', async () => {
   const f = additivesFixture();
-  await f.service.resume(f.id);
+  await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
   await f.service.stop(f.id, 'now');
   const summary = (await f.service.get(f.id))!;
   expect(FerretSummarySchema.safeParse(summary).success).toBe(true);
@@ -63,7 +64,7 @@ test('death cause: the summary schema carries it, and a later cause replaces the
 
 test('death cause: adopting a live process clears a stopped ferret’s end cause; the cause is present only while stopped', async () => {
   const f = additivesFixture();
-  await f.service.resume(f.id);
+  await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
   await f.service.stop(f.id, 'now', 'done', { kind: 'completed' });
   expect((await f.service.get(f.id))?.cause).toEqual({ kind: 'completed' });
   const adopted = await f.service.attach(f.id, f.runner.adoptable(f.id));

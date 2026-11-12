@@ -7,11 +7,13 @@ import type {
   FerretTurnDocument,
   FerretTurns,
   HarnessQueueOptions,
+  LaunchOrigin,
   ResumeOptions,
   RunnerDelivery,
   StartFailure,
   TranscriptEntry,
 } from '@ferretry/core-ferrets/contract';
+import { AGENT_ORIGIN, PERSON_ORIGIN } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import type { StatePort } from '@ferretry/kernel/contract';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
@@ -68,7 +70,12 @@ class SendFerrets extends FakeFerrets {
   readonly submitted: string[] = [];
   /** What a resume does: types its pointer and says so, is refused, comes back with nothing typed, or fails. */
   resumeAs: 'carries' | 'refuses' | 'nothing' | 'throws' | 'writes-then-fails' = 'carries';
-  readonly resumed: { readonly ferret: FerretId; readonly message?: string; readonly actor?: 'warden' | 'peer' }[] = [];
+  readonly resumed: {
+    readonly ferret: FerretId;
+    readonly message?: string;
+    readonly actor?: 'warden' | 'peer';
+    readonly origin?: LaunchOrigin;
+  }[] = [];
   /** The number the next revive's turn document takes. */
   reviveTurn = 5;
 
@@ -84,6 +91,7 @@ class SendFerrets extends FakeFerrets {
       ferret,
       ...(message === undefined ? {} : { message }),
       ...(options?.actor === undefined ? {} : { actor: options.actor }),
+      ...(options?.origin === undefined ? {} : { origin: options.origin }),
     });
     if (this.resumeAs === 'throws') throw new Error('FIXTURE_SECRET the tokens are unavailable');
     if (this.resumeAs === 'refuses') return err({ code: 'refused', reason: 'no runtime is free to relaunch it' });
@@ -894,7 +902,7 @@ describe('M3 a send to a stopped ferret revives it and carries the message', () 
     const sent = await api().send(F3, { kind: 'owner' }, { message: 'FIXTURE wake up', sendId: 's-revive' });
 
     expect(sent).toMatchObject({ ok: true, value: { disposition: 'revived', sendId: 's-revive', fate: 'accepted' } });
-    expect(ferrets.resumed).toEqual([{ ferret: F3, message: 'FIXTURE wake up' }]);
+    expect(ferrets.resumed).toEqual([{ ferret: F3, message: 'FIXTURE wake up', origin: PERSON_ORIGIN }]);
     expect(ferrets.typed).toEqual([]);
     // The row looks for what the relaunch typed (the pointer to the numbered document), and the turn it carried.
     expect(await stored('s-revive', 'f3')).toMatchObject({
@@ -992,7 +1000,9 @@ describe('M3 a send to a stopped ferret revives it and carries the message', () 
 
     await warden().send(F3, { kind: 'warden' }, { message: 'FIXTURE warden wake', sendId: 's-revive-warden' });
 
-    expect(ferrets.resumed).toEqual([{ ferret: F3, message: 'FIXTURE warden wake', actor: 'warden' }]);
+    expect(ferrets.resumed).toEqual([
+      { ferret: F3, message: 'FIXTURE warden wake', actor: 'warden', origin: AGENT_ORIGIN },
+    ]);
     await host.stop();
   });
 
@@ -1038,6 +1048,24 @@ describe('M3 a send to a stopped ferret revives it and carries the message', () 
     await api().send(F3, { kind: 'owner' }, { message: 'FIXTURE owner wake', sendId: 's-owner-fail' });
 
     expect(ferrets.resumed[0]).not.toHaveProperty('actor');
+    await host.stop();
+  });
+
+  test('M3 a revive keeps the ORIGIN of the credential that sent: the owner is a person, a ferret and the Warden are agents', async () => {
+    const { host, ferrets, api, warden } = await conversation(f => {
+      stopped(f);
+      f.resumeAs = 'nothing';
+    });
+
+    await api().send(F3, { kind: 'owner' }, { message: 'FIXTURE one', sendId: 's-origin-owner' });
+    await api().send(F3, { kind: 'ferret', ferret: F2 }, { message: 'FIXTURE two', sendId: 's-origin-ferret' });
+    await warden().send(F3, { kind: 'warden' }, { message: 'FIXTURE three', sendId: 's-origin-warden' });
+
+    expect(ferrets.resumed.map(resumed => resumed.origin)).toEqual([
+      PERSON_ORIGIN,
+      { kind: 'agent', ferret: F2 },
+      AGENT_ORIGIN,
+    ]);
     await host.stop();
   });
 });

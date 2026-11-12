@@ -1,3 +1,4 @@
+import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { describe, expect, test } from 'bun:test';
 import type { FencedPath, FerretId } from '@ferretry/kernel/contract';
 import { ok } from '@ferretry/std';
@@ -105,7 +106,7 @@ describe('S42 each harness supplies its own per-ferret home', () => {
     const codex = new FakeHarness('codex', CODEX_HOMES);
     const f = fixture([claude, codex]);
     for (const harness of ['claude-code', 'codex', 'claude-code', 'codex'] as const) {
-      const started = await f.service.start({ folder: '/work', harness, by: 'owner' });
+      const started = await f.service.start({ folder: '/work', harness, by: 'owner' }, PERSON_ORIGIN);
       expect(started.ok).toBe(true);
     }
     const homes = [...claude.launched, ...codex.launched].map(spec => spec.home);
@@ -130,7 +131,7 @@ describe('S42 each harness supplies its own per-ferret home', () => {
     };
     odd.prepareHome = async spec => ({ files: [fenced(`${spec.home}/x`)], args: [] });
     const f = fixture([odd]);
-    const started = await f.service.start({ folder: '/work', by: 'owner' });
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
     if (!started.ok) throw new Error(started.error.reason);
     expect(asked).toContain(started.value);
     expect(odd.launched[0]?.home).toBe(fenced(`/somewhere/only-the-harness-knows/${started.value}.home`));
@@ -140,7 +141,7 @@ describe('S42 each harness supplies its own per-ferret home', () => {
     const claude = new FakeHarness('claude-code', CLAUDE_HOMES);
     const impostor = new FakeHarness('codex', CLAUDE_HOMES);
     const f = fixture([claude, impostor]);
-    const started = await f.service.start({ folder: '/work', harness: 'codex', by: 'owner' });
+    const started = await f.service.start({ folder: '/work', harness: 'codex', by: 'owner' }, PERSON_ORIGIN);
     expect(started.ok).toBe(false);
     if (started.ok) return;
     expect(started.error.code).toBe('refused');
@@ -161,9 +162,9 @@ describe('S42 each harness supplies its own per-ferret home', () => {
       shared.homeFor = async ferret => fenced(answer(ferret));
       shared.prepareHome = async () => ({ files: [], args: [] });
       const f = fixture([shared]);
-      const first = await f.service.start({ folder: '/work', by: 'owner' });
+      const first = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
       expect(first.ok).toBe(true);
-      const second = await f.service.start({ folder: '/work', by: 'owner' });
+      const second = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
       expect(second.ok).toBe(false);
       if (second.ok) continue;
       expect(second.error.code).toBe('refused');
@@ -187,7 +188,7 @@ describe('S42 each harness supplies its own per-ferret home', () => {
       const harness = new FakeHarness('claude-code', CLAUDE_HOMES);
       breakIt(harness);
       const f = fixture([harness]);
-      const started = await f.service.start({ folder: '/work', by: 'owner' });
+      const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
       expect(started.ok).toBe(false);
       if (started.ok) continue;
       expect(started.error.code).toBe('harness_unavailable');
@@ -216,8 +217,8 @@ describe('S42 each harness supplies its own per-ferret home', () => {
       const harness = new LoggingHarness('claude-code', CLAUDE_HOMES, log);
       harness.homeFor = async ferret => fenced(ferret === 'f2' ? second : `${CLAUDE_HOMES}/${ferret}`);
       const f = fixture([harness], [], log);
-      expect((await f.service.start({ folder: '/work', by: 'owner' })).ok).toBe(true);
-      const started = await f.service.start({ folder: '/work', by: 'owner' });
+      expect((await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN)).ok).toBe(true);
+      const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
       expect(started.ok).toBe(false);
       if (started.ok) return;
       expect(started.error).toEqual({
@@ -236,8 +237,8 @@ describe('S42 each harness supplies its own per-ferret home', () => {
     const harness = new LoggingHarness('claude-code', CLAUDE_HOMES, log);
     harness.homeFor = async ferret => fenced(`${CLAUDE_HOMES}/${ferret === 'f2' ? 'F1' : ferret}`);
     const f = fixture([harness], [], log);
-    expect((await f.service.start({ folder: '/work', by: 'owner' })).ok).toBe(true);
-    const started = await f.service.start({ folder: '/work', by: 'owner' });
+    expect((await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN)).ok).toBe(true);
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
     expect(started.ok).toBe(false);
     if (started.ok) return;
     expect(started.error.code).toBe('refused');
@@ -252,7 +253,7 @@ describe('S42 each harness supplies its own per-ferret home', () => {
       const harness = new LoggingHarness('claude-code', CLAUDE_HOMES, log);
       harness.homeFor = async () => fenced(`${CLAUDE_HOMES}/${name}`);
       const f = fixture([harness], [], log);
-      const started = await f.service.start({ folder: '/work', by: 'owner' });
+      const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
       expect(started.ok).toBe(false);
       if (started.ok) return;
       expect(started.error.code).toBe('harness_unavailable');
@@ -280,7 +281,7 @@ describe('S42 each harness supplies its own per-ferret home', () => {
         return fenced(answer(ferret));
       };
       const f = fixture([harness], [], log);
-      const started = await f.service.start({ folder: '/work', by: 'owner' });
+      const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
       expect(started.ok).toBe(false);
       if (started.ok) return;
       expect(started.error.code).toBe('refused');
@@ -301,8 +302,8 @@ describe('S42 each harness supplies its own per-ferret home', () => {
       return await original(ferret);
     };
     const f = fixture([harness]);
-    expect((await f.service.start({ folder: '/work', by: 'owner' })).ok).toBe(true);
-    expect((await f.service.start({ folder: '/work', by: 'owner' })).ok).toBe(true);
+    expect((await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN)).ok).toBe(true);
+    expect((await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN)).ok).toBe(true);
     expect(asked.filter(ferret => ferret === 'home-probe')).toHaveLength(1);
 
     const broken = new FakeHarness('claude-code', CLAUDE_HOMES);
@@ -312,7 +313,7 @@ describe('S42 each harness supplies its own per-ferret home', () => {
       return await real(ferret);
     };
     const g = fixture([broken]);
-    const started = await g.service.start({ folder: '/work', by: 'owner' });
+    const started = await g.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
     expect(started.ok).toBe(false);
     if (started.ok) return;
     expect(started.error.code).toBe('refused');
@@ -337,7 +338,7 @@ describe('S42 each harness supplies its own per-ferret home', () => {
         return fenced(`${CODEX_HOMES}/${ferret}`);
       };
       const f = fixture([claude, codex], [stopped('old1', 'codex')], log);
-      const started = await f.service.start({ folder: '/work', harness: 'claude-code', by: 'owner' });
+      const started = await f.service.start({ folder: '/work', harness: 'claude-code', by: 'owner' }, PERSON_ORIGIN);
       expect(started.ok).toBe(false);
       if (started.ok) return;
       expect(started.error.code).toBe('refused');
@@ -358,7 +359,7 @@ describe('S42 each harness supplies its own per-ferret home', () => {
         return fenced(answer);
       };
       const f = fixture([claude, codex], [], log);
-      const started = await f.service.start({ folder: '/work', harness: 'claude-code', by: 'owner' });
+      const started = await f.service.start({ folder: '/work', harness: 'claude-code', by: 'owner' }, PERSON_ORIGIN);
       expect(started.ok).toBe(false);
       if (started.ok) return;
       expect(started.error.code).toBe('refused');
@@ -374,7 +375,7 @@ describe('S42 each harness supplies its own per-ferret home', () => {
       throw new Error('a link is at the home’s name');
     };
     const f = fixture([harness]);
-    const started = await f.service.start({ folder: '/work', by: 'owner' });
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
     expect(started.ok).toBe(false);
     if (started.ok) return;
     expect(started.error).toEqual({
@@ -391,7 +392,7 @@ describe('S42 prepareHome runs before the environment is resolved and runner.sta
   test('S42 a new start: prepareHome with the harness’s home, then the environment, then the runner (one log)', async () => {
     const log: string[] = [];
     const f = fixture([new LoggingHarness('claude-code', CLAUDE_HOMES, log)], [], log);
-    const started = await f.service.start({ folder: '/work', by: 'owner' });
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
     expect(started.ok).toBe(true);
     expect(log).toEqual([`prepareHome f1 ${CLAUDE_HOMES}/f1`, 'vault.childEnvironment f1', 'runner.start f1']);
   });
@@ -400,17 +401,18 @@ describe('S42 prepareHome runs before the environment is resolved and runner.sta
     const cases = [
       {
         records: [] as FerretRecord[],
-        go: (service: FerretsService) => service.start({ folder: '/work', harnessConversation: 'c1', by: 'owner' }),
+        go: (service: FerretsService) =>
+          service.start({ folder: '/work', harnessConversation: 'c1', by: 'owner' }, PERSON_ORIGIN),
         id: 'f1',
       },
       {
         records: [stopped('rev', 'codex')],
-        go: (service: FerretsService) => service.resume(ferretId('rev')),
+        go: (service: FerretsService) => service.resume(ferretId('rev'), undefined, { origin: PERSON_ORIGIN }),
         id: 'rev',
       },
       {
         records: [stopped('rec', 'codex', 'c2')],
-        go: (service: FerretsService) => service.resume(ferretId('rec')),
+        go: (service: FerretsService) => service.resume(ferretId('rec'), undefined, { origin: PERSON_ORIGIN }),
         id: 'rec',
       },
     ];
@@ -432,7 +434,7 @@ describe('S42 prepareHome runs before the environment is resolved and runner.sta
   test('S42 a fresh ferret starts beside ferrets that already have homes under the same agent-homes', async () => {
     const harness = new FakeHarness('claude-code', CLAUDE_HOMES);
     const f = fixture([harness], [stopped('old1', 'claude-code'), stopped('old2', 'claude-code')]);
-    const started = await f.service.start({ folder: '/work', by: 'owner' });
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
     if (!started.ok) throw new Error(started.error.reason);
     expect(harness.prepared.map(spec => spec.home)).toEqual([fenced(`${CLAUDE_HOMES}/${started.value}`)]);
   });

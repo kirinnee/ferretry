@@ -21,6 +21,7 @@
  * names no runtime contribute nothing, deliberately.
  */
 import {
+  checkCompactAt,
   type LaunchPart,
   type LaunchPartSource,
   LaunchPartsRefusal,
@@ -94,7 +95,12 @@ export class LaunchGate {
   readonly decide = async (input: StartDecideInput): Promise<HookDecision> => {
     // A decision supersedes whatever an earlier one left for this ferret: nothing checked is ever reused across launches.
     this.#checked.delete(input.ferret);
-    if (input.harness !== CLAUDE_CODE || input.runtime === undefined) return { allow: true };
+    if (input.runtime === undefined) return { allow: true };
+    // A START's own compaction trigger is judged against the window of the model it names, for EVERY harness (v4's
+    // `checkCompactAt` on the plan's window, before anything was written). A relaunch carries none here (the later launch
+    // falls back to Auto), and a runtime that is not published has no window to judge.
+    const explicitCompactAt = input.by === 'resume' ? undefined : input.compactAt;
+    if (input.harness !== CLAUDE_CODE && explicitCompactAt === undefined) return { allow: true };
     let facts: RuntimeLaunchFacts | undefined;
     try {
       facts = await this.deps.source.facts(input.runtime);
@@ -104,9 +110,16 @@ export class LaunchGate {
         reason:
           error instanceof FixedSettingsDamagedError
             ? `${error.message}, so runtime ${input.runtime} was not started`
-            : `the published runtimes could not be read, so runtime ${input.runtime} was not started: its folder's Claude settings cannot be checked against its login`,
+            : input.harness === CLAUDE_CODE
+              ? `the published runtimes could not be read, so runtime ${input.runtime} was not started: its folder's Claude settings cannot be checked against its login`
+              : `the published runtimes could not be read, so runtime ${input.runtime} was not started: its compaction trigger cannot be checked against its model`,
       };
     }
+    if (facts !== undefined && explicitCompactAt !== undefined) {
+      const refusal = checkCompactAt(explicitCompactAt, launchContextWindow(input.model, facts.windows));
+      if (refusal !== undefined) return { allow: false, reason: refusal };
+    }
+    if (input.harness !== CLAUDE_CODE) return { allow: true };
     if (facts !== undefined) {
       try {
         await assertFolderLeavesLoginAlone({
