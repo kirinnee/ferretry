@@ -30,6 +30,24 @@ export const QUESTION_STATE = defineState({
   format: 1,
   schema: QuestionSchema,
 });
+/**
+ * The last question a ferret's form took an answer for (v4's `lastAnsweredQuestionToolUseId`, the one fact the answer
+ * ledger's reconciliation defers to). It is stamped BEFORE `question.json` is cleared, so a crash between the two leaves
+ * the answer provable rather than a form that looks unanswered; a stamp is for one question and a newer one replaces it.
+ */
+export const QuestionAnsweredSchema = z.strictObject({
+  format: z.literal(1),
+  toolUseId: z.string().min(1),
+  answeredAt: z.string().min(1),
+});
+export type AnsweredQuestionStamp = z.infer<typeof QuestionAnsweredSchema>;
+export const QUESTION_ANSWERED_STATE = defineState({
+  name: 'question-answered',
+  path: '*/question-answered.json',
+  store: 'json',
+  format: 1,
+  schema: QuestionAnsweredSchema,
+});
 /** The hypermedia switch the owner set for one ferret; none means the mode's default (docs/hypermedia.md). */
 export const HypermediaSwitchSchema = z.strictObject({
   format: z.literal(1),
@@ -126,6 +144,7 @@ export const CONVERSATION_STATE = [
   ANSWERS_STATE,
   TURNS_STATE,
   QUESTION_STATE,
+  QUESTION_ANSWERED_STATE,
   HYPERMEDIA_STATE,
   DRAFTS_STATE,
   ATTACHMENT_ORIGINAL_STATE,

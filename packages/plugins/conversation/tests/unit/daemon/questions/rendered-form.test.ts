@@ -9,14 +9,18 @@ import {
   boundQuestionIndex,
   questionScreen,
   type RenderedQuestion,
+  freeFormPageShown,
   reviewShowsAnswer,
-  screenShowsQuestion,
+  showsOnlyKnownRows,
+  surfaceOf,
+  surfaceStillShown,
 } from '../../../../daemon/questions/lib/rendered-form.ts';
 
 const FIXTURES = join(import.meta.dir, '../../../fixtures/question-forms');
 const text = await fixtureTexts(FIXTURES);
 const fixture = (name: string): string => text(`${name}.txt`);
 /** A pane whose whole scrollback is its screen, as the shorter captures were taken. */
+const BORDER = '─'.repeat(40);
 const screenOnly = (name: string) => questionScreen(fixture(name), fixture(name));
 
 /** The owner's question, verbatim from the failing report (Claude Code 2.1.281, an 80×24 pane). */
@@ -44,10 +48,12 @@ const poolCheck: RenderedQuestion = {
 };
 
 const colour: RenderedQuestion = {
+  header: 'Colour',
   question: 'Which colour should the banner use?',
   options: [{ label: 'Red' }, { label: 'Blue' }],
 };
 const extras: RenderedQuestion = {
+  header: 'Extras',
   question: 'Which extras should ship with the banner?',
   multiSelect: true,
   options: [{ label: 'Shadow' }, { label: 'Border' }, { label: 'Icon' }],
@@ -105,6 +111,7 @@ describe('rendered question form', () => {
         submit: 4,
       });
       const single = bindQuestionForm(screenOnly('claude-2.1.281-single-multiselect'), {
+        header: 'Extras',
         question: 'Which extras should ship?',
         multiSelect: true,
         options: [{ label: 'Shadow' }, { label: 'Border' }],
@@ -222,27 +229,23 @@ describe('rendered question form', () => {
     should(bindQuestionForm(questionScreen(missing, missing), { question: 'Deploy?', options: [] })).be.undefined();
   });
 
-  it('binds a wrapped label and leaves an unnamed row under its own text so it is never chosen', () => {
-    const wrapped = [
-      '──────────',
-      'Pick one?',
-      '❯ 1. A label long enough that the harness',
-      '     wrapped it',
-      '  2. Something the transcript never named',
-      '  3. Other',
-    ].join('\n');
+  it('binds a wrapped label, and a row the transcript never named means the form is not the question', () => {
+    const wrapped = (rows: readonly string[]) =>
+      ['──────────', 'Pick one?', '❯ 1. A label long enough that the harness', '     wrapped it', ...rows].join('\n');
+    const question: RenderedQuestion = {
+      question: 'Pick one?',
+      options: [{ label: 'A label long enough that the harness wrapped it' }],
+    };
 
-    should(
-      bindQuestionForm(questionScreen(wrapped, wrapped), {
-        question: 'Pick one?',
-        options: [{ label: 'A label long enough that the harness wrapped it' }],
-      }),
-    ).deepEqual({
-      labels: ['A label long enough that the harness wrapped it', 'Something the transcript never named', 'Other'],
-      checked: [false, false, false],
+    const plain = wrapped(['  2. Other']);
+    should(bindQuestionForm(questionScreen(plain, plain), question)).deepEqual({
+      labels: ['A label long enough that the harness wrapped it', 'Other'],
+      checked: [false, false],
       cursor: 0,
-      freeForm: { index: 2, entry: 'page' },
+      freeForm: { index: 1, entry: 'page' },
     });
+    const extra = wrapped(['  2. Something the transcript never named', '  3. Other']);
+    should(bindQuestionForm(questionScreen(extra, extra), question)).be.undefined();
   });
 
   it('ignores a scrollback that does not end with the screen, rather than splice two instants', () => {
@@ -250,10 +253,123 @@ describe('rendered question form', () => {
     should(screen).deepEqual({ lines: ['row a', 'row b'], visibleFrom: 0 });
   });
 
-  it('finds a free-form page question on the screen only', () => {
-    const page = questionScreen('Tell me more about the\nrollout plan', 'Tell me more about the\nrollout plan');
-    should(screenShowsQuestion(page, 'Tell me more about the rollout plan')).be.true();
-    should(screenShowsQuestion(questionScreen('nothing', 'Tell me\nnothing'), 'Tell me')).be.false();
+  describe('the free-form page Enter on a plain Other row opens', () => {
+    const rollout: RenderedQuestion = { question: 'Tell me more about the rollout plan', options: [{ label: 'A' }] };
+    const shown = (visible: string, typed?: string, history = visible) =>
+      freeFormPageShown(questionScreen(visible, history), rollout, typed);
+
+    it('is the question as its whole heading and one entry line, before and after text is pasted', () => {
+      const page = 'Tell me more about the\nrollout plan\n\nType your answer: █';
+      should(shown(page)).be.true();
+      should(shown(`${BORDER}\n${page}`)).be.true();
+      should(shown(page.replace('█', 'Ship it on Friday'), 'Ship it on Friday')).be.true();
+      should(shown(page.replace('█', 'Ship it on Fri…'), 'Ship it on Friday')).be.true();
+    });
+
+    it('is not a screen that merely quotes the question, adds anything to it, or lacks the entry line', () => {
+      should(shown('Tell me more about the rollout plan')).be.false();
+      should(shown('Tell me more about the rollout plan: Deploy?\n\nType your answer: █')).be.false();
+      should(shown('Tell me more about the rollout plan\n\nNew MCP server found\nType your answer: █')).be.false();
+      should(shown('Tell me more about the rollout plan\n\nType your answer: █\nEnter to continue')).be.false();
+      should(shown('Tell me more about the rollout plan\n  1. A\n❯ 2. B\nType your answer: █')).be.false();
+      should(shown('Tell me more about the rollout plan\n\nType your answer: █', 'Ship it')).be.false();
+      should(shown('nothing', undefined, 'Tell me more about the rollout plan\nnothing')).be.false();
+    });
+  });
+
+  describe('a form is the stored question exactly', () => {
+    const deploy: RenderedQuestion = { question: 'Deploy?', options: [{ label: 'Yes' }, { label: 'No' }] };
+    const drawn = (rows: readonly string[], asks = 'Deploy?', cursor = 0) =>
+      [BORDER, asks, '', ...rows.map((row, index) => `${index === cursor ? '❯' : ' '} ${index + 1}. ${row}`)].join(
+        '\n',
+      );
+    const bind = (visible: string) => bindQuestionForm(questionScreen(visible, visible), deploy);
+
+    it('binds the options alone, in order, and with the harness’s free-form row anywhere', () => {
+      should(bind(drawn(['Yes', 'No']))?.labels).deepEqual(['Yes', 'No']);
+      should(bind(drawn(['Yes', 'No', 'Type something.']))?.labels).deepEqual(['Yes', 'No', 'Other']);
+      should(bind(drawn(['Yes', 'Type something.', 'No']))?.freeForm).deepEqual({ index: 1, entry: 'inline' });
+    });
+
+    it('refuses extra rows, missing rows and a different order', () => {
+      should(bind(drawn(['Yes', 'No', 'Yes, and do not ask again']))).be.undefined();
+      should(bind(drawn(['Yes', 'Maybe', 'No']))).be.undefined();
+      should(bind(drawn(['Yes']))).be.undefined();
+      should(bind(drawn(['No', 'Yes']))).be.undefined();
+      should(bind(drawn(['Yes', 'No', 'Type something.', 'Other…']))).be.undefined();
+    });
+
+    it('refuses a header that merely contains the question', () => {
+      should(bind(drawn(['Yes', 'No'], 'Approval required: Deploy?'))).be.undefined();
+      should(
+        bind(`${BORDER}\nBash command\n  printf Deploy?\n\n${drawn(['Yes', 'No']).split('\n').slice(1).join('\n')}`),
+      ).be.undefined();
+    });
+
+    it('takes the typed answer a revisited tab holds as its one extra row, only for the text it is known to hold', () => {
+      const held = (visible: string, ...known: string[]) =>
+        bindQuestionForm(questionScreen(visible, visible), deploy, undefined, known);
+      should(held(drawn(['Yes', 'No', 'Ask the on-call first ✔']), 'Ask the on-call first')?.heldRow).equal(2);
+      should(held(drawn(['Yes', 'No', 'Ask the on-call first ✔']), 'Ask the on-call first')?.chosen).equal(2);
+      // Marked chosen is not enough: a row nobody has evidence for is a foreign row, however it is marked.
+      should(bind(drawn(['Yes', 'No', 'Ask the on-call first ✔']))).be.undefined();
+      should(bind(drawn(['Yes', 'No', 'Allow all future operations ✔']))).be.undefined();
+      should(held(drawn(['Yes', 'No', 'Allow all future operations ✔']), 'Ask the on-call first')).be.undefined();
+      should(held(drawn(['Yes', 'No', 'Ask the on-call first']), 'Ask the on-call first')).be.undefined();
+      should(
+        held(drawn(['Yes', 'No', 'Ask the on-call first ✔', 'Another ✔']), 'Ask the on-call first'),
+      ).be.undefined();
+      // A review page cuts a long answer with an ellipsis; what is left is still the start of the row.
+      should(held(drawn(['Yes', 'No', 'Ask the on-call first ✔']), 'Ask the on-…')?.heldRow).equal(2);
+    });
+
+    it('does not record a foreign row on the surface it verifies', () => {
+      const known = bindQuestionForm(
+        questionScreen(
+          drawn(['Yes', 'No', 'Ask the on-call first ✔']),
+          drawn(['Yes', 'No', 'Ask the on-call first ✔']),
+        ),
+        deploy,
+        undefined,
+        ['Ask the on-call first'],
+      ) as NonNullable<ReturnType<typeof bind>>;
+      const surface = surfaceOf(known);
+      should(surface.held).equal('Ask the on-call first');
+      const same = questionScreen(
+        drawn(['Yes', 'No', 'Ask the on-call first ✔']),
+        drawn(['Yes', 'No', 'Ask the on-call first ✔']),
+      );
+      should(surfaceStillShown(same, deploy, surface)).be.true();
+      const foreign = questionScreen(
+        drawn(['Yes', 'No', 'Allow all future operations ✔']),
+        drawn(['Yes', 'No', 'Allow all future operations ✔']),
+      );
+      should(surfaceStillShown(foreign, deploy, surface)).be.false();
+      const plain = bind(drawn(['Yes', 'No', 'Type something.'])) as NonNullable<ReturnType<typeof bind>>;
+      should(surfaceOf(plain).held).be.undefined();
+    });
+
+    it('lets a tab holding the typed answer be passed only for exactly that answer', () => {
+      const screen = questionScreen(
+        drawn(['Yes', 'No', 'Only if it is on Zoom ✔']),
+        drawn(['Yes', 'No', 'Only if it is on Zoom ✔']),
+      );
+      should(showsOnlyKnownRows(screen, deploy)).be.false();
+      should(showsOnlyKnownRows(screen, deploy, 'Only if it is on Zoom')).be.true();
+      should(showsOnlyKnownRows(screen, deploy, 'Something else')).be.false();
+    });
+
+    it('verifies a pasted inline answer against the whole drawn row, whatever its whitespace', () => {
+      const stored = bind(drawn(['Yes', 'No', 'Type something.']));
+      const surface = surfaceOf(stored as NonNullable<typeof stored>);
+      const typed = { index: 2, text: 'Ask  the on-call first' };
+      const pane = questionScreen(
+        drawn(['Yes', 'No', 'Ask  the on-call first']),
+        drawn(['Yes', 'No', 'Ask  the on-call first']),
+      );
+      should(surfaceStillShown(pane, deploy, surface, typed)).be.true();
+      should(surfaceStillShown(pane, deploy, surface, { index: 2, text: 'Ask the on-call' })).be.false();
+    });
   });
   /**
    * A four-question form recorded from Claude Code 2.1.281 at 80×24 (`claude-2.1.281-tabs4/`): each file is
@@ -330,12 +446,16 @@ describe('rendered question form', () => {
         freeForm: { index: 3, entry: 'inline' },
         chosen: 0,
       });
-      // Typed text replaces the free-form row, so there is no empty row left to type into.
-      should(bindQuestionForm(pane('typed-revisited'), socials)).deepEqual({
+      // Typed text replaces the free-form row, so there is no empty row left to type into — and it binds only as the
+      // text the tab is known to hold.
+      should(bindQuestionForm(pane('typed-revisited'), socials)).be.undefined();
+      should(bindQuestionForm(pane('typed-revisited'), socials, undefined, ['Something else'])).be.undefined();
+      should(bindQuestionForm(pane('typed-revisited'), socials, undefined, ['WFH, decide later'])).deepEqual({
         labels: ['Decline all 3', 'Accept all 3', 'Lunch only', 'WFH, decide later'],
         checked: [false, false, false, false],
         cursor: 0,
         chosen: 3,
+        heldRow: 3,
       });
     });
 
@@ -372,5 +492,57 @@ describe('rendered question form', () => {
       should(reviewShowsAnswer('Only if it…', meet, { kind: 'other', text: 'Only if it is on Zoom' })).be.true();
       should(reviewShowsAnswer('Only if we…', meet, { kind: 'other', text: 'Only if it is on Zoom' })).be.false();
     });
+  });
+});
+
+describe('the complete surface of a bound form', () => {
+  const RULE = '─'.repeat(40);
+  const form = (rows: readonly string[], cursor = 0, asks = 'Deploy?'): string =>
+    [
+      RULE,
+      asks,
+      '',
+      ...rows.map((row, index) => `${index === cursor ? '❯' : ' '} ${index + 1}. ${row}`),
+      RULE,
+      '  9. Chat about this',
+    ].join('\n');
+  const deploy: RenderedQuestion = { question: 'Deploy?', options: [{ label: 'Yes' }, { label: 'No' }] };
+  const screen = (visible: string) => questionScreen(visible, visible);
+  const bound = surfaceOf(
+    bindQuestionForm(screen(form(['Yes', 'No', 'Type something.'])), deploy) as NonNullable<
+      ReturnType<typeof bindQuestionForm>
+    >,
+  );
+
+  it('names every row in order, the free-form row and whether a Submit row ends the page', () => {
+    should(bound).deepEqual({ labels: ['Yes', 'No', 'Other'], freeForm: 2, submit: false });
+  });
+
+  it('still shows the same rows wherever the cursor is, and nothing else', () => {
+    should(surfaceStillShown(screen(form(['Yes', 'No', 'Type something.'], 2)), deploy, bound)).be.true();
+    should(surfaceStillShown(screen(form(['No', 'Yes', 'Type something.'])), deploy, bound)).be.false();
+    should(surfaceStillShown(screen(form(['Yes', 'No'])), deploy, bound)).be.false();
+    should(surfaceStillShown(screen(form(['Yes', 'Yes, and do not ask again', 'No'])), deploy, bound)).be.false();
+    should(surfaceStillShown(screen(form(['Yes', 'No', 'Type something.'], 0, 'Ship it?')), deploy, bound)).be.false();
+  });
+
+  it('reads the typed text on its own row, whole or cut with an ellipsis, and nothing else', () => {
+    const typed = { index: 2, text: 'Ask first' };
+    should(surfaceStillShown(screen(form(['Yes', 'No', 'Ask first'], 2)), deploy, bound, typed)).be.true();
+    should(surfaceStillShown(screen(form(['Yes', 'No', 'Ask…'], 2)), deploy, bound, typed)).be.true();
+    should(surfaceStillShown(screen(form(['Yes', 'No', 'Type something.'], 2)), deploy, bound, typed)).be.false();
+    should(surfaceStillShown(screen(form(['Yes', 'No', 'Other words'], 2)), deploy, bound, typed)).be.false();
+    should(surfaceStillShown(screen(form(['Yes', 'Maybe', 'Ask first'], 2)), deploy, bound, typed)).be.false();
+    // An option labelled Other does not hide the typed row from the binder.
+    const withOther: RenderedQuestion = { ...deploy, options: [...(deploy.options ?? []), { label: 'Other' }] };
+    should(surfaceStillShown(screen(form(['Yes', 'No', 'Ask first'], 2)), withOther, bound, typed)).be.true();
+  });
+
+  it('accepts a tab whose rows were not seen only while every row is one of the question’s own', () => {
+    should(showsOnlyKnownRows(screen(form(['Yes', 'No', 'Type something.'])), deploy)).be.true();
+    should(showsOnlyKnownRows(screen(form(['No', 'Yes'])), deploy)).be.false();
+    should(showsOnlyKnownRows(screen(form(['Yes', 'Yes, and do not ask again', 'No'])), deploy)).be.false();
+    should(showsOnlyKnownRows(screen(form(['Yes', 'No', 'Type something.', 'More'])), deploy)).be.false();
+    should(showsOnlyKnownRows(screen('> '), deploy)).be.false();
   });
 });

@@ -21,7 +21,10 @@ import {
   PEER_MESSAGE_LABELS,
   type PeerMessageLabel,
   QueueChanged,
+  QuestionAnswered,
+  QuestionAsked,
   type QueuedMessage,
+  QUESTION_ANSWERED_STATE,
   QUESTION_STATE,
   type Question,
   type SendRecord,
@@ -68,7 +71,9 @@ import type { SessionStatus } from './seams/ferret-types.ts';
 import { sentDraftClearer, sharedDraftRoutes, sharedDraftSocketRoutes } from './drafts/lib/mounts/shared-drafts.ts';
 import { SessionSendError, sessionSendRoutes } from './delivery/lib/mounts/session-send.ts';
 import { StateDraftRepository } from './drafts/adapters/index.ts';
-import { clearAskedQuestion } from './questions/adapters/index.ts';
+import { buildQuestionAnswering, clearAskedQuestion, writeAskedQuestion } from './questions/adapters/index.ts';
+import { ANSWER_FAILURES, SessionAnswerError } from './questions/lib/mounts/session-answer.ts';
+import { QUESTION_WATCH_MS, QuestionWatch } from './questions/lib/watch.ts';
 import { OwnerWordsReader, TurnBoundaries, type TurnPhase } from './turns/lib/index.ts';
 import { SharedDraftPresence, SharedDraftService, sharedDraftOrigin } from './drafts/lib/index.ts';
 import { StateQueueStore } from './queue/adapters/index.ts';
@@ -83,12 +88,13 @@ import {
   INTERRUPT_UNAVAILABLE,
   MaybeTyped,
   PaneBusy,
-  SEND_EXTRAS_UNAVAILABLE,
+  SEND_PATH_UNWIRED,
   SEND_UNAVAILABLE,
   terminalSeam,
   Unconfirmed,
 } from './harness-seam.ts';
 import { startupParkedPending } from './delivery/lib/service.ts';
+import { type DeliveredAttachment, deliveredFilename, messageWithAttachments } from './attachments/lib/delivery.ts';
 import { harnessSendTerminal } from './send-terminal.ts';
 import { KeyedSerialExecutor } from './seams/keyed-serial-executor.ts';
 import { type MountRoute, routeTable, socketTable } from './seams/api.ts';
@@ -96,7 +102,7 @@ import { parseSessionId, type SessionId, tryParseSessionId } from './seams/ferre
 import type { ClockPort } from './seams/ports.ts';
 import type { SessionView } from './seams/protocol.ts';
 
-/** Said by every route that needs the ferret's terminal and is not connected to it: a send, an interrupt, the composer, a question's form, a retry. */
+/** Said by every route that needs the ferret's terminal and is not connected to it: an explicit send retry, the compact-at setting. */
 const TERMINAL_PENDING =
   "This needs the ferret's terminal, and Conversation is not connected to it yet. Drive the ferret from its terminal for now.";
 
@@ -127,6 +133,7 @@ const refusalCode = (error: unknown): string => {
   return (
     (
       {
+        invalid: 'invalid',
         not_found: 'not_found',
         refused: 'send_refused',
         pending: 'session_launching',
@@ -191,9 +198,21 @@ const statusOf = (ferret: FerretSummary): SessionStatus => {
   }
 };
 
+/** The stored original of one attachment of a ferret, its digest re-checked (part b's store). */
+export interface AttachmentSource {
+  download(
+    ferret: string,
+    id: string,
+  ): Promise<{
+    readonly attachment: { readonly id: string; readonly filename: string; readonly mime: string };
+    readonly bytes: Uint8Array;
+  }>;
+}
+
 /**
- * What a send can carry that the harness seam does not type yet. `label` is read only for `fyi`, the one label that
- * changes WHEN a message goes (held to the turn's end); `action` and `blocker` type at once, as the seam does.
+ * What a send can carry beyond its text. `attachmentIds` are handed to the agent as files ({@link deliverAttachments}).
+ * `label` is typed under its banner whatever it is: `fyi` too, as v4 did with its queue off (holding an fyi to the
+ * receiver's turn end waits on the queue deliverer, which this host does not wire).
  */
 interface UnwiredSend {
   /**
@@ -268,6 +287,8 @@ export interface ConversationAHalf {
   onAskAnswered(answered: { readonly ferret: string; readonly askId: AskId }): Promise<void>;
   /** What Ferrets says of a ferret's phase, for `turn.ended`. */
   readonly turns: { look(ferret: string, phase: TurnPhase): void; forget(ferret: string): void };
+  /** The question watch: one look at a ferret (a state change), and what is forgotten about a ferret that stopped. */
+  readonly questions: { look(ferret: string): void; forget(ferret: string): void };
   stop(): void;
 }
 
@@ -275,9 +296,9 @@ export interface ConversationAHalf {
  * Part a of Conversation's daemon half: the queue, the send ledger, questions, turns and the shared draft, on the
  * kernel's state, clock, events and ids. A send and an interrupt go through Ferrets' harness seam, which answers a
  * closed refusal for a send and presses the harness's own stop key (`deps.gate` can still hold either back, 503).
- * Everything else that needs the pane (the composer actions, a send's retry, cancel and submit, answering a question's
- * form, the harness's own compact-at setting) is wired to a refusal that says so; the queue, the ledger reads, the
- * shared draft and its stream are real.
+ * The composer actions, a send's cancel and Enter, and answering a question's form (the structured-question drive over
+ * the harness's form seam) are wired too. What is not (a send's explicit retry, the harness's own compact-at setting) is
+ * wired to a refusal that says so; the queue, the ledger reads, the shared draft and its stream are real.
  */
 export function buildConversationA(deps: {
   readonly kernel: KernelPorts;
@@ -286,6 +307,8 @@ export function buildConversationA(deps: {
   readonly hooks: Pick<HookInvoker, 'observe' | 'transform'>;
   /** Which of the harness seam's two actions are live (see {@link HarnessGate}). */
   readonly gate: HarnessGate;
+  /** The stored originals a send may name (part b's store). Absent: a send that names a file is refused. */
+  readonly attachments?: AttachmentSource;
 }): ConversationAHalf {
   const { kernel, ferrets, asks, hooks, gate } = deps;
   const clock: ClockPort = { now: () => kernel.clock.now() };
@@ -339,7 +362,7 @@ export function buildConversationA(deps: {
   /**
    * THE TERMINAL SEAM: typing and interrupting go through Ferrets' harness seam (`FerretsApi.harness`), whose runner acts
    * on the ferret's terminal itself, so nothing here wraps a call in an act of its own. Answering a question's form is
-   * the structured-question drive, which still waits on its own wiring.
+   * the structured-question drive (`answering`, below), which types through the harness's form seam the same way.
    */
   const terminal = terminalSeam(ferrets);
   /**
@@ -399,7 +422,7 @@ export function buildConversationA(deps: {
    * only a TYPING send needs — the turn documents, the revive and the declared wait — so those ports refuse; the
    * service's `send` and `reattempt` are not called from here (a send is `typeMessage`, below).
    */
-  const unwiredTyping = (): never => pending(SEND_EXTRAS_UNAVAILABLE);
+  const unwiredTyping = (): never => pending(SEND_PATH_UNWIRED);
   /** The ferret's turn documents and the files Ferrets writes for it; none when Ferrets offers none (or refuses the look). */
   const turnsOf = async (ferret: SessionId) => await ferrets.turns?.(ferret).catch(() => undefined);
   /**
@@ -551,17 +574,56 @@ export function buildConversationA(deps: {
   };
   /**
    * Whether a send may be typed at all, before its text is prepared, opened or kept (a repeat of a kept id is answered
-   * without it). A closed gate refuses it. And refuses what the harness seam does not type yet: files or an fyi message
-   * (held to the turn's end) would be dropped, and the send answered `sent` all the same. A send-now is refused while the
-   * interrupt gate is closed, as it presses a stop key. A field is refused only when it asks for something: the CLI always sends `now: false`
-   * and a label (`action` by default), and those type exactly as the seam types.
+   * without it). A closed gate refuses it. A send-now is refused while the interrupt gate is closed, as it presses a stop
+   * key. Files and every label type: files are handed to the agent first ({@link deliverAttachments}), and an `fyi` is
+   * typed at once under its banner like any other label.
    */
   const mayGo = (request: Omit<UnwiredSend, 'origin'>): void => {
     if (!gate.send) pending(SEND_UNAVAILABLE);
     // A send-now presses a stop key: with the interrupt gate closed (a stop could quit the agent) it presses nothing, so
     // it types nothing either.
     if (request.now === true && !gate.interrupt) pending(INTERRUPT_UNAVAILABLE);
-    if ((request.attachmentIds?.length ?? 0) > 0 || request.label === 'fyi') pending(SEND_EXTRAS_UNAVAILABLE);
+  };
+  /** Said when a send names a file this daemon has no store for. */
+  const NO_ATTACHMENTS = 'this daemon cannot take attachments with a send: the plugin that owns them is off';
+  /**
+   * THE FILE HAND-OFF (v4 `deliverAttachments`). Each named stored original is read back through the store (which
+   * re-checks its digest against the manifest, and finds only THIS ferret's) and written, by the ferret's harness seam,
+   * into the ferret's OWN session `attachments/` folder (`0700`; `0600` per file): the one place an agent reads a file it
+   * is sent without asking. The name is the file's own reduced to plain characters, behind eight characters of its
+   * digest, so two different files of one name never overwrite each other and the same file twice is one path. Answers
+   * the paths and types the message then lists. A file that is not this ferret's, or cannot be handed over, refuses the
+   * whole send (400 `invalid`) BEFORE anything is typed, because "see the screenshot" with no screenshot is the worse
+   * outcome. Nothing of the file but its path and type reaches the pane or the log.
+   */
+  const deliverAttachments = async (
+    ferret: SessionId,
+    ids: readonly string[] | undefined,
+  ): Promise<readonly DeliveredAttachment[]> => {
+    const wanted = [...new Set(ids ?? [])];
+    if (wanted.length === 0) return [];
+    const refuse = (why: string): never => {
+      throw new SessionSendError('invalid', `an attached file could not be handed to the agent: ${why}`);
+    };
+    const source = deps.attachments;
+    if (source === undefined) return refuse(NO_ATTACHMENTS);
+    const files: { name: string; contents: Uint8Array; mime: string }[] = [];
+    for (const id of wanted) {
+      const found = await source.download(ferret, id).catch((error: unknown) => {
+        return refuse(error instanceof Error ? error.message : 'it could not be read');
+      });
+      files.push({
+        name: `${found.attachment.id.replace(/^att_/u, '').slice(0, 8)}-${deliveredFilename(found.attachment.filename)}`,
+        contents: found.bytes,
+        mime: found.attachment.mime,
+      });
+    }
+    const harness = await ferrets.harness?.(ferret).catch(() => undefined);
+    if (harness?.deliverFiles === undefined) return refuse("this ferret's files cannot be written from here");
+    const paths = await harness
+      .deliverFiles(files.map(({ name, contents }) => ({ name, contents })))
+      .catch(() => refuse('they could not be written'));
+    return files.map((file, at) => ({ path: paths[at] as string, mime: file.mime }));
   };
   /**
    * THE TEXT THE AGENT READS (today's `payload()`): the message, trimmed, and — when a FERRET sent it — the protocol's
@@ -631,9 +693,9 @@ export function buildConversationA(deps: {
    *  - a pane behind a blocking prompt (a permission, a picker) is not pressed: Escape would answer it for the person;
    * Where it does not press, the send goes on as any send does, and the delivery decides (type, queue, or refuse).
    * A ferret holding a pending structured question never reaches here: {@link refuseWhileAsking} refuses every send to it
-   * first. That check reads `question.json`, which NOTHING writes on 5.0 yet (the observer's question part is not
-   * mounted), so until it does, only this pane read stands between a send-now and a question form — and it is unproven on
-   * an AskUserQuestion screen (see the conversation line in `ports-pending.json`).
+   * first. That check reads `question.json`, which the question watch writes from the hook's file for a Claude Code ferret
+   * (one question or a tabbed form of several). A Codex `request_user_input` is not detected (no hook; see the
+   * claude-code line in `ports-pending.json`), so for Codex only this pane read stands between a send-now and a form.
    */
   const stopForNow = async (ferret: SessionId, bound: Awaited<ReturnType<typeof terminal.bind>>): Promise<void> => {
     const pane = await lookAtPane.observe(ferret);
@@ -646,7 +708,7 @@ export function buildConversationA(deps: {
    * TODAY'S `authorizeSend` REFUSAL, for every send (plain or now): a ferret holding an unanswered structured question
    * is showing a form, not a composer, and typing prose into it selects whichever option the keys land on. Nothing is
    * typed, nothing is kept, and the sentence is today's (`SendUnavailable`, answered as the route answers every
-   * session-side refusal: 409 `send_refused`). Inert until something writes `question.json` (see {@link stopForNow}).
+   * session-side refusal: 409 `send_refused`). Live for every Claude Code question the watch has stored (see {@link stopForNow}).
    */
   const refuseWhileAsking = async (ferret: SessionId): Promise<void> => {
     try {
@@ -1061,12 +1123,71 @@ export function buildConversationA(deps: {
     return question;
   };
   /**
-   * Answering a question's form is the structured-question drive, which waits on its own wiring (see the conversation line
-   * in `ports-pending.json`): until then every answer is refused and `question.json` stays. When it lands, an answer that
-   * landed ends the question, so `question.json` goes with it (the route's subsystem "returns only after … state cleared
-   * its exact bound tool id") through {@link clearAskedQuestion}.
+   * Answering a question's form is the structured-question drive (`questions/adapters/question-answering.ts`): the
+   * service binds `question.json`, the driver types into the live form through Ferrets' form seam only after binding it
+   * on a captured frame, the coordinator drives one logical answer at most once, and the stamp plus the exact-id clear of
+   * `question.json` is the commit point. Its failures are the route's refusals (`SessionAnswerError`).
    */
-  const answerQuestion = async (): Promise<SessionView> => pending();
+  const answering = buildQuestionAnswering({
+    state: kernel.state,
+    ferrets,
+    questionLane: questionSerial,
+    // Its own queue: the answered clear re-enters the question lane, which an answer must not hold across the drive.
+    serial: new KeyedSerialExecutor(),
+    clock,
+    status: async id => {
+      const summary = await ferrets.get(id);
+      return summary === undefined ? undefined : statusOf(summary);
+    },
+    publishAnswered: async (ferret, toolUseId) => await kernel.events.publish(QuestionAnswered, { ferret, toolUseId }),
+    log: { info: (event, fields) => kernel.log.info(event, fields), warn: message => kernel.log.warn(message) },
+    sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
+  });
+  const answerQuestion = async (...args: Parameters<typeof answering.answer>): Promise<SessionView> =>
+    await answering.answer(...args);
+
+  /**
+   * THE QUESTION WATCH: Claude Code's hook leaves the question it asks in the ferret's own file; this reads it on the 2 s
+   * cadence over the roster (and once on a ferret's state change) and makes it `question.json`, which is what the app, the
+   * agenda and the send guard read. It also retires the question when the transcript says it was answered. Reads only.
+   */
+  const questionWatch = new QuestionWatch({
+    roster: async () => (await ferrets.list()).map(({ id, harness, state }) => ({ id, harness, state })),
+    harness: async ferret => {
+      const id = tryParseSessionId(ferret);
+      return id === undefined ? undefined : await ferrets.harness?.(id);
+    },
+    current: async ferret => {
+      const read = await kernel.state.read(QUESTION_STATE, ferret);
+      return read.ok ? read.value : undefined;
+    },
+    lastAnswered: async ferret => {
+      const read = await kernel.state.read(QUESTION_ANSWERED_STATE, ferret);
+      // Unreadable is missing evidence, never "nothing was answered": the look decides nothing and tries again.
+      if (!read.ok) throw new Error('the answered stamp is unreadable');
+      return read.value?.toolUseId;
+    },
+    write: async (ferret, payload, askedAt, transcript) =>
+      await writeAskedQuestion(kernel.state, questionSerial, ferret, payload, askedAt, transcript),
+    clear: async (ferret, toolUseId) => await clearAskedQuestion(kernel.state, questionSerial, ferret, toolUseId),
+    asked: async (ferret, toolUseId) => {
+      await kernel.events.publish(QuestionAsked, { ferret: parseSessionId(ferret), toolUseId });
+    },
+    answered: async (ferret, toolUseId) => {
+      await kernel.events.publish(QuestionAnswered, { ferret: parseSessionId(ferret), toolUseId });
+    },
+  });
+  let cancelQuestionWatch: (() => void) | undefined;
+  const watchQuestions = (): void => {
+    if (stopped) return;
+    cancelQuestionWatch = kernel.clock.after(milliseconds(QUESTION_WATCH_MS), () => {
+      void questionWatch
+        .sweep()
+        .catch(() => undefined)
+        .finally(watchQuestions);
+    });
+  };
+  watchQuestions();
 
   const hypermediaSwitch = new StateHypermediaSwitch(kernel.state);
   const hypermedia = new SessionHypermediaService({
@@ -1098,7 +1219,11 @@ export function buildConversationA(deps: {
           if (kept !== undefined) return kept;
           // Asked before the text is prepared: a refused send runs no `message.before-send` transform.
           mayGo(request);
-          return await typeMessage(parseSessionId(id), { ...request, message: await prepared(id, request.message) });
+          const delivered = await deliverAttachments(parseSessionId(id), request.attachmentIds);
+          return await typeMessage(parseSessionId(id), {
+            ...request,
+            message: messageWithAttachments(await prepared(id, request.message), delivered),
+          });
         },
         interrupt: async (id: string) => await interruptFerret(id),
         sends: records,
@@ -1140,10 +1265,11 @@ export function buildConversationA(deps: {
         if (kept !== undefined) return ok(kept);
         // Asked before an id is minted or the text is prepared: a refused send runs no transform and spends nothing.
         mayGo(request);
+        const delivered = await deliverAttachments(ferret, request.attachmentIds);
         return ok(
           await typeMessage(ferret, {
             sendId: request.sendId ?? String(kernel.ids.mint('send')),
-            message: await prepared(ferret, request.message),
+            message: messageWithAttachments(await prepared(ferret, request.message), delivered),
             ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
             ...(request.label === undefined ? {} : { label: request.label }),
             ...(request.now === undefined ? {} : { now: request.now }),
@@ -1248,7 +1374,20 @@ export function buildConversationA(deps: {
       }
     },
     question: async ferret => await askedQuestion(ferret),
-    answer: async () => err(pendingRefusal()),
+    answer: async (ferret, request) => {
+      try {
+        // No request id comes with the port's call: one is minted, and a repeat finds the question no longer pending.
+        await answering.answer(ferret, { ...request, requestId: String(kernel.ids.mint('answer')) });
+        return ok(undefined);
+      } catch (error) {
+        if (error instanceof SessionAnswerError)
+          return err({ code: ANSWER_FAILURES[error.failure].code, message: error.message });
+        return err({
+          code: error instanceof ApiError ? (error.code ?? 'answer_refused') : 'session_answer_failed',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
     compactAt: async () => undefined,
     setCompactAt: async () => err(pendingRefusal()),
     draft: async (ferret, slot) => await drafts.read(ferret, slot === 'chat' ? undefined : slot),
@@ -1291,7 +1430,14 @@ export function buildConversationA(deps: {
     api,
     sitrep,
     hypermediaRecorded: async ferret => await hypermediaSwitch.recorded(ferret),
-    withdrawQuestion: async ferret => await clearAskedQuestion(kernel.state, questionSerial, ferret),
+    withdrawQuestion: async ferret => {
+      questionWatch.forget(ferret);
+      await clearAskedQuestion(kernel.state, questionSerial, ferret);
+    },
+    questions: {
+      look: ferret => void questionWatch.look(ferret).catch(() => undefined),
+      forget: ferret => questionWatch.forget(ferret),
+    },
     onAskAnswered: async ({ ferret, askId }) => {
       await drafts.discard(ferret, askId).catch(() => undefined);
     },
@@ -1321,6 +1467,7 @@ export function buildConversationA(deps: {
     },
     stop: () => {
       stopped = true;
+      cancelQuestionWatch?.();
       disarm?.();
       for (const waiter of [...waiters.values()]) waiter.end();
       scheduler.cancelAll();

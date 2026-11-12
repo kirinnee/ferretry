@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { ApiError, type Log, type RootHandle, type RootsPort } from '@ferretry/kernel/contract';
 import { FERRET_READABLE_FOLDERS, FERRET_SESSIONS_ROOT } from '../../contract/sessions-root.ts';
 import type { FerretTurnAuthor, FerretTurnWritten } from '../../contract/port.ts';
-import { type Duration, milliseconds } from '@ferretry/std';
+import { type Duration, type Instant, milliseconds } from '@ferretry/std';
 import { FileSessionEffectLedger } from '../adapters/session/effects/file-session-effect-ledger.ts';
 import {
   FileSessionEnvironmentStore,
@@ -183,6 +183,7 @@ export class SessionFiles {
         );
         return parsed.success ? parsed.data : undefined;
       },
+      askedQuestion: async ferret => await this.readAskedQuestion(parseSessionId(ferret)),
       // Claude Code's question hook records the question it asks here (`FY_QUESTION_FILE`, today's `questionAsked`):
       // inside the ferret's own folder on the sessions root, never in its work tree.
       questionFile: async ferret => {
@@ -354,6 +355,36 @@ export class SessionFiles {
     } catch (error) {
       this.deps.log.warn('a revive turn could not be counted, so the ferret was not relaunched', { ferret: id });
       throw error;
+    }
+  }
+
+  /** The most bytes of `question-asked.json` read: a hook payload is a few kilobytes, so a larger file is not one. */
+  private static readonly ASKED_QUESTION_LIMIT = 262_144;
+
+  /**
+   * THIS ferret's `question-asked.json` as the hook left it, bounded, and WHEN THE HOOK WROTE IT: the file's own
+   * modification time, read from the fenced root (the hook replaces the file whole for every question, so a changed
+   * payload is a new question and the time moves with it). That is the authoritative asking time: a daemon that meets the
+   * file late (a restart, a question answered before the first look) still dates it when it was asked, so a transcript
+   * that has since moved on retires it. First-read time is never substituted: it is always later than the answer. A file
+   * whose time cannot be read is `undefined`, like an absent one, so it is never shown on a guess. `undefined` too when
+   * the file is absent, unreadable or over the bound; reading never throws.
+   */
+  private async readAskedQuestion(
+    id: SessionId,
+  ): Promise<{ readonly payload: string; readonly writtenAt: Instant } | undefined> {
+    try {
+      const root = this.root(id);
+      const named = root.resolve(QUESTION_ASKED_FILE);
+      if (!named.ok) return undefined;
+      const bytes = await root.readBytes(named.value, SessionFiles.ASKED_QUESTION_LIMIT + 1);
+      if (bytes.length > SessionFiles.ASKED_QUESTION_LIMIT) return undefined;
+      const payload = new TextDecoder().decode(bytes);
+      const stat = await root.stat(named.value);
+      if (stat === undefined || stat.kind !== 'file' || !Number.isFinite(Date.parse(stat.modified))) return undefined;
+      return { payload, writtenAt: stat.modified };
+    } catch {
+      return undefined;
     }
   }
 

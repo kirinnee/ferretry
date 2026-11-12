@@ -39,6 +39,23 @@ function textOf(content: unknown): string | undefined {
 const QUEUE_OPERATION_PROOF = 'queue-operation';
 const QUEUED_PROMPT_PROOF = 'queued-prompt';
 
+/**
+ * The tool calls and tool results a message record carries, by their ids (`tool_use.id`, `tool_result.tool_use_id`), as
+ * `TranscriptEntry.tools`. A reader that must know whether ONE call was made or answered (the question watch) matches
+ * these exactly: the ids are not in the entry's text, which holds only what a person would read. Kept out of `data`, which
+ * Conversation shows as a tool entry's content. Absent when the record carries no such block.
+ */
+function toolIdentity(blocks: readonly (Json | undefined)[]): NonNullable<TranscriptEntry['tools']> {
+  const ids = (type: string, field: string): string[] =>
+    blocks.flatMap(block => (block?.type === type && typeof block[field] === 'string' ? [block[field] as string] : []));
+  const calls = ids('tool_use', 'id');
+  const results = ids('tool_result', 'tool_use_id');
+  return {
+    ...(calls.length === 0 ? {} : { calls }),
+    ...(results.length === 0 ? {} : { results }),
+  };
+}
+
 const QUEUE_OPERATIONS: ReadonlySet<string> = new Set(['enqueue', 'dequeue', 'remove']);
 
 /** The input-proof entry a line is, or `undefined` (a prompt typed mid-turn, held or drained by Claude's own queue). */
@@ -97,11 +114,13 @@ export function parseEntry(line: string, ordinal = 0): TranscriptEntry | undefin
   const blocks = Array.isArray(content) ? content.map(asObject) : [];
   const tool = blocks.some(block => block?.type === 'tool_use' || block?.type === 'tool_result');
   const text = textOf(content);
+  const identity = toolIdentity(blocks);
   return {
     id,
     at,
     role: tool && text === undefined ? 'tool' : role,
     ...(text === undefined ? {} : { text }),
+    ...(Object.keys(identity).length === 0 ? {} : { tools: identity }),
   };
 }
 

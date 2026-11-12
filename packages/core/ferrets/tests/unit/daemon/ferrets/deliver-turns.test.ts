@@ -1281,6 +1281,67 @@ describe('ruling #45 BG-051 / BG-053: Conversation writes a send’s turn docume
   });
 });
 
+describe('FerretHarness.deliverFiles hands a send its files through the ferret’s own attachments folder', () => {
+  const bytes = (text: string) => new TextEncoder().encode(text);
+
+  test('each file lands 0600 in the ferret’s own attachments/ folder (0700), and the absolute paths come back in order', async () => {
+    const w = await world();
+    const id = await started(w);
+    const harness = (await w.service.harness(id as never))!;
+
+    const paths = await harness.deliverFiles!([
+      { name: 'one.png', contents: bytes('FIXTURE-ONE') },
+      { name: 'two.txt', contents: bytes('FIXTURE-TWO') },
+    ]);
+
+    expect(paths).toEqual([`${w.folderOf(id)}/attachments/one.png`, `${w.folderOf(id)}/attachments/two.txt`]);
+    expect(await readFile(paths[0]!, 'utf8')).toBe('FIXTURE-ONE');
+    expect(await readFile(paths[1]!, 'utf8')).toBe('FIXTURE-TWO');
+    expect((await stat(paths[0]!)).mode & 0o777).toBe(0o600);
+    expect((await stat(`${w.folderOf(id)}/attachments`)).mode & 0o777).toBe(0o700);
+  });
+
+  test('a name that is not a bare file name writes NOTHING, not even the files before it', async () => {
+    const w = await world();
+    const id = await started(w);
+    const harness = (await w.service.harness(id as never))!;
+
+    for (const name of ['../escape.png', 'a/b.png', '..', '.', 'a\\b.png', '', 'nul\0.png'])
+      await expect(
+        harness.deliverFiles!([
+          { name: 'fine.png', contents: bytes('FIXTURE') },
+          { name, contents: bytes('FIXTURE') },
+        ]),
+      ).rejects.toThrow();
+
+    await expect(readdir(`${w.folderOf(id)}/attachments`)).rejects.toThrow();
+    expect(await readdir(w.folderOf(id))).not.toContain('escape.png');
+  });
+
+  test('it is bound to its own ferret: a ferret opening another’s seam is refused, so no agent writes into another’s folder', async () => {
+    const w = await world();
+    const a = await started(w);
+    const b = await started(w);
+
+    await expect(w.service.harness(b as never, a as never)).rejects.toMatchObject({ status: 403 });
+    const mine = (await w.service.harness(a as never, a as never))!;
+    const [path] = await mine.deliverFiles!([{ name: 'mine.txt', contents: bytes('FIXTURE') }]);
+    expect(path).toBe(`${w.folderOf(a)}/attachments/mine.txt`);
+    await expect(readdir(`${w.folderOf(b)}/attachments`)).rejects.toThrow();
+  });
+
+  test('a daemon whose session files are unbound offers no writer, so a send that names a file is refused, never dropped', async () => {
+    const w = await world();
+    const id = await started(w);
+    const bare = new FerretsService(w.registry, w.tokens, {
+      ...(w.service as unknown as { ports: FerretsPorts }).ports,
+      session: undefined,
+    });
+
+    expect((await bare.harness(id as never))!.deliverFiles).toBeUndefined();
+  });
+});
+
 /**
  * `fy start -f` (V-0443): the files a start was given are planned by the attachment owner (a stand-in here; Conversation's
  * own is proved in its package), written into the ferret's own `attachments/` folder, and named in the opening turn.
@@ -1373,5 +1434,33 @@ describe('V-0443 a start carries its attachments with the opening message', () =
     expect(asked).toEqual([]);
     expect(await readFile(turnFile(w, id, 1), 'utf8')).toBe('# Assigned task\n\nBuild the thing.\n');
     expect(await readdir(w.folderOf(id))).not.toContain('attachments');
+  });
+});
+
+describe('structured questions: FerretHarness.askedQuestion reads the hook’s question file from the ferret’s own folder', () => {
+  const HOOK = JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', tool_use_id: 'toolu_1' });
+  const asking = async () => {
+    const w = await world();
+    const id = await started(w);
+    return { w, id, seam: (await w.service.harness(id as never))!, file: `${w.folderOf(id)}/question-asked.json` };
+  };
+
+  test('absent file reads nothing; a written one answers its payload, the proved transcript and a stable first-seen instant', async () => {
+    const { w, id, seam, file } = await asking();
+    expect(await seam.askedQuestion!()).toBeUndefined();
+    await writeFile(file, HOOK, { mode: 0o600 });
+    w.harness.transcripts.set(id as never, { stamp: { file: '/t/fern.jsonl', size: 1, mtimeMs: 2 }, records: [] });
+    const first = await seam.askedQuestion!();
+    expect(first).toMatchObject({ payload: HOOK, transcript: '/t/fern.jsonl' });
+    // The same text keeps its instant; a different payload is a new question with its own.
+    expect((await seam.askedQuestion!())?.writtenAt).toBe(first?.writtenAt);
+    await writeFile(file, `${HOOK} `, { mode: 0o600 });
+    expect((await seam.askedQuestion!())?.payload).toBe(`${HOOK} `);
+  });
+
+  test('a file over the bound is not a hook payload and reads nothing, and it never throws', async () => {
+    const { seam, file } = await asking();
+    await writeFile(file, 'x'.repeat(262_145), { mode: 0o600 });
+    expect(await seam.askedQuestion!()).toBeUndefined();
   });
 });

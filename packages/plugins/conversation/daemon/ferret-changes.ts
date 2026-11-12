@@ -9,6 +9,8 @@ export interface FerretChangeFollowers {
   readonly look: (ferret: string, phase: TurnPhase) => void;
   /** The ferret is gone: nothing is held for it any more. */
   readonly forget: (ferret: string) => void;
+  /** The ferret changed state while it can be asking: one look at the file its question hook left (the 2 s watch also looks). */
+  readonly lookQuestion?: (ferret: string) => void;
   /** The ferret stopped or went away: the question it was asking can no longer be answered, so it is withdrawn. */
   readonly withdrawQuestion: (ferret: string) => void;
   readonly warn: (message: string) => void;
@@ -45,7 +47,10 @@ export function followFerretChanges(followers: FerretChangeFollowers): (payload:
       try {
         if (ended) followers.withdrawQuestion(ferret);
         if (change === 'removed') followers.forget(ferret);
-        else followers.look(ferret, state);
+        else {
+          followers.look(ferret, state);
+          if (change === 'state' && !ended) followers.lookQuestion?.(ferret);
+        }
       } catch (error) {
         followers.warn(`conversation could not follow a turn of ${ferret}: ${String(error)}`);
       }

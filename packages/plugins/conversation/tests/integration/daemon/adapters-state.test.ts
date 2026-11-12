@@ -424,13 +424,8 @@ describe('question.json, the one writer and its readers', () => {
 
   test('what cannot be stored whole clears the earlier question instead of leaving it up', async () => {
     const state = world();
-    const several = JSON.stringify({
-      ...envelope,
-      tool_input: { questions: [envelope.tool_input.questions[0], envelope.tool_input.questions[0]] },
-    });
     for (const [payload, transcript] of [
       [PAYLOAD, undefined],
-      [several, TRANSCRIPT],
       ['not json', TRANSCRIPT],
     ] as const) {
       await writeAskedQuestion(state, lane, 'f1', PAYLOAD, AT, TRANSCRIPT);

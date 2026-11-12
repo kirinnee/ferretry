@@ -19,8 +19,9 @@ import {
 import './questions.css';
 
 /**
- * The form's questions. The daemon keeps one question per ferret (`QuestionSchema`); the form still steps through a
- * list, as today, so one tool call that asked several reads the same way.
+ * The form's questions. The daemon keeps one question (and its tool call) per ferret (`QuestionSchema`: the first
+ * question and the ones after it); the form steps through the list, so one tool call that asked several reads the same
+ * way.
  */
 export interface PendingQuestion {
   readonly toolUseId: string;
@@ -42,6 +43,12 @@ export const pendingQuestionOf = (question: Question): PendingQuestion => ({
       options: question.options,
       multiSelect: question.multiple,
     },
+    ...(question.more ?? []).map(more => ({
+      question: more.text,
+      ...(more.header === undefined ? {} : { header: more.header }),
+      options: more.options,
+      multiSelect: more.multiple,
+    })),
   ],
 });
 
@@ -77,7 +84,12 @@ const QUESTION_ALREADY_ANSWERED = 'question_already_answered';
  * The refusals that mean the daemon tried the native form and could not answer it. The person can
  * still answer — in the agent's own pane, or in prose — so that is what they are told.
  */
-const UNDELIVERED = new Set(['answer_unconfirmed', 'answer_released', 'session_answer_failed']);
+const UNDELIVERED = new Set([
+  'answer_unconfirmed',
+  'answer_released',
+  'answer_form_unreadable',
+  'session_answer_failed',
+]);
 const COULD_NOT_ANSWER = "Couldn't answer automatically — answer in the Console tab or type your choice in chat.";
 
 /**

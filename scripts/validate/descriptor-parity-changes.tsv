@@ -278,7 +278,7 @@ route	GET /v1/ferrets/:ferretId/messages	added	session routes renamed /v1/sessio
 route	GET /v1/sessions/:sessionId/transcript-images/:handle	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/ferrets/:ferretId/transcript-images/:handle	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/answer	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
-route	POST /v1/ferrets/:ferretId/answer	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/answer	moved-changed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); DELIBERATE correction of v4 R-0335 (capability=none): 5.0 adds the terminal use capability, because the route types native keys and pastes into the pane (the composer, permission and dialog routes ask it too); a remote or device caller now needs the terminal grant, the local owner keeps its exemption; a tightening only
 route	GET /v1/sessions/:sessionId/compact-at	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/ferrets/:ferretId/compact-at	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	PATCH /v1/sessions/:sessionId/compact-at	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged

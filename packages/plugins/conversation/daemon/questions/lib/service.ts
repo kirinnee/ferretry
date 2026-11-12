@@ -43,6 +43,21 @@ export class StructuredQuestionDrivePaused extends StructuredQuestionDriveFailur
   }
 }
 
+/** One step of a drive, journalled as it happens so a stopped drive says where and why. */
+export type StructuredQuestionDriveStep =
+  | { readonly step: 'started'; readonly mode: 'tabs' | 'pages'; readonly answered?: readonly boolean[] }
+  /** The question's answer was chosen and its tab (or page) visibly moved on. */
+  | { readonly step: 'answered'; readonly questionIndex: number }
+  /** A tab already ticked with the requested answer was passed over with →. */
+  | { readonly step: 'kept'; readonly questionIndex: number }
+  /** The review page listed a different answer, so the drive went back to this tab. */
+  | { readonly step: 'revisited'; readonly questionIndex: number; readonly shown?: string | undefined }
+  | { readonly step: 'review-verified' }
+  | { readonly step: 'submitted' };
+
+/** Where a driver reports its steps. Best-effort: a step that cannot be recorded never stops a drive. */
+export type StructuredQuestionDriveJournal = (id: SessionId, step: StructuredQuestionDriveStep) => Promise<void>;
+
 /** The receipt transition a failed attempt is allowed to make after recovery. */
 export type StructuredQuestionFailureReceipt = 'accepted' | 'withdrawn' | 'failed' | 'quarantined';
 
@@ -69,8 +84,27 @@ export class StructuredQuestionAttemptPaused extends StructuredQuestionAttemptFa
   }
 }
 
+/**
+ * The form's selection could not be read exactly once, so NOTHING more was typed — not even the recovery Escape — and the
+ * question stays pending. The receipt is `withdrawn` when no key had been sent (the same request may honestly start over once
+ * the form can be read) and stays `accepted` when an earlier key may have reached the form.
+ */
+export class StructuredQuestionAttemptUnreadable extends StructuredQuestionAttemptFailed {
+  /** A tabbed drive's partial progress, kept with the refusal: those tabs stay answered on the pane. */
+  get progress(): StructuredQuestionProgress | undefined {
+    return this.failure instanceof StructuredQuestionDrivePaused ? this.failure.progress : undefined;
+  }
+
+  constructor(message: string, failure: StructuredQuestionDriveFailure) {
+    super(message, failure.acceptance === 'none' ? 'withdrawn' : 'accepted', failure);
+    this.name = 'StructuredQuestionAttemptUnreadable';
+  }
+}
+
 /** The pane evidence retained with a failed answer. */
 export interface StructuredQuestionDiagnosticPane {
+  /** The runner's reading of the visible frame: a turn is running. */
+  readonly activeWork: boolean;
   readonly alive: boolean;
   readonly dead: boolean;
   readonly promptReady: boolean;
@@ -256,6 +290,21 @@ export class StructuredQuestionService {
         snapshotError => ({ error: snapshotError instanceof Error ? snapshotError.message : String(snapshotError) }),
       );
       const questionText = pending.questions.map(question => question.question).join('\n\n');
+      // An unreadable cursor is decided BEFORE a tabbed drive's pause: a form whose selected row cannot be read cannot be
+      // resumed (a retry reads the same pane), so "resume" would be a false remedy. Whatever the drive had answered so far
+      // stays on the pane and is reported with the refusal; no key, paste or Escape is sent.
+      if (failure.diagnostics.reason === 'cursor-missing') {
+        // Lizzette's rule: a selection that cannot be read is never typed into, and Escape is a key too. The question is
+        // kept exactly as it is; the owner is told the form could not be read safely and to answer it at the terminal.
+        await this.repository.retained(input.id, pending, answers, {
+          failure,
+          ...('pane' in snapshot ? { snapshot: snapshot.pane } : { snapshotError: snapshot.error }),
+        });
+        throw new StructuredQuestionAttemptUnreadable(
+          `${failure.message}\n\nNothing was cancelled or released; the structured form remains bound. Pending question:\n${questionText}`,
+          failure,
+        );
+      }
       if (failure instanceof StructuredQuestionDrivePaused) {
         // Nothing was submitted and the form is still open with whatever was answered so far. Escape
         // would discard those answers; the form stays pending, to be resumed or finished in the Console.
