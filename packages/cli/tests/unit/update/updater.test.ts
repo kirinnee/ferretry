@@ -467,6 +467,33 @@ describe('DaemonUpdater — major versions', () => {
     }
   }
 
+  // A v4 daemon can still answer while a 5.x `fy` runs the update (the plain cask is replaced under it), so
+  // current is 4.x there. Only v4 has a pinned cask: the way back must name `ferretry@4`.
+  it('names the real @4 cask as the way back when a v4 Homebrew daemon is offered v5', async () => {
+    const latest = new FakeLatest({ kind: 'found', release: { version: '5.0.0', url: 'https://example.com/v5' } });
+    const h = harness('homebrew', { version: '4.291.9', latest });
+    await h.run({ yes: true, report: '/r.json' });
+    should(h.report()).match({ from: '4.291.9', target: '5.0.0', outcome: 'failed' });
+    should(h.report().message).equal(
+      "5.0.0 is the next major version, not a plain update: it comes with its own steps. Read that release's notes first: https://github.com/kirinnee/ferretry/releases/tag/v5.0.0. Your daemon stays on 4.291.9. --major allows the move. To stay on v4, run: brew install --cask kirinnee/ferretry/ferretry@4",
+    );
+    should(h.host.trail).deepEqual([]);
+    should(h.host.running).equal('4.291.9');
+  });
+
+  it('recovers a v4 Homebrew daemon through the real @4 cask when the upgrade installs v5', async () => {
+    const h = harness('homebrew', { version: '4.291.9' });
+    h.packages.sourceVersion = '4.291.10';
+    h.packages.upgradeTo = '5.0.0';
+    await h.run({ yes: true, to: '4.291.10', report: '/r.json' });
+    should(h.report()).match({ from: '4.291.9', target: '4.291.10', outcome: 'failed' });
+    should(h.report().message).equal(
+      'The installed fyd is 5.0.0, a newer major than 4.291.9. No restart ran; the running daemon was left up. Recover with: brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4 && fy daemon restart. --major allows this move.',
+    );
+    should(h.host.running).equal('4.291.9');
+    should(h.host.trail.includes('restart')).be.false();
+  });
+
   it('keeps patch updates within v5 working', async () => {
     const h = harness('homebrew', { version: '5.0.9' });
     h.packages.upgradeTo = '5.0.10';
