@@ -117,6 +117,8 @@ describe('the plan', () => {
     ['state/sessions/s1/media', true],
     ['state/catalogs', true],
     ['state/unknown-new-file.json', false],
+    ['config/logins', true],
+    ['config/logins/work.yaml', false],
     ['fleet/assets/skills/x/.env', false],
     ['fleet/assets/skills/x/.env.local', false],
     ['fleet/assets/skills/x/key.pem', false],
@@ -379,13 +381,13 @@ describe('the preview is a clean copy (C1, M1, M2, M3)', () => {
     expect((await everyFile(fixtureOf.to)).some(file => file.endsWith('tokens.json'))).toBe(true);
   });
 
-  test('M3 logins are carried signed out: the file is copied, the sign-in folder never is, and the dry run says so', async () => {
+  test('M3 logins are carried signed out: no login file is staged, the shell is built from v4, and the dry run says so', async () => {
     await liveFerretWithV4Paths();
     await put('config/logins/work.yaml', 'harness: claude\nstore: host\nbudget:\n  daily:\n    hard: 20\n');
     await put('fleet/credentials/work/.credentials.json', SENTINEL);
     const target = fixtureOf.to;
     const walked = (await walk(v4)).files.map(file => file.path);
-    expect(walked).toContain('config/logins/work.yaml');
+    expect(walked.some(path => path.startsWith('config/logins'))).toBe(false);
     expect(walked.some(path => path.startsWith('fleet/credentials'))).toBe(false);
     const said = await dryRun(v4, target);
     expect(said).toContain('LOGINS ARE CARRIED SIGNED OUT');

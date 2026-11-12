@@ -6,10 +6,18 @@
  * Fixtures and temp homes only; every key is fake.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Log } from '@ferretry/kernel/contract';
 import { LoginFileSchema } from '@ferretry/plugin-logins/contract';
+import {
+  CREDENTIAL_STATUS_LABELS,
+  CredentialStatusService,
+  InMemoryCredentialStatusStore,
+} from '../../../../packages/plugins/logins/daemon/lib/credentials/credential-status.ts';
+import { resolveCredentialStore } from '../../../../packages/plugins/logins/daemon/lib/credentials/credentials.ts';
+import { credentialOf } from '../../../../packages/plugins/logins/daemon/lib/shared/credential.ts';
 import { fakeLogins, sampleLogin } from '../../../../packages/plugins/logins/contract/testing/index.ts';
 import { createConfigFiles } from '../../../../packages/core/kernel/host/config/service.ts';
 import { createNodeHostFs } from '../../../../packages/core/kernel/host/state/host-fs.ts';
@@ -86,6 +94,35 @@ const prepared = () =>
     home: join(f.root, 'home'),
   });
 
+/**
+ * The status of each converted login, from the REAL logins status service (not a hardcoded word): a signed-out store
+ * (no credential file anywhere) and the preview's EMPTY vault, whose names are read from nowhere because the vault file
+ * does not exist.
+ */
+async function statusOf(id: string, file: ReturnType<typeof LoginFileSchema.parse>) {
+  expect(existsSync(join(f.to, 'state/vault/vault.json'))).toBe(false);
+  const service = new CredentialStatusService({
+    local: async () => ({ shape: { kind: 'decided', reading: { state: 'missing' } } }),
+    passiveUsage: async () => undefined,
+    activeUsage: async () => {
+      throw new Error('a status read never asks the provider');
+    },
+    refresh: { refresh: async () => ({ outcome: 'unavailable', reason: 'not in this test' }) },
+    heads: new InMemoryCredentialStatusStore(),
+    secretNames: async () => new Set<string>(),
+    now: () => 1_000_000,
+    usageIntervalMs: 60_000,
+  });
+  const resolution = resolveCredentialStore(id, credentialOf(file), {
+    fleetRoot: join(f.to, 'fleet'),
+    userHome: join(f.root, 'home'),
+  });
+  return (await service.view({ id, resolution })).status;
+}
+
+/** The statuses the last {@link loadFleet} read from the service, by login. */
+let statusesSeen: Record<string, string> = {};
+
 /** The `fy runtimes` read, over the converted home's own config folder and its own login files (signed out). */
 async function loadFleet() {
   const files = createConfigFiles({
@@ -101,24 +138,28 @@ async function loadFleet() {
   });
   await files.reload();
   const logins = [];
+  const statuses: Record<string, string> = {};
   for (const entry of (await readdir(join(f.to, 'config/logins')).catch(() => [])).sort()) {
     const id = entry.replace(/\.yaml$/u, '');
     const file = LoginFileSchema.parse(parse(await readFile(join(f.to, 'config/logins', entry), 'utf8')));
+    const status = await statusOf(id, file);
+    statuses[id] = `${status.word}/${status.reason}`;
     logins.push(
       sampleLogin(id, {
         harness: file.harness,
         harnesses: [file.harness],
         store: file.store,
         status: {
-          word: 'needs_sign_in',
-          label: 'Needs sign-in',
-          reason: 'not_signed_in',
-          explanation: 'Signed out.',
+          word: status.word,
+          label: CREDENTIAL_STATUS_LABELS[status.word],
+          reason: status.reason,
+          explanation: 'From the logins status service.',
           lastCheckInconclusive: false,
         },
       } as never),
     );
   }
+  statusesSeen = statuses;
   return runtimesConfigFiles({
     config: files.port('runtimes'),
     logins: fakeLogins(logins),
@@ -148,6 +189,14 @@ describe('merge-bar case 2: the preview stage loads its whole fleet configuratio
       expect(heldSection(done.report as never)).toContain(`runtime ${name} `);
     }
     expect(heldSection(done.report as never)).toContain('login codex-login (Codex)');
+
+    // Every carried login says "Needs sign-in" because the REAL status service says so: a signed-out store, and an
+    // environment login whose ${secret:NAME} is not in the (empty) preview vault.
+    expect(statusesSeen).toEqual({
+      'claude-atomi': 'needs_sign_in/not_signed_in',
+      'claude-you': 'needs_sign_in/not_signed_in',
+      'glm-a': 'needs_sign_in/secret_not_stored',
+    });
   });
 
   test('(with an instructions layer) the fleet still loads and the component "main" is in the model', async () => {

@@ -71,7 +71,12 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
     signed-out shells, Codex held) and reads its fleet configuration through the very path `fy runtimes` takes (the
     kernel's `createConfigFiles` plus `runtimesConfigFiles(...).load()`). It must resolve, every carried runtime must be
     in the model, and every runtime the preview did not carry must be named in the report's hold list with one plain
-    line; never `fleet_catalog_unreadable`. Lead ask, 2026-11-12.
+    line; never `fleet_catalog_unreadable`. Each login's status is read from the REAL logins status service (not a
+    hardcoded word): a signed-out store is `not_signed_in`, and an environment login whose `${secret:NAME}` is not in the
+    empty preview vault is `secret_not_stored`, both "Needs sign-in". Lead ask, 2026-11-12.
+    `migration/v4-to-v5/tests/unit/preview-logins-leaks.test.ts` holds the shells to it: built from an allowlist, no login
+    file staged, no marker (comment, credential path, literal key, webhook token) in any `.ferretry-v5*` path after a
+    passing or a failing `prepare`.
 
 ## After merge
 

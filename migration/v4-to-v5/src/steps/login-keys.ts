@@ -73,6 +73,8 @@ export interface HeldLoginKey {
  */
 export class LoginKeyHold {
   readonly #items: { key: HeldLoginKey; value: string }[] = [];
+  /** Preview only: values that were discarded at once. Their NAMES stay for the report; the value is never kept. */
+  readonly #discarded: HeldLoginKey[] = [];
   readonly #taken = new Set<string>();
   readonly #ledger = new Map<string, string[]>();
   #vaultMoved = false;
@@ -119,6 +121,17 @@ export class LoginKeyHold {
   }
 
   /**
+   * Preview only: a literal env value is NOT carried. It is never held, sealed or written: only its name (the reference
+   * the shell uses) is kept for the report, and a digest of it goes to the ledger so the live and the enforced pass still
+   * compare. The caller's `value` is not stored.
+   */
+  discard(key: HeldLoginKey, value: string): void {
+    this.#discarded.push(key);
+    const digest = createHmac('sha256', RUN_KEY).update(value, 'utf8').digest('hex');
+    this.#ledger.set(key.login, [...(this.#ledger.get(key.login) ?? []), `${key.variable}=${key.name}:${digest}`]);
+  }
+
+  /**
    * What this run took out of one login's file, as a comparable string of `variable=NAME:digest` (no value): empty when
    * it took nothing. Two holds that give the same string put the same keys in the vault under the same names.
    */
@@ -132,7 +145,7 @@ export class LoginKeyHold {
 
   /** The names (never values), for a plan and the report. */
   keys(): readonly HeldLoginKey[] {
-    return this.#items.map(item => item.key);
+    return [...this.#items.map(item => item.key), ...this.#discarded];
   }
 
   /** The held values for sealing. Only the sealer calls this; it empties the hold. */
@@ -142,6 +155,7 @@ export class LoginKeyHold {
 
   clear(): void {
     this.#items.length = 0;
+    this.#discarded.length = 0;
   }
 
   toJSON(): readonly HeldLoginKey[] {
@@ -397,7 +411,7 @@ export const loginKeysStep: Step = {
       return {
         ...base,
         status: 'converted',
-        note: `preview: ${String(held.length)} plain key(s) were NOT carried and the preview vault stays empty; each login names a \${secret:NAME}: store it with fy secret set NAME: ${names}`,
+        note: `preview: ${String(held.length)} literal value(s) (keys, credential paths, flags) were NOT carried and the preview vault stays empty; each login names a \${secret:NAME}: store it with fy secret set NAME: ${names}`,
         kept: [],
         sealed: [],
       };

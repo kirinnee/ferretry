@@ -23,11 +23,15 @@ export const UNKNOWN_HELD_SENTENCE = `held: its harness is unknown (its runtime 
 export const BOTH_HELD_SENTENCE = `held: its login drives both CLIs and its profile includes a model set without a harness, which v4 scopes by model ids the preview does not read, so its harness is unknown and it is held like a Codex runtime. ${CODEX_HELD_SENTENCE.replace(/^held: /u, 'Why Codex is held: ')}`;
 
 /** Why a runtime is held when the login it names is not in the preview (a held Codex login, or one the preview cannot read). */
-export const NO_LOGIN_HELD_SENTENCE = `held: the login it names is not carried into the preview (it is a Codex login, or its file could not be read), and a runtime without its login would make the whole fleet configuration unreadable. ${CODEX_HELD_SENTENCE.replace(/^held: /u, 'Why Codex is held: ')}`;
+export const NO_LOGIN_HELD_SENTENCE = `held: the login it names is not carried into the preview (it is a Codex login, its file could not be read, or it has no way to sign in), and a runtime without its login would make the whole fleet configuration unreadable. ${CODEX_HELD_SENTENCE.replace(/^held: /u, 'Why Codex is held: ')}`;
 
 /** Why a login file is held when it does not name a harness the preview can prove is Claude Code. */
 export const LOGIN_UNNAMED_HELD_SENTENCE =
   'held: the login file does not name its harness (or the file cannot be read), so it is not provably a Claude Code login; the runtimes that name it are held too. Add the login fresh';
+
+/** Why a login file is held when, once its literals are not carried, it has no way to sign in (a cloud-only login). */
+export const LOGIN_NO_SIGN_IN_HELD_SENTENCE =
+  'held: the login has no way to sign in once the preview carries no credential (it holds no environment variable of its own, only a host cloud credential reference, which is never carried), so a shell of it would be invalid; the runtimes that name it are held too. Add the login fresh';
 
 /** Every sentence that says a runtime (or what uses one) is held; the dry run and the report list a held item by these. */
 export const HELD_SENTENCES: readonly string[] = [
@@ -36,12 +40,15 @@ export const HELD_SENTENCES: readonly string[] = [
   BOTH_HELD_SENTENCE,
   NO_LOGIN_HELD_SENTENCE,
   LOGIN_UNNAMED_HELD_SENTENCE,
+  LOGIN_NO_SIGN_IN_HELD_SENTENCE,
 ];
 
 /** What the stage knows of one v4 login: its harness, and whether it drives both CLIs (halves for both). */
 export interface LoginHarness {
   readonly harness: 'claude' | 'codex';
   readonly both: boolean;
+  /** The login has no way to sign in once nothing of it is carried (a cloud-only one): the Settings step holds it. */
+  readonly unusable?: boolean;
 }
 
 /** What a runtime is, as far as the preview can prove. `both`: a two-CLI login whose profile does not decide. */
@@ -155,6 +162,7 @@ export function runtimeHarnessOf(
   if (own !== undefined) return 'unknown';
   const fromLogin = login === undefined ? undefined : ctx.previewLoginHarnesses?.get(login);
   if (fromLogin === undefined) return 'unknown';
+  if (fromLogin.unusable === true) return 'no-login';
   let harness = fromLogin.harness;
   if (fromLogin.both) {
     if (profile === 'claude' || profile === 'codex') harness = profile;
@@ -189,7 +197,11 @@ export async function heldRuntimes(ctx: StepContext): Promise<ReadonlyMap<string
       scalar('credential'),
       profile === undefined ? undefined : scopes.get(profile),
     );
+    // A Claude Code runtime on a login with no way to sign in is held by the Settings step; its ferrets and routes follow.
+    const login = scalar('credential') ?? scalar('login');
     if (harness !== 'claude-code') held.set(file.address.name, harness);
+    else if (login !== undefined && ctx.previewLoginHarnesses?.get(login)?.unusable === true)
+      held.set(file.address.name, 'no-login');
   }
   return held;
 }

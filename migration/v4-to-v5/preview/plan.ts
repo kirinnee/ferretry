@@ -58,10 +58,6 @@ export const ALLOWED: readonly Allowed[] = [
   file('config/pack.yaml', 'packs'),
   file('config/models-guide.yaml', 'packs'),
   file('config/routing.json', 'packs'),
-  folder(
-    'config/logins',
-    'login files, which the Settings step reduces to signed-out shells (harness, store, label, preset, env references); the sign-ins in fleet/credentials stay denied',
-  ),
   folder('config/runtimes', 'settings'),
   folder('config/profiles', 'settings'),
   folder('config/presets', 'settings'),
@@ -126,6 +122,10 @@ export const DENIED: readonly { readonly pattern: RegExp; readonly why: string }
   },
   { pattern: /(^|\/)daemon\.json/u, why: 'the daemon document: v4 port, relay and grants must not reach the preview' },
   { pattern: /(^|\/)security\.json$/u, why: 'v4 security settings' },
+  {
+    pattern: /(^|\/)config\/logins(\/|$)/u,
+    why: "login files are never staged: the Settings step builds each login's signed-out shell from the v4 source straight into the preview home",
+  },
   // Inside the arbitrary folders that ARE copied (catalog installs, MCP bodies) anything may sit: refuse the names a
   // credential usually has.
   { pattern: /(^|\/)\.env(\.[^/]*)?$/u, why: 'an environment file' },
@@ -141,8 +141,8 @@ export const DENIED: readonly { readonly pattern: RegExp; readonly why: string }
 /** Why each top-level name of a v4 home is NOT copied, for the report. Names only; nothing here is opened. */
 export const LEFT_BEHIND: readonly { readonly path: string; readonly why: string }[] = [
   {
-    path: 'config/logins/<id>.yaml fields other than harness, store, label, preset, env',
-    why: 'a login is carried as a signed-out shell; budget, disabled, clonedFrom*, cloudCredential and codexProvider are left behind, a plain key is never carried, store: host becomes store: ferretry, and a Codex login is held',
+    path: 'config/logins',
+    why: 'no login file is staged (a failed prepare leaves none): the Settings step BUILDS each login a signed-out shell (harness, store, label, preset, env references) from the v4 source; a literal env value is never carried (it becomes a ${secret:NAME} reference), budget, disabled, clonedFrom*, cloudCredential and codexProvider are left behind, store: host becomes store: ferretry, a Codex login and a login with no way to sign in are held',
   },
   { path: 'api-token', why: 'admin token' },
   { path: 'api-warden-token', why: 'warden token' },

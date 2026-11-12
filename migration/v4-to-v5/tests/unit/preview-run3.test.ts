@@ -58,7 +58,7 @@ async function realShapes() {
   await put('config/logins/b-login.yaml', `harness: codex\nstore: environment\nenv:\n  OPENAI_API_KEY: ${FAKE_KEY}\n`);
   await put(
     'config/logins/h-login.yaml',
-    'harness: claude\nstore: environment\nclaude:\n  env: {}\ncodex:\n  env: {}\n',
+    'harness: claude\nstore: environment\nenv:\n  ANTHROPIC_AUTH_TOKEN: ${secret:H_KEY}\nclaude:\n  env: {}\ncodex:\n  env: {}\n',
   );
   await put('config/profiles/main.yaml', 'contents: []\n');
   await put('config/runtimes/claude-x.yaml', 'credential: a-login\nprofile: main\n');

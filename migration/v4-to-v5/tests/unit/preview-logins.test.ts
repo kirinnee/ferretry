@@ -1,18 +1,22 @@
 /**
- * The preview carries each v4 login FILE as an empty, signed-out shell (`src/steps/preview-logins.ts`): harness, store,
- * label, preset and env references only. No sign-in (`fleet/credentials`) and no plain key is ever carried, `store: host`
- * becomes `store: ferretry` in the preview alone, and a Codex login stays held. Every key here is fake.
+ * The preview carries each v4 login FILE as an empty, signed-out shell BUILT from an allowlist
+ * (`src/steps/preview-logins.ts`): harness, store, label, preset and env references only. No login file is staged. No
+ * sign-in (`fleet/credentials`) and no literal env value is ever carried, `store: host` becomes `store: ferretry` in the
+ * preview alone, and a Codex login stays held. Every key here is fake.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Document, parseDocument } from 'yaml';
+import { LoginKeyHold } from '../../src/steps/login-keys.ts';
 import { heldSection, prepare } from '../../preview/driver.ts';
 import { decide, DENIED } from '../../preview/plan.ts';
 import { walk } from '../../preview/stage.ts';
 import { settingsStep } from '../../src/steps/settings.ts';
-import { loginShell } from '../../src/steps/preview-logins.ts';
+import { buildShell, isPlainProviderUrl, signInIssue } from '../../src/steps/preview-logins.ts';
+import { LoginFileSchema } from '@ferretry/plugin-logins/contract';
+import { credentialIssues, credentialOf } from '../../../../packages/plugins/logins/daemon/lib/shared/credential.ts';
 import { CODEX_HELD_SENTENCE } from '../../src/steps/preview-hold.ts';
 import { fixture } from './ferret-fixture.ts';
 
@@ -39,29 +43,31 @@ const everything = async (folder: string): Promise<string> => {
 };
 
 describe('the plan', () => {
-  test('a login file is copied; the sign-ins and their folder never are', () => {
-    expect(decide('config/logins', true).verdict).toBe('descend');
-    expect(decide('config/logins/work.yaml', false).verdict).toBe('copy');
+  test('no login file is staged; the sign-ins never are', () => {
+    expect(decide('config/logins', true).verdict).toBe('leave');
+    expect(decide('config/logins/work.yaml', false).verdict).toBe('leave');
     expect(decide('fleet/credentials', true).verdict).toBe('leave');
     expect(decide('fleet/credentials/work/.credentials.json', false).verdict).toBe('leave');
     expect(decide('fleet/credentials/work/auth.json', false).verdict).toBe('leave');
     expect(decide('fleet/homes/h1/.claude/.credentials.json', false).verdict).toBe('leave');
+    expect(DENIED.some(deny => deny.pattern.test('config/logins/x.yaml'))).toBe(true);
     expect(DENIED.some(deny => deny.pattern.test('fleet/credentials/x'))).toBe(true);
   });
 
-  test('the walk lists the login file and nothing under fleet/credentials', async () => {
+  test('the walk lists no login file and nothing under fleet/credentials', async () => {
     await put('layout-version', '2\n');
     await put('config/logins/work.yaml', 'harness: claude\n');
     await put('fleet/credentials/work/.credentials.json', FAKE_KEY);
     const files = (await walk(f.from)).files.map(file => file.path);
-    expect(files).toContain('config/logins/work.yaml');
+    expect(files.some(path => path.startsWith('config/logins'))).toBe(false);
     expect(files.some(path => path.startsWith('fleet/credentials'))).toBe(false);
   });
 });
 
-describe('loginShell: the fields a shell keeps', () => {
+describe('buildShell: the fields a shell has', () => {
   const FULL = [
-    'harness: claude',
+    '# a comment above everything',
+    'harness: claude # a trailing comment',
     'store: environment',
     'label: Mine',
     'preset: zai-glm',
@@ -78,6 +84,7 @@ describe('loginShell: the fields a shell keeps', () => {
     'env:',
     '  A: ${secret:A_KEY}',
     '  B: https://api.example.com',
+    '  ANTHROPIC_BASE_URL: https://api.example.com/anthropic',
     'claude:',
     '  env:',
     '    C: ${secret:C_KEY}',
@@ -88,15 +95,23 @@ describe('loginShell: the fields a shell keeps', () => {
     '    D: ${secret:D_KEY}',
     '',
   ].join('\n');
+  const build = (text: string, holdCodex = false) =>
+    buildShell(parseDocument(text), 'work', holdCodex, new LoginKeyHold());
 
-  test('harness, store, label, preset and env (and a half’s env) stay; everything else is named and dropped', () => {
-    const document = parseDocument(FULL);
-    const shell = loginShell(document, false);
+  test('harness, store, label, preset and env stay; everything else is named and dropped', () => {
+    const shell = build(FULL);
     expect(shell.kind).toBe('carried');
-    const kept = document.toJS() as Record<string, unknown>;
+    if (shell.kind !== 'carried') return;
+    const kept = shell.document.toJS() as Record<string, unknown>;
     expect(Object.keys(kept).sort()).toEqual(['claude', 'codex', 'env', 'harness', 'label', 'preset', 'store']);
     expect(kept.claude).toEqual({ env: { C: '${secret:C_KEY}' } });
-    expect(shell.kind === 'carried' ? [...shell.removed].sort() : []).toEqual(
+    // A, a literal that is not a whole reference or a provider URL, is replaced; the provider URL stays.
+    expect(kept.env).toEqual({
+      A: '${secret:A_KEY}',
+      B: '${secret:LOGIN_WORK_B}',
+      ANTHROPIC_BASE_URL: 'https://api.example.com/anthropic',
+    });
+    expect([...shell.removed].sort()).toEqual(
       [
         'budget',
         'claude.codexProvider',
@@ -107,24 +122,29 @@ describe('loginShell: the fields a shell keeps', () => {
         'disabled',
       ].sort(),
     );
+    expect(shell.replaced).toEqual(['B']);
+    // A NEW document: not one comment of the v4 file is in it.
+    expect(String(shell.document)).not.toContain('comment');
   });
 
   test('while Codex is held, the codex half goes and a Codex login is not carried', () => {
-    const document = parseDocument(FULL);
-    loginShell(document, true);
-    expect(Object.keys(document.toJS() as object)).not.toContain('codex');
-    expect(loginShell(parseDocument('harness: codex\n'), true)).toEqual({ kind: 'held', harness: 'codex' });
-    expect(loginShell(parseDocument('store: host\n'), true)).toEqual({ kind: 'held', harness: 'unknown' });
-    expect(loginShell(new Document('text'), false)).toEqual({ kind: 'held', harness: 'unknown' });
+    const shell = build(FULL, true);
+    expect(shell.kind === 'carried' ? Object.keys(shell.document.toJS() as object) : []).not.toContain('codex');
+    expect(build('harness: codex\n', true)).toEqual({ kind: 'held', harness: 'codex' });
+    expect(build('store: host\n', true)).toEqual({ kind: 'held', harness: 'unknown' });
+    expect(buildShell(new Document('text'), 'work', false, new LoginKeyHold())).toEqual({
+      kind: 'held',
+      harness: 'unknown',
+    });
   });
 
   test('store: host becomes store: ferretry, and nothing else changes the store', () => {
-    const host = parseDocument('harness: claude\nstore: host\n');
-    expect(loginShell(host, true)).toMatchObject({ kind: 'carried', storeMoved: true });
-    expect(host.get('store')).toBe('ferretry');
-    const env = parseDocument('harness: claude\nstore: environment\n');
-    expect(loginShell(env, true)).toMatchObject({ storeMoved: false });
-    expect(env.get('store')).toBe('environment');
+    const host = build('harness: claude\nstore: host\n', true);
+    expect(host).toMatchObject({ kind: 'carried', storeMoved: true });
+    expect(host.kind === 'carried' ? host.document.get('store') : '').toBe('ferretry');
+    const env = build('harness: claude\nstore: environment\nenv:\n  A: ${secret:A_KEY}\n', true);
+    expect(env).toMatchObject({ storeMoved: false });
+    expect(env.kind === 'carried' ? env.document.get('store') : '').toBe('environment');
   });
 });
 
@@ -207,4 +227,61 @@ describe('a prepared preview', () => {
     expect(text).toContain('store: host');
     expect(text).toContain('budget');
   });
+});
+
+describe('the one plain-value exception: a provider address', () => {
+  const ok = (variable: string, value: string) => isPlainProviderUrl(variable, value);
+
+  test('a plain https address under a *_URL / *_BASE_URL name stays', () => {
+    expect(ok('ANTHROPIC_BASE_URL', 'https://api.z.ai/api/anthropic')).toBe(true);
+    expect(ok('OPENAI_BASE_URL', 'https://api.example.com/v1/')).toBe(true);
+    expect(ok('SERVICE_URL', 'https://example.com')).toBe(true);
+    expect(ok('X_BASE_URL', 'https://example.com:8443/some-long-but-hyphenated-compatible-endpoint-name')).toBe(true);
+  });
+
+  test('anything else becomes a reference: other names, other schemes, userinfo, query, fragment', () => {
+    expect(ok('ANTHROPIC_ENDPOINT', 'https://api.example.com')).toBe(false);
+    expect(ok('ANTHROPIC_BASE_URL', 'http://api.example.com')).toBe(false);
+    expect(ok('ANTHROPIC_BASE_URL', 'https://user:pass@api.example.com')).toBe(false);
+    expect(ok('ANTHROPIC_BASE_URL', 'https://user@api.example.com')).toBe(false);
+    expect(ok('ANTHROPIC_BASE_URL', 'https://api.example.com/v1?key=abc')).toBe(false);
+    expect(ok('ANTHROPIC_BASE_URL', 'https://api.example.com/v1#frag')).toBe(false);
+    expect(ok('ANTHROPIC_BASE_URL', 'not a url')).toBe(false);
+    expect(ok('ANTHROPIC_BASE_URL', 'file:///tmp/credentials.json')).toBe(false);
+  });
+
+  test('a path segment that looks like a token (20+ letters or digits, or a known secret shape) is a reference', () => {
+    expect(ok('WEBHOOK_URL', 'https://hooks.example.com/services/T0KENabcdefghij1234567890WEBHOOK')).toBe(false);
+    expect(ok('WEBHOOK_URL', 'https://hooks.example.com/services/T00000000/B00000000/abcdefghijklmnopqrstuvwx')).toBe(
+      false,
+    );
+    expect(ok('WEBHOOK_URL', 'https://hooks.example.com/sk-ant-FAKE-0000-not-a-real-key')).toBe(false);
+    expect(ok('WEBHOOK_URL', 'https://hooks.example.com/ghp_abcdefghijklmnopqrst')).toBe(false);
+    expect(ok('WEBHOOK_URL', 'https://hooks.example.com/%54%30KENabcdefghij1234567890WEBHOOK')).toBe(false);
+    expect(ok('WEBHOOK_URL', 'https://hooks.example.com/services/short/ids')).toBe(true);
+  });
+});
+
+describe('signInIssue agrees with the logins plugin rule (credentialIssues)', () => {
+  const cases: readonly [string, Record<string, unknown>][] = [
+    ['environment with env', { harness: 'claude-code', store: 'environment', env: { A: '${secret:A}' } }],
+    ['environment with no env', { harness: 'claude-code', store: 'environment' }],
+    ['environment with empty env', { harness: 'claude-code', store: 'environment', env: {} }],
+    [
+      'halves, the own half has a variable',
+      { harness: 'claude-code', store: 'environment', claude: { env: { A: '${secret:A}' } } },
+    ],
+    [
+      'halves, only the other half exists',
+      { harness: 'claude-code', store: 'environment', codex: { env: { A: '${secret:A}' } } },
+    ],
+    ['ferretry store', { harness: 'claude-code', store: 'ferretry' }],
+    ['host store', { harness: 'claude-code', store: 'host' }],
+  ];
+  for (const [name, shell] of cases)
+    test(name, () => {
+      const parsed = LoginFileSchema.parse(shell);
+      const real = credentialIssues(credentialOf(parsed)).length === 0;
+      expect(signInIssue(shell, shell.harness) === undefined).toBe(real);
+    });
 });

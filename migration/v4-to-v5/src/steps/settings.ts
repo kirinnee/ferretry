@@ -42,17 +42,20 @@ import {
   dropModeline,
   listV4Config,
   rawSecretPaths,
+  readPlainText,
   readV4Yaml,
+  strictYamlMap,
   V4_SINGLETONS,
   type V4ConfigFile,
   YAML_OPTIONS,
 } from '../v4/config.ts';
 import { failureNote, V4InputError } from '../v4/documents.ts';
 import { PREVIEW_CODEX_RUNTIMES, PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
-import { loginShell } from './preview-logins.ts';
+import { buildShell } from './preview-logins.ts';
 import {
   CODEX_HELD_SENTENCE,
   heldReason,
+  LOGIN_NO_SIGN_IN_HELD_SENTENCE,
   LOGIN_UNNAMED_HELD_SENTENCE,
   holdsCodex,
   type ProfileScopes,
@@ -64,7 +67,7 @@ import { runtimeIds } from '../v4/ferrets.ts';
 import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
-import { takeLoginKeys, v4VaultNames } from './login-keys.ts';
+import { LoginKeyHold, takeLoginKeys, v4VaultNames } from './login-keys.ts';
 
 /** Every v5 file this step writes, with its owning plugin, from the one registry of targets. */
 const {
@@ -367,38 +370,77 @@ function splitMachine(plan: Plan, file: V4ConfigFile, document: Document, resolv
   }
 }
 
+/** v4's 256 KiB cap on a config file, as the preview applies it to a login read from the v4 source. */
+const MAX_LOGIN_BYTES = 256 * 1024;
+
 async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolve: Resolve): Promise<void> {
   const { address, label } = file;
   if (address.kind === 'learning' || address.kind === 'pack' || address.kind === 'modelsGuide') return;
-  const document = await readV4Yaml(file);
-  if (address.kind === 'component' && (address.componentKind === 'settings' || address.componentKind === 'hooks')) {
+  const previewLogin = address.kind === 'login' && ctx.preview === true;
+  // A preview login is read straight from the v4 source (no login file is staged) through the one safe reader: a link, a
+  // hard link, an oversized file or YAML with any error is "cannot be read", and the login is held.
+  let document: Document | undefined;
+  if (previewLogin) {
+    const text = file.text ?? (await readPlainText(file.path, MAX_LOGIN_BYTES));
+    document = text === undefined ? undefined : strictYamlMap(text);
+  } else document = await readV4Yaml(file);
+  if (
+    document !== undefined &&
+    address.kind === 'component' &&
+    (address.componentKind === 'settings' || address.componentKind === 'hooks')
+  ) {
     await planHarnessComponent(ctx, plan, file, document, address.componentKind, address.name);
     return;
   }
-  // The preview carries a login only as a signed-out shell (see `./preview-logins.ts`); a Codex login stays held.
-  if (address.kind === 'login' && ctx.preview === true) {
-    const shell = loginShell(document, holdsCodex(ctx));
+  // The preview carries a login only as a signed-out shell BUILT from an allowlist (see `./preview-logins.ts`): a new
+  // document, so no comment, unknown key or literal value of the v4 file can reach it. A Codex login stays held, and so
+  // does one with no way to sign in.
+  if (previewLogin) {
+    const shell =
+      document === undefined
+        ? ({ kind: 'held', harness: 'unknown' } as const)
+        : buildShell(document, address.name, holdsCodex(ctx), ctx.loginKeys ?? new LoginKeyHold());
     if (shell.kind === 'held') {
+      const what =
+        shell.harness === 'codex'
+          ? ' (Codex)'
+          : shell.harness === 'unknown'
+            ? ' (its harness is not named)'
+            : ' (it has no way to sign in)';
       plan.dropped.push({
-        what: `login ${address.name}${shell.harness === 'codex' ? ' (Codex)' : ' (its harness is not named)'}`,
-        why: shell.harness === 'codex' ? CODEX_HELD_SENTENCE : LOGIN_UNNAMED_HELD_SENTENCE,
+        what: `login ${address.name}${what}`,
+        why:
+          shell.harness === 'codex'
+            ? CODEX_HELD_SENTENCE
+            : shell.harness === 'unknown'
+              ? LOGIN_UNNAMED_HELD_SENTENCE
+              : LOGIN_NO_SIGN_IN_HELD_SENTENCE,
       });
       return;
     }
+    document = shell.document;
+    document.commentBefore = ` Carried from v4 ${label} by the v4 → v5 converter, as a signed-out shell.`;
     if (shell.removed.length > 0)
       plan.dropped.push({
         what: `login ${address.name}: ${shell.removed.join(', ')}`,
         why: 'a login is carried as a signed-out shell (harness, store, label, preset, env references): these fields are left behind',
+      });
+    if (shell.replaced.length > 0)
+      plan.dropped.push({
+        what: `login ${address.name}: the value of ${shell.replaced.join(', ')}`,
+        why: 'a literal value (a key, a credential-file path, a flag) is never carried: it is written as a ${secret:NAME} reference and the value is discarded; store the secret with fy secret set NAME',
       });
     if (shell.storeMoved)
       plan.dropped.push({
         what: `login ${address.name}: store host`,
         why: "the preview's HOME is empty, so a host login would find no sign-in; it is written as a Ferretry-store login you sign in to",
       });
+  } else if (document !== undefined && address.kind === 'login' && ctx.loginKeys !== undefined) {
+    // A plain key in a login's env is parked for the vault and written here as a reference; any other secret-shaped value
+    // (and a key when no hold exists) still fails the step below, so nothing is ever left plain.
+    takeLoginKeys(document, address.name, ctx.loginKeys);
   }
-  // A plain key in a login's env is parked for the vault and written here as a reference; any other secret-shaped value
-  // (and a key when no hold exists) still fails the step below, so nothing is ever left plain.
-  if (address.kind === 'login' && ctx.loginKeys !== undefined) takeLoginKeys(document, address.name, ctx.loginKeys);
+  if (document === undefined) return; // unreachable: only a preview login is undefined, and it returned above
   const secrets = rawSecretPaths(document.toJS());
   if (secrets.length > 0)
     throw new V4InputError(
@@ -803,6 +845,18 @@ export async function buildPlan(
       ? name
       : (Object.entries(ids?.runtimes ?? {}).find(([, entry]) => entry.formerNames.includes(name))?.[0] ?? name);
   const listing = await listV4Config(ctx.v4.home, ctx.v4.configOverrides);
+  // The preview stages no login file (a failed prepare must leave no login bytes): its logins are listed from the real v4
+  // home, and read from there. The plain passes of a preview list them too, so a shell is "authored" only where it differs.
+  const staged = new Set(listing.files.map(file => file.label));
+  const loginFiles =
+    ctx.previewV4Home === undefined
+      ? []
+      : (await listV4Config(ctx.previewV4Home)).files.filter(
+          file =>
+            file.address.kind === 'login' &&
+            !staged.has(file.label) &&
+            ctx.v4.configOverrides?.has(file.label) !== true,
+        );
   const plan: Plan = {
     files: new Map(),
     assets: new Map(),
@@ -813,7 +867,9 @@ export async function buildPlan(
   };
   // machine.yaml last: it adds to files other v4 files may also own (limits.yaml).
   const machine = `config/${V4_SINGLETONS.machine}`;
-  const ordered = [...listing.files].sort((a, b) => Number(a.label === machine) - Number(b.label === machine));
+  const ordered = [...listing.files, ...loginFiles].sort(
+    (a, b) => Number(a.label === machine) - Number(b.label === machine),
+  );
   for (const file of ordered) await planFile(ctx, plan, file, resolve);
   if (ctx.preview === true) {
     // The preview never resumes a ferret by itself, whatever v4's machine.yaml said (or did not say). `limits.yaml` is
