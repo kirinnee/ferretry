@@ -48,7 +48,7 @@ H="${FY_HOME:-$HOME/.ferretry}"; STAMP="$(date -u +%Y-%m-%d-%H%M)"; B="$H-before
    reads layout 2 of 4.291.x only (`cat "$H/layout-version"` prints `2`). If it is older, bring v4 to 4.291.10 or later
    by the install kind (`fy daemon update --check` names it), and start again:
    - **Homebrew**: skip this when `fy --version` already prints 4.291.10 or newer. Otherwise switch to the separate v4
-     cask (needs 4.291.10 released). It links the same programs as the main cask, so remove the main cask first:
+     cask (`ferretry@4`, released with 4.291.10). It links the same programs as the main cask, so remove the main cask first:
      `brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4`, then `fy daemon restart`.
      `--to` does not work here: once 5.0 is released Homebrew installs the newest release whatever `--to` says.
    - **Nix profile**: skip this when `fy --version` already prints 4.291.10 or newer. Otherwise replace the profile
@@ -266,9 +266,8 @@ install kind `fy daemon update --check` named:
   then check `fy --version` prints `4.291.`. (Only an accidental v4 self-update on a standalone install never moved off
   4.x, because v4 refuses a standalone release it cannot verify; after §5 it did move, which is why §3 saved them.)
 - **Homebrew**: `brew upgrade` installs what the tap has now, which is 5.x, and brew cannot pin a cask version. The way
-  back is the separate v4 cask (needs 4.291.10 released):
-  `brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4`. If 4.291.10 is not released,
-  stop and tell the owner, and do not run `brew upgrade` again.
+  back is the separate v4 cask `ferretry@4` (released with 4.291.10):
+  `brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4`.
 - **deb/rpm**: install the 4.291.10 (or later 4.x) package of `fy` from the package source, if it still keeps that version.
 
 After the install line for your kind, run `fy daemon restart` and check `fy --version` prints `4.291.`.
