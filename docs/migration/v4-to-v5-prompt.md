@@ -47,10 +47,16 @@ H="${FY_HOME:-$HOME/.ferretry}"; STAMP="$(date -u +%Y-%m-%d-%H%M)"; B="$H-before
    the jump to 5.x unless it is given `--major`, so a stray update cannot leave this home unconverted. The converter
    reads layout 2 of 4.291.x only (`cat "$H/layout-version"` prints `2`). If it is older, bring v4 to 4.291.10 or later
    by the install kind (`fy daemon update --check` names it), and start again:
-   - **Homebrew**: `brew install --cask kirinnee/ferretry/ferretry@4` (the cask ships with 4.291.10). `--to` does not
-     work here: once 5.0 is released Homebrew installs the newest release whatever `--to` says.
-   - **Nix profile**: `nix profile install github:kirinnee/ferretry/v4.291.10`. Same reason: `nix profile upgrade` and
-     `--to` give the newest release.
+   - **Homebrew**: skip this when `fy --version` already prints 4.291.10 or newer. Otherwise switch to the separate v4
+     cask (needs 4.291.10 released). It links the same programs as the main cask, so remove the main cask first:
+     `brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4`, then `fy daemon restart`.
+     `--to` does not work here: once 5.0 is released Homebrew installs the newest release whatever `--to` says.
+   - **Nix profile**: skip this when `fy --version` already prints 4.291.10 or newer. Otherwise replace the profile
+     element with the v4 tag: `nix profile list` (the element's name is the `Name:` of the entry whose
+     `Original flake URL` is `github:kirinnee/ferretry`), then
+     `nix profile remove <element> && nix profile add github:kirinnee/ferretry/v4.291.10`, then `fy daemon restart`.
+     (A nix too old to know `add` calls it `install`.) Same reason: `nix profile upgrade` and `--to` give the
+     newest release.
    - **Pinning kinds** (standalone, nix-module with a pinned flake input, deb/rpm): `fy daemon update --yes --to 4.291.10`,
      or the kind's own pin.
    - If none of these applies, stop and tell the owner.
@@ -141,12 +147,21 @@ bun src/main.ts --from "$B" --to "$H"                # writes the new home at H
 
 ## 5. Install v5 (do not start it) and check the new home
 
-1. Install v5 the way this machine installs Ferretry (the kind from step 1.2; [updating.md](../updating.md) has the
-   exact commands per kind), without starting the daemon. The v4 updater refuses a jump to 5.x without `--major`, which
-   is why the home is prepared first: now run `fy daemon update --major --yes --to 5.0.0`. Homebrew and the Nix profile
-   install the newest release whatever `--to` says (for Homebrew that is the main `ferretry` cask, not `ferretry@4`);
-   a nix-module install changes its pinned flake input to the v5 release and switches; deb/rpm installs the 5.0.0
-   package. `fy --version` must print `5.`.
+1. Install v5 the way this machine installs Ferretry (the kind from step 1.2), without starting the daemon. The v4
+   updater refuses a jump to 5.x without `--major`, which is why the home is prepared first. `--major` only allows
+   the jump (it is a plain flag, combined with `--to`; `--yes` is still needed in an agent's shell and alone never
+   allows the jump). It does not switch a package source, so each kind has its own command:
+   - **Standalone binary**: `fy daemon update --major --yes --to 5.0.0`.
+   - **Homebrew on `ferretry@4`**: `fy daemon update` can never reach 5.0 here (that cask stays 4.x and refuses,
+     saying so). Switch the cask instead: `brew uninstall --cask ferretry@4 && brew install --cask kirinnee/ferretry/ferretry`.
+   - **Nix profile installed from `github:kirinnee/ferretry/v4.291.10`**: `nix profile upgrade` stays on that tag.
+     Switch the source: `nix profile list` (the element is the entry whose `Original flake URL` is that v4 tag), then
+     `nix profile remove <element> && nix profile add github:kirinnee/ferretry/v5.0.0`.
+   - **nix-module** (home-manager / nix-darwin): repin the flake input to `github:kirinnee/ferretry/v5.0.0` and switch.
+   - **deb/rpm**: install the 5.0.0 package.
+
+   Do not start the daemon. `fy --version` must print `5.`.
+
 2. `fy config check` — every YAML file in `H/config` parses and passes its schema.
 3. `fy doctor` — names any damaged file. A damaged file is a stop: tell the owner, do not start.
 4. `ls -la "$H"` shows only `home.json`, `config/`, `state/`, `run/`, `logs/`.
@@ -229,22 +244,26 @@ mv "$H" "$H-v5-failed-$STAMP" && chmod 700 "$H-v5-failed-$STAMP"
 mv "$B" "$H"                                     # the untouched v4 home, exactly as it was
 ```
 
-Then put **4.291.10 or later** (v4) back the way this machine installs Ferretry, and `fy daemon start`. v4 finds its
+Then put **4.291.10 or later** (v4) back the way this machine installs Ferretry (below), then `fy daemon restart`. v4 finds its
 home and its live tmux server as it left them. Every kind below applies to a machine that **did** install v5 in §5:
-until the v4 programs are back, `fy daemon start` runs v5, which refuses the restored v4 home. Pick the line for the
+until the v4 programs are back, starting the daemon runs v5, which refuses the restored v4 home. Pick the line for the
 install kind `fy daemon update --check` named:
 
-- **Nix profile**: `nix profile install github:kirinnee/ferretry/v4.291.10` (or `nix profile rollback` to the generation
-  from before §5, if it is still there and was 4.291.10 or later).
-- **nix-module** (home-manager / nix-darwin): pin the flake input to `github:kirinnee/ferretry/v4.291.10` and switch.
+- **Nix profile**: remove the v5 element and install the v4 tag: `nix profile list` (the entry whose
+  `Original flake URL` is the v5 tag), then `nix profile remove <element> && nix profile add github:kirinnee/ferretry/v4.291.10`
+  (or `nix profile rollback` to the generation from before §5, if it is still there and was 4.291.10 or later).
+- **nix-module** (home-manager / nix-darwin): repin the flake input to `github:kirinnee/ferretry/v4.291.10` and switch.
 - **Standalone binary**: copy the programs saved in §3 back over the v5 ones, to the paths in `$B-bin/paths.txt`:
   `for p in fy fyd fyd-browser-worker; do [ -f "$B-bin/$p" ] && cp -p "$B-bin/$p" "$(grep "/$p\$" "$B-bin/paths.txt")"; done`,
   then check `fy --version` prints `4.291.`. (Only an accidental v4 self-update on a standalone install never moved off
   4.x, because v4 refuses a standalone release it cannot verify; after §5 it did move, which is why §3 saved them.)
 - **Homebrew**: `brew upgrade` installs what the tap has now, which is 5.x, and brew cannot pin a cask version. The way
-  back is the separate cask: `brew uninstall --cask ferretry` and `brew install --cask kirinnee/ferretry/ferretry@4`.
-  It needs 4.291.10 to be released; if it is not, stop and tell the owner, and do not run `brew upgrade` again.
+  back is the separate v4 cask (needs 4.291.10 released):
+  `brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4`. If 4.291.10 is not released,
+  stop and tell the owner, and do not run `brew upgrade` again.
 - **deb/rpm**: install the 4.291.10 (or later 4.x) package of `fy` from the package source, if it still keeps that version.
+
+After the install line for your kind, run `fy daemon restart` and check `fy --version` prints `4.291.`.
 
 A migrated v5 home is **refused by v4 with nothing written** (it has no `layout-version`), so the `mv "$B" "$H"` above is
 the way back: without the backup there is no v4 home to go back to. Tell the owner the failed v5 home is at
