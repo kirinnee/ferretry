@@ -80,15 +80,18 @@ export async function stateHomeHolding(
   if ((await fencedReal(fs, fence, real)) || (await fencedReal(fs, fence, walk.at))) return fence.named;
   // The judging took time: a link re-pointed or a folder swapped since the walk looked makes the walk's end stale.
   if (!(await walkUnchanged(fs, walk))) return fence.named;
-  // A missing tail that appeared meanwhile is a change too: it is looked for again.
-  if (
-    !walk.complete &&
-    (await fs.realpath(requested).then(
-      () => true,
+  // A missing tail is looked for again, and only a PROVEN absence stays quiet. The request must still be "not there"
+  // (ENOENT, nothing else: ELOOP, EACCES, EPERM, ENOTDIR or an errno nobody named is doubt, and a request that now
+  // resolves is a tail that appeared), and the walk's own trail must still hold when asked AFTER that answer: an
+  // ENOENT alone says nothing about where the route leads, e.g. an entry that became a link to a missing place in the
+  // fence ends in ENOENT too. The re-look comes after the realpath so a change before its answer shows in it.
+  if (!walk.complete) {
+    const absent = await fs.realpath(requested).then(
       () => false,
-    ))
-  )
-    return fence.named;
+      (error: unknown) => (error as { code?: string } | null)?.code === 'ENOENT',
+    );
+    if (!absent || !(await walkUnchanged(fs, walk))) return fence.named;
+  }
   return undefined;
 }
 
