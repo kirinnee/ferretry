@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { spawn, type Subprocess } from 'bun';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -301,6 +301,56 @@ describe('a ferret authenticates end to end (merge bar 7)', () => {
     expect(provider.seen.map(r => [r.path, r.authHeaders, r.tokenMatches])).toEqual([
       ['/v1/messages', ['authorization'], true],
     ]);
+    expect(pane).toContain(FAKE_REPLY);
+  });
+
+  test('(d) Claude env login in a project whose .claude/settings.local.json blanks ANTHROPIC_BASE_URL: the login still wins, and no credential is in an argv (#1587)', async () => {
+    const provider = startFakeProvider(FAKE_TOKEN);
+    cleanups.push(() => provider.stop());
+    const daemon = await boot(provider, () => ({}), FAKE_TOKEN, undefined, {
+      'logins/envblank.yaml': claudeLogin('environment', {
+        ANTHROPIC_BASE_URL: provider.url,
+        ANTHROPIC_AUTH_TOKEN: `\${secret:${SECRET_NAME}}`,
+      }),
+    });
+    // The project's own settings blank the login's provider: Claude Code ranks them above the process environment.
+    await mkdir(join(daemon.folder, '.claude'), { recursive: true });
+    await writeFile(
+      join(daemon.folder, '.claude/settings.local.json'),
+      JSON.stringify({ env: { ANTHROPIC_BASE_URL: '' } }),
+    );
+
+    const pane = await startAndSee(daemon, 'claude-code', 'envblank');
+
+    // 1. The provider was reached at the LOGIN's base URL, with the login's token (the pin outranks the project).
+    expect(provider.seen.map(r => [r.path, r.authHeaders, r.tokenMatches])).toEqual([
+      ['/v1/messages', ['authorization'], true],
+    ]);
+    const launched = daemon.launches().filter(record => record.binary === 'claude');
+    expect(launched.at(-1)?.baseUrl).toBe(provider.url);
+    // 2. No credential in the argv the stand-in was given, in the pane's recorded start command, or in any process's.
+    expect(JSON.stringify(launched.at(-1)?.argv)).not.toContain(FAKE_TOKEN);
+    expect(launched.at(-1)?.argvFlags).toContain('--settings');
+    const tmux = Bun.which('tmux') ?? 'tmux';
+    const paneCommands = spawnSync(
+      tmux,
+      ['-S', join(daemon.home, 'state/terminals/tmux.sock'), 'list-panes', '-a', '-F', '#{pane_start_command}'],
+      { encoding: 'utf8' },
+    ).stdout;
+    expect(paneCommands).toContain('--settings');
+    expect(paneCommands).not.toContain(FAKE_TOKEN);
+    expect(spawnSync('ps', ['-eo', 'args'], { encoding: 'utf8' }).stdout).not.toContain(FAKE_TOKEN);
+    // 3. The pin lives in the ferret's private settings file, the token in none.
+    const homes = join(daemon.home, 'state/claude-code/agent-homes');
+    const ferretHome = readdirSync(homes)
+      .map(name => join(homes, name))
+      .find(path => existsSync(join(path, 'launch-settings.json')));
+    expect(ferretHome).toBeDefined();
+    const overlay = join(ferretHome as string, 'launch-settings.json');
+    expect(JSON.parse(readFileSync(overlay, 'utf8')).env).toEqual({ ANTHROPIC_BASE_URL: provider.url });
+    expect(readFileSync(overlay, 'utf8')).not.toContain(FAKE_TOKEN);
+    expect(statSync(overlay).mode & 0o777).toBe(0o600);
+    // 4. The reply is read back from the transcript (the existing cases stop here too until the reader is merged).
     expect(pane).toContain(FAKE_REPLY);
   });
 

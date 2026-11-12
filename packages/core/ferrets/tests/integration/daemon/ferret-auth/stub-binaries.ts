@@ -39,6 +39,15 @@ const say = text => { console.log(text); };
 const CLAUDE = String.raw`
 import { appendFileSync as append, mkdirSync } from 'node:fs';
 import { createInterface } from 'node:readline';
+// Claude's settings precedence for env (measured with the real binary): a project's .claude/settings.json and
+// settings.local.json outrank the process environment, and the --settings file outranks the project. A value the stand-in
+// reads is therefore the one this layering leaves, not the raw process environment.
+const applyEnv = text => { try { const found = JSON.parse(text).env; if (found && typeof found === 'object') for (const [k, v] of Object.entries(found)) if (typeof v === 'string') process.env[k] = v; } catch {} };
+const readText = file => { try { return readFileSync(file, 'utf8'); } catch { return undefined; } };
+for (const name of ['settings.json', 'settings.local.json']) { const text = readText(join(process.cwd(), '.claude', name)); if (text !== undefined) applyEnv(text); }
+const settingsFlag = args.indexOf('--settings');
+const settingsArg = settingsFlag >= 0 ? args[settingsFlag + 1] : undefined;
+if (settingsArg !== undefined) { const inline = settingsArg.trimStart().startsWith('{'); const text = inline ? settingsArg : readText(settingsArg); if (text !== undefined) applyEnv(text); }
 const configDir = env.CLAUDE_CONFIG_DIR;
 const storeDir = env.CLAUDE_SECURESTORAGE_CONFIG_DIR !== undefined && env.CLAUDE_SECURESTORAGE_CONFIG_DIR !== '' ? env.CLAUDE_SECURESTORAGE_CONFIG_DIR : configDir;
 const oauth = storeDir === undefined ? undefined : readJson(join(storeDir, '.credentials.json'))?.claudeAiOauth;
@@ -48,7 +57,7 @@ else if (env.ANTHROPIC_API_KEY) { auth = 'ANTHROPIC_API_KEY'; headers = { 'x-api
 else if (oauth && typeof oauth.accessToken === 'string' && oauth.expiresAt > Date.now()) { auth = 'oauth-file'; headers = { authorization: 'Bearer ' + oauth.accessToken }; }
 const base = env.ANTHROPIC_BASE_URL || (auth === 'oauth-file' ? BAKED_URL : undefined);
 const sid = args[args.indexOf('--session-id') + 1] ?? 'no-session-id';
-log({ binary: 'claude', argvFlags: args.filter(a => a.startsWith('--')).map(a => a.split('=')[0]), auth, base: base === undefined ? 'none' : 'set',
+log({ binary: 'claude', argv: args, argvFlags: args.filter(a => a.startsWith('--')).map(a => a.split('=')[0]), auth, base: base === undefined ? 'none' : 'set', baseUrl: base ?? null,
   envNames: Object.keys(env).filter(k => /^(ANTHROPIC_|CLAUDE_|FY_)/u.test(k)).sort(), configDir, storeDir: storeDir ?? null,
   configDirFiles: configDir === undefined ? [] : filesIn(configDir), storeDirFiles: storeDir === undefined ? [] : filesIn(storeDir) });
 // The transcript the daemon reads: <config>/projects/<cwd, every non-alphanumeric as '-'>/<session id>.jsonl.
