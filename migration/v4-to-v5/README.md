@@ -212,9 +212,15 @@ the Linux unit's `fyd.service.d/*.conf` drop-ins then `fyd.service`, else the ma
 converter's own environment (a managed daemon sees only its service definition, so that beats an incidental shell `export`; a
 unit for another `FY_HOME` is skipped). The value passes v4's own parse rule (whole hours, 1 or more, or `off`). Absent, `off`,
 invalid or over 8760 hours writes nothing and the summary says why, so the default stays off. `launchctl setenv`, `set-environment` and
-`EnvironmentFile=` are never read or run. The `archive.yaml` schema is Ferrets' U6 (`rebuild/mount-ferrets-archive-restarts`, not on
+`EnvironmentFile=` are never read or run. A service file may be a link (home-manager links `fyd.service` into the Nix store) and is
+then read; only one whose chain of links (followed with `readlink` alone, at most 16 hops, the file and every folder above it) lands in
+`~/.claude`, `~/.claude.json` or `~/.codex` is refused, with `the service file points into a terminal sign-in folder, so it was not read`. The `archive.yaml` schema is Ferrets' U6 (`rebuild/mount-ferrets-archive-restarts`, not on
 `rebuild/5.0` yet), restated in the step until it lands. `src/main.ts` passes the real home directory and environment; tests inject
 temp ones.
+
+The fence (`src/v4/fence.ts`): before any step runs, `convert()` `lstat`s the v4 home's own folders the steps descend into (`config`,
+`state`, `fleet` and its `credentials`, `assets`, `homes`, `shared`, `bin`). One that is a link, or not a folder, is never looked inside by any
+step (not even for a missing file); Lessons says its document was not carried because the folder is a link. The target is never named.
 
 The `rebuild/migration-ferrets-b` development branch contains a local merge of the unreviewed
 `rebuild/port-ferrets-a2` schemas. **Do not integrate it before Ferrets lands on `rebuild/5.0`.** Once Ferrets lands,

@@ -44,6 +44,7 @@ import {
   V4_ARCHIVE_VARIABLE,
 } from '../v4/archive-after.ts';
 import { YAML_OPTIONS } from '../v4/config.ts';
+import { pointsIntoTerminalFolder } from '../v4/link-chase.ts';
 import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
@@ -66,8 +67,26 @@ const missing = (error: unknown): boolean =>
   'code' in error &&
   (error.code === 'ENOENT' || error.code === 'ENOTDIR');
 
-/** A file's text, `undefined` when it is not there; any other failure leaves the question open. */
-async function readText(path: string, label: string): Promise<string | undefined> {
+/**
+ * Where a service definition is read from: the person's home (to know its terminal sign-in folders) and the notes a
+ * refusal is said in. A service file may be a link (home-manager links it into the Nix store); only one whose chain
+ * lands in `~/.claude`, `~/.claude.json` or `~/.codex` is refused.
+ */
+interface ServiceReads {
+  readonly homeDirectory: string;
+  readonly notes: string[];
+}
+
+/** Whether `path` was refused (it points into a terminal sign-in folder), saying so in the notes; nothing is read. */
+async function refused(path: string, label: string, reads: ServiceReads): Promise<boolean> {
+  if (!(await pointsIntoTerminalFolder(path, reads.homeDirectory))) return false;
+  reads.notes.push(`${label}: the service file points into a terminal sign-in folder, so it was not read`);
+  return true;
+}
+
+/** A file's text, `undefined` when it is not there or was refused; any other failure leaves the question open. */
+async function readText(path: string, label: string, reads: ServiceReads): Promise<string | undefined> {
+  if (await refused(path, label, reads)) return undefined;
   try {
     return await readFile(path, 'utf8');
   } catch (error) {
@@ -84,13 +103,15 @@ interface Systemd {
 }
 
 /** The unit, then its drop-ins in order, merged the way systemd merges `Environment=`. */
-async function readSystemd(unitFile: string, dropIns: string): Promise<Systemd> {
-  const unit = await readText(unitFile, 'the systemd unit fyd.service');
+async function readSystemd(unitFile: string, dropIns: string, reads: ServiceReads): Promise<Systemd> {
+  const unit = await readText(unitFile, 'the systemd unit fyd.service', reads);
   let names: string[] = [];
-  try {
-    names = (await readdir(dropIns)).filter(name => name.endsWith('.conf')).sort();
-  } catch (error) {
-    if (!missing(error)) throw new Unsettled('the fyd.service.d folder exists but could not be listed');
+  if (!(await refused(dropIns, 'the fyd.service.d folder', reads))) {
+    try {
+      names = (await readdir(dropIns)).filter(name => name.endsWith('.conf')).sort();
+    } catch (error) {
+      if (!missing(error)) throw new Unsettled('the fyd.service.d folder exists but could not be listed');
+    }
   }
   const merged = new Map<string, { value: string; source: string }>();
   let environmentFile = false;
@@ -101,7 +122,7 @@ async function readSystemd(unitFile: string, dropIns: string): Promise<Systemd> 
   };
   if (unit !== undefined) apply(unit, 'the systemd unit fyd.service');
   for (const name of names) {
-    const text = await readText(join(dropIns, name), `the drop-in fyd.service.d/${name}`);
+    const text = await readText(join(dropIns, name), `the drop-in fyd.service.d/${name}`, reads);
     if (text !== undefined) apply(text, `the drop-in fyd.service.d/${name}`);
   }
   const variable = merged.get(V4_ARCHIVE_VARIABLE);
@@ -128,7 +149,8 @@ async function locate(ctx: StepContext): Promise<Located> {
   }
   const paths = v4ServicePaths(host.homeDirectory, host.configHome);
 
-  const systemd = await readSystemd(paths.unitFile, paths.dropInFolder);
+  const reads: ServiceReads = { homeDirectory: host.homeDirectory, notes };
+  const systemd = await readSystemd(paths.unitFile, paths.dropInFolder, reads);
   const serves = (stateHome: string | undefined): boolean =>
     stateHome === undefined || resolve(stateHome) === resolve(ctx.v4.home);
   if (systemd.present && !serves(systemd.stateHome)) {
@@ -141,7 +163,7 @@ async function locate(ctx: StepContext): Promise<Located> {
       );
   }
 
-  const plistText = await readText(paths.plist, 'the launchd plist com.ferretry.fyd.plist');
+  const plistText = await readText(paths.plist, 'the launchd plist com.ferretry.fyd.plist', reads);
   if (plistText !== undefined) {
     const plist = plistEnvironmentValue(plistText, V4_ARCHIVE_VARIABLE);
     if (plist.binary) notes.push('the launchd plist is a binary plist, which is not read');

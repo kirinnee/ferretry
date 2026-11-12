@@ -9,6 +9,7 @@ import { type LockProbe, preflight } from './preflight.ts';
 import type { ConversionReport, StepReport } from './report.ts';
 import { type EnforcedConversion, type HostFacts, STEPS, type Step, type StepContext } from './steps/index.ts';
 import { LoginKeyHold } from './steps/login-keys.ts';
+import { fenceV4 } from './v4/fence.ts';
 import { type V4ConfigOverrides, v4Paths } from './v4/layout.ts';
 import { writeHomeJson } from './v5/home.ts';
 import { v5Writer } from './v5/write.ts';
@@ -88,7 +89,11 @@ async function plainConfigs(
   const loginKeys = new LoginKeyHold();
   const plain = {
     ...extra,
-    v4: { ...v4Paths(from), ...(overrides === undefined ? {} : { configOverrides: overrides }) },
+    v4: {
+      ...v4Paths(from),
+      fenced: await fenceV4(from),
+      ...(overrides === undefined ? {} : { configOverrides: overrides }),
+    },
     v5: v5Writer(to, { dryRun: true }),
     dryRun: true,
     loginKeys,
@@ -131,7 +136,7 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
 
   if (!options.dryRun) await mkdir(options.to, { recursive: true, mode: 0o700 });
   const ctx = {
-    v4: v4Paths(options.from),
+    v4: { ...v4Paths(options.from), fenced: await fenceV4(options.from) },
     v5: v5Writer(options.to, { dryRun: options.dryRun }),
     dryRun: options.dryRun,
     ...(options.preview === true

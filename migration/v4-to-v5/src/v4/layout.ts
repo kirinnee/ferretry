@@ -21,6 +21,11 @@ export type V4ConfigOverrides = ReadonlyMap<string, string | null>;
 export interface V4Paths {
   /** With it, config files named in it read as given (see {@link V4ConfigOverrides}); absent, every file reads from disk. */
   readonly configOverrides?: V4ConfigOverrides;
+  /**
+   * The v4 folders (relative to `home`, see `v4/fence.ts`) that are links or not folders, found once before any step
+   * ran. No step looks inside one. Absent: none is fenced (bare paths a test builds).
+   */
+  readonly fenced?: ReadonlySet<string>;
   readonly home: string;
   readonly layoutVersion: string;
   readonly daemonLock: string;
