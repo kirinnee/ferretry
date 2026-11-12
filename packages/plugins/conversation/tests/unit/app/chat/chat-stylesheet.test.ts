@@ -77,6 +77,11 @@ describe("the chat's own stylesheet", () => {
     expect(checked.length).toBeGreaterThanOrEqual(8);
   });
 
+  it('draws a send’s time, chips and read-out at the app’s normal small-text size, never a hand-picked smaller one', () => {
+    for (const selector of ['.fy-receipt-line .fy-receipt', '.fy-receipt-chip', '.fy-receipt-detail'])
+      expect(rule(css, selector)).toContain('font-size: var(--text-xs);');
+  });
+
   it('leaves the rules other homes own to them', () => {
     for (const foreign of ['.fy-question-form', '.fy-remote-browser', '.fy-chat-search', '.fy-convo-row'])
       expect(css).not.toContain(foreign);

@@ -191,7 +191,11 @@ export function LedgerMessage({
           {({ trigger, panels }) => (
             <>
               <div className="px-panel pb-1">
-                <MessageFooter clock={clockOfInstant(record.acceptedAt)} record={record} trailing={trigger} />
+                <MessageFooter
+                  clock={clockOfInstant(record.acceptedAt, { now: Date.now() })}
+                  record={record}
+                  trailing={trigger}
+                />
               </div>
               {panels}
             </>

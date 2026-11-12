@@ -186,7 +186,7 @@ const badgeOf = (record: LedgerSendRecord): SendBadge => {
 };
 
 /** What the 5.0 update left unsaid about a send it marked, in the words every such row ends with. */
-export const UPDATE_NOTE = 'unconfirmed — check the chat';
+const UPDATE_NOTE = 'unconfirmed — check the chat';
 
 /** Whether the v4 → 5.0 conversion marked this send: its old delivery claim could not be tied to what 5.0 reads. */
 export const isUpdateUnconfirmed = (record: Pick<LedgerSendRecord, 'unaccountedReason'>): boolean =>

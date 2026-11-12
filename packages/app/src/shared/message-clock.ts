@@ -9,6 +9,9 @@
  * style); `full` is the tooltip and the tap read-out: the date, the time to the second and the zone,
  * so "which day, which clock" is never a guess. `timeZone` and `locale` are parameters only so a test
  * can pin them; production passes nothing and gets the device's.
+ *
+ * A row that may be OLD (a send kept in the ledger for days) passes `now`: when the instant is not on the reader's
+ * calendar day of `now`, `short` leads with the date ("8 Nov, 08:55"), so a days-old send never reads as minutes ago.
  */
 
 export interface MessageClock {
@@ -19,11 +22,15 @@ export interface MessageClock {
 export interface ClockEnvironment {
   readonly timeZone?: string | undefined;
   readonly locale?: string | undefined;
+  /** The current instant. Given, a time from another calendar day (in the reader's zone) names its day. */
+  readonly now?: number | undefined;
 }
 
-const formatters = new Map<string, readonly [Intl.DateTimeFormat, Intl.DateTimeFormat]>();
+type Formatters = readonly [Intl.DateTimeFormat, Intl.DateTimeFormat, Intl.DateTimeFormat, Intl.DateTimeFormat];
 
-const formattersFor = ({ timeZone, locale }: ClockEnvironment): readonly [Intl.DateTimeFormat, Intl.DateTimeFormat] => {
+const formatters = new Map<string, Formatters>();
+
+const formattersFor = ({ timeZone, locale }: ClockEnvironment): Formatters => {
   const key = `${locale ?? ''}|${timeZone ?? ''}`;
   const cached = formatters.get(key);
   if (cached !== undefined) return cached;
@@ -31,6 +38,15 @@ const formattersFor = ({ timeZone, locale }: ClockEnvironment): readonly [Intl.D
   const made = [
     new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', ...zone }),
     new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'long', hourCycle: 'h23', ...zone }),
+    new Intl.DateTimeFormat(locale, {
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      ...zone,
+    }),
+    new Intl.DateTimeFormat(locale, { dateStyle: 'short', ...zone }),
   ] as const;
   formatters.set(key, made);
   return made;
@@ -44,6 +60,10 @@ export const clockOfInstant = (
   if (at === undefined) return undefined;
   const date = new Date(typeof at === 'number' ? at : Date.parse(at));
   if (!Number.isFinite(date.getTime())) return undefined;
-  const [short, full] = formattersFor(environment);
-  return { short: short.format(date), full: full.format(date) };
+  const [clock, full, dated, day] = formattersFor(environment);
+  const today = environment.now !== undefined && day.format(date) === day.format(environment.now);
+  return {
+    short: environment.now === undefined || today ? clock.format(date) : dated.format(date),
+    full: full.format(date),
+  };
 };

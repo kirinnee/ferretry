@@ -113,7 +113,7 @@ export function MessageFooter({
         <p className="fy-receipt-detail" data-send-reason="" data-side={side}>
           {sent === undefined ? receipt.detail : `${receipt.name} · ${sent} — ${receipt.detail}`}
         </p>
-      ) : (
+      ) : receipt.note === receipt.detail ? null : (
         <span className="sr-only">{receipt.detail}</span>
       )}
     </>

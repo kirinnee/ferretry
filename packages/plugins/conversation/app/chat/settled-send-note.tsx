@@ -27,7 +27,7 @@ export interface SettledSendNoteProps {
 export function SettledSendNote({ record, onDismiss, onExpand }: SettledSendNoteProps) {
   const receipt = sendReceipt(record);
   const { body } = peerFrom(record.message);
-  const clock = clockOfInstant(record.acceptedAt);
+  const clock = clockOfInstant(record.acceptedAt, { now: Date.now() });
   const said = body.replace(/\s+/gu, ' ').trim();
   return (
     <div className="fy-settled-note" data-send-id={record.sendId} data-settled-note={receipt.kind}>

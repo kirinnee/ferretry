@@ -100,14 +100,14 @@ describe('the reader’s own send', () => {
     expect(bubble.dataset['transcriptKind']).toBe('user');
     const words = must(bubble.querySelector('p'), 'its words');
     expect(words.textContent).toBe('ship it');
-    expect(bubble.querySelector('time')?.textContent).toBe(clockOfInstant(SENT)?.short ?? '');
+    expect(bubble.querySelector('time')?.textContent).toBe(clockOfInstant(SENT, { now: Date.now() })?.short ?? '');
 
     await view.render(inSession(null, [landed(record())]));
     expect(bubbleOf(view)).toBe(bubble);
     expect(bubble.querySelector('p')).toBe(words);
     expect(bubble.dataset['sendRow']).toBe('landed');
     // Its time is when it was SENT, so it does not change as it lands a minute later.
-    expect(bubble.querySelector('time')?.textContent).toBe(clockOfInstant(SENT)?.short ?? '');
+    expect(bubble.querySelector('time')?.textContent).toBe(clockOfInstant(SENT, { now: Date.now() })?.short ?? '');
     expect(bubble.querySelector('[data-ledger-more]')).toBeNull();
 
     await view.render(

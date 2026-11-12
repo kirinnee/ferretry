@@ -495,34 +495,62 @@ describe('LedgerMessage', () => {
 
   describe('every row the update marked explains itself, whatever else it is', () => {
     const marked = { unaccountedReason: 'update_unconfirmed' } as const;
+    const MIGRATION = 'unconfirmed — check the chat (sent before the update)';
     const cases: readonly [string, Partial<LedgerSendRecord>, string][] = [
       ['an ordinary one', { fate: 'unaccounted' }, 'unconfirmed — check the chat. This was sent before the update'],
       [
         'one held for a revive',
         { fate: 'accepted', held: true },
-        'kept safely; it will be delivered when this session is revived; unconfirmed — check the chat (sent before the update)',
+        `kept safely; it will be delivered when this session is revived; ${MIGRATION}`,
       ],
       [
         'a cancelled one',
         { fate: 'cancelled' },
-        'taken back; what that did on the agent’s screen is not known; unconfirmed — check the chat (sent before the update)',
+        `taken back; what that did on the agent’s screen is not known; ${MIGRATION}`,
       ],
       [
         'a cancelled one that cleared the composer',
         { fate: 'cancelled', cancelEffect: 'cleared' },
-        'removed, and erased from the agent’s composer; unconfirmed — check the chat (sent before the update)',
+        `removed, and erased from the agent’s composer; ${MIGRATION}`,
       ],
     ];
     for (const [name, patch, detail] of cases)
-      test(`${name} says so in its detail and draws the plain sentence, visibly`, () => {
+      test(`${name} says so in its detail and draws the same words, visibly, on the mounted row`, () => {
         const row = record({ ...patch, ...marked });
         expect(sendBadge(row).detail).toContain(detail);
         const drawn = render(<LedgerMessage onRetry={async () => true} record={row} />);
         const note = drawn.root.findAll(node => node.props['data-migration-note'] === '');
         expect(note).toHaveLength(1);
-        expect(textOfNode(note[0] as ReactTestInstance)).toBe('unconfirmed — check the chat');
+        // The visible note carries the row's OWN context and the migration sentence, not only "check the chat".
+        expect(textOfNode(note[0] as ReactTestInstance)).toContain(detail);
         expect(textOf(drawn)).not.toContain('update_unconfirmed');
       });
+
+    test('a held marked row says in words that it is held, not only with a clock', () => {
+      const drawn = render(
+        <LedgerMessage onRetry={async () => true} record={record({ fate: 'accepted', held: true, ...marked })} />,
+      );
+      const note = drawn.root.find(node => node.props['data-migration-note'] === '');
+      expect(textOfNode(note)).toContain('kept safely; it will be delivered when this session is revived');
+    });
+
+    test('a plain marked row says it once: the amber note, with no grey “unconfirmed” chip beside it', () => {
+      const drawn = render(
+        <LedgerMessage onRetry={async () => true} record={record({ fate: 'unaccounted', ...marked })} />,
+      );
+      expect(drawn.root.findAll(node => node.props['data-send-chip'] !== undefined)).toHaveLength(0);
+      expect(drawn.root.findAll(node => node.props['data-migration-note'] === '')).toHaveLength(1);
+    });
+
+    test('an unmarked unconfirmed row keeps its chip', () => {
+      const drawn = render(
+        <LedgerMessage
+          onRetry={async () => true}
+          record={record({ fate: 'unaccounted', unaccountedReason: 'timeout' })}
+        />,
+      );
+      expect(drawn.root.findAll(node => node.props['data-send-chip'] === 'unconfirmed')).toHaveLength(1);
+    });
 
     test('a row the update did not mark draws no such note', () => {
       for (const patch of [
@@ -533,6 +561,30 @@ describe('LedgerMessage', () => {
         const drawn = render(<LedgerMessage onRetry={async () => true} record={record(patch)} />);
         expect(drawn.root.findAll(node => node.props['data-migration-note'] === '')).toHaveLength(0);
       }
+    });
+  });
+
+  describe('the time of a row that is not from today names its day', () => {
+    const NOW = Date.parse('2026-11-12T12:00:00.000Z');
+    const realNow = Date.now;
+    const timeOf = (acceptedAt: string): string => {
+      Date.now = () => NOW;
+      try {
+        const drawn = render(<LedgerMessage onRetry={async () => true} record={record({ acceptedAt })} />);
+        return textOfNode(drawn.root.find(node => node.type === 'time'));
+      } finally {
+        Date.now = realNow;
+      }
+    };
+
+    test('a send from four days ago shows its date as well as its clock', () => {
+      const shown = timeOf('2026-11-08T12:00:00.000Z');
+      expect(shown).toMatch(/Nov/u);
+      expect(shown).toMatch(/\d{2}:\d{2}/u);
+    });
+
+    test('a send from earlier today shows the clock alone', () => {
+      expect(timeOf('2026-11-12T11:55:00.000Z')).toMatch(/^\d{2}:\d{2}$/u);
     });
   });
 

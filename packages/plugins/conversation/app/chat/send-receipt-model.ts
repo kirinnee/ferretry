@@ -18,7 +18,7 @@
  */
 
 import type { SendReceiptKind } from '@ferretry/app';
-import { isUpdateUnconfirmed, UPDATE_NOTE, sendBadge } from './send-badge.ts';
+import { isUpdateUnconfirmed, sendBadge } from './send-badge.ts';
 import { effectiveQueueState } from '../queue/send-queue.ts';
 import { isSessionEndedTimeout, type LedgerSendRecord } from './send-ledger.ts';
 
@@ -34,8 +34,9 @@ export interface SendReceipt {
   /** A small word beside the mark, only for a state that needs the reader. */
   readonly chip?: string;
   /**
-   * A plain sentence drawn under the message, always visible: the update marked this send, whatever else it is. A chip
-   * and a mark cannot carry "go and look" for a message that may or may not have arrived.
+   * A plain sentence drawn under the message, always visible: the update marked this send, whatever else it is. It is
+   * the row's own context ("kept safely …", "taken back …") followed by the migration sentence. A chip and a mark
+   * cannot carry "go and look" for a message that may or may not have arrived.
    */
   readonly note?: string;
 }
@@ -112,7 +113,11 @@ const queueReceipt = (record: LedgerSendRecord, detail: string): SendReceipt | u
  */
 export const sendReceipt = (record: LedgerSendRecord, answered = false): SendReceipt => {
   const receipt = receiptOf(record, answered);
-  return isUpdateUnconfirmed(record) ? { ...receipt, note: UPDATE_NOTE } : receipt;
+  if (!isUpdateUnconfirmed(record)) return receipt;
+  // The note is the row's whole claim in words — its own context AND the migration sentence — so it is drawn in
+  // full. It already says "unconfirmed", so the grey chip that said the same is dropped.
+  const { chip, ...rest } = receipt;
+  return { ...(receipt.kind === 'unconfirmed' || chip === undefined ? rest : receipt), note: sendBadge(record).detail };
 };
 
 const receiptOf = (record: LedgerSendRecord, answered: boolean): SendReceipt => {

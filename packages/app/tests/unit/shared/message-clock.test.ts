@@ -41,4 +41,31 @@ describe('clockOfInstant', () => {
     const device = Intl.DateTimeFormat().resolvedOptions().timeZone;
     expect(clockOfInstant(UTC_0145)).toEqual(clockOfInstant(UTC_0145, { timeZone: device }));
   });
+
+  describe('with a "now", a time from another day names its day', () => {
+    const environment = { timeZone: 'UTC', locale: 'en-GB' };
+    const NOW = Date.UTC(2026, 10, 12, 9, 0, 0);
+
+    test('the same day keeps the bare clock', () => {
+      expect(clockOfInstant(Date.UTC(2026, 10, 12, 8, 55, 0), { ...environment, now: NOW })?.short).toBe('08:55');
+    });
+
+    test('an earlier day adds the date, in the reader’s locale', () => {
+      expect(clockOfInstant(Date.UTC(2026, 10, 8, 8, 55, 0), { ...environment, now: NOW })?.short).toBe('8 Nov, 08:55');
+      expect(
+        clockOfInstant(Date.UTC(2026, 10, 8, 8, 55, 0), { ...environment, locale: 'en-US', now: NOW })?.short,
+      ).toBe('Nov 8, 08:55');
+    });
+
+    test('“today” is the reader’s calendar day, not UTC’s', () => {
+      const tokyo = { timeZone: 'Asia/Tokyo', locale: 'en-GB', now: Date.UTC(2026, 10, 12, 16, 0, 0) };
+      // 16:00Z is 01:00 on the 13th in Tokyo; 14:00Z on the 12th is 23:00 on the 12th — yesterday there.
+      expect(clockOfInstant(Date.UTC(2026, 10, 12, 14, 0, 0), tokyo)?.short).toBe('12 Nov, 23:00');
+      expect(clockOfInstant(Date.UTC(2026, 10, 12, 16, 0, 0), tokyo)?.short).toBe('01:00');
+    });
+
+    test('without a now nothing changes', () => {
+      expect(clockOfInstant(Date.UTC(2026, 10, 8, 8, 55, 0), environment)?.short).toBe('08:55');
+    });
+  });
 });
