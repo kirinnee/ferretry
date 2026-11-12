@@ -39,10 +39,11 @@ import {
   launchFactsSource,
   MANIFEST_REPAIR_JOB,
   manifestUnreadableProbe,
+  RepairOwner,
   repairRequester,
 } from '../../../daemon/host-assembly.ts';
 import { hostAssembly, runtimesDaemon } from '../../../daemon/index.ts';
-import { MAX_KEPT_UNREADABLE_MANIFESTS } from '../../../daemon/lib/manifest-reading.ts';
+import { KEPT_DIGEST_LENGTH, MAX_KEPT_UNREADABLE_MANIFESTS } from '../../../daemon/lib/manifest-reading.ts';
 import { LaunchGate } from '../../../daemon/lib/launch-gate.ts';
 import type { FleetManifest } from '../../../daemon/lib/manifest.ts';
 import type { FleetApplyPlan } from '../../../daemon/lib/provisioning.ts';
@@ -50,6 +51,7 @@ import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
 import { JobRunner } from '../../../../../core/kernel/host/jobs.ts';
 import { cleanupWorlds, fleetWorld, type FleetWorld } from '../../unit/support/fleet-world.ts';
 import { faultingDisk } from '../support/faulting-disk.ts';
+import { createHash } from 'node:crypto';
 
 afterEach(cleanupWorlds);
 
@@ -391,7 +393,7 @@ describe('the copies kept aside are bounded and verified', () => {
     await writeFile(manifestPathOf(world), truncated());
     const said: string[] = [];
     const disk = faultingDisk(world.disk, async (call, args) => {
-      if (call === 'remove' && String(args[0]) === copy) throw new Error('disk refused the removal');
+      if (call === 'unlinkFile' && String(args[0]) === copy) throw new Error('disk refused the removal');
     });
 
     await world.provisioner({ disk, say: sentence => said.push(sentence) }).apply(planFor(world));
@@ -673,7 +675,7 @@ describe('the start boundary says the manifest is being rebuilt', () => {
 
 // ── the real JobRunner over a driven clock ──────────────────────────────────────────────────────────────────────────
 
-async function scheduledCompose(failures = 0) {
+async function scheduledCompose(failures = 0, missingLogins = false) {
   const world = await fleetWorld();
   const clock = fixedClock();
   const silent = { debug() {}, info() {}, warn() {}, error() {}, child: () => silent };
@@ -709,7 +711,7 @@ async function scheduledCompose(failures = 0) {
     ],
     fakes: {
       ferrets: new FakeFerrets(),
-      logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
+      logins: fakeLogins(missingLogins ? [] : [sampleLogin('claude-you', { store: 'ferretry' })]),
       loginChanges: fakeLoginChanges(),
     },
     gate: new StandInAdmission(() => ownerStanding()),
@@ -868,6 +870,20 @@ describe('damage after a healthy boot is repaired without anyone asking', () => 
 });
 
 describe('the repair requester', () => {
+  it('asks nothing while the repair is owned (running or waiting out its backoff), and again once it succeeded', () => {
+    const asked: string[] = [];
+    const owner = new RepairOwner();
+    const request = repairRequester({ jobs: { add: () => {}, kick: id => asked.push(id) } }, owner);
+    request();
+    owner.begin();
+    request();
+    request();
+    expect(asked).toEqual([MANIFEST_REPAIR_JOB]);
+    owner.release();
+    request();
+    expect(asked).toEqual([MANIFEST_REPAIR_JOB, MANIFEST_REPAIR_JOB]);
+  });
+
   it('asks the job runner to run the repair job, and says nothing when this daemon has no such job', () => {
     const asked: string[] = [];
     repairRequester({ jobs: { add: () => {}, kick: id => asked.push(id) } })();
@@ -882,5 +898,242 @@ describe('the repair requester', () => {
         },
       })(),
     ).not.toThrow();
+  });
+});
+
+// ── fix2: pruning touches only what this writer made; housekeeping never recurses; one repair owner ──────────────────
+
+const digestOf = (body: string): string => createHash('sha256').update(body).digest('hex').slice(0, KEPT_DIGEST_LENGTH);
+
+describe('pruning only ever touches files this writer made itself', () => {
+  const repairThrice = async (world: FleetWorld, tag: string): Promise<void> => {
+    for (let n = 0; n < 4; n++) {
+      await writeFile(manifestPathOf(world), `${truncated()}-${tag}-${n}`);
+      await world.provisioner().apply(planFor(world));
+    }
+  };
+
+  it('keeps an owner note that only shares the prefix, however many repairs follow', async () => {
+    const world = await fleetWorld();
+    const note = join(world.fleet, 'manifest.json.unreadable-owner-notes');
+    await writeFile(note, 'fixture notes, not generated evidence');
+    await utimes(note, 1, 1);
+
+    await repairThrice(world, 'note');
+
+    expect(await readFile(note, 'utf8')).toBe('fixture notes, not generated evidence');
+    expect((await kept(world)).filter(name => name !== 'manifest.json.unreadable-owner-notes')).toHaveLength(
+      MAX_KEPT_UNREADABLE_MANIFESTS,
+    );
+  });
+
+  it.each([
+    ['whose contents hash to the digest', (body: string) => body],
+    ['whose contents do not', () => 'someone else is holding this'],
+  ])('keeps a digest-named file with a second name, %s', async (_name, contents) => {
+    const world = await fleetWorld();
+    const body = 'fixture evidence with a second name';
+    const alias = join(world.fleet, `manifest.json.unreadable-${digestOf(body)}`);
+    const other = join(world.person, 'fixture-evidence-alias');
+    await writeFile(other, contents(body));
+    await link(other, alias);
+    await utimes(alias, 1, 1);
+
+    await repairThrice(world, 'alias');
+
+    expect((await lstat(alias)).nlink).toBe(2);
+    expect(await readFile(other, 'utf8')).toBe(contents(body));
+  });
+
+  it('keeps a digest-named single-link file whose contents do not match the digest', async () => {
+    const world = await fleetWorld();
+    const foreign = join(world.fleet, 'manifest.json.unreadable-0123456789ab');
+    await writeFile(foreign, 'not the bytes that name digests', { mode: 0o600 });
+    await utimes(foreign, 1, 1);
+
+    await repairThrice(world, 'mismatch');
+
+    expect(await readFile(foreign, 'utf8')).toBe('not the bytes that name digests');
+    expect((await kept(world)).filter(name => name !== 'manifest.json.unreadable-0123456789ab')).toHaveLength(
+      MAX_KEPT_UNREADABLE_MANIFESTS,
+    );
+  });
+
+  it('still prunes its own old copies: the name is the digest of the contents and the file has one name', async () => {
+    const world = await fleetWorld();
+    const body = 'an old copy this writer made';
+    const old = join(world.fleet, `manifest.json.unreadable-${digestOf(body)}`);
+    await writeFile(old, body, { mode: 0o600 });
+    await utimes(old, 1, 1);
+
+    await repairThrice(world, 'own');
+
+    expect(await lstat(old).catch(() => undefined)).toBeUndefined();
+    expect(await kept(world)).toHaveLength(MAX_KEPT_UNREADABLE_MANIFESTS);
+  });
+});
+
+describe('housekeeping removes a regular file by its identity and never walks a folder', () => {
+  /** Swaps the entry named `victim` for a folder holding a file, the first time the disk is asked to unlink it. */
+  const swapForFolder = (world: FleetWorld, victim: string) => {
+    let swapped = false;
+    return {
+      swapped: () => swapped,
+      disk: faultingDisk(world.disk, async (call, args) => {
+        if (call !== 'unlinkFile' || swapped || String(args[0]) !== victim) return;
+        swapped = true;
+        await unlink(victim);
+        await mkdir(victim);
+        await writeFile(join(victim, 'keep'), 'a folder of someone else');
+      }),
+    };
+  };
+
+  it('a folder swapped in at a surplus copy before its unlink is left whole, and the apply still succeeds', async () => {
+    const world = await fleetWorld();
+    const body = 'an old copy this writer made';
+    const old = join(world.fleet, `manifest.json.unreadable-${digestOf(body)}`);
+    await writeFile(old, body, { mode: 0o600 });
+    await utimes(old, 1, 1);
+    const swap = swapForFolder(world, old);
+    await writeFile(manifestPathOf(world), truncated());
+
+    for (let n = 0; n < 4; n++) {
+      await writeFile(manifestPathOf(world), `${truncated()}-swap-${n}`);
+      await world.provisioner({ disk: swap.disk }).apply(planFor(world));
+    }
+
+    expect(swap.swapped()).toBe(true);
+    expect((await lstat(old)).isDirectory()).toBe(true);
+    expect(await readFile(join(old, 'keep'), 'utf8')).toBe('a folder of someone else');
+    expect(JSON.parse(await readFile(manifestPathOf(world), 'utf8'))).toMatchObject({ version: 1 });
+  });
+
+  it('a folder swapped in at the copy name before the EEXIST replacement is left whole and no private copy is claimed', async () => {
+    const world = await fleetWorld();
+    await writeFile(manifestPathOf(world), truncated());
+    await world.provisioner().apply(planFor(world));
+    const copy = join(world.fleet, (await kept(world))[0] ?? 'never');
+    await chmod(copy, 0o644);
+    const swap = swapForFolder(world, copy);
+    await writeFile(manifestPathOf(world), truncated());
+    const said: string[] = [];
+
+    await world.provisioner({ disk: swap.disk, say: sentence => said.push(sentence) }).apply(planFor(world));
+
+    expect(swap.swapped()).toBe(true);
+    expect((await lstat(copy)).isDirectory()).toBe(true);
+    expect(await readFile(join(copy, 'keep'), 'utf8')).toBe('a folder of someone else');
+    expect(said[0]).toContain('could not be kept aside');
+  });
+
+  it('the housekeeping never asks for the recursive remove', async () => {
+    const world = await fleetWorld();
+    const removed: string[] = [];
+    const disk = faultingDisk(world.disk, async (call, args) => {
+      if (call === 'remove') removed.push(String(args[0]));
+    });
+    for (let n = 0; n < 6; n++) {
+      await writeFile(manifestPathOf(world), `${truncated()}-plain-${n}`);
+      await world.provisioner({ disk }).apply(planFor(world));
+    }
+    const copy = join(world.fleet, (await kept(world))[0] ?? 'never');
+    await chmod(copy, 0o644);
+    await writeFile(manifestPathOf(world), await readFile(copy, 'utf8'));
+    await world.provisioner({ disk }).apply(planFor(world));
+
+    expect(removed.filter(path => path.includes('.unreadable-'))).toEqual([]);
+  });
+});
+
+describe('ONE repair owner across running and backoff', () => {
+  it('refused reads while a failed repair waits for its retry run no attempt and leave no second timer', async () => {
+    const f = await scheduledCompose(0, true);
+    try {
+      await writeFile(manifestPathOf(f.world), truncated());
+      await f.boot();
+      expect(f.attempts()).toBe(1);
+      expect(f.clock.pending()).toBe(1);
+
+      for (let n = 0; n < 8; n++) {
+        await expect(f.facts().facts('claude-default')).rejects.toBeInstanceOf(FleetManifestUnreadableError);
+        await f.runner.settle();
+      }
+
+      expect(f.attempts()).toBe(1);
+      expect(f.clock.pending()).toBe(1);
+      expect(f.runner.reports()[0]).toMatchObject({ runs: 0, failures: 1 });
+    } finally {
+      await f.runner.stop();
+    }
+    expect(f.clock.pending()).toBe(0);
+  });
+
+  it('the homes reader coalesces into the pending retry the same way', async () => {
+    const f = await scheduledCompose(0, true);
+    try {
+      await writeFile(manifestPathOf(f.world), truncated());
+      await f.boot();
+      const homes = f.assembly()?.homes;
+      if (homes === undefined) throw new Error('the composed daemon has no homes reader');
+
+      for (let n = 0; n < 8; n++) {
+        await expect(homes.homes()).rejects.toBeInstanceOf(RuntimeHomeUnreadable);
+        await f.runner.settle();
+      }
+
+      expect(f.attempts()).toBe(1);
+      expect(f.clock.pending()).toBe(1);
+    } finally {
+      await f.runner.stop();
+    }
+    expect(f.clock.pending()).toBe(0);
+  });
+
+  it('the backoff still retries by itself and a success hands the repair back: the next damage is repaired at once', async () => {
+    const f = await scheduledCompose(1);
+    try {
+      await publishOnce(f.host);
+      await writeFile(manifestPathOf(f.world), truncated());
+      await f.boot();
+      expect(f.attempts()).toBe(1);
+      await f
+        .facts()
+        .facts('claude-default')
+        .catch(() => undefined);
+      await f.runner.settle();
+      expect(f.attempts()).toBe(1);
+      await f.advance(1_000);
+      expect(f.attempts()).toBe(2);
+      expect(await f.facts().facts('claude-default')).toMatchObject({ kind: 'claude' });
+
+      await writeFile(manifestPathOf(f.world), withUnknownKey());
+      await f
+        .facts()
+        .facts('claude-default')
+        .catch(() => undefined);
+      await f.advance(0);
+
+      expect(f.attempts()).toBe(3);
+      expect(await f.facts().facts('claude-default')).toMatchObject({ kind: 'claude' });
+      expect(f.clock.pending()).toBe(0);
+    } finally {
+      await f.runner.stop();
+    }
+  });
+
+  it('an idle unpublishable configuration is retried on the capped schedule with one timer, and stop leaves none', async () => {
+    const f = await scheduledCompose(0, true);
+    try {
+      await writeFile(manifestPathOf(f.world), truncated());
+      await f.boot();
+      for (const delay of [1_000, 5_000, 30_000, 120_000, 600_000, 600_000]) await f.advance(delay);
+
+      expect(f.attempts()).toBe(7);
+      expect(f.clock.pending()).toBe(1);
+    } finally {
+      await f.runner.stop();
+    }
+    expect(f.clock.pending()).toBe(0);
   });
 });

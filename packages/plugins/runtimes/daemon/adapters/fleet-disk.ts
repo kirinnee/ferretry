@@ -184,6 +184,22 @@ export class FleetDisk {
     await this.fleet.remove(this.fenced(path));
   }
 
+  /**
+   * Removes ONE regular file, and only while it is still the file `identity` (as {@link identity} spelled it) names and
+   * has no second name. A folder, a link or anything else at the name is refused and left as it was: this never recurses
+   * (the housekeeping door; {@link remove} is the one that walks a tree).
+   */
+  async unlinkFile(path: string, identity: string): Promise<void> {
+    const [device, inode] = identity.split(':');
+    if (device === undefined || inode === undefined) throw new Error(`not an identity: ${identity}`);
+    await this.fleet.unlinkFile(this.fenced(path), { device: BigInt(device), inode: BigInt(inode) });
+  }
+
+  /** Removes the SYMLINK at `path` and nothing else (what it points at is untouched); a file or folder there is refused and left alone. */
+  async unlinkLink(path: string): Promise<void> {
+    await this.fleet.unlink(this.fenced(path));
+  }
+
   /** Narrows (or keeps) the permission bits of an existing file or folder, through a descriptor opened without following a link. */
   async setMode(path: string, mode: number): Promise<void> {
     await this.fleet.setMode(this.fenced(path), mode);

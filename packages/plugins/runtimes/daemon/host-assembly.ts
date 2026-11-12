@@ -98,12 +98,38 @@ async function publishedFleet(
 export const MANIFEST_REPAIR_JOB = 'runtimes.manifest-repair';
 
 /**
- * Asks for the repair job to run now (a launch reader met an unreadable manifest after a healthy start). It is the
- * runner's own single-flight kick, never a call into the repair: a kick while the job runs coalesces into one more run,
- * and a daemon whose job is not registered has nothing to ask.
+ * Who owns the manifest repair: the repair job, from the moment an attempt begins until one succeeds. It spans the
+ * attempt that is RUNNING and the backoff that follows a failed one (the runner's retry timer is the job's own), so a
+ * reader's request has one answer in both states: the owner already has it. A request made while it is held must not
+ * run another attempt or leave another timer, so the traffic of refused starts adds no work and no timers.
  */
-export function repairRequester(kernel: Pick<KernelPorts, 'jobs'>): () => void {
+export class RepairOwner {
+  #held = false;
+
+  /** An attempt starts (the job's first act): the repair is now owned until {@link release}. */
+  begin(): void {
+    this.#held = true;
+  }
+
+  /** The manifest reads again: the repair is done, and the next damage is a new request. */
+  release(): void {
+    this.#held = false;
+  }
+
+  get held(): boolean {
+    return this.#held;
+  }
+}
+
+/**
+ * Asks for the repair job to run now (a launch reader met an unreadable manifest after a healthy start). It is the
+ * runner's own single-flight kick, never a call into the repair, and it asks only when nobody owns the repair: while an
+ * attempt runs or waits out its backoff the request coalesces into it (the attempt re-checks the manifest at its end, and
+ * a failed one is retried by the runner's own timer). A daemon whose job is not registered has nothing to ask.
+ */
+export function repairRequester(kernel: Pick<KernelPorts, 'jobs'>, owner: RepairOwner = new RepairOwner()): () => void {
   return () => {
+    if (owner.held) return;
     try {
       kernel.jobs.kick(MANIFEST_REPAIR_JOB);
     } catch {

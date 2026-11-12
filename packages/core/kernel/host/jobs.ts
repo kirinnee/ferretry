@@ -218,6 +218,10 @@ export class JobRunner {
   }
 
   private run(job: Job): void {
+    // A run supersedes the retry waiting for it: a job is retried by ONE timer, so a fire that arrives while a retry is
+    // pending (a kick, a second schedule) cancels that timer before the new attempt can store another over it.
+    job.retry?.();
+    job.retry = undefined;
     job.running = (async () => {
       try {
         await job.spec.run(job.controller.signal);

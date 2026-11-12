@@ -3,7 +3,9 @@ import path from 'node:path';
 import { z } from 'zod';
 import { FleetManifestSchema } from '../lib/manifest.ts';
 import {
+  KEPT_DIGEST_LENGTH,
   KEPT_MANIFEST_INFIX,
+  keptCopyDigest,
   keptManifestName,
   manifestRebuiltSentence,
   readManifestText,
@@ -812,7 +814,10 @@ export class FileFleetProvisioner implements FleetProvisioner {
         sha256(await this.disk.readBytes(target, MAX_READ_BYTES)) === sha256(bytes)
       )
         return target;
-      await this.disk.remove(target);
+      // Out of the way by the one regular-file / link door bound to what was just looked at, never a recursive remove:
+      // an entry swapped for a folder since the look is refused (and left alone), not walked.
+      if (existing.kind === 'symlink') await this.disk.unlinkLink(target);
+      else await this.disk.unlinkFile(target, await this.requireIdentity(target));
       await this.disk.create(target, bytes, 0o600);
       return target;
     } catch {
@@ -820,17 +825,38 @@ export class FileFleetProvisioner implements FleetProvisioner {
     }
   }
 
+  /** The identity of the entry at `target` now; a name that vanished is a failure of the replacement (nothing to bind to). */
+  private async requireIdentity(target: string): Promise<string> {
+    const identity = await this.disk.identity(target);
+    if (identity === undefined) throw new Error(`${target} is gone`);
+    return identity;
+  }
+
   /** Keeps at most a few copies of unreadable manifests: older ones go, `keptAt` never, and only our own regular files. */
   private async pruneKeptCopies(manifestPath: string, keptAt: string): Promise<void> {
     try {
       const directory = path.dirname(manifestPath);
-      const entries = await this.disk.entries(directory);
-      const surplus = surplusKeptCopies(
-        entries.filter(entry => entry.kind === 'file'),
-        `${path.basename(manifestPath)}${KEPT_MANIFEST_INFIX}`,
-        path.basename(keptAt),
-      );
-      for (const name of surplus) await this.disk.remove(path.join(directory, name));
+      const prefix = `${path.basename(manifestPath)}${KEPT_MANIFEST_INFIX}`;
+      const own: { name: string; modified: string; links: number; identity: string }[] = [];
+      for (const entry of await this.disk.entries(directory)) {
+        // Only what this writer made: its exact name, a regular file with its only name, and — the marker — contents
+        // whose SHA-256 begins with the digest in the name (the name IS that digest, so the marker adds no secret and
+        // costs one bounded read). A note, a hard-linked alias or a file of other bytes under such a name is not ours.
+        const digest = keptCopyDigest(entry.name, prefix);
+        if (digest === undefined || entry.kind !== 'file' || entry.links !== 1) continue;
+        const target = path.join(directory, entry.name);
+        const identity = await this.disk.identity(target);
+        const contents = await this.disk.readBytes(target, MAX_READ_BYTES).catch(() => undefined);
+        if (identity === undefined || contents === undefined) continue;
+        if (sha256(contents).slice(0, KEPT_DIGEST_LENGTH) !== digest) continue;
+        own.push({ name: entry.name, modified: String(entry.modified), links: entry.links, identity });
+      }
+      for (const name of surplusKeptCopies(own, prefix, path.basename(keptAt))) {
+        const chosen = own.find(copy => copy.name === name);
+        if (chosen === undefined) continue;
+        // One failure to remove a copy (it changed since it was chosen) leaves THAT copy and goes on with the rest.
+        await this.disk.unlinkFile(path.join(directory, name), chosen.identity).catch(() => undefined);
+      }
     } catch {
       // Best-effort housekeeping: a copy that cannot be pruned is a copy too many, never a failed apply.
     }

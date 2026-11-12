@@ -35,25 +35,41 @@ export const KEPT_MANIFEST_INFIX = '.unreadable-';
 /** How many copies of unreadable manifests stay aside: the most recent few. Older damage is evidence nobody asked to keep. */
 export const MAX_KEPT_UNREADABLE_MANIFESTS = 3;
 
+/** How many hex digits of the contents' SHA-256 end a kept copy's name. */
+export const KEPT_DIGEST_LENGTH = 12;
+
 /** The name an unreadable manifest is kept under: the file's own name and a short digest of what it held, so it is kept once. */
 export function keptManifestName(manifestPath: string, digest: string): string {
-  return `${manifestPath}${KEPT_MANIFEST_INFIX}${digest.slice(0, 12)}`;
+  return `${manifestPath}${KEPT_MANIFEST_INFIX}${digest.slice(0, KEPT_DIGEST_LENGTH)}`;
 }
 
 /**
- * The names (of `candidates`, the regular files of the fleet folder) to remove so that at most
- * {@link MAX_KEPT_UNREADABLE_MANIFESTS} copies stay: those that begin with `prefix` (the manifest's file name and the
- * infix), oldest first. The copy just kept (`protect`) is never among them. A name that does not begin with the prefix
- * is never chosen, so nothing the person or another version put there is touched.
+ * The digest a name carries when it has EXACTLY the shape {@link keptManifestName} writes (`prefix` and then
+ * {@link KEPT_DIGEST_LENGTH} lowercase hex digits, nothing after), else `undefined`. This is half of "a copy we made":
+ * the other half is that the file's contents hash to that digest (see {@link surplusKeptCopies}'s caller), since the
+ * name IS the digest of the contents. A note a person named `manifest.json.unreadable-owner-notes` is neither.
+ */
+export function keptCopyDigest(name: string, prefix: string): string | undefined {
+  if (!name.startsWith(prefix)) return undefined;
+  const digest = name.slice(prefix.length);
+  return new RegExp(`^[0-9a-f]{${KEPT_DIGEST_LENGTH}}$`).test(digest) ? digest : undefined;
+}
+
+/**
+ * The names (of `candidates`, the regular files of the fleet folder whose contents were already proved to hash to the
+ * digest in their name) to remove so that at most {@link MAX_KEPT_UNREADABLE_MANIFESTS} copies stay: those named
+ * exactly as this writer names them ({@link keptCopyDigest}) and holding their only name (`links === 1`), oldest first.
+ * The copy just kept (`protect`) is never among them. Anything else — another spelling, a second hard link — is neither
+ * chosen nor counted, so nothing the person or another version put there is touched.
  */
 export function surplusKeptCopies(
-  candidates: readonly { readonly name: string; readonly modified: string }[],
+  candidates: readonly { readonly name: string; readonly modified: string; readonly links: number }[],
   prefix: string,
   protect: string | undefined,
   limit: number = MAX_KEPT_UNREADABLE_MANIFESTS,
 ): readonly string[] {
   const others = candidates
-    .filter(entry => entry.name.startsWith(prefix) && entry.name !== protect)
+    .filter(entry => keptCopyDigest(entry.name, prefix) !== undefined && entry.links === 1 && entry.name !== protect)
     .toSorted((left, right) =>
       left.modified === right.modified ? left.name.localeCompare(right.name) : left.modified < right.modified ? 1 : -1,
     )

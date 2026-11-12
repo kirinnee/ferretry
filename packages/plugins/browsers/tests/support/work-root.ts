@@ -87,6 +87,7 @@ export function workRoots(folder: string, stateHome: string): RootsPort {
     setMode: unused('setMode'),
     rename: unused('rename'),
     unlink: unused('unlink'),
+    unlinkFile: unused('unlinkFile'),
     checkPrivateChain: unused('checkPrivateChain'),
   };
   return {

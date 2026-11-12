@@ -7,6 +7,7 @@ import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import {
   FleetManifestUnreadableError,
   KEPT_MANIFEST_INFIX,
+  keptCopyDigest,
   keptManifestName,
   MAX_KEPT_UNREADABLE_MANIFESTS,
   manifestRebuiltSentence,
@@ -87,7 +88,8 @@ describe('the words about an unreadable manifest', () => {
 
 describe('surplusKeptCopies', () => {
   const prefix = `manifest.json${KEPT_MANIFEST_INFIX}`;
-  const copy = (digest: string, modified: string) => ({ name: `${prefix}${digest}`, modified });
+  const nameOf = (digest: string): string => `${prefix}${digest.padEnd(12, '0')}`;
+  const copy = (digest: string, modified: string, links = 1) => ({ name: nameOf(digest), modified, links });
 
   it('keeps a small fixed number of the most recent copies and names the older ones for removal', () => {
     expect(MAX_KEPT_UNREADABLE_MANIFESTS).toBe(3);
@@ -98,7 +100,7 @@ describe('surplusKeptCopies', () => {
       copy('d', '2027-01-01T00:00:04.000Z'),
       copy('e', '2027-01-01T00:00:05.000Z'),
     ];
-    expect(surplusKeptCopies(copies, prefix, `${prefix}c`)).toEqual([`${prefix}b`, `${prefix}a`]);
+    expect(surplusKeptCopies(copies, prefix, nameOf('c'))).toEqual([nameOf('b'), nameOf('a')]);
   });
 
   it('never names the protected copy, even when it is the oldest', () => {
@@ -108,23 +110,46 @@ describe('surplusKeptCopies', () => {
       copy('c', '2027-01-01T00:00:03.000Z'),
       copy('d', '2027-01-01T00:00:04.000Z'),
     ];
-    expect(surplusKeptCopies(copies, prefix, `${prefix}a`)).toEqual([`${prefix}b`]);
+    expect(surplusKeptCopies(copies, prefix, nameOf('a'))).toEqual([nameOf('b')]);
   });
 
   it('breaks a tie of age by name, so the choice is the same every time', () => {
     const same = '2027-01-01T00:00:01.000Z';
     const copies = ['d', 'a', 'c', 'b'].map(digest => copy(digest, same));
-    expect(surplusKeptCopies(copies, prefix, undefined, 2)).toEqual([`${prefix}c`, `${prefix}d`]);
+    expect(surplusKeptCopies(copies, prefix, undefined, 2)).toEqual([nameOf('c'), nameOf('d')]);
   });
 
   it('chooses nothing that does not begin with the prefix, and nothing when there are few copies', () => {
     const others = [
-      { name: 'manifest.json', modified: '2027-01-01T00:00:01.000Z' },
-      { name: 'other.json.unreadable-a', modified: '2027-01-01T00:00:01.000Z' },
+      { name: 'manifest.json', modified: '2027-01-01T00:00:01.000Z', links: 1 },
+      { name: 'other.json.unreadable-a', modified: '2027-01-01T00:00:01.000Z', links: 1 },
     ];
     expect(surplusKeptCopies(others, prefix, undefined, 0)).toEqual([]);
-    expect(surplusKeptCopies([copy('a', '2027-01-01T00:00:01.000Z')], prefix, `${prefix}a`)).toEqual([]);
+    expect(surplusKeptCopies([copy('a', '2027-01-01T00:00:01.000Z')], prefix, nameOf('a'))).toEqual([]);
     expect(surplusKeptCopies([], prefix, undefined)).toEqual([]);
+  });
+
+  it('chooses and counts only the exact grammar of this writer: 12 lowercase hex digits and nothing after', () => {
+    const stamp = '2027-01-01T00:00:01.000Z';
+    const odd = [
+      `${prefix}owner-notes`,
+      `${prefix}0123456789AB`,
+      `${prefix}0123456789a`,
+      `${prefix}0123456789abc`,
+      `${prefix}0123456789ab.bak`,
+      `${prefix}`,
+    ].map(name => ({ name, modified: stamp, links: 1 }));
+    expect(surplusKeptCopies(odd, prefix, undefined, 0)).toEqual([]);
+    expect(keptCopyDigest(nameOf('a'), prefix)).toBe('a00000000000');
+    expect(keptCopyDigest(`${prefix}owner-notes`, prefix)).toBeUndefined();
+    expect(keptCopyDigest('manifest.json', prefix)).toBeUndefined();
+  });
+
+  it('never chooses or counts an entry with a second name', () => {
+    const stamp = '2027-01-01T00:00:01.000Z';
+    const copies = [copy('a', stamp, 2), copy('b', stamp), copy('c', stamp), copy('d', stamp), copy('e', stamp)];
+    expect(surplusKeptCopies(copies, prefix, undefined, 3)).toEqual([nameOf('e')]);
+    expect(surplusKeptCopies(copies, prefix, undefined, 0)).not.toContain(nameOf('a'));
   });
 });
 

@@ -105,6 +105,7 @@ function kernelRoot(
     setMode: record('setMode'),
     rename: record('rename'),
     unlink: record('unlink'),
+    unlinkFile: record('unlinkFile'),
     checkPrivateChain: record('checkPrivateChain'),
   };
 }

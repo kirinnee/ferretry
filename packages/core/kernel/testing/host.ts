@@ -2074,6 +2074,19 @@ async function start(world: World): Promise<TestHost> {
             testLinks.delete(place);
             placedCredentialLinks.forgetUnder(place);
           },
+          unlinkFile: async (path, expected) => {
+            if (isReadOnlyRoot(name) || !takesUnlinks(name)) throw new RootError('read_only');
+            const refused = unlinkNameRefusal(path);
+            if (refused !== undefined) throw new RootError(refused);
+            const place = ownPath(path);
+            const parent = place.slice(0, place.lastIndexOf('/'));
+            const steps = parent.split('/').map((_, index, parts) => parts.slice(0, index + 1).join('/'));
+            if (steps.some(step => step !== '' && testLinks.has(step))) throw new RootError('link_escape');
+            if (testLinks.has(place) || testFolderExists(place)) throw new RootError('not_a_file');
+            if (!world.roots.has(place)) return;
+            if (expected.device !== 1n || expected.inode !== (inodes.get(place) ?? 0n)) throw new RootError('changed');
+            world.roots.delete(place);
+          },
           setMode: async (path, mode) => {
             if (manifest.permissions?.setMode !== true) throw new RootError('not_declared');
             if (isReadOnlyRoot(name)) throw new RootError('read_only');
