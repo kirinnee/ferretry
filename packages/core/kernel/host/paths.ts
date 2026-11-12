@@ -72,7 +72,9 @@ export async function stateHomeHolding(
     real = await fs.realpath(requested);
     if (!walk.complete) return fence.named; // the walk found a missing tail, the kernel found the whole path
   } catch (error) {
-    const gone = ['ENOENT', 'ENOTDIR'].includes((error as { code?: string }).code ?? '');
+    // Only a genuine ENOENT is "missing". ENOTDIR (a file stands where a folder should), ELOOP, EACCES and any errno
+    // nobody named is doubt, and doubt is held, exactly as at the final recheck below.
+    const gone = (error as { code?: string } | null)?.code === 'ENOENT';
     if (!gone || walk.complete) return fence.named; // not "missing", or the walk saw it all there
     real = await fs.realpath(walk.at).catch(() => undefined);
   }
