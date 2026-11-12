@@ -225,6 +225,15 @@ describe('parity-ticks: a route also needs descriptor-parity', () => {
     expect(run([R], ctx(named, bare))[0]).toContain('no record');
   });
 
+  test('a recorded consultsGrants added is a tightening: it only gives the handler the grant standing to ask', () => {
+    const records = new Map([['route\tGET /v1/a', rec('changed')]]);
+    const consulting = { ...todayRow('GET /v1/a'), consultsGrants: true };
+    const ok = () => routeWorld([todayRow('GET /v1/a')], [consulting], records);
+    expect(run([R], ctx(named, ok))).toEqual([]);
+    const bare = () => routeWorld([todayRow('GET /v1/a')], [consulting], new Map());
+    expect(run([R], ctx(named, bare))[0]).toContain('no record');
+  });
+
   test('a moved route passes only with both halves recorded, and a recorded difference must be a tightening', () => {
     const r = routeRow('R-0001', 'GET /v1/sessions/:sessionId/q');
     const today = [todayRow('GET /v1/sessions/:sessionId/q')];

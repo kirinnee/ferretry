@@ -54,7 +54,8 @@ const MINIMUM_RANK: Readonly<Record<string, number>> = { none: 0, authenticated:
 /**
  * A difference that can only REFUSE more callers than today: minimum rank up, caller any → person, a capability
  * added, `noStore` or `privilegedOnly` added, a `catalog` resolver added (it names where the handler already read the
- * catalog from). Anything else is not one, so a record can never bless a loosening.
+ * catalog from), `consultsGrants` added (it only gives the handler the grant standing to ask; without it the call has none,
+ * and a handler that needs the decision can only refuse). Anything else is not one, so a record can never bless a loosening.
  */
 export function isTightening(diff: FieldDiff, was: DescriptorRow, now: DescriptorRow): boolean {
   switch (diff.field) {
@@ -68,6 +69,7 @@ export function isTightening(diff: FieldDiff, was: DescriptorRow, now: Descripto
     case 'capability':
     case 'noStore':
     case 'privilegedOnly':
+    case 'consultsGrants':
     case 'catalog':
       return diff.before === '∅' && diff.after !== '∅';
     default:

@@ -183,7 +183,7 @@ route	GET /v1/ferrets	added	session routes renamed /v1/sessions/:sessionId/… t
 route	GET /v1/sessions/:sessionId	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/ferrets/:ferretId	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
-route	POST /v1/ferrets	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets	moved-changed	session routes renamed /v1/sessions to /v1/ferrets (design §1.4); 5.0 adds consultsGrants, because a start outside every registered project is terminal.use for a governed device (route-security/launch.ts) and Gate gives a call its grant standing only when the route asks for it; without it every such start answered 503 launch_gate_unavailable instead of the terminal.use decision. It adds a question, not a permission: the answer is the same grant decision every other consulting route reads
 route	POST /v1/sessions/:sessionId/stop	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/stop	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/resume	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged

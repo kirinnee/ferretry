@@ -1540,7 +1540,9 @@ async function start(world: World): Promise<TestHost> {
           resolve(relative) {
             if (prefix === undefined || relative.startsWith('/') || relative.split('/').includes('..'))
               return { ok: false, error: 'outside' };
-            return { ok: true, value: `${prefix}/${relative}` as never };
+            // The scope's own folder is its prefix, never `prefix/`: production names a home with no trailing slash, and
+            // Ferrets refuses a home that is not canonical (a real harness's `homeFor` returns exactly this).
+            return { ok: true, value: (relative === '' ? prefix : `${prefix}/${relative}`) as never };
           },
           readText: async path => {
             const text = world.roots.get(path);
@@ -1669,7 +1671,13 @@ async function start(world: World): Promise<TestHost> {
                 links: 1,
               };
             }),
-          stat: async path => (world.roots.has(path) ? fileStat(path) : undefined),
+          // A file, or a folder the test world holds something under (a made folder, a file, a link), as the real root's `stat` says.
+          stat: async path =>
+            world.roots.has(path)
+              ? fileStat(path)
+              : testFolderExists(path.replace(/\/+$/u, ''))
+                ? { kind: 'directory' as const, size: 0, modified: clock.now(), mode: 0o700, links: 1 }
+                : undefined,
           // The real host's rules over the flat test world, with the same refusals: the LEAF IS NEVER FOLLOWED (the parent
           // is opened first, then the entry goes by its own name; a link goes as a link and its target stays), and
           // `onlyIfEmpty` is `rmdir` (one step: refused `not_empty` when anything is inside, never recursing).

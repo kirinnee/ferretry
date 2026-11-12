@@ -202,6 +202,9 @@ export default definePlugin({
         minimum: 'operator',
         caller: 'any',
         noStore: true,
+        // B2: a governed device's start outside every project is `terminal.use` (route-security/launch.ts). Gate gives a call
+        // its grant standing only when the route asks for it, so without this the decision has no standing to read.
+        consultsGrants: true,
         audit: { record: AUDIT_KINDS['session.opened'] },
         guard: { none: 'answers the new ferret id only' },
       }),
