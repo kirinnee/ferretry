@@ -86,11 +86,31 @@ export type LaunchPart =
    * project's settings outrank the process environment but not that file (#1587). LITERALS ONLY, never a `${secret:NAME}`
    * or another variable: the value goes into a private file in the ferret's home and never into an argv.
    */
-  | { readonly kind: 'pin'; readonly env: Readonly<Record<string, string>> };
+  | { readonly kind: 'pin'; readonly env: Readonly<Record<string, string>> }
+  /**
+   * Where the harness squeezes its own conversation, in tokens (a login's `compactAt`, once it is a number: `auto` adds
+   * nothing). The Claude harness writes it into its private settings file as `autoCompactWindow`.
+   */
+  | { readonly kind: 'compact'; readonly at: number };
 
 /** What a `launch.parts` taker contributes: a source asked per launch (a contribute item is static; the parts are not). */
 export interface LaunchPartSource {
+  /**
+   * A launch cannot be judged safe without this source's answer (a login's pinned environment is one): when it throws,
+   * the launch is refused with nothing started, instead of the source being skipped. A source that is only an
+   * addition (lessons, a skill) leaves this off and is skipped when it fails.
+   */
+  readonly required?: boolean;
   parts(spec: Omit<LaunchSpec, 'parts'>): Promise<readonly LaunchPart[]>;
+}
+
+/**
+ * A required {@link LaunchPartSource} refusing the launch, with the sentence a person reads. The message must be plain
+ * words: never a value read from a file, an environment or a secret. Any other failure of a required source is refused
+ * with a generic sentence instead, because a port's error text can carry launch values.
+ */
+export class LaunchPartsRefusal extends Error {
+  override readonly name = 'LaunchPartsRefusal';
 }
 
 /**

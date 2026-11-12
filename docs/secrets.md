@@ -356,7 +356,7 @@ at exec). The keys pinned are the login's own variables (an environment login) a
 
 **A value that names `${secret:…}` (or the optional `${secret?:…}`) never goes into that file, any settings file, or a command line.** It stays
 process environment, which the wrapper resolves from the store when it execs. Why a command line counts: if a launch copies `fixed.json` **inline** into
-`--settings '<json>'` (v4's fast mode and compaction point did; 5.0 has no such reader, and the rule is kept
+`--settings '<json>'` (v4's fast mode and compaction point did; 5.0 writes both into the private file below and has no such reader, and the rule is kept
 as a precaution), that argv shows in `ps` and in the session's saved command. The rule is enforced
 twice in code: only values with no reference are pinned, and the write of `fixed.json` (`fixedSettingsOperation`) throws
 `FleetMaterialiseError`, naming the key and never a value, if a value that names a secret or another variable ever
@@ -369,10 +369,21 @@ A ferret the daemon starts, restarts, revives, moves or adopts is launched by ex
 `FerretsService.launchAttempt` → the harness → the runner. For a Claude ferret:
 
 - **The pins.** Runtimes takes `launch.parts` and, for a Claude start on a published runtime, contributes a `pin` part: the literal
-  `env` of that runtime's `fixed.json` (`plugins/runtimes/daemon/lib/launch-gate.ts`, `launchPinParts`), filtered once more through the
+  `env` of that runtime's `fixed.json` (`plugins/runtimes/daemon/lib/launch-gate.ts`, `LaunchGate`), filtered once more through the
   same rule that wrote the file (a value that names a secret or another variable is never a pin). The Claude harness merges the pins
   into the `env` of the `launch-settings.json` it writes in the ferret's own home, which `--settings` names, so a folder's own `env`
-  cannot replace them.
+  cannot replace them. **The facts are read once per launch and cannot be lost after the folder was judged.** `start.decide` reads the
+  published manifest AND the runtime's `fixed.json` inside ONE publication read (so an apply cannot remove the file between the two), judges
+  the folder on them, and keeps that snapshot for the ferret; `launch.parts` pins from exactly that snapshot and reads nothing again. The
+  source is **required** (`LaunchPartSource.required`): if a launch reaches it with no checked snapshot, or it fails for any reason, Ferrets
+  refuses the launch with nothing started rather than skipping it (a source that is only an addition, such as lessons, is still skipped when it
+  fails). A `fixed.json` that is already unreadable refuses at `start.decide`. A `fixed.json` that is **absent** is a login that pins
+  nothing, which is what an apply that publishes no overlay leaves; under the publication read an apply cannot be half-way through removing it.
+- **Fast mode and compaction ride the same file.** A start that names `fast` writes `fastMode` into `launch-settings.json` (the start's
+  options are kept, so a stop/resume writes it again), and a published runtime's `compactAt` (a number; `auto` adds nothing) reaches it as
+  `autoCompactWindow` through a `compact` launch part, on a start, a resume and an adoption alike. Neither is ever in an argv. A ferret's own
+  compaction choice and the launch model's window cap (v4's `resolveCompactAt`) are not carried: the published account value is used as is
+  (its schema holds the floor).
 - **The credential is never in an argv.** The command is `env CLAUDE_CONFIG_DIR=<home> … claude --settings <home>/launch-settings.json …`:
   it names a path, never a value, so `ps`, the pane's command line and the session document's recorded `command` hold none. The file
   is written through the kernel's `agent-homes` root: `0600`, inside the ferret's `0700` home, and a link or a file the root refuses fails the launch
@@ -380,8 +391,11 @@ A ferret the daemon starts, restarts, revives, moves or adopts is launched by ex
   the pins of the runtime it is on NOW; it lives and goes with the ferret's home, which is why there is no sweep of launch files and no
   live-session guard for one.
 - **No inline overlay anywhere.** v4's fast-mode and compaction `--settings '<json>'` overlay, its per-launch file adapter, its argv
-  builder and its launch service were deleted with this change: nothing in 5.0 builds a second argv, and the move module keeps the
-  session document's `command` as it is (its route is still a 503 skeleton on this base, see `moves-deps.ts`).
+  builder and its launch service were deleted with this change: nothing in 5.0 builds a second argv. **A move launches nothing yet:** its
+  route is still a 503 skeleton on this base (`moves-deps.ts`). With a request id and a record that has a complete legacy lifecycle it answers
+  `503 plugin_unavailable` at the unbound account resolution; a freshly started record has no lifecycle command and answers
+  `409 session_unusable` first; without a request id it is `400 missing_request_id`. The launch-wiring table pins each answer and zero launches,
+  so the day the route is bound its relaunch must go through `launchAttempt` and the same checks.
 - A pinned **literal** credential written in a login's YAML (an internal gateway's `ANTHROPIC_AUTH_TOKEN`) is plain text in the
   configuration already; a real key belongs in the secret store.
 

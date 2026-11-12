@@ -6,6 +6,7 @@ import { ApiError } from '@ferretry/kernel/contract';
 import { applicableInstructions, sectionDigests } from './launch-sections.ts';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { KeyedSerialExecutor } from './serial.ts';
+import { LaunchPartsRefusal } from '../../../contract/index.ts';
 import type {
   DeliveryOutcome,
   FerretChangedPayload,
@@ -1629,11 +1630,9 @@ export class FerretsService implements FerretsApi {
       ...(conversation === undefined ? {} : { harnessConversation: conversation }),
       ...(readable.length === 0 ? {} : { readable }),
     };
-    const parts = (
-      await Promise.all(
-        this.ports.launchParts().map(source => source.parts(base).catch(() => [] as readonly LaunchPart[])),
-      )
-    ).flat();
+    const collected = await this.collectParts(base);
+    if (!collected.ok) return collected;
+    const parts = collected.value;
     const spec: LaunchSpec = { ...base, parts };
     // Today's order: the home is written (and made private) before the environment is resolved and the runner asked.
     try {
@@ -1674,6 +1673,32 @@ export class FerretsService implements FerretsApi {
     };
     await this.write(working, record.state, 'state');
     return ok(record.id);
+  }
+
+  /**
+   * What `launch.parts` takers add. A source that is only an addition and fails is skipped; a REQUIRED one (a login's
+   * pinned environment) that fails refuses the launch, because skipping it would start the ferret without the protection
+   * it exists to give. Nothing is started either way a refusal is returned.
+   */
+  private async collectParts(base: Omit<LaunchSpec, 'parts'>): Promise<Result<readonly LaunchPart[], StartFailure>> {
+    const answers = await Promise.all(
+      this.ports.launchParts().map(async source => {
+        try {
+          return { ok: true as const, parts: await source.parts(base) };
+        } catch (error) {
+          return { ok: false as const, required: source.required === true, error };
+        }
+      }),
+    );
+    const refused = answers.find(answer => !answer.ok && answer.required);
+    if (refused !== undefined && !refused.ok)
+      return failed(
+        'failed',
+        refused.error instanceof LaunchPartsRefusal
+          ? refused.error.message
+          : 'a part of this launch that must be checked could not be read, so the ferret was not started',
+      );
+    return ok(answers.flatMap(answer => (answer.ok ? answer.parts : [])));
   }
 
   /**

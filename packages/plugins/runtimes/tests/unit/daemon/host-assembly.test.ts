@@ -5,11 +5,12 @@
  */
 import { afterEach, describe, it } from 'bun:test';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
-import type { KernelPorts } from '@ferretry/kernel/contract';
+import type { KernelPorts, RootHandle } from '@ferretry/kernel/contract';
 import { testHost, testProcessTable } from '@ferretry/kernel/testing';
 import should from 'should';
 import { endedSeams, launchFactsSource } from '../../../daemon/host-assembly.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
+import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
 import { autoResumeSwitch } from '../../../daemon/lib/service/auto-resume-answer.ts';
 
 const ID = '00000000-0000-4000-8000-000000000001';
@@ -169,7 +170,7 @@ describe('launchFactsSource', () => {
     ],
   });
 
-  async function source(files: Readonly<Record<string, string>>) {
+  async function kernelWith(files: Readonly<Record<string, string>>): Promise<KernelPorts> {
     const seen: { kernel?: KernelPorts } = {};
     const host = await testHost({
       plugins: [
@@ -200,7 +201,11 @@ describe('launchFactsSource', () => {
       if (!resolved.ok) throw new Error(resolved.error);
       await fleet.writeText(resolved.value, text);
     }
-    return launchFactsSource(kernel);
+    return kernel;
+  }
+
+  async function source(files: Readonly<Record<string, string>>) {
+    return launchFactsSource(await kernelWith(files));
   }
 
   it('should publish the login’s names and the literal pins of its fixed settings, by name or by id', async () => {
@@ -248,5 +253,54 @@ describe('launchFactsSource', () => {
     });
 
     await should(facts.facts('work')).be.rejectedWith(/not valid JSON/u);
+  });
+
+  it('should publish the compaction trigger of the account when it is a number, and none for auto', async () => {
+    const withCompact = (compactAt: unknown) => ({
+      ...claudeManifest,
+      accounts: [{ ...claudeManifest.accounts[0], compactAt }],
+    });
+    const numeric = await source({ 'manifest.json': JSON.stringify(withCompact(200_000)) });
+    const auto = await source({ 'manifest.json': JSON.stringify(withCompact('auto')) });
+
+    should((await numeric.facts('work'))?.compactAt).equal(200_000);
+    should('compactAt' in ((await auto.facts('work')) ?? {})).be.false();
+  });
+
+  it('should read the manifest AND the fixed settings inside ONE publication read, so an apply cannot land between them', async () => {
+    const kernel = await kernelWith({
+      'manifest.json': JSON.stringify(claudeManifest),
+      [`homes/${CLAUDE_ID}/.fy/fixed.json`]: JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://gateway.invalid' } }),
+    });
+    const publication = new FleetPublication();
+    const realRoot = kernel.roots.root('fleet');
+    let appliedDuringRead = false;
+    let applying: Promise<void> | undefined;
+    // The moment the source looks for the fixed settings, an apply queues and (if it were let in) removes them.
+    const root = new Proxy(realRoot, {
+      get(target, key) {
+        if (key === 'lstat')
+          return async (path: Parameters<RootHandle['lstat']>[0]) => {
+            if (String(path).endsWith('/.fy/fixed.json')) {
+              applying = publication.publishing(async () => {
+                appliedDuringRead = true;
+                await realRoot.remove(path);
+              });
+              // A publishing callback runs at once when nothing holds the gate: it would remove the file now.
+              await Promise.resolve();
+              if (appliedDuringRead) await applying;
+            }
+            return await target.lstat(path);
+          };
+        const value = Reflect.get(target, key) as unknown;
+        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+
+    const facts = await launchFactsSource({ roots: { ...kernel.roots, root: () => root } }, publication).facts('work');
+    await applying;
+
+    // The apply waited for the read to finish: the read saw the generation it started on, not the gap.
+    should(facts?.pins).deepEqual({ ANTHROPIC_BASE_URL: 'https://gateway.invalid' });
   });
 });

@@ -37,7 +37,7 @@ import manifest from '../manifest.ts';
 import { fleetHomes } from './adapters/fleet-home-reader.ts';
 import { endedSeams, fileAssembly, launchFactsSource } from './host-assembly.ts';
 import { FolderClaudeSettingsFiles } from './adapters/folder-claude-settings-file.ts';
-import { launchPinParts, launchStartDecision, type RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
+import { LaunchGate, type RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import { FleetPublication } from './lib/service/publication.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
 import type { FleetCatalogService } from './lib/service/catalog-service.ts';
@@ -401,6 +401,15 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         },
       };
 
+      // ONE gate: its `start.decide` keeps the facts it checked and its `launch.parts` pins from exactly those.
+      const launchGate = new LaunchGate({
+        source: launchFacts,
+        folderSettings: new FolderClaudeSettingsFiles(
+          folder => ctx.kernel.roots.root('harness-home', { subfolder: folder }),
+          ctx.kernel.paths.home(),
+        ),
+      });
+
       return {
         routes: {
           ...fleetCatalogRoutes(assembly.catalog),
@@ -433,7 +442,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         // Logins asks which runtimes use a login before it removes one (`logins.used-by`).
         hooks: {
           // The login's literal environment, pinned into the harness's private settings file (#1587).
-          'launch.parts': () => [{ id: 'runtimes-login-pins', item: launchPinParts(launchFacts) }],
+          'launch.parts': () => [{ id: 'runtimes-login-pins', item: launchGate.parts }],
           'logins.used-by:runtimes': loginUsers(() => config.collection(runtimeItems)),
           // Whether an automatic resume may spend (W2-a): the switch, then the ferret's runtime, each a no when in doubt.
           'auto-resume.decide': autoResumeAnswer({
@@ -445,13 +454,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           }),
           // #1587: a Claude start, restart, revive, move or adoption whose folder's own settings would blank the runtime's
           // login is refused before anything is written; with no facts to check against, a start of a runtime is refused.
-          'start.decide': launchStartDecision({
-            source: launchFacts,
-            folderSettings: new FolderClaudeSettingsFiles(
-              folder => ctx.kernel.roots.root('harness-home', { subfolder: folder }),
-              ctx.kernel.paths.home(),
-            ),
-          }),
+          'start.decide': launchGate.decide,
         },
 
         subscribers: {

@@ -200,6 +200,58 @@ describe('homeText', () => {
     });
     should(JSON.stringify(text)).not.containEql('secret:');
   });
+
+  describe('the settings overlay a launch decides (v4 parity)', () => {
+    const base = {
+      folder: '/work',
+      permissionMode: 'auto',
+      instructions: [],
+      settings: new Map(),
+      hooks: new Map(),
+    } as const;
+    const overlayOf = (inputs: Partial<Parameters<typeof homeText>[0]>) =>
+      JSON.parse(homeText({ ...base, parts: [], ...inputs }).overlay) as Record<string, unknown>;
+
+    it('writes fastMode for a start that asked for it, and false for one that asked against it', () => {
+      should(overlayOf({ fast: true }).fastMode).equal(true);
+      should(overlayOf({ fast: false }).fastMode).equal(false);
+    });
+
+    it('leaves fastMode out when the start did not name it', () => {
+      should('fastMode' in overlayOf({})).be.false();
+    });
+
+    it('writes a compact part as autoCompactWindow, the last one winning', () => {
+      should(overlayOf({ parts: [{ kind: 'compact', at: 200_000 }] }).autoCompactWindow).equal(200_000);
+      should(
+        overlayOf({
+          parts: [
+            { kind: 'compact', at: 200_000 },
+            { kind: 'compact', at: 250_000 },
+          ],
+        }).autoCompactWindow,
+      ).equal(250_000);
+      should('autoCompactWindow' in overlayOf({})).be.false();
+    });
+
+    it('carries the pins, fast mode and the compaction trigger together in the one overlay, and into no other file', () => {
+      const text = homeText({
+        ...base,
+        parts: [
+          { kind: 'pin', env: { ANTHROPIC_BASE_URL: 'https://gateway.invalid' } },
+          { kind: 'compact', at: 200_000 },
+        ],
+        fast: true,
+      });
+      const overlay = JSON.parse(text.overlay);
+      should(overlay.env).eql({ ANTHROPIC_BASE_URL: 'https://gateway.invalid' });
+      should(overlay.fastMode).equal(true);
+      should(overlay.autoCompactWindow).equal(200_000);
+      should(text.settings).not.containEql('fastMode');
+      should(text.settings).not.containEql('autoCompactWindow');
+      should(text.settings).not.containEql('gateway.invalid');
+    });
+  });
 });
 
 describe('launchCommand', () => {

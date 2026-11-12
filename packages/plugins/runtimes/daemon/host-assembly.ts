@@ -118,8 +118,10 @@ export function endedSeams(
 
 /**
  * What a launch of a published runtime needs of it (`lib/launch-gate.ts`): its kind, the names its login leaves to the
- * process environment (the manifest) and the literals it pins (its `fixed.json`, read through the `fleet` root).
- * Read between applies, so it never sees a half-written fleet. A runtime matches by name or by id.
+ * process environment (the manifest), its compaction trigger and the literals it pins (its `fixed.json`, read through
+ * the `fleet` root). EVERY fact is read inside ONE publication read ({@link FleetPublication.reading}), so the manifest
+ * and the fixed settings are the same committed generation: an apply cannot remove `fixed.json` between the two reads
+ * and turn a login that pins into one that pins nothing. A runtime matches by name or by id.
  */
 export function launchFactsSource(
   kernel: Pick<KernelPorts, 'roots'>,
@@ -128,19 +130,26 @@ export function launchFactsSource(
   return {
     facts: async runtime => {
       const fleet = kernel.roots.root('fleet');
-      const { directory, manifest } = await publishedFleet(kernel.roots, fleet, publication);
-      const published = manifest?.runtimes.find(row => row.name === runtime || row.id === runtime);
-      const account = manifest?.accounts.find(row => row.id === published?.id);
-      if (published === undefined || account === undefined) return undefined;
+      const directory = fleetDirectory(fleet);
       const files = rootHostFiles(fleetMounts(kernel.roots, fleet, directory));
-      const text = await files.readText(`${account.home}/${RUNTIME_STATE_DIRECTORY}/${FIXED_SETTINGS_FILE}`);
-      return {
-        runtime: published.name,
-        kind: account.kind,
-        secretEnvNames: Object.keys(account.secretEnv),
-        referencedEnv: account.referencedEnv ?? [],
-        pins: account.kind === 'claude' ? pinsOf(text) : {},
-      };
+      return await publication.reading(async () => {
+        const manifest = await readFleetManifest(files, `${directory}/${MANIFEST_FILE}`);
+        const published = manifest?.runtimes.find(row => row.name === runtime || row.id === runtime);
+        const account = manifest?.accounts.find(row => row.id === published?.id);
+        if (published === undefined || account === undefined) return undefined;
+        const text =
+          account.kind === 'claude'
+            ? await files.readText(`${account.home}/${RUNTIME_STATE_DIRECTORY}/${FIXED_SETTINGS_FILE}`)
+            : undefined;
+        return {
+          runtime: published.name,
+          kind: account.kind,
+          secretEnvNames: Object.keys(account.secretEnv),
+          referencedEnv: account.referencedEnv ?? [],
+          pins: account.kind === 'claude' ? pinsOf(text) : {},
+          ...(typeof account.compactAt === 'number' ? { compactAt: account.compactAt } : {}),
+        };
+      });
     },
   };
 }

@@ -32,6 +32,8 @@ export interface HomeInputs {
   readonly settings: ReadonlyMap<string, SettingsItem>;
   readonly hooks: ReadonlyMap<string, HooksItem>;
   readonly effort?: string | undefined;
+  /** The start asked for (`true`) or against (`false`) the harness's fast mode; absent leaves Claude's own setting. */
+  readonly fast?: boolean | undefined;
 }
 
 export interface HomeText {
@@ -77,7 +79,14 @@ export function homeText(inputs: HomeInputs): HomeText {
   // A login's literal environment, pinned where a project's own `.claude/settings*.json` cannot replace it: the
   // `--settings` file outranks a project's `env`, the process environment does not (#1587).
   const pinned = Object.assign({}, ...inputs.parts.flatMap(part => (part.kind === 'pin' ? [part.env] : [])));
-  const overlay = Object.keys(pinned).length === 0 ? fixed.overlay : { ...fixed.overlay, env: pinned };
+  // The compaction trigger a login publishes (a `compact` part), where Claude reads it: `autoCompactWindow`.
+  const compactAt = inputs.parts.flatMap(part => (part.kind === 'compact' ? [part.at] : [])).at(-1);
+  const overlay = {
+    ...fixed.overlay,
+    ...(Object.keys(pinned).length === 0 ? {} : { env: pinned }),
+    ...(inputs.fast === undefined ? {} : { fastMode: inputs.fast }),
+    ...(compactAt === undefined ? {} : { autoCompactWindow: compactAt }),
+  };
   return {
     memory: memory === '' ? '' : `${memory}\n`,
     settings: `${JSON.stringify(deepMergeSettings(settingsDocument(inputs), fixed.settings), null, 2)}\n`,

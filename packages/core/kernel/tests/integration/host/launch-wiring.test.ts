@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeAsks } from '../../../../asks/contract/testing/index.ts';
-import { Runners, type RunSpec } from '../../../../ferrets/contract/index.ts';
+import { FerretConfigFile, LaunchParts, Runners, type RunSpec } from '../../../../ferrets/contract/index.ts';
 import { FakeRunner } from '../../../../ferrets/contract/testing/index.ts';
 import { FakeGate, ownerStanding, StandInAdmission } from '../../../../gate/contract/testing/index.ts';
 import { FakeVault } from '../../../../vault/contract/testing/index.ts';
@@ -25,12 +25,59 @@ import { diskFolders, type TestHost, testHost } from '../../../testing/index.ts'
  *  (iv)  a clean folder launches;
  *  (v)   the login's pinned literal environment is in the `--settings` file, which outranks a folder's own `env`.
  *
+ * (vi)  the login's pins are never lost AFTER the folder was judged: the facts are read once, so a `fixed.json` that breaks
+ *       after the decision still launches with the pins that were checked, and one already broken refuses the launch;
+ * (vii) `fast: true` writes `fastMode` and a published account `compactAt` writes `autoCompactWindow`, on a start, a
+ *       stop/resume and an adoption alike, into the same private settings file.
+ *
  * A MOVE is the fifth path. Its route (`POST /v1/ferrets/:id/move`) is still a 503 skeleton on this base (its account
- * inventory, planner and session directory are unbound), so it refuses before anything is launched: that is pinned here
- * so the day it is bound it must go through `launchAttempt` too.
+ * inventory, planner and session directory are unbound): with a request id and a COMPLETE legacy lifecycle record it
+ * reaches the unbound account-resolution dependency (`503 plugin_unavailable`) and launches nothing; a freshly started
+ * record has no lifecycle command, so it answers `409 session_unusable` first. Both are pinned here so the day the
+ * route is bound it must go through `launchAttempt` too.
  *
  * Fixture values only; folders are real temporary directories because the folder settings are read from disk.
  */
+
+/**
+ * Fault injection at the launch itself: a test plugin that contributes a `launch.parts` source, which Ferrets asks once
+ * per launch AFTER `start.decide` has judged it. `atLaunch` is called with the 1-based launch count the moment it is
+ * asked, so a test can break a file exactly `after the decision` (a source that touched the files first would meet the
+ * damage; one that reads nothing again cannot). Fixture-only; unset outside the tests that use it.
+ */
+let atLaunch: ((launch: number) => void) | undefined;
+let launchesAsked = 0;
+
+const faultPlugin = () =>
+  implementDaemon(
+    definePlugin({
+      id: 'fault-injection',
+      title: 'Fault injection (fixture)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: LaunchParts }] },
+    }),
+    {
+      build: () => ({
+        hooks: {
+          'launch.parts': () => [
+            {
+              id: 'fault',
+              item: {
+                parts: async () => {
+                  launchesAsked += 1;
+                  atLaunch?.(launchesAsked);
+                  return [];
+                },
+              },
+            },
+          ],
+        },
+      }),
+    },
+  );
 
 const real = (id: string) => {
   const found = daemonImplementations.find(implementation => implementation.manifest.id === id);
@@ -106,8 +153,11 @@ const FIXED = JSON.stringify({ env: { ANTHROPIC_BASE_URL: BASE_URL, ANTHROPIC_AU
 let fixture: string;
 beforeEach(async () => {
   fixture = await mkdtemp(join(tmpdir(), 'launch-wiring-'));
+  atLaunch = undefined;
+  launchesAsked = 0;
 });
 afterEach(async () => {
+  atLaunch = undefined;
   await rm(fixture, { recursive: true, force: true });
 });
 
@@ -115,7 +165,7 @@ async function boot(runner: RecordingRunner): Promise<TestHost> {
   const h = await testHost({
     // The launch folder's settings are read through the kernel's own `harness-home` rules, here over real temp files.
     harnessHomeFolders: await diskFolders(await mkdtemp(join(fixture, 'roots-'))),
-    plugins: [real('ferrets'), real('runtimes'), real('claude-code'), runnerPlugin(runner)],
+    plugins: [real('ferrets'), real('runtimes'), real('claude-code'), runnerPlugin(runner), faultPlugin()],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: {
       gate: new FakeGate(),
@@ -184,6 +234,26 @@ interface Row {
   readonly drive: (h: TestHost, runner: RecordingRunner, name: string, plant: Plant) => Promise<Outcome>;
 }
 
+/** A record as a v4 session left it: it HAS its lifecycle command and tmux session, so a move can start from it. */
+function plantLegacyLifecycle(h: TestHost, id: string): void {
+  const state = h.state('ferrets');
+  const raw = JSON.parse(state.raw(FerretConfigFile, id) as string) as Record<string, unknown>;
+  state.plant(
+    FerretConfigFile,
+    JSON.stringify({ ...raw, command: ['/fleet/bin/claude-work'], tmuxSession: 'fixture-pane' }),
+    id,
+  );
+}
+
+/** A move request WITH its request id, on a record that has a complete legacy lifecycle. */
+const legacyMove = async (h: TestHost, id: string) => {
+  plantLegacyLifecycle(h, id);
+  return await h.request('POST', `/v1/ferrets/${id}/move`, {
+    headers: { 'x-fy-request-id': randomUUID() },
+    body: { agent: RUNTIME },
+  });
+};
+
 const outcome = (r: { status: number; body: string }, launches: number): Outcome => ({
   status: r.status,
   body: r.body,
@@ -236,7 +306,9 @@ const ROWS: readonly Row[] = [
   },
   {
     // A move's route is a 503 skeleton on this base (its accounts, planner and session directory are unbound): it must
-    // refuse before launching anything, and the day it is bound its relaunch is `launchAttempt` like the rest.
+    // refuse before launching anything, and the day it is bound its relaunch is `launchAttempt` like the rest. The
+    // request carries its id and the record a complete legacy lifecycle, so the route gets past the request check and
+    // the lifecycle subject to the unbound dependency itself (see `legacyMove`).
     name: 'move',
     drive: async (h, runner, name, plant) => {
       const where = await folder(name);
@@ -245,7 +317,7 @@ const ROWS: readonly Row[] = [
       await h.settle();
       await plant(where);
       const before = runner.starts;
-      const moved = await h.request('POST', `/v1/ferrets/${idOf(first)}/move`, { body: { agent: RUNTIME } });
+      const moved = await legacyMove(h, idOf(first));
       return { status: moved.status, body: moved.body, launches: runner.starts - before };
     },
   },
@@ -292,9 +364,15 @@ describe.each(ROWS.map(row => [row.name, row] as const))('#1587 launch wiring: %
 
       const result = await row.drive(h, runner, `refused-${randomUUID()}`, refused.plant);
 
-      expect(result.status).toBeGreaterThanOrEqual(400);
+      if (isMove) {
+        // The skeleton refuses first, whatever the folder: the exact code, and never a launch.
+        expect(result.status).toBe(503);
+        expect(JSON.parse(result.body)).toMatchObject({ code: 'plugin_unavailable' });
+      } else {
+        expect(result.status).toBeGreaterThanOrEqual(400);
+        for (const sentence of refused.says) expect(result.body).toContain(sentence);
+      }
       expect(result.launches).toBe(0);
-      if (!isMove) for (const sentence of refused.says) expect(result.body).toContain(sentence);
       await h.stop();
     },
   );
@@ -306,7 +384,9 @@ describe.each(ROWS.map(row => [row.name, row] as const))('#1587 launch wiring: %
     const result = await row.drive(h, runner, `clean-${randomUUID()}`, async () => undefined);
 
     if (isMove) {
-      expect(result.status).toBeGreaterThanOrEqual(400);
+      expect(result.status).toBe(503);
+      expect(JSON.parse(result.body)).toMatchObject({ code: 'plugin_unavailable' });
+      expect((JSON.parse(result.body) as { error: string }).error).toContain('account resolution');
       expect(result.launches).toBe(0);
       await h.stop();
       return;
@@ -343,6 +423,209 @@ describe('#1587 what is not judged', () => {
 
     expect(started.status).toBe(201);
     expect(overlayOf(h, idOf(started))?.env).toBeUndefined();
+    await h.stop();
+  });
+});
+
+/** The rows that really launch (a move is a skeleton on this base). */
+const LAUNCHING = ROWS.filter(row => row.name !== 'move');
+const PINS = { ANTHROPIC_BASE_URL: BASE_URL, ANTHROPIC_AUTH_TOKEN: TOKEN };
+const BROKEN_FIXED = '{ fixture-corruption';
+
+describe.each(LAUNCHING.map(row => [row.name, row] as const))('#1587 the pins never fail open: %s', (name, row) => {
+  test('a fixed.json already broken refuses the launch, and the runner is not called', async () => {
+    const runner = new RecordingRunner();
+    const h = await boot(runner);
+
+    // A revive judges the file as it is at the resume; a start and an adoption as it is at the start.
+    const result = await row.drive(h, runner, `broken-${randomUUID()}`, async () => {
+      h.putRoot('fleet', `homes/${ID}/.fy/fixed.json`, BROKEN_FIXED);
+    });
+
+    expect(result.status).toBeGreaterThanOrEqual(400);
+    expect(result.body).toContain('could not be read');
+    expect(result.launches).toBe(0);
+    await h.stop();
+  });
+
+  test('a fixed.json that breaks after the folder was judged still launches with the pins that were checked', async () => {
+    // The facts are read ONCE per launch (at \`start.decide\`) and carried to the launch: nothing is read again, so the
+    // launch cannot meet a half-written or broken file after the decision and carry on without the pins.
+    let h: TestHost | undefined;
+    // A revive's first launch is its start; the launch under test is the resume.
+    const underTest = name === 'revive' ? 2 : 1;
+    atLaunch = launch => {
+      if (launch === underTest) h?.putRoot('fleet', `homes/${ID}/.fy/fixed.json`, BROKEN_FIXED);
+    };
+    const runner = new RecordingRunner();
+    h = await boot(runner);
+
+    const result = await row.drive(h, runner, `after-${randomUUID()}`, async () => undefined);
+
+    expect(result.status).toBeLessThan(300);
+    expect(result.launches).toBe(1);
+    expect(overlayOf(h, result.ferret as string)?.env).toEqual(PINS);
+    expect(launchesAsked).toBe(underTest);
+    await h.stop();
+  });
+});
+
+describe.each(LAUNCHING.map(row => [row.name, row] as const))('#1587 fast mode and compaction: %s', (_name, row) => {
+  const overlay = (h: TestHost, id: string) =>
+    JSON.parse(h.rootText('agent-homes', `${id}/launch-settings.json`) as string) as {
+      fastMode?: boolean;
+      autoCompactWindow?: number;
+      env?: Record<string, string>;
+    };
+  const publish = (h: TestHost, compactAt: unknown) =>
+    h.putRoot(
+      'fleet',
+      'manifest.json',
+      JSON.stringify({ ...manifest, accounts: [{ ...manifest.accounts[0], compactAt }] }),
+    );
+
+  test('a published account compactAt reaches the private settings file as autoCompactWindow, beside the pins', async () => {
+    const runner = new RecordingRunner();
+    const h = await boot(runner);
+    publish(h, 200_000);
+
+    const result = await row.drive(h, runner, `compact-${randomUUID()}`, async () => undefined);
+
+    expect(result.status).toBeLessThan(300);
+    expect(result.launches).toBe(1);
+    expect(overlay(h, result.ferret as string).autoCompactWindow).toBe(200_000);
+    expect(overlay(h, result.ferret as string).env).toEqual(PINS);
+    // The value rides the private file only, never the argv.
+    expect(JSON.stringify(runner.specs.at(-1)?.command)).not.toContain('200000');
+    await h.stop();
+  });
+
+  test('compactAt auto adds no compaction setting', async () => {
+    const runner = new RecordingRunner();
+    const h = await boot(runner);
+    publish(h, 'auto');
+
+    const result = await row.drive(h, runner, `auto-${randomUUID()}`, async () => undefined);
+
+    expect(result.status).toBeLessThan(300);
+    expect(overlay(h, result.ferret as string).autoCompactWindow).toBeUndefined();
+    await h.stop();
+  });
+});
+
+describe('#1587 fast mode through the production start', () => {
+  const overlay = (h: TestHost, id: string) =>
+    JSON.parse(h.rootText('agent-homes', `${id}/launch-settings.json`) as string) as {
+      fastMode?: boolean;
+      env?: Record<string, string>;
+    };
+
+  test('fast: true writes fastMode, and a stop/resume keeps it', async () => {
+    const runner = new RecordingRunner();
+    const h = await boot(runner);
+
+    const first = await start(h, { folder: await folder('fast'), fast: true });
+    expect(first.status).toBe(201);
+    await h.settle();
+    const id = idOf(first);
+    expect(overlay(h, id).fastMode).toBe(true);
+    expect(overlay(h, id).env).toEqual(PINS);
+    expect(
+      (await h.request('POST', `/v1/ferrets/${id}/stop`, { query: { how: 'now' }, body: {} })).status,
+    ).toBeLessThan(300);
+    await h.settle();
+    // The overlay is rewritten at every launch: remove it so the resume has to put fastMode back.
+    h.putRoot('agent-homes', `${id}/launch-settings.json`, '{}');
+    const resumed = await h.request('POST', `/v1/ferrets/${id}/resume`, { body: {} });
+
+    expect(resumed.status).toBe(200);
+    expect(overlay(h, id).fastMode).toBe(true);
+    expect(overlay(h, id).env).toEqual(PINS);
+    await h.stop();
+  });
+
+  test('a start that does not name fast mode leaves it to Claude', async () => {
+    const runner = new RecordingRunner();
+    const h = await boot(runner);
+
+    const started = await start(h, { folder: await folder('nofast') });
+
+    expect(started.status).toBe(201);
+    expect(overlay(h, idOf(started)).fastMode).toBeUndefined();
+    await h.stop();
+  });
+});
+
+describe('#1587 a move on a record a v4 session left', () => {
+  test('a freshly started record has no lifecycle command, so the move answers 409 session_unusable before any launch', async () => {
+    const runner = new RecordingRunner();
+    const h = await boot(runner);
+    const first = await start(h, { folder: await folder('fresh-move') });
+    expect(first.status).toBe(201);
+    await h.settle();
+    const before = runner.starts;
+
+    const moved = await h.request('POST', `/v1/ferrets/${idOf(first)}/move`, {
+      headers: { 'x-fy-request-id': randomUUID() },
+      body: { agent: RUNTIME },
+    });
+
+    expect(moved.status).toBe(409);
+    expect(JSON.parse(moved.body)).toMatchObject({ code: 'session_unusable' });
+    expect(runner.starts - before).toBe(0);
+    await h.stop();
+  });
+
+  test('a move without its request id never reaches the move subsystem (400 missing_request_id)', async () => {
+    const runner = new RecordingRunner();
+    const h = await boot(runner);
+    const first = await start(h, { folder: await folder('no-header-move') });
+    await h.settle();
+
+    const moved = await h.request('POST', `/v1/ferrets/${idOf(first)}/move`, { body: { agent: RUNTIME } });
+
+    expect(moved.status).toBe(400);
+    expect(JSON.parse(moved.body)).toMatchObject({ code: 'missing_request_id' });
+    await h.stop();
+  });
+});
+
+describe('#1586 model provenance across a lifecycle sequence, on the real path', () => {
+  const modelArguments = (spec: RunSpec | undefined): readonly string[] => {
+    const at = spec?.command.indexOf('--model') ?? -1;
+    return at < 0 || spec === undefined ? [] : [spec.command[at + 1] as string];
+  };
+
+  test('a model the start asked for survives a stop/resume, and one it did not ask for stays unpinned', async () => {
+    const runner = new RecordingRunner();
+    const h = await boot(runner);
+
+    const picked = await start(h, { folder: await folder('picked'), model: 'kimi-k3' });
+    const defaulted = await start(h, { folder: await folder('defaulted') });
+    expect(picked.status).toBe(201);
+    expect(defaulted.status).toBe(201);
+    await h.settle();
+    // The launch whose home (CLAUDE_CONFIG_DIR) is this ferret's.
+    const launchOf = (id: string): RunSpec | undefined =>
+      runner.specs.findLast(spec =>
+        spec.command.some(part => part.startsWith('CLAUDE_CONFIG_DIR=') && part.endsWith(`/${id}`)),
+      );
+    const pickedId = idOf(picked);
+    const defaultedId = idOf(defaulted);
+    expect(modelArguments(launchOf(pickedId))).toEqual(['kimi-k3']);
+    expect(modelArguments(launchOf(defaultedId))).toEqual([]);
+
+    for (const id of [pickedId, defaultedId]) {
+      expect(
+        (await h.request('POST', `/v1/ferrets/${id}/stop`, { query: { how: 'now' }, body: {} })).status,
+      ).toBeLessThan(300);
+      await h.settle();
+      expect((await h.request('POST', `/v1/ferrets/${id}/resume`, { body: {} })).status).toBe(200);
+      await h.settle();
+    }
+
+    expect(modelArguments(launchOf(pickedId))).toEqual(['kimi-k3']);
+    expect(modelArguments(launchOf(defaultedId))).toEqual([]);
     await h.stop();
   });
 });
