@@ -9,6 +9,7 @@ import type { KernelPorts, RootHandle } from '@ferretry/kernel/contract';
 import { testHost, testProcessTable } from '@ferretry/kernel/testing';
 import should from 'should';
 import { endedSeams, launchFactsSource } from '../../../daemon/host-assembly.ts';
+import { FixedSettingsDamagedError } from '../../../daemon/lib/launch-gate.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
 import { autoResumeSwitch } from '../../../daemon/lib/service/auto-resume-answer.ts';
@@ -212,7 +213,7 @@ describe('launchFactsSource', () => {
     const facts = await source({
       'manifest.json': JSON.stringify(claudeManifest),
       [`homes/${CLAUDE_ID}/.fy/fixed.json`]: JSON.stringify({
-        env: { ANTHROPIC_BASE_URL: 'https://gateway.invalid', LEAK: '${secret:K}', INDIRECT: '$OTHER', N: 1 },
+        env: { ANTHROPIC_BASE_URL: 'https://gateway.invalid', LEAK: '${secret:K}', INDIRECT: '$OTHER' },
       }),
     });
 
@@ -253,6 +254,47 @@ describe('launchFactsSource', () => {
     });
 
     await should(facts.facts('work')).be.rejectedWith(/not valid JSON/u);
+  });
+
+  it('should refuse, naming the file and never a value, a PRESENT fixed.json of the wrong shape', async () => {
+    for (const text of [
+      'null',
+      '[]',
+      '42',
+      '"text"',
+      '{"env":[]}',
+      '{"env":null}',
+      '{"env":"x"}',
+      '{"env":{"ANTHROPIC_AUTH_TOKEN":42,"ANTHROPIC_BASE_URL":"fixture-value-7788"}}',
+    ]) {
+      const facts = await source({
+        'manifest.json': JSON.stringify(claudeManifest),
+        [`homes/${CLAUDE_ID}/.fy/fixed.json`]: text,
+      });
+
+      const refused = await facts.facts('work').then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      should(refused).be.instanceOf(FixedSettingsDamagedError);
+      should((refused as Error).message).match(/fixed\.json/u);
+      should((refused as Error).message).not.match(/fixture-value-7788/u);
+    }
+  });
+
+  it('should keep a document with other keys, and an empty env, as the deliberate "pins nothing / pins what it holds"', async () => {
+    const other = await source({
+      'manifest.json': JSON.stringify(claudeManifest),
+      [`homes/${CLAUDE_ID}/.fy/fixed.json`]: JSON.stringify({ theme: 'dark', env: { A: 'literal' } }),
+    });
+    const empty = await source({
+      'manifest.json': JSON.stringify(claudeManifest),
+      [`homes/${CLAUDE_ID}/.fy/fixed.json`]: '{"env":{}}',
+    });
+
+    should((await other.facts('work'))?.pins).deepEqual({ A: 'literal' });
+    should((await empty.facts('work'))?.pins).deepEqual({});
   });
 
   it('should publish the compaction trigger of the account when it is a number, and none for auto', async () => {

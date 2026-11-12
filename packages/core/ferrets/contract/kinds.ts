@@ -32,6 +32,11 @@ export interface LaunchSpec {
   readonly login?: string;
   readonly model?: string;
   readonly effort?: string;
+  /**
+   * This ferret's OWN compaction choice, in tokens or `auto` (its session config, else its start options). A
+   * `launch.parts` taker resolves it against the login's default and the model's window; ABSENT means the login's default.
+   */
+  readonly compactAt?: 'auto' | number;
   /** The work folder, fenced (`WorkFolders`). */
   readonly folder: FencedPath;
   /** The ferret's home under the harness's own `agent-homes` root: the harness's `homeFor` answer, unchanged. */

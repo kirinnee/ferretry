@@ -27,6 +27,7 @@ import {
   type StartDecideInput,
 } from '@ferretry/core-ferrets/contract';
 import type { HookDecision } from '@ferretry/kernel/contract';
+import { launchContextWindow, type ModelWindows, resolveLaunchCompactAt } from './launch-compact-at.ts';
 import {
   assertFolderLeavesLoginAlone,
   FolderSettingsOverrideError,
@@ -46,6 +47,20 @@ interface RuntimeLaunchFacts {
   readonly pins: Readonly<Record<string, string>>;
   /** Where ferrets on this account compact, in tokens, when the manifest names a number (`auto` is absent). */
   readonly compactAt?: number;
+  /** The account's default model and the context window its catalog declares per model: what caps a trigger. */
+  readonly windows: ModelWindows;
+}
+
+/**
+ * A runtime's `fixed.json` is PRESENT but is not a document a login can be pinned from (not JSON, not an object, an `env`
+ * that is not an object of text values). Damaged evidence is not "no pins": the launch is refused. The message names the
+ * file and the expected shape, never a value read from it, and is shown to the person as it is.
+ */
+export class FixedSettingsDamagedError extends Error {
+  constructor(reason: string) {
+    super(`the login’s fixed settings (fixed.json) could not be read: ${reason}`);
+    this.name = 'FixedSettingsDamagedError';
+  }
 }
 
 export interface RuntimeLaunchFactsSource {
@@ -83,10 +98,13 @@ export class LaunchGate {
     let facts: RuntimeLaunchFacts | undefined;
     try {
       facts = await this.deps.source.facts(input.runtime);
-    } catch {
+    } catch (error) {
       return {
         allow: false,
-        reason: `the published runtimes could not be read, so runtime ${input.runtime} was not started: its folder's Claude settings cannot be checked against its login`,
+        reason:
+          error instanceof FixedSettingsDamagedError
+            ? `${error.message}, so runtime ${input.runtime} was not started`
+            : `the published runtimes could not be read, so runtime ${input.runtime} was not started: its folder's Claude settings cannot be checked against its login`,
       };
     }
     if (facts !== undefined) {
@@ -124,9 +142,15 @@ export class LaunchGate {
         );
       const facts = checked.facts;
       if (facts === undefined || facts.kind !== 'claude') return [];
+      // v4's `resolveCompactAt`: the ferret's own value over the login's default, and nothing the model cannot honour.
+      const at = resolveLaunchCompactAt({
+        own: spec.compactAt,
+        accountDefault: facts.compactAt,
+        window: launchContextWindow(spec.model, facts.windows),
+      });
       return [
         ...(Object.keys(facts.pins).length === 0 ? [] : [{ kind: 'pin' as const, env: facts.pins }]),
-        ...(facts.compactAt === undefined ? [] : [{ kind: 'compact' as const, at: facts.compactAt }]),
+        ...(at === undefined ? [] : [{ kind: 'compact' as const, at }]),
       ];
     },
   };

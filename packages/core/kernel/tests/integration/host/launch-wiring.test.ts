@@ -154,6 +154,7 @@ let fixture: string;
 beforeEach(async () => {
   fixture = await mkdtemp(join(tmpdir(), 'launch-wiring-'));
   atLaunch = undefined;
+  startExtras = {};
   launchesAsked = 0;
 });
 afterEach(async () => {
@@ -161,7 +162,7 @@ afterEach(async () => {
   await rm(fixture, { recursive: true, force: true });
 });
 
-async function boot(runner: RecordingRunner): Promise<TestHost> {
+async function boot(runner: RecordingRunner, fixed: string | null = FIXED): Promise<TestHost> {
   const h = await testHost({
     everyDirectory: true,
     // The launch folder's settings are read through the kernel's own `harness-home` rules, here over real temp files.
@@ -187,14 +188,17 @@ async function boot(runner: RecordingRunner): Promise<TestHost> {
       }) as never,
   });
   h.putRoot('fleet', 'manifest.json', JSON.stringify(manifest));
-  h.putRoot('fleet', `homes/${ID}/.fy/fixed.json`, FIXED);
+  if (fixed !== null) h.putRoot('fleet', `homes/${ID}/.fy/fixed.json`, fixed);
   return h;
 }
+
+/** Start options every start of the current test adds (a ferret's own compaction choice rides the start, like v4's). */
+let startExtras: Record<string, unknown> = {};
 
 const start = async (h: TestHost, body: Record<string, unknown>) =>
   await h.request('POST', '/v1/ferrets', {
     headers: { 'x-fy-request-id': randomUUID() },
-    body: { mode: 'interactive', runtime: RUNTIME, harness: 'claude-code', ...body },
+    body: { mode: 'interactive', runtime: RUNTIME, harness: 'claude-code', ...startExtras, ...body },
   });
 const idOf = (answer: { json<T>(): T }) => answer.json<{ id: string }>().id;
 
@@ -471,6 +475,72 @@ describe.each(LAUNCHING.map(row => [row.name, row] as const))('#1587 the pins ne
   });
 });
 
+/** A PRESENT fixed.json of the wrong shape is damaged evidence, never "no pins" (v4's fixedSettingsObject refused all of these). */
+const WRONG_SHAPES: readonly (readonly [string, string])[] = [
+  ['null', 'null'],
+  ['an array', '[]'],
+  ['a number', '42'],
+  ['an env that is an array', '{"env":[]}'],
+  ['an env that is null', '{"env":null}'],
+  ['an env value that is not text', '{"env":{"ANTHROPIC_AUTH_TOKEN":42,"ANTHROPIC_BASE_URL":"fixture-literal-9931"}}'],
+];
+
+describe.each(LAUNCHING.map(row => [row.name, row] as const))(
+  '#1587 a damaged fixed.json refuses: %s',
+  (_name, row) => {
+    test.each(WRONG_SHAPES)(
+      '%s refuses the launch, names the file, shows no value, and starts nothing',
+      async (_label, text) => {
+        const runner = new RecordingRunner();
+        const h = await boot(runner);
+
+        const result = await row.drive(h, runner, `shape-${randomUUID()}`, async () => {
+          h.putRoot('fleet', `homes/${ID}/.fy/fixed.json`, text);
+        });
+
+        expect(result.status).toBeGreaterThanOrEqual(400);
+        expect(result.body).toContain('fixed.json');
+        expect(result.body).not.toContain('fixture-literal-9931');
+        expect(result.body).not.toContain(TOKEN);
+        expect(result.launches).toBe(0);
+        await h.stop();
+      },
+    );
+
+    test.each([
+      ['an object with no env', '{}'],
+      ['an object whose env is empty', '{"env":{}}'],
+      [
+        'an object with other keys beside a valid env',
+        '{"theme":"dark","env":{"ANTHROPIC_BASE_URL":"https://gateway.fixture.invalid"}}',
+      ],
+    ])('%s is still the deliberate "pins what it holds" case', async (_label, text) => {
+      const runner = new RecordingRunner();
+      const h = await boot(runner);
+
+      const result = await row.drive(h, runner, `shape-ok-${randomUUID()}`, async () => {
+        h.putRoot('fleet', `homes/${ID}/.fy/fixed.json`, text);
+      });
+
+      expect(result.status).toBeLessThan(300);
+      expect(result.launches).toBe(1);
+      await h.stop();
+    });
+
+    test('a fixed.json that is absent is a login that pins nothing: it launches, with no pin written', async () => {
+      const runner = new RecordingRunner();
+      const h = await boot(runner, null);
+
+      const result = await row.drive(h, runner, `absent-${randomUUID()}`, async () => undefined);
+
+      expect(result.status).toBeLessThan(300);
+      expect(result.launches).toBe(1);
+      expect(overlayOf(h, result.ferret as string)?.env).toBeUndefined();
+      await h.stop();
+    });
+  },
+);
+
 describe.each(LAUNCHING.map(row => [row.name, row] as const))('#1587 fast mode and compaction: %s', (_name, row) => {
   const overlay = (h: TestHost, id: string) =>
     JSON.parse(h.rootText('agent-homes', `${id}/launch-settings.json`) as string) as {
@@ -510,6 +580,130 @@ describe.each(LAUNCHING.map(row => [row.name, row] as const))('#1587 fast mode a
 
     expect(result.status).toBeLessThan(300);
     expect(overlay(h, result.ferret as string).autoCompactWindow).toBeUndefined();
+    await h.stop();
+  });
+});
+
+describe.each(LAUNCHING.map(row => [row.name, row] as const))(
+  '#1587 compaction keeps v4 resolveCompactAt: own value over the login default, capped by the model window: %s',
+  (_name, row) => {
+    const windowAt = (h: TestHost, id: string): number | undefined =>
+      (JSON.parse(h.rootText('agent-homes', `${id}/launch-settings.json`) as string) as { autoCompactWindow?: number })
+        .autoCompactWindow;
+    /** Publishes a login whose default model `m` has this context window (absent: the catalog states none). */
+    const publish = (h: TestHost, accountAt: number | 'auto', context: number | undefined) =>
+      h.putRoot(
+        'fleet',
+        'manifest.json',
+        JSON.stringify({
+          ...manifest,
+          accounts: [
+            {
+              ...manifest.accounts[0],
+              compactAt: accountAt,
+              defaultModel: 'm',
+              models: [{ id: 'm', displayName: 'M', available: true, ...(context === undefined ? {} : { context }) }],
+            },
+          ],
+        }),
+      );
+    const run = async (
+      accountAt: number | 'auto',
+      context: number | undefined,
+      extras: Record<string, unknown> = {},
+    ) => {
+      startExtras = extras;
+      const runner = new RecordingRunner();
+      const h = await boot(runner);
+      publish(h, accountAt, context);
+      const result = await row.drive(h, runner, `compact-${randomUUID()}`, async () => undefined);
+      expect(result.status).toBeLessThan(300);
+      expect(result.launches).toBe(1);
+      const at = windowAt(h, result.ferret as string);
+      await h.stop();
+      return at;
+    };
+
+    test.each([200_000, 1_000_000])(
+      'an account compactAt of %i larger than the model’s 128000 window falls back to Auto (nothing written)',
+      async accountAt => {
+        expect(await run(accountAt, 128_000)).toBeUndefined();
+      },
+    );
+
+    test('the same cap holds for a model the start NAMED', async () => {
+      expect(await run(200_000, 128_000, { model: 'm' })).toBeUndefined();
+    });
+
+    test('a value that fits the window is written as is, and equal to the window fits', async () => {
+      expect(await run(400_000, 1_000_000)).toBe(400_000);
+      expect(await run(128_000, 128_000)).toBe(128_000);
+    });
+
+    test('a model whose catalog states no window is judged against the 200k default, as v4 planned it', async () => {
+      expect(await run(1_000_000, undefined)).toBeUndefined();
+      expect(await run(200_000, undefined)).toBe(200_000);
+    });
+
+    test('a [1m] model selector states a 1M window even when the catalog says less', async () => {
+      expect(await run(400_000, 128_000, { model: 'm[1m]' })).toBe(400_000);
+    });
+
+    test('a ferret’s own value overrides the account default', async () => {
+      expect(await run(200_000, 1_000_000, { compactAt: 300_000 })).toBe(300_000);
+    });
+
+    test('a ferret’s own Auto suppresses a numeric account default', async () => {
+      expect(await run(200_000, 1_000_000, { compactAt: 'auto' })).toBeUndefined();
+    });
+
+    test('a ferret’s own number gives Auto when it is larger than the window; the account default is not used in its place', async () => {
+      expect(await run(100_000, 128_000, { compactAt: 500_000 })).toBeUndefined();
+    });
+
+    test('a ferret’s own number applies where the account default is Auto', async () => {
+      expect(await run('auto', 1_000_000, { compactAt: 250_000 })).toBe(250_000);
+    });
+  },
+);
+
+describe('#1587 a ferret’s own compaction choice in its session config reaches a resume', () => {
+  test('config.json compactAt (what the compact-at action edits) overrides the account default on the next launch', async () => {
+    const runner = new RecordingRunner();
+    const h = await boot(runner);
+    h.putRoot(
+      'fleet',
+      'manifest.json',
+      JSON.stringify({
+        ...manifest,
+        accounts: [
+          {
+            ...manifest.accounts[0],
+            compactAt: 200_000,
+            models: [{ id: 'm', displayName: 'M', available: true, context: 1_000_000 }],
+          },
+        ],
+      }),
+    );
+    const first = await start(h, { folder: await folder('config-own') });
+    expect(first.status).toBe(201);
+    await h.settle();
+    const id = idOf(first);
+    expect(
+      (await h.request('POST', `/v1/ferrets/${id}/stop`, { query: { how: 'now' }, body: {} })).status,
+    ).toBeLessThan(300);
+    await h.settle();
+    const state = h.state('ferrets');
+    const raw = JSON.parse(state.raw(FerretConfigFile, id) as string) as Record<string, unknown>;
+    state.plant(FerretConfigFile, JSON.stringify({ ...raw, compactAt: 350_000 }), id);
+
+    const resumed = await h.request('POST', `/v1/ferrets/${id}/resume`, { body: {} });
+
+    expect(resumed.status).toBe(200);
+    expect(
+      (JSON.parse(h.rootText('agent-homes', `${id}/launch-settings.json`) as string) as { autoCompactWindow?: number })
+        .autoCompactWindow,
+    ).toBe(350_000);
     await h.stop();
   });
 });

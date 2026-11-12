@@ -15,6 +15,7 @@ const FACTS = {
   secretEnvNames: ['ANTHROPIC_API_KEY'],
   referencedEnv: ['OTHER_KEY'],
   pins: { ANTHROPIC_BASE_URL: 'https://gateway.invalid' },
+  windows: { defaultModel: 'm', models: [{ id: 'm', context: 1_000_000 }] },
 };
 const source = (facts: typeof FACTS | undefined): RuntimeLaunchFactsSource => ({ facts: async () => facts });
 const input = (more: Partial<StartDecideInput> = {}): StartDecideInput =>

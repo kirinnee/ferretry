@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { FakeHarness, FakeRunner } from '../../../../contract/testing/index.ts';
 import { directory, FakeRootPinner, textFile, treeOf } from '../session/filesystem/support.ts';
 import { as, fakePacks, host, record } from './route-fixture.ts';
@@ -169,4 +169,68 @@ test('S47 R-0151 an agent’s file-browser read is refused inside the state home
   const person = await h.request('GET', '/v1/ferrets/lead/fs/file', { query: { path: 'sibling.txt' } });
   expect(person.status).toBe(200);
   expect(person.body).toContain('sibling-bytes');
+});
+
+describe('an agent’s resume binds its folder under the same state-home policy as an agent’s start', () => {
+  /** A lead and its helper started in the project; the helper is stopped, so the next call is a resume. */
+  async function stoppedHelper(extra: { readonly directories?: Readonly<Record<string, string>> } = {}) {
+    const runner = new FakeRunner();
+    const harness = new FakeHarness();
+    const h = await host([], { harness, runner, fenceHome: STATE, plugins: [fakePacks().plugin], ...extra });
+    const lead = await h.request('POST', '/v1/ferrets', {
+      headers: { 'x-fy-request-id': 'lead' },
+      body: { folder: PROJECT },
+    });
+    const leadId = lead.json<{ id: string }>().id;
+    const child = await h.request('POST', '/v1/ferrets', {
+      headers: { ...as(leadId).headers, 'x-fy-request-id': 'child' },
+      body: { folder: PROJECT },
+    });
+    expect(child.status).toBe(201);
+    const childId = child.json<{ id: string }>().id;
+    await h.settle();
+    const stopped = await h.request('POST', `/v1/ferrets/${childId}/stop`, {
+      ...as(leadId),
+      query: { how: 'now' },
+      body: {},
+    });
+    expect(stopped.status).toBe(200);
+    await h.settle();
+    return { h, runner, harness, leadId, childId };
+  }
+
+  test('a project swapped for a link into the state home BEFORE the resume binds refuses an agent’s resume, with zero starts', async () => {
+    const { h, runner, harness, leadId, childId } = await stoppedHelper();
+    // The swap precedes the resume's own binding, so re-verifying that binding alone would accept it.
+    h.setDirectory(PROJECT, `${STATE}/credentials`);
+    const before = runner.starts;
+
+    const resumed = await h.request('POST', `/v1/ferrets/${childId}/resume`, { ...as(leadId), body: {} });
+
+    expect(resumed.status).toBeGreaterThanOrEqual(400);
+    expect(resumed.body).toContain('state home');
+    expect(runner.starts).toBe(before);
+    expect(harness.launched).toHaveLength(2);
+  });
+
+  test('the same swap does not stop the owner’s resume: only an agent is fenced out', async () => {
+    const { h, runner, childId } = await stoppedHelper();
+    h.setDirectory(PROJECT, `${STATE}/credentials`);
+    const before = runner.starts;
+
+    const resumed = await h.request('POST', `/v1/ferrets/${childId}/resume`, { body: {} });
+
+    expect(resumed.status).toBe(200);
+    expect(runner.starts).toBe(before + 1);
+  });
+
+  test('an agent’s resume of a helper in an ordinary project folder still relaunches', async () => {
+    const { h, runner, leadId, childId } = await stoppedHelper();
+    const before = runner.starts;
+
+    const resumed = await h.request('POST', `/v1/ferrets/${childId}/resume`, { ...as(leadId), body: {} });
+
+    expect(resumed.status).toBe(200);
+    expect(runner.starts).toBe(before + 1);
+  });
 });

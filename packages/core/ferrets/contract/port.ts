@@ -1,6 +1,7 @@
 import { defineEvent, definePort, type FerretId, type RefusalCode } from '@ferretry/kernel/contract';
 import type { JsonValue, Result } from '@ferretry/std';
 import { z } from 'zod';
+import { CompactAtSchema } from './view/compact-at.ts';
 import {
   FerretCardIdSchema,
   type FerretRole,
@@ -99,6 +100,12 @@ export const StartOptionsSchema = z.strictObject({
   effort: z.string().min(1).optional(),
   /** Launch in the harness's fast mode. Refused when the chosen model has none; omitted leaves it off. */
   fast: z.boolean().optional(),
+  /**
+   * Where this ferret's harness compacts its own conversation, in tokens, or `auto` (docs/compact-at.md). Its OWN value:
+   * it overrides the login's default on every launch, and `auto` suppresses a numeric default. A value larger than the
+   * launch model's window is not used (the launch falls back to Auto), as v4's `resolveCompactAt` did.
+   */
+  compactAt: CompactAtSchema.optional(),
   /** `auto` for an autonomous teammate (needs a prompt), `interactive` for a human terminal. */
   mode: z.enum(['auto', 'interactive']).optional(),
   /**

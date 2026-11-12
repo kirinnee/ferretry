@@ -1279,6 +1279,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         const resumed = await service.resume(id, message, {
           confirmRestore: confirmRestore(call, callerIsAgent(call)),
           actor: resumeActorOf(call),
+          byAgent: callerIsAgent(call),
         });
         if (!resumed.ok) return startFailure(resumed.error);
         return jsonResponse({ id: resumed.value });

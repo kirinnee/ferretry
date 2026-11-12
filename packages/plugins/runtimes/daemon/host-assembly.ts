@@ -22,6 +22,7 @@ import type { ConfigPort, KernelPorts, RootHandle, RootsPort } from '@ferretry/k
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { UsageApi } from '@ferretry/plugin-usage/contract';
 import { milliseconds } from '@ferretry/std';
+import { z } from 'zod';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
 import { PROFILE_COMPONENTS_KEY, PROFILE_ITEMS } from '../contract/index.ts';
 import { applyClaimFor } from './adapters/apply-claim.ts';
@@ -32,7 +33,7 @@ import { writeAllConfigWriter } from './adapters/config-write-all.ts';
 import { credentialMounts, FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
 import { readFleetManifest } from './adapters/manifest-file.ts';
 import { FIXED_SETTINGS_FILE, pinnableLoginEnvironment, RUNTIME_STATE_DIRECTORY } from './lib/account/materialise.ts';
-import type { RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
+import { FixedSettingsDamagedError, type RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import type { AdapterHost } from './adapters/ports.ts';
 import { refuseBeforeWriting, runtimesConfigFiles } from './adapters/runtimes-config-files.ts';
 import { fleetMounts, harnessMounts, rootHostFiles } from './adapters/root-host-files.ts';
@@ -148,26 +149,42 @@ export function launchFactsSource(
           referencedEnv: account.referencedEnv ?? [],
           pins: account.kind === 'claude' ? pinsOf(text) : {},
           ...(typeof account.compactAt === 'number' ? { compactAt: account.compactAt } : {}),
+          windows: {
+            ...(account.defaultModel === null ? {} : { defaultModel: account.defaultModel }),
+            models: account.models.map(model => ({
+              id: model.id,
+              ...(model.context === undefined ? {} : { context: model.context }),
+            })),
+          },
         };
       });
     },
   };
 }
 
-/** The literal `env` of a `fixed.json` text, once more through the pin filter: a reference or a secret is never a pin. */
+/**
+ * What a PRESENT `fixed.json` must be: a JSON object, whose `env`, when it has one, is an object of text values (v4's
+ * `fixedSettingsObject` refused the rest). Other keys are the harness's own and are left alone.
+ */
+const FixedSettingsSchema = z.looseObject({ env: z.record(z.string(), z.string()).optional() });
+
+/**
+ * The literal `env` of a `fixed.json` text, once more through the pin filter: a reference or a secret is never a pin.
+ * An ABSENT file (`undefined`) or a document with no `env` is the deliberate "pins nothing"; a PRESENT file of the wrong
+ * shape is damaged and refuses, with a sentence that never repeats what the file holds.
+ */
 function pinsOf(text: string | undefined): Readonly<Record<string, string>> {
   if (text === undefined) return {};
   let document: unknown;
   try {
     document = JSON.parse(text);
   } catch {
-    throw new Error('the runtime’s fixed settings are not valid JSON, so its pinned login environment cannot be read');
+    throw new FixedSettingsDamagedError('it is not valid JSON');
   }
-  const env = (document as { env?: unknown } | null)?.env;
-  if (typeof env !== 'object' || env === null || Array.isArray(env)) return {};
-  return pinnableLoginEnvironment(
-    Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
-  );
+  const parsed = FixedSettingsSchema.safeParse(document);
+  if (!parsed.success)
+    throw new FixedSettingsDamagedError('it must be a JSON object whose env, when present, holds only text values');
+  return pinnableLoginEnvironment(parsed.data.env ?? {});
 }
 
 /** The harness homes a first run may read and a component may come from: the person's own, by the OS's home. */

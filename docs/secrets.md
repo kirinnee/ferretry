@@ -302,7 +302,11 @@ by everyone …`), nothing is written or narrowed, and the runner is not called.
   the child environment is resolved). A change refuses the launch (`409 refused`, "no longer what was checked") and nothing is spawned.
   An **agent's** start of a folder inside the state home is refused `403 state_home` at the route (`stateHomeReach` now answers from
   `bindDirectory`, so an ordinary agent start in a project works, and a fence the kernel cannot compute is `503 state_home_unresolved`)
-  and again by the service. A resume has no caller to tell an agent from a person, so it only re-verifies the folder it bound.
+  and again by the service. A **resume** has a caller too: the route passes whether it is an agent (`byAgent`, from the credential, not the
+  attribution-only `actor`), and the folder the resume binds NOW is judged by the same state-home policy as an agent's start, so a project
+  swapped for a link into the state home before the resume is refused (`403`-class `refused`, zero runner starts) and `verify()` is
+  not the only defence. A person's or the daemon's own resume is not fenced out. A **move**'s relaunch is not covered (its route is an
+  unbound skeleton on this base and carries no caller into the service): the day it is bound it must pass the caller the same way.
 - **Tests:** the launch-wiring table drives each of those through the real Ferrets, Runtimes and Claude Code halves for a start, a
   stop/resume and an adoption (four ancestors at `0777`, a foreign owner, a link, and three kinds of folder swap), and removing the
   `verify()` or either chain check turns them red.
@@ -429,13 +433,20 @@ A ferret the daemon starts, restarts, revives, moves or adopts is launched by ex
   the folder on them, and keeps that snapshot for the ferret; `launch.parts` pins from exactly that snapshot and reads nothing again. The
   source is **required** (`LaunchPartSource.required`): if a launch reaches it with no checked snapshot, or it fails for any reason, Ferrets
   refuses the launch with nothing started rather than skipping it (a source that is only an addition, such as lessons, is still skipped when it
-  fails). A `fixed.json` that is already unreadable refuses at `start.decide`. A `fixed.json` that is **absent** is a login that pins
+  fails). A `fixed.json` that is already unreadable refuses at `start.decide`, and so does one that is **present but the wrong shape**: it must
+  be a JSON object whose `env`, when it has one, is an object of text values (`null`, an array, a number, `{"env":[]}` and
+  `{"env":{"X":42}}` all refuse, as v4's `fixedSettingsObject` did). The refusal names `fixed.json` and the shape expected, never a
+  value from it, and nothing is started on a start, a resume or an adoption. A `fixed.json` that is **absent**, or has no `env`, is a login that pins
   nothing, which is what an apply that publishes no overlay leaves; under the publication read an apply cannot be half-way through removing it.
 - **Fast mode and compaction ride the same file.** A start that names `fast` writes `fastMode` into `launch-settings.json` (the start's
-  options are kept, so a stop/resume writes it again), and a published runtime's `compactAt` (a number; `auto` adds nothing) reaches it as
-  `autoCompactWindow` through a `compact` launch part, on a start, a resume and an adoption alike. Neither is ever in an argv. A ferret's own
-  compaction choice and the launch model's window cap (v4's `resolveCompactAt`) are not carried: the published account value is used as is
-  (its schema holds the floor).
+  options are kept, so a stop/resume writes it again), and the compaction trigger reaches it as `autoCompactWindow` through a `compact`
+  launch part, on a start, a resume and an adoption alike. Neither is ever in an argv. The trigger is v4's `resolveCompactAt`, decided
+  once in the Runtimes launch gate from the checked snapshot: **a ferret's own value** (its session config's `compactAt`, else the
+  `compactAt` its start asked for, kept in its details) **overrides the login's default**, and an own `auto` suppresses a numeric
+  default; **a value larger than the launch model's context window falls back to Auto** (nothing is written, and an oversized own value
+  is dropped to Auto, not to the login's default). The window is v4's: a `[1m]` selector states 1M, else the model's declared `context`
+  in the published manifest, else 200k; the model is the one the launch names, else the login's default model. A session config that is
+  unreadable or holds a value outside the floor says "none recorded".
 - **The credential is never in an argv.** The command is `env CLAUDE_CONFIG_DIR=<home> … claude --settings <home>/launch-settings.json …`:
   it names a path, never a value, so `ps`, the pane's command line and the session document's recorded `command` hold none. The file
   is written through the kernel's `agent-homes` root: `0600`, inside the ferret's `0700` home, and a link or a file the root refuses fails the launch

@@ -315,6 +315,11 @@ export interface FerretSessionPort {
    */
   readable?(ferret: FerretId): Promise<readonly FencedPath[]>;
   /**
+   * The ferret's OWN compaction choice recorded in its session config (what the compact-at action edits), or `undefined`
+   * when it recorded none or the document is unreadable (the launch then follows the start options, then the login).
+   */
+  compactAt?(ferret: FerretId): Promise<'auto' | number | undefined>;
+  /**
    * Additive (U4): where Claude Code's question hook records the question it is asking, inside THIS ferret's own session
    * folder (`question-asked.json`, today's `SessionPaths.questionAsked`), handed to the pane as `FY_QUESTION_FILE`.
    * Unbound, or a path that cannot be named: the variable is not set, and the hook records nothing.
@@ -513,6 +518,12 @@ export interface ServiceResumeOptions extends Omit<ResumeOptions, 'actor'> {
    * never authority. Absent: `unknown`, so the turn names no author.
    */
   readonly actor?: ResumeActor;
+  /**
+   * The caller is an AGENT (a ferret's token, the Warden, or the admin token with a ferret behind it), as the route
+   * decided from the credential. Unlike {@link actor} this is AUTHORITY: an agent's resume binds its folder under the
+   * same state-home policy as an agent's start. Absent: a person or the daemon itself, who are not fenced out.
+   */
+  readonly byAgent?: boolean;
   /**
    * The state the ferret must STILL be in, judged under its own queue before anything is decided (today's auto-resume
    * `expectedStatus: 'failed'`): false refuses the resume with nothing written or launched. The auto-resume sets it, so
@@ -998,7 +1009,9 @@ export class FerretsService implements FerretsApi {
     const target = options?.target;
     const retargeted = target === undefined ? found : this.retarget(found, target);
     if (typeof retargeted === 'string') return failed('refused', retargeted);
-    const bound = await this.bindLaunchFolder(retargeted.folder, false);
+    // The folder is bound NOW, and an agent's resume gets the verdict an agent's start gets: `verify()` below only proves
+    // this binding held, which a folder already swapped into the state home satisfies.
+    const bound = await this.bindLaunchFolder(retargeted.folder, options?.byAgent === true);
     if (!bound.ok) return bound;
     const decision = await this.ports.decide({
       ferret,
@@ -1654,6 +1667,10 @@ export class FerretsService implements FerretsApi {
     // Today's read allowance for what the ferret is sent (`handoffFolders` → `--allowedTools=Read(…)`): its own session
     // folder's hand-off folders only. One that cannot be named pre-allows nothing (the agent asks), never more.
     const readable = (await this.ports.session?.readable?.(record.id).catch(() => undefined)) ?? [];
+    // The ferret's own compaction choice: its session config (a later edit) over what its start asked.
+    const ownCompactAt =
+      (await this.ports.session?.compactAt?.(record.id).catch(() => undefined)) ??
+      this.registry.detailsOf(record.id)?.options?.compactAt;
     const base: Omit<LaunchSpec, 'parts'> = {
       ferret: record.id,
       name: record.name,
@@ -1664,6 +1681,7 @@ export class FerretsService implements FerretsApi {
       ...(record.runtime === undefined ? {} : { runtime: record.runtime }),
       ...(record.login === undefined ? {} : { login: record.login }),
       ...launchOptions(this.registry.detailsOf(record.id)?.options),
+      ...(ownCompactAt === undefined ? {} : { compactAt: ownCompactAt }),
       folder: record.folder as FencedPath,
       home: home.value,
       instructions: applicableInstructions(this.ports.instructions(), record),
