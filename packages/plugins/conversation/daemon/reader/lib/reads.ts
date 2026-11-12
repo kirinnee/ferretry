@@ -742,22 +742,24 @@ export class TranscriptReadService {
     options: { readonly partialFirstRecord: boolean },
   ): Promise<string> {
     const markers: string[] = [];
-    // Each event is masked while it is still structured (`maskedEvent`); the rendered text is masked again after, for a
-    // value that only exists across the rendering (a header and a body).
-    const lifted = await this.redactor.batch(scrub =>
-      renderTranscript(
-        events.map(event => maskedEvent(event, scrub)),
-        {
-          ...options,
-          mark: image => {
-            markers.push(imageMarker(image));
-            return `${NUL}fy-image-${spell(markers.length - 1)}${NUL}`;
+    // ONE Vault read for the whole render: each event is masked while it is still structured (`maskedEvent`), the text
+    // is rendered, and the rendered text is masked again for a value that only exists across the rendering (a header
+    // and a body) — all through the SAME `scrub`, so the page opens the Vault once, not once per step.
+    const scrubbed = await this.redactor.batch(scrub =>
+      scrub.text(
+        renderTranscript(
+          events.map(event => maskedEvent(event, scrub)),
+          {
+            ...options,
+            mark: image => {
+              markers.push(imageMarker(image));
+              return `${NUL}fy-image-${spell(markers.length - 1)}${NUL}`;
+            },
           },
-        },
+        ),
       ),
     );
-    if (markers.length === 0) return await this.redactor.redact(lifted);
-    const scrubbed = await this.redactor.redact(lifted);
+    if (markers.length === 0) return scrubbed;
     return scrubbed.replace(LIFTED_MARKER, (whole, index: string) => markers[unspell(index)] ?? whole);
   }
 
