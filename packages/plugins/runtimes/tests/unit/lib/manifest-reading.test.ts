@@ -5,10 +5,14 @@
 import { describe, expect, it } from 'bun:test';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import {
+  FleetManifestUnreadableError,
+  KEPT_MANIFEST_INFIX,
   keptManifestName,
+  MAX_KEPT_UNREADABLE_MANIFESTS,
   manifestRebuiltSentence,
   manifestUnreadableSentence,
   readManifestText,
+  surplusKeptCopies,
 } from '../../../daemon/lib/manifest-reading.ts';
 
 const manifest = buildFleetManifest({
@@ -78,5 +82,57 @@ describe('the words about an unreadable manifest', () => {
     const sentence = manifestUnreadableSentence('/fleet/manifest.json');
     expect(sentence).toContain('/fleet/manifest.json');
     expect(sentence).toContain('try again');
+  });
+});
+
+describe('surplusKeptCopies', () => {
+  const prefix = `manifest.json${KEPT_MANIFEST_INFIX}`;
+  const copy = (digest: string, modified: string) => ({ name: `${prefix}${digest}`, modified });
+
+  it('keeps a small fixed number of the most recent copies and names the older ones for removal', () => {
+    expect(MAX_KEPT_UNREADABLE_MANIFESTS).toBe(3);
+    const copies = [
+      copy('a', '2027-01-01T00:00:01.000Z'),
+      copy('b', '2027-01-01T00:00:02.000Z'),
+      copy('c', '2027-01-01T00:00:03.000Z'),
+      copy('d', '2027-01-01T00:00:04.000Z'),
+      copy('e', '2027-01-01T00:00:05.000Z'),
+    ];
+    expect(surplusKeptCopies(copies, prefix, `${prefix}c`)).toEqual([`${prefix}b`, `${prefix}a`]);
+  });
+
+  it('never names the protected copy, even when it is the oldest', () => {
+    const copies = [
+      copy('a', '2027-01-01T00:00:01.000Z'),
+      copy('b', '2027-01-01T00:00:02.000Z'),
+      copy('c', '2027-01-01T00:00:03.000Z'),
+      copy('d', '2027-01-01T00:00:04.000Z'),
+    ];
+    expect(surplusKeptCopies(copies, prefix, `${prefix}a`)).toEqual([`${prefix}b`]);
+  });
+
+  it('breaks a tie of age by name, so the choice is the same every time', () => {
+    const same = '2027-01-01T00:00:01.000Z';
+    const copies = ['d', 'a', 'c', 'b'].map(digest => copy(digest, same));
+    expect(surplusKeptCopies(copies, prefix, undefined, 2)).toEqual([`${prefix}c`, `${prefix}d`]);
+  });
+
+  it('chooses nothing that does not begin with the prefix, and nothing when there are few copies', () => {
+    const others = [
+      { name: 'manifest.json', modified: '2027-01-01T00:00:01.000Z' },
+      { name: 'other.json.unreadable-a', modified: '2027-01-01T00:00:01.000Z' },
+    ];
+    expect(surplusKeptCopies(others, prefix, undefined, 0)).toEqual([]);
+    expect(surplusKeptCopies([copy('a', '2027-01-01T00:00:01.000Z')], prefix, `${prefix}a`)).toEqual([]);
+    expect(surplusKeptCopies([], prefix, undefined)).toEqual([]);
+  });
+});
+
+describe('FleetManifestUnreadableError', () => {
+  it('carries the path and the retryable sentence', () => {
+    const error = new FleetManifestUnreadableError('/fleet/manifest.json');
+    expect(error.path).toBe('/fleet/manifest.json');
+    expect(error.name).toBe('FleetManifestUnreadableError');
+    expect(error.message).toBe(manifestUnreadableSentence('/fleet/manifest.json'));
   });
 });

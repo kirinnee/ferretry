@@ -476,6 +476,7 @@ export function fleetHomes(
   roots: Pick<RootsPort, 'root'>,
   publication: Pick<FleetPublication, 'reading'>,
   say: SaySentence = () => {},
+  requestRepair: () => void = () => {},
 ): RuntimeHomesApi {
   const fleet = roots.root('fleet');
   const directory = fleetDirectory(fleet);
@@ -495,7 +496,9 @@ export function fleetHomes(
     try {
       homes = homesOf(await readFleetManifest(files, path), directory);
     } catch (error) {
-      // Damage is retryable (the daemon rebuilds the manifest), and the sentence says so.
+      // Damage is retryable (the daemon rebuilds the manifest), and the sentence says so. The repair is only ASKED for
+      // here (a kick of the repair job, never a call into it): this read holds the publication.
+      if (error instanceof FleetManifestUnreadableError) requestRepair();
       throw unreadable(
         error instanceof FleetManifestUnreadableError
           ? error.message

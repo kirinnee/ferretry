@@ -25,6 +25,7 @@ import {
   type StartDecideInput,
 } from '@ferretry/core-ferrets/contract';
 import type { HookDecision } from '@ferretry/kernel/contract';
+import { FleetManifestUnreadableError } from './manifest-reading.ts';
 import { launchContextWindow, type ModelWindows, resolveLaunchCompactAt } from './launch-compact-at.ts';
 
 /** What the launch gate needs of one published runtime. */
@@ -80,7 +81,13 @@ export class LaunchGate {
     let facts: RuntimeLaunchFacts | undefined;
     try {
       facts = await this.deps.source.facts(input.runtime);
-    } catch {
+    } catch (error) {
+      // A manifest the daemon is rebuilding is a moment's refusal, not a broken start: say so, so the person tries again.
+      if (error instanceof FleetManifestUnreadableError)
+        return {
+          allow: false,
+          reason: `runtime ${input.runtime} was not started: ${error.message}`,
+        };
       return {
         allow: false,
         reason: `the published runtimes could not be read, so runtime ${input.runtime} was not started: its compaction trigger cannot be checked against its model`,

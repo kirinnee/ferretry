@@ -8,6 +8,7 @@ import { describe, it } from 'bun:test';
 import { LaunchPartsRefusal, type LaunchSpec, type StartDecideInput } from '@ferretry/core-ferrets/contract';
 import should from 'should';
 import { LaunchGate, type RuntimeLaunchFactsSource } from '../../../daemon/lib/launch-gate.ts';
+import { FleetManifestUnreadableError } from '../../../daemon/lib/manifest-reading.ts';
 
 const FACTS = {
   kind: 'claude' as const,
@@ -41,6 +42,23 @@ describe('LaunchGate.decide', () => {
 
     should(answer.allow).be.false();
     should((answer as { reason: string }).reason).containEql('could not be read');
+  });
+
+  it('should refuse a start over an unreadable manifest with the retryable sentence, naming the runtime and the file', async () => {
+    const answer = await new LaunchGate({
+      source: {
+        facts: async () => {
+          throw new FleetManifestUnreadableError('/fleet/manifest.json');
+        },
+      },
+    }).decide(input());
+
+    should(answer.allow).be.false();
+    const reason = (answer as { reason: string }).reason;
+    should(reason).containEql('runtime work was not started');
+    should(reason).containEql('/fleet/manifest.json');
+    should(reason).containEql('try again');
+    should(reason).not.containEql('compaction trigger cannot be checked');
   });
 
   it('should allow a Claude start of a published runtime: it needs no folder, so none is ever read or refused', async () => {

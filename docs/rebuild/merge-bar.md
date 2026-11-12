@@ -61,10 +61,13 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
 9. **An unreadable derived fleet manifest is regenerated, never refuses every start**:
    `packages/plugins/runtimes/tests/integration/daemon/manifest-regen.test.ts` — a `fleet/manifest.json` with an unknown key
    on an account row (the v4 4.291.12 shape) or truncated JSON is rebuilt from the configuration once after the daemon
-   starts and by every apply, the old file is kept once beside it (owner-only) and one plain line says so (the file is named,
-   never its contents), a start resolves its runtime from the rebuilt file with the same harness homes, and a valid
-   manifest is left alone. Until it is rebuilt, a reader refuses with a retryable sentence, never a permanent one. Live
-   v4 outage, 2026-11-12.
+   starts and by every apply, and ALSO when the damage happens after a healthy boot: a launch reader that meets it asks
+   the repair job to run (the read itself never publishes; a healthy manifest never causes a publish), so the next start
+   after a moment passes. A repair that fails throws, so the job runner retries it with its backoff until it works (proved
+   with the real runner over a driven clock). The start boundary (`LaunchGate.decide`) says the manifest is being rebuilt
+   and to try again. The old file is kept beside it (owner-only, verified, at most the 3 most recent) and one plain line
+   says so (the file is named, never its contents); a start resolves its runtime from the rebuilt file with the same
+   harness homes, and a valid manifest is left alone. Live v4 outage, 2026-11-12.
 
 ## After merge
 

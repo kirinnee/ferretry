@@ -2,7 +2,13 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
 import { FleetManifestSchema } from '../lib/manifest.ts';
-import { keptManifestName, manifestRebuiltSentence, readManifestText } from '../lib/manifest-reading.ts';
+import {
+  KEPT_MANIFEST_INFIX,
+  keptManifestName,
+  manifestRebuiltSentence,
+  readManifestText,
+  surplusKeptCopies,
+} from '../lib/manifest-reading.ts';
 import {
   ABSENT_DOCUMENT_REVISION,
   type FleetApplyCommittedState,
@@ -776,16 +782,58 @@ export class FileFleetProvisioner implements FleetProvisioner {
     if (bytes !== undefined && readManifestText(new TextDecoder().decode(bytes)).kind !== 'unreadable') return;
     let keptAt: string | undefined;
     if (bytes !== undefined) {
-      const target = keptManifestName(manifestPath, sha256(bytes));
-      try {
-        await this.disk.create(target, bytes, 0o600);
-        keptAt = target;
-      } catch (error) {
-        // The same damage kept by an earlier apply is the one copy wanted; anything else leaves no copy.
-        if (error instanceof AlreadyExistsError) keptAt = target;
-      }
+      keptAt = await this.keepCopy(keptManifestName(manifestPath, sha256(bytes)), bytes);
+      if (keptAt !== undefined) await this.pruneKeptCopies(manifestPath, keptAt);
     }
     this.say?.(manifestRebuiltSentence(manifestPath, keptAt));
+  }
+
+  /**
+   * The owner-only copy at `target`, or `undefined` when no VERIFIED private copy could be kept. A name that is taken is
+   * not proof of a copy: it counts only when it is a regular file, this file's only name, mode 0600, holding exactly
+   * these bytes. Anything else at the name (a link, a wider mode, other bytes) is taken out of the way — a link itself,
+   * never what it points at — and the copy is made again, exclusively. A directory at the name is left alone.
+   */
+  private async keepCopy(target: string, bytes: Uint8Array): Promise<string | undefined> {
+    try {
+      await this.disk.create(target, bytes, 0o600);
+      return target;
+    } catch (error) {
+      if (!(error instanceof AlreadyExistsError)) return undefined;
+    }
+    try {
+      const existing = await this.disk.lstat(target);
+      if (existing === undefined || (existing.kind !== 'file' && existing.kind !== 'symlink')) return undefined;
+      if (
+        existing.kind === 'file' &&
+        existing.links === 1 &&
+        (existing.mode & 0o7777) === 0o600 &&
+        existing.size === bytes.length &&
+        sha256(await this.disk.readBytes(target, MAX_READ_BYTES)) === sha256(bytes)
+      )
+        return target;
+      await this.disk.remove(target);
+      await this.disk.create(target, bytes, 0o600);
+      return target;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Keeps at most a few copies of unreadable manifests: older ones go, `keptAt` never, and only our own regular files. */
+  private async pruneKeptCopies(manifestPath: string, keptAt: string): Promise<void> {
+    try {
+      const directory = path.dirname(manifestPath);
+      const entries = await this.disk.entries(directory);
+      const surplus = surplusKeptCopies(
+        entries.filter(entry => entry.kind === 'file'),
+        `${path.basename(manifestPath)}${KEPT_MANIFEST_INFIX}`,
+        path.basename(keptAt),
+      );
+      for (const name of surplus) await this.disk.remove(path.join(directory, name));
+    } catch {
+      // Best-effort housekeeping: a copy that cannot be pruned is a copy too many, never a failed apply.
+    }
   }
 
   private async writeManifest(plan: FleetApplyPlan, journal: MutationJournal): Promise<void> {

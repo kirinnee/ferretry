@@ -29,9 +29,46 @@ export function readManifestText(text: string | undefined): ManifestReading {
   return parsed.success ? { kind: 'readable', manifest: parsed.data } : { kind: 'unreadable' };
 }
 
+/** What follows the manifest's own file name in the name of a copy kept aside: only files with this infix are ever pruned. */
+export const KEPT_MANIFEST_INFIX = '.unreadable-';
+
+/** How many copies of unreadable manifests stay aside: the most recent few. Older damage is evidence nobody asked to keep. */
+export const MAX_KEPT_UNREADABLE_MANIFESTS = 3;
+
 /** The name an unreadable manifest is kept under: the file's own name and a short digest of what it held, so it is kept once. */
 export function keptManifestName(manifestPath: string, digest: string): string {
-  return `${manifestPath}.unreadable-${digest.slice(0, 12)}`;
+  return `${manifestPath}${KEPT_MANIFEST_INFIX}${digest.slice(0, 12)}`;
+}
+
+/**
+ * The names (of `candidates`, the regular files of the fleet folder) to remove so that at most
+ * {@link MAX_KEPT_UNREADABLE_MANIFESTS} copies stay: those that begin with `prefix` (the manifest's file name and the
+ * infix), oldest first. The copy just kept (`protect`) is never among them. A name that does not begin with the prefix
+ * is never chosen, so nothing the person or another version put there is touched.
+ */
+export function surplusKeptCopies(
+  candidates: readonly { readonly name: string; readonly modified: string }[],
+  prefix: string,
+  protect: string | undefined,
+  limit: number = MAX_KEPT_UNREADABLE_MANIFESTS,
+): readonly string[] {
+  const others = candidates
+    .filter(entry => entry.name.startsWith(prefix) && entry.name !== protect)
+    .toSorted((left, right) =>
+      left.modified === right.modified ? left.name.localeCompare(right.name) : left.modified < right.modified ? 1 : -1,
+    )
+    .map(entry => entry.name);
+  // The protected copy takes one of the places; the newest of the others fill the rest.
+  const room = Math.max(0, protect === undefined ? limit : limit - 1);
+  return others.slice(room);
+}
+
+/** The manifest exists and is not one. Retryable: the daemon rebuilds it. The message names the file, never its contents. */
+export class FleetManifestUnreadableError extends Error {
+  constructor(readonly path: string) {
+    super(manifestUnreadableSentence(path));
+    this.name = 'FleetManifestUnreadableError';
+  }
 }
 
 /** One plain line for the log: the file is named, its contents never are. */

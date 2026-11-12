@@ -35,7 +35,14 @@ import {
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { fleetHomes } from './adapters/fleet-home-reader.ts';
-import { endedSeams, fileAssembly, launchFactsSource, manifestUnreadableProbe } from './host-assembly.ts';
+import {
+  endedSeams,
+  fileAssembly,
+  launchFactsSource,
+  MANIFEST_REPAIR_JOB,
+  manifestUnreadableProbe,
+  repairRequester,
+} from './host-assembly.ts';
 import { LaunchGate, type RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import { FleetPublication } from './lib/service/publication.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
@@ -232,12 +239,17 @@ export const hostAssembly: RuntimesAssembler = ctx => {
     setup: deferred(() => assembled().setup),
     ended: deferred(() => assembled().ended),
     homes: onceHomes(() =>
-      fleetHomes(ctx.kernel.roots, publication, sentence => {
-        ctx.kernel.log.warn(sentence);
-      }),
+      fleetHomes(
+        ctx.kernel.roots,
+        publication,
+        sentence => {
+          ctx.kernel.log.warn(sentence);
+        },
+        repairRequester(ctx.kernel),
+      ),
     ),
     profileEtag: async profile => await assembled().profileEtag(profile),
-    launchFacts: launchFactsSource(ctx.kernel, publication),
+    launchFacts: launchFactsSource(ctx.kernel, publication, repairRequester(ctx.kernel)),
     manifestUnreadable: manifestUnreadableProbe(ctx.kernel, publication),
     probe: () => {
       assembled();
@@ -372,18 +384,23 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         setTimer: (run, ms) => clock.after(milliseconds(ms), run),
       });
       void expiry.rearm();
-      // A manifest the previous version wrote in a shape this one does not read is derived data: rebuilt once after start
-      // (the apply keeps the old file aside and says so), never left to refuse every start. Nothing else is republished.
+      // A manifest the previous version wrote in a shape this one does not read is derived data: rebuilt (the apply keeps
+      // the old file aside and says so), never left to refuse every start. It runs once after start AND whenever a launch
+      // reader meets the damage later (it asks through the runner's single-flight kick; a healthy manifest never publishes).
+      // A repair that did not succeed THROWS: the runner retries a failed job with its backoff until the manifest reads.
       ctx.kernel.jobs.add({
-        id: 'runtimes.manifest-repair',
+        id: MANIFEST_REPAIR_JOB,
         schedule: { onceAfterStart: true },
         run: async () => {
           if (!(await assembly.manifestUnreadable?.())) return;
-          await assembly.catalog.republish?.({ rebuild: true }).catch((error: unknown) => {
-            ctx.kernel.log.warn(
-              `the fleet manifest could not be read and could not be rebuilt yet: ${error instanceof Error ? error.message : String(error)}`,
-            );
-          });
+          const failure = await assembly.catalog.republish?.({ rebuild: true }).then(
+            () => undefined,
+            (error: unknown) => (error instanceof Error ? error.message : String(error)),
+          );
+          if (!(await assembly.manifestUnreadable?.())) return;
+          const message = `the fleet manifest could not be read and could not be rebuilt yet: ${failure ?? 'the configuration could not be published'}`;
+          ctx.kernel.log.warn(message);
+          throw new Error(message);
         },
       });
       // A republish that cannot run (the model is not readable yet) is said once and never fails the event.

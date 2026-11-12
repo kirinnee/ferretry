@@ -13,16 +13,10 @@
  * get a typed, retryable {@link FleetManifestUnreadableError} until it has been.
  */
 import type { FleetManifest } from '../lib/manifest.ts';
-import { manifestUnreadableSentence, readManifestText } from '../lib/manifest-reading.ts';
+import { FleetManifestUnreadableError, readManifestText } from '../lib/manifest-reading.ts';
 import type { HostFiles } from './ports.ts';
 
-/** The manifest exists and is not one. Retryable: the daemon rebuilds it. The message names the file, never its contents. */
-export class FleetManifestUnreadableError extends Error {
-  constructor(readonly path: string) {
-    super(manifestUnreadableSentence(path));
-    this.name = 'FleetManifestUnreadableError';
-  }
-}
+export { FleetManifestUnreadableError };
 
 /**
  * The manifest, or `undefined` when no apply has published one yet. Throws {@link FleetManifestUnreadableError}, naming
