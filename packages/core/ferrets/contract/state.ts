@@ -553,7 +553,10 @@ export const LimitsConfigFile = defineConfig({
   loosens: limitsLoosen,
 });
 
-/** `config/instructions/<name>.md` are instruction items (§4.2), read as text; listed here for ownership only. */
+/**
+ * The folder of the instruction items. They are `config/instructions/<name>.yaml` (a `text:` document, Runtimes' `INSTRUCTION_ITEMS`),
+ * never `<name>.md`; listed here for ownership only, and nothing in 5.0 reads a `.md` there.
+ */
 export const INSTRUCTION_ITEMS_FOLDER = 'instructions' as const;
 
 // ─── archive.yaml (the session archive's one setting) ─────────────────────────────────────────────────────────────

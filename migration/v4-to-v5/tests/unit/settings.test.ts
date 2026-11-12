@@ -9,6 +9,7 @@ import { ConversationConfigSchema } from '@ferretry/plugin-conversation/contract
 import { EndpointFileSchema, LoginFileSchema, ModelCatalogFileSchema } from '@ferretry/plugin-logins/contract';
 import { McpItemSchema } from '@ferretry/plugin-mcp/contract';
 import {
+  InstructionsFileSchema,
   ModelSetFileSchema,
   ProfileFileSchema,
   RuntimeFileSchema,
@@ -187,7 +188,12 @@ test('converts every v4 config kind into the v5 file that owns it, read back wit
   expect(await read('model-sets/fast.yaml', ModelSetFileSchema)).toMatchObject({ default: 'm-a' });
   expect((await read('mcp/github.yaml', McpItemSchema)).env).toEqual({ GITHUB_TOKEN: '${secret:FAKE_GITHUB}' });
   expect((await read('skills/mine.yaml', SkillsItemSchema)).items).toEqual(['one', 'two']);
-  expect(await text('instructions/house.md')).toBe('# House rules\nBe kind.\n');
+  // v5 reads `instructions/<name>.yaml` (the document is its `text:`), never a `.md` there; v4's harness is kept.
+  expect(await read('instructions/house.yaml', InstructionsFileSchema)).toEqual({
+    text: '# House rules\nBe kind.\n',
+    harness: 'claude-code',
+  });
+  expect(await exists('instructions/house.md')).toBe(false);
 
   const login = await read('logins/work-login.yaml', LoginFileSchema);
   expect(login.env?.ANTHROPIC_AUTH_TOKEN).toBe('${secret:FAKE_API_KEY}');
@@ -260,7 +266,7 @@ test('the Global lessons component is dropped and every profile stops layering i
   expect(report.status).toBe('converted');
   expect(await exists('instructions/lessons.md')).toBe(false);
   expect(await exists('instructions/lessons.yaml')).toBe(false);
-  expect(await text('instructions/house.md')).toBe('# House rules\n');
+  expect((await read('instructions/house.yaml', InstructionsFileSchema)).text).toBe('# House rules\n');
   expect((await read('profiles/main.yaml', ProfileFileSchema)).contents).toEqual(['instructions/house']);
   expect(await text('profiles/main.yaml')).toContain('# mine');
   expect((await read('profiles/bare.yaml', ProfileFileSchema)).contents).toEqual([]);
@@ -373,4 +379,56 @@ test("v4's path grammar and the raw-secret rule", () => {
   expect(classifyV4ConfigPath('daemon.json')).toBeUndefined();
   expect(rawSecretPaths({ env: { API_KEY: '${secret:FAKE}', URL: 'https://example.com' } })).toEqual([]);
   expect(rawSecretPaths({ env: { API_TOKEN: 'Zx9qLm2Pw8Rt5Vb7Nc4K' } })).toEqual(['env.API_TOKEN']);
+});
+
+/** A v4 instructions component whose document is `document`, layered by a profile `main`. */
+async function plantInstruction(name: string, document: string | Uint8Array, extra = '') {
+  await yaml(`components/instructions/${name}.yaml`, `file: instructions/${name}.md\n${extra}`);
+  await mkdir(join(f.from, 'fleet/assets/instructions'), { recursive: true });
+  await writeFile(join(f.from, `fleet/assets/instructions/${name}.md`), document);
+  await yaml('profiles/main.yaml', `contents:\n  - instructions/${name}\n`);
+}
+
+test('an instructions document reaches v5 as the exact same text, whatever the text holds', async () => {
+  const documents = [
+    '# Rules\n\n  - indented first line\n\ttabbed\ntrailing spaces   \n\n\n',
+    '   starts with spaces\nno final newline',
+    'colon: and # hash and \'quotes\' and "double"\n---\n...\n',
+    'carriage\r\nreturns\r\nkept\r\n',
+    'ünïcödé — 日本語 🦦\n',
+  ];
+  for (const [index, document] of documents.entries()) {
+    const name = `doc${String(index)}`;
+    await plantInstruction(name, document);
+    const report = await settingsStep.run(f.ctx());
+    expect({ name, status: report.status, note: report.note }).toEqual({ name, status: 'converted', note: undefined });
+    expect((await read(`instructions/${name}.yaml`, InstructionsFileSchema)).text).toBe(document);
+  }
+});
+
+test('an instructions document v5 refuses (too long, or a control character) is named in the report, never dropped quietly', async () => {
+  await plantInstruction('huge', 'x'.repeat(200_001));
+  await plantInstruction('nul', 'a\u0000b\n');
+  await yaml('profiles/main.yaml', 'contents:\n  - instructions/huge\n  - instructions/nul\n');
+  const report = await settingsStep.run(f.ctx());
+  // A profile layering one is pending: no profile is left naming a component that is not there.
+  expect(report.status).toBe('pending');
+  expect(report.note).toContain('config/components/instructions/huge.yaml');
+  expect(report.note).toContain('config/components/instructions/nul.yaml');
+  const notCarried = report.notCarried.map(item => item.what);
+  expect(notCarried).toContain('config/components/instructions/huge.yaml');
+  expect(notCarried).toContain('config/components/instructions/nul.yaml');
+  expect(JSON.stringify(report)).not.toContain('a\u0000b');
+  expect(await exists('instructions/huge.yaml')).toBe(false);
+  expect(await exists('instructions/nul.yaml')).toBe(false);
+});
+
+test('--drop-uncarried removes the layer of a refused instructions document and names it', async () => {
+  await plantInstruction('nul', 'a\u0000b\n');
+  const report = await settingsStep.run({ ...f.ctx(), dropUncarried: true });
+  expect(report.status).toBe('converted');
+  expect((await read('profiles/main.yaml', ProfileFileSchema)).contents).toEqual([]);
+  expect(report.notCarried.find(item => item.what === 'config/components/instructions/nul.yaml')?.why).toContain(
+    'REMOVED',
+  );
 });
