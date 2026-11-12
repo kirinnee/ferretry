@@ -52,11 +52,11 @@ H="${FY_HOME:-$HOME/.ferretry}"; STAMP="$(date -u +%Y-%m-%d-%H%M)"; B="$H-before
      `brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4`, then `fy daemon restart`.
      `--to` does not work here: once 5.0 is released Homebrew installs the newest release whatever `--to` says.
    - **Nix profile**: skip this when `fy --version` already prints 4.291.10 or newer. Otherwise replace the profile
-     element with the v4 tag: `nix profile list` (the element's name is the `Name:` of the entry whose
-     `Original flake URL` is `github:kirinnee/ferretry`), then
+     element with the v4 tag: `nix profile list` (the element is the entry's `Name:` on newer Nix, or its `Index:` on
+     older Nix such as 2.18; pick the entry whose original flake URL starts with `github:kirinnee/ferretry`), then
      `nix profile remove <element> && nix profile add github:kirinnee/ferretry/v4.291.10`, then `fy daemon restart`.
-     (A nix too old to know `add` calls it `install`.) Same reason: `nix profile upgrade` and `--to` give the
-     newest release.
+     (A Nix too old to know `add` calls it `install`; this applies to EVERY `nix profile add` line in this prompt.)
+     Same reason: `nix profile upgrade` and `--to` give the newest release.
    - **Pinning kinds** (standalone, nix-module with a pinned flake input, deb/rpm): `fy daemon update --yes --to 4.291.10`,
      or the kind's own pin.
    - If none of these applies, stop and tell the owner.
@@ -152,11 +152,17 @@ bun src/main.ts --from "$B" --to "$H"                # writes the new home at H
    the jump (it is a plain flag, combined with `--to`; `--yes` is still needed in an agent's shell and alone never
    allows the jump). It does not switch a package source, so each kind has its own command:
    - **Standalone binary**: `fy daemon update --major --yes --to 5.0.0`.
-   - **Homebrew on `ferretry@4`**: `fy daemon update` can never reach 5.0 here (that cask stays 4.x and refuses,
-     saying so). Switch the cask instead: `brew uninstall --cask ferretry@4 && brew install --cask kirinnee/ferretry/ferretry`.
-   - **Nix profile installed from `github:kirinnee/ferretry/v4.291.10`**: `nix profile upgrade` stays on that tag.
-     Switch the source: `nix profile list` (the element is the entry whose `Original flake URL` is that v4 tag), then
-     `nix profile remove <element> && nix profile add github:kirinnee/ferretry/v5.0.0`.
+   - **Homebrew**: §1.1 is skipped when v4 is already 4.291.10 or newer, so check which cask is installed:
+     `brew list --cask | grep -x 'ferretry\(@4\)\?'`.
+     - **Main cask `ferretry`**: the tap's cask is 5.x once 5.0.0 is released, so `brew upgrade --cask ferretry`.
+     - **`ferretry@4`**: `fy daemon update` can never reach 5.0 here (that cask stays 4.x and refuses, saying so).
+       Switch the cask instead: `brew uninstall --cask ferretry@4 && brew install --cask kirinnee/ferretry/ferretry`.
+   - **Nix profile**: `nix profile upgrade` stays on the source it was installed from, whichever v4 source that is
+     (untagged, or any v4 tag). Switch the source: `nix profile list`, pick the Ferretry element whatever its source
+     (the entry whose original flake URL starts with `github:kirinnee/ferretry`; its `Name:` on newer Nix, its
+     `Index:` on older Nix such as 2.18), then
+     `nix profile remove <element> && nix profile add github:kirinnee/ferretry/v5.0.0`. (A Nix too old to know `add`
+     calls it `install`; that applies here too.)
    - **nix-module** (home-manager / nix-darwin): repin the flake input to `github:kirinnee/ferretry/v5.0.0` and switch.
    - **deb/rpm**: install the 5.0.0 package.
 
@@ -250,11 +256,13 @@ until the v4 programs are back, starting the daemon runs v5, which refuses the r
 install kind `fy daemon update --check` named:
 
 - **Nix profile**: remove the v5 element and install the v4 tag: `nix profile list` (the entry whose
-  `Original flake URL` is the v5 tag), then `nix profile remove <element> && nix profile add github:kirinnee/ferretry/v4.291.10`
+  original flake URL is the v5 tag; its `Name:` on newer Nix, its `Index:` on older Nix), then
+  `nix profile remove <element> && nix profile add github:kirinnee/ferretry/v4.291.10` (`install` instead of `add` on a
+  Nix too old to know `add`)
   (or `nix profile rollback` to the generation from before §5, if it is still there and was 4.291.10 or later).
 - **nix-module** (home-manager / nix-darwin): repin the flake input to `github:kirinnee/ferretry/v4.291.10` and switch.
 - **Standalone binary**: copy the programs saved in §3 back over the v5 ones, to the paths in `$B-bin/paths.txt`:
-  `for p in fy fyd fyd-browser-worker; do [ -f "$B-bin/$p" ] && cp -p "$B-bin/$p" "$(grep "/$p\$" "$B-bin/paths.txt")"; done`,
+  `for p in fy fyd fyd-browser-worker; do if [ -f "$B-bin/$p" ]; then cp -p "$B-bin/$p" "$(grep "/$p\$" "$B-bin/paths.txt")"; fi; done`,
   then check `fy --version` prints `4.291.`. (Only an accidental v4 self-update on a standalone install never moved off
   4.x, because v4 refuses a standalone release it cannot verify; after §5 it did move, which is why §3 saved them.)
 - **Homebrew**: `brew upgrade` installs what the tap has now, which is 5.x, and brew cannot pin a cask version. The way
