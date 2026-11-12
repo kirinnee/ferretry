@@ -2,7 +2,7 @@ import type { Instant } from '@ferretry/std';
 import { parseHandoffPointer, type SendEvidence } from '../../seams/protocol.ts';
 import { PASTE_PLACEHOLDER_PATTERN } from '../../seams/composer.ts';
 import type { ObservedHumanInput } from '../../seams/transcript-types.ts';
-import { isFreshAcceptance, type SendRecord, type SendSenderKind } from './types.ts';
+import { type SendRecord, type SendSenderKind } from './types.ts';
 
 /**
  * The pure half of knowing where a send went: matching ledger records against what the harness
@@ -308,12 +308,14 @@ function kindOf(input: ObservedHumanInput): SendEvidence['kind'] {
 }
 
 /**
- * How far before its acceptance a transcript record may be written and still be this send's: the ordinary clock-skew
- * slack, except for a send a person's Retry re-accepted, whose window opens exactly AT that acceptance — the input that
- * left it unconfirmed is history, and sits within the slack of a Retry made soon after it.
+ * The earliest instant a transcript input may count as this send's: the durable floor a person's Retry of an
+ * update-unconfirmed send wrote (no slack: the input that left it unconfirmed is history), else the ordinary clock-skew
+ * slack before its acceptance.
  */
-function slackFor(record: SendRecord, slackMs: number): number {
-  return isFreshAcceptance(record) ? 0 : slackMs;
+function evidenceSince(record: SendRecord, slackMs: number): number {
+  return record.evidenceNotBefore === undefined
+    ? Date.parse(record.acceptedAt) - slackMs
+    : Date.parse(record.evidenceNotBefore);
 }
 
 /**
@@ -335,7 +337,7 @@ function judgeSends(
   const ordered = [...watched].sort((left, right) => Date.parse(left.acceptedAt) - Date.parse(right.acceptedAt));
   for (const record of ordered) {
     const needle = normalized(record.matchText ?? record.message);
-    const since = Date.parse(record.acceptedAt) - slackFor(record, slackMs);
+    const since = evidenceSince(record, slackMs);
     const after = (input: ObservedHumanInput): boolean => Date.parse(input.observedAt) >= since;
     const entered = inputs.find(
       input =>
@@ -423,7 +425,7 @@ function mergedRun(
     for (let end = start; end < pending.length; end += 1) {
       const record = pending[end] as SendRecord;
       // Every part must have been accepted before the record that carries it was written.
-      if (observedAt < Date.parse(record.acceptedAt) - slackFor(record, slackMs)) break;
+      if (observedAt < evidenceSince(record, slackMs)) break;
       joined += squeezed(record.matchText ?? record.message);
       if (!target.startsWith(joined)) break;
       if (joined === target && end > start) return pending.slice(start, end + 1);

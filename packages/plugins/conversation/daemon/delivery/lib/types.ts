@@ -125,6 +125,13 @@ export interface SendRecord {
   readonly path: SendPath;
   readonly message: string;
   readonly matchText?: string | undefined;
+  /**
+   * The earliest instant a transcript input may count as proof this send was delivered, with NO clock-skew slack. Written
+   * ONLY by a person's Retry of an update-unconfirmed send, at the moment that Retry was accepted, and moved by nothing
+   * else: an input from before it is the history that left the send unconfirmed. Absent for every other send, whose
+   * evidence window opens `matchSlackMs` before its acceptance. The daemon's own bookkeeping: it never leaves the daemon.
+   */
+  readonly evidenceNotBefore?: string | undefined;
   /** The turn this send STARTS, when it starts one. Absent for a native-queue ride. */
   readonly turn?: number | undefined;
   readonly attachmentIds?: readonly string[] | undefined;
@@ -206,6 +213,7 @@ export type SendSettlement = Partial<
     | 'queueProof'
     | 'attempt'
     | 'attemptAt'
+    | 'evidenceNotBefore'
     | 'deadlineAt'
     | 'retryable'
     | 'typedNotSent'
@@ -317,16 +325,6 @@ export function isUnconfirmedTyping(record: Pick<SendRecord, 'fate' | 'unaccount
  */
 export function isUpdateUnconfirmed(record: Pick<SendRecord, 'unaccountedReason'> | undefined): boolean {
   return record?.unaccountedReason === 'update_unconfirmed';
-}
-
-/**
- * Whether this send's acceptance is its LATEST attempt, after an earlier one: the one shape a person's Retry of an
- * update-unconfirmed send leaves (`SessionSendService.reattempt` re-stamps `acceptedAt` with the new attempt's time).
- * An ordinary retry keeps its first acceptance, so its `attemptAt` moves on and this is false. For such a send the
- * transcript evidence window opens exactly AT the acceptance: no input written before the Retry may deliver it.
- */
-export function isFreshAcceptance(record: Pick<SendRecord, 'attempt' | 'attemptAt' | 'acceptedAt'>): boolean {
-  return (record.attempt ?? 1) > 1 && record.attemptAt === record.acceptedAt;
 }
 
 /** One durable state change a send or an interrupt makes, named by the event it journals. */

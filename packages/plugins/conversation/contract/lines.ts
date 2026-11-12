@@ -86,7 +86,7 @@ export const SendLineFateSchema = z.enum([
 /**
  * One line of `sends.jsonl`: the daemon's own record of a send, appended whole at every change (accept, revise, settle,
  * withdraw), the last line for a `sendId` winning. Unlike the wire view it has no `v`, carries the daemon's bookkeeping
- * (`submitNudges`, `busyTyped`, `untyped`, `noticesOwed`, `matchText`, `payloadFile`: none of it leaves the daemon), and
+ * (`submitNudges`, `busyTyped`, `untyped`, `noticesOwed`, `evidenceNotBefore`, `matchText`, `payloadFile`: none of it leaves the daemon), and
  * adds `at`, when this line was written, and `reason`, only on a withdrawal.
  */
 export const SendLineSchema = z.strictObject({
@@ -115,6 +115,8 @@ export const SendLineSchema = z.strictObject({
   queueProof: z.enum(['transcript', 'pane']).optional(),
   attempt: PositiveInteger.optional(),
   attemptAt: InstantSchema.optional(),
+  /** A person's Retry of an update-unconfirmed send: no transcript input before this instant is proof of delivery. */
+  evidenceNotBefore: InstantSchema.optional(),
   deadlineAt: InstantSchema.optional(),
   retryable: z.boolean().optional(),
   typedNotSent: z.boolean().optional(),

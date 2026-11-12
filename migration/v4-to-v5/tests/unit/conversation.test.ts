@@ -437,6 +437,30 @@ console.log(JSON.stringify({ text }));
           for (const line of written) SendRecordSchema.parse(v5SendView(line));
         });
 
+      test('the conversion never writes an evidence floor: only a person’s Retry in 5.0 does', async () => {
+        const written = await converted(
+          [
+            send('first', 'delivered', { evidence: codexPayloadId(), fateAt: AT }),
+            send('second', 'accepted', { ...second, untyped: true }),
+            send('third', 'accepted', { ...second, attempt: 2, attemptAt: second.acceptedAt }),
+          ],
+          null,
+          'codex',
+        );
+        expect(state(written)).toEqual([
+          ['first', 'delivered', undefined],
+          ['second', 'unaccounted', 'update_unconfirmed'],
+          ['third', 'unaccounted', 'update_unconfirmed'],
+        ]);
+        expect(written[1]?.untyped).toBe(true);
+        for (const line of written) expect(line).not.toHaveProperty('evidenceNotBefore');
+        // The line schema carries the floor a 5.0 Retry later writes; a line without one parses unchanged.
+        const withFloor = { ...written[1], evidenceNotBefore: '2026-11-11T01:00:30.000Z' };
+        expect(V5SendLineSchema.parse(withFloor).evidenceNotBefore).toBe('2026-11-11T01:00:30.000Z');
+        expect(V5SendLineSchema.parse(written[1]).evidenceNotBefore).toBeUndefined();
+        expect(V5SendLineSchema.safeParse({ ...written[1], evidenceNotBefore: 'soon' }).success).toBe(false);
+      });
+
       test('every unresolved fate is marked, and delivered and withdrawn rows are not', async () => {
         const written = await converted(
           [

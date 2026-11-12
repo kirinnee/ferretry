@@ -341,6 +341,7 @@ function restorable(record: SendRecord): SendSettlement {
     submitNudges: record.submitNudges,
     busyTyped: record.busyTyped,
     untyped: record.untyped,
+    evidenceNotBefore: record.evidenceNotBefore,
   };
 }
 
@@ -508,9 +509,10 @@ export class SessionSendService {
         fate: 'accepted',
         attempt,
         attemptAt: now,
-        // A person's Retry of an update-unconfirmed send is a FRESH send: the tracker matches transcript entries from
-        // `acceptedAt`, and the historical input that left it unconfirmed is exactly the one it must not confirm from.
-        ...(leftByUpdate ? { acceptedAt: now } : {}),
+        // A person's Retry of an update-unconfirmed send is a FRESH send: the historical input that left it unconfirmed
+        // is exactly the one it must not confirm from. The floor is written HERE and nowhere else (a later Enter, a
+        // queue, a resubmit or a Warden retry never moves it), and the tracker honours it with no clock-skew slack.
+        ...(leftByUpdate ? { acceptedAt: now, evidenceNotBefore: now } : {}),
         fateAt: undefined,
         deadlineAt: undefined,
         unaccountedReason: undefined,

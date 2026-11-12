@@ -182,7 +182,7 @@ export const V5QueueLineSchema = z.discriminatedUnion('kind', [
 /**
  * One `sends.jsonl` line: v5's internal `SendRecord` (`delivery/lib/types.ts`) as `StateSendLedger` appends it, with
  * the append's `at` and a withdrawal's `reason`. Unlike the wire view it keeps `withdrawn` as a fate and the ledger's
- * private bookkeeping (`matchText`, `batch`, `submitNudges`, `busyTyped`, `untyped`, `noticesOwed`).
+ * private bookkeeping (`matchText`, `batch`, `submitNudges`, `busyTyped`, `untyped`, `evidenceNotBefore`, `noticesOwed`).
  */
 export const V5SendLineSchema = z.strictObject({
   format: Format,
@@ -209,6 +209,7 @@ export const V5SendLineSchema = z.strictObject({
   queueProof: z.enum(['transcript', 'pane']).optional(),
   attempt: Positive.optional(),
   attemptAt: Instant.optional(),
+  evidenceNotBefore: Instant.optional(),
   deadlineAt: Instant.optional(),
   retryable: z.boolean().optional(),
   typedNotSent: z.boolean().optional(),
