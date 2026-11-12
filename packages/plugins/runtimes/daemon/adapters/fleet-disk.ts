@@ -160,15 +160,6 @@ export class FleetDisk {
     if (outcome.outcome === 'exists') throw new AlreadyExistsError(path);
   }
 
-  /**
-   * Writes `bytes` at `path` through the same root writer as {@link create} (a private temporary, then a rename onto the
-   * name), but REPLACING what is there: a link at the name is replaced itself, never followed. The caller decides that
-   * what is there is its own; nothing is ever removed, and a folder at the name is refused by the root.
-   */
-  async replace(path: string, bytes: Uint8Array, mode: number): Promise<void> {
-    await this.fleet.publish(this.fenced(path), bytes, { mode });
-  }
-
   /** `mkdir -p` in the fleet folder; each folder it makes gets `mode`. */
   async makeFolder(path: string, mode: number): Promise<void> {
     await this.fleet.makeDirectory(this.fenced(path), { mode });

@@ -71,11 +71,13 @@ describe('the words about an unreadable manifest', () => {
   });
 
   it('says in one line that it is being rebuilt and where the old file is, or that it could not be kept', () => {
-    const kept = manifestRebuiltSentence('/fleet/manifest.json', '/fleet/manifest.json.unreadable');
+    const kept = manifestRebuiltSentence('/fleet/manifest.json', '/fleet/manifest.json.unreadable', true);
     expect(kept).toContain('/fleet/manifest.json could not be read');
     expect(kept).toContain('rebuilt from the configuration');
     expect(kept).toContain('/fleet/manifest.json.unreadable (owner-only)');
-    expect(manifestRebuiltSentence('/fleet/manifest.json', undefined)).toContain('could not be kept aside');
+    const notKept = manifestRebuiltSentence('/fleet/manifest.json', '/fleet/manifest.json.unreadable', false);
+    expect(notKept).toContain('could not be kept aside at /fleet/manifest.json.unreadable');
+    expect(notKept).not.toContain('(owner-only)');
     expect(kept).not.toContain('\n');
   });
 

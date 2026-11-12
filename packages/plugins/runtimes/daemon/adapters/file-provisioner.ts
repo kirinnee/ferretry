@@ -7,7 +7,6 @@ import {
   keptAsideText,
   MAX_KEPT_DAMAGE_BYTES,
   manifestRebuiltSentence,
-  readKeptAside,
   readManifestText,
 } from '../lib/manifest-reading.ts';
 import {
@@ -66,12 +65,6 @@ const DEFAULT_FOLDER_MODE = 0o777;
 
 /** The largest file the provisioner reads whole to judge it (a wrapper, a settings file, a record, a document). */
 const MAX_READ_BYTES = 4 * 1024 * 1024;
-
-/**
- * The largest aside file read back to judge it: the envelope of a damaged file of at most
- * {@link MAX_KEPT_DAMAGE_BYTES}, in base64 (4/3) with its few fixed fields.
- */
-const MAX_ASIDE_FILE_BYTES = Math.ceil((MAX_KEPT_DAMAGE_BYTES * 4) / 3) + 4096;
 
 const MaterialisedRecordSchema = z.strictObject({
   version: z.literal(1),
@@ -777,9 +770,9 @@ export class FileFleetProvisioner implements FleetProvisioner {
    * is replaced the damaged bytes are kept ONCE, in ONE fixed aside file beside it (a self-describing envelope, owner-only),
    * so a person can still look at what the last version wrote. A copy rather than a move: the original stays in place until
    * the apply's own journal replaces it, so no reader sees the gap and a rolled-back apply leaves it exactly as it was.
-   * Nothing is ever deleted: the aside is created when the name is free, and replaced only while it is single-link regular
-   * file holding OUR envelope (so it carries the latest damage); anything else at the name is left as it is. Best-effort:
-   * a copy that cannot be kept is said once, and the manifest is still rebuilt.
+   * Nothing is ever deleted or replaced: the aside is created once, when the name is free. Anything already at the name
+   * (whoever made it, our own earlier aside included) is left exactly as it is. Best-effort: a copy that cannot be kept is
+   * said once, naming the aside, and the manifest is still rebuilt.
    */
   private async keepUnreadableManifest(manifestPath: string): Promise<void> {
     const entry = await this.disk.lstat(manifestPath);
@@ -794,40 +787,24 @@ export class FileFleetProvisioner implements FleetProvisioner {
       bytes = undefined;
     }
     if (bytes !== undefined && readManifestText(new TextDecoder().decode(bytes)).kind !== 'unreadable') return;
-    const keptAt = bytes === undefined ? undefined : await this.keepAside(keptAsideName(manifestPath), bytes);
-    this.say?.(manifestRebuiltSentence(manifestPath, keptAt));
+    const aside = keptAsideName(manifestPath);
+    const kept = bytes !== undefined && (await this.keepAside(aside, bytes));
+    this.say?.(manifestRebuiltSentence(manifestPath, aside, kept));
   }
 
   /**
-   * The aside file's path once it holds `damaged`, or `undefined` when it could not be kept. Written through the one
-   * root writer (a private temporary, then a name): created exclusively when the name is free, replaced by rename only
-   * when what is there is a single-link regular file that parses as our envelope. A foreign file, a link, a folder, a
-   * hard-linked file or anything unparsable is untouched. No call here removes anything.
+   * Whether `damaged` is now kept at `target`. Written through the one
+   * root writer (a private temporary, then an exclusive link onto the name): ONLY when the name is free. A name that is
+   * taken, by anything, is left untouched and nothing is written, so no publish or rename ever reaches an existing
+   * entry. No call here removes anything.
    */
-  private async keepAside(target: string, damaged: Uint8Array): Promise<string | undefined> {
+  private async keepAside(target: string, damaged: Uint8Array): Promise<boolean> {
     try {
-      const digest = sha256(damaged);
-      const text = keptAsideText(damaged, digest, this.now());
-      const existing = await this.disk.lstat(target);
-      if (existing === undefined) {
-        try {
-          await this.disk.create(target, Buffer.from(text), 0o600);
-          return target;
-        } catch (error) {
-          if (!(error instanceof AlreadyExistsError)) return undefined;
-          // Something arrived at the name since the look: judge it as any other occupant below.
-        }
-      }
-      const occupant = await this.disk.lstat(target);
-      if (occupant?.kind !== 'file' || occupant.links !== 1 || occupant.size > MAX_ASIDE_FILE_BYTES) return undefined;
-      const ours = readKeptAside(new TextDecoder().decode(await this.disk.readBytes(target, MAX_ASIDE_FILE_BYTES)));
-      if (ours === undefined) return undefined;
-      // Already holding this very damage and private: nothing to write. Otherwise the latest damage replaces it.
-      if (ours.sha256 !== digest || (occupant.mode & 0o7777) !== 0o600)
-        await this.disk.replace(target, Buffer.from(text), 0o600);
-      return target;
+      if ((await this.disk.lstat(target)) !== undefined) return false;
+      await this.disk.create(target, Buffer.from(keptAsideText(damaged, sha256(damaged), this.now())), 0o600);
+      return true;
     } catch {
-      return undefined;
+      return false;
     }
   }
 

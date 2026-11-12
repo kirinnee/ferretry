@@ -36,7 +36,7 @@ export const KEPT_ASIDE_SUFFIX = '.unreadable';
 /** The largest damaged manifest that is kept aside: a bigger one is not kept (and the manifest is still rebuilt). */
 export const MAX_KEPT_DAMAGE_BYTES = 4 * 1024 * 1024;
 
-/** The fixed name the damaged manifest is kept under: ONE file per manifest, replaced only while it is ours, never deleted. */
+/** The fixed name the damaged manifest is kept under: ONE file per manifest, created once, never replaced or deleted. */
 export function keptAsideName(manifestPath: string): string {
   return `${manifestPath}${KEPT_ASIDE_SUFFIX}`;
 }
@@ -89,10 +89,11 @@ export class FleetManifestUnreadableError extends Error {
 }
 
 /** One plain line for the log: the file is named, its contents never are. */
-export function manifestRebuiltSentence(manifestPath: string, keptAt: string | undefined): string {
-  const kept =
-    keptAt === undefined ? 'the old file could not be kept aside' : `the old file is kept at ${keptAt} (owner-only)`;
-  return `The fleet manifest at ${manifestPath} could not be read, so it is being rebuilt from the configuration; ${kept}.`;
+export function manifestRebuiltSentence(manifestPath: string, aside: string, kept: boolean): string {
+  const note = kept
+    ? `the old file is kept at ${aside} (owner-only)`
+    : `the old file could not be kept aside at ${aside} (a file is already there, or it could not be written)`;
+  return `The fleet manifest at ${manifestPath} could not be read, so it is being rebuilt from the configuration; ${note}.`;
 }
 
 /** What a reader that needs the launch inventory says while the manifest cannot be read: retryable, not permanent. */
