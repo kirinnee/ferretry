@@ -70,12 +70,12 @@ export interface FolderSettingsVariables {
 }
 
 /**
- * Raised when a folder's own settings set a variable this runtime takes from the secret store.
+ * Raised when folder settings conflict with a login's explicit `claude.env` override that needs a reference.
  *
  * Claude Code ranks a project's `env` above the process environment the secret reaches it through (and a
- * secret may not be pinned into a `--settings` file, which travels in argv), so the ferret would start
- * signed out and sit on "Not logged in". Said at the start instead, naming the file and the key — never
- * the value.
+ * secret may not be pinned into a `--settings` file), so the deliberate override cannot be honoured.
+ * Said at the start instead, naming the file and the key — never the value. Plain login env is allowed
+ * to lose to project settings.
  */
 export class FolderSettingsOverrideError extends Error {
   constructor(
@@ -84,7 +84,7 @@ export class FolderSettingsOverrideError extends Error {
     readonly runtime: string,
   ) {
     super(
-      `this folder's settings file ${file} sets ${variable}, which overrides runtime ${runtime}'s login (it takes ${variable} from the secret store or the host environment), so it would start signed out. Remove ${variable} from ${file}, or keep it out of the secret store.`,
+      `this folder's settings file ${file} sets ${variable}, which conflicts with runtime ${runtime}'s explicit login claude.env override (it takes ${variable} from the secret store or the host environment). Remove ${variable} from ${file}, or move the login's variable to plain env so project settings can win.`,
     );
     this.name = 'FolderSettingsOverrideError';
   }
@@ -160,11 +160,10 @@ export class FleetLaunchEnvironment implements AccountLaunchEnvironment {
       published => wrapperNameOf(published.wrapper) === name || published.wrapper === wrapper,
     );
     if (account === undefined) return {};
-    // Before the store is opened: a folder that would blank the login refuses the start outright. EVERY variable
-    // left to the process environment counts — a `${secret:}` one and a bare `$OTHER` reference alike — because
-    // neither is pinned in a settings file, so a folder's own `env` outranks both.
+    // Only an explicit claude.env override opts into a refusal. Plain login env and profile bindings
+    // stay process-only and may lose to a project's settings, even when they reference the secret store.
     const secretNames = Object.keys(account.secretEnv);
-    const taken = new Set([...secretNames, ...(account.referencedEnv ?? [])]);
+    const taken = new Set(account.claudeEnvOverrides ?? []);
     if (account.kind === 'claude' && taken.size > 0 && cwd !== undefined && this.folderSettings !== undefined) {
       for (const { file, names } of await this.folderSettings.variables(cwd)) {
         const clash = names.find(variable => taken.has(variable));

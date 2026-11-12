@@ -150,12 +150,12 @@ const accountShape = {
    */
   secretEnv: z.record(NonEmptyString, SecretTemplateSchema).default({}),
   /**
-   * The NAMES of the variables whose whole value is a bare `$OTHER` reference, resolved from the host's
-   * environment or its secrets file when the wrapper runs. Names only, never a value, and never pinned in a
-   * `--settings` file. Published for the same reader as `secretEnv`: the start-time refusal of a folder
-   * whose own Claude settings would override them (`docs/secrets.md`). Absent is none.
+   * The NAMES of explicit login `claude.env` keys whose effective launch values reference a secret or
+   * another variable, so cannot be pinned in `--settings`. Only these deliberate overrides refuse a
+   * start when project settings set the same key (`docs/secrets.md`). Plain login and profile env keep
+   * their process-environment precedence. Names only, never values; absent is none.
    */
-  referencedEnv: z.array(NonEmptyString).optional(),
+  claudeEnvOverrides: z.array(NonEmptyString).optional(),
 };
 
 /**

@@ -1,17 +1,15 @@
 /**
- * The login's own environment, pinned into a Claude runtime's `--settings` file (`fixed.json`).
+ * A login's explicit `claude.env` overrides, pinned into a Claude runtime's `--settings` file (`fixed.json`).
  *
- * WHY. Claude Code ranks a settings file's `env` above the process environment, and a folder's
- * `.claude/settings.local.json` above nothing a wrapper can export. So a repo that blanks
- * `ANTHROPIC_BASE_URL` silently turned a runtime on another provider into a signed-out one. A
- * `--settings` file ranks above both the project and the local file, per variable, so the variables a
- * login names are written there too (docs/launch-settings.md).
+ * WHY. Project .claude settings win over a login's plain `env`, as teams intend. A value under the
+ * login's `claude.env` deliberately opts into overriding the project and local files: `--settings`
+ * ranks above both, per variable (docs/launch-settings.md). Catalog tier slots stay process-only.
  *
  * THE SECRET RULE. Nothing a secret store or an environment reference resolves is ever written to that
  * file. (A literal credential in it never reaches an argv either: a fast or compact start writes the merged
  * overlay to a per-launch file and names only its path.) A variable that names `${secret:NAME}` (or `$OTHER`, whose
  * value comes from the host's environment or the secrets file at exec) stays process-environment only,
- * resolved at launch as it always was. A LITERAL in the login's YAML is already plain text in
+ * resolved at launch as it always was. A LITERAL under the login's `claude.env` is already plain text in
  * configuration and is pinned. The rule is enforced twice: {@link pinnableLoginEnvironment} filters, and
  * {@link secretBackedOverlayKeys} lets the write step refuse (docs/secrets.md).
  *

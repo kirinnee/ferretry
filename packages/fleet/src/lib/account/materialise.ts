@@ -55,7 +55,6 @@ import { type SettingsObject, serializeSettings } from '../settings.ts';
 import { sharedHistoryPoolDirectory, sharedHistoryPoolRequests } from '../shared-history.ts';
 import { CREDENTIAL_ENV } from '../usage.ts';
 import {
-  envReferenceName,
   MANAGED_MARKER,
   RUNTIME_NAME_ENV,
   renderCommandScript,
@@ -196,8 +195,8 @@ interface PlannedRuntime {
   /** The runtime's own `compactAt`, else its profile's. Absent is `auto`. */
   readonly compactAt?: CompactAt;
   readonly secretEnv: Readonly<Record<string, string>>;
-  /** The names of the variables that are a bare `$OTHER` reference, resolved at exec and never pinned. */
-  readonly referencedEnv: readonly string[];
+  /** Explicit `claude.env` keys that cannot be pinned because their effective value is a reference. */
+  readonly claudeEnvOverrides: readonly string[];
   /** Why it cannot launch, when it cannot. */
   readonly blocked?: string;
 }
@@ -415,29 +414,23 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     for (const [variable, reason] of Object.entries(REFUSED_LAUNCH_VARIABLES)) {
       if (variable in env) problems.push({ runtime: name, message: `it may not set ${variable}: ${reason}` });
     }
-    // The login's variables, pinned in the --settings file as well, so a folder's own settings cannot blank
-    // them: the KEYS the login and the catalog name, at the value the launch will actually run with (a
-    // profile's same-named variable wins here as it does in the process environment). Only literals are
-    // pinned; a reference stays in the process environment and is published below.
+    // Project settings win over plain login env and catalog tier slots. Only an explicit claude.env
+    // key opts into --settings precedence, at the effective launch value (a profile still wins a clash).
+    // References stay process-only; publish those explicit keys so a conflicting project refuses early.
     const profileSettingsFlag = resolved.flags.some(
       ({ flag }) => flag === '--settings' || flag.startsWith('--settings='),
     );
-    const pins =
-      harness === 'claude'
-        ? pinnableLoginEnvironment(
-            Object.fromEntries(
-              Object.keys({
-                ...(store.store === 'environment' ? credentialLaunchEnvironment(store) : {}),
-                ...derived.env,
-              }).flatMap(variable => (variable in env ? [[variable, env[variable] as string]] : [])),
-            ),
-          )
-        : {};
+    const overrides = Object.fromEntries(
+      Object.keys(
+        harness === 'claude' && credential.store === 'environment' ? (credential.claude?.env ?? {}) : {},
+      ).flatMap(variable => (variable in env ? [[variable, env[variable] as string]] : [])),
+    );
+    const pins = pinnableLoginEnvironment(overrides);
     if (!runtime.agent && Object.keys(pins).length > 0 && profileSettingsFlag) {
       problems.push({
         runtime: name,
         message:
-          "its profile passes its own --settings, and Claude Code honours only one, so the login's environment cannot be pinned against a folder's settings; remove --settings from the profile",
+          "its profile passes its own --settings, and Claude Code honours only one, so the login's claude.env cannot be pinned against a folder's settings; remove --settings from the profile",
       });
     }
     const overlay =
@@ -526,9 +519,8 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       secretEnv: sorted(
         Object.fromEntries(Object.entries(env).filter(([, value]) => secretReferencesIn(value).length > 0)),
       ),
-      referencedEnv: Object.entries(env)
-        .filter(([, value]) => secretReferencesIn(value).length === 0 && envReferenceName(value) !== undefined)
-        .map(([variable]) => variable)
+      claudeEnvOverrides: Object.keys(overrides)
+        .filter(variable => !(variable in pins))
         .sort(),
       ...(blocked === undefined ? {} : { blocked }),
     });
@@ -569,7 +561,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         available: reason === undefined,
         unavailableReason: reason ?? null,
         secretEnv: runtime.secretEnv,
-        ...(runtime.referencedEnv.length === 0 ? {} : { referencedEnv: runtime.referencedEnv }),
+        ...(runtime.claudeEnvOverrides.length === 0 ? {} : { claudeEnvOverrides: runtime.claudeEnvOverrides }),
       };
     }),
     runtimes: planned.map(runtime => ({

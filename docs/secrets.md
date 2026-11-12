@@ -316,22 +316,28 @@ pane's exec is still fail-closed: the new wrapper carries its own guard for ever
 
 ### A login's environment against a folder's own settings
 
-Claude Code ranks a folder's `.claude/settings.json` and `settings.local.json` `env` **above the process
-environment**, so a repo that blanks `ANTHROPIC_BASE_URL` used to hijack a runtime on another provider. A
-runtime's `--settings` file (`<home>/.fy/fixed.json`) ranks above both, so the login's **literal**
-variables — `env`, `claude.env` and the catalog's model pins — are pinned in its `env`, for interactive
-runtimes as well as agents.
+**Project .claude settings win over a login's env. To make a value win over the project, put it under
+the login's `claude.env`.** Claude Code ranks a folder's `.claude/settings.json` and `settings.local.json`
+`env` above the process environment, which is where plain login `env` and catalog model tier slots stay.
+Teams keep their project configuration by default.
+
+For example, **claude-kimi** deliberately puts its loge-oss provider address under the login's
+`claude.env`. Only those explicit **literal** values are pinned in the runtime's `--settings` file
+(`<home>/.fy/fixed.json`), which ranks above project and local settings. An interactive runtime gets an
+env-only file and `--settings` only when there are literals to pin. Without them its launch arguments
+stay unchanged, including a profile's own `--settings`. With literal pins, a profile that already passes
+`--settings` is refused at apply time because Claude accepts only one.
 
 **The rule: a value the secret store resolves never goes into `fixed.json`.** A variable that names
 `${secret:NAME}` — or a bare `$OTHER` reference, which resolves from the host's environment or the secrets
 file at exec — stays process environment only. It is enforced twice: the pin step filters, and the write
 step **throws** (`FleetMaterialiseError`, naming the key, never a value) if one ever reaches it. A
-variable both the login and the profile set is pinned at the **profile's** value, the one the wrapper
+variable both the login's `claude.env` and the profile set is pinned at the **profile's** value, the one the wrapper
 exports, so `--settings` cannot hand the login's value back; if the profile's value is a reference, the
 key is not pinned at all.
 
 **A literal credential never reaches an argv either.** A literal in a login's YAML
-(`ANTHROPIC_AUTH_TOKEN=loge-internal`) is plain text in configuration, so it **is** pinned in `fixed.json`
+(`claude.env.ANTHROPIC_AUTH_TOKEN=loge-internal`) is plain text in configuration, so it **is** pinned in `fixed.json`
 (a 0600 file). But fast mode or a compaction trigger _replaces_ that file with a merged overlay, and an
 overlay used to be written inline into `--settings '<json>'`, which shows in `ps`, the pane's command line
 and the session document's recorded `command`. An overlay that carries an `env` is therefore **never
@@ -348,15 +354,16 @@ inlined**: the daemon writes it to a per-launch file and the argv names only its
   rather than inline such an overlay, so a caller that forgets the file fails loudly.
 - An overlay with no `env` (a login that pins nothing) is still inline, as before.
 
-**A variable left to the process environment cannot be pinned, so a folder that sets one refuses the
-start.** Before a Claude ferret launches, the daemon reads every settings file Claude Code reads for the
+**Only an explicit `claude.env` override that references a secret or another variable can refuse the
+start.** Before a Claude ferret with such an override launches, the daemon reads the settings files Claude Code reads for the
 launch folder — its own `.claude/settings.json` and `settings.local.json`, and the local file at the git
 root (the **main checkout's** root, in a linked worktree; not when the root is the home directory). If any
-sets a variable the runtime takes from the store (`secretEnv`) or from a bare `$OTHER` reference
-(`referencedEnv` in the manifest, names only), the ferret does not start and the reason names the file
-path and the key (never the value): remove it there, or keep that key out of the secret store.
+sets one of those explicit keys (`claudeEnvOverrides` in the manifest, names only), the ferret does not
+start and the reason names the file path and key (never the value): remove it there, or move that login
+variable to plain `env` so project settings can win. A folder setting a plain login `env` or profile-only
+key starts normally, even when that variable references the secret store.
 
-- **GAP — a folder's secret-backed override is refused, not defeated.** There is no way to make a
+- **GAP — a folder's conflict with a secret-backed `claude.env` override is refused, not defeated.** There is no way to make a
   store-backed `ANTHROPIC_AUTH_TOKEN` win over a folder that blanks it without writing the secret to a
   file. An `apiKeyHelper` fallback (the wrapper exports the value as a Ferretry-owned variable and
   `fixed.json` carries only command text) was designed and **not built**; it needs a contract test
@@ -364,8 +371,6 @@ path and the key (never the value): remove it there, or keep that key out of the
 - **GAP — managed policy and intermediate parents are not checked.** Only the files Claude Code documents
   reading (the folder's, the git root's local file) are. Ownership exceptions Claude applies to the root
   location are not modelled.
-- **GAP — profile-only `env` is not pinned.** A variable only the profile sets is the person's tuning and
-  keeps its process-environment precedence, so a folder can still override it.
 
 ## Accounts and sign-ins: the store
 
