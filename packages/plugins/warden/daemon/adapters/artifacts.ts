@@ -4,7 +4,6 @@ import {
   provenancePath,
   reportsWorthReading,
   type WardenArtifacts,
-  type WardenReadScope,
   type WardenReportFileSystem,
   type WardenSpawnProvenance,
 } from '../lib/index.ts';
@@ -60,11 +59,12 @@ export class FileWardenArtifacts implements WardenArtifacts {
    * Newest is decided by modification time through the same ordering the verdict
    * list uses, so "the latest report" means the same thing on both surfaces — a
    * filename sort would disagree the moment a report was rewritten.
+   *
+   * The owner's and a person's: a FERRET is never shown report text, so the route does not ask for it.
    */
-  async latest(scope?: WardenReadScope): Promise<{ readonly reportId: string; readonly head: string } | undefined> {
+  async latest(): Promise<{ readonly reportId: string; readonly head: string } | undefined> {
     const files = await this.files.listFiles(this.reportsDirectory);
-    // For a scope, "newest" is the newest report the scope may read: a stranger's newer report is not its latest.
-    const newest = scope === undefined ? await this.newestOf(files) : await this.reader.newestReportFor(files, scope);
+    const newest = await this.newestOf(files);
     if (newest === undefined) return undefined;
     return {
       reportId: basename(newest.path),

@@ -401,6 +401,12 @@ export interface WardenRuntimeState {
   /** Why each queued target is queued, keyed by target session id. */
   readonly queueMeta?: Readonly<Record<string, WardenQueueEntryMeta>>;
   readonly sweepCoverage?: WardenSweepCoverage;
+  /**
+   * The instant of the latest sweep that SCANNED each ferret, keyed by session id (a ferret the fleet no longer lists is
+   * forgotten). A ferret caller's "last swept" is read from the entries of its own lineage only, never the global
+   * `lastSweepAt`, so it cannot learn of, or change with, a sweep that looked at nobody of its own.
+   */
+  readonly scanned?: Readonly<Record<string, string>>;
   /** The last 30 UTC days of the Warden's work, oldest first (`daily.ts`). Absent in a document that predates it. */
   readonly daily?: readonly WardenDayStats[];
   /** The sequence of the last investigator named `warden-xxxxxx`; the next one is issued after it. */
@@ -484,6 +490,7 @@ const RuntimeStateSchema = z.object({
   actions: z.array(WardenActionSchema).optional(),
   queueMeta: z.record(z.string(), QueueMetaSchema).optional(),
   sweepCoverage: SweepCoverageSchema.optional(),
+  scanned: z.record(z.string(), Instant).optional(),
   daily: DailySchema.optional(),
   investigatorSequence: z.number().int().min(0).max(WARDEN_INVESTIGATOR_MAX_SEQUENCE).optional(),
   revive: ReviveStateSchema.optional(),

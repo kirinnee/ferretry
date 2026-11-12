@@ -165,6 +165,7 @@ import {
 } from './failover.ts';
 import { blessingViews, investigationList, retainRecords, WARDEN_STATUS_LIST_LIMIT } from './feed.ts';
 import { type WardenFocusCard, wardenResumeMessage } from './focus-card.ts';
+import { wardenFixedNudge, wardenFixedResumeReason, wardenFixedStopReason } from './ferret-sentences.ts';
 import {
   capSkipKey,
   JEV_CHECKS_SHOWN,
@@ -214,7 +215,6 @@ import {
   type WardenRemedyPort,
   type WardenVerdictAct,
   wardenActDetail,
-  wardenNudgeMessage,
 } from './remedy.ts';
 import {
   detectOverdueReports,
@@ -269,6 +269,7 @@ import {
   type WardenRuntimeState,
   wardenMayStop,
 } from './state.ts';
+import { scannedAfter, sweptField } from './scanned.ts';
 import { DEFAULT_TICK_SECONDS } from './sus.ts';
 import { instantMs } from './time.ts';
 import {
@@ -370,10 +371,10 @@ export interface WardenArtifacts {
   writeProvenance(reportPath: string, provenance: WardenSpawnProvenance): Promise<void>;
   readReport(reportPath: string): Promise<string | undefined>;
   /**
-   * The newest report, for the status surface: its identity and its first lines. For a scope, the newest report ABOUT its
-   * lineage (a report that also covers a stranger, or no one, is not its report).
+   * The newest report, for the status surface: its identity and its first lines. The owner's: a ferret is never shown
+   * report text, so this takes no scope.
    */
-  latest(scope?: WardenReadScope): Promise<{ readonly reportId: string; readonly head: string } | undefined>;
+  latest(): Promise<{ readonly reportId: string; readonly head: string } | undefined>;
   /** Absolute path for a report written at `at`, optionally about `targetId`. */
   reportPath(at: string, targetId?: string): string;
 }
@@ -935,13 +936,14 @@ export class WardenSweepService {
     );
     return {
       config: stored.config,
-      ...(state.lastSweepAt === undefined ? {} : { lastSweepAt: state.lastSweepAt }),
+      ...sweptField(state, scope),
       ...(nextSweepAt === undefined ? {} : { nextSweepAt }),
       ...wireFlags(state.lastAnomalies ?? []),
       fingerprint: state.lastFingerprint ?? '',
       ...(liveWarden === undefined ? {} : { liveWarden }),
       ...(state.lastSpawnAt === undefined ? {} : { lastSpawnAt: state.lastSpawnAt }),
-      ...(await this.latestReportField(scope)),
+      // A report's head is the owner's: a ferret is never shown report text, so it is not even read for one.
+      ...(scope === undefined ? await this.latestReportField() : {}),
       failover: await this.failoverStatus(stored.config, resolved.accounts, state.failover ?? {}),
       login: resolved.login,
       triage: budget.status,
@@ -1017,7 +1019,9 @@ export class WardenSweepService {
       boards,
       unreadBoards: read.length - boards.length,
       reportsUnreadable: reports === undefined,
-      ...(state.lastSweepAt === undefined ? {} : { lastSweepAt: state.lastSweepAt }),
+      // A scoped reader's "last swept" is the latest sweep that scanned its own lineage, so a sweep that looked at
+      // nobody of its own can neither show nor change its outcome (no-sweep, clean-sweep, overdue).
+      ...sweptField(state, scope),
       ...(state.failover?.exhaustedSince === undefined ? {} : { exhaustedSince: state.failover.exhaustedSince }),
       sweepIntervalMinutes: stored.config.intervalMinutes,
       ...(scope === undefined ? {} : { mayRead: (sessionId: string) => scope.mayRead(sessionId) }),
@@ -1281,6 +1285,7 @@ export class WardenSweepService {
     state = {
       ...state,
       lastSweepAt: at,
+      scanned: scannedAfter(state.scanned, fleet, scannable, at),
       lastAnomalies: flagged,
       triageDay: { ...today, flags: today.flags + newFlagCount(state.lastAnomalies ?? [], flagged) },
     };
@@ -2103,6 +2108,8 @@ export class WardenSweepService {
           detail: (result, error) => jevActDetail(act.action, act.reason, outcome.confidence, result, error),
           nudge: jevNudgeMessage(outcome.message ?? ''),
           stopReason: `${sure}: ${act.reason}`,
+          // Jev judges ONE flag from that ferret's own facts, so its words are about the ferret it is told to.
+          resumeReason: act.reason,
         },
       );
       next = await this.noteJevCheck(done.state, check(done.done));
@@ -2567,8 +2574,11 @@ export class WardenSweepService {
     }
     const done = await this.carryOut(state, targetId, act, base, {
       detail: (outcome, error) => wardenActDetail(act, outcome, error),
-      nudge: wardenNudgeMessage(act.reason),
-      stopReason: `Warden verdict: ${act.reason}`,
+      // Everything TYPED INTO the ferret's own session is a fixed sentence for the flag's class: the investigator's
+      // reason is a model's prose about a report that may name other ferrets, and what a ferret is shown is not its.
+      nudge: wardenFixedNudge(record.kinds[0]),
+      stopReason: wardenFixedStopReason(record.kinds[0]),
+      resumeReason: wardenFixedResumeReason(record.kinds[0]),
     });
     return done.state;
   }
@@ -2587,6 +2597,7 @@ export class WardenSweepService {
       readonly detail: (outcome: 'done' | 'failed', error?: string) => string;
       readonly nudge: string;
       readonly stopReason: string;
+      readonly resumeReason: string;
     },
   ): Promise<{ readonly state: WardenRuntimeState; readonly done: boolean }> {
     // Read the fleet afresh: the sweep's snapshot is older than the verdict, and nothing else stands in
@@ -2603,7 +2614,7 @@ export class WardenSweepService {
         // The ferret started again carries on with its card (`focus-card.ts`). Only an auto one is handed
         // a turn: an interactive one is somebody's terminal, and keeps the resume domain's own behaviour.
         const card = target.config.mode === 'auto' ? await this.focusCard(targetId) : undefined;
-        const message = card === undefined ? undefined : wardenResumeMessage(act.action, act.reason, card);
+        const message = card === undefined ? undefined : wardenResumeMessage(act.action, words.resumeReason, card);
         if (act.action === 'resume') await this.ports.remedies.resume(targetId, message);
         else await this.ports.remedies.restart(targetId, message);
       } else await this.ports.remedies.stop(targetId, words.stopReason);
@@ -3839,8 +3850,8 @@ export class WardenSweepService {
     return resolveWardenLogin(config, installed, defaultRuntime);
   }
 
-  private async latestReportField(scope?: WardenReadScope): Promise<Pick<WardenStatusView, 'lastReport'>> {
-    const latest = await this.ports.artifacts.latest(scope).catch(() => undefined);
+  private async latestReportField(): Promise<Pick<WardenStatusView, 'lastReport'>> {
+    const latest = await this.ports.artifacts.latest().catch(() => undefined);
     return latest === undefined ? {} : { lastReport: latest };
   }
 

@@ -109,6 +109,17 @@ export const wardenNeedsYouCount = (status: WardenStatusView): number => {
 };
 
 /**
+ * What the strip says of the flags, in whose voice. The owner is told who needs THEM; a ferret's view (the only one
+ * that carries `wardenRunning`) is about its own work, so it is never told that nobody needs "you".
+ */
+export const wardenNeedsLabel = (status: WardenStatusView, needs: number, reporting: boolean): string => {
+  const ferretView = status.wardenRunning !== undefined;
+  if (needs > 0) return ferretView ? `${needs} flagged for your work` : `${needs} need you`;
+  if (!reporting) return 'no evidence yet';
+  return ferretView ? 'no flags for your work' : 'nobody needs you';
+};
+
+/**
  * When a cap reached only for this hour is back, `07:00 UTC` — or undefined when the cap is not
  * paced (reached for the day, or not reached).
  */

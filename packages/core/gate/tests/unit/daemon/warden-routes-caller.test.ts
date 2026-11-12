@@ -46,3 +46,27 @@ for (const key of PERSON_ONLY) {
     expect(admit(w, route, { bearer: FERRET_TOKEN, arrival: local(true) }).outcome).toBe('403 owner_only');
   });
 }
+
+/**
+ * Audit A fix 6. A ferret is never served a Warden report: the route answers it 404 with one plain sentence (the owner and a
+ * device read it as before). That refusal lives in the Warden handler, so the report route must still ADMIT a ferret bearer
+ * (`caller: 'any'`), as that ferret: were it a person-only route a ferret would be told 403 owner_only, which confirms the
+ * report route exists, and a handler change could never be reached. The real `GateAdmission` decides both below.
+ */
+test('audit A fix 6 GET /v1/warden/report reaches the handler for a ferret bearer, which is what refuses it', async () => {
+  const w = world();
+  const route = await declaredRoute('GET /v1/warden/report');
+  expect(route.caller).toBe('any');
+  const asFerret = admit(w, route, { bearer: FERRET_TOKEN, arrival: local(true) });
+  if (asFerret.decision.outcome !== 'admitted')
+    throw new Error('expected the ferret bearer admitted to the report route');
+  expect(ferretOf({ credential: asFerret.decision.standing.credential, actor: asFerret.decision.standing.actor })).toBe(
+    FERRET,
+  );
+  // The owner is admitted as nobody, so it reads the report whole.
+  const asOwner = admit(w, route, { bearer: ADMIN, arrival: local() });
+  if (asOwner.decision.outcome !== 'admitted') throw new Error('expected the admin token admitted to the report route');
+  expect(
+    ferretOf({ credential: asOwner.decision.standing.credential, actor: asOwner.decision.standing.actor }),
+  ).toBeUndefined();
+});

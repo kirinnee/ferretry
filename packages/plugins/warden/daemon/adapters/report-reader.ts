@@ -8,7 +8,6 @@ import {
   parseWardenSpawnProvenance,
   provenancePath,
   reportNamedFor,
-  reportOwnedBy,
   reportsWorthReading,
   type WardenReadScope,
   type WardenReportFile,
@@ -52,70 +51,19 @@ export class WardenReportReader {
 
   /** Read one exact report from this daemon's evidence directory. A verdict row
    * may carry a path, but this read surface must never become an arbitrary-file
-   * oracle for a paired browser. */
-  async readReportAt(reportPath: string, scope?: WardenReadScope): Promise<string | undefined> {
+   * oracle for a paired browser. The owner's and a person's: a FERRET is never
+   * served a report (the route refuses it before it gets here). */
+  async readReportAt(reportPath: string): Promise<string | undefined> {
     const reports = resolve(this.reportsDirectory);
     const candidate = resolve(reportPath);
     if (dirname(candidate) !== reports || !candidate.endsWith('.md')) return undefined;
-    return scope === undefined ? await this.readReport(candidate) : await this.readReportFor(candidate, scope);
+    return await this.readReport(candidate);
   }
 
   /**
-   * One report, only when EVERY part of it is attributable to the scope's lineage (`reportOwnedBy`: a strict check of the
-   * report's structure and of the daemon's own file name and sidecar, not the best-effort verdict parser); `undefined`
-   * otherwise, which is also what a report that does not exist or cannot be read reads as, so a caller cannot tell a
-   * stranger's report from a missing one. A report whose NAME puts it outside the lineage is not even opened.
-   */
-  async readReportFor(reportPath: string, scope: WardenReadScope): Promise<string | undefined> {
-    const named = reportNamedFor(reportPath);
-    if (named !== undefined && !scope.mayRead(named)) return undefined;
-    const content = await this.files.readText(reportPath).catch(() => undefined);
-    if (content === undefined) return undefined;
-    const provenance = await this.readProvenance(reportPath);
-    return this.ownedBy({ path: reportPath, content }, provenance, scope)
-      ? mergeWardenReportProvenance(content, provenance)
-      : undefined;
-  }
-
-  private ownedBy(
-    report: { readonly path: string; readonly content: string },
-    provenance: WardenSpawnProvenance | undefined,
-    scope: WardenReadScope,
-  ): boolean {
-    return reportOwnedBy(
-      {
-        ...report,
-        ...(provenance?.target === undefined ? {} : { provenanceTarget: provenance.target }),
-        ...(provenance === undefined ? {} : { provenanceWarden: provenance.wardenSessionId }),
-      },
-      scope,
-    );
-  }
-
-  /**
-   * The newest report the scope may read (see {@link readReportFor}), with its path. The scan is NEWEST FIRST over every
-   * report, not a window: a stranger's newer reports cannot hide the caller's own.
-   */
-  async newestReportFor(
-    files: readonly { readonly path: string; readonly mtimeMs: number }[],
-    scope: WardenReadScope,
-  ): Promise<{ readonly path: string; readonly content: string } | undefined> {
-    const ordered = newestReportsFirst(files);
-    for (let from = 0; from < ordered.length; from += SCAN_BATCH) {
-      const batch = ordered.slice(from, from + SCAN_BATCH);
-      const read = await mapWithConcurrency(batch, async file => await this.readReportFor(file.path, scope));
-      const index = read.findIndex(content => content !== undefined);
-      const content = read[index];
-      const file = batch[index];
-      if (content !== undefined && file !== undefined) return { path: file.path, content };
-    }
-    return undefined;
-  }
-
-  /**
-   * The most recent verdicts across every report in the directory. For a scope, the most recent verdicts about its
-   * lineage: reports are scanned newest first in full, and only a report whose every entry is about the lineage counts,
-   * so the limit is applied to what the caller may read and a stranger's reports cannot evict its own.
+   * The most recent verdicts across every report in the directory. For a scope, the most recent verdicts ABOUT its
+   * lineage: reports are scanned newest first in full and only the entries whose target is in the lineage count, so the
+   * limit is applied to what the caller may read and a stranger's reports cannot evict its own.
    */
   async readVerdicts(
     limit = DEFAULT_VERDICT_LIMIT,
@@ -149,11 +97,15 @@ export class WardenReportReader {
   }
 
   /**
-   * The scope's verdicts, newest report first, filtered by lineage BEFORE anything is read or cut. A report whose name puts
-   * it outside the lineage is never opened; one whose name does not say whose it is (a fleet triage) is opened and counts
-   * only when every part of it is the lineage's, and when it cannot be read it is simply not the scope's, so no report
-   * the scope may not read can change a row, an error or a banner. A report named for the lineage that cannot be read is
-   * the scope's own and fails the read, as it does for the owner.
+   * The scope's verdicts, newest report first, filtered by lineage BEFORE anything is cut. A report whose name puts it
+   * outside the lineage is never opened; one whose name does not say whose it is (a fleet triage) is opened, contributes
+   * only the entries whose target is in the lineage, and when it cannot be read it is simply not the scope's, so no
+   * report the scope may not read can change a row, an error or a banner. A report named for the lineage that cannot be
+   * read is the scope's own and fails the read, as it does for the owner.
+   *
+   * What a FERRET is then shown of a row is only its target, classification and times (`ferretVerdictsView`): the
+   * entry's prose is a model's and never leaves, so a target's being read out of a model's heading carries no more than
+   * which of the caller's own ferrets the row is about.
    */
   private async readVerdictsFor(
     ordered: readonly { readonly path: string; readonly mtimeMs: number }[],
@@ -181,12 +133,9 @@ export class WardenReportReader {
         throw new Error('a Warden report could not be read');
       for (const { report } of loaded) {
         if (report === undefined) continue;
-        const provenance = await this.readProvenance(report.path);
-        if (!this.ownedBy(report, provenance, scope)) continue;
         rows.push(
-          ...attachSpawnProvenance(
-            parseWardenReports([report], limit),
-            provenance === undefined ? new Map() : new Map([[report.path, provenance]]),
+          ...parseWardenReports([report], limit).filter(
+            verdict => verdict.targetSession !== undefined && scope.mayRead(verdict.targetSession),
           ),
         );
         if (rows.length >= limit) break;

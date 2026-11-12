@@ -85,7 +85,8 @@ export interface WardenSubsystem {
    */
   status(scope?: WardenReadScope): Promise<WardenStatusView>;
   verdicts(scope?: WardenReadScope): Promise<readonly WardenVerdict[]>;
-  report(reportPath: string, scope?: WardenReadScope): Promise<string | undefined>;
+  /** One report's text: the owner's and a person's. The route never asks for it on a ferret's behalf. */
+  report(reportPath: string): Promise<string | undefined>;
   run(spawn: boolean): Promise<WardenRunView>;
   config(): ReturnType<WardenSweepService['view']>;
   updateConfig(patch: unknown): ReturnType<WardenSweepService['updateConfig']>;
@@ -348,8 +349,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       return await service.status(due === undefined ? undefined : isoFromMs(due), scope);
     },
     verdicts: async scope => await reader.readVerdicts(undefined, scope),
-    report: async (reportPath, scope) =>
-      await reader.readReportAt(posix.join(REPORTS_DIRECTORY, posix.basename(reportPath)), scope),
+    report: async reportPath => await reader.readReportAt(posix.join(REPORTS_DIRECTORY, posix.basename(reportPath))),
     run: async spawn => await loop.run(spawn),
     config: async () => await service.view(),
     updateConfig: async patch => await service.updateConfig(parseWardenConfigPatch(patch)),

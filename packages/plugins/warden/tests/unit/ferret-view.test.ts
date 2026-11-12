@@ -110,7 +110,6 @@ describe('ferretStatusView is deny by default', () => {
         'flags',
         'investigations',
         'jevChecks',
-        'lastReport',
         'lastSweepAt',
         'login',
         'nextSweepAt',
@@ -125,7 +124,15 @@ describe('ferretStatusView is deny by default', () => {
     const text = JSON.stringify(view);
     for (const hidden of [STRANGER, 'theirs', 'warden-of-stranger', '"streak":17', '"costUsd":9', 'strikes', 'demoted'])
       expect(text).not.toContain(hidden);
-    for (const aggregate of ['spend', 'savings', 'history', 'actionTotals', 'reviveTotals', 'lastSpawnAt'])
+    for (const aggregate of [
+      'spend',
+      'savings',
+      'history',
+      'actionTotals',
+      'reviveTotals',
+      'lastSpawnAt',
+      'lastReport',
+    ])
       expect(view).not.toHaveProperty(aggregate);
     expect(view.fingerprint).toBe('');
     expect(view.liveWarden).toBeUndefined();
@@ -193,6 +200,97 @@ describe('the other Warden reads are deny by default too', () => {
     expect(JSON.stringify(view)).not.toMatch(/zzNew|secret-new-field|"skipped"/u);
   });
 
+  test('a verdict row carries a target, a classification and times, and a fixed sentence — never a model’s words', () => {
+    const view = ferretVerdictsView(
+      [
+        {
+          at: AT,
+          target: MINE,
+          name: 'Victim Vera',
+          label: 'billing for ' + STRANGER,
+          anomalyKind: 'sus_thinking',
+          verdict: 'needs_human',
+          explicitNeedsHuman: true,
+          reason: `${STRANGER} burned $0.45678 on the migration`,
+          recommendation: { action: 'move', reason: `move it like ${STRANGER}`, agent: 'their-login' },
+          reportPath: 'reports/a.md',
+          spawn: { agent: 'their-login', model: 'their-model', failoverReason: 'their quota' },
+        },
+      ] as unknown as Parameters<typeof ferretVerdictsView>[0],
+      scope,
+    );
+    expect(view).toEqual([
+      {
+        at: AT,
+        target: MINE,
+        anomalyKind: 'sus_thinking',
+        verdict: 'needs_human',
+        explicitNeedsHuman: true,
+        reason: 'The Warden judged that this needs the owner.',
+        reportPath: 'reports/a.md',
+      },
+    ]);
+    expect(JSON.stringify(view)).not.toMatch(/Vera|billing|0\.45678|migration|their-|other-9/u);
+  });
+
+  test('an action row keeps the act and its outcome and drops the detail a model wrote', () => {
+    const view = ferretStatusView(
+      {
+        ...ownerStatus(),
+        actions: [
+          {
+            at: AT,
+            ferret: MINE,
+            action: 'nudge',
+            outcome: 'held',
+            by: 'warden',
+            anomalyKind: 'sus_thinking',
+            detail: `The Warden recommends a nudge: ${STRANGER} stalled at $0.45678. It waits for you.`,
+            reason: 'also prose',
+            reportPath: 'reports/a.md',
+          },
+        ],
+      } as unknown as Parameters<typeof ferretStatusView>[0],
+      scope,
+    );
+    expect(view.actions).toEqual([
+      {
+        at: AT,
+        ferret: MINE,
+        action: 'nudge',
+        outcome: 'held',
+        by: 'warden',
+        anomalyKind: 'sus_thinking',
+        detail:
+          'The Warden asked the owner to nudge this ferret, and it waits for them. The Warden’s reasons are the owner’s to read.',
+      },
+    ]);
+  });
+
+  test('a status never carries a report’s head or path, and an investigation carries no report path', () => {
+    const view = ferretStatusView(
+      {
+        ...ownerStatus(),
+        investigations: [
+          {
+            id: 'i1',
+            state: 'done',
+            scope: 'ferret',
+            origin: 'owner',
+            target: MINE,
+            reportPath: 'reports/x.md',
+            verdict: 'cleared',
+          },
+        ],
+      } as unknown as Parameters<typeof ferretStatusView>[0],
+      scope,
+    );
+    expect(view).not.toHaveProperty('lastReport');
+    expect(view.investigations).toEqual([
+      { id: 'i1', state: 'done', scope: 'ferret', origin: 'owner', target: MINE, verdict: 'cleared' },
+    ]);
+  });
+
   test('an agenda keeps its lineage items; an empty one is an all-clear, never "items"', () => {
     const item = (ferret: FerretId) => ({
       ferret,
@@ -219,6 +317,52 @@ describe('the other Warden reads are deny by default too', () => {
     expect(none.items).toEqual([]);
     expect(none.outcome).toBe('clean-sweep');
     expect(ferretAgendaView({ ...owner, items: [], lastSweepAt: undefined }, scope).outcome).toBe('no-sweep');
+  });
+
+  test('an agenda escalation carries a target, a classification and a time, and fixed sentences — never its text', () => {
+    const owner = {
+      generatedAt: AT,
+      lastSweepAt: AT,
+      outcome: 'items',
+      items: [
+        {
+          ferret: MINE,
+          name: 'Victim Vera',
+          label: 'billing',
+          ferretState: 'working',
+          id: 'a1',
+          source: 'agent-raised',
+          subject: `${STRANGER} stalled`,
+          why: `${STRANGER} burned $0.45678`,
+          context: 'Remedy: move it like other-9',
+          waitingSince: AT,
+          howToResolve: 'Ask other-9 for the key',
+          recommendation: { action: 'move', reason: 'other-9', agent: 'their-login' },
+          raisedBy: 'daemon',
+          raisedByName: 'Warden',
+          fromFlag: true,
+          provider: 'their-provider',
+          anomalyKind: 'unattended_question',
+        },
+      ],
+      verdictCoverage: { limit: 100, truncated: false },
+    } as unknown as Parameters<typeof ferretAgendaView>[0];
+    const view = ferretAgendaView(owner, scope);
+    expect(view.items).toEqual([
+      {
+        ferret: MINE,
+        id: 'a1',
+        source: 'agent-raised',
+        waitingSince: AT,
+        raisedBy: 'daemon',
+        raisedByName: 'Warden',
+        anomalyKind: 'unattended_question',
+        subject: 'The Warden flagged this ferret: it asked a question and nobody has answered.',
+        why: 'The Warden asked the owner to look at this. The Warden’s reasons are the owner’s to read.',
+        howToResolve: 'Nothing to answer here: the owner decides. Carry on with your work.',
+      },
+    ]);
+    expect(JSON.stringify(view)).not.toMatch(/Vera|billing|0\.45678|other-9|their-/u);
   });
 
   test('a run keeps when it looked and the lineage’s flags, with no spawn, warden or sentence', () => {

@@ -313,20 +313,19 @@ test('audit A fix 4 unrelated investigation records cannot evict the only readab
   }
 });
 
-test('audit A fix 4 the latest report is the lineage’s own, never a stranger’s', async () => {
+test('audit A fix 6 a ferret’s status carries no latest report at all, and the owner’s is the newest of all', async () => {
   const w = await world();
   const { host, lead, victim } = w;
   try {
     report(host, `2026-11-06T09-00-00-000Z-${lead}.md`, `# Warden report — ${lead}\n\nVERDICT: cleared\n\nown note`);
-    const own = (await w.status(lead)).lastReport;
-    expect(own.reportId).toBe(`2026-11-06T09-00-00-000Z-${lead}.md`);
+    expect(await w.status(lead)).not.toHaveProperty('lastReport');
     report(
       host,
       `2026-11-06T10-00-00-000Z-${victim}.md`,
       `# Warden report — ${victim}\n\nVERDICT: cleared\n\n$${COST}`,
     );
     const after = await w.status(lead);
-    expect(after.lastReport).toEqual(own);
+    expect(after).not.toHaveProperty('lastReport');
     expect(JSON.stringify(after)).not.toContain(COST);
     // The owner's latest is the newest of all.
     expect((await w.status()).lastReport.reportId).toBe(`2026-11-06T10-00-00-000Z-${victim}.md`);
@@ -358,7 +357,7 @@ for (const route of ['verdicts', 'report', 'agenda'] as const) {
   });
 }
 
-test('audit A fix 4 a ferret reads its own report and verdicts; the owner reads every one', async () => {
+test('audit A fix 6 a ferret reads its own verdicts and no report, its own included; the owner reads every one', async () => {
   const w = await world();
   const { host, lead, helper, victim } = w;
   try {
@@ -369,8 +368,8 @@ test('audit A fix 4 a ferret reads its own report and verdicts; the owner reads 
     const verdicts = await w.as(lead, '/v1/warden/verdicts');
     expect(verdicts.json<{ target: string }[]>().map(entry => entry.target)).toEqual([lead]);
     const read = await w.as(lead, '/v1/warden/report', { path: own });
-    expect(read.status).toBe(200);
-    expect(read.body).toContain('needs_human');
+    expect(read.status).toBe(404);
+    expect(read.body).not.toContain('needs_human');
     expect((await w.as(helper, '/v1/warden/report', { path: own })).status).toBe(404);
     expect((await w.as(lead, '/v1/warden/report', { path: other })).status).toBe(404);
     const owner = await w.as(undefined, '/v1/warden/verdicts');
@@ -421,9 +420,6 @@ test('audit A fix 4 unrelated reports cannot evict the only readable verdict bef
         anomalyReport(victim, 'Victim'),
       );
     expect((await w.as(lead, '/v1/warden/verdicts')).json<unknown[]>()).toEqual(before);
-    expect(
-      (await w.as(lead, '/v1/warden/status')).json<{ lastReport: { reportId: string } }>().lastReport.reportId,
-    ).toBe(`2026-11-01T09-00-00-000Z-${lead}.md`);
   } finally {
     await host.stop();
   }
@@ -450,6 +446,43 @@ test('audit A fix 4 agenda cannot name a stranger notification, and an empty one
     expect(response.json<{ items: unknown[] }>().items).toEqual([]);
     // The owner sees the notification.
     expect((await w.as(undefined, '/v1/warden/agenda')).body).toContain(victim);
+  } finally {
+    await host.stop();
+  }
+});
+
+test('audit A fix 6 an escalation about the caller reaches it as fixed sentences, and the owner still reads the text', async () => {
+  const w = await world();
+  const { host, asks, start } = w;
+  try {
+    const lead = await start();
+    const victim = await start();
+    await asks.notify({
+      source: 'daemon' as never,
+      entry: `f.${lead}.warden:ask:unattended_question` as never,
+      ref: { ferret: lead, kind: 'unattended_question' },
+      subject: `${victim} is stuck`,
+      why: `${victim} burned $${COST} on the migration`,
+      context: `Remedy: move it like ${victim}`,
+      howToResolve: `Ask ${victim} for the key`,
+      raisedBy: { kind: 'daemon' },
+      ferret: lead,
+    });
+    const response = await w.as(lead, '/v1/warden/agenda');
+    expect(response.status).toBe(200);
+    for (const hidden of [victim, COST, 'migration', 'Remedy']) expect(response.body).not.toContain(hidden);
+    const [item] = response.json<{ items: Record<string, unknown>[] }>().items;
+    expect(item).toMatchObject({
+      ferret: lead,
+      anomalyKind: 'unattended_question',
+      subject: 'The Warden flagged this ferret: it asked a question and nobody has answered.',
+      why: 'The Warden asked the owner to look at this. The Warden’s reasons are the owner’s to read.',
+      howToResolve: 'Nothing to answer here: the owner decides. Carry on with your work.',
+    });
+    expect(item).not.toHaveProperty('context');
+    // The owner reads the notification's own words.
+    const owner = (await w.as(undefined, '/v1/warden/agenda')).body;
+    expect(owner).toContain(victim);
   } finally {
     await host.stop();
   }

@@ -120,27 +120,51 @@ It is not an investigation request (`warden.use`): it switches supervision of th
 which is how the Warden behaves on this host — so a governed device steps up for it, and a remote warden,
 which can never step up, can never quiet its own supervision or anyone else's.
 
-**A ferret reads only its own lineage of the Warden.** The owner and an enrolled device read the whole fleet. A
-ferret caller (itself and its helpers, Ferrets' `mayTouch`) reads, on `GET /v1/warden/status`, `verdicts`, `report`,
-`agenda` and `POST /v1/warden/run`, its own lineage's rows and plain states, and nothing about another lineage: no
-identity, no figure, no activity. One projection (`ferretWardenView`, `warden/daemon/lib/ferret-view.ts`) builds that
-answer at the route spine from an allowlist, so a field added to the owner's view later is absent for a ferret until it
-is listed. Lists are narrowed to the lineage **before** their newest-N cut, so another lineage's records cannot evict the
-caller's own. A report about anyone outside the lineage (or about no one, or about the lineage and a stranger) is
-**404**, never 403, so its existence is not confirmed. The ferret's status carries no spend, savings, history,
-fingerprint, spawn time or failover strikes; a Warden's id appears only while it investigates the caller's own, otherwise
-a plain `wardenRunning` boolean. The owner's static settings (`GET /v1/warden/config`, the `config` block) are readable.
+**A ferret reads only its own lineage of the Warden, and never a Warden report.** The owner and an enrolled device read
+the whole fleet. A ferret caller (itself and its helpers, Ferrets' `mayTouch`) reads, on `GET /v1/warden/status`,
+`verdicts`, `agenda` and `POST /v1/warden/run`, its own lineage's rows and plain states, and nothing about another
+lineage: no identity, no figure, no activity. One projection (`ferretWardenView`, `warden/daemon/lib/ferret-view.ts`)
+builds that answer at the route spine from an allowlist, so a field added to the owner's view later is absent for a
+ferret until it is listed. Lists are narrowed to the lineage **before** their newest-N cut, so another lineage's records
+cannot evict the caller's own. The ferret's status carries no spend, savings, history, fingerprint, spawn time or
+failover strikes; a Warden's id appears only while it investigates the caller's own, otherwise a plain `wardenRunning`
+boolean. The owner's static settings (`GET /v1/warden/config`, the `config` block) are readable.
 **A ferret's answers do not change because of another lineage's data** — a status code, a banner, a degraded state or a
-timestamp included. Raw report text (`report`, the newest report's head) and verdict rows come from a report only when
-**every part of it is attributable to the lineage**, decided by a strict, fail-closed check (`reportOwnedBy`,
-`warden/daemon/lib/report-ownership.ts`) and never by the best-effort parser the owner's summaries use: every anomaly
-heading well formed and naming a lineage session, no other second-level section in a fleet report, exactly one
-well-formed header in an assigned one that agrees with the daemon's file name and sidecar, and no identity outside the
-lineage anywhere in the text. A report that fails, is headless, or is unreadable is simply not the ferret's (404, or
-absent from its rows), and a report whose file name puts it outside the lineage is not even opened, so it cannot fail the
-ferret's verdicts or darken its agenda. The agenda's "could not be read" banner is computed from the ferret's own
-reports only, and its "all accounts exhausted" state carries no timestamp (that instant belongs to whichever lineage's
-investigation failed). The owner and a device keep today's semantics, an unreadable report included.
+timestamp included.
+
+**No model-written word reaches a ferret.** A Warden report is an LLM's text, and proving whose subject each sentence of
+it is about cannot be done reliably, so a ferret receives none of it in any form:
+
+- `GET /v1/warden/report` is **404** for every ferret credential (fleet or assigned report, its own included, or one
+  that does not exist), before any file is opened, with one plain sentence: the Warden's reports are for the owner and
+  its own verdicts are at `GET /v1/warden/verdicts`. The status carries no `lastReport` head. **This narrows v4**, where
+  `GET /v1/warden/report` was `caller: any` and served a ferret any report (4.291.9).
+- A verdict row, a completed investigation's verdict, an action (nudge, stop, move, bless; held, done or failed) and an
+  agenda escalation carry **only** the target id (in the caller's lineage), a validated classification (the anomaly kind,
+  the verdict kind, the act and its outcome) and times. Every free-text field a model wrote — name, label, reason,
+  recommendation and its reason, why, context, remedy, an action's detail — is dropped and replaced by the one fixed
+  sentence for that classification (`warden/daemon/lib/ferret-sentences.ts`, a total table, so a new class without a
+  sentence does not compile). A blessing carries its kinds, who gave it and when it ends, and nothing a model wrote.
+- What the Warden **types into a ferret's own session** after an investigation's verdict (the nudge, the stop reason,
+  the resume or restart turn) is that same fixed sentence, not the investigator's reason. (Jev judges one flag from that
+  ferret's own facts and is not report prose; its words are unchanged, and a ferret's action rows still show the fixed
+  sentence for them.) The owner's actions list keeps the investigator's own words.
+- A report is read for a ferret only to find which of the caller's own ferrets a row is about: a fleet report contributes
+  the rows whose target is in the lineage, a report whose file name puts it outside the lineage is not opened, and one
+  that cannot be read and is not named for the lineage is simply not the ferret's. A **non-empty report named for the
+  lineage that does not parse is silently omitted** from a ferret's rows (no banner, no error); an **empty or unreadable**
+  one named for the lineage still fails `verdicts` and darkens the agenda, as it does for the owner.
+- **`lastSweepAt` is the lineage's.** Each sweep records the instant it scanned each ferret (`scanned`, `warden/daemon/lib/scanned.ts`);
+  a ferret is shown the newest such instant among its own lineage, and none when no sweep ever scanned it. The agenda's
+  `no-sweep`, `clean-sweep` and overdue states for a ferret are computed from that, so a sweep that scanned nobody of its
+  own cannot change them. `nextSweepAt` is the fixed periodic schedule and is shown as is.
+- The agenda's "could not be read" banner is computed from the ferret's own reports only, and its "all accounts
+  exhausted" state carries no timestamp (that instant belongs to whichever lineage's investigation failed). On a ferret's
+  view the strip reads "no flags for your work", not "nobody needs you".
+
+The owner and a device keep today's semantics byte for byte, an unreadable report included. What this does **not** cover
+is the Warden's notifications as they sit on the Agenda boards (owner Inbox text built from the investigator's reason): they
+are the owner's, and who may read a board is Agenda's rule, not this one.
 
 **Updating the daemon is `fleet`.** Reading `GET /v1/daemon/update` is `use`; starting an update and
 changing automatic install are `configure`, and a governed device also gives a passkey step-up for that

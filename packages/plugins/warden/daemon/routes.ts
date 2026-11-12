@@ -65,6 +65,10 @@ const guarded =
     }
   };
 
+/** What a ferret is told when it asks for a report: why not, and where its own verdicts are. */
+const FERRET_REPORT_SENTENCE =
+  'The Warden’s reports are for the owner. Your own verdicts are at GET /v1/warden/verdicts.';
+
 const first = (call: CallContext, name: string): string | undefined => call.request.query.get(name)?.[0];
 
 /**
@@ -93,12 +97,15 @@ export function wardenRoutes(subsystem: WardenSubsystem, ferrets: Pick<FerretsAp
       const owner = toWireVerdicts(await subsystem.verdicts(scope));
       return jsonResponse(scope === undefined ? owner : ferretVerdictsView(owner, scope));
     }),
-    // A report about anyone outside the lineage is NOT FOUND (404, never 403), so its existence is not confirmed.
+    // A report is a model's prose and proving whose subject each sentence is cannot be done reliably, so a FERRET is never
+    // served one, its own included: 404 (never 403, so no report's existence is confirmed) for a fleet or an assigned
+    // credential alike, before any file is opened. The owner and a person read it as before.
     'GET /v1/warden/report': guarded(async call => {
+      if (scopeOf(call) !== undefined) throw new ApiError(404, FERRET_REPORT_SENTENCE, 'warden_report_not_found');
       const reportPath = first(call, 'path');
       if (reportPath === undefined || reportPath.trim() === '')
         throw new ApiError(400, 'a warden report path is required', 'invalid_request');
-      const body = await subsystem.report(reportPath, scopeOf(call));
+      const body = await subsystem.report(reportPath);
       if (body === undefined) throw new ApiError(404, 'warden report not found', 'warden_report_not_found');
       return textResponse(body);
     }),

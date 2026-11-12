@@ -18,7 +18,7 @@ import { daemonImplementations } from '../../../src/generated/plugins.ts';
 import { testHost } from '../../../testing/index.ts';
 
 /**
- * Audit A fix 5: a FERRET's Warden answers must not CHANGE because of another lineage's data. Status codes, banners,
+ * Audit A fix 5 and 6: a FERRET's Warden answers must not CHANGE because of another lineage's data. Status codes, banners,
  * degraded states and timestamps all count. The REAL Ferrets and Warden halves run behind the stand-in admission (the
  * kernel cannot import Gate's daemon, `context-imports`): the caller's standing is the stand-in's `ferretStanding` /
  * `ownerStanding` / `deviceStanding`, the same `credential.tokenClass` the production Gate admits a ferret bearer, the admin
@@ -113,7 +113,7 @@ const world = async () => {
       ...(query === undefined ? {} : { query }),
     });
   const read = async (route: string, query?: Record<string, string>) => await asFerret(lead, route, query);
-  return { host, lead, helper, victim, read, asOwner, asDevice };
+  return { host, lead, helper, victim, read, asFerret, asOwner, asDevice };
 };
 
 type World = Awaited<ReturnType<typeof world>>;
@@ -196,87 +196,169 @@ test('audit A fix 5 the lead’s OWN unreadable report is still its own to hear 
   }
 });
 
-// ─── a report is the lead's only when EVERY part of it is attributable to the lead ──────────────────────────────────
-
 const MIXED = (w: World) =>
   `# Warden sweep (2026-11-06T09:00:00.000Z)\n\n## Anomaly: ${w.lead} — Caller\nVERDICT: LEAVE\n\n## Anomaly: \nVictim ${w.victim} diagnostic cost $${COST}\nVERDICT: NEEDS_HUMAN\n`;
 
-for (const [what, text] of [
-  ['an own section beside a section whose target is missing', MIXED],
-  [
-    'an own section beside a heading the parser cannot read',
-    (w: World) => `## Anomaly: ${w.lead} — Caller\nVERDICT: LEAVE\n\n## Anomaly —\nVictim ${w.victim} $${COST}\n`,
-  ],
-  [
-    'an own section beside a stranger’s section',
-    (w: World) =>
-      `## Anomaly: ${w.lead} — Caller\nVERDICT: LEAVE\n\n## Anomaly: ${w.victim} — Victim\nVERDICT: NEEDS_HUMAN\ncost $${COST}\n`,
-  ],
-  [
-    'an own section with a stranger named in its prose',
-    (w: World) => `## Anomaly: ${w.lead} — Caller\nVERDICT: LEAVE\n\nSee also ${w.victim}, cost $${COST}.\n`,
-  ],
-  [
-    'an own section beside an unrelated second-level section',
-    (w: World) => `## Anomaly: ${w.lead} — Caller\nVERDICT: LEAVE\n\n## Fleet summary\ncost $${COST}\n`,
-  ],
-  ['an assigned report with no header', () => `VERDICT: LEAVE\n\ncost $${COST}\n`],
-  [
-    'an assigned report with a second header',
-    (w: World) => `# Warden report — ${w.lead}\nVERDICT: LEAVE\n\n# Warden report — ${w.victim}\ncost $${COST}\n`,
-  ],
+// ─── audit A fix 6: a ferret is never served a report, and no model-written word reaches it ─────────────────────────
+
+const REPORT_REFUSAL = 'The Warden’s reports are for the owner. Your own verdicts are at GET /v1/warden/verdicts.';
+
+/** A fleet report whose OWN section is about the lead and whose prose names a stranger and a cost. */
+const FLEET_WITH_PROSE = (w: World) =>
+  `# Warden sweep (2026-11-06T09:00:00.000Z)\n\n## Anomaly: ${w.lead} — Caller\nVERDICT: NEEDS_HUMAN\n- **Recommended action:** MOVE (their-login) — ${w.victim} burned $${COST} on the migration\n- **Reported reason:** ${w.victim} cost $${COST}\n\n## Anomaly: ${w.victim} — Victim\nVERDICT: NEEDS_HUMAN\ncost $${COST}\n`;
+/** An assigned report about the lead, in the same shape, with the same prose. */
+const ASSIGNED_WITH_PROSE = (w: World) =>
+  `Verdict: NEEDS_HUMAN\n\n# Warden report — ${w.lead} (teammate :caller, -)\n\n- **Anomaly kind:** unattended_question\n\n## Summary\n- **Recommended action:** NUDGE — ${w.victim} burned $${COST} on the migration\n`;
+
+for (const [what, file, text] of [
+  ['a fleet report', () => `${stamp(9)}.md`, FLEET_WITH_PROSE],
+  ['an assigned report, the lead’s OWN', (w: World) => `${stamp(9)}-${w.lead}.md`, ASSIGNED_WITH_PROSE],
+  ['an assigned report about the stranger', (w: World) => `${stamp(9)}-${w.victim}.md`, ASSIGNED_WITH_PROSE],
+  ['a report that does not exist', () => `${stamp(9)}-nothing.md`, () => undefined],
 ] as const) {
-  test(`audit A fix 5 ${what} is not found, in the report, the latest report or the verdicts`, async () => {
+  test(`audit A fix 6 ${what} is not found for a ferret, with one plain sentence`, async () => {
     const w = await world();
     try {
-      const own = `${stamp(7)}-${w.lead}.md`;
-      put(w, own, leadReport(w));
-      const baseline = {
-        verdicts: shape(await w.read('verdicts')),
-        status: (await w.read('status')).json<{ lastReport?: unknown }>().lastReport,
-      };
-      for (const file of [`${stamp(9)}-${w.lead}.md`, `${stamp(9)}.md`]) {
-        put(w, file, text(w));
-        const found = await w.read('report', { path: file });
-        expect([file, found.status]).toEqual([file, 404]);
-        expect(found.body).not.toContain(w.victim);
-        expect(found.body).not.toContain(COST);
-        // Neither the newest report nor a verdict row is built from the half-recognised one.
-        expect((await w.read('status')).json<{ lastReport?: unknown }>().lastReport).toEqual(baseline.status);
-        expect(shape(await w.read('verdicts'))).toEqual(baseline.verdicts);
-        w.host.state('warden').bytes.delete(`reports/${file}`);
+      const name = file(w);
+      const body = text(w);
+      if (body !== undefined) put(w, name, body);
+      const found = await w.read('report', { path: name });
+      expect(found.status).toBe(404);
+      expect(found.body).toContain(REPORT_REFUSAL);
+      expect(found.body).not.toContain(w.victim);
+      expect(found.body).not.toContain(COST);
+      // The helper (same lineage) is refused the same way, and so is a ferret that is nobody's lead.
+      expect((await w.asFerret(w.helper, 'report', { path: name })).status).toBe(404);
+      expect((await w.asFerret(w.victim, 'report', { path: name })).status).toBe(404);
+      // The owner and a device read it whole, as before.
+      if (body !== undefined) {
+        for (const who of ['asOwner', 'asDevice'] as const) {
+          const read = await w[who]('report', { path: name });
+          expect(read.status).toBe(200);
+          expect(read.body).toContain(COST);
+        }
       }
-      // The owner and a device still read it whole.
-      put(w, `${stamp(9)}.md`, text(w));
-      expect((await w.asOwner('report', { path: `${stamp(9)}.md` })).status).toBe(200);
-      expect((await w.asDevice('report', { path: `${stamp(9)}.md` })).status).toBe(200);
     } finally {
       await w.host.stop();
     }
   });
 }
 
-test('audit A fix 5 a report that is wholly the lead’s is still read, in the report, the latest report and the verdicts', async () => {
+test('audit A fix 6 the latest report is never on a ferret’s status, and the owner still has it', async () => {
   const w = await world();
   try {
-    const file = `${stamp(9)}.md`;
-    put(
-      w,
-      file,
-      `# Warden sweep (2026-11-06T09:00:00.000Z)\n\n## Anomaly: ${w.lead} — Caller\nVERDICT: LEAVE\n\n## Anomaly: ${w.helper} — Helper\nVERDICT: NUDGE\n`,
+    put(w, `${stamp(9)}-${w.lead}.md`, ASSIGNED_WITH_PROSE(w));
+    const status = (await w.read('status')).json<Record<string, unknown>>();
+    expect(status).not.toHaveProperty('lastReport');
+    expect((await w.read('status')).body).not.toContain(COST);
+    expect((await w.asOwner('status')).json<{ lastReport?: { reportId: string } }>().lastReport?.reportId).toBe(
+      `${stamp(9)}-${w.lead}.md`,
     );
-    expect((await w.read('report', { path: file })).status).toBe(200);
-    expect((await w.read('status')).json<{ lastReport: { reportId: string } }>().lastReport.reportId).toBe(file);
-    expect(
-      (await w.read('verdicts'))
-        .json<{ target: string }[]>()
-        .map(row => row.target)
-        .toSorted(),
-    ).toEqual([w.helper, w.lead].toSorted());
   } finally {
     await w.host.stop();
   }
 });
+
+test('audit A fix 6 a verdict row whose report names a victim and a cost reaches the ferret as a classification, a target and a time', async () => {
+  const w = await world();
+  try {
+    put(w, `${stamp(9)}.md`, FLEET_WITH_PROSE(w));
+    const rows = (await w.read('verdicts')).json<Record<string, unknown>[]>();
+    // Only the lead's own section is a row; the stranger's section is another lineage's.
+    expect(rows.map(row => row.target)).toEqual([w.lead]);
+    const text = JSON.stringify(rows);
+    for (const hidden of [w.victim, COST, 'their-login', 'migration', 'Caller', 'Victim'])
+      expect(text).not.toContain(hidden);
+    expect(Object.keys(rows[0] ?? {}).toSorted()).toEqual(
+      ['at', 'explicitNeedsHuman', 'reason', 'reportPath', 'target', 'verdict'].toSorted(),
+    );
+    expect(rows[0]).toMatchObject({
+      target: w.lead,
+      verdict: 'needs_human',
+      reason: 'The Warden judged that this needs the owner.',
+    });
+    // The owner still reads the whole row.
+    const owner = JSON.stringify((await w.asOwner('verdicts')).json());
+    expect(owner).toContain(w.victim);
+    expect(owner).toContain(COST);
+  } finally {
+    await w.host.stop();
+  }
+});
+
+test('audit A fix 6 a stranger’s section beside the lead’s own does not change the lead’s row', async () => {
+  const w = await world();
+  try {
+    const own = `# Warden sweep (2026-11-06T09:00:00.000Z)\n\n## Anomaly: ${w.lead} — Caller\nVERDICT: LEAVE\n`;
+    put(w, `${stamp(9)}.md`, own);
+    const before = await w.read('verdicts');
+    put(
+      w,
+      `${stamp(9)}.md`,
+      `${own}\n## Anomaly: ${w.victim} — Victim\nVERDICT: NEEDS_HUMAN\ncost $${COST}\n\n## Anomaly: \nunreadable heading $${COST}\n`,
+    );
+    const after = await w.read('verdicts');
+    expect(shape(after)).toEqual(shape(before));
+  } finally {
+    await w.host.stop();
+  }
+});
+
+// ─── audit A fix 6: a ferret's "last swept" is its own lineage's, never the fleet's ───────────────────────────────────
+
+const T1 = '2026-11-06T09:00:00.000Z';
+const T2 = '2026-11-06T09:04:00.000Z';
+const T3 = '2026-11-06T09:08:00.000Z';
+const setSweeps = (w: World, state: Record<string, unknown>) =>
+  w.host.state('warden').files.set('state.json', JSON.stringify({ format: 1, ...state }));
+
+test('audit A fix 6 lastSweepAt is absent for a ferret whose lineage the latest sweep did not scan, and so is the agenda’s verdict', async () => {
+  const w = await world();
+  try {
+    setSweeps(w, { lastSweepAt: T1, scanned: { [w.victim]: T1 } });
+    const status = await w.read('status');
+    expect(status.json<Record<string, unknown>>()).not.toHaveProperty('lastSweepAt');
+    const agenda = await w.read('agenda');
+    expect(agenda.json<{ outcome: string }>().outcome).toBe('no-sweep');
+    expect(agenda.json<Record<string, unknown>>()).not.toHaveProperty('lastSweepAt');
+    // Only the stranger's sweep moves: the lead's answers do not.
+    setSweeps(w, { lastSweepAt: T3, scanned: { [w.victim]: T3 } });
+    expect(shape(await w.read('status'))).toEqual(shape(status));
+    expect((await w.read('agenda')).body).not.toContain(T3);
+    expect((await w.read('agenda')).json<{ outcome: string }>().outcome).toBe('no-sweep');
+    // A stale global sweep cannot make the lead's agenda "overdue" either.
+    setSweeps(w, { lastSweepAt: '2020-01-01T00:00:00.000Z', scanned: { [w.victim]: '2020-01-01T00:00:00.000Z' } });
+    expect((await w.read('agenda')).json<{ outcome: string }>().outcome).toBe('no-sweep');
+  } finally {
+    await w.host.stop();
+  }
+});
+
+test('audit A fix 6 lastSweepAt is the newest sweep that scanned the lineage, the helper’s included', async () => {
+  const w = await world();
+  try {
+    setSweeps(w, { lastSweepAt: T3, scanned: { [w.lead]: T1, [w.helper]: T2, [w.victim]: T3 } });
+    expect((await w.read('status')).json<{ lastSweepAt: string }>().lastSweepAt).toBe(T2);
+    const agenda = (await w.read('agenda')).json<{ outcome: string; lastSweepAt: string }>();
+    expect(agenda.lastSweepAt).toBe(T2);
+    expect((await w.read('status')).body).not.toContain(T3);
+  } finally {
+    await w.host.stop();
+  }
+});
+
+for (const who of ['asOwner', 'asDevice'] as const) {
+  test(`audit A fix 6 control: ${who} still reads the global lastSweepAt`, async () => {
+    const w = await world();
+    try {
+      setSweeps(w, { lastSweepAt: T3, scanned: { [w.victim]: T3 } });
+      expect((await w[who]('status')).json<{ lastSweepAt: string }>().lastSweepAt).toBe(T3);
+      expect((await w[who]('agenda')).json<{ lastSweepAt: string }>().lastSweepAt).toBe(T3);
+    } finally {
+      await w.host.stop();
+    }
+  });
+}
 
 // ─── controls: the owner and a device keep today's answers ──────────────────────────────────────────────────────────
 

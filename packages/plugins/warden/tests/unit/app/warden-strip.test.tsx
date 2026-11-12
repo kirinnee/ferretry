@@ -46,6 +46,23 @@ describe('WardenStrip', () => {
     }
   });
 
+  it('should speak of the ferret’s own work, never "nobody needs you", on a ferret’s view', async () => {
+    // Arrange: only a ferret's status carries wardenRunning
+    const view = await mount(
+      <WardenStrip status={wardenStatus({ lastSweepAt: SWEPT, wardenRunning: false })} now={NOW} />,
+    );
+    try {
+      // Act
+      const text = view.container.textContent ?? '';
+
+      // Assert
+      expect(text).toContain('no flags for your work');
+      expect(text).not.toContain('nobody needs you');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('should refuse to call a daemon that never swept healthy', async () => {
     // Arrange
     const view = await mount(<WardenStrip status={wardenStatus()} />);
