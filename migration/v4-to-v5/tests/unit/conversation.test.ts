@@ -456,7 +456,7 @@ console.log(JSON.stringify({ text }));
         for (const line of written) expect(line).not.toHaveProperty('evidenceNotBefore');
         // The line schema carries the floor a 5.0 Retry later writes; a line without one parses unchanged.
         const withFloor = { ...written[1], evidenceNotBefore: '2026-11-11T01:00:30.000Z' };
-        expect(V5SendLineSchema.parse(withFloor).evidenceNotBefore).toBe('2026-11-11T01:00:30.000Z');
+        expect(V5SendLineSchema.parse(withFloor).evidenceNotBefore).toBe('2026-11-11T01:00:30.000Z' as never);
         expect(V5SendLineSchema.parse(written[1]).evidenceNotBefore).toBeUndefined();
         expect(V5SendLineSchema.safeParse({ ...written[1], evidenceNotBefore: 'soon' }).success).toBe(false);
       });
