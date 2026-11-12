@@ -265,7 +265,7 @@ export interface FleetCatalogServiceDeps {
   presets?(): Promise<readonly ProviderPreset[]>;
   /** The model catalogs and presets in effect (docs/model-catalog.md): what each runtime offers and pins. */
   modelCatalogs?(): Promise<ModelCatalogSources>;
-  /** The fleet manifest as it is published now, unparsed; `undefined` when there is none. */
+  /** The current publication; `undefined` when absent, `FleetManifestUnreadableError` when it cannot parse. */
   publishedManifest?(): Promise<unknown>;
   /** The last auto-resume pass after a restart, for the Machine view; `null` when none has run. */
   lastAutoResume?(): Promise<AutoResumeSummary | null>;

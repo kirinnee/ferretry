@@ -12320,8 +12320,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             analytics.provides.ingestion.pricingChanged();
             // Credentials the edit added or removed open or close their watches.
             await fleetReading.configLoaded();
-            await fleetCatalog.republish().then(
-              async outcome => {
+            await fleetCatalog
+              .republish()
+              .then(async outcome => {
                 if (outcome === 'applied') {
                   // The early boot preflight read the old publication. Report the repaired fleet
                   // now, so its earlier refusal does not remain the daemon's last readiness word.
@@ -12333,12 +12334,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                       : harnessAbsentWarning(harnesses, CLIENT_NAME),
                   );
                 }
-              },
-              (error: unknown) =>
+              })
+              .catch((error: unknown) =>
                 bootNotices.state(
                   `could not republish the fleet for its model catalogs: ${error instanceof Error ? error.message : String(error)}`,
                 ),
-            );
+              );
             await disableExpiry.rearm();
             // A budget written, raised or lowered is judged at once rather than at the next minute.
             void usageBuilt.provides.budgets.current()?.tick();
