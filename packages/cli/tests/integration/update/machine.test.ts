@@ -251,7 +251,7 @@ describe('the daemon controller a person’s fy builds', () => {
     await writeFile(join(h.home, 'stray.txt'), 'somebody else’s files');
     const { controller } = await controllerIn(h);
     await should(controller.restart({ midTurnSaid: true })).rejectedWith(
-      `${h.home} is not a Ferretry home; the daemon creates it on its first start`,
+      /is not empty and has no home\.json.*reinstall 4.291.10 or later/s,
     );
   });
 
@@ -309,7 +309,7 @@ describe('restarting the daemon from an update, into a folder that is not a form
       },
       { view: async () => await Promise.resolve(undefined) },
     );
-    await should(machine.deps.lifecycle.restart()).rejected();
+    await should(machine.deps.lifecycle.restart()).rejectedWith(/has no home.json.*reinstall 4.291.10 or later/s);
     should(io.stderr()).containEql('fyd was not running; starting it');
   });
 });

@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { HomeJsonSchema } from '@ferretry/kernel/contract';
+import { decideHome, HomeJsonSchema } from '@ferretry/kernel/contract';
 import type { IStateHomeClaimPort } from '../../lib/daemon/ports.ts';
 
 /**
@@ -23,3 +23,20 @@ export const homeMarker: Pick<IStateHomeClaimPort, 'inspect'> = {
     }
   },
 };
+
+/**
+ * Why a service definition may not be written for `home`, or `undefined` when it is a Ferretry 5 home. Reads only.
+ * A folder with content and no usable `home.json` (a Ferretry 4 home above all) is refused with the SAME sentence the
+ * daemon gives (`decideHome`, one owner of the words): it names the carry-over prompt and the way back to Ferretry 4,
+ * and says nothing was changed. "The daemon creates it on its first start" is true only of a folder that is missing or
+ * empty, so it is said only of those.
+ */
+export async function serviceRefusal(home: string): Promise<string | undefined> {
+  const state = await homeMarker.inspect(home);
+  if (state === 'claimed') return undefined;
+  if (state === 'absent' || state === 'empty')
+    return `${home} is not a Ferretry home; the daemon creates it on its first start`;
+  const text = await readFile(join(home, 'home.json'), 'utf8').catch(() => undefined);
+  const decision = decideHome(home, text === undefined ? { kind: 'no-home-json' } : { kind: 'home-json', text });
+  return decision.kind === 'refuse' ? decision.sentence : undefined;
+}

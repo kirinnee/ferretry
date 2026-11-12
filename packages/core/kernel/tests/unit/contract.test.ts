@@ -56,6 +56,8 @@ describe('decideHome (§9.3)', () => {
     const decision = decideHome('/h', { kind: 'no-home-json' });
     expect(decision.kind).toBe('refuse');
     expect(decision.kind === 'refuse' && decision.sentence).toContain(CARRY_OVER_PROMPT);
+    expect(decision.kind === 'refuse' && decision.sentence).toContain('reinstall 4.291.10 or later');
+    expect(decision.kind === 'refuse' && decision.sentence).toContain('this folder is unchanged');
   });
   test('a lower, higher or unreadable home.json is refused', () => {
     const at = '2026-11-06T09:00:00Z';

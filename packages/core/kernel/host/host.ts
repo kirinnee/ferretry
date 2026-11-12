@@ -295,6 +295,8 @@ export interface HostOptions {
   readonly timings?: DaemonTimings;
   /** `FYD_BACKGROUND_DELAY_SECONDS` as `fyd` parsed it: when the `worker` job lane opens after start. */
   readonly backgroundDelayMs?: number;
+  /** Called once, when the home has been decided and opened for this daemon: from here on the boot log may be written. */
+  readonly onHomeOpened?: () => void;
   /** The product's binary names for `kernel.identity`. Default: read from the repo's `bin` keys. */
   readonly binaries?: BinaryNames;
 }
@@ -340,7 +342,13 @@ export interface RunningHost {
 
 export type BootOutcome =
   | { readonly kind: 'running'; readonly host: RunningHost }
-  | { readonly kind: 'refused'; readonly sentence: string; readonly trace: readonly string[] };
+  | {
+      readonly kind: 'refused';
+      readonly sentence: string;
+      readonly trace: readonly string[];
+      /** `'home'` when the folder itself was refused (not ours, or unreadable): nothing else about the boot is wrong. */
+      readonly cause?: 'home';
+    };
 
 /**
  * The plugin's update seam: the real one only for a plugin that declared `permissions.updateHost` AND the state files
@@ -408,7 +416,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   // this reading is stale the moment another daemon sets up the same home (today's `storage-factory.ts` order).
   phases.mark('home');
   const preliminary = decideHome(home, await probeHome(adapters.fs, home));
-  if (preliminary.kind === 'refuse') return { kind: 'refused', sentence: preliminary.sentence, trace };
+  if (preliminary.kind === 'refuse') return { kind: 'refused', sentence: preliminary.sentence, trace, cause: 'home' };
   if (preliminary.kind === 'create') await adapters.fs.mkdirp(home, 0o700);
   phases.mark('lock');
   let lease: HomeLockLease;
@@ -452,9 +460,10 @@ async function bootLocked(
 
   // Home and fence, identity (before anything is read from the home).
   const opened = await openHome(adapters.fs, home, `fyd ${options.version}`, clock.now() as Instant);
-  if (opened.kind === 'refused') return { kind: 'refused', sentence: opened.decision.sentence, trace };
+  if (opened.kind === 'refused') return { kind: 'refused', sentence: opened.decision.sentence, trace, cause: 'home' };
   if (opened.kind === 'logs-refused') return { kind: 'refused', sentence: opened.sentence, trace };
   // From here the log is written: a folder made or tightened now is the first thing it says.
+  options.onHomeOpened?.();
   if (opened.logs !== undefined)
     log.info(
       opened.logs === 'made'

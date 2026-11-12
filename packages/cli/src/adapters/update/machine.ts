@@ -1,9 +1,7 @@
 /** Production composition copied from today's bin/program.ts: package managers, verified releases and lifecycle. */
 import { statSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { HomeJsonSchema } from '@ferretry/kernel/contract';
 import type { TerminalIo } from '@ferretry/kernel/manifest';
 import { DAEMON_RELEASE_KEYS } from '@ferretry/plugin-updates/contract';
 import { resolveDaemonBinaryPath } from '../../lib/daemon/binary.ts';
@@ -26,6 +24,7 @@ import { BunDaemonProcess } from '../daemon/process.ts';
 import { HostProcessIncarnations } from '../daemon/process-incarnation.ts';
 import { privateRuntimeDirectory } from '../daemon/runtime-directory.ts';
 import { FileServiceStore } from '../daemon/service-files.ts';
+import { serviceRefusal } from '../daemon/state-home-marker.ts';
 import { HostInstallFacts } from './install-facts.ts';
 import { GitHubLatestRelease } from './latest-release.ts';
 import { CommandPackageManagers } from './package-managers.ts';
@@ -108,7 +107,8 @@ export function buildUpdateMachine(
   // Updates only restart an existing format-1 home; the kernel creates new homes itself.
   const claims: Pick<IStateHomeClaimPort, 'claim'> = {
     async claim(home) {
-      HomeJsonSchema.parse(JSON.parse(await readFile(join(home, 'home.json'), 'utf8')));
+      const refusal = await serviceRefusal(home);
+      if (refusal !== undefined) throw new Error(refusal);
     },
   };
   const service =

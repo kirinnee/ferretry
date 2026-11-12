@@ -228,6 +228,37 @@ describe('boot (§7.6)', () => {
     expect(await readFile(`${home}/notes.txt`, 'utf8')).toBe('mine');
   });
 
+  test("a refused home is marked as the home's fault and never calls onHomeOpened; a usable home calls it once", async () => {
+    const stray = await freshHome();
+    await mkdir(stray, { recursive: true });
+    await writeFile(`${stray}/notes.txt`, 'mine');
+    let opened = 0;
+    const refused = await bootHost({
+      home: stray,
+      version: '5.0.0',
+      implementations: [],
+      adapters: realAdapters(stray, () => {}, { binary: 'fy' }),
+      onHomeOpened: () => {
+        opened += 1;
+      },
+    });
+    expect(refused.kind === 'refused' && refused.cause).toBe('home');
+    expect(opened).toBe(0);
+    const fresh = await freshHome();
+    const started = await bootHost({
+      home: fresh,
+      version: '5.0.0',
+      implementations: [],
+      adapters: realAdapters(fresh, () => {}, { binary: 'fy' }),
+      onHomeOpened: () => {
+        opened += 1;
+      },
+    });
+    if (started.kind === 'running') running.push(started.host);
+    expect(started.kind).toBe('running');
+    expect(opened).toBe(1);
+  });
+
   test('a damaged identity refuses the boot instead of minting a new one', async () => {
     const home = await freshHome();
     await (await boot(home)).stop();
