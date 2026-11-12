@@ -46,6 +46,7 @@ export const LoginStatusReasonSchema = z.enum([
   'not_checked_yet',
   'api_key',
   'from_environment',
+  'host_terminal',
   'credential_unreadable',
   'access_expired_refreshable',
   'access_expiring',

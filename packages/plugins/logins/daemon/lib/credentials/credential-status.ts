@@ -106,6 +106,8 @@ const CredentialStatusReasonSchema = z.enum([
   'api_key',
   /** `store: environment`: the environment authenticates it, so there is no login to check. */
   'from_environment',
+  /** `store: host` Claude: the person's own terminal sign-in, which a ferret starts with and Ferretry never reads. */
+  'host_terminal',
   /** The login could not be read just now (a locked keychain, a newer format). Nothing is condemned. */
   'credential_unreadable',
   // refresh_due
@@ -425,7 +427,8 @@ export function decideCodexStatus(input: CodexStatusInput): CredentialStatus {
   const { facts, head, now } = input;
   if (input.checking) return status('checking', 'check_in_flight', head);
   if (facts.state === 'missing') return status('needs_sign_in', 'not_signed_in', head);
-  if (facts.state === 'unreadable') return lastKnown(head);
+  // A Codex file that cannot be read or used is a login a ferret cannot start on, so it is never Ready: it is listed to sign in again.
+  if (facts.state === 'unreadable') return status('needs_sign_in', 'credential_unreadable', head);
   if (facts.state === 'api_key') return status('ready', 'api_key', head);
   const plan = facts.planType;
   const failure = head.codexFailure;
@@ -453,9 +456,10 @@ export function decideCodexStatus(input: CodexStatusInput): CredentialStatus {
 
 /** A credential with no login to read: the environment authenticates it, or its store cannot be reached. */
 export function decideStorelessStatus(resolution: CredentialStoreResolution): CredentialStatus {
-  return resolution.store === 'environment'
-    ? status('ready', 'from_environment', {})
-    : status('needs_sign_in', 'store_unreachable', {});
+  if (resolution.store === 'environment') return status('ready', 'from_environment', {});
+  // A Claude login kept in the terminal's own folder launches without being read (as in v4), so it is not "unreachable".
+  if (resolution.store === 'host' && resolution.harness === 'claude') return status('ready', 'host_terminal', {});
+  return status('needs_sign_in', 'store_unreachable', {});
 }
 
 // ── Folding what a check learned into the head ───────────────────────────────────────────────────

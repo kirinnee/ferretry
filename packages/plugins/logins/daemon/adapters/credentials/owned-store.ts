@@ -30,6 +30,10 @@ import type { CodexUsageProbe } from './codex-usage-probe.ts';
 export const HOST_STORE_PENDING =
   "using a login kept in your terminal's own sign-in folder (store: host) is not in 5.0 yet; the sign-in in your terminal itself still works";
 
+/** Said for a Claude login kept in the terminal's own folder: it starts ferrets as it does in v4, and Ferretry neither reads nor signs it in. */
+const HOST_CLAUDE_TERMINAL =
+  'this login uses the sign-in in your terminal (store: host); Ferretry does not read or change it, so sign in or out with claude in your terminal';
+
 export type OwnedLoginRoot = Pick<RootHandle, 'resolve' | 'readText' | 'stat' | 'lstat' | 'ensurePrivateDirectory'>;
 
 const describe = (info: Pick<RootLstat, 'kind' | 'size' | 'modified' | 'mode' | 'links'>): string =>
@@ -91,7 +95,7 @@ export class OwnedLoginStore {
           return {
             harness: credential.harness,
             store: 'host',
-            unavailable: HOST_STORE_PENDING,
+            unavailable: credential.harness === 'claude' ? HOST_CLAUDE_TERMINAL : HOST_STORE_PENDING,
           };
         // A login is one directory, never a path supplied by a configuration name.
         if (id.length === 0 || id === '.' || id === '..' || /[/\\\0]/u.test(id))
@@ -137,6 +141,12 @@ export class OwnedLoginStore {
           outcome: 'unreadable',
           reason:
             'the Claude credential file is a symbolic link, which Claude replaces with a private copy on its next refresh',
+        };
+      } else if (resolution.harness === 'codex' && ((await this.root.lstat(path))?.links ?? 1) > 1) {
+        material = {
+          outcome: 'unreadable',
+          reason:
+            'the Codex sign-in file has a second name (another link to it exists), so a ferret cannot be given it',
         };
       } else if ((await this.root.stat(path)) === undefined) material = { outcome: 'absent' };
       else {

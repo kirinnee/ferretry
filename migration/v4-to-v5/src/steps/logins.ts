@@ -11,16 +11,21 @@
  *   key of `config/logins/<id>.yaml`, runtimes, budgets and spend.
  * - `state/model-catalog.json` → `state/logins/models.json` `published` (the catalog last taken and verified by v4).
  *
+ * - A Codex login with `store: host` (5.0 cannot start Codex from a host store): the Settings step writes it
+ *   `store: ferretry` under the same name; here it gets an EMPTY private (0700) folder, nothing is copied or read, and the
+ *   report names it for `fy login signin <name>`. See `./host-logins.ts`.
+ *
  * `config/logins/*.yaml` is the Settings step's (`./settings.ts`). Logins are keyed by NAME in
  * v4 already, so there is no runtime uuid to re-key here (M7 applies to routing and usage rows).
  */
 import { LOGINS_CREDENTIALS, LOGINS_MODELS, LoginIdSchema, ModelsStateSchema } from '@ferretry/plugin-logins/contract';
-import { lstat, readdir } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { KeptItem, StepReport } from '../report.ts';
 import { moveSealedTree, SealedUnreadableError } from '../sealed.ts';
 import { failureNote, isRecord, readV4Json, V4InputError } from '../v4/documents.ts';
 import { V4_CREDENTIALS, V4_MODEL_CATALOG, V4_PASSIVE_USAGE, V4LoginId, V4ModelCatalog } from '../v4/logins.ts';
+import { codexHostLogins, HOST_CODEX_MOVED } from './host-logins.ts';
 import type { Step } from './index.ts';
 
 const V5_LOGINS = 'state/logins';
@@ -71,7 +76,7 @@ export const loginsStep: Step = {
     },
     {
       what: 'sign-ins outside the v4 home (store: host, the macOS keychain)',
-      why: 'they are the harness’s own store, never Ferretry’s to move; a store: host login keeps pointing at it',
+      why: 'they are the harness’s own store, never Ferretry’s to move or read. A Claude store: host login keeps pointing at it (5.0 starts it from the terminal’s own sign-in); a Codex one is written store: ferretry under the same name with an empty folder, and signed in once',
     },
   ],
   async run(ctx): Promise<StepReport> {
@@ -86,6 +91,9 @@ export const loginsStep: Step = {
       });
       if (root !== undefined && !root.isDirectory()) throw new V4InputError(`${V4_CREDENTIALS}: is not a folder`);
 
+      // Codex logins v4 kept in the terminal's own folder (the Settings step wrote them `store: ferretry`): each gets an
+      // EMPTY private folder here, and v4's folder of that name (only usage.json, or a link out) is not moved or followed.
+      const codexHost = new Set(await codexHostLogins(ctx));
       const sealed: { file: string; bytes: number }[] = [];
       let logins = 0;
       let links = 0;
@@ -97,6 +105,7 @@ export const loginsStep: Step = {
           throw new V4InputError(
             `${where}: login "${name}" is not a v5 login id (lowercase letters, digits and dashes); rename the login in v4 first`,
           );
+        if (codexHost.has(name)) continue;
         const usage = join(credentialsFrom, name, V4_PASSIVE_USAGE);
         const entries = await moveSealedTree(join(credentialsFrom, name), join(credentialsTo, name), {
           write: !ctx.dryRun,
@@ -127,7 +136,19 @@ export const loginsStep: Step = {
         }
       }
 
+      for (const name of codexHost) {
+        if (!V4LoginId.safeParse(name).success || !LoginIdSchema.safeParse(name).success)
+          throw new V4InputError(
+            `config/logins/${name}.yaml: login "${name}" is not a v5 login id (lowercase letters, digits and dashes); rename the login in v4 first`,
+          );
+        if (ctx.dryRun) continue;
+        const folder = join(credentialsTo, name);
+        await mkdir(credentialsTo, { recursive: true, mode: 0o700 });
+        await mkdir(folder, { mode: 0o700 });
+        await chmod(folder, 0o700);
+      }
       const notes: string[] = ctx.dryRun ? ['dry run: nothing written'] : [];
+      for (const name of codexHost) notes.push(HOST_CODEX_MOVED(name));
       if (usageLeft > 0) notes.push(`${String(usageLeft)} passive usage reading(s) left for Usage`);
       const catalog = await publishedCatalog(home);
       if (catalog.held)
@@ -139,6 +160,11 @@ export const loginsStep: Step = {
         { what: 'links in sign-in folders made again, never followed', count: links },
         { what: 'published model catalog', count: catalog.held ? 1 : 0 },
       ];
+      if (codexHost.size > 0)
+        kept.push({
+          what: 'Codex store: host logins moved to Ferretry’s own sign-in (empty folder; sign in once)',
+          count: codexHost.size,
+        });
       return {
         ...base,
         status: 'converted',

@@ -128,23 +128,31 @@ bun src/main.ts --from "$B" --to "$H"                # writes the new home at H
       that held edit: `fy config confirm logins/<id>.yaml` (list what waits with `fy config confirm`; or Allow it in the
       app). Setting the secret does not approve the reference. Do not bypass this.
    4. `fy config check` passes, and `fy secret run NAME -- true` succeeds.
-6. **Codex logins. Tell the owner this before starting v5; the checks come in §8.9.**
+6. **Logins. Tell the owner this before starting v5; the checks come in §8.9.**
    1. **Which are listed.** The converter moves every v4 login folder (`fleet/credentials/<name>/`) to
       `state/logins/credentials/<name>/` whole and unopened, **keeping its name**. After v5 starts, `fy login ls` lists
-      every login by that name, Claude Code and Codex together, with whether each works. The ones that do not are
-      repeated under "Needs sign-in:", each with its exact command.
+      every login by that name, Claude Code and Codex together, with whether each works. Every login Ferretry keeps itself
+      that needs a sign-in is repeated under "Needs sign-in:", each with its exact command. A login kept in the terminal's
+      own folder (`store: host`) is never in that section (§5.6.4).
    2. **An old terminal sign-in keeps working.** The sign-in your own terminal holds (`~/.codex*`) is never read, moved or
       changed by the converter or by v5, so `codex` in a terminal stays signed in as before.
-   3. **When the owner must sign a Codex login in again.** Only for a login `fy login ls` lists under "Needs sign-in:"
-      (its sign-in file is empty, unreadable, or has a second name). Do not guess: the owner signs it in again with the app
+   3. **When the owner must sign a Codex login in again.** For each Codex login `fy login ls` lists under "Needs sign-in:":
+      its sign-in file is empty or missing, cannot be read, has a second name (another link to it), or its sign-in has
+      expired. A Codex file that cannot be read or has a second name is shown as "Needs sign-in" and never as Ready. Do not guess: the owner signs it in again with the app
       (Settings › Logins, open that login, "Sign in to <name>") or with `fy login signin <name>` (Codex shows a code and a
       page to open, or a link; `--force` starts over). `fy login check <name>` then re-checks it. You never see the sign-in.
-   4. **A host-store Codex login is not in 5.0 yet.** A Codex login v4 kept in the terminal's own folder (`store: host`)
-      keeps its name and its pointer, but this build cannot use it: starting a ferret on it is refused with "using a login
-      kept in your terminal's own sign-in folder (store: host) is not in 5.0 yet; the sign-in in your terminal itself still
-      works". Tell the owner which logins those are (their login files say `store: host`). Do not copy or link the terminal's
-      sign-in into Ferretry to get around it; until it is built the owner can use a Codex login Ferretry keeps itself
-      (`fy login add codex`).
+   4. **Logins kept in the terminal's own folder (`store: host`).** Say both parts plainly.
+      - **A Codex login (`harness: codex`) is moved to Ferretry's own sign-in.** 5.0 cannot start a Codex ferret from the
+        terminal's folder, so the converter writes that login as `store: ferretry` under the **same name** (every other
+        field kept) and gives it an **empty, private** sign-in folder. It copies, links and reads nothing of the terminal's
+        sign-in. The converter's summary lists each one: "moved to Ferretry's own sign-in; needs one sign-in:
+        fy login signin <name>". List them for the owner by name. The owner runs `fy login signin <name>` **once for each**
+        (Codex shows a code and a page to open), then `fy login check <name>`. Until then `fy login ls` lists it under
+        "Needs sign-in:". You never see the sign-in.
+      - **A Claude login (`harness: claude`) stays `store: host`, with no step.** 5.0 starts a Claude ferret from the
+        terminal's own sign-in as v4 did, and `fy login ls` shows it as shared with the terminal. Nothing is created or
+        moved for it. Signing it in or out happens with `claude` in the terminal.
+      - The terminal's own sign-in (`~/.claude*`, `~/.codex*`, the keychain) is never read or changed, and keeps working.
 
 ## 6. What is kept, item by item
 
@@ -201,8 +209,9 @@ Run each check and show the owner the result. Command names are v5's; if one dif
    `fy secret run <NAME> -- true` for one of them; it must succeed. You never see the value.
 8. **Devices**: on one paired phone, reload the app: it connects without pairing again and unlocks with its passkey.
 9. **Sign-ins**: `fy login ls` lists every login by name, Codex ones included, and shows whether each works. Anything under
-   "Needs sign-in:" is signed in again as in §5.6.3. A host-store Codex login is not in 5.0 yet (§5.6.4): list those for the
-   owner by name; do not work around it.
+   "Needs sign-in:" is signed in again as in §5.6.3. A `store: host` Codex login the converter moved (§5.6.4) is listed there until
+   the owner has run `fy login signin <name>` for it; name each one. A `store: host` Claude login needs nothing and shows as
+   shared with the terminal.
 10. `fy doctor` is clean.
 
 Then turn automatic updates back on if the owner had them on.

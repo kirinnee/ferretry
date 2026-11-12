@@ -366,7 +366,9 @@ const REASON_SENTENCES: Readonly<Record<CredentialStatusReason, string>> = {
   not_checked_yet: 'This login is present and current. Nothing has checked it with the provider yet.',
   api_key: 'This login uses an API key, so there is nothing to renew.',
   from_environment: 'This login comes from environment variables, so there is no sign-in to check.',
-  credential_unreadable: 'This login could not be read just now. Nothing is wrong with it as far as anyone knows.',
+  host_terminal: 'This login is the sign-in in your terminal. Ferrets start with it; Ferretry does not read it.',
+  credential_unreadable:
+    'This login could not be read just now. If it keeps happening, sign in again to replace its sign-in file.',
   access_expired_refreshable: 'The access token has expired. It renews itself the next time it is used.',
   access_expiring: 'The access token expires within five minutes. It renews the next time it is used.',
   last_refresh_old: 'This login has not been renewed for over eight days. It renews the next time it is used.',

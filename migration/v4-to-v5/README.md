@@ -147,7 +147,11 @@ dropped. Logins moves each `fleet/credentials/<login>/` whole with `moveSealedTr
 a file this user may not read fails the step by path, never hard-linked, so the backup stays its own file; a link is
 made again, never followed) and turns
 `state/model-catalog.json` into `models.json` `published`. A v4 login id with capitals fails the step: v5 login ids
-are lowercase. `config/warden.yaml` and `config/logins/*.yaml` belong to the Settings step.
+are lowercase. A Codex login with `store: host` (the terminal's own folder, which 5.0 cannot start Codex from) is written
+`store: ferretry` under the same name by the Settings step and gets an EMPTY 0700 folder here: nothing of the terminal's sign-in
+(`~/.claude*`, `~/.codex*`, the keychain) is read, listed or linked, and the report says "moved to Ferretry's own sign-in; needs
+one sign-in: fy login signin <name>". A Claude `store: host` login is left as it is (5.0 starts it from the terminal).
+`config/warden.yaml` and `config/logins/*.yaml` belong to the Settings step.
 
 Settings (`src/steps/settings.ts`) turns each v4 `config/*.yaml` into the v5 plugin config file that owns it: runtimes
 (`credential` → `login`), profiles, model sets, MCP and skills items, logins, endpoints (v4 presets), model catalogs,

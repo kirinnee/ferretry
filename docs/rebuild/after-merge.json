@@ -114,7 +114,7 @@
     },
     {
       "id": "host-store-codex-login",
-      "what": "host-store Codex login (store: host): a Codex login kept in the terminal's own folder cannot start a ferret. Migration step: list each Codex login by name; an old terminal sign-in keeps working (card &F3468) (due 2026-11-27)",
+      "what": "host-store Codex login (store: host): a Codex login kept in the terminal's own folder cannot start a ferret in the product. The migration converts each one to Ferretry's own sign-in under the same name (the owner signs in once); an old terminal sign-in keeps working (card &F3468) (due 2026-11-27)",
       "owner": "britnee"
     },
     {

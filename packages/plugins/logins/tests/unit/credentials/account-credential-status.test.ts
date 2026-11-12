@@ -340,6 +340,13 @@ describe('decideCodexStatus', () => {
     should(decide({ state: 'api_key' }).reason).equal('api_key');
   });
 
+  it('should never read an unreadable Codex file as Ready, even after an earlier Ready', () => {
+    const ready: CredentialStatusHead = { conclusion: { word: 'ready', reason: 'refresh_accepted', at: NOW - MINUTE } };
+    for (const head of [{}, ready]) {
+      should(decide({ state: 'unreadable' }, head)).match({ word: 'needs_sign_in', reason: 'credential_unreadable' });
+    }
+  });
+
   it('should be Refresh due within five minutes of exp, and when there is no exp and last_refresh is old', () => {
     should(decide(tokens({ accessExpiresAt: NOW + 4 * MINUTE })).reason).equal('access_expiring');
     should(
@@ -394,6 +401,13 @@ describe('decideStorelessStatus', () => {
     should(decideStorelessStatus({ harness: 'codex', store: 'host', unavailable: 'relative CODEX_HOME' }).reason).equal(
       'store_unreachable',
     );
+  });
+
+  it('should treat a Claude login kept in the terminal as Ready, since a ferret starts with it unread', () => {
+    should(decideStorelessStatus({ harness: 'claude', store: 'host', unavailable: 'x' })).match({
+      word: 'ready',
+      reason: 'host_terminal',
+    });
   });
 });
 
