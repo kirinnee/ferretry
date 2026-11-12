@@ -321,9 +321,12 @@ class FakePeerWaits implements PeerWaitEnder {
 /** Records that every mutation went through a keyed lock, and runs the work inline. */
 class RecordingSerial implements SerialExecutor {
   readonly keys: string[] = [];
+  /** Runs just before the locked work: a change another writer makes between a caller's unlocked read and its lock. */
+  beforeRun: (() => void) | undefined = undefined;
 
   async run<T>(key: string, work: () => Promise<T>): Promise<T> {
     this.keys.push(key);
+    this.beforeRun?.();
     return await work();
   }
 
@@ -1208,6 +1211,58 @@ describe('&B153: a pane that never comes to a prompt', () => {
     built.terminal.notReady = notReady(why);
     return built;
   };
+
+  for (const senderKind of ['human', 'daemon'] as const)
+    for (const uncertain of [false, true])
+      it(`RV6 HELD: a migrated ${senderKind} row is never released to the pane (landing uncertain: ${uncertain})`, async () => {
+        // The conversion keeps a held send's fate and adds the mark, so the row is held AND update-unconfirmed.
+        const built = parts(target(), [pane({ promptReady: true })]);
+        built.ledger.records.set('held-1', {
+          sendId: 'held-1',
+          acceptedAt: NOW,
+          acceptedTurn: 3,
+          path: 'revive-queue',
+          message: 'when you are back',
+          held: true,
+          senderKind,
+          fate: 'accepted',
+          unaccountedReason: 'update_unconfirmed',
+        });
+        if (uncertain)
+          built.terminal.deliverFailure = new SendLandingUnconfirmed('typed, and the composer never showed it');
+
+        should(await built.service.releaseHeld(ID)).equal(0);
+
+        should(built.terminal.typed).be.empty();
+        should(built.ledger.records.get('held-1')).containEql({
+          fate: 'accepted',
+          held: true,
+          unaccountedReason: 'update_unconfirmed',
+        });
+      });
+
+  it('RV6 HELD: a row marked after the selection is refused again under the lock, before any transport', async () => {
+    const built = parts(target(), [pane({ promptReady: true })]);
+    built.ledger.records.set('held-1', {
+      sendId: 'held-1',
+      acceptedAt: NOW,
+      acceptedTurn: 3,
+      path: 'revive-queue',
+      message: 'when you are back',
+      held: true,
+      fate: 'accepted',
+    });
+    // The mark lands between the unlocked selection and the locked re-read.
+    built.serial.beforeRun = () => {
+      const row = built.ledger.records.get('held-1');
+      if (row !== undefined) built.ledger.records.set('held-1', { ...row, unaccountedReason: 'update_unconfirmed' });
+    };
+
+    should(await built.service.releaseHeld(ID)).equal(0);
+
+    should(built.terminal.typed).be.empty();
+    should(built.ledger.records.get('held-1')).containEql({ held: true, unaccountedReason: 'update_unconfirmed' });
+  });
 
   it('keeps a released held message open for the tracker when the live pane never comes to a prompt', async () => {
     // Back on hold it would wait for a revive this live session never gets.

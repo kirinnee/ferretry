@@ -21,7 +21,8 @@ import {
   type SharedDraftSent,
 } from '../../../seams/protocol.ts';
 import { DraftSentSchema } from '../../../../contract/index.ts';
-import { ferretOf } from '@ferretry/core-gate/contract';
+import { callerIsAgent, ferretOf, OWNER_ONLY_CODE, ownerOnlyWords } from '@ferretry/core-gate/contract';
+import { isUpdateUnconfirmed } from '../types.ts';
 import { parseBody } from '../../../seams/api.ts';
 import { ApiError } from '../../../seams/api.ts';
 import { type ApiResponse, decodeParameter, headerValue } from '../../../seams/api.ts';
@@ -477,6 +478,14 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly MountRoute[
         const id = pathSessionId(context);
         const sendId = pathSendId(context);
         await parseBody(context.request, SendEnterRequestSchema);
+        // An Enter for a send the update left unconfirmed has Retry's caller policy: a person's alone, so an agent is
+        // refused here (`owner_only`) exactly as Retry's route refuses it. The service refuses every caller's Enter for
+        // it as well (`SessionSendService.submit`); this says WHO may ask instead.
+        if (callerIsAgent(context.credential, context.actor)) {
+          const row = (await subsystem.sends(id).catch(refuse)).find(record => record.sendId === sendId);
+          if (isUpdateUnconfirmed(row))
+            throw new ApiError(403, ownerOnlyWords(`may press Enter for send ${sendId}`), OWNER_ONLY_CODE);
+        }
         return jsonResponse(await subsystem.submit(id, sendId).catch(refuse));
       },
     },

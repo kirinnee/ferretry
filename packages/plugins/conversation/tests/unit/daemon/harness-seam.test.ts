@@ -73,6 +73,7 @@ const CALLER = ferretId('lead');
 /** The calling ferret's name, apart from its id so a banner that names the wrong one shows. */
 const LEAD_NAME = 'kamila';
 const SEND_ROUTE = 'POST /v1/ferrets/:ferretId/send';
+const ENTER_ROUTE = 'POST /v1/ferrets/:ferretId/sends/:sendId/enter';
 
 /**
  * The banner a message from the lead (`kamila`, session `lead`) is typed under, spelled out by hand rather than built
@@ -192,6 +193,8 @@ async function conversation(
      * stand-in admission stamps no actor and no credential at all, so the send route is wrapped to carry this one.
      */
     readonly sendStanding?: CallStanding;
+    /** The same for the send's Enter route: its handler reads who is calling, which the stand-in does not stamp. */
+    readonly enterStanding?: CallStanding;
     /** Plugin ids that need the conversation port and nothing else, so `apiFor(id)` is what the kernel binds for them. */
     readonly consumers?: readonly string[];
   } = {},
@@ -220,13 +223,21 @@ async function conversation(
         throw new Error('Conversation entered kernel.act around the harness seam: that deadlocks the runner');
       }) as typeof ctx.kernel.act;
       const built = build({ ...ctx, kernel: { ...ctx.kernel, act, state } });
-      const standing = options.sendStanding;
-      if (standing === undefined) return built;
+      const stamped = [
+        [SEND_ROUTE, options.sendStanding],
+        [ENTER_ROUTE, options.enterStanding],
+      ] as const;
+      if (stamped.every(([, standing]) => standing === undefined)) return built;
       const routes = built.routes as Readonly<Record<string, RouteHandler | undefined>>;
-      const handler = routes[SEND_ROUTE];
-      if (handler === undefined) throw new Error('the conversation daemon half serves no send route');
-      const peer: RouteHandler = async call => await handler({ ...call, ...standing } as typeof call);
-      return { ...built, routes: { ...routes, [SEND_ROUTE]: peer } } as typeof built;
+      let wrapped = routes;
+      for (const [key, standing] of stamped) {
+        if (standing === undefined) continue;
+        const handler = routes[key];
+        if (handler === undefined) throw new Error(`the conversation daemon half serves no ${key} route`);
+        const peer: RouteHandler = async call => await handler({ ...call, ...standing } as typeof call);
+        wrapped = { ...wrapped, [key]: peer };
+      }
+      return { ...built, routes: wrapped } as typeof built;
     },
   } as typeof served;
   const host = await testHost({
@@ -2126,11 +2137,11 @@ const migratedRows = (senderKind: 'human' | 'daemon') => [
   },
 ];
 
-async function migratedWorld(senderKind: 'human' | 'daemon') {
+async function migratedWorld(senderKind: 'human' | 'daemon', options: { readonly enterStanding?: CallStanding } = {}) {
   const { SENDS_STATE, SendLineSchema } = await import('../../../contract/index.ts');
   const ferrets = new HarnessFerrets();
   ferrets.reviewEntries = [{ id: 'native-a:2:0:message', at: OLD_INPUT_AT, role: 'user', text: MIGRATED_MESSAGE }];
-  const w = await conversation(ferrets, OPEN, { harness: 'codex' });
+  const w = await conversation(ferrets, OPEN, { harness: 'codex' }, options);
   for (const row of migratedRows(senderKind)) await w.state.append(SENDS_STATE, SendLineSchema.parse(row), 'f1');
   const pending = async () => (await w.api().sends(F1)).sends.find(row => row.sendId === 'pending')!;
   return { ...w, pending };
@@ -2196,3 +2207,111 @@ test('RV5 RETRY ROUTE: a person still gets the pending answer (the public route 
     await w.host.stop();
   }
 });
+
+for (const senderKind of ['human', 'daemon'] as const)
+  describe(`RV6 BYPASS: no path but a person's Retry presses a key for a migrated send (${senderKind} send)`, () => {
+    /** A pane that shows the flagged send's exact text, idle: the one pane an Enter could land in. */
+    const showingTheText = (w: Awaited<ReturnType<typeof migratedWorld>>) => {
+      w.ferrets.script.observe = async () =>
+        ok({ alive: true, dead: false, promptReady: true, activeWork: false, draft: MIGRATED_MESSAGE });
+    };
+    const untouched = async (w: Awaited<ReturnType<typeof migratedWorld>>) => {
+      expect(w.ferrets.composerKeys).toEqual([]);
+      const saved = await w.pending();
+      expect(saved.fate).toBe('unaccounted');
+      expect(saved.unaccountedReason).toBe('update_unconfirmed');
+      expect(saved.evidence).toBeUndefined();
+    };
+
+    test('a ferret’s Enter on the send’s route is refused owner_only before any key', async () => {
+      const w = await migratedWorld(senderKind, { enterStanding: ferretStanding(F1) });
+      try {
+        showingTheText(w);
+        const response = await w.host.request('POST', '/v1/ferrets/f1/sends/pending/enter', {
+          as: asFerret('f1'),
+          body: {},
+        });
+        expect(response.status).toBe(403);
+        expect(response.json()).toMatchObject({ code: 'owner_only' });
+        await untouched(w);
+      } finally {
+        await w.host.stop();
+      }
+    });
+
+    test('a ferret’s Enter on an ordinary send still presses its key (the refusal is the migration mark’s alone)', async () => {
+      const w = await migratedWorld(senderKind, { enterStanding: ferretStanding(F1) });
+      try {
+        const sent = await w.api().send(F1, { kind: 'owner' }, { message: 'an ordinary send', sendId: 'ordinary' });
+        expect(sent.ok).toBe(true);
+        w.ferrets.script.observe = async () =>
+          ok({ alive: true, dead: false, promptReady: true, activeWork: false, draft: 'an ordinary send' });
+        const response = await w.host.request('POST', '/v1/ferrets/f1/sends/ordinary/enter', {
+          as: asFerret('f1'),
+          body: {},
+        });
+        expect(response.status).toBe(200);
+        expect(w.ferrets.composerKeys).toEqual(['submit:an ordinary send']);
+      } finally {
+        await w.host.stop();
+      }
+    });
+
+    test('a person’s Enter on the route is refused too, in words, with no key: only Retry sends it again', async () => {
+      const w = await migratedWorld(senderKind, { enterStanding: ownerStanding() });
+      try {
+        showingTheText(w);
+        const response = await w.host.request('POST', '/v1/ferrets/f1/sends/pending/enter', { as: owner(), body: {} });
+        expect(response.status).toBeGreaterThanOrEqual(400);
+        expect(JSON.stringify(response.json())).toContain("only a person's Retry sends it again");
+        await untouched(w);
+      } finally {
+        await w.host.stop();
+      }
+    });
+
+    test('the Warden-bound enterSend port is refused through the same service guard: no key', async () => {
+      const w = await migratedWorld(senderKind);
+      try {
+        showingTheText(w);
+        const acted = await w.api().enterSend(F1, 'pending');
+        expect(acted).toMatchObject({ ok: false });
+        await untouched(w);
+      } finally {
+        await w.host.stop();
+      }
+    });
+
+    test('the Warden-bound composer(submit) port is refused when the draft is the flagged send’s text: no key', async () => {
+      const w = await migratedWorld(senderKind);
+      try {
+        showingTheText(w);
+        const acted = await w.api().composer(F1, 'submit', MIGRATED_MESSAGE);
+        expect(acted).toMatchObject({ ok: false });
+        await untouched(w);
+      } finally {
+        await w.host.stop();
+      }
+    });
+
+    test('the person’s composer route is refused for that draft too, but a different draft is still submitted', async () => {
+      const w = await migratedWorld(senderKind);
+      try {
+        showingTheText(w);
+        const refused = await w.host.request('POST', '/v1/ferrets/f1/composer', {
+          as: owner(),
+          body: { action: 'submit', draft: MIGRATED_MESSAGE },
+        });
+        expect(refused.status).toBeGreaterThanOrEqual(400);
+        await untouched(w);
+
+        w.ferrets.script.observe = async () =>
+          ok({ alive: true, dead: false, promptReady: true, activeWork: false, draft: 'something else entirely' });
+        const other = await w.api().composer(F1, 'submit', 'something else entirely');
+        expect(other).toEqual({ ok: true, value: { action: 'submit', outcome: 'submitted' } });
+        expect(w.ferrets.composerKeys).toEqual(['submit:something else entirely']);
+      } finally {
+        await w.host.stop();
+      }
+    });
+  });
