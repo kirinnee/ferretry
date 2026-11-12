@@ -751,6 +751,36 @@ export interface RootDurableHeld extends RootDurableRead {
   stillNames(): Promise<boolean>;
 }
 
+/** Why {@link RootHandle.checkPrivateChain} refused one folder on the way. */
+export type DirectoryChainFault =
+  /** Nothing is there (a check makes nothing). */
+  | 'missing'
+  /** A file, a socket or another thing that is not a folder. */
+  | 'not_directory'
+  /** A symbolic link: whatever it points at, the folder could be swapped by renaming the link. */
+  | 'link'
+  /** Owned by somebody other than the daemon's user. */
+  | 'foreign_owner'
+  /** Writable by its group or by everyone: another user could add, rename or swap a name in it. */
+  | 'writable_by_others'
+  /** The daemon's own user is not known on this host, so ownership cannot be judged: nothing is proved. */
+  | 'unknown_owner'
+  /** The folder could not be looked at (no permission, a disk error): nothing is proved. */
+  | 'unreadable'
+  /** The folder is not below the home: this check is for the kernel-made roots, and judges nothing else. */
+  | 'outside_home';
+
+/**
+ * The first folder of a chain that is not private, and why. `component` is its path RELATIVE to the home (`.` is the
+ * home itself, `state/claude-code`), never absolute; `reason` is a plain sentence naming that component and carries no
+ * file content and no secret value.
+ */
+export interface DirectoryChainProblem {
+  readonly fault: DirectoryChainFault;
+  readonly component: string;
+  readonly reason: string;
+}
+
 /**
  * A scoped handle on one root: resolves symlinks before checking, refuses `..`, keeps today's link and device-file
  * checks, and refuses everything inside the fence for an owner's root.
@@ -828,6 +858,20 @@ export interface RootHandle {
   copyShared(tree: SharedTree, to: FencedPath, options?: TreeCopyOptions): Promise<SharedTreeCopied>;
   /** A folder made (or narrowed) to `0700`, refused when a link or a file is at the name. */
   ensurePrivateDirectory(path: FencedPath): Promise<void>;
+  /**
+   * The directory-chain policy for a credential-bearing file (v4's launch overlay, as a kernel fact): looks at EVERY
+   * folder from the home down to the folder `path` names, each by its own `lstat` (no link followed), and answers the
+   * FIRST that is missing, is not a plain directory, is a link, is owned by someone other than the daemon's user, or is
+   * writable by its group or by everyone. A pass means every one of them is a real directory the daemon alone can change.
+   * The home's own spelling may be a link (the fence and every internal root already anchor on its real path); what it
+   * reaches is judged like the rest. Read-only: it makes nothing and NEVER changes a mode (silently narrowing an
+   * ancestor would hide that it was open), so the caller refuses the write with `reason` and the owner fixes the folder.
+   * Ask it before the file is written AND again immediately before it is used (a mode or an owner can change between);
+   * the write itself is still made through the no-follow descriptors of `publish`, so a link swapped in after the check
+   * reaches nothing. For a root below the home only (`agent-homes`, `fleet`, `sessions`, `downloads`, `credentials`);
+   * any other root answers `outside_home`. A path the root refuses throws, as every call does.
+   */
+  checkPrivateChain(path: FencedPath): Promise<Result<void, DirectoryChainProblem>>;
   list(path: FencedPath): Promise<readonly string[]>;
   /** The folder's names with each leaf's own kind, size, mode and hard-link count (a link is listed, never entered). */
   entries(path: FencedPath): Promise<readonly RootEntry[]>;
@@ -1455,6 +1499,15 @@ export interface PathsPort {
    */
   checkDirectory(absolutePath: string): Promise<Result<CheckedDirectory, DirectoryRefusal>>;
   /**
+   * {@link checkDirectory}, and the answer remembered: the folder's canonical path, its device and inode, and whether the
+   * state-home fence holds it. {@link BoundDirectory.verify} then re-judges all three right before the process is started,
+   * which closes every swap made BEFORE that look (a folder renamed away and replaced by a link into the state home after
+   * the start-time check). It does NOT close the instant between that look and the child's `chdir`: the runner still
+   * reaches the folder by path (declared GAP, `docs/secrets.md`). Fails closed: a fence that cannot be computed refuses
+   * the bind (`unresolved`). Read-only, like `checkDirectory`, and gated by the same `permissions.checkDirectory`.
+   */
+  bindDirectory(absolutePath: string): Promise<Result<BoundDirectory, BoundDirectoryRefusal>>;
+  /**
    * A bare executable NAME (`npx`, `claude`) resolved to the path a shell would run, under the kernel's control: only
    * for a manifest with `permissions.which`. The caller's `directories` (absolute; a harness's configured search
    * folders) are searched first, then the daemon's inherited `PATH`; an empty, relative or odd entry is never searched,
@@ -1512,6 +1565,40 @@ export interface CheckedDirectory {
 export interface DirectoryRefusal {
   readonly reason: 'not_absolute' | 'not_a_directory';
   readonly message: string;
+}
+
+/** {@link PathsPort.bindDirectory} refused, or a {@link BoundDirectory.verify} that held: why, and the sentence for the person. */
+export interface BoundDirectoryRefusal {
+  /**
+   * `not_absolute` / `not_a_directory`: as {@link DirectoryRefusal}. `unresolved`: the kernel could not tell (the state
+   * home cannot be identified, or a look failed), so it proves nothing. `changed` (verify only): what the folder reaches
+   * is no longer what was checked.
+   */
+  readonly reason: 'not_absolute' | 'not_a_directory' | 'unresolved' | 'changed';
+  readonly message: string;
+}
+
+/**
+ * A launch folder as it was when it was checked ({@link PathsPort.bindDirectory}): its canonical path, the device and
+ * inode of the directory that path resolved to, and the state-home fence's answer. {@link verify} looks at the folder
+ * again and answers whether it is still exactly that, so a folder renamed away and replaced by a link (or another
+ * directory) after the check is held instead of launched into.
+ */
+export interface BoundDirectory {
+  /** The canonical path, as {@link PathsPort.checkDirectory} answers it. */
+  readonly realPath: string;
+  /**
+   * The fence's answer when it was bound: the folder is the daemon's state home, lies inside it (by name and by identity,
+   * wherever it is reached from) or is reached through a link that lives there. The caller decides who may start in such a
+   * folder (an agent never may); binding refuses nothing for it.
+   */
+  readonly insideStateHome: boolean;
+  /**
+   * Resolves the folder again, immediately: the same canonical path, the same directory (device and inode) and the same
+   * fence answer, else `changed`. Anything the kernel cannot read is `unresolved`: it fails closed, never passes on
+   * doubt, never throws. Ask it as late as possible — right before the process is started.
+   */
+  verify(): Promise<Result<void, BoundDirectoryRefusal>>;
 }
 
 /**

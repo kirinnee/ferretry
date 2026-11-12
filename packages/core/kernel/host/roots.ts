@@ -16,6 +16,7 @@ import {
 import { insideFence, internalRootFolder } from '../contract/home.ts';
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import type {
+  DirectoryChainProblem,
   RootEntry,
   RootHandle,
   RootLstat,
@@ -60,6 +61,8 @@ import { type OwnFolderSpellings, PROCESS_FOLDER_ROOTS, processFolderAllowed } f
 import { type ProjectUse, projectFilesScope, projectPathRefusal } from '../manifest/project-files.ts';
 import {
   anchorWalk,
+  chainFault,
+  chainProblem,
   harnessFileRefusal,
   permittedMode,
   renameNamesRefusal,
@@ -1279,6 +1282,8 @@ interface HandleSetup {
   readonly privateFiles: PrivatePlaces;
   /** Whether the plugin declared `permissions.setMode`. */
   readonly setMode?: boolean;
+  /** The daemon's own uid, for `checkPrivateChain`; absent: nothing about ownership can be proved. */
+  readonly daemonUid?: number;
   /** The manifest's `permissions.projectFiles`: the relative set a `project-files` handle may reach. */
   readonly projectFiles?: readonly string[];
 }
@@ -2240,6 +2245,13 @@ function rootHandle(setup: HandleSetup): RootHandle {
       });
       return 'copied';
     },
+    checkPrivateChain: async path => {
+      const root = base();
+      if (root === undefined) return refuse(name === 'work' ? 'unknown_ferret' : 'outside');
+      const lexical = lexicalInRoot(home, root, ownerRoot, path);
+      if (!lexical.ok) return refuse(lexical.error);
+      return await privateChain(fs, home, lexical.value, setup.daemonUid);
+    },
     ensurePrivateDirectory: async path => {
       writable();
       gate(path, 'make');
@@ -2499,9 +2511,15 @@ export function pluginStateFolder(home: string, plugin: string): string {
  * makes at boot and the base the roots port serves are this fact.
  */
 function internalRootBase(home: string, plugin: string, name: RootName): string | undefined {
+  const below = internalRootRelative(plugin, name);
+  return below === undefined ? undefined : `${home.replace(/\/+$/u, '')}/${below}`;
+}
+
+/** The same fact relative to the home (`state/<plugin>/agent-homes`, `fleet`), for the testing host's chain; `undefined` for a root that has none. */
+export function internalRootRelative(plugin: string, name: RootName): string | undefined {
   const fixed = HOME_ROOT_FOLDERS[name];
-  if (fixed !== undefined) return `${home.replace(/\/+$/u, '')}/${fixed}`;
-  return isInternalRoot(name) ? `${home.replace(/\/+$/u, '')}/${internalRootFolder(plugin, name)}` : undefined;
+  if (fixed !== undefined) return fixed;
+  return isInternalRoot(name) ? internalRootFolder(plugin, name) : undefined;
 }
 
 /** One declared internal root whose base the kernel would not make or accept, and why. */
@@ -2594,6 +2612,11 @@ export interface RootsOptions {
   readonly harnessFiles?: readonly string[];
   /** Whether the manifest declared `permissions.setMode`; absent, `RootHandle.setMode` is refused `not_declared`. */
   readonly setMode?: boolean;
+  /**
+   * The daemon's own uid, for `RootHandle.checkPrivateChain`. Absent: this process's own (`process.getuid`); `null`: not
+   * known, so ownership proves nothing and every chain check fails closed (`unknown_owner`).
+   */
+  readonly daemonUid?: number | null;
   /** Whether the manifest declares `permissions.shareTrees` (`RootsPort.share`); absent, every share is refused. */
   readonly shareTrees?: boolean;
   /** The manifest's `permissions.projectFiles`, for the `project-files` root; absent, every name of it is refused. */
@@ -2635,6 +2658,7 @@ export function rootsPortFor(
   let proven: Promise<readonly string[]> | undefined;
   const immutable = (): Promise<readonly string[]> =>
     (proven ??= resolveImmutableRoots(fs, options.hardLinkRoots ?? HARD_LINK_ROOTS).catch(() => []));
+  const daemonUid = options.daemonUid === undefined ? process.getuid?.() : (options.daemonUid ?? undefined);
   const home = absolute(layout.home, 'the home');
   const privateFiles: PrivatePlaces = {
     files: options.privateFiles ?? [],
@@ -2757,10 +2781,46 @@ export function rootsPortFor(
         pins: options.pins,
         privateFiles,
         ...(options.setMode === true ? { setMode: true } : {}),
+        ...(daemonUid === undefined ? {} : { daemonUid }),
         ...(options.projectFiles === undefined ? {} : { projectFiles: options.projectFiles }),
       });
     },
   };
+}
+
+/**
+ * `RootHandle.checkPrivateChain`: every folder from the home down to `target`, each by its own `lstat`, judged by the one
+ * rule ({@link chainFault}). The home is reached by its REAL path (its own spelling may be a link, as the fence and every
+ * internal root treat it); everything below it is looked at exactly as named, so a link anywhere is a link. Nothing is
+ * made and no mode is ever changed. A folder that cannot be looked at, and a home that cannot be resolved, prove nothing.
+ */
+async function privateChain(
+  fs: HostFs,
+  home: string,
+  target: string,
+  uid: number | undefined,
+): Promise<Result<void, DirectoryChainProblem>> {
+  const named = absolute(home, 'the home');
+  if (!within(named, target)) return err(chainProblem('(outside the home)', 'outside_home'));
+  const realHome = await fs.realpath(named).catch(() => undefined);
+  if (realHome === undefined) return err(chainProblem('.', 'unreadable'));
+  const parts = relative(named, target)
+    .split('/')
+    .filter(part => part !== '');
+  let at = realHome;
+  for (let depth = 0; depth <= parts.length; depth += 1) {
+    if (depth > 0) at = join(at, parts[depth - 1] as string);
+    const component = depth === 0 ? '.' : parts.slice(0, depth).join('/');
+    let entry: FileIdentity | undefined;
+    try {
+      entry = await fs.identity(at);
+    } catch {
+      return err(chainProblem(component, 'unreadable'));
+    }
+    const fault = chainFault(entry, uid);
+    if (fault !== undefined) return err(chainProblem(component, fault, entry));
+  }
+  return ok(undefined);
 }
 
 /** A shared tree's folder must exist, be a folder, and pass its source's own checks NOW (at mint, as at every copy). */
