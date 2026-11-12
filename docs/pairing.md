@@ -275,8 +275,9 @@ every plugin is built, so Access asks Connections for the advertisement on every
 build), and Connections takes the host and port from `kernel.bind` — whichever of `--host`, `--port`, `FY_PORT` or the
 default decided them — and falls back to `direct` in `config/connections.yaml` only while nothing is bound. A loopback
 bind with a relay source is therefore `local-only` with a link on its own port, and needs no `direct` block. Only the
-advertisement and the reachability check follow the bound listener: the browser-origin allowlist (what a passkey may
-name, what a tunnel upgrade's `Origin` may be) is still read from the configured `direct` block alone.
+advertisement and the reachability check follow the bound listener. Connections' browser-origin allowlist remains
+configuration-based, independent of the bound listener; production Access passkeys remain restricted to the hosted app
+origin.
 
 Each remedy below answers **the direct address**, which is the only thing these reasons describe. **The supported way
 to pair a phone is a loopback listener plus the discovered relay**: the link names the daemon's own loopback address,

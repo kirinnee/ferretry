@@ -129,8 +129,10 @@ test('G158 R206 the production doctor states loopback reachability before postur
   expect(lines[1]).toContain(
     'direct-only — no relay could be discovered: this daemon could not reach the relay directory',
   );
-  expect(finding.detail).toContain('NO other device can reach it');
-  expect(finding.detail).toContain('a restart asks the relay directory again');
+  expect(finding.detail).toContain('another device cannot pair yet');
+  expect(finding.detail).toContain('Restart to ask the hosted relay directory again');
+  expect(finding.detail).toContain('"relay" entry in config/connections.yaml');
+  expect(finding.detail).not.toMatch(/carriers|publicUrl|0\.0\.0\.0/u);
   expect(finding.detail).not.toMatch(/password|may use|change settings for/u);
 });
 
@@ -168,5 +170,5 @@ test('R206 a configured relay switched off is diagnosed with its own remedy', as
   const { finding } = await boot([{ url: 'https://mine.example', enabled: false }]);
   expect(finding.state).toBe('warn');
   expect(finding.detail).toContain('direct-only — the relay https://mine.example is switched off');
-  expect(finding.detail).toContain('correct it or remove it, then restart');
+  expect(finding.detail).toContain('correct or remove the top-level "relay" entry in config/connections.yaml');
 });

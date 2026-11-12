@@ -10,7 +10,6 @@
 
 import { describe, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
-const WILDCARD_BIND_HOST = '0.0.0.0';
 import should from 'should';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { testHost } from '../../../../../core/kernel/testing/host.ts';
@@ -44,7 +43,7 @@ import {
   DiscoveredRelayCarrierSchema,
 } from '../../../daemon/lib/runtime/relay-config.ts';
 
-const CONFIG_FILE = '/tmp/state/config/daemon.json';
+const CONFIG_FILE = 'connections.yaml';
 const HOSTED = 'https://relay.example';
 
 const available = (relayUrl: string): RelayAdvertisement => ({ kind: 'available', relayUrl });
@@ -274,7 +273,7 @@ describe('what the daemon says about its carrier', () => {
       /^carrier {6}hosted — https:\/\/relay\.example, from Ferretry/u,
     );
     should(describeRelayCarrierPosture(chooseRelayCarrierSource(configured(), NO_RELAY_DIRECTORY), CONFIG_FILE)).match(
-      /^carrier {6}self-hosted — https:\/\/relay\.example, from \/tmp/u,
+      /^carrier {6}self-hosted — https:\/\/relay\.example, from connections\.yaml$/u,
     );
     should(
       describeRelayCarrierPosture(
@@ -298,15 +297,22 @@ describe('what the daemon says about its carrier', () => {
 
     // Assert — THE OLD NOTICE WAS THE FIRST LINE ALONE, which told somebody whose phone could not
     // reach this daemon nothing they could act on.
-    should(lines).have.length(3);
+    should(lines).have.length(5);
     should(lines[0]).match(/^no relay carrier — /u);
-    should(lines[1]).match(/reachable only from this machine/u);
-    should(lines[2]).match(/relay directory again/u);
-    should(lines[2]).containEql(CONFIG_FILE);
+    should(lines[1]).match(
+      /^No relay is available, so another device cannot pair yet; this daemon is bound to 192\.168\.1\.10, but it refuses direct connections from other machines\.$/u,
+    );
+    should(lines[2]).equal('Keep the daemon on a loopback listener ("fyd --host 127.0.0.1").');
+    should(lines[3]).match(
+      /^Restart to ask the hosted relay directory again; .*top-level "relay" entry in config\/connections\.yaml/u,
+    );
+    should(lines[4]).match(
+      /^5\.0 has no separate public-address setting, and widening the listener does not enable direct connections/u,
+    );
   });
 
   it.each(['127.0.0.1', '::1', 'localhost', '[::1]'])(
-    'should say a daemon on %s with no carrier cannot be paired with at all, and name the way out',
+    'should say a daemon on %s with no carrier cannot pair another device yet, and name the way out',
     host => {
       // Act — the worst case, and the one every fresh install is in.
       const lines = describeAbsentRelayCarrier({
@@ -316,18 +322,19 @@ describe('what the daemon says about its carrier', () => {
         host,
       });
 
-      // Assert — naming only the relay would leave the reader exactly as stuck: pairing is always
-      // direct, so this daemon cannot be paired with from another device however the relay ends up.
-      should(lines).have.length(4);
-      should(lines[1]).containEql(host);
-      should(lines[1]).match(/nothing can pair with it either/u);
-      // Bind everywhere before advertising one dialable URL. The wildcard keeps loopback working,
-      // so the host's own command can still spend the owner-only credential after applying the fix.
-      should(lines[2]).match(/^to pair: set "host" to "0\.0\.0\.0" on the bind entry in "carriers" of/u);
-      should(lines[2]).containEql(CONFIG_FILE);
-      should(lines[2]).containEql(`"${WILDCARD_BIND_HOST}"`);
-      should(lines[2]).containEql('"publicUrl"');
-      should(lines[3]).match(/^to stay reachable once that browser leaves the network/u);
+      // Assert — the consequence, the one supported listener, the relay correction and the limit.
+      should(lines).have.length(5);
+      should(lines[1]).equal(
+        `No relay is available, so another device cannot pair yet; this daemon is bound to ${host}, and a browser on this machine can pair locally.`,
+      );
+      should(lines[2]).equal('Keep the daemon on a loopback listener ("fyd --host 127.0.0.1").');
+      should(lines[3]).equal(
+        'Restart to ask the hosted relay directory again; to stop depending on it, add the top-level "relay" entry in ' +
+          'config/connections.yaml naming a rendezvous you operate (docs/cloudflare-relay-self-hosting.md).',
+      );
+      should(lines[4]).equal(
+        '5.0 has no separate public-address setting, and widening the listener does not enable direct connections from other machines.',
+      );
     },
   );
 
@@ -342,8 +349,9 @@ describe('what the daemon says about its carrier', () => {
 
     // Assert — the specific sentence survives, and the remedy points at the block being dialled.
     should(lines[0]).containEql('not a daemon fingerprint');
-    should(lines[2]).match(/relay entry in "carriers" of .* is what this daemon dials/u);
-    should(lines[2]).match(/correct it or remove it/u);
+    should(lines[3]).equal(
+      'This relay is explicitly configured, so correct or remove the top-level "relay" entry in config/connections.yaml (it is what this daemon dials), then restart.',
+    );
   });
 
   it('should fall back to a stated absence rather than an empty reason', () => {
@@ -362,7 +370,23 @@ describe('what the daemon says about its carrier', () => {
     // Assert — `--check` names the posture in its own line and would otherwise say it twice.
     should(
       relayCarrierRemedy(chooseRelayCarrierSource(undefined, { kind: 'disabled' }), CONFIG_FILE, '192.168.1.10'),
-    ).have.length(2);
+    ).have.length(4);
+  });
+
+  it.each([
+    ['discovered', chooseRelayCarrierSource(undefined, NO_RELAY_DIRECTORY)],
+    ['configured', chooseRelayCarrierSource(configured(), RELAY_DIRECTORY_NOT_ASKED)],
+  ] as const)('should never prescribe a v4 remedy 5.0 cannot honour for a %s source', (_name, source) => {
+    // Assert — "carriers", "publicUrl" and the wildcard bind do not exist in 5.0: the strict schema refuses them
+    // and the listener refuses a peer off this machine, so a sentence naming them sends the reader nowhere.
+    for (const host of ['127.0.0.1', '::1', 'localhost', '192.168.1.10']) {
+      const said = [
+        ...relayCarrierRemedy(source, CONFIG_FILE, host),
+        ...describeAbsentRelayCarrier({ source, carrierDetail: undefined, configFile: CONFIG_FILE, host }),
+      ].join('\n');
+      should(said).not.match(/carriers|publicUrl|0\.0\.0\.0/u);
+      should(said).containEql('"relay" entry in config/connections.yaml');
+    }
   });
 
   it('should never print the same sentence for a switch that is off and a directory it could not reach', () => {

@@ -31,7 +31,6 @@
  */
 
 import { DaemonOriginSchema, isLoopbackHost, PublishedCarriersSchema } from '../../../contract/index.ts';
-const WILDCARD_BIND_HOST = '0.0.0.0';
 import { z } from 'zod';
 import { SocketEndpointSchema } from './endpoint.ts';
 const HostedRelayAdvertisementSchema = z.strictObject({
@@ -226,7 +225,7 @@ function duplicateRendezvousRefusal(url: string): string {
     `two relay carriers resolved to the same rendezvous ${url} — a relay written in this daemon’s ` +
     'configuration and the one the relay directory advertises are the same address, so this boot would ' +
     'open two sockets to one room and publish it to devices twice. Remove the configured entry to keep ' +
-    'the hosted one, or switch the { "kind": "relay", "source": "discovery" } entry off to keep your own.'
+    'the hosted one, or switch the { "source": "discovery" } entry off in the top-level "relay" list to keep your own.'
   );
 }
 
@@ -367,21 +366,20 @@ export function describeAbsentRelayCarrier(input: {
 }
 
 export function relayCarrierRemedy(source: RelayCarrierSource, configFile: string, host: string): readonly string[] {
+  const relayEntry = `the top-level "relay" entry in config/${configFile}`;
   const relay =
     source.kind === 'configured'
-      ? `the relay entry in "carriers" of ${configFile} is what this daemon dials — correct it or remove it, then restart.`
-      : 'a restart asks the relay directory again; to stop depending on it, point the relay entry in "carriers" of ' +
-        `${configFile} at a rendezvous you operate (docs/cloudflare-relay-self-hosting.md).`;
-  if (!isLoopbackHost(host)) {
-    return ['this daemon is reachable only from this machine’s own network: nothing off it can connect.', relay];
-  }
+      ? `this relay is explicitly configured, so correct or remove ${relayEntry} (it is what this daemon dials), then restart.`
+      : `restart to ask the hosted relay directory again; to stop depending on it, add ${relayEntry} naming a rendezvous you ` +
+        'operate (docs/cloudflare-relay-self-hosting.md).';
   return [
-    `this daemon is bound to ${host} and dials no relay, so NO other device can reach it — and with no ` +
-      'rendezvous of its own to redeem a code through, nothing can pair with it either.',
-    `to pair: set "host" to "${WILDCARD_BIND_HOST}" on the bind entry in "carriers" of ${configFile} ` +
-      'set "publicUrl" to this ' +
-      'machine’s URL on the local network, restart, and pair from a browser on that same network.',
-    `to stay reachable once that browser leaves the network, a carrier is still needed — ${relay}`,
+    'No relay is available, so another device cannot pair yet' +
+      (isLoopbackHost(host)
+        ? `; this daemon is bound to ${host}, and a browser on this machine can pair locally.`
+        : `; this daemon is bound to ${host}, but it refuses direct connections from other machines.`),
+    'Keep the daemon on a loopback listener ("fyd --host 127.0.0.1").',
+    `${relay[0]!.toUpperCase()}${relay.slice(1)}`,
+    '5.0 has no separate public-address setting, and widening the listener does not enable direct connections from other machines.',
   ];
 }
 
