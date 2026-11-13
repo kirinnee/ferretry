@@ -216,7 +216,7 @@ describe('NewFerretPage', () => {
   });
 
   it('shows a daemon failure and makes the form actionable again', async () => {
-    const harness = page({ start: new Error('daemon refused start') });
+    const harness = page({ start: Object.assign(new Error('daemon refused start'), { status: 409 }) });
     fill(harness.view);
 
     await runAsync(async () => {
