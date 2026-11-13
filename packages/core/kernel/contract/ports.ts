@@ -1223,6 +1223,13 @@ export interface SpawnOptions {
   readonly stdin?: string | Uint8Array;
   readonly timeout?: Duration;
   readonly signal?: AbortSignal;
+  /**
+   * A SEALED child (a secure copy's command capture): it sees only the host's sealed environment (the nine names a
+   * child may inherit: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, `TMPDIR`, `TERM`) and what its caller
+   * hands over in `env`. The host's tool environment (the proxy, ssh-agent and config variables a `git` or `gh` child is given)
+   * is NEVER added, whatever the program is called: a name is no evidence that a program is the trusted tool.
+   */
+  readonly sealed?: true;
   /** Runs inside this ferret's limits. */
   readonly forFerret?: FerretId;
   /**

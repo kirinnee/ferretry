@@ -105,6 +105,42 @@ export const TOOL_ENVIRONMENT_NAMES: readonly string[] = Object.freeze([
   'no_proxy',
 ]);
 
+/**
+ * The ONLY names a SEALED child (`SpawnOptions.sealed`) inherits from the daemon, by name: v4's allowlist
+ * (`bun-secret-child-runner.ts`). An allowlist, not a filter: the daemon loads its own configured secrets into its own
+ * environment, and none of them, nor the proxy credentials of {@link TOOL_ENVIRONMENT_NAMES}, may reach a child whose output
+ * a copy's masking cannot see into.
+ */
+export const SEALED_ENVIRONMENT_NAMES: readonly string[] = Object.freeze([
+  'PATH',
+  'HOME',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'LANG',
+  'LC_ALL',
+  'TMPDIR',
+  'TERM',
+]);
+
+/** The sealed names that are set in `source`: nothing else of it is copied. */
+export function sealedEnvironment(source: Readonly<Record<string, string | undefined>>): Record<string, string> {
+  const picked: Record<string, string> = {};
+  for (const name of SEALED_ENVIRONMENT_NAMES) {
+    const value = source[name];
+    if (typeof value === 'string') picked[name] = value;
+  }
+  return picked;
+}
+
+/** What `realAdapters` is given besides the plain base: the tool overlay and the sealed allowlist, both from one source. */
+export function childEnvironments(source: Readonly<Record<string, string | undefined>>): {
+  readonly toolEnv: Record<string, string>;
+  readonly sealedEnv: Record<string, string>;
+} {
+  return { toolEnv: toolEnvironment(source), sealedEnv: sealedEnvironment(source) };
+}
+
 /** The programs that are given {@link TOOL_ENVIRONMENT_NAMES}. */
 const TOOL_PROGRAMS: ReadonlySet<string> = new Set(['git', 'gh']);
 
@@ -136,9 +172,14 @@ export function bunSpawn(
   baseEnv: Readonly<Record<string, string>>,
   opener: () => ChildEnvironmentOpener | undefined = () => undefined,
   tools: Readonly<Record<string, string>> = {},
+  /** What a SEALED child inherits ({@link sealedEnvironment}); absent, a sealed child sees only its caller's env. */
+  sealedBase: Readonly<Record<string, string>> = {},
 ): SpawnPort {
   const env = (program: string, options?: SpawnOptions): Record<string, string> =>
-    childEnvironment(program, baseEnv, tools, resolveEnv(options?.env, opener()));
+    options?.sealed === true
+      ? // Never the tool overlay, whatever the program is called.
+        { ...sealedBase, ...resolveEnv(options.env, opener()) }
+      : childEnvironment(program, baseEnv, tools, resolveEnv(options?.env, opener()));
   /**
    * One piped child. `signalCode` is read from the Bun subprocess after `exited` settles: a killed child (Bun's
    * `timeout`, an abort `signal`, `kill`) resolves `exited` with `128 + n` while `signalCode` names the signal, and

@@ -1984,6 +1984,8 @@ export class InputRequestService {
       const follows =
         clear === undefined && seen.facts.kind === 'page' && held.request.lock?.reason === 'until-moved-on';
       const arming = { armed: false };
+      // The takeover check a paste repeats inside the target's own turn, right before the write (secure-clip-1 fix1, P1-1).
+      const takeover: { sentence?: string } = {};
       const outcome: TypeResult = await this.deps.target
         .type(request.sessionId, request.target, values, submitted, seen.facts, {
           ...(follows
@@ -1998,6 +2000,17 @@ export class InputRequestService {
           codeProgram: seen.codeProgram === true && fields.some(field => field.sensitivity === 'code'),
           ...(by.kind === 'rule' && held.pastedInto !== undefined ? { profileProgram: held.pastedInto } : {}),
           ...(clear === undefined ? {} : { armClear: true }),
+          // A secure paste asks the takeover check once more inside that turn: a person who took the page over while the
+          // write waited in the queue, or while the attempt was journalled and the page held, receives nothing.
+          ...(pasted === undefined || this.deps.sealed?.refusal === undefined
+            ? {}
+            : {
+                refuse: async () => {
+                  const sentence = await this.deps.sealed?.refusal?.(request.sessionId, pasted, request.target);
+                  if (sentence !== undefined) takeover.sentence = sentence;
+                  return sentence;
+                },
+              }),
           // Asked again inside the target's own turn: a write that waited in the page's queue may find the line gone.
           ...(grant === undefined ? {} : { proceed: () => grant.held() }),
           // A standing rule's terminal fill: the reader proved again before Enter, and a refused guard said as such.
@@ -2007,6 +2020,13 @@ export class InputRequestService {
         })
         .catch((): TypeResult => 'uncertain');
       wrote?.(outcome);
+      if (takeover.sentence !== undefined && outcome !== 'typed' && outcome !== 'uncertain') {
+        // Refused inside the target's turn: nothing was typed. The request ends refused, like a takeover seen at the open.
+        await this.letGo(hold);
+        hold = undefined;
+        await this.finish(held, 'refused', 'taken_over', undefined, { closeCard: true, tellAgent: true });
+        throw new InputRequestError('conflict', takeover.sentence, 'taken_over');
+      }
       // Taken before anything else is awaited: what the ferret does after this counts against a sign-in's facts.
       const deliveredAt = this.deps.clock.now();
       const stored = async (uncertain: boolean): Promise<void> => {

@@ -185,6 +185,12 @@ export interface TypeOptions {
    * `reader_changed` (the line is erased); a guard that refuses answers `guard_refused`, never a plain `target_changed`.
    */
   readonly reprove?: boolean;
+  /**
+   * A secure paste's takeover check, asked INSIDE the target's own turn (the page's queue) right before the write, after
+   * every other check. A sentence refuses: nothing is typed and the target answers `guard_refused`. It exists because a
+   * person can take a page over while the write waits its turn, and nothing the Vault looked at earlier can see that.
+   */
+  readonly refuse?: () => Promise<string | undefined>;
 }
 
 /** The card the owner answers. The daemon words the title and ask; the agent's prompt rides as `prompt` only. */

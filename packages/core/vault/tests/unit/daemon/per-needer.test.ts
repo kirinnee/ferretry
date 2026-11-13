@@ -105,6 +105,7 @@ async function world(
 ) {
   let opener: ChildEnvironmentOpener | undefined;
   const programs: string[] = [];
+  const spawned: { program: string; options: unknown }[] = [];
   const reached: string[] = [];
   const refused = (): never => {
     throw new Error('not used by a secret run');
@@ -114,6 +115,7 @@ async function world(
     runBytes: refused,
     start: (program, _args, spawnOptions): ChildHandle => {
       programs.push(program);
+      spawned.push({ program, options: spawnOptions });
       const env = opener?.open(spawnOptions?.env as ChildEnvironment) ?? {};
       return {
         pid: 1,
@@ -164,7 +166,7 @@ async function world(
   const core = host.provided(VaultPort);
   for (const name of [GROQ, OWNED, OTHER]) await core.put(name, VALUE);
   const of = (id: string) => host.provided(VaultPort, id);
-  return { host, core, of, programs, reached, seen };
+  return { host, core, of, programs, spawned, reached, seen };
 }
 
 const TENANT: Permissions = { network: ['api.groq.test'], spawn: ['echo'], secrets: [GROQ] };
@@ -662,6 +664,19 @@ describe('secure copy’s reach through the Vault is by name', () => {
     expect(typeof of('accounts').maskCopy?.hold).toBe('function');
     expect(typeof of('accounts').maskCopy?.retime).toBe('function');
     expect(typeof core.captureCommand).toBe('function');
+  });
+
+  test('P1-2 starts a capture child sealed: no tool overlay, whatever the program is called', async () => {
+    const { of, spawned } = await world({ accounts: NONE });
+    const capture = of('accounts').captureCommand;
+    if (capture === undefined) throw new Error('Accounts should be handed the command runner');
+
+    for (const program of ['git', 'gh', 'vercel']) {
+      await capture({ command: [program, 'auth', 'token'], cwd: '/tmp', timeoutMs: 1000, maxOutputBytes: 1024 });
+    }
+
+    expect(spawned.map(each => each.program)).toEqual(['git', 'gh', 'vercel']);
+    for (const each of spawned) expect((each.options as { sealed?: unknown }).sealed).toBe(true);
   });
 
   test('holds a value in the masking registry without handing it back, and lets go of the hold sooner', async () => {

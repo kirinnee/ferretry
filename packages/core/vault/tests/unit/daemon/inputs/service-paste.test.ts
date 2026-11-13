@@ -130,17 +130,17 @@ describe('raising a paste', () => {
   });
 });
 
+const FIELD_RAISE = {
+  target: { kind: 'page', key: 'app' },
+  prompt: 'paste the token',
+  fields: [{ id: 'pass', sensitivity: 'secret', element: { kind: 'selector', selector: '#password' } }],
+  submit: 'owner-default',
+  source: { kind: 'sealed', name: 'vercel' },
+} satisfies InputRaise;
+
 const TAKEN_OVER = 'A person has taken over that page, so nothing is pasted into it.';
 
 describe('a paste into a page a person has taken over', () => {
-  const FIELD_RAISE = {
-    target: { kind: 'page', key: 'app' },
-    prompt: 'paste the token',
-    fields: [{ id: 'pass', sensitivity: 'secret', element: { kind: 'selector', selector: '#password' } }],
-    submit: 'owner-default',
-    source: { kind: 'sealed', name: 'vercel' },
-  } satisfies InputRaise;
-
   it('should refuse the raise while a person holds the page, raising no card and opening no copy', async () => {
     const w = world({ withSealed: true, facts: githubPageFacts() });
     w.copy();
@@ -182,6 +182,46 @@ describe('a paste into a page a person has taken over', () => {
     should(error.code).equal('conflict');
     should(w.ruleLog.reserved).eql([]);
     should(w.writes).eql([]);
+  });
+});
+
+describe('a takeover that lands after the last check (secure-clip-1 fix1, P1-1)', () => {
+  it('should refuse and type nothing when a takeover lands between opening the copy and the write', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    // Free at the open of the copy, held at the write (it landed during the journal and hold awaits between them).
+    w.state.pasteRefusals = [undefined, TAKEN_OVER];
+
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(error.code).equal('conflict');
+    should(error.message).equal(TAKEN_OVER);
+    should(w.writes).eql([]);
+    should(w.used).eql([]);
+    should(w.events.at(-1)).match({ state: 'refused', reason: 'taken_over' });
+    should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql(COPY_VALUE);
+  });
+
+  it('should refuse and type nothing when a takeover lands while the write waits in the page queue', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    w.state.onQueue = () => {
+      w.state.pasteRefusal = TAKEN_OVER;
+    };
+    // The queue's own check is the only one that sees it: the open of the copy found the page free.
+    w.state.pasteRefusals = [undefined];
+
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(error.code).equal('conflict');
+    should(error.message).equal(TAKEN_OVER);
+    should(w.writes).eql([]);
+    should(w.used).eql([]);
+    should(w.events.at(-1)).match({ state: 'refused', reason: 'taken_over' });
   });
 });
 

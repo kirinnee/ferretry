@@ -201,7 +201,8 @@ export default implementDaemon(manifest, {
       resolve: async name => (await vault.values()).get(name as SecretName),
     };
 
-    const copyRunner = new KernelSecretChildRunner(kernel.spawn, kernel.clock);
+    // Its OWN sealed child path (secure-clip-1 fix1, P1-2): the sealed allowlist only, never the git/gh tool overlay.
+    const copyRunner = new KernelSecretChildRunner(kernel.spawn, kernel.clock, undefined, true);
     const full: VaultApi = {
       names: async () => await directory.list(),
       has: async name => (await directory.list()).some(secret => secret.name === name),
