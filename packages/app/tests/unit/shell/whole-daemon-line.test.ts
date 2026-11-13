@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { UNREADABLE_INVENTORY_SENTENCE, wholeDaemonSentence } from '../../../src/client/sentences.ts';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
@@ -9,11 +9,20 @@ const settle = async (): Promise<void> => {
   for (let i = 0; i < 10; i += 1) await new Promise(resolve => setTimeout(resolve, 0));
 };
 
+// A failed read is asked again on a timer (DaemonClient's re-read), so every runtime is unpaired after its test: a
+// timer left running would fire inside whichever test the same process runs next.
+const openedLists: DaemonList[] = [];
+
+afterEach(() => {
+  for (const daemons of openedLists.splice(0)) daemons.remove('d1');
+});
+
 async function opened(plugins: (request: { path: string }) => ReturnType<typeof json> | Promise<never>) {
   const transport = new FakeTransport(request =>
     request.path === '/v1/plugins' ? plugins(request) : json({ protocol: 1, version: '5.0.0' }),
   );
   const daemons = new DaemonList({ storage: memoryStore(), now: () => 1 });
+  openedLists.push(daemons);
   daemons.add({ daemon: 'd1', machine: 'laptop', deviceId: 'dev', address: 'http://127.0.0.1:40245' });
   const runtime = new ShellRuntime({ appVersion: '5.0.0', surfaces: CORE, daemons, connect: async () => transport });
   runtime.connection('d1');
