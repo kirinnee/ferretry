@@ -364,6 +364,31 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
   `fy pair` that may be showing it to a browser right now.
 - **Never screenshot a real one.** Committed captures use a fixed fake code (`HARNESS_INVITE`). A QR is a
   machine-readable label, not obfuscation, so a PNG of a real code in a repository is a leaked credential.
+- **Never show it to an agent.** While the app shows a live code or its QR (the Add-a-device panel with a minted code on
+  it; the pair screen holding a pasted or arriving link) it puts `<meta name="ferretry-pairing-screen" content="shown">`
+  in the document head, and takes it out when the code is gone. The marker is held by a **layout effect**, so it lands in
+  the same synchronous commit that puts the code in the document and leaves in the one that removes it: no task can see
+  the code without the marker. A second element, `ferretry-pairing-screen-seen`, counts how many codes the document has
+  shown and is never removed. Both names, the sentence below and the mint path are owned by
+  `@ferretry/std/pairing-screen`, which the app and the agent browser both import.
+  The agent browser (Browsers) looks for them with a DevTools DOM search — **no page script runs**, the main document and
+  every same-process (same-origin) frame are covered, and a query that cannot be answered counts as marked (**fail
+  closed**). Before an agent's `browser_read`, `screenshot`, `highlight`, `pdf`, `eval`, `console` or `network`, a
+  `browser_wait_for` on text, text gone or an element, and the `POST /v1/sessions/:id/browser` read, screenshot and
+  highlight, the page — **and every window of its opener group** (the page that opened it and the pages it opened) — is
+  checked inside the page's queue, before anything reaches it. The agent gets exactly
+  `hidden: this page shows a pairing code` (plus a fixed instruction) and no content. The same check runs again when the
+  call ends, **success or failure**: if the page or its group was marked at any point meanwhile — the marker is on now, the
+  sighting count moved, or the group's windows changed — the result is discarded and so is the failure's own wording.
+  Navigating, closing, and a wait on the address, the load state or a time still work. A person's own calls, and the
+  owner's view, are unchanged; the picture stream refuses a ferret.
+  A mint's response is never shown either: `POST /v1/pair/code` is a person's route, Access has no agent tool, and
+  `browser_network` prints `(body not shown: a pairing code)` for that address on any page, marked or not.
+  Declared GAPs: a page script already running when the code appears is **not stopped**, only its result is discarded
+  (an async script's side effects on the page stand); the marker is the app's own element, so a page that forges it only
+  loses its own reads; a window that cannot reach the marked one (no opener relation) is not covered by the group check;
+  a code in a catalog share link's QR (Catalogs' share sheet) carries no marker; and a marker inside a shadow root or a
+  cross-site frame is not searched for.
 
 ## Revoking
 

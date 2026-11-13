@@ -72,6 +72,17 @@ export interface BrowserInputDocument {
   readonly navigationId: string;
   /** The host the page is on now (`accounts.google.com`): a login's facts watch it leave the sign-in hosts. */
   readonly host?: string;
+  /**
+   * Whether the page, or a frame of it, carries the pairing-screen marker (`PAIRING_SCREEN_META_NAME`): it shows a live
+   * pairing code or its QR, so no agent may read or picture it. Read by a DOM search, never a page script; absent means
+   * it does not. `true` also when the browser could not say (fail closed).
+   */
+  readonly pairingScreen?: boolean;
+  /**
+   * How many times a code has come on screen in the page's documents (the sighting count that outlives the marker), so a
+   * read that began on an unmarked page knows when one was shown meanwhile. `-1`: the browser could not say.
+   */
+  readonly pairingSeen?: number;
 }
 
 /**

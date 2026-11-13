@@ -97,6 +97,21 @@ export class FakeSession implements InputCdpSession {
     switch (method) {
       case 'DOM.getDocument':
         return { root: { nodeId: 1 } };
+      // The pairing-screen look (`daemon/target/lib/pairing-screen.ts`): a search for the marker's or the counter's
+      // element, answered from what the world says its documents show. Node ids 9001 and 9002 stand for those two.
+      case 'DOM.performSearch': {
+        const marker = String(params.query).includes('screen-seen') ? 9002 : 9001;
+        const present = marker === 9001 ? this.world.pairing.marked : this.world.pairing.seen > 0;
+        return { searchId: String(marker), resultCount: present ? 1 : 0 };
+      }
+      case 'DOM.getSearchResults':
+        return { nodeIds: [Number(params.searchId)] };
+      case 'DOM.getAttributes':
+        return Number(params.nodeId) === 9001
+          ? { attributes: ['name', 'ferretry-pairing-screen', 'content', 'shown'] }
+          : { attributes: ['name', 'ferretry-pairing-screen-seen', 'content', String(this.world.pairing.seen)] };
+      case 'DOM.discardSearchResults':
+        return {};
       case 'DOM.getOuterHTML':
         return { outerHTML: this.world.markup };
       case 'Page.getFrameTree': {
@@ -279,6 +294,9 @@ export class FakeWorld {
   readonly pointers = new Map<string, FakeElement>();
   /** The nodes each handle was asked about, in order: the identity comes from the handle, not the page. */
   readonly described: number[] = [];
+
+  /** What the page's documents say about a pairing code: the marker is in one, and how many codes they have shown. */
+  readonly pairing = { marked: false, seen: 0 };
 
   session(name: string): FakeSession {
     let session = this.sessions.get(name);

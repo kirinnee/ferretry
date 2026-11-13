@@ -373,8 +373,25 @@ describe('describeInputDocument', () => {
     should(await describeInputDocument(world.subject)).eql({
       navigationId: 'loader-5',
       host: new URL(PAGE_URL).host,
+      pairingSeen: 0,
     });
-    should(world.session('page-target').calls.map(call => call.method)).eql(['Page.getFrameTree']);
+    // The loader, then the pairing-screen look: DevTools' DOM domain only, so no page script runs and no field is looked at.
+    const calls = world.session('page-target').calls.map(call => call.method);
+    should(calls[0]).equal('Page.getFrameTree');
+    should(calls.slice(1).every(method => method.startsWith('DOM.'))).be.true();
+  });
+
+  it('says the page carries the pairing-screen marker, and how many codes it has shown', async () => {
+    const { world } = loginWorld();
+    world.pairing.marked = true;
+    world.pairing.seen = 2;
+    should(await describeInputDocument(world.subject)).match({ pairingScreen: true, pairingSeen: 2 });
+  });
+
+  it('says marked when the browser cannot be asked (FAILS CLOSED)', async () => {
+    const { world } = loginWorld();
+    world.session('page-target').failOn = method => (method === 'DOM.performSearch' ? new Error('gone') : undefined);
+    should(await describeInputDocument(world.subject)).match({ pairingScreen: true, pairingSeen: -1 });
   });
 
   it('says the host the page is on, so a login’s facts can watch it leave the sign-in hosts', async () => {
@@ -386,7 +403,7 @@ describe('describeInputDocument', () => {
   it('says no host for a page whose address will not parse', async () => {
     const { world } = loginWorld();
     world.pageUrl = '';
-    should(await describeInputDocument(world.subject)).eql({ navigationId: world.loaderId });
+    should(await describeInputDocument(world.subject)).eql({ navigationId: world.loaderId, pairingSeen: 0 });
   });
 
   it('refuses a closed page', async () => {

@@ -30,6 +30,13 @@ export class Tabs {
   documentFails = false;
   /** The host the live page reports, when a case sets one. */
   documentHost: string | undefined;
+  /**
+   * What each page says about a pairing code, as the worker's DOM search would answer it: `marked` when a live code is on
+   * screen (the marker is in the document), `seen` how many times one has been. A page not listed shows none.
+   */
+  readonly pairing = new Map<string, { marked: boolean; seen: number }>();
+  /** Called inside every act (after it began, before it answers): a page can start showing a code while it runs. */
+  whileActing: ((call: string) => void) | undefined;
   /** While set, a click does not return: the page's queue is stuck behind it, as it is behind a dialog. */
   clickGate: Promise<void> | undefined;
   /** What a page in the error state says went wrong (the worker's first line of a failed navigation). */
@@ -67,6 +74,7 @@ export class Tabs {
 
   private acted(method: string, pageId: string): BrowserPageActionSnapshot {
     this.calls.push(`${method}:${pageId}`);
+    this.whileActing?.(method);
     return { ...this.state(pageId), actedPageId: pageId };
   }
 
@@ -108,7 +116,13 @@ export class Tabs {
     inputDocument: async pageId => {
       this.calls.push(`inputDocument:${pageId}`);
       if (this.documentFails) throw new Error('the page is gone');
-      return { navigationId: 'loader-1', ...(this.documentHost === undefined ? {} : { host: this.documentHost }) };
+      const pairing = this.pairing.get(pageId) ?? { marked: false, seen: 0 };
+      return {
+        navigationId: 'loader-1',
+        ...(this.documentHost === undefined ? {} : { host: this.documentHost }),
+        ...(pairing.marked ? { pairingScreen: true } : {}),
+        pairingSeen: pairing.seen,
+      };
     },
     inputObserve: async pageId => {
       this.calls.push(`inputObserve:${pageId}`);

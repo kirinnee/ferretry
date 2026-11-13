@@ -37,6 +37,7 @@ import {
   RelayPairingRefusedError,
 } from '../../shell-pairing.ts';
 import type { QrScanHost } from '../../lib/pair-scan.ts';
+import { usePairingScreenMarker } from '../../lib/pairing-screen-marker.ts';
 import { type PairingArrival, pairingDaemonHost, pairingSeedFromUrl, type PairingSeed } from '../../lib/pairing.ts';
 import { DeviceKeyUnsupportedError } from '../../lib/device-keys.ts';
 import { browserDeviceName, normalizedDeviceName } from '../../lib/device-name.ts';
@@ -169,6 +170,8 @@ export function PairingScreen({
   const [pasting, setPasting] = useState(false);
   const [link, setLink] = useState('');
   const [linkError, setLinkError] = useState<string | null>(null);
+  // A pasted link, or a seed taken from one, holds a live code: the page is marked for the whole of that (docs/pairing.md).
+  usePairingScreenMarker(link !== '' || stage.kind === 'confirm' || stage.kind === 'pairing');
 
   // The fragment carries a single-use secret. It is in this screen's state from
   // the first render, so the address bar — history, a bookmark, a screenshot,

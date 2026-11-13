@@ -127,7 +127,17 @@ export function workerInputFields(request: WorkerRequest): Required<BrowserInput
       if (typeof navigationId !== 'string' || navigationId === '' || navigationId.length > 128)
         throw new InputAnswerRefused('the browser did not say which document the page shows');
       const host = (raw as { document?: { host?: unknown } } | null)?.document?.host;
-      return typeof host === 'string' && host !== '' && host.length <= 260 ? { navigationId, host } : { navigationId };
+      const document = (raw as { document?: { pairingScreen?: unknown; pairingSeen?: unknown } } | null)?.document;
+      const pairingSeen = document?.pairingSeen;
+      return {
+        navigationId,
+        ...(typeof host === 'string' && host !== '' && host.length <= 260 ? { host } : {}),
+        // Anything but a plain yes is NOT a no: a reply that cannot be believed is a marked page (fail closed).
+        ...(document?.pairingScreen === true || typeof pairingSeen !== 'number' || !Number.isInteger(pairingSeen)
+          ? { pairingScreen: true }
+          : {}),
+        pairingSeen: typeof pairingSeen === 'number' && Number.isInteger(pairingSeen) ? pairingSeen : -1,
+      };
     },
 
     /** The page's visible text, for the daemon's own look for a just-typed value. A malformed answer is refused. */

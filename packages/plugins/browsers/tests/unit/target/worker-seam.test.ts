@@ -58,7 +58,7 @@ describe('the worker side of the page input seam', () => {
   test('reads answer the document, the text and the fields of the page they name', async () => {
     const { serve, pageId } = loginWorld();
     expect(await serve('inputDocument', { pageId })).toEqual({
-      document: { navigationId: 'loader-1', host: 'localhost:3000' },
+      document: { navigationId: 'loader-1', host: 'localhost:3000', pairingSeen: 0 },
     });
     expect(((await serve('inputText', { pageId })) as { text: string }).text).toContain('Welcome back');
     const facts = await pageFacts(serve, pageId);
@@ -226,12 +226,18 @@ describe('the daemon side of the page input seam', () => {
   const facts = { kind: 'page' } as unknown as BrowserInputFacts;
 
   test('the document answer is believed only with a document id, and a host only when it fits', async () => {
-    expect(await port({ document: { navigationId: 'n1', host: 'a.test' } }).fields.inputDocument('p')).toEqual({
+    expect(
+      await port({ document: { navigationId: 'n1', host: 'a.test', pairingSeen: 0 } }).fields.inputDocument('p'),
+    ).toEqual({
       navigationId: 'n1',
       host: 'a.test',
+      pairingSeen: 0,
     });
-    expect(await port({ document: { navigationId: 'n1', host: '' } }).fields.inputDocument('p')).toEqual({
+    expect(
+      await port({ document: { navigationId: 'n1', host: '', pairingSeen: 0 } }).fields.inputDocument('p'),
+    ).toEqual({
       navigationId: 'n1',
+      pairingSeen: 0,
     });
     for (const bad of [
       null,

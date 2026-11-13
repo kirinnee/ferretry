@@ -34,6 +34,7 @@ import type { AgentSurface, SurfaceControlView, SurfaceController } from '../../
 import type { BrowserFiles } from './files.ts';
 import { sizeWords } from './files-policy.ts';
 import { AGENT_TOOL_MAX_OUTPUT_CHARS } from './limits.ts';
+import { pairingScreenGuard } from './pairing-screen.ts';
 import type { ResolvedSurface, ToolCaller } from './types.ts';
 import type { BrowserToolCall } from './wire.ts';
 
@@ -615,7 +616,7 @@ export class BrowserTools {
     surface: ResolvedSurface,
     reference: string,
   ): Promise<BrowserToolAnswer> {
-    const guard = this.browserGuard(caller, surface);
+    const guard = this.browserGuard(caller, surface, call);
     const target = pageTarget(surface.id);
     const send: LifecycleSend = async request =>
       await this.ports.browser.lifecycleOnPage(caller.sessionId, surface.id, request, guard);
@@ -746,7 +747,7 @@ export class BrowserTools {
           caller.sessionId,
           surface.id,
           pageActionOf(call),
-          this.browserGuard(caller, surface),
+          this.browserGuard(caller, surface, call),
         );
       } catch (error) {
         // An act that failed partway may still have moved the page or typed into it (the browser runtime clears too).
@@ -842,7 +843,7 @@ export class BrowserTools {
     reference: string,
   ): Promise<BrowserToolAnswer> {
     const element = call.ref !== undefined || call.selector !== undefined ? elementTargetOf(call) : undefined;
-    const guard = this.browserGuard(caller, surface);
+    const guard = this.browserGuard(caller, surface, call);
     const scripts = this.ports.scriptedOrigins;
     let ran = false;
     let finished: (() => void) | undefined;
@@ -857,7 +858,7 @@ export class BrowserTools {
             ...(call.timeoutMs === undefined ? {} : { timeoutMs: call.timeoutMs }),
           },
           async page => {
-            await guard?.(page);
+            const after = await guard?.(page);
             // The LAST thing before the script runs, inside the page's queue. While it runs, no standing rule fills
             // anywhere, and the host it is about to run on is tainted for the rules at once.
             finished = scripts?.running?.();
@@ -865,6 +866,7 @@ export class BrowserTools {
             // A script can type or choose an account on any page of the session: who they sign in is no longer known.
             this.ports.typedIdentities?.forget(caller.sessionId);
             ran = true;
+            return after;
           },
         );
         // The origin of the world the script ACTUALLY ran in, and where it left the page: each is tainted too.
@@ -902,7 +904,7 @@ export class BrowserTools {
     reference: string,
   ): Promise<BrowserToolAnswer> {
     const { sessionId } = caller;
-    const guard = this.browserGuard(caller, surface);
+    const guard = this.browserGuard(caller, surface, call);
     const target = pageTarget(surface.id);
     if (call.tool === 'browser.upload') {
       const prepared = await this.ports.files.prepareUpload(sessionId, call.files);
@@ -1027,9 +1029,18 @@ export class BrowserTools {
    * The check the browser runs INSIDE the page's own queue, right before an agent's act: a takeover that landed
    * while the act was waiting its turn still refuses it. Holds and pending input are the act runner's (§4.7).
    */
-  private browserGuard(caller: ToolCaller, surface: ResolvedSurface): BrowserActGuard | undefined {
+  private browserGuard(
+    caller: ToolCaller,
+    surface: ResolvedSurface,
+    call?: BrowserToolCall,
+  ): BrowserActGuard | undefined {
     if (caller.kind !== 'agent') return undefined;
-    return async () => await this.assertFree(caller.sessionId, surface);
+    // An agent's READ of a page is also refused while the page shows a live pairing code (`./pairing-screen.ts`).
+    const pairing = pairingScreenGuard(call);
+    return async page => {
+      await this.assertFree(caller.sessionId, surface);
+      return await pairing?.(page);
+    };
   }
 
   /** The pages, each one an agent may not use left out (today's `listPages` + `listed`). */

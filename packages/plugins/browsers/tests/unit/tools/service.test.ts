@@ -109,17 +109,35 @@ class FakeBrowser {
     return { id: page.id, url: page.url, title: page.title } as never;
   };
 
-  actOnPage = async (_sessionId: string, key: string, action: { action: string }, guard?: BrowserActGuard) => {
-    await guard?.({ document: async () => ({}) } as never);
-    const page = this.page(key);
-    this.acts.push(action.action);
-    const failure = this.failOn.get(action.action);
-    if (failure !== undefined) throw failure();
-    if (action.action === 'read') return this.acted(page, { text: page.text });
-    if (action.action === 'screenshot')
-      return this.acted(page, { screenshotBase64: Buffer.from(`pixels ${SECRET}`).toString('base64') });
-    return this.acted(page);
-  };
+  /** What the live page tells a guard: nothing is on screen that shows a pairing code (`pairing-screen.test.ts` covers one). */
+  private guardPage = (extra: object = {}) =>
+    ({
+      document: async () => ({}),
+      pairingState: async () => ({ marked: false, seen: 0, pages: 1 }),
+      ...extra,
+    }) as never;
+
+  /** The runtime's own order: the guard, the act, then the after-check the guard handed back (even when the act threw). */
+  private async guarded<T>(guard: BrowserActGuard | undefined, page: object, work: () => Promise<T>): Promise<T> {
+    const after = await guard?.(page as never);
+    try {
+      return await work();
+    } finally {
+      await after?.(page as never);
+    }
+  }
+
+  actOnPage = async (_sessionId: string, key: string, action: { action: string }, guard?: BrowserActGuard) =>
+    await this.guarded(guard, this.guardPage(), async () => {
+      const page = this.page(key);
+      this.acts.push(action.action);
+      const failure = this.failOn.get(action.action);
+      if (failure !== undefined) throw failure();
+      if (action.action === 'read') return this.acted(page, { text: page.text });
+      if (action.action === 'screenshot')
+        return this.acted(page, { screenshotBase64: Buffer.from(`pixels ${SECRET}`).toString('base64') });
+      return this.acted(page);
+    });
 
   filesOnPage = async (_sessionId: string, key: string, action: { action: string; paths?: readonly string[] }) => {
     const page = this.page(key);
@@ -134,15 +152,16 @@ class FakeBrowser {
   attachViewer = async () => ({ detach: () => undefined }) as never;
   scriptOnPage = async (_sessionId: string, key: string, script: { source: string }, guard?: BrowserActGuard) => {
     const page = this.page(key);
-    await guard?.({ document: async () => ({}), host: async () => new URL(page.url).host } as never);
-    this.duringScript?.();
-    if (this.scriptFails) throw new Error('Execution context was destroyed');
-    if (this.scriptMoves !== undefined) page.url = this.scriptMoves;
-    return {
-      ...(this.acted(page) as object),
-      text: `ran:${script.source}`,
-      ...(this.scriptOrigin === undefined ? {} : { scriptOrigin: this.scriptOrigin }),
-    } as never;
+    return await this.guarded(guard, this.guardPage({ host: async () => new URL(page.url).host }), async () => {
+      this.duringScript?.();
+      if (this.scriptFails) throw new Error('Execution context was destroyed');
+      if (this.scriptMoves !== undefined) page.url = this.scriptMoves;
+      return {
+        ...(this.acted(page) as object),
+        text: `ran:${script.source}`,
+        ...(this.scriptOrigin === undefined ? {} : { scriptOrigin: this.scriptOrigin }),
+      } as never;
+    });
   };
   closePage = async () => undefined as never;
   lifecycleOnPage = async () => {

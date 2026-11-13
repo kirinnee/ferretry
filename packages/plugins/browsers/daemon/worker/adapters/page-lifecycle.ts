@@ -1,3 +1,4 @@
+import { isPairingMintAddress, PAIRING_MINT_BODY_HIDDEN } from '@ferretry/std/pairing-screen';
 import {
   BROWSER_CONSOLE_BUFFER,
   BROWSER_CONSOLE_DEFAULT_LIMIT,
@@ -325,6 +326,11 @@ export class NetworkLog {
     }
     const headers = Object.entries(response.headers()).filter(([name]) => !isCredentialHeader(name));
     if (headers.length > 0) lines.push('response headers:', ...headers.map(([name, value]) => `  ${name}: ${value}`));
+    // A pairing mint's response IS a live code, its link and its QR's text: no tool shows it (docs/pairing.md).
+    if (isPairingMintAddress(entry.url)) {
+      lines.push(PAIRING_MINT_BODY_HIDDEN);
+      return lines.join('\n');
+    }
     const contentType = Object.entries(response.headers()).find(([name]) => name.toLowerCase() === 'content-type');
     if (contentType !== undefined && !TEXT_BODY.test(contentType[1])) {
       lines.push(`(body not shown: ${contentType[1].split(';')[0] ?? 'binary'})`);

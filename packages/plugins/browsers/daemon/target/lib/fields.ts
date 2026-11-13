@@ -14,6 +14,7 @@ import {
   type BrowserInputValue,
   BROWSER_INPUT_TEXT_MAX_CHARS,
 } from './contracts.ts';
+import { readPairingScreen } from './pairing-screen.ts';
 import {
   BROWSER_PROBE_TIMEOUT_MS,
   browserElementOf,
@@ -289,7 +290,13 @@ export async function describeInputDocument(subject: InputSubject): Promise<Brow
   } catch {
     host = undefined;
   }
-  return { navigationId, ...(host === undefined ? {} : { host }) };
+  const pairing = await readPairingScreen(await subject.cdp.page());
+  return {
+    navigationId,
+    ...(host === undefined ? {} : { host }),
+    ...(pairing.marked ? { pairingScreen: true } : {}),
+    pairingSeen: pairing.seen,
+  };
 }
 
 /** How long the daemon waits for a page's text after a sign-in. */

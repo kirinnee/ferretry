@@ -10,11 +10,14 @@ import {
   type SocketDownstream,
   type SocketHandler,
 } from '@ferretry/kernel/contract';
+import { ferretOf } from '@ferretry/core-gate/contract';
+import { PAIRING_SCREEN_REFUSAL } from '@ferretry/std/pairing-screen';
 import { BrowserLoginActionSchema } from '../../contract/index.ts';
 import { mapStrings } from '../address-rule.ts';
 import { BrowserControlError, type BrowserLoginLifecycle, type BrowserLoginStatus } from '../worker/control/index.ts';
 import { acted, maskedSnapshot, maskedStatus, opOfAction, targetOfAction, writeAct } from './acts.ts';
 import { parseBody } from './body.ts';
+import { pairingScreenGuard } from './pairing-screen-guard.ts';
 import { BrowserSessionError, type BrowserSubsystem } from './service.ts';
 import { type BrowserActionResult, BrowserActionSchema } from '../../contract/wire/browser.ts';
 
@@ -143,17 +146,29 @@ async function browserStatus(kernel: KernelPorts, browser: BrowserSubsystem, cal
   return jsonResponse(await kernel.redaction.read(scope => maskedStatus(scope, status)));
 }
 
+/** The toolbar actions whose answer carries the page itself: its text, its markup, its picture. */
+const PAGE_CONTENT_ACTIONS: ReadonlySet<string> = new Set(['read', 'screenshot', 'highlight']);
+
+/** What a ferret is told of a page showing a pairing code (docs/pairing.md): the sentence, and nothing of the page. */
+const pairingScreenRefusal = (): ApiError => new ApiError(403, PAIRING_SCREEN_REFUSAL, 'pairing_screen');
+
 /** `POST /v1/sessions/:sessionId/browser`: one action on its page, through the act runner. */
 async function browserAction(kernel: KernelPorts, browser: BrowserSubsystem, call: CallContext): Promise<ApiResponse> {
   const sessionId = sessionIdOf(call);
   const action = await parseBody(call.request, BrowserActionSchema);
+  // What a FERRET is handed of a page (its words, its markup, a picture) is refused while the page shows a pairing code,
+  // from inside the page's queue; a person's own toolbar is untouched.
+  const guard =
+    ferretOf(call) !== undefined && PAGE_CONTENT_ACTIONS.has(action.action)
+      ? pairingScreenGuard(pairingScreenRefusal)
+      : undefined;
   const before = await browser.status(sessionId).catch(browserFailure);
   const target = targetOfAction(sessionId, action, before);
   const op = opOfAction(action);
   if (op === 'read') {
     const content = acted<'read'>(
       await kernel.act(target, 'read', async () => {
-        const result = await browser.act(sessionId, action).catch(browserFailure);
+        const result = await browser.act(sessionId, action, guard).catch(browserFailure);
         const text = 'result' in result && 'text' in result.result ? result.result.text : '';
         return await kernel.redaction.read(scope => ({
           kind: 'content' as const,
@@ -172,7 +187,7 @@ async function browserAction(kernel: KernelPorts, browser: BrowserSubsystem, cal
     let answerBody: BrowserActionResult | undefined;
     acted(
       await kernel.act(target, 'picture', async () => {
-        const result = await browser.act(sessionId, action).catch(browserFailure);
+        const result = await browser.act(sessionId, action, guard).catch(browserFailure);
         answerBody = await kernel.redaction.read(
           scope =>
             ({
@@ -210,6 +225,13 @@ export function streamSocket(
 ): SocketAccept {
   return guarded(redaction, async call => {
     const id = sessionIdOf(call);
+    // A stream of pictures of the page is the owner's view, never a ferret's: a frame could show a pairing code.
+    if (ferretOf(call) !== undefined)
+      throw new ApiError(
+        403,
+        'Only a person watches the browser view; a ferret reads pages with its browser tools.',
+        'owner_only',
+      );
     await browser.status(id).catch(browserFailure);
     return async downstream => await stream(id, downstream);
   });
