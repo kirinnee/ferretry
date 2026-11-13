@@ -53,5 +53,10 @@ export function summarise(report: ConversionReport): string {
     ? 'complete: home.json written, v5 may start on this home'
     : 'NOT complete: home.json was not written, so v5 refuses this folder (by design)';
   const notes = (report.notes ?? []).map(line => `  note: ${line}`);
-  return [`v4 -> v5 conversion ${report.dryRun ? '(dry run) ' : ''}${verdict}`, ...lines, ...notes].join('\n');
+  return [
+    `v4 -> v5 conversion ${report.dryRun ? '(dry run) ' : ''}${verdict}`,
+    `  new home: ${report.to}`,
+    ...lines,
+    ...notes,
+  ].join('\n');
 }

@@ -740,3 +740,77 @@ test('a link inside fleet/homes, shared or bin does not hide a fenced folder tha
     await tripwire.restore();
   }
 });
+
+// Rule A at the source home's own entry, and the real v4 link shapes (reviewer probes, now regression tests).
+test('RULE A: a source home that is itself a link refuses with the plain sentence, before any stat, read or realpath of it', async () => {
+  await canaries();
+  const alias = join(f.root, 'source-alias');
+  await symlink(join(userHome, '.codex'), alias);
+  await arm();
+  const result = await convert({
+    from: alias,
+    to: f.to,
+    dryRun: false,
+    lock: notHeld,
+    now: () => new Date(),
+    steps: [],
+    host: { homeDirectory: userHome, env: {} },
+  });
+  wire.armed = false;
+  expect(wire.hits).toEqual([]);
+  expect(result.kind).toBe('refused');
+  const text = result.kind === 'refused' ? result.problems.join('\n') : '';
+  expect(text).toContain(`${alias} is a link: replace it with the real folder, then run again`);
+  expect(text).not.toContain(userHome);
+  expect(await lstat(f.to).catch(() => undefined)).toBeUndefined();
+});
+
+test('RULE A: a source home spelled THROUGH an ancestor link (macOS /var, /tmp) still converts', async () => {
+  await writeFile(join(f.from, 'layout-version'), '2\n', { mode: 0o600 });
+  const ancestor = join(f.root, 'ancestor-alias');
+  await symlink(f.root, ancestor);
+  const from = join(ancestor, 'v4');
+  const result = await convert({ from, to: f.to, dryRun: false, lock: notHeld, now: () => new Date(), steps: [] });
+  expect(result.kind).toBe('done');
+  if (result.kind === 'done') expect(result.report.complete).toBe(true);
+});
+
+test('actual v4 auth.json placement and relative and absolute C-tree loops stay untouched', async () => {
+  const tripwire = await plantTripwire(userHome);
+  try {
+    const links = [...(await provisionerLinks(f.from, userHome))];
+    const auth = join(f.from, 'fleet/homes/acct1/auth.json');
+    await symlink(join(userHome, '.codex/auth.json'), auth);
+    links.push(auth);
+    const relativeLoop = join(f.from, 'fleet/homes/acct1/relative-loop');
+    const absoluteLoop = join(f.from, 'fleet/bin/absolute-loop');
+    await symlink('relative-loop', relativeLoop);
+    await symlink(absoluteLoop, absoluteLoop);
+    links.push(relativeLoop, absoluteLoop);
+    const result = await whole();
+    expect(wire.hits).toEqual([]);
+    expect(result.kind).toBe('done');
+    if (result.kind === 'done') {
+      expect(result.report.complete).toBe(true);
+      expect(result.report.notes?.map(note => note.split(' is a link')[0])).toEqual(links.sort());
+      expect(JSON.stringify(result)).not.toContain(userHome);
+    }
+  } finally {
+    wire.armed = false;
+    await tripwire.restore();
+  }
+});
+
+test('deep required-reader directory with a relative link to a fake terminal folder refuses before writes', async () => {
+  await canaries();
+  const folder = join(f.from, 'config/deep');
+  await mkdir(folder, { recursive: true });
+  const { relative } = await import('node:path');
+  const link = join(folder, 'reader');
+  await symlink(relative(folder, join(userHome, '.codex')), link);
+  const result = await whole();
+  expect(result.kind).toBe('refused');
+  expect(wire.hits).toEqual([]);
+  expect(result.kind === 'refused' ? result.problems.join('\n') : '').toContain(link + ' is a link');
+  expect(await lstat(f.to).catch(() => undefined)).toBeUndefined();
+});

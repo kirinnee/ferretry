@@ -6,9 +6,16 @@ import { lstat, readdir, readFile, readlink, realpath, stat } from 'node:fs/prom
 import { join, relative, sep } from 'node:path';
 import { fenceReport } from './v4/fence.ts';
 import { V4_LAYOUT_VERSION, v4Paths } from './v4/layout.ts';
+import { LinkOnWritePathError, refuseLinkOnPath } from './v5/no-link.ts';
+import { type ResolvedPlace, resolvePlace } from './v5/resolved-place.ts';
 
 export type Preflight =
-  | { readonly ok: true; readonly notes: readonly string[] }
+  | {
+      readonly ok: true;
+      readonly notes: readonly string[];
+      /** Where the new home really is (its parent resolved once) and the folder the write-time link checks start at. */
+      readonly to: ResolvedPlace;
+    }
   | { readonly ok: false; readonly problems: readonly string[] };
 
 /** Who holds a path open, without reading it. Injected so tests do not depend on the host's process table. */
@@ -21,6 +28,14 @@ export async function preflight(from: string, to: string, lock: LockProbe): Prom
   const problems: string[] = [];
   const v4 = v4Paths(from);
 
+  // The v4 home's own entry is looked at FIRST and never followed: a link there refuses before anything else touches it
+  // (no stat, read or realpath), and the message never names what it points to. A link ABOVE it (macOS /var, /tmp) is fine.
+  if ((await lstat(from).catch(() => undefined))?.isSymbolicLink() === true) {
+    return {
+      ok: false,
+      problems: [`${from} is a link: replace it with the real folder, then run again`],
+    };
+  }
   const source = await stat(from).catch(() => undefined);
   if (!source?.isDirectory()) return { ok: false, problems: [`${from} is not a folder`] };
 
@@ -59,16 +74,31 @@ export async function preflight(from: string, to: string, lock: LockProbe): Prom
     };
   }
   const resolvedFrom = await realpath(from);
-  const target = await stat(to).catch(() => undefined);
+  // The new home's parent is resolved ONCE; every write goes to the resolved place and is lstat-checked from its anchor.
+  const place = await resolvePlace(to);
+  try {
+    refuseLinkOnPath(place.anchor, place.path);
+  } catch (error) {
+    if (error instanceof LinkOnWritePathError) {
+      return {
+        ok: false,
+        problems: [
+          `${error.link} is a link, so the conversion did not start: replace it with a real folder, then run again`,
+        ],
+      };
+    }
+    throw error;
+  }
+  const target = await stat(place.path).catch(() => undefined);
   if (target !== undefined) {
     if (!target.isDirectory()) problems.push(`${to} exists and is not a folder`);
-    else if ((await readdir(to)).length > 0) problems.push(`${to} is not empty; the converter only writes a NEW home`);
+    else if ((await readdir(place.path)).length > 0)
+      problems.push(`${to} is not empty; the converter only writes a NEW home`);
   }
-  const resolvedTo = target === undefined ? to : await realpath(to);
-  if (inside(resolvedFrom, resolvedTo) || inside(resolvedTo, resolvedFrom)) {
+  if (inside(resolvedFrom, place.path) || inside(place.path, resolvedFrom)) {
     problems.push(`${to} and ${from} overlap; the new home must be a separate folder`);
   }
-  return problems.length === 0 ? { ok: true, notes } : { ok: false, problems };
+  return problems.length === 0 ? { ok: true, notes, to: place } : { ok: false, problems };
 }
 
 function inside(parent: string, child: string): boolean {

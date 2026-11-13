@@ -111,13 +111,18 @@ export function formatFirst(value: unknown, stamp?: number): unknown {
 /** The source of a config write whose caller named none: its v4 sources are not known. */
 export const UNKNOWN_SOURCE = '*';
 
-export function v5Writer(home: string, options: { readonly dryRun: boolean }): V5Writer {
+/**
+ * `anchor` is the resolved folder above the home the write-time link checks start from (see `./resolved-place.ts`);
+ * absent, they start at the home itself.
+ */
+export function v5Writer(home: string, options: { readonly dryRun: boolean; readonly anchor?: string }): V5Writer {
+  const anchor = options.anchor ?? home;
   const configs = new Map<string, string>();
   const sources = new Map<string, Set<string>>();
   const place = async (relativePath: string, text: string | Uint8Array, mode: number): Promise<void> => {
     if (options.dryRun) return;
     const target = join(home, relativePath);
-    refuseLinkOnPath(home, target);
+    refuseLinkOnPath(anchor, target);
     await mkdir(dirname(target), { recursive: true, mode: 0o700 });
     const temporary = `${target}.tmp-${process.pid}`;
     await writeFile(temporary, text, { mode, flag: 'wx' });
@@ -169,7 +174,7 @@ export function v5Writer(home: string, options: { readonly dryRun: boolean }): V
     },
     resolve(relativePath) {
       const path = join(home, relativePath);
-      refuseLinkOnPath(home, path);
+      refuseLinkOnPath(anchor, path);
       return path;
     },
   };

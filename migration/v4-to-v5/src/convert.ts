@@ -11,6 +11,7 @@ import { LoginKeyHold } from './steps/login-keys.ts';
 import { fenceV4 } from './v4/fence.ts';
 import { type V4ConfigOverrides, v4Paths } from './v4/layout.ts';
 import { writeHomeJson } from './v5/home.ts';
+import { refuseLinkOnPath } from './v5/no-link.ts';
 import { v5Writer } from './v5/write.ts';
 
 export interface ConvertOptions {
@@ -133,10 +134,17 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
   const checked = await preflight(options.from, options.to, options.lock);
   if (!checked.ok) return { kind: 'refused', problems: checked.problems };
 
-  if (!options.dryRun) await mkdir(options.to, { recursive: true, mode: 0o700 });
+  // Every write goes to the RESOLVED place (the new home's parent resolved once in preflight) and is lstat-checked from
+  // its anchor down, so a link swapped in after preflight refuses instead of redirecting a write.
+  const to = checked.to.path;
+  if (!options.dryRun) {
+    refuseLinkOnPath(checked.to.anchor, to);
+    await mkdir(to, { recursive: true, mode: 0o700 });
+    refuseLinkOnPath(checked.to.anchor, to);
+  }
   const ctx = {
     v4: { ...v4Paths(options.from), fenced: await fenceV4(options.from) },
-    v5: v5Writer(options.to, { dryRun: options.dryRun }),
+    v5: v5Writer(to, { dryRun: options.dryRun, anchor: checked.to.anchor }),
     dryRun: options.dryRun,
     ...(options.preview === true
       ? {
@@ -166,12 +174,12 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
     ...(options.previewUserHome === undefined ? {} : { previewUserHome: options.previewUserHome }),
     ...(options.dropUncarried === true ? { dropUncarried: true } : {}),
   };
-  const withEnforced = { ...ctx, dryConfigs: dryConfigsOf(options.from, options.to, options.host, steps, extra) };
+  const withEnforced = { ...ctx, dryConfigs: dryConfigsOf(options.from, to, options.host, steps, extra) };
   const withPlain =
     options.preview === true
       ? {
           ...withEnforced,
-          plainConfigs: (await plainConfigs(options.from, options.to, options.host, steps, extra)).configs,
+          plainConfigs: (await plainConfigs(options.from, to, options.host, steps, extra)).configs,
         }
       : withEnforced;
 
@@ -200,7 +208,7 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
     // log at all, and `run/` holds its lock and sockets. Then home.json, last.
     for (const folder of V5_HOME_TREE) await mkdir(ctx.v5.resolve(folder), { recursive: true, mode: 0o700 });
     ctx.v5.resolve('home.json');
-    await writeHomeJson(options.to, at, 'ferretry-v4-to-v5');
+    await writeHomeJson(to, at, 'ferretry-v4-to-v5');
   }
   return {
     kind: 'done',
@@ -208,7 +216,7 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
       format: 1,
       tool: 'ferretry-v4-to-v5',
       from: options.from,
-      to: options.to,
+      to,
       at: at.toISOString(),
       dryRun: options.dryRun,
       steps: reports,
