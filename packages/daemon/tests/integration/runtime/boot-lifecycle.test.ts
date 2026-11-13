@@ -6936,14 +6936,18 @@ describe('daemon boot lifecycle', () => {
       should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
     });
 
-    it('should not dial a discovered relay at boot when the configuration became unreadable after the boot loaded it', async () => {
-      // Arrange: the document was fine when the boot loaded it; it is corrupted while the directory is read.
-      const home = await tempDirectory('fyd-relay-boot-gate-corrupt');
+    it('should not start the hosted carrier when the configuration became unreadable while the lookup was failing', async () => {
+      // Arrange: transient failure at boot; the document is then corrupted (v4 keeps no last-good copy of daemon.json, so unreadable fails closed); the
+      // directory finally answers. An explicit entry wins over a late success.
+      const home = await tempDirectory('fyd-relay-retry-corrupt');
       const relay = refusingRelay();
       const cleanups: Array<() => void | Promise<void>> = [];
       const said = recordingNotices();
-      let answer: (value: RelayAdvertisement) => void = () => undefined;
-      let asked = false;
+      const timers: Array<{ readonly action: () => void; cancelled: boolean }> = [];
+      const answers: RelayAdvertisement[] = [
+        { kind: 'undetermined', reason: 'this daemon could not reach the relay directory', transient: true },
+        { kind: 'available', relayUrl: relay.url },
+      ];
       let release = (): void => {};
       const stopped = new Promise<void>(resolve => {
         release = resolve;
@@ -6951,32 +6955,41 @@ describe('daemon boot lifecycle', () => {
       const world = {
         ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)),
         notices: said.port,
-        relayDirectory: {
-          read: async (): Promise<RelayAdvertisement> => {
-            asked = true;
-            return await new Promise<RelayAdvertisement>(resolve => {
-              answer = resolve;
-            });
+        relayDirectory: { read: async (): Promise<RelayAdvertisement> => answers.shift() ?? NO_RELAY_DIRECTORY },
+        relayLookupTiming: {
+          scheduler: {
+            after: (_milliseconds: number, action: () => void) => {
+              const timer = { action, cancelled: false };
+              timers.push(timer);
+              return {
+                cancel: () => {
+                  timer.cancelled = true;
+                },
+              };
+            },
           },
+          random: () => 0.5,
         },
       };
 
       // Act
       const booting = start(world, cleanups);
-      await waitFor(() => asked, 'the boot to ask the directory');
+      const port = await recordedPort(home);
+      await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
       await writeFile(world.config.path, '{ this is not json');
-      answer({ kind: 'available', relayUrl: relay.url });
+      for (const timer of timers.splice(0)) timer.action();
       await waitFor(
         () => said.stated.some(line => line.includes('relay configuration cannot be read now')),
-        'the boot to refuse the discovered relay',
+        'the late answer to be dropped because the configuration cannot be read',
       );
       release();
       const code = await booting;
       await runCleanups(cleanups);
       await relay.stop();
 
-      // Assert — fail closed: nothing dialled, and the daemon still served.
+      // Assert
       should(code).equal(0);
+      should(said.stated.filter(line => line.startsWith('relay carrier recovered'))).be.empty();
       should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
     });
 
