@@ -67,9 +67,10 @@ H="${FY_HOME:-$HOME/.ferretry}"; STAMP="$(date -u +%Y-%m-%d-%H%M)"; B="$H-before
 
 2. Note how Ferretry is installed here (Homebrew, nix profile, home-manager/nix-darwin, deb/rpm, standalone binary):
    `fy daemon update --check` names it. You need it in step 7 and for a rollback.
-3. Get the v5 repository at the release you will install, in a folder **outside** `H`:
-   `git clone --branch v5.0.0 https://github.com/kirinnee/ferretry ~/ferretry-v5-src`, or in an existing clone
-   `git fetch && git checkout v5.0.0`. Check the converter is there: `ls ~/ferretry-v5-src/migration/v4-to-v5/README.md`.
+3. Get the v5 repository at the release you will install, in a folder **outside** `H`. Before 5.0.0 is released (the tag
+   `v5.0.0` does not exist yet) use the branch: `git clone --branch rebuild/5.0 https://github.com/kirinnee/ferretry ~/ferretry-v5-src`,
+   or in an existing clone `git fetch && git checkout rebuild/5.0`. Once 5.0.0 is released use the tag:
+   `git clone --branch v5.0.0 https://github.com/kirinnee/ferretry ~/ferretry-v5-src`, or `git fetch && git checkout v5.0.0`. Check the converter is there: `ls ~/ferretry-v5-src/migration/v4-to-v5/README.md`.
    If it is not, this machine is already past the window in which the converter exists: stop and tell the owner.
 4. Check free space: the new home needs about as much as `du -sh "$H"` reports, on **the same filesystem** as `H`
    (`df -h "$(dirname "$H")"`).
@@ -78,10 +79,12 @@ H="${FY_HOME:-$HOME/.ferretry}"; STAMP="$(date -u +%Y-%m-%d-%H%M)"; B="$H-before
 
 1. Turn off automatic updates for the duration: in the app, Settings › ‹this machine› › Updates › _Install updates
    automatically when idle_ off (or confirm it is already off — it is off by default).
-2. Write down what is running, into a file outside the home: `fy list > ~/v4-ferrets-$STAMP.txt` (names, states,
-   cards). This is for the owner's eyes and for step 6; it holds no secret.
-3. Let every ferret reach a quiet point: wait until `fy list` shows **no ferret mid-turn** (each is idle or waiting on
-   the owner). Do not interrupt a ferret that is mid-turn unless the owner says so. Ferrets that are idle stay idle in
+2. Write down what is running, into a file outside the home: `fy ps -a > ~/v4-ferrets-$STAMP.txt` (`-a` includes the
+   stopped ferrets, which §8.1 compares; names, states, cards). This is for the owner's eyes and for step 6; it holds no secret.
+3. Let every ferret reach a quiet point. v4 has no view that lists "mid-turn" (`fy ps` shows an idle ferret as `running`
+   too); its own check is `fy daemon restart --when-idle`, which prints how many ferrets are mid-turn, waits until none
+   is, and only then restarts v4's daemon (ferrets and panes keep running through it, so it is harmless here). Run it and
+   wait for it to return. Do not interrupt a ferret that is mid-turn unless the owner says so. Ferrets that are idle stay idle in
    their panes; nothing is ended.
 4. Stop the daemon: `fy daemon stop`. **The tmux server and every pane stay running** — v4's stop only ends the daemon
    (only `fy daemon reset` ends the terminal server, and you must not run it). Check: `tmux -S "$H/tmux.sock" ls` still
@@ -177,9 +180,9 @@ bun src/main.ts --from "$B" --to "$H"                # writes the new home at H
    1. `fy secret set NAME` — the owner types the value at the prompt. You never read, copy, echo or paste it.
    2. The owner rewrites that login's variable to `${secret:NAME}` (app: Settings › Files, or edit `config/logins/<id>.yaml`).
    3. v5 **holds** a login file that newly names a secret reference until the owner acknowledges it. The owner confirms
-      that held edit: `fy config confirm logins/<id>.yaml` (list what waits with `fy config confirm`; or Allow it in the
+      that held edit: `fy config confirm logins/<id>.yaml` (list what waits with a bare `fy config confirm`; or Allow it in the
       app). Setting the secret does not approve the reference. Do not bypass this.
-   4. `fy config check` passes, and `fy secret run NAME -- true` succeeds.
+   4. `fy config check` passes, and `fy secret use --with NAME -- true` succeeds.
 
 ## 6. What is kept, item by item
 
@@ -219,23 +222,23 @@ Tell the owner this list before starting v5, and say which items the summary sho
 ## 8. Verify
 
 Run each check and show the owner the result. Command names are v5's; if one differs in the installed release, use
-`fy help` to find its current name — never fall back to reading files. Any failure: stop, tell the owner, and offer the rollback (§9).
+`fy --help` (or `fy <verb> --help`) to find its current name — never fall back to reading files. Any failure: stop, tell the owner, and offer the rollback (§9).
 
-1. **Ferrets**: `fy list` shows every ferret from `~/v4-ferrets-$STAMP.txt`, with the same names and parents.
+1. **Ferrets**: `fy ps -a` shows every ferret from `~/v4-ferrets-$STAMP.txt`, with the same names and parents.
 2. **Running ferrets were attached in their own panes**: for each ferret that was running, its pane id is unchanged
-   (`tmux -S "$H/state/terminals/tmux.sock" list-panes -a` against the note) and `fy list` shows it live. Send one a
+   (`tmux -S "$H/state/terminals/tmux.sock" list-panes -a` against the note) and `fy ps` shows it live. Send one a
    short message with the owner's yes and see it answer in the same conversation.
 3. **Resume**: pick one stopped ferret with the owner and resume it; it continues its old conversation.
-4. **Board**: `fy board` shows the same cards in the same lanes; open one with history and links.
-5. **Agenda**: open asks and their answers are there (`fy ask list`).
-6. **Secrets by USE**: `fy secret list` shows every name; with the owner's yes run one harmless command that uses a
-   secret by name (never print it), e.g. `fy secret run <NAME> -- true`. It must succeed. You never see the value.
+4. **Board**: `fy board`, run from the project's folder, shows the same cards in the same lanes; open one with history and links.
+5. **Agenda**: open asks and their answers are there (`fy ask`).
+6. **Secrets by USE**: `fy secret ls` shows every name; with the owner's yes run one harmless command that uses a
+   secret by name (never print it), e.g. `fy secret use --with <NAME> -- true`. It must succeed. You never see the value.
 7. **No key in plain text in a login file**: `fy config check` passes (v5 refuses a login file that holds a key, so a pass is
    the proof; do not open the login files to look). Every key the converter moved out of a login file is listed in its
    summary by login, variable and secret name (`LOGIN_<ID>_<VAR>`), never by value. With the owner's yes run
-   `fy secret run <NAME> -- true` for one of them; it must succeed. You never see the value.
+   `fy secret use --with <NAME> -- true` for one of them; it must succeed. You never see the value.
 8. **Devices**: on one paired phone, reload the app: it connects without pairing again and unlocks with its passkey.
-9. **Sign-ins**: `fy login list` shows every login signed in.
+9. **Sign-ins**: `fy login ls` shows every login signed in.
 10. `fy doctor` is clean.
 
 Then turn automatic updates back on if the owner had them on.
