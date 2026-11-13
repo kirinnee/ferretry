@@ -8,10 +8,17 @@ import {
 } from '../../../app/lib/runtime-switch.ts';
 import { launchedModel } from '../../../app/lib/session-view.ts';
 import { type Call, scripted } from './support/client.ts';
-import { summaryOf } from './support/ferret-summary.ts';
+import { ferretSummary } from '@ferretry/core-ferrets/contract/testing';
 
 // What `GET /v1/ferrets/:ferretId` serves: Ferrets' summary, built from the contract (not a hand-written view).
-const FERRET = summaryOf({ harness: 'codex', model: 'gpt-5.6', effort: 'high', fast: true, state: 'idle' });
+const FERRET = ferretSummary({
+  id: 's-1',
+  harness: 'codex',
+  model: 'gpt-5.6',
+  effort: 'high',
+  fast: true,
+  state: 'idle',
+});
 
 describe('runtimeControlApi', () => {
   it('sends the command to the ferret through the route key and the session parameter', async () => {
@@ -49,12 +56,16 @@ describe('readRuntimeSessionView', () => {
   });
 
   it('says a live ferret is running with the turn the daemon decided, and a stopped one is stopped', () => {
-    expect(parseRuntimeSessionView(summaryOf({ state: 'working' })).state).toEqual({
+    expect(parseRuntimeSessionView(ferretSummary({ id: 's-1', state: 'working' })).state).toEqual({
       status: 'running',
       turnState: 'working',
     });
-    expect(parseRuntimeSessionView(summaryOf({ state: 'starting' })).state).toEqual({ status: 'starting' });
-    expect(parseRuntimeSessionView(summaryOf({ state: 'stopped' })).state).toEqual({ status: 'stopped' });
+    expect(parseRuntimeSessionView(ferretSummary({ id: 's-1', state: 'starting' })).state).toEqual({
+      status: 'starting',
+    });
+    expect(parseRuntimeSessionView(ferretSummary({ id: 's-1', state: 'stopped' })).state).toEqual({
+      status: 'stopped',
+    });
   });
 
   it("refuses a document that is not a ferret summary, including today's { config, state } view no route serves", () => {
@@ -62,7 +73,9 @@ describe('readRuntimeSessionView', () => {
     expect(() =>
       parseRuntimeSessionView({ config: { id: 's', harness: 'codex' }, state: { status: 'running' } }),
     ).toThrow('cannot read as a ferret');
-    expect(() => parseRuntimeSessionView({ ...summaryOf(), harness: 'claude' })).toThrow('cannot read as a ferret');
+    expect(() => parseRuntimeSessionView({ ...ferretSummary({ id: 's-1' }), harness: 'claude' })).toThrow(
+      'cannot read as a ferret',
+    );
   });
 });
 
