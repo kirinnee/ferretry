@@ -6303,7 +6303,8 @@ describe('daemon boot lifecycle', () => {
       const refusedLines: string[] = [];
       const refusedCode = await checkConfiguration(world, line => refusedLines.push(line));
       should(refusedCode).equal(1);
-      should(reads).equal(2);
+      // The boot's own read plus the two retries.
+      should(reads).equal(3);
       should(refusedLines.filter(line => line.startsWith('carrier'))).have.length(1);
       should(refusedLines.join('\n')).match(/refused.*two relay carriers resolved to the same rendezvous/u);
       // A REFUSED SET MUST NOT BE REPORTED AS AN ABSENT ONE. The grant posture is derived from the
