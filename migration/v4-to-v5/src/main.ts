@@ -50,8 +50,8 @@ async function main(argv: readonly string[]): Promise<number> {
   // ONCE here and the report is written against that place; a link on its path is refused before anything is written,
   // and again when it is written (the report is never written through a link).
   const wanted = await resolveReport(resolve(values.report ?? `${to}.conversion-report.json`));
-  if (wanted.problem !== undefined) {
-    console.error(`refused; nothing was written:\n  - ${wanted.problem}`);
+  if (wanted.place === undefined || wanted.problem !== undefined) {
+    console.error(`refused; nothing was written:\n  - ${wanted.problem ?? 'the report path could not be resolved'}`);
     return 2;
   }
   const reportPath = wanted.place.path;

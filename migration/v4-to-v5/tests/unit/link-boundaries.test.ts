@@ -111,6 +111,7 @@ test('the report: its parent is resolved once and written against; a link swappe
   expect(wanted.problem).toBeUndefined();
   await rename(parent, `${parent}-real`);
   await symlink(outside, parent);
+  if (wanted.place === undefined) throw new Error('expected a place');
   const written = await writeReportFile(wanted.place, '{}\n');
   expect(written.problem).toContain(`${parent} is a link`);
   expect(await readFile(join(outside, 'report.json'), 'utf8')).toBe('FAKE-PRECIOUS-KEEP');
@@ -123,6 +124,7 @@ test('the report: a final-component link refuses, before and at write time, and 
   const wanted = await resolveReport(path);
   expect(wanted.problem).toContain(`${path} is a link`);
   expect(wanted.problem).not.toContain(outside);
+  if (wanted.place === undefined) throw new Error('expected a place');
   expect((await writeReportFile(wanted.place, '{}\n')).problem).toContain(`${path} is a link`);
   expect(await readFile(join(outside, 'report.json'), 'utf8')).toBe('FAKE-PRECIOUS-KEEP');
 });
@@ -259,6 +261,7 @@ test('the report: a PERSISTENT link swapped in above its resolved anchor refuses
   expect(wanted.problem).toBeUndefined();
   await rename(outer, `${outer}-saved`);
   await symlink(outside, outer);
+  if (wanted.place === undefined) throw new Error('expected a place');
   const written = await writeReportFile(wanted.place, '{}\n');
   expect(written.problem).toContain(`${outer} is a link`);
   expect(written.problem).not.toContain(outside);

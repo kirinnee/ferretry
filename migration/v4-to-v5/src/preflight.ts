@@ -75,8 +75,9 @@ export async function preflight(from: string, to: string, lock: LockProbe): Prom
   }
   const resolvedFrom = await realpath(from);
   // The new home's parent is resolved ONCE; every write goes to the resolved place and is lstat-checked from its anchor.
-  const place = await resolvePlace(to);
+  let place: ResolvedPlace;
   try {
+    place = await resolvePlace(to);
     refuseLinkOnPath(place.anchor, place.path, place.pins);
   } catch (error) {
     if (error instanceof LinkOnWritePathError) {

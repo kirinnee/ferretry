@@ -9,7 +9,7 @@
  */
 import { lstat, realpath } from 'node:fs/promises';
 import { basename, dirname, join, parse, sep } from 'node:path';
-import type { PinnedFolder } from './no-link.ts';
+import { LinkOnWritePathError, type PinnedFolder } from './no-link.ts';
 
 export interface ResolvedPlace {
   /** The absolute path every write goes to: the resolved parent, then the rest of the way down. */
@@ -20,7 +20,11 @@ export interface ResolvedPlace {
   readonly pins: readonly PinnedFolder[];
 }
 
-/** The identity of `/` and each folder down to `anchor` (a resolved path, so none is a link); `[]` when unreadable. */
+/**
+ * The identity of `/` and each folder down to `anchor` (a resolved path, so none is a link). A component that is NOW a
+ * link, is not a folder, or cannot be read refuses ({@link LinkOnWritePathError}, naming that folder, never a target):
+ * a chain is whole or it is refused, never empty and never partial, so nothing can be written below a folder that was not pinned.
+ */
 async function pinChain(anchor: string): Promise<readonly PinnedFolder[]> {
   const { root } = parse(anchor);
   const names = anchor
@@ -33,30 +37,35 @@ async function pinChain(anchor: string): Promise<readonly PinnedFolder[]> {
     if (index >= 0) walked = join(walked, names[index] ?? '');
     try {
       const facts = await lstat(walked, { bigint: true });
-      if (facts.isSymbolicLink() || !facts.isDirectory()) return [];
+      if (facts.isSymbolicLink()) throw new LinkOnWritePathError(walked, 'link');
+      if (!facts.isDirectory()) throw new LinkOnWritePathError(walked, 'changed');
       pins.push({ path: walked, dev: facts.dev, ino: facts.ino });
-    } catch {
-      return [];
+    } catch (error) {
+      if (error instanceof LinkOnWritePathError) throw error;
+      throw new LinkOnWritePathError(walked, 'changed');
     }
   }
   return pins;
 }
 
-/** Resolves the parent of `path` once (its deepest existing ancestor through `realpath`, the absent rest appended). */
+/**
+ * Resolves the parent of `path` once (its deepest existing ancestor through `realpath`, the absent rest appended).
+ * Throws {@link LinkOnWritePathError} when the resolved chain is not whole real folders (see {@link pinChain}): the
+ * callers treat that as "write nothing".
+ */
 export async function resolvePlace(path: string): Promise<ResolvedPlace> {
   const name = basename(path);
   const tail: string[] = [];
   let current = dirname(path);
   for (;;) {
-    try {
-      const anchor = await realpath(current);
+    const anchor = await realpath(current).catch(() => undefined);
+    // Pinned OUTSIDE the lookup's `catch`: a refusal is an answer, not "nothing here, try the folder above".
+    if (anchor !== undefined)
       return { path: join(anchor, ...tail.reverse(), name), anchor, pins: await pinChain(anchor) };
-    } catch {
-      const up = dirname(current);
-      // Nothing above resolves (a root that cannot be read): keep the spelling, the write checks refuse what is wrong.
-      if (up === current) return { path, anchor: current, pins: [] };
-      tail.push(basename(current));
-      current = up;
-    }
+    const up = dirname(current);
+    // Nothing above resolves (a root that cannot be read): there is no chain to pin, so refuse rather than write.
+    if (up === current) throw new LinkOnWritePathError(current, 'changed');
+    tail.push(basename(current));
+    current = up;
   }
 }

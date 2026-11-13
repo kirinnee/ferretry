@@ -15,11 +15,23 @@ const linkSentence = (link: string, reason: 'link' | 'changed' = 'link'): string
     ? `${link} is a link: replace it with a real file or folder (or name another with --report), then run again`
     : `${link} is not the folder it was when the run started: put the real folder back (or name another report with --report), then run again`;
 
-/** Resolves the report's parent once; `problem` is set when a link is already on its path. */
+/**
+ * Resolves the report's parent once. `problem` is set when a link (or a folder that is not one) is on its path: then
+ * write nothing. A refusal while the parent chain is pinned has no `place` at all, so there is nothing to write at.
+ */
 export async function resolveReport(
   path: string,
-): Promise<{ readonly place: ResolvedPlace; readonly problem?: string }> {
-  const place = await resolvePlace(path);
+): Promise<
+  | { readonly place: ResolvedPlace; readonly problem?: string }
+  | { readonly place?: undefined; readonly problem: string }
+> {
+  let place: ResolvedPlace;
+  try {
+    place = await resolvePlace(path);
+  } catch (error) {
+    if (error instanceof LinkOnWritePathError) return { problem: linkSentence(error.link, error.reason) };
+    throw error;
+  }
   try {
     refuseLinkOnPath(place.anchor, place.path, place.pins);
   } catch (error) {
