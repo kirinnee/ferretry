@@ -43,6 +43,15 @@ const CONVERTER = join(FIXTURES, '..', 'src', 'main.ts');
 /** The ports nobody here may ever reach: v4's default bind (a real daemon may run there), v4's own home, the owner's preview. */
 const FORBIDDEN_PORTS = new Set([7431, 7457, 7458]);
 const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
+
+/**
+ * The hosted relay is a real service the owner pays for (lead ruling 2026-11-13): it is OFF in a fake home unless the
+ * sweeper switches it on for one side with SWEEP_RELAY_V4=on / SWEEP_RELAY_V5=on (only the access/connections sweep does).
+ * "Off" is the explicit `{ kind: 'relay', source: 'discovery', enabled: false }` entry, never an omission, because an
+ * omitted relay means the hosted default.
+ */
+const relayOn = (side: 'v4' | 'v5'): boolean => process.env[`SWEEP_RELAY_${side.toUpperCase()}`] === 'on';
+const RELAY_OFF = { kind: 'relay', source: 'discovery', enabled: false } as const;
 const ENV_PASSTHROUGH = ['PATH', 'LANG', 'LC_ALL', 'TERM', 'TZ'] as const;
 
 type Which = 'v4' | 'v5';
@@ -230,7 +239,7 @@ function daemonEnvironment(slot: Slot, which: Which): Record<string, string> {
     FY_UPDATE_CHECK: 'off',
     FY_LOCAL_MODELS: 'off',
     // The v4 hosted app reaches a daemon ONLY through the hosted relay (it never dials 127.0.0.1 itself), so the v4 daemon keeps
-    // its default directory and dials it. The 5.0 side gets its OWN identity (freshIdentityForV5): the converter carries v4's,
+    // its default directory and dials it ONLY when SWEEP_RELAY_V4=on (relayOn). The 5.0 side gets its OWN identity (freshIdentityForV5): the converter carries v4's,
     // and a rendezvous holds one claim per identity, so two daemons under one identity would answer each other's apps.
     FY_CLAUDE_BIN: join(world.harness, 'claude'),
     FY_CODEX_BIN: join(world.harness, 'codex'),
@@ -532,13 +541,13 @@ async function workaroundMovedHome(copy: string, original: string): Promise<void
 /**
  * The COPY is told what this slot's 5.0 side must be, BEFORE the converter reads it, so the converter carries it as
  * written and records it as accepted (an edit made to the converted home afterwards would be HELD for the owner, and the
- * held one would not govern): the bind port is the slot's 5.0 port, and WebRTC is off (no STUN server is asked). The relay is left at its default: the hosted
- * relay, which both hosted apps reach a daemon through.
+ * held one would not govern): the bind port is the slot's 5.0 port, and WebRTC is off (no STUN server is asked). The relay is OFF unless SWEEP_RELAY_V5=on (then the hosted
+ * relay, which both hosted apps can reach a daemon through).
  */
 async function settleCopyForThisSlot(copy: string, slot: Slot): Promise<void> {
   const file = join(copy, 'config', 'daemon.json');
   const document = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
-  document.carriers = [{ kind: 'bind', host: '127.0.0.1', port: slot.v5Port }];
+  document.carriers = [{ kind: 'bind', host: '127.0.0.1', port: slot.v5Port }, ...(relayOn('v5') ? [] : [RELAY_OFF])];
   const webrtc = isRecord(document.webrtc) ? document.webrtc : {};
   document.webrtc = { ...webrtc, enabled: false };
   await writeFile(file, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 });
@@ -561,7 +570,10 @@ async function freshIdentityForV5(slot: Slot): Promise<void> {
 async function pinV4(slot: Slot): Promise<void> {
   const file = join(slot.v4.home, 'config', 'daemon.json');
   const document = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
-  const carriers = Array.isArray(document.carriers) ? (document.carriers as Record<string, unknown>[]) : [];
+  const carriers = (Array.isArray(document.carriers) ? (document.carriers as Record<string, unknown>[]) : []).filter(
+    entry => relayOn('v4') || entry.kind !== 'relay',
+  );
+  if (!relayOn('v4')) carriers.push({ ...RELAY_OFF });
   const bind = carriers.find(entry => entry.kind === 'bind');
   if (bind === undefined) carriers.unshift({ kind: 'bind', host: '127.0.0.1', port: slot.v4Port });
   else {
