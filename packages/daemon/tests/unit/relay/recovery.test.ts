@@ -18,7 +18,10 @@ import {
   type RelayRecoveryPorts,
   recoverRelays,
   relayDialGate,
+  dialledRelayUrl,
+  withdrawDiscoveredRelays,
 } from '../../../src/lib/relay/index.ts';
+import { PublishedCarrierSet } from '../../../src/lib/runtime/published-carriers.ts';
 import type { DaemonRelayCarrierEntry } from '../../../src/lib/runtime/carriers.ts';
 
 const DISCOVERY: DaemonRelayCarrierEntry = { kind: 'relay', source: 'discovery', enabled: true, reconnectSeconds: 5 };
@@ -353,5 +356,42 @@ describe('relayDialGate', () => {
   it('should refuse a changed configuration', async () => {
     const verdict = await relayDialGate({ ...passing, readCurrentRelays: async () => [SWITCHED_OFF] });
     should(verdict).deepEqual({ kind: 'changed' });
+  });
+});
+
+describe('withdrawDiscoveredRelays — a vetoed relay is no longer promised', () => {
+  const discovered: RelayCarrierSource = {
+    kind: 'discovered',
+    config: { url: 'wss://relay.example/rendezvous', enabled: true, reconnectSeconds: 5 },
+  };
+  const mine: RelayCarrierSource = {
+    kind: 'configured',
+    config: { url: 'wss://mine.example/rendezvous', enabled: true, reconnectSeconds: 5 },
+  };
+
+  it('should turn only the discovered sources direct-only, in place, with the reason', () => {
+    // Act
+    const after = withdrawDiscoveredRelays([mine, discovered], 'the configuration changed');
+
+    // Assert
+    should(after).deepEqual([mine, { kind: 'direct-only', reason: 'the configuration changed' }]);
+  });
+
+  it('should withdraw the relay from the published set (GET /v1/carriers and pairing redemption) and from discovery', () => {
+    // Arrange — the boot published what the directory advertised.
+    const published = new PublishedCarrierSet('http://127.0.0.1:4123', [mine, discovered]);
+    should(published.current().filter(carrier => carrier.kind === 'relay')).have.length(2);
+
+    // Act — the dial was vetoed.
+    const after = withdrawDiscoveredRelays([mine, discovered], 'vetoed');
+    published.relaysChanged(after);
+
+    // Assert — the one published object both surfaces read lists only the relay that is still dialled, and
+    // the source list pairing’s provenance getter reads has no relay left to disclose.
+    should(published.current().filter(carrier => carrier.kind === 'relay')).deepEqual([
+      { kind: 'relay', url: 'wss://mine.example/rendezvous' },
+    ]);
+    should(after.filter(source => source.kind === 'discovered')).be.empty();
+    should(after.map(dialledRelayUrl)).deepEqual(['wss://mine.example/rendezvous', undefined]);
   });
 });

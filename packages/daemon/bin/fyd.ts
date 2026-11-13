@@ -973,6 +973,7 @@ import {
   RelayLookupRetry,
   recoverRelays,
   relayDialGate,
+  withdrawDiscoveredRelays,
   type RelayPairingRedeemer,
   type RelayStreamDispatch,
   RememberedHandoverReceipts,
@@ -13702,14 +13703,18 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     });
     if (verdict.kind !== 'go') {
       for (const { carrier } of relay.carriers) carrier.stop();
-      relay = {
-        refusal:
-          verdict.kind === 'stopped'
-            ? 'the daemon is stopping'
-            : verdict.kind === 'unreadable'
-              ? 'this daemon’s relay configuration cannot be read now, so the discovered relay is not dialled'
-              : 'the relay configuration changed while this daemon was starting, and an explicit entry wins, so the discovered relay is not dialled',
-      };
+      const refusal =
+        verdict.kind === 'stopped'
+          ? 'the daemon is stopping'
+          : verdict.kind === 'unreadable'
+            ? 'this daemon’s relay configuration cannot be read now, so the discovered relay is not dialled'
+            : 'the relay configuration changed while this daemon was starting, and an explicit entry wins, so the discovered relay is not dialled';
+      relay = { refusal };
+      // WITHDRAWN FROM PUBLICATION AND DISCOVERY TOO: the boot published what the directory advertised before
+      // the dial, and a relay nothing dials must not stay in `GET /v1/carriers`, in pairing redemption, or in
+      // the discovery pairing discloses (all read from these sources).
+      relaySources = withdrawDiscoveredRelays(relaySources, refusal);
+      carriers.relaysChanged(relaySources);
     }
   }
   if ('carriers' in relay) {

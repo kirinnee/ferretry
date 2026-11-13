@@ -6845,12 +6845,24 @@ describe('daemon boot lifecycle', () => {
       const said = recordingNotices();
       let answer: (value: RelayAdvertisement) => void = () => undefined;
       let asked = false;
+      // What the boot handed pairing: the ONE published set, and the discovery getter its QR is drawn from.
+      let handed:
+        | {
+            readonly carriers: { current(): readonly { readonly kind: string }[] };
+            readonly discovered: () => string | undefined;
+          }
+        | undefined;
+      const underlying = await worldAt(home, OS_CHOSEN_PORT, async () => await stopped);
       let release = (): void => {};
       const stopped = new Promise<void>(resolve => {
         release = resolve;
       });
       const world = {
-        ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)),
+        ...underlying,
+        createPairing: async (...args: Parameters<typeof underlying.createPairing>) => {
+          handed = { carriers: args[2], discovered: args[3] };
+          return await underlying.createPairing(...args);
+        },
         notices: said.port,
         relayDirectory: {
           read: async (): Promise<RelayAdvertisement> => {
@@ -6875,6 +6887,14 @@ describe('daemon boot lifecycle', () => {
         () => said.stated.some(line => line.startsWith('no relay carriers')),
         'the boot to refuse the discovered relay',
       );
+      const adminToken = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+      const served = DaemonCarriersViewSchema.parse(
+        await (
+          await fetch(`http://127.0.0.1:${String(port)}/v1/carriers`, {
+            headers: { authorization: `Bearer ${adminToken}` },
+          })
+        ).json(),
+      );
       release();
       const code = await booting;
       await runCleanups(cleanups);
@@ -6883,6 +6903,11 @@ describe('daemon boot lifecycle', () => {
       // Assert
       should(code).equal(0);
       should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
+      // And it is no longer PROMISED: not in GET /v1/carriers, not in the set pairing redeems from, and not in
+      // the discovery the pairing QR is drawn from.
+      should(served.carriers.filter(carrier => carrier.kind === 'relay')).be.empty();
+      should(handed?.carriers.current().filter(carrier => carrier.kind === 'relay')).be.empty();
+      should(handed?.discovered()).be.undefined();
       should(
         said.stated.some(line => line.includes('relay configuration changed while this daemon was starting')),
       ).be.true();

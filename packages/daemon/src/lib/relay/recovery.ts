@@ -93,6 +93,20 @@ export async function relayDialGate(ports: RelayDialGatePorts): Promise<RelayDia
   return { kind: sameRelayEntries(ports.bootRelays, current) ? 'go' : 'changed' };
 }
 
+/**
+ * The sources with every DISCOVERED relay turned direct-only, position for position — what a vetoed dial
+ * leaves behind. A carrier that is not dialled must not stay promised: the published set (`GET
+ * /v1/carriers`, pairing redemption) and the discovery pairing discloses are both read from these
+ * sources, so replacing them is what stops a device being handed a rendezvous nothing dials. A relay the
+ * operator wrote down (`configured`) is theirs and is left alone.
+ */
+export function withdrawDiscoveredRelays(
+  sources: readonly RelayCarrierSource[],
+  reason: string,
+): readonly RelayCarrierSource[] {
+  return sources.map(source => (source.kind === 'discovered' ? { kind: 'direct-only' as const, reason } : source));
+}
+
 /** Ends a carrier that was built and is not going to run. A failing stop is not this recovery's to report. */
 async function discard<C extends RecoverableCarrier>(carriers: readonly RecoveredCarrier<C>[]): Promise<void> {
   for (const { carrier } of carriers) {
