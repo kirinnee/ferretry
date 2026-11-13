@@ -189,7 +189,33 @@ export class SurfaceControl {
     await this.events.publish(sessionId, SURFACE_EVENT_TYPES.handed, handed);
   }
 
-  /** A surface that closed: nothing about it stands any more. */
+  /**
+   * A surface that closed, however it closed (a tool, the viewer, the session's end, the browser stopping): nothing
+   * about it stands any more — in memory, and in the journal, where a takeover that stood ends with a `surface.handback`
+   * so a replay reads it released. A close that was never recorded left the takeover in both, and a page id can come
+   * back (a restarted browser numbers its pages from the start): the old takeover would then hold a page that is not
+   * the one the person took.
+   */
+  async closed(sessionId: string, surface: ResolvedSurface): Promise<void> {
+    const key = keyOf(sessionId, surface.surface, surface.id);
+    try {
+      await this.#load(sessionId);
+    } catch (error) {
+      this.forget(sessionId, surface);
+      throw error;
+    }
+    const held = this.#takeovers.get(key)?.value;
+    this.forget(sessionId, surface);
+    if (held === undefined) return;
+    await this.events.publish(sessionId, SURFACE_EVENT_TYPES.handback, {
+      surface: held.surface,
+      id: held.id,
+      ...(held.name === undefined ? {} : { name: held.name }),
+      at: instantFromEpochMs(this.clock.now()),
+    });
+  }
+
+  /** A surface that closed: nothing about it stands any more (in memory; {@link closed} also journals it). */
   forget(sessionId: string, surface: ResolvedSurface): void {
     const key = keyOf(sessionId, surface.surface, surface.id);
     this.#driving.delete(key);
@@ -268,4 +294,21 @@ export class SurfaceControl {
   #prune(now: number): void {
     for (const [key, held] of this.#driving) if (epochMs(held.value.until) <= now) this.#driving.delete(key);
   }
+}
+
+/**
+ * What the browser tells when one of a ferret's pages closes, however it closed: the page's takeover, ask and every other
+ * mark end with it ({@link SurfaceControl.closed}). The close is a wake-up, so a record that could not be told never
+ * fails it; `then` hears the close after.
+ */
+export function forgetsClosedPages(
+  control: SurfaceControl,
+  then?: (sessionId: string, pageId: string) => void,
+): { closed(sessionId: string, pageId: string): void } {
+  return {
+    closed: (sessionId, pageId) => {
+      control.closed(sessionId, { surface: 'browser', id: pageId }).catch(() => undefined);
+      then?.(sessionId, pageId);
+    },
+  };
 }

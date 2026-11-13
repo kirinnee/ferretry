@@ -40,6 +40,16 @@ export class Tabs {
     this.exited = resolve;
   });
 
+  /**
+   * The agent Chrome started again: its pages are gone and its worker numbers pages from the start, as a fresh worker
+   * does — so a page opened now can carry an id an earlier page had.
+   */
+  restart(): void {
+    this.pages = [{ id: 'p0', url: 'about:blank', title: '' }];
+    this.minted = 0;
+    this.casts.clear();
+  }
+
   die(): void {
     this.exited(1);
   }
