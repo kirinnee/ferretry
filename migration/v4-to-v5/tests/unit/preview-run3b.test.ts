@@ -128,12 +128,16 @@ describe('m2: the harness map opens files as safely as the rest of the converter
 });
 
 describe('m3: a login that drives both CLIs is decided by the runtime profile, as in v4', () => {
-  const BOTH = 'harness: claude\nstore: environment\nclaude:\n  env: {}\ncodex:\n  env: {}\n';
+  const BOTH =
+    'harness: claude\nstore: environment\nenv:\n  ANTHROPIC_AUTH_TOKEN: ${secret:D_KEY}\nclaude:\n  env: {}\ncodex:\n  env: {}\n';
   const setup = async () => {
     await put('layout-version', '2\n');
     await put('config/logins/dual.yaml', BOTH);
     await put('config/logins/dual-cx.yaml', BOTH.replace('harness: claude', 'harness: codex'));
-    await put('config/logins/one-half.yaml', 'harness: codex\nstore: environment\ncodex:\n  env: {}\n');
+    await put(
+      'config/logins/one-half.yaml',
+      'harness: codex\nstore: environment\ncodex:\n  env:\n    OPENAI_API_KEY: ${secret:C_KEY}\n',
+    );
     await put('config/components/instructions/c-only.yaml', 'file: a.md\nharness: claude\n');
     await put('config/components/instructions/x-only.yaml', 'file: b.md\nharness: codex\n');
     await put('config/components/instructions/plain.yaml', 'file: c.md\n');

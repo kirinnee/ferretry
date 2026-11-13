@@ -198,6 +198,8 @@ export class OwnedLoginStore {
     readonly codex: CodexUsageProbe;
     readonly refresh: FleetTokenRefreshPort;
     readonly usageIntervalMs: number;
+    /** The vault's secret NAMES (never a value): an environment login is Ready only when each name it holds is there. */
+    readonly secretNames?: () => Promise<ReadonlySet<string> | undefined>;
   }): CredentialStatusPorts {
     return {
       local: resolution => this.local(resolution),
@@ -235,6 +237,7 @@ export class OwnedLoginStore {
         },
       },
       heads: new InMemoryCredentialStatusStore(),
+      ...(options.secretNames === undefined ? {} : { secretNames: options.secretNames }),
       now: this.now,
       usageIntervalMs: options.usageIntervalMs,
     };

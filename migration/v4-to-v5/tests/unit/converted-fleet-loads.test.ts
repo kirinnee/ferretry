@@ -211,8 +211,5 @@ describe('a converted home’s fleet configuration loads the way `fy runtimes` l
     expect(Object.keys(model.profiles).toSorted()).toEqual(['claude-default', 'codex-default']);
     expect(loaded.unreadable).toEqual([]);
   });
-
-  // CASE 2 (logins held out of the preview) is a separate unit: it runs the preview stage plan and its hold, and asserts
-  // load() still resolves with every runtime it did not carry named in the report. Its tests go in this describe.
-  describe('CASE 2, logins held out (the preview)', () => {});
+  // CASE 2 (logins held out of the preview) is converted-fleet-loads-preview.test.ts.
 });

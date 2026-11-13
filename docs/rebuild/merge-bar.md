@@ -65,7 +65,7 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
    configuration service and `runtimesConfigFiles(...).load()`. `load()` must resolve, every v4 runtime must be in the
    model, and `instructions` must hold each document's text. One unreadable reference makes the WHOLE fleet
    configuration unreadable, and the converter once wrote instructions as `<name>.md` where 5.0 reads `<name>.yaml`. CASE 1
-   (every login carried) is in; CASE 2 (logins held out of the preview) is a separate unit.
+   (every login carried) is in; CASE 2 (logins held out of the preview) is line 10.
 10. **An unreadable derived fleet manifest is regenerated, never refuses every start**:
     `packages/plugins/runtimes/tests/integration/daemon/manifest-regen.test.ts` — a `fleet/manifest.json` with an unknown key
     on an account row (the v4 4.291.12 shape) or truncated JSON is rebuilt from the configuration once after the daemon
@@ -103,6 +103,34 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
     because the CLI shell dropped the header a half set (and the app's start sent none), and a start by runtime then
     launched signed out because nothing turned the runtime into its login; every other start test named the login in a
     raw `POST /v1/ferrets`. No credential is printed.
+12. **The preview stage loads its whole fleet configuration** (case 2 of the converter's fleet-load check):
+    `migration/v4-to-v5/tests/unit/converted-fleet-loads-preview.test.ts` runs the preview stage (logins carried as
+    signed-out shells, Codex held) and reads its fleet configuration through the very path `fy runtimes` takes (the
+    kernel's `createConfigFiles` plus `runtimesConfigFiles(...).load()`). It must resolve, every carried runtime must be
+    in the model, and every runtime the preview did not carry must be named in the report's hold list with one plain
+    line; never `fleet_catalog_unreadable`. Each login's status is read from the REAL logins status service (not a
+    hardcoded word): a signed-out store is `not_signed_in`, and an environment login whose `${secret:NAME}` is not in the
+    empty preview vault is `secret_not_stored`, both "Needs sign-in". Lead ask, 2026-11-12.
+    `migration/v4-to-v5/tests/unit/preview-logins-leaks.test.ts` holds the shells to it: built from an allowlist, no login
+    file staged, no marker (comment, credential path, literal key, webhook token) in any `.ferretry-v5*` path after a
+    passing or a failing `prepare`.
+13. **A converted home keeps its v4 spend caps, enforced** (lead ruling on #F3703; 5.0's Usage plugin enforces a budget
+    ONLY from `config/usage.yaml` `budgets.<login>`, so the converter moves each login's cap there, rebuilt from numbers):
+    `migration/v4-to-v5/tests/unit/preview-logins-usage.test.ts` converts a home (the real converter AND the preview, owner
+    and non-owner, with and without an unrelated held deletion), reads it back through the kernel's configuration service
+    and runs the REAL Usage `start.decide` on a synthetic meter reading. It must hold these lines:
+    - (a) a converted home stops a start at the login's v4 hard cap, and a later harmless login label apply keeps it;
+    - (b) an unaccepted v4 raise stays held: the start is judged at the ACCEPTED cap until the owner accepts, then at the
+      new one, and the migration report says "held: accepted X, pending Y" in numbers only;
+    - (c) every period and level v4 had (daily, weekly; trigger and hard) carries: past a trigger nothing new starts
+      (docs/budgets.md), and past the hard limit nothing new starts either.
+    - (d) an unaccepted v4 time-zone change is held: starts are judged in the ACCEPTED zone until the owner accepts (v4
+      holds EVERY zone change, the first one set and one removed included; Usage's `usageLoosens` holds it, and the
+      held edit says "budgets now reset in X instead of Y");
+    - (e) a login v4 accepted with a budget, whose file is now gone and which a runtime still uses, stays a held deletion
+      (`preview-logins-deletion.test.ts`): the unrelated runtime still loads, no unrelated login or runtime is held.
+      The whole-artifact scan (every `<HOME>/.ferretry-v5*` path, a passing and a throwing `prepare`) finds no comment, key,
+      path or token marker in `usage.yaml` or its accepted-config snapshot beside a credential-shaped comment on the budget.
 
 ## After merge
 

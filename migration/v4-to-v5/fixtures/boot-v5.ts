@@ -332,6 +332,7 @@ async function bootHome(at: string, dir: string, data: boolean): Promise<readonl
       await checkProjects(base, token);
       await checkCards(base, token);
       await checkAgenda(base, token);
+      await checkRuntimes(base, token);
     }
   } catch (error) {
     if (!(error instanceof BootStop))
@@ -468,6 +469,18 @@ async function checkCards(url: string, bearer: string): Promise<void> {
         fail(`card ${card.id}: it depended on ${card.dependsOn}; v5 lists no such dependency`);
       say(`card ${card.id}: in lane ${view.laneId}, ${String(view.dependsOn.length)} dependency(ies)`);
     });
+}
+
+/**
+ * The converted fleet configuration is READABLE: `GET /v1/runtimes` answers 200. A runtime that names a login no file
+ * carries (or any other broken reference) makes the whole configuration unreadable, and the route then answers
+ * `fleet_catalog_unreadable`; this proves the converted home does not fall into that state.
+ */
+async function checkRuntimes(url: string, bearer: string): Promise<void> {
+  await checked('runtimes', 'fleet configuration', async () => {
+    await get(url, bearer, '/v1/runtimes');
+    say('GET /v1/runtimes: 200 (the fleet configuration reads whole)');
+  });
 }
 
 async function checkAgenda(url: string, bearer: string): Promise<void> {

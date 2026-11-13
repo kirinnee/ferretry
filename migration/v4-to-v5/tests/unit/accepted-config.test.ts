@@ -142,3 +142,14 @@ test('a damaged accepted record is read as nothing accepted; a dry run writes no
   expect(dry.kept).toContainEqual({ what: 'v5 config files recorded as accepted', count: 1 });
   expect(await readdir(f.to).catch(() => [])).toEqual([]);
 });
+
+test('an accepted entry v4 itself never reads (a path no kind owns) whose file is gone is no held deletion and no record', async () => {
+  await yaml('limits.yaml', LIMITS);
+  await f.put('state/config-accepted.json', {
+    'limits.yaml': { etag: sha256(LIMITS), text: LIMITS },
+    'notes/unknown.yaml': { etag: sha256('x: 1\n'), text: 'x: 1\n' },
+  });
+  const report = await convert();
+  expect(report.kept.map(item => item.what).join('\n')).not.toContain('notes/unknown.yaml');
+  expect(await listAccepted()).toEqual([`${acceptedName('limits.yaml')}.json`]);
+});

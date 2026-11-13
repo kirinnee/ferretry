@@ -132,12 +132,15 @@ export function buildLoginsDaemon() {
       const store = new OwnedLoginStore(kernel.roots.root('credentials'), () => clock.nowMs());
       const catalog = store.catalog(files);
       const quota = quotaFetch(kernel.fetch, clock);
+      const vaultNames = async (): Promise<ReadonlySet<string>> =>
+        new Set((await needs.vault.names()).map(summary => String(summary.name)));
       const status = new CredentialStatusService(
         store.statusPorts({
           anthropic: new AnthropicUsageProbe({ fetch: quota }),
           codex: new CodexUsageProbe({ fetch: quota, now: () => clock.nowMs() }),
           refresh: codexTokenRefresh(kernel.spawn, clock),
           usageIntervalMs: 60_000,
+          secretNames: vaultNames,
         }),
       );
       const credentials = new FleetCredentialsService({
@@ -157,7 +160,7 @@ export function buildLoginsDaemon() {
         environment: {
           catalog: () => presetService.catalog(),
           presets: () => presetService.presets(),
-          secretNames: async () => new Set((await needs.vault.names()).map(summary => String(summary.name))),
+          secretNames: vaultNames,
           test: (subject, consent) => providerProbe.test(subject, consent),
         },
         listCache: { now: () => clock.nowMs(), freshMs: CREDENTIAL_LIST_FRESH_MS },

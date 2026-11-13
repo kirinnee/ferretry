@@ -197,7 +197,9 @@ test('converts every v4 config kind into the v5 file that owns it, read back wit
 
   const login = await read('logins/work-login.yaml', LoginFileSchema);
   expect(login.env?.ANTHROPIC_AUTH_TOKEN).toBe('${secret:FAKE_API_KEY}');
-  expect(login.budget).toEqual({ daily: { hard: 20 } });
+  // The cap moved to usage.yaml (the only place 5.0 enforces a budget); the login file carries none.
+  expect(login.budget).toBeUndefined();
+  expect(await text('logins/work-login.yaml')).not.toContain('budget');
   expect(login.harness).toBe('claude-code');
   expect(await text('logins/work-login.yaml')).toContain('# a gateway login');
   expect((await read('endpoints/fake-gateway.yaml', EndpointFileSchema)).label).toBe('Fake gateway');
@@ -232,7 +234,11 @@ test('converts every v4 config kind into the v5 file that owns it, read back wit
   expect(browsers.mode).toBe('window');
   expect(browsers.proxy?.password).toBe('${secret:FAKE_PROXY_PASS}');
   expect(await read('agenda.yaml', AgendaConfigSchema)).toMatchObject({ agendaNudge: false, agendaMode: false });
-  expect(await read('usage.yaml', UsageFileSchema)).toEqual({ timeZone: 'Europe/Berlin', publicFeed: true });
+  expect(await read('usage.yaml', UsageFileSchema)).toEqual({
+    timeZone: 'Europe/Berlin',
+    publicFeed: true,
+    budgets: { 'work-login': { daily: { hard: 20 } } },
+  });
   expect(await text('usage.yaml')).toContain('Carried from v4 config/machine.yaml');
 
   expect((await stat(join(f.to, 'config/runtimes/claude-work.yaml'))).mode & 0o777).toBe(0o600);
@@ -431,4 +437,17 @@ test('--drop-uncarried removes the layer of a refused instructions document and 
   expect(report.notCarried.find(item => item.what === 'config/components/instructions/nul.yaml')?.why).toContain(
     'REMOVED',
   );
+});
+
+test('a login budget that cannot be read as plain data (an alias bomb) is left in the file, so the config check refuses the login: never written capless', async () => {
+  const aliases = Array.from({ length: 150 }, (_, i) => `    x${String(i)}: *cap`).join('\n');
+  await yaml(
+    'logins/bomb.yaml',
+    `harness: claude\nstore: ferretry\nbudget:\n  daily:\n    hard: &cap 10\n${aliases}\n`,
+  );
+  const report = await settingsStep.run(f.ctx());
+  // Whatever the step said about the file, no login was written without its cap and no cap reached usage.yaml.
+  expect(await exists('logins/bomb.yaml')).toBe(false);
+  expect(await exists('usage.yaml')).toBe(false);
+  expect(JSON.stringify(report)).not.toContain('bomb daily');
 });

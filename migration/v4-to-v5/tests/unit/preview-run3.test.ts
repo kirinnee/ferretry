@@ -58,7 +58,7 @@ async function realShapes() {
   await put('config/logins/b-login.yaml', `harness: codex\nstore: environment\nenv:\n  OPENAI_API_KEY: ${FAKE_KEY}\n`);
   await put(
     'config/logins/h-login.yaml',
-    'harness: claude\nstore: environment\nclaude:\n  env: {}\ncodex:\n  env: {}\n',
+    'harness: claude\nstore: environment\nenv:\n  ANTHROPIC_AUTH_TOKEN: ${secret:H_KEY}\nclaude:\n  env: {}\ncodex:\n  env: {}\n',
   );
   await put('config/profiles/main.yaml', 'contents: []\n');
   await put('config/runtimes/claude-x.yaml', 'credential: a-login\nprofile: main\n');
@@ -126,7 +126,10 @@ describe('problem 1: the harness comes from the login, through a stage map that 
     expect(JSON.stringify(done.report)).not.toContain(FAKE_KEY);
     expect(done.summary).not.toContain(FAKE_KEY);
     expect(await everything(f.to)).not.toContain(FAKE_KEY);
-    expect(existsSync(join(f.to, 'config/logins'))).toBe(false);
+    // The Claude logins are carried as signed-out shells; the Codex one is held; the plain key was never carried.
+    expect(existsSync(join(f.to, 'config/logins/a-login.yaml'))).toBe(true);
+    expect(existsSync(join(f.to, 'config/logins/h-login.yaml'))).toBe(true);
+    expect(existsSync(join(f.to, 'config/logins/b-login.yaml'))).toBe(false);
   });
 
   test('a login file that is not YAML, or names no harness, is left out and says nothing', async () => {
@@ -157,12 +160,15 @@ describe('problem 2: held means what v4 `fy config confirm` lists', () => {
     return result.kind === 'done' ? result.report : undefined;
   };
 
-  test('v4 would list nothing (logins are left out of the preview on purpose): both files are accepted', async () => {
+  test('v4 would list nothing (the logins are in the real home, read in memory): both files are accepted', async () => {
     await put('config/machine.yaml', MACHINE);
+    // fix4: the preview reads the logins from the real v4 home, so an accepted login with its file in place is not a deletion.
+    const aLogin = 'harness: claude\nbudget:\n  daily:\n    hard: 10\n';
+    await put('config/logins/a-login.yaml', aLogin);
+    await put('config/logins/b-login.yaml', 'harness: codex\n');
     await accept({
       'machine.yaml': MACHINE,
-      // The preview does not copy logins, so these look "deleted"; v4 has them and holds nothing.
-      'logins/a-login.yaml': 'harness: claude\nbudget:\n  daily:\n    hard: 10\n',
+      'logins/a-login.yaml': aLogin,
       'logins/b-login.yaml': 'harness: codex\n',
     });
     // An accepted file v4 never reads (not a config path) and one on disk: neither is a held edit.
@@ -206,15 +212,27 @@ describe('problem 2: held means what v4 `fy config confirm` lists', () => {
     expect(previewHeldFiles(report?.steps ?? [])).toEqual([]);
   });
 
+  test('fix4: an accepted login with a budget whose file is gone is a held deletion in the preview too (the cap stays)', async () => {
+    await put('config/machine.yaml', MACHINE);
+    await accept({
+      'machine.yaml': MACHINE,
+      'logins/a-login.yaml': 'harness: claude\nbudget:\n  daily:\n    hard: 10\n',
+    });
+    const report = await run(true);
+    expect(v4HeldFiles(report?.steps ?? [])).toEqual(['config/logins/a-login.yaml (a held deletion)']);
+  });
+
   test('a runtime moved off a login whose budget was in effect is a held edit', async () => {
     await put('config/machine.yaml', MACHINE);
+    const aLogin = 'harness: claude\nbudget:\n  daily:\n    hard: 10\n';
+    await put('config/logins/a-login.yaml', aLogin);
     await put('config/profiles/main.yaml', 'contents: []\n');
     await put('config/runtimes/r.yaml', 'credential: b-login\nprofile: main\n');
     await accept({
       'machine.yaml': MACHINE,
       'profiles/main.yaml': 'contents: []\n',
       'runtimes/r.yaml': 'credential: a-login\nprofile: main\n',
-      'logins/a-login.yaml': 'harness: claude\nbudget:\n  daily:\n    hard: 10\n',
+      'logins/a-login.yaml': aLogin,
     });
     const report = await run(true);
     expect(v4HeldFiles(report?.steps ?? [])).toEqual(['config/runtimes/r.yaml (an unconfirmed edit)']);
