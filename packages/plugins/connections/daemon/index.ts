@@ -26,12 +26,15 @@ import { RelayCarrier, type RelayWebSocketFactory } from './adapters/relay/bun-r
 import { HostedRelayDirectory } from './adapters/relay/hosted-relay-directory.ts';
 import { nativeRelaySocket, randomSessionBytes } from './adapters/relay/native.ts';
 import { DirectCarrier } from './lib/relay/direct.ts';
+import { RelayDirectoryRetry } from './lib/relay/directory-retry.ts';
 import {
   chooseRelayCarrierSources,
   describeAbsentRelayCarrier,
   describeRelayCarrierPosture,
   dialledRelayUrl,
+  isTransientAdvertisement,
   NO_RELAY_DIRECTORY,
+  type RelayAdvertisement,
   relayCarriersNeedDiscovery,
   relayCarrierRemedy,
   type RelayCarrierSource,
@@ -81,7 +84,10 @@ const unavailable = () => {
 };
 const configFile = manifest.data.config[0] as ConfigFileDef<ConnectionsConfig>;
 
-/** build is synchronous; the one discovery read is an after-listen job, before the relay starts. */
+/**
+ * build is synchronous; the first discovery read is an after-listen job, before the relay starts. A transient
+ * failure of that read is asked again in the background (`RelayDirectoryRetry`), never on the boot path.
+ */
 export function buildConnections(
   ctx: DaemonContext<typeof manifest>,
   bindings?: ConnectionBindings,
@@ -89,10 +95,11 @@ export function buildConnections(
   tunnelHost?: TunnelHostPort,
 ) {
   const config = ctx.kernel.config.file(configFile);
-  const relays: readonly DaemonRelayCarrierEntry[] =
-    config?.relay === undefined || config.relay.length === 0
+  const relaysOf = (document: ConnectionsConfig | undefined): readonly DaemonRelayCarrierEntry[] =>
+    document?.relay === undefined || document.relay.length === 0
       ? [DISCOVERED_RELAY_CARRIER]
-      : config.relay.map(entry => ({ kind: 'relay', ...entry }));
+      : document.relay.map(entry => ({ kind: 'relay', ...entry }));
+  const relays = relaysOf(config);
   /**
    * WHERE THIS DAEMON LISTENS, asked at the moment of use. The kernel binds AFTER every plugin is built, so a value
    * captured at build would be the `connections.yaml` guess for ever. The listener the kernel really bound wins
@@ -113,22 +120,75 @@ export function buildConnections(
   let initial: Promise<void> | undefined;
   /** The tunnel's address while cloudflared holds a registered connection; kept across the discovery read. */
   let tunnelUrl: string | undefined;
+  /** The relay carrier's layer and signal once it has started, so a later recovery can dial without a restart. */
+  let carrierStart: { readonly layer: SessionLayer; readonly signal: AbortSignal } | undefined;
+  let dialRecovered: () => Promise<void> = async () => {};
+  let directoryPort: RelayDirectoryPort | undefined;
+  const directory = (): RelayDirectoryPort =>
+    (directoryPort ??=
+      bindings?.directory ??
+      new HostedRelayDirectory(bindings?.directoryOrigin ?? HOSTED_RELAY_DIRECTORY_ORIGIN, {
+        fetcher: (url, init) => ctx.kernel.fetch.request(url, init),
+      }));
+  /** Resolves `advertisement` into this boot's sources. A refusal changes nothing and is returned for the caller to say. */
+  const adopt = (advertisement: RelayAdvertisement, announce: boolean) => {
+    const resolved = chooseRelayCarrierSources(relays, advertisement);
+    if (resolved.kind === 'refused') return resolved;
+    sources = resolved.sources;
+    if (!announce) return resolved;
+    published = new PublishedCarrierSet(bindings?.directUrl, sources);
+    if (tunnelUrl !== undefined) published.tunnel(tunnelUrl);
+    ctx.kernel.events.publish(CarriersChanged, { kinds: published.current().map(c => c.kind) });
+    return resolved;
+  };
+  /**
+   * A transient failure of the boot read is asked again here, in the background: the same `discovered` source, links
+   * and relay carrier as a first-read success once it answers. Definitive answers never come here, and an explicit
+   * relay written meanwhile wins (`stillNeeded`) and stops it.
+   */
+  const retry = new RelayDirectoryRetry(
+    {
+      read: async signal => await directory().read(signal),
+      after: (ms, fn) => ctx.kernel.clock.after(milliseconds(ms), fn),
+      random: Math.random,
+      nowMs: () => ctx.kernel.clock.nowMs(),
+      stillNeeded: () => relayCarriersNeedDiscovery(relaysOf(ctx.kernel.config.file(configFile))),
+    },
+    {
+      // Still failing: only the sentence changes (the next try's time), so nothing is republished.
+      waiting: failed => void adopt(failed, false),
+      settled: answer => {
+        const resolved = adopt(answer, true);
+        if (resolved.kind === 'refused') {
+          ctx.kernel.log.error(resolved.reason);
+          sources = [{ kind: 'direct-only', reason: resolved.reason }];
+        }
+        void dialRecovered().catch(() => ctx.kernel.log.warn('the recovered relay carrier could not start'));
+      },
+      abandoned: () => {
+        ctx.kernel.log.info(
+          `relay directory retries stopped — a relay is now written in config/${configFile.file}; restart to dial it`,
+        );
+        sources = sources.map(source =>
+          source.kind === 'direct-only' && source.retrying === true
+            ? {
+                kind: 'direct-only' as const,
+                reason: `a relay is now written in config/${configFile.file} and the hosted directory was not reached first; restart to dial it`,
+              }
+            : source,
+        );
+      },
+    },
+  );
+  ctx.kernel.lifecycle.onStop(() => retry.stop());
   const initialise = (): Promise<void> =>
     (initial ??= (async () => {
-      const advertisement = relayCarriersNeedDiscovery(relays)
-        ? await (
-            bindings?.directory ??
-            new HostedRelayDirectory(bindings?.directoryOrigin ?? HOSTED_RELAY_DIRECTORY_ORIGIN, {
-              fetcher: (url, init) => ctx.kernel.fetch.request(url, init),
-            })
-          ).read()
+      let advertisement = relayCarriersNeedDiscovery(relays)
+        ? await directory().read(ctx.kernel.lifecycle.signal)
         : NO_RELAY_DIRECTORY;
-      const resolved = chooseRelayCarrierSources(relays, advertisement);
+      if (isTransientAdvertisement(advertisement)) advertisement = retry.begin(advertisement);
+      const resolved = adopt(advertisement, true);
       if (resolved.kind === 'refused') throw new ApiError(503, resolved.reason, 'plugin_failed');
-      sources = resolved.sources;
-      published = new PublishedCarrierSet(bindings?.directUrl, sources);
-      if (tunnelUrl !== undefined) published.tunnel(tunnelUrl);
-      ctx.kernel.events.publish(CarriersChanged, { kinds: published.current().map(c => c.kind) });
     })());
   const publishTunnel = (url: string | undefined): void => {
     tunnelUrl = url;
@@ -183,41 +243,54 @@ export function buildConnections(
     });
   const directProvider = direct ?? new UnavailableCarrier('The direct carrier is unavailable.');
   let held: RelayCarrier[] = [];
+  const heldUrls = new Set<string>();
+  /**
+   * Starts a carrier for every source not already held, then says the trail. Run at start, and again when a
+   * background retry recovers (the sources then hold the discovered relay); a carrier already held is never
+   * started twice. A recovery's trail repeats the lines for relays already dialling — said again, never wrongly.
+   */
+  const dial = async (layer: SessionLayer, signal: AbortSignal): Promise<void> => {
+    if (bindings === undefined) return;
+    const dialled = sources.flatMap(source =>
+      source.kind === 'direct-only' || heldUrls.has(source.config.url)
+        ? []
+        : [
+            {
+              source,
+              carrier: new RelayCarrier({
+                config: source.config,
+                identity: bindings.identity,
+                scheduler,
+                now: () => ctx.kernel.clock.nowMs(),
+                random: Math.random,
+                socketFactory: bindings.socketFactory ?? nativeRelaySocket,
+                log: line => ctx.kernel.log.info(line),
+              }),
+            },
+          ],
+    );
+    for (const { source, carrier } of dialled) {
+      heldUrls.add(source.config.url);
+      held = [...held, carrier];
+    }
+    const started = new Map<string, CarrierStatus>();
+    for (const { carrier, source } of dialled) {
+      await carrier.start(layer, signal);
+      const relayUrl = dialledRelayUrl(source);
+      if (relayUrl !== undefined) started.set(relayUrl, carrier.status());
+    }
+    for (const line of relayBootTrail(sources, started, { configFile: configFile.file, host: listening().host }))
+      ctx.kernel.log.info(line);
+  };
+  dialRecovered = async () => {
+    if (carrierStart !== undefined && !carrierStart.signal.aborted) await dial(carrierStart.layer, carrierStart.signal);
+  };
   const relay: Carrier = {
     start: async (layer, signal) => {
       await initialise();
+      carrierStart = { layer, signal };
       if (signal.aborted) return;
-      if (bindings === undefined) return;
-      const dialled = sources.flatMap(source =>
-        source.kind === 'direct-only'
-          ? []
-          : [
-              {
-                source,
-                carrier: new RelayCarrier({
-                  config: source.config,
-                  identity: bindings.identity,
-                  scheduler,
-                  now: () => ctx.kernel.clock.nowMs(),
-                  random: Math.random,
-                  socketFactory: bindings.socketFactory ?? nativeRelaySocket,
-                  log: line => ctx.kernel.log.info(line),
-                }),
-              },
-            ],
-      );
-      held = dialled.map(entry => entry.carrier);
-      const started = new Map<string, CarrierStatus>();
-      for (const { carrier, source } of dialled) {
-        await carrier.start(layer, signal);
-        const relayUrl = dialledRelayUrl(source);
-        if (relayUrl !== undefined) started.set(relayUrl, carrier.status());
-      }
-      for (const line of relayBootTrail(sources, started, {
-        configFile: configFile.file,
-        host: listening().host,
-      }))
-        ctx.kernel.log.info(line);
+      await dial(layer, signal);
     },
     status: () => {
       if (bindings === undefined) return { state: 'failed', sentence: 'The relay carrier is unavailable.' };

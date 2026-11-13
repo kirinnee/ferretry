@@ -1437,6 +1437,22 @@ Every failure to discover narrows that entry to nothing rather than guessing an 
 trail plus `fyd --check` state the consequence and the remedy rather than one bare clause; `--check`
 names the posture in one line: direct-only, hosted, or self-hosted, and which.
 
+**A transient failure is asked again; an answer is not.** The first read stays the after-listen job and
+never holds the boot. When it ends in a failure that time can fix — the fetch threw (network, DNS,
+refused), the read timed out, HTTP 5xx, or HTTP 429 (a `Retry-After` in whole seconds is honoured, up to
+the cap) — the daemon asks again **in the background**, with jittered exponential delays (a window that
+starts at 2 s and doubles to a 5 min cap, the delay landing in its upper half), until the directory
+answers. A relay that finally answers is applied exactly as a first-read success would be: the same
+`discovered` source, the carrier started, `discoveredRelayUrl` on links and pairing, and the boot trail
+and `connections.reachability` row move from the "retrying in the background, next try at HH:MM:SSZ"
+sentence to the hosted one. Everything else is a **definitive answer** and is asked once: an explicit relay
+entry (`enabled: false` included — the directory is not even asked), the directory advertising
+`relayUrl: null`, an advertisement that fails the schema, a body that is not JSON, a build with no origin
+or an origin this daemon may not ask, and any other 4xx. An explicit relay written to
+`config/connections.yaml` while a retry is pending wins and ends the retries without dialling anything
+(it takes effect on restart, as any relay edit does). `stop()` cancels the pending timer and aborts a read
+in flight, and nothing fires afterwards. Every read keeps `cache: 'no-store'`.
+
 **`fyd` now dials and carries a session.** `packages/daemon/src/lib/relay` is the daemon half of this
 protocol — the claim signed with the key pairing already minted, the per-session handshake, the record
 layer, the credit window, and the §14 tunnel that turns a relayed request into the same `ApiRequest`
@@ -1502,8 +1518,8 @@ outstanding:
    and any failure as "no hosted carrier". On the daemon the advertised address resolves whichever
    `source: 'discovery'` entry the carrier list holds, through the same schema an operator's own entry
    uses, so a discovered rendezvous and a configured one cannot acquire different redial cadences; an
-   entry that already carries a `url` never reads it, and one boot performs one read no matter how
-   many entries there are. In the browser the same read supplies the last-resort hosted carrier and
+   entry that already carries a `url` never reads it, and one boot performs one read at a time no matter
+   how many entries there are — repeated only while the failure was transient (see above). In the browser the same read supplies the last-resort hosted carrier and
    the only relayed first-pairing candidate, as well as labelling a published address as Ferretry's
    hosted rendezvous or somebody's own.
 3. **A relay-capable transport on both ends** — **built.** `packages/daemon/src/lib/relay` dials out,

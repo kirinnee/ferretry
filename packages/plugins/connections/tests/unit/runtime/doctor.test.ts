@@ -119,7 +119,7 @@ async function boot(relay?: unknown, advertisement: unknown = { version: 1, rela
   return { finding: finding!, report, asked, host: outcome.host };
 }
 
-test('G158 R206 the production doctor states loopback reachability before posture and remedy with a failed directory', async () => {
+test('G158 R206 the production doctor says it is still retrying, and when, while the directory is unreachable', async () => {
   const { finding, asked, host } = await boot(undefined, new Error('directory down'));
   expect(host.hooks.contributions(DoctorChecks).map(check => check.id)).toEqual(['connections.reachability']);
   expect(asked).toEqual([{ url: `${HOSTED_RELAY_DIRECTORY_ORIGIN}/v1/default-relay`, cache: 'no-store' }]);
@@ -127,13 +127,28 @@ test('G158 R206 the production doctor states loopback reachability before postur
   const lines = finding.detail.split('\n');
   expect(lines[0]).toBe('reachability nothing off this host can reach this daemon');
   expect(lines[1]).toContain(
-    'direct-only — no relay could be discovered: this daemon could not reach the relay directory',
+    'direct-only — no relay could be discovered: this daemon could not reach the relay directory; retrying in the background, next try at ',
   );
+  expect(lines[1]).toMatch(/next try at \d\d:\d\d:\d\dZ$/u);
   expect(finding.detail).toContain('another device cannot pair yet');
-  expect(finding.detail).toContain('Restart to ask the hosted relay directory again');
+  expect(finding.detail).toContain('keeps asking the hosted relay directory in the background');
+  expect(finding.detail).not.toContain('Restart to ask the hosted relay directory again');
   expect(finding.detail).toContain('"relay" entry in config/connections.yaml');
   expect(finding.detail).not.toMatch(/carriers|publicUrl|0\.0\.0\.0/u);
   expect(finding.detail).not.toMatch(/password|may use|change settings for/u);
+});
+
+test('G158 R206 the production doctor states loopback reachability before posture and remedy with a definitive directory answer', async () => {
+  const { finding, asked } = await boot(undefined, { version: 9, relayUrl: 'https://hosted.example' });
+  expect(asked).toHaveLength(1);
+  expect(finding.state).toBe('warn');
+  const lines = finding.detail.split('\n');
+  expect(lines[0]).toBe('reachability nothing off this host can reach this daemon');
+  expect(lines[1]).toContain(
+    'direct-only — no relay could be discovered: the relay directory answered a document this daemon cannot read',
+  );
+  expect(finding.detail).not.toContain('retrying');
+  expect(finding.detail).toContain('Restart to ask the hosted relay directory again');
 });
 
 test('G158 reachability contributions precede declared capability checks in the production doctor', async () => {

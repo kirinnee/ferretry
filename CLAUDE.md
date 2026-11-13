@@ -96,8 +96,9 @@ no advertisement was reachable from nothing but its own host, which is why
 `scripts/validate/relay-config.sh` pins that source chain. An explicit relay
 carrier in `config/daemon.json` **wins and is never overwritten**, `enabled: false` included — the boot
 conversion carries a legacy `relay` block over into `carriers` unchanged, and adds no relay entry where
-none was written; a conversion that is refused or fails leaves the legacy spelling (and a recorded port is then written as the legacy `port`), because only the journalled conversion moves legacy keys — and every failure to discover fails closed to direct-only with the consequence and
-the remedy said out loud.
+none was written; a conversion that is refused or fails leaves the legacy spelling (and a recorded port is then written as the legacy `port`), because only the journalled conversion moves legacy keys — and a transient failure to discover (network, timeout, 5xx, 429) is retried in the background with capped
+jittered backoff and picked up without a restart, while every definitive one (relay switched off, an unreadable
+advertisement, no usable origin) fails closed to direct-only with the consequence and the remedy said out loud.
 Running your own relay stays supported as an **expert opt-in path** with its own runbook,
 [docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md), and its fingerprint
 allowlist remains independent of the hosted deployment. First-run onboarding asks no carrier
