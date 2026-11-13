@@ -23,12 +23,14 @@ import {
   type BrowserFileAction,
   type BrowserFileResult,
   type BrowserLifecycleOutcome,
+  type BrowserPairingState,
   type BrowserOpenOptions,
   type BrowserPageAction,
   type BrowserScriptResult,
   BrowserSessionError,
   type BrowserSubsystem,
   type PageScript,
+  underGuard,
   type RecordedSurfaceEvent,
   type Scrub,
   SurfaceControl,
@@ -191,9 +193,18 @@ class FakeBrowserPages
   host: string | undefined = 'github.com';
   /** Whether every page carries the pairing-screen marker, as an act's in-queue guard reads it from the live page. */
   pairingScreen = false;
+  /** Whether a page a script on this one could reach (a same-origin opener or popup) carries the marker. */
+  relatedPairingScreen = false;
+  /** How many codes each page's document has shown (the counter the app leaves behind), by page id. */
+  pairingEpochs: Record<string, number> = {};
+  /** Runs, oldest first, inside the browser's work of an act: the page changing while the act is being answered. */
+  readonly whileWorking: (() => void | Promise<void>)[] = [];
   private readonly guardPage = {
     document: async (): Promise<string | undefined> => this.document,
-    pairingScreen: async (): Promise<boolean> => this.pairingScreen,
+    pairing: async (): Promise<BrowserPairingState> => ({
+      marked: this.pairingScreen || this.relatedPairingScreen,
+      epochs: { ...this.pairingEpochs },
+    }),
     host: async (): Promise<string | undefined> => this.host,
   };
 
@@ -201,6 +212,15 @@ class FakeBrowserPages
   private async guarded(guard: BrowserActGuard | undefined): Promise<void> {
     await this.beforeGuard.shift()?.();
     await guard?.(this.guardPage);
+  }
+
+  /** The same, and the check a guard hands back runs once `work` is over, for its answer or its error: the runtime's. */
+  private async underGuarded<T>(guard: BrowserActGuard | undefined, work: () => Promise<T>): Promise<T> {
+    await this.beforeGuard.shift()?.();
+    return await underGuard(guard, this.guardPage, async () => {
+      await this.whileWorking.shift()?.();
+      return await work();
+    });
   }
   failure: unknown;
   private minted = 0;
@@ -253,7 +273,10 @@ class FakeBrowserPages
     guard?: BrowserActGuard,
   ): Promise<BrowserActionResult> {
     this.fail();
-    await this.guarded(guard);
+    return await this.underGuarded(guard, async () => await this.actWork(sessionId, key, action));
+  }
+
+  private async actWork(sessionId: string, key: string, action: BrowserPageAction): Promise<BrowserActionResult> {
     const page = this.page(sessionId, key);
     this.active.set(sessionId, page.id);
     this.acts.push(`${sessionId}:${page.id}:${action.action}`);
@@ -311,11 +334,12 @@ class FakeBrowserPages
   ): Promise<BrowserLifecycleOutcome> {
     this.fail();
     await this.beforeLifecycle.shift()?.();
-    await this.guarded(guard);
-    const page = this.page(sessionId, key);
-    this.lifecycles.push(request);
-    this.acts.push(`${sessionId}:${page.id}:lifecycle-${request.op}`);
-    return this.lifecycleReplies.shift() ?? { reply: { text: 'done' } };
+    return await this.underGuarded(guard, async () => {
+      const page = this.page(sessionId, key);
+      this.lifecycles.push(request);
+      this.acts.push(`${sessionId}:${page.id}:lifecycle-${request.op}`);
+      return this.lifecycleReplies.shift() ?? { reply: { text: 'done' } };
+    });
   }
 
   async adoptPage(sessionId: string, key: string, name: string, openedBy?: SurfaceOpener): Promise<BrowserPageSummary> {
@@ -338,7 +362,10 @@ class FakeBrowserPages
     guard?: BrowserActGuard,
   ): Promise<BrowserFileResult> {
     this.fail();
-    await this.guarded(guard);
+    return await this.underGuarded(guard, async () => await this.filesWork(sessionId, key, action));
+  }
+
+  private async filesWork(sessionId: string, key: string, action: BrowserFileAction): Promise<BrowserFileResult> {
     const page = this.page(sessionId, key);
     this.active.set(sessionId, page.id);
     this.acts.push(`${sessionId}:${page.id}:${action.action}`);
@@ -360,7 +387,10 @@ class FakeBrowserPages
     guard?: BrowserActGuard,
   ): Promise<BrowserScriptResult> {
     this.fail();
-    await this.guarded(guard);
+    return await this.underGuarded(guard, async () => await this.scriptWork(sessionId, key, script));
+  }
+
+  private async scriptWork(sessionId: string, key: string, script: PageScript): Promise<BrowserScriptResult> {
     const page = this.page(sessionId, key);
     this.acts.push(`${sessionId}:${page.id}:eval`);
     this.scripts.push(script);

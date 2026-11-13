@@ -85,3 +85,16 @@ export const PAIRING_SCREEN_SELECTOR = `meta[name="${PAIRING_SCREEN_META_NAME}"]
 /** What an agent is told instead of a page that shows a pairing code: no content, and no hint of what it held. */
 export const PAIRING_SCREEN_REFUSAL =
   'hidden: this page shows a pairing code, so it cannot be read or pictured. Ask the owner to finish or close it; navigating away or closing the page works.';
+
+/**
+ * THE COUNTER THAT SAYS A CODE WAS SHOWN AT ANY POINT (docs/pairing.md, "Never show it to an agent").
+ *
+ * `<meta name="ferretry-pairing-epoch" content="N">` is added next to the marker the first time the document shows a
+ * code and counts up every time one is shown again. It is never removed, so a code that came and went while an agent's
+ * read, picture or script was in flight still leaves a different number behind: the daemon compares the number it saw
+ * before the operation with the one after, and refuses the result when they differ or the marker is there.
+ */
+export const PAIRING_EPOCH_META_NAME = 'ferretry-pairing-epoch';
+
+/** The CSS selector that finds {@link PAIRING_EPOCH_META_NAME}'s element. */
+export const PAIRING_EPOCH_SELECTOR = `meta[name="${PAIRING_EPOCH_META_NAME}"]`;

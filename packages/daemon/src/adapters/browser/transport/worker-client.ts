@@ -56,6 +56,26 @@ import {
 import { SystemFrameClock } from './system-frame-clock.ts';
 
 /** What the worker saw of a page's fields, checked against the protocol before it is believed. */
+/** The most pages whose pairing counter one answer may carry. */
+const PAIRING_EPOCH_PAGES_MAX = 64;
+
+/**
+ * The pairing counters the browser reported, by page id; `undefined` when they are missing or not exactly that shape
+ * (a count per page, a bounded number of pages), which the caller reads as a pairing screen.
+ */
+function parsePairingEpochs(raw: unknown): Record<string, number> | undefined {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const entries = Object.entries(raw);
+  if (entries.length > PAIRING_EPOCH_PAGES_MAX) return undefined;
+  const epochs: Record<string, number> = {};
+  for (const [page, epoch] of entries) {
+    if (page === '' || page.length > 128 || typeof epoch !== 'number' || !Number.isSafeInteger(epoch) || epoch < 0)
+      return undefined;
+    epochs[page] = epoch;
+  }
+  return epochs;
+}
+
 function parseObservation(raw: unknown): BrowserInputObservation {
   const observation = (raw as { observation?: unknown } | null)?.observation as Record<string, unknown> | undefined;
   if (observation?.ok === false && typeof observation.missing === 'string')
@@ -513,11 +533,15 @@ export class BrowserWorkerClient implements BrowserAutomation {
     if (typeof navigationId !== 'string' || navigationId === '' || navigationId.length > 128)
       throw new BrowserTransportError('upstream_failed', 'the browser did not say which document the page shows', 502);
     const host = (raw as { document?: { host?: unknown } } | null)?.document?.host;
-    const pairingScreen = (raw as { document?: { pairingScreen?: unknown } } | null)?.document?.pairingScreen === true;
+    const pairing = (raw as { document?: { pairingScreen?: unknown; pairingEpochs?: unknown } } | null)?.document;
+    const epochs = parsePairingEpochs(pairing?.pairingEpochs);
+    // A marker, or a counter that cannot be believed, is a pairing screen: FAIL CLOSED.
+    const pairingScreen = pairing?.pairingScreen === true || epochs === undefined;
     return {
       navigationId,
       ...(typeof host === 'string' && host !== '' && host.length <= 260 ? { host } : {}),
       ...(pairingScreen ? { pairingScreen } : {}),
+      ...(epochs === undefined || Object.keys(epochs).length === 0 ? {} : { pairingEpochs: epochs }),
     };
   }
 

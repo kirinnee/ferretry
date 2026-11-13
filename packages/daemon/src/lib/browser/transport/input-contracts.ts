@@ -72,10 +72,16 @@ export interface BrowserInputDocument {
   /** The host the page is on now (`accounts.google.com`): a login's facts watch it leave the sign-in hosts. */
   readonly host?: string;
   /**
-   * Whether the page carries the pairing-screen marker (`PAIRING_SCREEN_META_NAME`): it shows a live pairing code or its
-   * QR, so no agent may read or picture it. Read by a DOM query, never a page script; absent means it does not.
+   * Whether the page, or any page that could reach it (same-origin: an opener, a popup), carries the pairing-screen
+   * marker (`PAIRING_SCREEN_META_NAME`): it shows a live pairing code or its QR, so no agent may read, picture or script
+   * it. Read by DOM queries, never a page script; absent means none does.
    */
   readonly pairingScreen?: boolean;
+  /**
+   * How many pairing codes each of those pages' documents has ever shown (`PAIRING_EPOCH_META_NAME`), by page id. It
+   * never goes down while a document lives, so a number that moved says a code was shown in between two looks.
+   */
+  readonly pairingEpochs?: Readonly<Record<string, number>>;
 }
 
 /**

@@ -712,6 +712,13 @@ describe('browser worker client — the input bridge', () => {
     should(missing).deepEqual({ ok: false, missing: 'password' });
     should(document).deepEqual({ navigationId: 'loader-1', host: 'accounts.example.test' });
     should(hostless).deepEqual({ navigationId: 'loader-1' });
+    should(await client.inputDocument('pairing')).deepEqual({
+      navigationId: 'loader-1',
+      pairingScreen: true,
+      pairingEpochs: { pairing: 2 },
+    });
+    // A worker that does not say what its pages show is read as showing a pairing code.
+    should(await client.inputDocument('epochless')).deepEqual({ navigationId: 'loader-1', pairingScreen: true });
     should(text).equal('Welcome back');
     should(refound.ok && refound.facts.fields[0]?.backendNodeId).equal(9);
     should(refoundMissing).deepEqual({ ok: false, missing: 'password' });

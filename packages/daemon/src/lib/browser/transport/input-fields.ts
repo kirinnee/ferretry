@@ -1,4 +1,9 @@
-import { type BrowserElementTarget, type InputBrowserFieldFacts, PAIRING_SCREEN_SELECTOR } from '@ferretry/protocol';
+import {
+  type BrowserElementTarget,
+  type InputBrowserFieldFacts,
+  PAIRING_EPOCH_SELECTOR,
+  PAIRING_SCREEN_SELECTOR,
+} from '@ferretry/protocol';
 import { recogniseBrowserChallenge } from './challenge.ts';
 import {
   BROWSER_INPUT_SHOT_MARGIN,
@@ -281,25 +286,58 @@ export async function describeInputDocument(subject: InputSubject): Promise<Brow
   } catch {
     host = undefined;
   }
-  const pairingScreen = await showsPairingCode(await subject.cdp.page());
-  return { navigationId, ...(host === undefined ? {} : { host }), ...(pairingScreen ? { pairingScreen } : {}) };
+  return { navigationId, ...(host === undefined ? {} : { host }) };
+}
+
+/** What one document says of pairing: whether it carries the marker now, and how many codes it has ever shown. */
+interface PairingRead {
+  readonly marked: boolean;
+  readonly epoch: number;
+}
+
+/** What the marker and counter of ONE document say. FAILS CLOSED (see {@link readPairingGroup}). */
+async function readPairing(subject: InputSubject): Promise<PairingRead> {
+  const closed: PairingRead = { marked: true, epoch: 0 };
+  try {
+    if (subject.page.isClosed()) return closed;
+    const session = await subject.cdp.page();
+    const root = objectOf(objectOf(await ask(session, 'DOM.getDocument', { depth: 0 })).root).nodeId;
+    if (typeof root !== 'number') return closed;
+    const marker = (await ask(session, 'DOM.querySelector', { nodeId: root, selector: PAIRING_SCREEN_SELECTOR }))
+      .nodeId;
+    if (typeof marker !== 'number') return closed;
+    const counter = (await ask(session, 'DOM.querySelector', { nodeId: root, selector: PAIRING_EPOCH_SELECTOR }))
+      .nodeId;
+    if (typeof counter !== 'number') return closed;
+    if (counter === 0) return { marked: marker !== 0, epoch: 0 };
+    const attributes = (await ask(session, 'DOM.getAttributes', { nodeId: counter })).attributes;
+    if (!Array.isArray(attributes)) return closed;
+    const at = attributes.indexOf('content');
+    const epoch = at === -1 ? Number.NaN : Number(attributes[at + 1]);
+    return Number.isSafeInteger(epoch) && epoch >= 0 ? { marked: marker !== 0, epoch } : closed;
+  } catch {
+    return closed;
+  }
 }
 
 /**
- * Whether the main document carries the pairing-screen marker (docs/pairing.md, "Never show it to an agent"). A plain
- * DOM query through DevTools: no page script runs, so a page cannot answer for itself, and a page that forges the marker
- * only loses its own reads. FAILS CLOSED: a query that cannot be answered says the marker is there, because a refusal
- * costs one read and a miss hands an agent a credential.
+ * Whether ANY of these documents shows a pairing code, and how many codes each has ever shown (docs/pairing.md, "Never
+ * show it to an agent"). The documents are the page an agent is acting on and every page that could reach it, because
+ * a script in one reaches a same-origin document in another (an opener, a popup).
+ *
+ * Plain DOM queries through DevTools: no page script runs, so a page cannot answer for itself, and a page that forges
+ * the marker only loses its own reads. FAILS CLOSED: a document that cannot be asked, or whose counter is not a count,
+ * says the marker is there, because a refusal costs one read and a miss hands an agent a credential.
  */
-async function showsPairingCode(session: InputCdpSession): Promise<boolean> {
-  try {
-    const root = objectOf(objectOf(await ask(session, 'DOM.getDocument', { depth: 0 })).root).nodeId;
-    if (typeof root !== 'number') return true;
-    const found = (await ask(session, 'DOM.querySelector', { nodeId: root, selector: PAIRING_SCREEN_SELECTOR })).nodeId;
-    return typeof found !== 'number' || found !== 0;
-  } catch {
-    return true;
-  }
+export async function readPairingGroup(subjects: readonly InputSubject[]): Promise<{
+  readonly pairingScreen: boolean;
+  readonly pairingEpochs: Readonly<Record<string, number>>;
+}> {
+  const reads = await Promise.all(subjects.map(async subject => await readPairing(subject)));
+  return {
+    pairingScreen: reads.some(read => read.marked),
+    pairingEpochs: Object.fromEntries(subjects.map((subject, index) => [subject.pageId, reads[index]?.epoch ?? 0])),
+  };
 }
 
 /** How long the daemon waits for a page's text after a sign-in. */
@@ -1118,4 +1156,27 @@ export async function clearInputFields(
   } catch {
     return 'unknown';
   }
+}
+
+/**
+ * The pages a script on `page` could reach, among `pages` (docs/pairing.md, "Never show it to an agent"): every other one
+ * on the same origin, because a same-origin window (an opener, a popup, a window it named) is a document that script can
+ * read. A page whose origin cannot be told apart (`about:blank`, an address that will not parse) is counted too, on
+ * either side: a miss would hand an agent a credential, an extra page only refuses one read.
+ */
+export function pairingRelatedPages<T extends { url(): string }>(page: T, pages: readonly T[]): readonly T[] {
+  const originOf = (candidate: T): string => {
+    try {
+      const origin = new URL(candidate.url()).origin;
+      return origin === 'null' ? '' : origin;
+    } catch {
+      return '';
+    }
+  };
+  const mine = originOf(page);
+  return pages.filter(other => {
+    if (other === page) return false;
+    const theirs = originOf(other);
+    return mine === '' || theirs === '' || theirs === mine;
+  });
 }

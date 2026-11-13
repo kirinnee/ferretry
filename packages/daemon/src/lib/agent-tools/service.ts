@@ -53,6 +53,7 @@ import { AGENT_FILE_LIMITS, AgentFileError, type AgentFiles, extensionOf, sizeWo
 import type { AuditSink } from '../audit/types.ts';
 import {
   type BrowserActGuard,
+  holdPairingScreen,
   type BrowserFileAction,
   type BrowserLifecycleOutcome,
   type BrowserPageAction,
@@ -926,7 +927,15 @@ export class AgentToolService {
     reference: string,
     facts: CallFacts,
   ): Promise<AgentToolResult> {
-    const guard = this.browserGuard(caller, surface, call.tool);
+    // A wait on text or on an element answers yes or no from what the page shows: as good as reading it (a time, a load
+    // or an address says nothing of the page's content, so those stay open).
+    const guard = this.browserGuard(
+      caller,
+      surface,
+      call.tool,
+      true,
+      call.tool === 'browser.wait_for' ? isContentWait(waitConditionOf(call)) : undefined,
+    );
     const send = async (request: BrowserPageLifecycleRequest): Promise<BrowserLifecycleOutcome> =>
       await this.ports.browser.lifecycleOnPage(caller.sessionId, surface.id, request, guard);
     switch (call.tool) {
@@ -1151,7 +1160,8 @@ export class AgentToolService {
           ...(call.timeoutMs === undefined ? {} : { timeoutMs: call.timeoutMs }),
         },
         async page => {
-          await guard?.(page);
+          // What the guard hands back is the check on the script's answer or error (see underGuard): it must get out.
+          const after = await guard?.(page);
           // The LAST thing before the script runs, inside the page's queue. While it runs, no standing rule fills
           // anywhere (the page may still move before its world is made, so the origin it really runs in is known only
           // after: secrev-1282a M2), and the host it is about to run on is tainted for the rules at once.
@@ -1160,6 +1170,7 @@ export class AgentToolService {
           // A script can type or choose an account on any page of the session: who they sign in is no longer known.
           this.ports.typedIdentities?.forget(caller.sessionId);
           ran = true;
+          return after;
         },
       );
       // The origin of the world the script ACTUALLY ran in, read before its code ran (unknown: it may have been any
@@ -1285,6 +1296,8 @@ export class AgentToolService {
     tool?: string,
     /** Whether the act reads the page for the AGENT (a copy's own read does not: the agent never sees it). */
     reads = true,
+    /** Whether what the act answers depends on what the page shows (see {@link PAIRING_SCREEN_GUARDED}). */
+    pairing = tool !== undefined && PAIRING_SCREEN_GUARDED.has(tool),
   ): BrowserActGuard | undefined {
     const gated =
       (this.ports.input !== undefined || this.ports.copyPages !== undefined) &&
@@ -1293,10 +1306,14 @@ export class AgentToolService {
     if (caller.kind !== 'agent' && !gated) return undefined;
     return async page => {
       if (caller.kind === 'agent') await this.assertFree(caller.sessionId, surface);
-      if (caller.kind === 'agent' && reads && tool !== undefined && PAIRING_SCREEN_GUARDED.has(tool))
-        if ((await page.pairingScreen?.()) === true) throw new AgentToolError('forbidden', PAIRING_SCREEN_REFUSAL);
+      // Refused before the act, and again after it (see underGuard): a code that arrives while it runs is refused too.
+      const after =
+        caller.kind === 'agent' && reads && pairing
+          ? await holdPairingScreen(page, () => new AgentToolError('forbidden', PAIRING_SCREEN_REFUSAL))
+          : undefined;
       if (gated) await this.guardPage(caller, tool, surface, async () => await page.document());
       if (reads && tool !== undefined) await this.sawPage(caller, tool, surface, page);
+      return after;
     };
   }
 
@@ -1562,7 +1579,14 @@ export class AgentToolService {
       { name: call.name, source: { ...call.source, key }, ...options },
       {
         seen: () => this.ports.copyPages?.seen(caller.sessionId, [surface.name, surface.id]) ?? [],
-        ...(guard === undefined ? {} : { guard }),
+        // A copy's own read is never the agent's (reads is false): there is no after-check for the copy port to run.
+        ...(guard === undefined
+          ? {}
+          : {
+              guard: async page => {
+                await guard(page);
+              },
+            }),
       },
     );
   }
@@ -2325,6 +2349,10 @@ function inputSummary(view: InputAgentView): string {
       return `${card} was cancelled${view.reason === undefined ? '' : ` (${view.reason})`}.`;
   }
 }
+
+/** Whether a wait's answer depends on what the page shows (its words or an element on it) and so could tell a code. */
+const isContentWait = (condition: BrowserWaitCondition): boolean =>
+  condition.kind === 'text' || condition.kind === 'textGone' || condition.kind === 'element';
 
 /** The one thing a `browser.wait_for` waits for. The call schema already holds it to exactly one. */
 function waitConditionOf(call: Extract<AgentToolCall, { readonly tool: 'browser.wait_for' }>): BrowserWaitCondition {

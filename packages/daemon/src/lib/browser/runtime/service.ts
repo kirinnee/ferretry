@@ -30,6 +30,7 @@ import type { BrowserUploadMode } from '../transport/page-acts.ts';
 import type { PageScript } from '../transport/page-script.ts';
 import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '../transport/viewer-contracts.ts';
 import type { WorkerStagedFile } from '../transport/worker-protocol.ts';
+import { underGuard } from './pairing-guard.ts';
 import { type BrowserSignInWatch, pageActLeavesSignIn, toolbarActLeavesSignIn } from './sign-in-watch.ts';
 
 export const DEFAULT_BROWSER_VIEWPORT: BrowserViewport = { width: 1280, height: 800 };
@@ -71,19 +72,37 @@ export interface BrowserIdlePolicy {
 export interface BrowserGuardPage {
   document(): Promise<string | undefined>;
   /**
-   * Whether the page shows a live pairing code (it carries the pairing-screen marker), read from the live page inside
-   * its queue. `true` when the browser cannot say, so a guard that refuses on it fails closed.
+   * What the page's pairing documents say, read from the live page inside its queue: the page itself and every page
+   * that could reach it (see {@link BrowserPairingState}). A browser that cannot say answers `marked`, so a guard that
+   * refuses on it fails closed.
    */
-  pairingScreen?(): Promise<boolean>;
+  pairing?(): Promise<BrowserPairingState>;
   /** The host the page is on now, read from the live page inside its queue; `undefined` when it can't be read. */
   host?(): Promise<string | undefined>;
 }
 
 /**
- * Refuses an act from inside its page's own queue, immediately before it runs — a takeover that landed while it
- * waited, or an owner's value pending on or just typed into the page (the input bridge's holds).
+ * What the pages a script on one page could reach say of pairing (docs/pairing.md, "Never show it to an agent"): whether
+ * any of them shows a live pairing code now, and how many codes each document has shown so far, by page id. The counter
+ * never goes down while a document lives, so one that moved says a code was shown between two looks.
  */
-export type BrowserActGuard = (page: BrowserGuardPage) => Promise<void>;
+export interface BrowserPairingState {
+  readonly marked: boolean;
+  readonly epochs: Readonly<Record<string, number>>;
+}
+
+/**
+ * Runs after an act whose guard handed it back, with the act's answer or error already in hand: it throws to refuse
+ * both. See {@link underGuard}.
+ */
+export type BrowserAfterCheck = () => Promise<void>;
+
+/**
+ * Refuses an act from inside its page's own queue, immediately before it runs — a takeover that landed while it
+ * waited, or an owner's value pending on or just typed into the page (the input bridge's holds). It may hand back a
+ * check to run once the act is over.
+ */
+export type BrowserActGuard = (page: BrowserGuardPage) => Promise<void | BrowserAfterCheck>;
 
 /** The sessions the browser serves: whether one exists, and the display name a page is grouped under. */
 export interface BrowserSessionDirectory {
@@ -347,11 +366,11 @@ export class BrowserSessionService implements BrowserSubsystem {
     return await this.onPage(
       run,
       viewed,
-      async () => {
-        await guard?.(this.guardPage(run, viewed));
-        if (!toolbarActLeavesSignIn(action)) this.signIns?.cleared(sessionId, viewed);
-        return await this.perform(run, viewed, action);
-      },
+      async () =>
+        await underGuard(guard, this.guardPage(run, viewed), async () => {
+          if (!toolbarActLeavesSignIn(action)) this.signIns?.cleared(sessionId, viewed);
+          return await this.perform(run, viewed, action);
+        }),
       sessionId,
     );
   }
@@ -377,21 +396,21 @@ export class BrowserSessionService implements BrowserSubsystem {
     const run = this.requireRunning();
     const page = this.requirePage(run, sessionId, key);
     return await this.exclusive(page.id, async () => {
-      await guard?.(this.guardPage(run, page.id));
-      // Cleared BEFORE an act that may change who the page signs in, and after ANY act that failed partway (a fill that
-      // typed the email and then broke, an Enter that timed out after the page moved): the agent tools put a record
-      // back only from what they saw a finished act do.
-      if (!pageActLeavesSignIn(action)) this.signIns?.cleared(sessionId, page.id);
-      let result: BrowserPageActionSnapshot;
-      try {
-        result = await this.perform(run, page.id, action);
-      } catch (error) {
-        this.signIns?.cleared(sessionId, page.id);
-        throw error;
-      }
-      run.snapshot = pageOf(result);
+      const done = await underGuard(guard, this.guardPage(run, page.id), async () => {
+        // Cleared BEFORE an act that may change who the page signs in, and after ANY act that failed partway (a fill that
+        // typed the email and then broke, an Enter that timed out after the page moved): the agent tools put a record
+        // back only from what they saw a finished act do.
+        if (!pageActLeavesSignIn(action)) this.signIns?.cleared(sessionId, page.id);
+        try {
+          return await this.perform(run, page.id, action);
+        } catch (error) {
+          this.signIns?.cleared(sessionId, page.id);
+          throw error;
+        }
+      });
+      run.snapshot = pageOf(done);
       this.touch(run);
-      return { status: this.project(run, sessionId), result };
+      return { status: this.project(run, sessionId), result: done };
     });
   }
 
@@ -423,9 +442,10 @@ export class BrowserSessionService implements BrowserSubsystem {
     const page = this.requirePage(run, sessionId, key);
     return await this.exclusive(page.id, async () => {
       // The same in-queue check an agent's act gets: a takeover or a hold that landed while the copy waited wins.
-      await guard?.(this.guardPage(run, page.id));
-      this.touch(run);
-      return await work(run.driver, page.id);
+      return await underGuard(guard, this.guardPage(run, page.id), async () => {
+        this.touch(run);
+        return await work(run.driver, page.id);
+      });
     });
   }
 
@@ -451,14 +471,9 @@ export class BrowserSessionService implements BrowserSubsystem {
       this.touch(run);
       return { reply: answered.lifecycle, ...(answered.dialog === undefined ? {} : { dialog: answered.dialog }) };
     };
-    if (request.op === 'dialog' || request.op === 'console' || request.op === 'network') {
-      await guard?.(this.guardPage(run, page.id));
-      return await perform();
-    }
-    return await this.exclusive(page.id, async () => {
-      await guard?.(this.guardPage(run, page.id));
-      return await perform();
-    });
+    if (request.op === 'dialog' || request.op === 'console' || request.op === 'network')
+      return await underGuard(guard, this.guardPage(run, page.id), perform);
+    return await this.exclusive(page.id, async () => await underGuard(guard, this.guardPage(run, page.id), perform));
   }
 
   async adoptPage(sessionId: string, key: string, name: string, openedBy?: SurfaceOpener): Promise<BrowserPageSummary> {
@@ -486,20 +501,19 @@ export class BrowserSessionService implements BrowserSubsystem {
     const run = this.requireRunning();
     const page = this.requirePage(run, sessionId, key);
     return await this.exclusive(page.id, async () => {
-      await guard?.(this.guardPage(run, page.id));
-      let staged: WorkerStagedFile | undefined;
-      let result: BrowserPageActionSnapshot;
-      if (action.action === 'upload')
-        result = await run.driver.upload(page.id, action.target, action.paths, action.mode);
-      else {
+      const { staged, result } = await underGuard(guard, this.guardPage(run, page.id), async () => {
+        if (action.action === 'upload')
+          return {
+            staged: undefined,
+            result: await run.driver.upload(page.id, action.target, action.paths, action.mode),
+          };
         const done =
           action.action === 'download'
             ? await run.driver.download(page.id, action.downloadId)
             : await run.driver.pdf(page.id);
-        const { staged: file, ...snapshot } = done;
-        staged = file;
-        result = snapshot;
-      }
+        const { staged: file, ...snapshot }: { staged?: WorkerStagedFile } & BrowserPageActionSnapshot = done;
+        return { staged: file, result: snapshot };
+      });
       run.snapshot = pageOf(result);
       this.touch(run);
       return { status: this.project(run, sessionId), result, ...(staged === undefined ? {} : { staged }) };
@@ -516,10 +530,11 @@ export class BrowserSessionService implements BrowserSubsystem {
     const run = this.requireRunning();
     const page = this.requirePage(run, sessionId, key);
     return await this.exclusive(page.id, async () => {
-      await guard?.(this.guardPage(run, page.id));
-      // A script can type or choose an account on any page of the session: who they sign in is no longer known.
-      this.signIns?.forget(sessionId);
-      const { text, scriptOrigin, ...result } = await run.driver.evaluate(page.id, script);
+      const { text, scriptOrigin, ...result } = await underGuard(guard, this.guardPage(run, page.id), async () => {
+        // A script can type or choose an account on any page of the session: who they sign in is no longer known.
+        this.signIns?.forget(sessionId);
+        return await run.driver.evaluate(page.id, script);
+      });
       run.snapshot = pageOf(result);
       this.touch(run);
       return {
@@ -867,11 +882,11 @@ export class BrowserSessionService implements BrowserSubsystem {
           .inputDocument(pageId)
           .then(found => found.host)
           .catch(() => undefined),
-      pairingScreen: async () =>
+      pairing: async () =>
         await run.driver
           .inputDocument(pageId)
-          .then(found => found.pairingScreen === true)
-          .catch(() => true),
+          .then(found => ({ marked: found.pairingScreen === true, epochs: found.pairingEpochs ?? {} }))
+          .catch(() => ({ marked: true, epochs: {} })),
     };
   }
 

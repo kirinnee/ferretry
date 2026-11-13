@@ -17,7 +17,12 @@ import {
   type BrowserLoginLifecycle,
   type BrowserLoginStatus,
 } from '../../browser/control/index.ts';
-import { type BrowserActGuard, BrowserSessionError, type BrowserSubsystem } from '../../browser/runtime/index.ts';
+import {
+  type BrowserActGuard,
+  BrowserSessionError,
+  type BrowserSubsystem,
+  holdPairingScreen,
+} from '../../browser/runtime/index.ts';
 
 export interface BrowserMountedSubsystem extends BrowserSubsystem {
   stream(sessionId: string, downstream: SocketDownstream): Promise<SocketHandler>;
@@ -147,9 +152,8 @@ async function browserStatus(browser: BrowserSubsystem, context: RouteContext): 
 const PAGE_CONTENT_ACTIONS: ReadonlySet<string> = new Set(['read', 'screenshot', 'highlight']);
 
 /** Refuses an agent's read of a page that carries the pairing-screen marker (docs/pairing.md), from inside its queue. */
-const pairingScreenGuard: BrowserActGuard = async page => {
-  if ((await page.pairingScreen?.()) === true) throw new ApiError(403, PAIRING_SCREEN_REFUSAL, 'pairing_screen');
-};
+const pairingScreenGuard: BrowserActGuard = async page =>
+  await holdPairingScreen(page, () => new ApiError(403, PAIRING_SCREEN_REFUSAL, 'pairing_screen'));
 
 async function browserAction(browser: BrowserSubsystem, context: RouteContext): Promise<ApiResponse> {
   const action = await parseBody(context.request, BrowserActionSchema);

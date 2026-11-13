@@ -212,8 +212,12 @@ function inputReply(id, method, params) {
       page === 'garbled'
         ? { document: {} }
         : page === 'hostless'
-          ? { document: { navigationId: 'loader-1' } }
-          : { document: { navigationId: 'loader-1', host: 'accounts.example.test' } },
+          ? { document: { navigationId: 'loader-1', pairingEpochs: {} } }
+          : page === 'pairing'
+            ? { document: { navigationId: 'loader-1', pairingScreen: true, pairingEpochs: { pairing: 2 } } }
+            : page === 'epochless'
+              ? { document: { navigationId: 'loader-1' } }
+              : { document: { navigationId: 'loader-1', host: 'accounts.example.test', pairingEpochs: {} } },
     );
   else if (method === 'inputProbe')
     reply(id, true, { outcome: page === 'garbled' ? 'typed' : page === 'echoes' ? 'shown' : 'hidden' });

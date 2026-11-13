@@ -67,7 +67,9 @@ import {
   type InputLocator,
   type InputSubject,
   observeInputFields,
+  pairingRelatedPages,
   playwrightNodeOf,
+  readPairingGroup,
   probeInputFields,
   readInputText,
   refindInputFields,
@@ -1008,8 +1010,13 @@ async function act(request: Request): Promise<Record<string, unknown>> {
         ),
       };
     }
-    case 'inputDocument':
-      return { document: await describeInputDocument(inputSubject(targetPage(params.pageId))) };
+    case 'inputDocument': {
+      const page = targetPage(params.pageId);
+      const document = await describeInputDocument(inputSubject(page));
+      // Pairing screens (docs/pairing.md): the page asked about and every page that could reach it.
+      const pairing = await readPairingGroup([page, ...pairingRelatedPages(page, livePages())].map(inputSubject));
+      return { document: { ...document, ...pairing } };
+    }
     case 'inputText':
       return { text: await readInputText(inputSubject(targetPage(params.pageId))) };
     case 'inputObserve':
