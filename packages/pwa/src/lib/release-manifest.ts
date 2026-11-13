@@ -262,5 +262,7 @@ export const releasePathForRequest = (
   const directory = listed(`${direct}/index.html`);
   if (directory !== null) return directory;
   const rewrite = rewrites.find(rule => matchesRewrite(request.pathname, rule.from));
-  return rewrite === undefined ? null : listed(rewrite.to.slice(1));
+  if (rewrite === undefined) return null;
+  // A directory target (`/app/`, the only spelling Pages serves without a redirect) is that directory's `index.html`.
+  return listed(rewrite.to.endsWith('/') ? `${rewrite.to.slice(1)}index.html` : rewrite.to.slice(1));
 };
