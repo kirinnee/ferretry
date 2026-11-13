@@ -20,6 +20,78 @@ function all(invocation: VerbInvocation, names: readonly string[]): readonly str
   });
 }
 
+/** What `secret use` was asked to run and with which names, or the usage sentence that refuses the words. */
+type UseWords =
+  | {
+      readonly names: readonly string[];
+      readonly command: readonly string[];
+      readonly cwd?: string;
+      readonly timeout?: string;
+      readonly json: boolean;
+    }
+  | { readonly refused: string };
+
+const WITH = new Set(['with', 'w']);
+const VALUE_OPTIONS = new Set(['cwd', 'timeout']);
+
+/**
+ * Reads `secret use`'s words the way v4's commander did. `--with <name...>` is variadic: every word after it, up to the
+ * next option or `--`, is a name. The command is what follows `--`. Without `--` the command is every word that is
+ * not a name (written before the options); a list that swallowed the command is refused, never guessed at, because
+ * running a secret's name as the program is the mistake this guards against.
+ */
+function readUseWords(words: readonly string[]): UseWords {
+  const boundary = words.indexOf('--');
+  const head = boundary < 0 ? words : words.slice(0, boundary);
+  const tail = boundary < 0 ? [] : words.slice(boundary + 1);
+  const names: string[] = [];
+  const bare: string[] = [];
+  let cwd: string | undefined;
+  let timeout: string | undefined;
+  let json = false;
+  let listing = false;
+  for (let index = 0; index < head.length; index += 1) {
+    const word = head[index] as string;
+    if (!word.startsWith('-') || word === '-') {
+      (listing ? names : bare).push(word);
+      continue;
+    }
+    listing = false;
+    const body = word.replace(/^-{1,2}/u, '');
+    const equals = body.indexOf('=');
+    const given = equals >= 0 ? body.slice(0, equals) : body;
+    const inline = equals >= 0 ? body.slice(equals + 1) : undefined;
+    if (WITH.has(given)) {
+      if (inline === undefined) listing = true;
+      else names.push(inline);
+    } else if (VALUE_OPTIONS.has(given)) {
+      const value = inline ?? head[index + 1];
+      if (inline === undefined) index += 1;
+      if (given === 'cwd') cwd = value;
+      else timeout = value;
+    } else if (given === 'json') json = inline === undefined || inline === 'true';
+    else if (given === 'no-json') json = false;
+  }
+  const options = { ...(cwd === undefined ? {} : { cwd }), ...(timeout === undefined ? {} : { timeout }), json };
+  if (boundary >= 0) {
+    if (bare.length > 0)
+      return {
+        refused:
+          "a word before '--' is neither a secret name nor an option: write each name after --with and the command after --",
+      };
+    if (tail.length === 0) return { refused: "missing required argument 'command'" };
+    return { names, command: tail, ...options };
+  }
+  if (bare.length === 0)
+    return {
+      refused:
+        names.length === 0
+          ? "missing required argument 'command'"
+          : "missing required argument 'command' (--with takes every word after it as a name: end the names with -- and write the command after it)",
+    };
+  return { names, command: bare, ...options };
+}
+
 const on = (invocation: VerbInvocation, name: string): boolean => {
   const value = invocation.options[name];
   return value === true || value === 'true';
@@ -38,8 +110,9 @@ const on = (invocation: VerbInvocation, name: string): boolean => {
  *     fy secret use --with ANTHROPIC_KEY -- curl -H "Authorization: Bearer $ANTHROPIC_KEY" https://…
  *
  * The caller writes the NAME. The daemon puts the value in the environment of the child it spawns and answers that
- * child's output with every known value masked. Repeat `--with` for more than one name: the shell cannot tell where a
- * list ends and the command begins, so a second name written after the first is part of the command.
+ * child's output with every known value masked. `--with` takes several names, or repeats, as v4's did:
+ * `--with A B -- command`; the `--` is where the names end and the command begins. Without it a name list that
+ * swallowed the command is refused with a usage error, never run.
  */
 export function secretVerbs(
   controller: SecretController,
@@ -80,6 +153,17 @@ export function secretVerbs(
         ],
       },
       async invocation => {
+        if (invocation.words !== undefined) {
+          const read = readUseWords(invocation.words);
+          if ('refused' in read) throw new Error(read.refused);
+          await controller.use(read.command, {
+            with: read.names,
+            ...(read.cwd === undefined ? {} : { cwd: read.cwd }),
+            ...(read.timeout === undefined ? {} : { timeout: read.timeout }),
+            json: read.json,
+          });
+          return;
+        }
         const cwd = text(invocation, 'cwd');
         const timeout = text(invocation, 'timeout');
         await controller.use(invocation.args, {

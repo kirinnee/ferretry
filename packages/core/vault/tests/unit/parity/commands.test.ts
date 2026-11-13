@@ -23,7 +23,12 @@ type Call = { readonly route: string; readonly init: Record<string, unknown> | u
 type Answer = (call: Call) => unknown;
 
 interface Rig {
-  readonly run: (verb: string, args?: readonly string[], options?: VerbInvocation['options']) => Promise<number>;
+  readonly run: (
+    verb: string,
+    args?: readonly string[],
+    options?: VerbInvocation['options'],
+    words?: readonly string[],
+  ) => Promise<number>;
   readonly calls: Call[];
   readonly out: string[];
   readonly err: string[];
@@ -51,11 +56,11 @@ function rig(answer: Answer, options: { readonly stdin?: string; readonly pwd?: 
   };
   const half = cli.build?.(ctx);
   return {
-    run: async (verb, args = [], opts = {}) => {
+    run: async (verb, args = [], opts = {}, words) => {
       const verbs = (half?.verbs ?? {}) as Record<string, ((i: VerbInvocation) => Promise<number>) | undefined>;
       const handler = verbs[verb];
       if (handler === undefined) throw new Error(`the vault cli half answers no \`${verb}\``);
-      return await handler({ args, options: opts });
+      return await handler({ args, options: opts, ...(words === undefined ? {} : { words }) });
     },
     calls,
     out,
@@ -239,6 +244,117 @@ describe('fy secret use', () => {
     expect(await r.run('secret use', ['true'], { cwd: '/srv', env: 'A=B' })).toBe(1);
     expect(r.err.join('')).toContain("unknown option '--env'");
     expect(r.calls).toEqual([]);
+  });
+});
+
+/**
+ * `fy secret use <argv>` as the 5.0 shell hands it over: `parseArgs`'s split (copied small, a plugin test does not import
+ * the shell) AND the words as typed, `--` included.
+ */
+function typedWords(tokens: readonly string[]): {
+  args: string[];
+  options: Record<string, string | boolean | string[]>;
+  words: string[];
+} {
+  const args: string[] = [];
+  const options: Record<string, string | boolean | string[]> = {};
+  const put = (name: string, value: string | boolean): void => {
+    const known = options[name];
+    if (known === undefined || typeof value === 'boolean' || typeof known === 'boolean') options[name] = value;
+    else options[name] = Array.isArray(known) ? [...known, value] : [String(known), value];
+  };
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index] as string;
+    if (token === '--') {
+      args.push(...tokens.slice(index + 1));
+      break;
+    }
+    if (!token.startsWith('-') || token === '-') {
+      args.push(token);
+      continue;
+    }
+    const body = token.replace(/^-{1,2}/u, '');
+    const equals = body.indexOf('=');
+    if (equals >= 0) {
+      put(body.slice(0, equals), body.slice(equals + 1));
+      continue;
+    }
+    const next = tokens[index + 1];
+    if (next !== undefined && (!next.startsWith('-') || next === '-')) {
+      put(body, next);
+      index += 1;
+    } else put(body, true);
+  }
+  return { args, options, words: [...tokens] };
+}
+
+describe('fy secret use, the words as typed', () => {
+  const run = async (tokens: readonly string[], answer: Record<string, unknown> = {}) => {
+    const r = rig(() => ({ ...USED, ...answer }), { pwd: '/work' });
+    const typed = typedWords(tokens);
+    const code = await r.run('secret use', typed.args, typed.options, typed.words);
+    const body = (
+      r.calls[0]?.init as
+        | { body?: { command: string[]; secrets: string[]; cwd: string; timeoutMs: number } }
+        | undefined
+    )?.body;
+    return { code, r, body };
+  };
+
+  it('V-0429 reads v4’s variadic --with A B -- cmd: every name up to -- is a name, the command is what follows', async () => {
+    const { code, body } = await run(['--with', 'ALPHA_KEY', 'BETA_KEY', '--', 'sh', '-c', 'exit 0']);
+    expect(code).toBe(0);
+    expect(body).toMatchObject({ command: ['sh', '-c', 'exit 0'], secrets: ['ALPHA_KEY', 'BETA_KEY'] });
+  });
+
+  it('V-0429 still takes -w A -w B and mixes the forms, with --cwd and --timeout beside them', async () => {
+    const repeated = await run(['-w', 'ALPHA_KEY', '-w', 'BETA_KEY', '--', 'true']);
+    expect(repeated.body).toMatchObject({ command: ['true'], secrets: ['ALPHA_KEY', 'BETA_KEY'] });
+    const mixed = await run([
+      '-w',
+      'ALPHA_KEY',
+      'BETA_KEY',
+      '--cwd',
+      '/srv',
+      '--with=GAMMA_KEY',
+      '--timeout',
+      '5000',
+      '--',
+      'env',
+    ]);
+    expect(mixed.body).toMatchObject({
+      command: ['env'],
+      secrets: ['ALPHA_KEY', 'BETA_KEY', 'GAMMA_KEY'],
+      cwd: '/srv',
+      timeoutMs: 5000,
+    });
+  });
+
+  it('V-0429 keeps a command word that follows -- even when it looks like a name or an option', async () => {
+    const { body } = await run(['--with', 'ALPHA_KEY', '--', 'BETA_KEY', '--with', 'x']);
+    expect(body).toMatchObject({ command: ['BETA_KEY', '--with', 'x'], secrets: ['ALPHA_KEY'] });
+  });
+
+  it('V-0429 takes the command before the options without --, as v4 did', async () => {
+    const { body } = await run(['true', '--with', 'ALPHA_KEY']);
+    expect(body).toMatchObject({ command: ['true'], secrets: ['ALPHA_KEY'] });
+  });
+
+  it('V-0429 refuses, rather than guesses, a names list that swallowed the command or a stray word before --', async () => {
+    for (const tokens of [
+      ['--with', 'ALPHA_KEY', 'BETA_KEY', 'sh'],
+      ['-w', 'ALPHA_KEY', 'sh'],
+      ['-w', 'ALPHA_KEY', '--'],
+      ['stray', '-w', 'ALPHA_KEY', '--', 'true'],
+    ]) {
+      const { code, r } = await run(tokens);
+      expect(code).toBe(1);
+      expect(r.calls).toEqual([]);
+      expect(r.err.join('')).toStartWith('error: ');
+    }
+    const swallowed = await run(['--with', 'ALPHA_KEY', 'sh']);
+    expect(swallowed.r.err.join('')).toContain("missing required argument 'command'");
+    expect(swallowed.r.err.join('')).toContain('end the names with --');
   });
 });
 

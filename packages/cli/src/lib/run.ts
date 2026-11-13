@@ -207,7 +207,7 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
     };
     return await handler(context);
   }
-  return await runPluginVerb(world, entry, invocation, deps, surfaces);
+  return await runPluginVerb(world, entry, { ...invocation, words: resolved.rest }, deps, surfaces);
 }
 
 async function runPluginVerb(

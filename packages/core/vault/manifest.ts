@@ -186,8 +186,8 @@ export default definePlugin({
         summary: 'run a command with secrets in ITS environment; output comes back masked',
         options: [
           {
-            flag: '-w, --with <name>',
-            help: 'a secret to put in the command environment, by name (repeat for more than one)',
+            flag: '-w, --with <name...>',
+            help: 'a secret to put in the command environment, by name (several names, or repeat the option; end the list with --)',
           },
           { flag: '--cwd <path>', help: 'where to run (defaults to the current directory)' },
           { flag: '--timeout <ms>', help: 'how long the command may take' },

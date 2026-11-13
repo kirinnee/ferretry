@@ -456,6 +456,12 @@ export interface TerminalIo {
 }
 
 export interface VerbInvocation {
+  /**
+   * The words after the verb exactly as they were typed, `--` included, for the one verb whose grammar needs the boundary
+   * the parser drops (`fy secret use --with A B -- cmd`: a list of names ends where `--` begins). Optional: a caller that
+   * does not supply it gets the parsed `args` and `options` alone.
+   */
+  readonly words?: readonly string[];
   readonly args: readonly string[];
   readonly options: Readonly<Record<string, string | boolean | readonly string[]>>;
 }
