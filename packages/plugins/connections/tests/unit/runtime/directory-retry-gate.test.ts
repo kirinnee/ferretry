@@ -218,6 +218,117 @@ describe('every dial path asks the gate after its last await', () => {
   });
 });
 
+describe('a veto withdraws the discovered relay from everything the daemon promises', () => {
+  /** Published carriers, the advertisement the pairing mint / doctor / `fyd --check` read, and the outbound permission. */
+  const promisesNothing = (half: ReturnType<typeof buildConnections>): void => {
+    expect(half.provides.connections.carriers()).toEqual([{ kind: 'direct', url: 'https://box.example' }]);
+    expect(half.provides.connections.advertisement().discoveredRelayUrl).toBeUndefined();
+    expect(half.resolvers.relay()).toEqual([]);
+  };
+  const promisesTheHostedRelay = (half: ReturnType<typeof buildConnections>): void => {
+    expect(carrierKinds(half)).toContain('relay');
+    expect(half.provides.connections.advertisement().discoveredRelayUrl).toBe('https://hosted.example');
+  };
+
+  test('should promise nothing when the veto lands after the boot answer published the relay and before the first dial', async () => {
+    const r = rig(async () => available);
+    const host = await testHost({ plugins: [r.plugin] });
+    try {
+      await host.runJob('relay-discovery');
+      promisesTheHostedRelay(r.half());
+      host.setConfig('connections.yaml', disabled);
+      await r.half().hooks['carriers:relay'].start(new FakeSessions(), new AbortController().signal);
+      expect(r.sockets).toEqual([]);
+      promisesNothing(r.half());
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('should promise nothing when the veto lands before the boot answer is applied', async () => {
+    let host!: Awaited<ReturnType<typeof testHost>>;
+    const r = rig(async () => {
+      host.setConfig('connections.yaml', disabled);
+      return available;
+    });
+    host = await testHost({ plugins: [r.plugin] });
+    try {
+      await host.runJob('relay-discovery');
+      await r.half().hooks['carriers:relay'].start(new FakeSessions(), new AbortController().signal);
+      expect(r.sockets).toEqual([]);
+      promisesNothing(r.half());
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('should promise nothing when the veto lands after a recovery published the relay and before it dials', async () => {
+    let reads = 0;
+    const r = rig(async () => (++reads === 1 ? transient : available));
+    const host = await testHost({ plugins: [r.plugin] });
+    try {
+      await host.runJob('relay-discovery');
+      await host.clock.advance(2_000);
+      await flush();
+      promisesTheHostedRelay(r.half());
+      host.setConfig('connections.yaml', mixed);
+      await r.half().hooks['carriers:relay'].start(new FakeSessions(), new AbortController().signal);
+      // The operator's own relay may dial; the hosted one was never dialled and is promised nowhere.
+      expect(r.sockets.every(url => !url.includes('hosted.example'))).toBe(true);
+      expect(r.half().provides.connections.advertisement().discoveredRelayUrl).toBeUndefined();
+      expect(r.half().resolvers.relay().includes('hosted.example')).toBe(false);
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('should promise nothing when a recovery answer arrives after the operator disabled discovery', async () => {
+    let reads = 0;
+    const r = rig(async () => (++reads === 1 ? transient : available));
+    const host = await testHost({ plugins: [r.plugin] });
+    try {
+      await host.runJob('relay-discovery');
+      host.setConfig('connections.yaml', disabled);
+      await host.clock.advance(2_000);
+      await flush();
+      await r.half().hooks['carriers:relay'].start(new FakeSessions(), new AbortController().signal);
+      expect(r.sockets).toEqual([]);
+      promisesNothing(r.half());
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('should promise nothing when the file becomes invalid after boot, before the first dial (real config service)', async () => {
+    const fs = createMemoryHostFs();
+    const def = manifest.data.config[0] as ConfigFileDef<unknown>;
+    const home = '/home/fy-relay-gate-promise';
+    fs.seed(`${home}/config/connections.yaml`, 'relay:\n  - source: discovery\n');
+    const files = createConfigFiles({
+      home,
+      fs,
+      clock: idleClock,
+      log: quietLog,
+      binary: 'fy',
+      defs: [{ plugin: 'connections', def }],
+    });
+    await files.reload();
+    const r = rig(async () => available, { port: files.port('connections') });
+    const host = await testHost({ plugins: [r.plugin] });
+    try {
+      await host.runJob('relay-discovery');
+      promisesTheHostedRelay(r.half());
+      fs.seed(`${home}/config/connections.yaml`, 'relay: [');
+      await files.reload();
+      await r.half().hooks['carriers:relay'].start(new FakeSessions(), new AbortController().signal);
+      expect(r.sockets).toEqual([]);
+      promisesNothing(r.half());
+    } finally {
+      await host.stop();
+    }
+  });
+});
+
 describe('a configuration that cannot be read vetoes (the real config service)', () => {
   const home = '/home/fy-relay-gate';
   async function realService(initial?: string) {
