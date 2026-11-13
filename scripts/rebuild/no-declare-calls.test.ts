@@ -63,7 +63,7 @@ test('no script under scripts/ uses an identifier named declare (Bun 1.3.x erase
       offenders.push(`${relative(root, path)}: ${finding}`);
   }
   expect(offenders).toEqual([]);
-});
+}, 60_000); // a whole-tree parse: its time grows with scripts/ and is no guarantee, so the default 5 s is not its bound
 
 const FLAGGED: Readonly<Record<string, string>> = {
   'a binding': 'const declare = (a: number) => a;',

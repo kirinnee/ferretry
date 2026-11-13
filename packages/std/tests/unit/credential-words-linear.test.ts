@@ -1,6 +1,8 @@
 /**
  * CFG-LEAK (ii): the cutter and W are linear in the length of one word. The ratio of the time at 256 KiB to the time at
- * 128 KiB must stay under 3 (linear is 2; quadratic is 4), best of several runs so one slow tick does not decide it.
+ * 64 KiB must stay under 8 (linear is 4; quadratic is 16), best of several runs so one slow tick does not decide it. A
+ * fourfold step keeps a factor of two between the bound and either answer, so a loaded CI runner cannot fail a linear
+ * cutter (a twofold step against a bound of 3 did: 3.09) and a quadratic one still fails by the same margin.
  *
  * Fake only: the shapes are credential-like runs and are none.
  */
@@ -30,17 +32,17 @@ const SHAPES: readonly (readonly [string, (size: number) => string])[] = [
 describe('CFG-LEAK (ii) linear time at 256 KiB', () => {
   for (const [label, make] of SHAPES) {
     test(`the cutter is linear on ${label}`, () => {
-      const small = make(128 * KIB);
+      const small = make(64 * KIB);
       const large = make(256 * KIB);
       const ratio = best(() => shownWords([large])) / best(() => shownWords([small]));
-      expect(ratio).toBeLessThan(3);
+      expect(ratio).toBeLessThan(8);
     });
 
     test(`W is linear on ${label}`, () => {
-      const small = make(128 * KIB);
+      const small = make(64 * KIB);
       const large = make(256 * KIB);
       const ratio = best(() => findFlagSecrets({ args: [large] })) / best(() => findFlagSecrets({ args: [small] }));
-      expect(ratio).toBeLessThan(3);
+      expect(ratio).toBeLessThan(8);
     });
   }
 });
