@@ -19,8 +19,9 @@ const draft = (overrides: Partial<NewFerretDraft> = {}): NewFerretDraft => ({
 
 /**
  * Runs `body` in a browser with no WebCrypto, then puts back the exact `crypto` the host had. The whole
- * `crypto` global is swapped, never its `subtle`: Bun's own `subtle` cannot be redefined, and a DOM
- * preload's is inherited, so stubbing it in place either throws or is never restored.
+ * `crypto` global is swapped, never its `subtle`: depending on the runtime `subtle` is a locked own
+ * property (stubbing it throws) or inherited from the prototype (Bun 1.4.4 — an own stub shadows it,
+ * there is no own descriptor to restore, and every later file in the one-process unit tier loses it).
  */
 const withoutWebCrypto = async (body: () => Promise<void>): Promise<void> => {
   const host = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
