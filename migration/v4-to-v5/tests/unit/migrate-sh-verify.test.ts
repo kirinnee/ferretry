@@ -154,7 +154,7 @@ describe('verify: compares each field with its own v5 destination', () => {
     await sb.fake('fy', [
       { match: 'ps -a --json', run: 'cat "$D/ps.v5.json"' },
       { match: 'board *', run: 'echo \'{"cards":[{"id":"C1","laneId":"todo"}],"nextCursor":null}\'' },
-      { match: 'secret ls --json', out: '{"secrets":[]}' },
+      { match: 'secret ls --json', out: '{"health":"ready","secrets":[]}' },
       { match: 'ask', out: 'no asks are waiting' },
       { match: 'doctor' },
     ]);
@@ -169,7 +169,7 @@ describe('verify: compares each field with its own v5 destination', () => {
     await sb.fake('fy', [
       { match: 'ps -a --json', run: 'cat "$D/ps.v5.json"' },
       { match: 'board *', run: 'echo \'{"cards":[],"nextCursor":null}\'' },
-      { match: 'secret ls --json', out: '{"secrets":[{"name":"API_KEY"}]}' },
+      { match: 'secret ls --json', out: '{"health":"ready","secrets":[{"name":"API_KEY"}]}' },
       { match: 'ask', out: 'ASK  FROM  ASKING\na1  f1  q\na2  f2  q' },
       { match: 'doctor' },
     ]);

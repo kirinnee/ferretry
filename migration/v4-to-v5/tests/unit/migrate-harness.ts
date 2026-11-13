@@ -10,7 +10,8 @@ import { dirname, join } from 'node:path';
  * machine's fy, fyd, brew, nix or tmux, and no real credential exists anywhere in it.
  */
 
-const SCRIPT = join(import.meta.dir, '..', '..', 'migrate.sh');
+// MIGRATE_SH_UNDER_TEST points a run at another copy of the script (to prove a new test fails on the old one).
+const SCRIPT = process.env.MIGRATE_SH_UNDER_TEST ?? join(import.meta.dir, '..', '..', 'migrate.sh');
 
 /** A value that must never appear in anything the script prints or writes: it sits in a fake sealed store and in a trap field. */
 export const SECRET_VALUE = 'SUPERSECRET-VALUE-do-not-print';
@@ -44,7 +45,7 @@ function fakeScript(name: string, rules: readonly Rule[]): string {
   return `#!/usr/bin/env bash
 D="\${FAKE_DIR:?}"
 printf '%s %s\\n' ${quote(name)} "$*" >> "$D/calls.log"
-printf '%s|%s|PATH=%s|FY_URL=%s\\n' ${quote(name)} "$*" "$PATH" "\${FY_URL-<unset>}" >> "$D/env.log"
+printf '%s|%s|PATH=%s|FY_URL=%s|FY_HOME=%s|FY_PORT=%s\\n' ${quote(name)} "$*" "$PATH" "\${FY_URL-<unset>}" "\${FY_HOME-<unset>}" "\${FY_PORT-<unset>}" >> "$D/env.log"
 case "$*" in
 ${arms}
 esac
@@ -64,6 +65,7 @@ export const V5_PS = JSON.stringify([
   { id: 'f2', name: 'bob', title: 'Child task', parent: 'f1' },
 ]);
 const SECRET_LS = JSON.stringify({
+  health: 'ready',
   secrets: [{ name: 'API_KEY', value: SECRET_VALUE, createdAt: 'x', updatedAt: 'x' }],
 });
 const BOARD_OPEN = '{"cards":[{"id":"C1","laneId":"todo","title":"t"}],"nextCursor":null}';
@@ -269,7 +271,10 @@ async function installDefaults(sb: Sandbox): Promise<void> {
   ]);
   await sb.fake('sleep', [{ match: '*' }]);
   await sb.fake('fyd-browser-worker', [{ match: '--version', run: 'cat "$D/fyd.version"' }]);
-  await sb.fake('ps', [{ match: '-eo args=', run: `cat ${D}/ps.out` }]);
+  await sb.fake('ps', [
+    { match: '-eo comm=', run: `cat ${D}/ps.out` },
+    { match: '-eo args=', run: `cat ${D}/ps.out` }, // the pre-fix script read the whole command line
+  ]);
   await sb.fake('xattr', [{ match: '-p com.apple.quarantine *', code: 1 }, { match: '-d com.apple.quarantine *' }]);
   await sb.fake('bun', [
     { match: 'install --frozen-lockfile' },
@@ -321,7 +326,7 @@ export async function writeV5Build(sb: Sandbox): Promise<void> {
     const path = join(sb.v5bin, name);
     await writeFile(
       path,
-      `#!/usr/bin/env bash\nD="\${FAKE_DIR:?}"\nprintf '%s|%s|PATH=%s|FY_URL=%s\\n' ${quote(`v5build-${name}`)} "$*" "$PATH" "\${FY_URL-<unset>}" >> "$D/env.log"\ncase "$*" in\n  --version) echo 5.0.0-rc.1 ;;\n  --check) echo "a Ferretry home — this daemon would use it" ;;\n  "ps -a --json") cat "$D/ps.v5.json" ;;\n  "daemon start") echo /v5/fyd > "$D/ps.out" ;;\n  "daemon stop") : > "$D/ps.out" ;;\n  *) printf '%s\\n' "$*" >> "$D/v5build.log" ;;\nesac\n`,
+      `#!/usr/bin/env bash\nD="\${FAKE_DIR:?}"\nprintf '%s|%s|PATH=%s|FY_URL=%s|FY_HOME=%s|FY_PORT=%s\\n' ${quote(`v5build-${name}`)} "$*" "$PATH" "\${FY_URL-<unset>}" "\${FY_HOME-<unset>}" "\${FY_PORT-<unset>}" >> "$D/env.log"\ncase "$*" in\n  --version) echo 5.0.0-rc.1 ;;\n  --check) echo "a Ferretry home — this daemon would use it" ;;\n  "ps -a --json") cat "$D/ps.v5.json" ;;\n  "daemon start") echo /v5/fyd > "$D/ps.out" ;;\n  "daemon stop") : > "$D/ps.out" ;;\n  *) printf '%s\\n' "$*" >> "$D/v5build.log" ;;\nesac\n`,
     );
     await chmod(path, 0o755);
   }

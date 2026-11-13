@@ -33,7 +33,10 @@ a stop: tell the owner what it printed, and never improvise around it.** The exi
 - Do not use any Ferretry tool (`fy`, the app, an MCP tool) to read the old home or the backup yourself; the script does
   the only reading, and only of names and metadata.
 - **Run in `bash`.** Each tool call may begin in a fresh shell, so pass the notes file on every call: `--notes "$NOTES"`.
-  The script never changes your shell: you export nothing (no `PATH`, no `FY_URL`).
+  The script never changes your shell: you export nothing (no `PATH`, no `FY_URL`, no `FY_HOME`, no `FY_PORT`). Every
+  phase runs `fy`/`fyd` with the home and port recorded at `preflight`, whatever your shell holds later. A `FY_URL` that
+  carries credentials or names another machine makes `preflight` refuse (unset it for the switch); a query or fragment on a
+  loopback address is dropped, never copied.
 
 ## Decisions the owner makes
 
@@ -69,16 +72,16 @@ bash "$S" preflight
 `preflight` prints `NOTES=<path>`: use that path as `$NOTES` from now on. Then, each followed by showing its output to
 the owner:
 
-| Phase                     | What it does                                                                                                                                                                                                                                                                              | Owner / you                                                                        |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `preflight`               | tools present, v4 is 4.291.10 or later, this checkout is a released v5 tag the install kind can get, disk space; records the original `PATH`, whether `FY_URL`/`FY_PORT` were set, and where v4's `fy`/`fyd` are (never a secret)                                                         | stop on any exit                                                                   |
-| `baseline --asks-open N`  | saves what v4 holds now into a folder beside the notes: every ferret (id, **callsign and title kept apart**, parent, state), pane map, board ids and lanes of every state (stops at the 500-card limit), login names, secret **names**. An empty fleet (no live ferret) is a defined path | the owner's agenda count                                                           |
-| `quiet --owner-confirmed` | no pane writes for a minute, stops the v4 daemon, proves it again, checks nothing is half-done. Panes and tmux keep running                                                                                                                                                               | exit `1` = still writing or something pending: wait, ask again, rerun from the top |
-| `backup --owner-yes`      | `mv` the home to `<home>-before-<stamp>` (mode 700)                                                                                                                                                                                                                                       | the owner's yes                                                                    |
-| `convert`                 | converter dry run (own report), then the real run, exit codes checked. Writes the new home with `home.json` last                                                                                                                                                                          | show the printed summary; exit `3` → rollback or wait for a fixed converter        |
-| `install`                 | puts the released v5 programs in place for the recorded install kind (cask, nix profile element, standalone), proves `fy --version` is the tag. **Never starts the daemon**                                                                                                               | stop on any exit                                                                   |
-| `start`                   | `fyd --check`, `fy config check` (offline: nothing can start a daemon), the home holds only what v5 makes, then **the one deliberate daemon start**, proved by asking it                                                                                                                  | show every `!` line                                                                |
-| `verify`                  | compares v5 with the baseline and prints a table: ferret ids, parents, callsigns (v4 callsign = v5 name), titles, panes, board ids (lanes are shown to the owner), logins, secret names, asks, `fy doctor`                                                                                | a `FAIL` row is a stop; a `REVIEW` row is for the owner to decide                  |
+| Phase                     | What it does                                                                                                                                                                                                                                                                                                                                              | Owner / you                                                                        |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `preflight`               | tools present, v4 is 4.291.10 or later, this checkout is a released v5 tag the install kind can get, disk space; records the original `PATH`, whether `FY_URL` (a plain loopback address only) and `FY_PORT` were set, and where v4's `fy`/`fyd` are (never a secret). `MIGRATE_REHEARSAL=1` on the default home is refused here, before anything changes | stop on any exit                                                                   |
+| `baseline --asks-open N`  | saves what v4 holds now into a folder beside the notes: every ferret (id, **callsign and title kept apart**, parent, state), pane map, board ids and lanes of every state (stops at the 500-card limit), login names, secret **names**. An empty fleet (no live ferret) is a defined path                                                                 | the owner's agenda count                                                           |
+| `quiet --owner-confirmed` | no pane writes for a minute, stops the v4 daemon, proves it again, checks nothing is half-done. Panes and tmux keep running                                                                                                                                                                                                                               | exit `1` = still writing or something pending: wait, ask again, rerun from the top |
+| `backup --owner-yes`      | `mv` the home to `<home>-before-<stamp>` (mode 700)                                                                                                                                                                                                                                                                                                       | the owner's yes                                                                    |
+| `convert`                 | converter dry run (own report), then the real run, exit codes checked. Writes the new home with `home.json` last                                                                                                                                                                                                                                          | show the printed summary; exit `3` → rollback or wait for a fixed converter        |
+| `install`                 | puts the released v5 programs in place for the recorded install kind (cask, nix profile element, standalone), proves `fy --version` is the tag. **Never starts the daemon**                                                                                                                                                                               | stop on any exit                                                                   |
+| `start`                   | `fyd --check`, `fy config check` (offline: nothing can start a daemon), the home holds only what v5 makes, then **the one deliberate daemon start**, proved by asking it                                                                                                                                                                                  | show every `!` line                                                                |
+| `verify`                  | compares v5 with the baseline and prints a table: ferret ids, parents, callsigns (v4 callsign = v5 name), titles, panes, board ids (lanes are shown to the owner), logins, secret names, asks, `fy doctor`                                                                                                                                                | a `FAIL` row is a stop; a `REVIEW` row is for the owner to decide                  |
 
 `fy config check` may name a login file that still holds a literal key: that is expected and the **owner** repairs it
 (below), after `start`. Any other `config check` failure stops the run.
@@ -157,6 +160,11 @@ for a fake home, never a real one) and is never used on the owner's machine.
 5. Reload the app on one paired phone: it connects without pairing and unlocks with its passkey.
 6. `fy secret use --with <NAME> -- true` (owner's yes) for one secret by name. It must succeed; you never see the value.
 
+**An item that does not exist on this machine** (no running ferret, no stopped ferret, no card with history, no answered
+ask, no paired phone, no named secret): ask the owner to confirm there is none and write it down as
+`SKIP: <item> (owner confirmed there is none)` in your report. Never invent a substitute and never call a skipped item
+checked.
+
 Then turn automatic updates back on if the owner had them on.
 
 ## Rollback (owner's yes)
@@ -175,7 +183,11 @@ by the process list, not by a marker), moves the v5 home aside only if the backu
 v4 programs back from the recorded state (including "neither installed"), restores the recorded `PATH` and `FY_URL`
 exactly, starts v4, and restarts **only the recorded ferrets by id**: v5 may have relaunched their harnesses with its own
 hooks, so `--restart` runs `fy restart <id>...` (bare `fy restart` only reports status). If it exits non-zero, read what
-it printed and tell the owner; it is safe to run again.
+it printed and tell the owner; it is safe to run again. It proves the panes quiet before it moves anything, whether or not
+a daemon is running, and it decides what a live `fyd` is from the notes, not from the `fy` now on the PATH: if that
+`fyd` is the v5 one and no v5 `fy` is left to stop it, it refuses and moves nothing. For an install kind `manual` it
+restores the homes, then stops and asks the owner to put the v4 programs back by hand; **run `rollback` again after
+that** and it checks that `fy` and `fyd` print 4.291.x and finishes (starts v4, restarts the recorded ferrets).
 
 ## Afterwards
 

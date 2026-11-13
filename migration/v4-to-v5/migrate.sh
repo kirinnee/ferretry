@@ -91,28 +91,67 @@ mark() { echo "# $1" >>"${NOTES}"; }
 has_mark() { grep -qx "# $1" "${NOTES}"; }
 
 # The recorded programs and environment. v4 and v5 programs are always called by ABSOLUTE path with an environment
-# this script chose, so nothing here depends on (or changes) the agent's own PATH or FY_URL.
+# this script chose, so nothing here depends on (or changes) the agent's own PATH, FY_URL, FY_HOME or FY_PORT:
+# EVERY call gets the home and the port recorded at preflight, never the ones the caller's shell holds now.
 resolve() { bash -c 'PATH="$1"; command -v "$2"' _ "$1" "$2"; }
 v5_path() {
   local build
   build="$(note_get REHEARSAL_BUILD)"
   if [ -n "${build}" ]; then echo "${build}:$(note_get ORIG_PATH)"; else note_get ORIG_PATH; fi
 }
-# fy of the v4 era: the original PATH and FY_URL exactly as preflight recorded them.
+# fy_pin PATH URL cmd...: URL "-" means FY_URL unset. Home and port come from the notes (port: set to the recorded value, or unset).
+fy_pin() {
+  local path="$1" url="$2" home
+  shift 2
+  home="$(note_get H)"
+  if [ "${url}" = "-" ]; then
+    if [ "$(note_get FY_PORT_STATE)" = set ]; then
+      env -u FY_URL FY_HOME="${home}" FY_PORT="$(note_get FY_PORT)" PATH="${path}" "$@"
+    else
+      env -u FY_URL -u FY_PORT FY_HOME="${home}" PATH="${path}" "$@"
+    fi
+  elif [ "$(note_get FY_PORT_STATE)" = set ]; then
+    env FY_URL="${url}" FY_HOME="${home}" FY_PORT="$(note_get FY_PORT)" PATH="${path}" "$@"
+  else
+    env -u FY_PORT FY_URL="${url}" FY_HOME="${home}" PATH="${path}" "$@"
+  fi
+}
+# fy of the v4 era: the original PATH and FY_URL (a plain loopback address, no query) exactly as preflight recorded them.
 orig_env() {
   if [ "$(note_get FY_URL_STATE)" = set ]; then
-    env FY_URL="$(note_get FY_URL)" PATH="$(note_get ORIG_PATH)" "$@"
+    fy_pin "$(note_get ORIG_PATH)" "$(note_get FY_URL)" "$@"
   else
-    env -u FY_URL PATH="$(note_get ORIG_PATH)" "$@"
+    fy_pin "$(note_get ORIG_PATH)" - "$@"
   fi
 }
 fy4() { orig_env "$(resolve "$(note_get ORIG_PATH)" fy)" "$@"; }
 # fy of v5: its PATH, no FY_URL (it talks to the v5 daemon); `pinned` adds the dummy address so nothing starts a daemon.
 v5_fy() { resolve "$(v5_path)" fy; }
 v5_fyd() { resolve "$(v5_path)" fyd; }
-fy5() { env -u FY_URL PATH="$(v5_path)" "$(v5_fy)" "$@"; }
-fy5_pinned() { env FY_URL="${PIN_URL}" PATH="$(v5_path)" "$(v5_fy)" "$@"; }
-fyd5_pinned() { env FY_URL="${PIN_URL}" PATH="$(v5_path)" "$(v5_fyd)" "$@"; }
+fy5() { fy_pin "$(v5_path)" - "$(v5_fy)" "$@"; }
+fy5_pinned() { fy_pin "$(v5_path)" "${PIN_URL}" "$(v5_fy)" "$@"; }
+fyd5_pinned() { fy_pin "$(v5_path)" "${PIN_URL}" "$(v5_fyd)" "$@"; }
+
+# A path's canonical form even when its last part is absent (a moved home): the parent resolved, the name kept.
+canon() {
+  local parent
+  if [ -d "$1" ]; then
+    (cd "$1" && pwd -P)
+  else
+    parent="$(cd "$(dirname "$1")" 2>/dev/null && pwd -P)" || parent="$(dirname "$1")"
+    printf '%s/%s\n' "${parent}" "$(basename "$1")"
+  fi
+}
+# A rehearsal is for a fake home only: refuse the default home, by name and by where it really is, BEFORE any change.
+rehearsal_refuse() {
+  if [ "$1" = "${HOME}/.ferretry" ] || [ "$(canon "$1")" = "$(canon "${HOME}/.ferretry")" ]; then
+    fail "rehearsal mode (MIGRATE_REHEARSAL=1) refuses the default home ${HOME}/.ferretry: it is never for a real home. Nothing was changed"
+  fi
+}
+# Every phase that stops, moves or converts re-checks what preflight proved.
+rehearsal_phase_guard() {
+  if [ "$(note_get REHEARSAL)" = 1 ]; then rehearsal_refuse "$1"; fi
+}
 
 # tmux pane list, one "<pane id> <activity>" line per pane; non-zero when tmux cannot be read.
 quiet_check() { # $1 socket. 0 quiet for 60 s, 1 still writing after QUIET_TRIES tries, 2 tmux could not be read.
@@ -128,11 +167,12 @@ quiet_check() { # $1 socket. 0 quiet for 60 s, 1 still writing after QUIET_TRIES
 }
 
 # 0 when a process named `fyd` is running (proof by process list, never by a marker); 1 when none; exits 2 when ps fails.
+# Only each process's command NAME is read (`comm`), never its arguments, which can carry tokens of unrelated programs.
 daemon_live() {
-  local listing arg0
-  listing="$(ps -eo args=)" || unreadable "cannot read the process list (ps failed)"
-  while read -r arg0 _; do
-    [ "${arg0##*/}" = fyd ] && return 0
+  local listing name
+  listing="$(ps -eo comm=)" || unreadable "cannot read the process list (ps failed)"
+  while IFS= read -r name; do
+    if [ "${name##*/}" = fyd ]; then return 0; fi
   done <<<"${listing}"
   return 1
 }
@@ -144,6 +184,9 @@ version_of() {
   [[ ${out} =~ ([0-9]+\.[0-9]+\.[0-9]+) ]] || return 1
   echo "${BASH_REMATCH[1]}"
 }
+# The same, with the recorded home and port pinned (v5 programs: their PATH; v4 programs: the original PATH and FY_URL).
+v5_version() { version_of fy_pin "$(v5_path)" - "$1"; }
+v4_version_of() { version_of orig_env "$1"; }
 
 # macOS: drop the quarantine attribute from a file. An absent attribute is expected (exit 1 of the probe), not an error.
 unquarantine() {
@@ -169,6 +212,8 @@ preflight)
   done
 
   H="${FY_HOME:-$HOME/.ferretry}"
+  # A rehearsal never touches the default home: refused here, before anything is read, stopped, moved or converted.
+  if [ "${MIGRATE_REHEARSAL:-}" = 1 ]; then rehearsal_refuse "${H}"; fi
   [ -d "${H}" ] || fail "no Ferretry home at ${H}"
   [ -f "${H}/layout-version" ] || fail "${H} has no layout-version: it is not a v4 home (a v5 home has none)"
   [ "$(cat "${H}/layout-version")" = 2 ] || fail "${H}/layout-version is not 2: the converter reads layout 2 of 4.291.x only"
@@ -227,6 +272,32 @@ preflight)
   avail_kb="$(df -Pk "$(dirname "${H}")" | awk 'NR==2 {print $4}')" || unreadable "cannot read free space"
   [ "${avail_kb}" -ge "${used_kb}" ] || fail "not enough free space beside ${H}: need about ${used_kb} KB, ${avail_kb} KB free"
 
+  # FY_URL: only scheme://host:port of THIS machine's loopback is ever recorded. Credentials (user:pass@), a query, a
+  # fragment or a path are never copied or printed; a remote address cannot be proven to be the daemon of this home.
+  url_state="unset"
+  url_base=""
+  url_extra=""
+  if [ -n "${FY_URL:-}" ]; then
+    url_re='^(https?)://([^/?#]*)(.*)$'
+    [[ ${FY_URL} =~ ${url_re} ]] || fail "FY_URL is set but is not an http(s) address. Unset it for the switch (nothing was recorded)"
+    url_scheme="${BASH_REMATCH[1]}"
+    url_auth="${BASH_REMATCH[2]}"
+    url_rest="${BASH_REMATCH[3]}"
+    case "${url_auth}" in *@*) fail "FY_URL carries credentials before the host. Unset it for the switch: fy reaches the daemon of ${H} without it (nothing was recorded)" ;; esac
+    loopback_re='^(localhost|127(\.[0-9]{1,3}){3}|\[::1\])(:[0-9]{1,5})?$'
+    [[ ${url_auth} =~ ${loopback_re} ]] || fail "FY_URL names a host that is not this machine's loopback, so it cannot be proven to be the daemon of ${H}. Unset it for the switch (nothing was recorded)"
+    url_state="set"
+    url_base="${url_scheme}://${url_auth}"
+    if [ -n "${url_rest}" ] && [ "${url_rest}" != "/" ]; then url_extra=present; fi
+  fi
+  port_state="unset"
+  port_value=""
+  if [ -n "${FY_PORT+x}" ]; then
+    [[ ${FY_PORT} =~ ^[0-9]{1,5}$ ]] || fail "FY_PORT is set but is not a plain port number. Unset it or fix it for the switch (nothing was recorded)"
+    port_state="set"
+    port_value="${FY_PORT}"
+  fi
+
   stamp="${MIGRATE_STAMP:-$(date -u +%Y-%m-%d-%H%M)}"
   if [ -z "${NOTES}" ]; then NOTES="${HOME}/v4-to-v5-${stamp}.notes"; fi
   (
@@ -247,17 +318,15 @@ preflight)
   note_set V4_FYD "${v4_fyd}"
   note_set V4_WORKER "${v4_worker}"
   note_set ORIG_PATH "${PATH}"
-  # FY_URL is a plain address; a value that could carry credentials is recorded as set but not copied.
-  if [ -n "${FY_URL+x}" ]; then
-    note_set FY_URL_STATE set
-    if [[ ${FY_URL} =~ ^https?://[^@/]*/?$ ]]; then note_set FY_URL "${FY_URL}"; else
-      note_set FY_URL ""
-      say "⚠️ FY_URL is set to a value this script will not copy; rollback cannot restore it. Note it yourself."
-    fi
-  else
-    note_set FY_URL_STATE unset
+  note_set H_CANON "$(canon "${H}")"
+  note_set FY_URL_STATE "${url_state}"
+  if [ "${url_state}" = set ]; then
+    note_set FY_URL "${url_base}"
+    note_set FY_URL_EXTRA "${url_extra:-none}"
+    if [ -n "${url_extra}" ]; then say "⚠️ FY_URL carries more than scheme://host:port (a path, query or fragment: query present). Only the address is recorded; rollback uses the address alone. The extra part is never copied."; fi
   fi
-  note_set FY_PORT_STATE "$([ -n "${FY_PORT+x}" ] && echo set || echo unset)"
+  note_set FY_PORT_STATE "${port_state}"
+  if [ "${port_state}" = set ]; then note_set FY_PORT "${port_value}"; fi
   mark preflighted
   say "✅ preflight passed: v4 ${v4_version} -> ${tag:-rehearsal}, kind ${kind}, home ${H}"
   say "NOTES=${NOTES}"
@@ -316,10 +385,10 @@ baseline)
   done
   sort "${base}/logins.raw" >"${base}/logins.txt"
   rm -f "${base}/logins.raw"
-  orig_env "${v4_fy}" secret ls --json >"${base}/secrets.raw.json" || fail "v4 'fy secret ls --json' failed"
-  jq -e '(.health // "ok") != "damaged" and (.secrets | type) == "array"' "${base}/secrets.raw.json" >/dev/null || fail "the v4 secret store is damaged or unreadable; do not go on"
-  jq -r '[.secrets[].name] | sort | .[]' "${base}/secrets.raw.json" >"${base}/secrets.txt"
-  rm -f "${base}/secrets.raw.json"
+  secret_listing="$(orig_env "${v4_fy}" secret ls --json)" || fail "v4 'fy secret ls --json' failed"
+  jq -e '(.health // "ok") != "damaged" and (.secrets | type) == "array"' <<<"${secret_listing}" >/dev/null || fail "the v4 secret store is damaged or unreadable; do not go on"
+  jq -r '[.secrets[].name] | sort | .[]' <<<"${secret_listing}" >"${base}/secrets.txt"
+  secret_listing=""
 
   note_set BASE "${base}"
   note_set ASKS_OPEN "${asks_open}"
@@ -334,6 +403,7 @@ quiet)
   v4_fy="$(note_get V4_FY)"
   [ "${owner_quiet}" = 1 ] || fail "ask the owner first, then pass --owner-confirmed. They must say: no ferret is mid-turn, phone approvals and input holds are settled, no loop or timer runs inside a harness, and nobody will message a ferret or type into a pane"
   has_mark baselined || fail "run baseline first"
+  rehearsal_phase_guard "${H}"
   mark quieting
   sock="${H}/tmux.sock"
   empty=0
@@ -390,6 +460,7 @@ backup)
   B="$(note_get B)"
   [ "${owner_yes}" = 1 ] || fail "tell the owner: 'I will move ${H} to ${B}; that folder is the backup and stays untouched until you delete it', then pass --owner-yes"
   has_mark quiet || fail "run quiet first"
+  rehearsal_phase_guard "${H}"
   if has_mark backed-up && [ -d "${B}" ] && [ ! -e "${H}" ]; then
     say "✅ already backed up at ${B}"
     exit 0
@@ -409,6 +480,7 @@ convert)
   B="$(note_get B)"
   src="$(note_get SRC)"
   has_mark backed-up || fail "run backup first"
+  rehearsal_phase_guard "${H}"
   [ "$(git -C "${src}" rev-parse HEAD)" = "$(note_get COMMIT)" ] || fail "the converter checkout moved off the recorded commit"
   [ -z "$(git -C "${src}" status --porcelain)" ] || fail "the converter checkout has local changes"
   [ ! -e "${H}" ] || fail "${H} exists: the converter writes a new home"
@@ -450,14 +522,13 @@ install)
   kind="$(note_get KIND)"
   tag="$(note_get TAG)"
   has_mark converted || fail "run convert first"
+  rehearsal_phase_guard "${H}"
   mark installing-v5
 
   if [ -n "${rehearsal_build}" ]; then
     # REHEARSAL ONLY: a pre-release build in a sandbox. Never for a real home.
     [ "${MIGRATE_REHEARSAL:-}" = 1 ] || fail "--rehearsal-build needs MIGRATE_REHEARSAL=1. It is for rehearsing the migration in a sandbox; the owner's real switch runs only from a released 5.0"
-    default_home="none"
-    if [ -d "${HOME}/.ferretry" ]; then default_home="$(cd "${HOME}/.ferretry" && pwd -P)"; fi
-    [ "${H}" != "${HOME}/.ferretry" ] && [ "$(cd "${H}" && pwd -P)" != "${default_home}" ] || fail "--rehearsal-build refuses the default home ${HOME}/.ferretry: this mode is never for a real home"
+    rehearsal_refuse "${H}"
     [ -x "${rehearsal_build}/fy" ] && [ -x "${rehearsal_build}/fyd" ] || fail "${rehearsal_build} must hold executable fy and fyd"
     say "⚠️ REHEARSAL BUILD: the app origin of this build is the PREVIEW (ferretry-v5.pages.dev), not the production app, so paired devices and passkeys from the real app do NOT carry over. This mode is never for a real home."
     note_set REHEARSAL_BUILD "${rehearsal_build}"
@@ -498,18 +569,43 @@ install)
     standalone)
       note_set PKG_BEFORE standalone
       aside="${B}-bin"
-      mkdir -p "${aside}"
-      : >"${aside}/paths.txt"
-      for p in fy fyd fyd-browser-worker; do
-        c=""
-        if found="$(resolve "$(note_get ORIG_PATH)" "${p}")"; then c="${found}"; fi # not found: handled below by name
-        if [ -n "${c}" ]; then
-          cp -p "${c}" "${aside}/${p}" || fail "cannot copy ${c} aside"
-          printf '%s\n' "${c}" >>"${aside}/paths.txt"
-        elif [ "${p}" = fyd-browser-worker ]; then say "📝 no fyd-browser-worker found (a very old install)"; else fail "${p} is missing: there would be no exact v4 to put back"; fi
-      done
-      say "📝 v4 programs kept in ${aside}"
-      orig_env "$(note_get V4_FY)" daemon update --major --yes --to "${want}" || fail "'fy daemon update --major --yes --to ${want}' failed"
+      skip_update=0
+      if [ -e "${aside}" ]; then
+        # A backup of the v4 programs exists: it is the only exact copy and is NEVER written again. Same bytes as now = nothing
+        # was swapped yet; different bytes and fy already is the selected release = the swap happened, go on to the checks.
+        swapped=0
+        for p in fy fyd fyd-browser-worker; do
+          [ -f "${aside}/${p}" ] || continue
+          c="$(resolve "$(note_get ORIG_PATH)" "${p}")" || c=""
+          if [ -z "${c}" ] || ! cmp -s "${c}" "${aside}/${p}"; then swapped=1; fi
+        done
+        if [ "${swapped}" = 1 ]; then
+          now="$(v5_version "$(v5_fy)")" || now=""
+          [ "${now}" = "${want}" ] || fail "the saved v4 programs in ${aside} are kept untouched, and the programs now on the PATH differ from them without being ${want}: install will not overwrite that backup. Run rollback, or restore by hand"
+          say "📝 the swap to ${want} already happened; the v4 backup in ${aside} is untouched"
+          skip_update=1
+        else
+          say "📝 the v4 backup in ${aside} already exists and matches the installed programs: kept untouched"
+        fi
+      else
+        partial="${aside}.partial"
+        rm -rf "${partial}"
+        mkdir -p "${partial}"
+        : >"${partial}/paths.txt"
+        for p in fy fyd fyd-browser-worker; do
+          c=""
+          if found="$(resolve "$(note_get ORIG_PATH)" "${p}")"; then c="${found}"; fi # not found: handled below by name
+          if [ -n "${c}" ]; then
+            cp -p "${c}" "${partial}/${p}" || fail "cannot copy ${c} aside"
+            printf '%s\n' "${c}" >>"${partial}/paths.txt"
+          elif [ "${p}" = fyd-browser-worker ]; then say "📝 no fyd-browser-worker found (a very old install)"; else fail "${p} is missing: there would be no exact v4 to put back"; fi
+        done
+        mv "${partial}" "${aside}" || fail "cannot finish the v4 backup ${aside}"
+        say "📝 v4 programs kept in ${aside}"
+      fi
+      if [ "${skip_update}" = 0 ]; then
+        orig_env "$(note_get V4_FY)" daemon update --major --yes --to "${want}" || fail "'fy daemon update --major --yes --to ${want}' failed"
+      fi
       ;;
     manual)
       note_set PKG_BEFORE manual
@@ -520,13 +616,16 @@ install)
     mark installed-v5
   fi
 
-  got="$(version_of "$(v5_fy)")" || fail "the v5 fy prints no version"
+  got="$(v5_version "$(v5_fy)")" || fail "the v5 fy prints no version"
   [[ ${got} =~ ^5\. ]] || fail "fy --version prints ${got}, not 5.x: v5 is not what 'fy' resolves to"
   if [ -z "${rehearsal_build}" ]; then
     [ "${got}" = "${tag#v}" ] || fail "fy is ${got} but the converter is ${tag}: they must match"
   fi
-  fyd_got="$(version_of "$(v5_fyd)")" || fail "the v5 fyd prints no version"
+  fyd_got="$(v5_version "$(v5_fyd)")" || fail "the v5 fyd prints no version"
   [[ ${fyd_got} =~ ^5\. ]] || fail "fyd --version prints ${fyd_got}, not 5.x"
+  if [ -z "${rehearsal_build}" ]; then
+    [ "${fyd_got}" = "${tag#v}" ] || fail "fyd is ${fyd_got} but the converter is ${tag}: fy and fyd must both be the selected release"
+  fi
   say "✅ v5 installed: fy ${got}, fyd ${fyd_got} (the daemon is NOT started)"
   ;;
 
@@ -551,8 +650,11 @@ start)
   status=0
   fy5_pinned config check >"${NOTES}.config-check.out" 2>&1 || status=$?
   if [ "${status}" -ne 0 ]; then
-    # Expected only for a literal credential in a login file (it names the file and key, never a value).
-    grep -q 'secret set' "${NOTES}.config-check.out" || fail "fy config check failed for a reason other than a literal credential (see ${NOTES}.config-check.out)"
+    # Expected only for a literal credential in a login file (it names the file and key, never a value). EVERY line of the
+    # report must be that diagnostic: one other problem next to it (schema, access, a held change) is a stop.
+    credential_lines="$(awk '/secret set/ {n++} END {print n + 0}' "${NOTES}.config-check.out")"
+    other_lines="$(awk 'NF && !/secret set/ {n++} END {print n + 0}' "${NOTES}.config-check.out")"
+    { [ "${credential_lines}" -gt 0 ] && [ "${other_lines}" -eq 0 ]; } || fail "fy config check failed for a reason other than only a literal credential (see ${NOTES}.config-check.out)"
     say "⚠️ fy config check names a literal credential in a login file (expected, repaired by the OWNER after the start; names below)"
     cat "${NOTES}.config-check.out"
     mark credential-repair-pending
@@ -663,17 +765,20 @@ verify)
   done
   sort "${work}/logins.raw" >"${work}/logins.txt"
   if cmp -s "${base}/logins.txt" "${work}/logins.txt"; then row "logins" OK "$(wc -l <"${base}/logins.txt" | tr -d ' ') login files, same names"; else row "logins" FAIL "login names differ from the baseline"; fi
-  if fy5 secret ls --json >"${work}/secrets.raw" && jq -r '[.secrets[].name] | sort | .[]' "${work}/secrets.raw" >"${work}/secrets.txt"; then
+  # The listing stays in memory. v5 answers a damaged store with health "damaged" and no names, so an empty list proves nothing:
+  # only a well-formed listing with health "ready" is compared (a zero-name baseline included).
+  if secret_listing="$(fy5 secret ls --json)" && jq -e '.health == "ready" and (.secrets | type) == "array"' <<<"${secret_listing}" >/dev/null && jq -r '[.secrets[].name] | sort | .[]' <<<"${secret_listing}" >"${work}/secrets.txt"; then
     # Names the converter added (LOGIN_<ID>_<VAR>) are expected on top of the baseline; none may be missing.
     missing="$(comm -23 "${base}/secrets.txt" "${work}/secrets.txt")"
     if [ -z "${missing}" ]; then row "secret names" OK "$(wc -l <"${base}/secrets.txt" | tr -d ' ') baseline names present"; else row "secret names" FAIL "$(wc -l <<<"${missing}" | tr -d ' ') baseline names missing"; fi
   else
-    row "secret names" FAIL "v5 'fy secret ls --json' failed"
+    row "secret names" FAIL "v5 'fy secret ls --json' failed, was unreadable, or says the store is not healthy"
   fi
 
   # Asks: the owner's count against v5's list.
   if fy5 ask >"${work}/ask.out"; then
-    if grep -q 'no asks are waiting' "${work}/ask.out"; then listed=0; else listed=$(($(wc -l <"${work}/ask.out") - 1)); fi
+    # Exactly the empty form (one line, "no asks are waiting"), else one header line and one line per ask.
+    if [ "$(wc -l <"${work}/ask.out" | tr -d ' ')" = 1 ] && grep -qxE 'no asks are waiting.*' "${work}/ask.out"; then listed=0; else listed=$(($(wc -l <"${work}/ask.out") - 1)); fi
     if [ "${listed}" = "$(note_get ASKS_OPEN)" ]; then row "asks" OK "${listed} open, as the owner counted"; else row "asks" REVIEW "v5 lists ${listed}, the owner counted $(note_get ASKS_OPEN): show the owner"; fi
   else
     row "asks" FAIL "v5 'fy ask' failed"
@@ -706,32 +811,52 @@ rollback)
   [ "${owner_yes}" = 1 ] || fail "tell the owner what a rollback costs: v4 returns exactly as it was at the backup; anything done in v5 since the start (messages, cards, asks, new ferrets, new secrets) stays whole in ${H}-v5-failed-${stamp} and is not in v4. With their yes pass --owner-yes"
   mark rolling-back
 
-  # 1. A v5 daemon that may be live: proven by the process list, never by a marker.
+  # 1. Quiet first, then the daemon. The panes of the harnesses run in tmux whether or not any daemon does, so a quiet
+  # window is established for every expected live pane EVERY time (a crashed or absent daemon is not an idle harness), and
+  # nothing is moved until it is. Which daemon a live fyd is comes from the RECORDED state, never from the fy now on PATH.
+  want_quiet=1
+  if [ "$(note_get PANES)" = none ]; then want_quiet=0; fi
+  rb_sock=""
+  for cand in "${H}/state/terminals/tmux.sock" "${B}/tmux.sock" "${H}/tmux.sock"; do
+    if [ -S "${cand}" ] && [ -z "${rb_sock}" ]; then rb_sock="${cand}"; fi
+  done
+  rb_quiet() { # $1 when: "before" or "after" the daemon stop
+    [ "${want_quiet}" = 1 ] || return 0
+    if [ -z "${rb_sock}" ]; then
+      say "📝 no tmux socket found at ${H} or ${B}: there is no live pane to watch"
+      return 0
+    fi
+    local qs=0
+    quiet_check "${rb_sock}" || qs=$?
+    case "${qs}" in
+    0) say "📝 quiet ${1}: no pane wrote for 60 s" ;;
+    1) fail "no quiet point ${1} (a pane kept writing): the owner messages no ferret and types into no pane; nothing was moved; run rollback again" ;;
+    *) unreadable "tmux could not be read at ${rb_sock} (${1}): nothing was moved, because pane activity cannot be proven quiet" ;;
+    esac
+  }
+  last_daemon="$(grep -E '^# (starting-v5|started-v5|v4-daemon-started)$' "${NOTES}" | tail -n 1)" || last_daemon=""
   if daemon_live; then
-    ver=""
-    if fy_try="$(v5_fy)" && out="$(version_of "${fy_try}")"; then ver="${out}"; fi # fy absent or silent: not v5, handled below
-    if [[ ${ver} =~ ^5\. ]]; then
-      say "⚙️ a fyd process is running and fy is v5: reaching a quiet point, then stopping it (panes keep running)"
-      sock=""
-      if [ -S "${H}/state/terminals/tmux.sock" ]; then sock="${H}/state/terminals/tmux.sock"; elif [ -S "${B}/tmux.sock" ]; then sock="${B}/tmux.sock"; fi
-      if [ -n "${sock}" ]; then
-        status=0
-        quiet_check "${sock}" || status=$?
-        [ "${status}" -eq 0 ] || fail "no quiet point before stopping v5 (exit ${status}): the owner messages no ferret and types into no pane; run rollback again"
-      fi
+    case "${last_daemon}" in
+    "# starting-v5" | "# started-v5")
+      # The recorded state says the last daemon this script launched is v5. Only a v5 fy can stop it; without one, nothing is moved.
+      ver=""
+      if fy_try="$(v5_fy)" && out="$(v5_version "${fy_try}")"; then ver="${out}"; fi # fy absent or silent: not v5, refused below
+      [[ ${ver} =~ ^5\. ]] || fail "a fyd process is running and the notes say it is the v5 daemon, but fy (${ver:-not found}) is not v5, so it cannot be stopped safely here. Nothing was moved: stop that daemon yourself, or bring the v5 programs back, then run rollback again"
+      say "⚙️ a fyd process is running; the notes say it is the v5 daemon: reaching a quiet point, then stopping it (panes keep running)"
+      rb_quiet before
       fy5 daemon stop || fail "'fy daemon stop' failed for the v5 daemon"
-      if [ -n "${sock}" ]; then
-        status=0
-        quiet_check "${sock}" || status=$?
-        [ "${status}" -eq 0 ] || fail "no quiet point after stopping v5 (exit ${status})"
-      fi
+      rb_quiet after
       if daemon_live; then fail "a fyd process is still running after 'fy daemon stop': it cannot be proven that no v5 daemon owns ${H}; tell the owner"; fi
       say "📝 proven: no fyd process is running"
-    else
-      say "📝 a fyd process is running but fy is not v5 (${ver:-unknown}): treated as the v4 daemon, left alone"
-    fi
+      ;;
+    *)
+      say "📝 a fyd process is running, and the notes record no v5 daemon launch after the last v4 start: it is the v4 daemon, left alone"
+      rb_quiet before
+      ;;
+    esac
   else
     say "📝 proven: no fyd process is running"
+    rb_quiet before
   fi
 
   # 2. Homes. Only move H aside when the backup exists (otherwise H still IS the v4 home).
@@ -786,7 +911,13 @@ rollback)
       done
       ;;
     rehearsal) say "📝 a rehearsal build changed no installed package: nothing to restore" ;;
-    manual | *) fail "restore the v4 programs (4.291.10 or later) by hand, the way this machine installs Ferretry, then run rollback again" ;;
+    manual | *)
+      # The owner restores the v4 programs by hand; a rerun recognises it (fy AND fyd print 4.291.x) and goes on.
+      v4_back=0
+      if got_fy="$(v4_version_of "$(resolve "$(note_get ORIG_PATH)" fy)" 2>/dev/null)" && got_fyd="$(v4_version_of "$(resolve "$(note_get ORIG_PATH)" fyd)" 2>/dev/null)" && [[ ${got_fy} =~ ^4\.291\. ]] && [[ ${got_fyd} =~ ^4\.291\. ]]; then v4_back=1; fi
+      [ "${v4_back}" = 1 ] || fail "restore the v4 programs (4.291.10 or later) by hand, the way this machine installs Ferretry, then run rollback again (the homes are already restored)"
+      say "📝 the v4 programs are back (fy ${got_fy}, fyd ${got_fyd}): going on"
+      ;;
     esac
   else
     say "📝 v5 was never installed: v4 is still installed"
@@ -795,7 +926,6 @@ rollback)
   # 4. v4 again: ORIGINAL PATH and FY_URL exactly as recorded (never the shell's current ones).
   got="$(fy4 --version)" || fail "fy does not run with the recorded PATH"
   [[ ${got} =~ 4\.291\.[0-9]+ ]] || fail "fy --version prints '${got}', not 4.291.x: the v4 programs are not back"
-  if [ "$(note_get FY_PORT_STATE)" != "$([ -n "${FY_PORT+x}" ] && echo set || echo unset)" ]; then say "⚠️ FY_PORT is now $([ -n "${FY_PORT+x}" ] && echo set || echo unset); it was $(note_get FY_PORT_STATE) at preflight: restore it in the owner's shell"; fi
   fy4 daemon start || fail "'fy daemon start' failed: if it says v4 is already running, run 'fy daemon restart'"
   mark v4-daemon-started
 

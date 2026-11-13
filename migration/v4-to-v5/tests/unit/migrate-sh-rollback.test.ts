@@ -344,13 +344,14 @@ describe('rollback: by recorded state', () => {
     expect((await sb.calls()).filter(line => line.startsWith('fy restart'))).toEqual([]);
   });
 
-  test('a live v4 daemon (fy is v4) is left alone, not stopped as if it were v5', async () => {
+  test('a live fyd when the notes record NO v5 launch is the v4 daemon: left alone, after the quiet check', async () => {
     const sb = await box();
     await advance(sb, 'backup');
     await sb.state('ps.out', '/opt/ferretry/fyd\n');
     const result = await sb.run('rollback', ['--owner-yes']);
     expect(result.code).toBe(0);
-    expect(result.out).toContain('treated as the v4 daemon');
+    expect(result.out).toContain('it is the v4 daemon, left alone');
+    expect(result.out).toContain('quiet before');
     expect((await sb.calls()).filter(line => line === 'fy daemon stop').length).toBe(1); // only the quiet phase's own stop
   });
 });

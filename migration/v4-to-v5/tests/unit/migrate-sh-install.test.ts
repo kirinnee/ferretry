@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { advance, makeSandbox, type Sandbox, writeV5Build } from './migrate-harness.ts';
 
@@ -239,24 +239,25 @@ describe('install --rehearsal-build (a sandbox proof only)', () => {
     );
   });
 
-  test('refuses the default home ($HOME/.ferretry), even with MIGRATE_REHEARSAL=1', async () => {
+  test('refuses the default home ($HOME/.ferretry), even with MIGRATE_REHEARSAL=1 (already in preflight: see migrate-sh-fix1 P1-7)', async () => {
     const sb = await box({ homeName: '.ferretry', tag: null });
     await writeV5Build(sb);
-    await upToConvert(sb);
-    const result = await sb.run('install', ['--rehearsal-build', sb.v5bin], rehearsalEnv);
+    const result = await sb.run('preflight', ['--notes', sb.notes], rehearsalEnv);
     expect(result.code).toBe(1);
     expect(result.err).toContain('never for a real home');
   });
 
-  test('refuses the default home reached by a symlink, too', async () => {
-    const sb = await box({ homeName: 'real-home', tag: null });
+  test('install itself re-checks the default home from the recorded notes (a notes file edited into a rehearsal)', async () => {
+    const sb = await box({ homeName: '.ferretry' });
     await writeV5Build(sb);
-    await upToConvert(sb);
-    await mkdir(join(sb.home), { recursive: true });
-    await Bun.spawn(['ln', '-s', sb.v4home, join(sb.home, '.ferretry')]).exited;
+    await advance(sb, 'convert');
+    await writeFile(sb.notes, (await sb.notesText()).replace('REHEARSAL=0', 'REHEARSAL=1'));
     const result = await sb.run('install', ['--rehearsal-build', sb.v5bin], rehearsalEnv);
     expect(result.code).toBe(1);
     expect(result.err).toContain('never for a real home');
+    expect(
+      (await sb.calls()).filter(line => /^(brew|nix) /.test(line) && /install|uninstall|upgrade|remove/.test(line)),
+    ).toEqual([]);
   });
 
   test('in a sandbox it works, says the app origin is the preview, never touches a package manager, and v5 runs from the build folder', async () => {
