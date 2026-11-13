@@ -86,6 +86,11 @@
       "id": "fy-ask-archive-paging",
       "what": "fy ask reads the asks of at most 500 archived ferrets (the archive route has no cursor); past that it says so and exits 1",
       "owner": "britnee"
+    },
+    {
+      "id": "fy-browser-firewall-entry",
+      "what": "fy browser firewall entry: 5.0 has no route for the browser ports (browserPorts is read by Runtimes, not Browsers); the verb refuses with a sentence and exits 1. The firewall script/unit/verify-unit/timer verbs are in 5.0",
+      "owner": "britnee"
     }
   ]
 }

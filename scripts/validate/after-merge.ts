@@ -63,6 +63,10 @@ export const OWNER_MOVED_ITEMS: readonly { readonly id: string; readonly decisio
     id: 'fy-ask-archive-paging',
     decision: 'lizzette 2026-11-13: fy ask past 500 archived ferrets moves after merge (not parity, fails loudly)',
   },
+  {
+    id: 'fy-browser-firewall-entry',
+    decision: 'lizzette 2026-11-13: fy browser firewall entry stays a declared gap after merge (no 5.0 route)',
+  },
 ];
 
 export const COUNT_NAMES = ['parityOpen', 'portsPendingLines', 'guaranteesMissing'] as const;
