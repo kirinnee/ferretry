@@ -529,13 +529,19 @@ export class CarrierRouter {
     const chosen = current.choice;
     const winner = chosen?.ok === true ? chosen.method : undefined;
     const named = (method: ConnectionMethod): boolean => carriers.some(listed => sameCarrier(listed, method));
-    const outlives = (method: ConnectionMethod): boolean =>
-      winner !== undefined && outlivesRepublish(winner) && sameCarrier(method, winner);
-    const kept = winner !== undefined && (named(winner) || outlivesRepublish(winner));
     // The live set belongs to the pairing, not to the entry, and is the one source of truth for the fallback: while any
-    // accepted session still stands in for the relay, a republish keeps the disclosure and the direct choice it shows,
-    // whether or not the remembered winner survived (a lost request lane forgets it; a lane is not every lane).
+    // accepted session still stands in for the relay, a republish keeps the disclosure, the direct choice it shows AND
+    // the stand-in itself, whether or not the remembered winner survived (a lost request lane forgets it; a lane is not
+    // every lane). What is kept follows the live set, not the winner: the paired direct address is positively marked and
+    // no publication can revoke it, so omitting it is not a withdrawal — unless the person has since CHOSEN a carrier
+    // (the unchosen default is the only fallback), which withdraws what that choice excludes.
     const standingIn = [...current.live].filter(live => live.standsIn);
+    const paired = this.#plan(daemon.daemon).fallsBackToPairedDirect ? pairedDirect(daemon) : undefined;
+    const standsInFor = (method: ConnectionMethod): boolean =>
+      standingIn.length > 0 && paired !== undefined && sameCarrier(method, paired);
+    const outlives = (method: ConnectionMethod): boolean =>
+      (winner !== undefined && outlivesRepublish(winner) && sameCarrier(method, winner)) || standsInFor(method);
+    const kept = winner !== undefined && (named(winner) || outlivesRepublish(winner));
     const entry: CarrierEntry = {
       published,
       choice: kept ? chosen : standingIn.at(-1)?.choice,
