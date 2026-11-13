@@ -95,7 +95,7 @@ const keeperFor = (
     state: state.port,
     compiledKey: signer.publicKey,
     allowUnsigned: options.allowUnsigned ?? false,
-    rewrites: [{ from: '/app/*', to: '/app/index.html' }],
+    rewrites: [{ from: '/app/*', to: '/app/' }],
     headers: HEADERS,
   });
   return { subject, caches, state };

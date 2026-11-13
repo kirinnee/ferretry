@@ -108,10 +108,10 @@ describe('the static landing document', () => {
   });
 
   it('routes both app navigation and QR pairing deep links to the PWA entry', () => {
-    expect(redirects).toContain('/app/* /app/index.html 200');
-    expect(redirects).toContain('/d/* /app/index.html 200');
-    expect(redirects).toContain('/setup /app/index.html 200');
-    expect(redirects).toContain('/pair /app/index.html 200');
-    expect(redirects).toContain('/pair/* /app/index.html 200');
+    expect(redirects).toContain('/app/* /app/ 200');
+    expect(redirects).toContain('/d/* /app/ 200');
+    expect(redirects).toContain('/setup /app/ 200');
+    expect(redirects).toContain('/pair /app/ 200');
+    expect(redirects).toContain('/pair/* /app/ 200');
   });
 });
