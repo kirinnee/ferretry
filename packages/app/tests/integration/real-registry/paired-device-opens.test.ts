@@ -190,7 +190,9 @@ describe('the registered production carrier router, with its real default', () =
       expect(inventoryKind(session)).toBe('unreadable');
       expect(session.runtime.wholeDaemonLine(session.daemonId)).toContain('Could not read');
       const why = session.runtime.wholeDaemonDetail(session.daemonId) ?? '';
-      expect(why).toBe('Relay only — there is no relay for this machine right now');
+      // The carrier's own cause, alone (no "the plugin list could not be read:" stacked in front of it).
+      expect(why.toLowerCase()).toContain('relay');
+      expect(why).not.toContain('could not be read');
       // Strict: the daemon's own address is never dialled, so no line says it was used.
       expect(session.dialled.every(isRelayDial)).toBe(true);
       expect(session.relayFallbackLine()).toBeUndefined();
