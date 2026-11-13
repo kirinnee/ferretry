@@ -1,5 +1,5 @@
 import { chmod, mkdir, readdir, utimes } from 'node:fs/promises';
-import { join, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { moveSealed } from '../sealed.ts';
 import { rebaseV4Path } from '../v4/rebase.ts';
@@ -126,7 +126,7 @@ export const harnessHomesStep: Step = {
       const presentHomes = (await info(homes)) === undefined ? [] : await readdir(homes, { withFileTypes: true });
       let carriedHomes = 0;
       let omittedHomes = 0;
-      const carriedNames = new Set<string>();
+      const carriedIds = new Set<string>();
       for (const source of presentHomes) {
         if (source.isSymbolicLink()) {
           links++;
@@ -146,14 +146,17 @@ export const harnessHomesStep: Step = {
           continue;
         }
         await copyTree(join(homes, name), join(targetRoot(item.harness), id), true);
-        carriedNames.add(name);
+        carriedIds.add(id);
         carriedHomes++;
       }
-      // A runtime v4 recorded (its id is known) whose home folder is on disk but was not mapped: its conversations would
-      // be lost while the report said complete. Named, and the conversion is incomplete.
-      const unmapped = presentHomes
-        .filter(source => source.isDirectory() && known.has(source.name) && !carriedNames.has(source.name))
-        .map(source => source.name)
+      // A runtime v4 recorded (its id is known) whose home sits under fleet/homes but was not carried: its conversations
+      // would be lost while the report said complete. Recorded runtimes and on-disk homes are matched on the SAME key (the
+      // runtime id): a recorded home with no folder on disk, or one only a differently-shaped folder stands in for, is named.
+      // A recorded home outside fleet/homes is never inspected and stays in the notCarried list.
+      const unmapped = [...known.entries()]
+        .filter(([id]) => !carriedIds.has(id))
+        .map(([, item]) => relative(resolve(homes), resolve(item.home)))
+        .filter(inside => inside !== '' && inside !== '..' && !inside.startsWith(`..${sep}`) && !isAbsolute(inside))
         .sort();
       return {
         ...base,
@@ -161,7 +164,7 @@ export const harnessHomesStep: Step = {
           ? { status: 'converted' as const }
           : {
               status: 'failed' as const,
-              note: `${unmapped.length} runtime home(s) on disk could not be mapped to where v4 recorded them, so they were not carried: ${unmapped.join(', ')}`,
+              note: `${unmapped.length} runtime home(s) v4 recorded under fleet/homes could not be mapped to a folder carried, so they were not carried: ${unmapped.join(', ')}`,
             }),
         sealed,
         kept: [
