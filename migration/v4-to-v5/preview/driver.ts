@@ -11,6 +11,7 @@ import { previewAuthoredFiles, previewHeldFiles, v4HeldFiles } from '../src/step
 import type { LockProbe } from '../src/preflight.ts';
 import { type ConversionReport, summarise } from '../src/report.ts';
 import { PREVIEW_WORKSPACE } from '../src/v5/harness-paths.ts';
+import { HELD_SENTENCES } from '../src/steps/preview-hold.ts';
 import { CODEX_HELD_SENTENCE, previewShellEnv, ZDOT_FOLDER } from '../src/v5/preview-env.ts';
 import { type Spellings } from '../src/v4/homes.ts';
 import { gateFiles, gateForecast } from './gate.ts';
@@ -53,7 +54,7 @@ const isRealFolder = async (path: string): Promise<boolean> =>
  */
 export function heldSection(report: ConversionReport): string {
   const held = report.steps.flatMap(step =>
-    step.notCarried.filter(item => item.why === CODEX_HELD_SENTENCE).map(item => `  - ${item.what}: ${item.why}`),
+    step.notCarried.filter(item => HELD_SENTENCES.includes(item.why)).map(item => `  - ${item.what}: ${item.why}`),
   );
   return held.length === 0
     ? 'HELD OUT OF THE PREVIEW: nothing (no Codex runtime, ferret or route was found)'
@@ -118,7 +119,7 @@ export async function dryRun(
     '',
     'IN THE PREVIEW HOME EVERY FERRET IS STOPPED: no launch command, no terminal handle, no transcript pointer, no',
     'credential hash, no token ledger, no worktree ownership. The runtimes config says autoResume: false.',
-    'LOGINS ARE LEFT OUT OF THE COPY (config/logins is not copied): you add logins fresh in the preview. `prepare` (an agent never runs it) reads each config/logins/*.yaml ONCE, for its harness field (and whether it has both claude and codex halves) and nothing else, to know which runtimes are Claude Code ones; this dry run reads no login file. Do not add a Codex login or runtime to the preview yet.',
+    'LOGINS ARE CARRIED SIGNED OUT: each Claude config/logins/*.yaml becomes an empty shell, BUILT from harness, store, label, preset and env references only (the budget is rebuilt from its numbers and moved to config/usage.yaml, where 5.0 enforces it, so the spend cap v4 enforced stays; an unaccepted raise stays held at the accepted cap) (store: host is written as store: ferretry; the preview vault is empty), so every Claude Code runtime loads and shows "Needs sign-in". fleet/credentials (the sign-ins themselves) is never copied: you sign in fresh in the preview. A Codex login is held with the Codex runtimes. No login file is copied or staged. `prepare` (an agent never runs it) reads each config/logins/*.yaml in memory, straight from v4, to build its shell and to know which runtimes are Claude Code ones; this dry run reads no login file. A literal env value (a key, a credential-file path, a flag) is never carried: it becomes a ${secret:NAME} reference, so you store it with fy5 secret set NAME. A login with no way to sign in (a cloud-only one), or with a budget that does not parse, is held by name, with its runtimes. Do not add a Codex login or runtime to the preview yet.',
     'LAST GATE: only fields that are EXECUTED or RESOLVED AS PATHS are checked (a ferret command, agent, folder, env and flags; every',
     'command, argument, env value, home and path of a runtime, profile, component, preset or MCP server). Free text (messages, events,',
     'prompts, notes) is neither gated nor redacted. A hit refuses the whole home, naming file and field, never the value. Spellings',
@@ -138,7 +139,7 @@ export async function dryRun(
     'THEN: fresh daemon identity and empty vault come from the 5.0 daemon at first start; nothing from v4 is reused.',
     `START (owner): ${join(target, 'bin', PREVIEW.wrapper)} daemon start   (FY_HOME, FY_PORT=${PREVIEW.port}, FY_URL pinned to it; no service unit)`,
     '',
-    `PROOF v4 was untouched: config files hashed and credential paths stat'ed (never read) before and after; the one login read is the harness field above (never written). Volatile, not hashed:`,
+    `PROOF v4 was untouched: config files hashed and credential paths stat'ed (never read) before and after; a login is read in memory only, to build its shell (never written back). Volatile, not hashed:`,
     ...VOLATILE.map(row => `  ${row}`),
   ];
   return lines.join('\n');
@@ -214,14 +215,17 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
   const before = await snapshot(v4Home, facts);
   const staging = guarded.staging;
   await rm(staging, { recursive: true, force: true });
-  const staged = await stage(v4Home, staging);
-  // The one thing read of the v4 login files: which harness each names (see `harness-map.ts`).
-  const loginHarnesses = await readLoginHarnesses(v4Home);
-
-  // The converter reads the host only for the archive-setting step, which is skipped; this folder is empty on purpose.
-  const emptyHost = await mkdtemp(join(tmpdir(), 'fy-preview-host-'));
+  // Staging, and everything after it, is under ONE cleanup: a prepare that fails at any point leaves no staging copy.
+  // (No login file is staged at all; the Settings step reads them from `v4Home` itself.)
+  let emptyHost: string | undefined;
+  let staged: Awaited<ReturnType<typeof stage>>;
   let result: Awaited<ReturnType<typeof convert>>;
   try {
+    staged = await stage(v4Home, staging);
+    // The v4 login files are read here only for which harness each names and whether it can sign in (`harness-map.ts`).
+    const loginHarnesses = await readLoginHarnesses(v4Home);
+    // The converter reads the host only for the archive-setting step, which is skipped; this folder is empty on purpose.
+    emptyHost = await mkdtemp(join(tmpdir(), 'fy-preview-host-'));
     result = await convert({
       from: staging,
       to: target,
@@ -239,7 +243,7 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
       ...(inputs.dropUncarried === true ? { dropUncarried: true } : {}),
     });
   } finally {
-    await rm(emptyHost, { recursive: true, force: true });
+    if (emptyHost !== undefined) await rm(emptyHost, { recursive: true, force: true });
     await rm(staging, { recursive: true, force: true });
   }
 

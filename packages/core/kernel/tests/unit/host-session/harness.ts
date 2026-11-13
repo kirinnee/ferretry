@@ -19,6 +19,7 @@ import type {
 } from '../../../contract/session.ts';
 import { isSessionEnd } from '../../../contract/session.ts';
 import type { SocketUpgradeDecision } from '../../../contract/socket.ts';
+import { type LogRecord, scopedLog } from '../../../host/log.ts';
 import type { Duration } from '@ferretry/std';
 import {
   type AccessLeasePolicy,
@@ -139,6 +140,8 @@ export interface Fixture {
   dispatch: (request: ApiRequest) => Promise<ApiResponse>;
   sockets: StreamDispatch;
   modesOff: Set<string>;
+  /** Every line the layer logged, in order. */
+  readonly logged: LogRecord[];
 }
 
 export async function fixture(options: { lease?: AccessLeasePolicy; crypto?: SessionCrypto } = {}): Promise<Fixture> {
@@ -148,6 +151,7 @@ export async function fixture(options: { lease?: AccessLeasePolicy; crypto?: Ses
   const pair = new FakePairMode();
   const requests: ApiRequest[] = [];
   const streams: ApiRequest[] = [];
+  const logged: LogRecord[] = [];
   const state: Fixture = {
     layer: undefined as unknown as SessionLayerHost,
     clock,
@@ -168,6 +172,7 @@ export async function fixture(options: { lease?: AccessLeasePolicy; crypto?: Ses
       reauthorize: () => true,
     },
     modesOff: new Set(),
+    logged,
   };
   const layer = createSessionLayer({
     crypto: options.crypto ?? relayCrypto,
@@ -183,6 +188,7 @@ export async function fixture(options: { lease?: AccessLeasePolicy; crypto?: Ses
     },
     clock,
     ...(options.lease === undefined ? {} : { lease: options.lease }),
+    log: scopedLog(record => logged.push(record), 'session'),
   });
   (state as { layer: SessionLayerHost }).layer = layer;
   return state;

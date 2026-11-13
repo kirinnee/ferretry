@@ -220,8 +220,8 @@ describe('fy pair', () => {
     should(h.qr.requests).be.empty();
     should(h.screen.text).containEql('Only a browser on this machine can redeem this link');
     const flattened = h.screen.text.replace(/\s+/gu, ' ');
-    should(flattened).containEql('publicUrl');
-    should(flattened).containEql('to the address other devices reach this machine at');
+    should(flattened).containEql('a loopback listener');
+    should(flattened).containEql('no separate public-address setting yet');
     should(h.screen.text).containEql(CODE);
     // There is nothing to scan on this offer, so the live line must not say there is.
     should(h.progress.events[0]).equal('start:Waiting for the code to be redeemed — 2:00 left');

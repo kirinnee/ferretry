@@ -149,7 +149,7 @@ async function daemon() {
   const pairing = new PairingService({
     daemonId: opened.daemonId,
     daemonName: opened.daemonName,
-    advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+    reach: () => ({ advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' } }),
     carriers: { current: () => [{ kind: 'direct', url: 'https://workstation.example.test' }] },
     clock: { now: () => Date.parse(AT) },
     cryptography: new NodePairingCryptography(),

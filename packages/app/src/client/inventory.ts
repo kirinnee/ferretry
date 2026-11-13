@@ -29,8 +29,20 @@ export type Inventory =
   | { readonly kind: 'read'; readonly entries: ReadonlyMap<string, InventoryEntry> }
   /** The daemon speaks another session protocol: the one full-screen sentence, nothing else is sent. */
   | { readonly kind: 'protocol-mismatch'; readonly daemonProtocol: number }
-  /** The answer was not an inventory. Damaged is not empty: everything stays blocked. */
-  | { readonly kind: 'unreadable' };
+  /**
+   * The answer was not an inventory, or never arrived. Damaged is not empty: everything stays blocked. `cause` is the
+   * session's own sentence when the read failed on the way (which carrier could not carry it), capped, never a body.
+   */
+  | { readonly kind: 'unreadable'; readonly cause?: string };
+
+/** The longest cause kept: a sentence to read to someone, not a log line. */
+const CAUSE_MAX = 240;
+
+/** An unreadable list because the read itself failed: the failure's sentence is kept, capped, so the screen can name it. */
+export function unreadableBecause(error: unknown): Inventory {
+  const message = error instanceof Error ? error.message.trim().replace(/\s+/gu, ' ') : '';
+  return message === '' ? { kind: 'unreadable' } : { kind: 'unreadable', cause: message.slice(0, CAUSE_MAX) };
+}
 
 export function parseInventory(body: unknown): Inventory {
   const envelope = InventoryEnvelopeSchema.safeParse(body);
@@ -129,4 +141,42 @@ export function wholeDaemonBlocked(inventory: Inventory | undefined, compiled: r
 export function eventOwner(eventName: string): string {
   const dot = eventName.indexOf('.');
   return dot === -1 ? eventName : eventName.slice(0, dot);
+}
+
+/**
+ * Why a whole daemon is blocked, in words an owner can read to a person helping: which core piece, and how it failed
+ * (`kernel: its contract differs`), or that the protocol differs, or why the answer could not be read — the carrier's own
+ * sentence, alone: the line above it already says the list could not be read, so a second "could not be read:" only
+ * stacks colons ("Why: Relay only — there is no relay for this machine right now."). Names
+ * ids and reasons only, never a hash or a body. `undefined` when nothing is blocked (or the answer has not come).
+ *
+ * The one full-screen sentence is the same for every core cause, so without this a mismatch, a missing piece and a
+ * damaged answer all read "Reload to get the new app." and cannot be told apart.
+ */
+export function wholeDaemonWhy(
+  inventory: Inventory | undefined,
+  compiled: readonly SurfaceEntry[],
+): string | undefined {
+  if (inventory === undefined) return undefined;
+  if (inventory.kind === 'unreadable')
+    return inventory.cause === undefined
+      ? 'the plugin list this daemon sent could not be read'
+      : inventory.cause.replace(/[.\s]+$/u, '');
+  if (inventory.kind === 'protocol-mismatch')
+    return `this app speaks protocol ${PROTOCOL}, this daemon speaks protocol ${inventory.daemonProtocol}`;
+  const coreIds: readonly string[] = CORE_IDS;
+  const words: Record<'missing' | 'off' | 'different', string> = {
+    missing: 'is not in the list',
+    off: 'is off',
+    different: 'has a different contract',
+  };
+  const causes = compiled
+    .filter(entry => coreIds.includes(entry.id))
+    .flatMap(entry => {
+      const own = ownStanding(entry, inventory.entries);
+      return own.state === 'blocked' && own.reason !== 'core' && own.reason in words
+        ? [`${entry.id} ${words[own.reason as keyof typeof words]}`]
+        : [];
+    });
+  return causes.length === 0 ? undefined : causes.join('; ');
 }

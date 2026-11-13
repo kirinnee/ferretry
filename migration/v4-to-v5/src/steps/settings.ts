@@ -9,7 +9,7 @@
  * | `components/modelSets/<n>.yaml`        | `model-sets/<n>.yaml`                                               |
  * | `components/mcp/<n>.yaml`              | `mcp/<n>.yaml`                                                      |
  * | `components/skills/<n>.yaml`           | `skills/<n>.yaml`                                                   |
- * | `components/instructions/<n>.yaml`     | `instructions/<n>.md` (the document it points at, inside the assets) |
+ * | `components/instructions/<n>.yaml`     | `instructions/<n>.yaml` (`text:` = the document it points at, inside the assets) |
  * | `components/settings\|hooks/<n>.yaml`  | `{claude-code,codex}/{settings,hooks}/<n>.yaml` inline (file, env, -c, --disallowedTools); else NOT CARRIED, see `planHarnessComponent` |
  * | `logins/<id>.yaml`                     | `logins/<id>.yaml`                                                  |
  * | `presets/<id>.yaml`, `models/<id>.yaml`| `endpoints/<id>.yaml`, `models/<id>.yaml`                           |
@@ -30,28 +30,34 @@
  * file is read back as the v5 kernel reads it and parsed with the declared schema BEFORE anything is written. A value
  * that looks like a raw secret fails the step naming the file and key; `${secret:NAME}` references are kept verbatim.
  */
-import { INSTRUCTION_ITEMS_FOLDER } from '@ferretry/core-ferrets/contract';
 import { lstat, readFile } from 'node:fs/promises';
 import { componentFileSource, instructionsSource, MAX_COMPONENT_BYTES } from './component-files.ts';
 import { carryFlags, type FlagOutcome } from './component-flags.ts';
 import { carryAssetReferences, type CarriedAsset, v5AssetPath } from './component-assets.ts';
 import { join } from 'node:path';
-import { Document, isMap, isScalar, isSeq, Pair, type YAMLMap } from 'yaml';
+import { Document, isMap, isScalar, isSeq, Pair, parse, Scalar, type YAMLMap } from 'yaml';
 import type { KeptItem, NotCarried, StepReport } from '../report.ts';
 import {
   documentCredentialPaths,
   dropModeline,
   listV4Config,
   rawSecretPaths,
+  readPlainText,
   readV4Yaml,
+  strictYamlMap,
   V4_SINGLETONS,
   type V4ConfigFile,
   YAML_OPTIONS,
 } from '../v4/config.ts';
 import { failureNote, V4InputError } from '../v4/documents.ts';
 import { PREVIEW_CODEX_RUNTIMES, PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
+import { type Budget, buildShell, rebuildBudget } from './preview-logins.ts';
 import {
+  CODEX_HELD_SENTENCE,
   heldReason,
+  LOGIN_BUDGET_HELD_SENTENCE,
+  LOGIN_NO_SIGN_IN_HELD_SENTENCE,
+  LOGIN_UNNAMED_HELD_SENTENCE,
   type ProfileScopes,
   previewProfileScopes,
   type RuntimeHarness,
@@ -61,8 +67,8 @@ import { runtimeIds } from '../v4/ferrets.ts';
 import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
-import { takeLoginKeys, v4VaultNames } from './login-keys.ts';
 import { isCodexHostLogin, moveToFerretryStore } from './host-logins.ts';
+import { LoginKeyHold, takeLoginKeys, v4VaultNames } from './login-keys.ts';
 
 /** Every v5 file this step writes, with its owning plugin, from the one registry of targets. */
 const {
@@ -80,6 +86,7 @@ const {
   AGENDA: AGENDA_CONFIG,
   CONVERSATION: CONVERSATION_CONFIG,
   ENDPOINTS: ENDPOINTS_CONFIG,
+  INSTRUCTION_ITEMS,
   LOGINS: LOGINS_CONFIG,
   MODELS: MODELS_CONFIG,
   MCP: MCP_CONFIG,
@@ -137,10 +144,6 @@ const STATIC_NOT_CARRIED: readonly NotCarried[] = [
     why: 'JSON daemon documents, not YAML config kinds: the Daemon settings step splits daemon.json (Gate, Connections, the harness files, Agenda), the Usage step takes the pricing and the Packs step reads routing.json',
   },
   {
-    what: 'instructions component harness and clonedFrom* fields',
-    why: 'a v5 instruction item is a plain markdown file with no fields',
-  },
-  {
     what: 'config/layout.yaml, config/layouts/, config/themes/',
     why: 'no v4 source: v4 kept no layout or theme on disk; v5 starts on its built-in layout',
   },
@@ -171,13 +174,17 @@ interface Uncarried {
 
 interface Plan {
   readonly files: Map<string, Planned>;
-  readonly instructions: { readonly name: string; readonly source: string; readonly from: string }[];
   /** Files under v4's `fleet/assets/` that a carried hooks or settings document points at, by path under it. */
   readonly assets: Map<string, CarriedAsset>;
   readonly waiting: string[];
   readonly dropped: NotCarried[];
   readonly kept: Map<string, number>;
   readonly uncarried: Uncarried[];
+  /**
+   * Each login's spend cap, rebuilt from numbers, by login id. 5.0 enforces a budget only from `config/usage.yaml`
+   * (`budgets.<login>`), so a cap is moved there ({@link writeBudgets}); the login file carries none.
+   */
+  readonly budgets: Map<string, Budget>;
 }
 
 // ── yaml Document helpers ────────────────────────────────────────────────────────────────────────────────────────
@@ -201,7 +208,7 @@ function rename(map: YAMLMap, from: string, to: string, label: string): void {
 }
 
 /** v5 names a harness by its plugin id (`HarnessKeySchema`): v4 `claude` is `claude-code`; the `claude:` half key stays. */
-const HARNESS_FIELD = new Set(['login', 'preset', 'runtime', 'mcp', 'skills']);
+const HARNESS_FIELD = new Set(['login', 'preset', 'runtime', 'mcp', 'skills', 'instructions']);
 function harnessToV5(map: YAMLMap): void {
   const value = pairOf(map, 'harness')?.value;
   if (isScalar(value) && value.value === 'claude') value.value = 'claude-code';
@@ -369,19 +376,140 @@ function splitMachine(plan: Plan, file: V4ConfigFile, document: Document, resolv
   }
 }
 
+/**
+ * Takes a v4 login's `budget` out of its document and returns it REBUILT from numbers through v5's budget schema, or
+ * `undefined` when there is none to move. A budget that does not parse stays where it is, so the config check below
+ * refuses the file exactly as it always did (the real converter never writes a login capless). The comment on the removed
+ * key goes with it.
+ */
+function takeBudget(document: Document): Budget | undefined {
+  const map = contents(document);
+  if (pairOf(map, 'budget') === undefined) return undefined;
+  let value: unknown;
+  try {
+    value = (document.toJS({ maxAliasCount: 100 }) as Record<string, unknown>).budget;
+  } catch {
+    return undefined;
+  }
+  const rebuilt = rebuildBudget(value, true);
+  if (rebuilt === 'invalid' || rebuilt === undefined) return undefined;
+  take(map, 'budget');
+  return rebuilt;
+}
+
+/** The dollars of a cap as the report says them: a number and nothing else. */
+const dollars = (n: number): string => `$${String(n)}`;
+
+/**
+ * Writes every login's cap into `config/usage.yaml` `budgets.<login>`, a fresh object from numbers, merged into the
+ * file machine.yaml's split may already have planned (`timeZone`, `publicFeed` stay). The login files are its sources,
+ * so a login v4 holds an unconfirmed edit on holds this file's record too. The report names each carried limit by login
+ * id, period, level and dollars only.
+ */
+function writeBudgets(plan: Plan): void {
+  if (plan.budgets.size === 0) return;
+  const budgets: Record<string, Budget> = {};
+  let planned: Planned | undefined;
+  for (const [login, budget] of [...plan.budgets].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    budgets[login] = budget;
+    planned = place(plan, USAGE_CONFIG, undefined, `config/logins/${login}.yaml`);
+    for (const [period, limit] of Object.entries(budget))
+      for (const [level, amount] of Object.entries(limit))
+        count(plan, `login ${login} ${period} ${level} limit ${dollars(amount)}`);
+  }
+  if (planned === undefined) return;
+  if (!isMap(planned.document.contents)) planned.document.contents = planned.document.createNode({}) as YAMLMap;
+  const map = contents(planned.document);
+  take(map, 'budgets');
+  map.items.push(planned.document.createPair('budgets', budgets));
+}
+
+/** v4's 256 KiB cap on a config file, as the preview applies it to a login read from the v4 source. */
+export const MAX_LOGIN_BYTES = 256 * 1024;
+
 async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolve: Resolve): Promise<void> {
   const { address, label } = file;
   if (address.kind === 'learning' || address.kind === 'pack' || address.kind === 'modelsGuide') return;
-  const document = await readV4Yaml(file);
-  if (address.kind === 'component' && (address.componentKind === 'settings' || address.componentKind === 'hooks')) {
+  // The preview run AND its plain comparison / enforced passes (they carry `previewV4Home`; the real converter never does)
+  // see a login only as the BUILT shell, so no plain conversion of a login document is ever computed, and the accepted
+  // record of a login is the shell's, never the v4 file's.
+  const previewLogin = address.kind === 'login' && ctx.previewV4Home !== undefined;
+  // A preview login is read straight from the v4 source (no login file is staged) through the one safe reader: a link, a
+  // hard link, an oversized file or YAML with any error is "cannot be read", and the login is held.
+  let document: Document | undefined;
+  if (previewLogin) {
+    const text = file.text ?? (await readPlainText(file.path, MAX_LOGIN_BYTES));
+    document = text === undefined ? undefined : strictYamlMap(text);
+  } else document = await readV4Yaml(file);
+  if (
+    document !== undefined &&
+    address.kind === 'component' &&
+    (address.componentKind === 'settings' || address.componentKind === 'hooks')
+  ) {
     await planHarnessComponent(ctx, plan, file, document, address.componentKind, address.name);
     return;
   }
-  // A plain key in a login's env is parked for the vault and written here as a reference; any other secret-shaped value
-  // (and a key when no hold exists) still fails the step below, so nothing is ever left plain.
-  if (address.kind === 'login' && ctx.loginKeys !== undefined) takeLoginKeys(document, address.name, ctx.loginKeys);
-  // A Codex login kept in the terminal's own folder is written as Ferretry's own (the Logins step makes its empty folder).
-  if (address.kind === 'login' && isCodexHostLogin(document)) moveToFerretryStore(document);
+  // The preview carries a login only as a signed-out shell BUILT from an allowlist (see `./preview-logins.ts`): a new
+  // document, so no comment, unknown key or literal value of the v4 file can reach it. A Codex login stays held, and so
+  // does one with no way to sign in.
+  if (previewLogin) {
+    const shell =
+      document === undefined
+        ? ({ kind: 'held', harness: 'unknown' } as const)
+        : buildShell(document, address.name, !PREVIEW_CODEX_RUNTIMES, ctx.loginKeys ?? new LoginKeyHold());
+    if (shell.kind === 'held') {
+      const what =
+        shell.harness === 'codex'
+          ? ' (Codex)'
+          : shell.harness === 'unknown'
+            ? ' (its harness is not named)'
+            : shell.harness === 'budget'
+              ? ' (its budget cannot be carried)'
+              : ' (it has no way to sign in)';
+      plan.dropped.push({
+        what: `login ${address.name}${what}`,
+        why:
+          shell.harness === 'codex'
+            ? CODEX_HELD_SENTENCE
+            : shell.harness === 'unknown'
+              ? LOGIN_UNNAMED_HELD_SENTENCE
+              : shell.harness === 'budget'
+                ? LOGIN_BUDGET_HELD_SENTENCE
+                : LOGIN_NO_SIGN_IN_HELD_SENTENCE,
+      });
+      return;
+    }
+    document = shell.document;
+    if (shell.budget !== undefined) plan.budgets.set(address.name, shell.budget);
+    // The built shell is what the plain and enforced passes compare: its digest joins the login's fingerprint.
+    ctx.loginKeys?.sealShell(address.name, document.toString());
+    document.commentBefore = ` Carried from v4 ${label} by the v4 → v5 converter, as a signed-out shell.`;
+    if (shell.removed.length > 0)
+      plan.dropped.push({
+        what: `login ${address.name}: ${shell.removed.join(', ')}`,
+        why: 'a login is carried as a signed-out shell (harness, store, label, preset, env references): these fields are left behind',
+      });
+    if (shell.replaced.length > 0)
+      plan.dropped.push({
+        what: `login ${address.name}: the value of ${shell.replaced.join(', ')}`,
+        why: 'a literal value (a key, a credential-file path, a flag) is never carried: it is written as a ${secret:NAME} reference and the value is discarded; store the secret with fy secret set NAME',
+      });
+    if (shell.storeMoved)
+      plan.dropped.push({
+        what: `login ${address.name}: store host`,
+        why: "the preview's HOME is empty, so a host login would find no sign-in; it is written as a Ferretry-store login you sign in to",
+      });
+  } else if (document !== undefined && address.kind === 'login') {
+    // A plain key in a login's env is parked for the vault and written here as a reference; any other secret-shaped value
+    // (and a key when no hold exists) still fails the step below, so nothing is ever left plain.
+    if (ctx.loginKeys !== undefined) takeLoginKeys(document, address.name, ctx.loginKeys);
+    // A Codex login kept in the terminal's own folder is written as Ferretry's own (the Logins step makes its empty folder).
+    if (isCodexHostLogin(document)) moveToFerretryStore(document);
+    // The login's spend cap moves to usage.yaml (the only place 5.0 enforces one); the login file then carries none.
+    const budget = takeBudget(document);
+    if (budget !== undefined) plan.budgets.set(address.name, budget);
+  }
+  if (document === undefined) return; // unreachable: only a preview login is undefined, and it returned above
   const secrets = rawSecretPaths(document.toJS());
   if (secrets.length > 0)
     throw new V4InputError(
@@ -462,13 +590,79 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
         plan.waiting.push(`${label} (its document is a hard link (v4 refused it), so it was never read)`);
       else if (source === undefined)
         plan.waiting.push(`${label} (its document is not a plain file inside fleet/assets/)`);
-      else plan.instructions.push({ name: address.name, source, from: label });
+      else await planInstruction(plan, address.name, label, source, map);
       return;
     }
     case 'settings':
     case 'hooks':
       return; // handled above (planHarnessComponent)
   }
+}
+
+/** The fields of a v4 instructions component that a v5 `instructions/<name>.yaml` also holds (v4's `file` becomes `text`). */
+const INSTRUCTION_FIELDS = ['description', 'harness', 'clonedFrom', 'clonedFromDaemon', 'clonedFromKey'] as const;
+
+/**
+ * A v4 instructions component → v5's `instructions/<name>.yaml`: the document it points at becomes `text:` (v5 holds the
+ * text in the item; it reads no `.md` there), with the fields v4 had (`harness`, `description`, clone origin).
+ *
+ * v5 refuses a text over its size limit or holding a control character, and a text that does not read back from the YAML
+ * byte for byte would reach the harness changed. Each is NOT CARRIED, by name, exactly like a settings component v5
+ * refuses: a profile that layers it is then pending (or loses the layer under `--drop-uncarried`), so no profile is ever
+ * left naming a component that is not there (which makes the WHOLE fleet configuration unreadable).
+ */
+async function planInstruction(plan: Plan, name: string, label: string, source: string, map: YAMLMap): Promise<void> {
+  const layer = `instructions/${name}`;
+  const refuse = (reason: string): void => {
+    plan.uncarried.push({ label, layer, reasons: [`its document is not carried: ${reason}`], flags: [], empty: false });
+  };
+  const bytes = await readFile(source).catch(() => {
+    throw new V4InputError(`${label}: its document cannot be read`);
+  });
+  let text: string;
+  try {
+    // `ignoreBOM: true` KEEPS an initial U+FEFF in the text (the default strips it). v4 read this document with
+    // `readFile(path, 'utf8')`, which keeps it, so the harness was handed it; dropping it here would change the document.
+    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    refuse('it is not valid UTF-8 text');
+    return;
+  }
+  const fields: Record<string, string> = {};
+  for (const key of INSTRUCTION_FIELDS) {
+    const value = pairOf(map, key)?.value;
+    if (isScalar(value) && typeof value.value === 'string') fields[key] = value.value;
+  }
+  const { description, harness, ...origin } = fields;
+  // A block scalar when it reads back exactly; else a double-quoted one (which escapes what a block cannot hold).
+  const attempts: readonly (Scalar.Type | undefined)[] = [undefined, Scalar.QUOTE_DOUBLE];
+  let problem: string | undefined;
+  for (const type of attempts) {
+    const item = new Document(
+      {
+        ...(description === undefined ? {} : { description }),
+        text,
+        ...(harness === undefined ? {} : { harness }),
+        ...origin,
+      },
+      YAML_OPTIONS,
+    );
+    if (type !== undefined) {
+      const node = item.createNode(text);
+      node.type = type;
+      item.set('text', node);
+    }
+    item.commentBefore = ` Carried from v4 ${label} by the v4 → v5 converter.`;
+    const written = item.toString({ lineWidth: 0 });
+    problem = v5ConfigProblem(INSTRUCTION_ITEMS, name, written);
+    if (problem === undefined && (parse(written, { version: '1.2' }) as { text?: unknown }).text !== text)
+      problem = 'its text does not read back from the YAML unchanged';
+    if (problem !== undefined) continue;
+    place(plan, INSTRUCTION_ITEMS, name, label, item);
+    count(plan, 'instruction documents');
+    return;
+  }
+  refuse(`v5 refuses it as an instructions item (${problem ?? 'unknown'})`);
 }
 
 const V5_HARNESS = { claude: 'claude-code', 'claude-code': 'claude-code', codex: 'codex' } as const;
@@ -720,19 +914,37 @@ export async function buildPlan(
       ? name
       : (Object.entries(ids?.runtimes ?? {}).find(([, entry]) => entry.formerNames.includes(name))?.[0] ?? name);
   const listing = await listV4Config(ctx.v4.home, ctx.v4.configOverrides);
+  // The preview stages no login file (a failed prepare must leave no login bytes): its logins are listed from the real v4
+  // home, and read from there. Every pass that lists them (the preview run, its plain comparison and its enforced
+  // conversion) builds the SAME shell from them (`planFile`), never a plain conversion: a plain conversion of a login
+  // document keeps its comments and `store: host`, and the accepted-config step would write it to disk as a snapshot.
+  // The shell carries no budget: the cap is rebuilt from numbers into usage.yaml, so the same cap v4 enforced is kept.
+  const staged = new Set(listing.files.map(file => file.label));
+  const loginFiles =
+    ctx.previewV4Home === undefined
+      ? []
+      : (await listV4Config(ctx.previewV4Home)).files.filter(
+          file =>
+            file.address.kind === 'login' &&
+            !staged.has(file.label) &&
+            ctx.v4.configOverrides?.has(file.label) !== true,
+        );
   const plan: Plan = {
     files: new Map(),
-    instructions: [],
     assets: new Map(),
     waiting: [],
     dropped: [],
     kept: new Map(),
     uncarried: [],
+    budgets: new Map(),
   };
   // machine.yaml last: it adds to files other v4 files may also own (limits.yaml).
   const machine = `config/${V4_SINGLETONS.machine}`;
-  const ordered = [...listing.files].sort((a, b) => Number(a.label === machine) - Number(b.label === machine));
+  const ordered = [...listing.files, ...loginFiles].sort(
+    (a, b) => Number(a.label === machine) - Number(b.label === machine),
+  );
   for (const file of ordered) await planFile(ctx, plan, file, resolve);
+  writeBudgets(plan);
   if (ctx.preview === true) {
     // The preview never resumes a ferret by itself, whatever v4's machine.yaml said (or did not say). `limits.yaml` is
     // written off too (5.0 reads that file for launches, so once accepted it is a third layer); what the preview
@@ -801,12 +1013,15 @@ const scalarOf = (map: YAMLMap, key: string): string | undefined => {
 /**
  * Preview only: leaves out every runtime that is not provably a Claude Code one, and every profile that only such
  * runtimes use. Only a runtime PROVEN to be a Claude Code one is kept: its own `harness`, else the harness its login
- * names (the stage's map, `runtimeHarnessOf`; v4's own rule, never the runtime's name). The preview leaves every v4 login
- * file out, so a login the map does not know leaves the harness unknown, and an unknown one is held, said truthfully.
- * Each held runtime is listed by NAME.
+ * names (the stage's map, `runtimeHarnessOf`; v4's own rule, never the runtime's name). The preview carries each Claude
+ * login as a signed-out shell, so a login the map does not know leaves the harness unknown, and an unknown one is held,
+ * said truthfully; so is a runtime whose login was not carried. Each held runtime is listed by NAME.
  */
 function holdCodexRuntimes(plan: Plan, ctx: Pick<StepContext, 'previewLoginHarnesses'>, scopes: ProfileScopes): void {
   const planned = [...plan.files.entries()];
+  const carriedLogins = new Set(
+    planned.flatMap(([, file]) => (file.target === LOGINS_CONFIG && file.name !== undefined ? [file.name] : [])),
+  );
   const held = new Map<string, RuntimeHarness>();
   const profilesOf = new Map<string, { held: number; kept: number; codex: number }>();
   for (const [path, file] of planned) {
@@ -814,12 +1029,12 @@ function holdCodexRuntimes(plan: Plan, ctx: Pick<StepContext, 'previewLoginHarne
     const map = file.document.contents;
     const own = scalarOf(map, 'harness');
     const profile = scalarOf(map, 'profile');
-    const harness = runtimeHarnessOf(
-      ctx,
-      own,
-      scalarOf(map, 'login'),
-      profile === undefined ? undefined : scopes.get(profile),
-    );
+    const login = scalarOf(map, 'login');
+    const decided = runtimeHarnessOf(ctx, own, login, profile === undefined ? undefined : scopes.get(profile));
+    // A Claude Code runtime whose login was not carried would make the whole fleet configuration unreadable: it is
+    // held by name. (A Codex, unknown or two-CLI one keeps its own reason.)
+    const harness: RuntimeHarness =
+      decided === 'claude-code' && login !== undefined && !carriedLogins.has(login) ? 'no-login' : decided;
     const isHeld = harness !== 'claude-code';
     if (profile !== undefined) {
       const tally = profilesOf.get(profile) ?? { held: 0, kept: 0, codex: 0 };
@@ -833,7 +1048,7 @@ function holdCodexRuntimes(plan: Plan, ctx: Pick<StepContext, 'previewLoginHarne
     plan.files.delete(path);
     uncount(plan, 'runtimes');
     plan.dropped.push({
-      what: `runtime ${file.name}${harness === 'unknown' ? ' (its harness is unknown)' : harness === 'both' ? ' (its login drives both CLIs)' : ' (Codex)'}`,
+      what: `runtime ${file.name}${harness === 'unknown' ? ' (its harness is unknown)' : harness === 'both' ? ' (its login drives both CLIs)' : harness === 'no-login' ? ' (its login is not carried)' : ' (Codex)'}`,
       why: heldReason(harness),
     });
   }
@@ -901,13 +1116,6 @@ export const settingsStep: Step = {
         await ctx.v5.config(planned.target, planned.name, planned.document.toString({ lineWidth: 0 }), [
           ...planned.from,
         ]);
-      for (const item of plan.instructions) {
-        const bytes = await readFile(item.source).catch(() => {
-          throw new V4InputError(`${item.from}: its document cannot be read`);
-        });
-        await ctx.v5.opaque(join('config', INSTRUCTION_ITEMS_FOLDER, `${item.name}.md`), bytes);
-        count(plan, 'instruction documents');
-      }
       // The bytes the checks read, never a second read of the path.
       for (const asset of plan.assets.values()) await ctx.v5.opaque(v5AssetPath(asset.rel), asset.bytes, asset.mode);
     } catch (error) {

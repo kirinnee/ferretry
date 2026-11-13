@@ -41,6 +41,7 @@ import { check as readScoped } from '../validate/read-scoped.ts';
 import { check as registriesFresh } from '../validate/registries-fresh.ts';
 import { check as screenPaths } from '../validate/screen-paths.ts';
 import { check as shellProvides } from '../validate/shell-provides.ts';
+import { check as unwiredSeams } from '../validate/unwired-seams.ts';
 import { check as words } from '../validate/words.ts';
 import { type Check, type Finding, contextFor, parseArgs, report } from './lib/check.ts';
 import { generatePackage, writeFiles } from './registries.ts';
@@ -57,6 +58,7 @@ export const CHECKS: readonly Check[] = [
   manifestMatch,
   screenPaths,
   portsPending,
+  unwiredSeams,
   afterMerge,
   descriptorParity,
   parityTicks,
@@ -93,7 +95,7 @@ const SCOPED = new Set([
   'glossary',
   'private-files',
 ]);
-const GRAPH = new Set(['plugin-graph', 'core-closed', 'contract-graph']);
+const GRAPH = new Set(['plugin-graph', 'core-closed', 'contract-graph', 'unwired-seams']);
 
 /** Whether a finding is about this package: it is `where`, or a whole word of the message. */
 export function namesPackage(finding: Finding, id: string): boolean {

@@ -1,6 +1,7 @@
 import { relative } from 'node:path';
-import type { BinaryNames, ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
+import type { BinaryNames, BoundAddress, ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import type { Instant } from '@ferretry/std';
+import { notBuiltSummary } from '../contract/doctor.ts';
 import { decideHome } from '../contract/home.ts';
 import { milliseconds } from '@ferretry/std';
 import type {
@@ -270,6 +271,8 @@ export interface HostAdapters {
 
 export interface Listening {
   readonly addresses: readonly string[];
+  /** The TCP host and port it bound, for plugins that hand the address out (`kernel.bind`). */
+  readonly bound?: BoundAddress;
   stop(): Promise<void>;
 }
 
@@ -295,6 +298,8 @@ export interface HostOptions {
   readonly timings?: DaemonTimings;
   /** `FYD_BACKGROUND_DELAY_SECONDS` as `fyd` parsed it: when the `worker` job lane opens after start. */
   readonly backgroundDelayMs?: number;
+  /** Called once, when the home has been decided and opened for this daemon: from here on the boot log may be written. */
+  readonly onHomeOpened?: () => void;
   /** The product's binary names for `kernel.identity`. Default: read from the repo's `bin` keys. */
   readonly binaries?: BinaryNames;
 }
@@ -340,7 +345,13 @@ export interface RunningHost {
 
 export type BootOutcome =
   | { readonly kind: 'running'; readonly host: RunningHost }
-  | { readonly kind: 'refused'; readonly sentence: string; readonly trace: readonly string[] };
+  | {
+      readonly kind: 'refused';
+      readonly sentence: string;
+      readonly trace: readonly string[];
+      /** `'home'` when the folder itself was refused (not ours, or unreadable): nothing else about the boot is wrong. */
+      readonly cause?: 'home';
+    };
 
 /**
  * The plugin's update seam: the real one only for a plugin that declared `permissions.updateHost` AND the state files
@@ -408,7 +419,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   // this reading is stale the moment another daemon sets up the same home (today's `storage-factory.ts` order).
   phases.mark('home');
   const preliminary = decideHome(home, await probeHome(adapters.fs, home));
-  if (preliminary.kind === 'refuse') return { kind: 'refused', sentence: preliminary.sentence, trace };
+  if (preliminary.kind === 'refuse') return { kind: 'refused', sentence: preliminary.sentence, trace, cause: 'home' };
   if (preliminary.kind === 'create') await adapters.fs.mkdirp(home, 0o700);
   phases.mark('lock');
   let lease: HomeLockLease;
@@ -452,9 +463,10 @@ async function bootLocked(
 
   // Home and fence, identity (before anything is read from the home).
   const opened = await openHome(adapters.fs, home, `fyd ${options.version}`, clock.now() as Instant);
-  if (opened.kind === 'refused') return { kind: 'refused', sentence: opened.decision.sentence, trace };
+  if (opened.kind === 'refused') return { kind: 'refused', sentence: opened.decision.sentence, trace, cause: 'home' };
   if (opened.kind === 'logs-refused') return { kind: 'refused', sentence: opened.sentence, trace };
   // From here the log is written: a folder made or tightened now is the first thing it says.
+  options.onHomeOpened?.();
   if (opened.logs !== undefined)
     log.info(
       opened.logs === 'made'
@@ -471,6 +483,8 @@ async function bootLocked(
     daemonName: daemonNameFrom(adapters.hostname?.() ?? ''),
     binaries: options.binaries ?? PRODUCT_BINARIES,
   });
+  /** Set once the local listener has bound; cleared as it stops. Read lazily through `kernel.bind`. */
+  let listenerAt: BoundAddress | undefined;
   const websockets = adapters.websocket ?? noWebSockets();
   const sessionSigner = createIdentitySigner(identity);
 
@@ -922,6 +936,7 @@ async function bootLocked(
         onStop: lifecycle.onStop.bind(lifecycle),
         stopping: () => lifecycle.stopping(),
       }),
+      bind: { current: () => listenerAt },
       identity: identityPort,
       paths: gatedWhich(
         manifest.id,
@@ -1390,6 +1405,7 @@ async function bootLocked(
     },
     clock,
     lease: (options.timings ?? DEFAULT_DAEMON_TIMINGS).lease,
+    log: log.child('session'),
   });
   own(() => sessionLayer.close());
   // The bound admission may tell the host its policy moved (`watch`): every open stream is re-asked at once. The
@@ -1496,7 +1512,11 @@ async function bootLocked(
   if (options.listen !== undefined) {
     const listener = await options.listen(running);
     listening.push(listener);
-    own(() => listener.stop());
+    listenerAt = listener.bound;
+    own(() => {
+      listenerAt = undefined;
+      return listener.stop();
+    });
   }
   const carriers = new Map<string, AbortController>();
   const stopCarriers = (): void => {
@@ -1534,6 +1554,7 @@ async function bootLocked(
     stopping ??= (async () => {
       try {
         trace.push('stop:listen');
+        listenerAt = undefined;
         stopCarriers();
         for (const listener of [...listening].reverse()) await listener.stop().catch(() => undefined);
         sessionLayer.close();
@@ -1646,7 +1667,13 @@ async function doctorLines(
     for (const check of record.manifest.doctor ?? []) {
       const run = runs[check];
       if (run === undefined) {
-        lines.push({ plugin: id, check, state: 'fail', detail: `The check ${check} has no implementation.` });
+        // Declared and not built yet is a note, never a failure: nothing was found wrong, only nothing was checked.
+        lines.push({
+          plugin: id,
+          check,
+          state: 'warn',
+          detail: notBuiltSummary(check),
+        });
         continue;
       }
       try {

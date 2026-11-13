@@ -129,13 +129,13 @@ rg -q '^  Cache-Control: no-cache, no-store, must-revalidate$' "${headers}"
 rg -q '^  Cache-Control: public, max-age=31536000, immutable$' "${headers}"
 # The static landing owns `/`; the app and its durable daemon/pair/setup routes
 # are selectively rewritten to the PWA entry before the landing fallback.
-rg -q '^/app/\* /app/index\.html 200$' "${redirects}"
-rg -q '^/d/\* /app/index\.html 200$' "${redirects}"
-rg -q '^/setup /app/index\.html 200$' "${redirects}"
-rg -q '^/pair /app/index\.html 200$' "${redirects}"
-rg -q '^/pair/\* /app/index\.html 200$' "${redirects}"
-rg -q '^/join /app/index\.html 200$' "${redirects}"
-rg -q '^/shared /app/index\.html 200$' "${redirects}"
+rg -q '^/app/\* /app/ 200$' "${redirects}"
+rg -q '^/d/\* /app/ 200$' "${redirects}"
+rg -q '^/setup /app/ 200$' "${redirects}"
+rg -q '^/pair /app/ 200$' "${redirects}"
+rg -q '^/pair/\* /app/ 200$' "${redirects}"
+rg -q '^/join /app/ 200$' "${redirects}"
+rg -q '^/shared /app/ 200$' "${redirects}"
 require_in_block "/join" '^  Cache-Control: no-store$'
 last_redirect="$(tail -n 1 "${redirects}")"
 [[ ${last_redirect} == '/* /index.html 200' ]]

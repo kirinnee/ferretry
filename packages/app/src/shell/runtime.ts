@@ -1,10 +1,11 @@
 import { type ClientOrigin, DaemonClient, type ShellPluginClient } from '../client/daemon-client.ts';
-import type { Standing } from '../client/inventory.ts';
+import { type Standing, wholeDaemonWhy } from '../client/inventory.ts';
 import {
   blockedLine,
   DEVICE_NOT_ACCEPTED_SENTENCE,
   remedyFor,
   type Remedy,
+  UNREADABLE_INVENTORY_SENTENCE,
   wholeDaemonSentence,
 } from '../client/sentences.ts';
 import type { DaemonTransport } from '../client/transport.ts';
@@ -274,7 +275,18 @@ export class ShellRuntime {
     if (inventory === undefined) return undefined;
     const kernel = connection.client.standing('kernel');
     if (inventory.kind === 'read' && !(kernel.state === 'blocked' && kernel.reason === 'core')) return undefined;
+    // A list that could not be read is its own sentence: "reload" is the remedy for a different build, and says nothing
+    // true about a read that failed on the way.
+    if (inventory.kind === 'unreadable') return UNREADABLE_INVENTORY_SENTENCE;
     return wholeDaemonSentence(this.remedy(daemon));
+  }
+
+  /** Why {@link wholeDaemonLine} is showing (which core piece, or that the list was unreadable); `undefined` when it is not. */
+  wholeDaemonDetail(daemon: string): string | undefined {
+    if (this.wholeDaemonLine(daemon) === undefined) return undefined;
+    const connection = this.#connections.get(daemon);
+    if (connection?.kind !== 'connected') return undefined;
+    return wholeDaemonWhy(connection.client.inventory, this.surfaces);
   }
 
   /** The one line a blocked package shows on this daemon, or `undefined` when it may run. */

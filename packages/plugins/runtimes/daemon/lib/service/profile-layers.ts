@@ -27,8 +27,9 @@ import {
   type RuntimeId,
   type RuntimeLayers,
   type RuntimeLayersApi,
+  type StackFailure,
+  expandStack,
 } from '../../../contract/index.ts';
-import { expandStack, type StackFailure } from '../account/layering.ts';
 import { configFileWriteRefusal } from './ports.ts';
 
 /** A profile stack that cannot be resolved: the sentence says which profile and why. */

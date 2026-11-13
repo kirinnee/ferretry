@@ -44,6 +44,7 @@
  * Pure decisions and one service over ports. No timer lives here: {@link CredentialStatusService.observe}
  * is what the EXISTING usage pass calls, and {@link CredentialStatusService.checkNow} is a person.
  */
+import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { dirname } from 'node:path';
 import { z } from 'zod';
 import { FLEET_HEALTH_FRESH_MS, type LocalCredentialReading } from '../shared/health.ts';
@@ -132,6 +133,8 @@ const CredentialStatusReasonSchema = z.enum([
   'refresh_rejected',
   /** The store cannot be reached at all (a `host` Codex home that cannot be named). */
   'store_unreachable',
+  /** `store: environment`: a `${secret:NAME}` the login names is not in the vault yet, so there is nothing to sign in with. */
+  'secret_not_stored',
   // checking
   /** A check is running now. */
   'check_in_flight',
@@ -454,12 +457,25 @@ export function decideCodexStatus(input: CodexStatusInput): CredentialStatus {
   return status('ready', 'access_current', head, facts.lastRefreshAt, plan);
 }
 
-/** A credential with no login to read: the environment authenticates it, or its store cannot be reached. */
-export function decideStorelessStatus(resolution: CredentialStoreResolution): CredentialStatus {
-  if (resolution.store === 'environment') return status('ready', 'from_environment', {});
+/**
+ * A credential with no login to read: the environment authenticates it, or its store cannot be reached.
+ *
+ * An environment login is Ready only when every secret it names (`${secret:NAME}`) is stored. `held` is the vault's NAMES
+ * (never a value); a name it does not hold is a login nobody has signed in with yet, so it is Needs sign-in, not Ready.
+ * `held` undefined (the vault cannot be listed, or no vault is wired) judges nothing: the answer is the old one.
+ */
+export function decideStorelessStatus(
+  resolution: CredentialStoreResolution,
+  held?: ReadonlySet<string>,
+): CredentialStatus {
   // A Claude login kept in the terminal's own folder launches without being read (as in v4), so it is not "unreachable".
   if (resolution.store === 'host' && resolution.harness === 'claude') return status('ready', 'host_terminal', {});
-  return status('needs_sign_in', 'store_unreachable', {});
+  if (resolution.store !== 'environment') return status('needs_sign_in', 'store_unreachable', {});
+  if (held !== undefined) {
+    const named = new Set(Object.values(resolution.env).flatMap(value => secretReferencesIn(value)));
+    for (const name of named) if (!held.has(name)) return status('needs_sign_in', 'secret_not_stored', {});
+  }
+  return status('ready', 'from_environment', {});
 }
 
 // ── Folding what a check learned into the head ───────────────────────────────────────────────────
@@ -676,6 +692,11 @@ export interface CredentialStatusPorts {
   /** The explicit Codex refresh (Check now only). */
   readonly refresh: FleetTokenRefreshPort;
   readonly heads: CredentialStatusStore;
+  /**
+   * The NAMES the vault holds (never a value; `undefined` when it cannot be listed). An environment login is Ready only
+   * when every `${secret:NAME}` it names is among them. Absent: that is not judged.
+   */
+  secretNames?(): Promise<ReadonlySet<string> | undefined>;
   now(): number;
   /** The usage pass's interval: a passive reading younger than this makes the active read unnecessary. */
   readonly usageIntervalMs: number;
@@ -822,7 +843,7 @@ export class CredentialStatusService {
       return {
         id: subject.id,
         harness,
-        status: decideStorelessStatus(subject.resolution),
+        status: decideStorelessStatus(subject.resolution, await this.#held()),
         usage: chooseCredentialUsage([]),
       };
     }
@@ -849,6 +870,15 @@ export class CredentialStatusService {
         head.activeUsage,
       ]),
     };
+  }
+
+  /** The vault's secret names, or `undefined` when they cannot be listed (nothing is condemned for that). */
+  async #held(): Promise<ReadonlySet<string> | undefined> {
+    try {
+      return await this.ports.secretNames?.();
+    } catch {
+      return undefined;
+    }
   }
 
   async #passive(subject: CredentialSubject): Promise<PassiveUsageRecord | undefined> {

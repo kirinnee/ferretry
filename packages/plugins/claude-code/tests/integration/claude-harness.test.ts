@@ -231,36 +231,67 @@ describe('ClaudeHarness', () => {
     expect(await listing(f2)).toEqual(['conversation.json', 'projects']);
   });
 
-  describe.each(['start', 'resume'] as const)('a login’s pinned literal environment (#1587) on %s', method => {
-    const PINS = { ANTHROPIC_BASE_URL: 'https://fixture.invalid', ANTHROPIC_AUTH_TOKEN: 'FIXTURE-CREDENTIAL' };
+  describe.each(['start', 'resume'] as const)(
+    'a login’s environment is never written into the private --settings file (project .claude env wins) on %s',
+    method => {
+      const ENV = { ANTHROPIC_BASE_URL: 'https://fixture.invalid', ANTHROPIC_AUTH_TOKEN: 'FIXTURE-CREDENTIAL' };
 
-    test('is written into the private --settings file the argv names, and into no argv', async () => {
-      const { harness } = build();
-      const started: { command?: readonly string[] } = {};
-      const input = spec({ parts: [{ kind: 'pin', env: PINS }] });
+      test('the file the argv names carries no env, whatever env the launch hands the child, and no argv holds a value', async () => {
+        const { harness } = build();
+        const started: { command?: readonly string[] } = {};
+        const input = spec({
+          parts: [
+            { kind: 'env', env: ENV },
+            { kind: 'shell', name: 'sh', env: { ANTHROPIC_AUTH_TOKEN: 'FIXTURE-CREDENTIAL' } },
+            { kind: 'compact', at: 200_000 },
+          ],
+        });
 
-      const result =
-        method === 'start'
-          ? await harness.start(input, runner(started), {} as never)
-          : await harness.resume(input, runner(started), {} as never, 'conv-resume');
+        const result =
+          method === 'start'
+            ? await harness.start(input, runner(started), {} as never)
+            : await harness.resume(input, runner(started), {} as never, 'conv-resume');
 
-      expect(result.ok).toBe(true);
-      const file = join(HOME, 'launch-settings.json');
-      expect(JSON.parse(await readFile(file, 'utf8')).env).toEqual(PINS);
-      expect((await lstat(file)).mode & 0o777).toBe(0o600);
-      expect(started.command).toContain(file);
-      expect(JSON.stringify(started.command)).not.toContain('FIXTURE-CREDENTIAL');
-    });
+        expect(result.ok).toBe(true);
+        const file = join(HOME, 'launch-settings.json');
+        const written = JSON.parse(await readFile(file, 'utf8')) as { env?: unknown; autoCompactWindow?: number };
+        expect(written.env).toBeUndefined();
+        expect(written.autoCompactWindow).toBe(200_000);
+        expect(await readFile(file, 'utf8')).not.toContain('FIXTURE-CREDENTIAL');
+        expect((await lstat(file)).mode & 0o777).toBe(0o600);
+        expect(started.command).toContain(file);
+        expect(JSON.stringify(started.command)).not.toContain('FIXTURE-CREDENTIAL');
+      });
 
-    test('is absent when the launch pins nothing', async () => {
-      const { harness } = build();
-      const started: { command?: readonly string[] } = {};
+      test('a pin part or a login env from an older caller is ignored: the file still carries no env', async () => {
+        const { harness } = build();
+        const started: { command?: readonly string[] } = {};
+        const stale = {
+          ...spec({ parts: [{ kind: 'pin', env: ENV } as never] }),
+          loginEnv: ENV,
+        } as never;
 
-      await harness.start(spec({ parts: [] }), runner(started), {} as never);
+        const result =
+          method === 'start'
+            ? await harness.start(stale, runner(started), {} as never)
+            : await harness.resume(stale, runner(started), {} as never, 'conv-resume');
 
-      expect(JSON.parse(await readFile(join(HOME, 'launch-settings.json'), 'utf8')).env).toBeUndefined();
-    });
-  });
+        expect(result.ok).toBe(true);
+        const file = join(HOME, 'launch-settings.json');
+        expect(JSON.parse(await readFile(file, 'utf8')).env).toBeUndefined();
+        expect(await readFile(file, 'utf8')).not.toContain('FIXTURE-CREDENTIAL');
+      });
+
+      test('is absent when the launch carries no env either', async () => {
+        const { harness } = build();
+        const started: { command?: readonly string[] } = {};
+
+        await harness.start(spec({ parts: [] }), runner(started), {} as never);
+
+        expect(JSON.parse(await readFile(join(HOME, 'launch-settings.json'), 'utf8')).env).toBeUndefined();
+      });
+    },
+  );
 
   describe('the checked directory chain (v4 parity): no credential under a folder another user could rewrite', () => {
     const ANCESTORS = [
@@ -278,7 +309,7 @@ describe('ClaudeHarness', () => {
         const started: { command?: readonly string[] } = {};
 
         await expect(
-          harness.start(spec({ parts: [{ kind: 'pin', env: { A: 'fixture-pin' } }] }), runner(started), {} as never),
+          harness.start(spec({ parts: [{ kind: 'env', env: { A: 'fixture' } }] }), runner(started), {} as never),
         ).rejects.toThrow(/writable by its group or by everyone/u);
 
         expect(started.command).toBeUndefined();
@@ -1682,26 +1713,28 @@ describe('F-0006 prepareHome links the selected skills into the ferret home', ()
   });
 });
 
-describe('B190 a login’s literal provider values are pinned in the home’s launch overlay', () => {
-  test('prepareHome writes the literals into launch-settings.json env, and no secret reference into any home file', async () => {
+describe('a login’s provider values are not pinned in the home’s launch overlay (project .claude env wins)', () => {
+  test('prepareHome writes no env into launch-settings.json for env parts, and no secret reference into any home file', async () => {
     const { harness } = build();
 
     const plan = await harness.prepareHome(
       spec({
-        loginEnv: {
-          ANTHROPIC_BASE_URL: 'https://gateway.example.test',
-          ANTHROPIC_AUTH_TOKEN: '${secret:GW_TOKEN}',
-          ANTHROPIC_API_KEY: '${secret?:OPTIONAL_KEY}',
-          INDIRECT: '$GATEWAY_TOKEN',
-          FY_SESSION_TOKEN: 'forged',
-        },
+        parts: [
+          {
+            kind: 'env',
+            env: {
+              ANTHROPIC_BASE_URL: 'https://gateway.example.test',
+              ANTHROPIC_AUTH_TOKEN: '${secret:GW_TOKEN}',
+              ANTHROPIC_API_KEY: '${secret?:OPTIONAL_KEY}',
+              INDIRECT: '$GATEWAY_TOKEN',
+            },
+          },
+        ],
       }),
     );
 
-    const overlay = JSON.parse(await readFile(join(HOME, 'launch-settings.json'), 'utf8')) as {
-      env?: Record<string, string>;
-    };
-    expect(overlay.env).toEqual({ ANTHROPIC_BASE_URL: 'https://gateway.example.test' });
+    const overlay = JSON.parse(await readFile(join(HOME, 'launch-settings.json'), 'utf8')) as { env?: unknown };
+    expect(overlay.env).toBeUndefined();
     for (const file of plan.files) expect(await readFile(file, 'utf8')).not.toContain('secret');
   });
 

@@ -183,6 +183,9 @@ export interface Half {
 export interface HalfHost {
   readonly hostFacts?: HostFactsPort;
   readonly spawn?: TestHostOptions['spawn'];
+  /** The absolute paths `kernel.paths.which` finds executable, and the `PATH` it searches (the `tmux` doctor row). */
+  readonly executables?: TestHostOptions['executables'];
+  readonly searchPath?: TestHostOptions['searchPath'];
   /** "What agents may control" as core's `AgentControlPort` answers it; `null` leaves the port unbound. Default all on. */
   readonly agentControl?: AgentControlReader | null;
 }
@@ -210,6 +213,8 @@ export async function terminalsHalf(
   const host = await testHost({
     hostFacts: kernelHost.hostFacts ?? unarmedHostFacts,
     ...(kernelHost.spawn === undefined ? {} : { spawn: kernelHost.spawn }),
+    ...(kernelHost.executables === undefined ? {} : { executables: kernelHost.executables }),
+    ...(kernelHost.searchPath === undefined ? {} : { searchPath: kernelHost.searchPath }),
     plugins: [plugin],
     fakes: { ferrets: fakeFerrets(known), vault: fakeVault(raised) },
     uses: kernelHost.agentControl === null ? {} : { agentControl: kernelHost.agentControl ?? ALL_ON },

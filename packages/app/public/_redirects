@@ -1,9 +1,9 @@
-/app/* /app/index.html 200
-/d/* /app/index.html 200
-/setup /app/index.html 200
-/pair /app/index.html 200
-/pair/* /app/index.html 200
-/join /app/index.html 200
-/shared /app/index.html 200
+/app/* /app/ 200
+/d/* /app/ 200
+/setup /app/ 200
+/pair /app/ 200
+/pair/* /app/ 200
+/join /app/ 200
+/shared /app/ 200
 /oauth/mcp-callback/* /oauth/mcp-callback.html 200
 /* /index.html 200

@@ -80,6 +80,7 @@ async function openSession(options: { readonly accepted?: boolean } = {}) {
     observer,
     {
       stale: () => undefined,
+      pairingEnded: () => undefined,
       track: tracked => {
         held.push(tracked);
         return () => undefined;

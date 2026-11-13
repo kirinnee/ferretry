@@ -1,24 +1,17 @@
 /**
- * What a runtime's login does to a Claude launch (#1587): a folder that would blank it is refused on `start.decide`,
- * and the SAME checked facts supply its literal environment as a `pin` launch part and its compaction trigger as a
- * `compact` part. The parts source reads nothing again and is required.
+ * What a runtime's login does to a Claude launch: its compaction trigger, as a `compact` part from the facts `start.decide`
+ * checked. The gate never touches the login's ENVIRONMENT: a project's own `.claude` env wins over it (v4 before 4.291.9;
+ * owner, !A500), so it reads no folder, pins nothing and refuses no start over a key a folder sets. The parts source reads
+ * nothing again and is required.
  */
 import { describe, it } from 'bun:test';
 import { LaunchPartsRefusal, type LaunchSpec, type StartDecideInput } from '@ferretry/core-ferrets/contract';
 import should from 'should';
-import { FolderSettingsUnreadableError } from '../../../daemon/lib/folder-settings.ts';
-import {
-  FixedSettingsDamagedError,
-  LaunchGate,
-  type RuntimeLaunchFactsSource,
-} from '../../../daemon/lib/launch-gate.ts';
+import { LaunchGate, type RuntimeLaunchFactsSource } from '../../../daemon/lib/launch-gate.ts';
+import { FleetManifestUnreadableError } from '../../../daemon/lib/manifest-reading.ts';
 
 const FACTS = {
-  runtime: 'work',
   kind: 'claude' as const,
-  secretEnvNames: ['ANTHROPIC_API_KEY'],
-  referencedEnv: ['OTHER_KEY'],
-  pins: { ANTHROPIC_BASE_URL: 'https://gateway.invalid' },
   windows: { defaultModel: 'm', models: [{ id: 'm', context: 1_000_000 }] },
 };
 const source = (facts: typeof FACTS | undefined): RuntimeLaunchFactsSource => ({ facts: async () => facts });
@@ -35,39 +28,9 @@ const input = (more: Partial<StartDecideInput> = {}): StartDecideInput =>
   }) as unknown as StartDecideInput;
 const spec = (more: Partial<LaunchSpec> = {}): Omit<LaunchSpec, 'parts'> =>
   ({ ferret: 'f1', harness: 'claude-code', runtime: 'work', ...more }) as unknown as Omit<LaunchSpec, 'parts'>;
-const folderWith = (...names: string[]) => ({
-  variables: async () => [{ file: '.claude/settings.local.json', names }],
-});
-const gate = (facts: typeof FACTS | undefined, ...names: string[]) =>
-  new LaunchGate({ source: source(facts), folderSettings: folderWith(...names) });
+const gate = (facts: typeof FACTS | undefined) => new LaunchGate({ source: source(facts) });
 
 describe('LaunchGate.decide', () => {
-  it('should refuse a folder that sets a key the login leaves to the secret store, naming the file and the key', async () => {
-    const answer = await gate(FACTS, 'ANTHROPIC_API_KEY').decide(input());
-
-    should(answer.allow).be.false();
-    should((answer as { reason: string }).reason).containEql('.claude/settings.local.json');
-    should((answer as { reason: string }).reason).containEql('ANTHROPIC_API_KEY');
-  });
-
-  it('should refuse a folder that sets a key the login takes from a bare $OTHER reference', async () => {
-    should((await gate(FACTS, 'OTHER_KEY').decide(input())).allow).be.false();
-  });
-
-  it('should refuse, with the reason, a folder whose repository layout cannot be proved', async () => {
-    const answer = await new LaunchGate({
-      source: source(FACTS),
-      folderSettings: {
-        variables: async () => {
-          throw new FolderSettingsUnreadableError('the launch folder /work/a cannot be resolved');
-        },
-      },
-    }).decide(input());
-
-    should(answer.allow).be.false();
-    should((answer as { reason: string }).reason).containEql('cannot be resolved');
-  });
-
   it('should refuse when the published runtimes cannot be read', async () => {
     const answer = await new LaunchGate({
       source: {
@@ -75,45 +38,38 @@ describe('LaunchGate.decide', () => {
           throw new Error('damaged');
         },
       },
-      folderSettings: folderWith(),
     }).decide(input());
 
     should(answer.allow).be.false();
     should((answer as { reason: string }).reason).containEql('could not be read');
   });
 
-  it('should say the damaged fixed settings in their own words, rather than that the runtimes could not be read', async () => {
+  it('should refuse a start over an unreadable manifest with the retryable sentence, naming the runtime and the file', async () => {
     const answer = await new LaunchGate({
       source: {
         facts: async () => {
-          throw new FixedSettingsDamagedError('it is not valid JSON');
+          throw new FleetManifestUnreadableError('/fleet/manifest.json');
         },
       },
-      folderSettings: folderWith(),
     }).decide(input());
 
     should(answer.allow).be.false();
-    should((answer as { reason: string }).reason).equal(
-      'the login’s fixed settings (fixed.json) could not be read: it is not valid JSON, so runtime work was not started',
-    );
+    const reason = (answer as { reason: string }).reason;
+    should(reason).containEql('runtime work was not started');
+    should(reason).containEql('/fleet/manifest.json');
+    should(reason).containEql('try again');
+    should(reason).not.containEql('compaction trigger cannot be checked');
   });
 
-  it('should let an error that is not a folder refusal fail the decision (the kernel reads a throw as no)', async () => {
-    const decide = new LaunchGate({
-      source: source(FACTS),
-      folderSettings: {
-        variables: async () => {
-          throw new Error('boom');
-        },
-      },
-    }).decide;
-
-    await should(decide(input())).be.rejectedWith('boom');
+  it('should allow a Claude start of a published runtime: it needs no folder, so none is ever read or refused', async () => {
+    // The gate has no folder reader (a project’s `.claude` env wins over a login’s: owner, !A500), so nothing a folder
+    // sets, a `${secret:}` key or a bare $OTHER key included, can be a reason to refuse.
+    should((await gate(FACTS).decide(input())).allow).be.true();
   });
 
-  it('should allow a clean folder, a start on another harness, one on no runtime and one on an unpublished runtime', async () => {
-    const decide = gate(FACTS, 'UNRELATED').decide;
-    const nothing = gate(undefined, 'ANTHROPIC_API_KEY').decide;
+  it('should allow a start on another harness, one on no runtime and one on an unpublished runtime', async () => {
+    const decide = gate(FACTS).decide;
+    const nothing = gate(undefined).decide;
 
     should((await decide(input())).allow).be.true();
     should((await decide(input({ harness: 'codex' }))).allow).be.true();
@@ -194,7 +150,6 @@ describe('LaunchGate.decide: a start’s OWN compaction trigger (v4 checkCompact
           throw new Error('damaged');
         },
       },
-      folderSettings: folderWith(),
     }).decide(input({ harness: 'codex', compactAt: 200_000 }));
 
     should(answer.allow).be.false();
@@ -207,43 +162,31 @@ describe('LaunchGate.parts', () => {
     should(gate(FACTS).parts.required).be.true();
   });
 
-  it('should contribute the login’s literal environment as one pin part for a Claude launch it checked', async () => {
-    const launch = gate(FACTS);
-    await launch.decide(input());
-
-    should(await launch.parts.parts(spec())).deepEqual([{ kind: 'pin', env: FACTS.pins }]);
-  });
-
   it('should contribute the login’s compaction trigger as a compact part', async () => {
     const launch = gate({ ...FACTS, compactAt: 200_000 } as never);
     await launch.decide(input());
 
-    should(await launch.parts.parts(spec())).deepEqual([
-      { kind: 'pin', env: FACTS.pins },
-      { kind: 'compact', at: 200_000 },
-    ]);
+    should(await launch.parts.parts(spec())).deepEqual([{ kind: 'compact', at: 200_000 }]);
   });
 
-  it('should read the facts ONCE: the pins written are the ones the folder was judged against', async () => {
+  it('should read the facts ONCE: the trigger written is the one the start was judged against', async () => {
     let reads = 0;
     const launch = new LaunchGate({
       source: {
         facts: async () => {
           reads += 1;
-          // A second read would find the fixed settings gone: a login that pins nothing.
-          if (reads > 1) return { ...FACTS, pins: {} };
-          return FACTS;
+          // A second read would find the trigger changed by an apply in between.
+          return { ...FACTS, compactAt: reads === 1 ? 200_000 : 100_000 };
         },
       },
-      folderSettings: folderWith(),
     });
     await launch.decide(input());
 
-    should(await launch.parts.parts(spec())).deepEqual([{ kind: 'pin', env: FACTS.pins }]);
+    should(await launch.parts.parts(spec())).deepEqual([{ kind: 'compact', at: 200_000 }]);
     should(reads).equal(1);
   });
 
-  it('should refuse a launch no decision checked, rather than launch without the pins', async () => {
+  it('should refuse a launch no decision checked, rather than launch without its trigger', async () => {
     const launch = gate(FACTS);
 
     await should(launch.parts.parts(spec())).be.rejectedWith(LaunchPartsRefusal);
@@ -274,10 +217,10 @@ describe('LaunchGate.parts', () => {
     should(await launch.parts.parts(spec({ runtime: undefined }))).deepEqual([]);
   });
 
-  it('should contribute nothing for an unpublished runtime, a Codex runtime or no pins, once checked', async () => {
+  it('should contribute nothing for an unpublished runtime, a Codex runtime or an Auto trigger, once checked', async () => {
     const unpublished = gate(undefined);
-    const codex = gate({ ...FACTS, kind: 'codex' as never });
-    const bare = gate({ ...FACTS, pins: {} as never });
+    const codex = gate({ ...FACTS, kind: 'codex' as never, compactAt: 200_000 } as never);
+    const bare = gate(FACTS);
     for (const launch of [unpublished, codex, bare]) await launch.decide(input());
 
     should(await unpublished.parts.parts(spec())).deepEqual([]);

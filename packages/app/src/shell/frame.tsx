@@ -254,14 +254,24 @@ function ShellCommandBar(props: {
 /**
  * The sentence that replaces a whole machine's page. A machine this page was refused on (`4403`) also offers the one
  * repair, "Pair again" (S12): its key and pairing are kept, so the person chooses whether to repeat the pairing.
+ *
+ * THE CONNECTION SETTING IS ALWAYS REACHABLE FROM HERE: this page replaces every screen of the machine, including the
+ * machine's own Connection panel, and how this device reaches a machine is a per-device choice kept in the browser — so
+ * the link goes to This device's settings, which need no machine, rather than to a screen this very block hides.
  */
 function WholeLine({ daemon, line }: { readonly daemon: string | undefined; readonly line: string }) {
   const { runtime } = useShell();
+  // Which core piece (or that the list could not be read): the sentence above is the same for every cause.
+  const why = daemon === undefined ? undefined : runtime.wholeDaemonDetail(daemon);
   const { navigate } = useRouter();
   const refused = daemon !== undefined && runtime.isRefused(daemon) ? daemon : undefined;
   return (
     <>
       <ShellLine tone="warn">{line}</ShellLine>
+      {why === undefined ? null : <ShellLine>{`Why: ${why}.`}</ShellLine>}
+      <p className="fy-shell-line" data-whole-daemon-connection="">
+        <Link to={DEVICE_SETTINGS_HREF}>Connection settings</Link>
+      </p>
       {refused === undefined ? null : (
         <button
           type="button"

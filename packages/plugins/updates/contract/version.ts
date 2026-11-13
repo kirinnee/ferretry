@@ -56,3 +56,10 @@ export function compareVersions(a: string, b: string): -1 | 0 | 1 | undefined {
   }
   return comparePrerelease(left.prerelease, right.prerelease);
 }
+
+/** A newer major requires a migration, even when the target is a prerelease. */
+export function isNewerMajorVersion(current: string, target: string): boolean {
+  const from = parseVersion(current);
+  const to = parseVersion(target);
+  return from !== undefined && to !== undefined && to.core[0] > from.core[0];
+}

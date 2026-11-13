@@ -6,7 +6,7 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { lstat, mkdir, mkdtemp, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readlink, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FencedPath, RootHandle, RootOpenedBytes } from '@ferretry/kernel/contract';
@@ -70,12 +70,20 @@ function scheduled(
   };
 }
 
-/** How many descriptors this process holds (Linux): the leak checks compare it before and after. */
-const descriptors = async (): Promise<number | undefined> =>
-  await readdir('/proc/self/fd').then(
-    names => names.length,
-    () => undefined,
+/**
+ * How many descriptors this process holds ON `target` (Linux): the leak checks compare it before and after. Counting only the
+ * descriptors that resolve to the file under test is the real property (the handle's descriptor is closed) and is immune to
+ * the runtime's own descriptors opening and closing around the test, which move a whole-process count by one.
+ */
+const descriptorsOn = async (target: string): Promise<number | undefined> => {
+  const names = await readdir('/proc/self/fd').catch(() => undefined);
+  if (names === undefined) return undefined;
+  const real = await realpath(target);
+  const links = await Promise.all(
+    names.map(async name => await readlink(`/proc/self/fd/${name}`).catch(() => undefined)),
   );
+  return links.filter(link => link === real).length;
+};
 
 describe('G162 the byte handle is bound to ONE opened object', () => {
   test('it reads, stats and tokens the opened file, with the same token for every handle on one generation', async () => {
@@ -286,7 +294,7 @@ describe('G162 the handle is closable and bounded', () => {
   test('open and close leaves no descriptor behind, close is idempotent, and a read after it fails without the path', async () => {
     const w = await world();
     await writeFile(w.target, 'PROVED');
-    const base = await descriptors();
+    const base = await descriptorsOn(w.target);
     for (let n = 0; n < 40; n++) {
       const handle = (await openTranscriptBytes(w.root, w.file, 'codex', digest))!;
       await handle.read(0, 4);
@@ -300,7 +308,7 @@ describe('G162 the handle is closable and bounded', () => {
     expect(failure).not.toBeInstanceOf(HarnessTranscriptReplaced);
     expect(`${(failure as Error).message}${(failure as Error).stack ?? ''}`).not.toContain('rollout-a');
     expect(await handle.stat()).toBeUndefined();
-    if (base !== undefined) expect(await descriptors()).toBe(base);
+    if (base !== undefined) expect(await descriptorsOn(w.target)).toBe(base);
   });
 
   /** The kernel clock's `after`, driven by hand: a timer is live until it fires or is cancelled. */
@@ -332,7 +340,7 @@ describe('G162 the handle is closable and bounded', () => {
     test('a clock that cannot install the idle backstop', async () => {
       const w = await world();
       await writeFile(w.target, 'PROVED');
-      const base = await descriptors();
+      const base = await descriptorsOn(w.target);
       const broken = {
         after: () => {
           throw new Error('timer unavailable');
@@ -341,25 +349,25 @@ describe('G162 the handle is closable and bounded', () => {
       await expect(openTranscriptBytes(w.root, w.file, 'codex', digest, { clock: broken })).rejects.toThrow(
         'timer unavailable',
       );
-      if (base !== undefined) expect(await descriptors()).toBe(base);
+      if (base !== undefined) expect(await descriptorsOn(w.target)).toBe(base);
     });
 
     test('a digest that throws', async () => {
       const w = await world();
       await writeFile(w.target, 'PROVED');
-      const base = await descriptors();
+      const base = await descriptorsOn(w.target);
       await expect(
         openTranscriptBytes(w.root, w.file, 'codex', () => {
           throw new Error('digest unavailable');
         }),
       ).rejects.toThrow('digest unavailable');
-      if (base !== undefined) expect(await descriptors()).toBe(base);
+      if (base !== undefined) expect(await descriptorsOn(w.target)).toBe(base);
     });
 
     test('a failure over many opens leaves the descriptor count flat, and a working open afterwards is unaffected', async () => {
       const w = await world();
       await writeFile(w.target, 'PROVED');
-      const base = await descriptors();
+      const base = await descriptorsOn(w.target);
       const broken = {
         after: () => {
           throw new Error('timer unavailable');
@@ -367,7 +375,7 @@ describe('G162 the handle is closable and bounded', () => {
       };
       for (let n = 0; n < 20; n++)
         await openTranscriptBytes(w.root, w.file, 'codex', digest, { clock: broken }).catch(() => undefined);
-      if (base !== undefined) expect(await descriptors()).toBe(base);
+      if (base !== undefined) expect(await descriptorsOn(w.target)).toBe(base);
       const handle = (await openTranscriptBytes(w.root, w.file, 'codex', digest))!;
       expect(decode(await handle.read(0, 6))).toBe('PROVED');
       await handle.close();
@@ -377,7 +385,7 @@ describe('G162 the handle is closable and bounded', () => {
   test('a handle nobody closes lets its descriptor go when its idle time passes', async () => {
     const w = await world();
     await writeFile(w.target, 'PROVED');
-    const base = await descriptors();
+    const base = await descriptorsOn(w.target);
     const time = manualClock();
     const handles = await Promise.all(
       Array.from(
@@ -387,11 +395,11 @@ describe('G162 the handle is closable and bounded', () => {
     );
     expect(time.live()).toHaveLength(10);
     expect(time.live()[0]?.delay).toBe(25);
-    if (base !== undefined) expect(await descriptors()).toBeGreaterThan(base);
+    if (base !== undefined) expect(await descriptorsOn(w.target)).toBeGreaterThan(base);
     time.elapse();
     // The timer's close is in flight: closing again waits for it.
     await Promise.all(handles.map(async handle => await handle.close()));
-    if (base !== undefined) expect(await descriptors()).toBe(base);
+    if (base !== undefined) expect(await descriptorsOn(w.target)).toBe(base);
     await expect(handles[0]!.read(0, 4)).rejects.toThrow('closed');
   });
 

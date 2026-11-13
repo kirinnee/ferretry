@@ -5,12 +5,19 @@ import {
   type NewFerretAccountSlotProps,
   type NewFerretProjectSlotProps,
 } from '@ferretry/core-ferrets/contract';
-import { type ComponentType, type ReactNode, useEffect, useState } from 'react';
+import { type ComponentType, type ReactNode, useEffect, useRef, useState } from 'react';
 import type { LiveFerretsClient } from '../../lib/client.ts';
 import { Button, Card, cn, FastSwitch, ModelSelect, PanelBody, Textarea } from '../../ui.ts';
 import { FolderPicker } from './folder-picker.tsx';
 import { daemonHomeHref, ferretChatHref, runtimesSettingsHref } from './hrefs.ts';
-import { canStartFerret, emptyNewFerretDraft, type NewFerretDraft, startFerret } from './new-ferret-draft.ts';
+import {
+  canStartFerret,
+  emptyNewFerretDraft,
+  type NewFerretDraft,
+  type StartAttempt,
+  startAttemptFor,
+  startFerret,
+} from './new-ferret-draft.ts';
 import { type FolderRead, LOADING_FOLDERS, readRecentFolders } from './recent-folders.ts';
 import { type AccountSlotProps, ShellAccountSlot } from './shell-account-slot.tsx';
 
@@ -134,6 +141,7 @@ export function NewFerretPage({
 }: NewFerretPageProps) {
   const [draft, setDraft] = useState<NewFerretDraft>(emptyNewFerretDraft);
   const [submitting, setSubmitting] = useState(false);
+  const attempt = useRef<StartAttempt | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [chosenRuntime, setChosenRuntime] = useState<ChosenFerretAccount | null>(null);
   const [noRunnableAccount, setNoRunnableAccount] = useState(false);
@@ -201,11 +209,16 @@ export function NewFerretPage({
     setSubmitting(true);
     setError(null);
     try {
-      const id = await startFerret(client, {
+      const sent = {
         ...draft,
         fast: draft.fast && fastReason === undefined,
         remoteControl: draft.remoteControl && remoteControlReason === undefined,
-      });
+      };
+      // The attempt is kept until a start succeeds: a resubmit of the same draft after a lost answer is the same
+      // request (same id), so the daemon answers the ferret it already started instead of starting a second one.
+      attempt.current = startAttemptFor(sent, attempt.current);
+      const id = await startFerret(client, sent, attempt.current);
+      attempt.current = undefined;
       onNavigate(ferretChatHref(daemon, id));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));

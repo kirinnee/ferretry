@@ -422,10 +422,24 @@ export class SessionFiles {
     });
     await new OwnFolder(this.root(id)).ensure();
     await new OwnFolder(root).ensure();
+    await this.requirePrivateAnchor(root);
     for (const { path, contents } of named)
       await root.publish(path, typeof contents === 'string' ? new TextEncoder().encode(contents) : contents, {
         mode: 0o600,
       });
+  }
+
+  /**
+   * Refuses, before the first file is written, an `attachments` anchor that is not private to the daemon: any folder from
+   * the home down to it that is a link, is owned by someone else (or by an owner that cannot be determined) or is writable
+   * by its group or everyone. The judgement is the kernel's one primitive (`RootHandle.checkPrivateChain`), not a copy;
+   * a caller words the refusal for its person (a send says "they could not be written").
+   */
+  private async requirePrivateAnchor(root: RootHandle): Promise<void> {
+    const anchor = root.resolve('.');
+    if (!anchor.ok) throw new Error(`the attachments folder of this ferret could not be named (${anchor.error})`);
+    const verdict = await root.checkPrivateChain(anchor.value);
+    if (!verdict.ok) throw new Error(`the attachments folder of this ferret is not private: ${verdict.error.reason}`);
   }
 
   /**

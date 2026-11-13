@@ -7,6 +7,7 @@ import {
   LaunchParts,
   MOVE_ACCOUNT_SLOT,
   NEW_FERRET_ACCOUNT_SLOT,
+  RuntimeStart,
   StartDecide,
 } from '@ferretry/core-ferrets/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
@@ -271,8 +272,10 @@ export default definePlugin({
     takes: [
       { hook: LoginsUsedBy, key: 'runtimes' },
       { hook: AutoResumeDecide },
-      // #1587: refuses a Claude start whose folder would blank the login, and pins the login's literal environment.
+      // A start's own compaction trigger is judged against its model's window; the launch carries the login's trigger.
       { hook: StartDecide },
+      // Ferrets asks which harness and login a runtime starts with (a start that names a runtime); only this plugin answers.
+      { hook: RuntimeStart, key: 'runtimes' },
       { hook: LaunchParts },
     ],
     offers: [
@@ -290,8 +293,7 @@ export default definePlugin({
 
   permissions: {
     // `fleet`: the wrappers, one harness home per runtime, `manifest.json`, `ids.json` (writable, Runtimes alone).
-    // `harness-home`: the machine's own Claude Code and Codex homes, READ-ONLY, for the first-run scan; also, scoped to one folder at
-    // a time, the launch folder and its ancestors for the folder-settings check (`folder-claude-settings-file.ts`).
+    // `harness-home`: the machine's own Claude Code and Codex homes, READ-ONLY, for the first-run scan and, scoped to one folder, a runtime's home.
     roots: ['fleet', 'harness-home'],
     network: [],
     spawn: ['brew', 'apt-get', 'npm'],

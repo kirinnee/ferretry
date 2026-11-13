@@ -9,7 +9,7 @@ describe('DaemonUpdateStatusReader', () => {
   it('classifies the installed daemon and asks the serving one about updates', async () => {
     const view = new FakeUpdateView([0]);
     const status = await new DaemonUpdateStatusReader(new FakeFacts('homebrew'), view).read(daemon, true);
-    should(status.install).deepEqual({ kind: 'homebrew', cask: 'ferretry' });
+    should(status.install).deepEqual({ kind: 'homebrew', cask: 'kirinnee/ferretry/ferretry' });
     should(status.update?.available).be.true();
   });
 

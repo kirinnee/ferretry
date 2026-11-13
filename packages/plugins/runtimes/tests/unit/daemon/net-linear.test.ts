@@ -1,11 +1,12 @@
 /**
  * CFG-LEAK (ii) the Runtimes net (the cutter, then W on what it shows) is linear at 256 KiB: the ratio of the time at
- * 256 KiB to the time at 128 KiB stays under 3, best of five. Measured alone: each test about 0.1 s.
+ * 256 KiB to the time at 128 KiB stays under 3, the two runs interleaved round by round and the least of nine rounds
+ * kept. Measured alone: each test about 0.1 s.
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { ratioOf } from '@ferretry/std/testing/linear-time';
 import { shownLine, writtenWithheld } from '../../../daemon/lib/service/command-line.ts';
-import { best } from './timing-support.ts';
 
 const SHAPES: readonly (readonly [string, (size: number) => string])[] = [
   ['keys and separators', size => 'API_KEY=,'.repeat(Math.ceil(size / 9)).slice(0, size)],
@@ -18,16 +19,19 @@ describe('CFG-LEAK (ii) the Runtimes net is linear at 256 KiB', () => {
     it(`should cut and check one word in linear time: ${label}`, () => {
       const small = make(128 * 1024);
       const large = make(256 * 1024);
-      // The small text is read first: it warms the code up, so the large one is not timed cold.
-      const base = best(() => shownLine([small]));
-      const ratio = best(() => shownLine([large])) / base;
+      const ratio = ratioOf(
+        () => shownLine([large]),
+        () => shownLine([small]),
+      );
       should(ratio).be.below(3);
     });
     it(`should judge a command shown as written in linear time: ${label}`, () => {
       const small = make(128 * 1024);
       const large = make(256 * 1024);
-      const base = best(() => writtenWithheld('command', small));
-      const ratio = best(() => writtenWithheld('command', large)) / base;
+      const ratio = ratioOf(
+        () => writtenWithheld('command', large),
+        () => writtenWithheld('command', small),
+      );
       should(ratio).be.below(3);
     });
   }

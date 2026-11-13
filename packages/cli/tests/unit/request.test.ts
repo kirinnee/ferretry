@@ -41,6 +41,27 @@ describe('buildRequest', () => {
     should('body' in buildRequest('POST /v1/x')).be.false();
   });
 
+  it('should carry only the closed header list a half may set, and no headers key when none survives', () => {
+    should(
+      buildRequest('POST /v1/x', {
+        headers: { 'x-fy-request-id': 'req-1', 'x-fy-agenda-channel': '2' },
+      }).headers,
+    ).deepEqual({ 'x-fy-request-id': 'req-1', 'x-fy-agenda-channel': '2' });
+    // A variable, not a literal: the type allows only the two names, and this proves the runtime drops the rest too.
+    const forged = {
+      'x-fy-request-id': 'req-2',
+      authorization: 'Bearer forged',
+      'x-fy-contract': 'h',
+      'x-fy-agenda-channel': '1',
+    };
+    should(buildRequest('POST /v1/x', { headers: forged as never }).headers).deepEqual({ 'x-fy-request-id': 'req-2' });
+    should('headers' in buildRequest('POST /v1/x', { headers: { 'x-fy-agenda-channel': '1' as never } })).be.false();
+    should('headers' in buildRequest('POST /v1/x', { headers: {} })).be.false();
+    for (const bad of [123, true, ['req-1'], { id: 'req-1' }, ''])
+      should('headers' in buildRequest('POST /v1/x', { headers: { 'x-fy-request-id': bad as never } })).be.false();
+    should('headers' in buildRequest('POST /v1/x')).be.false();
+  });
+
   it('should refuse a missing or an unused parameter', () => {
     should(() => buildRequest('GET /v1/cards/:id')).throw(/needs the parameter "id"/u);
     should(() => buildRequest('GET /v1/cards', { params: { id: 'a' } })).throw(/has no parameter "id"/u);

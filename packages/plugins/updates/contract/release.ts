@@ -4,7 +4,7 @@
  */
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { compareVersions, VersionSchema } from './version.ts';
+import { compareVersions, isNewerMajorVersion, VersionSchema } from './version.ts';
 
 /**
  * The GitHub account that publishes releases. The repository is the PRODUCT name, which callers pass
@@ -89,8 +89,8 @@ export function parseGitHubNewestTag(product: string, value: unknown): LatestRel
   return { version: newest, url: `https://github.com/${RELEASE_OWNER}/${product}/releases/tag/v${newest}` };
 }
 
-/** Whether `latest` is newer than `current`. Versions that do not parse are never "newer". */
+/** Whether a newer release is available within this major. A new major needs its migration, so it is never a plain update. */
 export function isUpdateAvailable(current: string, latest: LatestRelease | undefined): boolean {
   if (latest === undefined) return false;
-  return compareVersions(latest.version, current) === 1;
+  return compareVersions(latest.version, current) === 1 && !isNewerMajorVersion(current, latest.version);
 }

@@ -20,10 +20,6 @@ Each line names the seam it waits on and who owns it. Nothing here is stood in f
   Today's "reply OK" run, which caught a login out of quota, is an additive `RuntimesApi.probe(runtime)` through the
   harness plugins. It spends, so it runs only on an owner's act (Clean up is person-only); nothing in Packs checks or
   starts a runtime unattended, and Packs arms no job.
-- **A finished ferret's result**: `FerretsApi.summary` reads `summary.md`, which nothing writes on this base (Ferrets'
-  `signal` is not built and its signal writer is not wired). Until it is, `GET /v1/ferrets/:ferretId/result` reports
-  every finished ferret with no summary, and a Clean up run (which cannot start yet either) would fail "without writing
-  a prompt".
 - **Warden lineage** is read from labels: a ferret whose own label, or any ancestor's, is `fleet-warden` is never told
   about Pack mode. Today's start also stamped `provenance.wardenLineage`, which outlived a pruned warden; no 5.0 start
   writes that stamp yet (Ferrets'), so it is read only as a second guard.

@@ -49,6 +49,7 @@ describe('terminals manifest', () => {
   });
   test('declares the tmux-release doctor row and selftest, and takes no contributed doctor hook', () => {
     expect(manifest.doctor).toContain('tmux-release');
+    expect(manifest.doctor).toContain('tmux');
     expect(manifest.selftest).toEqual(['tmux-release']);
   });
   test('uses neither Browsers nor the Warden, so their optional uses of Terminals make no cycle', () => {

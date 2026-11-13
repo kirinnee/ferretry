@@ -113,6 +113,7 @@ import type {
   SpawnResult,
   IdentityPort,
   WebSocketClient,
+  BoundAddress,
   CarrierListenerPort,
 } from '../contract/ports.ts';
 import { readConfigText } from '@ferretry/std/yaml';
@@ -230,6 +231,8 @@ export interface TestHostOptions {
   readonly websocket?: (url: URL) => WebSocketClient;
   /** Answers `kernel.carrierListener.open` (the test host binds no listener of its own). Without it an open fails. */
   readonly carrierListener?: CarrierListenerPort;
+  /** What `kernel.bind.current()` answers (a live read, so a test may bind "after" the plugin is built). Default: not bound. */
+  readonly bind?: () => BoundAddress | undefined;
   /** Answers `RootHandle.pin` (with the path the test root resolved). Without it a pin is refused. */
   readonly pinner?: SessionRootPinner;
   /** What `kernel.paths.home()` answers. Default: `/home/owner`. */
@@ -2241,6 +2244,7 @@ async function start(world: World): Promise<TestHost> {
           throw new Error(`${manifest.id}: open a carrier listener with no carrierListener fake`);
         },
       },
+      bind: { current: () => options.bind?.() },
       identity,
       paths: gatedWhich(
         manifest.id,

@@ -164,12 +164,12 @@ describe('releaseKeyFromPem', () => {
 describe('releasePathForRequest', () => {
   const files = { 'index.html': HASH, 'app/index.html': HASH, 'assets/a.js': HASH, 'docs/index.html': HASH };
   const rewrites = parseReleaseRewrites(
-    '/app/* /app/index.html 200\n/old /new 301\n\n/* /index.html 200\n/gone /missing.html 200\n',
+    '/app/* /app/ 200\n/old /new 301\n\n/* /index.html 200\n/gone /missing.html 200\n',
   );
 
   it('reads only 200 rewrites from _redirects', () => {
     should(rewrites).eql([
-      { from: '/app/*', to: '/app/index.html' },
+      { from: '/app/*', to: '/app/' },
       { from: '/*', to: '/index.html' },
       { from: '/gone', to: '/missing.html' },
     ]);
@@ -225,5 +225,24 @@ describe('isDeferredReleaseFile', () => {
       'assets/vosk-a.b.wasm',
     ])
       should(isDeferredReleaseFile(path)).be.false();
+  });
+});
+
+describe('releasePathForRequest with a directory rewrite target', () => {
+  const files = { 'index.html': HASH, 'app/index.html': HASH };
+
+  it('reads /app/ as that directory’s index.html', () => {
+    const rewrites = parseReleaseRewrites('/pair /app/ 200\n/pair/* /app/ 200\n/* /index.html 200\n');
+    should(releasePathForRequest({ pathname: '/pair', navigate: true }, files, rewrites)).equal('app/index.html');
+    should(releasePathForRequest({ pathname: '/pair/x', navigate: true }, files, rewrites)).equal('app/index.html');
+    should(releasePathForRequest({ pathname: '/pair', navigate: false }, files, rewrites)).be.null();
+  });
+
+  it('answers nothing when the directory has no listed index.html', () => {
+    should(
+      releasePathForRequest({ pathname: '/pair', navigate: true }, { 'index.html': HASH }, [
+        { from: '/pair', to: '/app/' },
+      ]),
+    ).be.null();
   });
 });

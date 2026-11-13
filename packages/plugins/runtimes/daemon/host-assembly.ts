@@ -22,7 +22,6 @@ import type { ConfigPort, KernelPorts, RootHandle, RootsPort } from '@ferretry/k
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { UsageApi } from '@ferretry/plugin-usage/contract';
 import { milliseconds } from '@ferretry/std';
-import { z } from 'zod';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
 import { PROFILE_COMPONENTS_KEY, PROFILE_ITEMS } from '../contract/index.ts';
 import { applyClaimFor } from './adapters/apply-claim.ts';
@@ -31,9 +30,8 @@ import { CommandCache } from './adapters/command-cache.ts';
 import { PROVIDER_ANSWER_MS, withinMs } from './adapters/profile-components.ts';
 import { writeAllConfigWriter } from './adapters/config-write-all.ts';
 import { credentialMounts, FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
-import { readFleetManifest } from './adapters/manifest-file.ts';
-import { FIXED_SETTINGS_FILE, pinnableLoginEnvironment, RUNTIME_STATE_DIRECTORY } from './lib/account/materialise.ts';
-import { FixedSettingsDamagedError, type RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
+import { FleetManifestUnreadableError, manifestIsUnreadable, readFleetManifest } from './adapters/manifest-file.ts';
+import type { RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import type { AdapterHost } from './adapters/ports.ts';
 import { refuseBeforeWriting, runtimesConfigFiles } from './adapters/runtimes-config-files.ts';
 import { fleetMounts, harnessMounts, rootHostFiles } from './adapters/root-host-files.ts';
@@ -91,6 +89,67 @@ async function publishedFleet(
   };
 }
 
+/**
+ * Whether the published manifest exists and cannot be read, in ONE publication read. It is the daemon's boot check: a
+ * manifest the last version wrote in a shape this one does not read is rebuilt from the configuration by a republish
+ * (derived data, never fatal), so every start does not stay refused until some other change happens to publish.
+ */
+/** The job that rebuilds an unreadable manifest: once after start, and whenever a launch reader meets the damage. */
+export const MANIFEST_REPAIR_JOB = 'runtimes.manifest-repair';
+
+/**
+ * Who owns the manifest repair: the repair job, from the moment an attempt begins until one succeeds. It spans the
+ * attempt that is RUNNING and the backoff that follows a failed one (the runner's retry timer is the job's own), so a
+ * reader's request has one answer in both states: the owner already has it. A request made while it is held must not
+ * run another attempt or leave another timer, so the traffic of refused starts adds no work and no timers.
+ */
+export class RepairOwner {
+  #held = false;
+
+  /** An attempt starts (the job's first act): the repair is now owned until {@link release}. */
+  begin(): void {
+    this.#held = true;
+  }
+
+  /** The manifest reads again: the repair is done, and the next damage is a new request. */
+  release(): void {
+    this.#held = false;
+  }
+
+  get held(): boolean {
+    return this.#held;
+  }
+}
+
+/**
+ * Asks for the repair job to run now (a launch reader met an unreadable manifest after a healthy start). It is the
+ * runner's own single-flight kick, never a call into the repair, and it asks only when nobody owns the repair: while an
+ * attempt runs or waits out its backoff the request coalesces into it (the attempt re-checks the manifest at its end, and
+ * a failed one is retried by the runner's own timer). A daemon whose job is not registered has nothing to ask.
+ */
+export function repairRequester(kernel: Pick<KernelPorts, 'jobs'>, owner: RepairOwner = new RepairOwner()): () => void {
+  return () => {
+    if (owner.held) return;
+    try {
+      kernel.jobs.kick(MANIFEST_REPAIR_JOB);
+    } catch {
+      // No such job on this daemon: the refusal already says to try again and to restart if it stays.
+    }
+  };
+}
+
+export function manifestUnreadableProbe(
+  kernel: Pick<KernelPorts, 'roots'>,
+  publication: FleetPublication = new FleetPublication(),
+): () => Promise<boolean> {
+  return async () => {
+    const fleet = kernel.roots.root('fleet');
+    const directory = fleetDirectory(fleet);
+    const files = rootHostFiles(fleetMounts(kernel.roots, fleet, directory));
+    return await publication.reading(async () => await manifestIsUnreadable(files, `${directory}/${MANIFEST_FILE}`));
+  };
+}
+
 /** What an ended Codex ferret's follow-up stands on, from the kernel's roots, processes and clock. */
 export function endedSeams(
   kernel: Pick<KernelPorts, 'roots' | 'processes' | 'clock'>,
@@ -118,73 +177,46 @@ export function endedSeams(
 }
 
 /**
- * What a launch of a published runtime needs of it (`lib/launch-gate.ts`): its kind, the names its login leaves to the
- * process environment (the manifest), its compaction trigger and the literals it pins (its `fixed.json`, read through
- * the `fleet` root). EVERY fact is read inside ONE publication read ({@link FleetPublication.reading}), so the manifest
- * and the fixed settings are the same committed generation: an apply cannot remove `fixed.json` between the two reads
- * and turn a login that pins into one that pins nothing. A runtime matches by name or by id.
+ * What a launch of a published runtime needs of it (`lib/launch-gate.ts`): its kind, its compaction trigger and the
+ * model windows that cap it, all from the published manifest in ONE publication read ({@link FleetPublication.reading}),
+ * so an apply cannot land between two reads. A runtime matches by name or by id. It reads no login environment and no
+ * `fixed.json`: a project's own Claude settings win over a login's variables (docs/secrets.md).
  */
 export function launchFactsSource(
   kernel: Pick<KernelPorts, 'roots'>,
   publication: FleetPublication = new FleetPublication(),
+  requestRepair: () => void = () => {},
 ): RuntimeLaunchFactsSource {
   return {
     facts: async runtime => {
       const fleet = kernel.roots.root('fleet');
       const directory = fleetDirectory(fleet);
       const files = rootHostFiles(fleetMounts(kernel.roots, fleet, directory));
-      return await publication.reading(async () => {
-        const manifest = await readFleetManifest(files, `${directory}/${MANIFEST_FILE}`);
-        const published = manifest?.runtimes.find(row => row.name === runtime || row.id === runtime);
-        const account = manifest?.accounts.find(row => row.id === published?.id);
-        if (published === undefined || account === undefined) return undefined;
-        const text =
-          account.kind === 'claude'
-            ? await files.readText(`${account.home}/${RUNTIME_STATE_DIRECTORY}/${FIXED_SETTINGS_FILE}`)
-            : undefined;
-        return {
-          runtime: published.name,
-          kind: account.kind,
-          secretEnvNames: Object.keys(account.secretEnv),
-          referencedEnv: account.referencedEnv ?? [],
-          pins: account.kind === 'claude' ? pinsOf(text) : {},
-          ...(typeof account.compactAt === 'number' ? { compactAt: account.compactAt } : {}),
-          windows: {
-            ...(account.defaultModel === null ? {} : { defaultModel: account.defaultModel }),
-            models: account.models.map(model => ({
-              id: model.id,
-              ...(model.context === undefined ? {} : { context: model.context }),
-            })),
-          },
-        };
-      });
+      try {
+        return await publication.reading(async () => {
+          const manifest = await readFleetManifest(files, `${directory}/${MANIFEST_FILE}`);
+          const published = manifest?.runtimes.find(row => row.name === runtime || row.id === runtime);
+          const account = manifest?.accounts.find(row => row.id === published?.id);
+          if (published === undefined || account === undefined) return undefined;
+          return {
+            kind: account.kind,
+            ...(typeof account.compactAt === 'number' ? { compactAt: account.compactAt } : {}),
+            windows: {
+              ...(account.defaultModel === null ? {} : { defaultModel: account.defaultModel }),
+              models: account.models.map(model => ({
+                id: model.id,
+                ...(model.context === undefined ? {} : { context: model.context }),
+              })),
+            },
+          };
+        });
+      } catch (error) {
+        // Asked AFTER the publication read is released: the repair publishes, and the read itself never does.
+        if (error instanceof FleetManifestUnreadableError) requestRepair();
+        throw error;
+      }
     },
   };
-}
-
-/**
- * What a PRESENT `fixed.json` must be: a JSON object, whose `env`, when it has one, is an object of text values (v4's
- * `fixedSettingsObject` refused the rest). Other keys are the harness's own and are left alone.
- */
-const FixedSettingsSchema = z.looseObject({ env: z.record(z.string(), z.string()).optional() });
-
-/**
- * The literal `env` of a `fixed.json` text, once more through the pin filter: a reference or a secret is never a pin.
- * An ABSENT file (`undefined`) or a document with no `env` is the deliberate "pins nothing"; a PRESENT file of the wrong
- * shape is damaged and refuses, with a sentence that never repeats what the file holds.
- */
-function pinsOf(text: string | undefined): Readonly<Record<string, string>> {
-  if (text === undefined) return {};
-  let document: unknown;
-  try {
-    document = JSON.parse(text);
-  } catch {
-    throw new FixedSettingsDamagedError('it is not valid JSON');
-  }
-  const parsed = FixedSettingsSchema.safeParse(document);
-  if (!parsed.success)
-    throw new FixedSettingsDamagedError('it must be a JSON object whose env, when present, holds only text values');
-  return pinnableLoginEnvironment(parsed.data.env ?? {});
 }
 
 /** The harness homes a first run may read and a component may come from: the person's own, by the OS's home. */
@@ -322,6 +354,9 @@ export function fileAssembly(
     claudeStatusline: claudeStatuslineFor(CLIENT_NAME),
     configDirectory,
     publication,
+    say: sentence => {
+      ctx.kernel.log.warn(sentence);
+    },
   });
   const catalog: FleetCatalogServiceDeps = {
     ...unguarded,

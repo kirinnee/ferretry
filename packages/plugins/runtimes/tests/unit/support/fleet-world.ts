@@ -31,6 +31,7 @@ export interface FleetWorld {
     readonly sharedHistory?: SharedHistoryPooling;
     readonly publishing?: <T>(mutate: () => Promise<T>) => Promise<T>;
     readonly disk?: FleetDisk;
+    readonly say?: (sentence: string) => void;
   }): FileFleetProvisioner;
   cleanup(): Promise<void>;
 }
@@ -86,7 +87,13 @@ export async function fleetWorld(): Promise<FleetWorld> {
     disk,
     claimFor,
     provisioner: options =>
-      new FileFleetProvisioner(options?.disk ?? disk, claimFor, options?.sharedHistory, options?.publishing),
+      new FileFleetProvisioner(
+        options?.disk ?? disk,
+        claimFor,
+        options?.sharedHistory,
+        options?.publishing,
+        options?.say,
+      ),
     cleanup: async () => {
       await rm(parent, { recursive: true, force: true });
     },

@@ -9,12 +9,21 @@ import {
   FerretFiles,
   FerretsPort,
   Harnesses,
+  Logins,
   type FerretId,
+  RUNTIME_START_KEY,
+  RuntimeStart,
   Runners,
   StartDecide,
 } from '../../../../ferrets/contract/index.ts';
-import { FakeHarness, FakeRunner } from '../../../../ferrets/contract/testing/index.ts';
+import {
+  FakeHarness,
+  FakeLoginKind,
+  FakeRunner,
+  FakeRuntimeStart,
+} from '../../../../ferrets/contract/testing/index.ts';
 import { FakeGate, ferretStanding, ownerStanding, StandInAdmission } from '../../../../gate/contract/testing/index.ts';
+import { type SecretName } from '../../../../vault/contract/index.ts';
 import { FakeVault } from '../../../../vault/contract/testing/index.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import { daemonImplementations } from '../../../src/generated/plugins.ts';
@@ -42,6 +51,18 @@ const plugin = (id: string, hooks: ReturnType<typeof definePlugin>['hooks'], pro
     { build: () => ({ hooks: provided as never }) },
   );
 
+/** The login the fixture runtime signs in with: a start by runtime resolves to it (v5), and a relaunch reads it again. */
+const FIXTURE_LOGIN = 'fixture-login';
+
+/** Runtimes' `runtime.start` for the fixture: `fixture-runtime` runs Claude Code on `FIXTURE_LOGIN`; any other is unknown. */
+class FixtureRuntimeStart extends FakeRuntimeStart {
+  override async resolve(runtime: string) {
+    return runtime === 'fixture-runtime'
+      ? ({ ok: true, harness: 'claude-code', login: FIXTURE_LOGIN } as const)
+      : await super.resolve(runtime);
+  }
+}
+
 let parent: string;
 let home: string;
 let project: string;
@@ -64,6 +85,8 @@ async function swappedHelper(stopped: boolean, stopLead = false) {
   const runner = new FakeRunner();
   const harness = new FakeHarness();
   const disk = nodeFs(() => crypto.randomUUID());
+  const vault = new FakeVault();
+  await vault.put('LOGIN_FIXTURE_LOGIN' as SecretName, 'fixture-not-a-credential');
   const ferrets = {
     ...ferretsHalf,
     build: (ctx: Parameters<typeof buildFerrets>[0]) =>
@@ -115,15 +138,25 @@ async function swappedHelper(stopped: boolean, stopLead = false) {
       // The Runtimes hook that lets the boot pass relaunch what the host took down with it.
       plugin(
         'runtimes',
-        { takes: [{ hook: AutoResumeDecide }] },
-        { 'auto-resume.decide': async () => ({ allow: true }) },
+        {
+          takes: [{ hook: AutoResumeDecide }, { hook: RuntimeStart, key: RUNTIME_START_KEY }],
+        },
+        { 'auto-resume.decide': async () => ({ allow: true }), 'runtime.start:runtimes': new FixtureRuntimeStart() },
+      ),
+      // The kind that holds the fixture login, as in production (it answers the launch environment).
+      plugin(
+        'logins',
+        { takes: [{ hook: Logins, key: 'api-key' }] },
+        {
+          'logins:api-key': new FakeLoginKind('api-key', [FIXTURE_LOGIN]),
+        },
       ),
     ],
     gate: new StandInAdmission(request => {
       const raw = request.headers.get(caller);
       return raw ? ferretStanding(raw as FerretId) : ownerStanding();
     }),
-    fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
+    fakes: { gate: new FakeGate(), vault, asks: new FakeAsks() },
   });
   const lead = await h.request('POST', '/v1/ferrets', {
     headers: { 'x-fy-request-id': 'lead' },

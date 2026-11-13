@@ -7,13 +7,16 @@ import { appendFileSync } from 'node:fs';
 import { chmod, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import type { DaemonImplementation } from '../manifest/implement.ts';
+import pkg from '../package.json' with { type: 'json' };
 import { toolEnvironment } from './adapters/process.ts';
 import { answerArguments, EXIT_USAGE } from './arguments.ts';
 import { PRODUCT_BINARIES } from './binaries.ts';
 import { runCheck } from './check-run.ts';
+import { bootLog } from './boot-log.ts';
 import { bootHost } from './host.ts';
 import { parseBackgroundDelay } from './jobs.ts';
 import { listenLocal } from './listener.ts';
+import { holdUntilStopped, startedByLaunchd } from './refusal-hold.ts';
 import { filterByLevel, renderSettings, resolveSettings } from './settings.ts';
 import { stopOnSignalReporting } from './stop-signals.ts';
 import { bootTimings } from './session/timings.ts';
@@ -24,7 +27,8 @@ interface GeneratedRegistry {
   readonly contractHashes?: Readonly<Record<string, { readonly effective: string; readonly member?: string }>>;
 }
 
-const VERSION = '5.0.0';
+/** The manifest's version, which `scripts/release/bump.sh` stamps; the JSON import is bundled into the compiled binary. */
+const VERSION = pkg.version;
 /** The client's binary name: the `bin` key of `packages/cli/package.json` (see `binaries.ts`), unless the operator names it. */
 const BINARY = process.env.FY_BINARY_NAME ?? PRODUCT_BINARIES.client;
 
@@ -68,17 +72,15 @@ async function main(): Promise<number> {
         ((await import('../src/generated/plugins.ts')) as unknown as GeneratedRegistry).daemonImplementations,
     });
   }
-  // Nothing is written before the home is decided (§9.3): until boot creates `logs/`, a line is dropped.
-  const sink = filterByLevel(
-    fileLogSink(line => {
-      try {
-        appendFileSync(`${home}/logs/fyd.log`, line, { mode: 0o600 });
-      } catch {
-        // the home is not decided yet, or was refused
-      }
-    }),
-    resolved.settings.logLevel.value,
-  );
+  // §9.3: nothing is written before the home is decided (a v4 home has a `logs/fyd.log`): dropped until `onHomeOpened`.
+  const log = bootLog(line => {
+    try {
+      appendFileSync(`${home}/logs/fyd.log`, line, { mode: 0o600 });
+    } catch {
+      // `logs/` is not there
+    }
+  });
+  const sink = filterByLevel(fileLogSink(log.append), resolved.settings.logLevel.value);
   // R247: read once; a value that would lengthen anything refuses the boot, a shortened one is said once.
   const timings = bootTimings(process.env.FYD_TEST_TIMINGS, line => {
     process.stderr.write(`fyd: ${line}\n`);
@@ -114,6 +116,7 @@ async function main(): Promise<number> {
       (surface === 'member' ? registry.contractHashes?.[id]?.member : registry.contractHashes?.[id]?.effective) ??
       'unhashed',
     timings: timings.timings,
+    onHomeOpened: log.open,
     backgroundDelayMs,
     pid: process.pid,
     listen: async host =>
@@ -130,7 +133,8 @@ async function main(): Promise<number> {
   });
   if (outcome.kind === 'refused') {
     process.stderr.write(`${outcome.sentence}\n`);
-    return 78;
+    // Under launchd an exit is a respawn every 10 s, so a refused home is held idle instead (see `holdUntilStopped`).
+    return outcome.cause === 'home' && startedByLaunchd(process.env) ? await holdUntilStopped(78) : 78;
   }
   const { host } = outcome;
   for (const line of await host.doctor()) if (line.state === 'fail') process.stderr.write(`fyd: ${line.detail}\n`);

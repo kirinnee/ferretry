@@ -72,6 +72,10 @@ export const OWNER_MOVED_ITEMS: readonly { readonly id: string; readonly decisio
   },
   { id: 'board-asks-read-performance', decision: 'lizzette 2026-11-11: board perf after merge (&F3491)' },
   { id: 'held-delivery-on-revive', decision: 'lizzette 2026-11-12: held delivery on revive after merge (&F3456)' },
+  {
+    id: 'v4-doctor-checks',
+    decision: 'lizzette 2026-11-13: the v4 doctor checks and readiness move after merge (card &F3715); tmux is in 5.0',
+  },
 ];
 
 export const COUNT_NAMES = ['parityOpen', 'portsPendingLines', 'guaranteesMissing'] as const;

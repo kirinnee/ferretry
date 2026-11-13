@@ -1,23 +1,14 @@
 /**
  * CFG-LEAK (ii): the cutter and W are linear in the length of one word. The ratio of the time at 256 KiB to the time at
- * 128 KiB must stay under 3 (linear is 2; quadratic is 4), best of several runs so one slow tick does not decide it.
+ * 128 KiB must stay under 3 (linear is 2; quadratic is 4), best of interleaved runs so one slow tick does not decide it.
  *
  * Fake only: the shapes are credential-like runs and are none.
  */
 import { describe, expect, test } from 'bun:test';
 import { findFlagSecrets, shownWords } from '../../src/credential-words/index.ts';
+import { ratioOf } from '../../testing/linear-time.ts';
 
 const KIB = 1024;
-
-const best = (run: () => void): number => {
-  let least = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < 5; i++) {
-    const t0 = performance.now();
-    run();
-    least = Math.min(least, performance.now() - t0);
-  }
-  return Math.max(least, 0.01);
-};
 
 /** Hostile shapes: the same run of keys, separators, pointers and quotes, repeated to a length. */
 const SHAPES: readonly (readonly [string, (size: number) => string])[] = [
@@ -32,14 +23,20 @@ describe('CFG-LEAK (ii) linear time at 256 KiB', () => {
     test(`the cutter is linear on ${label}`, () => {
       const small = make(128 * KIB);
       const large = make(256 * KIB);
-      const ratio = best(() => shownWords([large])) / best(() => shownWords([small]));
+      const ratio = ratioOf(
+        () => shownWords([large]),
+        () => shownWords([small]),
+      );
       expect(ratio).toBeLessThan(3);
     });
 
     test(`W is linear on ${label}`, () => {
       const small = make(128 * KIB);
       const large = make(256 * KIB);
-      const ratio = best(() => findFlagSecrets({ args: [large] })) / best(() => findFlagSecrets({ args: [small] }));
+      const ratio = ratioOf(
+        () => findFlagSecrets({ args: [large] }),
+        () => findFlagSecrets({ args: [small] }),
+      );
       expect(ratio).toBeLessThan(3);
     });
   }

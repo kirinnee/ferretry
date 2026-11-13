@@ -348,7 +348,7 @@ describe('v4 fence: a component file carries only when it resolves under fleet/a
     for (const path of await allFiles(f.to)) expect((await readFile(path)).includes(KEY)).toBe(false);
     expect(JSON.stringify(report)).not.toContain(KEY);
     expect(JSON.stringify(report)).toContain('a hard link (v4 refused it)');
-    await expect(stat(join(f.to, 'config/instructions/i.md'))).rejects.toThrow();
+    await expect(stat(join(f.to, 'config/instructions/i.yaml'))).rejects.toThrow();
   });
   test('a bare name present only beside the YAML is not carried', async () => {
     await notCarried(

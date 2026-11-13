@@ -13,6 +13,7 @@ import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { Harnesses, Logins, type LoginKind, Runners } from '../../../../contract/index.ts';
 import { FakeHarness, FakeLoginKind, FakeRunner } from '../../../../contract/testing/index.ts';
 import ferrets from '../../../../daemon/index.ts';
+import { runtimesPlugin } from './runtimes-plugin.ts';
 
 /**
  * The daemon half of Ferrets, booted whole, starts a ferret on a login: the `logins:<kind>` provider that HOLDS the
@@ -126,6 +127,7 @@ async function boot(withLogins = true) {
       ferrets,
       harnessPlugin(harness),
       runnerPlugin(new FakeRunner()),
+      runtimesPlugin(),
       ...(withLogins ? [loginsPlugin(endpoint, oauth)] : []),
     ],
     gate: new StandInAdmission(() => ownerStanding()),
@@ -154,9 +156,9 @@ describe('a ferret started on a login launches with that login’s environment',
     expect(child.ANTHROPIC_AUTH_TOKEN).toBe(GATEWAY_TOKEN);
     expect(child.HOME).toBeUndefined();
     expect(child.FY_SESSION_TOKEN).not.toBe('forged');
-    // The spec carries references and literals, never the resolved value.
+    // The spec carries no copy of the login's environment (nothing pins it over a project's own), never the resolved value.
     const spec = harness.launched[0];
-    expect(spec?.loginEnv?.ANTHROPIC_AUTH_TOKEN).toBe('${secret:GATEWAY_TOKEN}');
+    expect(spec).not.toHaveProperty('loginEnv');
     expect(JSON.stringify(spec)).not.toContain(GATEWAY_TOKEN);
   });
 
@@ -171,7 +173,7 @@ describe('a ferret started on a login launches with that login’s environment',
     expect(Object.keys(harness.children[0] ?? {}).filter(name => name.startsWith('ANTHROPIC'))).toEqual([]);
     expect(harness.children[1]?.[STORE_VARIABLE]).toBeUndefined();
     // It is Ferretry's own variable, not part of what the login file declares.
-    expect(harness.launched.map(spec => spec.loginEnv)).toEqual([undefined, undefined]);
+    for (const spec of harness.launched) expect(spec).not.toHaveProperty('loginEnv');
   });
 
   test('an OAuth login with no usable sign-in refuses the start with a sentence and launches nothing', async () => {
@@ -282,6 +284,7 @@ describe('a ferret on an environment login reaches the login’s endpoint', () =
           ferrets,
           harnessPlugin(harness),
           runnerPlugin(new FakeRunner()),
+          runtimesPlugin(),
           loginsPlugin(endpoint, new HoldingKind('anthropic', {})),
         ],
         gate: new StandInAdmission(() => ownerStanding()),
@@ -322,7 +325,7 @@ describe('a ferret on an environment login reaches the login’s endpoint', () =
       await writeFile(script, STUB);
       const harness = new StubClaudeHarness(script);
       const host = await testHost({
-        plugins: [ferrets, harnessPlugin(harness), runnerPlugin(new FakeRunner())],
+        plugins: [ferrets, harnessPlugin(harness), runnerPlugin(new FakeRunner()), runtimesPlugin()],
         gate: new StandInAdmission(() => ownerStanding()),
         fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
         everyDirectory: true,
@@ -362,6 +365,7 @@ describe('a ferret on an environment login reaches the login’s endpoint', () =
           ferrets,
           harnessPlugin(harness),
           runnerPlugin(new FakeRunner()),
+          runtimesPlugin(),
           loginsPlugin(
             new HoldingKind('endpoint', {}),
             new HoldingKind('anthropic', { personal: {} }, { personal: { [STORE_VARIABLE]: store } }),

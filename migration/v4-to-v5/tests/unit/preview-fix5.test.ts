@@ -34,7 +34,9 @@ async function convertedHome() {
   const f = await fixture();
   await write(f.from, 'layout-version', '2\n');
   await write(f.from, 'config/machine.yaml', 'defaultRuntime: codex-work\n');
-  // The preview leaves v4's logins out, so only a runtime that says its own harness can be told from a Codex one.
+  // The preview carries each Claude login as a signed-out shell; a Codex login is held with its runtimes.
+  await write(f.from, 'config/logins/claude-login.yaml', 'harness: claude\nstore: ferretry\n');
+  await write(f.from, 'config/logins/codex-login.yaml', 'harness: codex\nstore: ferretry\n');
   await write(f.from, 'config/runtimes/claude-work.yaml', 'credential: claude-login\nprofile: main\nharness: claude\n');
   await write(f.from, 'config/runtimes/codex-work.yaml', 'credential: codex-login\nprofile: codexp\nharness: codex\n');
   await write(f.from, 'config/runtimes/silent.yaml', 'credential: some-login\nprofile: main\n');

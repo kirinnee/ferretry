@@ -37,9 +37,9 @@ const openAiResponse = (text: string) => ({
 
 /**
  * A loopback provider speaking the Anthropic Messages shape (`POST /v1/messages`) and the OpenAI Responses shape
- * (`POST /v1/responses`) with one fixed reply. Port 0, so the operating system picks; fake values only.
+ * (`POST /v1/responses`) with one fixed reply. With `strict`, only a request carrying the expected token gets that reply; any other gets a 401. Port 0, so the operating system picks; fake values only.
  */
-export function startFakeProvider(expectedToken: string): FakeProvider {
+export function startFakeProvider(expectedToken: string, options: { readonly strict?: boolean } = {}): FakeProvider {
   const seen: SeenRequest[] = [];
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -53,6 +53,9 @@ export function startFakeProvider(expectedToken: string): FakeProvider {
       );
       const presented = bearer?.replace(/^Bearer /u, '') ?? apiKey;
       seen.push({ method: request.method, path, authHeaders, tokenMatches: presented === expectedToken });
+      // Strict: answer ONLY a request that carries the signed-in login's credential, so a signed-out launch gets no reply.
+      if (options.strict === true && presented !== expectedToken)
+        return Response.json({ error: 'unauthorized' }, { status: 401 });
       if (path === '/v1/messages') return Response.json(anthropicMessage(FAKE_REPLY));
       if (path === '/v1/responses') return Response.json(openAiResponse(FAKE_REPLY));
       return Response.json({});

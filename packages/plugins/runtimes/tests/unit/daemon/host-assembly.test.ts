@@ -5,11 +5,10 @@
  */
 import { afterEach, describe, it } from 'bun:test';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
-import type { KernelPorts, RootHandle } from '@ferretry/kernel/contract';
+import type { KernelPorts } from '@ferretry/kernel/contract';
 import { testHost, testProcessTable } from '@ferretry/kernel/testing';
 import should from 'should';
 import { endedSeams, launchFactsSource } from '../../../daemon/host-assembly.ts';
-import { FixedSettingsDamagedError } from '../../../daemon/lib/launch-gate.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
 import { autoResumeSwitch } from '../../../daemon/lib/service/auto-resume-answer.ts';
@@ -209,35 +208,21 @@ describe('launchFactsSource', () => {
     return launchFactsSource(await kernelWith(files));
   }
 
-  it('should publish the login’s names and the literal pins of its fixed settings, by name or by id', async () => {
-    const facts = await source({
-      'manifest.json': JSON.stringify(claudeManifest),
-      [`homes/${CLAUDE_ID}/.fy/fixed.json`]: JSON.stringify({
-        env: { ANTHROPIC_BASE_URL: 'https://gateway.invalid', LEAK: '${secret:K}', INDIRECT: '$OTHER' },
-      }),
-    });
+  const EXPECTED_FACTS = { kind: 'claude', windows: { defaultModel: 'm', models: [{ id: 'm' }] } };
 
-    const expected = {
-      runtime: 'work',
-      kind: 'claude',
-      secretEnvNames: ['ANTHROPIC_API_KEY'],
-      referencedEnv: ['OTHER_KEY'],
-      pins: { ANTHROPIC_BASE_URL: 'https://gateway.invalid' },
-      windows: { defaultModel: 'm', models: [{ id: 'm' }] },
-    };
-    should(await facts.facts('work')).deepEqual(expected);
-    should(await facts.facts(CLAUDE_ID)).deepEqual(expected);
+  it('should publish the kind and the model windows of a runtime, by name or by id, and nothing of its environment', async () => {
+    const facts = await source({ 'manifest.json': JSON.stringify(claudeManifest) });
+
+    should(await facts.facts('work')).deepEqual(EXPECTED_FACTS);
+    should(await facts.facts(CLAUDE_ID)).deepEqual(EXPECTED_FACTS);
   });
 
-  it('should publish no pins for a runtime with no fixed settings or none that pin anything', async () => {
-    const none = await source({ 'manifest.json': JSON.stringify(claudeManifest) });
-    const noEnv = await source({
-      'manifest.json': JSON.stringify(claudeManifest),
-      [`homes/${CLAUDE_ID}/.fy/fixed.json`]: JSON.stringify({ permissions: {} }),
-    });
+  it('should still read a manifest whose account carries the legacy referencedEnv names, and say nothing of them', async () => {
+    // v4 4.291.9 to 4.291.11 wrote this field; a manifest from then must not turn a start into a refusal.
+    const facts = await source({ 'manifest.json': JSON.stringify(claudeManifest) });
 
-    should((await none.facts('work'))?.pins).deepEqual({});
-    should((await noEnv.facts('work'))?.pins).deepEqual({});
+    should(JSON.stringify(claudeManifest)).containEql('OTHER_KEY');
+    should(await facts.facts('work')).deepEqual(EXPECTED_FACTS);
   });
 
   it('should say nothing of an unpublished runtime or a fleet nobody published', async () => {
@@ -248,54 +233,25 @@ describe('launchFactsSource', () => {
     should(await empty.facts('work')).be.undefined();
   });
 
-  it('should refuse, rather than guess, fixed settings that are not JSON', async () => {
-    const facts = await source({
-      'manifest.json': JSON.stringify(claudeManifest),
-      [`homes/${CLAUDE_ID}/.fy/fixed.json`]: '{ not json',
-    });
-
-    await should(facts.facts('work')).be.rejectedWith(/not valid JSON/u);
-  });
-
-  it('should refuse, naming the file and never a value, a PRESENT fixed.json of the wrong shape', async () => {
+  it('should never read fixed.json: a stale env, a file that is not JSON and one of the wrong shape change nothing', async () => {
+    // A project's own .claude env wins over a login's (owner, !A500): nothing is pinned, so nothing is read, and no
+    // damaged file can refuse a start (v4 before 4.291.9 read none either).
     for (const text of [
+      JSON.stringify({
+        env: { ANTHROPIC_BASE_URL: 'https://gateway.invalid', LEAK: '${secret:K}', INDIRECT: '$OTHER' },
+      }),
+      '{ not json',
       'null',
       '[]',
-      '42',
-      '"text"',
-      '{"env":[]}',
-      '{"env":null}',
-      '{"env":"x"}',
-      '{"env":{"ANTHROPIC_AUTH_TOKEN":42,"ANTHROPIC_BASE_URL":"fixture-value-7788"}}',
+      '{"env":{"ANTHROPIC_AUTH_TOKEN":42}}',
     ]) {
       const facts = await source({
         'manifest.json': JSON.stringify(claudeManifest),
         [`homes/${CLAUDE_ID}/.fy/fixed.json`]: text,
       });
 
-      const refused = await facts.facts('work').then(
-        () => undefined,
-        (error: unknown) => error,
-      );
-
-      should(refused).be.instanceOf(FixedSettingsDamagedError);
-      should((refused as Error).message).match(/fixed\.json/u);
-      should((refused as Error).message).not.match(/fixture-value-7788/u);
+      should(await facts.facts('work')).deepEqual(EXPECTED_FACTS);
     }
-  });
-
-  it('should keep a document with other keys, and an empty env, as the deliberate "pins nothing / pins what it holds"', async () => {
-    const other = await source({
-      'manifest.json': JSON.stringify(claudeManifest),
-      [`homes/${CLAUDE_ID}/.fy/fixed.json`]: JSON.stringify({ theme: 'dark', env: { A: 'literal' } }),
-    });
-    const empty = await source({
-      'manifest.json': JSON.stringify(claudeManifest),
-      [`homes/${CLAUDE_ID}/.fy/fixed.json`]: '{"env":{}}',
-    });
-
-    should((await other.facts('work'))?.pins).deepEqual({ A: 'literal' });
-    should((await empty.facts('work'))?.pins).deepEqual({});
   });
 
   it('should publish the compaction trigger of the account when it is a number, and none for auto', async () => {
@@ -310,40 +266,29 @@ describe('launchFactsSource', () => {
     should('compactAt' in ((await auto.facts('work')) ?? {})).be.false();
   });
 
-  it('should read the manifest AND the fixed settings inside ONE publication read, so an apply cannot land between them', async () => {
-    const kernel = await kernelWith({
-      'manifest.json': JSON.stringify(claudeManifest),
-      [`homes/${CLAUDE_ID}/.fy/fixed.json`]: JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://gateway.invalid' } }),
-    });
+  it('should read the manifest inside the publication read, so a read waits for an apply in flight rather than the gap', async () => {
+    const kernel = await kernelWith({ 'manifest.json': JSON.stringify(claudeManifest) });
     const publication = new FleetPublication();
-    const realRoot = kernel.roots.root('fleet');
-    let appliedDuringRead = false;
-    let applying: Promise<void> | undefined;
-    // The moment the source looks for the fixed settings, an apply queues and (if it were let in) removes them.
-    const root = new Proxy(realRoot, {
-      get(target, key) {
-        if (key === 'lstat')
-          return async (path: Parameters<RootHandle['lstat']>[0]) => {
-            if (String(path).endsWith('/.fy/fixed.json')) {
-              applying = publication.publishing(async () => {
-                appliedDuringRead = true;
-                await realRoot.remove(path);
-              });
-              // A publishing callback runs at once when nothing holds the gate: it would remove the file now.
-              await Promise.resolve();
-              if (appliedDuringRead) await applying;
-            }
-            return await target.lstat(path);
-          };
-        const value = Reflect.get(target, key) as unknown;
-        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
-      },
-    });
+    let finishApply!: () => void;
+    const applying = publication.publishing(
+      async () =>
+        await new Promise<void>(resolve => {
+          finishApply = resolve;
+        }),
+    );
+    let read = false;
 
-    const facts = await launchFactsSource({ roots: { ...kernel.roots, root: () => root } }, publication).facts('work');
+    const pending = launchFactsSource(kernel, publication)
+      .facts('work')
+      .then(facts => {
+        read = true;
+        return facts;
+      });
+    await new Promise<void>(resolve => setTimeout(resolve, 20));
+    should(read).be.false();
+    finishApply();
     await applying;
 
-    // The apply waited for the read to finish: the read saw the generation it started on, not the gap.
-    should(facts?.pins).deepEqual({ ANTHROPIC_BASE_URL: 'https://gateway.invalid' });
+    should(await pending).deepEqual(EXPECTED_FACTS);
   });
 });

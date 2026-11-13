@@ -77,6 +77,8 @@ export interface DiskSessionsRoots {
 export async function diskSessionsRoots(
   parent: string,
   observe: (disk: HostFs) => HostFs = disk => disk,
+  /** `daemonUid`: the uid `checkPrivateChain` compares each owner with; absent: this process's own; `null`: unknown. */
+  options: { readonly daemonUid?: number | null } = {},
 ): Promise<DiskSessionsRoots> {
   const home = `${parent}/home`;
   const layout = { home, plugin: 'ferrets', worktrees: `${parent}/worktrees` };
@@ -90,6 +92,7 @@ export async function diskSessionsRoots(
       counter += 1;
       return `t${String(counter)}`;
     },
+    ...(options.daemonUid === undefined ? {} : { daemonUid: options.daemonUid }),
   });
   return {
     root: subfolder => port.root('sessions', { subfolder }),

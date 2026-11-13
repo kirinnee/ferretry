@@ -39,15 +39,15 @@ Walking the launched path's links therefore shows it (`passes through home-manag
   anything under `/run/current-system/sw/bin` (`environment.systemPackages`): no `home-manager-path`
   on the chain. Reported as a **nix-darwin** or **NixOS** module.
 
-| method           | how it is recognised                                                              | update                                                            |
-| ---------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `homebrew`       | the resolved path is under `…/Caskroom/<product>/`                                | **self**: `brew update`, `brew upgrade --cask <product>`, restart |
-| `nix-profile`    | a store path reached through the user's nix profile, held by a profile element    | **self**: `nix profile upgrade <element>`, then restart           |
-| `nix-shell`      | the launched path is itself a `/nix/store/…` path (an ephemeral `nix shell`)      | **switch**: offer a nix profile install; never silently           |
-| `nix-module`     | a store path reached through home-manager, nix-darwin or NixOS (see above)        | **manual**: bump the flake input, then switch                     |
-| `system-package` | `dpkg` or `rpm` owns the file (`/usr/bin/<daemon>` from the deb/rpm)              | **manual**: the exact `sudo apt`/`sudo dnf` command               |
-| `standalone`     | a release archive or `install.sh` binary anywhere else                            | **self**: download, verify the signature, swap, keep a rollback   |
-| `unknown`        | a development build (`bun …/fyd.ts`) or anything the rules above do not recognise | **manual**: none — said so                                        |
+| method           | how it is recognised                                                              | update                                                                         |
+| ---------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `homebrew`       | the resolved path is under `…/Caskroom/<product>/` or `…/Caskroom/<product>@4/`   | **self**: `brew update`, `brew upgrade --cask <product>`, restart              |
+| `nix-profile`    | a store path reached through the user's nix profile, held by a profile element    | **self**: install a guarded locked revision, replace the element, then restart |
+| `nix-shell`      | the launched path is itself a `/nix/store/…` path (an ephemeral `nix shell`)      | **switch**: offer a nix profile install; never silently                        |
+| `nix-module`     | a store path reached through home-manager, nix-darwin or NixOS (see above)        | **manual**: bump the flake input, then switch                                  |
+| `system-package` | `dpkg` or `rpm` owns the file (`/usr/bin/<daemon>` from the deb/rpm)              | **manual**: the exact `sudo apt`/`sudo dnf` command                            |
+| `standalone`     | a release archive or `install.sh` binary anywhere else                            | **self**: download, verify the signature, swap, keep a rollback                |
+| `unknown`        | a development build (`bun …/fyd.ts`) or anything the rules above do not recognise | **manual**: none — said so                                                     |
 
 Two things deliberately do NOT self-update:
 
@@ -68,8 +68,8 @@ means running `nix shell` again and reinstalling the unit by hand.
 
 A nix profile gives a **stable** path: `~/.nix-profile/bin/<daemon>` is a link that moves when the
 profile moves. `fy daemon install` records the path it finds on `PATH` without resolving it, so a
-profile install's unit names the profile link, and `nix profile upgrade` plus a restart is the whole
-update. `fy daemon install` on a `nix-shell` daemon therefore offers to run
+profile install's unit names the profile link. Guarded updates replace that profile element with an
+immutable revision before restarting (see [artifact checks](#the-version-judged-is-the-version-installed)). `fy daemon install` on a `nix-shell` daemon therefore offers to run
 `nix profile install github:kirinnee/ferretry` first (it asks; `--yes` does not answer it for you).
 
 `fy update` on a `nix-shell` daemon explains this and offers the same switch; it changes
@@ -92,6 +92,123 @@ as a switch, not as an update.
   suite that boots a real daemon stays off the network. The kernel reads the switch and folds it into
   `kernel.updateHost.checks` (a compiled build AND not `off`), so the Updates plugin never reads the environment.
 
+## Major versions
+
+**The updater refuses a jump to a new major version.** From 5.x that means 6.0 and later. This
+applies to the latest release and to an explicit `fy update --to 6.0.0`, including `--yes`:
+`--yes` only answers the confirmation and never allows the jump. The refusal happens before a
+package installation, binary swap or restart, and leaves the running daemon on its current
+version. Package metadata may be refreshed to make that decision. Patch and minor updates continue
+as before. Homebrew and Nix also judge the exact artifact they will install, even with `--to`
+naming the current major. Unreadable or unparseable manager metadata refuses the update. A failed
+latest-release check also refuses an update without an explicit target; GitHub tags are never a
+substitute for a Nix revision check. The daemon's own check, the app and automatic installation
+never offer a new major as an update: it has no badge, no button and no automatic installation.
+
+The refusal says that the next major is not a plain update (it comes with its own steps), to read that release's notes, that the
+daemon stays on the current version, and that `--major` allows the move. No migration document
+exists yet for a 5-to-6 move, so nothing here links one; the release notes of that release are the
+place it will be described.
+
+`--major` is a plain flag and combines with `--to`: `fy update --major --yes --to 6.0.0`.
+It only removes this version guard; consent, install-method checks and health checks still apply.
+Use it as part of that release's migration instructions, after preparing the home. The app never
+passes it.
+
+**Package managers bypass this guard.** Plain `brew upgrade`, `brew upgrade --cask ferretry` and
+tools such as topgrade still move the unversioned cask to the next major. So do `nix profile upgrade`
+(including `--all`), a home-manager/nix-darwin/NixOS flake-input update followed by a switch,
+`apt upgrade`, `dnf upgrade`, and re-running `install.sh`. None calls the guarded updater. Keep
+those sources pinned until a migration is intended.
+
+### The version judged is the version installed
+
+Homebrew first ensures the tap exists, then runs `brew update`. It reads the refreshed local cask
+with `HOMEBREW_NO_AUTO_UPDATE=1 brew info --cask --json=v2 <full-cask-name>`, validates its version
+and guards its major. After confirmation or `--when-idle`, it reads the local cask again and refuses
+if the version changed. It then runs `HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade --cask <full-cask-name>`.
+There is no later tap refresh. Both the plain cask and `kirinnee/ferretry/ferretry@4` keep their full
+names in every cask command; the latter can still update within v4 when the global latest release is v5.
+
+Nix reads the existing profile element's source, attribute and priority (or uses the product flake
+for a shell switch), then runs `nix flake metadata --refresh --json <source>`. It requires an immutable
+`locked.rev` for this repository and reads `VERSION` from that exact revision with `nix eval --raw`.
+A failed source, revision or version read refuses before prompts or profile changes. The newest tag
+is never treated as proof of what an unlocked branch contains.
+
+After judging that version, Nix installs only `github:kirinnee/ferretry/<locked-revision>`, with
+`--no-update-lock-file` and no later `--refresh`. For an existing profile it first runs
+`nix profile install --no-update-lock-file --priority <old-priority+1> <locked-reference>#<attribute>`.
+The higher numeric priority gives the new element lower precedence, so the old binaries remain active.
+Then `nix profile remove <old-element>` switches to the new artifact. If removal fails, staging is
+rolled back. After a successful switch, one `nix profile rollback` restores the old element's precedence
+from the intermediate generation. A shell switch installs the locked reference directly.
+
+**Nix updates leave a revision-pinned profile element, and guarded updates remain repeatable.**
+Plain `nix profile upgrade` cannot advance that immutable reference. `fy daemon update` and app updates
+recognise `github:kirinnee/ferretry/<40-hex-revision>` as the updater's own pin: they resolve the product
+flake again, read and guard the next revision's version, then replace the element by the same safe
+sequence. A second patch update works just like the first; a next-major candidate still requires its migration.
+Tags, other repositories and unsupported sources remain explicit user pins and refuse an automatic
+source change.
+
+Immediately before every restart, including service-definition repair and rollback, the updater reads
+the installed executable's version again. Without `--major`, an unexpectedly installed newer major is
+refused without restarting: the running daemon stays up, and the message names the way back —
+`nix profile rollback`, putting the previous binaries back, or for Homebrew reinstalling the previous release
+(a v4 install has the `ferretry@4` cask for it: `brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4 && fy daemon restart`). An unreadable
+version also refuses a restart. Manager installs must report exactly the judged version in the final
+health check; a newer major can never pass merely by being greater than the requested version.
+
+Another process can refresh the Homebrew tap in the instant between the final local version check
+and `brew upgrade`. In that remaining race, brew can still install the next major, just as a manual
+`brew upgrade` can. The updater does not restart it: it leaves the running daemon up and prints the way back
+(for a v4 install `brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4 && fy daemon restart`).
+
+### Homebrew: the way back to v4
+
+Starting with the guarded v4 release, every **4.x release** generates and commits
+`Casks/ferretry@4.rb`, with that release's archive URLs and SHA-256 checksums. GoReleaser publishes
+this second cask only for major version 4; all v5 releases leave it untouched. Both casks declare
+mutual conflicts because each links `fy`, `fyd` and `fyd-browser-worker`; they cannot be installed together. The `homebrew-cask`
+validation contract checks the major gate and, once the generated file exists, that its version is 4.x.
+
+To replace an accidentally installed unversioned v5 cask with v4:
+
+```bash
+brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry
+brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4
+fy daemon restart
+```
+
+The two casks install the same executable names, so remove the unversioned cask first. If migration
+already happened, restore the v4 home backup as the migration prompt explains before restarting v4.
+An unmigrated v4 home needs no conversion to run v4 again. The `@4` cask follows v4 patch and minor releases;
+`brew upgrade` of the plain `ferretry` cask continues to follow the latest major.
+
+A `ferretry@4` package cannot deliver v5. Both `fy daemon update --major --to 5.0.0` and a latest-v5
+update with `--major` refuse before refreshing or changing anything. After preparing the home as
+the migration explains, switch the cask explicitly:
+
+```bash
+brew uninstall --cask ferretry@4 && brew install --cask kirinnee/ferretry/ferretry
+fy daemon restart
+```
+
+On a normal Homebrew install, the v4 launchd plist records the selected PATH link, usually
+`/opt/homebrew/bin/fyd`, without resolving it into a versioned Caskroom path. The cask swap relinks
+that stable path. `fy daemon restart` resolves the installed daemon again, rewrites the plist and
+runs `launchctl bootout` then `bootstrap`, so launchd reloads the new executable. A legacy plist
+that names a versioned Caskroom path is rewritten by the same restart. If `FY_DAEMON_BIN` was also
+manually pinned to that removed Caskroom version, override it with the stable link while repairing:
+
+```bash
+FY_DAEMON_BIN="$(brew --prefix)/bin/fyd" fy daemon restart
+```
+
+This path/reload behavior is covered by binary-resolution and launchd-supervisor tests with fakes;
+it does not require a still-existing old Caskroom executable.
+
 ## Applying an update
 
 `fy update` is the one implementation. The app's **Update** button asks the daemon, which
@@ -102,13 +219,18 @@ survive the daemon's own restart: the systemd unit uses `KillMode=process` and t
 
 Every self-update is the same transaction:
 
-1. **Check** the target is newer than what runs, and the method can self-update.
+1. **Check** the target is newer than what runs, and the method can self-update. Refresh and judge
+   the package manager's exact artifact before asking for confirmation or installing anything.
 2. **Say what happens to ferrets mid-turn** — they keep running (see
    [Ferrets keep running](#ferrets-keep-running)) — or, with `--when-idle`, wait until none is.
 3. **Upgrade** with the method's own tool (`brew`, `nix profile`) or, for a standalone binary, by
    downloading and verifying the release archive.
 4. **Restart** through the service manager, exactly as `fy daemon restart` does.
-5. **Health check**: the installed version must be the target **or newer**, and `/healthz` must report that installed version within 30 seconds. A package manager can build something newer than the release that was offered (semantic-release tags before the GitHub release, the cask and the archives catch up, and `nix profile upgrade` builds the flake's `main`); that is a healthy update, reported as `updated 4.46.0 → 4.47.1 (newer than the 4.47.0 release you were offered)`. An older, unchanged, pre-release-of-the-target or unreadable version is still rolled back. A nix install is offered the newest stable tag rather than only the latest release, so the prompt names the version it will get; Homebrew and standalone installs download release assets, so they are offered the release.
+5. **Health check**: a package manager must install exactly the artifact version judged above; a standalone
+   install may report the target or a newer version within the running major. A newer major always requires
+   `--major`. Before any restart the installed version is read again. After restarting, `/healthz` must
+   report that installed version within 30 seconds. Wrong, unreadable or older versions fail validation.
+   A newly discovered newer major leaves the running daemon up and prints recovery instructions.
 6. **Roll back** when it does not: `nix profile rollback`, or putting the previous standalone binary
    back, then restart again and confirm the previous version serves.
 7. **Report** the outcome. The new daemon reads the report file and shows it in the app.
@@ -352,17 +474,17 @@ explicit yes, and never on a timer.**
   `classifyHarnessInstall` (`packages/protocol/src/lib/harness-update.ts`) adds only what a harness has
   and the daemon does not.
 
-| method             | recognised by (on the resolved path unless said)                                      | update                                                              | rollback                         |
-| ------------------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------- |
-| Homebrew cask      | `…/Caskroom/<cask>/`                                                                  | **self**: `brew update`, `brew upgrade --cask <cask>`               | none (declared GAP)              |
-| nix profile        | a store path reached through the user's profile, held by a profile element            | **self**: `nix profile upgrade --refresh <element>`                 | `nix profile rollback`           |
-| nix shell          | the launched path is itself a store path                                              | **manual**: `nix profile install nixpkgs#<attr>`                    | —                                |
-| Nix module         | home-manager / nix-darwin / NixOS, told apart exactly as for the daemon               | **manual**: `nix flake update nixpkgs`, then the ONE switch command | —                                |
-| npm global         | `…/lib/node_modules/<package>/` — the prefix is reported, and nvm/fnm/asdf/mise named | **self**: `<prefix>/bin/npm install -g --prefix <prefix> <pkg>@<v>` | the same install of the previous |
-| pnpm / Bun / Volta | `pnpm/global`, `.bun/install/global`, or a launched path under `.volta`               | **self**: `pnpm add -g`, `bun add -g`, `volta install` `<pkg>@<v>`  | the same install of the previous |
-| Homebrew formula   | `…/Cellar/<formula>/`                                                                 | **self**: `brew update`, `brew upgrade <formula>`                   | none                             |
-| Claude installer   | `~/.local/share/claude/…` (Claude Code only)                                          | **self**: `claude update`, or `claude install <v>` for a chosen one | `claude install <previous>`      |
-| standalone         | anything else                                                                         | **manual**: Claude's `install.sh`, or Codex's release / npm         | —                                |
+| method             | recognised by (on the resolved path unless said)                                      | update                                                                               | rollback                         |
+| ------------------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------- |
+| Homebrew cask      | `…/Caskroom/<cask>/`                                                                  | **self**: `brew update`, `brew upgrade --cask <cask>`                                | none (declared GAP)              |
+| nix profile        | a store path reached through the user's profile, held by a profile element            | **self**: resolve/guard the locked revision, install it, then remove the old element | `nix profile rollback`           |
+| nix shell          | the launched path is itself a store path                                              | **manual**: `nix profile install nixpkgs#<attr>`                                     | —                                |
+| Nix module         | home-manager / nix-darwin / NixOS, told apart exactly as for the daemon               | **manual**: `nix flake update nixpkgs`, then the ONE switch command                  | —                                |
+| npm global         | `…/lib/node_modules/<package>/` — the prefix is reported, and nvm/fnm/asdf/mise named | **self**: `<prefix>/bin/npm install -g --prefix <prefix> <pkg>@<v>`                  | the same install of the previous |
+| pnpm / Bun / Volta | `pnpm/global`, `.bun/install/global`, or a launched path under `.volta`               | **self**: `pnpm add -g`, `bun add -g`, `volta install` `<pkg>@<v>`                   | the same install of the previous |
+| Homebrew formula   | `…/Cellar/<formula>/`                                                                 | **self**: `brew update`, `brew upgrade <formula>`                                    | none                             |
+| Claude installer   | `~/.local/share/claude/…` (Claude Code only)                                          | **self**: `claude update`, or `claude install <v>` for a chosen one                  | `claude install <previous>`      |
+| standalone         | anything else                                                                         | **manual**: Claude's `install.sh`, or Codex's release / npm                          | —                                |
 
 **A store path is asked before the npm layout**, because nixpkgs' `claude-code` is itself a
 `lib/node_modules/@anthropic-ai/claude-code` inside the store. A module install reports the flake
@@ -447,6 +569,9 @@ The Updates plugin (`packages/plugins/updates`) owns `/v1/daemon/update` (view, 
 (a kernel job; the idle moment arrives as `ferret.changed`), `fy update`, and the Settings › Updates tab with the
 `behind` notice. The harness CLIs' updates are the harness plugins' (`/v1/claude-code/update`, `/v1/codex/update`).
 
+- **A new major is never a plain update.** `isNewerMajorVersion` and `isUpdateAvailable` live in the plugin's contract
+  (`contract/version.ts`, `contract/release.ts`), so the daemon's check, the app and automatic installation never offer
+  one; `fy update` (the shell's `DaemonUpdater`) refuses it unless given `--major` (see [Major versions](#major-versions)).
 - **Automatic installs ship OFF.** `config/updates.yaml` has `autoInstall: false`; turning it on is a loosening, so the
   daemon holds the edit for the owner (`202` with the sentence) instead of applying it. Whether a remote device also
   confirms with a passkey is Gate's step-up decision for the act, not a handler's.

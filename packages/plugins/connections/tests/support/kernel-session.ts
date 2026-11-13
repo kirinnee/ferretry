@@ -19,6 +19,7 @@ import {
   type SessionEnd,
   type SessionMode,
   type SocketDownstream,
+  type SocketUpgradeDecision,
 } from '@ferretry/kernel/contract';
 import { session } from '@ferretry/kernel/host';
 import { createIdentitySigner } from '../../../../core/kernel/host/session/signer.ts';
@@ -101,6 +102,10 @@ export interface KernelFixture {
   readonly requests: ApiRequest[];
   /** What the kernel's dispatcher answers a carried request with. Defaults to echoing its path. */
   route: (request: ApiRequest) => Promise<ApiResponse>;
+  /** What the kernel does with a stream (socket) request. Defaults to no route claiming it; `acceptStreams` claims every one. */
+  upgrade: (request: ApiRequest) => Promise<SocketUpgradeDecision>;
+  /** Claims every stream the daemon is asked for: it opens, takes whatever the client sends, and says nothing. */
+  acceptStreams(): void;
   paired(suffix?: string): Promise<PairedTestDevice>;
 }
 
@@ -133,6 +138,13 @@ export async function kernelFixture(): Promise<KernelFixture> {
     pair,
     requests,
     route: async request => jsonResponse({ path: request.path }),
+    upgrade: async () => ({ outcome: 'unclaimed' }),
+    acceptStreams: () => {
+      fixture.upgrade = async () => ({
+        outcome: 'accepted',
+        attach: async () => ({ open: async () => undefined, fromClient: () => undefined, close: () => undefined }),
+      });
+    },
     paired: async (suffix = 'A') => {
       const key = await kernelCrypto.generateDeviceKey();
       const deviceId = `fy_device_id_${suffix.padEnd(22, 'x')}`;
@@ -154,7 +166,7 @@ export async function kernelFixture(): Promise<KernelFixture> {
       requests.push(request);
       return await fixture.route(request);
     },
-    sockets: { upgrade: async () => ({ outcome: 'unclaimed' }), reauthorize: () => true },
+    sockets: { upgrade: async request => await fixture.upgrade(request), reauthorize: () => true },
     clock: clock as never,
   });
   return fixture;

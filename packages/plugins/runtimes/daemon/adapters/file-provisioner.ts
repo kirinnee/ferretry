@@ -3,6 +3,13 @@ import path from 'node:path';
 import { z } from 'zod';
 import { FleetManifestSchema } from '../lib/manifest.ts';
 import {
+  keptAsideName,
+  keptAsideText,
+  MAX_KEPT_DAMAGE_BYTES,
+  manifestRebuiltSentence,
+  readManifestText,
+} from '../lib/manifest-reading.ts';
+import {
   ABSENT_DOCUMENT_REVISION,
   type FleetApplyCommittedState,
   type FleetApplyFailure,
@@ -138,6 +145,10 @@ export class FileFleetProvisioner implements FleetProvisioner {
      * the commit or at the rollback of a failure. Absent, the mutation simply runs.
      */
     private readonly publishing?: <T>(mutate: () => Promise<T>) => Promise<T>,
+    /** Told, in one plain line, that an unreadable manifest is being rebuilt (the file is named, its contents never). */
+    private readonly say?: (sentence: string) => void,
+    /** The time an aside file records as `keptAt`. */
+    private readonly now: () => Date = () => new Date(),
   ) {}
 
   async preview(plan: FleetApplyPlan): Promise<FleetApplyPreview> {
@@ -211,6 +222,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     // Everything a reader could catch moved aside — the documents, the operations, the manifest and a rollback of any
     // of them — and nothing after the commit, which leaves every published name in place.
     const mutate = async (): Promise<void> => {
+      await this.keepUnreadableManifest(plan.manifestPath);
       try {
         for (const document of documents) {
           const mark = journal.beginOperation();
@@ -750,6 +762,49 @@ export class FileFleetProvisioner implements FleetProvisioner {
       return parseSettings(document, format);
     } catch (error) {
       throw new Error(`refusing to merge settings over ${backup}: it could not be parsed (${reasonOf(error)})`);
+    }
+  }
+
+  /**
+   * A manifest on disk that is not one is derived data this apply writes again, so it never refuses the apply. Before it
+   * is replaced the damaged bytes are kept ONCE, in ONE fixed aside file beside it (a self-describing envelope, owner-only),
+   * so a person can still look at what the last version wrote. A copy rather than a move: the original stays in place until
+   * the apply's own journal replaces it, so no reader sees the gap and a rolled-back apply leaves it exactly as it was.
+   * Nothing is ever deleted or replaced: the aside is created once, when the name is free. Anything already at the name
+   * (whoever made it, our own earlier aside included) is left exactly as it is. Best-effort: a copy that cannot be kept is
+   * said once, naming the aside, and the manifest is still rebuilt.
+   */
+  private async keepUnreadableManifest(manifestPath: string): Promise<void> {
+    const entry = await this.disk.lstat(manifestPath);
+    if (entry?.kind !== 'file') return;
+    let bytes: Uint8Array | undefined;
+    try {
+      // A read stops at its limit without saying so: one byte more than the bound tells a file that is too big (not kept,
+      // and never a truncated copy of it) from one that just fits.
+      bytes = await this.disk.readBytes(manifestPath, MAX_KEPT_DAMAGE_BYTES + 1);
+      if (bytes.length > MAX_KEPT_DAMAGE_BYTES) bytes = undefined;
+    } catch {
+      bytes = undefined;
+    }
+    if (bytes !== undefined && readManifestText(new TextDecoder().decode(bytes)).kind !== 'unreadable') return;
+    const aside = keptAsideName(manifestPath);
+    const kept = bytes !== undefined && (await this.keepAside(aside, bytes));
+    this.say?.(manifestRebuiltSentence(manifestPath, aside, kept));
+  }
+
+  /**
+   * Whether `damaged` is now kept at `target`. Written through the one
+   * root writer (a private temporary, then an exclusive link onto the name): ONLY when the name is free. A name that is
+   * taken, by anything, is left untouched and nothing is written, so no publish or rename ever reaches an existing
+   * entry. No call here removes anything.
+   */
+  private async keepAside(target: string, damaged: Uint8Array): Promise<boolean> {
+    try {
+      if ((await this.disk.lstat(target)) !== undefined) return false;
+      await this.disk.create(target, Buffer.from(keptAsideText(damaged, sha256(damaged), this.now())), 0o600);
+      return true;
+    } catch {
+      return false;
     }
   }
 

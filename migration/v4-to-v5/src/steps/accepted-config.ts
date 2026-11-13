@@ -29,7 +29,7 @@
  * cannot run, or a config-writing step fails in it, NO record is written for any file, the step fails (the conversion is
  * incomplete) and it never falls back to the current text.
  *
- * The files the PREVIEW itself wrote or changed (its text differs from the plain conversion's, e.g. `terminals.yaml`, the
+ * The files the PREVIEW itself wrote or changed (its text differs from the plain conversion's, e.g. `terminals.yaml`, `runtimes.yaml`, the
  * `fy-preview` settings item, the forced `limits.yaml`) are recorded only when the owner ran `prepare --owner` (the flag
  * is the owner's act of accepting them; without it nothing of theirs is recorded), and only the ones with NO held v4
  * source (a held edit, or a held deletion, of any v4 file the writing step named for it). One with a held v4 source gets
@@ -42,15 +42,16 @@ import { acceptedConfigFile, acceptedName } from '@ferretry/kernel/contract';
 import { createHash } from 'node:crypto';
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import { type Document, isScalar } from 'yaml';
+import { type Document, isScalar, parse } from 'yaml';
 import { z } from 'zod';
 import type { KeptItem, StepReport } from '../report.ts';
-import { classifyV4ConfigPath, strictYamlMap, V4_SINGLETONS } from '../v4/config.ts';
+import { classifyV4ConfigPath, listV4Config, readPlainText, strictYamlMap, V4_SINGLETONS } from '../v4/config.ts';
 import { readV4Json } from '../v4/documents.ts';
 import { configOwner } from '../v5/targets.ts';
 import { UNKNOWN_SOURCE } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
-import { PREVIEW_AUTHOR } from './settings.ts';
+import { rebuildBudget } from './preview-logins.ts';
+import { MAX_LOGIN_BYTES, PREVIEW_AUTHOR } from './settings.ts';
 
 export const V4_CONFIG_ACCEPTED = 'state/config-accepted.json';
 const V5_ACCEPTED_DIR = 'state/kernel/accepted-config';
@@ -245,6 +246,15 @@ async function notInEffect(ctx: StepContext): Promise<V4State> {
   const parsed = decoded === undefined ? { success: true as const, data: {} } : V4AcceptedRecord.safeParse(decoded);
   const accepted: Record<string, { etag: string; text: string }> = parsed.success ? parsed.data : {};
   const files = await v4ConfigFiles(ctx.v4.config);
+  // The preview stages no login file, so its logins are read (in memory, through the one safe reader) from the real v4
+  // home: a login v4 holds an unconfirmed budget raise on is then held here like any other file, and its cap is judged at
+  // the ACCEPTED value (the enforced conversion reads it as its accepted text).
+  if (ctx.previewV4Home !== undefined)
+    for (const login of (await listV4Config(ctx.previewV4Home)).files) {
+      const path = relative('config', login.label);
+      if (login.address.kind !== 'login' || files.has(path)) continue;
+      files.set(path, (await readPlainText(login.path, MAX_LOGIN_BYTES)) ?? null);
+    }
   const paths: string[] = [];
   const deleted: string[] = [];
   const named: string[] = [];
@@ -278,11 +288,12 @@ async function notInEffect(ctx: StepContext): Promise<V4State> {
     if (loosens(address, entry?.text, text, budgeted)) hold(path, 'edit');
   }
   // An entry whose file is gone waits only when deleting it loosens; any other deletion v4 applied at once. The
-  // preview leaves `config/logins` out on purpose (the owner adds logins fresh), so a login entry is not a deletion there.
+  // A preview run with its real home reads the logins from it (above), so a missing login entry is a real deletion.
   for (const [path, entry] of Object.entries(accepted)) {
     if (files.has(path)) continue;
     const address = classifyV4ConfigPath(path);
-    if (address === undefined || (ctx.preview === true && address.kind === 'login')) continue;
+    if (address === undefined || (ctx.preview === true && ctx.previewV4Home === undefined && address.kind === 'login'))
+      continue;
     if (loosens(address, entry.text, undefined, budgeted)) hold(path, 'deletion');
   }
   return {
@@ -333,8 +344,62 @@ async function enforcedConfigs(ctx: StepContext, state: V4State): Promise<Enforc
   }
 }
 
+const USAGE_FILE = 'config/usage.yaml';
+
+/** A usage.yaml text's caps as `login period level` to dollars. Numbers only; whatever is not a number is left out. */
+function capsOf(text: string | undefined): ReadonlyMap<string, number> {
+  const caps = new Map<string, number>();
+  if (text === undefined) return caps;
+  const budgets = asMap(asMap(parse(text, { version: '1.2' }))?.budgets) ?? {};
+  for (const [login, budget] of Object.entries(budgets))
+    for (const period of BUDGET_PERIODS)
+      for (const level of BUDGET_LEVELS) {
+        const amount = asMap(asMap(budget)?.[period])?.[level];
+        if (typeof amount === 'number') caps.set(`${login} ${period} ${level}`, amount);
+      }
+  return caps;
+}
+
+/**
+ * The caps v4 still HOLDS a change to: each limit whose accepted value is below the file's (or that the file drops).
+ * "login work daily hard limit held: accepted $10, pending $20". Numbers and login ids only.
+ */
+function heldCaps(accepted: string | undefined, current: string | undefined): readonly KeptItem[] {
+  const [was, now] = [capsOf(accepted), capsOf(current)];
+  return [...was]
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .flatMap(([key, amount]) => {
+      const pending = now.get(key);
+      if (pending !== undefined && pending <= amount) return [];
+      const [login, period, level] = key.split(' ') as [string, string, string];
+      return [
+        {
+          what: `login ${login} ${period} ${level} limit held: accepted $${String(amount)}, pending ${pending === undefined ? 'removal' : `$${String(pending)}`}`,
+          count: 1,
+        },
+      ];
+    });
+}
+
 /** The login a `config/logins/<id>.yaml` path names, or `undefined` for any other path. */
 const loginOf = (path: string): string | undefined => /^config\/logins\/([^/]+)\.yaml$/u.exec(path)?.[1];
+
+/**
+ * The accepted record of a login v4 holds the DELETION of. The cap moved to usage.yaml, so the login's own enforced text
+ * carries no `budget`, and Logins' deletion judge (`loginLoosening`) would see nothing to hold: the kernel would drop the
+ * login on boot, the runtime that uses it would name an unknown credential, and the whole runtime catalog would stop
+ * loading. The cap keeps ONE owner (usage.yaml's `budgets.<login>`, which the same enforced pass records); the login
+ * record of a held deletion alone re-states the budget, rebuilt from those numbers, so the judge holds the deletion as v4
+ * does. There is no live file for it to disagree with. Anything unreadable leaves the text as it was.
+ */
+function withHeldBudget(login: string, text: string, enforcedUsage: string | undefined): string {
+  if (enforcedUsage === undefined) return text;
+  const budget = rebuildBudget(asMap(asMap(parse(enforcedUsage, { version: '1.2' }))?.budgets)?.[login], true);
+  const document = strictYamlMap(text);
+  if (budget === undefined || budget === 'invalid' || document === undefined) return text;
+  document.set('budget', document.createNode(budget));
+  return String(document);
+}
 
 export const acceptedConfigStep: Step = {
   id: 'accepted-config',
@@ -427,6 +492,12 @@ export const acceptedConfigStep: Step = {
                     loginHeld.push(path);
                     return false;
                   })
+                  .map(([path, text]): readonly [string, string] => {
+                    const login = loginOf(path);
+                    return login !== undefined && held.deleted.includes(`logins/${login}.yaml`)
+                      ? [path, withHeldBudget(login, text, enforced.configs.get(USAGE_FILE))]
+                      : [path, text];
+                  })
                   .sort(([a], [b]) => a.localeCompare(b)),
                 true,
               );
@@ -436,6 +507,9 @@ export const acceptedConfigStep: Step = {
           kept: [
             ...named,
             { what: `${V4_HELD_PREFIX}${held.named.join(', ')}`, count: held.named.length },
+            ...(enforced.kind === 'ok'
+              ? heldCaps(enforced.configs.get(USAGE_FILE), ctx.v5.writtenConfigs().get(USAGE_FILE))
+              : []),
             ...(ownerRan && heldSource.length > 0
               ? [{ what: `${HELD_PREFIX}${heldSource.join(', ')}`, count: heldSource.length }]
               : []),

@@ -9,15 +9,8 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  expandStack,
-  type FlatLayer,
-  flattenProfile,
-  MAX_STACK_DEPTH,
-  MAX_STACK_LAYERS,
-  resolveProfile,
-  type StackLayer,
-} from '../../../daemon/lib/account/layering.ts';
+import { expandStack, MAX_STACK_DEPTH, MAX_STACK_LAYERS, type StackLayer } from '../../../contract/index.ts';
+import { type FlatLayer, flattenProfile, resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { type AccountModel, parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 
 type Graph = Readonly<Record<string, readonly string[]>>;

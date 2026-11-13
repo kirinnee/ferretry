@@ -18,7 +18,7 @@ import {
   runtimeCatalog,
 } from '../../../daemon/lib/service/catalog.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
-import { best } from './timing-support.ts';
+import { ratioOf } from '@ferretry/std/testing/linear-time';
 
 const V = 'Zk3pQ9vXw2LmN7rT';
 const W = 'Hy8cBt4Fg6SdJ1uE';
@@ -366,9 +366,8 @@ describe('the batch 2 nets stay linear to 256 KiB', () => {
   };
   for (const [name, make] of Object.entries(shapes)) {
     it(`should grow under 3x from 128 to 256 KiB: ${name}`, () => {
-      const small = best(make(128 * 1024));
-      const large = best(make(256 * 1024));
-      should(large / small).be.below(3);
+      const ratio = ratioOf(make(256 * 1024), make(128 * 1024));
+      should(ratio).be.below(3);
     }, 60_000);
   }
 });

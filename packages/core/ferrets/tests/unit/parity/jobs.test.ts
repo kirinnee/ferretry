@@ -28,6 +28,8 @@ import type { Result } from '@ferretry/std';
 import manifest from '../../../manifest.ts';
 import {
   AutoResumeDecide,
+  RUNTIME_START_KEY,
+  RuntimeStart,
   type AutoResumeDecideInput,
   AutoResumeSummaryFile,
   FerretChanged,
@@ -56,7 +58,7 @@ import type { SessionDirectorySubsystem } from '../../../daemon/lib/session/dire
 import { createSessionEvent, encodeSessionEvent } from '../../../daemon/lib/storage/journal.ts';
 import type { SessionId } from '../../../daemon/lib/session-id.ts';
 import { sessionHandoverNeedsForTest } from '../daemon/modules/session-handover/fixture.ts';
-import { fakePacks, host as ferretsHost } from '../daemon/ferrets/route-fixture.ts';
+import { fakeLogins, fakePacks, fakeRuntimeStartAnswer, host as ferretsHost } from '../daemon/ferrets/route-fixture.ts';
 import { handoverReceiptFor } from '../../support/daemon/parity-fj-docs.ts';
 import { memoryStorage, sessionConfig, sessionState } from '../../support/daemon/storage.ts';
 import { generatedFleet, restartWithCacheLost, sessionIdAt } from '../../support/daemon/index-rebuild-world.ts';
@@ -533,11 +535,12 @@ describe('auto-resume and the agenda hook (J-0002 J-0015)', () => {
         api: 5,
         core: false,
         kinds: [],
-        hooks: { takes: [{ hook: AutoResumeDecide }] },
+        hooks: { takes: [{ hook: AutoResumeDecide }, { hook: RuntimeStart, key: RUNTIME_START_KEY }] },
       }),
       {
         build: () => ({
           hooks: {
+            'runtime.start:runtimes': fakeRuntimeStartAnswer,
             'auto-resume.decide': (input: AutoResumeDecideInput) => {
               seen.push(input);
               return { allow: true };
@@ -550,7 +553,11 @@ describe('auto-resume and the agenda hook (J-0002 J-0015)', () => {
   test('J-0002 auto-resume is a job the daemon arms once it serves: nothing is resumed before it runs, one run resumes the ferret a host restart took down', async () => {
     const runner = new FakeRunner();
     const asked: AutoResumeDecideInput[] = [];
-    let h = await ferretsHost([], { harness: new FakeHarness(), runner, plugins: [runtimesAllowing(asked)] });
+    let h = await ferretsHost([], {
+      harness: new FakeHarness(),
+      runner,
+      plugins: [runtimesAllowing(asked), fakeLogins()],
+    });
     const started = await h.request('POST', '/v1/ferrets', {
       headers: { 'x-fy-request-id': 'parity-j2' },
       body: { folder: '/work/a', name: 'wren', runtime: 'claude-work' },

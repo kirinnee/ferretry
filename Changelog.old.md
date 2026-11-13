@@ -1,3 +1,41 @@
+## [4.291.14](https://github.com/kirinnee/ferretry/compare/v4.291.13...v4.291.14) (2026-11-13)
+
+### Fixes
+
+* **pwa:** serve every app route from /app/ so a first-time browser can pair ([#1594](https://github.com/kirinnee/ferretry/issues/1594)) ([8f1b478](https://github.com/kirinnee/ferretry/commit/8f1b4782f5d3a397c7646188c43082be4d350b17))
+
+## [4.291.13](https://github.com/kirinnee/ferretry/compare/v4.291.12...v4.291.13) (2026-11-12)
+
+### Fixes
+
+* **daemon:** regenerate an unreadable fleet manifest instead of refusing every start ([#1593](https://github.com/kirinnee/ferretry/issues/1593)) ([dd9e63b](https://github.com/kirinnee/ferretry/commit/dd9e63b26082f475191e19d6625929035863d34a))
+
+## [4.291.12](https://github.com/kirinnee/ferretry/compare/v4.291.11...v4.291.12) (2026-11-12)
+
+### Fixes
+
+* **fleet:** let project .claude settings win over a login's env again ([#1592](https://github.com/kirinnee/ferretry/issues/1592)) ([4ac1dcd](https://github.com/kirinnee/ferretry/commit/4ac1dcd8bac8f069c62e2fce3419a78db5cbc9c8))
+
+## [4.291.11](https://github.com/kirinnee/ferretry/compare/v4.291.10...v4.291.11) (2026-11-12)
+
+### Fixes
+
+* **ci:** accept GoReleaser's multi-line conflicts_with in the cask contract ([#1591](https://github.com/kirinnee/ferretry/issues/1591)) ([c396402](https://github.com/kirinnee/ferretry/commit/c3964024794f8e2523ad4402ed38bfedf137d362))
+
+## [4.291.10](https://github.com/kirinnee/ferretry/compare/v4.291.9...v4.291.10) (2026-11-12)
+
+### Fixes
+
+* **fleet:** pin only a login's claude.env so project settings win by default ([#1590](https://github.com/kirinnee/ferretry/issues/1590)) ([ac97c73](https://github.com/kirinnee/ferretry/commit/ac97c73c468e5e7bd1ee95bd15ad1adc6477f5e4))
+* **update:** require migration before moving to a new major ([#1589](https://github.com/kirinnee/ferretry/issues/1589)) ([876764a](https://github.com/kirinnee/ferretry/commit/876764a0dec7bb8fb7933bf6a8c71cec0e87811b))
+
+## [4.291.9](https://github.com/kirinnee/ferretry/compare/v4.291.8...v4.291.9) (2026-11-11)
+
+### Fixes
+
+* **fleet:** a profile's third-party model set applies; a move keeps only a picked model ([#1586](https://github.com/kirinnee/ferretry/issues/1586)) ([178624e](https://github.com/kirinnee/ferretry/commit/178624ecf7891b9ccacf35013ae01ee593c1a79d))
+* **fleet:** pin a login's literal env so a repo's .claude settings cannot blank it ([#1587](https://github.com/kirinnee/ferretry/issues/1587)) ([afec015](https://github.com/kirinnee/ferretry/commit/afec015e344b4ff305dd65eb948f196258c5cd26))
+
 ## [4.291.8](https://github.com/kirinnee/ferretry/compare/v4.291.7...v4.291.8) (2026-11-11)
 
 ### Fixes

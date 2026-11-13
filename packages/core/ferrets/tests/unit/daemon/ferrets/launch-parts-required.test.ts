@@ -133,11 +133,11 @@ describe('a required launch-part source', () => {
   });
 
   test('a required source that answers is used like any other', async () => {
-    const f = fixture([{ required: true, parts: async () => [{ kind: 'pin', env: { A: 'b' } }] }]);
+    const f = fixture([{ required: true, parts: async () => [{ kind: 'compact', at: 200_000 }] }]);
 
     const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
 
     expect(started.ok).toBe(true);
-    expect(f.harness.launched[0]?.parts).toEqual([{ kind: 'pin', env: { A: 'b' } }]);
+    expect(f.harness.launched[0]?.parts).toEqual([{ kind: 'compact', at: 200_000 }]);
   });
 });

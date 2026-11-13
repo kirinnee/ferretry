@@ -13,7 +13,7 @@
  * Relay only — and the card carries that selector (the same one Settings › This device
  * lists), but what it REPORTS is still the measurement: the carrier that won under the
  * preference, and the reason, in `chooseConnection`'s own words — including "Tunnel
- * only: this machine has no tunnel yet" when a preference leaves nothing to try.
+ * only — this machine has no tunnel yet" when a preference leaves nothing to try.
  *
  * THE OBSERVER LIST IS `describeConnectionMethod`'s, verbatim. A second copy of "what
  * a relay operator can see" would be a second thing to keep true, and the one in
@@ -36,15 +36,16 @@
  */
 
 import { type ConnectionChoice, type ConnectionMethod, describeConnectionMethod } from '../../lib/connection.ts';
-import type { CarrierPreference } from '../../lib/carrier-preference.ts';
+import type { CarrierSetting } from '../../lib/carrier-preference.ts';
 import type { ConnectionHealthState } from '../../lib/connection-health.ts';
 import { carrierLines, RECONNECTING_LABEL, stallCopy } from '../connection/connection-copy.ts';
 import { type CarrierPreferenceAvailability, CarrierPreferenceSelector } from './carrier-preference-selector.tsx';
+import { RelayFallbackNotice, useConnectionCardOnScreen } from './relay-fallback-notice.tsx';
 
 /** This machine's connection preference on this device, and how to change it. */
 interface CarrierPreferenceControl {
-  readonly value: CarrierPreference;
-  readonly onChange: (preference: CarrierPreference) => void;
+  readonly value: CarrierSetting;
+  readonly onChange: (setting: CarrierSetting) => void;
   readonly availability: CarrierPreferenceAvailability;
 }
 
@@ -59,6 +60,10 @@ export interface ActiveCarrierCardProps {
   readonly machine?: string;
   /** The connection preference selector; absent where nothing can change it. */
   readonly preference?: CarrierPreferenceControl;
+  /** Said while the paired direct address stands in for an unreachable relay (the default preference only). */
+  readonly relayFallback?: string;
+  /** The machine's id: the frame's own status line for it stays quiet while this card says the fallback itself. */
+  readonly daemon?: string;
 }
 
 /** The status the card leads with, as one machine-readable word. */
@@ -82,9 +87,19 @@ const CONNECTION_STATUS_LABEL: Readonly<Record<ConnectionStatusKind, string>> = 
   none: 'Not measured yet',
 };
 
+/**
+ * What precedes the host after "Via relay —". It never repeats the lead word: a relay nobody can name is just its host,
+ * and the other two say only what the app knows (the address it discovered itself, or the one the daemon is set up to use).
+ */
+const RELAY_TITLE = {
+  hosted: 'Hosted · ',
+  configured: 'Configured · ',
+  unknown: '',
+} as const satisfies Record<'hosted' | 'configured' | 'unknown', string>;
+
 /** Which relay carried it: whose, and the host it lives on — never the daemon fingerprint. */
 const relayName = (method: Extract<ConnectionMethod, { kind: 'relay' }>): string =>
-  `${describeConnectionMethod(method).label} · ${new URL(method.relayUrl).host}`;
+  RELAY_TITLE[method.operator ?? 'unknown'] + new URL(method.relayUrl).host;
 
 /**
  * What follows the status word, naming WHICH carrier of its kind: a relay's operator and host, a
@@ -104,7 +119,7 @@ const connectionStatusKind = (
 
 /** Said before the first request, because a carrier nobody has tried is not a carrier. */
 /**
- * The lead word when a walk RAN and nothing carried — "Tunnel only: not set up by the operator." among
+ * The lead word when a walk RAN and nothing carried — "Tunnel only — not set up by the operator." among
  * them. Not "not measured yet": something was measured, and the answer was no. The machine-readable
  * status stays `none`, because no carrier is live.
  */
@@ -146,7 +161,10 @@ export function ActiveCarrierCard({
   health,
   machine = 'this machine',
   preference,
+  relayFallback,
+  daemon,
 }: ActiveCarrierCardProps) {
+  useConnectionCardOnScreen(daemon);
   const method = choice?.ok === true ? choice.method : undefined;
   const disclosure = method === undefined ? undefined : describeConnectionMethod(method);
   const status = connectionStatusKind(method, health);
@@ -204,10 +222,14 @@ export function ActiveCarrierCard({
           )}
         </div>
       )}
-      {/* The measured sentence, or the honest absence of one. Never a default. */}
-      <p className="mb-0 mt-1 text-cell leading-base text-muted">
-        {choice === undefined ? CARRIER_UNMEASURED : choice.reason}
-      </p>
+      {/* The relay could not carry this machine, so the direct address it was paired over does: say that, plainly. */}
+      {relayFallback === undefined ? null : <RelayFallbackNotice line={relayFallback} />}
+      {/* The measured sentence, or the honest absence of one. Never a default. The fallback's sentence IS the line above. */}
+      {relayFallback !== undefined && choice?.reason === relayFallback ? null : (
+        <p className="mb-0 mt-1 text-cell leading-base text-muted">
+          {choice === undefined ? CARRIER_UNMEASURED : choice.reason}
+        </p>
+      )}
       {/* A constraint the reader will otherwise discover as a screen that stops
           updating, or a daemon that stops answering from a café. `text-warn` because
           it is a limit on what works, not decoration. */}
@@ -245,7 +267,9 @@ export function ActiveCarrierCard({
           <p className="mb-0 mt-3 text-cell leading-base text-fg">{disclosure.summary}</p>
           {/* Under a "who can see this" heading an empty list reads as a redaction, so
               the list is only ever rendered with its heading and never on its own. */}
-          <h4 className="mb-0 mt-4 text-cell font-semibold text-fg">What the parties on this path can see</h4>
+          <h4 className="mb-0 mt-4 text-cell font-semibold text-fg">
+            What the parties on this path can and cannot see
+          </h4>
           <ul className="mb-0 mt-2 flex list-disc flex-col gap-1 pl-5 text-meta leading-base text-muted">
             {disclosure.observers.map(observer => (
               <li key={observer}>{observer}</li>

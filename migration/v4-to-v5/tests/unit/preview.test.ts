@@ -381,18 +381,27 @@ describe('the preview is a clean copy (C1, M1, M2, M3)', () => {
     expect((await everyFile(fixtureOf.to)).some(file => file.endsWith('tokens.json'))).toBe(true);
   });
 
-  test('M3 logins are left out entirely: config/logins is not copied and the dry run says so', async () => {
+  test('M3 logins are carried signed out: no login file is staged, the shell is built from v4, and the dry run says so', async () => {
     await liveFerretWithV4Paths();
-    await put('config/logins/work.yaml', 'store: host\n');
+    await put('config/logins/work.yaml', 'harness: claude\nstore: host\nbudget:\n  daily:\n    hard: 20\n');
+    await put('fleet/credentials/work/.credentials.json', SENTINEL);
     const target = fixtureOf.to;
-    expect((await walk(v4)).files.some(file => file.path.startsWith('config/logins'))).toBe(false);
+    const walked = (await walk(v4)).files.map(file => file.path);
+    expect(walked.some(path => path.startsWith('config/logins'))).toBe(false);
+    expect(walked.some(path => path.startsWith('fleet/credentials'))).toBe(false);
     const said = await dryRun(v4, target);
-    expect(said).toContain('LOGINS ARE LEFT OUT OF THE COPY');
+    expect(said).toContain('LOGINS ARE CARRIED SIGNED OUT');
     expect(said).toContain('this dry run reads no login file');
-    expect(said).not.toContain('LEFT OUT ENTIRELY');
     const done = await prepare({ v4Home: v4, target, lock, now, home: join(root, 'home') });
     expect(done.report?.complete).toBe(true);
-    expect((await everyFile(target)).some(file => file.includes('/logins/'))).toBe(false);
+    // The shell: harness and store (store: host is the preview's ferretry store); the cap v4 enforced is in usage.yaml,
+    // rebuilt from its numbers.
+    const shell = await readFile(join(target, 'config/logins/work.yaml'), 'utf8');
+    expect(shell).toContain('store: ferretry');
+    expect(shell).not.toContain('budget');
+    expect(await readFile(join(target, 'config/usage.yaml'), 'utf8')).toContain('work:\n    daily:\n      hard: 20');
+    expect((await everyFile(target)).some(file => file.includes('fleet/credentials'))).toBe(false);
+    expect((await everyFile(target)).some(file => file.endsWith('.credentials.json'))).toBe(false);
   });
 
   test('MAJOR-3 free text that names a v4 path does not refuse the home, and is not redacted', async () => {

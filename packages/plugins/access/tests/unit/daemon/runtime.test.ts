@@ -40,6 +40,7 @@ import {
   PushKeysFile,
   UnlocksFile,
 } from '../../../contract/index.ts';
+import type { ConnectionsApi } from '@ferretry/plugin-connections/contract';
 import { accessConformance } from '../../../contract/testing/index.ts';
 import { toBase64Url } from '../../../daemon/lib/proof/binary.ts';
 import { type AccessHost, AccessRuntime, type AccessRuntimeDeps } from '../../../daemon/runtime.ts';
@@ -98,6 +99,8 @@ function world(
     readonly unlockWritesFail?: () => boolean;
     /** What a push service answers (and is shown) when a push is posted; absent is a unit test that reaches no network. */
     readonly request?: (init: { readonly headers: Headers }) => Response;
+    /** What the Connections port answers WHEN ASKED (a live read, so a test may provide it after the runtime is built). */
+    readonly connections?: () => ConnectionsApi | undefined;
   } = {},
 ): World {
   const folder = options.folder ?? new MemoryStateFolder();
@@ -147,7 +150,7 @@ function world(
   const runtime = new AccessRuntime({
     kernel,
     gate,
-    connections: () => undefined,
+    connections: options.connections ?? (() => undefined),
     host,
     ...(options.stages === undefined ? {} : { stages: options.stages }),
   });
@@ -191,6 +194,70 @@ async function mint(w: World, grants?: 'full' | 'limited'): Promise<string> {
   expect(response.status).toBe(201);
   return PairingCodeMintResponseSchema.parse(jsonBody(response)).code;
 }
+
+/** The whole mint response, for a case about the link (or its refusal) and not only the code. */
+async function mintResponse(w: World): Promise<ReturnType<typeof PairingCodeMintResponseSchema.parse>> {
+  const response = await w.runtime.handler('POST /v1/pair/code')(
+    call({ host: true, method: 'POST', path: '/v1/pair/code', body: '' }),
+  );
+  expect(response.status).toBe(201);
+  return PairingCodeMintResponseSchema.parse(jsonBody(response));
+}
+
+const ADVERTISED: ConnectionsApi = {
+  carriers: () => [],
+  tunnel: async () => {
+    throw new Error('not used here');
+  },
+  advertisement: () => ({
+    advertisement: { kind: 'local-only', url: 'http://127.0.0.1:7458' },
+    discoveredRelayUrl: 'wss://hosted.example.test/fy',
+    appOrigin: 'https://app.example.test',
+    allowedOrigins: [],
+  }),
+};
+
+describe('the pairing link is decided at each mint', () => {
+  test('a Connections provided AFTER Access was built still gives the next mint a link', async () => {
+    let provided: ConnectionsApi | undefined;
+    const w = world({ connections: () => provided });
+    await w.runtime.ready();
+
+    const before = await mintResponse(w);
+    provided = ADVERTISED;
+    const after = await mintResponse(w);
+
+    expect(before.refusal).toBe('no-port');
+    expect(before.pairUrl).toBeUndefined();
+    expect(after.refusal).toBeUndefined();
+    expect(after.reach).toBe('local-only');
+    expect(after.daemonUrl).toBe('http://127.0.0.1:7458/');
+    expect(after.discoveredRelayUrl).toBe('wss://hosted.example.test/fy');
+    expect(typeof after.pairUrl).toBe('string');
+  });
+
+  test('a Connections that cannot answer refuses the link with no-port AND says why in the log', async () => {
+    const w = world({
+      connections: () => ({
+        ...ADVERTISED,
+        advertisement: () => {
+          throw new Error('This carrier is unavailable.');
+        },
+      }),
+    });
+
+    const minted = await mintResponse(w);
+
+    expect(minted.refusal).toBe('no-port');
+    expect(
+      w.logged.some(
+        line =>
+          line.includes('could not say how other devices reach this daemon') &&
+          line.includes('This carrier is unavailable.'),
+      ),
+    ).toBe(true);
+  });
+});
 
 interface Attempt {
   readonly code: string;

@@ -96,10 +96,18 @@ const settle = async (): Promise<void> => {
 };
 const ports = {} as DaemonlessPorts;
 
+// A failed or refused plugin-list read is asked again on a timer, so every paired daemon is unpaired after its test
+// (unmounting the view does not stop the runtime): a timer left running fires inside a later test in the same process.
+const openedLists: DaemonList[] = [];
+afterEach(() => {
+  for (const daemons of openedLists.splice(0)) daemons.remove('d1');
+});
+
 function setup(withDaemon: boolean) {
   const transport = new FakeTransport(() => json({ error: 'none', code: 'not_found' }, 404));
   const storage = memoryStore();
   const daemons = new DaemonList({ storage, now: () => 1 });
+  if (withDaemon) openedLists.push(daemons);
   if (withDaemon) daemons.add({ daemon: 'd1', machine: 'laptop', deviceId: 'dev', address: 'http://127.0.0.1:40245' });
   const registered = registeredDaemonless(surfaces, ports);
   const runtime = new ShellRuntime({

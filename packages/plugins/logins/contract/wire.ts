@@ -58,6 +58,7 @@ export const LoginStatusReasonSchema = z.enum([
   'refresh_revoked',
   'refresh_rejected',
   'store_unreachable',
+  'secret_not_stored',
   'check_in_flight',
 ]);
 export type LoginStatusReason = z.infer<typeof LoginStatusReasonSchema>;

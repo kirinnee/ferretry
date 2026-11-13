@@ -1,13 +1,20 @@
 import { KERNEL_REFUSALS, PluginsChanged, parseRouteKey } from '@ferretry/kernel/contract';
 import type { EventDef } from '@ferretry/kernel/contract';
-import type { PluginCallHeaders, PluginClient } from '@ferretry/kernel/manifest';
+import { allowedCallHeaders, type PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
 import type { PairedDaemon } from '../daemons/daemon-list.ts';
 import { type PasskeyHandler, type PasskeyNeed, type PromptOrigin, requestOrigin } from '../passkey/passkey.ts';
 import type { SurfaceEntry } from '../surfaces/registry.ts';
 import { untilAborted } from './machine-deadline.ts';
 import { DEVICE_NOT_ACCEPTED_SENTENCE } from './sentences.ts';
-import { eventOwner, type Inventory, parseInventory, type Standing, standings } from './inventory.ts';
+import {
+  eventOwner,
+  type Inventory,
+  parseInventory,
+  type Standing,
+  standings,
+  unreadableBecause,
+} from './inventory.ts';
 import {
   CARRIER_OUTAGE_CODE,
   DaemonCallError,
@@ -76,28 +83,16 @@ const isCapabilityRefusal = (answer: TransportAnswer): boolean => {
   return typeof code === 'string' && code.startsWith('grant_');
 };
 
-/** The agenda channel header and the one value it may carry (the Asks contract's `AGENDA_CHANNEL_HEADER` / `AGENDA_CHANNEL_VERSION`). */
-const AGENDA_CHANNEL_HEADER = 'x-fy-agenda-channel';
-const AGENDA_CHANNEL_VERSIONS: ReadonlySet<string> = new Set(['2']);
-
-/**
- * The CLOSED list of headers a half may set (`PluginCallHeaders`): `x-fy-request-id` and `x-fy-agenda-channel` with
- * today's value. Any other key a half passes is dropped, and so is a channel value outside the list; nothing else
- * (credentials, the contract hash) is ever a half's to send.
- */
-const allowedHeaders = (given: PluginCallHeaders | undefined): Record<string, string> | undefined => {
-  if (given === undefined) return undefined;
-  const sent: Record<string, string> = {};
-  const requestId = given['x-fy-request-id'];
-  if (requestId !== undefined) sent['x-fy-request-id'] = requestId;
-  const channel = given[AGENDA_CHANNEL_HEADER];
-  if (channel !== undefined && AGENDA_CHANNEL_VERSIONS.has(channel)) sent[AGENDA_CHANNEL_HEADER] = channel;
-  return Object.keys(sent).length === 0 ? undefined : sent;
-};
-
 export interface DaemonClientOptions {
   readonly transport: DaemonTransport;
   readonly surfaces: readonly SurfaceEntry[];
+  /**
+   * Waits (ms) between the reads of the plugin list that follow a failed one, the last repeating. A failed read leaves
+   * the whole machine on "could not read what this daemon offers", so it is asked again until it answers (a carrier
+   * that dropped, a daemon still starting) instead of staying that way until the app is reopened. Default: 1 s doubling
+   * to 30 s. An empty list reads once.
+   */
+  readonly rereadAfterMs?: readonly number[];
   /**
    * The daemon this client reaches and Access's passkey handler (`passkey/passkey.ts`): a refusal for want of an
    * unlock or a step-up is shown to it, and the call is sent again ONCE when the person confirmed. Absent, nothing can
@@ -158,6 +153,9 @@ function refusal(answer: TransportAnswer): DaemonCallError {
   return new DaemonCallError(answer.status, code, message, answer.body);
 }
 
+/** 1 s doubling to 30 s: a read that failed is asked again until it answers. */
+const DEFAULT_REREAD_AFTER_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
+
 export class DaemonClient {
   readonly #transport: DaemonTransport;
   readonly #surfaces: readonly SurfaceEntry[];
@@ -184,10 +182,15 @@ export class DaemonClient {
   readonly #authorityListeners = new Set<(signal: AuthoritySignal) => void>();
   readonly #refusedListeners = new Set<() => void>();
   #refused = false;
+  readonly #rereadAfterMs: readonly number[];
+  /** Failed reads in a row, and the pending re-read's timer; both reset by an answered read. */
+  #failedReads = 0;
+  #rereadTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(options: DaemonClientOptions) {
     this.#transport = options.transport;
     this.#surfaces = options.surfaces;
+    this.#rereadAfterMs = options.rereadAfterMs ?? DEFAULT_REREAD_AFTER_MS;
     this.#passkey = options.passkey;
     for (const entry of options.surfaces) {
       for (const route of entry.manifest.actions?.routes ?? []) this.#routeOwner.set(route.key, entry.id);
@@ -210,6 +213,8 @@ export class DaemonClient {
     this.#stopEvents = undefined;
     this.#setFeedLive(false);
     this.#stopReconnect?.();
+    if (this.#rereadTimer !== undefined) clearTimeout(this.#rereadTimer);
+    this.#rereadTimer = undefined;
     for (const open of this.#sockets) open.socket.close();
     this.#sockets.clear();
   }
@@ -346,7 +351,7 @@ export class DaemonClient {
       inventory = answer.status === 200 ? parseInventory(answer.body) : { kind: 'unreadable' };
     } catch (error) {
       if (isDeviceRefusal(error)) this.#refuse();
-      inventory = { kind: 'unreadable' };
+      inventory = unreadableBecause(error);
     }
     try {
       const health = await this.#transport.request({ method: 'GET', path: parseRouteKey(HEALTH_ROUTE).path });
@@ -362,6 +367,32 @@ export class DaemonClient {
     this.#ensureEvents();
     this.#settle();
     for (const listener of this.#changeListeners) listener();
+    this.#planReread(inventory);
+  }
+
+  /**
+   * An unreadable plugin list is asked again, after a growing wait, until it answers: a read that failed on the way
+   * (a carrier that dropped, a daemon still starting) is not a verdict, and reloading the app would only repeat it. A
+   * device the daemon refused is not asked again (pairing is the repair), and a protocol mismatch IS an answer.
+   */
+  #planReread(inventory: Inventory): void {
+    if (this.#rereadTimer !== undefined) clearTimeout(this.#rereadTimer);
+    this.#rereadTimer = undefined;
+    if (inventory.kind !== 'unreadable') {
+      this.#failedReads = 0;
+      return;
+    }
+    const waits = this.#rereadAfterMs;
+    if (this.#stopped || this.#refused || waits.length === 0) return;
+    const wait = waits[Math.min(this.#failedReads, waits.length - 1)] as number;
+    this.#failedReads += 1;
+    this.#rereadTimer = setTimeout(() => {
+      this.#rereadTimer = undefined;
+      if (this.#reading !== undefined || this.#stopped) return;
+      this.#reading = this.#read().finally(() => {
+        this.#reading = undefined;
+      });
+    }, wait);
   }
 
   #allowed(id: string): boolean {
@@ -384,8 +415,8 @@ export class DaemonClient {
     if (owner === undefined) throw new TypeError(`${caller} called ${route}, which no compiled manifest declares`);
     await this.#admit(caller, owner);
     const { method, path } = parseRouteKey(route);
-    // Only the allow-listed headers cross (`allowedHeaders`); any other key a half passes is dropped.
-    const headers = allowedHeaders(init.headers);
+    // Only the allow-listed headers cross (`allowedCallHeaders`); any other key a half passes is dropped.
+    const headers = allowedCallHeaders(init.headers);
     const request = {
       method,
       path: fillPath(path, init.params),

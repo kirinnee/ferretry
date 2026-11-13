@@ -875,8 +875,8 @@ included — is never shown, and an agent's text that holds one is refused. Not 
 - `usage.yaml` (the time zone and the public feed): a time-zone change is not held yet; before 5.0 it was.
 - `harness-claude-code.yaml`, `harness-codex.yaml` (the agent permission mode): each also holds the harness
   binary and search paths, which no agent reached before, and only the permission mode is judged.
-- `components/instructions/` (now `instructions/<name>.md`, not a declared YAML file) and `presets/` (no
-  successor declared yet).
+- `components/instructions/` (now `instructions/<name>.yaml`, a `text:` document that Runtimes owns, which an agent does
+  not reach) and `presets/` (no successor declared yet).
 
 `agenda.yaml` also holds `deadlineWarnHours`, which before 5.0 lived in `daemon.json`, out of an agent's reach. It
 only moves when a deadline warning buzzes: no spend and no authority, so an agent may change it.

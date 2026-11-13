@@ -82,6 +82,7 @@ export async function exchangePairing(
       machine: response.daemonName,
       deviceId: response.deviceId,
       address: connection.baseUrl,
+      ...(outcome.via.kind === 'direct' ? { pairedOver: 'direct' as const } : {}),
       carriers: response.carriers,
     });
   } catch (reason) {

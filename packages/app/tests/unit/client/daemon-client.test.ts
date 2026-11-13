@@ -255,8 +255,13 @@ describe('events', () => {
 
   test('an unreadable inventory blocks everything', async () => {
     const { client } = daemon({ nonsense: true });
-    await client.start();
-    expect(client.standing('board')).toEqual({ state: 'blocked', reason: 'unreadable' });
+    // An unreadable list is asked again on a timer; stopping the client is what ends it.
+    try {
+      await client.start();
+      expect(client.standing('board')).toEqual({ state: 'blocked', reason: 'unreadable' });
+    } finally {
+      client.stop();
+    }
   });
 });
 

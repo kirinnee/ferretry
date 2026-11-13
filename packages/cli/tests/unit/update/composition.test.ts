@@ -10,6 +10,9 @@ import { registry as compiledRegistry } from '../../../src/generated/commands.ts
 import { runFy } from '../../../src/lib/run.ts';
 import { capturedIo, entry, inventoryOf, registryOf } from '../fakes.ts';
 
+const CASK = 'kirinnee/ferretry/ferretry';
+const GUARDED = 'env HOMEBREW_NO_AUTO_UPDATE=1';
+
 test.each([1, 2])(
   'V-0250 production update composition runs with Updates off and checks home.json format %s before launch',
   async format => {
@@ -74,9 +77,13 @@ test.each([1, 2])(
     });
     const streaming = spyOn(BunDaemonProcess.prototype, 'runStreaming').mockImplementation(async argv => {
       commands.push([...argv]);
-      if (argv.join(' ') === 'brew tap') return { code: 0, stdout: 'kirinnee/ferretry\n', stderr: '' };
-      if (argv.join(' ') === 'brew upgrade --cask ferretry') installed = '5.0.1';
-      else if (argv[0] !== 'brew') throw new Error(`unexpected package command: ${argv.join(' ')}`);
+      const line = argv.join(' ');
+      if (line === 'brew tap') return { code: 0, stdout: 'kirinnee/ferretry\n', stderr: '' };
+      // The local cask metadata the adapter judges before installing: the qualified token and the version brew would install.
+      if (line === `${GUARDED} brew info --cask --json=v2 ${CASK}`)
+        return { code: 0, stdout: JSON.stringify({ casks: [{ full_token: CASK, version: '5.0.1' }] }), stderr: '' };
+      if (line === `${GUARDED} brew upgrade --cask ${CASK}`) installed = '5.0.1';
+      else if (line !== 'brew update') throw new Error(`unexpected package command: ${line}`);
       return { code: 0, stdout: '', stderr: '' };
     });
     const holds = spyOn(BunDaemonProcess.prototype, 'holdsOpen').mockImplementation(async (pid, path) => {
@@ -156,7 +163,7 @@ test.each([1, 2])(
       expect(signals).toEqual([4321]);
       expect(checkedLocks.length).toBeGreaterThan(0);
       expect(checkedLocks.every(path => path === join(home, 'run', 'daemon.lock'))).toBe(true);
-      expect(commands).toContainEqual(['brew', 'upgrade', '--cask', 'ferretry']);
+      expect(commands).toContainEqual(['env', 'HOMEBREW_NO_AUTO_UPDATE=1', 'brew', 'upgrade', '--cask', CASK]);
       expect(requests).toContain('http://127.0.0.1:17458/healthz');
       expect(requests).toContain('http://127.0.0.1:17431/v1/plugins');
       expect(requests.some(url => url.endsWith('/v1/daemon/update'))).toBe(false);

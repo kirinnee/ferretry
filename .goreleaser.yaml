@@ -88,7 +88,10 @@ release:
 # The cask is committed INTO THIS REPO under Casks/ (no separate homebrew-tap repo):
 #   brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry && brew install --cask ferretry
 homebrew_casks:
-  - name: ferretry
+  - &release_cask
+    name: ferretry
+    conflicts:
+      - cask: ferretry@4
     ids: [archive]
     binaries: [fy, fyd, fyd-browser-worker]
     repository:
@@ -109,3 +112,10 @@ homebrew_casks:
           if OS.mac?
             system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/fy", "#{staged_path}/fyd", "#{staged_path}/fyd-browser-worker"]
           end
+  # Every v4 release refreshes this cask from its real archives and checksums.
+  # Releases of every other major leave the committed Casks/ferretry@4.rb untouched.
+  - <<: *release_cask
+    name: ferretry@4
+    conflicts:
+      - cask: ferretry
+    skip_upload: '{{ ne .Major 4 }}'

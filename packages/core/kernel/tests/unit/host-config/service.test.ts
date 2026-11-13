@@ -526,6 +526,74 @@ describe('config files: live reading and watching', () => {
     expect(h.log.lines.some(line => line.includes('listener bug'))).toBe(true);
   });
 
+  test('an edit landing between boot reload and the watcher being armed is reloaded, not taken as the baseline', async () => {
+    // #1593 (v4 4.291.13): the first fingerprint was the baseline, so an edit made while boot published its schemas
+    // (after the reload, before startWatching) was never seen. The baseline is the tree as the boot reload read it.
+    const h = configHarness();
+    h.fs.seed(h.path('updates.yaml'), 'limit: 5\n');
+    await h.files.reload();
+    expect(limitOf(h)).toBe(5);
+    h.fs.seed(h.path('updates.yaml'), 'limit: 4\n');
+    const stop = h.files.startWatching();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    h.clock.advance(100);
+    h.clock.advance(1_000);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    h.clock.advance(400);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(limitOf(h)).toBe(4);
+    stop();
+  });
+
+  /** A memory filesystem whose `info` of the updates file can be made to fail, as an EACCES on one file does. */
+  const statDeniable = () => {
+    const memory = createMemoryHostFs();
+    const state = { denied: false };
+    const fs = new Proxy(memory, {
+      get(target, key) {
+        if (key === 'info')
+          return async (path: string) => {
+            if (state.denied && path === `${HOME}/config/updates.yaml`) throw new Error('EACCES: permission denied');
+            return await target.info(path);
+          };
+        const got = Reflect.get(target, key) as unknown;
+        return typeof got === 'function' ? (got as (...args: unknown[]) => unknown).bind(target) : got;
+      },
+    });
+    return { fs, state };
+  };
+
+  test('a config file that cannot be statted does not fail the first reload: the accepted version stays in effect', async () => {
+    const { fs, state } = statDeniable();
+    const h = configHarness(fs);
+    await h.files.write('updates', updatesDef, undefined, 'limit: 5\n');
+    const restarted = h.restart();
+    state.denied = true;
+    await restarted.reload();
+    expect((restarted.port('updates').file(updatesDef) as { limit: number } | undefined)?.limit).toBe(5);
+    expect(restarted.status().issues.length).toBeGreaterThan(0);
+  });
+
+  test('when boot could not fingerprint the tree, an edit made after boot is still reloaded by the watcher', async () => {
+    const { fs, state } = statDeniable();
+    const h = configHarness(fs);
+    await h.files.write('updates', updatesDef, undefined, 'limit: 5\n');
+    const restarted = h.restart();
+    state.denied = true;
+    await restarted.reload();
+    state.denied = false;
+    h.fs.seed(h.path('updates.yaml'), 'limit: 4\n');
+    const stop = restarted.startWatching();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    h.clock.advance(100);
+    h.clock.advance(1_000);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    h.clock.advance(400);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect((restarted.port('updates').file(updatesDef) as { limit: number } | undefined)?.limit).toBe(4);
+    stop();
+  });
+
   test('startWatching reloads after the tree has been quiet, and stops when told', async () => {
     const h = configHarness();
     await h.files.write('updates', updatesDef, undefined, 'limit: 5\n');

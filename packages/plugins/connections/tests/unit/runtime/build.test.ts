@@ -280,10 +280,11 @@ test('R206 a discovery failure on a loopback bind says the consequence and the r
   await half!.hooks['carriers:relay'].start({} as SessionLayer, new AbortController().signal);
   const trail = host.logs.map(entry => entry.message);
   expect(trail[0]).toBe('no relay carrier — no relay could be discovered: the relay directory is unavailable');
-  expect(trail[1]).toContain('bound to 127.0.0.1 and dials no relay, so NO other device can reach it');
-  expect(trail[2]).toContain('to pair: set "host" to "0.0.0.0"');
-  expect(trail[3]).toContain('a restart asks the relay directory again');
-  expect(trail).toHaveLength(4);
+  expect(trail[1]).toContain('another device cannot pair yet; this daemon is bound to 127.0.0.1');
+  expect(trail[2]).toBe('Keep the daemon on a loopback listener ("fyd --host 127.0.0.1").');
+  expect(trail[3]).toContain('Restart to ask the hosted relay directory again');
+  expect(trail.slice(1).join('\n')).not.toMatch(/carriers|publicUrl|0\.0\.0\.0/u);
+  expect(trail).toHaveLength(5);
   expect(host.provided(ConnectionsPort).carriers()).toEqual([{ kind: 'direct', url: 'https://box.example' }]);
   await host.stop();
 });
@@ -299,8 +300,10 @@ test('R206 a relay switched off in the configuration names that switch once, wit
   expect(trail.filter(line => line.startsWith('no relay carrier — '))).toEqual([
     "no relay carrier — the configured relay https://mine.example is switched off in this daemon's configuration",
   ]);
-  expect(trail.some(line => line.includes('reachable only from this machine’s own network'))).toBe(true);
-  expect(trail.some(line => line.includes('is what this daemon dials — correct it or remove it'))).toBe(true);
+  expect(trail.some(line => line.includes('refuses direct connections from other machines'))).toBe(true);
+  expect(
+    trail.some(line => line.includes('correct or remove the top-level "relay" entry in config/connections.yaml')),
+  ).toBe(true);
   await host.stop();
 });
 describe('the carrier set is the daemon’s answer', () => {
@@ -310,7 +313,7 @@ describe('the carrier set is the daemon’s answer', () => {
     await host.runJob('relay-discovery');
     const daemonSet: PublishedCarriers = [
       { kind: 'direct', url: 'https://box.example' },
-      { kind: 'relay', url: 'https://mine.example' },
+      { kind: 'relay', url: 'https://mine.example', source: 'configured' },
     ];
     const queries: Record<string, string>[] = [{}, { kind: 'relay', url: 'https://evil.example' }, { carriers: '[]' }];
     for (const query of queries)
@@ -375,7 +378,7 @@ describe('the carrier set is the daemon’s answer', () => {
     expect(parsed.carriers).toEqual(host.provided(ConnectionsPort).carriers());
     expect(publishedConnectionMethods(parsed.carriers)).toEqual([
       { kind: 'direct', daemonUrl: 'https://box.example' },
-      { kind: 'relay', relayUrl: 'https://mine.example', operator: 'self' },
+      { kind: 'relay', relayUrl: 'https://mine.example', operator: 'configured' },
     ]);
     await host.stop();
   });
@@ -452,9 +455,9 @@ describe('the default relay dial through the Kernel restricted WebSocket port', 
     expect(h.dials.map(url => new URL(url).host)).toEqual(['one.example', 'hosted.example', 'two.example']);
     expect(h.half.resolvers.relay()).toEqual(['one.example', 'hosted.example', 'two.example']);
     expect(h.host.provided(ConnectionsPort).carriers()).toEqual([
-      { kind: 'relay', url: 'https://one.example' },
+      { kind: 'relay', url: 'https://one.example', source: 'configured' },
       { kind: 'relay', url: 'https://hosted.example' },
-      { kind: 'relay', url: 'https://two.example' },
+      { kind: 'relay', url: 'https://two.example', source: 'configured' },
     ]);
     expect(() => h.websocket.connect('wss://off.example/other')).toThrow('manifest does not declare it');
     await h.stop();
@@ -529,8 +532,14 @@ describe('the carrier set the daemon publishes (Appendix D, connections batch 3)
     }));
     expect(PublishedCarriersSchema.safeParse(nine.slice(0, 8)).success).toBe(true);
     expect(PublishedCarriersSchema.safeParse(nine).success).toBe(false);
-    // Every entry is exactly `{ kind, url }`: nothing else rides on the redemption response.
-    for (const carrier of set) expect(Object.keys(carrier).sort()).toEqual(['kind', 'url']);
+    // Every entry is `{ kind, url }`, and a relay the operator wrote also says so (`source: 'configured'`): nothing else
+    // rides on the redemption response, and a discovered relay says nothing about whose it is.
+    for (const carrier of set)
+      expect(Object.keys(carrier).sort()).toEqual(
+        carrier.kind === 'relay' && carrier.url !== 'https://hosted.example'
+          ? ['kind', 'source', 'url']
+          : ['kind', 'url'],
+      );
     await host.stop();
   });
 
@@ -621,5 +630,106 @@ describe('the carrier set the daemon publishes (Appendix D, connections batch 3)
       expect(ConnectionsConfigSchema.safeParse(stray).success).toBe(false);
     }
     expect(ConnectionsConfigSchema.safeParse({ direct: { host: '0.0.0.0', port: 7431 } }).success).toBe(true);
+  });
+});
+
+describe('the advertisement follows the listener the kernel bound', () => {
+  const unbound: ConnectionBindings = { identity, openSession: (layer, key, peer) => layer.open(key, peer) };
+  const hosted = { read: async () => ({ kind: 'available', relayUrl: 'wss://hosted.example/fy' }) as const };
+  const via = (bind: () => { host: string; port: number } | undefined, config?: object) =>
+    testHost({
+      plugins: [
+        implementDaemon(manifest, {
+          build: ctx =>
+            buildConnections(ctx, { ...unbound, directory: hosted, ...kernelConnectionBindings(ctx.kernel) }),
+        }),
+      ],
+      bind,
+      ...(config === undefined ? {} : { config: { 'connections.yaml': config } }),
+    });
+
+  test('a loopback listener with no connections.yaml is a local-only address on the port it really bound', async () => {
+    const host = await via(() => ({ host: '127.0.0.1', port: 7458 }));
+    await host.runJob('relay-discovery');
+    const advertised = host.provided(ConnectionsPort).advertisement();
+    expect(advertised.advertisement).toEqual({ kind: 'local-only', url: 'http://127.0.0.1:7458' });
+    expect(advertised.port).toBe(7458);
+    expect(advertised.discoveredRelayUrl).toBe('wss://hosted.example/fy');
+    expect(advertised.allowedOrigins).toEqual([HOSTED_APP_ORIGIN]);
+    await host.stop();
+  });
+
+  test('the bound port wins over direct.port in the configuration, and the configuration answers only while nothing is bound', async () => {
+    let bound: { host: string; port: number } | undefined;
+    const host = await via(() => bound, { direct: { host: '127.0.0.1', port: 9999 } });
+    await host.runJob('relay-discovery');
+    expect(host.provided(ConnectionsPort).advertisement().advertisement).toEqual({
+      kind: 'local-only',
+      url: 'http://127.0.0.1:9999',
+    });
+    bound = { host: '127.0.0.1', port: 7458 };
+    expect(host.provided(ConnectionsPort).advertisement().advertisement).toEqual({
+      kind: 'local-only',
+      url: 'http://127.0.0.1:7458',
+    });
+    await host.stop();
+  });
+
+  test('it is read when asked, not when built: no port before the listener binds, an address after', async () => {
+    let bound: { host: string; port: number } | undefined;
+    const host = await via(() => bound);
+    expect(host.provided(ConnectionsPort).advertisement().advertisement).toEqual({
+      kind: 'none',
+      refusal: 'no-port',
+    });
+    bound = { host: '127.0.0.1', port: 51234 };
+    expect(host.provided(ConnectionsPort).advertisement().advertisement).toEqual({
+      kind: 'local-only',
+      url: 'http://127.0.0.1:51234',
+    });
+    await host.stop();
+  });
+
+  test('a wildcard listener still refuses with wildcard-bind, whatever the configuration says', async () => {
+    const host = await via(() => ({ host: '0.0.0.0', port: 7458 }), { direct: { host: '127.0.0.1', port: 7458 } });
+    expect(host.provided(ConnectionsPort).advertisement().advertisement).toEqual({
+      kind: 'none',
+      refusal: 'wildcard-bind',
+    });
+    await host.stop();
+  });
+
+  describe('the browser-origin allowlist is the configuration, never the listener', () => {
+    const HOSTED = [HOSTED_APP_ORIGIN];
+    const origins = async (bound: { host: string; port: number } | undefined, config?: object) => {
+      const host = await via(() => bound, config);
+      const allowed = host.provided(ConnectionsPort).advertisement().allowedOrigins;
+      await host.stop();
+      return allowed;
+    };
+    test.each([
+      ['a loopback listener', { host: '127.0.0.1', port: 7458 }],
+      ['a wildcard listener', { host: '0.0.0.0', port: 7458 }],
+      ['a concrete listener', { host: '192.0.2.7', port: 7458 }],
+      ['an ephemeral port', { host: '127.0.0.1', port: 51234 }],
+    ])('with no direct block, %s adds nothing to the hosted origin', async (_name, bound) => {
+      expect(await origins(bound)).toEqual(HOSTED);
+    });
+    test.each([
+      ['loopback', { host: '127.0.0.1', port: 7458 }],
+      ['wildcard', { host: '0.0.0.0', port: 7458 }],
+      ['concrete', { host: '192.0.2.7', port: 7458 }],
+    ])('a direct block that matches the %s listener is unchanged', async (_name, bound) => {
+      expect(await origins(bound, { direct: { host: bound.host, port: bound.port } })).toEqual([
+        ...HOSTED,
+        `http://${bound.host}:${String(bound.port)}`,
+      ]);
+    });
+    test('a direct block that differs from the listener is what stays allowed, not the listener', async () => {
+      expect(await origins({ host: '127.0.0.1', port: 7458 }, { direct: { host: '192.0.2.7', port: 9999 } })).toEqual([
+        ...HOSTED,
+        'http://192.0.2.7:9999',
+      ]);
+    });
   });
 });

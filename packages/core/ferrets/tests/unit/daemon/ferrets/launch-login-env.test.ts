@@ -92,12 +92,14 @@ describe('a ferret launch carries its login’s environment', () => {
     expect(f.asked[0]?.ANTHROPIC_AUTH_TOKEN).toBe('${secret:GW_TOKEN}');
   });
 
-  test('the spec carries the login env as its own field, and none of it is a launch part', async () => {
+  test('the login env reaches the child only: the spec carries no copy of it, and none of it is a launch part', async () => {
     const f = fixture({ loginEnv: env({ ANTHROPIC_BASE_URL: 'https://gateway.example.test' }) });
 
     await f.service.start({ folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' }, PERSON_ORIGIN);
 
-    expect(f.harness.launched[0]?.loginEnv).toEqual({ ANTHROPIC_BASE_URL: 'https://gateway.example.test' });
+    expect(f.asked[0]?.ANTHROPIC_BASE_URL).toBe('https://gateway.example.test');
+    // Nothing hands a harness the login's values to pin: a project's own `.claude` env wins over them (docs/secrets.md).
+    expect(f.harness.launched[0]).not.toHaveProperty('loginEnv');
     expect(f.harness.launched[0]?.parts).toEqual([]);
   });
 
@@ -140,7 +142,7 @@ describe('a ferret launch carries its login’s environment', () => {
     expect(f.asked[0]?.FY_SESSION_TOKEN).not.toBe('forged');
     expect(f.asked[0]?.FY_SESSION_ID).not.toBe('forged');
     expect(f.asked[0]?.KEEP).toBe('kept');
-    expect(f.harness.launched[0]?.loginEnv).toEqual({ KEEP: 'kept' });
+    expect(f.harness.launched[0]).not.toHaveProperty('loginEnv');
   });
 
   test('a ferret with no login, or a login with no env, gets nothing extra; the port is not asked without a login', async () => {
@@ -156,8 +158,8 @@ describe('a ferret launch carries its login’s environment', () => {
     await f.service.start({ folder: '/work', harness: 'claude-code', login: 'oauth', by: 'owner' }, PERSON_ORIGIN);
 
     expect(asks).toBe(1);
-    expect(f.harness.launched[0]?.loginEnv).toBeUndefined();
-    expect(f.harness.launched[1]?.loginEnv).toBeUndefined();
+    expect(f.harness.launched[0]).not.toHaveProperty('loginEnv');
+    expect(f.harness.launched[1]).not.toHaveProperty('loginEnv');
     for (const asked of f.asked) expect(Object.keys(asked).every(name => name.startsWith('FY_'))).toBe(true);
   });
 

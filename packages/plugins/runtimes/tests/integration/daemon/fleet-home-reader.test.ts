@@ -731,7 +731,9 @@ describe('R1 m5 every escape is typed', () => {
     );
     for (const failure of failures) {
       expect(failure).toBeInstanceOf(RuntimeHomeUnreadable);
-      expect(failure?.message).toBe(`The fleet manifest at ${path} could not be read.`);
+      expect(failure?.message).toStartWith(`The fleet manifest at ${path} could not be read.`);
+      expect(failure?.message).toContain('try again');
+      expect(failure?.message).not.toContain(SECRET);
     }
     expect(await home.skillManifest('plain', 100)).toBeUndefined();
     expect(await home.skillFile('plain', 'SKILL.md', 100)).toEqual({ ok: false, reason: 'unreadable' });

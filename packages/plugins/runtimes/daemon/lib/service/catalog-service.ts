@@ -532,21 +532,24 @@ export class FleetCatalogService {
    * pins move with it, and no login has to be edited. No configuration file is written, and a fleet
    * whose manifest would be identical is left exactly as it is.
    *
-   * Answers what it did. A machine with no fleet yet, or one wired without catalogs, has nothing to do.
+   * Answers what it did. A machine with no fleet yet, or one wired without catalogs, has nothing to do — unless the
+   * caller says `rebuild`: the published manifest could not be read, so it is derived again from the configuration
+   * exactly as an apply derives it (an apply plans without catalogs on such a machine too), and the catalogs a
+   * moved-catalog republish waits for are not what rebuilding it needs.
    *
    * It runs under the same one-at-a-time section as an apply ({@link FleetCatalogService.apply}): a republish that read
    * the model, then waited while an apply of another model committed, would otherwise land a plan made from the model
    * BEFORE that apply and prune what the apply added.
    */
-  async republish(): Promise<'applied' | 'unchanged' | 'skipped'> {
-    return await this.#exclusively(async () => await this.#republish());
+  async republish(options: { readonly rebuild?: boolean } = {}): Promise<'applied' | 'unchanged' | 'skipped'> {
+    return await this.#exclusively(async () => await this.#republish(options.rebuild === true));
   }
 
   /** {@link republish} for a caller that already holds the section (a login change republishes from inside its apply). */
-  async #republish(): Promise<'applied' | 'unchanged' | 'skipped'> {
+  async #republish(rebuild = false): Promise<'applied' | 'unchanged' | 'skipped'> {
     const reading = await this.#read();
     const sources = await this.#modelCatalogs();
-    if (reading.format === 'none' || sources.modelCatalogs === undefined) return 'skipped';
+    if (reading.format === 'none' || (sources.modelCatalogs === undefined && !rebuild)) return 'skipped';
     // A reading that holds a stand-in is never published: it would replace what the homes hold with what stands in. This is
     // the guard every caller of a republish (a timer, a budget pause, a login change) passes through.
     if (reading.unreadable.length > 0)

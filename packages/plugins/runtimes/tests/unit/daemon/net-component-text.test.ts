@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { Glob } from 'bun';
 import should from 'should';
 import { findFlagSecrets, rawTextHoldsSecret } from '@ferretry/std/credential-words';
+import { ratioOf } from '@ferretry/std/testing/linear-time';
 import { WITHHELD_LINE } from '../../../daemon/lib/service/catalog.ts';
 import { shownFor } from './redact-support.ts';
 
@@ -111,25 +112,33 @@ describe('component text lines the write rule refuses are withheld', () => {
     should(overWithheld).deepEqual([]);
   }, 60_000);
 
-  it('should stay linear to 256 KiB on a very long line, many short lines and many lines of one key', () => {
-    // Arrange
-    const shapes: Readonly<Record<string, (size: number) => string>> = {
-      'one very long line': size => `key: ${'a1B2'.repeat(size / 4)}`,
-      'many short lines': size => 'ab\n'.repeat(size / 3),
-      'many lines each holding a long value': size => `key: ${LONG40}\n`.repeat(Math.ceil(size / 47)),
-    };
-    const timed = (text: string): number => {
-      const start = performance.now();
-      shownFor(text);
-      return performance.now() - start;
-    };
+  // One test per shape. The timeout is the shape's local time (0.6, 5.7 and 1.2 s, in the order below) with at least
+  // four times the headroom; it is a margin for a loaded runner, not a speed claim.
+  const shapes: readonly (readonly [string, (size: number) => string, number])[] = [
+    ['one very long line', size => `key: ${'a1B2'.repeat(size / 4)}`, 10_000],
+    ['many short lines', size => 'ab\n'.repeat(size / 3), 30_000],
+    ['many lines each holding a long value', size => `key: ${LONG40}\n`.repeat(Math.ceil(size / 47)), 15_000],
+  ];
+  for (const [name, make, timeoutMs] of shapes) {
+    it(
+      `should stay linear to 256 KiB on a very long line, many short lines and many lines of one key: ${name}`,
+      () => {
+        // Arrange
+        shownFor(make(16 * 1024));
+        const small = make(128 * 1024);
+        const large = make(256 * 1024);
 
-    // Act + Assert: the ratio of 256 to 128 KiB stays under 3 (a quadratic rule would give about 4).
-    for (const [name, make] of Object.entries(shapes)) {
-      timed(make(16 * 1024));
-      const small = Math.max(timed(make(128 * 1024)), 1);
-      const large = timed(make(256 * 1024));
-      should(large / small).be.below(3, name);
-    }
-  }, 60_000);
+        // Act: the ratio of 256 to 128 KiB stays under 3 (a quadratic rule would give about 4).
+        const ratio = ratioOf(
+          () => shownFor(large),
+          () => shownFor(small),
+          { floorMs: 1 },
+        );
+
+        // Assert
+        should(ratio).be.below(3, name);
+      },
+      timeoutMs,
+    );
+  }
 });

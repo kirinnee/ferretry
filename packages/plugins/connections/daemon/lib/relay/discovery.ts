@@ -17,8 +17,8 @@
  * DISCOVERY ORIGIN: a service address that identifies the relay directory and never a daemon, a
  * person, or a carrier. The carrier itself is whatever that directory says today, which is the whole
  * point — `relayUrl: null` withdraws it without a release, and a cached answer is that switch not
- * working. Nothing here caches; the read happens once per boot, which is the shortest life a value
- * a daemon holds can have.
+ * working. Nothing here caches: an answer is held for the life of the boot, and a FAILED read that was
+ * transient is asked again in the background (`directory-retry.ts`) until it is answered.
  *
  * AN EXPLICIT BLOCK WINS AND IS NEVER OVERWRITTEN. Somebody who wrote a `relay` block chose it, and
  * `enabled: false` is a decision rather than an omission — so a configured block short-circuits this
@@ -31,7 +31,6 @@
  */
 
 import { DaemonOriginSchema, isLoopbackHost, PublishedCarriersSchema } from '../../../contract/index.ts';
-const WILDCARD_BIND_HOST = '0.0.0.0';
 import { z } from 'zod';
 import { SocketEndpointSchema } from './endpoint.ts';
 const HostedRelayAdvertisementSchema = z.strictObject({
@@ -65,8 +64,95 @@ export type RelayAdvertisement =
   | { readonly kind: 'available'; readonly relayUrl: string }
   /** The operator has withdrawn it. `null` is disabled, not an empty address and not a guess. */
   | { readonly kind: 'disabled' }
-  /** This daemon could not find out. Treated as no carrier, and said as ignorance. */
-  | { readonly kind: 'undetermined'; readonly reason: string };
+  /**
+   * This daemon could not find out. Treated as no carrier, and said as ignorance.
+   *
+   * `retry` is present exactly when the failure is TRANSIENT (see {@link classifyDirectoryOutcome}):
+   * the daemon will ask again in the background. Its absence is a definitive answer — nobody asks twice.
+   */
+  | { readonly kind: 'undetermined'; readonly reason: string; readonly retry?: DirectoryRetryHint };
+
+/** What a transient failure tells the retry: a server-sent wait, and (once scheduled) when the next try is. */
+export interface DirectoryRetryHint {
+  /** A sane `Retry-After` the directory sent, in milliseconds. */
+  readonly retryAfterMs?: number;
+  /** The wall-clock time (`HH:MM:SSZ`) of the next try, filled in when one is scheduled. */
+  readonly nextAt?: string;
+}
+
+/** Whether this answer is a failure worth asking about again (as opposed to an answer). */
+export function isTransientAdvertisement(
+  advertisement: RelayAdvertisement,
+): advertisement is Extract<RelayAdvertisement, { kind: 'undetermined' }> & { readonly retry: DirectoryRetryHint } {
+  return advertisement.kind === 'undetermined' && advertisement.retry !== undefined;
+}
+
+/** Every way a directory read can end, before it is sorted. The adapter reports these; it decides nothing. */
+export type DirectoryOutcome =
+  | { readonly kind: 'no-origin' }
+  | { readonly kind: 'refused-origin' }
+  /** `fetch` threw: DNS, refused, reset, no network yet. */
+  | { readonly kind: 'unreachable' }
+  /** The read's own deadline ran out. */
+  | { readonly kind: 'timeout' }
+  | { readonly kind: 'status'; readonly status: number; readonly retryAfter: string | null }
+  /** The status was fine and the body broke mid-read (reset, abort). */
+  | { readonly kind: 'body-interrupted' }
+  /** The status was fine and the body is not JSON. */
+  | { readonly kind: 'body-not-document' }
+  | { readonly kind: 'document'; readonly value: unknown };
+
+/** The most whole seconds a `Retry-After` is carried as; far above the retry's own cap, which is what bounds the wait. */
+const MAX_RETRY_AFTER_SECONDS = 999_999_999;
+
+/**
+ * A `Retry-After` in whole seconds, in milliseconds; anything else (a date, a fraction, junk) is ignored.
+ *
+ * A valid number of any length is CLAMPED, never discarded: a server that says "come back in a million seconds" is
+ * saying "not soon", and the retry's cap turns that into the longest wait it ever makes. Leading zeros are
+ * not digits of the value, and the clamp is decided on the digits that remain so no input can overflow.
+ */
+export function parseRetryAfterMs(header: string | null): number | undefined {
+  const text = header?.trim();
+  if (text === undefined || !/^\d+$/u.test(text)) return undefined;
+  const digits = text.replace(/^0+(?=\d)/u, '');
+  const seconds = digits.length > 9 ? MAX_RETRY_AFTER_SECONDS : Math.min(Number(digits), MAX_RETRY_AFTER_SECONDS);
+  return seconds * 1_000;
+}
+
+/**
+ * THE ONE SORTING RULE: is this ending an answer, or a reason to ask again?
+ *
+ * TRANSIENT (retried in the background): `fetch` threw (network, DNS, refused), the read timed out, HTTP
+ * 5xx, HTTP 429 (a `Retry-After` in seconds is carried), a body that broke mid-read.
+ * DEFINITIVE (the sentence, then silence): no origin, an origin this daemon may not ask, the directory
+ * advertising `relayUrl: null` (disabled), a document the schema refuses, a body that is not JSON, and every
+ * other HTTP status (a 404 or 403 will not change by being asked again). An explicit `relay` block never
+ * reaches this function — it is not asked at all.
+ */
+export function classifyDirectoryOutcome(outcome: DirectoryOutcome): RelayAdvertisement {
+  switch (outcome.kind) {
+    case 'no-origin':
+      return NO_RELAY_DIRECTORY;
+    case 'refused-origin':
+      return { kind: 'undetermined', reason: 'the configured relay directory is not an address this daemon may ask' };
+    case 'unreachable':
+    case 'timeout':
+      return { kind: 'undetermined', reason: 'this daemon could not reach the relay directory', retry: {} };
+    case 'body-interrupted':
+      return { kind: 'undetermined', reason: 'the relay directory’s answer was cut off', retry: {} };
+    case 'body-not-document':
+      return { kind: 'undetermined', reason: 'the relay directory answered something that is not a document' };
+    case 'status': {
+      const reason = `the relay directory answered ${outcome.status}`;
+      if (outcome.status < 500 && outcome.status !== 429) return { kind: 'undetermined', reason };
+      const retryAfterMs = parseRetryAfterMs(outcome.retryAfter);
+      return { kind: 'undetermined', reason, retry: retryAfterMs === undefined ? {} : { retryAfterMs } };
+    }
+    case 'document':
+      return parseRelayAdvertisement(outcome.value);
+  }
+}
 
 /**
  * The answer when a build carries no directory to ask.
@@ -125,7 +211,7 @@ export type RelayCarrierSource =
   /** Ferretry's advertised carrier, read this boot and held no longer than this boot. */
   | { readonly kind: 'discovered'; readonly config: DaemonRelayConfig }
   /** Nothing to dial, and the sentence saying why. */
-  | { readonly kind: 'direct-only'; readonly reason: string };
+  | { readonly kind: 'direct-only'; readonly reason: string; readonly retrying?: true };
 
 /**
  * Choose the carrier, with the operator's own choice winning unconditionally.
@@ -147,6 +233,14 @@ export function chooseRelayCarrierSource(
     };
   }
   if (advertised.kind === 'undetermined') {
+    if (advertised.retry !== undefined) {
+      const next = advertised.retry.nextAt === undefined ? '' : `, next try at ${advertised.retry.nextAt}`;
+      return {
+        kind: 'direct-only',
+        reason: `no relay could be discovered: ${advertised.reason}; retrying in the background${next}`,
+        retrying: true,
+      };
+    }
     return { kind: 'direct-only', reason: `no relay could be discovered: ${advertised.reason}` };
   }
   /**
@@ -226,7 +320,7 @@ function duplicateRendezvousRefusal(url: string): string {
     `two relay carriers resolved to the same rendezvous ${url} — a relay written in this daemon’s ` +
     'configuration and the one the relay directory advertises are the same address, so this boot would ' +
     'open two sockets to one room and publish it to devices twice. Remove the configured entry to keep ' +
-    'the hosted one, or switch the { "kind": "relay", "source": "discovery" } entry off to keep your own.'
+    'the hosted one, or switch the { "source": "discovery" } entry off in the top-level "relay" list to keep your own.'
   );
 }
 
@@ -305,7 +399,13 @@ export function publishedDaemonCarriers(
     ...(tunnelUrl === undefined ? [] : [{ kind: 'tunnel' as const, url: tunnelUrl }]),
     ...sources.flatMap(source => {
       const url = dialledRelayUrl(source);
-      return url === undefined ? [] : [{ kind: 'relay' as const, url }];
+      return url === undefined
+        ? []
+        : [
+            source.kind === 'configured'
+              ? { kind: 'relay' as const, url, source: 'configured' as const }
+              : { kind: 'relay' as const, url },
+          ];
     }),
   ]);
 }
@@ -367,21 +467,22 @@ export function describeAbsentRelayCarrier(input: {
 }
 
 export function relayCarrierRemedy(source: RelayCarrierSource, configFile: string, host: string): readonly string[] {
+  const relayEntry = `the top-level "relay" entry in config/${configFile}`;
   const relay =
     source.kind === 'configured'
-      ? `the relay entry in "carriers" of ${configFile} is what this daemon dials — correct it or remove it, then restart.`
-      : 'a restart asks the relay directory again; to stop depending on it, point the relay entry in "carriers" of ' +
-        `${configFile} at a rendezvous you operate (docs/cloudflare-relay-self-hosting.md).`;
-  if (!isLoopbackHost(host)) {
-    return ['this daemon is reachable only from this machine’s own network: nothing off it can connect.', relay];
-  }
+      ? `this relay is explicitly configured, so correct or remove ${relayEntry} (it is what this daemon dials), then restart.`
+      : source.kind === 'direct-only' && source.retrying === true
+        ? `this daemon keeps asking the hosted relay directory in the background and dials the relay by itself once it answers; to stop depending on it, add ${relayEntry} naming a rendezvous you operate (docs/cloudflare-relay-self-hosting.md).`
+        : `restart to ask the hosted relay directory again; to stop depending on it, add ${relayEntry} naming a rendezvous you ` +
+          'operate (docs/cloudflare-relay-self-hosting.md).';
   return [
-    `this daemon is bound to ${host} and dials no relay, so NO other device can reach it — and with no ` +
-      'rendezvous of its own to redeem a code through, nothing can pair with it either.',
-    `to pair: set "host" to "${WILDCARD_BIND_HOST}" on the bind entry in "carriers" of ${configFile} ` +
-      'set "publicUrl" to this ' +
-      'machine’s URL on the local network, restart, and pair from a browser on that same network.',
-    `to stay reachable once that browser leaves the network, a carrier is still needed — ${relay}`,
+    'No relay is available, so another device cannot pair yet' +
+      (isLoopbackHost(host)
+        ? `; this daemon is bound to ${host}, and a browser on this machine can pair locally.`
+        : `; this daemon is bound to ${host}, but it refuses direct connections from other machines.`),
+    'Keep the daemon on a loopback listener ("fyd --host 127.0.0.1").',
+    `${relay[0]!.toUpperCase()}${relay.slice(1)}`,
+    '5.0 has no separate public-address setting, and widening the listener does not enable direct connections from other machines.',
   ];
 }
 
@@ -392,5 +493,6 @@ export function relayCarrierRemedy(source: RelayCarrierSource, configFile: strin
  * sentences above, so a directory that is down cannot take a boot with it.
  */
 export interface RelayDirectoryPort {
-  read(): Promise<RelayAdvertisement>;
+  /** `signal` aborts a read in flight (the daemon is stopping); the answer to an aborted read is dropped by the caller. */
+  read(signal?: AbortSignal): Promise<RelayAdvertisement>;
 }

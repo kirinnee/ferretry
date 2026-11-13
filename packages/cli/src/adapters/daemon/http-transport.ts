@@ -75,6 +75,8 @@ export class HttpTransport implements DaemonTransport {
     const headersFor = async (): Promise<Headers> => {
       if (headers !== undefined) return headers;
       const built = new Headers(this.options.headers);
+      // The half's allow-listed headers (the request id); the credential below is still only `authorization()`'s.
+      for (const [name, value] of Object.entries(request.headers ?? {})) built.set(name, value);
       built.delete('authorization');
       const authorization = await this.options.authorization();
       if (authorization !== undefined) built.set('authorization', authorization);

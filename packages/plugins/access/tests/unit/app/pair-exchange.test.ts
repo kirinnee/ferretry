@@ -84,6 +84,7 @@ describe('the pairing exchange', () => {
         machine: 'workstation',
         deviceId,
         address: 'https://daemon.example.test',
+        // The pairing crossed a relay, so nothing marks the link's address as one this device paired over.
         carriers: response().carriers,
       },
     ]);
@@ -91,7 +92,7 @@ describe('the pairing exchange', () => {
   });
 
   it('falls back to a direct pairing over the pairing’s own address when the shell offers no walk', async () => {
-    const { store, claims, inputs, base } = harness();
+    const { store, claims, added, inputs, base } = harness();
     const ports: PairingPorts = {
       ...base,
       pairDirect: async input => {
@@ -101,6 +102,8 @@ describe('the pairing exchange', () => {
     };
 
     await exchangePairing({ ports, claims, store }, seed, 'My phone');
+    // A direct pairing records the address it crossed AND the positive mark that it paired over it.
+    should(added[0]).have.property('pairedOver', 'direct');
 
     should(inputs).have.length(1);
     should(inputs[0]?.address).equal(seed.daemonUrl);

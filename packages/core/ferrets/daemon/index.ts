@@ -39,6 +39,8 @@ import {
   OPENING_ATTACHMENTS_KEY,
   OpeningAttachments,
   Runners,
+  RUNTIME_START_KEY,
+  RuntimeStart,
   SitrepLines,
   SubtreeViewSchema,
   StartDecide,
@@ -460,6 +462,29 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       const decision = helperDecision(input, await hooks.decideAnswered(StartDecide, input));
       if (decision === 'unanswered') throw noHelperAdmission();
       return decision;
+    },
+    // Bounds Runtimes' answers below on the kernel clock (RUNTIME_START_DEADLINE_MS).
+    after: (delayMs, fire) => kernel.clock.after(milliseconds(delayMs), fire),
+    // Which harness and login a runtime starts with: Runtimes alone answers. With no Runtimes a start that names a
+    // runtime is refused here, never launched signed out.
+    runtimeStart: async runtime => {
+      const found = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
+      return found === 'unavailable'
+        ? {
+            ok: false,
+            sentence: `runtime ${runtime} cannot be started: the Runtimes plugin is not running, so its login cannot be found`,
+          }
+        : await found.resolve(runtime);
+    },
+    // Whether a login named with no runtime may be spent: Runtimes alone answers, the same check a runtime's login passes.
+    loginStart: async login => {
+      const found = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
+      return found === 'unavailable'
+        ? {
+            ok: false,
+            sentence: `login ${login} cannot be started: the Runtimes plugin is not running, so it cannot be checked`,
+          }
+        : await found.login(login);
     },
     launchParts: () => hooks.contributions(LaunchParts).map(contribution => contribution.item),
     // The kind that HOLDS the login answers (`LoginKind.holds`): no kind trial, no caught throw. Each failure is a

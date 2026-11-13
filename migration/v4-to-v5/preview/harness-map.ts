@@ -15,7 +15,10 @@ import { lstat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isScalar } from 'yaml';
 import type { LoginHarness } from '../src/steps/preview-hold.ts';
+import { buildShell } from '../src/steps/preview-logins.ts';
+import { LoginKeyHold } from '../src/steps/login-keys.ts';
 import { readPlainText, strictYamlMap } from '../src/v4/config.ts';
+import { PREVIEW_CODEX_RUNTIMES } from '../src/v5/preview-env.ts';
 import { V4LoginId } from '../src/v4/logins.ts';
 
 /** v4's 256 KiB cap on a config file. */
@@ -41,10 +44,18 @@ export async function readLoginHarnesses(v4Home: string): Promise<ReadonlyMap<st
     const harness = document.get('harness', true);
     const value = isScalar(harness) ? harness.value : undefined;
     if (value !== 'claude' && value !== 'codex') continue;
+    // A login that has no way to sign in once nothing of it is carried is held by the Settings step: it is marked, so every
+    // runtime and ferret that names it is held too, said as "its login is not carried" (a throwaway hold: nothing is kept).
+    const shell = buildShell(document, id, !PREVIEW_CODEX_RUNTIMES, new LoginKeyHold());
+    const unusable = shell.kind === 'held' && shell.harness === 'no-sign-in';
     // Only a login of the environment store has halves (v4 `hasHalves`).
     const store = document.get('store', true);
     const halves = isScalar(store) && store.value === 'environment';
-    found.set(id, { harness: value, both: halves && document.has('claude') && document.has('codex') });
+    found.set(id, {
+      harness: value,
+      both: halves && document.has('claude') && document.has('codex'),
+      ...(unusable ? { unusable: true } : {}),
+    });
   }
   return found;
 }

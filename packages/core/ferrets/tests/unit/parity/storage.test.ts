@@ -10,6 +10,8 @@ import {
   AgentPinsFile,
   ArchiveFile,
   AutoResumeDecide,
+  RUNTIME_START_KEY,
+  RuntimeStart,
   type AutoResumeDecideInput,
   AutoResumeFile,
   AutoResumeSummaryFile,
@@ -35,7 +37,7 @@ import {
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { AUTO_RESUME_JOB } from '../../../daemon/modules/auto-resume.ts';
 import manifest from '../../../manifest.ts';
-import { as, host, portConsumer, record } from '../daemon/ferrets/route-fixture.ts';
+import { as, fakeLogins, fakeRuntimeStartAnswer, host, portConsumer, record } from '../daemon/ferrets/route-fixture.ts';
 import { AT as forkAt, command as forkCommand, plan as forkPlan } from '../daemon/forks/fixtures.ts';
 import { handoverReceiptFor } from '../../support/daemon/parity-fj-docs.ts';
 import { memoryStorage, RecordingLog, sessionState } from '../../support/daemon/storage.ts';
@@ -293,11 +295,12 @@ describe('auto-resume state parity (W2-a: FY_HOME/auto-resume*.json moved under 
         api: 5,
         core: false,
         kinds: [],
-        hooks: { takes: [{ hook: AutoResumeDecide }] },
+        hooks: { takes: [{ hook: AutoResumeDecide }, { hook: RuntimeStart, key: RUNTIME_START_KEY }] },
       }),
       {
         build: () => ({
           hooks: {
+            'runtime.start:runtimes': fakeRuntimeStartAnswer,
             'auto-resume.decide': (input: AutoResumeDecideInput) => {
               seen(input);
               return { allow: true };
@@ -318,6 +321,7 @@ describe('auto-resume state parity (W2-a: FY_HOME/auto-resume*.json moved under 
         runtimesAnswering(input => {
           if (input.ask === 'runtime') owedWhenAsked.push(h.state('ferrets').raw(AutoResumeFile));
         }),
+        fakeLogins(),
       ],
     });
     const started = await h.request('POST', '/v1/ferrets', {
@@ -344,7 +348,11 @@ describe('auto-resume state parity (W2-a: FY_HOME/auto-resume*.json moved under 
 
   test('F-0108 what the last pass did lands in state/ferrets/auto-resume-summary.json as { format: 1, at, resumed, skipped }', async () => {
     const runner = new FakeRunner();
-    let h = await host([], { harness: new FakeHarness(), runner, plugins: [runtimesAnswering(() => undefined)] });
+    let h = await host([], {
+      harness: new FakeHarness(),
+      runner,
+      plugins: [runtimesAnswering(() => undefined), fakeLogins()],
+    });
     await h.request('POST', '/v1/ferrets', {
       headers: { 'x-fy-request-id': 'parity-auto-resume-2' },
       body: { folder: '/work/a', name: 'wren', runtime: 'claude-work' },

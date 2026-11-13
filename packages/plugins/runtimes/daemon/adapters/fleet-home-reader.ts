@@ -69,7 +69,7 @@ import { homesOf } from '../lib/service/runtime-homes.ts';
 import type { FleetPublication } from '../lib/service/publication.ts';
 import { readLinkedDocument } from './document-link.ts';
 import { followingHandle, isPlainFileInside, type ReadHandle } from './following-handle.ts';
-import { readFleetManifest } from './manifest-file.ts';
+import { FleetManifestUnreadableError, readFleetManifest } from './manifest-file.ts';
 
 const MANIFEST_FILE = 'manifest.json';
 const SKILL_MANIFEST = 'SKILL.md';
@@ -476,6 +476,7 @@ export function fleetHomes(
   roots: Pick<RootsPort, 'root'>,
   publication: Pick<FleetPublication, 'reading'>,
   say: SaySentence = () => {},
+  requestRepair: () => void = () => {},
 ): RuntimeHomesApi {
   const fleet = roots.root('fleet');
   const directory = fleetDirectory(fleet);
@@ -494,8 +495,15 @@ export function fleetHomes(
     let homes: readonly RuntimeHome[];
     try {
       homes = homesOf(await readFleetManifest(files, path), directory);
-    } catch {
-      throw unreadable(`The fleet manifest at ${path} could not be read.`);
+    } catch (error) {
+      // Damage is retryable (the daemon rebuilds the manifest), and the sentence says so. The repair is only ASKED for
+      // here (a kick of the repair job, never a call into it): this read holds the publication.
+      if (error instanceof FleetManifestUnreadableError) requestRepair();
+      throw unreadable(
+        error instanceof FleetManifestUnreadableError
+          ? error.message
+          : `The fleet manifest at ${path} could not be read.`,
+      );
     }
     known = new Set(homes.map(home => home.id));
     return homes;

@@ -155,10 +155,9 @@ const accountShape = {
    */
   secretEnv: z.record(NonEmptyString, SecretTemplateSchema).default({}),
   /**
-   * The NAMES of the variables whose whole value is a bare `$OTHER` reference, resolved from the host's
-   * environment or its secrets file when the wrapper runs. Names only, never a value, and never pinned in a
-   * `--settings` file. Published for the same reader as `secretEnv`: the start-time refusal of a folder
-   * whose own Claude settings would override them (`docs/secrets.md`). Absent is none.
+   * LEGACY, read and never written: v4 4.291.9 to 4.291.11 published the names of the variables whose whole value is a
+   * bare `$OTHER` reference here, for a start refusal this version no longer has (a project's `.claude` env wins over a
+   * login's: docs/secrets.md). A manifest an earlier version wrote must still parse, so the field is tolerated and ignored.
    */
   referencedEnv: z.array(NonEmptyString).optional(),
 };

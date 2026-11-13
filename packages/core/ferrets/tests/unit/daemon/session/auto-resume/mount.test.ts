@@ -17,14 +17,17 @@ import {
   type FerretId,
   FerretsPort,
   type FerretSummary,
+  RUNTIME_START_KEY,
+  RuntimeStart,
   StartDecide,
   type StartDecideInput,
 } from '../../../../../contract/index.ts';
 import { FakeHarness, FakeRunner } from '../../../../../contract/testing/index.ts';
 import { AUTO_RESUME_JOB } from '../../../../../daemon/modules/auto-resume.ts';
 import { NO_AUTO_RESUME_ANSWER } from '../../../../../daemon/lib/ferrets/auto-resume.ts';
-import { host } from '../../ferrets/route-fixture.ts';
+import { fakeLogins, fakeRuntimeStartAnswer, host } from '../../ferrets/route-fixture.ts';
 
+type Plugins = NonNullable<NonNullable<Parameters<typeof host>[1]>['plugins']>;
 type Answer = (input: AutoResumeDecideInput) => unknown;
 
 /** A stand-in for Runtimes: its real manifest id, taking `auto-resume.decide`, recording every question. */
@@ -38,11 +41,18 @@ const fakeRuntimes = (answer: Answer, id = 'runtimes') => {
       api: 5,
       core: false,
       kinds: [],
-      hooks: { takes: [{ hook: AutoResumeDecide }] },
+      hooks: {
+        takes: [
+          { hook: AutoResumeDecide },
+          // Only Runtimes' own id may take `runtime.start`; a stand-in under another id answers auto-resume alone.
+          ...(id === 'runtimes' ? [{ hook: RuntimeStart, key: RUNTIME_START_KEY }] : []),
+        ],
+      },
     }),
     {
       build: () => ({
         hooks: {
+          ...(id === 'runtimes' ? { 'runtime.start:runtimes': fakeRuntimeStartAnswer } : {}),
           'auto-resume.decide': async (input: AutoResumeDecideInput) => {
             asked.push(input);
             return (await answer(input)) as never;
@@ -55,9 +65,24 @@ const fakeRuntimes = (answer: Answer, id = 'runtimes') => {
 };
 const yes: Answer = () => ({ allow: true });
 
-async function boot(plugins: ReturnType<typeof fakeRuntimes>['plugin'][]) {
+/** Runtimes that answers a START (the runtime's login) and nothing about auto-resume: no answer of its own to that. */
+const startOnlyRuntimes = () =>
+  implementDaemon(
+    definePlugin({
+      id: 'runtimes',
+      title: 'runtimes (start only) (fake)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: RuntimeStart, key: RUNTIME_START_KEY }] },
+    }),
+    { build: () => ({ hooks: { 'runtime.start:runtimes': fakeRuntimeStartAnswer } }) },
+  );
+
+async function boot(plugins: Plugins) {
   const runner = new FakeRunner();
-  const h = await host([], { harness: new FakeHarness(), runner, plugins });
+  const h = await host([], { harness: new FakeHarness(), runner, plugins: [...plugins, fakeLogins()] });
   return { h, runner };
 }
 
@@ -148,15 +173,15 @@ describe('W2-a auto-resume, mounted', () => {
   });
 
   describe("fails closed: no answer of Runtimes' own is no resume and nothing spent (RULING #27 Q5)", () => {
-    const cases: readonly [string, ReturnType<typeof fakeRuntimes>['plugin'][]][] = [
-      ['no Runtimes half', []],
+    const cases: readonly [string, Plugins][] = [
+      ['no auto-resume answer from Runtimes', [startOnlyRuntimes()]],
       ['Runtimes throws', [fakeRuntimes(() => Promise.reject(new Error('sk-live-nope'))).plugin]],
       ['Runtimes hangs past the kernel bound', [fakeRuntimes(() => new Promise(() => undefined)).plugin]],
       ['Runtimes answers garbage (a string)', [fakeRuntimes(() => 'yes').plugin]],
       ['Runtimes answers garbage (allow: "true")', [fakeRuntimes(() => ({ allow: 'true' })).plugin]],
       ['Runtimes answers garbage (null)', [fakeRuntimes(() => null).plugin]],
       ['Runtimes answers allow: false', [fakeRuntimes(() => ({ allow: false, reason: 'off' })).plugin]],
-      ['only another plugin says yes', [fakeRuntimes(yes, 'usage').plugin]],
+      ['only another plugin says yes', [startOnlyRuntimes(), fakeRuntimes(yes, 'usage').plugin]],
     ];
     for (const [name, plugins] of cases)
       test(`W2-a the switch: ${name} → nothing resumed, nothing launched, the ledger forgotten`, async () => {
@@ -258,7 +283,7 @@ describe('W2-a auto-resume, mounted', () => {
       }
     }
     const runner = new RacingRunner();
-    let h = await host([], { harness: new FakeHarness(), runner, plugins: [fakeRuntimes(yes).plugin] });
+    let h = await host([], { harness: new FakeHarness(), runner, plugins: [fakeRuntimes(yes).plugin, fakeLogins()] });
     const id = await start(h, 'tamarack');
     h = await hostRestart(h, runner);
     const launches = runner.starts;
@@ -477,11 +502,12 @@ describe('W2-a auto-resume, mounted', () => {
           api: 5,
           core: false,
           kinds: [],
-          hooks: { takes: [{ hook: AutoResumeDecide }] },
+          hooks: { takes: [{ hook: AutoResumeDecide }, { hook: RuntimeStart, key: RUNTIME_START_KEY }] },
         }),
         {
           build: ctx => ({
             hooks: {
+              'runtime.start:runtimes': fakeRuntimeStartAnswer,
               'auto-resume.decide': async (input: AutoResumeDecideInput) => {
                 if (input.ask === 'runtime') {
                   await ctx.kernel.clock.sleep(milliseconds(300));

@@ -8,6 +8,7 @@ import {
   INSTALL_METHOD_LABELS,
   type InstallFacts,
   type InstallMethod,
+  isNewerMajorVersion,
   isUpdateAvailable,
   knownLatestRelease,
   latestReleaseApiUrl,
@@ -109,6 +110,21 @@ describe('classifyInstallMethod', () => {
     should(classify({ compiled: false }).kind).equal('unknown');
   });
 
+  it('recognises the pinned v4 Homebrew cask and preserves its full name', () => {
+    should(classify({ resolvedPath: '/opt/homebrew/Caskroom/ferretry@4/4.291.10/fyd' })).deepEqual({
+      kind: 'homebrew',
+      cask: 'kirinnee/ferretry/ferretry@4',
+    });
+  });
+
+  it('names the pinned @4 cask in full for a 5.x daemon too, so --check and the @4-to-plain swap say it right', () => {
+    should(classify({ resolvedPath: '/usr/local/Caskroom/ferretry@4/5.0.0/fyd' })).deepEqual({
+      kind: 'homebrew',
+      cask: 'kirinnee/ferretry/ferretry@4',
+    });
+    should(classify({ resolvedPath: '/opt/homebrew/Caskroom/ferretry@40/4.0.0/fyd' }).kind).equal('standalone');
+  });
+
   it('recognises a Homebrew cask by its Caskroom', () => {
     should(
       classify({
@@ -116,7 +132,7 @@ describe('classifyInstallMethod', () => {
         launchedPath: '/opt/homebrew/bin/fyd',
         resolvedPath: '/opt/homebrew/Caskroom/ferretry/4.28.0/fyd',
       }),
-    ).deepEqual({ kind: 'homebrew', cask: 'ferretry' });
+    ).deepEqual({ kind: 'homebrew', cask: 'kirinnee/ferretry/ferretry' });
   });
 
   it('recognises a file a system package manager owns', () => {
@@ -372,6 +388,30 @@ describe('latest release', () => {
     should(isUpdateAvailable('4.30.0', latest)).be.false();
     should(isUpdateAvailable('dev', latest)).be.false();
     should(isUpdateAvailable('4.28.0', undefined)).be.false();
+  });
+
+  it('offers only updates within the installed major version', () => {
+    should(isUpdateAvailable('4.291.9', { ...latest, version: '5.0.0' })).be.false();
+    should(isUpdateAvailable('4.291.9', { ...latest, version: '5.0.0-rc.1' })).be.false();
+    should(isUpdateAvailable('4.291.9', { ...latest, version: '4.291.10' })).be.true();
+    should(isUpdateAvailable('4.291.9', { ...latest, version: '4.292.0' })).be.true();
+  });
+
+  it('never offers the next major as a plain update: 5.x does not see 6.x', () => {
+    should(isUpdateAvailable('5.0.3', { ...latest, version: '6.0.0' })).be.false();
+    should(isUpdateAvailable('5.0.3', { ...latest, version: '6.0.0-rc.1' })).be.false();
+    should(isUpdateAvailable('5.0.3', { ...latest, version: '5.0.4' })).be.true();
+    should(isUpdateAvailable('5.0.3', { ...latest, version: '5.1.0' })).be.true();
+    should(isUpdateAvailable('5.0.3', { ...latest, version: '5.0.3' })).be.false();
+  });
+
+  it('knows a newer major from a patch, a minor, an older release and an unparseable one', () => {
+    should(isNewerMajorVersion('5.0.3', '6.0.0')).be.true();
+    should(isNewerMajorVersion('5.0.3', '6.0.0-rc.1')).be.true();
+    should(isNewerMajorVersion('5.0.3', '5.9.9')).be.false();
+    should(isNewerMajorVersion('5.0.3', '4.291.10')).be.false();
+    should(isNewerMajorVersion('dev', '6.0.0')).be.false();
+    should(isNewerMajorVersion('5.0.3', 'latest')).be.false();
   });
 
   it('keeps the last good answer through a failed check', () => {

@@ -35,13 +35,21 @@ import {
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { fleetHomes } from './adapters/fleet-home-reader.ts';
-import { endedSeams, fileAssembly, launchFactsSource } from './host-assembly.ts';
-import { FolderClaudeSettingsFiles } from './adapters/folder-claude-settings-file.ts';
+import {
+  endedSeams,
+  fileAssembly,
+  launchFactsSource,
+  MANIFEST_REPAIR_JOB,
+  manifestUnreadableProbe,
+  RepairOwner,
+  repairRequester,
+} from './host-assembly.ts';
 import { LaunchGate, type RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import { FleetPublication } from './lib/service/publication.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
 import type { FleetCatalogService } from './lib/service/catalog-service.ts';
 import { autoResumeAnswer, autoResumeSwitch, readAutoResume } from './lib/service/auto-resume-answer.ts';
+import { runtimeStartAnswer } from './lib/service/runtime-start-answer.ts';
 import { DisableExpiryWatch, earliestExpiry, keepUnpublished, runtimesBackOn } from './lib/service/disable-expiry.ts';
 import { loginUsers } from './lib/service/login-users.ts';
 import { createProfileLayers } from './lib/service/profile-layers.ts';
@@ -97,10 +105,17 @@ export interface RuntimesAssembly {
    */
   readonly probe?: () => void;
   /**
-   * The published runtimes' launch facts (`lib/launch-gate.ts`): what a Claude start is checked against and what its
-   * login pins. Absent: a start of a runtime is refused rather than launched unchecked.
+   * The published runtimes' launch facts (`lib/launch-gate.ts`): the compaction trigger a Claude start is checked against and
+   * carries. Absent: a start of a runtime is refused rather than launched unchecked.
    */
   readonly launchFacts?: RuntimeLaunchFactsSource;
+  /**
+   * Whether the published fleet manifest exists and cannot be read. Asked once after start: when it is, the fleet is
+   * published again from the configuration (the manifest is derived data). Absent: nothing to repair.
+   */
+  readonly manifestUnreadable?: () => Promise<boolean>;
+  /** Who owns the manifest repair across its running and backoff states; readers ask through it (see {@link RepairOwner}). */
+  readonly repair?: RepairOwner;
 }
 
 export type RuntimesAssembler = (ctx: DaemonContext<typeof manifest>) => RuntimesAssembly;
@@ -206,6 +221,7 @@ export const hostAssembly: RuntimesAssembler = ctx => {
   // ONE publication gate: every apply (the catalogue's and the setup's share one provisioner) runs exclusively under
   // it, and every read of the published fleet (the ended-runtime seams, the manifest the republish compares) waits (S67).
   const publication = new FleetPublication();
+  const repair = new RepairOwner();
   // `build` touches nothing (it is also run against an inert kernel to compare it with the manifest): the fleet folder
   // is opened and its paths spelled on the first use of a service, never while the half is built.
   let said = false;
@@ -228,12 +244,19 @@ export const hostAssembly: RuntimesAssembler = ctx => {
     setup: deferred(() => assembled().setup),
     ended: deferred(() => assembled().ended),
     homes: onceHomes(() =>
-      fleetHomes(ctx.kernel.roots, publication, sentence => {
-        ctx.kernel.log.warn(sentence);
-      }),
+      fleetHomes(
+        ctx.kernel.roots,
+        publication,
+        sentence => {
+          ctx.kernel.log.warn(sentence);
+        },
+        repairRequester(ctx.kernel, repair),
+      ),
     ),
     profileEtag: async profile => await assembled().profileEtag(profile),
-    launchFacts: launchFactsSource(ctx.kernel, publication),
+    launchFacts: launchFactsSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),
+    manifestUnreadable: manifestUnreadableProbe(ctx.kernel, publication),
+    repair,
     probe: () => {
       assembled();
     },
@@ -367,6 +390,34 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         setTimer: (run, ms) => clock.after(milliseconds(ms), run),
       });
       void expiry.rearm();
+      // A manifest the previous version wrote in a shape this one does not read is derived data: rebuilt (the apply keeps
+      // the old file aside and says so), never left to refuse every start. It runs once after start AND whenever a launch
+      // reader meets the damage later (it asks through the runner's single-flight kick; a healthy manifest never publishes).
+      // A repair that did not succeed THROWS: the runner retries a failed job with its backoff until the manifest reads.
+      ctx.kernel.jobs.add({
+        id: MANIFEST_REPAIR_JOB,
+        schedule: { onceAfterStart: true },
+        run: async () => {
+          // ONE owner across running and backoff: held from here until the manifest reads (a failure THROWS and stays
+          // held, so the runner's retry is the only thing that runs the repair again while it is unreadable).
+          assembly.repair?.begin();
+          if (!(await assembly.manifestUnreadable?.())) {
+            assembly.repair?.release();
+            return;
+          }
+          const failure = await assembly.catalog.republish?.({ rebuild: true }).then(
+            () => undefined,
+            (error: unknown) => (error instanceof Error ? error.message : String(error)),
+          );
+          if (!(await assembly.manifestUnreadable?.())) {
+            assembly.repair?.release();
+            return;
+          }
+          const message = `the fleet manifest could not be read and could not be rebuilt yet: ${failure ?? 'the configuration could not be published'}`;
+          ctx.kernel.log.warn(message);
+          throw new Error(message);
+        },
+      });
       // A republish that cannot run (the model is not readable yet) is said once and never fails the event.
       const republishForBudget = async (): Promise<void> => {
         await assembly.catalog.republish?.().then(
@@ -401,14 +452,8 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         },
       };
 
-      // ONE gate: its `start.decide` keeps the facts it checked and its `launch.parts` pins from exactly those.
-      const launchGate = new LaunchGate({
-        source: launchFacts,
-        folderSettings: new FolderClaudeSettingsFiles(
-          folder => ctx.kernel.roots.root('harness-home', { subfolder: folder }),
-          ctx.kernel.paths.home(),
-        ),
-      });
+      // ONE gate: its `start.decide` keeps the facts it read and its `launch.parts` contributes from exactly those.
+      const launchGate = new LaunchGate({ source: launchFacts });
 
       return {
         routes: {
@@ -441,8 +486,8 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         },
         // Logins asks which runtimes use a login before it removes one (`logins.used-by`).
         hooks: {
-          // The login's literal environment, pinned into the harness's private settings file (#1587).
-          'launch.parts': () => [{ id: 'runtimes-login-pins', item: launchGate.parts }],
+          // The login's compaction trigger, from the facts `start.decide` read (never its environment: docs/secrets.md).
+          'launch.parts': () => [{ id: 'runtimes-compact-at', item: launchGate.parts }],
           'logins.used-by:runtimes': loginUsers(() => config.collection(runtimeItems)),
           // Whether an automatic resume may spend (W2-a): the switch, then the ferret's runtime, each a no when in doubt.
           'auto-resume.decide': autoResumeAnswer({
@@ -452,8 +497,12 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
               ),
             resolve: async id => await api.resolve(id),
           }),
-          // #1587: a Claude start, restart, revive, move or adoption whose folder's own settings would blank the runtime's
-          // login is refused before anything is written; with no facts to check against, a start of a runtime is refused.
+          // A start that names a runtime spends that runtime's login: its harness and login, or why it cannot start now.
+          'runtime.start:runtimes': {
+            ...runtimeStartAnswer({ resolve: async id => await api.resolve(id), logins: ctx.needs.logins }),
+          },
+          // A start's own compaction trigger is judged against its model's window, and the facts launch.parts uses are read
+          // here; with no facts to read, a Claude start of a runtime is refused.
           'start.decide': launchGate.decide,
         },
 

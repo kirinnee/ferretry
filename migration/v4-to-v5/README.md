@@ -325,7 +325,7 @@ text), each v5 config file this run wrote is recorded as accepted (`state/kernel
 `acceptedConfigFile`, each record naming the plugin whose def owns the path, from `src/v5/targets.ts`; a path no def
 owns is not recorded and stays held), so a loosening the owner confirmed in v4 is not asked about again. In the preview,
 a file the PREVIEW wrote or changed (its text differs from a plain, non-preview conversion of the same v4 home, or the
-plain conversion writes no such file: `terminals.yaml`, the `fy-preview` settings item, the forced `limits.yaml`) is
+plain conversion writes no such file: `terminals.yaml`, `runtimes.yaml`, the `fy-preview` settings item, the forced `limits.yaml`) is
 "preview-authored" and is recorded only with `prepare --owner`, never otherwise.
 
 **A v4 edit that v4 still held stays held in v5, whatever its direction relative to v5's defaults** (v4 judges an edit

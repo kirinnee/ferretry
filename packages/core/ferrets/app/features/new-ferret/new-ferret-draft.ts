@@ -77,8 +77,76 @@ export function buildStartBody(draft: NewFerretDraft): StartBody {
 
 const StartedSchema = z.object({ id: z.string().min(1) });
 
-/** Starts the ferret the draft describes and answers its id. A refusal throws with the daemon's sentence. */
-export async function startFerret(client: FerretsClient, draft: NewFerretDraft): Promise<string> {
-  const answer = await client.call('POST /v1/ferrets', { body: buildStartBody(draft) });
-  return StartedSchema.parse(answer).id;
+/**
+ * ONE ATTEMPT AT A START: the request id and the exact body text it was sent with. A start is idempotent on its request id
+ * AND body, so an attempt whose answer was lost must be repeated with the SAME id and body (the daemon then answers the
+ * ferret it already started), never with a new id, which would start a second ferret.
+ */
+export interface StartAttempt {
+  readonly requestId: string;
+  /** The body as sent: what the recovery read's digest is taken of. */
+  readonly payload: string;
+}
+
+/**
+ * The attempt a submit of `draft` is. A resubmit of the same draft (the body is the same) is the held attempt, id and all;
+ * a draft that changed is a genuinely new start and gets a fresh id. `held` is the last attempt that has not succeeded.
+ */
+export function startAttemptFor(draft: NewFerretDraft, held?: StartAttempt): StartAttempt {
+  const payload = JSON.stringify(buildStartBody(draft));
+  return held !== undefined && held.payload === payload ? held : { requestId: crypto.randomUUID(), payload };
+}
+
+/** Whether a call died without an answer from the daemon (a dropped carrier, a network error, a deadline): the start may still have happened. */
+function lostAnswer(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  if ((error as { carrier?: unknown }).carrier === true) return true;
+  return error instanceof Error && !('status' in error);
+}
+
+const sha256Hex = async (text: string): Promise<string | undefined> => {
+  if (globalThis.crypto?.subtle === undefined) return undefined;
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+};
+
+/**
+ * Starts the ferret the draft describes and answers its id. A refusal throws with the daemon's sentence.
+ *
+ * A start is idempotent on its request id (the daemon answers 400 `missing_request_id` to one with none), so the call carries
+ * one: the attempt's, or a fresh one. If the answer was lost the start may well have succeeded, so the same POST is sent
+ * once more and then the daemon is asked which ferret that request id started (the CLI's recovery, `by-request`); only if
+ * that finds nothing is the original failure thrown, and the person's resubmit reuses the same attempt.
+ */
+export async function startFerret(
+  client: FerretsClient,
+  draft: NewFerretDraft,
+  attempt: StartAttempt | string = crypto.randomUUID(),
+): Promise<string> {
+  const payload = typeof attempt === 'string' ? JSON.stringify(buildStartBody(draft)) : attempt.payload;
+  const requestId = typeof attempt === 'string' ? attempt : attempt.requestId;
+  // One body snapshot for both POSTs and the digest: the bytes the daemon hashes are the bytes sent.
+  const init = { body: JSON.parse(payload) as unknown, headers: { 'x-fy-request-id': requestId } };
+  let original: unknown;
+  try {
+    return StartedSchema.parse(await client.call('POST /v1/ferrets', init)).id;
+  } catch (error) {
+    if (!lostAnswer(error)) throw error;
+    original = error;
+  }
+  try {
+    return StartedSchema.parse(await client.call('POST /v1/ferrets', init)).id;
+  } catch (error) {
+    if (!lostAnswer(error)) throw error;
+  }
+  const digest = await sha256Hex(payload).catch(() => undefined);
+  const recovered =
+    digest === undefined
+      ? undefined
+      : await client
+          .call('GET /v1/ferrets/by-request/:requestId', { params: { requestId }, query: { payload: digest } })
+          .then(answer => StartedSchema.parse(answer).id)
+          .catch(() => undefined);
+  if (recovered === undefined) throw original;
+  return recovered;
 }

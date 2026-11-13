@@ -20,7 +20,7 @@ const plugin = definePlugin({
   doctor: ['checked-ok', 'checked-unbuilt', 'checked-silent'],
 });
 
-test('G158 a declared doctor check with no run still boots, and fy doctor names it as a failure', async () => {
+test('G158 a declared doctor check with no run still boots, and fy doctor names it as a note, not a failure', async () => {
   const root = await mkdtemp(`${tmpdir()}/doctor-route-`);
   const home = `${root}/home`;
   const adapters: HostOptions['adapters'] = {
@@ -52,8 +52,8 @@ test('G158 a declared doctor check with no run still boots, and fy doctor names 
     expect(lines).toContainEqual({
       plugin: 'checked',
       check: 'checked-unbuilt',
-      state: 'fail',
-      detail: 'The check checked-unbuilt has no implementation.',
+      state: 'warn',
+      detail: 'The check checked-unbuilt is not built yet in this build, so nothing was checked.',
     });
     expect(lines.some(line => line.check === 'checked-silent')).toBe(false);
   } finally {
@@ -72,7 +72,7 @@ const gate = definePlugin({
   provides: { admission: AdmissionPort },
 });
 
-test('R-0081 GET /v1/doctor is the kernel’s: it runs every plugin’s declared checks and a missing run is a required failure', async () => {
+test('R-0081 GET /v1/doctor is the kernel’s: it runs every plugin’s declared checks and a missing run is a note, never a failure', async () => {
   const root = await mkdtemp(`${tmpdir()}/doctor-route-`);
   const home = `${root}/home`;
   const outcome = await bootHost({
@@ -110,12 +110,13 @@ test('R-0081 GET /v1/doctor is the kernel’s: it runs every plugin’s declared
     });
     expect(report.checks).toContainEqual({
       name: 'checked: checked-unbuilt',
-      requirement: 'required',
+      requirement: 'optional',
       status: 'missing',
-      summary: 'The check checked-unbuilt has no implementation.',
-      impact: 'Ferretry cannot rely on this until it is resolved.',
+      summary: 'The check checked-unbuilt is not built yet in this build, so nothing was checked.',
+      impact: 'Ferretry keeps working, with less than it could do.',
     });
-    expect(report.ready).toBe(false);
+    // A check nobody built yet is a note, never a failure: a healthy daemon is ready.
+    expect(report.ready).toBe(true);
   } finally {
     if (outcome.kind === 'running') await outcome.host.stop();
     await rm(root, { recursive: true, force: true });
