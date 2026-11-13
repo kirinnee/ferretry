@@ -27,7 +27,7 @@
 import { hasTokenShape, LoginFileSchema, storedEnvironmentIssue } from '@ferretry/plugin-logins/contract';
 import { SecretNameSchema, secretReference } from '@ferretry/core-vault/contract';
 import { Document } from 'yaml';
-import { pathSegment } from '../key-path.ts';
+import { looksLikeKey, pathSegment } from '../key-path.ts';
 import { YAML_OPTIONS } from '../v4/config.ts';
 import type { LoginKeyHold } from './login-keys.ts';
 
@@ -37,20 +37,45 @@ const WHOLE_REFERENCE = /^\$\{secret:([A-Z][A-Z0-9_]{0,63})\}$/u;
 /** A POSIX environment variable name. */
 const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,255}$/u;
 
-/** A run of 20 or more letters and digits in a URL path segment reads as a token. */
-const TOKEN_RUN = /[A-Za-z0-9]{20,}/u;
+/**
+ * Whether a piece of text reads as a token or a key, by the migration's one conservative rule (`looksLikeKey` in
+ * `key-path.ts`: a known provider prefix, or 20 or more token characters mixing a letter and a digit), widened here for
+ * the underscore a base64url token uses (`key-path.ts` itself is left alone: the real converter's reports depend on it).
+ * It is asked of the whole text AND of every run of 20 or more token characters inside it, so punctuation such as `:`
+ * or a space cannot split a token below the limit; a known secret shape (`hasTokenShape`) counts whatever its length.
+ */
+export function looksLikeToken(text: string): boolean {
+  if (hasTokenShape(text) || looksLikeKey(text) || looksLikeKey(text.replaceAll('_', '-'))) return true;
+  return (text.match(TOKEN_RUN) ?? []).some(run => /[A-Za-z]/u.test(run) && /\d/u.test(run));
+}
+
+/** A run of 20 or more characters of the full token alphabet (base64url, base64, dots and tildes included). */
+const TOKEN_RUN = /[A-Za-z0-9_.~+=-]{20,}/gu;
+
+/** The lead's rule for a URL path, kept: 20 or more letters or digits in a row read as a token there, mixed or not. */
+const ALNUM_RUN = /[A-Za-z0-9]{20,}/u;
+
+/** A dot segment, however it is written. */
+const DOT_SEGMENT = new Set(['.', '..']);
 
 /**
  * THE ONE PLAIN-VALUE EXCEPTION (britnee's call, narrowed by the lead): an address a GLM-style login points at its
  * provider with (`ANTHROPIC_BASE_URL`) may stay plain, so the shell still names its provider. It is kept only when ALL of:
  * the variable name ends in `_URL` or `_BASE_URL`; the value is `https://` with no userinfo, no query and no fragment;
- * the real converter's rule (`storedEnvironmentIssue`) and the token-shape rule find no secret in it; and no path segment
- * looks like a token (20 or more letters or digits in a row; a webhook address carries its key in the path). Anything else
- * becomes a `${secret:NAME}` reference like any other literal.
+ * the real converter's rule (`storedEnvironmentIssue`) and the token rule ({@link looksLikeToken}) find no secret in it;
+ * and it is KEPT AS VALIDATED: the stored bytes are exactly the URL's own serialization (a path with a dot segment,
+ * `..` or `%2e%2e` in any case, is refused, because normalising it would discard a segment that then travels in the raw
+ * value), and every raw path segment, and its decoded form, is no token (a webhook address carries its key in the path).
+ * Anything else becomes a `${secret:NAME}` reference like any other literal.
  */
 export function isPlainProviderUrl(variable: string, value: string): boolean {
   if (!/_(?:BASE_)?URL$/u.test(variable)) return false;
   if (!value.startsWith('https://') || /[?#@\s\\]/u.test(value)) return false;
+  // The authority (host and port; userinfo is refused above) and the raw path, as written, split at the first slash.
+  const rest = value.slice('https://'.length);
+  const slash = rest.indexOf('/');
+  const authority = slash < 0 ? rest : rest.slice(0, slash);
+  const rawPath = slash < 0 ? '' : rest.slice(slash);
   let url: URL;
   try {
     url = new URL(value);
@@ -60,14 +85,26 @@ export function isPlainProviderUrl(variable: string, value: string): boolean {
   if (url.protocol !== 'https:' || url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '')
     return false;
   if (hasTokenShape(value) || storedEnvironmentIssue(variable, value) !== undefined) return false;
-  return !url.pathname.split('/').some(segment => {
-    let decoded = segment;
+  // The bytes kept are the bytes validated: the host as the URL serialises it (an international name is written in
+  // punycode there, so a non-ASCII one is compared by its path alone) and the path exactly as the URL serialises it.
+  if (/^[\u0020-\u007e]*$/u.test(authority) && authority.toLowerCase() !== url.host) return false;
+  if ((rawPath === '' ? '/' : rawPath) !== url.pathname) return false;
+  if (url.hostname.split('.').some(looksLikeToken)) return false;
+  return !rawPath.split('/').some(segment => {
+    let decoded: string;
     try {
       decoded = decodeURIComponent(segment);
     } catch {
       return true;
     }
-    return TOKEN_RUN.test(segment) || TOKEN_RUN.test(decoded) || hasTokenShape(decoded);
+    return (
+      DOT_SEGMENT.has(segment) ||
+      DOT_SEGMENT.has(decoded) ||
+      ALNUM_RUN.test(segment) ||
+      ALNUM_RUN.test(decoded) ||
+      looksLikeToken(segment) ||
+      looksLikeToken(decoded)
+    );
   });
 }
 
@@ -88,12 +125,12 @@ export type LoginShell =
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/** A `label` / `preset` that is a plain string and no token. */
+/** A `label` / `preset` that is a plain string and no token ({@link looksLikeToken}); a suspicious one is omitted, never said. */
 const plainText = (value: unknown, max: number, pattern?: RegExp): string | undefined =>
   typeof value === 'string' &&
   value.length > 0 &&
   value.length <= max &&
-  !hasTokenShape(value) &&
+  !looksLikeToken(value) &&
   (pattern === undefined || pattern.test(value))
     ? value
     : undefined;

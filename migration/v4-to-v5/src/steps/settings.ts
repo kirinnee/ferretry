@@ -846,10 +846,13 @@ export async function buildPlan(
       : (Object.entries(ids?.runtimes ?? {}).find(([, entry]) => entry.formerNames.includes(name))?.[0] ?? name);
   const listing = await listV4Config(ctx.v4.home, ctx.v4.configOverrides);
   // The preview stages no login file (a failed prepare must leave no login bytes): its logins are listed from the real v4
-  // home, and read from there. The plain passes of a preview list them too, so a shell is "authored" only where it differs.
+  // home, and read from there, by the PREVIEW run alone. The plain comparison and enforced passes (`ctx.preview` absent)
+  // never read a login: a plain conversion of a login document keeps its comments, `store: host` and budget, and the
+  // accepted-config step would write it to disk as a snapshot. A login shell is therefore always "authored" (the plain
+  // conversion has none to equal), and v4's enforced conversion carries no login to record.
   const staged = new Set(listing.files.map(file => file.label));
   const loginFiles =
-    ctx.previewV4Home === undefined
+    ctx.preview !== true || ctx.previewV4Home === undefined
       ? []
       : (await listV4Config(ctx.previewV4Home)).files.filter(
           file =>

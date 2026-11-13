@@ -7,6 +7,7 @@
  * required scan. Every marker is synthetic; no real credential is read.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { link, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parse } from 'yaml';
@@ -15,6 +16,9 @@ import { decideStorelessStatus } from '../../../../packages/plugins/logins/daemo
 import { resolveCredentialStore } from '../../../../packages/plugins/logins/daemon/lib/credentials/credentials.ts';
 import { credentialIssues, credentialOf } from '../../../../packages/plugins/logins/daemon/lib/shared/credential.ts';
 import { heldSection, prepare } from '../../preview/driver.ts';
+import { LoginKeyHold } from '../../src/steps/login-keys.ts';
+import { buildShell } from '../../src/steps/preview-logins.ts';
+import { strictYamlMap } from '../../src/v4/config.ts';
 import { fixture } from './ferret-fixture.ts';
 
 let f: Awaited<ReturnType<typeof fixture>>;
@@ -224,4 +228,104 @@ describe('no login byte survives a prepare, passing or failing', () => {
       expect(credentialIssues(credentialOf(file))).toEqual([]);
     }
   });
+});
+
+const OPAQUE_TOKEN = 'aB3dE5gH7jK9mN2pQ4rS6tV8';
+const BASE64URL_TOKEN = 'aB3dE5gH7jK9mN2pQ4r_S6tV8-wX0yZ2aB4cD6eF8';
+const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+
+describe('fix2: no credential reaches disk through any preview representation of a login', () => {
+  const everything = async () => (await everythingPreview()).text;
+
+  for (const [name, path] of [
+    ['a raw dot segment', `${OPAQUE_TOKEN}/../v1`],
+    ['an encoded dot segment', `${OPAQUE_TOKEN}/%2e%2e/v1`],
+    ['a mixed-case encoded dot segment', `${OPAQUE_TOKEN}/%2E%2e/v1`],
+    ['a base64url segment split by _ and -', BASE64URL_TOKEN],
+  ] as const)
+    test(`${name} in a URL path does not reach any prepared artifact`, async () => {
+      await put('layout-version', '2\n');
+      await put(
+        'config/logins/work.yaml',
+        `harness: claude\nstore: environment\nenv:\n  ANTHROPIC_BASE_URL: https://api.example.com/${path}\n  ANTHROPIC_API_KEY: \${secret:EMPTY}\n`,
+      );
+      const done = await run();
+      expect(done.report?.complete).toBe(true);
+      const shell = await readFile(join(target(), 'config/logins/work.yaml'), 'utf8');
+      expect(shell).not.toContain(path);
+      expect(shell).toContain('ANTHROPIC_BASE_URL: ${secret:LOGIN_WORK_ANTHROPIC_BASE_URL}');
+      const seen = await everything();
+      expect(seen).not.toContain(OPAQUE_TOKEN);
+      expect(seen).not.toContain(BASE64URL_TOKEN);
+    });
+
+  for (const field of ['label', 'preset'])
+    test(`an opaque ${field} is absent from every prepared artifact`, async () => {
+      await put('layout-version', '2\n');
+      await put(
+        'config/logins/work.yaml',
+        `harness: claude\nstore: environment\n${field}: ${OPAQUE_TOKEN}\nenv:\n  A: \${secret:EMPTY}\n`,
+      );
+      const done = await run();
+      expect(done.report?.complete).toBe(true);
+      expect(await everything()).not.toContain(OPAQUE_TOKEN);
+    });
+
+  // A held deletion (limits.yaml accepted in v4, now gone) makes the accepted-config step record what v4 ENFORCED. The
+  // login's older accepted text carries a credential-shaped comment, `store: host` and a budget: none of it may reach disk.
+  for (const failReport of [false, true])
+    test(`a held deletion writes no plain login conversion into the accepted-config snapshots (report failure=${failReport})`, async () => {
+      await put('layout-version', '2\n');
+      const prior = `# ${COMMENT_MARKER}\nharness: claude\nstore: host\nbudget:\n  daily:\n    hard: 10\n`;
+      await put('config/logins/work.yaml', prior.replace('hard: 10', 'hard: 20'));
+      const limits = 'enabled: true\nperFerret:\n  memoryMax: 4G\n';
+      await f.put('state/config-accepted.json', {
+        'logins/work.yaml': { etag: sha(prior), text: prior },
+        'limits.yaml': { etag: sha(limits), text: limits },
+      });
+      if (failReport) await mkdir(`${target()}.conversion-report.json`, { recursive: true });
+      if (failReport) await expect(run()).rejects.toThrow('not a plain file');
+      else expect((await run()).report?.complete).toBe(true);
+      const seen = await everything();
+      expect(seen).not.toContain(COMMENT_MARKER);
+      // No accepted-config snapshot of the login exists at all: the preview shell has no budget to hold, and a plain
+      // conversion of the v4 document (comments, `store: host`, budget) is never computed into anything that persists.
+      const snapshots = (
+        await readdir(join(target(), 'state/kernel/accepted-config')).catch(() => [] as string[])
+      ).filter(name => name.includes('logins'));
+      expect(snapshots).toEqual([]);
+      expect(seen).not.toContain('store: host');
+      expect(seen).not.toContain('hard: 20');
+    });
+
+  for (const failure of ['conversion', 'report', 'none'] as const)
+    test(`the whole-artifact scan on ${failure}: no marker, no discarded-value digest, no staging`, async () => {
+      await put('layout-version', '2\n');
+      await put(
+        'config/logins/work.yaml',
+        `# ${COMMENT_MARKER}\nharness: claude\nstore: environment\nenv:\n  ANTHROPIC_API_KEY: ${KEY_MARKER}\n  GOOGLE_APPLICATION_CREDENTIALS: ${PATH_MARKER}\n`,
+      );
+      if (failure === 'conversion') await put('config/profiles/main.yaml', 'contents: [\n');
+      if (failure === 'report') await mkdir(`${target()}.conversion-report.json`, { recursive: true });
+      if (failure === 'report') await expect(run()).rejects.toThrow('not a plain file');
+      else expect((await run()).report?.complete).toBe(failure === 'none');
+      const seen = await everything();
+      for (const marker of [COMMENT_MARKER, KEY_MARKER, PATH_MARKER]) expect(seen).not.toContain(marker);
+      // The hold's ledger digests of the discarded values (the same process key, so they are comparable) are nowhere.
+      const hold = new LoginKeyHold();
+      const doc = strictYamlMap(
+        `harness: claude\nstore: environment\nenv:\n  ANTHROPIC_API_KEY: ${KEY_MARKER}\n  GOOGLE_APPLICATION_CREDENTIALS: ${PATH_MARKER}\n`,
+      );
+      if (doc === undefined) throw new Error('fixture does not parse');
+      buildShell(doc, 'work', true, hold);
+      const pieces = hold.fingerprint('work').split(';');
+      expect(pieces.length).toBeGreaterThan(1);
+      for (const piece of pieces) expect(seen).not.toContain(piece.split(':').at(-1) ?? piece);
+      expect(
+        await stat(`${target()}.staging`).then(
+          () => true,
+          () => false,
+        ),
+      ).toBe(false);
+    });
 });

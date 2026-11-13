@@ -262,6 +262,85 @@ describe('the one plain-value exception: a provider address', () => {
   });
 });
 
+describe('the URL exception keeps only the bytes it validated (fix2, review finding 2)', () => {
+  const OPAQUE = 'aB3dE5gH7jK9mN2pQ4rS6tV8';
+  const bad = (value: string) => expect(isPlainProviderUrl('API_URL', value)).toBe(false);
+
+  test('a dot segment, raw or percent-encoded in any case, is refused: normalising it would hide a discarded segment', () => {
+    for (const dots of ['..', '.', '%2e%2e', '%2E%2E', '%2e.', '.%2E', '%2e', '%2E'])
+      bad(`https://api.example.com/${OPAQUE}/${dots}/v1`);
+    bad('https://api.example.com/v1/../v2');
+    bad('https://api.example.com/v1/./v2');
+    bad('https://api.example.com/v1/%2e%2e/v2');
+    bad('https://api.example.com/..');
+  });
+
+  test('only a value the URL serialises as itself is kept: odd escapes, a default port or a changed host are refused', () => {
+    bad('https://[not-a-host/v1');
+    bad('https://api.example.com/%ff');
+    bad('https://api.example.com/a b');
+    bad('https://api.example.com:443/v1');
+    bad('https://API.EXAMPLE.COM.evil:99999/v1');
+  });
+
+  test('ordinary provider addresses, an international host, a port and a trailing slash are kept', () => {
+    for (const value of [
+      'https://api.example.com/v1',
+      'https://api.z.ai/api/anthropic',
+      'https://open.bigmodel.cn/api/paas/v4',
+      'https://api.example.com:8443/',
+      'https://例え.テスト/v1/',
+      'https://api.example.com',
+      'https://API.example.com/v1',
+    ])
+      expect(isPlainProviderUrl('API_URL', value)).toBe(true);
+  });
+});
+
+describe('the token rule covers the whole token alphabet (fix2, review findings 3 and 4)', () => {
+  const BASE64URL = 'aB3dE5gH7jK9mN2pQ4r_S6tV8-wX0yZ2aB4cD6eF8';
+  const OPAQUE = 'aB3dE5gH7jK9mN2pQ4rS6tV8';
+  const base = 'harness: claude\nstore: environment\n';
+  const shellOf = (text: string): string => {
+    const built = buildShell(parseDocument(text), 'work', true, new LoginKeyHold());
+    return built.kind === 'carried' ? String(built.document) : '';
+  };
+
+  test('a base64url path segment split by _ or - is a token; the run needs no whole-segment match', () => {
+    expect(isPlainProviderUrl('API_URL', `https://api.example.com/${BASE64URL}`)).toBe(false);
+    expect(isPlainProviderUrl('API_URL', `https://api.example.com/${BASE64URL.replaceAll('_', '-')}`)).toBe(false);
+    expect(isPlainProviderUrl('API_URL', `https://api.example.com/v1:${OPAQUE}`)).toBe(false);
+    expect(isPlainProviderUrl('API_URL', `https://${OPAQUE}.example.com/v1`)).toBe(false);
+    expect(isPlainProviderUrl('API_URL', 'https://api.example.com/v1/chat-completions-endpoint')).toBe(true);
+    expect(isPlainProviderUrl('API_URL', 'https://api.example.com/api/anthropic')).toBe(true);
+  });
+
+  test('a label or a preset that is credential-shaped is omitted, and no line prints it', () => {
+    for (const field of ['label', 'preset']) {
+      const built = buildShell(
+        parseDocument(`${base}${field}: ${OPAQUE}\nenv:\n  A: \${secret:EMPTY}\n`),
+        'work',
+        true,
+        new LoginKeyHold(),
+      );
+      expect(built.kind).toBe('carried');
+      if (built.kind !== 'carried') continue;
+      expect(String(built.document)).not.toContain(OPAQUE);
+      expect(built.removed).toContain(field);
+      expect(JSON.stringify(built)).not.toContain(OPAQUE);
+    }
+    expect(shellOf(`${base}label: sk-ant-FAKE-0000-not-a-real-key\nenv:\n  A: \${secret:EMPTY}\n`)).not.toContain(
+      'sk-ant',
+    );
+  });
+
+  test('an ordinary label and preset are still carried', () => {
+    const out = shellOf(`${base}label: Work account\npreset: zai\nenv:\n  A: \${secret:EMPTY}\n`);
+    expect(out).toContain('label: Work account');
+    expect(out).toContain('preset: zai');
+  });
+});
+
 describe('signInIssue agrees with the logins plugin rule (credentialIssues)', () => {
   const cases: readonly [string, Record<string, unknown>][] = [
     ['environment with env', { harness: 'claude-code', store: 'environment', env: { A: '${secret:A}' } }],
