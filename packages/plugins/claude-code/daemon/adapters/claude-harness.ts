@@ -47,6 +47,7 @@ import {
   CLAUDE_CODE_HOOKS,
   CLAUDE_CODE_LAUNCH_SETTINGS,
   CLAUDE_CODE_SETTINGS,
+  ClaudeConversationBindingSchema,
   type HarnessConfig,
 } from '../../contract/index.ts';
 import type { DialogAnswerService } from '../lib/dialog/service.ts';
@@ -358,7 +359,7 @@ export class ClaudeHarness implements Harness {
     const home = this.home(spec.ferret);
     await home.writeText(
       this.fenced(home.resolve(HOME_FILES.conversation)),
-      `${JSON.stringify({ format: 1, id: conversation.id, cwd: spec.folder })}\n`,
+      `${JSON.stringify(ClaudeConversationBindingSchema.parse({ format: 1, id: conversation.id, cwd: spec.folder }))}\n`,
     );
     // Checked again immediately before the runner is asked: a folder made writable since the write is seen here.
     await this.requirePrivateChain(home);
@@ -533,18 +534,17 @@ export class ClaudeHarness implements Harness {
     ferret: FerretId,
   ): Promise<{ readonly home: RootHandle; readonly file: FencedPath; readonly stat: RootStat } | undefined> {
     const home = this.home(ferret);
-    const binding = home.resolve(HOME_FILES.conversation);
-    if (!binding.ok) return undefined;
+    const bindingFile = home.resolve(HOME_FILES.conversation);
+    if (!bindingFile.ok) return undefined;
     let identity: unknown;
     try {
-      identity = JSON.parse(await home.readText(binding.value, FIRST_RECORDS_BYTES));
+      identity = JSON.parse(await home.readText(bindingFile.value, FIRST_RECORDS_BYTES));
     } catch {
       return undefined;
     }
-    if (typeof identity !== 'object' || identity === null) return undefined;
-    const { format, id, cwd } = identity as { format?: unknown; id?: unknown; cwd?: unknown };
-    if (format !== 1 || !isConversationId(id) || typeof cwd !== 'string' || !cwd.startsWith('/')) return undefined;
-    const file = home.resolve(claudeTranscriptPath(cwd, id));
+    const binding = ClaudeConversationBindingSchema.safeParse(identity);
+    if (!binding.success) return undefined;
+    const file = home.resolve(claudeTranscriptPath(binding.data.cwd, binding.data.id));
     if (!file.ok) return undefined;
     const stat = await home.stat(file.value);
     if (stat?.kind !== 'file') return undefined;

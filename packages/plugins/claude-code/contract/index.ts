@@ -26,6 +26,7 @@ import {
 } from './wire.ts';
 
 export * from './wire.ts';
+export * from './conversation.ts';
 
 /** The harness key and plugin id. */
 export const CLAUDE_CODE = 'claude-code' as const;

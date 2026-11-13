@@ -1,5 +1,10 @@
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
-import type { HarnessConfig, HooksItem, SettingsItem } from '../../../contract/index.ts';
+import {
+  CLAUDE_CODE_CONVERSATION_FILE,
+  type HarnessConfig,
+  type HooksItem,
+  type SettingsItem,
+} from '../../../contract/index.ts';
 import { seededCommand } from './api-key-seed.ts';
 import { fixedLayer } from './fixed-layer.ts';
 import { deepMergeSettings } from './settings.ts';
@@ -18,7 +23,7 @@ export const HOME_FILES = {
   settings: 'settings.json',
   overlay: 'launch-settings.json',
   claudeJson: '.claude.json',
-  conversation: 'conversation.json',
+  conversation: CLAUDE_CODE_CONVERSATION_FILE,
   mcp: 'mcp.json',
 } as const;
 
