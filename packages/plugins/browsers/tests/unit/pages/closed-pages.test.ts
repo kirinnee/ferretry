@@ -105,4 +105,62 @@ describe('a page that closes without the service closing it', () => {
     should((await control.view('s1', 'browser')).asked).deepEqual([]);
     should(await control.takeoverOf('s1', kept)).not.be.undefined();
   });
+
+  it('ends the takeover of a live popup on stop, however its opener went first', async () => {
+    // Arrange — a person took a popup over, then the opener closed inside Chrome while the popup stayed.
+    const { control, tabs, pages } = world();
+    const parent = await pages.openPage('s1', 'app');
+    tabs.pages.push({ id: 'popup', openerId: parent.id, url: 'about:blank', title: '' });
+    await pages.status('s1');
+    const popup = { surface: 'browser', id: 'popup' } as const;
+    await control.takeover('s1', popup, { by: 'local' });
+    tabs.pages = tabs.pages.filter(page => page.id !== parent.id);
+    await pages.status('s1');
+
+    // Act
+    await pages.closeAll();
+    await settled();
+
+    // Assert
+    should(await control.takeoverOf('s1', popup)).be.undefined();
+  });
+
+  it('ends the takeover of a live popup on a crash, however its opener went first', async () => {
+    // Arrange
+    const { control, tabs, pages } = world();
+    const parent = await pages.openPage('s1', 'app');
+    tabs.pages.push({ id: 'popup', openerId: parent.id, url: 'about:blank', title: '' });
+    await pages.status('s1');
+    const popup = { surface: 'browser', id: 'popup' } as const;
+    await control.takeover('s1', popup, { by: 'local' });
+    tabs.pages = tabs.pages.filter(page => page.id !== parent.id);
+    await pages.status('s1');
+
+    // Act
+    tabs.die();
+    await settled();
+
+    // Assert
+    should(await control.takeoverOf('s1', popup)).be.undefined();
+  });
+
+  it('ends the takeover of a popup’s popup on stop, once the first opener went', async () => {
+    // Arrange — a popup of a popup, both live, the first opener gone.
+    const { control, tabs, pages } = world();
+    const parent = await pages.openPage('s1', 'app');
+    tabs.pages.push({ id: 'popup', openerId: parent.id, url: 'about:blank', title: '' });
+    tabs.pages.push({ id: 'grandchild', openerId: 'popup', url: 'about:blank', title: '' });
+    await pages.status('s1');
+    const grandchild = { surface: 'browser', id: 'grandchild' } as const;
+    await control.takeover('s1', grandchild, { by: 'local' });
+    tabs.pages = tabs.pages.filter(page => page.id !== parent.id);
+    await pages.status('s1');
+
+    // Act
+    await pages.closeAll();
+    await settled();
+
+    // Assert
+    should(await control.takeoverOf('s1', grandchild)).be.undefined();
+  });
 });

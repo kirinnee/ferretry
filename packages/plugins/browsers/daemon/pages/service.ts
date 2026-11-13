@@ -712,6 +712,12 @@ export class BrowserSessionService implements BrowserSubsystem {
 
   /** A page ended, however it ended: its records, its viewers, and who watches for a close all hear of it. */
   private release(run: Running, sessionId: string | undefined, pageId: string): void {
+    // A live popup is its opener's only by lineage; with the opener gone nothing resolves its session, so a stop or a
+    // crash would skip it and leave its takeover standing. It keeps its session's ownership on itself before the
+    // opener's records go.
+    if (sessionId !== undefined)
+      for (const page of run.seen.values())
+        if (page.openerId === pageId && !run.owners.has(page.id)) run.owners.set(page.id, sessionId);
     run.seen.delete(pageId);
     run.owners.delete(pageId);
     run.names.delete(pageId);

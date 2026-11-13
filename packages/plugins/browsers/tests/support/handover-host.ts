@@ -1,4 +1,10 @@
-import { FakeGate, ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
+import {
+  deviceStanding,
+  FakeGate,
+  ferretStanding,
+  ownerStanding,
+  StandInAdmission,
+} from '@ferretry/core-gate/contract/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import type { FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
@@ -11,7 +17,7 @@ const FERRETS = { get: async (id: string) => (id === 'f1' || id === 'f2' ? { nam
 
 /**
  * The browsers daemon half exactly as `build` composes it, over a fake agent browser (real tabs, nothing started), with
- * "What agents may control" fully on. Gate's stand-in admission stamps the standing a real daemon gives: the ferret `as`
+ * "What agents may control" fully on. Gate's stand-in admission stamps the standing a real daemon gives: a paired device its own device standing, the ferret `as`
  * names for a ferret's own (privileged local) arrival, the owner for everything else.
  */
 export async function handoverHost(): Promise<{
@@ -26,7 +32,11 @@ export async function handoverHost(): Promise<{
     build: ctx => buildBrowsers(ctx, { launcher: { launch: async () => tabs.automation } }),
   });
   const gate = new StandInAdmission(request =>
-    request.arrival.kind === 'local' && request.arrival.privileged ? ferretStanding(calling) : ownerStanding(),
+    request.arrival.kind === 'local' && request.arrival.privileged
+      ? ferretStanding(calling)
+      : request.principal?.kind === 'device'
+        ? deviceStanding(String(request.principal.holder))
+        : ownerStanding(),
   );
   const host = await testHost({
     plugins: [half],

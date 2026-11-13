@@ -7,6 +7,8 @@ import { handoverHost } from '../../support/handover-host.ts';
 import type { Tabs } from '../../support/tabs.ts';
 
 const STREAM = '/v1/sessions/f1/browser/stream';
+/** The page the agent's person views is the one `browser_open` just made (the browser's own first page is not it). */
+const viewed = (tabs: Tabs): { id: string } => tabs.pages.at(-1) as { id: string };
 const TYPE = JSON.stringify({ kind: 'insertText', text: 'typed at the viewer' });
 
 /**
@@ -26,7 +28,7 @@ describe('the browser viewer socket — whose input reaches a page', () => {
     running = world.host;
     await world.host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, world.as('f1'));
     // The page is under an input hold: a card pending, or a private value just typed into it.
-    world.host.hold(pageTarget((world.tabs.pages[0] as { id: string }).id), 'held');
+    world.host.hold(pageTarget(viewed(world.tabs).id), 'held');
     return world;
   }
 
@@ -79,7 +81,7 @@ describe('the browser viewer socket — whose input reaches a page', () => {
   it('R549 delivers a ferret on the viewer socket no input on a page nothing holds either', async () => {
     // Arrange
     const { host, tabs, as } = await held();
-    host.release(pageTarget((tabs.pages[0] as { id: string }).id));
+    host.release(pageTarget(viewed(tabs).id));
     const socket = await host.socket(STREAM, as('f1'));
 
     // Act
