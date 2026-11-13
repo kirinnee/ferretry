@@ -10,7 +10,7 @@
 import type { AccountChange, LayeredProfileView } from '../../../../contract/index.ts';
 import { useEffect, useId, useState } from 'react';
 import { Button } from '../../../ui.ts';
-import { type AccountCatalog, useAccountCatalog } from '../components/account-catalog.ts';
+import { type AccountCatalog, allComponents, useAccountCatalog } from '../components/account-catalog.ts';
 import {
   CatalogNote,
   ComponentBadges,
@@ -26,6 +26,7 @@ import { counted, listed, profileScopeBadge, profileScopeWord } from '../compone
 import { isComponentReference, itemHref, useHashItem } from '../components/machine-links.ts';
 import { ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machine-tab.ts';
+import { InstructionTexts } from './instruction-text.tsx';
 import { ProfileEditor } from './profile-editor.tsx';
 import { includedBy, profileUseLine, runtimesReaching } from './profile-model.ts';
 
@@ -182,6 +183,7 @@ function DetailPage(props: DetailProps) {
         onSaved={props.onSaved}
         onFileChanged={props.onFileChanged}
       />
+      <InstructionTexts profile={profile} profiles={catalog.profiles.profiles} components={allComponents(catalog)} />
       <Section title="Where it is used">
         {includers.length === 0 && runtimes.length === 0 ? (
           <Hint>Nothing uses this profile yet.</Hint>
