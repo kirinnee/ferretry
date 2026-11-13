@@ -29,12 +29,14 @@ export type { PublishedCarrierView } from '../pairing/index.ts';
 /** The daemon's published set: fixed direct and relay entries, and a tunnel that comes and goes. */
 export class PublishedCarrierSet implements PublishedCarrierView {
   #current: readonly DaemonCarrier[];
+  #tunnelUrl: string | undefined;
 
   constructor(
     private readonly directUrl: string | undefined,
-    private readonly relays: readonly RelayCarrierSource[],
+    private relays: readonly RelayCarrierSource[],
   ) {
     this.#current = Object.freeze(publishedDaemonCarriers(directUrl, relays));
+    this.#tunnelUrl = undefined;
   }
 
   current(): readonly DaemonCarrier[] {
@@ -43,6 +45,20 @@ export class PublishedCarrierSet implements PublishedCarrierView {
 
   /** Publishes the tunnel at `url`, or withdraws it when `undefined`. The whole set is replaced. */
   tunnel(url: string | undefined): void {
-    this.#current = Object.freeze(publishedDaemonCarriers(this.directUrl, this.relays, url));
+    this.#tunnelUrl = url;
+    this.#republish();
+  }
+
+  /**
+   * Replaces the relay sources — used once, when the background lookup retry recovers a relay the boot
+   * could not discover. The tunnel, if one is published, stays; the whole set is replaced and parsed.
+   */
+  relaysChanged(relays: readonly RelayCarrierSource[]): void {
+    this.relays = relays;
+    this.#republish();
+  }
+
+  #republish(): void {
+    this.#current = Object.freeze(publishedDaemonCarriers(this.directUrl, this.relays, this.#tunnelUrl));
   }
 }

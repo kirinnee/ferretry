@@ -239,7 +239,7 @@ function fixture(
     /** What this daemon resolved at boot, for a case about what a redemption hands out. */
     readonly carriers?: readonly DaemonCarrier[];
     /** The rendezvous the composition root proved a fresh device could discover, if any. */
-    readonly discoveredRelayUrl?: string;
+    readonly discoveredRelayUrl?: string | (() => string | undefined);
     /** The machine's idle period, when a case is about the setting rather than the default. */
     readonly idleExpiryDays?: () => number;
     /** How long one idle day is, when a case drives the period in seconds. */
@@ -357,6 +357,19 @@ describe('PairingService minting and status', () => {
 
     const discovered = fixture({ carriers, discoveredRelayUrl: 'wss://hosted.example.test/fy' });
     should(discovered.mint().discoveredRelayUrl).equal('wss://hosted.example.test/fy');
+  });
+
+  it('should read the discoverable rendezvous when it is minted, so one found after boot is disclosed', () => {
+    // Arrange — a function, as the composition root passes it, that starts answering later.
+    let found: string | undefined;
+    const late = fixture({ discoveredRelayUrl: () => found });
+    should(late.mint().discoveredRelayUrl).be.undefined();
+
+    // Act
+    found = 'wss://hosted.example.test/fy';
+
+    // Assert
+    should(late.mint().discoveredRelayUrl).equal('wss://hosted.example.test/fy');
   });
 
   it('should mint the same fragment whether or not a rendezvous is discoverable', async () => {

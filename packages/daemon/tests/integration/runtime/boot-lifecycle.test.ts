@@ -6576,6 +6576,476 @@ describe('daemon boot lifecycle', () => {
       should(JSON.parse(await readFile(named, 'utf8'))).have.property('host', 'box.invalid');
     });
 
+    it('should ask the directory again after a transient boot-time failure and dial what it then advertises', async () => {
+      // Arrange: the directory is unreachable at boot — the network is not up yet — and answers later.
+      const home = await tempDirectory('fyd-relay-retry');
+      const relay = refusingRelay();
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      const timers: Array<{ readonly action: () => void; cancelled: boolean }> = [];
+      const answers: RelayAdvertisement[] = [
+        { kind: 'undetermined', reason: 'this daemon could not reach the relay directory', transient: true },
+        { kind: 'undetermined', reason: 'this daemon could not reach the relay directory', transient: true },
+        { kind: 'available', relayUrl: relay.url },
+      ];
+      let reads = 0;
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = {
+        ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)),
+        notices: said.port,
+        relayDirectory: {
+          read: async (): Promise<RelayAdvertisement> => {
+            reads += 1;
+            return answers.shift() ?? NO_RELAY_DIRECTORY;
+          },
+        },
+        relayLookupTiming: {
+          scheduler: {
+            after: (_milliseconds: number, action: () => void) => {
+              const timer = { action, cancelled: false };
+              timers.push(timer);
+              return {
+                cancel: () => {
+                  timer.cancelled = true;
+                },
+              };
+            },
+          },
+          random: () => 0.5,
+        },
+      };
+      const fire = async (): Promise<void> => {
+        const due = timers.splice(0).filter(timer => !timer.cancelled);
+        for (const timer of due) timer.action();
+        await waitFor(
+          () => timers.length > 0 || said.stated.some(line => line.startsWith('relay carrier recovered')),
+          'the lookup retry to read again and re-arm or recover',
+        );
+      };
+
+      // Act
+      const booting = start(world, cleanups);
+      const port = await recordedPort(home);
+      await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
+      const beforeRetry = {
+        steps: said.steps.filter(step => step.startsWith('dialling the relay')),
+        stated: [...said.stated],
+      };
+      await fire();
+      const stillDirectOnly = said.stated.filter(line => line.startsWith('relay carrier recovered'));
+      await fire();
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+      await relay.stop();
+
+      // Assert — direct-only at boot, said with the promise to ask again; still nothing after the second
+      // failed read; recovered, with the read count, once it answered; and one loop throughout.
+      should(code).equal(0);
+      should(beforeRetry.steps).be.empty();
+      should(beforeRetry.stated.some(line => line.startsWith('the relay directory will be asked again'))).be.true();
+      should(stillDirectOnly).be.empty();
+      // The boot's own read plus the two retries.
+      should(reads).equal(3);
+      const recovered = said.stated.filter(line => line.startsWith('relay carrier recovered'));
+      should(recovered).have.length(1);
+      should(recovered[0]).match(/answered on read 3/u);
+      should(recovered[0]).containEql(`now dialling ${relay.url}`);
+      should(timers.filter(timer => !timer.cancelled)).be.empty();
+    });
+
+    it('should not ask again after a definitive answer, and should cancel a pending retry on stop', async () => {
+      // Arrange — a disabled advertisement is final; a transient failure leaves exactly one timer, which
+      // stopping the daemon cancels.
+      const retriesArmed = async (answer: RelayAdvertisement) => {
+        const home = await tempDirectory('fyd-relay-retry-final');
+        const cleanups: Array<() => void | Promise<void>> = [];
+        const armed: Array<{ cancelled: boolean }> = [];
+        let release = (): void => {};
+        const stopped = new Promise<void>(resolve => {
+          release = resolve;
+        });
+        const world = {
+          ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)),
+          notices: recordingNotices().port,
+          relayDirectory: { read: async (): Promise<RelayAdvertisement> => answer },
+          relayLookupTiming: {
+            scheduler: {
+              after: () => {
+                const timer = { cancelled: false };
+                armed.push(timer);
+                return {
+                  cancel: () => {
+                    timer.cancelled = true;
+                  },
+                };
+              },
+            },
+            random: () => 0.5,
+          },
+        };
+        const booting = start(world, cleanups);
+        const port = await recordedPort(home);
+        await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
+        release();
+        await booting;
+        await runCleanups(cleanups);
+        return armed;
+      };
+
+      // Act
+      const disabled = await retriesArmed({ kind: 'disabled' });
+      const unreadable = await retriesArmed({ kind: 'undetermined', reason: 'a document it cannot read' });
+      const transient = await retriesArmed({ kind: 'undetermined', reason: 'unreachable', transient: true });
+
+      // Assert
+      should(disabled).be.empty();
+      should(unreadable).be.empty();
+      should(transient).have.length(1);
+      should(transient[0]?.cancelled).be.true();
+    });
+
+    it('should not start the hosted carrier when the discovery entry was switched off while the lookup was failing', async () => {
+      // Arrange: transient failure at boot; the operator then switches the discovery entry off; the
+      // directory finally answers. An explicit entry wins over a late success.
+      const home = await tempDirectory('fyd-relay-retry-veto');
+      const relay = refusingRelay();
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      const timers: Array<{ readonly action: () => void; cancelled: boolean }> = [];
+      const answers: RelayAdvertisement[] = [
+        { kind: 'undetermined', reason: 'this daemon could not reach the relay directory', transient: true },
+        { kind: 'available', relayUrl: relay.url },
+      ];
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = {
+        ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)),
+        notices: said.port,
+        relayDirectory: { read: async (): Promise<RelayAdvertisement> => answers.shift() ?? NO_RELAY_DIRECTORY },
+        relayLookupTiming: {
+          scheduler: {
+            after: (_milliseconds: number, action: () => void) => {
+              const timer = { action, cancelled: false };
+              timers.push(timer);
+              return {
+                cancel: () => {
+                  timer.cancelled = true;
+                },
+              };
+            },
+          },
+          random: () => 0.5,
+        },
+      };
+
+      // Act
+      const booting = start(world, cleanups);
+      const port = await recordedPort(home);
+      await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
+      const document = JSON.parse(await readFile(world.config.path, 'utf8')) as { carriers: unknown[] };
+      document.carriers.push({ kind: 'relay', source: 'discovery', enabled: false });
+      await writeFile(world.config.path, `${JSON.stringify(document, null, 2)}\n`);
+      for (const timer of timers.splice(0)) timer.action();
+      await waitFor(
+        () => said.stated.some(line => line.includes('relay configuration changed while it was failing')),
+        'the late answer to be dropped because the configuration changed',
+      );
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+      await relay.stop();
+
+      // Assert
+      should(code).equal(0);
+      should(said.stated.filter(line => line.startsWith('relay carrier recovered'))).be.empty();
+      should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
+    });
+
+    it('should end the lookup retry, and abort its read in flight, the instant the daemon is told to stop', async () => {
+      // Arrange: a retry read that has been sent and not answered when the daemon stops.
+      const home = await tempDirectory('fyd-relay-retry-stop');
+      const relay = refusingRelay();
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      const timers: Array<{ readonly action: () => void; cancelled: boolean }> = [];
+      const signals: AbortSignal[] = [];
+      let answer: (value: RelayAdvertisement) => void = () => undefined;
+      let reads = 0;
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = {
+        ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)),
+        notices: said.port,
+        relayDirectory: {
+          read: async (options?: { readonly signal?: AbortSignal }): Promise<RelayAdvertisement> => {
+            reads += 1;
+            if (reads === 1)
+              return {
+                kind: 'undetermined',
+                reason: 'this daemon could not reach the relay directory',
+                transient: true,
+              };
+            if (options?.signal !== undefined) signals.push(options.signal);
+            return await new Promise<RelayAdvertisement>(resolve => {
+              answer = resolve;
+            });
+          },
+        },
+        relayLookupTiming: {
+          scheduler: {
+            after: (_milliseconds: number, action: () => void) => {
+              const timer = { action, cancelled: false };
+              timers.push(timer);
+              return {
+                cancel: () => {
+                  timer.cancelled = true;
+                },
+              };
+            },
+          },
+          random: () => 0.5,
+        },
+      };
+
+      // Act
+      const booting = start(world, cleanups);
+      const port = await recordedPort(home);
+      await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
+      for (const timer of timers.splice(0)) timer.action();
+      await waitFor(() => signals.length === 1, 'the retry read to be sent');
+      release();
+      const code = await booting;
+      // `start` has returned, and NO cleanup has run yet: the retry is already over.
+      const abortedBeforeAnyCleanup = signals[0]?.aborted;
+      answer({ kind: 'available', relayUrl: relay.url });
+      await new Promise(resolve => setTimeout(resolve, 20));
+      await runCleanups(cleanups);
+      await relay.stop();
+
+      // Assert — the late answer started and published nothing.
+      should(code).equal(0);
+      should(abortedBeforeAnyCleanup).be.true();
+      should(said.stated.filter(line => line.startsWith('relay carrier recovered'))).be.empty();
+      should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
+    });
+
+    it('should not dial a discovered relay at boot when the configuration changed while the directory was being read', async () => {
+      // Arrange: the boot's own read is slow; the operator switches the discovery entry off inside it.
+      const home = await tempDirectory('fyd-relay-boot-gate-changed');
+      const relay = refusingRelay();
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let answer: (value: RelayAdvertisement) => void = () => undefined;
+      let asked = false;
+      // What the boot handed pairing: the ONE published set, and the discovery getter its QR is drawn from.
+      let handed:
+        | {
+            readonly carriers: { current(): readonly { readonly kind: string }[] };
+            readonly discovered: () => string | undefined;
+          }
+        | undefined;
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const underlying = await worldAt(home, OS_CHOSEN_PORT, async () => await stopped);
+      const world = {
+        ...underlying,
+        createPairing: async (...args: Parameters<typeof underlying.createPairing>) => {
+          handed = { carriers: args[2], discovered: args[3] };
+          return await underlying.createPairing(...args);
+        },
+        notices: said.port,
+        relayDirectory: {
+          read: async (): Promise<RelayAdvertisement> => {
+            asked = true;
+            return await new Promise<RelayAdvertisement>(resolve => {
+              answer = resolve;
+            });
+          },
+        },
+      };
+
+      // Act
+      const booting = start(world, cleanups);
+      await waitFor(() => asked, 'the boot to ask the directory');
+      const document = JSON.parse(await readFile(world.config.path, 'utf8')) as { carriers: unknown[] };
+      document.carriers.push({ kind: 'relay', source: 'discovery', enabled: false });
+      await writeFile(world.config.path, `${JSON.stringify(document, null, 2)}\n`);
+      answer({ kind: 'available', relayUrl: relay.url });
+      const port = await recordedPort(home);
+      await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
+      await waitFor(
+        () => said.stated.some(line => line.startsWith('no relay carriers')),
+        'the boot to refuse the discovered relay',
+      );
+      const adminToken = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+      const served = DaemonCarriersViewSchema.parse(
+        await (
+          await fetch(`http://127.0.0.1:${String(port)}/v1/carriers`, {
+            headers: { authorization: `Bearer ${adminToken}` },
+          })
+        ).json(),
+      );
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+      await relay.stop();
+
+      // Assert
+      should(code).equal(0);
+      should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
+      // And it is no longer PROMISED: not in GET /v1/carriers, not in the set pairing redeems from, and not in
+      // the discovery the pairing QR is drawn from.
+      should(served.carriers.filter(carrier => carrier.kind === 'relay')).be.empty();
+      should(handed?.carriers.current().filter(carrier => carrier.kind === 'relay')).be.empty();
+      should(handed?.discovered()).be.undefined();
+      should(
+        said.stated.some(line => line.includes('relay configuration changed while this daemon was starting')),
+      ).be.true();
+    });
+
+    it('should abort the boot’s own directory read when the daemon is told to stop, and dial nothing it then answers', async () => {
+      // Arrange: a first read that has not answered when the stop arrives.
+      const home = await tempDirectory('fyd-relay-boot-stop');
+      const relay = refusingRelay();
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      const signals: AbortSignal[] = [];
+      let answer: (value: RelayAdvertisement) => void = () => undefined;
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = {
+        ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)),
+        notices: said.port,
+        relayDirectory: {
+          read: async (options?: { readonly signal?: AbortSignal }): Promise<RelayAdvertisement> => {
+            if (options?.signal !== undefined) signals.push(options.signal);
+            return await new Promise<RelayAdvertisement>(resolve => {
+              answer = resolve;
+            });
+          },
+        },
+      };
+
+      // Act — the stop is the FIRST registered cleanup, which is what a shutdown runs first.
+      const booting = start(world, cleanups);
+      await waitFor(() => signals.length === 1, 'the boot to ask the directory');
+      await cleanups[0]?.();
+      const abortedByStop = signals[0]?.aborted;
+      answer({ kind: 'available', relayUrl: relay.url });
+      const port = await recordedPort(home);
+      await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
+      await waitFor(
+        () => said.stated.some(line => line.startsWith('no relay carriers')),
+        'the boot to refuse the late answer',
+      );
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+      await relay.stop();
+
+      // Assert
+      should(code).equal(0);
+      should(abortedByStop).be.true();
+      should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
+    });
+
+    it('should not start the hosted carrier when the configuration became unreadable while the lookup was failing', async () => {
+      // Arrange: transient failure at boot; the document is then corrupted (v4 keeps no last-good copy of daemon.json, so unreadable fails closed); the
+      // directory finally answers. An explicit entry wins over a late success.
+      const home = await tempDirectory('fyd-relay-retry-corrupt');
+      const relay = refusingRelay();
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      const timers: Array<{ readonly action: () => void; cancelled: boolean }> = [];
+      const answers: RelayAdvertisement[] = [
+        { kind: 'undetermined', reason: 'this daemon could not reach the relay directory', transient: true },
+        { kind: 'available', relayUrl: relay.url },
+      ];
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = {
+        ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)),
+        notices: said.port,
+        relayDirectory: { read: async (): Promise<RelayAdvertisement> => answers.shift() ?? NO_RELAY_DIRECTORY },
+        relayLookupTiming: {
+          scheduler: {
+            after: (_milliseconds: number, action: () => void) => {
+              const timer = { action, cancelled: false };
+              timers.push(timer);
+              return {
+                cancel: () => {
+                  timer.cancelled = true;
+                },
+              };
+            },
+          },
+          random: () => 0.5,
+        },
+      };
+
+      // Act
+      const booting = start(world, cleanups);
+      const port = await recordedPort(home);
+      await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
+      await writeFile(world.config.path, '{ this is not json');
+      for (const timer of timers.splice(0)) timer.action();
+      await waitFor(
+        () => said.stated.some(line => line.includes('relay configuration cannot be read now')),
+        'the late answer to be dropped because the configuration cannot be read',
+      );
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+      await relay.stop();
+
+      // Assert
+      should(code).equal(0);
+      should(said.stated.filter(line => line.startsWith('relay carrier recovered'))).be.empty();
+      should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
+    });
+
+    it('should refuse to boot on a relay configuration that is already unreadable, rather than discover past it', async () => {
+      // Arrange: v4 keeps no last-good copy of daemon.json — the boot refuses a document it cannot read.
+      const home = await tempDirectory('fyd-relay-boot-invalid');
+      const cleanups: Array<() => void | Promise<void>> = [];
+      let reads = 0;
+      const world = {
+        ...(await worldAt(home, OS_CHOSEN_PORT, async () => undefined)),
+        notices: recordingNotices().port,
+        relayDirectory: {
+          read: async (): Promise<RelayAdvertisement> => {
+            reads += 1;
+            return { kind: 'disabled' } as const;
+          },
+        },
+      };
+      await mkdir(dirname(world.config.path), { recursive: true });
+      await writeFile(world.config.path, '{ this is not json');
+
+      // Act / Assert
+      const outcome = await start(world, cleanups).then(
+        code => code,
+        () => 'threw',
+      );
+      should(outcome).not.equal(0);
+      await runCleanups(cleanups);
+      should(reads).equal(0);
+    });
+
     it('should dial the carrier the directory advertises when this daemon configured none', async () => {
       // Arrange: a home with no `relay` block — which is every home, since nothing writes one — and
       // a directory advertising a rendezvous. The address is a port nothing is listening on: the
