@@ -359,6 +359,7 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
   `rmdir`, and treats an absent state home as nothing to do. A page younger than 30 seconds is left to the
   `fy pair` that may be showing it to a browser right now.
 - **Never screenshot a real one.** Committed captures use a fixed fake code (`HARNESS_INVITE`). A QR is a
+- **Never show it to an agent.** Every browser tool result — the MCP `browser_*` tools and `fy browser` alike: address headers, page and tab lists, navigation and wait echoes, network and console entries, errors — passes one function, `hidePairingFragments` in `@ferretry/protocol`, which turns a `#v1;…` fragment into `#<pairing code hidden>`. Any other fragment (`#section`) is left as it is, and the page and its navigation are untouched: only what the tool prints changes.
   machine-readable label, not obfuscation, so a PNG of a real code in a repository is a leaked credential.
 
 ## Revoking

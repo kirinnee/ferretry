@@ -28,6 +28,7 @@ import {
   copyHandle,
   copyPlanOf,
   durationWords,
+  hidePairingFragments,
   INPUT_QUARANTINE_SECONDS,
   INPUT_SINGLE_FIELD_ID,
   type InputAgentView,
@@ -448,7 +449,7 @@ export class AgentToolService {
         note = this.ports.loginActs?.acted(caller.sessionId, acting, call.tool === 'browser.eval') ?? undefined;
       // The surface is known only once the call has run: dispatch resolves it.
       const dispatched = await this.dispatch(caller, call, facts);
-      result = this.remasked(caller, facts.surface, dispatched);
+      result = withoutPairingFragments(call.tool, this.remasked(caller, facts.surface, dispatched));
       await this.record(caller, call, facts, 'succeeded');
     } catch (error) {
       const refusal = await this.heldOrMasked(caller, call.tool, facts.surface, translate(error) ?? error);
@@ -1481,7 +1482,9 @@ export class AgentToolService {
     }
     const message = error instanceof Error ? error.message : undefined;
     if (message === undefined || message === '') return error;
-    const masked = await this.ports.redactor.batch(scrub => scrub.text(message)).catch(() => undefined);
+    const vaultMasked = await this.ports.redactor.batch(scrub => scrub.text(message)).catch(() => undefined);
+    // An error names the page's address too (a failed navigation, a timeout): the same one function hides it.
+    const masked = vaultMasked === undefined ? undefined : hiddenFor(tool, vaultMasked);
     if (masked === message) return error;
     const text =
       masked ??
@@ -2613,6 +2616,23 @@ const liveCopies = (count: number): string =>
 /** A copy's name as a call wrote it: `sealed:vercel` and `vercel` are one copy, whether or not the wire parsed it. */
 const bareCopyName = (handle: string): string =>
   handle.startsWith(COPY_HANDLE_PREFIX) ? handle.slice(COPY_HANDLE_PREFIX.length) : handle;
+
+/**
+ * A browser tool's text with every pairing-link fragment hidden (docs/pairing.md): the page's address is
+ * shown in a header, a tab list, an echo, a wait, a network or console entry, and the fragment of a
+ * pairing link is a live credential no agent may read. Output only; other tools pass as they are.
+ */
+function hiddenFor(tool: string, text: string): string {
+  return tool.startsWith('browser.') ? hidePairingFragments(text) : text;
+}
+
+/**
+ * A browser tool's whole result with its pairing fragments hidden, for EVERY caller — the one gate the
+ * address-carrying fields all pass through, so no field needs to remember to. A picture's bytes pass.
+ */
+function withoutPairingFragments(tool: string, result: AgentToolResult): AgentToolResult {
+  return tool.startsWith('browser.') ? (masked(result, hidePairingFragments) as AgentToolResult) : result;
+}
 
 /** Every string in a result, masked; a picture's base64 bytes are not text and pass as they are. */
 function masked(value: unknown, scrub: (text: string) => string): unknown {
