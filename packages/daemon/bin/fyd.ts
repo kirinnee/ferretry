@@ -13056,7 +13056,17 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.boot.performance === undefined
       ? () => undefined
       : instrumentChildProcesses(world.boot.performance, world.clock, Bun, () => activities.current());
+  // ONE abort for all relay discovery — the boot's own read and the background retry. Aborted synchronously
+  // the instant a shutdown begins, so no late answer, first or later, is acted on while the daemon tears down.
+  const relayDiscovery = new AbortController();
+  // Ends the background lookup too once it exists; the abort alone until then.
+  let stopRelayRecovery = (): void => relayDiscovery.abort();
   cleanups.push(() => {
+    // FIRST in the list, so first on an early release: cleanups run in registration order and each is
+    // awaited, and a stop at the END would let a late answer start a carrier while queue delivery, tmux,
+    // storage and the tunnel were torn down. A serving daemon stops it the instant the shutdown wait ends
+    // (below), before any cleanup runs at all.
+    stopRelayRecovery();
     clearInterval(lagTicks);
     stopIoPressure?.();
     watchdog.stop();
@@ -13259,16 +13269,6 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * one on their behalf, and that choice would change when the directory changes.
    */
   progress.enter('reading the relay advertisement');
-  // ONE abort for all discovery — the boot's own read and the background retry. Aborted synchronously the
-  // instant a shutdown begins, so no late answer, first or later, is acted on while the daemon tears down.
-  const relayDiscovery = new AbortController();
-  // Ends the background lookup too once it exists; a no-op beyond the abort until then.
-  let stopRelayRecovery = (): void => relayDiscovery.abort();
-  // FIRST in the list, not last: cleanups run in registration order and each is awaited, so a stop at the
-  // END of the list would let a late answer start a carrier while queue delivery, tmux, storage and the
-  // tunnel were torn down. A boot interrupted before it serves releases this first; a serving daemon stops
-  // it the instant the shutdown wait ends (below), before any cleanup runs at all.
-  cleanups.unshift(() => stopRelayRecovery());
   // The relay entries as they stand RIGHT NOW, read from the document and never from a cache: a document
   // that cannot be read, or that has gone, REJECTS — an unreadable configuration is not "last good".
   const readCurrentRelays = async () => {

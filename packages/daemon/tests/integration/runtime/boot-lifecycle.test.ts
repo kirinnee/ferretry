@@ -6936,6 +6936,78 @@ describe('daemon boot lifecycle', () => {
       should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
     });
 
+    it('should not dial a discovered relay at boot when the configuration became unreadable after the boot loaded it', async () => {
+      // Arrange: the document was fine when the boot loaded it; it is corrupted while the directory is read.
+      const home = await tempDirectory('fyd-relay-boot-gate-corrupt');
+      const relay = refusingRelay();
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let answer: (value: RelayAdvertisement) => void = () => undefined;
+      let asked = false;
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = {
+        ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)),
+        notices: said.port,
+        relayDirectory: {
+          read: async (): Promise<RelayAdvertisement> => {
+            asked = true;
+            return await new Promise<RelayAdvertisement>(resolve => {
+              answer = resolve;
+            });
+          },
+        },
+      };
+
+      // Act
+      const booting = start(world, cleanups);
+      await waitFor(() => asked, 'the boot to ask the directory');
+      await writeFile(world.config.path, '{ this is not json');
+      answer({ kind: 'available', relayUrl: relay.url });
+      await waitFor(
+        () => said.stated.some(line => line.includes('relay configuration cannot be read now')),
+        'the boot to refuse the discovered relay',
+      );
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+      await relay.stop();
+
+      // Assert — fail closed: nothing dialled, and the daemon still served.
+      should(code).equal(0);
+      should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
+    });
+
+    it('should refuse to boot on a relay configuration that is already unreadable, rather than discover past it', async () => {
+      // Arrange: v4 keeps no last-good copy of daemon.json — the boot refuses a document it cannot read.
+      const home = await tempDirectory('fyd-relay-boot-invalid');
+      const cleanups: Array<() => void | Promise<void>> = [];
+      let reads = 0;
+      const world = {
+        ...(await worldAt(home, OS_CHOSEN_PORT, async () => undefined)),
+        notices: recordingNotices().port,
+        relayDirectory: {
+          read: async (): Promise<RelayAdvertisement> => {
+            reads += 1;
+            return { kind: 'disabled' } as const;
+          },
+        },
+      };
+      await mkdir(dirname(world.config.path), { recursive: true });
+      await writeFile(world.config.path, '{ this is not json');
+
+      // Act / Assert
+      const outcome = await start(world, cleanups).then(
+        code => code,
+        () => 'threw',
+      );
+      should(outcome).not.equal(0);
+      await runCleanups(cleanups);
+      should(reads).equal(0);
+    });
+
     it('should dial the carrier the directory advertises when this daemon configured none', async () => {
       // Arrange: a home with no `relay` block — which is every home, since nothing writes one — and
       // a directory advertising a rendezvous. The address is a port nothing is listening on: the
