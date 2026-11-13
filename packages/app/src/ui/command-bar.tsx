@@ -16,6 +16,7 @@
 
 import { ArrowDown, ArrowUp, CornerDownLeft, Search } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   COMMAND_BAR_IDS,
   type CommandBarChoices,
@@ -158,7 +159,11 @@ export function CommandBar({
   // v4 drew the chips while searching, and the "Searching…" line only while nothing was listed yet.
   const pending = trimmed !== '' && found.results.length === 0 ? found.pending : undefined;
 
-  return (
+  // AT THE DOCUMENT ROOT, NOT IN THE FRAME. The frame is `position: fixed`, so it is a stacking context and a z-50 drawn inside it
+  // is only z-50 among the frame's own children: an item menu portalled to `document.body` (z-45, `--z-popover`) painted above
+  // the whole frame, scrim included, and took the clicks. Mounted here the bar and the menus share one root context, where
+  // sheets z-40 < popovers z-45 < dialogs z-50 holds. Focus, Escape and restore-to-opener are the hook's and do not care.
+  return createPortal(
     <div className="kt-overlay fixed inset-x-0 z-50 flex justify-center px-3 pt-[12vh]">
       {/* Scrim. A real button, so a click and a keyboard activation dismiss the same way. */}
       <button
@@ -271,7 +276,8 @@ export function CommandBar({
           {announcement}
         </span>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

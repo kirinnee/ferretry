@@ -146,3 +146,44 @@ describe('the command bar over an open item menu', () => {
       }
     });
 });
+
+describe('the command bar over an open item menu, inside the REAL fixed frame', () => {
+  // The reviewer's evidence case ("command palette paints over an already open item menu"): the shell mounts the bar INSIDE
+  // `.fy-frame`, which is `position: fixed` and so its own stacking context, while the menu portals to `document.body`. The bar's
+  // z-50 is only local to the frame unless the bar leaves it, so the body-level z-45 menu painted above it.
+  for (const viewport of VIEWPORTS)
+    it(`the menu is open, Ctrl+K opens the bar, and the bar paints over it with the menu closed to pointers (${viewport.name})`, async () => {
+      const { tab, close } = await openPage(viewport);
+      try {
+        const frame = await tab.evaluate(() => {
+          const el = document.querySelector('.fy-frame');
+          return el === null ? null : getComputedStyle(el).position;
+        });
+        expect(frame, 'the fixture mounts the real, fixed frame').toBe('fixed');
+        await tab.click('.fy-item-view__bar [data-agenda-menu-toggle]:visible');
+        await tab.waitForSelector('[data-agenda-menu] [data-agenda-menu-snooze]');
+        await tab.waitForTimeout(300);
+        await tab.keyboard.press('Control+k');
+        await tab.locator('[role="dialog"][aria-label="Command bar"]').waitFor({ state: 'visible' });
+        await tab.waitForTimeout(200);
+        const hit = await tab.evaluate(() => {
+          const menu = document.querySelector('[data-agenda-menu]');
+          if (menu === null) return { menuOpen: false, what: 'closed', inMenu: false, bar: false };
+          const box = menu.getBoundingClientRect();
+          const at = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+          return {
+            menuOpen: true,
+            what: at?.outerHTML.slice(0, 100) ?? 'nothing',
+            inMenu: at !== null && menu.contains(at),
+            bar: at?.closest('[aria-label="Close the command bar"], [role="dialog"][aria-label="Command bar"]') != null,
+          };
+        });
+        await shot(tab, `${viewport.name}-item-menu-and-command-bar-in-frame`);
+        expect(hit.inMenu, `the menu does not take the click (${hit.what})`).toBe(false);
+        // The menu still open under the bar must be under its scrim, not merely closed or covered by something else.
+        if (hit.menuOpen) expect(hit.bar, `the bar's scrim is what is at that point (${hit.what})`).toBe(true);
+      } finally {
+        await close();
+      }
+    });
+});

@@ -52,9 +52,12 @@ function Scene() {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, []);
+  // THE REAL FRAME: `.fy-frame` is `position: fixed` in the shipping stylesheet, which makes it a stacking context, and the
+  // shell mounts its command bar INSIDE it (`shell/frame.tsx`) while the item menu portals to `document.body`. A bar placed
+  // outside this wrapper would compare its z-50 straight against the menu's z-45 and hide exactly that containment.
   return (
-    <>
-      <div style={{ position: 'fixed', inset: 0, display: 'flex' }}>
+    <div className="fy-frame fy-frame--nav-left" data-testid="frame">
+      <div style={{ position: 'relative', display: 'flex', width: '100%', height: '100%' }}>
         {phone ? null : (
           <nav style={{ width: 168, flex: 'none', borderRight: '1px solid var(--border)', padding: 8 }}>
             <p>Ferrets</p>
@@ -79,8 +82,8 @@ function Scene() {
           />
         </div>
       </div>
-      <CommandBar onClose={() => setBar(false)} open={bar} sources={[]} />
-    </>
+      <CommandBar focusSignal={0} onClose={() => setBar(false)} open={bar} sources={[]} />
+    </div>
   );
 }
 

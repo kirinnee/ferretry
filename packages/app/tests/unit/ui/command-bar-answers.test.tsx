@@ -119,16 +119,16 @@ describe('S11 a command bar answer that can say more', () => {
       entry(`${query}-${filters.kind}-${filters.state}`, { label: `${query} ${filters.kind} ${filters.state}` }),
     ]);
     const view = await mount(<CommandBar open focusSignal={1} onClose={() => {}} sources={[source]} />);
-    expect(view.container.querySelector('[data-command-bar-filters]')).toBeNull(); // nothing typed: no chips
-    await typeInto(view.container, 'bar');
-    expect(chip(view.container, 'All').getAttribute('aria-pressed')).toBe('true');
-    expect(chip(view.container, 'Everything').getAttribute('aria-pressed')).toBe('true');
-    expect(view.container.querySelector('[role="option"]')?.textContent).toContain('bar all everything');
-    await interact(() => chip(view.container, 'Cards').click());
-    await interact(() => chip(view.container, 'Open').click());
-    expect(chip(view.container, 'Cards').getAttribute('aria-pressed')).toBe('true');
-    expect(chip(view.container, 'All').getAttribute('aria-pressed')).toBe('false');
-    expect(view.container.querySelector('[role="option"]')?.textContent).toContain('bar task open');
+    expect(document.body.querySelector('[data-command-bar-filters]')).toBeNull(); // nothing typed: no chips
+    await typeInto(document.body, 'bar');
+    expect(chip(document.body, 'All').getAttribute('aria-pressed')).toBe('true');
+    expect(chip(document.body, 'Everything').getAttribute('aria-pressed')).toBe('true');
+    expect(document.body.querySelector('[role="option"]')?.textContent).toContain('bar all everything');
+    await interact(() => chip(document.body, 'Cards').click());
+    await interact(() => chip(document.body, 'Open').click());
+    expect(chip(document.body, 'Cards').getAttribute('aria-pressed')).toBe('true');
+    expect(chip(document.body, 'All').getAttribute('aria-pressed')).toBe('false');
+    expect(document.body.querySelector('[role="option"]')?.textContent).toContain('bar task open');
     expect(asked.at(-1)?.filters).toEqual({ kind: 'task', state: 'open' });
     await view.unmount();
   });
@@ -137,12 +137,12 @@ describe('S11 a command bar answer that can say more', () => {
     const { source } = scripted(() => [entry('x')]);
     const bar = (open: boolean) => <CommandBar open={open} focusSignal={1} onClose={() => {}} sources={[source]} />;
     const view = await mount(bar(true));
-    await typeInto(view.container, 'x');
-    await interact(() => chip(view.container, 'Cards').click());
+    await typeInto(document.body, 'x');
+    await interact(() => chip(document.body, 'Cards').click());
     await view.render(bar(false));
     await view.render(bar(true));
-    await typeInto(view.container, 'x');
-    expect(chip(view.container, 'All').getAttribute('aria-pressed')).toBe('true');
+    await typeInto(document.body, 'x');
+    expect(chip(document.body, 'All').getAttribute('aria-pressed')).toBe('true');
     await view.unmount();
   });
 
@@ -153,15 +153,15 @@ describe('S11 a command bar answer that can say more', () => {
     );
     const bar = (tick: number) => <CommandBar open focusSignal={tick} onClose={() => {}} sources={[{ ...source }]} />;
     const view = await mount(bar(1));
-    await typeInto(view.container, 'hello');
-    expect(view.container.querySelector('[data-command-bar-pending]')?.textContent).toBe('Searching cards and agenda…');
-    expect(view.container.textContent).not.toContain('Nothing matches');
-    expect(view.container.querySelector('[data-command-bar-filters]')?.getAttribute('aria-busy')).toBe('true');
+    await typeInto(document.body, 'hello');
+    expect(document.body.querySelector('[data-command-bar-pending]')?.textContent).toBe('Searching cards and agenda…');
+    expect(document.body.textContent).not.toContain('Nothing matches');
+    expect(document.body.querySelector('[data-command-bar-filters]')?.getAttribute('aria-busy')).toBe('true');
     waiting = false;
     await view.render(bar(2));
-    await typeInto(view.container, 'hello!');
-    expect(view.container.querySelector('[data-command-bar-pending]')).toBeNull();
-    expect(view.container.textContent).toContain('Nothing matches');
+    await typeInto(document.body, 'hello!');
+    expect(document.body.querySelector('[data-command-bar-pending]')).toBeNull();
+    expect(document.body.textContent).toContain('Nothing matches');
     await view.unmount();
   });
 
@@ -171,8 +171,8 @@ describe('S11 a command bar answer that can say more', () => {
       entry('live', { label: 'live card' }),
     ]);
     const view = await mount(<CommandBar open focusSignal={1} onClose={() => {}} sources={[source]} />);
-    await typeInto(view.container, 'card');
-    const rows = [...view.container.querySelectorAll('[role="option"]')];
+    await typeInto(document.body, 'card');
+    const rows = [...document.body.querySelectorAll('[role="option"]')];
     const closed = must(
       rows.find(row => row.textContent?.includes('closed card')),
       'closed row',
@@ -193,8 +193,8 @@ describe('S11 a command bar answer that can say more', () => {
   it('S11 an empty detail draws no line', async () => {
     const { source } = scripted(() => [entry('e', { label: 'e card', detail: '' })]);
     const view = await mount(<CommandBar open focusSignal={1} onClose={() => {}} sources={[source]} />);
-    await typeInto(view.container, 'card');
-    expect(view.container.querySelector('[data-command-bar-detail]')).toBeNull();
+    await typeInto(document.body, 'card');
+    expect(document.body.querySelector('[data-command-bar-detail]')).toBeNull();
     await view.unmount();
   });
 });
