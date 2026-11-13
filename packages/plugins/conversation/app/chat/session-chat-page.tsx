@@ -14,7 +14,13 @@
  * nothing on this page holds or indexes a transcript beyond the rows on screen.
  */
 
-import { type ChatScrollSlot, LiveStreamIndicator, type LiveStreamIndicatorProps, PanelSlot } from '@ferretry/app';
+import {
+  type ChatScrollSlot,
+  FerretWorkspace,
+  LiveStreamIndicator,
+  type LiveStreamIndicatorProps,
+  PanelSlot,
+} from '@ferretry/app';
 import { ReferenceSurfaceProvider, TERMINAL_STATUSES, statusMark, useLiveActivity } from '@ferretry/app';
 import type { LiveActivityFeed } from '@ferretry/app';
 import type { FerretLiveActivity, FerretView } from '@ferretry/core-ferrets/contract';
@@ -344,10 +350,8 @@ export function SessionChatPage({
               data-session={ferretId}
             >
               {header}
-              <div className="flex min-h-0 min-w-0 flex-1">
-                {chat}
-                <PanelSlot daemon={daemonId} slot="ferret.side" subject={ferretId} />
-              </div>
+              {/* The chat and the `ferret.side` panels: side by side wide; on a phone one at a time behind chips and "+". */}
+              <FerretWorkspace chat={chat} daemon={daemonId} subject={ferretId} />
             </main>
           </RowSlotProvider>
         </AttachmentGalleryProvider>

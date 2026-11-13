@@ -377,6 +377,45 @@ describe('SessionTerminalDeck', () => {
     run(() => page.unmount());
   });
 
+  test('starts a shell when its host asks for a new terminal (the phone’s + New terminal), once per request', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+    let created = 0;
+    const dependencies: typeof deck.dependencies = {
+      ...deck.dependencies,
+      create: async (...args) => {
+        created += 1;
+        return await deck.dependencies.create(...args);
+      },
+    };
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={dependencies} scope={scopeAlpha} />);
+    await settle();
+    expect(created).toBe(0);
+
+    const ask = (id: number, action: string) =>
+      run(() =>
+        page.update(
+          <SessionTerminalDeck
+            connection={alpha}
+            dependencies={dependencies}
+            intent={{ id, action }}
+            scope={scopeAlpha}
+          />,
+        ),
+      );
+    ask(1, 'new-page');
+    await settle();
+    expect(created, 'a request for another panel’s act is ignored').toBe(0);
+
+    ask(2, 'new-terminal');
+    await settle();
+    expect(created).toBe(1);
+    expect(json(page)).toContain('Terminal 1');
+    ask(2, 'new-terminal');
+    await settle();
+    expect(created, 'the same request does not start a second shell').toBe(1);
+    run(() => page.unmount());
+  });
+
   test('does not kill a shell the reader declined to close', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
     deck.confirm = false;

@@ -36,12 +36,10 @@ export function AgendaItemMenu({ open, onOpenChange, label = 'Item options', chi
   const trigger = useRef<HTMLButtonElement | null>(null);
   const panel = useRef<HTMLDivElement | null>(null);
 
-  // The popover: focus its first control, and a press anywhere outside closes it. The popover is drawn on the page body
-  // (below), so "outside" is outside the ⋯ button's wrapper AND outside the popover itself. (The sheet owns its own
-  // focus and scrim.)
+  // The popover: a press anywhere outside closes it. The popover is drawn on the page body (below), so "outside" is
+  // outside the ⋯ button's wrapper AND outside the popover itself. (The sheet owns its own focus and scrim.)
   useEffect(() => {
     if (!open || sheet) return undefined;
-    panel.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
     const onPointer = (event: PointerEvent): void => {
       const target = event.target;
       if (!(target instanceof Node)) return;
@@ -87,6 +85,21 @@ export function AgendaItemMenu({ open, onOpenChange, label = 'Item options', chi
       document.removeEventListener('scroll', measure, true);
     };
   }, [open, sheet]);
+
+  // FOCUS GOES IN ONCE THE POPOVER IS PLACED. Until the first placement it is `visibility: hidden`, and a browser refuses
+  // focus into hidden content, so this waits for the placed, visible popover (the commit after `place` is set) and moves
+  // focus to its first control exactly once per opening.
+  const focusedIn = useRef(false);
+  const placed = place !== null;
+  useEffect(() => {
+    if (!open || sheet) {
+      focusedIn.current = false;
+      return;
+    }
+    if (!placed || focusedIn.current) return;
+    focusedIn.current = true;
+    panel.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+  }, [open, sheet, placed]);
 
   // A choice that closes the menu (a version picked, Changes, Merge with…) takes the focused control away with it: put
   // focus back on ⋯ so a keyboard is still in the item. A press outside keeps its own target, which already has focus.
@@ -160,7 +173,7 @@ export function AgendaItemMenu({ open, onOpenChange, label = 'Item options', chi
                 labelledBy={titleId}
                 onClose={() => onOpenChange(false)}
                 open={open}
-                zIndexClass="z-50"
+                zIndexClass="z-40"
               >
                 <div className="fy-item-menu__sheet" data-agenda-menu="sheet">
                   <h2 className="fy-item-menu__title" id={titleId}>

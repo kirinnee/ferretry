@@ -10,12 +10,15 @@
  *
  * Set `FY_LAYOUT_SHOTS_DIR` to keep `<viewport>-<case>.png`.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '../support/browser/index.ts';
+
+// Each case drives a real browser through several taps and screenshots; the default 5s is too tight for a loaded machine.
+setDefaultTimeout(30_000);
 
 const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_LAYOUT_SHOTS_DIR ?? '';
@@ -66,7 +69,7 @@ const VIEWPORTS = [
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 
-const open = async (viewport: (typeof VIEWPORTS)[number], path: string, ready: string) => {
+const open = async (viewport: (typeof VIEWPORTS)[number], path: string, ready: string, query = '') => {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     deviceScaleFactor: viewport.phone ? 2 : 1,
@@ -78,9 +81,10 @@ const open = async (viewport: (typeof VIEWPORTS)[number], path: string, ready: s
     new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
   );
   const tab = await context.newPage();
+  tab.setDefaultTimeout(8_000);
   const problems: string[] = [];
   tab.on('pageerror', error => problems.push(error.message));
-  await tab.goto(`${origin}${path}?theme=studio-light`);
+  await tab.goto(`${origin}${path}?theme=studio-light${query}`);
   try {
     await tab.waitForSelector(ready, { timeout: 8_000 });
     if (shotsDir !== '')
@@ -89,6 +93,10 @@ const open = async (viewport: (typeof VIEWPORTS)[number], path: string, ready: s
     throw new Error(`the scene did not draw ${ready}: ${String(error)}\n${problems.join('\n')}`);
   }
   return { tab, close: async () => await context.close() };
+};
+
+const shotOf = async (tab: Page, name: string): Promise<void> => {
+  if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${name}.png`) });
 };
 
 const width = async (tab: Page, selector: string): Promise<number> =>
@@ -176,11 +184,189 @@ describe('the ferret page', () => {
     }
   });
 
+  it('at 1280 there is no chip row: the panels are beside the chat', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], '/d/ws/ferrets/zoe', '[data-chat]');
+    try {
+      expect(await tab.locator('[data-phone-tab-row]').count()).toBe(0);
+    } finally {
+      await close();
+    }
+  });
+
   it('at 390 the side pane does not crush the chat', async () => {
     const { tab, close } = await open(VIEWPORTS[1], '/d/ws/ferrets/zoe', '[data-chat]');
     try {
       if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, '390-ferret-page.png') });
       expect(await width(tab, '[data-chat]'), 'the chat takes the phone’s width').toBeGreaterThanOrEqual(330);
+    } finally {
+      await close();
+    }
+  });
+});
+
+/** Where the chrome is, and how far the page's own content has been carried, after every scroller has been pushed to its end. */
+const scrolledToEnd = async (tab: Page) => {
+  const filler = tab.locator('[data-tall-filler]').first();
+  const before = await filler.evaluate(element => element.getBoundingClientRect().top);
+  // A real wheel over the page body, then the document and every box that could scroll to their ends (the body of an
+  // overflow:hidden page still scrolls programmatically, as a focused input or scrollIntoView does): whichever of them scrolls.
+  const body = await tab.evaluate(() => {
+    const box = document.querySelector('.fy-main')?.getBoundingClientRect();
+    return { x: (box?.left ?? 0) + 40, y: (box?.top ?? 0) + 200 };
+  });
+  await tab.mouse.move(body.x, body.y);
+  await tab.mouse.wheel(0, 4_000);
+  await tab.evaluate(() => {
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    for (const element of document.querySelectorAll<HTMLElement>(
+      'body, #root, .fy-frame, .fy-body, .fy-columns, .fy-main, [data-chat]',
+    ))
+      element.scrollTop = element.scrollHeight;
+  });
+  await tab.waitForTimeout(150);
+  return await tab.evaluate(
+    ({ before: start }) => {
+      const rect = (query: string) => document.querySelector(query)?.getBoundingClientRect();
+      const nav = rect('.fy-nav');
+      const top = rect('.fy-top');
+      const filler = document.querySelector('[data-tall-filler]')?.getBoundingClientRect();
+      return {
+        window: { width: window.innerWidth, height: window.innerHeight },
+        nav: { top: nav?.top ?? NaN, bottom: nav?.bottom ?? NaN, left: nav?.left ?? NaN, right: nav?.right ?? NaN },
+        top: { top: top?.top ?? NaN, bottom: top?.bottom ?? NaN },
+        carried: start - (filler?.top ?? start),
+      };
+    },
+    { before },
+  );
+};
+
+describe('the nav and the top bar stay put while a tall page scrolls', () => {
+  for (const viewport of VIEWPORTS)
+    for (const [name, path, ready] of [
+      ['agenda', '/d/ws/agenda', '[data-agenda-stand-in]'],
+      ['ferret', '/d/ws/ferrets/zoe', '[data-chat]'],
+    ] as const)
+      it(`a tall ${name} page at ${viewport.name}: only the page body scrolls`, async () => {
+        const { tab, close } = await open(viewport, path, ready, '&tall=1');
+        try {
+          const seen = await scrolledToEnd(tab);
+          expect(seen.carried, 'the page body did scroll').toBeGreaterThan(200);
+          expect(seen.top.top, 'the top bar is still at the top of the window').toBeGreaterThanOrEqual(0);
+          expect(seen.top.bottom, 'the top bar is still on screen').toBeLessThanOrEqual(seen.window.height);
+          expect(seen.nav.top, 'the nav starts inside the window').toBeGreaterThanOrEqual(0);
+          expect(seen.nav.bottom, 'the nav is still inside the window').toBeLessThanOrEqual(seen.window.height);
+          expect(seen.nav.right, 'the nav is still in view sideways').toBeGreaterThan(0);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${name}-page-scrolled.png`) });
+        } finally {
+          await close();
+        }
+      });
+});
+
+/** THE PHONE'S FERRET PAGE (v4's PhoneWorkspace): every `ferret.side` panel is one tap away, full width, one at a time. */
+describe('the ferret page on a phone (390)', () => {
+  const PHONE = VIEWPORTS[1];
+  const READY = '[data-phone-tab-row] [data-phone-chip]';
+  const CHIPS = [
+    ['Chat', 'chat'],
+    ['Console', 'stubs.console'],
+    ['Processes', 'stubs.processes'],
+    ['Terminals', 'stubs.terminals'],
+    ['Browser', 'stubs.browser'],
+    ['Files', 'stubs.files'],
+  ] as const;
+
+  it('offers v4’s chips in v4’s order: Chat, Console, Processes, Terminals, Browser, Files', async () => {
+    const { tab, close } = await open(PHONE, '/d/ws/ferrets/zoe', READY);
+    try {
+      const labels = await tab.locator('[data-phone-tab-row] [role="tab"]').allInnerTexts();
+      expect(labels.slice(0, 6)).toEqual(CHIPS.map(([label]) => label));
+      expect(labels.length, 'one chip per panel the default layout places, and Chat').toBe(15);
+      await shotOf(tab, '390-ferret-chip-chat');
+    } finally {
+      await close();
+    }
+  });
+
+  it('reaches terminals, browser and files (and the rest): each chip shows its panel full width, alone', async () => {
+    const { tab, close } = await open(PHONE, '/d/ws/ferrets/zoe', READY);
+    try {
+      for (const [label, key] of CHIPS.slice(1)) {
+        await tab.click(`[data-phone-chip="${key}"]`);
+        expect(await tab.getAttribute(`[data-phone-chip="${key}"]`, 'aria-selected'), `${label} is selected`).toBe(
+          'true',
+        );
+        const id = key.split('.')[1] as string;
+        const own = await hitsItself(tab, `[data-side-panel="${id}"]`);
+        expect(own.hit, `${label}: its panel is on screen and takes a tap`).toBe(true);
+        expect(await width(tab, `[data-panel="${key}"]`), `${label}: full width`).toBeGreaterThanOrEqual(340);
+        const shown = await tab.locator('[data-side-panel]:visible').count();
+        expect(shown, `${label}: one panel at a time`).toBe(1);
+        expect(await tab.locator('[data-chat]:visible').count(), `${label}: the chat is behind it`).toBe(0);
+        await shotOf(tab, `390-ferret-chip-${label.toLowerCase()}`);
+      }
+      await tab.click('[data-phone-chip="chat"]');
+      expect(await tab.locator('[data-chat]:visible').count(), 'back on the chat').toBe(1);
+      expect(await tab.locator('[data-side-panel]:visible').count(), 'no panel beside the chat').toBe(0);
+    } finally {
+      await close();
+    }
+  });
+
+  it('every other panel the layout places is reachable too (the whole row scrolls)', async () => {
+    const { tab, close } = await open(PHONE, '/d/ws/ferrets/zoe', READY);
+    try {
+      await tab.locator('[data-phone-chip="stubs.insights"]').scrollIntoViewIfNeeded();
+      await tab.click('[data-phone-chip="stubs.insights"]');
+      expect((await hitsItself(tab, '[data-side-panel="insights"]')).hit).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
+  it('the + menu lists New terminal, New browser, Open file; each takes you to the panel that owns it', async () => {
+    const { tab, close } = await open(PHONE, '/d/ws/ferrets/zoe', READY);
+    try {
+      await tab.click('[data-phone-new-tab]');
+      await tab.waitForSelector('[role="menu"] [role="menuitem"]');
+      const items = await tab.locator('[role="menu"] [role="menuitem"]').allInnerTexts();
+      expect(items.map(text => text.trim())).toEqual(['New terminal', 'New browser', 'Open file']);
+      for (const key of ['new-terminal', 'new-browser', 'open-file'])
+        expect((await hitsItself(tab, `[data-menu-key="${key}"]`)).hit, `${key} takes a tap`).toBe(true);
+      await shotOf(tab, '390-ferret-plus-menu');
+
+      await tab.click('[role="menuitem"]:has-text("New terminal")');
+      expect(await tab.getAttribute('[data-phone-chip="stubs.terminals"]', 'aria-selected')).toBe('true');
+      expect(
+        await tab.getAttribute('[data-side-panel="terminals"]', 'data-intent'),
+        'the terminals panel was asked',
+      ).toBe('new-terminal#1');
+
+      await tab.click('[data-phone-new-tab]');
+      await tab.click('[role="menuitem"]:has-text("New browser")');
+      expect(await tab.getAttribute('[data-phone-chip="stubs.browser"]', 'aria-selected')).toBe('true');
+      expect(await tab.getAttribute('[data-side-panel="browser"]', 'data-intent')).toBe('new-page#2');
+
+      await tab.click('[data-phone-new-tab]');
+      await tab.click('[role="menuitem"]:has-text("Open file")');
+      expect(await tab.getAttribute('[data-phone-chip="stubs.files"]', 'aria-selected')).toBe('true');
+      expect((await hitsItself(tab, '[data-side-panel="files"]')).hit).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
+  it('is a keyboard tablist: arrows move focus and selection', async () => {
+    const { tab, close } = await open(PHONE, '/d/ws/ferrets/zoe', READY);
+    try {
+      await tab.focus('[data-phone-chip="chat"]');
+      await tab.keyboard.press('ArrowRight');
+      expect(await tab.getAttribute('[data-phone-chip="stubs.console"]', 'aria-selected')).toBe('true');
+      expect(await tab.evaluate(() => document.activeElement?.getAttribute('data-phone-chip'))).toBe('stubs.console');
+      await tab.keyboard.press('End');
+      expect(await tab.getAttribute('[data-phone-chip="stubs.insights"]', 'aria-selected')).toBe('true');
     } finally {
       await close();
     }

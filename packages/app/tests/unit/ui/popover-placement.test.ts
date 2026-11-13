@@ -34,3 +34,23 @@ describe('placePopover', () => {
     expect(placePopover(trigger(100, 100), MENU, { width: 300, height: 700 }).left).toBe(8);
   });
 });
+
+describe('placePopover with the trigger scrolled out of the window', () => {
+  test('a trigger above the window still leaves the whole menu inside it (clamped to the margin)', () => {
+    const at = placePopover({ left: 300, right: 332, top: -300, bottom: -268 }, MENU, VIEW);
+    expect(at.top).toBeGreaterThanOrEqual(8);
+    expect(at.top + at.maxHeight).toBeLessThanOrEqual(VIEW.height - 8);
+  });
+
+  test('a trigger below the window leaves the whole menu inside it too', () => {
+    const at = placePopover({ left: 300, right: 332, top: 900, bottom: 932 }, MENU, VIEW);
+    expect(at.top).toBeGreaterThanOrEqual(8);
+    expect(at.top + at.maxHeight).toBeLessThanOrEqual(VIEW.height - 8);
+  });
+
+  test('a menu taller than the window is capped to the window, from the margin', () => {
+    const at = placePopover({ left: 300, right: 332, top: -300, bottom: -268 }, { width: 352, height: 2_000 }, VIEW);
+    expect(at.top).toBe(8);
+    expect(at.maxHeight).toBe(VIEW.height - 16);
+  });
+});

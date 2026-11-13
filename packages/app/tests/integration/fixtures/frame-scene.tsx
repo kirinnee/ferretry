@@ -13,7 +13,7 @@
  * slot, the default layout and the stylesheet are the ones that ship. Everything on screen is fake data.
  */
 
-import { type Manifest, implementApp } from '@ferretry/kernel/manifest';
+import { type Manifest, type PanelProps, implementApp } from '@ferretry/kernel/manifest';
 import { DEFAULT_LAYOUT } from '@ferretry/plugin-layouts/contract';
 import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -25,7 +25,7 @@ import type { PasskeyHandler, PasskeyProvision } from '../../../src/passkey/pass
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { App } from '../../../src/shell/app.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
-import { PanelSlot } from '../../../src/shell/views.tsx';
+import { FerretWorkspace } from '../../../src/shell/ferret-workspace.tsx';
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
@@ -33,6 +33,10 @@ import { CORE, FakeTransport, inventoryOf, json } from '../../unit/client/fixtur
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
+// `?tall=1` makes the page's own content far taller than the window, as a long inbox or conversation is.
+const TALL = params.get('tall') === '1';
+const tallBlock = (what: string): ReactNode =>
+  TALL ? <div data-tall-filler="" style={{ height: 3_000, flexShrink: 0 }}>{`Fake ${what}: a tall page.`}</div> : null;
 
 const manifestOf = (id: string, extra: Record<string, unknown> = {}): Manifest =>
   ({ id, title: id, version: '5.0.0', api: 5, core: false, kinds: ['view'], ...extra }) as unknown as Manifest;
@@ -63,6 +67,7 @@ function AgendaScreen(): ReactNode {
         <strong>Which fix should I apply?</strong>
         <p>Fake item: the page column is as wide as the frame leaves it.</p>
       </section>
+      {tallBlock('inbox')}
     </div>
   );
 }
@@ -98,18 +103,22 @@ function FerretListScreen(): ReactNode {
   );
 }
 
-/** What Conversation's chat page draws: the log beside the `ferret.side` slot, in the same flex row. */
+/** What Conversation's chat page draws: the log and the `ferret.side` slot, as the REAL `FerretWorkspace` lays them out (beside each other wide, one at a time behind chips on a phone). */
 function FerretPageScreen(): ReactNode {
   return (
     <main className="flex h-full min-h-0 min-w-0 flex-col overflow-clip" data-session="zoe">
       <header style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>Fixture running · zoe</header>
-      <div className="flex min-h-0 min-w-0 flex-1">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-chat="" style={{ padding: 16 }}>
-          <p>Fake conversation: the chat log would be here.</p>
-          <p>It keeps what is left of the row once the side pane has its column.</p>
-        </div>
-        <PanelSlot daemon="ws" slot="ferret.side" subject="zoe" />
-      </div>
+      <FerretWorkspace
+        chat={
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-chat="" style={{ padding: 16, overflowY: 'auto' }}>
+            <p>Fake conversation: the chat log would be here.</p>
+            <p>It keeps what is left of the row once the side pane has its column.</p>
+            {tallBlock('conversation')}
+          </div>
+        }
+        daemon="ws"
+        subject="zoe"
+      />
     </main>
   );
 }
@@ -133,9 +142,13 @@ const OWNER: Readonly<Record<string, string>> = {
 };
 const SIDE = DEFAULT_LAYOUT.panels['ferret.side'] ?? [];
 const panelStand = (id: string) =>
-  function SidePanel(): ReactNode {
+  function SidePanel({ intent }: PanelProps): ReactNode {
     return (
-      <section data-side-panel={id} style={{ padding: 8, border: '1px solid var(--border)', borderRadius: 6 }}>
+      <section
+        data-intent={intent === undefined ? undefined : `${intent.action}#${String(intent.id)}`}
+        data-side-panel={id}
+        style={{ padding: 8, border: '1px solid var(--border)', borderRadius: 6 }}
+      >
         <h3 style={{ margin: 0, fontSize: 13 }}>{id}</h3>
         <p style={{ margin: '4px 0 0', fontSize: 12, opacity: 0.7 }}>Fake {OWNER[id] ?? 'plugin'} panel.</p>
       </section>

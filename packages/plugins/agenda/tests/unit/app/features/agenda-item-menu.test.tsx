@@ -143,3 +143,51 @@ describe('the item’s ⋯ menu on a wide screen', () => {
     expect(closes).toEqual([true]);
   });
 });
+
+describe('the item’s ⋯ menu moves focus in, and only once it can take it', () => {
+  test('focus goes to the first choice AFTER the popover is placed (never while it is still visibility:hidden)', async () => {
+    setViewport(1_280);
+    const realFocus = HTMLElement.prototype.focus;
+    const seen: { readonly hidden: boolean }[] = [];
+    HTMLElement.prototype.focus = function (this: HTMLElement, ...rest: Parameters<HTMLElement['focus']>): void {
+      const popover = this.closest<HTMLElement>('[data-agenda-menu="popover"]');
+      if (popover !== null) seen.push({ hidden: popover.style.visibility === 'hidden' });
+      realFocus.apply(this, rest);
+    };
+    try {
+      view = await mount(<Harness closes={[]} />);
+      await interact(() =>
+        must(view?.container.querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), '⋯').click(),
+      );
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every(call => !call.hidden)).toBe(true);
+      expect(document.activeElement).toBe(must(document.body.querySelector('[data-test-choice]'), 'the first choice'));
+    } finally {
+      HTMLElement.prototype.focus = realFocus;
+    }
+  });
+
+  test('Escape still closes it and returns focus to ⋯', async () => {
+    setViewport(1_280);
+    const closes: boolean[] = [];
+    view = await mount(<Harness closes={closes} />);
+    const toggle = must(view.container.querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), '⋯');
+    await interact(() => toggle.click());
+    await interact(
+      () =>
+        void must(document.body.querySelector('[data-test-choice]'), 'choice').dispatchEvent(
+          new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+        ),
+    );
+    expect(closes).toEqual([true]);
+    expect(document.activeElement).toBe(toggle);
+  });
+});
+
+describe('the item’s ⋯ menu sits under every dialog', () => {
+  test('its stylesheet takes its layer from the app’s popover token, not a number of its own', async () => {
+    const css = await Bun.file(new URL('../../../../app/features/agenda/agenda-item-card.css', import.meta.url)).text();
+    const rule = /\.fy-item-menu__popover\s*\{[^}]*\}/u.exec(css)?.[0] ?? '';
+    expect(rule).toContain('z-index: var(--z-popover)');
+  });
+});

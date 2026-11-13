@@ -1630,7 +1630,7 @@
    `max-height` inline): no card's `overflow` clips it and no column paints over it. */
 .fy-item-menu__popover {
   position: fixed;
-  z-index: 60;
+  z-index: var(--z-popover);
   width: min(22rem, calc(100vw - 2 * var(--gap-md, 16px)));
   max-height: min(70vh, 34rem);
   overflow-y: auto;
