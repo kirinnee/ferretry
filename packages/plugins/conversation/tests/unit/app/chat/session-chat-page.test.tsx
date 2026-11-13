@@ -6,6 +6,7 @@ import type { ComponentProps } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { CONVERSATION_ABOVE_COMPOSER_SLOT } from '../../../../contract/index.ts';
 import { HandoffSourceProvider } from '../../../../app/chat/handoff-message.tsx';
+import { unreadChatSession } from '../../../../app/chat/chat-session.ts';
 import { SessionChatPage } from '../../../../app/chat/session-chat-page.tsx';
 import { Transcript } from '../../../../app/chat/transcript.tsx';
 import type { TranscriptEntry } from '../../../../app/chat/transcript-entries.ts';
@@ -270,17 +271,42 @@ describe('the issue line', () => {
     expect(issue.findByType('summary').props.className).toContain('truncate');
   });
 
-  test('shows an unprovable transcript as its own notice in place of the issue line, with Check again', () => {
+  test('shows an unprovable transcript as its own notice, with Check again', () => {
     let refreshed = 0;
     const page = draw({
       onRefresh: () => (refreshed += 1),
-      refreshError: 'Conversation issue: ferret shared has no transcript this daemon can prove is its own',
       transcriptUnbound: true,
     });
     expect(page.root.findAllByType(TranscriptUnboundNotice)).toHaveLength(1);
-    expect(page.root.findAllByProps({ 'data-session-issue': '' })).toHaveLength(0);
     run(() => page.root.findByType(TranscriptUnboundNotice).props.onCheckAgain());
     expect(refreshed).toBe(1);
+  });
+
+  test('shows a separate session failure ALONGSIDE the unprovable-transcript notice, never instead of it', () => {
+    const page = draw({
+      refreshError: 'Conversation issue: Session: permission denied',
+      session: unreadChatSession('shared'),
+      transcriptUnbound: true,
+    });
+    expect(page.root.findAllByType(TranscriptUnboundNotice)).toHaveLength(1);
+    const issue = page.root.findAllByProps({ 'data-session-issue': '' });
+    expect(issue).toHaveLength(1);
+    expect(textOf(issue[0] as ReactTestInstance)).toBe('Conversation issue: Session: permission denied');
+  });
+
+  test('disables the composer, and says why, for a ferret that was never read', () => {
+    const page = draw({
+      refreshError: 'Conversation issue: Session: permission denied',
+      session: unreadChatSession('shared'),
+    });
+    expect(page.root.findByType(Composer).props.disabled).toBe(true);
+    expect(textOf(page.root.findByProps({ 'data-composer-unread': '' }))).toContain('could not be read');
+  });
+
+  test('leaves the composer on, with no such note, for a ferret that was read', () => {
+    const page = draw();
+    expect(page.root.findByType(Composer).props.disabled).toBe(false);
+    expect(page.root.findAllByProps({ 'data-composer-unread': '' })).toHaveLength(0);
   });
 });
 

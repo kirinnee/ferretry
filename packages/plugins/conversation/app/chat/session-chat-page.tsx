@@ -251,11 +251,9 @@ export function SessionChatPage({
           {liveStream === undefined ? null : <LiveStreamIndicator {...liveStream} compact={compact} quiet />}
         </div>
       ) : null}
-      {transcriptUnbound ? (
-        <TranscriptUnboundNotice onCheckAgain={() => onRefresh?.()} />
-      ) : refreshError === null ? null : (
-        <CompactIssue sentence={refreshError} />
-      )}
+      {/* Independent failures: an unprovable transcript never hides that the session itself could not be read. */}
+      {transcriptUnbound ? <TranscriptUnboundNotice onCheckAgain={() => onRefresh?.()} /> : null}
+      {refreshError === null ? null : <CompactIssue sentence={refreshError} />}
     </>
   );
 
@@ -321,18 +319,25 @@ export function SessionChatPage({
               </p>
             </section>
           ) : (
-            <Composer
-              busy={busy}
-              compact={compact}
-              compacting={liveSample?.compaction?.phase === 'running'}
-              {...(session.context === undefined ? {} : { context: session.context })}
-              daemon={daemonConnection(daemonId)}
-              {...composerPreferences}
-              disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
-              ferretId={ferretId}
-              {...(account === undefined ? {} : { account })}
-              onSent={onSent}
-            />
+            <>
+              {isUnread(session) ? (
+                <p className="m-0 px-3 py-1 text-meta text-warn" data-composer-unread="" role="status">
+                  This ferret could not be read, so nothing can be sent to it until it can.
+                </p>
+              ) : null}
+              <Composer
+                busy={busy}
+                compact={compact}
+                compacting={liveSample?.compaction?.phase === 'running'}
+                {...(session.context === undefined ? {} : { context: session.context })}
+                daemon={daemonConnection(daemonId)}
+                {...composerPreferences}
+                disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl || isUnread(session)}
+                ferretId={ferretId}
+                {...(account === undefined ? {} : { account })}
+                onSent={onSent}
+              />
+            </>
           )}
         </div>
       </div>
