@@ -6653,7 +6653,7 @@ describe('daemon boot lifecycle', () => {
       const recovered = said.stated.filter(line => line.startsWith('relay carrier recovered'));
       should(recovered).have.length(1);
       should(recovered[0]).match(/answered on read 3/u);
-      should(recovered[0]).containEql(`now dialling ws://127.0.0.1:${String(relay.port)}`);
+      should(recovered[0]).containEql(`now dialling ${relay.url}`);
       should(timers.filter(timer => !timer.cancelled)).be.empty();
     });
 
