@@ -1,5 +1,6 @@
 /**
- * ONE HTTP READ, ONCE PER BOOT: what carrier does Ferretry advertise today?
+ * ONE HTTP READ: what carrier does Ferretry advertise today? (Asked at boot, and asked again in the
+ * background while a failure was transient — see `lib/relay/directory-retry.ts`.)
  *
  * THE ORIGIN IS A BUILD CONSTANT AND THE CARRIER IS NOT. What a release may carry is the address of
  * the DIRECTORY — a service, never a daemon and never a person. The relay it names is a runtime
@@ -7,16 +8,18 @@
  * the answer is asked rather than assumed and why `cache: 'no-store'` is not optional: a cached
  * advertisement is the kill switch not working.
  *
- * IT NEVER THROWS AND IT NEVER RETRIES. Every failure — no origin, an origin that is not an address
- * this daemon may ask, a refusal, a timeout, a document in the wrong shape — becomes one
- * `undetermined` sentence, and the boot carries on direct-only and says so. A daemon that failed to
- * start because a discovery service was down would be a worse product than one that cannot be
- * reached remotely.
+ * IT NEVER THROWS, AND IT DOES NOT DECIDE WHETHER TO RETRY. Every failure — no origin, an origin that
+ * is not an address this daemon may ask, a refusal, a timeout, a document in the wrong shape —
+ * becomes one `undetermined` sentence, and the boot carries on direct-only and says so. This adapter
+ * only REPORTS how the read ended; `classifyDirectoryOutcome` is the one place that sorts an ending
+ * into transient (the network, a timeout, 5xx, 429 — asked again) or definitive (everything else —
+ * never asked again). A daemon that failed to start because a discovery service was down would be a
+ * worse product than one that cannot be reached remotely.
  */
 
 import {
-  NO_RELAY_DIRECTORY,
-  parseRelayAdvertisement,
+  classifyDirectoryOutcome,
+  type DirectoryOutcome,
   RELAY_DISCOVERY_TIMEOUT_MS,
   type RelayAdvertisement,
   relayAdvertisementAddress,
@@ -49,26 +52,31 @@ export class HostedRelayDirectory implements RelayDirectoryPort {
     this.timeoutMs = options.timeoutMs ?? RELAY_DISCOVERY_TIMEOUT_MS;
   }
 
-  async read(): Promise<RelayAdvertisement> {
-    if (this.origin === undefined) return NO_RELAY_DIRECTORY;
+  async read(signal?: AbortSignal): Promise<RelayAdvertisement> {
+    return classifyDirectoryOutcome(await this.#outcome(signal));
+  }
+
+  async #outcome(signal: AbortSignal | undefined): Promise<DirectoryOutcome> {
+    if (this.origin === undefined) return { kind: 'no-origin' };
     const address = relayAdvertisementAddress(this.origin);
-    if (address === undefined) {
-      return { kind: 'undetermined', reason: 'the configured relay directory is not an address this daemon may ask' };
-    }
+    if (address === undefined) return { kind: 'refused-origin' };
+    const deadline = AbortSignal.timeout(this.timeoutMs);
     let response: Response;
     try {
       response = await this.fetcher(address, {
         cache: 'no-store',
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: signal === undefined ? deadline : AbortSignal.any([signal, deadline]),
       });
     } catch {
-      return { kind: 'undetermined', reason: 'this daemon could not reach the relay directory' };
+      return deadline.aborted ? { kind: 'timeout' } : { kind: 'unreachable' };
     }
-    if (!response.ok) return { kind: 'undetermined', reason: `the relay directory answered ${response.status}` };
+    if (!response.ok)
+      return { kind: 'status', status: response.status, retryAfter: response.headers.get('retry-after') };
     try {
-      return parseRelayAdvertisement(await response.json());
-    } catch {
-      return { kind: 'undetermined', reason: 'the relay directory answered something that is not a document' };
+      return { kind: 'document', value: await response.json() };
+    } catch (error) {
+      // A body that is not JSON is an answer; a body that broke on the wire is the network again.
+      return error instanceof SyntaxError ? { kind: 'body-not-document' } : { kind: 'body-interrupted' };
     }
   }
 }
