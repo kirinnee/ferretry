@@ -8,7 +8,7 @@ import {
 import { USE } from '../../contract/index.ts';
 import type { BrowserPageSummary } from '../../contract/wire/browser.ts';
 import { type BrowserSubsystem, BrowserSessionError } from './service.ts';
-import { browserFailure } from './routes.ts';
+import { maskedRefusal, refusalOf } from './routes.ts';
 
 /** How a row says who opened the page (the terminal menu's words: ownership is what a reader checks before driving a page). */
 const ownershipText = (opener: BrowserPageSummary['openedBy']): string => {
@@ -59,10 +59,10 @@ export class BrowsersReferenceMenu implements ReferenceCatalogProvider {
   ) {}
 
   async entries(input: ReferenceCatalogInput): Promise<readonly ReferenceCatalogEntry[]> {
-    const status = await this.browser.status(input.ferret).catch((error: unknown) => {
+    const status = await this.browser.status(input.ferret).catch(async (error: unknown) => {
       // A ferret this half does not know holds no pages; every other failure is the route's own refusal.
       if (error instanceof BrowserSessionError && error.code === 'not_found') return undefined;
-      return browserFailure(error);
+      throw await maskedRefusal(this.redaction, refusalOf(error));
     });
     if (status === undefined) return [];
     const wanted = input.query?.trim().toLowerCase() ?? '';

@@ -3,6 +3,7 @@ import { milliseconds } from '@ferretry/std';
 import { type DaemonContext, type DaemonHalf, implementDaemon } from '@ferretry/kernel/manifest';
 import { type BrowsersConfig, PageChanged } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { withAddressRuleKernel, withAddressRuleTools } from './address-rule.ts';
 import { type BrowserSessionLauncher, BrowserSessionService } from './pages/service.ts';
 import { type BrowserStreamOpener, pageRoutes, streamSocket } from './pages/routes.ts';
 import { BrowsersReferenceMenu } from './pages/reference-menu.ts';
@@ -73,7 +74,10 @@ export function buildBrowsers(
   ctx: DaemonContext<typeof manifest>,
   seams: BrowsersSeams = {},
 ): DaemonHalf<typeof manifest> {
-  const { kernel } = ctx;
+  // ONE address rule at the kernel seam (./address-rule.ts): every piece below reads and writes under this kernel, so
+  // no address, title, snapshot, error message, log line or event it returns can carry a pairing-shaped fragment.
+  // A delegating view, not a copy: every other port stays the kernel's own, read live.
+  const kernel = withAddressRuleKernel(ctx.kernel);
   const vault = ctx.needs.vault;
   const host = processHost();
   const config = (): BrowsersConfig | undefined =>
@@ -276,8 +280,8 @@ export function buildBrowsers(
       ...controlRoutes(tools),
       ...systemOpenRoutes(openUrl),
     },
-    sockets: { 'GET /v1/sessions/:sessionId/browser/stream': streamSocket(pages, stream) },
-    tools: { ...toolHandlers(tools), ...target.tools },
+    sockets: { 'GET /v1/sessions/:sessionId/browser/stream': streamSocket(kernel.redaction, pages, stream) },
+    tools: withAddressRuleTools({ ...toolHandlers(tools), ...target.tools }),
     provides: {
       browsers: {
         state: async () => pages.overview(),
