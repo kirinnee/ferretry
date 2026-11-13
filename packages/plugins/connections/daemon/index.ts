@@ -100,6 +100,27 @@ export function buildConnections(
       ? [DISCOVERED_RELAY_CARRIER]
       : document.relay.map(entry => ({ kind: 'relay', ...entry }));
   const relays = relaysOf(config);
+  /** Key order never decides whether two lists say the same thing. */
+  const canonical = (value: unknown): string =>
+    JSON.stringify(value, (_key, inner: unknown) =>
+      inner !== null && typeof inner === 'object' && !Array.isArray(inner)
+        ? Object.fromEntries(Object.entries(inner).sort(([a], [b]) => (a < b ? -1 : 1)))
+        : inner,
+    );
+  const bootRelays = canonical(relays);
+  /**
+   * THE VETO, ASKED AT THE MOMENT OF USE. The relay list this boot resolved is the only one a late answer may be applied
+   * to: anything the operator wrote meanwhile (a relay of their own, enabled:false included, a discovery entry switched off
+   * or removed, any other change) wins, and a configuration that cannot be read fails closed. The current file is read
+   * every time — never a copy taken at boot, never a value held across an await.
+   */
+  const relaysUnchanged = (): boolean => {
+    try {
+      return canonical(relaysOf(ctx.kernel.config.file(configFile))) === bootRelays;
+    } catch {
+      return false;
+    }
+  };
   /**
    * WHERE THIS DAEMON LISTENS, asked at the moment of use. The kernel binds AFTER every plugin is built, so a value
    * captured at build would be the `connections.yaml` guess for ever. The listener the kernel really bound wins
@@ -123,6 +144,17 @@ export function buildConnections(
   /** The relay carrier's layer and signal once it has started, so a later recovery can dial without a restart. */
   let carrierStart: { readonly layer: SessionLayer; readonly signal: AbortSignal } | undefined;
   let dialRecovered: () => Promise<void> = async () => {};
+  /**
+   * Set synchronously the moment shutdown begins. The Kernel aborts every carrier's signal FIRST (before the jobs stop and
+   * before any plugin's `onStop` runs, which come one slow `await` at a time), so the carrier's signal — not this plugin's
+   * own `onStop` — is what ends recovery; `onStop` stays as the backstop for a daemon whose carrier never started.
+   */
+  let stopped = false;
+  const stopRecovery = (): void => {
+    stopped = true;
+    retry.stop();
+  };
+  const shuttingDown = (): boolean => stopped || ctx.kernel.lifecycle.signal.aborted;
   let directoryPort: RelayDirectoryPort | undefined;
   const directory = (): RelayDirectoryPort =>
     (directoryPort ??=
@@ -141,11 +173,23 @@ export function buildConnections(
     ctx.kernel.events.publish(CarriersChanged, { kinds: published.current().map(c => c.kind) });
     return resolved;
   };
-  const relayWrittenMeanwhile = `a relay is now written in config/${configFile.file} and the hosted directory was not reached first; restart to dial it`;
+  /** Nothing a late answer says is applied: the sentence says restart, and nothing is resolved, published or dialled. */
+  const giveUp = (): void => {
+    ctx.kernel.log.info(
+      `relay directory retries stopped — the relay configuration in config/${configFile.file} changed; restart to apply it`,
+    );
+    sources = sources.map(source =>
+      source.kind === 'direct-only' && source.retrying === true
+        ? { kind: 'direct-only' as const, reason: relayWrittenMeanwhile }
+        : source,
+    );
+  };
+  const relayWrittenMeanwhile = `the relay configuration in config/${configFile.file} changed and the hosted directory was not reached first; restart to dial it`;
   /**
    * A transient failure of the boot read is asked again here, in the background: the same `discovered` source, links
-   * and relay carrier as a first-read success once it answers. Definitive answers never come here, and an explicit
-   * relay written meanwhile wins (`stillNeeded`) and stops it.
+   * and relay carrier as a first-read success once it answers. Definitive answers never come here, and any change to
+   * the relay configuration meanwhile (an explicit relay, `enabled: false` too) wins (`relaysUnchanged`) and stops it.
+   * Shutdown stops it the moment the carrier's signal aborts, before any slower teardown reaches `onStop`.
    */
   const retry = new RelayDirectoryRetry(
     {
@@ -153,12 +197,17 @@ export function buildConnections(
       after: (ms, fn) => ctx.kernel.clock.after(milliseconds(ms), fn),
       random: Math.random,
       nowMs: () => ctx.kernel.clock.nowMs(),
-      stillNeeded: () => relayCarriersNeedDiscovery(relaysOf(ctx.kernel.config.file(configFile))),
+      stillNeeded: relaysUnchanged,
     },
     {
       // Still failing: only the sentence changes (the next try's time), so nothing is republished.
       waiting: failed => void adopt(failed, false),
       settled: answer => {
+        if (shuttingDown()) return;
+        // The LAST read of the configuration before anything is resolved, published or dialled: no `await` stands
+        // between it and the first carrier start, so nothing can be written in between. Later carriers re-ask after
+        // their awaits.
+        if (!relaysUnchanged()) return giveUp();
         const resolved = adopt(answer, true);
         if (resolved.kind === 'refused') {
           // THE RULE, STATED ONCE: a relay the operator WROTE wins and is never torn down. A duplicate rendezvous found
@@ -174,29 +223,19 @@ export function buildConnections(
         }
         void dialRecovered().catch(() => ctx.kernel.log.warn('the recovered relay carrier could not start'));
       },
-      abandoned: () => {
-        ctx.kernel.log.info(
-          `relay directory retries stopped — a relay is now written in config/${configFile.file}; restart to dial it`,
-        );
-        sources = sources.map(source =>
-          source.kind === 'direct-only' && source.retrying === true
-            ? { kind: 'direct-only' as const, reason: relayWrittenMeanwhile }
-            : source,
-        );
-      },
+      abandoned: () => giveUp(),
     },
   );
-  ctx.kernel.lifecycle.onStop(() => retry.stop());
+  ctx.kernel.lifecycle.onStop(stopRecovery);
   const initialise = (): Promise<void> =>
     (initial ??= (async () => {
       const asked = relayCarriersNeedDiscovery(relays);
       let advertisement = asked ? await directory().read(ctx.kernel.lifecycle.signal) : NO_RELAY_DIRECTORY;
       // The same two guards the background retry has, applied to the FIRST read: the answer of a read that was in
       // flight when the daemon stopped is dropped, and a relay the operator wrote meanwhile (enabled:false too) wins.
-      if (asked && ctx.kernel.lifecycle.signal.aborted)
+      if (asked && shuttingDown())
         advertisement = { kind: 'undetermined', reason: 'this daemon stopped before the relay directory answered' };
-      else if (asked && !relayCarriersNeedDiscovery(relaysOf(ctx.kernel.config.file(configFile))))
-        advertisement = { kind: 'undetermined', reason: relayWrittenMeanwhile };
+      else if (asked && !relaysUnchanged()) advertisement = { kind: 'undetermined', reason: relayWrittenMeanwhile };
       if (isTransientAdvertisement(advertisement)) advertisement = retry.begin(advertisement);
       const resolved = adopt(advertisement, true);
       if (resolved.kind === 'refused') throw new ApiError(503, resolved.reason, 'plugin_failed');
@@ -268,7 +307,11 @@ export function buildConnections(
    * started twice. The trail is built from EVERY dialling carrier's status, so a relay already running is
    * reported as running — never as inactive just because this call did not start it.
    */
-  const dial = async (layer: SessionLayer, signal: AbortSignal): Promise<void> => {
+  const dial = async (
+    layer: SessionLayer,
+    signal: AbortSignal,
+    permitted: () => boolean = () => true,
+  ): Promise<void> => {
     if (bindings === undefined) return;
     const dialled = sources.flatMap(source =>
       source.kind === 'direct-only' || built.has(builtKey(source))
@@ -292,7 +335,13 @@ export function buildConnections(
       built.set(key, carrier);
       held = [...held, carrier];
     }
-    for (const { carrier } of dialled) await carrier.start(layer, signal);
+    let awaited = false;
+    for (const { carrier } of dialled) {
+      // After every await the answer is asked again, so a veto that lands during one carrier's start stops the next.
+      if (awaited && !permitted()) return;
+      await carrier.start(layer, signal);
+      awaited = true;
+    }
     const statuses = new Map<string, CarrierStatus>();
     for (const source of sources) {
       const relayUrl = dialledRelayUrl(source);
@@ -303,10 +352,15 @@ export function buildConnections(
       ctx.kernel.log.info(line);
   };
   dialRecovered = async () => {
-    if (carrierStart !== undefined && !carrierStart.signal.aborted) await dial(carrierStart.layer, carrierStart.signal);
+    const start = carrierStart;
+    if (start === undefined || start.signal.aborted || shuttingDown()) return;
+    // Recovery dials only while the daemon runs and the configuration still says what this boot resolved.
+    await dial(start.layer, start.signal, () => !start.signal.aborted && !shuttingDown() && relaysUnchanged());
   };
   const relay: Carrier = {
     start: async (layer, signal) => {
+      if (signal.aborted) stopRecovery();
+      else signal.addEventListener('abort', stopRecovery, { once: true });
       await initialise();
       carrierStart = { layer, signal };
       if (signal.aborted) return;

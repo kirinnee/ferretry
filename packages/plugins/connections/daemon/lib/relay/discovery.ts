@@ -102,11 +102,22 @@ export type DirectoryOutcome =
   | { readonly kind: 'body-not-document' }
   | { readonly kind: 'document'; readonly value: unknown };
 
-/** A `Retry-After` in whole seconds, in milliseconds; anything else (a date, a fraction, junk) is ignored. */
+/** The most whole seconds a `Retry-After` is carried as; far above the retry's own cap, which is what bounds the wait. */
+const MAX_RETRY_AFTER_SECONDS = 999_999_999;
+
+/**
+ * A `Retry-After` in whole seconds, in milliseconds; anything else (a date, a fraction, junk) is ignored.
+ *
+ * A valid number of any length is CLAMPED, never discarded: a server that says "come back in a million seconds" is
+ * saying "not soon", and the retry's cap turns that into the longest wait it ever makes. Leading zeros are
+ * not digits of the value, and the clamp is decided on the digits that remain so no input can overflow.
+ */
 export function parseRetryAfterMs(header: string | null): number | undefined {
   const text = header?.trim();
-  if (text === undefined || !/^\d{1,9}$/u.test(text)) return undefined;
-  return Number(text) * 1_000;
+  if (text === undefined || !/^\d+$/u.test(text)) return undefined;
+  const digits = text.replace(/^0+(?=\d)/u, '');
+  const seconds = digits.length > 9 ? MAX_RETRY_AFTER_SECONDS : Math.min(Number(digits), MAX_RETRY_AFTER_SECONDS);
+  return seconds * 1_000;
 }
 
 /**

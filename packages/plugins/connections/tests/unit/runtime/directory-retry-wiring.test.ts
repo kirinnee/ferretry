@@ -10,7 +10,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import type { SessionLayer } from '@ferretry/kernel/contract';
-import { implementDaemon } from '@ferretry/kernel/manifest';
+import { implementDaemon, type DaemonContext } from '@ferretry/kernel/manifest';
 import { testHost } from '../../../../../core/kernel/testing/host.ts';
 import { ConnectionsPort } from '../../../contract/index.ts';
 import manifest from '../../../manifest.ts';
@@ -47,36 +47,66 @@ function scriptedDirectory(script: Array<RelayAdvertisement | Promise<RelayAdver
   return { port, reads: () => reads, signals };
 }
 
-function build(directory: RelayDirectoryPort, extra: Partial<ConnectionBindings> = {}) {
+/** Counts every read of the connections configuration, and lets a test act just before read number N is answered. */
+function watchedConfig(ctx: DaemonContext<typeof manifest>, seen: () => void): DaemonContext<typeof manifest> {
+  return {
+    ...ctx,
+    kernel: {
+      ...ctx.kernel,
+      config: {
+        ...ctx.kernel.config,
+        file: (def: never) => {
+          seen();
+          return ctx.kernel.config.file(def);
+        },
+      },
+    },
+  } as unknown as DaemonContext<typeof manifest>;
+}
+
+function build(
+  directory: RelayDirectoryPort,
+  extra: Partial<ConnectionBindings> = {},
+  onConfigRead: (read: number) => void = () => undefined,
+) {
   const dialled: string[] = [];
+  const counter = { reads: 0 };
+  const dialledAt: number[] = [];
   const closed: string[] = [];
   let half: ReturnType<typeof buildConnections> | undefined;
   const plugin = implementDaemon(manifest, {
     build: ctx =>
-      (half = buildConnections(ctx, {
-        identity,
-        openSession: (layer, key, peer) => layer.open(key, peer),
-        directUrl: 'https://box.example',
-        host: '127.0.0.1',
-        port: 7431,
-        directory,
-        socketFactory: url => {
-          dialled.push(url);
-          const socket: RelayWebSocket = {
-            binaryType: '',
-            onopen: null,
-            onmessage: null,
-            onclose: null,
-            onerror: null,
-            send: () => undefined,
-            close: () => void closed.push(url),
-          };
-          return socket;
+      (half = buildConnections(
+        watchedConfig(ctx, () => {
+          counter.reads += 1;
+          onConfigRead(counter.reads);
+        }),
+        {
+          identity,
+          openSession: (layer, key, peer) => layer.open(key, peer),
+          directUrl: 'https://box.example',
+          host: '127.0.0.1',
+          port: 7431,
+          directory,
+          socketFactory: url => {
+            dialled.push(url);
+            dialledAt.push(counter.reads);
+            const socket: RelayWebSocket = {
+              binaryType: '',
+              onopen: null,
+              onmessage: null,
+              onclose: null,
+              onerror: null,
+              send: () => undefined,
+              close: () => void closed.push(url),
+            };
+            return socket;
+          },
+          ...extra,
         },
-        ...extra,
-      })),
+      )),
   });
-  return { plugin, dialled, closed, half: () => half! };
+  return { plugin, dialled, dialledAt, counter, closed, half: () => half! };
 }
 
 async function doctorRow(half: ReturnType<typeof buildConnections>) {
@@ -474,6 +504,209 @@ describe('the FIRST read honours stop and a relay written meanwhile, like every 
     await settle();
     expect(directory.reads()).toBe(1);
     expect(rig.dialled).toEqual([]);
+    await host.stop();
+  });
+});
+
+/** The explicit block an operator writes meanwhile: a switched-off relay of their own beside the discovery entry. */
+const WRITTEN_MEANWHILE = {
+  relay: [{ url: 'https://mine.example', enabled: false }, { source: 'discovery' }],
+};
+
+async function expectNothingStarted(host: Awaited<ReturnType<typeof testHost>>, rig: ReturnType<typeof build>) {
+  expect(rig.dialled).toEqual([]);
+  expect(kinds(host)).toEqual(['direct']);
+  expect(rig.half().resolvers.relay()).toEqual([]);
+  expect(host.provided(ConnectionsPort).advertisement().discoveredRelayUrl).toBeUndefined();
+}
+
+describe('a configuration written while the directory was failing wins over a late success', () => {
+  test('should publish and dial nothing when a relay block (enabled:false too) was written during the failing period', async () => {
+    const directory = scriptedDirectory([transient, transient, available]);
+    const rig = build(directory.port);
+    const host = await testHost({ plugins: [rig.plugin] });
+    await host.runJob('relay-discovery');
+    await relayStart(rig);
+    await host.clock.advance(2_000);
+    await settle();
+    expect(directory.reads()).toBe(2);
+    host.setConfig('connections.yaml', WRITTEN_MEANWHILE);
+    for (let elapsed = 0; elapsed < 5 * MINUTE; elapsed += 1_000) {
+      await host.clock.advance(1_000);
+      await settle();
+    }
+    expect(directory.reads()).toBe(2);
+    await expectNothingStarted(host, rig);
+    expect((await doctorRow(rig.half())).detail).toContain('restart to dial it');
+    await host.stop();
+  });
+
+  test('should publish and dial nothing when the discovery entry was switched off or removed meanwhile', async () => {
+    for (const written of [
+      { relay: [{ source: 'discovery', enabled: false }] },
+      { relay: [{ url: 'https://mine.example' }] },
+    ]) {
+      const directory = scriptedDirectory([transient, available]);
+      const rig = build(directory.port);
+      const host = await testHost({ plugins: [rig.plugin] });
+      await host.runJob('relay-discovery');
+      await relayStart(rig);
+      host.setConfig('connections.yaml', written);
+      await host.clock.advance(60 * MINUTE);
+      await settle();
+      await expectNothingStarted(host, rig);
+      await host.stop();
+    }
+  });
+
+  test('should publish and dial nothing when the list changed in any other way (a configured relay added)', async () => {
+    const directory = scriptedDirectory([transient, available]);
+    const rig = build(directory.port);
+    const host = await testHost({ plugins: [rig.plugin] });
+    await host.runJob('relay-discovery');
+    await relayStart(rig);
+    host.setConfig('connections.yaml', { relay: [{ url: 'https://mine.example' }, { source: 'discovery' }] });
+    await host.clock.advance(60 * MINUTE);
+    await settle();
+    await expectNothingStarted(host, rig);
+    await host.stop();
+  });
+
+  test('should still recover when the configuration was rewritten but says the same thing', async () => {
+    const directory = scriptedDirectory([transient, available]);
+    const rig = build(directory.port);
+    const host = await testHost({ plugins: [rig.plugin] });
+    await host.runJob('relay-discovery');
+    await relayStart(rig);
+    host.setConfig('connections.yaml', { relay: [{ source: 'discovery' }] });
+    await host.clock.advance(2_000);
+    await settle();
+    expect(rig.dialled).toHaveLength(1);
+    expect(kinds(host)).toEqual(['direct', 'relay']);
+    await host.stop();
+  });
+
+  test('should dial nothing wherever the override lands between the success and the dial', async () => {
+    // How many configuration reads a recovery makes before it dials, measured on an undisturbed run.
+    const baseline = scriptedDirectory([transient, available]);
+    const calm = build(baseline.port);
+    const calmHost = await testHost({ plugins: [calm.plugin] });
+    await calmHost.runJob('relay-discovery');
+    await relayStart(calm);
+    calm.counter.reads = 0;
+    await calmHost.clock.advance(2_000);
+    await settle();
+    expect(calm.dialled).toHaveLength(1);
+    const readsBeforeDial = calm.dialledAt[0]!;
+    await calmHost.stop();
+    expect(readsBeforeDial).toBeGreaterThanOrEqual(1);
+
+    for (let landing = 1; landing <= readsBeforeDial; landing++) {
+      const directory = scriptedDirectory([transient, available]);
+      let armed = false;
+      let host!: Awaited<ReturnType<typeof testHost>>;
+      let seen = 0;
+      const rig = build(directory.port, {}, () => {
+        if (!armed) return;
+        seen += 1;
+        if (seen === landing) host.setConfig('connections.yaml', WRITTEN_MEANWHILE);
+      });
+      host = await testHost({ plugins: [rig.plugin] });
+      await host.runJob('relay-discovery');
+      await relayStart(rig);
+      armed = true;
+      await host.clock.advance(2_000);
+      await settle();
+      expect(`landing at read ${landing}: ${rig.dialled.length} dialled`).toBe(`landing at read ${landing}: 0 dialled`);
+      await expectNothingStarted(host, rig);
+      await host.stop();
+    }
+  });
+
+  test('should hold the first read to the same rule when a relay is written beside the discovery entry meanwhile', async () => {
+    let answer!: (value: RelayAdvertisement) => void;
+    const slow = new Promise<RelayAdvertisement>(resolve => (answer = resolve));
+    const rig = build(scriptedDirectory([slow]).port);
+    const host = await testHost({ plugins: [rig.plugin] });
+    const job = host.runJob('relay-discovery');
+    await settle();
+    host.setConfig('connections.yaml', WRITTEN_MEANWHILE);
+    answer(available);
+    await job;
+    await relayStart(rig);
+    await expectNothingStarted(host, rig);
+    await host.stop();
+  });
+});
+
+describe('shutdown begins when the carrier signal aborts, not when the plugin’s own cleanup finally runs', () => {
+  test('should drop a retry read that answers after the carrier signal aborted, and abort that read', async () => {
+    let answer!: (value: RelayAdvertisement) => void;
+    const late = new Promise<RelayAdvertisement>(resolve => (answer = resolve));
+    const directory = scriptedDirectory([transient, late]);
+    const rig = build(directory.port);
+    const host = await testHost({ plugins: [rig.plugin] });
+    await host.runJob('relay-discovery');
+    const controller = new AbortController();
+    await rig.half().hooks['carriers:relay'].start(new FakeSessions(), controller.signal);
+    await host.clock.advance(2_000);
+    expect(directory.reads()).toBe(2);
+    expect(directory.signals[1]!.aborted).toBe(false);
+
+    // Shutdown has begun (the kernel aborts the carriers first); a slower earlier teardown still holds the plugin's own stop.
+    controller.abort();
+    expect(directory.signals[1]!.aborted).toBe(true);
+    answer(available);
+    await settle();
+    await expectNothingStarted(host, rig);
+    await host.stop();
+  });
+
+  test('should cancel the pending retry timer the moment the carrier signal aborts', async () => {
+    const directory = scriptedDirectory([transient, available]);
+    const rig = build(directory.port);
+    const host = await testHost({ plugins: [rig.plugin] });
+    await host.runJob('relay-discovery');
+    const controller = new AbortController();
+    await rig.half().hooks['carriers:relay'].start(new FakeSessions(), controller.signal);
+    const pending = host.clock.pending();
+    controller.abort();
+    expect(host.clock.pending()).toBeLessThan(pending);
+    await host.clock.advance(60 * MINUTE);
+    await settle();
+    expect(directory.reads()).toBe(1);
+    await expectNothingStarted(host, rig);
+    await host.stop();
+  });
+
+  test('should drop a first-read answer that lands after the carrier signal aborted', async () => {
+    let answer!: (value: RelayAdvertisement) => void;
+    const late = new Promise<RelayAdvertisement>(resolve => (answer = resolve));
+    const rig = build(scriptedDirectory([late]).port);
+    const host = await testHost({ plugins: [rig.plugin] });
+    const job = host.runJob('relay-discovery');
+    const controller = new AbortController();
+    const started = rig.half().hooks['carriers:relay'].start(new FakeSessions(), controller.signal);
+    await settle();
+    controller.abort();
+    answer(available);
+    await job;
+    await started;
+    await expectNothingStarted(host, rig);
+    await host.stop();
+  });
+
+  test('should not dial a second carrier once the signal aborted between two carrier starts', async () => {
+    const directory = scriptedDirectory([transient, available]);
+    const rig = build(directory.port);
+    const host = await testHost({ plugins: [rig.plugin] });
+    await host.runJob('relay-discovery');
+    const controller = new AbortController();
+    await rig.half().hooks['carriers:relay'].start(new FakeSessions(), controller.signal);
+    controller.abort();
+    await host.clock.advance(2_000);
+    await settle();
+    await expectNothingStarted(host, rig);
     await host.stop();
   });
 });

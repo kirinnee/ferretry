@@ -58,7 +58,11 @@ export interface DirectoryRetryPorts {
   after(ms: number, fn: () => void): () => void;
   random(): number;
   nowMs(): number;
-  /** False once nothing needs the directory (an explicit relay was written): asking stops. */
+  /**
+   * False once the relay configuration is no longer the one the boot resolved (a relay written, a discovery entry
+   * switched off or removed, anything else changed, or a configuration that cannot be read): asking stops and
+   * nothing is applied. Asked before every read and again when one answers.
+   */
   stillNeeded(): boolean;
 }
 
