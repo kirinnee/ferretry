@@ -1,3 +1,9 @@
+## [4.291.13](https://github.com/kirinnee/ferretry/compare/v4.291.12...v4.291.13) (2026-11-12)
+
+### Fixes
+
+* **daemon:** regenerate an unreadable fleet manifest instead of refusing every start ([#1593](https://github.com/kirinnee/ferretry/issues/1593)) ([dd9e63b](https://github.com/kirinnee/ferretry/commit/dd9e63b26082f475191e19d6625929035863d34a))
+
 ## [4.291.12](https://github.com/kirinnee/ferretry/compare/v4.291.11...v4.291.12) (2026-11-12)
 
 ### Fixes
