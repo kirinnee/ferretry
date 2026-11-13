@@ -17,6 +17,7 @@ import {
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { FleetFacts } from './adapters/fleet-facts.ts';
+import { LoginQuotaFacts } from './adapters/login-quota.ts';
 import { PackFerrets } from './adapters/ferrets.ts';
 import { RuntimeLaunchProbe } from './adapters/launch-probe.ts';
 import { StateReplacedRouting } from './adapters/replaced.ts';
@@ -60,10 +61,11 @@ export default implementDaemon(manifest, {
     // Until then Pack mode is handed none and says no model is usable now, rather than reading members it cannot see.
     const runtimeFacts = (): RuntimeFactsApi | undefined => undefined;
     const catalogs = async (): Promise<readonly ModelCatalogView[]> => [];
+    const quota = new LoginQuotaFacts(() => uses.logins.current());
     const fleet = new FleetFacts(
       runtimes,
       runtimeFacts,
-      () => uses.usage.current(),
+      () => quota,
       () => kernel.clock.now(),
     );
     const probes = new ProbeCache(new RuntimeLaunchProbe(runtimes, () => kernel.clock.nowMs()), () =>
@@ -220,6 +222,7 @@ export default implementDaemon(manifest, {
           setSwitch,
         },
         kernel.redaction,
+        kernel.log,
       ),
       provides: {
         packs: {

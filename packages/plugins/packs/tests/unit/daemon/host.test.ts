@@ -397,7 +397,7 @@ function builtHalf(ferrets: FakeFerrets, files = new Map<string, string>(), reda
     needs: { ferrets },
     uses: {
       runtimes: { current: () => undefined },
-      usage: { current: () => undefined },
+      logins: { current: () => undefined },
       conversation: { current: () => undefined },
     },
     hooks: {} as never,

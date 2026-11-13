@@ -32,8 +32,7 @@ Each line names the seam it waits on and who owns it. Nothing here is stood in f
   Conversation read; until then the newest dated sitrep line is used, masked whole before it is cut.
 - **`POST /v1/recommend`** (R-0321, the account recommender) is still declared by Runtimes at that path; the placement
   lists it with Packs. V-0260/V-0261 (`fy fleet`, `fy fleet recommend`) have no verb here. Both are the lead's to settle.
-- **Usage**: Packs reads quota through its own stand-in port (`UsagePort`, D2 #15); it is dropped once Packs binds the
-  merged Usage contract.
+- **Pane limits**: Packs reads each login's sign-in, quota windows and budget from the Logins port (`LoginView`). Which logins the panes prove out of quota is derived inside Usage and its port offers no read of it, so none is reported; a login that is out of quota on a pane only stays offered until its own windows or budget say otherwise.
 
 ## CLI
 

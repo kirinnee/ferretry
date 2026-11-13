@@ -2,6 +2,7 @@ import { AUDIT_KINDS } from '@ferretry/core-gate/contract';
 import { FerretsPort, LaunchParts, StartDecide } from '@ferretry/core-ferrets/contract';
 import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { CONVERSATION_ROW_SLOT, ConversationPort } from '@ferretry/plugin-conversation/contract';
+import { LoginsPort } from '@ferretry/plugin-logins/contract';
 import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
 import {
   PACK_REPLACED,
@@ -13,7 +14,6 @@ import {
   PacksPort,
   packConfigure,
   packUse,
-  UsagePort,
 } from './contract/index.ts';
 
 /**
@@ -32,7 +32,7 @@ import {
  *
  * It shapes a start only through `start.decide` (admission: depth and how many children a parent may have, whichever
  * command started the child) and `launch.parts` (the `FY_PACK` switch and the routing line a launch carries, which
- * Ferrets cannot ask a plugin's port for). Usage and Runtimes are optional: with them off there are no recommendations.
+ * Ferrets cannot ask a plugin's port for). Logins and Runtimes are optional: with them off there are no recommendations.
  */
 export default definePlugin({
   id: PACKS,
@@ -45,7 +45,7 @@ export default definePlugin({
 
   needs: { ferrets: FerretsPort },
   // Conversation is optional: the Pack card is drawn in its transcript, and with Conversation off there is no transcript.
-  uses: { usage: UsagePort, runtimes: RuntimesPort, conversation: ConversationPort },
+  uses: { logins: LoginsPort, runtimes: RuntimesPort, conversation: ConversationPort },
   provides: { packs: PacksPort },
 
   actions: {
