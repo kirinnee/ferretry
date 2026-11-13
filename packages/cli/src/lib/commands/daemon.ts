@@ -6,6 +6,7 @@ import type { DaemonController } from '../daemon/controller.ts';
 import { ClientResetInventory } from '../daemon/reset-inventory.ts';
 import { EXIT } from '../errors.ts';
 import { judgePlugin } from '../guard.ts';
+import { MidTurnUnreadableError } from '../update/mid-turn.ts';
 import type { ShellContext, ShellVerb } from '../shell-context.ts';
 
 export const daemonStatus: ShellVerb = async ctx => {
@@ -81,14 +82,6 @@ const controlled =
       world.io.err('This fy has no local daemon-control adapters.\n');
       return EXIT.unavailable;
     }
-    const whileUp = async <T>(fallback: T, read: () => Promise<T>): Promise<T> => {
-      if ((await world.probe()).state !== 'up') return fallback;
-      try {
-        return await read();
-      } catch {
-        return fallback;
-      }
-    };
     // EACH of the three counts is asked only while the daemon answers, like the mid-turn read: a daemon that died since
     // the controller's probe is not started by a read in the middle of a reset.
     const whileAnswering = (id: Manifest['id']): Pick<PluginClient, 'call'> => ({
@@ -104,11 +97,16 @@ const controlled =
         whileAnswering('ferrets'),
       ),
       turns: {
-        midTurn: () =>
-          whileUp(
-            0,
-            async () => DaemonUpdateViewSchema.parse(await ctx.client('updates').call(MID_TURN_ROUTE)).midTurn,
-          ),
+        // A daemon that is down has nothing to wait for (0); one that answers but whose count cannot be read says so,
+        // and `--when-idle` then refuses instead of going ahead (`passMidTurn`).
+        midTurn: async () => {
+          if ((await world.probe()).state !== 'up') return 0;
+          try {
+            return DaemonUpdateViewSchema.parse(await ctx.client('updates').call(MID_TURN_ROUTE)).midTurn;
+          } catch {
+            throw new MidTurnUnreadableError();
+          }
+        },
       },
     });
     await run(built.controller, ctx);
