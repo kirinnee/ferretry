@@ -365,5 +365,7 @@ export default definePlugin({
     roots: ['downloads'],
     /** The kernel's launch-guard fact: whether this daemon is a test's, and the PATH a real harness would be found on. */
     hostFacts: true,
+    /** Whether tmux is installed (`kernel.paths.which`: a PATH lookup, never executing) — the required `tmux` doctor row. */
+    which: true,
   },
 });

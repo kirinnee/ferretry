@@ -130,7 +130,17 @@ export function buildLoginsDaemon() {
 
       // ── logins ──────────────────────────────────────────────────────────────────────────────────────────────────────
       const store = new OwnedLoginStore(kernel.roots.root('credentials'), () => clock.nowMs());
-      const catalog = store.catalog(files);
+      // Which runtimes launch on a login is Runtimes' to say; the list only DISPLAYS it, so no provider (Runtimes off) or
+      // one that cannot answer reads as none rather than failing the whole list (a removal asks again and fails closed).
+      const catalog = store.catalog(files, async id => {
+        const users = hooks.provider(LoginsUsedBy, 'runtimes');
+        if (users === 'unavailable') return [];
+        try {
+          return await users.of(id);
+        } catch {
+          return [];
+        }
+      });
       const quota = quotaFetch(kernel.fetch, clock);
       const vaultNames = async (): Promise<ReadonlySet<string>> =>
         new Set((await needs.vault.names()).map(summary => String(summary.name)));

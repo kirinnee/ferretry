@@ -1665,7 +1665,13 @@ async function doctorLines(
     for (const check of record.manifest.doctor ?? []) {
       const run = runs[check];
       if (run === undefined) {
-        lines.push({ plugin: id, check, state: 'fail', detail: `The check ${check} has no implementation.` });
+        // Declared and not built yet is a note, never a failure: nothing was found wrong, only nothing was checked.
+        lines.push({
+          plugin: id,
+          check,
+          state: 'warn',
+          detail: `The check ${check} is not built yet in this build, so nothing was checked.`,
+        });
         continue;
       }
       try {
