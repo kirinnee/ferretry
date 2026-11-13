@@ -130,6 +130,61 @@ describe('raising a paste', () => {
   });
 });
 
+const TAKEN_OVER = 'A person has taken over that page, so nothing is pasted into it.';
+
+describe('a paste into a page a person has taken over', () => {
+  const FIELD_RAISE = {
+    target: { kind: 'page', key: 'app' },
+    prompt: 'paste the token',
+    fields: [{ id: 'pass', sensitivity: 'secret', element: { kind: 'selector', selector: '#password' } }],
+    submit: 'owner-default',
+    source: { kind: 'sealed', name: 'vercel' },
+  } satisfies InputRaise;
+
+  it('should refuse the raise while a person holds the page, raising no card and opening no copy', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    w.state.pasteRefusal = TAKEN_OVER;
+
+    const error = await refusal(w.service.raise(SESSION_ID, FIELD_RAISE));
+
+    should(error.code).equal('conflict');
+    should(error.message).equal(TAKEN_OVER);
+    should(w.cards).eql([]);
+    should(w.writes).eql([]);
+  });
+
+  it('should refuse a pending card when a takeover lands before the owner allows it, typing nothing', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    w.state.pasteRefusal = TAKEN_OVER;
+
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(error.code).equal('conflict');
+    should(error.message).equal(TAKEN_OVER);
+    should(w.writes).eql([]);
+    should(w.used).eql([]);
+    should(w.events.at(-1)).match({ state: 'refused', reason: 'taken_over' });
+    should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql(COPY_VALUE);
+  });
+
+  it('should refuse a rule’s unasked paste the same way: the card stays refused, the rule is given back', async () => {
+    const w = world({ withSealed: true, withRules: true, facts: githubPageFacts() });
+    w.copy();
+    w.state.ruleId = 'rule-1';
+    w.state.pasteRefusal = TAKEN_OVER;
+
+    const error = await refusal(w.service.raise(SESSION_ID, FIELD_RAISE));
+
+    should(error.code).equal('conflict');
+    should(w.ruleLog.reserved).eql([]);
+    should(w.writes).eql([]);
+  });
+});
+
 describe('allowing a paste', () => {
   it('should type the copy once when the owner allows it, count the use, and tell the agent it was pasted', async () => {
     const w = world({ withSealed: true, facts: VERCEL });
@@ -333,6 +388,24 @@ describe('a paste a rule approved in advance', () => {
     should(echoing.ruleLog.reserved).eql([]);
     should(replacing.ruleLog.reserved).eql([]);
     should(fresh.ruleLog.reserved).have.length(1);
+  });
+
+  it('should never reserve a rule for a copy whose exposure is not known clean: the owner is asked', async () => {
+    const unknown = world({ withSealed: true, withRules: true, facts: { ...VERCEL, echo: 'off' } });
+    unknown.copy({ exposure: { transcript: 'unknown' } });
+    const pageRead = world({ withSealed: true, withRules: true, facts: { ...VERCEL, echo: 'off' } });
+    pageRead.copy({ exposure: { transcript: 'clean', pageReadBeforeCapture: true } });
+    const clean = world({ withSealed: true, withRules: true, facts: { ...VERCEL, echo: 'off' } });
+    clean.copy({ exposure: { transcript: 'clean', pageReadBeforeCapture: false } });
+    for (const each of [unknown, pageRead, clean]) each.state.ruleId = 'rule-1';
+
+    await unknown.service.raise(SESSION_ID, PASTE_RAISE);
+    await pageRead.service.raise(SESSION_ID, PASTE_RAISE);
+    await clean.service.raise(SESSION_ID, PASTE_RAISE);
+
+    should(unknown.ruleLog.reserved).eql([]);
+    should(pageRead.ruleLog.reserved).eql([]);
+    should(clean.ruleLog.reserved).have.length(1);
   });
 
   it('should leave a paste into a page to the owner unless the card would be green for every field', async () => {

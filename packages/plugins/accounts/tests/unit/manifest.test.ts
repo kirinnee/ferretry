@@ -41,15 +41,22 @@ describe('accounts manifest', () => {
       }
     }
   });
-  test('M2 lists only the one agent tool that is built (account_hint), none showing a value; the six unbuilt are not offered to agents', () => {
-    expect(manifest.actions.agentTools.map(entry => entry.name)).toEqual(['account_hint']);
+  test('lists the agent tools that are built (account_hint and the four secure-copy tools), none showing a value; the two unbuilt are not offered to agents', () => {
+    expect(manifest.actions.agentTools.map(entry => entry.name)).toEqual([
+      'account_hint',
+      'secure_copy',
+      'secure_list',
+      'secure_discard',
+      'secure_paste',
+    ]);
     for (const entry of manifest.actions.agentTools) expect(entry.guard).not.toBe('secrets');
   });
-  test('needs the Vault, its sealed documents and Asks, and takes the phone-approval, sign-in-approval and four step-up stage hooks', () => {
+  test('needs the Vault, its sealed documents and Asks, and takes the phone-approval, secure-copy, sign-in-approval and four step-up stage hooks', () => {
     expect(Object.keys(manifest.needs ?? {}).sort()).toEqual(['asks', 'gate', 'sealed', 'vault']);
     expect(manifest.hooks.takes.map(take => `${take.hook.name}:${take.key}`)).toEqual([
       'redaction.sources:source',
       'input.phone-approval:phone',
+      'input.secure-copy:copy',
       'ask.sources:sign-in-approval',
       'step-up.stages:add-2fa-key',
       'step-up.stages:approve-task-plan',

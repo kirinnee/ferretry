@@ -52,7 +52,9 @@ const needsWords = (request: InputRequestView): string => {
 
 /** `!A7 · Hadi needs a password` — the ask reference first, because it is how the owner names the card. */
 export const titleWords = (request: InputRequestView, agentName: string): string =>
-  `!${request.agendaItemId} · ${agentName} needs ${needsWords(request)}`;
+  request.source === undefined
+    ? `!${request.agendaItemId} · ${agentName} needs ${needsWords(request)}`
+    : `!${request.agendaItemId} · ${agentName} wants to paste a sealed value`;
 
 /** Where a value goes, as the owner writes it: `%terminal:dev`, `%browser:app`, or "the secret NAME". */
 export const targetRef = (request: InputRequestView): string =>
@@ -168,6 +170,41 @@ export const typedBody = ({ request, fields, values, submit, deliveryId }: Typed
     },
   };
 };
+
+// ─── a paste of a secure copy (docs/secure-copy.md) ───────────────────────────────────────────────────────────────────
+
+/** What allowing a paste sends: no value, only that the owner allows the copy the REQUEST names. */
+export const sealedBody = (request: InputRequestView, submit: boolean, deliveryId: string): BuiltBody =>
+  request.observedDigest === undefined
+    ? { ok: false, problem: REOBSERVING }
+    : {
+        ok: true,
+        body: { deliveryId, observedDigest: request.observedDigest, sealed: true, submit: enterFor(request, submit) },
+      };
+
+/** "sealed:vercel_token": the handle a paste card pastes (where it came from is a row of its own). */
+export const pastedWords = (request: InputRequestView): string | undefined =>
+  request.source === undefined ? undefined : `sealed:${request.source.name}`;
+
+/** The two ends of a paste card: where its copy came from, and what the daemon saw reading the destination. */
+export function pasteRoute(request: InputRequestView): { readonly from: string; readonly to: string } | undefined {
+  const source = request.source;
+  if (source === undefined) return undefined;
+  const from =
+    source.from.kind === 'command'
+      ? `${source.from.path ?? source.from.program ?? 'a command'} (what it printed)`
+      : `${source.from.origin ?? 'a page'}${source.from.kind === 'clipboard' ? ' (its clipboard)' : ''}`;
+  const facts = request.observed;
+  const to =
+    facts === undefined
+      ? targetRef(request)
+      : facts.kind === 'terminal'
+        ? `${facts.foreground.comm} in %terminal:${request.target.key}`
+        : facts.kind === 'secret'
+          ? `the secret ${facts.name}${facts.exists ? ' (replacing its value)' : ' (new)'}`
+          : `a field on ${facts.origin}`;
+  return { from, to };
+}
 
 // ─── a failed Send, in words ──────────────────────────────────────────────────────────────────────────────────────────
 

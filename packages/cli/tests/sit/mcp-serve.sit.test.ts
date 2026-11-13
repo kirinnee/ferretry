@@ -113,7 +113,8 @@ describe('fy mcp serve (SIT)', () => {
     const names = (byId(2).result.tools as { name: string }[]).map(tool => tool.name);
     for (const name of ['terminal_open', 'instructions', 'card_progress', 'config_read'])
       should(names).containEql(name);
-    for (const name of ['secure_copy', 'task_plan', 'account_propose']) should(names).not.containEql(name);
+    for (const name of ['secure_copy', 'secure_list', 'secure_discard', 'secure_paste']) should(names).containEql(name);
+    for (const name of ['task_plan', 'account_propose']) should(names).not.containEql(name);
     should(byId(3).result).match({ content: [{ type: 'text', text: 'Open: %terminal:dev' }] });
 
     const call = seen.find(request => request.path === '/v1/agent/tools');

@@ -1108,7 +1108,7 @@ const CopyStateSchema = z.enum(['live', 'discarded', 'expired']);
  * EVERYTHING AN AGENT IS EVER TOLD ABOUT A COPY. `length` is in characters; `lines` counts line breaks plus
  * one. A command copy also says how the command ended and what it printed on stderr, masked.
  */
-const CopyMetaSchema = z.strictObject({
+export const CopyMetaSchema = z.strictObject({
   handle: z.string().regex(/^sealed:[a-z][a-z0-9_-]{0,39}$/u),
   name: CopyNameSchema,
   from: CopyOriginSchema,

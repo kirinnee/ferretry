@@ -441,6 +441,30 @@ export class BrowserTools {
   }
 
   /**
+   * The page a SECURE COPY reads from or pastes into, cleared exactly as `pageFor` clears an agent's page tool (the
+   * Browsers switch, the ferret's own page, nobody holding it), with the check the copy repeats INSIDE the page's queue: a
+   * takeover that lands while the copy waits its turn still refuses it.
+   */
+  async copyPageFor(
+    sessionId: string,
+    key: string,
+  ): Promise<{ readonly surface: ResolvedSurface; readonly guard: BrowserActGuard }> {
+    const caller: ToolCaller = { kind: 'agent', sessionId };
+    const surface = await this.pageFor(caller, key);
+    return { surface, guard: async () => await this.assertFree(sessionId, surface) };
+  }
+
+  /** Whether a person holds this ferret's page `key` now. A page that is not found is held: nothing is pasted there. */
+  async isTakenOver(sessionId: string, key: string): Promise<boolean> {
+    try {
+      const surface = await this.resolve(sessionId, key);
+      return (await this.ports.control.takeoverOf(sessionId, surface)) !== undefined;
+    } catch {
+      return true;
+    }
+  }
+
+  /**
    * One page input act (type, fill a form) in the page's own queue, with the takeover check repeated there. The page
    * tools run it INSIDE `kernel.act` on the page's hold target, so nothing here asks a hold again. What it answers is
    * what the browser saw the act do, for who the page signs in only: never shown to the caller.

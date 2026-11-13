@@ -12,9 +12,16 @@ lets the agent move the value **by name**:
 4. To use it, the agent pastes the handle into a destination. A paste always needs the owner's approval,
    unless the owner approved that route in advance.
 
-The wire contract is `packages/protocol/src/lib/secure-copy.ts`. This page says what it means and what it
-does not promise. It extends [input requests](input-requests.md) (a paste **is** an input request whose
-value comes from a handle) and [secrets](secrets.md) ("use, never read").
+The wire contract is `packages/plugins/accounts/contract/routes/secure-copy.ts`. This page says what it means and what it
+does not promise.
+
+> **State on 5.0 (unit 1: wiring and v4 parity).** Capturing a command's stdout or a page element, the masking, `secure_copy` /
+> `secure_list` / `secure_discard` / `secure_paste`, pasting into a terminal, a page field or the secret store, the owner's rules
+> and the app's **Allow paste** card are all wired. **Unit 2 is next, and is not built:** clipboard capture, refusing a read,
+> picture or `browser.eval` of the source page while a value lives, withholding a screenshot of another page that shows it,
+> masking what a terminal's own scrollback already drew, and `--stdin` / `--secret` on the CLI. Each place below says so where it
+> matters. The [phase table](#phases) is the one list. It extends [input requests](input-requests.md) (a paste **is** an input request whose
+> value comes from a handle) and [secrets](secrets.md) ("use, never read").
 
 ## What the agent is told
 
@@ -38,11 +45,11 @@ a field for the value; a protocol test walks every schema to keep it that way.
 
 ## Capturing
 
-| Source      | What the daemon does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | State |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
-| `command`   | Runs `argv` with **no shell**, in the session's folder (or `cwd`), through the secret store's child runner: an allowlisted environment (no admin token, none of the daemon's own secrets), stdin closed, a timeout (30 s, 60 s at most) and a byte cap. Stdout, trimmed unless `trim: false`, is the value.                                                                                                                                                                                                                                                                                                                                          | live  |
-| `browser`   | Reads one element of a page the agent opened or was handed (not one taken over), by `ref` or `selector`, in the page's own queue: its text, a field's value or one attribute. White space around it is dropped. Its origin is the FRAME's the element is in, and the browser names the document it was read from (a page that navigated mid-read copies nothing). Inside the queue it is checked like a page read first (a takeover, a pending value, the owner's hold refuse it), and masked and held before the queue moves on. A field's value, or the text of an element anyone may edit (`contenteditable`), is `editable`: no rule matches it. | live  |
-| `clipboard` | Reads the agent browser's clipboard for that page's origin, after the agent pressed the page's own Copy button. Never this computer's system clipboard, so only in a headless browser.                                                                                                                                                                                                                                                                                                                                                                                                                                                               | SC3c  |
+| Source      | What the daemon does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | State |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| `command`   | Runs `argv` with **no shell**, in the session's folder (or `cwd`), through the **Vault's** child runner (`VaultApi.captureCommand`, Accounts alone): an allowlisted environment (no admin token, none of the daemon's own secrets), stdin closed, a timeout (30 s, 60 s at most) and a byte cap. Stdout, trimmed unless `trim: false`, is the value. It needs the owner's Terminals switch. **GAP:** the runner does not locate the program on disk yet, so a copy records no `from.path` and **no rule matches a command copy**: every paste of one asks the owner.                                                                                                                                                                                                                                                                                                                                                                                                                                       | live  |
+| `browser`   | Reads one element of a page the agent opened or was handed (not one taken over), by `ref` or `selector`, in the page's own queue: its text, a field's value or one attribute. White space around it is dropped. Its origin is the FRAME's the element is in, and the browser names the document it was read from (a page that navigated mid-read copies nothing). It goes through Browsers' own checks, which Browsers repeats **inside the page's queue** right before the read: the "What agents may control › Browsers" switch, a page of the ferret's own (opened or handed, or a popup of those) and **nobody holding it** (a takeover refuses it as `taken_over`, even one that lands while the copy waits its turn). The value is masked and held before the queue moves on. **Next (unit 2):** the page read's other in-queue checks (a pending input value, the owner's hold). A field's value, or the text of an element anyone may edit (`contenteditable`), is `editable`: no rule matches it. | live  |
+| `clipboard` | **Next (unit 2), not built:** a capture of this kind answers `unavailable`. It will read the agent browser's clipboard for that page's origin, after the agent pressed the page's own Copy button. Never this computer's system clipboard, so only in a headless browser.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | SC3c  |
 
 A capture is refused, and nothing is held, when the command fails, times out, prints nothing, prints fewer
 than 4 characters (too short to mask without masking it everywhere by chance), or prints more than 16 KiB on
@@ -81,15 +88,12 @@ run the 10 minutes from then. That masks it in:
   to mask on its own (a list of recovery codes, a key's lines), and each escaped as a JSON or YAML string would. A
   page result passes the mask once more as it leaves, so a read that ran while a copy sealed is masked too.
 
-- **The page a copy was read from is not pictured** while it still shows that document: `browser.screenshot`,
-  `browser.pdf` and `browser.highlight` are refused there (no mask can be drawn on pixels), through the same page
-  gate as the input bridge's holds, checked before the act, inside the page's queue and after it. Its text stays
-  readable, masked as `[sealed:<name>]`, so the agent can still find "Done" by its ref. Navigating away (or the
-  copy's mask ending) lifts it. A page whose document cannot be told is treated as still showing it.
-- A screenshot of ANOTHER page that shows a held value is the next phase (SC3c): it will be **withheld**, not
-  pixel-masked. **GAP until then:** a page can draw the value where masking cannot see it (a canvas, an image),
-  another page that shows it can be pictured, and reloading the source page (a new document) lifts its hold while
-  it may show the value again.
+- **The page a copy was read from is NOT yet kept out of pictures (next, unit 2).** The records exist (`PageCopyRecords` holds
+  each copy's page by document, ends with the copy's mask, and a navigation lifts it), but nothing asks them before a
+  `browser.screenshot`, `browser.pdf` or `browser.highlight` yet, so those still work on the source page. Its text is
+  readable, masked as `[sealed:<name>]`, so the agent can still find "Done" by its ref. **GAP until unit 2:** a picture of the
+  source page, or of another page that shows the value, can show it, and so can a page that draws it where masking cannot see
+  it (a canvas, an image). A screenshot of another page that shows a held value will be **withheld**, not pixel-masked.
 - **GAP: page scripts.** With scripts on, the agent can write any text into a page with `browser.eval`, so a rule
   for a page's origin trusts what that page shows, which the agent may have put there. A field's value is never
   matched by a rule for that reason, nor editable text; other text is, so keep page scripts off where a rule names a
@@ -102,11 +106,13 @@ Masking cannot take back what the agent already read. So a capture says, honestl
 - **`exposure.transcript`**: the daemon searches the end (32 MiB) of the session's own transcript file for
   the value, as it is and as JSON escapes it. `found` means it is in the agent's context and **is not
   protected**: the agent is told so in plain words and should tell the owner to rotate it. `clean` means
-  it was not found in what was read; `unknown` means the transcript could not be read.
+  it was not found in what was read; `unknown` means the transcript could not be read. **GAP on 5.0:** Ferrets publishes no
+  transcript FILE to search, so every capture answers `unknown`, never `clean`; and `unknown` is treated as exposed: **no rule
+  pastes it unasked** (the owner is asked on a card), and a `unknown` copy is never green.
 - **`exposure.pageReadBeforeCapture`**: the agent read, screenshotted or evaluated that very document of the
-  page before the copy, so the value may be in its context already. The daemon records the document INSIDE the
-  page's queue, before each such act (whether it then succeeds or not), and the copy asks after its own read, so
-  a read queued ahead of the copy counts.
+  page before the copy, so the value may be in its context already. **Next (unit 2):** recording each such act inside the
+  page's queue. **Until then it is not recorded, so a page copy always says `true`: the agent MAY have read the page** (the
+  conservative answer, and the one under which no rule pastes it unasked).
 
 The agent instruction teaches the rule that makes this work: **capture before you read**.
 
@@ -139,7 +145,13 @@ value comes from the copy (`InputRaise.source`), so the card, the daemon-observe
   challenge showing. Anything the card would flag waits for the owner.
   **GAP:** once the page's hold ends, a page script (`browser.eval`, with scripts on) can read the field's value,
   so a page paste shares the value with whatever the page runs; a rule for a page is that trust, given ahead.
-- **Audit**: `input.delivered` with `source: sealed` and the copy's name, never the value.
+- **A page a person has taken over takes no paste.** `secure_paste` clears the page as a browser tool would (the switch, the
+  ferret's own page, nobody holding it). The Vault asks again at the raise and **again right before the write**, through the
+  `input.secure-copy` hook Accounts provides: a paste card that is waiting when a person takes the page over ends `refused`
+  (`taken_over`), types nothing and never opens the copy, so the paste is refused whether the owner or a rule would have
+  allowed it. After a handback the ferret raises it again.
+- **Audit**: `input.delivered` with `source: sealed` and the copy's name, never the value. Each tool call is one `agent.tool`
+  record with the copy's length, the transcript answer, the program's base name and which route (never the value).
 
 ### Into the secret store
 
@@ -220,15 +232,16 @@ profile on`) is listed for every paired device under Settings › Secure copy �
 - **Only where typing is hidden.** Nobody sees the card of a pre-approved paste, so a rule pastes unasked only
   into a terminal with echo off (or a page's password field). Anywhere the value would show on screen, the card
   waits for the owner even under a matching rule.
-- **Never a copy the ferret saw.** A copy whose value was already in the ferret's transcript is not protected,
-  so its paste always waits for the owner, whose card says so.
+- **Never a copy the ferret saw, or may have.** A copy whose value was in the ferret's transcript is not protected, and one
+  whose transcript could not be searched (`unknown`) or whose page the ferret read first (`pageReadBeforeCapture`) may be, so
+  its paste always waits for the owner; the card says so for a copy it was `found` in.
 - **A program run by its path never matches.** A rule names a bare program (`gh`), the one the daemon's PATH
   finds. A copy captured from `./gh` or `/tmp/x/gh` keeps that path as its source, because it may be a file the
   ferret made to print a value of its choosing, so no rule matches it and the owner is asked.
-- **The card names the file that printed it.** The child runner finds the program once, on the command's own
-  PATH, runs that very file, and the copy records its path (`from.path`), so the card, `fy input answer` and
-  `fy copy ls` show WHICH `gh` printed the value: `/usr/bin/gh`, or one in `~/.local/bin` the ferret could
-  have written. A program given by a path is walked on the disk itself, every `..` and symlink as the kernel takes
+- **The card names the file that printed it (GAP on 5.0: not yet).** The design: the child runner finds the program once, on
+  the command's own PATH, runs that very file, and the copy records its path (`from.path`), so the card, `fy input answer` and
+  `fy copy ls` show WHICH `gh` printed the value. The Vault's runner locates no program yet, so a command copy has no path and
+  matches no rule; what follows describes the check the rule makes once a path exists. A program given by a path is walked on the disk itself, every `..` and symlink as the kernel takes
   them, so neither a symlinked folder nor a link inside the path can point it at another file. A rule matches the
   bare name only for a program the daemon found AND that this account cannot change. It is `replaceable` (and every
   paste of it asks the owner, whose card shows the path) when any part of its path, or of the real file behind it,
@@ -505,12 +518,12 @@ Settings › Secure copy › "Paste rules may target programs in my own profile"
 
 ## Phases
 
-| Phase | What                                                                                                 | State       |
-| ----- | ---------------------------------------------------------------------------------------------------- | ----------- |
-| SC1   | This contract, the in-memory store, command capture, masking, exposure check, `secure_*` agent tools | done        |
-| SC2a  | Paste to a terminal prompt, pre-approval rules and the plan card, `fy copy`, Allow on the input card | done        |
-| SC2b  | Paste to the secret store, with the exact-NAME rule                                                  | done        |
-| SC3a  | Paste to a field on a page; the card names the file a command copy came from                         | done        |
-| SC3b  | Copy from a page element; the source page is not pictured; `pageReadBeforeCapture`                   | this change |
-| SC3c  | Clipboard capture (headless only); another page showing a held value is not pictured                 | later       |
-| SC4   | The app's paste and plan cards, Settings, and the agent instruction                                  | later       |
+| Phase | What                                                                                                                                         | State on 5.0                                                      |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| SC1   | The contract, the in-memory store, command capture, masking, the exposure check (transcript `unknown`), `secure_*` agent tools               | **unit 1: wired**                                                 |
+| SC2a  | Paste to a terminal prompt, pre-approval rules, `fy copy`, **Allow paste** on the input card                                                 | **unit 1: wired** (rules never match a command copy: no path yet) |
+| SC2b  | Paste to the secret store, with the exact-NAME rule                                                                                          | **unit 1: wired**                                                 |
+| SC3a  | Paste to a field on a page; a page a person has taken over takes no paste                                                                    | **unit 1: wired**                                                 |
+| SC3b  | Copy from a page element, with takeover refused in the queue; `pageReadBeforeCapture` (always `true` until reads are recorded)               | **unit 1: wired**; recording and picture-refusal **next**         |
+| SC3c  | Clipboard capture (headless only); `browser.eval` / read / screenshot guards while a value lives; screenshot withholding; scrollback masking | **next (unit 2)**                                                 |
+| SC4   | The settings screen, the agent instruction, `--stdin` / `--secret` on the CLI; a transcript file for the exposure check                      | **next (unit 2)**                                                 |

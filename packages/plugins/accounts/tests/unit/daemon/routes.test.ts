@@ -166,8 +166,13 @@ describe('the account routes through the kernel', () => {
     should(removed.json<{ defaults: { sites?: unknown } }>().defaults.sites ?? {}).eql({});
   });
 
-  it('S92 should refuse a seed while no device holds a passkey, and offer no tool that is not built (M2)', async () => {
-    const h = await host();
+  it('S92 should refuse a seed while no device holds a passkey, and offer the secure-copy tools now built but not the two unbuilt (M2)', async () => {
+    const h = await host(
+      undefined,
+      new StandInAdmission(request =>
+        request.arrival.kind === 'local' && request.arrival.privileged ? ferretStanding(F1) : ownerStanding(),
+      ),
+    );
     await h.request('PUT', '/v1/accounts/GITHUB', { body: { label: 'GitHub' } });
     const seed = await h.request('POST', '/v1/accounts/GITHUB/factors/seed', {
       body: { padded: padInputValue(SEED), totpAcknowledged: true },
@@ -175,10 +180,11 @@ describe('the account routes through the kernel', () => {
     should(seed.status).equal(409);
     should(seed.json<{ code: string }>().code).equal('passkey_required');
     should((await h.request('GET', '/v1/accounts/look-alike')).json()).match({ v: 1, groups: [] });
-    // A tool that is not built is not offered at all (M2): the six wait for after merge, so a call finds no such tool.
-    await h.tool('secure_list', {}, { as: ferret('F1') }).then(
-      () => should.fail(undefined, undefined, 'secure_list is offered'),
-      error => should(String(error)).containEql('no agent tool secure_list'),
+    // The secure-copy tools are built (a ferret with no copies is told so); a tool that is not built is not offered at all (M2).
+    should(await h.tool('secure_list', {}, { as: ferret('F1') })).match({ text: 'This session holds no copies.' });
+    await h.tool('task_plan', {}, { as: ferret('F1') }).then(
+      () => should.fail(undefined, undefined, 'task_plan is offered'),
+      error => should(String(error)).containEql('no agent tool task_plan'),
     );
   });
 

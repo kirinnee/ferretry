@@ -5,6 +5,7 @@
 import { defineEvent, definePort, type FerretId } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { BrowserPageIdSchema, type BrowserStateView, type SurfaceNameSchema } from './wire.ts';
+import type { BrowserElementTarget } from './wire/target.ts';
 
 export interface BrowserPageRef {
   readonly id: z.infer<typeof BrowserPageIdSchema>;
@@ -27,7 +28,70 @@ export interface LeftoverBrowsersClosed {
   readonly leftAlone: readonly { readonly pid: number; readonly why: LeftAloneWhy }[];
 }
 
+/** Why a page may not be used for a secure copy right now, as the browser tools word it. */
+export type BrowserCopyRefusalCode = 'taken_over' | 'forbidden' | 'not_found' | 'unavailable';
+
+/**
+ * One element of a page, read for a secure copy in that page's own queue (docs/secure-copy.md, "Capturing"): the value, and
+ * where it was read, or why not. THE VALUE CROSSES THIS SEAM ONCE, here, to the service that seals it; it is never logged and
+ * never in an error. `editable`: the element, or one it sits in, is editable, so its text is whatever was typed there.
+ */
+export type BrowserCopyAnswer =
+  | {
+      readonly ok: true;
+      readonly value: string;
+      /** The page's id, beside the key the agent named it by. */
+      readonly pageId: string;
+      /** `scheme://host[:port]` of the page. */
+      readonly origin: string;
+      /** `scheme://host[:port]` of the frame the element is in: the page's own, or one from another site. */
+      readonly frameOrigin: string;
+      /** The document the value was read from: it changes with every navigation. */
+      readonly navigationId: string;
+      readonly editable?: true;
+    }
+  | { readonly ok: false; readonly reason: 'missing' | 'empty' | 'changed' }
+  | { readonly ok: false; readonly reason: 'refused'; readonly code: BrowserCopyRefusalCode; readonly message: string };
+
+/**
+ * What a copy does INSIDE the page's queue: the owner's checks before the read (given the page's current document; a
+ * refusal throws), and `seal` right after a read that found a value, before the queue moves on, so an act queued behind the
+ * copy already meets the mask.
+ */
+export interface BrowserCopyQueue {
+  readonly guard?: (page: { document(): Promise<string | undefined> }) => Promise<void>;
+  seal(read: Extract<BrowserCopyAnswer, { readonly ok: true }>): void;
+}
+
+/** Whether a ferret may paste into one of its pages, and the key that names it, or why not. */
+export type BrowserPasteTarget =
+  | { readonly ok: true; readonly key: string }
+  | { readonly ok: false; readonly code: BrowserCopyRefusalCode; readonly message: string };
+
+/**
+ * SECURE COPY'S REACH INTO THE AGENT BROWSER (docs/secure-copy.md). Handed to Accounts ALONE (`perNeeder`): no other
+ * plugin's port carries it. Every call checks, before it acts, what a browser tool checks: the Browsers switch, a page of
+ * the ferret's own (opened, handed, or a popup of those) and nobody holding it, and repeats the takeover check inside the
+ * page's queue.
+ */
+export interface BrowsersCopyApi {
+  copyRead(
+    ferret: FerretId,
+    key: string,
+    target: BrowserElementTarget,
+    part: 'text' | 'value' | 'attribute',
+    attribute: string | undefined,
+    queue: BrowserCopyQueue,
+  ): Promise<BrowserCopyAnswer>;
+  /** The page a paste may go to, cleared as a browser tool would, and the key the daemon knows it by. */
+  pasteTarget(ferret: FerretId, key: string): Promise<BrowserPasteTarget>;
+  /** Whether a person holds this page right now (any page not found counts as held: nothing is pasted there). */
+  takenOver(ferret: FerretId, key: string): Promise<boolean>;
+}
+
 export interface BrowsersApi {
+  /** Secure copy's reach (docs/secure-copy.md): present for Accounts only. */
+  readonly copy?: BrowsersCopyApi;
   state(): Promise<BrowserStateView>;
   /**
    * Today's machine.browserPorts fact for Codex sign-in: shared is setting !== 'random' (per-user or explicit).

@@ -11,6 +11,7 @@ import {
   InputAskRefSchema,
   InputHoldsPort,
   InputPhoneApprovals,
+  InputSecureCopies,
   InputRequestFiles,
   InputTargets,
   OutputGuardPort,
@@ -204,7 +205,12 @@ export default definePlugin({
     subscribes: [AsksChanged, FerretsChanged],
   },
   hooks: {
-    offers: [{ hook: InputTargets }, { hook: InputPhoneApprovals }, { hook: RedactionSources }],
+    offers: [
+      { hook: InputTargets },
+      { hook: InputPhoneApprovals },
+      { hook: InputSecureCopies },
+      { hook: RedactionSources },
+    ],
     takes: [{ hook: AskSources, key: 'input', schema: InputAskRefSchema }],
   },
 });

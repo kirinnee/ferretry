@@ -56,5 +56,6 @@ export * from './port.ts';
 export * from './sealed.ts';
 export * from './secret-wire.ts';
 export * from './secrets.ts';
+export * from './secure-copy.ts';
 export * from './store.ts';
 export * from './targets.ts';

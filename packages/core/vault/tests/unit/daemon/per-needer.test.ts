@@ -647,3 +647,32 @@ describe('the phone approval’s reach through the Vault is by name', () => {
     expect(await core.raisePhoneApproval?.(FERRET, ask)).toEqual({ ok: false, error: PHONE_APPROVAL_UNAVAILABLE });
   });
 });
+
+describe('secure copy’s reach through the Vault is by name', () => {
+  const NONE: Permissions = {};
+
+  test('only Accounts (and a core caller) is handed the command runner and the masking registry', async () => {
+    const { of, core } = await world({ accounts: NONE, browsers: NONE, tenant: NONE });
+
+    for (const id of ['browsers', 'tenant']) {
+      expect(of(id).captureCommand).toBeUndefined();
+      expect(of(id).maskCopy).toBeUndefined();
+    }
+    expect(typeof of('accounts').captureCommand).toBe('function');
+    expect(typeof of('accounts').maskCopy?.hold).toBe('function');
+    expect(typeof of('accounts').maskCopy?.retime).toBe('function');
+    expect(typeof core.captureCommand).toBe('function');
+  });
+
+  test('holds a value in the masking registry without handing it back, and lets go of the hold sooner', async () => {
+    const { of } = await world({ accounts: NONE });
+    const registry = of('accounts').maskCopy;
+    if (registry === undefined) throw new Error('Accounts should be handed the masking registry');
+
+    registry.hold('ferret_1' as never, 'FAKE-SC-7f3a91', '[sealed:token]', Date.now() + 60_000);
+    registry.retime('ferret_1' as never, '[sealed:token]', Date.now() + 1_000);
+    registry.retime('ferret_9' as never, '[sealed:nothing]', Date.now());
+
+    expect(Object.keys(registry).sort()).toEqual(['hold', 'retime']);
+  });
+});

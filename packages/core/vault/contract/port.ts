@@ -36,6 +36,25 @@ export interface PageActNote {
   placed(page: ActedPage | undefined): void;
 }
 
+/** What a secure copy runs: no shell, an allowlisted environment, a timeout and a byte cap (`VaultApi.captureCommand`). */
+export interface SecureCopyCommand {
+  readonly command: readonly string[];
+  readonly cwd: string;
+  readonly timeoutMs: number;
+  readonly maxOutputBytes: number;
+}
+
+/** What running it produced. Raw: the caller seals stdout and masks stderr before anybody else sees either. */
+export interface SecureCopyCommandOutcome {
+  readonly outcome: 'exited' | 'timeout' | 'spawn_failed';
+  readonly program?: string;
+  readonly replaceable?: true;
+  readonly exitCode?: number;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly truncated: boolean;
+}
+
 /**
  * The Vault port (§2.2, §3.7): secrets by NAME only. There is no getter, and none may be added (it would delete the
  * feature): `run` executes a command with the values in that child's environment and returns masked output;
@@ -131,6 +150,25 @@ export interface VaultApi {
    * Present only for the plugins whose tools carry the raise; the ferret is the CALLER's credential, never a body.
    */
   raisePhoneApproval?(ferret: FerretId, ask: PhoneApprovalAsk): Promise<Result<PhoneApprovalAgentView, string>>;
+  /**
+   * SECURE COPY (docs/secure-copy.md). Additive, optional and ABSENT for every needer but Accounts: the Vault owns the
+   * child runner and the masking registry, so a copy reaches both only through these two members. An absent member means
+   * no copy is captured (fail closed).
+   *
+   * Runs `command` with NO shell, in `cwd`, with an allowlisted environment (no admin token, none of the daemon's own
+   * secrets), stdin closed, a timeout and a byte cap, and answers its raw output ONCE, to the service that seals it.
+   * Never a log line, never an error message: the caller masks before anyone else sees a byte.
+   */
+  captureCommand?(spec: SecureCopyCommand): Promise<SecureCopyCommandOutcome>;
+  /**
+   * The masking registry (`EphemeralValues`), for a secure copy: from `hold` on, `value` is masked as `marker` in every
+   * read of the ferret's surfaces, the owner's transcript and the journal, until `until` (epoch milliseconds); `retime`
+   * brings the end of every hold of `marker` forward. Neither returns a value.
+   */
+  maskCopy?: {
+    hold(ferret: FerretId, value: string, marker: string, until: number): void;
+    retime(ferret: FerretId, marker: string, until: number): void;
+  };
 }
 
 export const VaultPort = definePort<VaultApi>('vault');

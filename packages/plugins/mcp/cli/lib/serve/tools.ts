@@ -905,14 +905,7 @@ const CARD_TOOLS: readonly McpToolDefinition[] = [
  * the owner's manifest no longer declares them and this list keeps their definitions out of what the server lists, whatever
  * a manifest declares later; the parity test pins both.
  */
-const UNBUILT_TOOLS: ReadonlySet<string> = new Set([
-  'account_propose',
-  'secure_copy',
-  'secure_list',
-  'secure_discard',
-  'secure_paste',
-  'task_plan',
-]);
+const UNBUILT_TOOLS: ReadonlySet<string> = new Set(['account_propose', 'task_plan']);
 
 /** Every tool this server lists, in the order a model reads them: the built ones only. */
 export const MCP_TOOLS: readonly McpToolDefinition[] = [

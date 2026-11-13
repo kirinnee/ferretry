@@ -169,8 +169,14 @@ export class SecureCopyService implements InputSealedPort {
       read.command === undefined
         ? undefined
         : await this.report(read.command, [read.command.stdout, read.value], request.name);
+    // A caller that records which documents the agent has read says so; one that records nothing cannot say the agent did
+    // NOT read this page, so the copy says it MAY have (the conservative answer: no rule pastes it unasked).
     const pageReadBeforeCapture =
-      read.page === undefined ? undefined : (context.seen?.() ?? []).includes(read.page.navigationId);
+      read.page === undefined
+        ? undefined
+        : context.seen === undefined
+          ? true
+          : context.seen().includes(read.page.navigationId);
     const found: readonly ('found' | 'clean' | 'unknown')[] = await Promise.all(
       spellings(read.value).map(async spelling => await this.ports.exposure.transcriptHolds(sessionId, spelling)),
     ).catch(() => ['unknown']);

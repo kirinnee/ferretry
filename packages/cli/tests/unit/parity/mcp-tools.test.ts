@@ -20,7 +20,7 @@ const declared = everyManifest.flatMap(entry => entry.manifest.actions?.agentToo
  * them in its manifest (they are declared again once built), and the CLI lists none of them: an agent is not told to call a
  * tool that answers `is not built yet`.
  */
-const UNBUILT = ['account_propose', 'secure_copy', 'secure_list', 'secure_discard', 'secure_paste', 'task_plan'];
+const UNBUILT = ['account_propose', 'task_plan'];
 
 /**
  * Tools whose manifest declaration carries no zod `input` (their owner parses the call itself), so their row's property
@@ -30,6 +30,10 @@ const UNBUILT = ['account_propose', 'secure_copy', 'secure_list', 'secure_discar
 const NO_MANIFEST_INPUT = [
   'input_wait',
   'account_hint',
+  'secure_copy',
+  'secure_list',
+  'secure_discard',
+  'secure_paste',
   'lessons_suggest',
   'terminal_request_input',
   ...declared.filter(tool => tool.name.startsWith('browser_')).map(tool => tool.name),

@@ -39,6 +39,21 @@ const RiskSchema = z.strictObject({
 });
 export type InputRisk = z.infer<typeof RiskSchema>;
 
+/**
+ * A paste's copy as the owner's card is told it (the request's `source`): the handle's NAME and where the daemon read it.
+ * Tolerant, like the rest of this reader: a member a newer daemon adds is ignored. There is no member for a value.
+ */
+const SealedSourceSchema = z.looseObject({
+  kind: z.literal('sealed'),
+  name: z.string().min(1),
+  from: z.looseObject({
+    kind: z.enum(['browser', 'clipboard', 'command']),
+    origin: z.string().optional(),
+    program: z.string().optional(),
+    path: z.string().optional(),
+  }),
+});
+
 const FieldSchema = z.strictObject({
   id: InputFieldIdSchema,
   label: z.string().min(1),
@@ -60,8 +75,8 @@ export const InputRequestViewSchema = z.looseObject({
   fields: z.array(FieldSchema).min(1).max(INPUT_MAX_FIELDS),
   submit: InputSubmitModeSchema,
   expiresAt: z.string().min(1),
-  /** Present on a paste of a secure copy: there is nothing to type, and this card does not draw the approval. */
-  source: z.unknown().optional(),
+  /** Present on a paste of a secure copy: there is nothing to type, and the owner allows it on this card. */
+  source: SealedSourceSchema.optional(),
   chain: z.string().optional(),
   step: z.number().int().optional(),
   observed: InputTargetFactsSchema.optional(),
@@ -89,6 +104,8 @@ export type InputDeliverAnswer = z.infer<typeof InputDeliverAnswerSchema>;
 export interface InputDeliverBodyView {
   readonly deliveryId: string;
   readonly observedDigest: string;
+  /** The owner allows the copy the REQUEST names: no value, no handle (docs/secure-copy.md). */
+  readonly sealed?: true;
   readonly padded?: string;
   readonly fields?: readonly { readonly field: string; readonly padded: string }[];
   readonly submit: boolean;

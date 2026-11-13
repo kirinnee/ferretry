@@ -28,6 +28,19 @@ export class Tabs {
   dialog: { type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'; message: string } | undefined;
   /** The browser cannot say which document a page shows. */
   documentFails = false;
+  /** What a secure copy's read of one element found (an empty element by default). */
+  copyAnswer:
+    | {
+        readonly ok: true;
+        readonly value: string;
+        readonly origin: string;
+        readonly frameOrigin: string;
+        readonly navigationId: string;
+        readonly editable?: true;
+      }
+    | { readonly ok: false; readonly reason: 'missing' | 'empty' | 'changed' } = { ok: false, reason: 'empty' };
+  /** Held until a test lets go: a page read that takes as long as the test says, so the page's queue stays busy. */
+  readGate: Promise<void> | undefined;
   /** The host the live page reports, when a case sets one. */
   documentHost: string | undefined;
   /** While set, a click does not return: the page's queue is stuck behind it, as it is behind a dialog. */
@@ -83,7 +96,10 @@ export class Tabs {
       return { ...this.acted('type', pageId), ...this.typeAnswer };
     },
     pointer: async (pageId, act) => this.acted(`pointer-${act.action}`, pageId),
-    read: async (pageId, options) => ({ ...this.acted(`read-${options?.mode ?? 'text'}`, pageId), text: 'hello' }),
+    read: async (pageId, options) => {
+      await this.readGate;
+      return { ...this.acted(`read-${options?.mode ?? 'text'}`, pageId), text: 'hello' };
+    },
     screenshot: async pageId => ({ ...this.acted('screenshot', pageId), screenshotBase64: 'iVBOR' }),
     upload: async pageId => this.acted('upload', pageId),
     download: async pageId => ({
@@ -101,7 +117,7 @@ export class Tabs {
     location: async pageId => this.state(pageId),
     copyRead: async pageId => {
       this.calls.push(`copyRead:${pageId}`);
-      return { ok: false, reason: 'empty' };
+      return this.copyAnswer;
     },
     inputDocument: async pageId => {
       this.calls.push(`inputDocument:${pageId}`);

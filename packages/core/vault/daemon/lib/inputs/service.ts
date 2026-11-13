@@ -382,6 +382,8 @@ export class InputRequestService {
       if (raise.source === undefined) return await this.admit(sessionId, raise, raise.target);
       // A paste is always a secret, whatever the agent said: the value is one it must not see.
       const copy = this.describeCopy(sessionId, raise.source.name);
+      const refused = await this.deps.sealed?.refusal?.(sessionId, raise.source.name, raise.target);
+      if (refused !== undefined) throw new InputRequestError('conflict', refused, 'taken_over');
       const secret: InputRaise =
         raise.fields === undefined
           ? { ...raise, sensitivity: 'secret' }
@@ -2480,6 +2482,12 @@ export class InputRequestService {
    * the request: it can never be pasted now. One with a line break or a control character would press keys.
    */
   private async openCopy(held: Held, name: string): Promise<string> {
+    // A person may have taken the page over since the card was raised: nothing is typed, and the card ends.
+    const refused = await this.deps.sealed?.refusal?.(held.request.sessionId, name, held.request.target);
+    if (refused !== undefined) {
+      await this.finish(held, 'refused', 'taken_over', undefined, { closeCard: true, tellAgent: true });
+      throw new InputRequestError('conflict', refused, 'taken_over');
+    }
     const value = this.deps.sealed?.open(held.request.sessionId, name);
     if (value === undefined) {
       await this.finish(held, 'cancelled', 'copy_gone', undefined, { closeCard: true, tellAgent: true });
@@ -3349,7 +3357,9 @@ function pasteRisk(risk: InputRisk | undefined, copy: CopyMeta | undefined): Inp
  * for good), or paste into a page field the card would flag. Each waits for the owner on the card, which says so.
  */
 function ruleMayPaste(copy: CopyMeta, facts: InputTargetFacts, fields: readonly InputRequestField[]): boolean {
-  if (copy.exposure.transcript === 'found') return false;
+  // An exposed value always asks: one the ferret saw, one it MAY have seen (a transcript that could not be read, a page it
+  // read before the copy), and so one nothing can promise is still a secret.
+  if (copy.exposure.transcript !== 'clean' || copy.exposure.pageReadBeforeCapture === true) return false;
   if (facts.kind === 'secret') return !facts.exists;
   // On a page, a rule names the TOP page's origin, so it pastes unasked only where the card would be green for
   // every field: a visible, uncovered password field of that very page (not a frame from another site), on https,

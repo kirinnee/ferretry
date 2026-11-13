@@ -70,7 +70,7 @@ export const PASTE_RAISE: InputRaise = {
   source: { kind: 'sealed', name: 'vercel' },
 };
 
-const copyMeta = (over: Partial<CopyMeta> = {}): CopyMeta => ({
+export const copyMeta = (over: Partial<CopyMeta> = {}): CopyMeta => ({
   handle: 'sealed:vercel',
   name: 'vercel',
   from: { kind: 'command', program: 'vercel', path: '/usr/bin/vercel' },
@@ -129,6 +129,8 @@ export function world(options: WorldOptions = {}) {
     holdsSeq: [] as boolean[],
     keyOfFails: false,
     ruleId: undefined as string | undefined,
+    /** What the secure copy's takeover check says of the target now: a sentence while a person holds the page. */
+    pasteRefusal: undefined as string | undefined,
     journalFails: false,
     agendaFails: false,
     sessionEnded: false,
@@ -299,6 +301,7 @@ export function world(options: WorldOptions = {}) {
             describe: (_session: string, name: string) => copies.get(name)?.meta,
             open: (_session: string, name: string) => copies.get(name)?.value,
             used: (_session: string, name: string) => void used.push({ copy: name }),
+            refusal: async () => state.pasteRefusal,
           },
         }
       : {}),
