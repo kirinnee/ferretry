@@ -76,9 +76,9 @@ export default implementDaemon(manifest, {
     const rollup = new AgendaRollup(asks);
     const clearer = new AgendaAgentClearer(
       {
-        // Ferrets records a role, not "interactive or not": a helper is the ferret nobody chats with.
+        // v4's rule (`config.mode === 'auto'`, the set the app's Agents filter lists): a ferret that is not interactive.
         agentFerrets: async () =>
-          (await ferrets.list()).filter(ferret => ferret.role === 'helper').map(ferret => ferret.id),
+          (await ferrets.list()).filter(ferret => ferret.mode === 'auto').map(ferret => ferret.id),
       },
       asks,
     );

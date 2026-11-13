@@ -137,7 +137,7 @@ describe('the reading verbs', () => {
         messages: [{ role: 'user', text: 'hello' }],
       },
     });
-    await run(verbs.link, []);
+    await run(verbs['link [query...]'], []);
     expect(out.join('')).toContain('3+ turns');
     expect(out.join('')).toContain('(kept by lead)');
     await run(verbs['link preview'], ['codex', 'c1']);

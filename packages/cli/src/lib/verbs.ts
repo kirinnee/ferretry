@@ -121,9 +121,30 @@ const declaredVerbs = (plugin: RegistryEntry): readonly VerbDecl[] => plugin.man
 
 export type Resolution =
   | { readonly kind: 'verb'; readonly entry: VerbEntry; readonly rest: readonly string[] }
-  | { readonly kind: 'unknown'; readonly typed: readonly string[]; readonly nearby: readonly VerbEntry[] };
+  | { readonly kind: 'unknown'; readonly typed: readonly string[]; readonly nearby: readonly VerbEntry[] }
+  /** A known verb that has sub-verbs, followed by a word that is none of them and that the verb takes no arguments for. */
+  | {
+      readonly kind: 'subverb';
+      readonly parent: VerbEntry;
+      readonly word: string;
+      readonly subverbs: readonly VerbEntry[];
+    };
 
-/** Matches the longest run of leading words that names a verb. Words after the run are the verb's arguments. */
+/** Whether a declared verb line names arguments of its own (`voice [text...]`, `show <id>`). */
+const takesArguments = (entry: VerbEntry): boolean => /[<[]/u.test(entry.line);
+
+/** The verbs one word deeper under this one (`agenda open` under `agenda`). */
+const subverbsOf = (table: VerbTable, parent: VerbEntry): readonly VerbEntry[] =>
+  table.entries.filter(
+    candidate =>
+      candidate.words.length > parent.words.length && parent.words.every((word, at) => candidate.words[at] === word),
+  );
+
+/**
+ * Matches the longest run of leading words that names a verb. Words after the run are the verb's arguments, except that
+ * a verb with sub-verbs and no arguments of its own never reads a word after it as one: that word is a sub-verb that does
+ * not exist (`agenda bogus`), and running the parent with it would exit 0 having done nothing it was asked.
+ */
 export function resolveVerb(table: VerbTable, tokens: readonly string[]): Resolution {
   const leading: string[] = [];
   for (const token of tokens) {
@@ -133,7 +154,13 @@ export function resolveVerb(table: VerbTable, tokens: readonly string[]): Resolu
   for (let length = leading.length; length > 0; length -= 1) {
     const key = keyOf(leading.slice(0, length));
     const entry = table.entries.find(candidate => keyOf(candidate.words) === key);
-    if (entry !== undefined) return { kind: 'verb', entry, rest: tokens.slice(length) };
+    if (entry === undefined) continue;
+    const word = tokens[length];
+    if (word !== undefined && !word.startsWith('-') && entry.alias === undefined && !takesArguments(entry)) {
+      const subverbs = subverbsOf(table, entry);
+      if (subverbs.length > 0) return { kind: 'subverb', parent: entry, word, subverbs };
+    }
+    return { kind: 'verb', entry, rest: tokens.slice(length) };
   }
   const first = leading[0];
   const nearby = first === undefined ? [] : table.entries.filter(entry => entry.words[0] === first);

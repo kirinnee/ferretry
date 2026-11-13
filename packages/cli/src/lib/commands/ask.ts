@@ -74,7 +74,9 @@ export function archivedOf(body: unknown): { readonly ferrets: readonly Ferret[]
   const ferrets = answer.sessions.map(entry => {
     const config = (entry as { config?: Record<string, unknown> } | null)?.config;
     if (typeof config?.id !== 'string' || config.id === '') throw shape('the archived ferret list');
-    return { id: config.id, name: typeof config.name === 'string' && config.name !== '' ? config.name : config.id };
+    // The callsign (`teammate`), as the live list's `name` is: `config.name` is the task title.
+    const callsign = [config.teammate, config.name].find(value => typeof value === 'string' && value !== '');
+    return { id: config.id, name: typeof callsign === 'string' ? callsign : config.id };
   });
   return { ferrets, count: answer.count };
 }

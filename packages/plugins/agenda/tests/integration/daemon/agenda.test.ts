@@ -171,19 +171,27 @@ describe('the roll-up and clearing', () => {
     expect((await host.request('GET', '/v1/agenda/open', { query: { limit: '0' }, ...as(owner()) })).status).toBe(400);
   });
 
-  test('clear-agents counts on a dry run, dismisses on a clear, never touches a lead or a card’s ask, and refuses a ferret', async () => {
-    const { host, asks } = await world();
-    await raiseAsk(asks, 'h1', 'e1');
-    await raiseAsk(asks, 'h1', 'e2');
-    await raiseAsk(asks, 'h1', 'e3', { source: 'card' });
-    await raiseAsk(asks, 'f1', 'e4');
+  test('clear-agents counts on a dry run, dismisses on a clear, reaches an auto ferret whatever its role, never an interactive one or a card’s ask, and refuses a ferret', async () => {
+    const { host, asks, ferrets } = await world();
+    // v4's rule is the ferret's mode, not its lineage: an autonomous lead is an agent ferret, a helper with no mode is not.
+    ferrets.add({ id: ferretId('w1'), mode: 'auto' });
+    ferrets.add({ id: ferretId('w2'), mode: 'auto', parent: ferretId('f1') });
+    ferrets.add({ id: ferretId('w3'), mode: 'interactive' });
+    await raiseAsk(asks, 'w1', 'e1');
+    await raiseAsk(asks, 'w1', 'e2');
+    await raiseAsk(asks, 'w1', 'e3', { source: 'card' });
+    await raiseAsk(asks, 'w2', 'e4');
+    await raiseAsk(asks, 'w3', 'e5');
+    await raiseAsk(asks, 'h1', 'e6');
+    await raiseAsk(asks, 'f1', 'e7');
     const dry = await host.request('POST', '/v1/agenda/clear-agents', { body: { dryRun: true }, ...as(owner()) });
-    expect(dry.json()).toEqual({ cleared: 2, ferrets: 1 });
-    expect((await asks.open({ ferret: 'h1' as never })).length).toBe(3);
+    expect(dry.json()).toEqual({ cleared: 3, ferrets: 2 });
+    expect((await asks.open({ ferret: 'w1' as never })).length).toBe(3);
     const done = await host.request('POST', '/v1/agenda/clear-agents', { body: {}, ...as(owner()) });
-    expect(done.json()).toEqual({ cleared: 2, ferrets: 1 });
-    expect((await asks.open({ ferret: 'h1' as never })).map(ask => String(ask.source))).toEqual(['card']);
-    expect((await asks.open({ ferret: 'f1' as never })).length).toBe(1);
+    expect(done.json()).toEqual({ cleared: 3, ferrets: 2 });
+    expect((await asks.open({ ferret: 'w1' as never })).map(ask => String(ask.source))).toEqual(['card']);
+    expect((await asks.open({ ferret: 'w2' as never })).length).toBe(0);
+    for (const kept of ['w3', 'h1', 'f1']) expect((await asks.open({ ferret: kept as never })).length).toBe(1);
     expect(
       (await host.request('POST', '/v1/agenda/clear-agents', { body: {}, ...as({ kind: 'ferret', id: 'f1' }) })).status,
     ).toBe(403);

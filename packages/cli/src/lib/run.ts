@@ -147,6 +147,15 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
     return EXIT.usage;
   }
 
+  if (resolved.kind === 'subverb') {
+    const parent = resolved.parent.words.join(' ');
+    const subs = resolved.subverbs.map(each => `  ${identity.binary} ${each.words.join(' ')}`);
+    io.err(
+      `${identity.binary}: "${resolved.word}" is not a sub-verb of ${parent}; its sub-verbs are:\n${subs.join('\n')}\n`,
+    );
+    return EXIT.usage;
+  }
+
   const { entry } = resolved;
   if (asksForHelp(resolved.rest)) {
     io.out(`${identity.binary} ${entry.words.join(' ')}${entry.summary === undefined ? '' : `: ${entry.summary}`}\n`);
