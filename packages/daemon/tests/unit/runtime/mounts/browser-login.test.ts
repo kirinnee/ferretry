@@ -7,6 +7,7 @@ import {
   type BrowserPageSnapshot,
   type BrowserStatus,
   BrowserStatusSchema,
+  PAIRING_FRAGMENT_HIDDEN,
 } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
@@ -20,7 +21,7 @@ import {
   browserSocketRoutes,
 } from '../../../../src/lib/runtime/mounts/browser-login.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { BrokenBrowserLogin, CREDENTIALS, FakeBrowserLogin, GRANTED, human } from './support.ts';
+import { agentIn, BrokenBrowserLogin, CREDENTIALS, FakeBrowserLogin, GRANTED, human } from './support.ts';
 
 /**
  * The human browser-login route, over a window with no host behind it.
@@ -385,6 +386,92 @@ describe('the mounted per-session browser', () => {
 
     // Assert
     should([read.status, acted.status]).deepEqual([500, 500]);
+  });
+});
+
+/**
+ * A page that shows a pairing link, on the committed FAKE code (`HARNESS_INVITE`) — never a minted one.
+ *
+ * `fy browser` is an agent's other way to a page's address: its status, read and navigation answer from THESE routes,
+ * which do not pass `AgentToolService`, so they hide a pairing fragment from an agent themselves (docs/pairing.md).
+ */
+const FAKE_CODE = '7F3K-Q2ND';
+const PAIRING_LINK = `https://ferretry.pages.dev/pair#v1;note=(a)'b;code=${FAKE_CODE};fp=fy_daemon_${'a'.repeat(43)}`;
+
+class OnPairingPage extends FakeBrowser {
+  constructor(private readonly refuses = false) {
+    super();
+  }
+  override async status(sessionId: string): Promise<BrowserStatus> {
+    if (this.refuses) throw new BrowserSessionError('upstream_failed', `navigation to ${PAIRING_LINK} failed`);
+    return { ...RUNNING, sessionId, url: PAIRING_LINK, pages: [{ ...PAGE, url: PAIRING_LINK }] } as BrowserStatus;
+  }
+  override async act(sessionId: string, action: BrowserAction): Promise<BrowserActionResult> {
+    const status = await this.status(sessionId);
+    return {
+      status: status as Extract<BrowserActionResult, { result: unknown }>['status'],
+      result: { ...SNAPSHOT, url: PAIRING_LINK, text: `${action.action} ${PAIRING_LINK}` },
+    };
+  }
+}
+
+describe('the mounted per-session browser, for an agent', () => {
+  const asAgent = { ...agentIn('s1'), 'content-type': 'application/json' };
+  const read = (browser: FakeBrowser, headers: Record<string, string>) =>
+    served(browser).dispatch(request({ path: '/v1/sessions/s1/browser', headers }));
+  const open = (browser: FakeBrowser, headers: Record<string, string>) =>
+    served(browser).dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/sessions/s1/browser',
+        headers,
+        body: JSON.stringify({ action: 'open', url: PAIRING_LINK }),
+      }),
+    );
+
+  it('should hide a pairing fragment from the page status an agent reads', async () => {
+    // Act
+    const response = await read(new OnPairingPage(), asAgent);
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.body).not.containEql(FAKE_CODE);
+    should(response.body).containEql(PAIRING_FRAGMENT_HIDDEN);
+    should(BrowserStatusSchema.parse(JSON.parse(response.body))).have.property('activePageId', 'p1');
+  });
+
+  it('should hide it from the address and text a navigation or an act answers with', async () => {
+    // Act
+    const response = await open(new OnPairingPage(), asAgent);
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.body).not.containEql(FAKE_CODE);
+    should(response.body).containEql(PAIRING_FRAGMENT_HIDDEN);
+    should(response.body).containEql('"text"');
+  });
+
+  it('should hide it from a refusal that names the page address', async () => {
+    // Act
+    const status = await read(new OnPairingPage(true), asAgent);
+    const acted = await open(new OnPairingPage(true), asAgent);
+
+    // Assert
+    for (const response of [status, acted]) {
+      should(response.status).equal(502);
+      should(response.body).not.containEql(FAKE_CODE);
+      should(response.body).containEql(PAIRING_FRAGMENT_HIDDEN);
+    }
+  });
+
+  it('should leave the owner’s own view of the same page whole', async () => {
+    // Act
+    const status = await read(new OnPairingPage(), human);
+    const acted = await open(new OnPairingPage(), { ...human, 'content-type': 'application/json' });
+
+    // Assert
+    should(status.body).containEql(FAKE_CODE);
+    should(acted.body).containEql(FAKE_CODE);
   });
 });
 

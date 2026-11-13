@@ -1,4 +1,10 @@
-import { type BrowserActionResult, BrowserActionSchema, BrowserLoginActionSchema } from '@ferretry/protocol';
+import {
+  BrowserActionSchema,
+  BrowserLoginActionSchema,
+  hidePairingFragments,
+  hidePairingFragmentsIn,
+} from '@ferretry/protocol';
+import { isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiResponse } from '../../api/http.ts';
@@ -97,7 +103,19 @@ async function act(window: BrowserLoginLifecycle, context: RouteContext): Promis
   });
 }
 
-function browserFailure(error: unknown): never {
+/**
+ * WHAT AN AGENT MAY READ OF A PAGE'S ADDRESS (docs/pairing.md, "Never show it to an agent"). `fy browser` — status, read,
+ * navigation — answers from these routes, not from `AgentToolService`, so the one function that hides a pairing link's
+ * fragment (`hidePairingFragments`) is applied here too, to every body and every refusal an AGENT receives. The owner's
+ * own view of their browser (the PWA's page list and address bar, a person's `fy`) is the same bytes as before: the
+ * caller predicate is the boundary's one answer to "agent or person" (`callerIsAgent`).
+ */
+const projectedFor = (context: RouteContext) =>
+  isAgentCaller(context)
+    ? { body: <T>(value: T): T => hidePairingFragmentsIn(value), text: hidePairingFragments }
+    : { body: <T>(value: T): T => value, text: (text: string): string => text };
+
+function browserFailure(error: unknown, context: RouteContext): never {
   if (!(error instanceof BrowserSessionError)) throw error;
   const status = (
     {
@@ -109,7 +127,7 @@ function browserFailure(error: unknown): never {
       upstream_failed: 502,
     } as const
   )[error.code];
-  throw new ApiError(status, error.message, error.code);
+  throw new ApiError(status, projectedFor(context).text(error.message), error.code);
 }
 
 function sessionId(context: RouteContext): string {
@@ -120,13 +138,14 @@ function sessionId(context: RouteContext): string {
 }
 
 async function browserStatus(browser: BrowserSubsystem, context: RouteContext): Promise<ApiResponse> {
-  return jsonResponse(await browser.status(sessionId(context)).catch(browserFailure));
+  const status = await browser.status(sessionId(context)).catch(error => browserFailure(error, context));
+  return jsonResponse(projectedFor(context).body(status));
 }
 
 async function browserAction(browser: BrowserSubsystem, context: RouteContext): Promise<ApiResponse> {
   const action = await parseBody(context.request, BrowserActionSchema);
-  const result: BrowserActionResult = await browser.act(sessionId(context), action).catch(browserFailure);
-  return jsonResponse(result);
+  const result = await browser.act(sessionId(context), action).catch(error => browserFailure(error, context));
+  return jsonResponse(projectedFor(context).body(result));
 }
 
 /** The real per-session browser routes. The projection is BrowserStatus, which carries the active tab
@@ -214,7 +233,7 @@ export function browserSocketRoutes(browser: BrowserMountedSubsystem): readonly 
       capability: { capability: 'browser', axis: 'use' },
       accept: async context => {
         const id = sessionId(context);
-        await browser.status(id).catch(browserFailure);
+        await browser.status(id).catch(error => browserFailure(error, context));
         return async downstream => await browser.stream(id, downstream);
       },
     },

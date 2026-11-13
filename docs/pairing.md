@@ -360,6 +360,16 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
   `fy pair` that may be showing it to a browser right now.
 - **Never screenshot a real one.** Committed captures use a fixed fake code (`HARNESS_INVITE`). A QR is a
   machine-readable label, not obfuscation, so a PNG of a real code in a repository is a leaked credential.
+- **Never show it to an agent.** Every browser result an agent can read passes one function, `hidePairingFragments`
+  (`hidePairingFragmentsIn` for a whole JSON body) in `@ferretry/protocol`, which turns a `#v1;…` fragment into
+  `#<pairing code hidden>`. That is the MCP `browser_*` tools (`AgentToolService`: address headers, page and tab lists,
+  navigation and wait echoes, network and console entries, errors) **and** `fy browser` — its status, read and navigation
+  answer from `GET`/`POST /v1/sessions/:sessionId/browser` (and the stream route's refusals), which hide the fragment
+  from an agent caller (`callerIsAgent`) and show a person their own browser whole. **The whole fragment goes once it
+  starts** — through the next whitespace, in a raw link and in one percent-encoded into another address — because the
+  fields come in any order and an ignored one may hold any punctuation, so no field is parsed to find the code. Any
+  other fragment (`#section`) is left as it is, and the page and its navigation are untouched: only what is printed
+  changes. The pairing screen's own code and QR are a separate matter (a picture or a visible code in a page).
 
 ## Revoking
 
