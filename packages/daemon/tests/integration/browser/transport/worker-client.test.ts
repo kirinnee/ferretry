@@ -719,6 +719,8 @@ describe('browser worker client — the input bridge', () => {
     });
     // A worker that does not say what its pages show is read as showing a pairing code.
     should(await client.inputDocument('epochless')).deepEqual({ navigationId: 'loader-1', pairingScreen: true });
+    for (const garbled of ['epoch-list', 'epoch-text', 'epoch-many'])
+      should(await client.inputDocument(garbled)).deepEqual({ navigationId: 'loader-1', pairingScreen: true });
     should(text).equal('Welcome back');
     should(refound.ok && refound.facts.fields[0]?.backendNodeId).equal(9);
     should(refoundMissing).deepEqual({ ok: false, missing: 'password' });

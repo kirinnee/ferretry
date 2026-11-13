@@ -52,7 +52,9 @@ export type CopyPageRead =
   | { readonly ok: false; readonly reason: 'missing' | 'empty' | 'changed' };
 
 /** Checks run INSIDE the page's queue before the read, given the page's current document: a refusal throws. */
-export type CopyPageGuard = (page: { document(): Promise<string | undefined> }) => Promise<void>;
+export type CopyPageGuard = (page: {
+  document(): Promise<string | undefined>;
+}) => Promise<void | (() => Promise<void>)>;
 
 /**
  * What a page read does inside the page's own queue, so nothing queued behind it runs first: the guard before the

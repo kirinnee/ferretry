@@ -217,7 +217,20 @@ function inputReply(id, method, params) {
             ? { document: { navigationId: 'loader-1', pairingScreen: true, pairingEpochs: { pairing: 2 } } }
             : page === 'epochless'
               ? { document: { navigationId: 'loader-1' } }
-              : { document: { navigationId: 'loader-1', host: 'accounts.example.test', pairingEpochs: {} } },
+              : page === 'epoch-list'
+                ? { document: { navigationId: 'loader-1', pairingEpochs: [1] } }
+                : page === 'epoch-text'
+                  ? { document: { navigationId: 'loader-1', pairingEpochs: { p1: 'many' } } }
+                  : page === 'epoch-many'
+                    ? {
+                        document: {
+                          navigationId: 'loader-1',
+                          pairingEpochs: Object.fromEntries(
+                            Array.from({ length: 65 }, (_, at) => [`p${String(at)}`, 0]),
+                          ),
+                        },
+                      }
+                    : { document: { navigationId: 'loader-1', host: 'accounts.example.test', pairingEpochs: {} } },
     );
   else if (method === 'inputProbe')
     reply(id, true, { outcome: page === 'garbled' ? 'typed' : page === 'echoes' ? 'shown' : 'hidden' });

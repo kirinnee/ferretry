@@ -1579,14 +1579,7 @@ export class AgentToolService {
       { name: call.name, source: { ...call.source, key }, ...options },
       {
         seen: () => this.ports.copyPages?.seen(caller.sessionId, [surface.name, surface.id]) ?? [],
-        // A copy's own read is never the agent's (reads is false): there is no after-check for the copy port to run.
-        ...(guard === undefined
-          ? {}
-          : {
-              guard: async page => {
-                await guard(page);
-              },
-            }),
+        ...(guard === undefined ? {} : { guard }),
       },
     );
   }
