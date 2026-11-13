@@ -145,12 +145,15 @@ describe('the hosted relay directory', () => {
       () => new Response('later', { status: 503, headers: { 'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT' } }),
     );
     const absent = directoryServing(() => new Response('later', { status: 502 }));
+    // Any other 4xx is an answer: not transient, and its header is not read.
+    const refused = directoryServing(() => new Response('no', { status: 404, headers: { 'retry-after': '12' } }));
 
     // Act
     const answers = [
       await new HostedRelayDirectory(seconds.origin).read(),
       await new HostedRelayDirectory(dated.origin).read(),
       await new HostedRelayDirectory(absent.origin).read(),
+      await new HostedRelayDirectory(refused.origin).read(),
     ];
 
     // Assert
@@ -159,6 +162,9 @@ describe('the hosted relay directory', () => {
     should(answers[1]).not.have.property('retryAfterMs');
     should(answers[2]).match({ transient: true });
     should(answers[2]).not.have.property('retryAfterMs');
+    should(answers[3]).match({ reason: /answered 404/u });
+    should(answers[3]).not.have.property('transient');
+    should(answers[3]).not.have.property('retryAfterMs');
   });
 
   it('should give up rather than hold the boot when the directory never answers', async () => {
