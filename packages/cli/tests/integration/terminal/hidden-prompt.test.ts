@@ -148,6 +148,56 @@ describe('the hidden prompt', () => {
     await expect(failing(QUESTION)).rejects.toThrow('no raw mode here');
     expect(t.events).toEqual(['raw:true', 'raw:false', 'pause']);
   });
+
+  /** A control byte typed while an escape sequence is pending still ends the read: nothing is half-left raw. */
+  describe('with an escape sequence pending', () => {
+    const settle = (asked: Promise<string | undefined>) =>
+      asked.then(
+        value => ({ value }),
+        (error: unknown) => ({ error }),
+      );
+
+    for (const [name, prefix] of [
+      ['ESC', '\u001b'],
+      ['ESC [', '\u001b['],
+      ['ESC [ 1 ;', '\u001b[1;'],
+    ] as const) {
+      it(`restores the terminal and ends with status 130 on a typed Ctrl-C after ${name}, in one chunk or two`, async () => {
+        for (const pieces of [[`${prefix}\u0003`], [prefix, '\u0003']]) {
+          const t = terminal();
+          const asked = settle(t.prompt(QUESTION));
+          t.type(SECRET);
+          for (const piece of pieces) t.type(piece);
+          const settled = await Promise.race([asked, new Promise<'pending'>(r => setTimeout(() => r('pending'), 50))]);
+          expect(settled).not.toBe('pending');
+          const refusal = (settled as { error?: unknown }).error;
+          expect(refusal).toBeInstanceOf(ShellError);
+          expect((refusal as ShellError).exitCode).toBe(130);
+          expect(t.events).toEqual(['raw:true', 'resume', 'raw:false', 'pause']);
+          expect(t.listeners.size).toBe(0);
+          expect(t.written.join('')).not.toContain(SECRET);
+        }
+      });
+    }
+
+    it('ends the read on Ctrl-D or Enter after an ESC, with what was typed before it, and never stores the sequence', async () => {
+      for (const ender of ['\u0004', '\r', '\n']) {
+        const t = terminal();
+        const asked = t.prompt(QUESTION);
+        t.type(`ab\u001b[${ender}`);
+        expect(await asked).toBe('ab');
+        expect(t.events).toEqual(['raw:true', 'resume', 'raw:false', 'pause']);
+      }
+    });
+
+    it('still skips a whole escape sequence, and only that, once its final byte arrives', async () => {
+      const t = terminal();
+      const asked = t.prompt(QUESTION);
+      t.type('a\u001b[1;5Db\u001bOc\r');
+      // ESC O is a two-byte sequence in some terminals; the existing rule skips ESC and its one next byte.
+      expect(await asked).toBe('abc');
+    });
+  });
 });
 
 /**

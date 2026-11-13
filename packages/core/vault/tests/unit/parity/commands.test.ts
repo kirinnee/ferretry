@@ -340,12 +340,22 @@ describe('fy secret use, the words as typed', () => {
     expect(body).toMatchObject({ command: ['true'], secrets: ['ALPHA_KEY'] });
   });
 
-  it('V-0429 refuses, rather than guesses, a names list that swallowed the command or a stray word before --', async () => {
+  it('V-0429 takes command words before --, as v4 did, and appends what follows --', async () => {
+    const help = await run(['printf', '--', '--help']);
+    expect(help.body).toMatchObject({ command: ['printf', '--help'], secrets: [] });
+    const named = await run(['printf', '-w', 'ALPHA_KEY', '--', 'hello']);
+    expect(named.body).toMatchObject({ command: ['printf', 'hello'], secrets: ['ALPHA_KEY'] });
+    const json = await run(['--json', 'true']);
+    expect(json.code).toBe(0);
+    expect(json.body).toMatchObject({ command: ['true'], secrets: [] });
+  });
+
+  it('V-0429 refuses, rather than guesses, a names list that swallowed the command or a command that was never given', async () => {
     for (const tokens of [
       ['--with', 'ALPHA_KEY', 'BETA_KEY', 'sh'],
       ['-w', 'ALPHA_KEY', 'sh'],
       ['-w', 'ALPHA_KEY', '--'],
-      ['stray', '-w', 'ALPHA_KEY', '--', 'true'],
+      ['--json'],
     ]) {
       const { code, r } = await run(tokens);
       expect(code).toBe(1);

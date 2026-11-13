@@ -35,10 +35,12 @@ const WITH = new Set(['with', 'w']);
 const VALUE_OPTIONS = new Set(['cwd', 'timeout']);
 
 /**
- * Reads `secret use`'s words the way v4's commander did. `--with <name...>` is variadic: every word after it, up to the
- * next option or `--`, is a name. The command is what follows `--`. Without `--` the command is every word that is
- * not a name (written before the options); a list that swallowed the command is refused, never guessed at, because
- * running a secret's name as the program is the mistake this guards against.
+ * Reads `secret use`'s words the way v4's commander (15) did. `--with <name...>` is variadic: every word after it, up to
+ * the next option or `--`, is a name. A word that is neither an option nor in that list is a command word, wherever it
+ * stands before `--`; `--` ends option parsing and every word after it is a command word too, so
+ * `printf -w A -- hello` runs `printf hello` and `printf -- --help` runs `printf --help`. A list that swallowed the
+ * command (no command word at all) is refused, never guessed at, because running a secret's name as the program is the
+ * mistake this guards against. A switch (`--json`) takes no value, so the word after it is a command word.
  */
 function readUseWords(words: readonly string[]): UseWords {
   const boundary = words.indexOf('--');
@@ -73,23 +75,15 @@ function readUseWords(words: readonly string[]): UseWords {
     else if (given === 'no-json') json = false;
   }
   const options = { ...(cwd === undefined ? {} : { cwd }), ...(timeout === undefined ? {} : { timeout }), json };
-  if (boundary >= 0) {
-    if (bare.length > 0)
-      return {
-        refused:
-          "a word before '--' is neither a secret name nor an option: write each name after --with and the command after --",
-      };
-    if (tail.length === 0) return { refused: "missing required argument 'command'" };
-    return { names, command: tail, ...options };
-  }
-  if (bare.length === 0)
+  const command = [...bare, ...tail];
+  if (command.length === 0)
     return {
       refused:
-        names.length === 0
+        names.length === 0 || boundary >= 0
           ? "missing required argument 'command'"
           : "missing required argument 'command' (--with takes every word after it as a name: end the names with -- and write the command after it)",
     };
-  return { names, command: bare, ...options };
+  return { names, command, ...options };
 }
 
 const on = (invocation: VerbInvocation, name: string): boolean => {
@@ -128,6 +122,46 @@ export function secretVerbs(
   const list = verbHandler(io, exit, { command: 'ls', args: [], options: [JSON_OPTION] }, async invocation => {
     await controller.list({ json: on(invocation, 'json') });
   });
+  const useOptions: readonly OptionShape[] = [
+    { names: ['with', 'w'], takesValue: true },
+    { names: ['cwd'], takesValue: true },
+    { names: ['timeout'], takesValue: true },
+    JSON_OPTION,
+  ];
+  // The words as typed: the generic reader still refuses an unknown option or one missing its value, but it cannot know
+  // which positional is the command (a switch it took for a value, a variadic list, `--`), so `readUseWords` is the
+  // one place that decides there IS a command.
+  const runWords = verbHandler(
+    io,
+    exit,
+    { command: 'use', args: [], variadic: true, options: useOptions },
+    async invocation => {
+      const read = readUseWords(invocation.words ?? []);
+      if ('refused' in read) throw new Error(read.refused);
+      await controller.use(read.command, {
+        with: read.names,
+        ...(read.cwd === undefined ? {} : { cwd: read.cwd }),
+        ...(read.timeout === undefined ? {} : { timeout: read.timeout }),
+        json: read.json,
+      });
+    },
+  );
+  // No words (a caller that already split them): the parsed args are the command.
+  const runParsed = verbHandler(
+    io,
+    exit,
+    { command: 'use', args: ['command'], variadic: true, options: useOptions },
+    async invocation => {
+      const cwd = text(invocation, 'cwd');
+      const timeout = text(invocation, 'timeout');
+      await controller.use(invocation.args, {
+        with: all(invocation, ['with', 'w']),
+        ...(cwd === undefined ? {} : { cwd }),
+        ...(timeout === undefined ? {} : { timeout }),
+        json: on(invocation, 'json'),
+      });
+    },
+  );
   return {
     // Bare `fy secret` lists, as it always did.
     secret: list,
@@ -138,41 +172,6 @@ export function secretVerbs(
     'secret rm': verbHandler(io, exit, { command: 'rm', args: ['name'] }, async ({ args }) => {
       await controller.remove(args[0] ?? '');
     }),
-    'secret use': verbHandler(
-      io,
-      exit,
-      {
-        command: 'use',
-        args: ['command'],
-        variadic: true,
-        options: [
-          { names: ['with', 'w'], takesValue: true },
-          { names: ['cwd'], takesValue: true },
-          { names: ['timeout'], takesValue: true },
-          JSON_OPTION,
-        ],
-      },
-      async invocation => {
-        if (invocation.words !== undefined) {
-          const read = readUseWords(invocation.words);
-          if ('refused' in read) throw new Error(read.refused);
-          await controller.use(read.command, {
-            with: read.names,
-            ...(read.cwd === undefined ? {} : { cwd: read.cwd }),
-            ...(read.timeout === undefined ? {} : { timeout: read.timeout }),
-            json: read.json,
-          });
-          return;
-        }
-        const cwd = text(invocation, 'cwd');
-        const timeout = text(invocation, 'timeout');
-        await controller.use(invocation.args, {
-          with: all(invocation, ['with', 'w']),
-          ...(cwd === undefined ? {} : { cwd }),
-          ...(timeout === undefined ? {} : { timeout }),
-          json: on(invocation, 'json'),
-        });
-      },
-    ),
+    'secret use': invocation => (invocation.words === undefined ? runParsed(invocation) : runWords(invocation)),
   };
 }

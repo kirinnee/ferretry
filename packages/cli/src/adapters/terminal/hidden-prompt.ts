@@ -91,6 +91,17 @@ export function createHiddenPrompt(deps: HiddenPromptDeps): (question: string) =
       function onData(chunk: Uint8Array | string): void {
         const text = typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
         for (const char of text) {
+          // The control bytes come FIRST: Ctrl-C, Ctrl-D and Enter end the read whatever escape sequence was pending, so a
+          // cancel typed after a stray ESC is never swallowed as that sequence's continuation and the terminal is never
+          // left raw behind a prompt that is still waiting.
+          if (char === '\r' || char === '\n' || char === '\u0004') {
+            finish({ ok: typed.join('') });
+            return;
+          }
+          if (char === '\u0003') {
+            interrupt();
+            return;
+          }
           if (skipping === 'after-escape') {
             skipping = char === '[' ? 'in-sequence' : 'none';
             continue;
@@ -99,14 +110,6 @@ export function createHiddenPrompt(deps: HiddenPromptDeps): (question: string) =
             // A CSI sequence ends at its final byte, `@` to `~`.
             if (char >= '@' && char <= '~') skipping = 'none';
             continue;
-          }
-          if (char === '\r' || char === '\n' || char === '\u0004') {
-            finish({ ok: typed.join('') });
-            return;
-          }
-          if (char === '\u0003') {
-            interrupt();
-            return;
           }
           if (char === '\u001b') skipping = 'after-escape';
           else if (char === '\u007f' || char === '\b') typed = typed.slice(0, -1);
