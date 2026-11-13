@@ -31,6 +31,7 @@ class Tabs {
   readonly casts = new Map<string, Set<(frame: BrowserScreencastFrame) => void>>();
   pages: Page[] = [{ id: 'p0', url: 'about:blank', title: '' }];
   castFailure: Error | undefined;
+  documentPairing = false;
   /** A dialog the worker reports on the page of every result, as a worker with a dialog open does. */
   dialog: { type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'; message: string } | undefined;
   /** The browser cannot say which document a page shows. */
@@ -108,7 +109,11 @@ class Tabs {
     inputDocument: async pageId => {
       this.calls.push(`inputDocument:${pageId}`);
       if (this.documentFails) throw new Error('the page is gone');
-      return { navigationId: 'loader-1', ...(this.documentHost === undefined ? {} : { host: this.documentHost }) };
+      return {
+        navigationId: 'loader-1',
+        ...(this.documentHost === undefined ? {} : { host: this.documentHost }),
+        ...(this.documentPairing ? { pairingScreen: true } : {}),
+      };
     },
     inputObserve: async pageId => {
       this.calls.push(`inputObserve:${pageId}`);
@@ -961,6 +966,43 @@ describe('the machine agent browser — a page’s lifecycle', () => {
 
     // Assert
     should(seen).eql(['github.com', undefined]);
+  });
+
+  it('should let a guard ask whether the page shows a pairing code, and treat a page it cannot ask as showing one', async () => {
+    // Arrange — the marker is read from the live page inside its queue; a browser that cannot say fails CLOSED.
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+    const seen: (boolean | undefined)[] = [];
+    const guard = async (page: { pairingScreen?(): Promise<boolean> }) => void seen.push(await page.pairingScreen?.());
+
+    // Act
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+    tabs.documentPairing = true;
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+    tabs.documentFails = true;
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+
+    // Assert
+    should(seen).eql([false, true, true]);
+  });
+
+  it('should run a guard inside the queue of the page a person’s toolbar acts on, and refuse before the browser is touched', async () => {
+    // Arrange — `fy browser read` and `screenshot` answer from the toolbar route, which hands a guard in for an agent.
+    const { tabs, service } = harness();
+    await service.act('s1', { action: 'open', url: 'https://one.test/' });
+    tabs.documentPairing = true;
+    const refusing = async (page: { pairingScreen?(): Promise<boolean> }): Promise<void> => {
+      if ((await page.pairingScreen?.()) === true) throw new BrowserSessionError('conflict', 'hidden');
+    };
+
+    // Act
+    const refused = await failure(service.act('s1', { action: 'read' }, refusing));
+    const allowed = await service.act('s1', { action: 'back' });
+
+    // Assert
+    should(refused.code).equal('conflict');
+    should(allowed).have.property('status');
+    should(tabs.calls.filter(call => call.startsWith('read'))).eql([]);
   });
 
   it('should refuse a lifecycle request on a page of another session', async () => {

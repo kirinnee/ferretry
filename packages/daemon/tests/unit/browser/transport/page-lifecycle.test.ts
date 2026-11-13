@@ -1080,4 +1080,9 @@ describe('isPairingMintUrl', () => {
     ])
       should(isPairingMintUrl(address)).equal(false);
   });
+
+  it('should still tell the mint route in an address that will not parse', () => {
+    should(isPairingMintUrl('http://[/v1/pair/code')).equal(true);
+    should(isPairingMintUrl('http://[/v1/pair/devices')).equal(false);
+  });
 });
