@@ -54,11 +54,22 @@ async function until<T>(read: () => Promise<T | undefined>, ms: number, what: st
   }
 }
 
+export interface StartDaemonOptions {
+  readonly version: string;
+  /**
+   * Writes STATE into the home, as a daemon of this release left it (for example a ferret's record, written through
+   * its owner's contract schema). The home is first made by a real boot of this release, which is then stopped, so
+   * `home.json` and the folders are the kernel's own; the daemon returned is a second boot over the seeded home.
+   * Never a response: every answer still comes from the host.
+   */
+  readonly seed?: (home: string) => Promise<void>;
+}
+
 /**
  * Boots a daemon of `release`, saying `options.version` on `GET /v1/health`. "Older" and "newer" than the app are the
  * version alone: the hashes are the release's own.
  */
-export async function startDaemon(release: Release, options: { readonly version: string }): Promise<StartedDaemon> {
+export async function startDaemon(release: Release, options: StartDaemonOptions): Promise<StartedDaemon> {
   // The home's Unix socket path has a platform length limit, so the folder names stay short.
   const parent = mkdtempSync(join(tmpdir(), 'fyd-'));
   const home = join(parent, 'h');
@@ -70,30 +81,44 @@ export async function startDaemon(release: Release, options: { readonly version:
     }
   });
   const real = realAdapters(home, sink, { binary: BINARY, childEnv: { PATH: process.env.PATH ?? '/usr/bin:/bin' } });
-  const outcome = await bootHost({
-    home,
-    version: options.version,
-    implementations: release.daemon.daemonImplementations,
-    // No network: the same adapters as `fyd`, with `fetch` refusing.
-    adapters: {
-      ...real,
-      fetch: {
-        request: () => Promise.reject(new Error('the two-release fixture reaches no network')),
+  const boot = async () =>
+    await bootHost({
+      home,
+      version: options.version,
+      implementations: release.daemon.daemonImplementations,
+      // No network: the same adapters as `fyd`, with `fetch` refusing.
+      adapters: {
+        ...real,
+        fetch: {
+          request: () => Promise.reject(new Error('the two-release fixture reaches no network')),
+        },
       },
-    },
-    contractHash: contractHashOf(release.daemon),
-    pid: process.pid,
-    listen: async host =>
-      await listenLocal(host, {
-        home,
-        port: 0,
-        pid: process.pid,
-        version: options.version,
-        write: (path, text) => writeFile(path, text, { mode: 0o600 }),
-        chmod: (path, mode) => chmod(path, mode),
-        remove: path => rm(path, { force: true }),
-      }),
-  });
+      contractHash: contractHashOf(release.daemon),
+      pid: process.pid,
+      listen: async host =>
+        await listenLocal(host, {
+          home,
+          port: 0,
+          pid: process.pid,
+          version: options.version,
+          write: (path, text) => writeFile(path, text, { mode: 0o600 }),
+          chmod: (path, mode) => chmod(path, mode),
+          remove: path => rm(path, { force: true }),
+        }),
+    });
+  if (options.seed !== undefined) {
+    try {
+      const made = await boot();
+      if (made.kind === 'refused')
+        throw new Error(`the ${release.name} daemon refused to make its home: ${made.sentence}`);
+      await made.host.stop();
+      await options.seed(home);
+    } catch (error) {
+      rmSync(parent, { recursive: true, force: true });
+      throw error;
+    }
+  }
+  const outcome = await boot();
   if (outcome.kind === 'refused') {
     rmSync(parent, { recursive: true, force: true });
     throw new Error(`the ${release.name} daemon refused to boot: ${outcome.sentence}`);

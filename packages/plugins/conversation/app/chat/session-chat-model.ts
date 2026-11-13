@@ -35,7 +35,7 @@
 // biome-ignore-all lint/complexity/useLiteralKeys: event payloads are
 // unknown-shaped daemon output, so every field is read through an index
 // signature on purpose rather than asserted into a shape we do not control.
-import type { FerretView } from '@ferretry/core-ferrets/contract';
+import type { ChatSession } from './chat-session.ts';
 import { TERMINAL_STATUSES } from '@ferretry/app';
 
 export type PendingStatus = 'sending' | 'queued' | 'delivered' | 'error';
@@ -54,7 +54,7 @@ export type PendingStatus = 'sending' | 'queued' | 'delivered' | 'error';
  * answered and moved on. A terminal session is never awaiting anything, so a
  * stale question is never shown for one.
  */
-export const hasOpenQuestion = (view: FerretView | undefined): boolean => {
+export const hasOpenQuestion = (view: ChatSession | undefined): boolean => {
   if (!view) return false;
   if (TERMINAL_STATUSES.has(view.state.status)) return false;
   return view.state.status === 'awaiting_question' || Boolean(view.state.pendingQuestion);

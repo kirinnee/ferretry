@@ -7,14 +7,14 @@ import {
 } from '../../../../app/slots/agenda-conversation-panel.tsx';
 import { ConversationClientProvider } from '../../../../app/client.ts';
 import { fakeClient } from '../../../support/app/fake-client.ts';
-import { ferretView } from '../../../support/app/ferret-view.ts';
+import { ferretSummary } from '../../../support/app/ferret-view.ts';
 
 ensureDom();
 
 const daemon = () =>
   fakeClient(
     {
-      'GET /v1/ferrets/:ferretId': call => ferretView(call.params['ferretId'] ?? ''),
+      'GET /v1/ferrets/:ferretId': call => ferretSummary(call.params['ferretId'] ?? ''),
       'GET /v1/ferrets/:ferretId/log-page': call => ({
         v: 1,
         ferret: call.params['ferretId'],
