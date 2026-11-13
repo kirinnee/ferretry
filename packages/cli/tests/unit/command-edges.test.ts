@@ -3,6 +3,7 @@ import { definePlugin, route } from '@ferretry/kernel/manifest';
 import should from 'should';
 import type { DaemonController, DaemonControlReads } from '../../src/lib/daemon/controller.ts';
 import { runFy } from '../../src/lib/run.ts';
+import { passMidTurn } from '../../src/lib/update/mid-turn.ts';
 import { fakeWorld, inventoryOf, registryOf, skeletonEntry } from './fakes.ts';
 
 const SCOPE = { minimum: 'operator', audit: { skip: 't' }, guard: { none: 't' }, caller: 'any' } as const;
@@ -37,7 +38,10 @@ const view = (midTurn: number) => ({
   job: null,
 });
 
-/** A world whose daemon controller restarts by asking how many ferrets are mid-turn. */
+/**
+ * A world whose daemon controller restarts through the real mid-turn gate, over the reader this verb builds: what a
+ * restart would have said, and whether it would have gone ahead.
+ */
 function restartWorld(probe: typeof up | typeof down) {
   const made = fakeWorld({
     registry: registryOf(updates),
@@ -45,48 +49,98 @@ function restartWorld(probe: typeof up | typeof down) {
     probe,
   });
   const asked: number[] = [];
+  const said: string[] = [];
+  const restarted: boolean[] = [];
   const world = {
     ...made.world,
     daemon: (reads: DaemonControlReads) => ({
       controller: {
-        restart: async () => {
-          asked.push(await reads.turns.midTurn());
+        restart: async (options: { whenIdle?: boolean } = {}) => {
+          await passMidTurn(
+            {
+              midTurn: async () => {
+                const count = await reads.turns.midTurn();
+                asked.push(count);
+                return count;
+              },
+              sleep: async () => undefined,
+              warn: line => said.push(line),
+            },
+            options.whenIdle === true,
+            'restarting',
+          );
+          restarted.push(true);
         },
       } as unknown as DaemonController,
       exitCode: () => 0,
     }),
   };
-  return { ...made, world, asked };
+  return { ...made, world, asked, said, restarted };
 }
 
 describe('fy daemon restart counts the ferrets mid-turn', () => {
   it('reads the count from the daemon’s update view while it answers', async () => {
-    const { world, asked, transport } = restartWorld(up);
+    const { world, asked, said, transport } = restartWorld(up);
     transport.replies.push({ status: 200, body: view(3) });
 
     should(await runFy(['daemon', 'restart'], world)).equal(0);
 
     should(asked).deepEqual([3]);
+    should(said[0]).containEql('3 ferrets are mid-turn; they keep running');
     should(transport.sent.map(request => request.path)).deepEqual(['/v1/daemon/update']);
   });
 
-  it('counts none, and asks nothing, when the daemon is not answering', async () => {
-    const { world, asked, transport, connects } = restartWorld(down);
+  it('counts none, and asks nothing, when the daemon is not answering, with or without --when-idle', async () => {
+    const { world, asked, transport, connects, restarted } = restartWorld(down);
 
     should(await runFy(['daemon', 'restart'], world)).equal(0);
+    should(await runFy(['daemon', 'restart', '--when-idle'], world)).equal(0);
 
-    should(asked).deepEqual([0]);
+    should(asked).deepEqual([0, 0]);
+    should(restarted).deepEqual([true, true]);
     should(transport.sent).deepEqual([]);
     should(connects).deepEqual([]);
   });
 
-  it('counts none when the daemon refuses the read', async () => {
-    const { world, asked, transport } = restartWorld(up);
+  it('counts none when the daemon refuses the read, and goes ahead without --when-idle', async () => {
+    const { world, transport, restarted, said } = restartWorld(up);
     transport.replies.push({ status: 500, body: { error: 'broken' } });
 
     should(await runFy(['daemon', 'restart'], world)).equal(0);
 
-    should(asked).deepEqual([0]);
+    should(restarted).deepEqual([true]);
+    should(said).deepEqual([]);
+  });
+
+  it('with --when-idle refuses, restarting nothing, when the daemon is up but its count cannot be read', async () => {
+    for (const unreadable of [
+      { status: 500, body: { error: 'broken' } },
+      { status: 200, body: { not: 'a view' } },
+      new Error('timed out'),
+    ]) {
+      const { world, transport, restarted, io } = restartWorld(up);
+      transport.replies.push(unreadable);
+
+      should(await runFy(['daemon', 'restart', '--when-idle'], world)).equal(1);
+
+      should(restarted).deepEqual([]);
+      should(io.stderr()).containEql('could not read how many ferrets are mid-turn, so nothing was restarted');
+      should(io.stderr()).containEql('leave out --when-idle');
+    }
+  });
+
+  it('with --when-idle waits while ferrets are mid-turn, then goes ahead, and says when none is', async () => {
+    const waits = restartWorld(up);
+    waits.transport.replies.push({ status: 200, body: view(2) }, { status: 200, body: view(0) });
+    should(await runFy(['daemon', 'restart', '--when-idle'], waits.world)).equal(0);
+    should(waits.asked).deepEqual([2, 0]);
+    should(waits.said[0]).containEql('waiting until every ferret is idle before restarting');
+    should(waits.restarted).deepEqual([true]);
+
+    const idle = restartWorld(up);
+    idle.transport.replies.push({ status: 200, body: view(0) });
+    should(await runFy(['daemon', 'restart', '--when-idle'], idle.world)).equal(0);
+    should(idle.said).deepEqual(['no ferret is mid-turn']);
   });
 });
 

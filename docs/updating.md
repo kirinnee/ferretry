@@ -303,6 +303,9 @@ secret is present; `scripts/ci/sign-daemon-release.sh` refuses a key whose publi
   (`turnState: working`) and the app and `fy` say so in one line, but an update asked for `now` goes
   ahead: ferrets keep running through the restart (below). **Update when idle** (`when: 'when-idle'`,
   `--when-idle`) is still there for whoever would rather wait for every turn to end.
+  `--when-idle` fails closed: if the daemon is up but how many ferrets are mid-turn cannot be read, `fy daemon
+restart` and `fy update` refuse with one sentence and change nothing (run again, or leave the flag out); a
+  daemon that is down has nothing to wait for. When none is mid-turn, `--when-idle` says so.
 - **Remote devices** may start an update or change the update setting only with the `fleet`
   capability's `configure` axis **and** a passkey step-up, like loosening a configuration file. A
   remote update downloads and runs new code on the machine, which is at least as much as the acts that
