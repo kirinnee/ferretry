@@ -23,9 +23,9 @@ function plugin(id: string, ui: NonNullable<Manifest['ui']>): SurfaceEntry {
 const surfaces = [
   plugin('agenda', {
     screens: [{ id: 'agenda', path: 'agenda', nav: { label: 'Agenda', order: 1 } }],
-    panels: [{ id: 'ferret-agenda', slot: 'ferret.side', order: 0 }],
+    panels: [{ id: 'ferret-agenda', slot: 'ferret.side', order: 10 }],
   }),
-  plugin('warden', { panels: [{ id: 'ferret-warden', slot: 'ferret.side', order: 5 }] }),
+  plugin('warden', { panels: [{ id: 'ferret-warden', slot: 'ferret.side', order: 30 }] }),
   // The ids the real manifests declare: Ferrets declares the list screen and the new-ferret and move ones.
   plugin('ferrets', {
     screens: [
@@ -33,17 +33,32 @@ const surfaces = [
       { id: 'new-ferret', path: 'new' },
       { id: 'move', path: 'ferrets/:ferret/move' },
     ],
-    panels: [{ id: 'files', slot: 'ferret.side', order: 2 }],
+    panels: [{ id: 'files', slot: 'ferret.side', order: 40 }],
   }),
   plugin('board', {
     screens: [{ id: 'board', path: 'board' }],
-    panels: [{ id: 'cards-of-ferret', slot: 'ferret.side', order: 1 }],
+    panels: [{ id: 'cards-of-ferret', slot: 'ferret.side', order: 20 }],
   }),
   plugin('usage', {
     screens: [{ id: 'insights', path: 'insights' }],
-    panels: [{ id: 'insights', slot: 'ferret.side', order: 4 }],
+    panels: [
+      { id: 'usage', slot: 'ferret.side', order: 65 },
+      { id: 'insights', slot: 'ferret.side', order: 70 },
+    ],
   }),
-  plugin('conversation', { panels: [{ id: 'queue', slot: 'ferret.side', order: 3 }] }),
+  plugin('conversation', { panels: [{ id: 'queue', slot: 'ferret.side', order: 10 }] }),
+  // The rest of what the real manifests declare for `ferret.side` (the default layout lists every one of them).
+  plugin('terminals', {
+    panels: [
+      { id: 'terminals', slot: 'ferret.side', order: 20 },
+      { id: 'console', slot: 'ferret.side', order: 21 },
+      { id: 'processes', slot: 'ferret.side', order: 22 },
+    ],
+  }),
+  plugin('browsers', { panels: [{ id: 'browser', slot: 'ferret.side', order: 30 }] }),
+  plugin('mcp', { panels: [{ id: 'mcp-servers', slot: 'ferret.side', order: 40 }] }),
+  plugin('packs', { panels: [{ id: 'helpers', slot: 'ferret.side', order: 40 }] }),
+  plugin('skills', { panels: [{ id: 'skills', slot: 'ferret.side', order: 50 }] }),
   // The ids and orders the real manifests declare for `composer.tools` (voice, conversation, runtimes, usage).
   plugin('voice', { panels: [{ id: 'dictation', slot: 'composer.tools', order: 20 }] }),
   plugin('conversation-files', { panels: [{ id: 'attachments', slot: 'composer.tools', order: 10 }] }),
@@ -197,12 +212,21 @@ describe('the frame plan', () => {
       views,
     );
     expect(kept.side.holds).toMatchObject({ kind: 'panels' });
+    // A listed slot draws exactly what it lists, in that order: the default lists every panel the plugins declare for it.
     expect(plan.panels('ferret.side').map(p => p.id)).toEqual([
       'ferret-agenda',
+      'queue',
       'cards-of-ferret',
+      'terminals',
+      'console',
+      'processes',
+      'browser',
       'files',
       'ferret-warden',
-      'queue',
+      'mcp-servers',
+      'helpers',
+      'skills',
+      'usage',
       'insights',
     ]);
     expect(plan.panels('composer.tools').map(p => p.id)).toEqual([
@@ -219,7 +243,22 @@ describe('the frame plan', () => {
       planFrame(layout, views)
         .panels('ferret.side')
         .map(p => p.id),
-    ).toEqual(['ferret-agenda', 'cards-of-ferret', 'files', 'queue', 'insights', 'ferret-warden']);
+    ).toEqual([
+      'ferret-agenda',
+      'queue',
+      'cards-of-ferret',
+      'terminals',
+      'console',
+      'processes',
+      'browser',
+      'ferret-warden',
+      'files',
+      'mcp-servers',
+      'helpers',
+      'skills',
+      'usage',
+      'insights',
+    ]);
   });
 
   test('a screen id two plugins declare is reachable only qualified', () => {

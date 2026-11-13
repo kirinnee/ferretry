@@ -163,11 +163,21 @@ export function PanelSlot({
   slot,
   subject,
   props,
+  phone,
 }: {
   readonly daemon: string;
   readonly slot: string;
   readonly subject?: string;
   readonly props?: Readonly<Record<string, unknown>>;
+  /**
+   * On a phone the slot shows ONE panel at a time, full width (`ferret-workspace.tsx`). `active` is the panel on show
+   * (`<plugin>.<id>`), or none while another tab (the chat) is; every panel stays mounted, only the active one is drawn,
+   * so a terminal keeps its stream while another tab is open. `labelledBy` names the chip each panel answers to.
+   */
+  readonly phone?: {
+    readonly active: string | undefined;
+    readonly labelledBy: (panel: string) => string;
+  };
 }) {
   // Outside a shell (a plugin's own harness or suite) there is no layout, so no panel is placed.
   const shell = useOptionalShell();
@@ -175,9 +185,20 @@ export function PanelSlot({
   const panels: readonly PanelRef[] = shell.plan.panels(slot);
   if (panels.length === 0) return null;
   return (
-    <div className="fy-slot" data-slot={slot}>
+    <div className="fy-slot" data-slot={slot} data-phone-active={phone?.active}>
       {panels.map(panel => (
-        <div key={`${panel.plugin}.${panel.id}`} className="fy-panel" data-panel={`${panel.plugin}.${panel.id}`}>
+        <div
+          key={`${panel.plugin}.${panel.id}`}
+          className="fy-panel"
+          data-panel={`${panel.plugin}.${panel.id}`}
+          {...(phone === undefined
+            ? {}
+            : {
+                role: 'tabpanel',
+                'aria-labelledby': phone.labelledBy(`${panel.plugin}.${panel.id}`),
+                'data-phone-shown': phone.active === `${panel.plugin}.${panel.id}` ? '' : undefined,
+              })}
+        >
           <PluginView
             daemon={daemon}
             plugin={panel.plugin}
@@ -190,6 +211,13 @@ export function PanelSlot({
     </div>
   );
 }
+
+/** The panels the layout places in `slot` here, in order; none outside a shell. */
+export function useSlotPanels(slot: string): readonly PanelRef[] {
+  const shell = useOptionalShell();
+  return shell === null ? NO_PANELS : shell.plan.panels(slot);
+}
+const NO_PANELS: readonly PanelRef[] = [];
 
 /**
  * Whether the layout places any panel in `slot` here: false outside a shell. A screen that offers a slot draws its own

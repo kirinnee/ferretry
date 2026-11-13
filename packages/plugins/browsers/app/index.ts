@@ -17,8 +17,10 @@ export default implementApp(manifest, {
     const daemon: BrowserDaemon = { daemonId: daemonOfClient(client) ?? 'this-daemon', client };
     return {
       panels: {
-        browser: ({ subject }) =>
-          subject === undefined ? null : createElement(BrowserPanel, { daemon, sessionId: subject }),
+        browser: ({ subject, intent }) =>
+          subject === undefined
+            ? null
+            : createElement(BrowserPanel, { daemon, sessionId: subject, ...(intent === undefined ? {} : { intent }) }),
       },
       settings: {
         browser: () => createElement(BrowserTab, { client }),

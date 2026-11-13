@@ -302,7 +302,7 @@ describe('AgendaInboxPage snooze from the open item', () => {
       ).click(),
     );
     await interact(() =>
-      must(view.container.querySelector<HTMLElement>('[data-agenda-menu-snooze="hour"]'), '1 hour').click(),
+      must(document.body.querySelector<HTMLElement>('[data-agenda-menu-snooze="hour"]'), '1 hour').click(),
     );
     expect(view.container.querySelector('[data-agenda-view="A1"]')).toBeNull();
     expect(must(view.container.querySelector('[data-agenda-undo]'), 'toast').textContent).toContain(

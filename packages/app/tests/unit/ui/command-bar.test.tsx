@@ -37,6 +37,8 @@ describe('the command bar model', () => {
   });
 });
 
+// The bar is portalled to `document.body` (it must share a stacking context with the menus that portal there), so it is read
+// from the body, not from the mount container.
 describe('the command bar', () => {
   it('retains screen destinations after an empty query, typing, and closing/reopening in StrictMode', async () => {
     const screens = new Map([
@@ -58,9 +60,9 @@ describe('the command bar', () => {
       </StrictMode>
     );
     const view = await mount(bar(true, 1));
-    const labels = () => [...view.container.querySelectorAll('[role="option"]')].map(option => option.textContent);
+    const labels = () => [...document.body.querySelectorAll('[role="option"]')].map(option => option.textContent);
     expect(labels()).toEqual(['Board', 'Agenda']);
-    const input = must(view.container.querySelector<HTMLInputElement>('input[role="combobox"]'), 'query box');
+    const input = must(document.body.querySelector<HTMLInputElement>('input[role="combobox"]'), 'query box');
     await interact(() => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
       setter?.call(input, 'board');
@@ -70,16 +72,16 @@ describe('the command bar', () => {
     expect(labels()).toEqual(['Board']);
     expect(commandBarResults(sources, 'board').results.map(entry => entry.id)).toEqual(['screen-board.board']);
     await view.render(bar(false, 1));
-    expect(view.container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     await view.render(bar(true, 2));
-    expect(view.container.querySelector<HTMLInputElement>('input')?.value).toBe('');
+    expect(document.body.querySelector<HTMLInputElement>('input')?.value).toBe('');
     expect(labels()).toEqual(['Board', 'Agenda']);
     await view.unmount();
   });
 
   it('renders nothing while closed', async () => {
     const view = await mount(<CommandBar open={false} focusSignal={0} onClose={() => {}} sources={[places]} />);
-    expect(view.container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     await view.unmount();
   });
 
@@ -89,9 +91,9 @@ describe('the command bar', () => {
     const view = await mount(
       <CommandBar open focusSignal={1} onClose={() => (closed += 1)} sources={[places, layout]} />,
     );
-    const input = must(view.container.querySelector<HTMLInputElement>('input[role="combobox"]'), 'the query box');
+    const input = must(document.body.querySelector<HTMLInputElement>('input[role="combobox"]'), 'the query box');
     expect(document.activeElement).toBe(input);
-    const options = [...view.container.querySelectorAll('[role="option"]')];
+    const options = [...document.body.querySelectorAll('[role="option"]')];
     expect(options.map(option => option.textContent)).toEqual(['Board', 'Agenda']);
     expect(input.getAttribute('aria-activedescendant')).toBe(options[0]?.id ?? null);
     await interact(() => pressKey(input, 'ArrowDown'));
