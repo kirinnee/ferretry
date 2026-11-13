@@ -153,6 +153,41 @@
   gap: 8px;
 }
 
+/* A ferret's side pane (`ferret.side`, drawn beside the chat by Conversation's page): the default layout lists every panel
+   the plugins provide for it — fourteen — so the pane is its own COLUMN with its own scroll, never the chat's width and never
+   taller than the window (it sticks to the top of the page and scrolls inside, so a panel below the fold stays reachable
+   whether the chat's page is bounded or the window scrolls). On a phone there is no room beside a
+   chat: the pane is not drawn there (Info is the phone's way to a ferret's details). */
+.fy-slot[data-slot='ferret.side'] {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  position: sticky;
+  top: 0;
+  width: min(360px, 40%);
+  min-height: 0;
+  max-height: var(--app-h, 100dvh);
+  overflow-y: auto;
+  padding: 8px;
+  border-left: var(--border-width) solid var(--border);
+}
+@media (max-width: 767.98px) {
+  .fy-slot[data-slot='ferret.side'] {
+    display: none;
+  }
+}
+
+/* THE STATUS STRIP (frame.tsx): what the views mounted at the frame root draw in flow, a row under the top bar. Empty, it
+   takes no room; a line it holds is one quiet bar across the page, never a column of its own. */
+.fy-status:empty {
+  display: none;
+}
+.fy-status > .fy-shell-line {
+  margin: 0;
+  padding: 6px 12px;
+  border-bottom: var(--border-width) solid var(--border);
+}
+
 /* The page scroll region adds a node to listen on, never a box (scroll/page-scroll-region.tsx). */
 .contents {
   display: contents;

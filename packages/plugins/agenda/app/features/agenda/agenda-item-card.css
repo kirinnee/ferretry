@@ -1626,11 +1626,11 @@
 .fy-item-menu__toggle[aria-expanded='true'] {
   background: var(--accent-soft);
 }
+/* Drawn on the page body (`agenda-item-menu.tsx`), so it is FIXED at the place the component measures (`left`, `top`,
+   `max-height` inline): no card's `overflow` clips it and no column paints over it. */
 .fy-item-menu__popover {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 30;
+  position: fixed;
+  z-index: 60;
   width: min(22rem, calc(100vw - 2 * var(--gap-md, 16px)));
   max-height: min(70vh, 34rem);
   overflow-y: auto;

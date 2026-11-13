@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { useState } from 'react';
 import { AgendaItemMenu, MenuGroup } from '../../../../app/features/agenda/agenda-item-menu.tsx';
-import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { ensureDom, interact, type Mounted, mount, must } from '@ferretry/app/testing';
+
+// This file reads `window` as it loads: a lone run (one file per process) has no DOM until something mounts.
+ensureDom();
 
 /** On a phone (under 768px) the ⋯ menu is the app's bottom sheet; the width is a process-wide global, handed back. */
 const originalMatchMedia = Object.getOwnPropertyDescriptor(window, 'matchMedia');
@@ -65,5 +68,78 @@ describe('the item’s ⋯ menu on a phone', () => {
     await interact(() => close.click());
     expect(closes).toEqual([true]);
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  });
+});
+
+describe('the item’s ⋯ menu on a wide screen', () => {
+  /** happy-dom lays nothing out: the ⋯ button sits at a given place and the popover is 352×240, whatever its box. */
+  const realRect = Element.prototype.getBoundingClientRect;
+  const rectOf = (left: number, top: number, width: number, height: number): DOMRect =>
+    ({
+      left,
+      top,
+      width,
+      height,
+      right: left + width,
+      bottom: top + height,
+      x: left,
+      y: top,
+      toJSON: () => ({}),
+    }) as DOMRect;
+  let toggleAt = { left: 388, top: 152, width: 32, height: 32 };
+  const stubLayout = (): void => {
+    Element.prototype.getBoundingClientRect = function (this: Element): DOMRect {
+      if (this.matches('[data-agenda-menu-toggle]'))
+        return rectOf(toggleAt.left, toggleAt.top, toggleAt.width, toggleAt.height);
+      if (this.matches('[data-agenda-menu="popover"]')) return rectOf(0, 0, 352, 240);
+      return realRect.call(this);
+    };
+  };
+  afterEach(() => {
+    Element.prototype.getBoundingClientRect = realRect;
+    toggleAt = { left: 388, top: 152, width: 32, height: 32 };
+  });
+
+  test('is drawn on the page body, fixed under ⋯ — so no card’s overflow clips it and no column hides it', async () => {
+    setViewport(1_280);
+    stubLayout();
+    view = await mount(<Harness closes={[]} />);
+    const toggle = must(view.container.querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), 'the ⋯ button');
+    await interact(() => toggle.click());
+    const popover = must(document.body.querySelector<HTMLElement>('[data-agenda-menu="popover"]'), 'the popover');
+    expect(view.container.contains(popover)).toBe(false);
+    expect(popover.parentElement).toBe(document.body);
+    // Its right edge on ⋯'s right edge (420), 4px under it.
+    expect(popover.style.left).toBe(`${420 - 352}px`);
+    expect(popover.style.top).toBe(`${152 + 32 + 4}px`);
+  });
+
+  test('never opens off the window: ⋯ near the left edge opens rightwards from the margin; near the bottom it flips above', async () => {
+    setViewport(1_280);
+    stubLayout();
+    toggleAt = { left: 40, top: 700, width: 32, height: 32 };
+    Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 760 });
+    view = await mount(<Harness closes={[]} />);
+    await interact(() =>
+      must(view?.container.querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), '⋯').click(),
+    );
+    const popover = must(document.body.querySelector<HTMLElement>('[data-agenda-menu="popover"]'), 'the popover');
+    expect(popover.style.left).toBe('8px');
+    expect(popover.style.top).toBe(`${700 - 4 - 240}px`);
+  });
+
+  test('a press inside the popover keeps it open; a press outside closes it', async () => {
+    setViewport(1_280);
+    stubLayout();
+    const closes: boolean[] = [];
+    view = await mount(<Harness closes={closes} />);
+    await interact(() =>
+      must(view?.container.querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), '⋯').click(),
+    );
+    const choice = must(document.body.querySelector<HTMLElement>('[data-test-choice]'), 'a choice');
+    await interact(() => void choice.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true })));
+    expect(closes).toEqual([]);
+    await interact(() => void document.body.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true })));
+    expect(closes).toEqual([true]);
   });
 });

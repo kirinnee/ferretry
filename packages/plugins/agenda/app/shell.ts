@@ -27,6 +27,8 @@ export {
   type Marquee,
   marqueeOf,
   nextDetailsTab,
+  type PopoverPlace,
+  placePopover,
   RouteLink,
   Spinner,
   Textarea,

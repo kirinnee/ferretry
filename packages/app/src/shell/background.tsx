@@ -9,7 +9,9 @@ import { WithViewPlace } from './view-place.tsx';
 /**
  * THE FRAME'S BACKGROUND HOST (shell contract S5): every plugin's background views, each mounted ONCE PER PAIRED DAEMON
  * where the plugin may run — at the frame root, outside the router, so a watcher keeps running whatever page is open.
- * A view may render nothing (a watcher) or an overlay (a toast, a sheet).
+ * A view may render nothing (a watcher), an overlay (a toast, a sheet) or a line in flow. The frame draws this host in its
+ * status strip (`frame.tsx`, `.fy-status`, under the top bar), so a line in flow is a bar across the page and never a
+ * column beside it.
  *
  * - **Background origin (MJ1).** A view is handed, as a prop, its plugin's client on that daemon in BACKGROUND passkey
  *   origin — the `background` entry of the one client cache — and its plugin identity is `place: 'background'`, whose

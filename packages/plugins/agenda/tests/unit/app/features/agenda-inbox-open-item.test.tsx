@@ -125,19 +125,19 @@ describe('the open Inbox item', () => {
   it('keeps Not needed under the head’s ⓘ with Skip, never as a pill in the card body', async () => {
     const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
     expect(topView(mounted).querySelector('[data-agenda-dismiss]')).toBeNull();
-    expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).toBeNull();
+    expect(document.body.querySelector('[data-inbox-tool="not-needed"]')).toBeNull();
     await interact(() =>
       must(topView(mounted).querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), 'the ⋯ button').click(),
     );
-    expect(topView(mounted).querySelector('[data-inbox-tool="skip"]')).not.toBeNull();
-    expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-inbox-tool="skip"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-inbox-tool="not-needed"]')).not.toBeNull();
     await mounted.unmount();
   });
 
   it('offers no Snooze and no composer on a ferret’s rule suggestion: the ferret reads its own board (C2)', async () => {
     const snoozeOf = async (root: HTMLElement): Promise<Element | null> => {
       await interact(() => root.querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]')?.click());
-      return root.querySelector('[data-agenda-menu-group="snooze"]');
+      return document.body.querySelector('[data-agenda-menu-group="snooze"]');
     };
     const plain = await mount(
       page(fakeInbox(), [shipIt], { initialOpen: shipIt.key, renderComposer: () => <textarea /> }),
@@ -170,8 +170,8 @@ describe('the open Inbox item', () => {
     await interact(() =>
       must(topView(mounted).querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), 'the ⋯ button').click(),
     );
-    expect(topView(mounted).querySelector('[data-inbox-tool="skip"]')).not.toBeNull();
-    expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).toBeNull();
+    expect(document.body.querySelector('[data-inbox-tool="skip"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-inbox-tool="not-needed"]')).toBeNull();
     await mounted.unmount();
   });
 
@@ -443,24 +443,22 @@ describe('the open Inbox item’s History', () => {
       daemonId('laptop'),
     );
     const mounted = await mount(
-      <>
-        <InboxHarness
-          cards={[stored]}
-          fake={fakeInbox()}
-          reading={false}
-          render={inbox => (
-            <AgendaInboxPage
-              clock={Date.now}
-              inbox={{ ...inbox, connectionFor: () => laptop }}
-              initialOpen={stored.key}
-              now={NOW}
-              onNavigate={() => undefined}
-              phone
-              reducedMotion
-            />
-          )}
-        />
-      </>,
+      <InboxHarness
+        cards={[stored]}
+        fake={fakeInbox()}
+        reading={false}
+        render={inbox => (
+          <AgendaInboxPage
+            clock={Date.now}
+            inbox={{ ...inbox, connectionFor: () => laptop }}
+            initialOpen={stored.key}
+            now={NOW}
+            onNavigate={() => undefined}
+            phone
+            reducedMotion
+          />
+        )}
+      />,
     );
     await interact(() => Promise.resolve());
     await openConversation(mounted.container);
@@ -520,7 +518,7 @@ describe('opening an item takes its alerts down (docs/notifications.md § When a
       must(topView(deck).querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), 'the ⋯ button').click(),
     );
     await interact(() =>
-      must(topView(deck).querySelector<HTMLButtonElement>('[data-inbox-tool="skip"]'), 'Skip').click(),
+      must(document.body.querySelector<HTMLButtonElement>('[data-inbox-tool="skip"]'), 'Skip').click(),
     );
 
     // Assert

@@ -307,6 +307,17 @@ export function Frame() {
         <Nav daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
         <div className="fy-body">
           <TopBar daemon={daemon} onSearch={openBar} />
+          {/* THE STATUS STRIP: where the views mounted at the frame root draw what they draw IN FLOW — a line a watcher
+      says ("Couldn't reach it through the relay…"), a banner. They sit here, a row under the top bar and above the
+      columns, never as a child of the frame's own row: a line placed beside the body is a COLUMN of the frame and takes its
+      width from the page (the agenda's item column fell from v4's ~680px to 350px at 1280). An overlay a view draws is
+      fixed or portalled and does not care where it is mounted; an empty strip takes no room. */}
+          <div className="fy-status" data-slot="status">
+            {/* Every plugin's device views, once each (S3): the one taker of its keyed fragments, over every machine. */}
+            <DeviceViews />
+            {/* Every plugin's background views, once per paired daemon where it may run (S5): watchers and overlays. */}
+            <BackgroundViews />
+          </div>
           <div className="fy-columns">
             <main className="fy-main" data-slot="main">
               <PageScrollRegion entryKey={entryKey} memory={scroll}>
@@ -325,10 +336,6 @@ export function Frame() {
         {/* One passkey prompt for the whole app (Access's): any daemon call refused for want of an unlock or a step-up
       raises it, and only the machine on screen may raise a background one (G95, G105). */}
         <PasskeyMount onScreen={runtime.passkeyOnScreen.chosen() ?? daemon ?? runtime.daemons.snapshot().selected} />
-        {/* Every plugin's device views, once each (S3): the one taker of its keyed fragments, over every machine. */}
-        <DeviceViews />
-        {/* Every plugin's background views, once per paired daemon where it may run (S5): watchers and overlays. */}
-        <BackgroundViews />
       </div>
     </FrameRootContext.Provider>
   );
