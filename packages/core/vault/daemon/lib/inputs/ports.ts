@@ -361,8 +361,12 @@ export type InputCaller =
 export interface InputSealedPort {
   /** What the daemon recorded about a live copy of this session, or nothing: never the value. */
   describe(sessionId: string, name: CopyName): CopyMeta | undefined;
-  /** The live copy's value for the one write; nothing once it was discarded or expired. */
-  open(sessionId: string, name: CopyName): string | undefined;
+  /**
+   * The live copy's value, for the one write; nothing once it was discarded or expired, and nothing when `capturedAt` is
+   * given and the copy now under that name was captured at another instant: a card is for ONE capture, never for
+   * whatever value happens to hold its name by the time the owner allows it.
+   */
+  open(sessionId: string, name: CopyName, capturedAt?: string): string | undefined;
   /** A paste of it was typed. */
   used(sessionId: string, name: CopyName): void;
   /**

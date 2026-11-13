@@ -247,6 +247,8 @@ export function buildBrowsers(
       scriptedOn: scriptHost => vault.scriptedOn?.(scriptHost),
     },
     pageActs: { acted: (sessionId, script) => vault.pageActed?.(sessionId as FerretId, script) },
+    // A takeover ends a secure paste still waiting for that page (the Vault refuses it now, P2-5).
+    takeovers: { landed: async (sessionId, keys) => await vault.pageTakenOver?.(sessionId as FerretId, keys) },
   });
   // The `page` input target and the four tools that type into a page or hand it over, on the same checks as the rest.
   const target = pageTarget({

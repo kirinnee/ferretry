@@ -31,8 +31,9 @@ const FOUND = {
 
 async function built(
   control: AgentControlReader = ALL_ON,
-): Promise<{ host: TestHost; tabs: Tabs; copy: BrowsersCopyApi }> {
+): Promise<{ host: TestHost; tabs: Tabs; copy: BrowsersCopyApi; vault: FakeVault }> {
   const tabs = new Tabs();
+  const vault = new FakeVault();
   const half = implementDaemon(daemon.manifest, {
     build: ctx => buildBrowsers(ctx, { launcher: { launch: async () => tabs.automation } }),
   });
@@ -42,12 +43,12 @@ async function built(
   const host = await testHost({
     plugins: [half],
     uses: { ferrets: FERRETS, agentControl: control },
-    fakes: { vault: new FakeVault(), gate: new FakeGate() },
+    fakes: { vault, gate: new FakeGate() },
     gate,
   });
   const copy = host.provided(BrowsersPort, needer('accounts')).copy;
   if (copy === undefined) throw new Error('Accounts should be handed the copy reach');
-  return { host, tabs, copy };
+  return { host, tabs, copy, vault };
 }
 
 /** A plugin that needs the port, as the kernel hands it over (the host loads no `accounts` plugin here). */
@@ -154,6 +155,40 @@ describe('the secure-copy reach into the agent browser', () => {
 
     should(answer).match({ ok: false, reason: 'refused', code: 'taken_over' });
     should(tabs.calls.filter(call => call.startsWith('copyRead'))).eql([]);
+  });
+
+  it('should tell the Vault when a person takes a page over, naming it by name and by id (P2-5)', async () => {
+    const { host: made, vault } = await built();
+    host = made;
+    await host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, as('f1'));
+
+    await takeOver(host, 'app');
+
+    should(vault.pageTakeovers).have.length(1);
+    should(vault.pageTakeovers[0]?.ferret).equal('f1');
+    should(vault.pageTakeovers[0]?.keys).containEql('app');
+    should(vault.pageTakeovers[0]?.keys.length).equal(2);
+  });
+
+  it('should refuse a queued read when the Browsers switch is turned off after it was admitted (P2-8)', async () => {
+    const switches = { on: true };
+    const { host: made, tabs, copy } = await built({ allows: async () => switches.on });
+    host = made;
+    tabs.copyAnswer = FOUND;
+    await host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, as('f1'));
+    const release = Promise.withResolvers<void>();
+    tabs.readGate = release.promise;
+    const reading = host.tool('browser_read', { name: 'app' }, as('f1'));
+    const queued = copy.copyRead('f1' as FerretId, 'app', ...READ, { seal: () => undefined });
+
+    switches.on = false;
+    release.resolve();
+    const answer = await queued;
+    await reading.catch(() => undefined);
+
+    should(answer).match({ ok: false, reason: 'refused', code: 'forbidden' });
+    should(tabs.calls.filter(call => call.startsWith('copyRead'))).eql([]);
+    should(JSON.stringify(answer)).not.containEql(SENTINEL);
   });
 
   it('should clear a paste target as a browser tool would: free, taken over, unknown, and Browsers switched off', async () => {

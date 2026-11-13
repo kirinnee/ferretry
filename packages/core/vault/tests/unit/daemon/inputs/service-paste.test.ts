@@ -82,8 +82,32 @@ describe('raising a paste', () => {
       kind: 'sealed',
       name: 'vercel',
       from: { kind: 'command', program: 'vercel', path: '/usr/bin/vercel' },
+      length: COPY_VALUE.length,
+      capturedAt: '2026-11-01T11:00:00.000Z',
     });
     should(w.events.map(event => event.sealed)).eql(['vercel']);
+  });
+
+  it('should not leave a copy green when its exposure is unknown or its page was read first, and say so without claiming a leak', async () => {
+    const calm = { ...VERCEL, recognisedConsumer: true };
+    const unknown = world({ withSealed: true, facts: calm });
+    unknown.copy({ exposure: { transcript: 'unknown' } });
+    const paged = world({ withSealed: true, facts: calm });
+    paged.copy({ exposure: { transcript: 'clean', pageReadBeforeCapture: true } });
+    const clean = world({ withSealed: true, facts: calm });
+    clean.copy({ exposure: { transcript: 'clean', pageReadBeforeCapture: false } });
+
+    await unknown.service.raise(SESSION_ID, PASTE_RAISE);
+    await paged.service.raise(SESSION_ID, PASTE_RAISE);
+    await clean.service.raise(SESSION_ID, PASTE_RAISE);
+
+    const said = [(await unknown.pending()).risk, (await paged.pending()).risk, (await clean.pending()).risk];
+    should(said[0]?.level).equal('amber');
+    should(said[0]?.reason).containEql('could not check').and.containEql('may not be protected');
+    should(said[1]?.level).equal('amber');
+    should(said[1]?.reason).containEql('may have read').and.containEql('may not be protected');
+    for (const each of [said[0], said[1]]) should(each?.reason).not.match(/\b(leak|leaked|stolen|compromised)\b/iu);
+    should(said[2]?.reason ?? '').not.containEql('protected');
   });
 
   it('should make every field of a paste a secret, whatever the agent called it', async () => {
@@ -185,6 +209,40 @@ describe('a paste into a page a person has taken over', () => {
   });
 });
 
+describe('a takeover refuses a waiting paste at once (secure-clip-1 fix1, P2-5)', () => {
+  it('should end a waiting paste card as refused the moment a person takes its page over, typing and opening nothing', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+
+    await w.service.pageTakenOver(SESSION_ID, ['app', 'page-1']);
+
+    should(w.events.at(-1)).match({ state: 'refused', reason: 'taken_over' });
+    should(w.closed.length).equal(1);
+    should(w.told.length).be.above(0);
+    should(w.writes).eql([]);
+    should(w.used).eql([]);
+    // The card is over: allowing it now is refused, not pasted.
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+    should(w.writes).eql([]);
+    should(error.message).not.containEql(COPY_VALUE);
+    should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql(COPY_VALUE);
+  });
+
+  it('should leave a paste into another page, a terminal paste and another ferret’s paste waiting', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, { ...FIELD_RAISE, target: { kind: 'page', key: 'other' } });
+
+    await w.service.pageTakenOver(SESSION_ID, ['app']);
+    await w.service.pageTakenOver('some-other-session', ['other']);
+
+    should((await w.pending()).state).equal('pending');
+    should(w.closed).eql([]);
+  });
+});
+
 describe('a takeover that lands after the last check (secure-clip-1 fix1, P1-1)', () => {
   it('should refuse and type nothing when a takeover lands between opening the copy and the write', async () => {
     const w = world({ withSealed: true, facts: githubPageFacts() });
@@ -222,6 +280,25 @@ describe('a takeover that lands after the last check (secure-clip-1 fix1, P1-1)'
     should(w.writes).eql([]);
     should(w.used).eql([]);
     should(w.events.at(-1)).match({ state: 'refused', reason: 'taken_over' });
+  });
+});
+
+describe('a copy replaced under the same name (secure-clip-1 fix1, P2-3)', () => {
+  it('should end a waiting card as copy_gone when its copy was discarded and captured again under the same name', async () => {
+    const w = world({ withSealed: true, facts: VERCEL });
+    w.copy();
+    await w.service.raise(SESSION_ID, PASTE_RAISE);
+    const request = await w.pending();
+    // The owner is still looking at the card for the first copy when another value takes its name.
+    w.copy({ capturedAt: '2026-11-01T11:30:00.000Z' }, 'FAKE-SC-REPLACED');
+
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(error.code).equal('gone');
+    should(w.writes).eql([]);
+    should(w.used).eql([]);
+    should(w.events.at(-1)).match({ state: 'cancelled', reason: 'copy_gone' });
+    should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql('FAKE-SC-REPLACED');
   });
 });
 

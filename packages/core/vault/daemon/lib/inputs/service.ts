@@ -568,7 +568,17 @@ export class InputRequestService {
         id: requestId,
         sessionId,
         agendaItemId: card.id,
-        ...(copy === undefined ? {} : { source: { kind: 'sealed' as const, name: copy.name, from: copy.from } }),
+        ...(copy === undefined
+          ? {}
+          : {
+              source: {
+                kind: 'sealed' as const,
+                name: copy.name,
+                from: copy.from,
+                length: copy.length,
+                capturedAt: copy.capturedAt,
+              },
+            }),
         target: raise.target,
         prompt: raise.prompt,
         sensitivity,
@@ -1523,6 +1533,32 @@ export class InputRequestService {
     // Only the card the request is on now: a card it was on before is closed already, and says nothing of this one.
     if (held === undefined || held.request.state !== 'pending' || held.request.agendaItemId !== id) return;
     await this.finish(held, 'cancelled', 'owner_declined', undefined, { closeCard: false, tellAgent: true });
+  }
+
+  /**
+   * A person took a page over (told by Browsers): every paste still waiting for the owner into THAT page ends as refused
+   * (`taken_over`) now, rather than only when someone allows it. Nothing is opened or typed; the card closes and the ferret
+   * is told. A paste into another page, a terminal or another session is untouched. `keys` are the page's name and id: a
+   * request names it by either.
+   */
+  async pageTakenOver(sessionId: string, keys: readonly string[]): Promise<void> {
+    const named = new Set(keys);
+    for (const held of [...this.held.values()]) {
+      const { request } = held;
+      if (
+        request.sessionId !== sessionId ||
+        request.source === undefined ||
+        request.state !== 'pending' ||
+        request.target.kind !== 'page' ||
+        !named.has(request.target.key)
+      )
+        continue;
+      await this.lock.run(sessionId, async () => {
+        // A delivery that held the lock ended it first: only a card still waiting is refused.
+        if (held.request.state !== 'pending') return;
+        await this.finish(held, 'refused', 'taken_over', undefined, { closeCard: true, tellAgent: true });
+      });
+    }
   }
 
   /**
@@ -2508,7 +2544,8 @@ export class InputRequestService {
       await this.finish(held, 'refused', 'taken_over', undefined, { closeCard: true, tellAgent: true });
       throw new InputRequestError('conflict', refused, 'taken_over');
     }
-    const value = this.deps.sealed?.open(held.request.sessionId, name);
+    // Opened for the capture THIS card was raised for: a copy discarded and captured again under the name is another value.
+    const value = this.deps.sealed?.open(held.request.sessionId, name, held.request.source?.capturedAt);
     if (value === undefined) {
       await this.finish(held, 'cancelled', 'copy_gone', undefined, { closeCard: true, tellAgent: true });
       throw new InputRequestError(
@@ -3364,11 +3401,27 @@ function pasteAskOf(copy: CopyMeta, facts: InputTargetFacts): string {
 }
 
 const SEEN_FLAG = 'The ferret saw this value before it was sealed, so it is not protected; consider rotating it.';
+const UNKNOWN_FLAG =
+  'Ferretry could not check whether the ferret already saw this value, so it may not be protected; consider rotating it if it matters.';
+const PAGE_READ_FLAG =
+  'The ferret may have read this value on the page before it was sealed, so it may not be protected; consider rotating it if it matters.';
 
-/** A copy the agent had already seen is never green: the owner is told it is not protected. */
+/**
+ * A copy is green only when nothing says the ferret may have seen it. One it saw (`found`) is not protected, and one whose
+ * confidentiality was never established (a transcript that could not be read, a page the ferret may have read first) may
+ * not be: both are amber, and the card says which without claiming that anything leaked.
+ */
 function pasteRisk(risk: InputRisk | undefined, copy: CopyMeta | undefined): InputRisk | undefined {
-  if (copy?.exposure.transcript !== 'found') return risk;
-  return { level: risk?.level === 'red' ? 'red' : 'amber', reason: SEEN_FLAG };
+  if (copy === undefined) return risk;
+  const reason =
+    copy.exposure.transcript === 'found'
+      ? SEEN_FLAG
+      : copy.exposure.transcript === 'unknown'
+        ? UNKNOWN_FLAG
+        : copy.exposure.pageReadBeforeCapture === true
+          ? PAGE_READ_FLAG
+          : undefined;
+  return reason === undefined ? risk : { level: risk?.level === 'red' ? 'red' : 'amber', reason };
 }
 
 /**

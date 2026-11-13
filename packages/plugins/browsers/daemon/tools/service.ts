@@ -154,6 +154,10 @@ export interface BrowserToolPorts {
   readonly scriptedOrigins?: ScriptedOrigins;
   /** Told of every page act a ferret makes, before it runs (the Vault's sign-in lock, I99 and I100). */
   readonly pageActs?: PageActs;
+  /** Told when a person takes a page over, so a secure paste still waiting for it is refused at once (P2-5). */
+  readonly takeovers?: {
+    landed(sessionId: string, keys: readonly string[]): Promise<void>;
+  };
 }
 
 /** The tools that change what a person would see, and so put up the driving marker. */
@@ -376,8 +380,16 @@ export class BrowserTools {
   async control(sessionId: string, request: SurfaceControlRequest, by: SurfaceController): Promise<SurfaceControlView> {
     try {
       const surface = await this.resolve(sessionId, request.key);
-      if (request.action === 'takeover') await this.ports.control.takeover(sessionId, surface, by);
-      else if (request.action === 'handback') await this.ports.control.handback(sessionId, surface);
+      if (request.action === 'takeover') {
+        await this.ports.control.takeover(sessionId, surface, by);
+        // Told after it landed, and never failing it: a card that cannot be refused now is refused when it is allowed.
+        await this.ports.takeovers
+          ?.landed(
+            sessionId,
+            [surface.name, surface.id].filter((key): key is string => key !== undefined),
+          )
+          .catch(() => undefined);
+      } else if (request.action === 'handback') await this.ports.control.handback(sessionId, surface);
       else await this.ports.control.hand(sessionId, surface, by);
       return await this.controlView(sessionId);
     } catch (error) {
@@ -451,7 +463,17 @@ export class BrowserTools {
   ): Promise<{ readonly surface: ResolvedSurface; readonly guard: BrowserActGuard }> {
     const caller: ToolCaller = { kind: 'agent', sessionId };
     const surface = await this.pageFor(caller, key);
-    return { surface, guard: async () => await this.assertFree(sessionId, surface) };
+    // INSIDE the page's queue the copy repeats every check it was cleared by: the Browsers switch (read afresh), that the page is
+    // still the ferret's own (opened, handed, or a popup of those) and that nobody holds it. A switch turned off, a page handed
+    // back or a takeover that lands while the copy waits its turn each refuse it before the read.
+    return {
+      surface,
+      guard: async () => {
+        if (!(await this.ports.policy.allows(sessionId, 'browser')))
+          throw new BrowserToolError('forbidden', controlRefusal('browser'));
+        await this.assertAgentMay(sessionId, surface);
+      },
+    };
   }
 
   /** Whether a person holds this ferret's page `key` now. A page that is not found is held: nothing is pasted there. */

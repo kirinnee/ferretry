@@ -95,6 +95,12 @@ export interface VaultApi {
    */
   pageActed?(ferret: FerretId, script: boolean): PageActNote;
   /**
+   * A person took a ferret's page over, told by Browsers with the page's name and id: a secure paste still waiting for the
+   * owner into it ends as refused (`taken_over`) at once, instead of only when someone allows it. Browsers alone is handed
+   * it (any other plugin could only cancel cards with it). Additive: absent, a waiting paste is refused when it is allowed.
+   */
+  pageTakenOver?(ferret: FerretId, keys: readonly string[]): Promise<void>;
+  /**
    * A page script is about to run, anywhere on the machine (today's `RuleSignInGrants.running`): until the returned
    * call, every page card counts as scripted. Memory only: a restart ends every script.
    */

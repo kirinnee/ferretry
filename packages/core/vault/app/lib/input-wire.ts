@@ -46,6 +46,8 @@ export type InputRisk = z.infer<typeof RiskSchema>;
 const SealedSourceSchema = z.looseObject({
   kind: z.literal('sealed'),
   name: z.string().min(1),
+  length: z.number().optional(),
+  capturedAt: z.string().optional(),
   from: z.looseObject({
     kind: z.enum(['browser', 'clipboard', 'command']),
     origin: z.string().optional(),

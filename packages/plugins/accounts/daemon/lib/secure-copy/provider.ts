@@ -33,9 +33,9 @@ export class SecureCopyHook implements SecureCopyProvider {
     return parsed.success ? this.copies.describe(sessionId, parsed.data) : undefined;
   }
 
-  open(sessionId: string, name: string): string | undefined {
+  open(sessionId: string, name: string, capturedAt?: string): string | undefined {
     const parsed = CopyNameSchema.safeParse(name);
-    return parsed.success ? this.copies.open(sessionId, parsed.data) : undefined;
+    return parsed.success ? this.copies.open(sessionId, parsed.data, capturedAt) : undefined;
   }
 
   used(sessionId: string, name: string): void {

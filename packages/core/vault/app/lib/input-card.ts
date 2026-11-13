@@ -186,6 +186,51 @@ export const sealedBody = (request: InputRequestView, submit: boolean, deliveryI
 export const pastedWords = (request: InputRequestView): string | undefined =>
   request.source === undefined ? undefined : `sealed:${request.source.name}`;
 
+const SOURCE_KIND_WORDS: Readonly<Record<'browser' | 'clipboard' | 'command', string>> = {
+  command: 'what a command printed',
+  browser: 'text read from a page',
+  clipboard: 'what a page copied to its clipboard',
+};
+
+/**
+ * How much was copied and what kind of place it came from: "40 characters · what a command printed". A count and a kind
+ * only, both the daemon's: never a prefix, a digest or a class of the value (a handle is all the owner is shown of it).
+ */
+export const pasteSize = (request: InputRequestView): string | undefined => {
+  const source = request.source;
+  if (source === undefined) return undefined;
+  const kind = SOURCE_KIND_WORDS[source.from.kind];
+  return source.length === undefined
+    ? kind
+    : `${source.length} ${source.length === 1 ? 'character' : 'characters'} · ${kind}`;
+};
+
+/**
+ * The page field a paste goes into, as the DAEMON saw it (its type and name), with the ferret's own label kept apart as
+ * the claim it is. Nothing for a terminal or the secret store.
+ */
+export const pasteField = (request: InputRequestView): string | undefined => {
+  const facts = request.observed;
+  if (request.source === undefined || facts?.kind !== 'page') return undefined;
+  const asked = request.fields[0];
+  const seen = facts.fields.find(each => each.fieldId === asked?.id) ?? facts.fields[0];
+  if (seen === undefined) return undefined;
+  const name = seen.field.name ?? seen.field.id;
+  return [
+    `${seen.field.type ?? seen.field.tag} field`,
+    ...(name === undefined ? [] : [`name “${name}”`]),
+    ...(asked === undefined || asked.label === '' ? [] : [`The ferret calls it “${asked.label}”`]),
+  ].join(' · ');
+};
+
+/** Whether allowing this paste overwrites a secret the store holds now: the old value is gone for good. */
+export const replacesSecret = (request: InputRequestView): boolean =>
+  request.source !== undefined && request.observed?.kind === 'secret' && request.observed.exists;
+
+/** The approval's own words: replacing a secret says so. */
+export const allowWords = (request: InputRequestView): string =>
+  replacesSecret(request) ? 'Replace secret' : 'Allow paste';
+
 /** The two ends of a paste card: where its copy came from, and what the daemon saw reading the destination. */
 export function pasteRoute(request: InputRequestView): { readonly from: string; readonly to: string } | undefined {
   const source = request.source;
@@ -214,9 +259,10 @@ const CODES = {
   targetChanged: 'target_changed',
   targetUnsettled: 'target_unsettled',
   alreadyDelivered: 'already_delivered',
+  takenOver: 'taken_over',
 } as const;
 
-type InputFailureKind = 'changed' | 'already' | 'gone' | 'refused' | 'unknown';
+type InputFailureKind = 'changed' | 'already' | 'gone' | 'ended' | 'refused' | 'unknown';
 
 export interface InputFailure {
   readonly kind: InputFailureKind;
@@ -286,6 +332,14 @@ export const inputFailure = (
       kind: 'gone',
       definitive: true,
       text: `The ${surface} kept changing, so nothing was typed and this request ended. Ask the ferret to request again.`,
+    };
+  // The daemon closed the request as refused (a person took the page over): nothing was pasted and it can never be, so
+  // the card settles instead of offering another try. Its own sentence says why.
+  if (failure.status === 409 && failure.code === CODES.takenOver)
+    return {
+      kind: 'ended',
+      definitive: true,
+      text: message ?? 'A person has taken over that page, so nothing was pasted into it.',
     };
   if (failure.status === 409 && failure.code === CODES.alreadyDelivered)
     return { kind: 'already', definitive: true, text: 'This was already sent.' };

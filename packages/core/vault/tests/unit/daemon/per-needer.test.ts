@@ -666,6 +666,14 @@ describe('secure copy’s reach through the Vault is by name', () => {
     expect(typeof core.captureCommand).toBe('function');
   });
 
+  test('P2-5 only Browsers (and a core caller) is handed the takeover report, which ends waiting pastes', async () => {
+    const { of, core } = await world({ accounts: NONE, browsers: NONE, tenant: NONE });
+
+    expect(typeof of('browsers').pageTakenOver).toBe('function');
+    expect(typeof core.pageTakenOver).toBe('function');
+    for (const id of ['accounts', 'tenant']) expect(of(id).pageTakenOver).toBeUndefined();
+  });
+
   test('P1-2 starts a capture child sealed: no tool overlay, whatever the program is called', async () => {
     const { of, spawned } = await world({ accounts: NONE });
     const capture = of('accounts').captureCommand;

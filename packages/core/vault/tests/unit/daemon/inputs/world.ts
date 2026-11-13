@@ -306,7 +306,12 @@ export function world(options: WorldOptions = {}) {
       ? {
           sealed: {
             describe: (_session: string, name: string) => copies.get(name)?.meta,
-            open: (_session: string, name: string) => copies.get(name)?.value,
+            open: (_session: string, name: string, pinned?: string) => {
+              const found = copies.get(name);
+              return found !== undefined && (pinned === undefined || pinned === found.meta.capturedAt)
+                ? found.value
+                : undefined;
+            },
             used: (_session: string, name: string) => void used.push({ copy: name }),
             refusal: async () => (state.pasteRefusals.length > 0 ? state.pasteRefusals.shift() : state.pasteRefusal),
           },

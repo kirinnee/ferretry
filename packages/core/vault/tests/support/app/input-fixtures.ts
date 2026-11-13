@@ -85,6 +85,8 @@ export const COPY_SOURCE = {
   kind: 'sealed',
   name: 'vercel',
   from: { kind: 'command', program: 'vercel', path: '/usr/bin/vercel' },
+  length: 40,
+  capturedAt: '2026-11-10T00:00:00.000Z',
 } as const;
 
 /** A paste of a secure copy into a terminal: nothing to type, the owner allows it. */
