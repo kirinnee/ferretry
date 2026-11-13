@@ -1,5 +1,5 @@
 /** `fy doctor` (§3.5 `doctor.checks`, S60): this fy against the daemon, plugin by plugin. */
-import { type DoctorReport, DoctorReportSchema, PROTOCOL } from '@ferretry/kernel/contract';
+import { type DoctorReport, DoctorReportSchema, notBuiltCheck, PROTOCOL } from '@ferretry/kernel/contract';
 import { judgePlugin, pausedSentence } from '../guard.ts';
 import { paneCredentialWarnings, type Environment } from '../credential.ts';
 import { EXIT } from '../errors.ts';
@@ -131,15 +131,30 @@ export function diagnose(input: DoctorInput): readonly Finding[] {
 function hostFindings(report: NonNullable<DoctorInput['hostChecks']>): readonly Finding[] {
   if ('unreadable' in report)
     return [{ state: 'warn', title: 'host checks', detail: `host checks could not be read: ${report.unreadable}` }];
-  const findings: Finding[] = report.checks.map(check => {
+  // Checks a plugin declared and nobody has built yet say so with one sentence (`notBuiltCheck`); they are listed on ONE
+  // line by name so a healthy daemon is not a wall of warnings. Every other row keeps its own line.
+  const notBuilt: string[] = [];
+  const findings: Finding[] = [];
+  for (const check of report.checks) {
     const state = check.status !== 'missing' ? 'ok' : check.requirement === 'required' ? 'fail' : 'warn';
-    return {
+    const unbuilt = state === 'warn' ? notBuiltCheck(check.summary) : undefined;
+    if (unbuilt !== undefined) {
+      notBuilt.push(unbuilt);
+      continue;
+    }
+    findings.push({
       state,
       title: `host ${check.name}`,
       detail: check.summary,
       ...(state === 'ok' ? {} : { fix: check.impact }),
-    };
-  });
+    });
+  }
+  if (notBuilt.length > 0)
+    findings.push({
+      state: 'warn',
+      title: 'Not built yet in this build (nothing checked)',
+      detail: [...new Set(notBuilt)].sort().join(', '),
+    });
   if (!report.ready)
     findings.push({
       state: 'fail',
