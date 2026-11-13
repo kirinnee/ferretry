@@ -1,3 +1,9 @@
+## [4.291.16](https://github.com/kirinnee/ferretry/compare/v4.291.15...v4.291.16) (2026-11-13)
+
+### Fixes
+
+* **browser:** hide pairing codes in every browser tool result ([#1596](https://github.com/kirinnee/ferretry/issues/1596)) ([9c6a33b](https://github.com/kirinnee/ferretry/commit/9c6a33b5ecf1e77676c0618e099d1f1b7f651822)), closes [#v1](https://github.com/kirinnee/ferretry/issues/v1) [#v1](https://github.com/kirinnee/ferretry/issues/v1)
+
 ## [4.291.15](https://github.com/kirinnee/ferretry/compare/v4.291.14...v4.291.15) (2026-11-13)
 
 ### Fixes
