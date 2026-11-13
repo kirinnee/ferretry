@@ -139,6 +139,10 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
   /** What the top of the chat offers: older messages to load, the first message, or nothing to page. */
   const [historyStatus, setHistoryStatus] = useState<TranscriptHistoryStatus>('unavailable');
   const refreshControl = useRef<ChatRefreshControl | null>(null);
+  /** Bumped to read the question again (a wake-up, or a refresh after a failed read). */
+  const [questionTick, setQuestionTick] = useState(0);
+  /** Whether the last question read FAILED: the summary's status cannot say it changed, so a refresh retries it. */
+  const questionFailed = useRef(false);
   const history = useMemo<TranscriptHistoryControl>(
     () => ({ status: historyStatus, loadOlder: () => void refreshControl.current?.loadOlder() }),
     [historyStatus],
@@ -155,7 +159,11 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
       onSends: rows => ledger.onSends(parseLedgerSendsResponse(rows)),
       onSendsFailed: ledger.onSendsFailed,
       onQueue: setQueue,
-      onSession: setView,
+      onSession: session => {
+        setView(session);
+        // Working and idle are one status here, so a failed question read is retried on the next read of the ferret.
+        if (questionFailed.current) setQuestionTick(tick => tick + 1);
+      },
       onError: setError,
       onTranscriptUnbound: setTranscriptUnbound,
     });
@@ -170,7 +178,6 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
    * THE WAKE-UPS. A send landing, the queue moving, a question asked or answered, the ferret changing state: each
    * nudges the poll at once rather than waiting for its next tick. None is relied on — the reads are the truth.
    */
-  const [questionTick, setQuestionTick] = useState(0);
   useEffect(() => {
     const mine = (payload: { readonly ferret: string }): boolean => payload.ferret === ferretId;
     const nudge = (payload: { readonly ferret: string }): void => {
@@ -195,8 +202,10 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
 
   /**
    * THE QUESTION, read from Conversation's own route — proved against the transcript — whenever the ferret's status
-   * moves or a question wake-up arrives. A failed read leaves the last answer: the status alone still says a
-   * question is waiting, and the page says it cannot be answered safely rather than inventing one.
+   * moves or a question wake-up arrives, and again on the next refresh of the ferret after a read that failed (the
+   * summary's status does not move between working and idle, so it cannot be the only trigger). A failed read leaves the
+   * last answer: the status alone still says a question is waiting, and the page says it cannot be answered safely
+   * rather than inventing one.
    */
   const status = view?.state.status;
   const [question, setQuestion] = useState<PendingQuestion | null | undefined>(undefined);
@@ -206,9 +215,12 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
     let current = true;
     readQuestion(client, ferretId)
       .then(asked => {
+        questionFailed.current = false;
         if (current) setQuestion(asked === null ? null : pendingQuestionOf(asked));
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (current) questionFailed.current = true;
+      });
     return () => {
       current = false;
     };
@@ -288,6 +300,7 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
   }, [scope]);
 
   const refresh = useCallback(() => {
+    if (questionFailed.current) setQuestionTick(tick => tick + 1);
     refreshControl.current?.acted();
     void refreshControl.current?.refresh(true);
   }, []);

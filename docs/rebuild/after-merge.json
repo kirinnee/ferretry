@@ -76,6 +76,26 @@
       "id": "v4-doctor-checks",
       "what": "the v4 doctor checks and readiness 5.0 does not have yet (doctor lists the unbuilt checks on one line as not built yet): user-slice, loopback-firewall (warn-only), notifications health, claude-code/codex paths; and doctor readiness: ready only when some runtime can launch (v4 doctor.ts:317) and a required row for an unreadable fleet/manifest.json (v4 :224). Starts already refuse by name. Due 2026-11-27, card &F3715",
       "owner": "britnee"
+    },
+    {
+      "id": "app-component-editing",
+      "what": "component editing in the app: MCP servers add/edit/delete/detail, Claude Code and Codex settings and hooks, skills, instructions (v4 Profiles > Components); the CLI way stays before merge, owner !A510",
+      "owner": "britnee"
+    },
+    {
+      "id": "fy-ask-archive-paging",
+      "what": "fy ask reads the asks of at most 500 archived ferrets (the archive route has no cursor); past that it says so and exits 1",
+      "owner": "britnee"
+    },
+    {
+      "id": "fy-browser-firewall-entry",
+      "what": "fy browser firewall entry: 5.0 has no route for the browser ports (browserPorts is read by Runtimes, not Browsers); the verb refuses with a sentence and exits 1. The firewall script/unit/verify-unit/timer verbs are in 5.0",
+      "owner": "britnee"
+    },
+    {
+      "id": "contract-hooks-restore",
+      "what": "the four v4 contract hooks dropped from 5.0 hook config in 26ed171ad0 (closed-set-agreement, composition-invocation, composition-reachability, route-agreement): rebuild 5.0 versions or record why one no longer applies, card &C57",
+      "owner": "britnee"
     }
   ]
 }

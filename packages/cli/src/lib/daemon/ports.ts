@@ -257,7 +257,7 @@ export interface ISessionTerminalServerPort {
   end(socket: string): Promise<SessionTerminalEnding>;
 }
 
-/** How many ferrets are mid-turn, for the line a restart says and for `--when-idle`. */
+/** How many ferrets are mid-turn, for the line a restart says and for `--when-idle`: 0 while the daemon is down, and `MidTurnUnreadableError` while it answers but the count cannot be read. */
 export interface IDaemonTurnsPort {
   midTurn(): Promise<number>;
 }

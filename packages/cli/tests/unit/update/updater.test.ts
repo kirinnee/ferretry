@@ -1093,6 +1093,36 @@ describe('DaemonUpdater — consent', () => {
     should(h.report().outcome).equal('succeeded');
   });
 
+  it('says so with --when-idle when no ferret is mid-turn at the first read, and goes ahead', async () => {
+    const h = harness('homebrew', { midTurn: [0] });
+    await h.run({ yes: true, whenIdle: true, report: '/r.json' });
+    should(h.out.text).match(/no ferret is mid-turn/u);
+    should(h.report().outcome).equal('succeeded');
+    const plain = harness('homebrew', { midTurn: [0] });
+    await plain.run({ yes: true, report: '/r.json' });
+    should(plain.out.text).not.match(/mid-turn/u);
+  });
+
+  it('with --when-idle refuses, updating nothing, when the daemon is up but its count cannot be read', async () => {
+    const h = harness('homebrew', { midTurn: [undefined] });
+    await h.run({ yes: true, whenIdle: true, report: '/r.json' });
+    should(h.report().outcome).equal('failed');
+    should(h.report().message).match(
+      /could not read how many ferrets are mid-turn, so nothing was updated; run it again, or leave out --when-idle/u,
+    );
+    const waiting = harness('homebrew', { midTurn: [2, undefined] });
+    await waiting.run({ yes: true, whenIdle: true, report: '/r.json' });
+    should(waiting.report().outcome).equal('failed');
+    should(waiting.report().message).match(/nothing was updated/u);
+  });
+
+  it('with --when-idle goes ahead when the daemon is stopped: there is no count to wait for', async () => {
+    const h = harness('homebrew', { running: false, midTurn: [undefined] });
+    await h.run({ yes: true, whenIdle: true, report: '/r.json' });
+    should(h.view.looks).equal(0);
+    should(h.report().outcome).equal('succeeded');
+  });
+
   it('counts a daemon without the view as idle, and a stopped one is never asked', async () => {
     const h = harness('homebrew', { midTurn: [undefined] });
     await h.run();
