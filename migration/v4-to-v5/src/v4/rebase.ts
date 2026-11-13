@@ -12,6 +12,9 @@
  * old home is never named, looked at or relied on to be `--to`. A path with no such tail (a project folder, a worktree,
  * the user's own `~/.claude`) is outside the v4 home and is returned as written.
  *
+ * A path is matched at its LAST such tail, so a home that used to live beneath a `fleet/homes` folder of its own
+ * (`<x>/fleet/homes/project/v4/fleet/homes/<id>`) still maps to `fleet/homes/<id>`.
+ *
  * It is pure string work: no `stat`, no `lstat`, no read, so the re-based path is only ever WALKED later by the steps
  * that already walk `--from` lstat-only, and the old absolute path is never touched.
  */
@@ -29,7 +32,9 @@ const AREAS: readonly (readonly string[])[] = [
 export function rebaseV4Path(home: string, path: string): string {
   if (!isAbsolute(path)) return path;
   const segments = resolve(path).split(sep).join(posix.sep).split(posix.sep).filter(Boolean);
-  for (let at = 0; at < segments.length; at++)
+  // The MOST SPECIFIC match is the LAST one: the v4 home's own area sits at the END of the spelling, and anything
+  // before it is where the home itself used to live (it may be nested beneath a `fleet/homes` folder of its own).
+  for (let at = segments.length - 1; at >= 0; at--)
     for (const area of AREAS)
       if (area.every((name, offset) => segments[at + offset] === name)) return join(home, ...segments.slice(at));
   return path;

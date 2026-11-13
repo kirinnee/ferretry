@@ -126,6 +126,7 @@ export const harnessHomesStep: Step = {
       const presentHomes = (await info(homes)) === undefined ? [] : await readdir(homes, { withFileTypes: true });
       let carriedHomes = 0;
       let omittedHomes = 0;
+      const carriedNames = new Set<string>();
       for (const source of presentHomes) {
         if (source.isSymbolicLink()) {
           links++;
@@ -145,11 +146,23 @@ export const harnessHomesStep: Step = {
           continue;
         }
         await copyTree(join(homes, name), join(targetRoot(item.harness), id), true);
+        carriedNames.add(name);
         carriedHomes++;
       }
+      // A runtime v4 recorded (its id is known) whose home folder is on disk but was not mapped: its conversations would
+      // be lost while the report said complete. Named, and the conversion is incomplete.
+      const unmapped = presentHomes
+        .filter(source => source.isDirectory() && known.has(source.name) && !carriedNames.has(source.name))
+        .map(source => source.name)
+        .sort();
       return {
         ...base,
-        status: 'converted' as const,
+        ...(unmapped.length === 0
+          ? { status: 'converted' as const }
+          : {
+              status: 'failed' as const,
+              note: `${unmapped.length} runtime home(s) on disk could not be mapped to where v4 recorded them, so they were not carried: ${unmapped.join(', ')}`,
+            }),
         sealed,
         kept: [
           { what: 'opaque harness files copied without opening', count: sealed.length },
