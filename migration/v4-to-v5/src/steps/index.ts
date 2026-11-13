@@ -20,6 +20,7 @@ import { catalogsStep } from './catalogs.ts';
 import { skillFoldersStep } from './skill-folders.ts';
 import { conversationStep } from './conversation.ts';
 import { daemonSettingsStep } from './daemon-settings.ts';
+import { ferretConversationsStep } from './ferret-conversations.ts';
 import { ferretsStep } from './ferrets.ts';
 import { gateStep } from './gate.ts';
 import { harnessHomesStep } from './harness-homes.ts';
@@ -138,6 +139,8 @@ export const STEPS: readonly Step[] = [
   conversationStep,
   terminalsStep,
   harnessHomesStep,
+  // After Ferrets and Harness folders: each ferret's conversation goes into its own agent home, beside the pool copy.
+  ferretConversationsStep,
   boardStep,
   agendaStep,
   projectsStep,

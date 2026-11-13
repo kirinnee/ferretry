@@ -61,7 +61,11 @@ Fixture homes built from the real 4.291.5 release are in
 
 Ferret records keep ids, parent edges, spawn provenance, transfer edges, project ids, names, runtime, work folder,
 resume ids, pane handles and credential hashes. Transcript home/file metadata points into the copied agent homes
-and shared pools; the transcript bytes are never parsed. Journals become history, callsign claims become names,
+and shared pools; the transcript bytes are never parsed. Each ferret's own conversation is also COPIED into its own
+agent home, where v5 proves and resumes it (`src/steps/ferret-conversations.ts`): Claude Code gets
+`projects/<cwd>/<id>.jsonl` and `conversation.json`, Codex its rollout under `sessions/` and `state/codex/rollouts/`;
+a ferret with no recorded file is named in the report, and one still running in a v4 pane shows its chat up to the
+conversion until it is restarted. Journals become history, callsign claims become names,
 and archive entries, worktree records/intents and fork receipts retain their schema-backed fields. The kernel's
 declared `format: 1` stamp is added to document bodies; fork receipts also retain their original `v: 1`.
 

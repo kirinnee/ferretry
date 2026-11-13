@@ -32,10 +32,6 @@ export const harnessHomesStep: Step = {
       why: 'agent-homes declarations specify no v5 link policy; no link is read, followed or re-made; Logins owns sign-ins',
     },
     {
-      what: 'runtime-home to per-ferret-home association',
-      why: 'v5 declares opaque agent-homes/* but no runtime-to-ferret mapping; runtime UUID folders and the shared pool (_shared) are kept for the owner to connect',
-    },
-    {
       what: 'harness homes outside fleet/homes or with no known harness',
       why: 'no safe declared source mapping; never inspect external user homes or guess a harness',
     },

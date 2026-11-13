@@ -74,3 +74,31 @@ export function rewriteTranscript(
   const isPooled = harness === 'claude' ? first === 'projects' : first === 'sessions' || first === 'archived_sessions';
   return { ...transcript, home, file: ctx.v5.resolve(join(root, isPooled ? '_shared' : id, inHome)) };
 }
+
+/**
+ * Where v4 keeps a ferret's transcript BYTES, for carrying them into the ferret's own v5 agent home: the shared pool
+ * (`fleet/shared/<harness>/…`) for a pooled path — reached directly, never through the account home's link into it —
+ * or a real file inside the runtime's own home (`fleet/homes/<id>/…`). `inPool` is the path below the pool or that home
+ * (`projects/<dir>/<id>.jsonl`, `sessions/YYYY/MM/DD/<rollout>.jsonl`). `undefined` when v4 recorded no file, or one
+ * outside both. Pure path work: the caller walks it lstat-only.
+ */
+export function v4TranscriptSource(
+  ctx: StepContext,
+  harness: 'claude' | 'codex',
+  recorded: TranscriptProvenance,
+): { readonly base: string; readonly inPool: string } | undefined {
+  if (recorded.file === undefined) return undefined;
+  const home = rebaseV4Path(ctx.v4.home, recorded.home);
+  const file = rebaseV4Path(ctx.v4.home, recorded.file);
+  const pool = join(ctx.v4.fleet, 'shared', harness);
+  const pooled = inside(pool, file);
+  if (pooled !== undefined && pooled.length > 0) return { base: pool, inPool: pooled };
+  const homes = join(ctx.v4.fleet, 'homes');
+  const local = inside(homes, home);
+  if (local === undefined || local.length === 0 || local.includes(sep)) return undefined;
+  const inHome = inside(home, file);
+  if (inHome === undefined || inHome.length === 0) return undefined;
+  const first = inHome.split(sep)[0];
+  const isPooled = harness === 'claude' ? first === 'projects' : first === 'sessions' || first === 'archived_sessions';
+  return isPooled ? { base: pool, inPool: inHome } : { base: join(homes, local), inPool: inHome };
+}
