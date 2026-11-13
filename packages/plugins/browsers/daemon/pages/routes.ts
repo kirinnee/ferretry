@@ -9,6 +9,7 @@ import {
   type SocketDownstream,
   type SocketHandler,
 } from '@ferretry/kernel/contract';
+import { isFerretCall, isHumanAdminActor } from '@ferretry/core-gate/contract';
 import { BrowserLoginActionSchema } from '../../contract/index.ts';
 import { BrowserControlError, type BrowserLoginLifecycle, type BrowserLoginStatus } from '../worker/control/index.ts';
 import { acted, maskedSnapshot, maskedStatus, opOfAction, targetOfAction, writeAct } from './acts.ts';
@@ -28,7 +29,22 @@ import { type BrowserActionResult, BrowserActionSchema } from '../../contract/wi
  * answers the status read afterwards, masked (S16); a read answers its masked text; a screenshot its picture.
  */
 /** Opens one viewer stream on a socket. */
-export type BrowserStreamOpener = (sessionId: string, downstream: SocketDownstream) => Promise<SocketHandler>;
+export type BrowserStreamOpener = (
+  sessionId: string,
+  downstream: SocketDownstream,
+  mayType: boolean,
+) => Promise<SocketHandler>;
+
+/**
+ * Whether the caller of the viewer socket may TYPE into the page: a person (the owner's own app or `fy` with the admin
+ * token, or a paired device), as Gate stamped it on the call. The socket is `caller: 'any'`, so a ferret's credential
+ * is admitted to watch; its input never is. Anything Gate did not prove a person is refused.
+ */
+function viewerMayType(call: Pick<CallContext, 'actor' | 'credential'>): boolean {
+  if (isFerretCall(call)) return false;
+  if (call.credential?.tokenClass === 'device') return true;
+  return call.credential?.tokenClass === 'admin' && isHumanAdminActor(call.actor);
+}
 
 /** Every refusal the login domain raises, in the transport's own taxonomy. */
 function refusal(error: BrowserControlError): ApiError {
@@ -152,6 +168,7 @@ export function streamSocket(browser: Pick<BrowserSubsystem, 'status'>, stream: 
   return async call => {
     const id = sessionIdOf(call);
     await browser.status(id).catch(browserFailure);
-    return async downstream => await stream(id, downstream);
+    const mayType = viewerMayType(call);
+    return async downstream => await stream(id, downstream, mayType);
   };
 }

@@ -473,7 +473,7 @@ describe('the viewer stream’s input, through the act runner (R549)', () => {
     // Arrange
     const { browser, kernel, tools } = await harness();
     await tools.call(person, { tool: 'browser.open', name: 'app' });
-    const host = heldViewerHost(kernel.kernel, browser as never);
+    const host = heldViewerHost(kernel.kernel, browser as never, true);
     const text = 'a whole sentence, typed at once';
 
     // Act
@@ -488,7 +488,7 @@ describe('the viewer stream’s input, through the act runner (R549)', () => {
     const { browser, kernel, tools } = await harness();
     await tools.call(agent, { tool: 'browser.open', name: 'app' });
     kernel.hold(pageTarget((browser.pages[0] as FakePage).id), 'held', ['type', 'press']);
-    const host = heldViewerHost(kernel.kernel, browser as never);
+    const host = heldViewerHost(kernel.kernel, browser as never, true);
 
     // Act
     const byAgent = await failure(tools.call(agent, { tool: 'browser.type', name: 'app', selector: '#q', text: 'x' }));

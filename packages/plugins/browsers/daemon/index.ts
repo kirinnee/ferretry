@@ -180,8 +180,8 @@ export function buildBrowsers(
       kernel.events.publish(PageChanged, { ferret: sessionId, page: pageId, change: 'closed' }),
     ),
   );
-  const viewerHost = heldViewerHost(kernel, pages);
-  const stream: BrowserStreamOpener = async (sessionId, downstream) => {
+  const stream: BrowserStreamOpener = async (sessionId, downstream, mayType) => {
+    const viewerHost = heldViewerHost(kernel, pages, mayType);
     let viewer: BrowserViewerStream | undefined;
     return {
       open: async () => {
