@@ -65,7 +65,7 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
    configuration service and `runtimesConfigFiles(...).load()`. `load()` must resolve, every v4 runtime must be in the
    model, and `instructions` must hold each document's text. One unreadable reference makes the WHOLE fleet
    configuration unreadable, and the converter once wrote instructions as `<name>.md` where 5.0 reads `<name>.yaml`. CASE 1
-   (every login carried) is in; CASE 2 (logins held out of the preview) is line 10.
+   (every login carried) is in; CASE 2 (logins held out of the preview) is line 12.
 10. **An unreadable derived fleet manifest is regenerated, never refuses every start**:
     `packages/plugins/runtimes/tests/integration/daemon/manifest-regen.test.ts` — a `fleet/manifest.json` with an unknown key
     on an account row (the v4 4.291.12 shape) or truncated JSON is rebuilt from the configuration once after the daemon
