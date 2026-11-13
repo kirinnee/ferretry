@@ -1453,15 +1453,24 @@ or an origin this daemon may not ask, and any other 4xx. Any change to the relay
 `config/connections.yaml` while a retry is pending — a relay of the operator's own (`enabled: false`
 included), a discovery entry switched off or removed, any other edit, or a file that cannot be read —
 wins and ends the retries without resolving, publishing or dialling anything (it takes effect on restart,
-as any relay edit does). The CURRENT file is read before every ask, when an answer arrives, immediately
-before the recovered carrier is started, and again after each carrier start that precedes another; a value
-captured at boot decides nothing. Recovery also ends **the moment shutdown begins**: the Kernel aborts every
-carrier's signal before it stops the jobs or any plugin's own cleanup, so that signal (not the plugin's
-later `onStop`) cancels the timer, aborts the read in flight and drops whatever a slower teardown lets
-arrive. Every read keeps `cache: 'no-store'`.
+as any relay edit does). **One gate decides, and every path asks it after its last `await`:** a
+DISCOVERED relay is published or dialled only while the daemon is not stopping, the CURRENT file is a clean
+read, and its relay list still says what this boot resolved. The gate is asked before every ask and when an
+answer arrives (first read and retries alike), when a recovery adopts its answer, at the boot carrier start
+after the first read, and immediately before **each** discovered carrier is built and started (so a change
+that lands while an earlier carrier is starting stops the next one); there is no path that dials a discovered
+relay without it. A file the kernel cannot read (invalid or oversized — the config service then answers
+`undefined` or its last good version, never an error) is not a clean read, so it vetoes whatever its effective
+value says; a file that is simply absent is clean. A veto that lands after the discovered relay was already
+published withdraws it again, so the published carriers, the hosts a redial may reach and the doctor row agree.
+Relays the operator wrote are not discovery: they keep their behaviour and stop only for shutdown. Discovery has
+ONE abort controller, aborted synchronously when shutdown begins: the Kernel aborts every carrier's signal
+before it stops the jobs or any plugin's own cleanup, so that signal (not the plugin's later `onStop`)
+aborts the first read and every retry read, cancels the timer, and nothing is adopted or published afterwards —
+a configured sibling included — whatever a slower teardown lets arrive. Every read keeps `cache: 'no-store'`.
 
-The same two guards apply to the **first** read, not only to the retries: an answer that arrives after
-shutdown began is dropped, and a change to the relay list in `config/connections.yaml` during that read
+The same gate applies to the **first** read, not only to the retries: an answer that arrives after
+shutdown began is dropped and publishes nothing, and a change to the relay list in `config/connections.yaml` during that read
 (`enabled: false` included) wins over the answer. In a **mixed** list (a configured relay beside a `source: discovery` entry)
 a recovery never disturbs a relay that is already running — it is not restarted, not re-reported as inactive,
 and not displaced. If the recovered address turns out to be the configured one, the **configured relay
