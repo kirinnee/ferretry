@@ -17,7 +17,7 @@ import should from 'should';
 import { findFlagSecrets, findRawSecrets, rawTextHoldsSecret } from '@ferretry/std/credential-words';
 import { componentCatalog, WITHHELD_LINE } from '../../../daemon/lib/service/catalog.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
-import { best } from './timing-support.ts';
+import { ratioOf } from '@ferretry/std/testing/linear-time';
 
 const V = 'Zk3pQ9vXw2LmN7rT';
 const V2 = 'Qw8rTy3uIo5pAs7dFg2h';
@@ -365,9 +365,11 @@ describe('the nets withhold nothing the write rule accepts', () => {
     for (const [name, make] of Object.entries(shapes)) {
       const small128 = make(128 * 1024);
       const large256 = make(256 * 1024);
-      const small = best(() => shown(name, small128));
-      const large = best(() => shown(name, large256));
-      should(large / small).be.below(3, name);
+      const ratio = ratioOf(
+        () => shown(name, large256),
+        () => shown(name, small128),
+      );
+      should(ratio).be.below(3, name);
     }
   }, 120_000);
 });

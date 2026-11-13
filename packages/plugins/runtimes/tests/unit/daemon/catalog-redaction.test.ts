@@ -7,6 +7,7 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { interleavedBest } from '@ferretry/std/testing/linear-time';
 import { AFTER_KEY, KEY_BODY_MARK, privateKeyShapes } from './redact-private-keys.ts';
 import { HIDDEN, shownFor } from './redact-support.ts';
 
@@ -1400,11 +1401,12 @@ describe('the redaction guarantees', () => {
     }
   });
 
-  // Per-test limit (testing standard): the test runs 7 shapes x (1 warm-up + 5 + 5 timed runs), 100 KB at the largest,
-  // through `shownFor`, which is the component-text path; the text net runs W's flag rule once per line. Measured
-  // alone, one file, wall clock: 5.0 3.24 s, fix 2 4.0 s, fix 3 4.5-5.5 s (5.26 s and 5.50 s failed bun's 5 s default),
-  // fix 4 4.76 s, 4.80 s, 4.80 s (+ one 5.13 s fail on the first run). The ratio and ceiling below are unchanged
-  // and are the linearity proof; 60 s is a margin for a loaded runner like net-command-value's, not a speed claim.
+  // Per-test limit (testing standard): the test runs 7 shapes x (1 warm-up + 9 interleaved rounds of a small and a
+  // large run), 100 KB at the largest, through `shownFor`, which is the component-text path; the text net runs W's
+  // flag rule once per line. Measured alone, one file, wall clock: 5.0 3.24 s, fix 2 4.0 s, fix 3 4.5-5.5 s (5.26 s
+  // and 5.50 s failed bun's 5 s default), fix 4 4.76 s, 4.80 s, 4.80 s (+ one 5.13 s fail on the first run), then
+  // 6.9 s with nine interleaved rounds. The ratio and ceiling below are unchanged and are the linearity proof; 60 s is
+  // a margin for a loaded runner like net-command-value's, not a speed claim.
   it('S25 every shape rule is linear: a long run of any shape costs the same per character as a short one', () => {
     // Arrange: the shapes that made the old rules quadratic (name characters with no separator, repeated token heads,
     // a separator with nothing after it, a long block, a long expansion).
@@ -1417,25 +1419,20 @@ describe('the redaction guarantees', () => {
       (n: number) => 'password\n'.repeat(n / 9),
       (n: number) => `${'-'.repeat(n)}=x`,
     ];
-    // The FASTEST of a few runs, in wall-clock ms (a small run is about 1 ms, which is the CPU clock's own tick, so the
-    // wall clock is the only one that can read it): a collection or a lost moment on a shared runner lands in one run,
-    // a rule that is not linear is slow in every run.
-    const RUNS = 5;
-    const timeOf = (text: string): number => {
-      let fastest = Number.POSITIVE_INFINITY;
-      for (let run = 0; run < RUNS; run += 1) {
-        const start = performance.now();
-        shownFor(text);
-        fastest = Math.min(fastest, performance.now() - start);
-      }
-      return fastest;
-    };
-
+    // The FASTEST of nine interleaved rounds, in wall-clock ms (a small run is about 1 ms, which is the CPU clock's own
+    // tick, so the wall clock is the only one that can read it): a collection or a lost moment on a shared runner lands
+    // in one round, and because the small and the large run alternate it lands on both sides, while a rule that is not
+    // linear is slow in every round.
     for (const shape of shapes) {
       // Act
       shownFor(shape(3_000));
-      const small = Math.max(timeOf(shape(10_000)), 1);
-      const large = timeOf(shape(100_000));
+      const smallText = shape(10_000);
+      const largeText = shape(100_000);
+      const { small, large } = interleavedBest(
+        () => shownFor(largeText),
+        () => shownFor(smallText),
+        { floorMs: 1 },
+      );
 
       // Assert: ten times the text is nowhere near a hundred times the time (quadratic), and an absolute ceiling.
       should(large).be.below(small * 40);

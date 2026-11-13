@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { Glob } from 'bun';
 import should from 'should';
 import { findFlagSecrets, rawTextHoldsSecret } from '@ferretry/std/credential-words';
+import { ratioOf } from '@ferretry/std/testing/linear-time';
 import { WITHHELD_LINE } from '../../../daemon/lib/service/catalog.ts';
 import { shownFor } from './redact-support.ts';
 
@@ -118,18 +119,17 @@ describe('component text lines the write rule refuses are withheld', () => {
       'many short lines': size => 'ab\n'.repeat(size / 3),
       'many lines each holding a long value': size => `key: ${LONG40}\n`.repeat(Math.ceil(size / 47)),
     };
-    const timed = (text: string): number => {
-      const start = performance.now();
-      shownFor(text);
-      return performance.now() - start;
-    };
-
     // Act + Assert: the ratio of 256 to 128 KiB stays under 3 (a quadratic rule would give about 4).
     for (const [name, make] of Object.entries(shapes)) {
-      timed(make(16 * 1024));
-      const small = Math.max(timed(make(128 * 1024)), 1);
-      const large = timed(make(256 * 1024));
-      should(large / small).be.below(3, name);
+      shownFor(make(16 * 1024));
+      const small = make(128 * 1024);
+      const large = make(256 * 1024);
+      const ratio = ratioOf(
+        () => shownFor(large),
+        () => shownFor(small),
+        { floorMs: 1 },
+      );
+      should(ratio).be.below(3, name);
     }
   }, 60_000);
 });

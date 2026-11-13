@@ -9,7 +9,8 @@
     "./yaml": "./src/yaml-text.ts",
     "./secret-reference": "./src/secret-reference.ts",
     "./compaction-line": "./src/compaction-line.ts",
-    "./credential-words": "./src/credential-words/index.ts"
+    "./credential-words": "./src/credential-words/index.ts",
+    "./testing/linear-time": "./testing/linear-time.ts"
   },
   "types": "./src/index.ts",
   "dependencies": {

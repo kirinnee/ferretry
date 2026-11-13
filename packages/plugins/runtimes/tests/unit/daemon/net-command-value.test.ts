@@ -15,7 +15,7 @@ import { resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { type CatalogFacts, componentCatalog } from '../../../daemon/lib/service/catalog.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
-import { best } from './timing-support.ts';
+import { ratioOf } from '@ferretry/std/testing/linear-time';
 
 const V = 'Zk3pQ9vXw2LmN7rT';
 const FACTS: CatalogFacts = {
@@ -156,9 +156,11 @@ describe('(I) a command is withheld in every view when the cutter cuts a value i
 
     // Act + Assert: the ratio of 256 to 128 KiB stays under 3 (a quadratic rule would give about 4).
     for (const [name, make] of Object.entries(shapes)) {
-      const small = best(() => commandWithheld(make(128 * 1024)));
-      const large = best(() => commandWithheld(make(256 * 1024)));
-      should(large / small).be.below(3, name);
+      const ratio = ratioOf(
+        () => commandWithheld(make(256 * 1024)),
+        () => commandWithheld(make(128 * 1024)),
+      );
+      should(ratio).be.below(3, name);
     }
   }, 60_000);
 });
