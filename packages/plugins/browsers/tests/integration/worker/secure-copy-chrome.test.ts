@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import should from 'should';
 import type { BrowsersApi } from '../../../contract/port.ts';
 import { BrowserSessionService } from '../../../daemon/pages/service.ts';
+import { SealedGate } from '../../../daemon/sealed/gate.ts';
 import { SealedPages } from '../../../daemon/sealed/page-guards.ts';
 import { secureCopyReach } from '../../../daemon/sealed/reach.ts';
 import { nodeStagedFiles } from '../../../daemon/tools/adapters/staged-files.ts';
@@ -29,9 +30,16 @@ import { workRoots } from '../../support/work-root.ts';
  *
  * STAND-INS, said plainly. Packages meet only through contracts (`context-imports`), so Accounts' copy service cannot be
  * imported here: `Copies` below is a small stand-in that drives Browsers' reach exactly as Accounts' adapters do (`clipboardRead`
- * with its queue and seal, `sealed.hold`, `sealed.pastedInto`, `sealed.drop`) and speaks like its four tools. Accounts' real
- * service, adapters and tools are proved against the same contract in Accounts' suites. The Vault's one guarded write is done by
- * the test into a real page field, a terminal buffer and a secret map, and the masking registry is a small copy of the Vault's.
+ * with its queue and seal, `sealed.hold`, `sealed.pastedOn`, `sealed.drop`) and speaks like its four tools. The Vault's one guarded
+ * write is done by the test into a real page field, a terminal buffer and a secret map, and the masking registry is a small copy
+ * of the Vault's. THIS FILE THEREFORE PROVES BROWSERS' HALF ONLY, over a real Chrome.
+ *
+ * The production wiring (the REAL Accounts copy service and tools, the REAL Vault with its registry, retention and registration
+ * awaits, the terminal path, the MCP door and the audit sink, with Browsers over a real Chrome) is driven end to end by the
+ * composed-daemon test `packages/core/kernel/tests/integration/host/secure-copy-pipeline.test.ts`, which also runs the
+ * absent-channel sweep (raw, base64, hex, reversed, split, URI-encoded) over the action route, the viewer socket, frames, dialogs,
+ * errors, list/tabs metadata and a second ferret on the shared browser. That test stands in only the terminal (a recording
+ * adapter instead of tmux). The one thing neither does is a real tmux pane.
  */
 
 const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
@@ -159,12 +167,12 @@ class Copies {
   }
 
   /** Where a paste went: a terminal's scrollback stays masked for the session; a page's origin stays closed. */
-  async pastedInto(name: string, target: { readonly kind: 'terminal' | 'page'; readonly key: string }): Promise<void> {
+  pastedInto(name: string, target: { readonly kind: 'terminal' | 'page'; readonly origin?: string }): void {
     const copy = this.held.get(name);
     if (copy?.value === undefined) return;
     if (target.kind === 'terminal') this.masker.holdScrollback(SESSION, copy.value, `[sealed:${name}]`);
     else
-      await this.api.sealed.pastedInto(SESSION as never, name, target.key, () =>
+      this.api.sealed.pastedOn(SESSION as never, name, [target.origin ?? ''], () =>
         copy.state === 'live' && copy.expiresAt > this.clock.now() ? copy.expiresAt : undefined,
       );
   }
@@ -202,6 +210,7 @@ let site: ReturnType<typeof Bun.serve>;
 let browser: BrowserSessionService;
 let tools: BrowserTools;
 let sealed: SealedPages;
+let gate: SealedGate;
 let control: SurfaceControl;
 let copies: Copies;
 let reach: BrowsersApi['copy'];
@@ -324,6 +333,7 @@ beforeAll(async () => {
   masker = new Masker(clock);
   terminal = new Terminal(masker);
   sealed = new SealedPages();
+  gate = new SealedGate({ sealed, mask: async text => masker.scrub(text) });
   control = new SurfaceControl(
     {
       publish: async (_session: string, type: string, data: unknown) => void events.push({ type, data }),
@@ -355,9 +365,9 @@ beforeAll(async () => {
       } as never),
     ),
     binaryName: 'fy',
-    sealed,
+    sealed: gate,
   });
-  reach = secureCopyReach({ tools, pages: browser, sealed });
+  reach = secureCopyReach({ tools, pages: browser, gate });
   copies = new Copies(masker, clock, reach as NonNullable<BrowsersApi['copy']>);
   for (const level of ['log', 'warn', 'error', 'info'] as const) {
     const original = console[level].bind(console);
@@ -380,10 +390,10 @@ async function pasteInto(destination: 'terminal' | 'field' | 'secret', name = 'k
   if (value === undefined) throw new Error('the copy is gone');
   if (destination === 'terminal') {
     terminal.type(value);
-    await copies.pastedInto(name, { kind: 'terminal', key: 'dev' });
+    copies.pastedInto(name, { kind: 'terminal' });
   } else if (destination === 'field') {
     await browser.actOnPage(SESSION, 'form', { action: 'type', selector: '#dest', text: value } as never);
-    await copies.pastedInto(name, { kind: 'page', key: 'form' });
+    copies.pastedInto(name, { kind: 'page', origin: B });
   } else secrets.set('VERCEL_TOKEN', value);
   copies.used(name);
 }

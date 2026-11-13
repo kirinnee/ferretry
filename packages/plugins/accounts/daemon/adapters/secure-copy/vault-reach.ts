@@ -49,10 +49,17 @@ export class VaultCopyMasking implements CopyMasking {
     this.vault()?.maskCopy?.retime(sessionId as FerretId, marker, until);
   }
 
-  holdScrollback(sessionId: string, value: string, marker: string): void {
+  holdScrollback(sessionId: string, value: string, marker: string): boolean {
     const registry = this.vault()?.maskCopy;
     if (registry === undefined)
       throw new SecureCopyError('unavailable', 'Secure copy is not available: nothing here can mask a held value.');
-    registry.holdScrollback(sessionId as FerretId, value, marker);
+    return registry.holdScrollback(sessionId as FerretId, value, marker);
+  }
+
+  scrollbackFull(sessionId: string, marker: string): boolean {
+    const registry = this.vault()?.maskCopy;
+    if (registry === undefined)
+      throw new SecureCopyError('unavailable', 'Secure copy is not available: nothing here can mask a held value.');
+    return registry.scrollbackFull(sessionId as FerretId, marker);
   }
 }

@@ -315,6 +315,8 @@ class LeasedBrowser implements BrowserAutomation {
   /** A real window on a desktop shares this computer's own clipboard: nothing is read from it. */
   copyClipboard: BrowserAutomation['copyClipboard'] = async pageId =>
     this.clipboardShared ? { ok: false, reason: 'shared' } : await this.worker.copyClipboard(pageId);
+  clearClipboard: BrowserAutomation['clearClipboard'] = async () =>
+    this.clipboardShared ? true : await this.worker.clearClipboard();
   inputDocument: BrowserAutomation['inputDocument'] = pageId => this.worker.inputDocument(pageId);
   pushNumberRead: NonNullable<BrowserAutomation['pushNumberRead']> = pageId => this.worker.pushNumberRead(pageId);
   inputText = (pageId: string): Promise<string> => this.worker.inputText(pageId);

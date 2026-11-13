@@ -269,6 +269,7 @@ export default implementDaemon(manifest, {
         hold: (ferret, value, marker, until) => values.holdUntil(ferret, value, marker, until),
         retime: (ferret, marker, until) => values.retime(ferret, marker, until),
         holdScrollback: (ferret, value, marker) => values.holdScrollback(ferret, value, marker),
+        scrollbackFull: (ferret, marker) => values.scrollbackFull(ferret, marker),
       },
     };
 

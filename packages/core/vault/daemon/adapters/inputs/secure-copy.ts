@@ -48,6 +48,19 @@ export class SecureCopiesThroughHook implements InputSealedPort, InputPasteRules
     }
   }
 
+  /** Never swallowed: a protection that could not be installed stops the write. */
+  protect(
+    sessionId: string,
+    name: CopyName,
+    target: InputTarget,
+    where: { readonly origins: readonly string[] },
+  ): void {
+    const provider = this.provider();
+    if (provider === undefined)
+      throw new Error('Secure copy is not available, so Ferretry cannot protect this paste: nothing was typed.');
+    provider.protect(sessionId, name, target, where);
+  }
+
   async refusal(sessionId: string, name: CopyName, target: InputTarget): Promise<string | undefined> {
     try {
       return await this.provider()?.refusal(sessionId, name, target);

@@ -361,6 +361,9 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     const bytes = new TextEncoder().encode(text);
     // A grant fill types only while its line is still held: asked after the last look, as the last thing before the write.
     if (options?.proceed?.() === false) return 'target_changed';
+    // A sealed paste: its scrollback mask is installed here, BEFORE the first byte, and stays whatever the write comes to.
+    // A mask that cannot be installed throws, and nothing is typed.
+    options?.protect?.({ origins: [] });
     const write = async (keys: Uint8Array): Promise<'typed' | 'refused' | 'uncertain'> => {
       const [chunk = []] = hexInputChunks(keys, keys.byteLength);
       const args = guardedWriteArguments(paneId, guard, ['send-keys', '-H', '-t', paneId, ...chunk].join(' '));

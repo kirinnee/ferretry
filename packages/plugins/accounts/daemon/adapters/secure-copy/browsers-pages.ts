@@ -55,8 +55,15 @@ export class BrowsersCopyGuards implements CopyGuards {
     sealed?.hold(sessionId as FerretId, copy, origins, until);
   }
 
-  async pastedInto(sessionId: string, copy: string, key: string, until: () => number | undefined): Promise<void> {
-    await this.browsers()?.copy?.sealed.pastedInto(sessionId as FerretId, copy, key, until);
+  pastedOn(sessionId: string, copy: string, origins: readonly string[], until: () => number | undefined): void {
+    const sealed = this.browsers()?.copy?.sealed;
+    // Browsers off: the page cannot be one an agent drives, but a paste that cannot be guarded is not made.
+    if (sealed === undefined)
+      throw new SecureCopyError(
+        'unavailable',
+        'Ferretry could not guard the page this value goes to (Browsers is off), so nothing was typed.',
+      );
+    sealed.pastedOn(sessionId as FerretId, copy, origins, until);
   }
 
   drop(sessionId: string): void {

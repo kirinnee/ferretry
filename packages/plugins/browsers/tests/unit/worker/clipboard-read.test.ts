@@ -92,7 +92,9 @@ describe('reading the clipboard in the worker’s own context', () => {
     should(helper.cleared).equal(1);
   });
 
-  it('should not let a failure to empty the clipboard fail a read that worked', async () => {
+  // FINDING 2 (secure-clip-2 fix round 1): a clipboard that could not be emptied still holds the value, so the answer SAYS so
+  // (`kept`) instead of reporting an ordinary success; the caller keeps the protection on until a clear is confirmed.
+  it('should say the clipboard was KEPT when it could not be emptied, though the read worked', async () => {
     const helper = new Helper(SENTINEL);
     helper.clear = async () => {
       throw new Error('gone');
@@ -101,11 +103,36 @@ describe('reading the clipboard in the worker’s own context', () => {
     const read = await readClipboardOf(page(), document('loader-1'), helper);
 
     should(read.ok).equal(true);
+    should(read.kept).equal(true);
+  });
+
+  it('should say KEPT for every outcome that left the clipboard unemptied: empty, changed and a failed read', async () => {
+    const stuck = (helper: Helper): Helper => {
+      helper.clear = async () => {
+        throw new Error('gone');
+      };
+      return helper;
+    };
+
+    const empty = await readClipboardOf(page(), document('loader-1'), stuck(new Helper('')));
+    const changed = await readClipboardOf(page(), document('loader-1', 'loader-2'), stuck(new Helper(SENTINEL)));
+    const failed = await readClipboardOf(page(), document('loader-1'), stuck(new Helper(SENTINEL, true)));
+
+    should(empty).eql({ ok: false, reason: 'empty', kept: true });
+    should(changed).eql({ ok: false, reason: 'changed', kept: true });
+    // A read that threw AND a clear that failed: the value may still be there, so it is not an error the caller can drop.
+    should(failed).eql({ ok: false, reason: 'empty', kept: true });
+  });
+
+  it('should not say KEPT when the clear was confirmed', async () => {
+    const read = await readClipboardOf(page(), document('loader-1'), new Helper(SENTINEL));
+
+    should('kept' in read).equal(false);
   });
 });
 
 /** A Playwright context as the helper uses it, recording what it was asked. */
-function fakeContext() {
+function fakeContext(options: { readonly stuck?: boolean } = {}) {
   const calls: string[] = [];
   let clipboard = SENTINEL;
   const helperPage: HelperPage = {
@@ -114,13 +141,14 @@ function fakeContext() {
     isClosed: () => false,
     evaluate: async (work: (argument: never) => unknown, argument: never) => {
       const source = String(work);
-      if (source.includes('readText')) {
+      if (source.includes('readText') && !source.includes('writeText')) {
         calls.push('read');
         return clipboard.slice(0, argument as number) as never;
       }
       calls.push('clear');
-      clipboard = '';
-      return undefined as never;
+      // A write that resolved but left text behind (`stuck`) is read back by the helper, and is a FAILED clear.
+      if (options.stuck !== true) clipboard = '';
+      return clipboard.length as never;
     },
   };
   const context: HelperContext = {
@@ -134,6 +162,18 @@ function fakeContext() {
 }
 
 describe('the worker’s own helper page', () => {
+  it('should CONFIRM a clear by reading the clipboard back, and fail when text is left', async () => {
+    const stuck = fakeContext({ stuck: true });
+    const helper = new ContextClipboardHelper(async () => stuck.context);
+
+    const failure = await helper.clear().then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+
+    should(failure?.message).containEql('still holds text');
+  });
+
   it('should be made once, granted the clipboard for one made-up origin only, and reused', async () => {
     const { context, calls } = fakeContext();
     let made = 0;

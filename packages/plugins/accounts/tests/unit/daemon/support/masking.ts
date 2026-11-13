@@ -20,7 +20,11 @@ interface Held {
 export class EphemeralValues implements CopyMasking {
   private readonly held = new Map<string, readonly Held[]>();
 
-  constructor(private readonly clock: { now(): number }) {}
+  /** `cap`: how many DIFFERENT copies a session keeps masked in scrollback (the real registry's is 256). */
+  constructor(
+    private readonly clock: { now(): number },
+    private readonly cap = 256,
+  ) {}
 
   holdUntil(sessionId: string, value: string, marker: string, until: number): void {
     if (value.length < MIN_MASKED_LENGTH) return;
@@ -33,13 +37,22 @@ export class EphemeralValues implements CopyMasking {
   }
 
   /** A value pasted into a terminal: masked for the life of the session's scrollback; `retime` does not shorten it. */
-  holdScrollback(sessionId: string, value: string, marker: string): void {
-    if (value.length < MIN_MASKED_LENGTH) return;
+  holdScrollback(sessionId: string, value: string, marker: string): boolean {
+    if (value.length < MIN_MASKED_LENGTH) return true;
     this.purge();
+    if (this.scrollbackFull(sessionId, marker)) return false;
     this.held.set(sessionId, [
       ...(this.held.get(sessionId) ?? []).filter(entry => !(entry.scrollback === true && entry.value === value)),
       { value, label: marker, marker, until: Number.POSITIVE_INFINITY, scrollback: true },
     ]);
+    return true;
+  }
+
+  scrollbackFull(sessionId: string, marker: string): boolean {
+    this.purge();
+    const kept = (this.held.get(sessionId) ?? []).filter(entry => entry.scrollback === true);
+    if (kept.some(entry => entry.marker === marker)) return false;
+    return new Set(kept.map(entry => entry.marker)).size >= this.cap;
   }
 
   retime(sessionId: string, marker: string, until: number): void {

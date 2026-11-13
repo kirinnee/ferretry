@@ -76,13 +76,50 @@ describe('a value pasted into a terminal stays masked for the scrollback’s lif
     should(values.heldCount()).equal(0);
   });
 
-  it('should keep every value of a session masked up to a bound, letting go of the OLDEST past it', () => {
+  // FINDING 4 (secure-clip-2 fix round 1): a mask whose value can still be read is NEVER dropped to make room. The bound counts
+  // DIFFERENT copies (each in all its spellings), and a session at the bound REFUSES a new one instead of forgetting an old one.
+  it('should never let go of a mask whose value can still be read: at the bound a NEW copy is refused, nothing is dropped', () => {
     const values = build();
-    for (let index = 0; index < 300; index += 1)
-      values.holdScrollback('s1', `value-${String(index).padStart(4, '0')}`, MARKER);
+    for (let index = 0; index < 256; index += 1)
+      should(
+        values.holdScrollback('s1', `value-${String(index).padStart(4, '0')}`, `[sealed:c${String(index)}]`),
+      ).equal(true);
+
+    should(values.scrollbackFull('s1', '[sealed:fresh]')).equal(true);
+    should(values.holdScrollback('s1', 'value-fresh', '[sealed:fresh]')).equal(false);
 
     should(values.heldCount('s1')).equal(256);
-    should(values.scrub('s1', 'value-0000 value-0299')).equal(`value-0000 ${MARKER}`);
+    // The OLDEST is still masked, and the refused value was never held.
+    should(values.scrub('s1', 'value-0000 value-fresh')).equal('[sealed:c0] value-fresh');
+  });
+
+  it('should count different COPIES, not spellings: one copy in many spellings and many pastes is one mask', () => {
+    const values = build();
+    for (let paste = 0; paste < 300; paste += 1)
+      for (const spelling of ['plain', 'cGxhaW4=', '706c61696e', 'uri%20form'])
+        values.holdScrollback('s1', spelling, MARKER);
+
+    should(values.scrollbackFull('s1', MARKER)).equal(false);
+    should(values.heldCount('s1')).equal(4);
+  });
+
+  it('should keep taking more spellings and pastes of a copy it already keeps, even when full of others', () => {
+    const values = build();
+    for (let index = 0; index < 256; index += 1)
+      values.holdScrollback('s1', `value-${String(index).padStart(4, '0')}`, `[sealed:c${String(index)}]`);
+
+    should(values.scrollbackFull('s1', '[sealed:c7]')).equal(false);
+    should(values.holdScrollback('s1', 'another spelling of 7', '[sealed:c7]')).equal(true);
+    should(values.scrub('s1', 'another spelling of 7')).equal('[sealed:c7]');
+  });
+
+  it('should bound each session on its own', () => {
+    const values = build();
+    for (let index = 0; index < 256; index += 1)
+      values.holdScrollback('s1', `value-${String(index).padStart(4, '0')}`, `[sealed:c${String(index)}]`);
+
+    should(values.scrollbackFull('s2', '[sealed:new]')).equal(false);
+    should(values.holdScrollback('s2', 'for s2', '[sealed:new]')).equal(true);
   });
 
   it('should mask in every read the daemon scrubs: text, data and by position (a screen cell by cell)', async () => {

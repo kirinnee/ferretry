@@ -25,8 +25,16 @@ export interface SecureCopyProvider {
    * whatever value happens to hold its name by the time the owner allows it.
    */
   open(sessionId: string, name: string, capturedAt?: string): string | undefined;
-  /** A paste of it was typed, into `target` (a count). */
+  /** A paste of it was typed, into `target` (a count; protection was installed BEFORE the write, by `protect`). */
   used(sessionId: string, name: string, target: InputTarget): void;
+  /**
+   * Installs the protection a paste needs, INSIDE the target's own write turn, BEFORE any byte can land: a terminal's
+   * scrollback is kept masked for the session, and the page document (and frame) the value goes into is kept closed to an
+   * agent. It throws a sentence when it cannot (and then nothing is typed), and it is never undone by a write that fails or
+   * is uncertain: bytes may have landed. `where` is what the target itself reports at that moment (a page's document and
+   * frame origins, as `https://host`; nothing for a terminal).
+   */
+  protect(sessionId: string, name: string, target: InputTarget, where: { readonly origins: readonly string[] }): void;
   /**
    * A sentence when this paste may not go to `target` now, or nothing: a person has taken the page over. Asked when the
    * paste is raised, and again right before the write, so a takeover that lands while the card waits ends the paste.

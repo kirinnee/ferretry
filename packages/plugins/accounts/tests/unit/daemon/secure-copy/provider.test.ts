@@ -21,10 +21,10 @@ const runner: SecretChildRunner = {
   run: async () => ({ outcome: 'exited', exitCode: 0, stdout: `${SENTINEL}\n`, stderr: '', truncated: false }),
 };
 
-async function world(browsers: () => BrowsersApi | undefined = () => undefined) {
+async function world(browsers: () => BrowsersApi | undefined = () => undefined, scrollbackCap = 256) {
   const clock = new Clock();
-  const masking = new EphemeralValues(clock);
-  const pasted: { copy: string; key: string; until: () => number | undefined }[] = [];
+  const masking = new EphemeralValues(clock, scrollbackCap);
+  const pasted: { copy: string; origins: readonly string[]; until: () => number | undefined }[] = [];
   const copies = new SecureCopyService({
     clock,
     runner,
@@ -34,7 +34,7 @@ async function world(browsers: () => BrowsersApi | undefined = () => undefined) 
     redact: async text => text,
     guards: {
       hold: () => undefined,
-      pastedInto: async (_session, copy, key, until) => void pasted.push({ copy, key, until }),
+      pastedOn: (_session, copy, origins, until) => void pasted.push({ copy, origins, until }),
       drop: () => undefined,
     },
   });
@@ -128,6 +128,7 @@ describe('a paste, as the Vault tells the copy where it went', () => {
   it('should mask a paste into a TERMINAL for the life of its scrollback, long after the copy’s own mask ended', async () => {
     const { hook, masking, clock } = await world();
 
+    hook.protect('s1', 'token', { kind: 'terminal', key: 'dev' }, { origins: [] });
     hook.used('s1', 'token', { kind: 'terminal', key: 'dev' });
     clock.ms += 7 * 24 * 3_600_000;
 
@@ -137,11 +138,10 @@ describe('a paste, as the Vault tells the copy where it went', () => {
   it('should close the origin of a PAGE a paste went into, until the copy ends', async () => {
     const { hook, pasted, copies } = await world();
 
-    hook.used('s1', 'token', { kind: 'page', key: 'form' });
-    await Promise.resolve();
+    hook.protect('s1', 'token', { kind: 'page', key: 'form' }, { origins: ['https://form.example.test'] });
 
     should(pasted).have.length(1);
-    should(pasted[0]).match({ copy: 'token', key: 'form' });
+    should(pasted[0]).match({ copy: 'token', origins: ['https://form.example.test'] });
     should(pasted[0]?.until()).be.a.Number();
     copies.discard('s1', 'token');
     should(pasted[0]?.until()).equal(undefined);
@@ -150,10 +150,72 @@ describe('a paste, as the Vault tells the copy where it went', () => {
   it('should hold nothing for a paste into the secret store, or for a name that is not a copy', async () => {
     const { hook, masking, pasted } = await world();
 
-    hook.used('s1', 'token', { kind: 'secret', key: 'VERCEL_TOKEN' });
-    hook.used('s1', 'not a copy!', { kind: 'terminal', key: 'dev' });
+    hook.protect('s1', 'token', { kind: 'secret', key: 'VERCEL_TOKEN' }, { origins: [] });
+    should(() => hook.protect('s1', 'not a copy!', { kind: 'terminal', key: 'dev' }, { origins: [] })).throw(
+      /nothing was typed/,
+    );
 
     should(pasted).eql([]);
     should(masking.scrub('s1', SENTINEL)).equal('[sealed:token]');
+  });
+});
+
+describe('FINDING 4: a terminal paste is refused, not forgotten, when the scrollback masks have nowhere to live', () => {
+  const SENTENCE_START = 'Ferretry will not paste [sealed:token] into a terminal';
+
+  async function full() {
+    const w = await world(() => undefined, 1);
+    // Another copy of this session already keeps the one mask this session can keep.
+    w.masking.holdScrollback('s1', 'OTHER-FAKE-COPY-0001', '[sealed:other]');
+    return w;
+  }
+
+  it('should refuse the paste when it is raised, naming why, what was not done and until when, and no value', async () => {
+    const { hook } = await full();
+
+    const said = await hook.refusal('s1', 'token', { kind: 'terminal', key: 'dev' });
+
+    should(said).containEql(SENTENCE_START);
+    should(said).containEql('Nothing was typed');
+    should(said).containEql('ends with the session');
+    should(said).not.containEql(SENTINEL);
+  });
+
+  it('should refuse it again at the write, inside the target’s turn, holding nothing and never dropping the old mask', async () => {
+    const { hook, masking, clock } = await full();
+
+    let message = '';
+    try {
+      hook.protect('s1', 'token', { kind: 'terminal', key: 'dev' }, { origins: [] });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+
+    should(message).containEql(SENTENCE_START);
+    // The mask that was already there is untouched, and the refused paste left no scrollback mask behind it.
+    should(masking.scrub('s1', 'OTHER-FAKE-COPY-0001')).equal('[sealed:other]');
+    clock.ms += 30 * 24 * 3_600_000;
+    should(masking.scrub('s1', SENTINEL)).equal(SENTINEL);
+  });
+
+  it('should keep taking pastes of a copy the session already keeps, however full it is', async () => {
+    const { hook, masking } = await world(() => undefined, 1);
+    hook.protect('s1', 'token', { kind: 'terminal', key: 'dev' }, { origins: [] });
+
+    const again = await hook.refusal('s1', 'token', { kind: 'terminal', key: 'dev' });
+    hook.protect('s1', 'token', { kind: 'terminal', key: 'dev' }, { origins: [] });
+
+    should(again).equal(undefined);
+    should(masking.scrub('s1', SENTINEL)).equal('[sealed:token]');
+  });
+
+  it('should not refuse a page paste or a secret paste because the terminals’ masks are full', async () => {
+    const { hook, pasted } = await full();
+
+    hook.protect('s1', 'token', { kind: 'page', key: 'form' }, { origins: ['https://form.example.test'] });
+    hook.protect('s1', 'token', { kind: 'secret', key: 'TOKEN' }, { origins: [] });
+
+    should(pasted).have.length(1);
+    should(await hook.refusal('s1', 'token', { kind: 'secret', key: 'TOKEN' })).equal(undefined);
   });
 });

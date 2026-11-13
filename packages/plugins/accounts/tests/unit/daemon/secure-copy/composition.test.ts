@@ -108,7 +108,7 @@ class Browsers {
       },
       sealed: {
         hold: (ferret, copy, origins, until) => void this.sealed.push({ ferret, copy, origins, until }),
-        pastedInto: async (ferret, copy, key, until) => void this.sealed.push({ ferret, copy, origins: [key], until }),
+        pastedOn: (ferret, copy, origins, until) => void this.sealed.push({ ferret, copy, origins, until }),
         drop: () => undefined,
       },
       takenOver: async () => this.takenOver,

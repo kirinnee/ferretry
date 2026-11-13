@@ -15,6 +15,7 @@ function provider(over: Partial<SecureCopyProvider> = {}): SecureCopyProvider {
     describe: () => copyMeta(),
     open: () => COPY_VALUE,
     used: () => undefined,
+    protect: () => undefined,
     refusal: async () => undefined,
     reserve: () => 'rule-1',
     release: () => undefined,

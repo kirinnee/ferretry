@@ -22,6 +22,7 @@ import { pageToolHost } from './tools/page-host.ts';
 import { agentControlPolicy } from './tools/agent-control.ts';
 import { BrowserTools } from './tools/service.ts';
 import { SealedPages } from './sealed/page-guards.ts';
+import { SealedGate } from './sealed/gate.ts';
 import { secureCopyReach } from './sealed/reach.ts';
 import type { RecordedSurfaceEvent } from './tools/types.ts';
 import { processHost } from './adapters/host.ts';
@@ -166,13 +167,21 @@ export function buildBrowsers(
         kernel.events.publish(PageChanged, { ferret: sessionId, page: pageId, change: 'closed' }),
     },
   );
+  // Which pages hold a sealed value, and whether a clipboard capture is running: told by Accounts (secure copy's reach), asked by the tools.
+  const sealed = new SealedPages({ after: (delay, action) => kernel.clock.after(milliseconds(delay), action) });
+  // The ONE gate every agent path to a page's words or pixels asks: the tools, the HTTP action route and the viewer socket.
+  const gate = new SealedGate({
+    sealed,
+    mask: async text => await kernel.redaction.read(scope => scope.text(text)),
+  });
   const viewerHost = heldViewerHost(kernel, pages);
-  const stream: BrowserStreamOpener = async (sessionId, downstream) => {
+  const agentViewerHost = heldViewerHost(kernel, pages, gate);
+  const stream: BrowserStreamOpener = async (sessionId, downstream, who) => {
     let viewer: BrowserViewerStream | undefined;
     return {
       open: async () => {
         viewer = await BrowserViewerStream.connect(
-          viewerHost,
+          who.agent ? agentViewerHost : viewerHost,
           sessionId,
           downstream,
           new KernelFrameClock(kernel.clock),
@@ -227,8 +236,6 @@ export function buildBrowsers(
   // "What agents may control" is read from core's AgentControlPort on every call; unbound, or an answer that is not a
   // plain yes, refuses (fail closed). ONE policy for the browser tools and the page target.
   const policy = agentControlPolicy(() => ctx.uses.agentControl.current());
-  // Which pages hold a sealed value, and whether a clipboard capture is running: told by Accounts (secure copy's reach), asked by the tools.
-  const sealed = new SealedPages();
   const tools = new BrowserTools({
     browser: pages,
     control,
@@ -244,7 +251,7 @@ export function buildBrowsers(
       scriptedOn: scriptHost => vault.scriptedOn?.(scriptHost),
     },
     pageActs: { acted: (sessionId, script) => vault.pageActed?.(sessionId as FerretId, script) },
-    sealed,
+    sealed: gate,
     // A takeover ends a secure paste still waiting for that page (the Vault refuses it now, P2-5).
     takeovers: { landed: async (sessionId, keys) => await vault.pageTakenOver?.(sessionId as FerretId, keys) },
   });
@@ -277,16 +284,16 @@ export function buildBrowsers(
   });
 
   // ── secure copy's reach (docs/secure-copy.md), for Accounts alone ─────────────────────────────────────────────
-  const secureCopy = secureCopyReach({ tools, pages, sealed });
+  const secureCopy = secureCopyReach({ tools, pages, gate });
 
   return {
     routes: {
-      ...pageRoutes(kernel, login, pages),
+      ...pageRoutes(kernel, login, pages, gate),
       ...proxyRoutes({ tester, state: () => pages.overview() }),
       ...controlRoutes(tools),
       ...systemOpenRoutes(openUrl),
     },
-    sockets: { 'GET /v1/sessions/:sessionId/browser/stream': streamSocket(pages, stream) },
+    sockets: { 'GET /v1/sessions/:sessionId/browser/stream': streamSocket(pages, stream, gate) },
     tools: { ...toolHandlers(tools), ...target.tools },
     provides: {
       browsers: perNeeder(

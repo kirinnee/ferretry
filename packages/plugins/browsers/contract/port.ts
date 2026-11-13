@@ -70,8 +70,12 @@ export interface BrowserSealedPages {
    * when it ends, or nothing once it has: a discarded or expired copy lifts its pages at once.
    */
   hold(ferret: FerretId, copy: string, origins: readonly string[], until: () => number | undefined): void;
-  /** A paste of the copy went into the page `key`: that page's origin joins the copy's. Nothing for a page not found. */
-  pastedInto(ferret: FerretId, copy: string, key: string, until: () => number | undefined): Promise<void>;
+  /**
+   * A paste of the copy is about to land on a page whose document (and the frame the field is in) are at these origins: they
+   * join the copy's. Told INSIDE the page's own write turn, BEFORE the bytes can land, with the origins as the page's own
+   * browser reports them there; it throws when it cannot record them, and then nothing is written.
+   */
+  pastedOn(ferret: FerretId, copy: string, origins: readonly string[], until: () => number | undefined): void;
   /** Every copy of this ferret's is let go of (its session ended). */
   drop(ferret: FerretId): void;
 }

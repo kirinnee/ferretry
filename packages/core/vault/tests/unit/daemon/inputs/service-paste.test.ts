@@ -313,6 +313,77 @@ describe('a copy replaced under the same name (secure-clip-1 fix1, P2-3)', () =>
   });
 });
 
+describe('a sealed paste is protected INSIDE the write turn, before any byte (secure-clip-2 fix1, finding 3)', () => {
+  it('should install the protection from the target’s own turn, with the origins it reports, before the first byte is typed', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    w.state.protectOrigins = ['https://form.example.test', 'https://frame.example.test'];
+
+    await w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER);
+
+    should(w.protects).have.length(1);
+    should(w.protects[0]).match({
+      copy: 'vercel',
+      target: { kind: 'page' },
+      where: { origins: ['https://form.example.test', 'https://frame.example.test'] },
+    });
+    // ONE protection, installed before the one write.
+    should(w.writes.map(write => write.protectedBefore)).eql([1]);
+  });
+
+  it('should type NOTHING, end the card refused and say why when the protection cannot be installed', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    w.state.protectRefusal = 'Ferretry could not guard the page this value goes to, so nothing was typed.';
+
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(error.code).equal('unavailable');
+    should(error.message).equal('Ferretry could not guard the page this value goes to, so nothing was typed.');
+    should(w.writes).eql([]);
+    should(w.used).eql([]);
+    should(w.events.at(-1)).match({ state: 'refused' });
+    should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql(COPY_VALUE);
+  });
+
+  it('should leave the protection ON when the write may have landed (uncertain), never undoing it', async () => {
+    const w = world({ withSealed: true, facts: SECRET_STORE(true) });
+    w.copy();
+    await w.service.raise(SESSION_ID, STORE_RAISE);
+    const request = await w.pending();
+    w.state.typed = 'uncertain';
+
+    await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(w.protects).have.length(1);
+    should(w.used).eql([]);
+  });
+
+  it('should install none for a value the owner typed, which no copy is behind', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    await w.service.raise(SESSION_ID, PAGE_LOGIN);
+    const request = await w.pending();
+
+    await w.service.deliver(
+      SESSION_ID,
+      request.id,
+      w.send(request, {
+        fields: [
+          { field: 'user', padded: padInputValue('kirin') },
+          { field: 'pass', padded: padInputValue('a-long-enough-password') },
+        ],
+      }),
+      OWNER,
+    );
+
+    should(w.protects).eql([]);
+  });
+});
+
 describe('allowing a paste', () => {
   it('should type the copy once when the owner allows it, count the use, and tell the agent it was pasted', async () => {
     const w = world({ withSealed: true, facts: VERCEL });

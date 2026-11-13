@@ -74,7 +74,9 @@ export interface BrowserGuardPage {
   document(): Promise<string | undefined>;
   /** The host the page is on now, read from the live page inside its queue; `undefined` when it can't be read. */
   host?(): Promise<string | undefined>;
-  /** What a read of the page could show now (visible text, accessibility tree, markup), read inside its queue; `undefined` when it can't be read. */
+  /** The host of the page AND of every frame in it (`undefined` when any cannot be told), read inside its queue. */
+  hosts?(): Promise<readonly (string | undefined)[] | undefined>;
+  /** What a read of the page and its frames could show now (visible text, accessibility tree, markup), read inside its queue; `undefined` when it can't be read. */
   text?(): Promise<string | undefined>;
 }
 
@@ -170,7 +172,11 @@ export interface BrowserSubsystem extends BrowserViewerHost {
   /** This session's view of the machine's browser: its own pages, and the one its person is viewing. */
   status(sessionId: string): Promise<BrowserStatus>;
   /** A person's toolbar: everything acts on the page this session's person is viewing. */
-  act(sessionId: string, action: BrowserAction): Promise<BrowserActionResult>;
+  act(sessionId: string, action: BrowserAction, guard?: BrowserActGuard): Promise<BrowserActionResult>;
+  /**
+   * Empties the browser's clipboard: `true` only when it was CONFIRMED empty. A browser that is not running holds none.
+   */
+  clearClipboard(): Promise<boolean>;
   /**
    * Opens a page with a human NAME in its own window, starting the browser when it is not running. A
    * name already in use in this session is refused, and so is a page past the session's or the
@@ -303,7 +309,7 @@ export class BrowserSessionService implements BrowserSubsystem {
     return this.project(run, sessionId);
   }
 
-  async act(sessionId: string, action: BrowserAction): Promise<BrowserActionResult> {
+  async act(sessionId: string, action: BrowserAction, guard?: BrowserActGuard): Promise<BrowserActionResult> {
     await this.requireSession(sessionId);
     if (action.action === 'stop') {
       this.signIns?.forget(sessionId);
@@ -331,6 +337,7 @@ export class BrowserSessionService implements BrowserSubsystem {
           return await run.driver.navigate(viewed, url);
         },
         sessionId,
+        guard,
       );
     }
     const run = this.requireRunning();
@@ -356,6 +363,7 @@ export class BrowserSessionService implements BrowserSubsystem {
         return await this.perform(run, viewed, action);
       },
       sessionId,
+      guard,
     );
   }
 
@@ -607,6 +615,13 @@ export class BrowserSessionService implements BrowserSubsystem {
     await this.stop();
   }
 
+  async clearClipboard(): Promise<boolean> {
+    const run = this.run;
+    // No browser, no clipboard of its: a restarted private browser starts empty.
+    if (run === undefined) return true;
+    return await run.driver.clearClipboard().catch(() => false);
+  }
+
   /** The machine's browser, started on first need; concurrent first needs share one launch. */
   private async ensure(): Promise<Running> {
     if (this.run !== undefined) return this.run;
@@ -734,8 +749,11 @@ export class BrowserSessionService implements BrowserSubsystem {
     pageId: string,
     work: () => Promise<BrowserPageActionSnapshot>,
     sessionId: string,
+    guard?: BrowserActGuard,
   ): Promise<BrowserActionResult> {
     return await this.exclusive(pageId, async () => {
+      // The caller's own check, inside the page's queue and before anything happens (a sealed page, for an agent).
+      await guard?.(this.guardPage(run, pageId));
       const result = withoutDialog(await work());
       run.snapshot = pageOf(result);
       this.touch(run);
@@ -886,6 +904,15 @@ export class BrowserSessionService implements BrowserSubsystem {
         await run.driver
           .inputDocument(pageId)
           .then(found => found.host)
+          .catch(() => undefined),
+      hosts: async () =>
+        await run.driver
+          .inputDocument(pageId)
+          .then(found =>
+            found.host === undefined || found.framesUnreadable === true
+              ? undefined
+              : [found.host, ...(found.frameHosts ?? [])],
+          )
           .catch(() => undefined),
       text: async () => await run.driver.inputText?.(pageId).catch(() => undefined),
     };

@@ -191,6 +191,12 @@ export interface TypeOptions {
    * person can take a page over while the write waits its turn, and nothing the Vault looked at earlier can see that.
    */
   readonly refuse?: () => Promise<string | undefined>;
+  /**
+   * A sealed paste's protection, installed from INSIDE the target's own write turn after every check that can refuse and
+   * before the first byte: `origins` are the document and frame origins the target reports now (empty for a terminal). It
+   * throws when it cannot protect, and the target then types nothing.
+   */
+  readonly protect?: (where: { readonly origins: readonly string[] }) => void;
 }
 
 /** The card the owner answers. The daemon words the title and ask; the agent's prompt rides as `prompt` only. */
@@ -367,8 +373,13 @@ export interface InputSealedPort {
    * whatever value happens to hold its name by the time the owner allows it.
    */
   open(sessionId: string, name: CopyName, capturedAt?: string): string | undefined;
-  /** A paste of it was typed into `target` (a count). */
+  /** A paste of it was typed into `target` (a count: the protection was installed by {@link protect}, before the write). */
   used(sessionId: string, name: CopyName, target: InputTarget): void;
+  /**
+   * Installs the protection a paste needs (a terminal's scrollback kept masked, a page's origins kept closed) from inside the
+   * target's own write turn, before any byte can land. THROWS when it cannot, with a sentence: then nothing is typed.
+   */
+  protect(sessionId: string, name: CopyName, target: InputTarget, where: { readonly origins: readonly string[] }): void;
   /**
    * A sentence when this paste may not go to `target` now (a person has taken the page over), or nothing. Asked when the
    * paste is raised and again right before the write. Absent: no check, as for a daemon that knows no takeover.

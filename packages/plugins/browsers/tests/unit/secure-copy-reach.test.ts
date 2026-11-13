@@ -349,7 +349,7 @@ describe('the secure-copy reach into the clipboard', () => {
       .tool('browser_eval', { name: 'app', function: '() => 1' }, as('f1'))
       .then(said('ran'), (error: unknown) => (error as Error).message);
 
-    should(String(during)).containEql('refused while a clipboard capture of yours is running');
+    should(String(during)).containEql('refused while a clipboard capture is running in this browser');
     should(after).equal('ran');
   });
 
@@ -378,14 +378,15 @@ describe('the secure-copy reach into the clipboard', () => {
     should(dropped).equal('read');
   });
 
-  it('should close the origin of the page a paste went into, where the page is now', async () => {
+  it('should close the origins a paste is about to land on, told inside the write turn, and refuse to guard none', async () => {
     const { host, copy, tabs } = await built();
     held = host;
     await host.tool('browser_open', { name: 'form', url: 'https://form.example.test/' }, as('f1'));
     await host.tool('browser_open', { name: 'other', url: 'https://other.example.test/' }, as('f1'));
 
-    await copy.sealed.pastedInto('f1' as FerretId, 'key', 'form', () => Date.now() + 60_000);
-    await copy.sealed.pastedInto('f1' as FerretId, 'key', 'nowhere', () => Date.now() + 60_000);
+    copy.sealed.pastedOn('f1' as FerretId, 'key', ['https://form.example.test'], () => Date.now() + 60_000);
+    // No origin to record is no protection: the write must not happen.
+    should(() => copy.sealed.pastedOn('f1' as FerretId, 'key', [], () => Date.now() + 60_000)).throw();
     // Inside the queue each page says where it IS now.
     tabs.documentHost = 'form.example.test';
     const form = await host

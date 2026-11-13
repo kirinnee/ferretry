@@ -17,7 +17,7 @@ import type { MaskValue, Scrub } from '../secrets/redaction.ts';
 
 const MIN_MASKED_LENGTH = 1;
 const MAX_FRAGMENT_FLOOR = 3;
-/** How many values pasted into terminals one session keeps masked for the life of its scrollback. */
+/** How many DIFFERENT copies pasted into terminals one session keeps masked for the life of its scrollback (each in all its spellings). */
 const MAX_SCROLLBACK_HOLDS = 256;
 
 /** The shortest piece of a value that counts as the value: three characters, fewer for a value too short to have three. */
@@ -69,20 +69,31 @@ export class EphemeralValues {
   /**
    * Masks `value` in `sessionId`'s reads for as long as the session lives (and the after-mask window past it): a value
    * PASTED INTO A TERMINAL stays in that terminal's scrollback, which no clock empties, so the mask must not end with the
-   * copy. `retime` (a discarded copy) does not shorten it. Bounded: past {@link MAX_SCROLLBACK_HOLDS} the oldest is let go.
+   * copy. `retime` (a discarded copy) does not shorten it. Bounded WITHOUT EVER LETTING GO: a mask whose value can still be
+   * read is never dropped to make room. A session that already keeps {@link MAX_SCROLLBACK_HOLDS} different copies refuses a
+   * new one (`false`, nothing held; ask {@link scrollbackFull} first so nothing is typed), and a copy it already keeps takes
+   * every further spelling and paste.
    */
-  holdScrollback(sessionId: string, value: string, marker: string): void {
-    if (value.length < MIN_MASKED_LENGTH) return;
+  holdScrollback(sessionId: string, value: string, marker: string): boolean {
+    if (value.length < MIN_MASKED_LENGTH) return true;
     this.purge();
+    if (this.scrollbackFull(sessionId, marker)) return false;
     const entries = (this.held.get(sessionId) ?? []).filter(
       entry => !(entry.scrollback === true && entry.value === value && entry.marker === marker),
     );
-    const kept = entries.filter(entry => entry.scrollback === true);
-    const dropped = kept.length >= MAX_SCROLLBACK_HOLDS ? kept[0] : undefined;
     this.held.set(sessionId, [
-      ...entries.filter(entry => entry !== dropped),
+      ...entries,
       { value, label: marker, marker, until: Number.POSITIVE_INFINITY, scrollback: true },
     ]);
+    return true;
+  }
+
+  /** Whether `sessionId` keeps as many different copies masked in scrollback as it may, and `marker` is not one of them. */
+  scrollbackFull(sessionId: string, marker: string): boolean {
+    this.purge();
+    const kept = (this.held.get(sessionId) ?? []).filter(entry => entry.scrollback === true);
+    if (kept.some(entry => entry.marker === marker)) return false;
+    return new Set(kept.map(entry => entry.marker)).size >= MAX_SCROLLBACK_HOLDS;
   }
 
   /** Brings forward the end of every hold of `sessionId` masked as `marker` to `until`, never later than it was. */

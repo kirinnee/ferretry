@@ -902,6 +902,14 @@ async function act(request: Request): Promise<Record<string, unknown>> {
         ),
       };
     }
+    case 'clipboardClear': {
+      return {
+        cleared: await clipboard.clear().then(
+          () => true,
+          () => false,
+        ),
+      };
+    }
     case 'clipboardRead': {
       const page = targetPage(params.pageId);
       return {

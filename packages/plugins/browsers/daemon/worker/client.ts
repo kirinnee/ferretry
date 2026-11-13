@@ -10,6 +10,7 @@ import type { BrowserPageLifecycleReply, BrowserPageLifecycleRequest } from '../
 import type { CopyElementPart } from '../pages/copy-contracts.ts';
 import { COPY_VALUE_MAX_BYTES } from '../pages/copy-contracts.ts';
 import {
+  BROWSER_CLIPBOARD_CLEAR_WORKER_METHOD,
   BROWSER_CLIPBOARD_WORKER_METHOD,
   BROWSER_COPY_WORKER_METHODS,
   type BrowserClipboardRead,
@@ -493,8 +494,19 @@ export class BrowserWorkerClient implements BrowserAutomation {
   /** What the agent browser's clipboard holds, read by the worker in a context of its own and emptied. */
   async copyClipboard(pageId: string): Promise<BrowserClipboardRead> {
     const raw = await this.request(BROWSER_CLIPBOARD_WORKER_METHOD, { pageId });
-    const read = parseCopyRead((raw as { read?: unknown } | null)?.read);
-    return read;
+    const answer = (raw as { read?: unknown } | null)?.read;
+    const read = parseCopyRead(answer);
+    return (answer as { kept?: unknown } | null)?.kept === true ? { ...read, kept: true } : read;
+  }
+
+  /** Empties the browser's clipboard: true only when the worker confirmed it. Any other answer is `false`. */
+  async clearClipboard(): Promise<boolean> {
+    try {
+      const raw = await this.request(BROWSER_CLIPBOARD_CLEAR_WORKER_METHOD, {});
+      return (raw as { cleared?: unknown } | null)?.cleared === true;
+    } catch {
+      return false;
+    }
   }
 
   inputObserve(pageId: string, fields: readonly BrowserInputFieldPointer[]): Promise<BrowserInputObservation> {

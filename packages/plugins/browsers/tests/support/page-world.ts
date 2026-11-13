@@ -48,11 +48,33 @@ export class FakeFrame implements InputFrame {
   ) {
     this.id = outOfProcess ? sessionName : `frame-${address}`;
   }
+  /** What this frame's own document shows: its visible text, its markup, and whether a read of it succeeds. */
+  bodyText = '';
+  markup = '<html></html>';
+  unreadable = false;
   url(): string {
     return this.address;
   }
   parentFrame(): FakeFrame | null {
     return this.parent;
+  }
+  locator(_selector: string) {
+    const body = {
+      first: () => body,
+      innerText: async () => {
+        if (this.unreadable) throw new Error('the frame cannot be read');
+        return this.bodyText;
+      },
+      ariaSnapshot: async () => {
+        if (this.unreadable) throw new Error('the frame cannot be read');
+        return `- document: ${this.bodyText}`;
+      },
+    };
+    return body;
+  }
+  async content(): Promise<string> {
+    if (this.unreadable) throw new Error('the frame cannot be read');
+    return this.markup;
   }
 }
 

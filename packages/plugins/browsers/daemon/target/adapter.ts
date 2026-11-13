@@ -171,6 +171,16 @@ export class PageInputTarget implements InputTargetAdapter {
         // A secure paste's takeover check, in THIS turn of the page's queue and the last thing asked before the write: a
         // person who took the page over while the write waited (or while the Vault journalled the attempt) types nothing.
         if (options?.refuse !== undefined && (await options.refuse()) !== undefined) return 'guard_refused';
+        // A sealed paste: the document it lands on, and every frame in it, are guarded BEFORE the first byte, from what this very
+        // queue turn reads. A page that cannot say where it is, or one of whose frames cannot be told, is not written to.
+        if (options?.protect !== undefined) {
+          const where = await port.inputDocument(pageId);
+          if (where.host === undefined || where.framesUnreadable === true)
+            throw new Error(
+              'Ferretry could not tell which site that page (or a frame in it) belongs to, so it could not protect the paste and nothing was typed.',
+            );
+          options.protect({ origins: [where.host, ...(where.frameHosts ?? [])].map(host => `https://${host}`) });
+        }
         began = true;
         return await port.inputType(pageId, expected, values, submit);
       });

@@ -46,6 +46,13 @@ export class Tabs {
   readGate: Promise<void> | undefined;
   /** The host the live page reports, when a case sets one. */
   documentHost: string | undefined;
+  /** The hosts of the frames inside the live page, and whether one of them cannot be told. */
+  frameHosts: readonly string[] | undefined;
+  framesUnreadable = false;
+  /** What a read of the page and its frames could show (the worker's `inputText`); unreadable when not set. */
+  pageText: string | undefined;
+  /** Whether the browser's clipboard is confirmed empty by a clear. */
+  clearAnswer = true;
   /** While set, a click does not return: the page's queue is stuck behind it, as it is behind a dialog. */
   clickGate: Promise<void> | undefined;
   /** What a page in the error state says went wrong (the worker's first line of a failed navigation). */
@@ -86,6 +93,12 @@ export class Tabs {
 
   readonly automation: BrowserAutomation = {
     unexpectedExit: this.exit,
+    clearClipboard: async () => this.clearAnswer,
+    inputText: async pageId => {
+      this.calls.push(`inputText:${pageId}`);
+      if (this.pageText === undefined) throw new Error('the page text cannot be read');
+      return this.pageText;
+    },
     navigate: async (pageId, url) => {
       this.pages = this.pages.map(page => (page.id === pageId ? { ...page, url } : page));
       return this.acted('navigate', pageId);
@@ -129,7 +142,12 @@ export class Tabs {
     inputDocument: async pageId => {
       this.calls.push(`inputDocument:${pageId}`);
       if (this.documentFails) throw new Error('the page is gone');
-      return { navigationId: 'loader-1', ...(this.documentHost === undefined ? {} : { host: this.documentHost }) };
+      return {
+        navigationId: 'loader-1',
+        ...(this.documentHost === undefined ? {} : { host: this.documentHost }),
+        ...(this.frameHosts === undefined ? {} : { frameHosts: this.frameHosts }),
+        ...(this.framesUnreadable ? { framesUnreadable: true as const } : {}),
+      };
     },
     inputObserve: async pageId => {
       this.calls.push(`inputObserve:${pageId}`);

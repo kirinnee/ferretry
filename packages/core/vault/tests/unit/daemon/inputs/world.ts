@@ -133,6 +133,10 @@ export function world(options: WorldOptions = {}) {
     pasteRefusal: undefined as string | undefined,
     /** Answers of the next takeover checks, in order (undefined = free); then `pasteRefusal`. */
     pasteRefusals: [] as (string | undefined)[],
+    /** What the sealed paste's protection says when the target asks it inside its own turn: a sentence refuses (nothing is typed). */
+    protectRefusal: undefined as string | undefined,
+    /** What the target reports to the protection as the document/frame origins it is about to write into. */
+    protectOrigins: ['https://form.example.test'] as readonly string[],
     /** Runs while the write waits its turn in the target's own queue, before the target's takeover check. */
     onQueue: undefined as (() => void) | undefined,
     journalFails: false,
@@ -154,7 +158,8 @@ export function world(options: WorldOptions = {}) {
     onAgendaRaise: undefined as ((card: InputCard) => void) | undefined,
     quarantineSessions: undefined as readonly string[] | Error | undefined,
   };
-  const writes: { values: string[]; submit: boolean; options: TypeOptions | undefined }[] = [];
+  const writes: { values: string[]; submit: boolean; options: TypeOptions | undefined; protectedBefore?: number }[] =
+    [];
   const cleared: ClearJob[] = [];
   const cards: InputCard[] = [];
   const closed: string[] = [];
@@ -170,6 +175,7 @@ export function world(options: WorldOptions = {}) {
   const fills: { id: string; role: LoginFieldRole; factor?: string }[] = [];
   const timers: { ms: number; fire: () => void }[] = [];
   const used: { copy: string; target?: unknown }[] = [];
+  const protects: { copy: string; target: unknown; where: unknown }[] = [];
   const ruleLog: { reserved: unknown[][]; released: string[]; spent: string[] } = {
     reserved: [],
     released: [],
@@ -236,7 +242,14 @@ export function world(options: WorldOptions = {}) {
       state.onQueue?.();
       // The target's own turn: a takeover that landed since the last look types nothing (secure-clip-1 fix1, P1-1).
       if ((await typeOptions?.refuse?.()) !== undefined) return 'guard_refused';
-      writes.push({ values: typedValues.map(each => each.text), submit, options: typeOptions });
+      // A sealed paste's protection is installed here, in the target's own turn, before the write (a throw types nothing).
+      typeOptions?.protect?.({ origins: state.protectOrigins });
+      writes.push({
+        values: typedValues.map(each => each.text),
+        submit,
+        options: typeOptions,
+        protectedBefore: protects.length,
+      });
       state.onType?.();
       if (typeOptions?.armClear === 'try') typeOptions.armed?.(true);
       return state.typedQueue.shift() ?? state.typed;
@@ -313,6 +326,10 @@ export function world(options: WorldOptions = {}) {
                 : undefined;
             },
             used: (_session: string, name: string, target?: unknown) => void used.push({ copy: name, target }),
+            protect: (_session: string, name: string, target: unknown, where: unknown) => {
+              if (state.protectRefusal !== undefined) throw new Error(state.protectRefusal);
+              protects.push({ copy: name, target, where });
+            },
             refusal: async () => (state.pasteRefusals.length > 0 ? state.pasteRefusals.shift() : state.pasteRefusal),
           },
         }
@@ -381,6 +398,7 @@ export function world(options: WorldOptions = {}) {
     fills,
     timers,
     used,
+    protects,
     ruleLog,
     grantLog,
     copies,

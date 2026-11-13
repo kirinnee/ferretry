@@ -1,21 +1,32 @@
 import type { BrowserCopyAnswer, BrowserCopyRefusalCode, BrowsersCopyApi } from '../../contract/port.ts';
 import type { BrowserSessionService } from '../pages/service.ts';
 import { BrowserToolError, type BrowserTools } from '../tools/service.ts';
-import { hostOfOrigin, type SealedPages } from './page-guards.ts';
+import type { SealedGate } from './gate.ts';
 
 /** What the reach stands on: the tools (their checks), the pages (the queue) and the registry of pages that hold a value. */
 export interface SecureCopyReachDeps {
   readonly tools: Pick<BrowserTools, 'copyPageFor' | 'isTakenOver' | 'addressOf'>;
-  readonly pages: Pick<BrowserSessionService, 'copyOnPage'>;
-  readonly sealed: SealedPages;
+  readonly pages: Pick<BrowserSessionService, 'copyOnPage' | 'clearClipboard'>;
+  readonly gate: SealedGate;
+  /** How long a capture waits for a script that was already running (a test shortens it). */
+  readonly scriptWaitMs?: number;
 }
+
+/** How long a clipboard capture waits for a script that was already running to finish. */
+const SCRIPT_WAIT_MS = 5_000;
 
 /**
  * SECURE COPY'S REACH INTO THE AGENT BROWSER (docs/secure-copy.md), handed to Accounts alone: a page element or the
  * clipboard is read in the page's own queue after the checks a browser tool makes, a paste target is cleared, and the pages
  * that hold a sealed value are recorded so the tools keep them closed.
  */
-export function secureCopyReach({ tools, pages, sealed }: SecureCopyReachDeps): BrowsersCopyApi {
+export function secureCopyReach({
+  tools,
+  pages,
+  gate,
+  scriptWaitMs = SCRIPT_WAIT_MS,
+}: SecureCopyReachDeps): BrowsersCopyApi {
+  const sealed = gate.registry;
   /** A refusal a browser tool would have given, as the copy's closed set of codes and the tool's own sentence. */
   const refusal = (error: unknown): { readonly code: BrowserCopyRefusalCode; readonly message: string } => {
     if (error instanceof BrowserToolError) {
@@ -51,9 +62,18 @@ export function secureCopyReach({ tools, pages, sealed }: SecureCopyReachDeps): 
       }
     },
     clipboardRead: async (ferret, key, queue): Promise<BrowserCopyAnswer> => {
-      // While it runs no page script of this ferret's may run: nothing it executes may see what the page put on the clipboard.
+      // While it runs no page script of the browser may run: nothing it executes may see what the page put on the clipboard.
       const done = sealed.capturing(ferret);
       try {
+        // A script that was already running cannot be refused any more: it is waited for, and none begins meanwhile.
+        if (!(await sealed.idle(scriptWaitMs)))
+          return {
+            ok: false,
+            reason: 'refused',
+            code: 'unavailable',
+            message:
+              'A page script was still running in this browser, so the clipboard was not read: a script could have seen what the page copied. Wait for it to finish and capture again; nothing was copied.',
+          };
         const { surface, guard } = await tools.copyPageFor(ferret, key);
         return await pages.copyOnPage<BrowserCopyAnswer>(ferret, surface.name ?? surface.id, {
           guard: async page => {
@@ -62,6 +82,14 @@ export function secureCopyReach({ tools, pages, sealed }: SecureCopyReachDeps): 
           },
           work: async (copy, pageId) => {
             const read = await copy.copyClipboard(pageId);
+            // A clipboard that could not be confirmed empty may still hold the value, however the read went: the page stays
+            // closed and a keyboard paste stays refused until a retry empties it (a restarted browser starts empty).
+            if (read.kept === true) {
+              const address = await tools.addressOf(ferret, key);
+              sealed.keepClipboard(ferret, 'clipboard', address === undefined ? [] : [address], () =>
+                pages.clearClipboard(),
+              );
+            }
             if (!read.ok) {
               if (read.reason !== 'shared') return { ok: false, reason: read.reason };
               return {
@@ -85,10 +113,10 @@ export function secureCopyReach({ tools, pages, sealed }: SecureCopyReachDeps): 
     },
     sealed: {
       hold: (ferret, copy, origins, until) => sealed.hold(ferret, copy, origins, until),
-      pastedInto: async (ferret, copy, key, until) => {
-        // Where the page is NOW, with no takeover or switch check: a page that holds the value is held whoever has it.
-        const address = await tools.addressOf(ferret, key);
-        if (address !== undefined && hostOfOrigin(address) !== undefined) sealed.hold(ferret, copy, [address], until);
+      pastedOn: (ferret, copy, origins, until) => {
+        // No origin to record is no protection: the write must not happen (the Vault refuses it with a sentence).
+        if (origins.length === 0) throw new Error('no page origin to guard');
+        sealed.hold(ferret, copy, origins, until);
       },
       drop: ferret => sealed.drop(ferret),
     },

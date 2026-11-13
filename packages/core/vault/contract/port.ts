@@ -179,7 +179,12 @@ export interface VaultApi {
      * A copy was PASTED INTO A TERMINAL: `value` stays masked as `marker` in that ferret's reads for the life of its session
      * (the scrollback the terminal keeps), not for the copy's own life. A later `retime` of `marker` does not shorten it.
      */
-    holdScrollback(ferret: FerretId, value: string, marker: string): void;
+    holdScrollback(ferret: FerretId, value: string, marker: string): boolean;
+    /**
+     * Whether this ferret already keeps as many DIFFERENT copies masked in scrollback as it may, and `marker` is not one of
+     * them: a mask is never dropped while its value can still be read, so a new paste is refused instead.
+     */
+    scrollbackFull(ferret: FerretId, marker: string): boolean;
   };
 }
 

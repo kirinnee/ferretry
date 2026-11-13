@@ -36,7 +36,9 @@ export interface CopyMasking {
   holdUntil(sessionId: string, value: string, marker: string, until: number): void;
   retime(sessionId: string, marker: string, until: number): void;
   /** A copy was pasted into a terminal: it stays masked for the life of that session's scrollback, not the copy's own. */
-  holdScrollback(sessionId: string, value: string, marker: string): void;
+  holdScrollback(sessionId: string, value: string, marker: string): boolean;
+  /** Whether the session already keeps as many different copies masked in scrollback as it may, and `marker` is not one of them. */
+  scrollbackFull(sessionId: string, marker: string): boolean;
 }
 
 /** One page element, read for a copy in that page's own queue: the value and where it was read, or why not. */
@@ -90,8 +92,11 @@ export interface CopyPagePort {
  */
 export interface CopyGuards {
   hold(sessionId: string, copy: string, origins: readonly string[], until: () => number | undefined): void;
-  /** A paste of the copy went into the page `key`. */
-  pastedInto(sessionId: string, copy: string, key: string, until: () => number | undefined): Promise<void>;
+  /**
+   * A paste of the copy is about to land on a page document (and frames) at these origins: they join the copy's. Throws when it
+   * cannot record them; the write then does not happen.
+   */
+  pastedOn(sessionId: string, copy: string, origins: readonly string[], until: () => number | undefined): void;
   drop(sessionId: string): void;
 }
 

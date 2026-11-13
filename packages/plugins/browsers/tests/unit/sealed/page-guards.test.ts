@@ -18,10 +18,13 @@ describe('which pages hold a sealed value', () => {
     pages.hold('f1', 'token', ['https://keys.example.test'], () => 5_000);
 
     should(pages.covering('f1', 'keys.example.test')).eql([
-      { copy: 'token', from: ['https://keys.example.test'], until: 5_000 },
+      { copy: 'token', from: ['https://keys.example.test'], until: 5_000, own: true },
     ]);
     should(pages.covering('f1', 'other.example.test')).eql([]);
-    should(pages.covering('f2', 'keys.example.test')).eql([]);
+    // The browser is ONE for every ferret: another ferret's page on the same site is covered too, and the copy is not its own.
+    should(pages.covering('f2', 'keys.example.test')).eql([
+      { copy: 'token', from: ['https://keys.example.test'], until: 5_000, own: false },
+    ]);
   });
 
   it('should match by host and port, in any case, and not by the scheme', () => {
@@ -96,7 +99,7 @@ describe('which pages hold a sealed value', () => {
 
     pages.drop('f1');
 
-    should(pages.anyLive('f1')).equal(false);
+    should(pages.covering('f1', 'a.test').map(cover => cover.copy)).eql(['b']);
     should(pages.isCapturing('f1')).equal(false);
     should(pages.anyLive('f2')).equal(true);
     done();
@@ -108,7 +111,8 @@ describe('which pages hold a sealed value', () => {
     const second = pages.capturing('f1');
 
     should(pages.isCapturing('f1')).equal(true);
-    should(pages.isCapturing('f2')).equal(false);
+    // The clipboard is the browser's, so a capture by anyone is a capture for every ferret's scripts.
+    should(pages.isCapturing('f2')).equal(true);
     first();
     first();
     should(pages.isCapturing('f1')).equal(true);
@@ -155,7 +159,7 @@ describe('what an agent is told when a page is closed', () => {
     const sentence = sealedPageRefusal(
       'browser.read',
       '%browser:app',
-      [{ copy: 'token', from: ['https://keys.example.test'], until: Date.UTC(2026, 10, 13, 12) }],
+      [{ copy: 'token', from: ['https://keys.example.test'], until: Date.UTC(2026, 10, 13, 12), own: true }],
       at,
     );
 
@@ -173,8 +177,8 @@ describe('what an agent is told when a page is closed', () => {
       'browser.eval',
       '%browser:app',
       [
-        { copy: 'a', from: ['https://x.test'], until: Date.UTC(2026, 10, 13, 10) },
-        { copy: 'b', from: ['https://x.test'], until: Date.UTC(2026, 10, 13, 14) },
+        { copy: 'a', from: ['https://x.test'], until: Date.UTC(2026, 10, 13, 10), own: true },
+        { copy: 'b', from: ['https://x.test'], until: Date.UTC(2026, 10, 13, 14), own: true },
       ],
       at,
     );

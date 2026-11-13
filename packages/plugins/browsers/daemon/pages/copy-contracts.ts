@@ -43,6 +43,8 @@ export interface BrowserCopyPort {
   ): Promise<BrowserCopyRead>;
   /** What the browser's clipboard holds now, read by the worker in a context of its own and emptied. */
   copyClipboard(pageId: string): Promise<BrowserClipboardRead>;
+  /** Empties the browser's clipboard; `true` only when it was CONFIRMED empty. A real window on this computer's own clipboard: `true` (nothing of Ferretry's is on it). */
+  clearClipboard(): Promise<boolean>;
 }
 
 /**
@@ -56,9 +58,18 @@ export const BROWSER_COPY_WORKER_METHODS = { read: 'copyRead' } as const;
  * granted clipboard-read) and then emptied. Where it was read is the page the agent named, as for {@link BrowserCopyRead}.
  * `shared`: this browser's clipboard is this computer's own (a real window on a desktop), so nothing was read.
  */
-export type BrowserClipboardRead =
+export type BrowserClipboardRead = (
   | Extract<BrowserCopyRead, { readonly ok: true }>
-  | { readonly ok: false; readonly reason: 'missing' | 'empty' | 'changed' | 'shared' };
+  | { readonly ok: false; readonly reason: 'missing' | 'empty' | 'changed' | 'shared' }
+) & {
+  /**
+   * Set when the clipboard could NOT be confirmed empty after the read: it may still hold what was on it, however the read
+   * went. The caller keeps the browser's clipboard paths and the page closed until a clear is confirmed.
+   */
+  readonly kept?: true;
+};
 
 /** The worker's JSON-line method for the clipboard: `clipboardRead` `{ pageId }` answers `{ read }`. */
 export const BROWSER_CLIPBOARD_WORKER_METHOD = 'clipboardRead' as const;
+/** The worker's JSON-line method that empties the clipboard: `clipboardClear` answers `{ cleared }`, true only when confirmed. */
+export const BROWSER_CLIPBOARD_CLEAR_WORKER_METHOD = 'clipboardClear' as const;

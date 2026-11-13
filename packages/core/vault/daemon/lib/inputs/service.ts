@@ -2022,6 +2022,27 @@ export class InputRequestService {
       const arming = { armed: false };
       // The takeover check a paste repeats inside the target's own turn, right before the write (secure-clip-1 fix1, P1-1).
       const takeover: { sentence?: string } = {};
+      // A sealed paste's protection (the scrollback mask, the page's origins) is installed INSIDE the target's own write turn,
+      // before the first byte, and stays on whatever the write comes to: bytes may have landed. A protection that cannot be
+      // installed types nothing.
+      const unprotected: { sentence?: string } = {};
+      const sealed = this.deps.sealed;
+      const protect =
+        pasted === undefined || sealed === undefined
+          ? undefined
+          : (where: { readonly origins: readonly string[] }): void => {
+              try {
+                sealed.protect(request.sessionId, pasted, request.target, where);
+              } catch (error) {
+                unprotected.sentence =
+                  error instanceof Error && error.message !== ''
+                    ? error.message
+                    : 'Ferretry could not protect this paste, so nothing was typed.';
+                throw error;
+              }
+            };
+      if (pasted !== undefined && sealed === undefined)
+        throw new InputRequestError('unavailable', 'Secure copy is not available, so nothing was pasted.');
       const outcome: TypeResult = await this.deps.target
         .type(request.sessionId, request.target, values, submitted, seen.facts, {
           ...(follows
@@ -2049,12 +2070,13 @@ export class InputRequestService {
               }),
           // Asked again inside the target's own turn: a write that waited in the page's queue may find the line gone.
           ...(grant === undefined ? {} : { proceed: () => grant.held() }),
+          ...(protect === undefined ? {} : { protect }),
           // A standing rule's terminal fill: the reader proved again before Enter, and a refused guard said as such.
           ...(grant !== undefined && by.kind === 'sign-in-rule' && request.target.kind === 'terminal'
             ? { reprove: true }
             : {}),
         })
-        .catch((): TypeResult => 'uncertain');
+        .catch((): TypeResult => (unprotected.sentence === undefined ? 'uncertain' : 'target_gone'));
       wrote?.(outcome);
       if (takeover.sentence !== undefined && outcome !== 'typed' && outcome !== 'uncertain') {
         // Refused inside the target's turn: nothing was typed. The request ends refused, like a takeover seen at the open.
@@ -2062,6 +2084,13 @@ export class InputRequestService {
         hold = undefined;
         await this.finish(held, 'refused', 'taken_over', undefined, { closeCard: true, tellAgent: true });
         throw new InputRequestError('conflict', takeover.sentence, 'taken_over');
+      }
+      if (unprotected.sentence !== undefined) {
+        // Nothing was typed: the protection could not be installed first. The card ends with the sentence.
+        await this.letGo(hold);
+        hold = undefined;
+        await this.finish(held, 'refused', 'interrupted', undefined, { closeCard: true, tellAgent: true });
+        throw new InputRequestError('unavailable', unprotected.sentence);
       }
       // Taken before anything else is awaited: what the ferret does after this counts against a sign-in's facts.
       const deliveredAt = this.deps.clock.now();

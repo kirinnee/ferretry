@@ -69,6 +69,9 @@ function host(
     cleared?: 'cleared' | 'moved' | 'unknown' | Error;
     /** Runs while the work waits its turn in the page's queue, before it starts. */
     onQueue?: () => void;
+    /** The hosts of the frames inside the page, and whether one of them cannot be told. */
+    frames?: readonly string[];
+    framesUnreadable?: boolean;
   } = {},
 ) {
   const calls: string[] = [];
@@ -76,9 +79,13 @@ function host(
   const port: BrowserInputFieldsPort = {
     inputDocument: async pageId => {
       calls.push(`document:${pageId}`);
-      return options.hostless === true
-        ? { navigationId: 'loader-2' }
-        : { navigationId: 'loader-2', host: 'accounts.example.test' };
+      if (options.hostless === true) return { navigationId: 'loader-2' };
+      return {
+        navigationId: 'loader-2',
+        host: 'accounts.example.test',
+        ...(options.frames === undefined ? {} : { frameHosts: options.frames }),
+        ...(options.framesUnreadable === true ? { framesUnreadable: true as const } : {}),
+      };
     },
     inputProbe: async (pageId, _expected, fieldIds, dummy) => {
       calls.push(`probe:${pageId}:${fieldIds.join(',')}:${dummy}`);
@@ -392,6 +399,59 @@ describe('PageInputTarget: a grant fill’s clear (R3a-4)', () => {
       }),
     ).equal('target_changed');
     should(second.calls).eql(['page:s1:app', 'arm:page-1:password']);
+  });
+
+  // FINDING 3 (secure-clip-2 fix round 1): a sealed paste's protection goes in INSIDE the page's turn, before the first byte, from
+  // what the page reports in that very turn (its document and every frame in it).
+  it('should install a sealed paste’s protection in the page turn, with the document’s and every frame’s origin, before it types', async () => {
+    const world = host({ frames: ['frame.example.test'] });
+    const told: string[][] = [];
+
+    const outcome = await world.target.type(S1, APP, VALUES, false, FACTS_PAGE, {
+      protect: where => {
+        told.push([...where.origins]);
+        world.calls.push('protect');
+      },
+    });
+
+    should(outcome).equal('typed');
+    should(told).eql([['https://accounts.example.test', 'https://frame.example.test']]);
+    should(world.calls).eql(['page:s1:app', 'document:page-1', 'protect', 'type:page-1:password:false']);
+  });
+
+  it('should type NOTHING when the protection cannot be installed, or the page cannot say where it is or a frame cannot be told', async () => {
+    const throws = host();
+    const refused = await throws.target.type(S1, APP, VALUES, false, FACTS_PAGE, {
+      protect: () => {
+        throw new Error('cannot guard');
+      },
+    });
+    const hostless = host({ hostless: true });
+    const noHost = await hostless.target.type(S1, APP, VALUES, false, FACTS_PAGE, { protect: () => undefined });
+    const blind = host({ framesUnreadable: true });
+    const noFrame = await blind.target.type(S1, APP, VALUES, false, FACTS_PAGE, { protect: () => undefined });
+
+    should(refused).equal('target_gone');
+    should(noHost).equal('target_gone');
+    should(noFrame).equal('target_gone');
+    for (const world of [throws, hostless, blind])
+      should(world.calls.some(call => call.startsWith('type:'))).be.false();
+  });
+
+  it('should not ask the protection for a write nothing sealed is behind, nor after an earlier check refused', async () => {
+    let asked = 0;
+    const plain = host();
+    await plain.target.type(S1, APP, VALUES, false, FACTS_PAGE);
+    const refused = host();
+    await refused.target.type(S1, APP, VALUES, true, FACTS_PAGE, {
+      armClear: true,
+      proceed: () => false,
+      protect: () => {
+        asked += 1;
+      },
+    });
+
+    should(asked).equal(0);
   });
 
   it('I217 should check and empty the typed fields in the page’s own queue, and read anything odd as unknown', async () => {

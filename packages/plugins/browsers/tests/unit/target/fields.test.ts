@@ -399,6 +399,111 @@ describe('describeInputDocument', () => {
   });
 });
 
+describe('FINDING 6: describeInputDocument names every frame’s host (secure-clip-2 fix round 1)', () => {
+  const frame = (world: FakeWorld, address: string, parent?: FakeFrame): FakeFrame => {
+    const made = new FakeFrame(address, `session-${address}`);
+    made.parent = parent ?? world.main;
+    world.frames.push(made);
+    return made;
+  };
+
+  it('should name the host of each frame inside the page, once, in lower case', async () => {
+    const { world } = loginWorld();
+    frame(world, 'https://Keys.Example.test/embed');
+    frame(world, 'https://keys.example.test/other');
+    frame(world, 'https://ads.example.test:8443/x');
+
+    const document = await describeInputDocument(world.subject);
+
+    should(document.frameHosts).eql(['keys.example.test', 'ads.example.test:8443']);
+    should(document.framesUnreadable).equal(undefined);
+  });
+
+  it('should give a blank or srcdoc frame its parent’s host, and a blob frame the host inside the blob', async () => {
+    const { world } = loginWorld();
+    const outer = frame(world, 'https://keys.example.test/embed');
+    frame(world, 'about:blank', outer);
+    frame(world, 'about:srcdoc', outer);
+    frame(world, 'blob:https://blobs.example.test/1234');
+
+    const document = await describeInputDocument(world.subject);
+
+    should(document.frameHosts).eql(['keys.example.test', 'blobs.example.test']);
+    should(document.framesUnreadable).equal(undefined);
+  });
+
+  it('should say a frame cannot be told for a data: frame, an address with no host, or a page with a great many frames', async () => {
+    for (const address of ['data:text/html,hi', 'https://', 'file:///a']) {
+      const { world } = loginWorld();
+      frame(world, address);
+      should((await describeInputDocument(world.subject)).framesUnreadable).equal(true);
+    }
+    const { world } = loginWorld();
+    for (let index = 0; index < 40; index += 1) frame(world, `https://f${String(index)}.example.test/`);
+    should((await describeInputDocument(world.subject)).framesUnreadable).equal(true);
+  });
+
+  it('should answer a blank frame in a blank page as one that cannot be told, not as a host of nothing', async () => {
+    const { world } = loginWorld();
+    world.pageUrl = 'about:blank';
+    // A blank frame in a blank page inherits nothing: no ancestor has a host to give it.
+    const blank = frame(world, 'about:blank');
+    blank.parent = new FakeFrame('about:blank', 'session-blank-parent');
+
+    const document = await describeInputDocument(world.subject);
+
+    should(document.framesUnreadable).equal(true);
+    should(document.host).equal(undefined);
+  });
+});
+
+describe('FINDING 6: readInputText reads every frame, and refuses when one cannot be read', () => {
+  const embed = (world: FakeWorld, address = 'https://keys.example.test/embed'): FakeFrame => {
+    const made = new FakeFrame(address, `session-${address}`);
+    made.parent = world.main;
+    world.frames.push(made);
+    return made;
+  };
+
+  it('should include the text, the accessibility tree, the markup and the address of a child frame', async () => {
+    const { world } = loginWorld();
+    const inner = embed(world);
+    inner.bodyText = 'Your API key: FAKE-SC-7f3a91';
+    inner.markup = '<p data-x="FAKE-ATTR-12">hi</p>';
+
+    const read = await readInputText(world.subject);
+
+    for (const part of ['Your API key: FAKE-SC-7f3a91', 'FAKE-ATTR-12', 'https://keys.example.test/embed'])
+      should(read).containEql(part);
+  });
+
+  it('should refuse the whole read when a frame cannot be read, rather than say a value is not there', async () => {
+    const { world } = loginWorld();
+    embed(world).unreadable = true;
+
+    await readInputText(world.subject).then(
+      () => should.fail(undefined, undefined, 'it should reject'),
+      () => undefined,
+    );
+  });
+
+  it('should refuse a frame too big to look through, a page with too many frames, and a frame that offers no way to read it', async () => {
+    const big = loginWorld().world;
+    embed(big).bodyText = 'x'.repeat(BROWSER_INPUT_TEXT_MAX_CHARS + 10);
+    const many = loginWorld().world;
+    for (let index = 0; index < 40; index += 1) embed(many, `https://f${String(index)}.example.test/`);
+    const bare = loginWorld().world;
+    const noMethods = embed(bare);
+    (noMethods as { locator?: unknown }).locator = undefined;
+
+    for (const world of [big, many, bare])
+      await readInputText(world.subject).then(
+        () => should.fail(undefined, undefined, 'it should reject'),
+        () => undefined,
+      );
+  });
+});
+
 describe('readInputText', () => {
   it('reads what a ferret could: the visible text, the accessibility snapshot and the markup', async () => {
     const { world } = loginWorld();

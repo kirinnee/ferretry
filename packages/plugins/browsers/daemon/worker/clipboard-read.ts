@@ -36,15 +36,26 @@ export async function readClipboardOf(
 ): Promise<BrowserClipboardRead> {
   const { navigationId } = await document();
   const origin = originOfUrl(page.url());
-  let text: string;
+  let text = '';
+  let failure: unknown;
+  let failed = false;
   try {
     text = await helper.read(COPY_VALUE_MAX_BYTES + 1);
-  } finally {
-    await helper.clear().catch(() => undefined);
+  } catch (error) {
+    failed = true;
+    failure = error;
   }
-  if (text.trim() === '') return { ok: false, reason: 'empty' };
-  if ((await document()).navigationId !== navigationId) return { ok: false, reason: 'changed' };
-  return { ok: true, value: text, origin, frameOrigin: origin, navigationId };
+  // EMPTIED either way, and the outcome is CONFIRMED, never swallowed: a clipboard that could not be emptied may still hold the
+  // value, and the caller (and its paste paths) must know, whether the read worked or not.
+  const unconfirmed = await helper.clear().then(
+    () => false,
+    () => true,
+  );
+  if (failed && !unconfirmed) throw failure;
+  const kept: { readonly kept?: true } = unconfirmed ? { kept: true } : {};
+  if (failed || text.trim() === '') return { ok: false, reason: 'empty', ...kept };
+  if ((await document()).navigationId !== navigationId) return { ok: false, reason: 'changed', ...kept };
+  return { ok: true, value: text, origin, frameOrigin: origin, navigationId, ...kept };
 }
 
 /** The made-up origin the helper page lives at: a reserved name, never a real site. */
@@ -89,9 +100,15 @@ export class ContextClipboardHelper implements ClipboardHelper {
   async clear(): Promise<void> {
     const page = await this.ready();
     await page.bringToFront();
-    await page.evaluate(async () => {
-      await (navigator as unknown as { clipboard: { writeText(text: string): Promise<void> } }).clipboard.writeText('');
+    // CONFIRMED: written empty, then read back. A write that resolved but left something behind is a failed clear.
+    const left = await page.evaluate(async () => {
+      const clipboard = (
+        navigator as unknown as { clipboard: { writeText(text: string): Promise<void>; readText(): Promise<string> } }
+      ).clipboard;
+      await clipboard.writeText('');
+      return (await clipboard.readText()).length;
     }, undefined);
+    if (left !== 0) throw new Error('the clipboard still holds text after it was emptied');
   }
 
   private async ready(): Promise<HelperPage> {

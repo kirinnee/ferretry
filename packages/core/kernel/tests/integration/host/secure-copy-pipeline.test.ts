@@ -44,7 +44,27 @@ const SENTINEL = 'FAKE-SC-7f3a91';
 const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
 
 const FERRET = 'F1';
+/** A second ferret, on the same machine and so on the same browser (secure-clip-2 fix1, finding 7). */
+const OTHER = 'F2';
 let calling = FERRET as FerretId;
+
+/**
+ * Every form an agent could be handed the sentinel in, or could ask a page to give it in: the sweep searches for each.
+ * Raw, base64 (padded and not), hex, reversed, the characters joined by a bar, URI-encoded, and split in two halves.
+ */
+function forms(value: string): readonly string[] {
+  const b64 = Buffer.from(value).toString('base64');
+  return [
+    value,
+    b64,
+    b64.replace(/=+$/u, ''),
+    Buffer.from(value).toString('hex'),
+    [...value].reverse().join(''),
+    [...value].join('|'),
+    encodeURIComponent(value),
+    value.slice(0, Math.floor(value.length / 2)) + value.slice(Math.floor(value.length / 2)),
+  ];
+}
 
 let root = '';
 let site: ReturnType<typeof Bun.serve>;
@@ -97,6 +117,9 @@ const PAGES: Readonly<Record<string, string>> = {
   '/dest': `<html><body><label>API token <input id="dest" type="password" oninput="fetch('/seen?v='+encodeURIComponent(this.value))"></label></body></html>`,
   '/other': '<html><body><p id="token">moved on</p></body></html>',
   '/slow': '<html><body><p>slow page</p></body></html>',
+  // Pages that say the value on a channel other than their visible text (secure-clip-2 fix1, finding 5): a title, a dialog, and
+  // two inputs whose value is it (so a click on "input" is a strict-mode error that quotes both).
+  '/titled': `<html><head><title>key ${SENTINEL}</title></head><body><p id="t">${SENTINEL}</p><button id="go" onclick="alert('your key is ' + document.getElementById('t').textContent)">Go</button><input id="a" value="${SENTINEL}"><input id="b" value="${SENTINEL}"></body></html>`,
 };
 
 /** The tool call as a ferret makes it; the answer is kept for the sentinel sweep. */
@@ -180,6 +203,14 @@ beforeAll(async () => {
         return new Response('ok');
       }
       if (url.pathname === '/slow') await Bun.sleep(2500);
+      // A page of another host that embeds the protected one in a frame (finding 6).
+      if (url.pathname === '/framed')
+        return new Response(
+          `<html><body><p>a harmless page</p><iframe src="http://127.0.0.1:${String(site.port)}/source"></iframe></body></html>`,
+          {
+            headers: { 'content-type': 'text/html' },
+          },
+        );
       const page = PAGES[url.pathname];
       return page === undefined
         ? new Response('not found', { status: 404 })
@@ -259,7 +290,7 @@ beforeAll(async () => {
   });
   gate = new FakeGate();
   const ferrets = {
-    get: async (id: string) => (id === FERRET ? { name: id } : undefined),
+    get: async (id: string) => (id === FERRET || id === OTHER ? { name: id } : undefined),
     workFolder: async () => ({ folder: join(root, 'work') }),
   };
   host = await testHost({
@@ -317,9 +348,11 @@ describe('the secure-copy pipeline, on real processes and a real Chrome', () => 
 
     should(delivered.status).equal(200);
     should(typedIntoTerminal).eql([SENTINEL]);
-    // The page the value was read from still says everything but the value: the registry masks the agent's read of it.
+    // The page the value was read from is CLOSED to the agent while the copy lives (secure-clip-2 fix1: a read of it could show the
+    // value in a form no mask knows), and the refusal says why and how to end it, without the value.
     const read = await tool('browser_read', { name: 'src', mode: 'snapshot' });
-    should(read.text).containEql('Token created').and.containEql('[sealed:pagetoken]');
+    mustBeRefused(read, 'holds sealed:pagetoken');
+    should(read.text).containEql('secure_discard');
     should(JSON.stringify(read)).not.containEql(SENTINEL);
   }, 120_000);
 
@@ -439,7 +472,8 @@ describe('the secure-copy pipeline, on real processes and a real Chrome', () => 
 
   it('should refuse a paste whose takeover lands while the write waits in the page’s queue, and type nothing', async () => {
     await copy('queued', command('fake-token'));
-    await tool('browser_open', { name: 'dest4', url: `${base}/dest` });
+    // On `localhost`, a host no copy covers: the agent's own page script is what keeps the queue busy, and a covered page would refuse it.
+    await tool('browser_open', { name: 'dest4', url: `${base.replace('127.0.0.1', 'localhost')}/dest` });
     const asked = await paste('queued', { kind: 'browser', name: 'dest4', selector: '#dest' });
     const typedBefore = typedIntoPage.length;
     // The page's queue is busy with the agent's own act; the owner allows, so the write queues behind it.
@@ -484,13 +518,136 @@ describe('the secure-copy pipeline, on real processes and a real Chrome', () => 
     should(await host.provided(VaultPort).inputState(requestOf(asked) as never)).equal('refused');
   }, 120_000);
 
+  describe('what a sealed value’s page still says, through every other channel (secure-clip-2 fix1)', () => {
+    const route = `/v1/sessions/${FERRET}/browser`;
+    const asAgent = { as: ferret(FERRET) };
+    const localhost = () => base.replace('127.0.0.1', 'localhost');
+
+    /** Whatever an agent was told, searched for every form of the value. */
+    const sweep = (answer: unknown): string[] => {
+      const text = typeof answer === 'string' ? answer : JSON.stringify(answer);
+      return forms(SENTINEL).filter(form => text.includes(form));
+    };
+
+    async function tellAndSweep<T>(answer: T): Promise<T> {
+      said.push(typeof answer === 'string' ? answer : JSON.stringify(answer));
+      should(sweep(answer)).eql([]);
+      return answer;
+    }
+
+    /** The page a person's status names as the one at `address`, made the viewed page: the route acts on that one. */
+    async function view(address: string): Promise<string> {
+      const status = await host.request('GET', route, {});
+      const page = status.json<{ pages: { id: string; url: string }[] }>().pages.find(each => each.url === address);
+      if (page === undefined) throw new Error(`no page at ${address}: ${status.body.slice(0, 600)}`);
+      const viewed = await host.request('POST', route, { body: { action: 'activate-page', pageId: page.id } });
+      should(viewed.status).equal(200);
+      return page.id;
+    }
+
+    it('should close the browser’s HTTP action route to an agent’s credential on a covered page, and keep a person’s own', async () => {
+      await copy('routetoken', { kind: 'browser', key: 'src', selector: '#token' });
+      await view(`${base}/source`);
+
+      const agent = await host.request('POST', route, { body: { action: 'read' }, ...asAgent });
+      const picture = await host.request('POST', route, { body: { action: 'screenshot' }, ...asAgent });
+      const person = await host.request('POST', route, { body: { action: 'read' } });
+
+      should(agent.status).equal(403);
+      should(agent.body).containEql('holds sealed:');
+      should(picture.status).equal(403);
+      should(JSON.stringify(picture.json())).not.containEql('screenshotBase64');
+      should(person.status).equal(200);
+      await tellAndSweep(agent.body);
+      await tellAndSweep(picture.body);
+    }, 120_000);
+
+    it('should refuse an agent credential’s viewer stream while a sealed value lives, and let a person watch', async () => {
+      const agent = await host.socket(`${route}/stream`, asAgent);
+      const person = await host.socket(`${route}/stream`, {});
+
+      should(agent.response?.status).equal(403);
+      should(agent.response?.body).containEql('cannot be masked');
+      should(person.response).equal(undefined);
+      await person.handler?.close();
+    }, 120_000);
+
+    it('should show a covered page by its origin and a fixed title in list and tabs, never its title or address', async () => {
+      await tool('browser_open', { name: 'titled', url: `${base}/titled` });
+
+      for (const answer of [await tool('browser_list', {}), await tool('browser_tabs', { action: 'list' })]) {
+        await tellAndSweep(answer);
+        should(JSON.stringify(answer)).containEql('this page holds a sealed value');
+      }
+    }, 120_000);
+
+    it('should withhold the words of a dialog the covered page raised, and the browser’s error about it', async () => {
+      const clicked = await tool('browser_click', { name: 'titled', selector: '#go' });
+      // Typing into a paragraph fails in the browser, whose own error may quote the element; the agent is told one sentence.
+      const typed = await tool('browser_type', { name: 'titled', selector: '#t', text: 'x' });
+
+      for (const answer of [clicked, typed]) await tellAndSweep(answer);
+      should(JSON.stringify(clicked)).containEql('this page holds a sealed value');
+      should(JSON.stringify(clicked)).not.containEql('your key is');
+      // Whether Chrome refuses to type there is Chrome's; if it does, the sentence is the fixed one.
+      if (typed.isError === true) should(typed.text).containEql('does not pass on what the browser said');
+    }, 120_000);
+
+    it('should refuse a selector that depends on what the page says, and still click by structure', async () => {
+      const byText = await tool('browser_click', { name: 'titled', selector: 'text=Go' });
+      const byAttribute = await tool('browser_click', { name: 'titled', selector: '[value^="FAKE"]' });
+      const byStructure = await tool('browser_click', { name: 'titled', selector: '#go' });
+      await tool('browser_dialog', { name: 'titled', action: 'accept' });
+
+      mustBeRefused(byText, 'depends on what the page says');
+      mustBeRefused(byAttribute, 'depends on what the page says');
+      should(byStructure.isError).not.equal(true);
+    }, 120_000);
+
+    it('should close a page of ANOTHER host that embeds the protected site in a frame', async () => {
+      await tool('browser_open', { name: 'framed', url: `${localhost()}/framed` });
+
+      const read = await tool('browser_read', { name: 'framed', mode: 'text' });
+      const picture = await tool('browser_screenshot', { name: 'framed' });
+
+      mustBeRefused(read, 'is refused');
+      mustBeRefused(picture);
+      await tellAndSweep(read);
+      await tellAndSweep(picture);
+    }, 120_000);
+
+    it('should refuse a SECOND ferret on the same browser too, without naming the first ferret’s copy', async () => {
+      calling = OTHER as FerretId;
+      const opened = await host.tool('browser_open', { name: 'mine', url: `${base}/source` }, { as: ferret(OTHER) });
+      const read = await host.tool('browser_read', { name: 'mine', mode: 'text' }, { as: ferret(OTHER) });
+      calling = FERRET as FerretId;
+      said.push(JSON.stringify(opened), JSON.stringify(read));
+
+      mustBeRefused(read, 'is refused');
+      should(JSON.stringify(read)).containEql('other ferrets sealed');
+      should(JSON.stringify(read)).not.containEql('sealed:pagetoken');
+      should(sweep(read)).eql([]);
+    }, 120_000);
+
+    it('should still let an agent read a page no copy covers, so the guards are not a blanket refusal', async () => {
+      await tool('browser_open', { name: 'elsewhere', url: `${localhost()}/other` });
+
+      const read = await tool('browser_read', { name: 'elsewhere', mode: 'text' });
+
+      should(read.isError).not.equal(true);
+      should(JSON.stringify(read)).containEql('moved on');
+    }, 120_000);
+  });
+
   it('should have said the sentinel nowhere: no answer, failure, audit record, event, log line or state file holds it', async () => {
     const everywhere = await trace();
 
     should(typedIntoTerminal).eql([SENTINEL]);
     should(said.length).be.above(20);
-    should(said.filter(answer => answer.includes(SENTINEL))).eql([]);
-    should(everywhere).not.containEql(SENTINEL);
+    for (const form of forms(SENTINEL)) {
+      should(said.filter(answer => answer.includes(form))).eql([]);
+      should(everywhere).not.containEql(form);
+    }
     should(said.filter(answer => answer.includes('FAKE-PROXY-CRED'))).eql([]);
     should(everywhere).not.containEql('FAKE-PROXY-CRED');
     // …and what the audit DID record is what the brief allows: names and counts.

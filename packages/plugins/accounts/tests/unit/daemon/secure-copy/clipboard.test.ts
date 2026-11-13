@@ -43,11 +43,11 @@ function world(answer: CopyPageRead | Error = FOUND, withClipboard = true) {
   const clock = new Clock();
   const masking = new EphemeralValues(clock);
   const held: Held[] = [];
-  const pasted: { session: string; copy: string; key: string; until: () => number | undefined }[] = [];
+  const pasted: { session: string; copy: string; origins: readonly string[]; until: () => number | undefined }[] = [];
   const dropped: string[] = [];
   const guards: CopyGuards = {
     hold: (session, copy, origins, until) => void held.push({ session, copy, origins, until }),
-    pastedInto: async (session, copy, key, until) => void pasted.push({ session, copy, key, until }),
+    pastedOn: (session, copy, origins, until) => void pasted.push({ session, copy, origins, until }),
     drop: session => void dropped.push(session),
   };
   const asked: string[] = [];
@@ -65,8 +65,9 @@ function world(answer: CopyPageRead | Error = FOUND, withClipboard = true) {
       retime: (...args) => masking.retime(...args),
       holdScrollback: (session, value, marker) => {
         scrollback.push({ session, value, marker });
-        masking.holdScrollback(session, value, marker);
+        return masking.holdScrollback(session, value, marker);
       },
+      scrollbackFull: (session, marker) => masking.scrollbackFull(session, marker),
     },
     redact: async text => text,
     guards,
@@ -261,11 +262,10 @@ describe('the pages a live copy keeps closed', () => {
     const { service, pasted, clock } = world();
     await service.capture(SESSION, fromClipboard());
 
-    service.pastedInto(SESSION, 'key', { kind: 'page', key: 'form' });
-    await Promise.resolve();
+    service.protectPaste(SESSION, 'key', { kind: 'page' }, { origins: ['https://form.example.test'] });
 
     should(pasted).have.length(1);
-    should(pasted[0]).match({ session: SESSION, copy: 'key', key: 'form' });
+    should(pasted[0]).match({ session: SESSION, copy: 'key', origins: ['https://form.example.test'] });
     should(pasted[0]?.until()).equal(clock.ms + COPY_DEFAULT_LIFETIME_SECONDS * 1000);
     service.discard(SESSION, 'key');
     should(pasted[0]?.until()).equal(undefined);
@@ -275,7 +275,7 @@ describe('the pages a live copy keeps closed', () => {
     const { service, scrollback, masking, clock } = world();
     await service.capture(SESSION, fromClipboard());
 
-    service.pastedInto(SESSION, 'key', { kind: 'terminal', key: 'dev' });
+    service.protectPaste(SESSION, 'key', { kind: 'terminal' }, { origins: [] });
     service.discard(SESSION, 'key');
     clock.ms += 30 * 24 * 3600 * 1000;
 
@@ -288,10 +288,13 @@ describe('the pages a live copy keeps closed', () => {
     const { service, scrollback, pasted } = world();
     await service.capture(SESSION, fromClipboard());
 
-    service.pastedInto(SESSION, 'key', { kind: 'secret', key: 'VERCEL_TOKEN' });
+    service.protectPaste(SESSION, 'key', { kind: 'secret' }, { origins: [] });
     service.discard(SESSION, 'key');
-    service.pastedInto(SESSION, 'key', { kind: 'terminal', key: 'dev' });
-    service.pastedInto(SESSION, 'key', { kind: 'page', key: 'form' });
+    // A copy that is no longer live cannot be protected: nothing is written, so the write is refused.
+    should(() => service.protectPaste(SESSION, 'key', { kind: 'terminal' }, { origins: [] })).throw(/ended before/);
+    should(() => service.protectPaste(SESSION, 'key', { kind: 'page' }, { origins: ['https://x.test'] })).throw(
+      /ended before/,
+    );
 
     should(scrollback).eql([]);
     should(pasted).eql([]);

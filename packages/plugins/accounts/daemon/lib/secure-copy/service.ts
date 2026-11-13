@@ -398,20 +398,53 @@ export class SecureCopyService implements InputSealedPort {
   }
 
   /**
-   * A paste of a copy was typed (the Vault tells us after the write). Into a TERMINAL the value is now in that terminal's
-   * scrollback, which no clock empties: it stays masked for the life of the session, not the copy. Into a PAGE field the
-   * page's origin joins the pages the copy keeps closed.
+   * A sentence when a paste of this copy into a TERMINAL cannot be made because its scrollback mask has nowhere to live: a mask
+   * whose value can still be read is never dropped to make room, so a session that already keeps as many different copies masked
+   * as it may refuses one more, until the session ends. Nothing for any other target or a copy it already keeps.
    */
-  pastedInto(sessionId: string, name: CopyName, target: { readonly kind: string; readonly key?: string }): void {
+  scrollbackRefusal(sessionId: string, name: CopyName, target: { readonly kind: string }): string | undefined {
+    if (target.kind !== 'terminal') return undefined;
+    if (!this.ports.masking.scrollbackFull(sessionId, copyMask(name))) return undefined;
+    return `Ferretry will not paste ${copyMask(name)} into a terminal: this session already keeps the most pasted values it can mask in terminal history, and a mask is never dropped while the history that shows the value can still be read. Nothing was typed. It ends with the session; type the value yourself, or start a new session.`;
+  }
+
+  /**
+   * THE PROTECTION A PASTE NEEDS, installed inside the target's own write turn, BEFORE any byte can land, and left on whatever the
+   * write comes to (bytes may have landed). Into a TERMINAL the value will be in that terminal's scrollback, which no clock
+   * empties: it stays masked for the life of the session, not the copy. Into a PAGE the document (and frame) origins it lands on
+   * join the pages the copy keeps closed. It THROWS when it cannot, and then nothing is typed.
+   */
+  protectPaste(
+    sessionId: string,
+    name: CopyName,
+    target: { readonly kind: string },
+    where: { readonly origins: readonly string[] },
+  ): void {
     const entry = this.copies.get(sessionId)?.get(name);
-    if (entry?.value === undefined || entry.state !== 'live') return;
-    if (target.kind === 'terminal')
+    if (entry?.value === undefined || entry.state !== 'live')
+      throw new SecureCopyError(
+        'not_found',
+        `${copyMask(name)} ended before it could be protected, so nothing was typed.`,
+      );
+    if (target.kind === 'terminal') {
+      const refused = this.scrollbackRefusal(sessionId, name, target);
+      if (refused !== undefined) throw new SecureCopyError('unavailable', refused);
       for (const spelling of maskSpellings(entry.value))
-        this.ports.masking.holdScrollback(sessionId, spelling, copyMask(name));
-    else if (target.kind === 'page' && target.key !== undefined)
-      void this.ports.guards
-        ?.pastedInto(sessionId, name, target.key, () => this.livesUntil(sessionId, name, entry.expiresAt))
-        .catch(() => undefined);
+        if (!this.ports.masking.holdScrollback(sessionId, spelling, copyMask(name)))
+          throw new SecureCopyError(
+            'unavailable',
+            'Ferretry could not keep this value masked in the terminal history, so nothing was typed.',
+          );
+      return;
+    }
+    if (target.kind !== 'page') return;
+    const guards = this.ports.guards;
+    if (guards === undefined)
+      throw new SecureCopyError(
+        'unavailable',
+        'Ferretry could not guard the page this value goes to, so nothing was typed.',
+      );
+    guards.pastedOn(sessionId, name, where.origins, () => this.livesUntil(sessionId, name, entry.expiresAt));
   }
 
   /**

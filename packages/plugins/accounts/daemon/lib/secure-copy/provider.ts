@@ -38,17 +38,24 @@ export class SecureCopyHook implements SecureCopyProvider {
     return parsed.success ? this.copies.open(sessionId, parsed.data, capturedAt) : undefined;
   }
 
-  used(sessionId: string, name: string, target: InputTarget): void {
+  used(sessionId: string, name: string, _target: InputTarget): void {
     const parsed = CopyNameSchema.safeParse(name);
     if (!parsed.success) return;
     this.copies.used(sessionId, parsed.data);
-    this.copies.pastedInto(sessionId, parsed.data, {
-      kind: target.kind,
-      ...('key' in target && typeof target.key === 'string' ? { key: target.key } : {}),
-    });
   }
 
-  async refusal(sessionId: string, _name: string, target: InputTarget): Promise<string | undefined> {
+  protect(sessionId: string, name: string, target: InputTarget, where: { readonly origins: readonly string[] }): void {
+    const parsed = CopyNameSchema.safeParse(name);
+    if (!parsed.success)
+      throw new Error('Ferretry could not protect this paste (the copy has no usable name), so nothing was typed.');
+    this.copies.protectPaste(sessionId, parsed.data, { kind: target.kind }, where);
+  }
+
+  async refusal(sessionId: string, name: string, target: InputTarget): Promise<string | undefined> {
+    // A terminal's scrollback mask must have somewhere to live (a mask is never dropped while its value is readable).
+    const parsed = CopyNameSchema.safeParse(name);
+    if (target.kind === 'terminal' && parsed.success)
+      return this.copies.scrollbackRefusal(sessionId, parsed.data, target);
     // Only a page can be held by a person: a terminal's takeover is the terminal tools' own check at their write.
     if (target.kind !== 'page') return undefined;
     const copy = this.browsers()?.copy;
