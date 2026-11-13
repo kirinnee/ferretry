@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'bun:test';
 import { InputCard } from '../../../app/features/input/input-card.tsx';
-import { pasteRoute, sealedBody, titleWords } from '../../../app/lib/input-card.ts';
+import { inputFailure, pasteRoute, sealedBody, titleWords } from '../../../app/lib/input-card.ts';
 import { InputRequestViewSchema } from '../../../app/lib/input-wire.ts';
 import { click, settle } from '../../support/app/dom-form.ts';
 import { mount, must } from '../../support/app/dom.ts';
@@ -24,14 +24,20 @@ const SENTINEL = 'FAKE-SC-7f3a91';
 
 const q = <T extends Element>(root: ParentNode, selector: string): T => must(root.querySelector<T>(selector), selector);
 
-async function card(request = pasteRequest(), answer?: () => Promise<unknown>) {
+async function card(request = pasteRequest(), answer?: () => Promise<unknown>, refreshed: string[] = []) {
   const rig = recordingClient(async route => {
     if (route.endsWith('/deliver')) return answer === undefined ? DELIVERED : await answer();
     return {};
   });
   const done: string[] = [];
   const mounted = await mount(
-    <InputCard client={rig.client} now={NOW} onDone={() => done.push('done')} request={request} />,
+    <InputCard
+      client={rig.client}
+      now={NOW}
+      onDone={() => done.push('done')}
+      onRefresh={() => refreshed.push('refresh')}
+      request={request}
+    />,
   );
   await settle();
   return { ...rig, mounted, done };
@@ -130,16 +136,18 @@ describe('the paste card', () => {
     }
   });
 
-  it('should say why a paste was refused (a person took the page over) and keep the card for another try', async () => {
+  it('should settle the card when the daemon ends the paste for good (a takeover): say why, refresh, and take Allow away', async () => {
+    const refreshed: string[] = [];
     const { mounted, done } = await card(
       pasteRequest({ target: { kind: 'page', key: 'app' }, observed: pageRequest().observed }),
       async () => {
         throw {
           status: 409,
-          code: 'conflict',
+          code: 'taken_over',
           message: 'A person has taken over that page, so nothing is pasted into it.',
         };
       },
+      refreshed,
     );
     try {
       await click(q(mounted.container, '[data-input-allow]'));
@@ -148,7 +156,55 @@ describe('the paste card', () => {
       expect(q(mounted.container, '[data-input-failure]').textContent).toBe(
         'A person has taken over that page, so nothing is pasted into it.',
       );
+      expect(q(mounted.container, '[data-input-ended]').textContent).toContain('Nothing was pasted');
+      expect(mounted.container.querySelector('[data-input-allow]')).toBeNull();
+      expect(refreshed).toEqual(['refresh']);
       expect(done).toEqual([]);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('should settle the card the same way when its copy is gone (discarded, expired or captured again)', async () => {
+    const refreshed: string[] = [];
+    const { mounted } = await card(
+      pasteRequest(),
+      async () => {
+        throw {
+          status: 410,
+          code: 'gone',
+          message: 'sealed:vercel was discarded or expired, so there is nothing to paste',
+        };
+      },
+      refreshed,
+    );
+    try {
+      await click(q(mounted.container, '[data-input-allow]'));
+      await settle();
+
+      expect(mounted.container.querySelector('[data-input-allow]')).toBeNull();
+      expect(q(mounted.container, '[data-input-ended]')).not.toBeNull();
+      expect(refreshed).toEqual(['refresh']);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('should keep the card for another try when the refusal is only a changed target', async () => {
+    const refreshed: string[] = [];
+    const { mounted } = await card(
+      pasteRequest(),
+      async () => {
+        throw { status: 409, code: 'target_changed', message: 'moved' };
+      },
+      refreshed,
+    );
+    try {
+      await click(q(mounted.container, '[data-input-allow]'));
+      await settle();
+
+      expect(mounted.container.querySelector('[data-input-ended]')).toBeNull();
+      expect(q<HTMLButtonElement>(mounted.container, '[data-input-allow]').disabled).toBe(false);
     } finally {
       await mounted.unmount();
     }
@@ -168,5 +224,134 @@ describe('the paste card', () => {
     } finally {
       await mounted.unmount();
     }
+  });
+});
+
+describe('the paste card tells what the daemon saw (secure-clip-1 fix1, P3-9)', () => {
+  it('should show a safe length and the kind of source, never a sample of the value', async () => {
+    const { mounted } = await card();
+    try {
+      expect(q(mounted.container, '[data-input-paste-size]').textContent).toBe(
+        '40 characters · what a command printed',
+      );
+      expect(mounted.container.textContent).not.toContain(SENTINEL);
+    } finally {
+      await mounted.unmount();
+    }
+    const page = pasteRequest({ source: { ...COPY_SOURCE, from: { kind: 'browser', origin: 'https://vercel.com' } } });
+    const other = await card(page);
+    try {
+      expect(q(other.mounted.container, '[data-input-paste-size]').textContent).toBe(
+        '40 characters · text read from a page',
+      );
+    } finally {
+      await other.mounted.unmount();
+    }
+  });
+
+  it('should show the field a page paste goes into: its observed type and name, and the ferret’s own label apart', async () => {
+    const observed = pageRequest().observed as unknown as { fields: { field: Record<string, unknown> }[] };
+    const request = pasteRequest({
+      target: { kind: 'page', key: 'app' },
+      fields: [{ id: 'value', label: 'Vercel token', sensitivity: 'secret' }],
+      observed: {
+        ...observed,
+        fields: [{ ...observed.fields[0], field: { tag: 'input', type: 'password', name: 'api_token' } }],
+      },
+    });
+    const { mounted } = await card(request);
+    try {
+      const said = q(mounted.container, '[data-input-paste-field]').textContent;
+      expect(said).toContain('password field');
+      expect(said).toContain('api_token');
+      expect(said).toContain('The ferret calls it “Vercel token”');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+});
+
+describe('the paste card’s layout and weight (secure-clip-1 fix1, P2-6, P3-10)', () => {
+  const replacing = () =>
+    pasteRequest({
+      target: { kind: 'secret', key: 'VERCEL_TOKEN' },
+      observed: { kind: 'secret', name: 'VERCEL_TOKEN', exists: true },
+      risk: { level: 'amber', reason: 'This replaces the value the secret holds now; the old value is gone for good.' },
+    });
+
+  it('should make replacing a secret loud and its approval destructive', async () => {
+    const { mounted } = await card(replacing());
+    try {
+      expect(q(mounted.container, '[data-input-replace]').textContent).toContain('gone for good');
+      const allow = q<HTMLButtonElement>(mounted.container, '[data-input-allow]');
+      expect(allow.dataset.variant).toBe('danger');
+      expect(allow.textContent).toBe('Replace secret');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('should keep the ordinary approval for a new secret or any other paste', async () => {
+    const fresh = await card(
+      pasteRequest({
+        target: { kind: 'secret', key: 'NEW_TOKEN' },
+        observed: { kind: 'secret', name: 'NEW_TOKEN', exists: false },
+      }),
+    );
+    try {
+      expect(fresh.mounted.container.querySelector('[data-input-replace]')).toBeNull();
+      const allow = q<HTMLButtonElement>(fresh.mounted.container, '[data-input-allow]');
+      expect(allow.dataset.variant).toBe('primary');
+      expect(allow.textContent).toBe('Allow paste');
+    } finally {
+      await fresh.mounted.unmount();
+    }
+  });
+
+  it('should keep the time left beside the title, not on a line of its own', async () => {
+    const { mounted } = await card();
+    try {
+      const header = q(mounted.container, 'header');
+      expect(header.className).not.toContain('flex-wrap');
+      expect(q(mounted.container, '[data-input-expiry]').className).toContain('shrink-0');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('should give one hidden-typing hint: the generic green risk line is not repeated on a paste card', async () => {
+    const quiet = pasteRequest({
+      risk: { level: 'green', reason: 'Typing is hidden here, and the ferret never sees the value.' },
+    });
+    const { mounted } = await card(quiet);
+    try {
+      expect(mounted.container.querySelector('[data-input-risk="green"]')).toBeNull();
+      expect(mounted.container.textContent).toContain('You type nothing');
+      expect(mounted.container.textContent).not.toContain('Typing is hidden here');
+    } finally {
+      await mounted.unmount();
+    }
+    const flagged = pasteRequest({
+      risk: {
+        level: 'amber',
+        reason: 'The ferret saw this value before it was sealed, so it is not protected; consider rotating it.',
+      },
+    });
+    const loud = await card(flagged);
+    try {
+      expect(q(loud.mounted.container, '[data-input-risk="amber"]').textContent).toContain('not protected');
+    } finally {
+      await loud.mounted.unmount();
+    }
+  });
+
+  it('should read a takeover and a gone copy as final, and a changed target as retryable', () => {
+    expect(inputFailure({ status: 409, code: 'taken_over', message: 'A person took it.' }, 'page')).toMatchObject({
+      kind: 'ended',
+      definitive: true,
+      text: 'A person took it.',
+    });
+    expect(inputFailure({ status: 410, code: 'gone', message: 'x' }, 'page').kind).toBe('gone');
+    expect(inputFailure({ status: 409, code: 'target_changed' }, 'page').kind).toBe('changed');
   });
 });

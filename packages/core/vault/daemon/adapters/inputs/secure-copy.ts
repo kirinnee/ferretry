@@ -32,9 +32,9 @@ export class SecureCopiesThroughHook implements InputSealedPort, InputPasteRules
     }
   }
 
-  open(sessionId: string, name: CopyName): string | undefined {
+  open(sessionId: string, name: CopyName, capturedAt?: string): string | undefined {
     try {
-      return this.provider()?.open(sessionId, name);
+      return this.provider()?.open(sessionId, name, capturedAt);
     } catch {
       return undefined;
     }

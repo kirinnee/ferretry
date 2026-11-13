@@ -19,9 +19,13 @@ import type { InputTarget, InputTargetFacts } from './targets.ts';
 export interface SecureCopyProvider {
   /** What the daemon recorded about a LIVE copy of this session (`CopyMeta`), or nothing: never the value. */
   describe(sessionId: string, name: string): unknown;
-  /** The live copy's value, for the one write; nothing once it was discarded or expired. */
-  open(sessionId: string, name: string): string | undefined;
-  /** A paste of it was typed, into `target`: a terminal's scrollback and a page's document now hold it. */
+  /**
+   * The live copy's value, for the one write; nothing once it was discarded or expired, and nothing when `capturedAt` is
+   * given and the copy now under that name was captured at another instant: a card is for ONE capture, never for
+   * whatever value happens to hold its name by the time the owner allows it.
+   */
+  open(sessionId: string, name: string, capturedAt?: string): string | undefined;
+  /** A paste of it was typed, into `target` (a count). */
   used(sessionId: string, name: string, target: InputTarget): void;
   /**
    * A sentence when this paste may not go to `target` now, or nothing: a person has taken the page over. Asked when the

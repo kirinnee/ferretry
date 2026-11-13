@@ -67,6 +67,8 @@ function host(
     armless?: boolean;
     arm?: 'armed' | 'refused' | Error;
     cleared?: 'cleared' | 'moved' | 'unknown' | Error;
+    /** Runs while the work waits its turn in the page's queue, before it starts. */
+    onQueue?: () => void;
   } = {},
 ) {
   const calls: string[] = [];
@@ -131,6 +133,7 @@ function host(
     inputOnPage: async (sessionId, key, work) => {
       calls.push(`page:${sessionId}:${key}`);
       if (options.refuse === true) throw new Error('no such page in this session');
+      options.onQueue?.();
       return await work(port, options.pageId ?? 'page-1');
     },
   };
@@ -434,5 +437,45 @@ describe("PageInputTarget: an owner's value Ferretry does not submit (secrev-133
     should(outcome).equal('typed');
     should(said).eql([false]);
     should(calls.some(call => call.startsWith('arm:'))).be.false();
+  });
+});
+
+describe('PageInputTarget: a takeover that lands before the write (secure-clip-1 fix1, P1-1)', () => {
+  const VALUES = [{ field: 'password', text: 'FAKE-SC-7f3a91' }];
+  const TAKEN = 'A person has taken over the page; wait or ask them.';
+
+  it('should ask the refusal inside the page turn and type nothing when a person holds the page', async () => {
+    const { target, calls } = host();
+    const askedAfter: string[][] = [];
+    const outcome = await target.type(S1, APP, VALUES, false, FACTS_PAGE, {
+      refuse: async () => {
+        askedAfter.push([...calls]);
+        return TAKEN;
+      },
+    });
+    should(outcome).equal('guard_refused');
+    // Asked after the page's turn began, never before it.
+    should(askedAfter).eql([['page:s1:app']]);
+    should(calls.some(call => call.startsWith('type:'))).be.false();
+  });
+
+  it('should refuse a takeover that lands while the write waits its turn in the page queue', async () => {
+    const taken = { now: false };
+    const { target, calls } = host({
+      onQueue: () => {
+        taken.now = true;
+      },
+    });
+    const outcome = await target.type(S1, APP, VALUES, false, FACTS_PAGE, {
+      refuse: async () => (taken.now ? TAKEN : undefined),
+    });
+    should(outcome).equal('guard_refused');
+    should(calls.some(call => call.startsWith('type:'))).be.false();
+  });
+
+  it('should type when nobody holds the page', async () => {
+    const { target, calls } = host();
+    should(await target.type(S1, APP, VALUES, false, FACTS_PAGE, { refuse: async () => undefined })).equal('typed');
+    should(calls).eql(['page:s1:app', 'type:page-1:password:false']);
   });
 });

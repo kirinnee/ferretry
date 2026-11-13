@@ -95,6 +95,12 @@ export interface VaultApi {
    */
   pageActed?(ferret: FerretId, script: boolean): PageActNote;
   /**
+   * A person took a ferret's page over, told by Browsers with the page's name and id: a secure paste still waiting for the
+   * owner into it ends as refused (`taken_over`) at once, instead of only when someone allows it. Browsers alone is handed
+   * it (any other plugin could only cancel cards with it). Additive: absent, a waiting paste is refused when it is allowed.
+   */
+  pageTakenOver?(ferret: FerretId, keys: readonly string[]): Promise<void>;
+  /**
    * A page script is about to run, anywhere on the machine (today's `RuleSignInGrants.running`): until the returned
    * call, every page card counts as scripted. Memory only: a restart ends every script.
    */
@@ -151,7 +157,8 @@ export interface VaultApi {
    */
   raisePhoneApproval?(ferret: FerretId, ask: PhoneApprovalAsk): Promise<Result<PhoneApprovalAgentView, string>>;
   /**
-   * SECURE COPY (docs/secure-copy.md). Additive, optional and ABSENT for every needer but Accounts: the Vault owns the
+   * SECURE COPY (docs/secure-copy.md). Additive, optional and present for Accounts and the trusted core callers (which are
+   * handed the Vault's full reach), and ABSENT for every other needer: the Vault owns the
    * child runner and the masking registry, so a copy reaches both only through these two members. An absent member means
    * no copy is captured (fail closed).
    *

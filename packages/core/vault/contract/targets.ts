@@ -211,6 +211,12 @@ export interface TypeOptions {
   /** Asked synchronously right before the write; false types nothing. */
   readonly proceed?: () => boolean;
   readonly reprove?: boolean;
+  /**
+   * A secure paste's takeover check, asked INSIDE the target's own turn (the page's queue) right before the write, after
+   * every other check. A sentence refuses: nothing is typed and the target answers `guard_refused`. It exists because a
+   * person can take a page over while the write waits its turn, and nothing the Vault looked at earlier can see that.
+   */
+  readonly refuse?: () => Promise<string | undefined>;
 }
 
 /** A picture of the target for the card (a page only; a terminal's card draws its own text). */

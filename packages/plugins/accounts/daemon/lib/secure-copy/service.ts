@@ -159,7 +159,12 @@ export class SecureCopyService implements InputSealedPort {
   /** Reads the value and holds it: the second half of a capture, run with its name taken. */
   private async hold(sessionId: string, request: CopyCapture, context: CopyCaptureContext): Promise<CopyCaptured> {
     const read = await this.read(sessionId, request, context);
-    const capturedAt = this.ports.clock.now();
+    // Strictly later than the copy this name held before (an ended copy stays listed), so two captures under one name are
+    // never one generation, even in one instant of a coarse clock: the capture time is the identity a paste card pins.
+    const capturedAt = Math.max(
+      this.ports.clock.now(),
+      (this.copies.get(sessionId)?.get(request.name)?.capturedAt ?? 0) + 1,
+    );
     const expiresAt = capturedAt + (request.expiresInSeconds ?? COPY_DEFAULT_LIFETIME_SECONDS) * 1000;
     // Masked BEFORE anything else is awaited or returned, in every spelling a reader may meet it in: no read after
     // this point can carry the value, whether a program printed it with its newline or without.
@@ -267,10 +272,13 @@ export class SecureCopyService implements InputSealedPort {
    * THE ONE PLACE A COPY'S VALUE LEAVES THIS SERVICE: to the input bridge's single guarded write, for a paste the
    * owner allowed (or approved in advance). It is not on any port a route or an agent tool is given.
    */
-  open(sessionId: string, name: CopyName): string | undefined {
+  open(sessionId: string, name: CopyName, capturedAt?: string): string | undefined {
     this.purge();
     const entry = this.copies.get(sessionId)?.get(name);
-    return entry?.state === 'live' ? entry.value : undefined;
+    if (entry?.state !== 'live') return undefined;
+    // A card is for ONE capture: a copy discarded and captured again under the name is another value.
+    if (capturedAt !== undefined && new Date(entry.capturedAt).toISOString() !== capturedAt) return undefined;
+    return entry.value;
   }
 
   /** A paste of the copy was typed. */

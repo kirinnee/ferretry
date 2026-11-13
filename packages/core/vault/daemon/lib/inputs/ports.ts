@@ -185,6 +185,12 @@ export interface TypeOptions {
    * `reader_changed` (the line is erased); a guard that refuses answers `guard_refused`, never a plain `target_changed`.
    */
   readonly reprove?: boolean;
+  /**
+   * A secure paste's takeover check, asked INSIDE the target's own turn (the page's queue) right before the write, after
+   * every other check. A sentence refuses: nothing is typed and the target answers `guard_refused`. It exists because a
+   * person can take a page over while the write waits its turn, and nothing the Vault looked at earlier can see that.
+   */
+  readonly refuse?: () => Promise<string | undefined>;
 }
 
 /** The card the owner answers. The daemon words the title and ask; the agent's prompt rides as `prompt` only. */
@@ -355,9 +361,13 @@ export type InputCaller =
 export interface InputSealedPort {
   /** What the daemon recorded about a live copy of this session, or nothing: never the value. */
   describe(sessionId: string, name: CopyName): CopyMeta | undefined;
-  /** The live copy's value for the one write; nothing once it was discarded or expired. */
-  open(sessionId: string, name: CopyName): string | undefined;
-  /** A paste of it was typed into `target`: a terminal's scrollback and a page's document now hold it. */
+  /**
+   * The live copy's value, for the one write; nothing once it was discarded or expired, and nothing when `capturedAt` is
+   * given and the copy now under that name was captured at another instant: a card is for ONE capture, never for
+   * whatever value happens to hold its name by the time the owner allows it.
+   */
+  open(sessionId: string, name: CopyName, capturedAt?: string): string | undefined;
+  /** A paste of it was typed into `target` (a count). */
   used(sessionId: string, name: CopyName, target: InputTarget): void;
   /**
    * A sentence when this paste may not go to `target` now (a person has taken the page over), or nothing. Asked when the

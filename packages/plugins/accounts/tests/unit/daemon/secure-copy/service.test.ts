@@ -333,6 +333,23 @@ describe('SecureCopyService limits', () => {
   });
 });
 
+describe('SecureCopyService generations (secure-clip-1 fix1, P2-3)', () => {
+  it('should open a copy only for the capture a card was raised for, even when the name is taken again in the same instant', async () => {
+    const { service } = world();
+    const first = (await service.capture('s1', command())).copy;
+    should(service.open('s1', 'token', first.capturedAt)).equal(TOKEN);
+    service.discard('s1', 'token');
+
+    // The clock has not moved: a capture under the same name must still be a different generation.
+    const second = (await service.capture('s1', command())).copy;
+
+    should(second.capturedAt).not.equal(first.capturedAt);
+    should(service.open('s1', 'token', first.capturedAt)).equal(undefined);
+    should(service.open('s1', 'token', second.capturedAt)).equal(TOKEN);
+    should(service.open('s1', 'token')).equal(TOKEN);
+  });
+});
+
 describe('SecureCopyService lifetime', () => {
   it('should let go of the value on discard, keep it listed and masked for the after-mask window, then forget it', async () => {
     const { service, masking, clock } = world();

@@ -24,6 +24,22 @@ function provider(over: Partial<SecureCopyProvider> = {}): SecureCopyProvider {
 }
 
 describe('the Vault’s secure copies, through the hook', () => {
+  it('should hand the pinned capture time to the provider, so a copy captured again is not opened for an old card', () => {
+    const asked: (string | undefined)[] = [];
+    const copies = new SecureCopiesThroughHook(() =>
+      provider({
+        open: (_session, _name, pinned) => {
+          asked.push(pinned);
+          return pinned === '2026-11-01T11:00:00.000Z' ? COPY_VALUE : undefined;
+        },
+      }),
+    );
+
+    should(copies.open('s1', 'vercel', '2026-11-01T11:00:00.000Z')).equal(COPY_VALUE);
+    should(copies.open('s1', 'vercel', '2026-11-01T11:30:00.000Z')).equal(undefined);
+    should(asked).eql(['2026-11-01T11:00:00.000Z', '2026-11-01T11:30:00.000Z']);
+  });
+
   it('should know no copy and match no rule while Accounts provides nothing', async () => {
     const copies = new SecureCopiesThroughHook(() => undefined);
 

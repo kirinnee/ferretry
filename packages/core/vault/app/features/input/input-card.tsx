@@ -24,9 +24,13 @@ import {
   type InputCardField,
   inputFailure,
   offersPressEnter,
+  allowWords,
   pastedWords,
+  pasteField,
   pasteRoute,
+  pasteSize,
   plainFlagWords,
+  replacesSecret,
   revealable,
   sealedBody,
   sendBlock,
@@ -351,10 +355,16 @@ function SealedPasteSection({
 }: PasteSectionProps) {
   const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  // The daemon ended the request for good (a takeover, a copy that is gone): nothing was pasted and nothing can be, so the card
+  // settles here and Allow is taken away, whatever the refresh brings.
+  const [ended, setEnded] = useState(false);
   // A paste the daemon never answered keeps its id, so pressing Allow again cannot paste twice.
   const pending = useRef<string | null>(null);
-  const off = blocked !== undefined || sending || busy;
+  const off = blocked !== undefined || sending || busy || ended;
   const route = pasteRoute(request);
+  const size = pasteSize(request);
+  const field = pasteField(request);
+  const replacing = replacesSecret(request);
 
   const allow = async (): Promise<void> => {
     if (off) return;
@@ -376,7 +386,8 @@ function SealedPasteSection({
       const words = inputFailure(cause, request.target.kind);
       if (words.definitive) pending.current = null;
       setFailure(words.text);
-      if (words.kind === 'changed') onRefresh?.();
+      if (words.kind === 'ended' || words.kind === 'gone') setEnded(true);
+      if (words.kind === 'changed' || words.kind === 'ended' || words.kind === 'gone') onRefresh?.();
     } finally {
       setSending(false);
       onSending(false);
@@ -393,6 +404,14 @@ function SealedPasteSection({
         <dd className="m-0 min-w-0 break-words mono text-fg" data-input-paste-copy="">
           {pastedWords(request)}
         </dd>
+        {size === undefined ? null : (
+          <>
+            <dt className="text-faint">Size</dt>
+            <dd className="m-0 min-w-0 break-words text-fg" data-input-paste-size="">
+              {size}
+            </dd>
+          </>
+        )}
         <dt className="text-faint">From</dt>
         <dd className="m-0 min-w-0 break-words text-fg" data-input-paste-from="">
           {/* A path from the ferret's own files: isolated, so a right-to-left folder name cannot reorder it. */}
@@ -402,6 +421,14 @@ function SealedPasteSection({
         <dd className="m-0 min-w-0 break-words font-medium text-fg" data-input-paste-to="">
           {route?.to}
         </dd>
+        {field === undefined ? null : (
+          <>
+            <dt className="text-faint">Field</dt>
+            <dd className="m-0 min-w-0 break-words text-fg" data-input-paste-field="">
+              {field}
+            </dd>
+          </>
+        )}
       </dl>
       <p className="m-0 text-meta text-faint">
         You type nothing: Ferretry pastes the sealed value, which the ferret never sees.
@@ -411,18 +438,25 @@ function SealedPasteSection({
           {failure}
         </p>
       )}
+      {ended ? (
+        <p className="m-0 text-ui font-semibold text-fg" data-input-ended="" role="status">
+          This paste has ended. Nothing was pasted.
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center justify-end gap-2" data-input-actions="">
-        {cancel}
-        <button
-          className="kt-btn min-h-[44px]"
-          data-input-allow=""
-          data-variant="primary"
-          disabled={off}
-          onClick={() => void allow()}
-          type="button"
-        >
-          {sending ? 'Pasting…' : 'Allow paste'}
-        </button>
+        {ended ? null : cancel}
+        {ended ? null : (
+          <button
+            className="kt-btn min-h-[44px]"
+            data-input-allow=""
+            data-variant={replacing ? 'danger' : 'primary'}
+            disabled={off}
+            onClick={() => void allow()}
+            type="button"
+          >
+            {sending ? (replacing ? 'Replacing…' : 'Pasting…') : allowWords(request)}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -494,19 +528,22 @@ export function InputCard({
       data-input-request={request.id}
       data-input-state={settled === null ? request.state : 'settled'}
     >
-      <header className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        {embedded ? null : (
-          <h3 className="m-0 min-w-0 text-row font-semibold text-fg" data-input-title="" id={headingId}>
-            {title}
-          </h3>
-        )}
-        <p className="m-0 text-cell text-muted">
-          Goes to{' '}
-          <code className="mono text-fg" data-input-target="">
-            {targetRef(request)}
-          </code>
-        </p>
-        <span className="ml-auto whitespace-nowrap text-meta text-faint" data-input-expiry="">
+      <header className="flex items-baseline gap-x-2">
+        {/* The title and the target wrap among themselves; the time left keeps its own column, never a line of its own. */}
+        <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1">
+          {embedded ? null : (
+            <h3 className="m-0 min-w-0 text-row font-semibold text-fg" data-input-title="" id={headingId}>
+              {title}
+            </h3>
+          )}
+          <p className="m-0 text-cell text-muted">
+            Goes to{' '}
+            <code className="mono text-fg" data-input-target="">
+              {targetRef(request)}
+            </code>
+          </p>
+        </div>
+        <span className="shrink-0 whitespace-nowrap text-meta text-faint" data-input-expiry="">
           {expiryWords(request.expiresAt, now)}
         </span>
       </header>
@@ -547,7 +584,20 @@ export function InputCard({
         )}
       </div>
 
-      {request.risk === undefined ? null : (
+      {request.risk === undefined ||
+      // A paste card says "you type nothing" once, below: the generic green hidden-typing line is not repeated on it.
+      (request.source !== undefined && request.risk.level === 'green') ? null : replacesSecret(request) ? (
+        // Overwriting a secret cannot be undone: said loudly, in its own box, and the approval below is a destructive one.
+        <div
+          className="flex gap-2 rounded-control border border-err bg-surface-2 p-3 text-ui font-semibold text-err"
+          data-input-replace=""
+          data-input-risk={request.risk.level}
+          role="alert"
+        >
+          <ShieldAlert aria-hidden="true" className="mt-0.5 shrink-0" size={16} />
+          <span>{request.risk.reason}</span>
+        </div>
+      ) : (
         <p className="m-0 text-cell text-muted" data-input-risk={request.risk.level}>
           {request.risk.reason}
         </p>

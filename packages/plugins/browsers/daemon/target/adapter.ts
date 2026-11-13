@@ -168,6 +168,9 @@ export class PageInputTarget implements InputTargetAdapter {
           if ((await port.inputArm(pageId, expected, passwords)) !== 'armed') return 'target_changed';
           if (options.proceed?.() === false) return 'target_changed';
         }
+        // A secure paste's takeover check, in THIS turn of the page's queue and the last thing asked before the write: a
+        // person who took the page over while the write waited (or while the Vault journalled the attempt) types nothing.
+        if (options?.refuse !== undefined && (await options.refuse()) !== undefined) return 'guard_refused';
         began = true;
         return await port.inputType(pageId, expected, values, submit);
       });

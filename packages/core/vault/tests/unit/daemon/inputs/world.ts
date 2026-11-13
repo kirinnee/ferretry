@@ -131,6 +131,10 @@ export function world(options: WorldOptions = {}) {
     ruleId: undefined as string | undefined,
     /** What the secure copy's takeover check says of the target now: a sentence while a person holds the page. */
     pasteRefusal: undefined as string | undefined,
+    /** Answers of the next takeover checks, in order (undefined = free); then `pasteRefusal`. */
+    pasteRefusals: [] as (string | undefined)[],
+    /** Runs while the write waits its turn in the target's own queue, before the target's takeover check. */
+    onQueue: undefined as (() => void) | undefined,
     journalFails: false,
     agendaFails: false,
     sessionEnded: false,
@@ -229,6 +233,9 @@ export function world(options: WorldOptions = {}) {
     ...(options.refind === undefined ? {} : { refind: async () => (options.refind as () => ObserveResult)() }),
     document: async () => state.document,
     type: async (_session, _target, typedValues, submit, _expected, typeOptions) => {
+      state.onQueue?.();
+      // The target's own turn: a takeover that landed since the last look types nothing (secure-clip-1 fix1, P1-1).
+      if ((await typeOptions?.refuse?.()) !== undefined) return 'guard_refused';
       writes.push({ values: typedValues.map(each => each.text), submit, options: typeOptions });
       state.onType?.();
       if (typeOptions?.armClear === 'try') typeOptions.armed?.(true);
@@ -299,9 +306,14 @@ export function world(options: WorldOptions = {}) {
       ? {
           sealed: {
             describe: (_session: string, name: string) => copies.get(name)?.meta,
-            open: (_session: string, name: string) => copies.get(name)?.value,
+            open: (_session: string, name: string, pinned?: string) => {
+              const found = copies.get(name);
+              return found !== undefined && (pinned === undefined || pinned === found.meta.capturedAt)
+                ? found.value
+                : undefined;
+            },
             used: (_session: string, name: string, target?: unknown) => void used.push({ copy: name, target }),
-            refusal: async () => state.pasteRefusal,
+            refusal: async () => (state.pasteRefusals.length > 0 ? state.pasteRefusals.shift() : state.pasteRefusal),
           },
         }
       : {}),
