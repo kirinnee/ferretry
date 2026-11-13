@@ -20,6 +20,7 @@ import {
   RELAY_LOOKUP_RETRY_BACKOFF,
   RelayLookupRetry,
   type RelayLookupSettled,
+  retryAfterOf,
 } from '../../../src/lib/relay/index.ts';
 import { ManualScheduler } from '../tunnel/support.ts';
 
@@ -187,6 +188,29 @@ describe('the relay lookup retry', () => {
     should(Math.max(...delays)).be.belowOrEqual(RELAY_LOOKUP_RETRY_BACKOFF.capMs);
     should(delays.at(-1)).equal(Math.round(RELAY_LOOKUP_RETRY_BACKOFF.capMs * 0.75));
     should(directory.asked).have.length(12);
+  });
+
+  it('should wait at least as long as the directory asked, capped, and read the ask off each failure', async () => {
+    // Arrange — the boot's failure said 60 s; the retry's own failure then says 9 000 s, past the cap.
+    const scheduler = new ManualScheduler();
+    const directory = scripted({ ...TRANSIENT, retryAfterMs: 9_000_000 });
+    const { retry } = retryOver(directory, scheduler);
+
+    // Act
+    retry.start(60_000);
+    const first = scheduler.fire();
+    await settle();
+    const second = scheduler.armed;
+
+    // Assert
+    should(first).deepEqual([60_000]);
+    should(second).deepEqual([RELAY_LOOKUP_RETRY_BACKOFF.capMs]);
+    should(retryAfterOf({ ...TRANSIENT, retryAfterMs: 1_000 })).equal(1_000);
+    should(retryAfterOf(AVAILABLE)).be.undefined();
+  });
+
+  it('should keep the 5.0 numbers: 2 s doubling to a 300 s cap', () => {
+    should(RELAY_LOOKUP_RETRY_BACKOFF).deepEqual({ baseMs: 2_000, capMs: 300_000 });
   });
 
   it('should be started once: a second start does not arm a second loop', () => {

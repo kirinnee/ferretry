@@ -26,8 +26,13 @@ import { backoffDelayMs, type BackoffPolicy } from '../tunnel/schedule.ts';
 import type { RelayLinkScheduler, RelayLinkTimer } from './link.ts';
 import type { RelayAdvertisement, RelayCarrierSource } from './discovery.ts';
 
-/** 5 s for the first wait, doubling to a 5 minute ceiling. Equal jitter is applied by {@link backoffDelayMs}. */
-export const RELAY_LOOKUP_RETRY_BACKOFF: BackoffPolicy = Object.freeze({ baseMs: 5_000, capMs: 300_000 });
+/** 2 s for the first wait, doubling to a 300 s ceiling — the same numbers as the 5.0 daemon. Equal jitter is applied by {@link backoffDelayMs}. */
+export const RELAY_LOOKUP_RETRY_BACKOFF: BackoffPolicy = Object.freeze({ baseMs: 2_000, capMs: 300_000 });
+
+/** How long the directory asked to be left alone (`Retry-After`, in seconds, read as ms), if it said. */
+export function retryAfterOf(advertisement: RelayAdvertisement): number | undefined {
+  return advertisement.kind === 'undetermined' ? advertisement.retryAfterMs : undefined;
+}
 
 /** Whether asking the directory again could change the answer. Only a failure marked transient can. */
 export function isTransientAdvertisement(advertisement: RelayAdvertisement): boolean {
@@ -64,11 +69,14 @@ export class RelayLookupRetry {
     this.#options = options;
   }
 
-  /** Arms the first wait. A second call, or a call after {@link stop}, does nothing. */
-  start(): void {
+  /**
+   * Arms the first wait; `retryAfterMs` is what the failed boot-time read's `Retry-After` asked for, if
+   * anything. A second call, or a call after {@link stop}, does nothing.
+   */
+  start(retryAfterMs?: number): void {
     if (this.#started || this.#stopped) return;
     this.#started = true;
-    this.#arm();
+    this.#arm(retryAfterMs);
   }
 
   /** Cancels the pending wait and makes any read still in flight settle into nothing. Idempotent. */
@@ -78,12 +86,14 @@ export class RelayLookupRetry {
     this.#timer = undefined;
   }
 
-  #arm(): void {
-    const delay = backoffDelayMs(
-      this.#options.backoff ?? RELAY_LOOKUP_RETRY_BACKOFF,
-      this.#retries,
-      this.#options.random,
-    );
+  /**
+   * The wait before the next read: the jittered backoff, but never sooner than the directory itself asked
+   * for with `Retry-After` — and never longer than the cap, so one odd header cannot park the loop for a day.
+   */
+  #arm(retryAfterMs?: number): void {
+    const policy = this.#options.backoff ?? RELAY_LOOKUP_RETRY_BACKOFF;
+    const backoff = backoffDelayMs(policy, this.#retries, this.#options.random);
+    const delay = Math.min(policy.capMs, Math.max(backoff, retryAfterMs ?? 0));
     this.#timer = this.#options.scheduler.after(delay, () => {
       this.#timer = undefined;
       void this.#attempt();
@@ -102,7 +112,7 @@ export class RelayLookupRetry {
     }
     if (this.#stopped) return;
     if (isTransientAdvertisement(advertisement)) {
-      this.#arm();
+      this.#arm(retryAfterOf(advertisement));
       return;
     }
     this.#stopped = true;

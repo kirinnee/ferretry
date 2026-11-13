@@ -39,6 +39,21 @@ describe('the hosted relay directory’s transient failures', () => {
     }
   });
 
+  it('should carry a Retry-After of whole seconds on a 429 or 5xx, and ignore any other spelling', async () => {
+    const withHeader = async (status: number, value?: string) =>
+      await answering(
+        () => new Response('later', { status, headers: value === undefined ? {} : { 'retry-after': value } }),
+      ).read();
+
+    should(await withHeader(429, '12')).match({ transient: true, retryAfterMs: 12_000 });
+    should(await withHeader(503, '0')).match({ transient: true, retryAfterMs: 0 });
+    should(await withHeader(503, 'Wed, 21 Oct 2026 07:28:00 GMT')).not.have.property('retryAfterMs');
+    should(await withHeader(503, '-5')).not.have.property('retryAfterMs');
+    should(await withHeader(503)).not.have.property('retryAfterMs');
+    // Any other 4xx is an answer, so its header is not read at all.
+    should(await withHeader(404, '12')).not.have.property('transient');
+  });
+
   it('should not mark a definitive refusal, a bad document, a disabled relay or a missing origin', async () => {
     const definitive = [
       await answering(() => new Response('no', { status: 404 })).read(),

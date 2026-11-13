@@ -1505,7 +1505,7 @@ outstanding:
    entry that already carries a `url` never reads it, and one boot performs one read no matter how
    many entries there are. **A transient failure of that read is retried.** A failure that changes by
    itself — a connection that fails, a timeout, a 5xx or a 429 — is asked again in the background, never
-   holding the boot, on a jittered backoff from 5 s doubling to a 5 minute cap, one request in flight at a
+   holding the boot, on a jittered backoff from 2 s doubling to a 300 s cap (a `Retry-After` of whole seconds is honoured, within that cap), one request in flight at a
    time, ending at the first answer and with the daemon. When a retry answers with a relay the daemon
    dials it exactly as a boot-time answer would have (and publishes it in `carriers`), and the boot
    notice that said direct-only is followed by one saying it was recovered and after how many reads. A

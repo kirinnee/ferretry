@@ -70,6 +70,8 @@ export type RelayAdvertisement =
        * differently on the next try is worth waiting for.
        */
       readonly transient?: true;
+      /** What a `Retry-After` of whole seconds on that 429 or 5xx asked for, in milliseconds. */
+      readonly retryAfterMs?: number;
     };
 
 /**

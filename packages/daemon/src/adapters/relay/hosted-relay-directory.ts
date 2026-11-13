@@ -16,7 +16,7 @@
  * A FAILURE THAT CHANGES BY ITSELF IS MARKED `transient`, and only that kind is asked again. The boot
  * reads once; if that read failed because the network was not up yet, the connection was refused or
  * timed out, or the service answered 5xx or 429, `lookup-retry.ts` repeats the read in the background
- * on a capped, jittered backoff until the directory answers. A DEFINITIVE answer — no origin compiled
+ * on a capped, jittered backoff (honouring `Retry-After`) until the directory answers. A DEFINITIVE answer — no origin compiled
  * in, an address this daemon may not ask, a 4xx, a body that is not a readable advertisement, a
  * disabled advertisement — is not marked, and is never retried: asking again is how a withdrawn relay
  * would come back.
@@ -37,6 +37,15 @@ export type RelayDirectoryFetch = (input: string, init?: RequestInit) => Promise
 export interface HostedRelayDirectoryOptions {
   readonly fetcher?: RelayDirectoryFetch;
   readonly timeoutMs?: number;
+}
+
+/**
+ * `Retry-After` as whole seconds, which is the only form honoured: an HTTP-date would need this daemon's
+ * clock to agree with the service's, and a wrong guess is worse than the ordinary backoff.
+ */
+function retryAfter(header: string | null): { readonly retryAfterMs?: number } {
+  if (header === null || !/^\d{1,6}$/u.test(header.trim())) return {};
+  return { retryAfterMs: Number(header.trim()) * 1_000 };
 }
 
 export class HostedRelayDirectory implements RelayDirectoryPort {
@@ -76,8 +85,10 @@ export class HostedRelayDirectory implements RelayDirectoryPort {
       return {
         kind: 'undetermined',
         reason: `the relay directory answered ${response.status}`,
-        // A 5xx or a 429 is the service saying "not now"; any other refusal is an answer.
-        ...(response.status >= 500 || response.status === 429 ? { transient: true as const } : {}),
+        // A 5xx or a 429 is the service saying "not now"; every other refusal (any other 4xx) is an answer.
+        ...(response.status >= 500 || response.status === 429
+          ? { transient: true as const, ...retryAfter(response.headers.get('retry-after')) }
+          : {}),
       };
     }
     try {

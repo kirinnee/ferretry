@@ -719,6 +719,7 @@ import {
   chooseRelayCarrierSources,
   isTransientAdvertisement,
   newlyDiscoveredRelays,
+  retryAfterOf,
   choosesPortAtBind,
   claimStartName,
   classifyPaneProcesses,
@@ -13792,7 +13793,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.notices.state(
       `the relay directory will be asked again in the background — a relay it advertises is dialled without a restart`,
     );
-    retry.start();
+    retry.start(retryAfterOf(resolvedRelays.advertisement));
   }
   /**
    * THE HOSTED TUNNEL (`docs/relay-protocol.md` §15), after the bind and the relays, for the reason
