@@ -1,3 +1,9 @@
+## [4.291.15](https://github.com/kirinnee/ferretry/compare/v4.291.14...v4.291.15) (2026-11-13)
+
+### Fixes
+
+* **daemon:** retry the hosted relay lookup after a failed boot-time read ([#1595](https://github.com/kirinnee/ferretry/issues/1595)) ([21b469d](https://github.com/kirinnee/ferretry/commit/21b469d165870392634a17d07aabb1ddaea5f604))
+
 ## [4.291.14](https://github.com/kirinnee/ferretry/compare/v4.291.13...v4.291.14) (2026-11-13)
 
 ### Fixes
