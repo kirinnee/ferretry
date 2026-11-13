@@ -17,7 +17,7 @@ import { USAGE_CONFIG } from '@ferretry/plugin-usage/contract';
 import { FakeFerrets } from '../../../../packages/core/ferrets/contract/testing/index.ts';
 import { createConfigFiles } from '../../../../packages/core/kernel/host/config/service.ts';
 import { createNodeHostFs } from '../../../../packages/core/kernel/host/state/host-fs.ts';
-import { testHost } from '../../../../packages/core/kernel/testing/index.ts';
+import { fixedClock, testHost } from '../../../../packages/core/kernel/testing/index.ts';
 import { FakeVault } from '../../../../packages/core/vault/contract/testing/index.ts';
 import { fakeConversation } from '../../../../packages/plugins/conversation/contract/testing/index.ts';
 import logins from '../../../../packages/plugins/logins/daemon/index.ts';
@@ -268,6 +268,102 @@ describe('(c) every period and level v4 had carries', () => {
         expect((await decideAt(booted, 1)).allow).toBe(true);
         expect(report).toMatch(/login work (daily|weekly) (trigger|hard) limit \$\d+/u);
       });
+});
+
+/**
+ * Whether the REAL Usage `start.decide` lets a start on `work` through at 2026-11-09T20:00Z when $15 were spent at
+ * 04:00Z, under the usage config IN EFFECT. UTC's day and week include that spend; America/Los_Angeles' (begin 08:00Z)
+ * exclude it, so the zone alone decides the answer.
+ */
+async function decideByWindow(booted: Booted): Promise<{ allow: boolean; reason?: string }> {
+  const at = Date.parse('2026-11-09T04:00:00Z');
+  const spent = spyOn(SpendMeter.prototype, 'spent').mockImplementation(((
+    _agents: unknown,
+    start: number,
+    end: number,
+  ) => ({
+    usdMicros: at >= start && at < end ? 15_000_000 : 0,
+    unpriced: 0,
+    partial: false,
+  })) as never);
+  const refresh = spyOn(SpendMeter.prototype, 'refresh').mockResolvedValue(undefined);
+  let h: Awaited<ReturnType<typeof testHost>> | undefined;
+  try {
+    let decide: ((input: unknown) => { allow: boolean; reason?: string }) | undefined;
+    const observed = {
+      ...usage,
+      build(ctx: never) {
+        const half = (usage as { build: (c: never) => { hooks?: Record<string, unknown> } }).build(ctx);
+        decide = half.hooks?.['start.decide'] as typeof decide;
+        return half;
+      },
+    };
+    const usageFile = booted.usageFile();
+    h = await testHost({
+      plugins: [logins, observed as never],
+      fakes: { ferrets: new FakeFerrets(), conversation: fakeConversation(), vault: new FakeVault() },
+      clock: fixedClock('2026-11-09T20:00:00Z'),
+      config: {
+        logins: { work: booted.work() },
+        ...(usageFile === undefined ? {} : { [USAGE_CONFIG.file]: usageFile }),
+      },
+    } as never);
+    await h.runJob('usage-budget');
+    if (decide === undefined) throw new Error('Usage built no start.decide hook');
+    return decide({ login: 'work' });
+  } finally {
+    await h?.stop();
+    spent.mockRestore();
+    refresh.mockRestore();
+  }
+}
+
+describe('(d) an unaccepted v4 time-zone change is held: starts are judged in the ACCEPTED zone until the owner accepts', () => {
+  /** v4's accepted machine.yaml says `accepted`; the file now says `current`; the owner has not accepted the change. */
+  async function arrangeZone(period: 'daily' | 'weekly', accepted: string | undefined, current: string | undefined) {
+    await arrange({ current: `  ${period}:\n    hard: 10\n` });
+    if (current !== undefined) await put('config/machine.yaml', `timeZone: ${current}\n`);
+    const prior = JSON.parse(await readFile(join(f.from, 'state/config-accepted.json'), 'utf8')) as object;
+    const acceptedText = accepted === undefined ? 'publicUsageFeed: false\n' : `timeZone: ${accepted}\n`;
+    await f.put('state/config-accepted.json', {
+      ...prior,
+      'machine.yaml': { etag: sha(acceptedText), text: acceptedText },
+    });
+  }
+
+  for (const mode of MODES)
+    for (const period of ['daily', 'weekly'] as const)
+      test(`${mode}, ${period}: judged in the accepted UTC until the owner accepts, then in the new zone`, async () => {
+        await arrangeZone(period, 'UTC', 'America/Los_Angeles');
+        const { target, report } = await convertHome(mode);
+        const booted = await boot(target);
+        // The version in effect is the ACCEPTED zone; the new one is a held edit naming both zones.
+        expect(booted.usageFile()?.timeZone).toBe('UTC');
+        const edit = booted.files.held().find(held => held.plugin === 'usage');
+        expect(edit?.sentences.join(' ')).toContain('budgets now reset in America/Los_Angeles instead of UTC');
+        expect(report).toContain('machine.yaml (an unconfirmed edit)');
+        // The same $15 the accepted UTC window holds is refused by the real hook.
+        const refused = await decideByWindow(booted);
+        expect(refused.allow).toBe(false);
+        expect(refused.reason).toContain('(UTC)');
+        // The owner accepts: the new zone applies, whose window does not include that spend.
+        expect(await booted.files.confirm(edit?.id ?? '')).toBe(true);
+        await booted.files.reload();
+        expect(booted.usageFile()?.timeZone).toBe('America/Los_Angeles');
+        expect((await decideByWindow(booted)).allow).toBe(true);
+      });
+
+  test('a zone newly set where v4 had none is held too, and the host zone stays in effect', async () => {
+    await arrangeZone('daily', undefined, 'Pacific/Kiritimati');
+    const set = await boot((await convertHome('real')).target);
+    expect(set.usageFile()?.timeZone).toBeUndefined();
+    expect(
+      set.files
+        .held()
+        .find(held => held.plugin === 'usage')
+        ?.sentences.join(' '),
+    ).toContain("budgets now reset in Pacific/Kiritimati instead of the host's time zone");
+  });
 });
 
 describe('a budget that cannot be rebuilt is never written capless', () => {

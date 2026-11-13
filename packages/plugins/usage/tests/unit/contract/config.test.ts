@@ -40,6 +40,27 @@ describe('usageLoosens', () => {
     ).toEqual([]);
   });
 
+  it('holds EVERY time-zone change as v4 does: the first zone set, one changed and one removed', () => {
+    expect(usageLoosens(undefined, { timeZone: 'America/Los_Angeles' })).toEqual([
+      "budgets now reset in America/Los_Angeles instead of the host's time zone",
+    ]);
+    expect(usageLoosens({}, { timeZone: 'Pacific/Kiritimati' })).toEqual([
+      "budgets now reset in Pacific/Kiritimati instead of the host's time zone",
+    ]);
+    expect(usageLoosens({ timeZone: 'UTC' }, { timeZone: 'Asia/Singapore' })).toEqual([
+      'budgets now reset in Asia/Singapore instead of UTC',
+    ]);
+    expect(usageLoosens({ timeZone: 'UTC' }, {})).toEqual(["budgets now reset in the host's time zone instead of UTC"]);
+  });
+
+  it('holds nothing when the zone is unchanged or absent on both sides, whatever else moves', () => {
+    expect(usageLoosens(undefined, {})).toEqual([]);
+    expect(usageLoosens({}, {})).toEqual([]);
+    expect(usageLoosens({ timeZone: 'UTC' }, { timeZone: 'UTC' })).toEqual([]);
+    const before = { timeZone: 'UTC', budgets: { work: { daily: { hard: 10 } } } };
+    expect(usageLoosens(before, { timeZone: 'UTC', budgets: { work: { daily: { hard: 5 } } } })).toEqual([]);
+  });
+
   it('is the loosens function the declared config carries', () => {
     expect(USAGE_CONFIG.loosens).toBe(usageLoosens);
   });

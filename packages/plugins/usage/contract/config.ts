@@ -21,7 +21,8 @@ const raised = (before: number, after: number, what: string): readonly string[] 
   after > before ? [`${what} goes up from ${String(before)} to ${String(after)}`] : [];
 
 /**
- * A budget loosens when a limit goes up or goes away (a period dropped, a login's budget removed), and the public feed
+ * A budget loosens when a limit goes up or goes away (a period dropped, a login's budget removed), ANY change of the time zone
+ * (v4's rule: the first zone set, one changed, one removed), and the public feed
  * loosens when it is switched on. Adding or lowering a limit tightens. Today's `loginLoosening`, word for word, over the
  * per-login map.
  */
@@ -41,6 +42,13 @@ export const usageLoosens: Loosens<UsageFile> = (before, after) => {
         else sentences.push(...raised(had, has, what));
       }
   }
+  // A zone moves when every budget's day and week begin, so ANY change is held (v4's rule, word for word): the first
+  // zone set included, and one removed. From the host's own zone (absent) to a zone where the next day has already begun
+  // would reset a day that is over budget, and lift its hold, without the owner ever seeing it.
+  if (after?.timeZone !== before?.timeZone)
+    sentences.push(
+      `budgets now reset in ${after?.timeZone ?? "the host's time zone"} instead of ${before?.timeZone ?? "the host's time zone"}`,
+    );
   if (before?.publicFeed !== true && after?.publicFeed === true)
     sentences.push('the usage feed is served to callers with no credential');
   return sentences;
