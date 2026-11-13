@@ -138,6 +138,29 @@ describe('the hosted relay directory', () => {
     should(answers[3]).match({ reason: /could not reach/u });
   });
 
+  it('should carry the Retry-After of whole seconds off a 429 or 5xx, and only that spelling', async () => {
+    // Arrange — over the wire, because a header is the thing a real service sends.
+    const seconds = directoryServing(() => new Response('later', { status: 429, headers: { 'retry-after': '12' } }));
+    const dated = directoryServing(
+      () => new Response('later', { status: 503, headers: { 'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT' } }),
+    );
+    const absent = directoryServing(() => new Response('later', { status: 502 }));
+
+    // Act
+    const answers = [
+      await new HostedRelayDirectory(seconds.origin).read(),
+      await new HostedRelayDirectory(dated.origin).read(),
+      await new HostedRelayDirectory(absent.origin).read(),
+    ];
+
+    // Assert
+    should(answers[0]).match({ transient: true, retryAfterMs: 12_000 });
+    should(answers[1]).match({ transient: true });
+    should(answers[1]).not.have.property('retryAfterMs');
+    should(answers[2]).match({ transient: true });
+    should(answers[2]).not.have.property('retryAfterMs');
+  });
+
   it('should give up rather than hold the boot when the directory never answers', async () => {
     // Arrange — a server that accepts the connection and says nothing.
     const silent = directoryServing(() => new Promise<Response>(() => {}));
