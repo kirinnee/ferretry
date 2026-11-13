@@ -53,7 +53,7 @@ export const OWNER_MOVED_ITEMS: readonly { readonly id: string; readonly decisio
   },
   {
     id: 'v4-doctor-checks',
-    decision: 'lizzette 2026-11-13: the five v4 doctor checks move after merge (card &F3715)',
+    decision: 'lizzette 2026-11-13: the v4 doctor checks and readiness move after merge (card &F3715); tmux is in 5.0',
   },
 ];
 
