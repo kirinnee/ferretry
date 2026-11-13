@@ -7,6 +7,8 @@ import type { ObserveResult, PushNumberRead } from './targets.ts';
 import type {
   AuthorizedOutcome,
   CredentialPlacement,
+  MintedExchangeOutcome,
+  MintedExchangeRequest,
   OutboundHttpRequest,
   SecretName,
   SecretSummary,
@@ -55,6 +57,19 @@ export interface VaultApi {
     request: OutboundHttpRequest,
     placement?: CredentialPlacement,
   ): Promise<AuthorizedOutcome>;
+  /**
+   * Sends ONE request with a secret the CALLER MINTED placed on it (default `authorization: Bearer`), and answers the
+   * reply itself, the credential masked out of it. Additive, and offered to NON-core needers only: a core needer is
+   * never narrowed to what it minted. Refused (nothing sent) unless the Vault's own mint ledger says this needer wrote
+   * the secret's CURRENT value: an owner's value under a matching name, a name another plugin minted and a name a
+   * manifest merely declares are all refused, whatever a pattern says. The destination must be a host the needer's own
+   * `network` already allows; a redirect is never followed. The needer never holds the value.
+   */
+  fetchMinted?(
+    name: SecretName,
+    request: MintedExchangeRequest,
+    placement?: CredentialPlacement,
+  ): Promise<MintedExchangeOutcome>;
   /**
    * Resolves `${secret:NAME}` in `env` for one ferret's child; a missing secret refuses the launch. A variable whose
    * whole value is an optional reference (`${secret?:NAME}`, {@link optionalSecretReference}) is set when the secret

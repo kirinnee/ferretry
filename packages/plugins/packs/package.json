@@ -25,13 +25,13 @@
     "@ferretry/plugin-conversation": "workspace:*",
     "@ferretry/plugin-logins": "workspace:*",
     "@ferretry/plugin-runtimes": "workspace:*",
-    "@ferretry/plugin-usage": "workspace:*",
     "react": "^19.0.0",
     "@ferretry/app": "workspace:*",
     "lucide-react": "^0.468.0"
   },
   "sideEffects": false,
   "devDependencies": {
+    "@ferretry/plugin-usage": "workspace:*",
     "@happy-dom/global-registrator": "^20.11.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

@@ -971,7 +971,6 @@ async function bootLocked(
           transport: outboundSecretTransport(fetchPort, clock),
           log: scopedLog(adapters.logSink, manifest.id),
         },
-        manifest.permissions?.mintedSecrets ?? [],
       ),
       signer: signerFor(manifest.id, sessionSigner),
       ...(manifest.id === 'gate' && configWriter !== undefined ? { configFiles: configWriter } : {}),
@@ -1031,7 +1030,19 @@ async function bootLocked(
       continue;
     }
     const needs: Record<string, unknown> = {};
-    const needer = neederOf(manifest, () => config.credentialRecordReferences?.(manifest.id) ?? new Set<string>());
+    const needer = neederOf(
+      manifest,
+      () => config.credentialRecordReferences?.(manifest.id) ?? new Set<string>(),
+      // What a provider acting for this plugin may reach: the kernel's own network decision for it, resolvers included.
+      (hostname, host) =>
+        hostPermitted(
+          effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
+          items,
+          hostname,
+          resolversOf(manifest.id),
+          host,
+        ),
+    );
     let missing: string | undefined;
     for (const [key, token] of Object.entries(manifest.needs ?? {})) {
       const provider = providerHalf(token);

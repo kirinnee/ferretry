@@ -57,11 +57,24 @@ export default implementDaemon(manifest, {
     const ferrets = (): FerretsApi => needs.ferrets;
     const packFerrets = new PackFerrets(ferrets);
     const runtimes = (): RuntimesApi | undefined => uses.runtimes.current();
-    // GAP: Runtimes offers no `catalog()`/`tools()`/`modelCatalogs()` on this base (its app porter adds them, additive).
-    // Until then Pack mode is handed none and says no model is usable now, rather than reading members it cannot see.
-    const runtimeFacts = (): RuntimeFactsApi | undefined => undefined;
-    const catalogs = async (): Promise<readonly ModelCatalogView[]> => [];
-    const quota = new LoginQuotaFacts(() => uses.logins.current());
+    // What `fy recommend` offers a start from: Runtimes' runtimes (with each one's models) and the machine's tools, and
+    // Logins' model catalogs. A provider that is off, or does not offer them, hands Pack mode none: it then says no model
+    // is usable now, never a guess.
+    const runtimeFacts = (): RuntimeFactsApi | undefined => {
+      const provider = runtimes();
+      if (provider?.catalog === undefined || provider.tools === undefined) return undefined;
+      return {
+        catalog: async () => (await provider.catalog?.()) ?? [],
+        tools: async () => (await provider.tools?.()) ?? [],
+      };
+    };
+    const catalogs = async (): Promise<readonly ModelCatalogView[]> =>
+      (await uses.logins.current()?.models())?.catalogs ?? [];
+    const quota = new LoginQuotaFacts(
+      () => uses.logins.current(),
+      async () => await ferrets().list(),
+      () => kernel.clock.nowMs(),
+    );
     const fleet = new FleetFacts(
       runtimes,
       runtimeFacts,

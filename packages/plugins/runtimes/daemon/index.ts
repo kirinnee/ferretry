@@ -29,8 +29,12 @@ import {
   type ModelSetFile,
   type ProfileFile,
   type RuntimeFile,
+  type MachineTool,
+  type RuntimeCheckEnvironment,
+  type RuntimeView,
   RuntimeHomeUnreadable,
   type RuntimeHomesApi,
+  type RuntimeId,
   type RuntimesFile,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
@@ -38,6 +42,7 @@ import { fleetHomes } from './adapters/fleet-home-reader.ts';
 import {
   endedSeams,
   fileAssembly,
+  checkEnvironmentSource,
   launchFactsSource,
   MANIFEST_REPAIR_JOB,
   manifestUnreadableProbe,
@@ -109,6 +114,8 @@ export interface RuntimesAssembly {
    * carries. Absent: a start of a runtime is refused rather than launched unchecked.
    */
   readonly launchFacts?: RuntimeLaunchFactsSource;
+  /** What a published runtime's launch carries, for a consumer that fills `${VAR}` from it. Absent: nothing is offered. */
+  readonly checkEnvironment?: (runtime: string) => Promise<RuntimeCheckEnvironment | undefined>;
   /**
    * Whether the published fleet manifest exists and cannot be read. Asked once after start: when it is, the fleet is
    * published again from the configuration (the manifest is derived data). Absent: nothing to repair.
@@ -255,6 +262,7 @@ export const hostAssembly: RuntimesAssembler = ctx => {
     ),
     profileEtag: async profile => await assembled().profileEtag(profile),
     launchFacts: launchFactsSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),
+    checkEnvironment: checkEnvironmentSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),
     manifestUnreadable: manifestUnreadableProbe(ctx.kernel, publication),
     repair,
     probe: () => {
@@ -461,7 +469,22 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           ...fleetSetupRoutes(assembly.setup),
           ...ferretRuntimeRoutes(assembly.runtime),
         },
-        provides: { runtimes: { ...api, ...layers, ...(assembly.homes ?? noHomes) } },
+        provides: {
+          runtimes: {
+            ...api,
+            ...layers,
+            ...(assembly.homes ?? noHomes),
+            // What `fy recommend` offers a start from: the catalogue's own runtimes and the machine's tools.
+            catalog: async (): Promise<readonly RuntimeView[]> => (await assembly.catalog.runtimes()).runtimes,
+            tools: async (): Promise<readonly MachineTool[]> => (await assembly.catalog.machine(undefined)).tools,
+            ...(assembly.checkEnvironment === undefined
+              ? {}
+              : {
+                  checkEnvironment: async (runtime: RuntimeId): Promise<RuntimeCheckEnvironment | undefined> =>
+                    await assembly.checkEnvironment?.(runtime),
+                }),
+          },
+        },
         doctor: {
           // The half builds without opening the fleet folder, so a broken fleet root shows here, not as a failed boot.
           'runtimes-config': async (): Promise<DoctorFinding> => {

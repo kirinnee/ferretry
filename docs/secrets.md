@@ -1515,12 +1515,6 @@ the first caller. It is the holder above with the same rules, held by the kernel
 - **The name passes `kernel.secrets.resolve`'s rule, in that order.** It is in the plugin's manifest `secrets`. The
   plugin's OWN configuration in effect names it as `${secret:NAME}`. The Vault knows it. A plugin can never put another
   plugin's secret on a request, because its config would have to name it, and adding a reference is held for the owner.
-  **A secret the plugin itself mints is its own too:** a name its manifest's `permissions.mintedSecrets` pattern
-  matches whole (MCP's sign-in access tokens) needs no `secrets` entry and no reference, because the plugin put the
-  value there and no configuration names it. Only that pattern and the Vault are asked. A plugin that mints nothing is
-  refused the same name, and a name outside the pattern is refused whatever else the Vault holds. This is what lets MCP
-  present a signed-in server's access token on a **Check** (`kernel.secrets.resolve(name).reveal()` into one request's
-  `Authorization` header, never logged); nothing else of MCP's reads a token back.
 - **Only to an exactly declared host.** The URL must be `https:`, or `http:` to this machine. Its host must be a plain
   host entry of the plugin's `permissions.network`. A wildcard, `'*'`, an installed-item entry or a resolver entry lets
   no key out. The request goes through the plugin's own `kernel.fetch` guard, so a redirect is answered, never followed.
@@ -1545,6 +1539,23 @@ screen neither shows it nor saves it, and a save keeps the line as it is.
 
 GAP: a send writes no `secrets.used` entry to the security log, and the Warden's settings card still says whether the
 key is set from Speed-ups, not whether `warden.yaml` names it.
+
+## A secret a plugin minted, placed on its request by the Vault
+
+A plugin that FILES a secret itself (MCP's sign-in access tokens, `permissions.mintedSecrets`) has no configuration that
+names it, so `kernel.secrets.resolve` and `send` refuse it as they refuse anything undeclared, and **no pattern of
+names turns a plugin into a reader**. What the plugin gets instead is a Vault operation:
+`vault.fetchMinted(name, request, placement?)` (non-core needers only). The Vault puts the value on ONE request and
+answers the reply, so the plugin never holds it.
+
+- **Only a value the plugin wrote.** The Vault's own mint ledger (`state/vault/mints.json`, ids and a per-write nonce,
+  never a value) records the plugin and the identity of its write whenever a plugin `put`s. A secret the owner put under a
+  matching name, one the owner replaced afterwards, one another plugin minted, and one a manifest only declares are all
+  refused and nothing is sent. A ledger that cannot be read refuses.
+- **Only to a host the plugin's own `network` allows**, `https:` or `http:` to this machine, no userinfo. A request that
+  already carries the placement header is refused. A redirect is answered, never followed.
+- **The reply comes back with the credential masked** out of its body (across chunk boundaries) and its headers. It is
+  still a stranger's text: a caller scrubs it with the redactor like any server's words before it keeps or shows it.
 
 ## Device-held speed-up keys
 

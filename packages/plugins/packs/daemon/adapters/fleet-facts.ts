@@ -38,8 +38,9 @@ export class FleetFacts {
             catalog
               .filter(runtime => runtime.agent)
               .map(async runtime => {
-                const id = RuntimeIdSchema.safeParse(runtime.id);
-                if (!id.success) return [[runtime.wrapper, `${runtime.id} is not a runtime name`] as const];
+                // Runtimes' port names a runtime by the word a person types, never by the catalogue's own opaque id.
+                const id = RuntimeIdSchema.safeParse(runtime.name);
+                if (!id.success) return [[runtime.wrapper, `${runtime.name} is not a runtime name`] as const];
                 const resolved = await runtimes.resolve(id.data);
                 // Sign-in, switches and a missing login are judged from the facts above; only a runtime that cannot be built is unlaunchable.
                 return resolved.ok || (resolved.refusal !== 'unknown' && resolved.refusal !== 'no_profile')

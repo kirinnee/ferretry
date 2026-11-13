@@ -81,3 +81,78 @@ describe('a command whose environment names stored secrets', () => {
     expect(started[0]?.env).toEqual({ HOME: '/home/owner' });
   });
 });
+
+describe('a remote check that carries a held sign-in', () => {
+  const remote = {
+    transport: 'http',
+    url: 'https://mcp.example.com/mcp',
+    headers: {},
+    credential: { secret: 'MCP_X_0123456789ABCDEF_ACCESS', header: 'Authorization', scheme: 'Bearer' },
+  } as Parameters<TransportMcpProbe['probe']>[0];
+
+  const reply = (id: number | undefined, result: unknown): Response =>
+    new Response(id === undefined ? '' : JSON.stringify({ jsonrpc: '2.0', id, result }), {
+      status: id === undefined ? 202 : 200,
+      headers: { 'content-type': 'application/json' },
+    });
+
+  test('is sent through the Vault’s minted exchange with the secret’s NAME, and never through the plain fetch', async () => {
+    const plain: string[] = [];
+    const asked: { secret: string; placement: unknown; method: string }[] = [];
+    const stub = {
+      spawn: {},
+      clock: {},
+      fetch: {
+        request: async (url: string) => {
+          plain.push(url);
+          return new Response('', { status: 200 });
+        },
+      },
+    } as unknown as ProbePorts;
+    const probe = new TransportMcpProbe(stub, {
+      childEnvironment: async () => ok(HANDLE),
+      fetchMinted: async (secret, request, placement) => {
+        asked.push({ secret, placement, method: request.method });
+        const body = JSON.parse(request.body ?? '{}') as { id?: number; method?: string };
+        if (request.method === 'DELETE') return { kind: 'response', response: new Response('', { status: 200 }) };
+        if (body.method === 'initialize')
+          return { kind: 'response', response: reply(body.id, { serverInfo: { name: 'Remote' } }) };
+        if (body.method === 'tools/list')
+          return { kind: 'response', response: reply(body.id, { tools: [{ name: 'a' }] }) };
+        return { kind: 'response', response: reply(undefined, {}) };
+      },
+    });
+
+    const answer = await probe.probe(remote, AbortSignal.timeout(2000));
+
+    expect(answer).toEqual({ serverName: 'Remote', tools: ['a'] });
+    expect(plain).toEqual([]);
+    expect(asked.length).toBeGreaterThan(0);
+    for (const call of asked) {
+      expect(call.secret).toBe('MCP_X_0123456789ABCDEF_ACCESS');
+      expect(call.placement).toEqual({ header: 'Authorization', scheme: 'Bearer' });
+    }
+  });
+
+  test('says in words, and sends nothing, when the Vault refuses to present the sign-in', async () => {
+    const stub = { spawn: {}, clock: {}, fetch: { request: async () => new Response('') } } as unknown as ProbePorts;
+    const probe = new TransportMcpProbe(stub, {
+      childEnvironment: async () => ok(HANDLE),
+      fetchMinted: async () => ({ kind: 'refused' }),
+    });
+
+    const failure = await probe.probe(remote, AbortSignal.timeout(2000)).catch((e: unknown) => e);
+
+    expect(failure).toBeInstanceOf(McpProbeFailure);
+    expect((failure as McpProbeFailure).message).toContain('mcp.example.com');
+  });
+
+  test('refuses to send a held sign-in at all when the Vault offers no way to present it', async () => {
+    const stub = { spawn: {}, clock: {}, fetch: { request: async () => new Response('') } } as unknown as ProbePorts;
+    const probe = new TransportMcpProbe(stub, { childEnvironment: async () => ok(HANDLE) });
+
+    const failure = await probe.probe(remote, AbortSignal.timeout(2000)).catch((e: unknown) => e);
+
+    expect(failure).toBeInstanceOf(McpProbeFailure);
+  });
+});

@@ -23,7 +23,7 @@ import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { UsageApi } from '@ferretry/plugin-usage/contract';
 import { milliseconds } from '@ferretry/std';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
-import { PROFILE_COMPONENTS_KEY, PROFILE_ITEMS } from '../contract/index.ts';
+import { PROFILE_COMPONENTS_KEY, PROFILE_ITEMS, type RuntimeCheckEnvironment } from '../contract/index.ts';
 import { applyClaimFor } from './adapters/apply-claim.ts';
 import { configDirectoryOf, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
 import { CommandCache } from './adapters/command-cache.ts';
@@ -216,6 +216,34 @@ export function launchFactsSource(
         throw error;
       }
     },
+  };
+}
+
+/**
+ * What a published runtime's launch carries for a consumer that fills `${VAR}` from it (`RuntimeHomesApi.checkEnvironment`):
+ * the plain variables its account published and the NAMES of the secret-bearing ones, read in ONE publication read.
+ */
+export function checkEnvironmentSource(
+  kernel: Pick<KernelPorts, 'roots'>,
+  publication: FleetPublication = new FleetPublication(),
+  requestRepair: () => void = () => {},
+): (runtime: string) => Promise<RuntimeCheckEnvironment | undefined> {
+  return async runtime => {
+    const fleet = kernel.roots.root('fleet');
+    const directory = fleetDirectory(fleet);
+    const files = rootHostFiles(fleetMounts(kernel.roots, fleet, directory));
+    try {
+      return await publication.reading(async () => {
+        const manifest = await readFleetManifest(files, `${directory}/${MANIFEST_FILE}`);
+        const published = manifest?.runtimes.find(row => row.name === runtime || row.id === runtime);
+        const account = manifest?.accounts.find(row => row.id === published?.id);
+        if (published === undefined || account === undefined) return undefined;
+        return { values: account.launchEnv ?? {}, opaque: Object.keys(account.secretEnv).sort() };
+      });
+    } catch (error) {
+      if (error instanceof FleetManifestUnreadableError) requestRepair();
+      throw error;
+    }
   };
 }
 

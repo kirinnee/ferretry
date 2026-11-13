@@ -7,6 +7,7 @@
  * never a body the server sent (which the check service redacts anyway).
  */
 
+import type { MintedExchangeOutcome, MintedExchangeRequest } from '@ferretry/core-vault/contract';
 import type { ChildEnvironment, ChildHandle, KernelPorts } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
 import { type McpProbe, type McpProbeAnswer, McpProbeFailure, type McpProbeSpec } from '../lib/inventory/check.ts';
@@ -36,6 +37,15 @@ export interface ProbeSecrets {
   childEnvironment(
     env: Readonly<Record<string, string>>,
   ): Promise<Result<ChildEnvironment, { readonly unknown: readonly string[] }>>;
+  /**
+   * ONE request with a secret THIS plugin minted placed on it by the Vault (use, never read): the reply is the server's,
+   * the credential masked out. Absent: the Vault offers none, and a check that needs one says so.
+   */
+  fetchMinted?(
+    secret: string,
+    request: MintedExchangeRequest,
+    placement: { readonly header: string; readonly scheme?: string },
+  ): Promise<MintedExchangeOutcome>;
 }
 
 /** Whether a value names a stored secret (`${secret:NAME}`, or the optional `${secret?:NAME}`). */
@@ -124,7 +134,8 @@ async function probeStdio(
       .split('\n')
       .map(line => line.trim())
       .filter(line => line !== '');
-    return lines.length === 0 ? '' : ` It said: “${clip(lines[lines.length - 1] ?? '')}”`;
+    // Whole, like every stranger's string here: the check scrubs it and THEN clips it.
+    return lines.length === 0 ? '' : ` It said: “${lines[lines.length - 1] ?? ''}”`;
   };
   const exited = child.exited.then(code => code);
   const kill = (): void => {
@@ -185,7 +196,57 @@ const statusFailure = (status: number): McpProbeFailure =>
         `It answered HTTP ${status}${status === 404 || status === 405 ? ' — is this the MCP endpoint, and the right transport?' : '.'}`,
       );
 
-async function send(ports: ProbePorts, url: string, init: RequestInit): Promise<Response> {
+/** The reply for a request that carries a held sign-in: placed by the Vault, never by this plugin. */
+async function sendCredentialed(
+  secrets: ProbeSecrets | undefined,
+  credential: NonNullable<RemoteSpec['credential']>,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  const host = new URL(url).host;
+  if (secrets?.fetchMinted === undefined)
+    throw new McpProbeFailure('unreachable', 'This machine has no way to present a held sign-in, so it was not sent.');
+  const method = init.method === 'DELETE' || init.method === 'GET' ? init.method : 'POST';
+  const outcome = await secrets.fetchMinted(
+    credential.secret,
+    {
+      method,
+      url,
+      headers: { ...(init.headers as Record<string, string>) },
+      ...(typeof init.body === 'string' ? { body: init.body } : {}),
+      ...(init.signal === undefined || init.signal === null ? {} : { signal: init.signal }),
+    },
+    { header: credential.header, ...(credential.scheme === undefined ? {} : { scheme: credential.scheme }) },
+  );
+  switch (outcome.kind) {
+    case 'response':
+      return outcome.response;
+    case 'aborted':
+      throw new McpProbeFailure('timeout', '');
+    case 'secret_missing':
+      throw new McpProbeFailure('unauthorized', 'The held sign-in is gone.');
+    case 'vault_damaged':
+      throw new McpProbeFailure('unreachable', 'The secret store could not be opened, so the sign-in was not sent.');
+    case 'unreachable':
+      throw new McpProbeFailure(
+        'unreachable',
+        `Nothing answered at ${host}${outcome.certificate ? ' (its certificate was refused)' : ''}.`,
+      );
+    case 'refused':
+      throw new McpProbeFailure(
+        'unreachable',
+        `The held sign-in could not be presented to ${host}; signing in again may fix it.`,
+      );
+  }
+}
+
+async function send(
+  ports: ProbePorts,
+  url: string,
+  init: RequestInit,
+  carried?: { readonly secrets: ProbeSecrets | undefined; readonly credential: RemoteSpec['credential'] },
+): Promise<Response> {
+  if (carried?.credential !== undefined) return await sendCredentialed(carried.secrets, carried.credential, url, init);
   try {
     return await ports.fetch.request(url, { ...init, redirect: 'manual' });
   } catch (error) {
@@ -232,22 +293,28 @@ async function messagesOf(response: Response, id: number | undefined): Promise<u
   return messages;
 }
 
-async function probeHttp(ports: ProbePorts, spec: RemoteSpec, signal: AbortSignal) {
+async function probeHttp(ports: ProbePorts, secrets: ProbeSecrets | undefined, spec: RemoteSpec, signal: AbortSignal) {
   let session: string | undefined;
   let protocol: string | undefined;
+  const carried = { secrets, credential: spec.credential };
   const answer = await exchange(async (message, id) => {
-    const response = await send(ports, spec.url, {
-      method: 'POST',
-      signal,
-      headers: {
-        ...spec.headers,
-        'content-type': 'application/json',
-        accept: 'application/json, text/event-stream',
-        ...(session === undefined ? {} : { 'mcp-session-id': session }),
-        ...(protocol === undefined ? {} : { 'mcp-protocol-version': protocol }),
+    const response = await send(
+      ports,
+      spec.url,
+      {
+        method: 'POST',
+        signal,
+        headers: {
+          ...spec.headers,
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          ...(session === undefined ? {} : { 'mcp-session-id': session }),
+          ...(protocol === undefined ? {} : { 'mcp-protocol-version': protocol }),
+        },
+        body: message,
       },
-      body: message,
-    });
+      carried,
+    );
     if (response.status >= 300 && response.status < 400)
       throw new McpProbeFailure('protocol', `It redirected (HTTP ${response.status}); use the address it moved to.`);
     if (!response.ok) {
@@ -264,24 +331,32 @@ async function probeHttp(ports: ProbePorts, spec: RemoteSpec, signal: AbortSigna
     return found;
   });
   if (session !== undefined)
-    await ports.fetch
-      .request(spec.url, {
+    await send(
+      ports,
+      spec.url,
+      {
         method: 'DELETE',
         headers: { ...spec.headers, 'mcp-session-id': session },
         signal: AbortSignal.timeout(2000),
-      })
-      .catch(() => undefined);
+      },
+      carried,
+    ).then(
+      reply => reply.body?.cancel().catch(() => undefined),
+      () => undefined,
+    );
   return answer;
 }
 
 // ── Legacy SSE ───────────────────────────────────────────────────────────────────────────────────
 
-async function probeSse(ports: ProbePorts, spec: RemoteSpec, signal: AbortSignal) {
-  const stream = await send(ports, spec.url, {
-    method: 'GET',
-    signal,
-    headers: { ...spec.headers, accept: 'text/event-stream' },
-  });
+async function probeSse(ports: ProbePorts, secrets: ProbeSecrets | undefined, spec: RemoteSpec, signal: AbortSignal) {
+  const carried = { secrets, credential: spec.credential };
+  const stream = await send(
+    ports,
+    spec.url,
+    { method: 'GET', signal, headers: { ...spec.headers, accept: 'text/event-stream' } },
+    carried,
+  );
   if (!stream.ok || stream.body === null) {
     await stream.body?.cancel().catch(() => undefined);
     throw statusFailure(stream.status);
@@ -316,12 +391,12 @@ async function probeSse(ports: ProbePorts, spec: RemoteSpec, signal: AbortSignal
         'It named an endpoint on another host; a check does not send headers there.',
       );
     return await exchange(async (message, id) => {
-      const response = await send(ports, target, {
-        method: 'POST',
-        signal,
-        headers: { ...spec.headers, 'content-type': 'application/json' },
-        body: message,
-      });
+      const response = await send(
+        ports,
+        target,
+        { method: 'POST', signal, headers: { ...spec.headers, 'content-type': 'application/json' }, body: message },
+        carried,
+      );
       await response.body?.cancel().catch(() => undefined);
       if (!response.ok) throw statusFailure(response.status);
       if (id === undefined) return undefined;
@@ -348,8 +423,8 @@ export class TransportMcpProbe implements McpProbe {
     if (spec.transport === 'stdio') return await probeStdio(this.ports, this.secrets, spec, signal);
     try {
       return spec.transport === 'sse'
-        ? await probeSse(this.ports, spec, signal)
-        : await probeHttp(this.ports, spec, signal);
+        ? await probeSse(this.ports, this.secrets, spec, signal)
+        : await probeHttp(this.ports, this.secrets, spec, signal);
     } catch (error) {
       throw timedOut(signal) ?? error;
     }

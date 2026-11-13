@@ -25,10 +25,10 @@ import {
  * descriptor fields copied exactly. Paths follow §3.2/§1.4: `/v1/fleet/mcp-auth…` → `/v1/mcp/auth…`;
  * `/v1/sessions/:sessionId/…` → `/v1/ferrets/:ferretId/…`.
  *
- * GAPS (for the port / the lead): `permissions.spawn` is empty and a check's own network reach is undeclared. A check
- * starts the owner's own stdio command (any program) and reaches the server it checks; today's code spawns and fetches
- * freely. The kernel ports refuse what is undeclared, so the check needs the data-driven allowance (the M3 unit) before
- * `ports-pending` can drop `mcp`. The sign-in's reach is declared (`network`, the `mcp-sign-in` resolver).
+ * REACH. A check starts the owner's own stdio command (any program) and reaches the server it checks. The program is
+ * allowed by the `mcp-check` spawn resolver (`daemon/lib/check-reach.ts`): ONLY the one command of the one approved
+ * server being checked, for as long as that check runs. The hosts are the `mcp-sign-in` resolver's (`daemon/lib/reach.ts`):
+ * the servers with a web address, the sign-ins on file and the hosts a sign-in in flight discovered.
  */
 export default definePlugin({
   id: 'mcp',
@@ -224,9 +224,10 @@ export default definePlugin({
     // worktree, read-only (lead ruling (B); `daemon/adapters/project-root-files.ts`).
     roots: ['work', 'imports'],
     // Sign-in: the servers being signed in to, and the issuer and endpoints their metadata named, answered by the
-    // `mcp-sign-in` resolver (`daemon/lib/reach.ts`). The check's own reach is still the GAP above.
+    // `mcp-sign-in` resolver (`daemon/lib/reach.ts`). A check reaches the same hosts.
     network: [{ resolver: 'mcp-sign-in' }],
-    spawn: [],
+    // A check's stdio command: the one being checked, while it is checked (`mcp-check`).
+    spawn: [{ resolver: 'mcp-check' }],
     secrets: [],
     // The OAuth access tokens a sign-in files in the Vault (`mcpOAuthSecretNames`): today's exact names, and no others.
     mintedSecrets: [SIGN_IN_SECRET_NAME],

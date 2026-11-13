@@ -4,10 +4,6 @@
  * kernel-only {@link SecretResolver}. Nothing a caller sends is read: the reference set comes from the config
  * service, the name list from the manifest.
  *
- * A secret the plugin MINTS (a name its manifest's `permissions.mintedSecrets` pattern matches whole: MCP's sign-in
- * access tokens) is its own too: the plugin put the value there itself, and no configuration names it, so only the
- * pattern and the Vault are asked. The pattern is the manifest's, never the caller's.
- *
  * `send` (K-secrets, design #9) is today's `OutboundProviderAuthorizer.send` held by the kernel: the same three-step
  * rule, today's destination / placement / echo rules, and the value lives only in this function's frame for the one
  * call. Read `docs/secrets.md` before changing it.
@@ -99,11 +95,8 @@ export function ownSecretsPort(
   references: () => ReadonlySet<string> | Promise<ReadonlySet<string>>,
   resolver: () => SecretResolver | undefined,
   sending?: OwnSecretSending,
-  minted: readonly string[] = [],
 ): SecretsPort {
   const names = new Set(declared);
-  const patterns = minted.map(source => new RegExp(`^(?:${source})$`, 'u'));
-  const isMinted = (name: string): boolean => WHOLE_NAME.test(name) && patterns.some(pattern => pattern.test(name));
   const isDeclared = (name: string): boolean => WHOLE_NAME.test(name) && names.has(name);
   const isConfigured = async (name: string): Promise<boolean> => {
     try {
@@ -113,11 +106,8 @@ export function ownSecretsPort(
     }
   };
   const owned = async (name: string): Promise<Owned> => {
-    // A minted name is in no configuration: the plugin wrote the value itself, so only its pattern and the Vault speak.
-    if (!isMinted(name)) {
-      if (!isDeclared(name)) return { refused: 'not_declared' };
-      if (!(await isConfigured(name))) return { refused: 'not_configured' };
-    }
+    if (!isDeclared(name)) return { refused: 'not_declared' };
+    if (!(await isConfigured(name))) return { refused: 'not_configured' };
     const vault = resolver();
     if (vault === undefined) return { refused: 'unknown' };
     try {
@@ -137,7 +127,7 @@ export function ownSecretsPort(
     const request = parsedRequest.data;
     const placement = parsedPlacement.data;
     const secret = String(name);
-    if (!isDeclared(secret) && !isMinted(secret)) return refused('not_declared');
+    if (!isDeclared(secret)) return refused('not_declared');
     if (sending === undefined || !allowedDestination(request.url, sending.hosts)) return refused('destination');
     const url = new URL(request.url);
     if (!sending.mayReach(url.hostname, url.host)) return refused('destination');

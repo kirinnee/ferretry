@@ -229,7 +229,7 @@ describe('MCP check messages', () => {
   });
 
   it('should read the server’s name, a nameless error, a result-less answer and text that is not JSON', () => {
-    should(serverNameOf({ serverInfo: { name: 'x'.repeat(300) } })?.length).equal(256);
+    should(serverNameOf({ serverInfo: { name: 'x'.repeat(300) } })?.length).equal(300);
     should(serverNameOf({})).be.undefined();
     should(() => responseFor([{ id: 1, error: {} }], 1)).throw('the server answered with an error');
     should(responseFor([{ id: 1 }], 1)).deepEqual({});

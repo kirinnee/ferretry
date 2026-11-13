@@ -12,7 +12,10 @@ import {
   type ResolveResult,
   type RuntimeAssetSkills,
   type RuntimeHome,
+  type MachineTool,
+  type RuntimeCheckEnvironment,
   type RuntimeHomeReader,
+  type RuntimeView,
   type RuntimeId,
   type RuntimeLayers,
   RuntimeIdSchema,
@@ -27,6 +30,10 @@ export interface FakeRuntimes extends RuntimesApi {
   setHomes(homes: readonly RuntimeHome[], readers?: Readonly<Record<string, RuntimeHomeReader>>): void;
   /** The fleet's installed skills `assetSkills()` answers (none until set). */
   setAssetSkills(assetSkills: RuntimeAssetSkills): void;
+  /** The runtimes and tools `catalog()` and `tools()` answer (none until set). */
+  setCatalog(runtimes: readonly RuntimeView[], tools?: readonly MachineTool[]): void;
+  /** What `checkEnvironment(runtime)` answers for a runtime (nothing for any other). */
+  setCheckEnvironment(runtime: RuntimeId, environment: RuntimeCheckEnvironment): void;
   /**
    * The profiles the fake holds (what `profiles()` answers and `changeProfileLayers` edits), and the layers `layers(id)`
    * answers for each runtime. The layers are exactly what a test sets: a change edits the PROFILES, not these.
@@ -88,6 +95,9 @@ export function fakeRuntimes(): FakeRuntimes {
   let homes: readonly RuntimeHome[] = [];
   let readers: Readonly<Record<string, RuntimeHomeReader>> = {};
   let assetSkills: RuntimeAssetSkills = { skills: async () => [], skillManifest: async () => undefined };
+  const checkEnvironments = new Map<string, RuntimeCheckEnvironment>();
+  let catalogRuntimes: readonly RuntimeView[] = [];
+  let catalogTools: readonly MachineTool[] = [];
   let profiles: readonly ProfileSummary[] = [];
   let layerSets: ReadonlyMap<RuntimeId, RuntimeLayers> = new Map();
   let forced: Parameters<FakeRuntimes['setChangeOutcome']>[0];
@@ -168,6 +178,16 @@ export function fakeRuntimes(): FakeRuntimes {
     },
     setAssetSkills: next => {
       assetSkills = next;
+    },
+    catalog: async () => catalogRuntimes,
+    tools: async () => catalogTools,
+    setCatalog: (next, nextTools = []) => {
+      catalogRuntimes = next;
+      catalogTools = nextTools;
+    },
+    checkEnvironment: async runtime => checkEnvironments.get(runtime),
+    setCheckEnvironment: (runtime, environment) => {
+      checkEnvironments.set(runtime, environment);
     },
     setHomes: (next, nextReaders = {}) => {
       homes = next;

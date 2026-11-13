@@ -184,3 +184,43 @@ export function allowedDestination(url: string, hostAllowlist: readonly string[]
   if (parsed.username !== '' || parsed.password !== '') return false;
   return hostAllowlist.includes(parsed.host.toLowerCase());
 }
+
+// ─── a credentialed exchange for a secret the caller MINTED ───────────────────────────────────────────────────────
+
+/**
+ * One request a plugin wants sent with a secret IT minted placed on it, answered as the reply itself (an MCP server's
+ * event stream cannot be reduced to one parsed document, which is why {@link OutboundHttpRequest} will not do). The
+ * value is placed by the Vault inside the call and appears in nothing it returns. The abort `signal` is the caller's.
+ */
+export interface MintedExchangeRequest {
+  readonly method: 'GET' | 'POST' | 'DELETE';
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body?: string;
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * What a minted exchange answered. `response` is the server's own reply with the credential MASKED out of its body and
+ * its headers: it is still a stranger's text, so a caller scrubs it as it scrubs any server's words. No branch carries
+ * the request it built. `unreachable.certificate` says the failure was a certificate or TLS refusal.
+ */
+export type MintedExchangeOutcome =
+  | { readonly kind: 'response'; readonly response: Response }
+  | { readonly kind: 'refused' }
+  | { readonly kind: 'secret_missing' }
+  | { readonly kind: 'vault_damaged' }
+  | { readonly kind: 'aborted' }
+  | { readonly kind: 'unreachable'; readonly certificate: boolean };
+
+/** The mask a minted exchange puts where the credential would have been echoed. */
+export const MINTED_ECHO_MASK = '[redacted]';
+
+/** {@link MintedExchangeRequest} as data, parsed once like {@link OutboundHttpRequestSchema} (the signal is the caller's own). */
+export const MintedExchangeRequestSchema = z.strictObject({
+  method: z.enum(['GET', 'POST', 'DELETE']),
+  url: z.string(),
+  headers: z.record(z.string(), z.string()),
+  body: z.string().optional(),
+  signal: z.instanceof(AbortSignal).optional(),
+});
