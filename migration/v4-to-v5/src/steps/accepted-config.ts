@@ -29,7 +29,7 @@
  * cannot run, or a config-writing step fails in it, NO record is written for any file, the step fails (the conversion is
  * incomplete) and it never falls back to the current text.
  *
- * The files the PREVIEW itself wrote or changed (its text differs from the plain conversion's, e.g. `terminals.yaml`, the
+ * The files the PREVIEW itself wrote or changed (its text differs from the plain conversion's, e.g. `terminals.yaml`, `runtimes.yaml`, the
  * `fy-preview` settings item, the forced `limits.yaml`) are recorded only when the owner ran `prepare --owner` (the flag
  * is the owner's act of accepting them; without it nothing of theirs is recorded), and only the ones with NO held v4
  * source (a held edit, or a held deletion, of any v4 file the writing step named for it). One with a held v4 source gets
