@@ -359,18 +359,30 @@ export class CarrierRouter {
   readonly #dial: (url: string) => ReturnType<ReturnType<typeof createBrowserRelayDial>>;
 
   /**
-   * The hosted address once the directory answered, only to LABEL a published relay as Ferretry's: a daemon that
-   * authored its own rendezvous is walked without ever waiting on the directory.
+   * The hosted address once the directory answered, only to LABEL a published relay as Ferretry's. The wire names no
+   * operator, so this comparison is the only thing that says whose relay carries a session — and the words a walk's
+   * choice is built from ("Connected over …") are fixed when it is made, so a relay dialled BEFORE the answer arrived
+   * would be called "your own" for as long as it carried. A walk therefore waits for the one read ({@link #labelled})
+   * before it dials a published relay, and not for anything else: direct, WebRTC and a tunnel never wait on it.
    */
   #hostedLabel: string | undefined;
 
+  /** The directory read has answered (or failed): the label is as known as it will ever be, so nothing waits again. */
+  #labelSettled = false;
+
+  /** Settles once the directory read has; never rejects, and the read is itself bounded, so a walk waits at most that long. */
+  readonly #labelled: Promise<void>;
+
   constructor(private readonly deps: CarrierRouterDependencies) {
     this.#dial = createBrowserRelayDial({ openSocket: deps.openSocket, after: deps.after });
-    void deps.hostedRelay().then(
+    this.#labelled = deps.hostedRelay().then(
       url => {
         this.#hostedLabel = url;
+        this.#labelSettled = true;
       },
-      () => undefined,
+      () => {
+        this.#labelSettled = true;
+      },
     );
   }
 
@@ -602,14 +614,19 @@ export class CarrierRouter {
     // again, so the walk flips back the moment it answers.
     const winner = entry.choice?.ok === true && !entry.fellBack ? entry.choice.method : undefined;
     if (winner !== undefined) yield this.#leg(daemon, winner);
-    const authored = daemonCarriers(daemon, this.#hostedLabel);
+    const authored = daemonCarriers(daemon);
     for (const kind of carrierOrder(plan.preference)) {
       if (kind === 'webrtc') {
         if (this.deps.webrtc === undefined) plan.why = WEBRTC_UNAVAILABLE;
         if (winner === undefined || !sameCarrier(WEBRTC, winner)) yield this.#leg(daemon, WEBRTC);
         continue;
       }
-      const ofKind = authored.filter(method => method.kind === kind);
+      // A published relay is labelled from the directory's answer, so it is awaited here and only here (see #hostedLabel).
+      if (kind === 'relay' && !this.#labelSettled && authored.some(method => method.kind === 'relay'))
+        await this.#labelled;
+      const ofKind = (kind === 'relay' ? daemonCarriers(daemon, this.#hostedLabel) : authored).filter(
+        method => method.kind === kind,
+      );
       for (const method of ofKind)
         if (winner === undefined || !sameCarrier(method, winner)) yield this.#leg(daemon, method);
       if (kind === 'tunnel') {

@@ -138,8 +138,8 @@ export type PairingCrossing = RelayCarrier | undefined;
  * compares `operator` — and the two values being compared cannot agree on that field even when they
  * name the identical address. A candidate is built from a fragment or from the discovery
  * advertisement before the daemon has said anything, so its `operator` is absent or this browser's
- * own guess, while `publishedConnectionMethods` always stamps `'hosted'` or `'self'` by comparing
- * against the hosted address. Using the whole-carrier test would therefore refuse every relayed
+ * own guess, while `publishedConnectionMethods` stamps `'hosted'` (the address compared with the hosted one), `'configured'` (a relay the
+ * daemon marks configured) or nothing (unknown). Using the whole-carrier test would therefore refuse every relayed
  * pairing that ever succeeded, which is a refusal about a label rather than about reachability.
  *
  * What §14's rule is actually asking is "can this device get back to this daemon the way it just

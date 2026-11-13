@@ -315,19 +315,19 @@ describe('a pairing that crossed a rendezvous', () => {
   /*
    * Compared by ADDRESS alone, deliberately. A candidate is built from a fragment or from the
    * discovery advertisement before the daemon has said anything, so its `operator` is absent or this
-   * browser's own guess, while `publishedConnectionMethods` always stamps `'hosted'` or `'self'`.
+   * browser's own guess, while `publishedConnectionMethods` always stamps `'hosted'` or `'configured'`.
    * A whole-carrier comparison would refuse every relayed pairing that ever succeeded, over a label.
    */
   it('should accept a published set that names the rendezvous under a different operator label', () => {
     const connection = pairedDaemonConnection(
       seed,
       response([{ kind: 'relay', url: 'wss://relay.example' }]),
-      // No hosted address discovered, so the daemon's own relay is labelled `self` while the
+      // No hosted address discovered, so the daemon's relay is left unlabelled (unknown) while the
       // candidate carried no label at all.
       undefined,
       crossed,
     );
-    should(connection.carriers).containEql({ kind: 'relay', relayUrl: 'wss://relay.example', operator: 'self' });
+    should(connection.carriers).containEql({ kind: 'relay', relayUrl: 'wss://relay.example' });
   });
 
   /** The rendezvous is checked against the published set and never written down beside it. */
@@ -344,7 +344,7 @@ describe('a pairing that crossed a rendezvous', () => {
     // The daemon's own entries, labelled by this browser — not the crossing candidate, and nothing added to them.
     should(connection.carriers).eql([
       { kind: 'direct', daemonUrl: 'https://studio.example.test' },
-      { kind: 'relay', relayUrl: 'wss://relay.example', operator: 'self' },
+      { kind: 'relay', relayUrl: 'wss://relay.example' },
     ]);
   });
 

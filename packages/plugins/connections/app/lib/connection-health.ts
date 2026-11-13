@@ -25,7 +25,7 @@ const RECONNECTING_GRACE_MS = 1_500;
 
 /** One carrier the last attempt tried and why it did not work — one entry per carrier, never per panel. */
 export interface CarrierFailure {
-  /** The carrier's human label, e.g. "Direct", "Hosted relay", "Your own relay". */
+  /** The carrier's human label, e.g. "Direct", "Hosted relay", "Configured relay". */
   readonly label: string;
   /** The technical sentence for the details sheet. Never shown outside it. */
   readonly detail: string;

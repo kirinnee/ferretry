@@ -141,7 +141,16 @@ export const MAX_PUBLISHED_CARRIERS = 8;
 /** One way a device may dial this daemon. WebRTC is not published: it is signalled inside a session. */
 export const PublishedCarrierSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('direct'), url: DaemonOriginSchema }),
-  z.strictObject({ kind: z.literal('relay'), url: SocketEndpointSchema }),
+  z.strictObject({
+    kind: z.literal('relay'),
+    url: SocketEndpointSchema,
+    /**
+     * Present only on a relay the operator WROTE in this daemon's own carriers list. A discovered relay carries no
+     * claim: absence means "this daemon cannot say whose it is", which a device must read as unknown, never as its
+     * own. It is a daemon's self-report (a device cannot check it), so it picks only the wording of a disclosure.
+     */
+    source: z.literal('configured').optional(),
+  }),
   z.strictObject({ kind: z.literal('tunnel'), url: TunnelOriginSchema }),
 ]);
 export type PublishedCarrier = z.infer<typeof PublishedCarrierSchema>;

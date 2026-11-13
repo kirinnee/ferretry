@@ -24,6 +24,7 @@ export * from './codex-launch.ts';
 export * from './component-source.ts';
 export * from './homes.ts';
 export * from './layers.ts';
+export * from './profile-stack.ts';
 export * from './tools-server.ts';
 export * from './config.ts';
 export * from './wire/index.ts';

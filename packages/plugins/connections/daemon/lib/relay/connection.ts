@@ -107,7 +107,7 @@ export const ConnectionMethodSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('relay'),
     relayUrl: SocketEndpointSchema,
-    operator: z.enum(['self', 'hosted']).optional(),
+    operator: z.enum(['configured', 'hosted']).optional(),
   }),
 ]);
 export type ConnectionMethod = z.infer<typeof ConnectionMethodSchema>;
@@ -247,22 +247,48 @@ const HOSTED_RELAY_DISCLOSURE: ConnectionDisclosure = {
   ],
 };
 
-const OWN_RELAY_DISCLOSURE: ConnectionDisclosure = {
-  label: 'Your own relay',
-  noun: 'your own relay',
+/**
+ * A relay this machine is set up to use, whose operator this device cannot tell. The daemon's own list holds its
+ * address, which proves it was ENTERED — not who runs it: it can be Ferretry's hosted relay (while the directory is
+ * down), a friend's, or a Worker in the owner's account. So the disclosure says what is true of EVERY relay and makes
+ * the one thing that depends on who runs it conditional.
+ */
+const CONFIGURED_RELAY_DISCLOSURE: ConnectionDisclosure = {
+  label: 'Configured relay',
+  noun: 'the relay this machine is set up to use',
   summary:
-    'A Cloudflare Worker in your own account passes ciphertext between you and the daemon. The daemon dials out, so it works from behind NAT, and nobody outside your account is on the path.',
+    'A relay passes ciphertext between you and the daemon. This machine is set up to use this one, but this app cannot tell who runs it, so it makes no claim about that.',
   observers: [
-    'The relay sees the daemon fingerprint in the URL, because that is what addresses the rendezvous.',
-    'The relay sees both IP addresses, when each side connects and for how long.',
-    'The relay sees how many frames go each way, how big each one is and exactly when it was sent.',
-    'The relay cannot read a frame, alter one or insert one: every record is authenticated under a key derived on your two devices.',
-    'You are the relay operator, so all of that is visible to you and to Cloudflare, and to nobody else.',
+    'Whoever runs the relay, and whoever hosts it, can see the daemon fingerprint in the URL, because that is what addresses the rendezvous.',
+    'They can see both IP addresses, when each side connects and for how long.',
+    'They can see how many frames go each way, how big each one is and exactly when it was sent.',
+    'They cannot read a frame, alter one or insert one: every record is authenticated under a key derived on your two devices.',
+    'If you run this relay yourself, only you and your hosting provider are on the path.',
   ],
   requires: [
-    'A Cloudflare account, and one deploy of this package into it.',
-    'The daemon fingerprint listed in the relay deployment, so the relay serves you and not a stranger.',
-    'The relay address configured on both the daemon and this browser.',
+    'The relay address configured on the daemon, and reachable from this browser.',
+    'The daemon fingerprint allowed by whoever runs the relay.',
+  ],
+};
+
+/**
+ * A relay whose operator this device cannot tell, and which the daemon does not even list as configured. It claims
+ * nothing about who runs the rendezvous or the infrastructure under it; it says what is true of EVERY relay.
+ */
+const UNKNOWN_RELAY_DISCLOSURE: ConnectionDisclosure = {
+  label: 'Relay',
+  noun: 'a relay',
+  summary:
+    'A relay passes ciphertext between you and the daemon. This app cannot tell who runs this one, so it makes no claim about that.',
+  observers: [
+    'Whoever runs the relay, and whoever hosts it, can see the daemon fingerprint in the URL, because that is what addresses the rendezvous.',
+    'They can see both IP addresses, when each side connects and for how long.',
+    'They can see how many frames go each way, how big each one is and exactly when it was sent.',
+    'They cannot read a frame, alter one or insert one: every record is authenticated under a key derived on your two devices.',
+  ],
+  requires: [
+    'The relay address configured on the daemon, and reachable from this browser.',
+    'The daemon fingerprint allowed by whoever runs the relay.',
   ],
 };
 
@@ -270,7 +296,8 @@ export function describeConnectionMethod(method: ConnectionMethod): ConnectionDi
   if (method.kind === 'direct') return DIRECT_DISCLOSURE;
   if (method.kind === 'webrtc') return WEBRTC_DISCLOSURE;
   if (method.kind === 'tunnel') return TUNNEL_DISCLOSURE;
-  return method.operator === 'hosted' ? HOSTED_RELAY_DISCLOSURE : OWN_RELAY_DISCLOSURE;
+  if (method.operator === 'hosted') return HOSTED_RELAY_DISCLOSURE;
+  return method.operator === 'configured' ? CONFIGURED_RELAY_DISCLOSURE : UNKNOWN_RELAY_DISCLOSURE;
 }
 
 /** The result of trying one carrier, in preference order. */
@@ -334,6 +361,21 @@ export function connectionPreferenceOrder(methods: readonly ConnectionMethod[]):
 }
 
 /**
+ * Whose relay a published relay is, for the SENTENCE a person reads and nothing else. Only positive evidence picks an
+ * ownership-specific answer: the address this browser discovered itself is Ferretry's hosted relay, and an entry the
+ * daemon lists as configured (`source: 'configured'`) is only CONFIGURED: an address that was entered says nothing about who runs
+ * it. Anything else is NO `operator` at all — unknown. Neither is ever worded as ownership, because a directory that failed
+ * to answer is an ordinary state and proves nothing.
+ */
+function relayOperator(
+  carrier: { readonly url: string; readonly source?: 'configured' },
+  hostedRelayUrl: string | undefined,
+): { readonly operator?: 'hosted' | 'configured' } {
+  if (carrier.url === hostedRelayUrl) return { operator: 'hosted' };
+  return carrier.source === 'configured' ? { operator: 'configured' } : {};
+}
+
+/**
  * A daemon's PUBLISHED carrier set, as carriers this browser will dial, in the order it will try them.
  *
  * The order is `connectionPreferenceOrder`'s and nothing else's — every `direct` entry in the order the
@@ -352,10 +394,11 @@ export function connectionPreferenceOrder(methods: readonly ConnectionMethod[]):
  * A throw here would turn a single bad member into a device that cannot pair at all.
  *
  * `operator` IS DERIVED HERE AND IS DISCLOSURE ONLY. Who runs a rendezvous is not a wire fact and the
- * published set carries no claim about it — deliberately, because a daemon's self-report is not
- * something a device can check. What a device CAN check is whether the address equals the hosted one it
- * discovered for itself, so that comparison is the answer, and an unrecognised address is somebody's
- * own relay. Nothing about the path changes either way; only the sentence a person reads.
+ * published set carries no claim about it beyond a configured relay's `source` — a daemon's self-report, not something a
+ * device can check. What a device CAN check is whether the address equals the hosted one it discovered for itself, so
+ * that comparison comes first; an entry the daemon lists as `configured` is only CONFIGURED (an entered address is not proof of who runs it), and
+ * EVERYTHING ELSE IS UNKNOWN (`operator` absent). Neither is worded as ownership; a directory that failed to answer is not proof of it.
+ * Nothing about the path changes either way; only the sentence a person reads.
  *
  * A TUNNEL is mapped to its own kind (§15): dialled like a direct address, disclosed as Cloudflare's.
  */
@@ -373,7 +416,7 @@ export function publishedConnectionMethods(
           : {
               kind: 'relay',
               relayUrl: carrier.url,
-              operator: carrier.url === hostedRelayUrl ? 'hosted' : 'self',
+              ...relayOperator(carrier, hostedRelayUrl),
             },
     );
     if (parsed.success) methods.push(parsed.data);
