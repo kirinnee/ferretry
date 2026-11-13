@@ -299,7 +299,7 @@ export function fleetHost(
  */
 export function fileAssembly(
   ctx: {
-    readonly kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log'> & {
+    readonly kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log' | 'identity'> & {
       readonly config: Pick<ConfigPort, 'writeAll' | 'collection' | 'file' | 'etag'>;
     };
     readonly needs: {
@@ -394,7 +394,7 @@ export function fileAssembly(
       catalog: base,
       logins: ctx.needs.logins,
       tools,
-      daemonId: () => undefined,
+      daemonId: () => ctx.kernel.identity.daemonId,
       secrets: { list: refusing.secrets.held, put: refusing.secrets.put },
     }),
   );

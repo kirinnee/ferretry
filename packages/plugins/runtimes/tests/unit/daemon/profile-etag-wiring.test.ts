@@ -61,8 +61,9 @@ async function realWorld(world: FleetWorld) {
     paths: { home: () => world.person, which: async () => undefined },
     clock: { nowMs: () => 1_000, after: () => () => undefined },
     log: { warn: () => undefined },
+    identity: { daemonId: 'fy_daemon_test', daemonName: 'test' },
     config: port,
-  } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log'> & {
+  } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log' | 'identity'> & {
     config: Pick<KernelPorts['config'], 'writeAll' | 'collection' | 'file' | 'etag'>;
   };
   const assembly = fileAssembly({ kernel, needs, hooks: { provider: () => 'unavailable' } }, new FleetPublication());
