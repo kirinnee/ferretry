@@ -87,9 +87,19 @@ const CONNECTION_STATUS_LABEL: Readonly<Record<ConnectionStatusKind, string>> = 
   none: 'Not measured yet',
 };
 
+/**
+ * What precedes the host after "Via relay —". It never repeats the lead word: a relay nobody can name is just its host,
+ * and the other two say only what the app knows (the address it discovered itself, or the one the daemon is set up to use).
+ */
+const RELAY_TITLE = {
+  hosted: 'Hosted · ',
+  configured: 'Configured · ',
+  unknown: '',
+} as const satisfies Record<'hosted' | 'configured' | 'unknown', string>;
+
 /** Which relay carried it: whose, and the host it lives on — never the daemon fingerprint. */
 const relayName = (method: Extract<ConnectionMethod, { kind: 'relay' }>): string =>
-  `${describeConnectionMethod(method).label} · ${new URL(method.relayUrl).host}`;
+  RELAY_TITLE[method.operator ?? 'unknown'] + new URL(method.relayUrl).host;
 
 /**
  * What follows the status word, naming WHICH carrier of its kind: a relay's operator and host, a
@@ -257,7 +267,9 @@ export function ActiveCarrierCard({
           <p className="mb-0 mt-3 text-cell leading-base text-fg">{disclosure.summary}</p>
           {/* Under a "who can see this" heading an empty list reads as a redaction, so
               the list is only ever rendered with its heading and never on its own. */}
-          <h4 className="mb-0 mt-4 text-cell font-semibold text-fg">What the parties on this path can see</h4>
+          <h4 className="mb-0 mt-4 text-cell font-semibold text-fg">
+            What the parties on this path can and cannot see
+          </h4>
           <ul className="mb-0 mt-2 flex list-disc flex-col gap-1 pl-5 text-meta leading-base text-muted">
             {disclosure.observers.map(observer => (
               <li key={observer}>{observer}</li>

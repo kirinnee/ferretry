@@ -18,6 +18,7 @@ import should from 'should';
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
 const direct: ConnectionMethod = { kind: 'direct', daemonUrl: 'https://box.tailnet.example' };
 const relay: ConnectionMethod = { kind: 'relay', relayUrl: 'https://relay.example' };
+const configured: ConnectionMethod = { kind: 'relay', relayUrl: 'https://relay.example', operator: 'configured' };
 const hosted: ConnectionMethod = { kind: 'relay', relayUrl: 'https://hosted.example', operator: 'hosted' };
 const secureDirect: ConnectionMethod = { kind: 'direct', daemonUrl: 'https://box.example' };
 const tunnel: ConnectionMethod = { kind: 'tunnel', tunnelUrl: 'https://k3x9.tunnels.example.com' };
@@ -153,9 +154,24 @@ describe('carrier disclosure and choice', () => {
     should(directly.observers.length).be.above(0);
 
     const relayed = describeConnectionMethod(relay);
-    should(relayed.label).equal('Your own relay');
+    should(relayed.label).equal('Relay');
+    should(relayed.noun).equal('a relay');
     should(relayed.observers.join(' ')).match(/cannot read a frame/u);
-    should(relayed.requires.join(' ')).match(/fingerprint listed/u);
+    should(relayed.requires.join(' ')).match(/fingerprint allowed/u);
+    // Nothing here can know who runs it: no ownership is stated as fact, in any copy of the words.
+    should([relayed.summary, ...relayed.observers].join(' ')).not.match(
+      /your own|you are the relay operator|nobody outside your account/iu,
+    );
+
+    const entered = describeConnectionMethod(configured);
+    should(entered.label).equal('Configured relay');
+    should(entered.noun).equal('the relay this machine is set up to use');
+    should(entered.observers.join(' ')).match(
+      /If you run this relay yourself, only you and your hosting provider are on the path\./u,
+    );
+    should([entered.summary, entered.noun, ...entered.observers.slice(0, -1)].join(' ')).not.match(
+      /your own|you are the relay operator|nobody outside your account/iu,
+    );
 
     const hostedDisclosure = describeConnectionMethod(hosted);
     should(hostedDisclosure.label).equal('Hosted relay');
@@ -193,7 +209,8 @@ describe('carrier disclosure and choice', () => {
     should(
       publishedConnectionMethods(
         [
-          { kind: 'relay', url: 'https://first-relay.example' },
+          { kind: 'relay', url: 'https://first-relay.example', source: 'configured' },
+          { kind: 'relay', url: 'https://stranger-relay.example' },
           { kind: 'direct', url: 'https://first-direct.example' },
           { kind: 'relay', url: 'https://hosted.example' },
           { kind: 'direct', url: 'https://second-direct.example' },
@@ -203,7 +220,8 @@ describe('carrier disclosure and choice', () => {
     ).deepEqual([
       { kind: 'direct', daemonUrl: 'https://first-direct.example' },
       { kind: 'direct', daemonUrl: 'https://second-direct.example' },
-      { kind: 'relay', relayUrl: 'https://first-relay.example', operator: 'self' },
+      { kind: 'relay', relayUrl: 'https://first-relay.example', operator: 'configured' },
+      { kind: 'relay', relayUrl: 'https://stranger-relay.example' },
       { kind: 'relay', relayUrl: 'https://hosted.example', operator: 'hosted' },
     ]);
     should(
@@ -277,9 +295,7 @@ describe('carrier disclosure and choice', () => {
     should(chosen.ok).be.true();
     if (chosen.ok) {
       should(chosen.method).deepEqual(relay);
-      should(chosen.reason).equal(
-        'Connected over your own relay because direct was not reachable (timed out after 3s).',
-      );
+      should(chosen.reason).equal('Connected over a relay because direct was not reachable (timed out after 3s).');
       should(chosen.passedOver.length).equal(1);
     }
   });

@@ -378,7 +378,7 @@ describe('the carrier set is the daemon’s answer', () => {
     expect(parsed.carriers).toEqual(host.provided(ConnectionsPort).carriers());
     expect(publishedConnectionMethods(parsed.carriers)).toEqual([
       { kind: 'direct', daemonUrl: 'https://box.example' },
-      { kind: 'relay', relayUrl: 'https://mine.example', operator: 'self' },
+      { kind: 'relay', relayUrl: 'https://mine.example', operator: 'configured' },
     ]);
     await host.stop();
   });

@@ -46,7 +46,7 @@ export const ConnectionMethodSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('relay'),
     relayUrl: SocketEndpointSchema,
-    operator: z.enum(['self', 'hosted']).optional(),
+    operator: z.enum(['configured', 'hosted']).optional(),
   }),
 ]);
 export type ConnectionMethod = z.infer<typeof ConnectionMethodSchema>;
@@ -64,15 +64,15 @@ function connectionPreferenceOrder(methods: readonly ConnectionMethod[]): readon
 /**
  * Whose relay a published relay is, for the SENTENCE a person reads and nothing else. Only positive evidence picks an
  * ownership-specific answer: the address this browser discovered itself is Ferretry's hosted relay, and an entry the
- * daemon says its operator wrote (`source: 'configured'`) is theirs. Anything else is NO `operator` at all — unknown — and is
- * disclosed neutrally, because a directory that failed to answer is an ordinary state and proves nothing.
+ * daemon lists as configured (`source: 'configured'`) is only CONFIGURED: an entered address says nothing about who runs it.
+ * Anything else is NO `operator` at all — unknown. Neither is worded as ownership; a directory that failed to answer proves nothing.
  */
 function relayOperator(
   carrier: { readonly url: string; readonly source?: 'configured' },
   hostedRelayUrl: string | undefined,
-): { readonly operator?: 'hosted' | 'self' } {
+): { readonly operator?: 'hosted' | 'configured' } {
   if (carrier.url === hostedRelayUrl) return { operator: 'hosted' };
-  return carrier.source === 'configured' ? { operator: 'self' } : {};
+  return carrier.source === 'configured' ? { operator: 'configured' } : {};
 }
 
 /**

@@ -1252,7 +1252,7 @@ The set crosses to the device at the one moment every device has: **redemption**
 "the one moment guaranteed to be direct", and §14 retired the guarantee without weakening the
 argument — see the rest of this paragraph. The pairing
 response carries `carriers`, at most **eight** entries, each one `{ kind: 'direct' | 'relay', url }`,
-in the daemon's own order. A relay the operator wrote in the daemon's own `carriers` list also carries `source: "configured"`; a discovered relay carries no `source`. It is the daemon's self-report — a device cannot check it — and it picks only the wording of the Connection card's disclosure (below), never what the path does. It is on the redemption response rather than the mint response because the
+in the daemon's own order. A relay the operator wrote in the daemon's own `carriers` list also carries `source: "configured"`; a discovered relay carries no `source`. It is the daemon's self-report — a device cannot check it — and it proves only that an address was ENTERED, never who runs it. It picks only the wording of the Connection card's disclosure (below), never what the path does. It is on the redemption response rather than the mint response because the
 two are read by different parties — the mint response is read by the **host's** own UI, which has the
 daemon in front of it, and this one is read by the **device**, which is who has to know where to look
 next time. No rendezvous has an opportunity to edit this answer on any carrier: a direct redemption
@@ -1299,14 +1299,22 @@ pair with it. The daemon **fingerprint** is a different matter. It is not on thi
 named in any carrier diagnostic — it addresses the rendezvous, it travels in the pairing fragment, and
 it stays out of anything a reader might paste into an issue.
 
-**Whose relay a relay is, as the Connection card says it** — only positive evidence picks an ownership-specific
-sentence, and the browser decides in this order: an address equal to the hosted one this browser discovered itself is
-**Hosted relay**; an entry carrying `source: "configured"` is **Your own relay** (the operator wrote it); everything
-else — a directory that timed out, failed or is switched off, an address it did not name, a daemon that says nothing —
-is the neutral **Relay**, which says it carries end-to-end-encrypted traffic and that whoever runs or hosts a relay can
-see addresses, timing and sizes, and claims nothing about who that is. A directory that did not answer proves nothing
-about ownership. Like `carriers` itself, the new optional key is a breaking change for an older client (the entry is
-a strict object), so it ships in the same release as the client that reads it.
+**Whose relay a relay is, as the Connection card says it** — the app never states ownership as fact unless it is
+positively known, and it cannot know it. The browser decides in this order: an address equal to the hosted one this
+browser discovered itself is **Hosted relay**; an entry carrying `source: "configured"` that is NOT that address is
+**Configured relay** ("the relay this machine is set up to use"); everything else — a directory that timed out, failed or
+is switched off, an address it did not name, a daemon that says nothing — is the neutral **Relay**. All three say that the
+relay carries end-to-end-encrypted traffic and that whoever runs or hosts it can see addresses, timing and sizes. The
+configured wording adds one sentence and only conditionally: "If you run this relay yourself, only you and your hosting
+provider are on the path." It never says "your own account" or "you are the relay operator", because a configured address
+may as well be Ferretry's hosted relay (entered by hand while the directory is down) or a friend's. A directory that did not
+answer proves nothing about ownership, and neither does an entered address.
+
+**Compatibility of the `source` key.** Like `carriers` itself, the optional key is a breaking change for an older client:
+the entry is a strict object, and the pairing response and the carrier set are each parsed whole, so an older client rejects
+the WHOLE pairing response (or carrier set) that carries one configured entry — not just that entry. Within 5.0 every reader
+ships together, so the only case is a cached older preview app held against a newer daemon: reload the app together with the
+daemon. A newer app reading an older daemon sees no marker and uses the neutral wording.
 
 **No entry says whether it is privileged, and no such field may ever be added.** Privilege is binary
 and carrier-derived: it is answered by the carrier that **accepted** an arrival, per connection, on the

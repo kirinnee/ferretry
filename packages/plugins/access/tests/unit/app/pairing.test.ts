@@ -315,7 +315,7 @@ describe('a pairing that crossed a rendezvous', () => {
   /*
    * Compared by ADDRESS alone, deliberately. A candidate is built from a fragment or from the
    * discovery advertisement before the daemon has said anything, so its `operator` is absent or this
-   * browser's own guess, while `publishedConnectionMethods` always stamps `'hosted'` or `'self'`.
+   * browser's own guess, while `publishedConnectionMethods` always stamps `'hosted'` or `'configured'`.
    * A whole-carrier comparison would refuse every relayed pairing that ever succeeded, over a label.
    */
   it('should accept a published set that names the rendezvous under a different operator label', () => {
