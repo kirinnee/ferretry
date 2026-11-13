@@ -82,6 +82,7 @@ export async function exchangePairing(
       machine: response.daemonName,
       deviceId: response.deviceId,
       address: connection.baseUrl,
+      ...(outcome.via.kind === 'relay' ? { pairedViaRelay: true as const } : {}),
       carriers: response.carriers,
     });
   } catch (reason) {

@@ -1,0 +1,191 @@
+/**
+ * THE DEFAULT PREFERENCE FALLS BACK TO THE DIRECT ADDRESS THE DEVICE PAIRED OVER (`docs/relay-protocol.md` §15).
+ *
+ * Relay is the owner's default and asks nothing. When nobody CHOSE a preference and the relay cannot carry a session —
+ * none discovered, or one that does not answer — the direct address recorded at pairing (that exact one) carries it, and
+ * the router says so. A "Relay only" the person chose stays strict. Through the real kernel session layer, scripted network.
+ */
+import { describe, expect, test } from 'bun:test';
+import type { PairedDaemon } from '@ferretry/app';
+import { RELAY_FALLBACK_LINE } from '../../../app/carriers/router.ts';
+import type { ScriptedHost } from '../../support/browser-network.ts';
+import { carriedOver, rig } from '../../support/router-rig.ts';
+
+const DIRECT = 'https://laptop.example.test';
+const HOSTED = 'wss://hosted.example';
+const PUBLISHED = [{ kind: 'direct', url: DIRECT }];
+
+const hostsOf = (hosted: ScriptedHost): Record<string, ScriptedHost> => ({
+  [new URL(DIRECT).host]: { kind: 'carries', carrier: 'direct' },
+  'hosted.example': hosted,
+});
+
+const hostsDialled = (urls: readonly string[]): string[] => urls.map(url => new URL(url).host);
+
+describe('the unchosen default (Relay) with a relay that cannot carry', () => {
+  test('no relay discovered: the paired direct address carries, and the router says it stands in for the relay', async () => {
+    const r = await rig(hostsOf({ kind: 'dead' }), PUBLISHED, 'relay', null, undefined, { chosen: () => false });
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    await transport.request({ method: 'GET', path: '/v1/carriers' });
+    expect(carriedOver(r.fx)).toEqual(['/v1/carriers direct']);
+    expect(hostsDialled(r.network.dialled)).toEqual([new URL(DIRECT).host]);
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({
+      ok: true,
+      method: { kind: 'direct', daemonUrl: DIRECT },
+      reason: RELAY_FALLBACK_LINE,
+    });
+    expect(r.router.relayFallback(r.fx.daemonId)).toBe(RELAY_FALLBACK_LINE);
+    r.fx.layer.close();
+  });
+
+  test('a relay that does not answer is dialled FIRST, then the paired direct address carries', async () => {
+    const r = await rig(hostsOf({ kind: 'dead' }), PUBLISHED, 'relay', HOSTED, undefined, { chosen: () => false });
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    await transport.request({ method: 'GET', path: '/v1/carriers' });
+    expect(hostsDialled(r.network.dialled)).toEqual(['hosted.example', new URL(DIRECT).host]);
+    expect(carriedOver(r.fx)).toEqual(['/v1/carriers direct']);
+    expect(r.router.relayFallback(r.fx.daemonId)).toBe(RELAY_FALLBACK_LINE);
+    const choice = r.router.choice(r.fx.daemonId);
+    expect(choice?.ok === true ? choice.passedOver.map(skip => skip.method.kind) : []).toEqual(['relay']);
+    r.fx.layer.close();
+  });
+
+  test('the relay answering again takes the session back, and the line goes away', async () => {
+    const hosts = hostsOf({ kind: 'dead' });
+    const r = await rig(hosts, PUBLISHED, 'relay', HOSTED, undefined, { chosen: () => false });
+    const first = await r.connect();
+    if (first === undefined) throw new Error('no transport');
+    await first.request({ method: 'GET', path: '/v1/carriers' });
+    expect(r.router.relayFallback(r.fx.daemonId)).toBe(RELAY_FALLBACK_LINE);
+
+    // The relay comes back. The next session tries it first (the direct stand-in is never a remembered winner).
+    hosts['hosted.example'] = { kind: 'carries', carrier: 'relay' };
+    const second = await r.connect();
+    if (second === undefined) throw new Error('no transport');
+    await second.request({ method: 'GET', path: '/v1/carriers' });
+
+    expect(carriedOver(r.fx).at(-1)).toBe('/v1/carriers relay');
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'relay' } });
+    expect(r.router.relayFallback(r.fx.daemonId)).toBeUndefined();
+    r.fx.layer.close();
+  });
+
+  test('when the paired direct address cannot carry either, nothing stands in for the relay and no line is said', async () => {
+    const hosts = hostsOf({ kind: 'dead' });
+    const r = await rig(hosts, PUBLISHED, 'relay', HOSTED, undefined, { chosen: () => false });
+    const first = await r.connect();
+    if (first === undefined) throw new Error('no transport');
+    await first.request({ method: 'GET', path: '/v1/carriers' });
+    expect(r.router.relayFallback(r.fx.daemonId)).toBe(RELAY_FALLBACK_LINE);
+
+    // The direct address stops carrying too: a walk that finds nothing at all says no carrier stands in for the relay.
+    hosts[new URL(DIRECT).host] = { kind: 'dead' };
+    const second = await r.connect();
+    if (second === undefined) throw new Error('no transport');
+    await expect(second.request({ method: 'GET', path: '/v1/carriers' })).rejects.toBeDefined();
+    expect(r.router.relayFallback(r.fx.daemonId)).toBeUndefined();
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: false });
+    r.fx.layer.close();
+  });
+
+  test('an unchosen Relay with nothing to try is named Relay, not "Relay only": nobody chose that', async () => {
+    const r = await rig(hostsOf({ kind: 'dead' }), [], 'relay', null, undefined, { chosen: () => false });
+    const device: PairedDaemon = { ...r.daemon, pairedViaRelay: true };
+    const transport = await r.connect(device);
+    if (transport === undefined) throw new Error('no transport');
+    await expect(transport.request({ method: 'GET', path: '/v1/carriers' })).rejects.toBeDefined();
+    const choice = r.router.choice(r.fx.daemonId);
+    expect(choice?.ok === false ? choice.reason : '').toBe('Relay: there is no relay for this machine right now.');
+    r.fx.layer.close();
+  });
+
+  test('a relay that carries is simply used: no fallback line, no direct dial', async () => {
+    const r = await rig(hostsOf({ kind: 'carries', carrier: 'relay' }), PUBLISHED, 'relay', HOSTED, undefined, {
+      chosen: () => false,
+    });
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    await transport.request({ method: 'GET', path: '/v1/carriers' });
+    expect(carriedOver(r.fx)).toEqual(['/v1/carriers relay']);
+    expect(hostsDialled(r.network.dialled)).toEqual(['hosted.example']);
+    expect(r.router.relayFallback(r.fx.daemonId)).toBeUndefined();
+    r.fx.layer.close();
+  });
+
+  test('a device that paired over a relay has no direct address it paired over, so it gets no fallback', async () => {
+    const r = await rig(hostsOf({ kind: 'dead' }), [], 'relay', null, undefined, { chosen: () => false });
+    // The link's address was never reached by this device: it is recorded, but it is not where the pairing crossed.
+    const device: PairedDaemon = { ...r.daemon, pairedViaRelay: true };
+    const transport = await r.connect(device);
+    if (transport === undefined) throw new Error('no transport');
+    await expect(transport.request({ method: 'GET', path: '/v1/carriers' })).rejects.toBeDefined();
+    expect(r.network.dialled).toEqual([]);
+    expect(r.router.relayFallback(r.fx.daemonId)).toBeUndefined();
+    r.fx.layer.close();
+  });
+
+  test('only the address recorded at pairing is used, never one the daemon published later', async () => {
+    // Paired at DIRECT, which does not carry now; the daemon's later publication names a host that does.
+    const r = await rig(
+      {
+        [new URL(DIRECT).host]: { kind: 'dead' },
+        'hosted.example': { kind: 'dead' },
+        'elsewhere.example.test': { kind: 'carries', carrier: 'direct' },
+      },
+      [{ kind: 'direct', url: 'https://elsewhere.example.test' }],
+      'relay',
+      null,
+      undefined,
+      { chosen: () => false },
+    );
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    await expect(transport.request({ method: 'GET', path: '/v1/carriers' })).rejects.toBeDefined();
+    expect(hostsDialled(r.network.dialled)).toEqual([new URL(DIRECT).host]);
+    r.fx.layer.close();
+  });
+});
+
+describe('a Relay only the person CHOSE', () => {
+  test('stays strict: the relay does not answer, the paired direct address is never dialled, and no line is said', async () => {
+    const r = await rig(hostsOf({ kind: 'dead' }), PUBLISHED, 'relay', HOSTED, undefined, { chosen: () => true });
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    await expect(transport.request({ method: 'GET', path: '/v1/carriers' })).rejects.toBeDefined();
+    expect(hostsDialled(r.network.dialled)).toEqual(['hosted.example']);
+    expect(r.router.relayFallback(r.fx.daemonId)).toBeUndefined();
+    r.fx.layer.close();
+  });
+
+  test('with no relay at all it says Relay only has nothing to try, and dials nothing', async () => {
+    const r = await rig(hostsOf({ kind: 'dead' }), PUBLISHED, 'relay', null, undefined, { chosen: () => true });
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    await expect(transport.request({ method: 'GET', path: '/v1/carriers' })).rejects.toBeDefined();
+    expect(r.network.dialled).toEqual([]);
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: false, reason: expect.stringContaining('Relay only') });
+    r.fx.layer.close();
+  });
+
+  test('a router built with no word on it counts every preference as chosen (nothing falls back)', async () => {
+    const r = await rig(hostsOf({ kind: 'dead' }), PUBLISHED, 'relay', null);
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    await expect(transport.request({ method: 'GET', path: '/v1/carriers' })).rejects.toBeDefined();
+    expect(r.network.dialled).toEqual([]);
+    r.fx.layer.close();
+  });
+});
+
+describe('other preferences never fall back', () => {
+  test('Auto already walks direct; a chosen tunnel never borrows the paired address', async () => {
+    const r = await rig(hostsOf({ kind: 'dead' }), PUBLISHED, 'tunnel', null, undefined, { chosen: () => false });
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    await expect(transport.request({ method: 'GET', path: '/v1/carriers' })).rejects.toBeDefined();
+    expect(hostsDialled(r.network.dialled)).not.toContain(new URL(DIRECT).host);
+    r.fx.layer.close();
+  });
+});

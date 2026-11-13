@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseInventory, wholeDaemonWhy } from '../../../src/client/inventory.ts';
+import { parseInventory, unreadableBecause, wholeDaemonWhy } from '../../../src/client/inventory.ts';
 import { CORE, inventoryOf, surface } from './fixtures.ts';
 
 const board = surface('board');
@@ -28,6 +28,24 @@ describe('wholeDaemonWhy: the same full-screen sentence, told apart', () => {
       'this app speaks protocol 1, this daemon speaks protocol 2',
     );
     expect(wholeDaemonWhy(parseInventory({ nope: true }), compiled)).toBe(
+      'the plugin list this daemon sent could not be read',
+    );
+  });
+
+  test('a read that failed on the way names the carrier’s own sentence as the cause', () => {
+    const inventory = unreadableBecause(new Error('Relay only: there is no relay for this machine right now.'));
+    expect(wholeDaemonWhy(inventory, compiled)).toBe(
+      'the plugin list could not be read: Relay only: there is no relay for this machine right now',
+    );
+  });
+
+  test('the cause is one capped line, and an error with no words says nothing more than an unreadable answer', () => {
+    const long = unreadableBecause(new Error(`a\n  b ${'x'.repeat(1000)}`));
+    expect(long.kind === 'unreadable' ? long.cause?.length : 0).toBe(240);
+    expect(long.kind === 'unreadable' ? long.cause?.startsWith('a b x') : false).toBe(true);
+    expect(unreadableBecause(new Error('  '))).toEqual({ kind: 'unreadable' });
+    expect(unreadableBecause('not an error')).toEqual({ kind: 'unreadable' });
+    expect(wholeDaemonWhy(unreadableBecause(undefined), compiled)).toBe(
       'the plugin list this daemon sent could not be read',
     );
   });

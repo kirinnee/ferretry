@@ -58,6 +58,11 @@ export const PairedDaemonSchema = z.strictObject({
   label: z.string().min(1).max(80).optional(),
   deviceId: z.string().min(1).max(128),
   address: OriginSchema,
+  /**
+   * Set when the pairing crossed a relay: the link's `address` was then NOT one this device reached, so it is not "the
+   * direct address this device paired over". Absent for a direct pairing, and for every record made before this was kept.
+   */
+  pairedViaRelay: z.literal(true).optional(),
   /** The daemon's published carrier set, opaque to the shell (Connections parses it). */
   carriers: z.array(z.unknown()).max(16).default([]),
   pairedAt: z.number().int().nonnegative(),
@@ -139,6 +144,7 @@ export interface PairingInput {
   readonly machine: string;
   readonly deviceId: string;
   readonly address: string;
+  readonly pairedViaRelay?: true;
   readonly carriers?: readonly unknown[];
   readonly label?: string;
 }
@@ -200,6 +206,7 @@ export class DaemonList {
       machine: input.machine,
       deviceId: input.deviceId,
       address: input.address,
+      ...(input.pairedViaRelay === true ? { pairedViaRelay: true } : {}),
       carriers: input.carriers ?? [],
       pairedAt: existing?.pairedAt ?? now,
       lastSelectedAt: now,

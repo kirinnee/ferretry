@@ -1,4 +1,8 @@
-/** This browser’s per-machine carrier preference. Absent means relay. */
+/**
+ * This browser’s per-machine carrier preference. Absent means the DEFAULT: Relay, which — because nobody chose it —
+ * falls back to the direct address the device paired over when the relay cannot be reached (§15). A saved `relay` is
+ * "Relay only", a choice, and stays strict.
+ */
 
 type DaemonId = string;
 
@@ -24,6 +28,22 @@ export const CARRIER_PREFERENCE_LABEL: Readonly<Record<CarrierPreference, string
   relay: 'Relay only',
 };
 
+/**
+ * What a selector offers: the four preferences a person can choose, and the DEFAULT — nothing chosen. The default walks
+ * Relay and, when the relay cannot be reached, uses the direct address the device paired over; "Relay only" is a
+ * choice and never does.
+ */
+export type CarrierSetting = CarrierPreference | 'default';
+
+/** Every setting, in the order a selector offers them. */
+export const CARRIER_SETTINGS: readonly CarrierSetting[] = ['default', ...CARRIER_PREFERENCES];
+
+/** How the default is named wherever a person reads it. */
+export const DEFAULT_SETTING_LABEL = 'Relay (default)';
+
+/** A machine's setting: what was chosen, or the default when nothing was. */
+export const settingOf = (chosen: CarrierPreference | undefined): CarrierSetting => chosen ?? 'default';
+
 /** Auto's walk (§15): direct has the fewest parties, WebRTC is the first remote carrier, the relay is last. */
 const AUTO_ORDER: readonly CarrierKind[] = ['direct', 'webrtc', 'tunnel', 'relay'];
 
@@ -36,19 +56,19 @@ const AUTO_ORDER: readonly CarrierKind[] = ['direct', 'webrtc', 'tunnel', 'relay
 export const carrierOrder = (preference: CarrierPreference): readonly CarrierKind[] =>
   preference === 'auto' ? AUTO_ORDER : [preference];
 
-/** Anything but the four known words is the default (Relay). */
-export const parseCarrierPreference = (raw: unknown): CarrierPreference =>
+/** One of the four known words, or nothing: anything else is no choice at all (so it reads as the unchosen default). */
+export const parseCarrierPreference = (raw: unknown): CarrierPreference | undefined =>
   typeof raw === 'string' && (CARRIER_PREFERENCES as readonly string[]).includes(raw)
     ? (raw as CarrierPreference)
-    : DEFAULT_CARRIER_PREFERENCE;
+    : undefined;
 
-/** Every machine's preference. A machine that is absent is on the default, Relay. */
+/** Every machine's CHOSEN preference. A machine that is absent is on the default: Relay, unchosen. */
 export type CarrierPreferences = Readonly<Record<string, CarrierPreference>>;
 
 /**
  * The stored map, read defensively: a document that is not an object is no preferences at all, and
- * an entry that is not a known word is dropped (so it reads as Relay) rather than refusing the rest.
- * Relay is never stored, because absent already means it; Auto is, because it no longer does.
+ * an entry that is not a known word is dropped (so it reads as the unchosen default) rather than refusing the rest.
+ * A saved `relay` is kept: it is "Relay only", a choice, and is told apart from absent, the default.
  */
 export const parseCarrierPreferences = (raw: string | null | undefined): CarrierPreferences => {
   if (raw === null || raw === undefined) return {};
@@ -62,7 +82,7 @@ export const parseCarrierPreferences = (raw: string | null | undefined): Carrier
   const preferences: Record<string, CarrierPreference> = {};
   for (const [daemonId, value] of Object.entries(document)) {
     const preference = parseCarrierPreference(value);
-    if (preference !== DEFAULT_CARRIER_PREFERENCE) preferences[daemonId] = preference;
+    if (preference !== undefined) preferences[daemonId] = preference;
   }
   return preferences;
 };
@@ -99,8 +119,11 @@ export class CarrierPreferenceStore {
     return this.#preferences;
   };
 
-  /** One machine's preference. */
+  /** One machine's preference: what the walk follows. An unchosen machine reads as the default, Relay. */
   preference = (daemonId: DaemonId): CarrierPreference => this.snapshot()[daemonId] ?? DEFAULT_CARRIER_PREFERENCE;
+
+  /** Whether the person chose this machine's preference. Unchosen Relay may fall back to the paired direct address. */
+  chosen = (daemonId: DaemonId): boolean => this.snapshot()[daemonId] !== undefined;
 
   /** Told which machine changed, so a router can forget only that machine's winner. */
   subscribe = (listener: (daemonId: DaemonId) => void): (() => void) => {
@@ -110,12 +133,22 @@ export class CarrierPreferenceStore {
     };
   };
 
-  /** A failed write still changes the preference for the rest of this tab. */
+  /** Chooses one machine's preference — "Relay only" included. A failed write still changes it for the rest of this tab. */
   set(daemonId: DaemonId, preference: CarrierPreference): void {
-    if (this.preference(daemonId) === preference) return;
+    if (this.snapshot()[daemonId] === preference) return;
+    const next: Record<string, CarrierPreference> = { ...this.snapshot(), [daemonId]: preference };
+    this.#commit(daemonId, next);
+  }
+
+  /** Forgets the choice: the machine is back on the default, Relay, which may fall back to the paired direct address. */
+  reset(daemonId: DaemonId): void {
+    if (this.snapshot()[daemonId] === undefined) return;
     const next: Record<string, CarrierPreference> = { ...this.snapshot() };
-    if (preference === DEFAULT_CARRIER_PREFERENCE) delete next[daemonId];
-    else next[daemonId] = preference;
+    delete next[daemonId];
+    this.#commit(daemonId, next);
+  }
+
+  #commit(daemonId: DaemonId, next: Record<string, CarrierPreference>): void {
     this.#preferences = next;
     this.#persist(next);
     for (const listener of this.#listeners) listener(daemonId);

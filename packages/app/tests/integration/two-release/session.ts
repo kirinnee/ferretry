@@ -1,9 +1,18 @@
-import { nativeCrypto, nativeFetch, nativeSetTimeout, NativeWebSocket } from './native-socket.ts';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { nativeCrypto, nativeFetch, NativeResponse, nativeSetTimeout, NativeWebSocket } from './native-socket.ts';
 import type { StartedDaemon } from '../../../../../scripts/test/two-release/daemon.ts';
 import type { Release } from '../../../../../scripts/test/two-release/releases.ts';
 import type { DaemonTransport } from '../../../src/client/transport.ts';
 import { connector, type DirectDial, pairOverDirect } from '../../../src/connect/connector.ts';
-import type { DeviceClaims } from '../../../src/connect/provides.ts';
+import {
+  type ConnectPorts,
+  type DeviceClaims,
+  registeredBackgroundViews,
+  registeredConnect,
+  registeredDevicePanels,
+} from '../../../src/connect/provides.ts';
+import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { directDial, type SocketLike } from '../../../src/session/direct-dial.ts';
 import { WebCryptoRelayCrypto } from '../../../src/session/webcrypto.ts';
@@ -38,6 +47,40 @@ export interface AppSession {
   ready(): Promise<void>;
   /** Drops the pairing (stopping the client) and closes the sealed session, so nothing outlives the test. */
   close(): void;
+  /** With {@link ProductionCarrier}: every socket URL the registered Connections router dialled, in order. */
+  readonly dialled: readonly string[];
+  /** With {@link ProductionCarrier}: whether the relay stand-in answers. Takes effect on the next session. */
+  setRelayUp(up: boolean): void;
+  /** With {@link ProductionCarrier}: opens one more session through the registered carrier and asks the daemon a read. */
+  probe(): Promise<void>;
+  /** With {@link ProductionCarrier}: the line the registered Connections background view draws for this daemon. */
+  relayFallbackLine(): string | undefined;
+  /** With {@link ProductionCarrier}: the device-settings panels the registered halves draw (no machine needed). */
+  deviceSettingsPanels(): readonly string[];
+}
+
+/**
+ * THE REGISTERED PRODUCTION CARRIER (not `carriers: []`): the shell's own `registeredConnect` over the REAL generated
+ * registry builds Connections' router exactly as `main.tsx` does, with its real default preference. Only the network is
+ * the fixture's: the hosted relay directory's answer, and what a relay socket reaches.
+ */
+/**
+ * The browser-storage key Connections keeps its per-machine preference under. Another package is reached only through its
+ * contract, so the key is spelled here; if it drifts, the chosen-Relay case stops being strict and its test fails.
+ */
+const CARRIER_PREFERENCE_KEY = 'fy-carrier-preference-v1';
+
+export interface ProductionCarrier {
+  /**
+   * The relay the hosted directory advertises: none (`undefined`), or one at a loopback address that answers only while
+   * {@link AppSession.setRelayUp} says so. When it answers it is the daemon's own listener, which speaks the same session
+   * route a rendezvous does; when not, nothing listens there.
+   */
+  readonly relay?: { readonly up: boolean };
+  /** The person chose "Relay only" for this machine (saved in the browser's storage, as Connections saves it). */
+  readonly chosenRelayOnly?: boolean;
+  /** The pairing crossed a relay, so the link's address is not one this device paired over. */
+  readonly pairedViaRelay?: boolean;
 }
 
 const poll = async <T>(read: () => T | undefined, what: string, ms = 30_000): Promise<T> => {
@@ -79,7 +122,7 @@ export async function turnUnlockOffAtTheMachine(daemon: StartedDaemon): Promise<
 export async function openApp(
   daemon: StartedDaemon,
   app: Pick<Release, 'surfaces' | 'appVersion'>,
-  options: { readonly grants: 'full' | 'limited' },
+  options: { readonly grants: 'full' | 'limited'; readonly production?: ProductionCarrier },
 ): Promise<AppSession> {
   const crypto = new WebCryptoRelayCrypto(nativeCrypto.subtle);
   const direct: DirectDial = target =>
@@ -149,11 +192,72 @@ export async function openApp(
     },
     forget: async () => {},
   };
-  const connect = connector({ crypto, claims, carriers: [], direct });
-
   const storage = memoryStore();
   const daemons = new DaemonList({ storage, now: () => 1 });
-  daemons.add({ daemon: daemonId, machine: 'fixture', deviceId, address: daemon.url });
+  daemons.add({
+    daemon: daemonId,
+    machine: 'fixture',
+    deviceId,
+    address: daemon.url,
+    ...(options.production?.pairedViaRelay === true ? { pairedViaRelay: true as const } : {}),
+  });
+
+  const dialled: string[] = [];
+  const relayState = { up: options.production?.relay?.up ?? false };
+  const restore: Array<() => void> = [];
+  let registered: ReturnType<typeof registeredConnect> | undefined;
+  let connect = connector({ crypto, claims, carriers: [], direct });
+  if (options.production !== undefined) {
+    const production = options.production;
+    const RELAY_URL = 'ws://127.0.0.1:9';
+    const daemonOrigin = new URL(daemon.url);
+    // A relay socket reaches the daemon's own listener while the stand-in is up, and nothing otherwise.
+    const openSocket = (url: string): SocketLike => {
+      dialled.push(url);
+      const asked = new URL(url);
+      const isRelay = asked.host === new URL(RELAY_URL).host;
+      const target = isRelay && relayState.up ? `ws://${daemonOrigin.host}${asked.pathname}` : url;
+      return new NativeWebSocket(target) as unknown as SocketLike;
+    };
+    const host = globalThis as { localStorage?: unknown; __FY_RELAY_DIRECTORY__?: string };
+    const priorStorage = host.localStorage;
+    const priorDirectory = host.__FY_RELAY_DIRECTORY__;
+    restore.push(() => {
+      host.localStorage = priorStorage;
+      host.__FY_RELAY_DIRECTORY__ = priorDirectory;
+    });
+    // Connections reads its saved preference from the browser's storage when it is built, as it does in a page.
+    const saved = new Map<string, string>(
+      production.chosenRelayOnly === true ? [[CARRIER_PREFERENCE_KEY, JSON.stringify({ [daemonId]: 'relay' })]] : [],
+    );
+    host.localStorage = {
+      getItem: (key: string) => saved.get(key) ?? null,
+      setItem: (key: string, value: string) => void saved.set(key, value),
+    };
+    host.__FY_RELAY_DIRECTORY__ = production.relay === undefined ? undefined : 'https://directory.example';
+    const ports: ConnectPorts = {
+      crypto,
+      subtle: nativeCrypto.subtle,
+      indexedDB: null,
+      openSocket,
+      after: (delayMs, run) => void nativeSetTimeout(run, delayMs),
+      now: () => Date.now(),
+      daemons,
+      pairDirect: pairOverDirect(crypto, direct),
+      ...(production.relay === undefined
+        ? {}
+        : {
+            directory: async () =>
+              new NativeResponse(JSON.stringify({ version: 1, relayUrl: RELAY_URL }), {
+                headers: { 'content-type': 'application/json' },
+              }),
+          }),
+    };
+    registered = registeredConnect(app.surfaces as readonly SurfaceEntry[], ports);
+    if (registered.carriers.length === 0)
+      throw new Error(`the registered Connections carrier did not build: ${JSON.stringify(registered.failures)}`);
+    connect = connector({ crypto, claims, carriers: registered.carriers, direct });
+  }
 
   let latest: RecordingTransport | undefined;
   let opened: (DaemonTransport & { close?: () => void }) | undefined;
@@ -178,7 +282,35 @@ export async function openApp(
     close: () => {
       daemons.remove(daemonId);
       opened?.close?.();
+      for (const undo of restore) undo();
     },
+    dialled,
+    setRelayUp: up => {
+      relayState.up = up;
+    },
+    probe: async () => {
+      const paired = daemons.get(daemonId);
+      if (paired === undefined) throw new Error('the pairing is gone');
+      const transport = await connect(paired);
+      if (transport === undefined) throw new Error('no transport');
+      try {
+        await transport.request({ method: 'GET', path: '/v1/health' });
+      } finally {
+        (transport as { close?: () => void }).close?.();
+      }
+    },
+    relayFallbackLine: () => {
+      const view = registeredBackgroundViews(app.surfaces as readonly SurfaceEntry[]).find(
+        entry => entry.plugin === 'connections' && entry.id === 'relay-fallback',
+      );
+      if (view === undefined) throw new Error('Connections registered no relay-fallback background view');
+      const html = renderToStaticMarkup(createElement(view.view, { daemon: daemonId, client: {} as never }));
+      const line = /data-relay-fallback="">([^<]*)</u.exec(html)?.[1];
+      return line === undefined ? undefined : line.replaceAll('&#x27;', "'").replaceAll('&amp;', '&');
+    },
+    deviceSettingsPanels: () => [
+      ...registeredDevicePanels(app.surfaces as readonly SurfaceEntry[], 'device.settings').keys(),
+    ],
     recording: () => {
       if (latest === undefined) throw new Error('the runtime has not connected yet');
       return latest;

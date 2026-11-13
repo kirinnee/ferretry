@@ -45,20 +45,23 @@ describe('carrierOrder', () => {
 });
 
 describe('reading a stored preference', () => {
-  test('R5 reads the four words and anything else as Relay, the default', () => {
+  test('R5 reads the four words, and anything else as no choice at all (the unchosen default, Relay)', () => {
     for (const preference of CARRIER_PREFERENCES) should(parseCarrierPreference(preference)).equal(preference);
-    should(parseCarrierPreference('Relay')).equal('relay');
-    should(parseCarrierPreference('carrier-pigeon')).equal('relay');
-    should(parseCarrierPreference(3)).equal('relay');
-    should(parseCarrierPreference(null)).equal('relay');
+    should(parseCarrierPreference('Relay')).equal(undefined);
+    should(parseCarrierPreference('carrier-pigeon')).equal(undefined);
+    should(parseCarrierPreference(3)).equal(undefined);
+    should(parseCarrierPreference(null)).equal(undefined);
   });
 
   test('keeps every known entry, drops an unknown one, and refuses nothing over a damaged document', () => {
     should(parseCarrierPreferences(JSON.stringify({ [STUDIO]: 'tunnel', [LAPTOP]: 'telepathy' }))).eql({
       [STUDIO]: 'tunnel',
     });
-    // Auto is a choice now, so it is kept; Relay is what absent means, so it is not stored.
-    should(parseCarrierPreferences(JSON.stringify({ [STUDIO]: 'auto', [LAPTOP]: 'relay' }))).eql({ [STUDIO]: 'auto' });
+    // A saved Relay is "Relay only", a choice, and is told apart from absent (the default): both are kept.
+    should(parseCarrierPreferences(JSON.stringify({ [STUDIO]: 'auto', [LAPTOP]: 'relay' }))).eql({
+      [STUDIO]: 'auto',
+      [LAPTOP]: 'relay',
+    });
     should(parseCarrierPreferences('{not json')).eql({});
     should(parseCarrierPreferences('[]')).eql({});
     should(parseCarrierPreferences('null')).eql({});
@@ -89,21 +92,54 @@ describe('CarrierPreferenceStore', () => {
     should(heard).eql([LAPTOP]);
     should(store.snapshot()).not.equal(first);
 
-    // Choosing what is already in force is not a change; Relay is stored as nothing at all.
+    // Choosing what is already chosen is not a change.
     store.set(LAPTOP, 'tunnel');
     should(heard).eql([LAPTOP]);
-    store.set(STUDIO, 'relay');
-    should(JSON.parse(storage.values.get(CARRIER_PREFERENCE_KEY) ?? '')).eql({ [LAPTOP]: 'tunnel' });
-    should(heard).eql([LAPTOP, STUDIO]);
 
-    // An explicit Auto IS stored: it is no longer what absent means.
+    // An explicit Auto IS stored.
     store.set(STUDIO, 'auto');
     should(store.preference(STUDIO)).equal('auto');
     should(JSON.parse(storage.values.get(CARRIER_PREFERENCE_KEY) ?? '')).eql({ [LAPTOP]: 'tunnel', [STUDIO]: 'auto' });
 
     unsubscribe();
     store.set(STUDIO, 'webrtc');
-    should(heard).eql([LAPTOP, STUDIO, STUDIO]);
+    should(heard).eql([LAPTOP, STUDIO]);
+  });
+
+  test('a CHOSEN Relay only is told apart from the default, and survives a reload', () => {
+    const storage = memory();
+    const store = new CarrierPreferenceStore(storage);
+    // Nothing chosen: Relay is what the walk follows, but nobody chose it (it may fall back to the paired direct address).
+    should(store.preference(STUDIO)).equal('relay');
+    should(store.chosen(STUDIO)).equal(false);
+
+    const heard: DaemonId[] = [];
+    store.subscribe(daemonId => heard.push(daemonId));
+    // Choosing Relay only while on the default IS a change: it is saved, and it is strict from now on.
+    store.set(STUDIO, 'relay');
+    should(store.preference(STUDIO)).equal('relay');
+    should(store.chosen(STUDIO)).equal(true);
+    should(JSON.parse(storage.values.get(CARRIER_PREFERENCE_KEY) ?? '')).eql({ [STUDIO]: 'relay' });
+    should(heard).eql([STUDIO]);
+    should(new CarrierPreferenceStore(storage).chosen(STUDIO)).equal(true);
+
+    // Back to the default forgets the choice; forgetting what was never chosen is not a change.
+    store.reset(STUDIO);
+    should(store.chosen(STUDIO)).equal(false);
+    should(JSON.parse(storage.values.get(CARRIER_PREFERENCE_KEY) ?? '')).eql({});
+    store.reset(STUDIO);
+    should(heard).eql([STUDIO, STUDIO]);
+    should(store.preference(LAPTOP)).equal('relay');
+    should(store.chosen(LAPTOP)).equal(false);
+  });
+
+  test('a stored document from before Relay only could be chosen reads exactly as it did', () => {
+    const storage = memory({ [CARRIER_PREFERENCE_KEY]: JSON.stringify({ [STUDIO]: 'webrtc' }) });
+    const store = new CarrierPreferenceStore(storage);
+    should(store.chosen(STUDIO)).equal(true);
+    should(store.preference(STUDIO)).equal('webrtc');
+    should(store.chosen(LAPTOP)).equal(false);
+    should(store.preference(LAPTOP)).equal('relay');
   });
 
   test('R630 choosing a preference reaches only this browser’s storage: no request and no socket to the daemon', () => {

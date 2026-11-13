@@ -2932,7 +2932,7 @@ and §7's records, and nothing a carrier operator holds can read, alter or inser
 
 **A connection preference is per device and per machine**, chosen in the PWA's Settings › This
 device and in the Connection status popover, and stored in that browser keyed by the daemon's
-fingerprint. **Relay is the default**: a machine with no stored choice is walked as Relay only, and Auto is a value a person has to pick (so it is stored, where Relay is stored as nothing). A device that held the earlier Auto-by-absence default moves to Relay on its first read of the current storage key; a deliberate WebRTC-only or Tunnel-only choice is carried forward as it was. It is never sent to the daemon and the daemon never reads one: the daemon still
+fingerprint. **Relay is the default**: a machine with no stored choice is walked as Relay, and Auto is a value a person has to pick. **"Relay only" is a choice, and is stored** — a saved `relay` is told apart from no saved value, because only the unchosen default may fall back (below). A device that held the earlier Auto-by-absence default moves to Relay on its first read of the current storage key; a deliberate WebRTC-only or Tunnel-only choice is carried forward as it was. It is never sent to the daemon and the daemon never reads one: the daemon still
 publishes the carriers it holds (§13), and the preference decides only which of them this browser
 walks, and in what order.
 
@@ -2941,13 +2941,28 @@ walks, and in what order.
 | **Auto**        | direct → WebRTC → tunnel → relay            | Chosen, never the default. Direct stays first because it has the fewest parties; WebRTC is the first remote carrier. A tunnel is tried only when the daemon published one. A WebRTC attempt costs about 0.4 s when it works and is bounded by its ICE deadline when it does not (§16). |
 | **WebRTC only** | WebRTC                                      | The relay (or direct) session is still used to **introduce** the two ends — signalling only, never the session's bytes.                                                                                                                                                                |
 | **Tunnel only** | tunnel                                      | Dials the tunnel this device kept; when there is none, or it does not carry, asks the daemon where it is (below). Says "not set up by the operator" when the hosted service advertises `available: false`, and "this machine has no tunnel yet" when the daemon still names none.      |
-| **Relay only**  | relay (published, then the hosted fallback) | **The default** for every device and machine that has not chosen — exactly the pre-choice relay behaviour.                                                                                                                                                                             |
+| **Relay only**  | relay (published, then the hosted fallback) | Chosen, and strict: never anything else, even when the relay cannot be reached.                                                                                                                                                                                                        |
+| **Default**     | relay, then the address paired over         | What a machine that nobody chose for is on. It walks the relay first, every session; when the relay carries nothing, the **direct address this device paired over** does (below).                                                                                                      |
 
 The walk's rules from §13 are unchanged inside each preference: the carrier is chosen by **trying**
 it, only a transport failure from a replay-safe request advances, a winner is remembered for the
 life of the connection, and a surface always names the live carrier and why the others were passed
 over. A preference that leaves nothing to try is a stated failure — "Tunnel only: this machine has no
 tunnel yet" — never a silent fall back to a carrier the person excluded.
+
+**The default falls back to the address this device paired over.** Relay is the owner's default and
+asks nothing, but a device that paired over a direct address and then cannot reach a relay — none
+discovered, or one that does not answer — would otherwise be blocked for good, with the machine's own
+Connection setting hidden behind the block. So an **unchosen** Relay tries the relay first and, when it
+carries nothing, dials the address recorded at pairing (the link's address; nothing discovered, published
+later or guessed). A device whose pairing crossed a relay recorded that address without ever reaching it,
+so it has none and gets no fallback. The session is the ordinary authenticated one — same proof, same
+device key, governed exactly as a relayed arrival. Every surface that names the live carrier says it
+is direct **because the relay failed** ("Couldn’t reach it through the relay, using the direct
+connection.") and the line goes when a relay session next answers; a direct session that ends does not
+clear it, a walk that finds nothing at all does. A chosen "Relay only" never falls back. When the read
+that opens a machine fails, the block page names the carrier's own cause and links Settings › This device
+› Connection, which needs no machine.
 
 **Pairing ignores the preference.** First contact is direct, then the hosted relay (§14), whatever is
 chosen: WebRTC needs a device key to signal and a tunnel is published only to a paired device.

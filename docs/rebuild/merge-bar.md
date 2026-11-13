@@ -141,7 +141,12 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
     must also carry one effective hash per package. The reading side is held by
     `packages/app/tests/unit/client/inventory-reread.test.ts` (a plugin list that failed to read is asked again, not left as
     the verdict) and `packages/app/tests/unit/shell/whole-daemon-line.test.ts` (a failed read is not the "reload" sentence;
-    a different core contract names the piece).
+    a different core contract names the piece). The same file then runs the **registered production Connections carrier
+    router with its real default preference** (`registeredConnect` over the real generated registry, not `carriers: []`):
+    the unchosen default falls back to the address the device paired over when no relay is discovered or the relay does not
+    answer, says so, and flips back when the relay answers; a chosen "Relay only" stays blocked with the relay named as the
+    cause and Settings › This device › Connection reachable from the block; a device that paired over a relay has no
+    direct address to fall back to.
 
 ## After merge
 

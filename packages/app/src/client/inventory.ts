@@ -29,8 +29,20 @@ export type Inventory =
   | { readonly kind: 'read'; readonly entries: ReadonlyMap<string, InventoryEntry> }
   /** The daemon speaks another session protocol: the one full-screen sentence, nothing else is sent. */
   | { readonly kind: 'protocol-mismatch'; readonly daemonProtocol: number }
-  /** The answer was not an inventory. Damaged is not empty: everything stays blocked. */
-  | { readonly kind: 'unreadable' };
+  /**
+   * The answer was not an inventory, or never arrived. Damaged is not empty: everything stays blocked. `cause` is the
+   * session's own sentence when the read failed on the way (which carrier could not carry it), capped, never a body.
+   */
+  | { readonly kind: 'unreadable'; readonly cause?: string };
+
+/** The longest cause kept: a sentence to read to someone, not a log line. */
+const CAUSE_MAX = 240;
+
+/** An unreadable list because the read itself failed: the failure's sentence is kept, capped, so the screen can name it. */
+export function unreadableBecause(error: unknown): Inventory {
+  const message = error instanceof Error ? error.message.trim().replace(/\s+/gu, ' ') : '';
+  return message === '' ? { kind: 'unreadable' } : { kind: 'unreadable', cause: message.slice(0, CAUSE_MAX) };
+}
 
 export function parseInventory(body: unknown): Inventory {
   const envelope = InventoryEnvelopeSchema.safeParse(body);
@@ -144,7 +156,10 @@ export function wholeDaemonWhy(
   compiled: readonly SurfaceEntry[],
 ): string | undefined {
   if (inventory === undefined) return undefined;
-  if (inventory.kind === 'unreadable') return 'the plugin list this daemon sent could not be read';
+  if (inventory.kind === 'unreadable')
+    return inventory.cause === undefined
+      ? 'the plugin list this daemon sent could not be read'
+      : `the plugin list could not be read: ${inventory.cause.replace(/[.\s]+$/u, '')}`;
   if (inventory.kind === 'protocol-mismatch')
     return `this app speaks protocol ${PROTOCOL}, this daemon speaks protocol ${inventory.daemonProtocol}`;
   const coreIds: readonly string[] = CORE_IDS;

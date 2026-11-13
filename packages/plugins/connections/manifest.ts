@@ -83,7 +83,11 @@ export default definePlugin({
 
   ui: {
     settings: [settingsTab('connection', { label: 'Connection', order: 15 })],
-    panels: [panel('daemon.status', { id: 'carrier', order: 20 })],
+    panels: [
+      panel('daemon.status', { id: 'carrier', order: 20 }),
+      // How this device reaches each machine: a device-level panel, so it needs no machine (the whole-machine block links here).
+      panel('device.settings', { id: 'connection', order: 40 }),
+    ],
   },
 
   data: {

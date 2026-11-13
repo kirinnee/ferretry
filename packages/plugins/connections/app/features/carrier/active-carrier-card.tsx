@@ -36,15 +36,16 @@
  */
 
 import { type ConnectionChoice, type ConnectionMethod, describeConnectionMethod } from '../../lib/connection.ts';
-import type { CarrierPreference } from '../../lib/carrier-preference.ts';
+import type { CarrierSetting } from '../../lib/carrier-preference.ts';
 import type { ConnectionHealthState } from '../../lib/connection-health.ts';
 import { carrierLines, RECONNECTING_LABEL, stallCopy } from '../connection/connection-copy.ts';
 import { type CarrierPreferenceAvailability, CarrierPreferenceSelector } from './carrier-preference-selector.tsx';
+import { RelayFallbackNotice } from './relay-fallback-notice.tsx';
 
 /** This machine's connection preference on this device, and how to change it. */
 interface CarrierPreferenceControl {
-  readonly value: CarrierPreference;
-  readonly onChange: (preference: CarrierPreference) => void;
+  readonly value: CarrierSetting;
+  readonly onChange: (setting: CarrierSetting) => void;
   readonly availability: CarrierPreferenceAvailability;
 }
 
@@ -59,6 +60,8 @@ export interface ActiveCarrierCardProps {
   readonly machine?: string;
   /** The connection preference selector; absent where nothing can change it. */
   readonly preference?: CarrierPreferenceControl;
+  /** Said while the paired direct address stands in for an unreachable relay (the default preference only). */
+  readonly relayFallback?: string;
 }
 
 /** The status the card leads with, as one machine-readable word. */
@@ -146,6 +149,7 @@ export function ActiveCarrierCard({
   health,
   machine = 'this machine',
   preference,
+  relayFallback,
 }: ActiveCarrierCardProps) {
   const method = choice?.ok === true ? choice.method : undefined;
   const disclosure = method === undefined ? undefined : describeConnectionMethod(method);
@@ -204,6 +208,8 @@ export function ActiveCarrierCard({
           )}
         </div>
       )}
+      {/* The relay could not carry this machine, so the direct address it was paired over does: say that, plainly. */}
+      {relayFallback === undefined ? null : <RelayFallbackNotice line={relayFallback} />}
       {/* The measured sentence, or the honest absence of one. Never a default. */}
       <p className="mb-0 mt-1 text-cell leading-base text-muted">
         {choice === undefined ? CARRIER_UNMEASURED : choice.reason}

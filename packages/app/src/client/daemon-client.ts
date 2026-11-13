@@ -7,7 +7,14 @@ import { type PasskeyHandler, type PasskeyNeed, type PromptOrigin, requestOrigin
 import type { SurfaceEntry } from '../surfaces/registry.ts';
 import { untilAborted } from './machine-deadline.ts';
 import { DEVICE_NOT_ACCEPTED_SENTENCE } from './sentences.ts';
-import { eventOwner, type Inventory, parseInventory, type Standing, standings } from './inventory.ts';
+import {
+  eventOwner,
+  type Inventory,
+  parseInventory,
+  type Standing,
+  standings,
+  unreadableBecause,
+} from './inventory.ts';
 import {
   CARRIER_OUTAGE_CODE,
   DaemonCallError,
@@ -344,7 +351,7 @@ export class DaemonClient {
       inventory = answer.status === 200 ? parseInventory(answer.body) : { kind: 'unreadable' };
     } catch (error) {
       if (isDeviceRefusal(error)) this.#refuse();
-      inventory = { kind: 'unreadable' };
+      inventory = unreadableBecause(error);
     }
     try {
       const health = await this.#transport.request({ method: 'GET', path: parseRouteKey(HEALTH_ROUTE).path });

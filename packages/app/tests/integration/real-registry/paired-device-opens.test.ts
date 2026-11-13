@@ -124,3 +124,100 @@ describe('narrowing still narrows', () => {
     }
   }, 60_000);
 });
+
+/**
+ * THE PRODUCTION CARRIER, NOT `carriers: []` (merge bar 14; ruling 2026-11-13).
+ *
+ * The cases above open the fleet over the shell's own direct dial. The shipped app registers Connections instead, and
+ * its router, with NO saved preference, used to walk "Relay only": a device that paired directly was never tried
+ * directly, so a daemon with no relay (or one that does not answer) was a permanent "could not read" block. These cases
+ * run the REGISTERED router (`registeredConnect` over the real generated registry) with its real default:
+ *   - the default (nobody chose) falls back to the address this device paired over, says so, and flips back when the
+ *     relay answers;
+ *   - a "Relay only" the person CHOSE stays strict, stays blocked, names the relay as the cause, and the Connection
+ *     setting is reachable from the block;
+ *   - a device that paired over a relay has no direct address it paired over, so it gets no fallback.
+ */
+const FALLBACK_LINE = 'Couldn’t reach it through the relay, using the direct connection.';
+
+describe('the registered production carrier router, with its real default', () => {
+  const withDevice = async (
+    production: Parameters<typeof openApp>[2]['production'],
+    run: (session: AppSession) => Promise<void>,
+  ): Promise<void> => {
+    const daemon = await startDaemon({ name: 'A', daemon: daemonRegistry } as never, { version: appVersion });
+    const session = await openApp(daemon, { surfaces, appVersion }, { grants: 'full', production });
+    try {
+      await run(session);
+    } finally {
+      session.close();
+      await daemon.stop();
+    }
+  };
+  const inventoryKind = (session: AppSession) => {
+    const connection = session.runtime.connection(session.daemonId);
+    if (connection.kind !== 'connected') throw new Error(`the app is ${connection.kind}, not connected`);
+    return connection.client.inventory?.kind;
+  };
+  const isRelayDial = (url: string): boolean => new URL(url).port === '9';
+
+  test('1. default + direct pairing + no relay discovered: the fleet opens over direct and says the relay was not used', async () => {
+    await withDevice({}, async session => {
+      await session.ready();
+      expect(inventoryKind(session)).toBe('read');
+      expect(session.runtime.wholeDaemonLine(session.daemonId)).toBeUndefined();
+      expect(session.runtime.wholeDaemonDetail(session.daemonId)).toBeUndefined();
+      expect(session.relayFallbackLine()).toBe(FALLBACK_LINE);
+      expect(session.dialled.some(isRelayDial)).toBe(false);
+    });
+  }, 60_000);
+
+  test('2. default + a relay discovered but unreachable: the relay is dialled FIRST, then the paired direct address carries', async () => {
+    await withDevice({ relay: { up: false } }, async session => {
+      await session.ready();
+      expect(inventoryKind(session)).toBe('read');
+      expect(session.runtime.wholeDaemonLine(session.daemonId)).toBeUndefined();
+      expect(session.relayFallbackLine()).toBe(FALLBACK_LINE);
+      const first = session.dialled[0];
+      expect(first !== undefined && isRelayDial(first)).toBe(true);
+      expect(session.dialled.some(url => !isRelayDial(url))).toBe(true);
+    });
+  }, 60_000);
+
+  test('3. a Relay only the person CHOSE stays strict: blocked, the relay named as the cause, the Connection setting reachable', async () => {
+    await withDevice({ relay: { up: false }, chosenRelayOnly: true }, async session => {
+      await session.ready();
+      expect(inventoryKind(session)).toBe('unreadable');
+      expect(session.runtime.wholeDaemonLine(session.daemonId)).toContain('Could not read');
+      const why = session.runtime.wholeDaemonDetail(session.daemonId) ?? '';
+      expect(why).toContain('the plugin list could not be read');
+      expect(why.toLowerCase()).toContain('relay');
+      // Strict: the daemon's own address is never dialled, so no line says it was used.
+      expect(session.dialled.every(isRelayDial)).toBe(true);
+      expect(session.relayFallbackLine()).toBeUndefined();
+      // The Connection setting is a device-level panel, so the block can link to it with no machine behind it.
+      expect(session.deviceSettingsPanels()).toContain('connections.connection');
+    });
+  }, 60_000);
+
+  test('4. the relay comes back: the next session flips back to the relay and the line goes away', async () => {
+    await withDevice({ relay: { up: false } }, async session => {
+      await session.ready();
+      expect(session.relayFallbackLine()).toBe(FALLBACK_LINE);
+      session.setRelayUp(true);
+      await session.probe();
+      expect(session.relayFallbackLine()).toBeUndefined();
+    });
+  }, 60_000);
+
+  test('5. a device that paired over a relay has no direct address to fall back to: blocked with the relay as the cause', async () => {
+    await withDevice({ pairedViaRelay: true }, async session => {
+      await session.ready();
+      expect(inventoryKind(session)).toBe('unreadable');
+      expect(session.runtime.wholeDaemonLine(session.daemonId)).toContain('Could not read');
+      expect((session.runtime.wholeDaemonDetail(session.daemonId) ?? '').toLowerCase()).toContain('relay');
+      expect(session.dialled).toEqual([]);
+      expect(session.relayFallbackLine()).toBeUndefined();
+    });
+  }, 60_000);
+});
