@@ -288,3 +288,55 @@ describe('holding', () => {
     stop();
   });
 });
+
+/**
+ * THE EARLY ARRIVAL (`public/arrival.js`, run before the module graph is fetched): the fragment is already off the
+ * address when the taker is built, and the value reaches it in memory on one property of `window`. The taker takes it
+ * once, by the plugins' own declarations.
+ */
+describe('early arrival', () => {
+  const EARLY = '#v1;a=127.0.0.1:9;c=FAKEFAKE;fp=00'; // an obviously fake pairing fragment
+  const withEarly = (browser: FakeBrowser, pathname: string, hash: string): FakeBrowser =>
+    Object.defineProperty(browser, '__fyArrival', { configurable: true, value: { pathname, hash } });
+
+  test('a fragment the early script took is held for its declared screen, with nothing left to rewrite', () => {
+    const browser = withEarly(browserAt('/pair'), '/pair', EARLY);
+    const taker = new AddressTaker(declared, browser);
+    expect(browser.href()).toBe('/pair');
+    expect(browser.replaced).toEqual([]);
+    expect(taker.arrival('path:access.pair')).toBe(1);
+    expect(taker.take('path:access.pair')).toBe(EARLY);
+    expect(taker.take('path:access.pair')).toBeUndefined();
+  });
+
+  test('it is taken once: the property leaves the window, so nothing else can read the code from there', () => {
+    const browser = withEarly(browserAt('/app/pair'), '/app/pair', EARLY);
+    new AddressTaker(declared, browser);
+    expect('__fyArrival' in browser).toBe(false);
+    expect(new AddressTaker(declared, browser).arrival('path:access.pair')).toBe(0);
+  });
+
+  test('an arrival beneath a screen, or on a path nobody declares, is dropped and handed to no one', () => {
+    for (const pathname of ['/pair/extra', '/settings', '/d/d1/settings']) {
+      const taker = new AddressTaker(declared, withEarly(browserAt(pathname), pathname, EARLY));
+      expect(taker.take('path:access.pair')).toBeUndefined();
+      expect(taker.take('path:catalogs.join')).toBeUndefined();
+    }
+  });
+
+  test('the hold still ends after two minutes, from the moment the taker holds it', () => {
+    const clock = fakeClock();
+    const taker = new AddressTaker(declared, withEarly(browserAt('/pair'), '/pair', EARLY), clock);
+    clock.advance(HELD_FOR_MS);
+    expect(taker.take('path:access.pair')).toBeUndefined();
+  });
+
+  test('a malformed property is ignored and removed', () => {
+    for (const value of [null, 'x', { pathname: 1, hash: EARLY }, { pathname: '/pair', hash: '#' }]) {
+      const browser = Object.defineProperty(browserAt('/pair'), '__fyArrival', { configurable: true, value });
+      const taker = new AddressTaker(declared, browser);
+      expect(taker.arrival('path:access.pair')).toBe(0);
+      expect('__fyArrival' in browser).toBe(false);
+    }
+  });
+});

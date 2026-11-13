@@ -12,6 +12,9 @@ import { addressPlace } from './routes.ts';
  * - **Path** (the whole fragment on one of the plugin's daemon-less screens), matched by the router's own parse
  *   (`addressPlace`): `at` → stripped and held for that screen; `beneath` → stripped and DROPPED.
  * - Anything else is not the shell's: never read, never stripped.
+ * - A path fragment normally leaves the address before the module graph is even fetched: `public/arrival.js` strips it
+ *   while the document parses and leaves it in memory on one `window` property, which the taker takes once at construction
+ *   (`takeEarlyArrival`) and then applies the same declarations to.
  * - A held value no one takes is dropped after two minutes: a pairing or share code is a live credential. It is never
  *   written to the URL, history state or storage, and never logged.
  */
@@ -24,6 +27,28 @@ export type FragmentDecl =
 export const FRAGMENT_KEY = /^[a-z][a-z0-9-]{0,31}$/u;
 /** How long a held fragment (or hand-off) waits for its taker. */
 export const HELD_FOR_MS = 120_000;
+
+/** The one property `public/arrival.js` leaves on `window` for the taker, in memory only. */
+export const EARLY_ARRIVAL_KEY = '__fyArrival';
+
+/**
+ * A fragment `public/arrival.js` already took off the address (before the module graph was fetched): the path it
+ * arrived on and the whole fragment, `#` included. The taker decides, by the plugins' own declarations, whether it is
+ * held for a screen or dropped.
+ */
+export interface EarlyArrival {
+  readonly pathname: string;
+  readonly hash: string;
+}
+
+/** Takes the early arrival off `window`, ONCE (it is deleted here), or `undefined` when none is there or it is odd. */
+function takeEarlyArrival(browser: object): EarlyArrival | undefined {
+  const found: unknown = Reflect.get(browser, EARLY_ARRIVAL_KEY);
+  Reflect.deleteProperty(browser, EARLY_ARRIVAL_KEY);
+  if (typeof found !== 'object' || found === null) return undefined;
+  const { pathname, hash } = found as Partial<EarlyArrival>;
+  return typeof pathname === 'string' && typeof hash === 'string' && hash.length > 1 ? { pathname, hash } : undefined;
+}
 
 /** The slice of `window` the taker reads and rewrites. */
 export interface AddressBrowser {
@@ -99,7 +124,22 @@ export class AddressTaker {
       }
     }
     browser?.addEventListener?.('hashchange', () => this.read());
+    const early = browser === undefined ? undefined : takeEarlyArrival(browser);
+    if (early !== undefined) this.#adopt(early);
     this.read();
+  }
+
+  /**
+   * A fragment the early script already took off the address: held for its declared screen (`at`), or dropped
+   * (`beneath`, or a path nobody declared). It is the same decision `read` makes, only the strip is already done.
+   */
+  #adopt({ pathname, hash }: EarlyArrival): void {
+    for (const { plugin, screen } of this.#paths) {
+      const place = addressPlace(screen, pathname);
+      if (place === 'elsewhere') continue;
+      if (place === 'at') this.#hold(`path:${plugin}.${screen.id}`, hash);
+      return;
+    }
   }
 
   /** Reads the address now: a declared, stripping part leaves it and is held (or, beneath a path screen, dropped). */

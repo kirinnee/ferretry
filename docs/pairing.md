@@ -225,6 +225,19 @@ and the mint response carries that answer rather than making each renderer infer
   invariant, enforced by the schema, is that **a disclosed rendezvous only ever rides beside a link**:
   there is no address to disclose one beside, and no link to draw.
 
+### The code leaves the address bar before anything else loads
+
+A pairing or share link's fragment must not sit in the tab's address while the app downloads, because anything that reads
+the address (an agent's browser tool, an extension, a shared screen) would see a live one-time code. The shell's
+`AddressTaker` strips it, but it is built only when the app's module graph has loaded: measured on a local 5.0 build, the
+fragment stayed ~0.5-0.7 s, through the first paint (the v4 app: ~0.8 s). So `packages/app/public/arrival.js`, a classic
+same-origin script in `app/index.html`'s head (it satisfies `script-src 'self'`), strips a declared `path` fragment
+(`/pair`, `/join`; also under `/app/`) with `history.replaceState` while the document is still parsing (~20-45 ms on the
+same build, before first paint) and leaves the value in memory only, on one non-enumerable `window` property that
+`AddressTaker` takes once and deletes. The script's path list is a second statement of the plugins' declared fragments
+and `tests/unit/arrival-script.test.ts` fails if they drift. A fragment on any other path is not taken and stays where it
+is. The hold's two minutes run from the moment the taker holds it, a moment after the strip.
+
 ### The link names no rendezvous; the device finds one itself
 
 The fragment is one form, `#v1;url=…;code=…;fp=…`, byte-identical to every link a daemon has ever

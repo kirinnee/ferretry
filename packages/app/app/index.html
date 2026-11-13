@@ -34,6 +34,9 @@
     <!-- Pre-paint stays classic and same-origin so it runs before first paint under CSP. The signed-release
          service worker is registered by src/main.tsx. -->
     <script src="/pre-paint.js"></script>
+    <!-- A pairing or share link's fragment leaves the address FIRST, before the module graph is fetched
+         (public/arrival.js; shell contract S3). It stays a classic same-origin script for the same reason. -->
+    <script src="/arrival.js"></script>
   </head>
   <body>
     <div id="root"></div>
