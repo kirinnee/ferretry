@@ -1,3 +1,9 @@
+## [4.291.14](https://github.com/kirinnee/ferretry/compare/v4.291.13...v4.291.14) (2026-11-13)
+
+### Fixes
+
+* **pwa:** serve every app route from /app/ so a first-time browser can pair ([#1594](https://github.com/kirinnee/ferretry/issues/1594)) ([8f1b478](https://github.com/kirinnee/ferretry/commit/8f1b4782f5d3a397c7646188c43082be4d350b17))
+
 ## [4.291.13](https://github.com/kirinnee/ferretry/compare/v4.291.12...v4.291.13) (2026-11-12)
 
 ### Fixes
