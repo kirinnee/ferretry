@@ -50,6 +50,7 @@ import { readV4Json } from '../v4/documents.ts';
 import { configOwner } from '../v5/targets.ts';
 import { UNKNOWN_SOURCE } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
+import { rebuildBudget } from './preview-logins.ts';
 import { MAX_LOGIN_BYTES, PREVIEW_AUTHOR } from './settings.ts';
 
 export const V4_CONFIG_ACCEPTED = 'state/config-accepted.json';
@@ -383,6 +384,23 @@ function heldCaps(accepted: string | undefined, current: string | undefined): re
 /** The login a `config/logins/<id>.yaml` path names, or `undefined` for any other path. */
 const loginOf = (path: string): string | undefined => /^config\/logins\/([^/]+)\.yaml$/u.exec(path)?.[1];
 
+/**
+ * The accepted record of a login v4 holds the DELETION of. The cap moved to usage.yaml, so the login's own enforced text
+ * carries no `budget`, and Logins' deletion judge (`loginLoosening`) would see nothing to hold: the kernel would drop the
+ * login on boot, the runtime that uses it would name an unknown credential, and the whole runtime catalog would stop
+ * loading. The cap keeps ONE owner (usage.yaml's `budgets.<login>`, which the same enforced pass records); the login
+ * record of a held deletion alone re-states the budget, rebuilt from those numbers, so the judge holds the deletion as v4
+ * does. There is no live file for it to disagree with. Anything unreadable leaves the text as it was.
+ */
+function withHeldBudget(login: string, text: string, enforcedUsage: string | undefined): string {
+  if (enforcedUsage === undefined) return text;
+  const budget = rebuildBudget(asMap(asMap(parse(enforcedUsage, { version: '1.2' }))?.budgets)?.[login], true);
+  const document = strictYamlMap(text);
+  if (budget === undefined || budget === 'invalid' || document === undefined) return text;
+  document.set('budget', document.createNode(budget));
+  return String(document);
+}
+
 export const acceptedConfigStep: Step = {
   id: 'accepted-config',
   title: 'Confirmed settings (the accepted record, so a loosening already confirmed is not asked again)',
@@ -473,6 +491,12 @@ export const acceptedConfigStep: Step = {
                       return true;
                     loginHeld.push(path);
                     return false;
+                  })
+                  .map(([path, text]): readonly [string, string] => {
+                    const login = loginOf(path);
+                    return login !== undefined && held.deleted.includes(`logins/${login}.yaml`)
+                      ? [path, withHeldBudget(login, text, enforced.configs.get(USAGE_FILE))]
+                      : [path, text];
                   })
                   .sort(([a], [b]) => a.localeCompare(b)),
                 true,

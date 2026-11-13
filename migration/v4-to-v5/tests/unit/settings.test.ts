@@ -438,3 +438,16 @@ test('--drop-uncarried removes the layer of a refused instructions document and 
     'REMOVED',
   );
 });
+
+test('a login budget that cannot be read as plain data (an alias bomb) is left in the file, so the config check refuses the login: never written capless', async () => {
+  const aliases = Array.from({ length: 150 }, (_, i) => `    x${String(i)}: *cap`).join('\n');
+  await yaml(
+    'logins/bomb.yaml',
+    `harness: claude\nstore: ferretry\nbudget:\n  daily:\n    hard: &cap 10\n${aliases}\n`,
+  );
+  const report = await settingsStep.run(f.ctx());
+  // Whatever the step said about the file, no login was written without its cap and no cap reached usage.yaml.
+  expect(await exists('logins/bomb.yaml')).toBe(false);
+  expect(await exists('usage.yaml')).toBe(false);
+  expect(JSON.stringify(report)).not.toContain('bomb daily');
+});
