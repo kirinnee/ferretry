@@ -305,6 +305,61 @@ describe('fy doctor', () => {
       should(notReady.io.stdout()).containEql('FAIL  host checks: the daemon reports it is not ready');
     });
 
+    it('should list the not-yet-built checks on ONE line by name, and keep every real warn and fail on its own line', async () => {
+      // Arrange
+      const unbuilt = (name: string) =>
+        check({
+          name: `plugin: ${name}`,
+          requirement: 'optional',
+          status: 'missing',
+          summary: `The check ${name} is not built yet in this build, so nothing was checked.`,
+          impact: 'Ferretry keeps working, with less than it could do.',
+        });
+      const { world, io } = healthyWorld(
+        report(
+          [
+            unbuilt('chrome'),
+            check({}),
+            unbuilt('board-store'),
+            check({ name: 'gh', requirement: 'optional', status: 'missing', summary: 'gh is not on PATH' }),
+            unbuilt('agenda-buzz'),
+            check({ name: 'tmux', status: 'missing', summary: 'tmux is not on PATH' }),
+          ],
+          false,
+        ),
+      );
+
+      // Act
+      const code = await runFy(['doctor'], world);
+
+      // Assert
+      const lines = io.stdout().split('\n');
+      should(lines.filter(line => line.includes('Not built yet in this build'))).deepEqual([
+        'warn  Not built yet in this build (nothing checked): agenda-buzz, board-store, chrome',
+      ]);
+      should(lines.filter(line => line.includes('so nothing was checked'))).be.empty();
+      should(io.stdout()).not.containEql('host plugin: chrome');
+      should(lines).containEql('warn  host gh: gh is not on PATH');
+      should(lines).containEql('FAIL  host tmux: tmux is not on PATH');
+      should(lines).containEql('ok    host git: git is on PATH');
+      should(code).equal(1);
+    });
+
+    it('should still exit 0 with ready true when the only warnings are not-yet-built checks', async () => {
+      const { world, io } = healthyWorld(
+        report([
+          check({
+            name: 'plugin: chrome',
+            requirement: 'optional',
+            status: 'missing',
+            summary: 'The check chrome is not built yet in this build, so nothing was checked.',
+          }),
+        ]),
+      );
+      should(await runFy(['doctor'], world)).equal(0);
+      should(io.stdout()).containEql('warn  Not built yet in this build (nothing checked): chrome');
+    });
+
     it('should warn, not fail, when the report is refused or not readable', async () => {
       const refused = healthyWorld({ error: 'no' });
       refused.transport.replies[0] = { status: 403, body: { error: 'not allowed' } };

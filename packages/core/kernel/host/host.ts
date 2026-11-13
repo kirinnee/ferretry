@@ -1,6 +1,7 @@
 import { relative } from 'node:path';
 import type { BinaryNames, BoundAddress, ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import type { Instant } from '@ferretry/std';
+import { notBuiltSummary } from '../contract/doctor.ts';
 import { decideHome } from '../contract/home.ts';
 import { milliseconds } from '@ferretry/std';
 import type {
@@ -1670,7 +1671,7 @@ async function doctorLines(
           plugin: id,
           check,
           state: 'warn',
-          detail: `The check ${check} is not built yet in this build, so nothing was checked.`,
+          detail: notBuiltSummary(check),
         });
         continue;
       }

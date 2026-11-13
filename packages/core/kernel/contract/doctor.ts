@@ -35,3 +35,16 @@ export const DoctorReportSchema = z.object({
   limitation: z.string().min(1),
 });
 export type DoctorReport = z.infer<typeof DoctorReportSchema>;
+
+/**
+ * The sentence for a check a plugin declared and nobody has built yet. One owner for both ends: the daemon writes it
+ * (`notBuiltSummary`) and a reader that wants to group those rows recognises it (`notBuiltCheck`) without the wire
+ * growing a field.
+ */
+export const notBuiltSummary = (check: string): string =>
+  `The check ${check} is not built yet in this build, so nothing was checked.`;
+
+const NOT_BUILT = /^The check (.+) is not built yet in this build, so nothing was checked\.$/;
+
+/** The check's name when `summary` is the not-built sentence, else `undefined`. */
+export const notBuiltCheck = (summary: string): string | undefined => NOT_BUILT.exec(summary)?.[1];
