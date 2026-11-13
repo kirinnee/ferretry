@@ -46,6 +46,21 @@ usage() {
   exit 64
 }
 
+# FY_URL may carry a credential (user:pass@, a query, a fragment). It is cleaned to scheme://host:port BEFORE the first child
+# process of ANY phase (even the CONVERTER_DIR lookup below), so no child (fy --version, tmux, git, bun ...) ever inherits the
+# raw value. The raw text stays in a plain (never exported) shell variable only for preflight's own checks; an address that
+# does not parse is dropped from the environment, and preflight refuses it from the raw text.
+RAW_FY_URL=""
+if [ -n "${FY_URL+x}" ]; then
+  RAW_FY_URL="${FY_URL}"
+  scrub_re='^(https?)://([^/?#]*)'
+  if [[ ${FY_URL} =~ ${scrub_re} ]]; then
+    export FY_URL="${BASH_REMATCH[1]}://${BASH_REMATCH[2]##*@}"
+  else
+    unset FY_URL
+  fi
+fi
+
 PIN_URL="http://127.0.0.1:9"
 QUIET_TRIES="${MIGRATE_QUIET_TRIES:-10}"
 CONVERTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -166,13 +181,21 @@ quiet_check() { # $1 socket. 0 quiet for 60 s, 1 still writing after QUIET_TRIES
   return 1
 }
 
-# 0 when a process named `fyd` is running (proof by process list, never by a marker); 1 when none; exits 2 when ps fails.
+# 0 when a daemon process may be running (proof by process list, never by a marker); 1 when none; exits 2 when ps fails.
 # Only each process's command NAME is read (`comm`), never its arguments, which can carry tokens of unrelated programs.
+# A daemon is recognised by what it IS, not by the exact name `fyd`: Nix's wrapProgram runs the real daemon as
+# `.fyd-wrapped` (and the kernel reports that name, whatever argv0 says), so ANY executable whose name holds `fyd` is a
+# daemon until proven otherwise. The browser worker (`fyd-browser-worker`, also wrapped) is a helper, not a daemon. An
+# unknown name errs on the side of "a daemon is running": that stops a move, it never allows one.
 daemon_live() {
   local listing name
   listing="$(ps -eo comm=)" || unreadable "cannot read the process list (ps failed)"
   while IFS= read -r name; do
-    if [ "${name##*/}" = fyd ]; then return 0; fi
+    name="${name##*/}"
+    case "${name}" in
+    *fyd-browser-worker*) ;;
+    *fyd*) return 0 ;;
+    esac
   done <<<"${listing}"
   return 1
 }
@@ -277,9 +300,9 @@ preflight)
   url_state="unset"
   url_base=""
   url_extra=""
-  if [ -n "${FY_URL:-}" ]; then
+  if [ -n "${RAW_FY_URL}" ]; then
     url_re='^(https?)://([^/?#]*)(.*)$'
-    [[ ${FY_URL} =~ ${url_re} ]] || fail "FY_URL is set but is not an http(s) address. Unset it for the switch (nothing was recorded)"
+    [[ ${RAW_FY_URL} =~ ${url_re} ]] || fail "FY_URL is set but is not an http(s) address. Unset it for the switch (nothing was recorded)"
     url_scheme="${BASH_REMATCH[1]}"
     url_auth="${BASH_REMATCH[2]}"
     url_rest="${BASH_REMATCH[3]}"
@@ -823,8 +846,9 @@ rollback)
   rb_quiet() { # $1 when: "before" or "after" the daemon stop
     [ "${want_quiet}" = 1 ] || return 0
     if [ -z "${rb_sock}" ]; then
-      say "📝 no tmux socket found at ${H} or ${B}: there is no live pane to watch"
-      return 0
+      # Live panes were expected (the baseline recorded them). A socket that cannot be found does not prove they are gone:
+      # the tmux server and the harnesses may run on. Unknown is a stop, never a success.
+      unreadable "no tmux socket was found at ${H} or ${B} (${1}), but the baseline recorded live ferret panes: whether they still write is UNKNOWN, so nothing was moved. Find the tmux server (the owner checks that no ferret pane is alive), then run rollback again"
     fi
     local qs=0
     quiet_check "${rb_sock}" || qs=$?
