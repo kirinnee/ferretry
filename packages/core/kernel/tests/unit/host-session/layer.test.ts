@@ -409,6 +409,81 @@ describe('the session layer: one session, one job', () => {
     expect(third.client.end?.code).toBe(4400);
   });
 
+  test('C3 a session ended on a record the daemon cannot read says so: the record kind and the zod issue, never a value', async () => {
+    const fx = await fixture();
+    const device = await pairedDevice(fx.device);
+    const client = TestClient.open(fx);
+    await client.handshake(fx.daemonId);
+    // What a browser page that named itself with a UUID (36 characters) sealed as its first record.
+    await client.send({
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceId: device.deviceId,
+      appSession: crypto.randomUUID(),
+      proof: 'p'.repeat(86),
+    });
+    await client.pump();
+
+    expect(client.end).toEqual({ code: 4400, reason: 'unparseable session record' });
+    expect(fx.logged).toEqual([
+      {
+        level: 'warn',
+        scope: 'session',
+        message: 'a session was ended because its record could not be read',
+        fields: {
+          carrier: 'relay',
+          phase: 'awaiting-credential',
+          kind: 'auth',
+          cause: 'shape',
+          issues: 'too_big@appSession',
+        },
+      },
+    ]);
+  });
+
+  test('C3 the unreadable-record line carries no value, id, proof, key name or token the peer chose', async () => {
+    const fx = await fixture();
+    const secrets = ['SECRET-VALUE-1', 'SECRET-VALUE-2', 'SECRET-VALUE-3', 'SECRET-KEY-NAME', 'SECRET-HEADER-NAME'];
+    const hostile: unknown[] = [
+      {
+        t: 'req',
+        id: 1,
+        method: 'GET',
+        path: '/v1/health?token=SECRET-VALUE-1',
+        headers: { 'SECRET-HEADER-NAME': 'SECRET-VALUE-2', authorization: 'Bearer SECRET-VALUE-3' },
+        'SECRET-KEY-NAME': 'SECRET-VALUE-1',
+      },
+      { t: 'SECRET-VALUE-2', deviceId: 'SECRET-VALUE-3', proof: 'SECRET-VALUE-1' },
+      { t: 'stream', query: [['token', 'SECRET-VALUE-1']], 'SECRET-KEY-NAME': 1 },
+    ];
+    for (const record of hostile) {
+      const { client } = await serving(fx);
+      await client.send(record);
+      await client.pump();
+      expect(client.end?.code).toBe(4400);
+    }
+
+    const logged = JSON.stringify(fx.logged);
+    for (const secret of secrets) expect(logged).not.toContain(secret);
+    expect(fx.logged.map(line => line.fields?.kind)).toEqual(['req', 'unknown', 'stream']);
+    expect(fx.logged.every(line => line.fields?.phase === 'serving')).toBe(true);
+  });
+
+  test('C3 a record that is not UTF-8 or not JSON is logged by its cause alone', async () => {
+    const fx = await fixture();
+    const first = await serving(fx);
+    await first.client.sendBytes(new Uint8Array([0xff, 0xfe]));
+    await first.client.pump();
+    const second = await serving(fx);
+    await second.client.sendBytes(utf8Bytes('{"t":"req" SECRET-VALUE-1'));
+    await second.client.pump();
+
+    expect(fx.logged.map(line => [line.fields?.kind, line.fields?.cause, line.fields?.issues])).toEqual([
+      ['none', 'not-utf8', ''],
+      ['none', 'not-json', ''],
+    ]);
+  });
+
   test('R229 R230 R624 a second credential, or a request as the first record, ends the session', async () => {
     const fx = await fixture();
     const { client, device } = await serving(fx);

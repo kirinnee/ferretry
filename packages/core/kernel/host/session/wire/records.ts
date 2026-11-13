@@ -380,6 +380,118 @@ export function decodeClientRecord(plaintext: Uint8Array): ClientRecord | null {
 }
 
 /**
+ * What the log may say about a record the daemon could not read: its KIND and the SHAPE of what was wrong.
+ *
+ * A session that ends on an unparseable record said nothing for it, so a browser sending a field the schema
+ * refuses looked like a dead rendezvous. This is the one description that is safe to write down: every word of
+ * it comes from this module's own vocabulary — a record kind from {@link CLIENT_RECORD_KINDS}, a field name
+ * from {@link LOGGABLE_FIELDS}, a zod issue code — and anything else the peer chose (an unknown kind, a header
+ * name, a stray key) is collapsed to `unknown` / `*`. No value, id, proof, path text or token can reach it, and
+ * the test that pins this feeds it a record made of nothing but secrets.
+ */
+export interface UnreadableRecord {
+  /** The record's `t` when it is one of ours, `unknown` when the peer named another, `none` when it named nothing. */
+  readonly kind: string;
+  /** Why it could not be read: not UTF-8, not JSON, or a JSON value outside every shape. */
+  readonly cause: 'not-utf8' | 'not-json' | 'shape';
+  /** `code@field.path` for each thing wrong, at most {@link MAX_LOGGED_ISSUES}; empty unless `cause` is `shape`. */
+  readonly issues: readonly string[];
+}
+
+/** Every record `t` a client may send: the only values `kind` ever reports as itself. */
+const CLIENT_RECORD_KINDS: ReadonlySet<string> = new Set([
+  'auth',
+  'stream',
+  'pair',
+  'join',
+  'join-options',
+  'member',
+  'req',
+  'req-more',
+  'renewed',
+  'stream-close',
+  'data',
+]);
+
+/** Field names the records above define: the only path segments an issue reports as themselves. */
+const LOGGABLE_FIELDS: ReadonlySet<string> = new Set([
+  't',
+  'protocol',
+  'deviceId',
+  'appSession',
+  'proof',
+  'code',
+  'deviceName',
+  'deviceKey',
+  'clientName',
+  'memberKey',
+  'boxKey',
+  'passkey',
+  'origin',
+  'keyId',
+  'id',
+  'method',
+  'path',
+  'query',
+  'headers',
+  'body',
+  'more',
+  'presence',
+  'reason',
+  'text',
+  'bytes',
+]);
+
+const MAX_LOGGED_ISSUES = 8;
+
+function loggablePath(path: readonly PropertyKey[]): string {
+  if (path.length === 0) return '(record)';
+  return path
+    .map(segment => {
+      if (typeof segment === 'number') return '#';
+      return typeof segment === 'string' && LOGGABLE_FIELDS.has(segment) ? segment : '*';
+    })
+    .join('.');
+}
+
+/** A union's issue holds each arm's issues; the arm that is nearest the peer's record is the useful one. */
+function leafIssues(issues: readonly z.core.$ZodIssue[], out: string[], prefix: readonly PropertyKey[]): void {
+  for (const issue of issues) {
+    if (out.length >= MAX_LOGGED_ISSUES) return;
+    const path = [...prefix, ...issue.path];
+    if (issue.code === 'invalid_union') {
+      const arm = issue.errors.reduce<readonly z.core.$ZodIssue[] | undefined>(
+        (best, candidate) => (best === undefined || candidate.length < best.length ? candidate : best),
+        undefined,
+      );
+      if (arm !== undefined && arm.length > 0) {
+        leafIssues(arm, out, path);
+        continue;
+      }
+    }
+    out.push(`${issue.code}@${loggablePath(path)}`);
+  }
+}
+
+/** Describe why a plaintext is not a client record, for the log. Total: it never throws and never echoes the peer. */
+export function describeUnreadableRecord(plaintext: Uint8Array): UnreadableRecord {
+  const text = utf8Text(plaintext);
+  if (text === null) return { kind: 'none', cause: 'not-utf8', issues: [] };
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return { kind: 'none', cause: 'not-json', issues: [] };
+  }
+  const named = typeof value === 'object' && value !== null ? (value as { readonly t?: unknown }).t : undefined;
+  const kind = typeof named !== 'string' ? 'none' : CLIENT_RECORD_KINDS.has(named) ? named : 'unknown';
+  const parsed = ClientRecordSchema.safeParse(value);
+  const issues: string[] = [];
+  if (!parsed.success) leafIssues(parsed.error.issues, issues, []);
+  return { kind, cause: 'shape', issues };
+}
+
+/**
  * A carried caller's rate-limit identity, derived from the session the carrier minted (R264).
  *
  * `ApiRequest.clientAddress` is the bucket key every rate-limited route reaches for; a carried request that
