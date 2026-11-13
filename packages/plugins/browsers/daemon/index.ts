@@ -3,6 +3,7 @@ import { milliseconds } from '@ferretry/std';
 import { type DaemonContext, type DaemonHalf, implementDaemon } from '@ferretry/kernel/manifest';
 import { type BrowsersConfig, PageChanged } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { withAddressRule } from './address-rule.ts';
 import { type BrowserSessionLauncher, BrowserSessionService } from './pages/service.ts';
 import { type BrowserStreamOpener, pageRoutes, streamSocket } from './pages/routes.ts';
 import { BrowsersReferenceMenu } from './pages/reference-menu.ts';
@@ -73,7 +74,12 @@ export function buildBrowsers(
   ctx: DaemonContext<typeof manifest>,
   seams: BrowsersSeams = {},
 ): DaemonHalf<typeof manifest> {
-  const { kernel } = ctx;
+  // ONE address rule at the redaction seam (./address-rule.ts): every piece below reads under this `redaction`, so no
+  // address, title, snapshot or error message it returns can carry a pairing-shaped fragment.
+  // A delegating view, not a copy: every other port stays the kernel's own, read live.
+  const kernel = new Proxy(ctx.kernel, {
+    get: (ports, name) => (name === 'redaction' ? withAddressRule(ports.redaction) : Reflect.get(ports, name, ports)),
+  });
   const vault = ctx.needs.vault;
   const host = processHost();
   const config = (): BrowsersConfig | undefined =>
