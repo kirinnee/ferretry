@@ -109,6 +109,20 @@ export function buildConnections(
     );
   const bootRelays = canonical(relays);
   /**
+   * THE FILE'S STATE AT BOOT, taken once. An `invalid` file whose accepted last good version is IN EFFECT governs this
+   * boot (the kernel says that version survives a restart): `config` above is that accepted document. An `invalid` file with
+   * no accepted version in effect has no authority at all, so discovery stays off. A state that cannot be read is no authority either.
+   */
+  const bootInvalid: { readonly inEffect: boolean } | undefined = (() => {
+    try {
+      const status = ctx.kernel.config.fileState(configFile);
+      return status.state === 'invalid' ? { inEffect: status.inEffect } : undefined;
+    } catch {
+      return { inEffect: false };
+    }
+  })();
+  const bootHasAuthority = bootInvalid === undefined || bootInvalid.inEffect;
+  /**
    * THE ONE GATE. A DISCOVERED RELAY IS PUBLISHED OR DIALLED ONLY WHEN THIS SAYS 'open', ASKED AT THE LAST MOMENT.
    *
    * Every path that publishes or dials a discovered relay — the boot read's answer, the boot carrier start after
@@ -118,7 +132,9 @@ export function buildConnections(
    * - `stopped`: discovery was aborted (the carrier's stop signal, which the Kernel aborts first, or the plugin's own stop).
    * - `unreadable`: the CURRENT configuration is not a clean read. The kernel's config service answers `undefined` or the
    *   last good version for a file it cannot read, never an exception, so the file's STATE is asked as well as its value:
-   *   an `invalid` file vetoes whatever its effective value says. A file that is simply absent is a clean read.
+   *   an `invalid` file vetoes whatever its effective value says, EXCEPT the one that was already `invalid` at boot with its
+   *   accepted last good version in effect and still is: that accepted document governs (and with no accepted version
+   *   in effect at boot nothing governs, so it always vetoes). A file that is simply absent is a clean read.
    * - `changed`: the current relay list differs from the one this boot resolved (a relay of the operator's own,
    *   `enabled: false` included, a discovery entry switched off or removed, any other edit).
    *
@@ -126,8 +142,11 @@ export function buildConnections(
    */
   const verdict = (): 'open' | 'stopped' | 'unreadable' | 'changed' => {
     if (shuttingDown()) return 'stopped';
+    if (!bootHasAuthority) return 'unreadable';
     try {
-      if (ctx.kernel.config.fileState(configFile).state === 'invalid') return 'unreadable';
+      const status = ctx.kernel.config.fileState(configFile);
+      // Invalid NOW is a veto unless it was invalid at boot too and the accepted version it started from is still in effect.
+      if (status.state === 'invalid' && !(bootInvalid !== undefined && status.inEffect)) return 'unreadable';
       return canonical(relaysOf(ctx.kernel.config.file(configFile))) === bootRelays ? 'open' : 'changed';
     } catch {
       return 'unreadable';

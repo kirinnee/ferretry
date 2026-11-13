@@ -296,6 +296,108 @@ describe('a configuration that cannot be read vetoes (the real config service)',
     }
   });
 
+  const lastGood = 'relay:\n  - source: discovery\n';
+  const broken = 'relay: [';
+
+  test('should dial the accepted last good discovery relay when the boot already starts with an invalid file', async () => {
+    const service = await realService(lastGood);
+    service.fs.seed(`${home}/config/connections.yaml`, broken);
+    await service.files.reload();
+    expect(service.port.fileState(service.def)).toMatchObject({ state: 'invalid', inEffect: true });
+    const r = rig(async () => available, { port: service.port });
+    const host = await testHost({ plugins: [r.plugin] });
+    try {
+      await host.runJob('relay-discovery');
+      await r.half().hooks['carriers:relay'].start(new FakeSessions(), new AbortController().signal);
+      expect(r.sockets).toHaveLength(1);
+      expect(r.sockets[0]).toContain('hosted.example');
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('should recover and dial from the accepted last good list when the boot read was transient and the file is still the same broken one', async () => {
+    const service = await realService(lastGood);
+    service.fs.seed(`${home}/config/connections.yaml`, broken);
+    await service.files.reload();
+    let reads = 0;
+    const r = rig(async () => (++reads === 1 ? transient : available), { port: service.port });
+    const host = await testHost({ plugins: [r.plugin] });
+    try {
+      await host.runJob('relay-discovery');
+      await r.half().hooks['carriers:relay'].start(new FakeSessions(), new AbortController().signal);
+      await host.clock.advance(2_000);
+      await flush();
+      expect(r.sockets).toHaveLength(1);
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('should dial nothing when the last good boot is followed by an explicit disable after boot', async () => {
+    const service = await realService(lastGood);
+    service.fs.seed(`${home}/config/connections.yaml`, broken);
+    await service.files.reload();
+    let reads = 0;
+    const r = rig(async () => (++reads === 1 ? transient : available), { port: service.port });
+    const host = await testHost({ plugins: [r.plugin] });
+    try {
+      await host.runJob('relay-discovery');
+      await r.half().hooks['carriers:relay'].start(new FakeSessions(), new AbortController().signal);
+      service.fs.seed(`${home}/config/connections.yaml`, 'relay:\n  - source: discovery\n    enabled: false\n');
+      await service.files.reload();
+      expect(service.port.fileState(service.def).state).toBe('valid');
+      await host.clock.advance(2_000);
+      await flush();
+      expect(r.sockets).toEqual([]);
+      expect(carrierKinds(r.half())).toEqual(['direct']);
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('should dial nothing when a valid boot is followed by a broken file before the carrier starts', async () => {
+    const service = await realService(lastGood);
+    expect(service.port.fileState(service.def).state).toBe('valid');
+    const r = rig(async () => available, { port: service.port });
+    const host = await testHost({ plugins: [r.plugin] });
+    try {
+      await host.runJob('relay-discovery');
+      // The file breaks after boot and before the discovered carrier is built: the last good version is in effect, yet
+      // the corruption first appeared during this boot, so it vetoes.
+      service.fs.seed(`${home}/config/connections.yaml`, broken);
+      await service.files.reload();
+      expect(service.port.fileState(service.def)).toMatchObject({ state: 'invalid', inEffect: true });
+      await r.half().hooks['carriers:relay'].start(new FakeSessions(), new AbortController().signal);
+      expect(r.sockets).toEqual([]);
+      expect(carrierKinds(r.half())).toEqual(['direct']);
+      expect(r.half().resolvers.relay()).toEqual([]);
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('should stop pending discovery when a valid boot is followed by an unreadable file', async () => {
+    const service = await realService(lastGood);
+    let reads = 0;
+    const r = rig(async () => (++reads === 1 ? transient : available), { port: service.port });
+    const host = await testHost({ plugins: [r.plugin] });
+    try {
+      await host.runJob('relay-discovery');
+      await r.half().hooks['carriers:relay'].start(new FakeSessions(), new AbortController().signal);
+      service.fs.seed(`${home}/config/connections.yaml`, broken);
+      await service.files.reload();
+      await host.clock.advance(2_000);
+      await flush();
+      await host.clock.advance(120_000);
+      await flush();
+      expect(reads).toBe(1);
+      expect(r.sockets).toEqual([]);
+    } finally {
+      await host.stop();
+    }
+  });
+
   test('should still dial when the boot had no file at all (absent is not unreadable)', async () => {
     const service = await realService();
     expect(service.port.fileState(service.def).state).toBe('absent');

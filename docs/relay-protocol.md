@@ -1461,7 +1461,11 @@ after the first read, and immediately before **each** discovered carrier is buil
 that lands while an earlier carrier is starting stops the next one); there is no path that dials a discovered
 relay without it. A file the kernel cannot read (invalid or oversized — the config service then answers
 `undefined` or its last good version, never an error) is not a clean read, so it vetoes whatever its effective
-value says; a file that is simply absent is clean. A veto that lands after the discovered relay was already
+value says; a file that is simply absent is clean. **The boundary is the boot:** a file that is already
+`invalid` when the daemon starts, with its accepted last good version in effect (the kernel keeps that version across
+a restart), is governed by that accepted document — discovery runs from it, and the veto stays for any change
+after boot (an explicit disable, a changed relay list, or a file that becomes invalid or unreadable only during this
+run). An invalid file at boot with NO accepted version in effect has no authority, so the daemon stays direct-only. A veto that lands after the discovered relay was already
 published withdraws it again, so the published carriers, the hosts a redial may reach and the doctor row agree.
 Relays the operator wrote are not discovery: they keep their behaviour and stop only for shutdown. Discovery has
 ONE abort controller, aborted synchronously when shutdown begins: the Kernel aborts every carrier's signal
