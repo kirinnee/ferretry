@@ -91,6 +91,11 @@
       "id": "fy-browser-firewall-entry",
       "what": "fy browser firewall entry: 5.0 has no route for the browser ports (browserPorts is read by Runtimes, not Browsers); the verb refuses with a sentence and exits 1. The firewall script/unit/verify-unit/timer verbs are in 5.0",
       "owner": "britnee"
+    },
+    {
+      "id": "contract-hooks-restore",
+      "what": "the four v4 contract hooks dropped from 5.0 hook config in 26ed171ad0 (closed-set-agreement, composition-invocation, composition-reachability, route-agreement): rebuild 5.0 versions or record why one no longer applies, card &C57",
+      "owner": "britnee"
     }
   ]
 }
