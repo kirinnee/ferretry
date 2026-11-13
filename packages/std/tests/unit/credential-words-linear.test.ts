@@ -1,8 +1,6 @@
 /**
  * CFG-LEAK (ii): the cutter and W are linear in the length of one word. The ratio of the time at 256 KiB to the time at
- * 64 KiB must stay under 8 (linear is 4; quadratic is 16), best of several runs so one slow tick does not decide it. A
- * fourfold step keeps a factor of two between the bound and either answer, so a loaded CI runner cannot fail a linear
- * cutter (a twofold step against a bound of 3 did: 3.09) and a quadratic one still fails by the same margin.
+ * 128 KiB must stay under 3 (linear is 2; quadratic is 4), best of interleaved runs so one slow tick does not decide it.
  *
  * Fake only: the shapes are credential-like runs and are none.
  */
@@ -11,14 +9,24 @@ import { findFlagSecrets, shownWords } from '../../src/credential-words/index.ts
 
 const KIB = 1024;
 
-const best = (run: () => void): number => {
-  let least = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < 5; i++) {
+/**
+ * The ratio of the best time on `large` to the best time on `small`, the two INTERLEAVED round by round, so a load that
+ * comes and goes on the machine lands on both sides instead of on whichever batch happened to run during it. Best of
+ * several rounds, so one slow tick does not decide it. The bound is unchanged; only the noise in the measurement is.
+ */
+const ratioOf = (large: () => void, small: () => void): number => {
+  let leastLarge = Number.POSITIVE_INFINITY;
+  let leastSmall = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < 9; i++) {
     const t0 = performance.now();
-    run();
-    least = Math.min(least, performance.now() - t0);
+    small();
+    const t1 = performance.now();
+    large();
+    const t2 = performance.now();
+    leastSmall = Math.min(leastSmall, t1 - t0);
+    leastLarge = Math.min(leastLarge, t2 - t1);
   }
-  return Math.max(least, 0.01);
+  return Math.max(leastLarge, 0.01) / Math.max(leastSmall, 0.01);
 };
 
 /** Hostile shapes: the same run of keys, separators, pointers and quotes, repeated to a length. */
@@ -32,17 +40,23 @@ const SHAPES: readonly (readonly [string, (size: number) => string])[] = [
 describe('CFG-LEAK (ii) linear time at 256 KiB', () => {
   for (const [label, make] of SHAPES) {
     test(`the cutter is linear on ${label}`, () => {
-      const small = make(64 * KIB);
+      const small = make(128 * KIB);
       const large = make(256 * KIB);
-      const ratio = best(() => shownWords([large])) / best(() => shownWords([small]));
-      expect(ratio).toBeLessThan(8);
+      const ratio = ratioOf(
+        () => shownWords([large]),
+        () => shownWords([small]),
+      );
+      expect(ratio).toBeLessThan(3);
     });
 
     test(`W is linear on ${label}`, () => {
-      const small = make(64 * KIB);
+      const small = make(128 * KIB);
       const large = make(256 * KIB);
-      const ratio = best(() => findFlagSecrets({ args: [large] })) / best(() => findFlagSecrets({ args: [small] }));
-      expect(ratio).toBeLessThan(8);
+      const ratio = ratioOf(
+        () => findFlagSecrets({ args: [large] }),
+        () => findFlagSecrets({ args: [small] }),
+      );
+      expect(ratio).toBeLessThan(3);
     });
   }
 });
