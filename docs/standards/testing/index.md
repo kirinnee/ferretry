@@ -89,6 +89,14 @@ the quarantine below only keeps a known flake from holding a release hostage whi
 `tests/realworld/` with the same file name. A rig both need lives in `tests/integration/support/`, where
 the realworld test imports it.
 
+**A linear-time test measures a ratio, and measures it interleaved.** A unit test that holds the
+time at a large size to a multiple of the time at a small one (a quadratic rule is about 4x, a linear one
+2x, the bound is 3) takes both from `ratioOf` / `interleavedBest` in `@ferretry/std/testing/linear-time`:
+the small and the large run alternate round by round and the least of nine rounds is kept, so a load
+that comes and goes lands on both sides instead of on whichever batch ran during it. A test never times
+the two sizes in separate batches, and never loosens the sizes or the bound to absorb noise: only the
+measurement changes.
+
 **Moving a matrix.** A deterministic browser file whose full matrix costs more than a merge gate may spend
 (a desktop and a phone, eight cold boots of the real app) may keep its whole matrix in `tests/realworld/` with
 no assertion dropped, if a FAST blocking file in `tests/integration/` still proves every distinct behaviour
