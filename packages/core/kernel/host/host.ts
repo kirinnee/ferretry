@@ -1405,6 +1405,7 @@ async function bootLocked(
     },
     clock,
     lease: (options.timings ?? DEFAULT_DAEMON_TIMINGS).lease,
+    log: log.child('session'),
   });
   own(() => sessionLayer.close());
   // The bound admission may tell the host its policy moved (`watch`): every open stream is re-asked at once. The

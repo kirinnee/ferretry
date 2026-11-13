@@ -8,7 +8,7 @@
  * `KeyRotation` over that same store (`lib/key-rotation.ts`), which the shell's session applies inside the next unlock or
  * step-up once the daemon says the key is due (R248) and falls back to once on a refused session (R252).
  */
-import type { ConnectPorts, DeviceClaims, PairingKey } from '@ferretry/app';
+import { type ConnectPorts, type DeviceClaims, type PairingKey, toBase64Url } from '@ferretry/app';
 import { PairingResponseSchema } from '../contract/index.ts';
 import {
   DeviceKeyUnreadableError,
@@ -37,9 +37,23 @@ export type ClaimPorts = Pick<ConnectPorts, 'crypto' | 'indexedDB'>;
 export const accessKeyStore = (ports: Pick<ConnectPorts, 'indexedDB'>): DeviceKeyStore =>
   new IndexedDbDeviceKeyStore(ports.indexedDB ?? undefined);
 
+/** Bytes in the page-load id a session names itself with: `docs/relay-protocol.md` §14, "16 random bytes, base64url". */
+const APP_SESSION_BYTES = 16;
+
+/**
+ * The name of THIS page load, in the shape the daemon's record decoder accepts and nothing else.
+ *
+ * It was `crypto.randomUUID()` — 36 characters, hyphens and all — and the daemon refuses any `auth` or
+ * `stream` record whose `appSession` is not exactly 22 base64url characters, so every session this page
+ * opened died at its first record with "unparseable session record".
+ */
+function pageLoadSession(): string {
+  return toBase64Url(crypto.getRandomValues(new Uint8Array(APP_SESSION_BYTES)));
+}
+
 export function accessClaims(ports: ClaimPorts, options: AccessClaimsOptions = {}): DeviceClaims {
   const store = options.store ?? accessKeyStore(ports);
-  const appSession = options.appSession ?? crypto.randomUUID();
+  const appSession = options.appSession ?? pageLoadSession();
   const deviceName = options.deviceName ?? browserDeviceName;
   // Today's `rotation: new KeyRotation({ store: deviceKeys, crypto })`: one rotation over the claims' own store.
   const rotation = new KeyRotation({

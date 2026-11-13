@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import type { PairedDaemon } from '@ferretry/app';
+import { decodeClientRecord, SESSION_PROTOCOL_ID } from '@ferretry/kernel/session';
 import should from 'should';
 import { accessClaims } from '../../../app/connect.ts';
 import { DeviceKeyUnreadableError } from '../../../app/lib/device-keys.ts';
@@ -50,6 +51,45 @@ describe('the device claims Access provides the app shell', () => {
     should(claim?.deviceId).equal('fy_device_id_two');
     should(claim?.appSession).equal('page-load-1');
     should((claim as unknown as { key: TestKeyHandle }).key.key).equal(privateKey);
+  });
+
+  it('names every page load with an app session the daemon’s own record decoder accepts (C3)', async () => {
+    // THE DEFAULT, not an injected value: every other test here passes `appSession` itself, which is how a page load
+    // that minted a 36-character UUID (the daemon wants 16 random bytes, base64url) shipped. The record is the one a
+    // session seals at sequence 1; the daemon decoding it is the only judge of its shape.
+    const store = new MemoryDeviceKeyStore();
+    const claims = accessClaims({ crypto: testDeviceKeyCrypto as never, indexedDB: null }, { store });
+    const { privateKey } = await testDeviceKeyCrypto.generateDeviceKey();
+    await store.save(DAEMON, privateKey);
+
+    const claim = await claims.claim(paired(DAEMON, `fy_device_id_${'b'.repeat(22)}`));
+    const appSession = claim?.appSession ?? '';
+
+    const decoded = decodeClientRecord(
+      new TextEncoder().encode(
+        JSON.stringify({
+          t: 'auth',
+          protocol: SESSION_PROTOCOL_ID,
+          deviceId: claim?.deviceId,
+          appSession,
+          proof: 'p'.repeat(86),
+        }),
+      ),
+    );
+
+    should(decoded).not.be.null();
+    should(appSession).match(/^[A-Za-z0-9_-]{22}$/u);
+  });
+
+  it('draws a fresh app session for each page load (C3)', async () => {
+    const draw = async (): Promise<string> => {
+      const store = new MemoryDeviceKeyStore();
+      await store.save(DAEMON, (await testDeviceKeyCrypto.generateDeviceKey()).privateKey);
+      const claims = accessClaims({ crypto: testDeviceKeyCrypto as never, indexedDB: null }, { store });
+      return (await claims.claim(paired(DAEMON)))?.appSession ?? '';
+    };
+
+    should(await draw()).not.equal(await draw());
   });
 
   it('says a key store it cannot read is unreadable, not missing', async () => {

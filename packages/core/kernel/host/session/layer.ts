@@ -25,7 +25,7 @@
 
 import { type ApiRequest, type ApiResponse, jsonResponse } from '../../contract/http.ts';
 import type { CarrierKey, SessionId } from '../../contract/ids.ts';
-import type { Clock } from '../../contract/ports.ts';
+import type { Clock, Log } from '../../contract/ports.ts';
 import type {
   CarrierLink,
   CarrierPeer,
@@ -72,6 +72,7 @@ import {
   decodeClientRecord,
   decodeCreditPayload,
   decodeFrame,
+  describeUnreadableRecord,
   deviceAuthMessage,
   devicePairMessage,
   deviceRenewMessage,
@@ -170,6 +171,11 @@ export interface SessionLayerDeps {
   readonly clock: Pick<Clock, 'nowMs' | 'after'>;
   /** The lease and its cap. Absent means {@link DEFAULT_ACCESS_LEASE_POLICY}. */
   readonly lease?: AccessLeasePolicy;
+  /**
+   * Where a session that ends on a record this daemon could not read says so (the kind and the shape of what was
+   * wrong, never a value). Absent means silence, as before.
+   */
+  readonly log?: Log;
 }
 
 /** What the layer is doing, for a surface that has to say whether this daemon is reachable at all. */
@@ -588,6 +594,17 @@ class SealedSession implements CarrierLink {
     if (!this.#consume()) return;
     const message = decodeClientRecord(opened.plaintext);
     if (message === null) {
+      // A session ended by the daemon on a record it could not read used to leave nothing behind, so an app
+      // sending a field the schema refuses looked like a dead rendezvous. Only the record's kind, which phase
+      // it arrived in and the zod issue codes/field names are written: see `describeUnreadableRecord`.
+      const unreadable = describeUnreadableRecord(opened.plaintext);
+      this.deps.log?.warn('a session was ended because its record could not be read', {
+        carrier: this.carrier,
+        phase: this.#phase,
+        kind: unreadable.kind,
+        cause: unreadable.cause,
+        issues: unreadable.issues.join(' '),
+      });
       this.#endSession(SESSION_CLOSE_CODES.protocolError, 'unparseable session record');
       return;
     }
