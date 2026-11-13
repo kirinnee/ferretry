@@ -145,8 +145,9 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
     router with its real default preference** (`registeredConnect` over the real generated registry, not `carriers: []`):
     the unchosen default falls back to the address the device paired over when no relay is discovered or the relay does not
     answer, says so, and flips back when the relay answers; a chosen "Relay only" stays blocked with the relay named as the
-    cause and Settings › This device › Connection reachable from the block; a device that paired over a relay has no
-    direct address to fall back to.
+    cause and Settings › This device › Connection reachable from the block; a record without the positive "paired over direct" mark (every older record, a
+    relayed pairing) has no direct address to fall back to, and the fallback notice holds while any lane of the same app
+    still sends direct.
 
 ## After merge
 

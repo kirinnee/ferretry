@@ -74,8 +74,12 @@ export interface WalkObserver {
   untried(method: ConnectionMethod, detail: string): void;
   /** A leg failed before the daemon accepted a session over it; the walk tries the next. */
   failed(failure: LegFailure): void;
-  /** The daemon accepted a session over this leg: this is the session's carrier now, and the walk's answer. */
-  committed(method: ConnectionMethod): void;
+  /**
+   * The daemon accepted a session over this leg: this is the session's carrier now, and the walk's answer. Answers a
+   * callback run once when THAT session ends (it closed, was cancelled, or its carrier dropped), so the router knows
+   * which accepted sessions are still live.
+   */
+  committed(method: ConnectionMethod): (() => void) | undefined;
   /** Every leg failed (or there were none): the session ends with this close. */
   exhausted(failures: readonly LegFailure[]): { readonly code: number; readonly reason: string };
   /** A request on an accepted session was lost because its carrier ended under this browser: it stopped carrying. */
@@ -213,6 +217,8 @@ class WalkingSocket implements ScopedSocket {
    * the drop), and the next session redials it first.
    */
   #droppedWith: number | undefined;
+  /** Told by the observer at acceptance: run once when this accepted session ends. */
+  #onEnded: (() => void) | undefined;
   readonly #untrack: () => void;
 
   constructor(
@@ -439,7 +445,7 @@ class WalkingSocket implements ScopedSocket {
     this.#servingSince = this.deps.now();
     // A stale walk publishes nothing: its entry was replaced, or its session is being closed under it.
     if (this.walk.scope.stale() !== undefined) return;
-    this.walk.observer.committed(this.#method);
+    this.#onEnded = this.walk.observer.committed(this.#method);
   }
 
   /** The dial for a fresh session on the walk's next leg, when this session ended unsent and the walk is current. */
@@ -562,6 +568,9 @@ class WalkingSocket implements ScopedSocket {
     if (this.#ended) return;
     this.#ended = true;
     this.#untrack();
+    const onEnded = this.#onEnded;
+    this.#onEnded = undefined;
+    onEnded?.();
     this.events.onClose(code, reason);
   }
 }

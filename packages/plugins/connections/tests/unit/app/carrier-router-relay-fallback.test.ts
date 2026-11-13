@@ -20,6 +20,11 @@ const hostsOf = (hosted: ScriptedHost): Record<string, ScriptedHost> => ({
   'hosted.example': hosted,
 });
 
+/** The record as every pairing made before the mark existed stored it: the address, and no word that it was crossed. */
+const unmarked = ({ pairedOver: _mark, ...legacy }: PairedDaemon): PairedDaemon => legacy;
+
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
 const hostsDialled = (urls: readonly string[]): string[] => urls.map(url => new URL(url).host);
 
 describe('the unchosen default (Relay) with a relay that cannot carry', () => {
@@ -60,8 +65,10 @@ describe('the unchosen default (Relay) with a relay that cannot carry', () => {
     await first.request({ method: 'GET', path: '/v1/carriers' });
     expect(r.router.relayFallback(r.fx.daemonId)).toBe(RELAY_FALLBACK_LINE);
 
-    // The relay comes back. The next session tries it first (the direct stand-in is never a remembered winner).
+    // The relay comes back and the last session that stood in for it ends. The next session tries the relay first (the
+    // direct stand-in is never a remembered winner).
     hosts['hosted.example'] = { kind: 'carries', carrier: 'relay' };
+    first.close?.();
     const second = await r.connect();
     if (second === undefined) throw new Error('no transport');
     await second.request({ method: 'GET', path: '/v1/carriers' });
@@ -81,6 +88,8 @@ describe('the unchosen default (Relay) with a relay that cannot carry', () => {
     expect(r.router.relayFallback(r.fx.daemonId)).toBe(RELAY_FALLBACK_LINE);
 
     // The direct address stops carrying too: a walk that finds nothing at all says no carrier stands in for the relay.
+    // (The first session ended: while it lives it still sends direct, which the notice rightly keeps saying.)
+    first.close?.();
     hosts[new URL(DIRECT).host] = { kind: 'dead' };
     const second = await r.connect();
     if (second === undefined) throw new Error('no transport');
@@ -92,12 +101,11 @@ describe('the unchosen default (Relay) with a relay that cannot carry', () => {
 
   test('an unchosen Relay with nothing to try is named Relay, not "Relay only": nobody chose that', async () => {
     const r = await rig(hostsOf({ kind: 'dead' }), [], 'relay', null, undefined, { chosen: () => false });
-    const device: PairedDaemon = { ...r.daemon, pairedViaRelay: true };
-    const transport = await r.connect(device);
+    const transport = await r.connect(unmarked(r.daemon));
     if (transport === undefined) throw new Error('no transport');
     await expect(transport.request({ method: 'GET', path: '/v1/carriers' })).rejects.toBeDefined();
     const choice = r.router.choice(r.fx.daemonId);
-    expect(choice?.ok === false ? choice.reason : '').toBe('Relay: there is no relay for this machine right now.');
+    expect(choice?.ok === false ? choice.reason : '').toBe('Relay — there is no relay for this machine right now.');
     r.fx.layer.close();
   });
 
@@ -114,11 +122,10 @@ describe('the unchosen default (Relay) with a relay that cannot carry', () => {
     r.fx.layer.close();
   });
 
-  test('a device that paired over a relay has no direct address it paired over, so it gets no fallback', async () => {
+  test('a record without the "paired over direct" mark (older, or relayed) gets no fallback, whatever its address answers', async () => {
     const r = await rig(hostsOf({ kind: 'dead' }), [], 'relay', null, undefined, { chosen: () => false });
-    // The link's address was never reached by this device: it is recorded, but it is not where the pairing crossed.
-    const device: PairedDaemon = { ...r.daemon, pairedViaRelay: true };
-    const transport = await r.connect(device);
+    // The link's address is recorded, but nothing proves this device crossed it: v4 parity, Relay and nothing else.
+    const transport = await r.connect(unmarked(r.daemon));
     if (transport === undefined) throw new Error('no transport');
     await expect(transport.request({ method: 'GET', path: '/v1/carriers' })).rejects.toBeDefined();
     expect(r.network.dialled).toEqual([]);
@@ -144,6 +151,89 @@ describe('the unchosen default (Relay) with a relay that cannot carry', () => {
     if (transport === undefined) throw new Error('no transport');
     await expect(transport.request({ method: 'GET', path: '/v1/carriers' })).rejects.toBeDefined();
     expect(hostsDialled(r.network.dialled)).toEqual([new URL(DIRECT).host]);
+    r.fx.layer.close();
+  });
+});
+
+describe('the notice tells the truth while ANY lane or stream of the machine still sends direct', () => {
+  const upHosts = (): Record<string, ScriptedHost> => hostsOf({ kind: 'dead' });
+
+  test('one transport: a relay bulk lane does not hide the fallback while the request lane still sends direct', async () => {
+    const hosts = upHosts();
+    const r = await rig(hosts, [], 'relay', HOSTED, undefined, { chosen: () => false });
+    const first = await r.connect();
+    if (first === undefined) throw new Error('no transport');
+    await first.request({ method: 'GET', path: '/v1/carriers' });
+    expect(r.router.relayFallback(r.fx.daemonId)).toBe(RELAY_FALLBACK_LINE);
+
+    // The relay comes back and the large body opens the separate bulk lane, which the relay carries.
+    hosts['hosted.example'] = { kind: 'carries', carrier: 'relay' };
+    await first.request({ method: 'POST', path: '/v1/bulk', body: 'x'.repeat(40_000) });
+    await first.request({ method: 'GET', path: '/v1/carriers' });
+    expect(carriedOver(r.fx)).toEqual(['/v1/carriers direct', '/v1/bulk relay', '/v1/carriers direct']);
+
+    // Still direct on one lane: the notice stays, and the connection never claims to be on the relay.
+    expect(r.router.relayFallback(r.fx.daemonId)).toBe(RELAY_FALLBACK_LINE);
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({
+      ok: true,
+      method: { kind: 'direct' },
+      reason: RELAY_FALLBACK_LINE,
+    });
+    r.fx.layer.close();
+  });
+
+  test('one transport: once the direct lane ends and the relay lane is live, the connection is on the relay and the line goes', async () => {
+    const hosts = upHosts();
+    const r = await rig(hosts, [], 'relay', HOSTED, undefined, { chosen: () => false });
+    const first = await r.connect();
+    if (first === undefined) throw new Error('no transport');
+    await first.request({ method: 'GET', path: '/v1/carriers' });
+    hosts['hosted.example'] = { kind: 'carries', carrier: 'relay' };
+    await first.request({ method: 'POST', path: '/v1/bulk', body: 'x'.repeat(40_000) });
+    expect(r.router.relayFallback(r.fx.daemonId)).toBe(RELAY_FALLBACK_LINE);
+
+    // The whole transport goes away: both lanes end, and nothing is live. A fresh transport reaches the relay first.
+    first.close?.();
+    const second = await r.connect();
+    if (second === undefined) throw new Error('no transport');
+    await second.request({ method: 'GET', path: '/v1/carriers' });
+    expect(carriedOver(r.fx).at(-1)).toBe('/v1/carriers relay');
+    expect(r.router.relayFallback(r.fx.daemonId)).toBeUndefined();
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'relay' } });
+    r.fx.layer.close();
+  });
+
+  test('a stream on the fallback keeps the notice while a request session on the relay answers, and clears it when the stream ends', async () => {
+    const hosts = upHosts();
+    const r = await rig(hosts, [], 'relay', HOSTED, undefined, { chosen: () => false });
+    const streaming = await r.connect();
+    if (streaming === undefined) throw new Error('no transport');
+    // The stream's own session is accepted over the paired direct address while the relay is down.
+    r.fx.acceptStreams();
+    const closes: string[] = [];
+    const stream = streaming.socket('/v1/example/stream', {
+      onFrame: () => undefined,
+      onClose: reason => closes.push(reason),
+    });
+    for (let waited = 0; waited < 1_000 && r.router.relayFallback(r.fx.daemonId) === undefined; waited += 10)
+      await sleep(10);
+    expect(closes).toEqual([]);
+    expect(r.router.relayFallback(r.fx.daemonId)).toBe(RELAY_FALLBACK_LINE);
+
+    hosts['hosted.example'] = { kind: 'carries', carrier: 'relay' };
+    const requesting = await r.connect();
+    if (requesting === undefined) throw new Error('no transport');
+    await requesting.request({ method: 'GET', path: '/v1/carriers' });
+    expect(carriedOver(r.fx).at(-1)).toBe('/v1/carriers relay');
+    // A relay request answered, yet the stream still sends direct: the machine is not fully back on the relay.
+    expect(r.router.relayFallback(r.fx.daemonId)).toBe(RELAY_FALLBACK_LINE);
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'direct' } });
+
+    stream.close();
+    for (let waited = 0; waited < 1_000 && r.router.relayFallback(r.fx.daemonId) !== undefined; waited += 10)
+      await sleep(10);
+    expect(r.router.relayFallback(r.fx.daemonId)).toBeUndefined();
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'relay' } });
     r.fx.layer.close();
   });
 });

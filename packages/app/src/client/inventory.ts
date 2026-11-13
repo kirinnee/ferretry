@@ -145,7 +145,9 @@ export function eventOwner(eventName: string): string {
 
 /**
  * Why a whole daemon is blocked, in words an owner can read to a person helping: which core piece, and how it failed
- * (`kernel: its contract differs`), or that the protocol differs, or that the answer could not be read at all. Names
+ * (`kernel: its contract differs`), or that the protocol differs, or why the answer could not be read — the carrier's own
+ * sentence, alone: the line above it already says the list could not be read, so a second "could not be read:" only
+ * stacks colons ("Why: Relay only — there is no relay for this machine right now."). Names
  * ids and reasons only, never a hash or a body. `undefined` when nothing is blocked (or the answer has not come).
  *
  * The one full-screen sentence is the same for every core cause, so without this a mismatch, a missing piece and a
@@ -159,7 +161,7 @@ export function wholeDaemonWhy(
   if (inventory.kind === 'unreadable')
     return inventory.cause === undefined
       ? 'the plugin list this daemon sent could not be read'
-      : `the plugin list could not be read: ${inventory.cause.replace(/[.\s]+$/u, '')}`;
+      : inventory.cause.replace(/[.\s]+$/u, '');
   if (inventory.kind === 'protocol-mismatch')
     return `this app speaks protocol ${PROTOCOL}, this daemon speaks protocol ${inventory.daemonProtocol}`;
   const coreIds: readonly string[] = CORE_IDS;

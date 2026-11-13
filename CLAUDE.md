@@ -72,7 +72,7 @@ Cloudflare rendezvous that can carry it. The wire contract is
 [docs/relay-protocol.md](docs/relay-protocol.md) — implement against that document, not the code.
 Carriers are a per-device, per-machine **choice** (owner decision 2026-10-21, protocol §15): **Relay is the
 default** (a later same-day decision: no Auto unless chosen) and asks nothing — and an UNCHOSEN Relay that cannot reach its relay
-uses the direct address the device paired over and says so, while a chosen "Relay only" never does; Auto walks direct → WebRTC →
+uses the direct address the device paired over (only a record carrying the positive `pairedOver: 'direct'` mark has one; older records behave as Relay only did) and says so for as long as any live lane or stream is on it, while a chosen "Relay only" never does; Auto walks direct → WebRTC →
 the hosted Cloudflare tunnel when the daemon published one → relay, and "WebRTC / tunnel / relay only"
 narrow that walk; every surface still names
 the live carrier and why the others were passed over. Pairing ignores the choice (direct, then the

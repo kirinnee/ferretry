@@ -198,11 +198,13 @@ const sameCarrier = (left: ConnectionMethod, right: ConnectionMethod): boolean =
 
 /**
  * The direct address this device paired over — what the pairing recorded for this daemon, nothing discovered or guessed
- * — as a carrier. `undefined` when the pairing crossed a relay (the link's address was never reached, so it was not
- * "paired over") or when it is not one this build will dial.
+ * — as a carrier. Only a record carrying the POSITIVE mark (`pairedOver: 'direct'`, written by the pairing that crossed
+ * it) has one: a record without it (every record made before the mark, relayed or not) only holds the link's address,
+ * which this device never proved it reached, so it has none and behaves as Relay only did before. `undefined` too when
+ * the address is not one this build will dial.
  */
 function pairedDirect(daemon: PairedDaemon): ConnectionMethod | undefined {
-  if (daemon.pairedViaRelay === true) return undefined;
+  if (daemon.pairedOver !== 'direct') return undefined;
   const parsed = ConnectionMethodSchema.safeParse({ kind: 'direct', daemonUrl: daemon.address });
   return parsed.success ? parsed.data : undefined;
 }
@@ -248,7 +250,7 @@ const choiceFor = (probes: readonly ConnectionProbe[], plan: WalkPlan): Connecti
   const passedOver: readonly ConnectionSkip[] = chosen.passedOver;
   // Nobody chose Relay here, so it is not called "Relay only": the sentence must not claim a choice that was not made.
   const label = plan.fallsBackToPairedDirect ? 'Relay' : CARRIER_PREFERENCE_LABEL[plan.preference];
-  return { ok: false, reason: `${label}: ${plan.why}.`, passedOver };
+  return { ok: false, reason: `${label} — ${plan.why}.`, passedOver };
 };
 
 const HOSTED_ONLY_CODES: ReadonlySet<number> = new Set([
@@ -323,6 +325,12 @@ class Generation {
   }
 }
 
+/** One accepted session that is still alive: whether it stands in for the relay, and the choice it made. */
+interface LiveSession {
+  readonly standsIn: boolean;
+  readonly choice: ConnectionChoice;
+}
+
 /** One tunnel lookup: when it was asked, and what it found — a tunnel, or nothing. */
 interface TunnelLookup {
   readonly at: number;
@@ -335,6 +343,11 @@ interface CarrierEntry {
   choice: ConnectionChoice | undefined;
   /** The choice is the paired direct address standing in for an unreachable relay (never a remembered winner). */
   fellBack: boolean;
+  /**
+   * Every ACCEPTED session of this pairing that is still alive, request lanes and streams alike (shared across a
+   * republish, which keeps the sessions). The fallback is told for as long as any of them stands in for the relay.
+   */
+  readonly live: Set<LiveSession>;
   readonly generation: Generation;
   /** The last tunnel lookup for this daemon, reused for {@link TUNNEL_LOOKUP_REUSE_MS}. */
   lookup: TunnelLookup | undefined;
@@ -404,6 +417,7 @@ export class CarrierRouter {
       published: entry.published,
       choice: undefined,
       fellBack: false,
+      live: new Set(),
       generation: new Generation(),
       lookup: entry.lookup,
     });
@@ -467,7 +481,8 @@ export class CarrierRouter {
 
   /**
    * The line a surface says while this daemon is carried by the paired direct address because the relay could not be
-   * reached, or `undefined` while the relay carries it (or nothing has been carried).
+   * reached — for as long as ANY live session of it (a request lane, a bulk lane, a stream) stands in for the relay —
+   * or `undefined` once none does (the relay carries it, or nothing has been carried).
    */
   relayFallback(daemonId: string): string | undefined {
     return this.#entries.get(daemonId)?.fellBack === true ? RELAY_FALLBACK_LINE : undefined;
@@ -497,6 +512,7 @@ export class CarrierRouter {
         published,
         choice: undefined,
         fellBack: false,
+        live: new Set(),
         generation: new Generation(),
         lookup: undefined,
       };
@@ -515,6 +531,7 @@ export class CarrierRouter {
       published,
       choice: winner !== undefined && (named(winner) || outlivesRepublish(winner)) ? chosen : undefined,
       fellBack: current.fellBack && winner !== undefined && (named(winner) || outlivesRepublish(winner)),
+      live: current.live,
       generation: current.generation,
       lookup: current.lookup,
     };
@@ -692,19 +709,35 @@ export class CarrierRouter {
       },
       committed: (method: ConnectionMethod) => {
         const entry = this.#current(daemonId, walked);
-        if (entry === undefined) return;
+        if (entry === undefined) return undefined;
         this.deps.health?.answered(daemonId);
         this.deps.drops?.reconnected(daemonId);
-        if (!decides) return;
+        if (!decides) return undefined;
         // Under the unchosen default the only direct leg is the fallback: the relay did not carry this session.
         const standsIn = plan.fallsBackToPairedDirect && method.kind === 'direct';
-        // Initial sessions may walk concurrently; once one has a winner, that is the connection's fact — except that
-        // a relay answering again takes the place of the direct address that stood in for it.
-        if (entry.choice?.ok === true && !(entry.fellBack && !standsIn)) return;
         const chosen = choiceFor([...probes, carrierProbe(method, { kind: 'answered', status: 101 })], plan);
-        entry.choice = standsIn && chosen.ok ? { ...chosen, reason: RELAY_FALLBACK_LINE } : chosen;
-        entry.fellBack = standsIn;
-        this.#announce();
+        const session: LiveSession = {
+          standsIn: standsIn && chosen.ok,
+          choice: standsIn && chosen.ok ? { ...chosen, reason: RELAY_FALLBACK_LINE } : chosen,
+        };
+        entry.live.add(session);
+        if (session.standsIn) {
+          // A session on the paired direct address is live: the connection says so, whatever else carries.
+          entry.choice = session.choice;
+          entry.fellBack = true;
+          this.#announce();
+        } else if (![...entry.live].some(live => live.standsIn)) {
+          // Initial sessions may walk concurrently; once one has a winner, that is the connection's fact — except that
+          // a relay answering again takes the place of a direct address that stood in for it and has since ended.
+          if (!(entry.choice?.ok === true && !entry.fellBack)) {
+            entry.choice = session.choice;
+            entry.fellBack = false;
+            this.#announce();
+          }
+        }
+        // Otherwise a relay session came up while another lane still sends direct: the disclosure stays until that
+        // lane (or stream) ends, because the connection is not fully back on the relay.
+        return () => this.#sessionEnded(daemonId, walked.generation, entry.live, session);
       },
       exhausted: (failures: readonly LegFailure[]) => {
         if (!decides) {
@@ -719,7 +752,7 @@ export class CarrierRouter {
         if (entry.choice?.ok !== true) {
           entry.choice = choiceFor(probes, plan);
           // Nothing carried at all, the paired direct address included: no carrier is standing in for the relay.
-          entry.fellBack = false;
+          entry.fellBack = [...entry.live].some(live => live.standsIn);
           this.#announce();
         }
         if (failures.length > 0) this.deps.health?.outage(daemonId, carrierOutage(failures));
@@ -734,6 +767,23 @@ export class CarrierRouter {
         end: Parameters<NonNullable<CarrierRouterDependencies['drops']>['dropped']>[3],
       ) => this.deps.drops?.dropped(daemonId, method.kind, 'requests', end),
     };
+  }
+
+  /**
+   * An accepted session ended. When it was the last one standing in for the relay, the fallback is over — provided a
+   * session on the relay is still alive to take its place; with nothing live the line stays (it must not flicker with
+   * every idle session that closes), and the next walk tries the relay first again.
+   */
+  #sessionEnded(daemonId: string, generation: Generation, live: Set<LiveSession>, session: LiveSession): void {
+    live.delete(session);
+    if (!session.standsIn) return;
+    const entry = this.#holding(daemonId, generation);
+    if (entry === undefined || [...live].some(other => other.standsIn)) return;
+    const relayed = [...live].at(-1);
+    if (relayed === undefined) return;
+    entry.choice = relayed.choice;
+    entry.fellBack = false;
+    this.#announce();
   }
 
   #announce(): void {

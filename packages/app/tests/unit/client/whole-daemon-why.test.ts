@@ -33,10 +33,8 @@ describe('wholeDaemonWhy: the same full-screen sentence, told apart', () => {
   });
 
   test('a read that failed on the way names the carrier’s own sentence as the cause', () => {
-    const inventory = unreadableBecause(new Error('Relay only: there is no relay for this machine right now.'));
-    expect(wholeDaemonWhy(inventory, compiled)).toBe(
-      'the plugin list could not be read: Relay only: there is no relay for this machine right now',
-    );
+    const inventory = unreadableBecause(new Error('Relay only — there is no relay for this machine right now.'));
+    expect(wholeDaemonWhy(inventory, compiled)).toBe('Relay only — there is no relay for this machine right now');
   });
 
   test('the cause is one capped line, and an error with no words says nothing more than an unreadable answer', () => {

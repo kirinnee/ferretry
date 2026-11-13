@@ -26,7 +26,7 @@ describe('the full-screen line tells a failed read from a different build', () =
     const runtime = await opened(() => Promise.reject(new Error('the carrier dropped')));
     expect(runtime.wholeDaemonLine('d1')).toBe(UNREADABLE_INVENTORY_SENTENCE);
     expect(runtime.wholeDaemonLine('d1')).not.toBe(wholeDaemonSentence('reload-app'));
-    expect(runtime.wholeDaemonDetail('d1')).toBe('the plugin list could not be read: the carrier dropped');
+    expect(runtime.wholeDaemonDetail('d1')).toBe('the carrier dropped');
   });
 
   test('a core piece with another contract keeps the reload sentence and names the piece', async () => {

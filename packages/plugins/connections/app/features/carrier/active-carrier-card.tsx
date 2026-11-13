@@ -13,7 +13,7 @@
  * Relay only — and the card carries that selector (the same one Settings › This device
  * lists), but what it REPORTS is still the measurement: the carrier that won under the
  * preference, and the reason, in `chooseConnection`'s own words — including "Tunnel
- * only: this machine has no tunnel yet" when a preference leaves nothing to try.
+ * only — this machine has no tunnel yet" when a preference leaves nothing to try.
  *
  * THE OBSERVER LIST IS `describeConnectionMethod`'s, verbatim. A second copy of "what
  * a relay operator can see" would be a second thing to keep true, and the one in
@@ -40,7 +40,7 @@ import type { CarrierSetting } from '../../lib/carrier-preference.ts';
 import type { ConnectionHealthState } from '../../lib/connection-health.ts';
 import { carrierLines, RECONNECTING_LABEL, stallCopy } from '../connection/connection-copy.ts';
 import { type CarrierPreferenceAvailability, CarrierPreferenceSelector } from './carrier-preference-selector.tsx';
-import { RelayFallbackNotice } from './relay-fallback-notice.tsx';
+import { RelayFallbackNotice, useConnectionCardOnScreen } from './relay-fallback-notice.tsx';
 
 /** This machine's connection preference on this device, and how to change it. */
 interface CarrierPreferenceControl {
@@ -62,6 +62,8 @@ export interface ActiveCarrierCardProps {
   readonly preference?: CarrierPreferenceControl;
   /** Said while the paired direct address stands in for an unreachable relay (the default preference only). */
   readonly relayFallback?: string;
+  /** The machine's id: the frame's own status line for it stays quiet while this card says the fallback itself. */
+  readonly daemon?: string;
 }
 
 /** The status the card leads with, as one machine-readable word. */
@@ -107,7 +109,7 @@ const connectionStatusKind = (
 
 /** Said before the first request, because a carrier nobody has tried is not a carrier. */
 /**
- * The lead word when a walk RAN and nothing carried — "Tunnel only: not set up by the operator." among
+ * The lead word when a walk RAN and nothing carried — "Tunnel only — not set up by the operator." among
  * them. Not "not measured yet": something was measured, and the answer was no. The machine-readable
  * status stays `none`, because no carrier is live.
  */
@@ -150,7 +152,9 @@ export function ActiveCarrierCard({
   machine = 'this machine',
   preference,
   relayFallback,
+  daemon,
 }: ActiveCarrierCardProps) {
+  useConnectionCardOnScreen(daemon);
   const method = choice?.ok === true ? choice.method : undefined;
   const disclosure = method === undefined ? undefined : describeConnectionMethod(method);
   const status = connectionStatusKind(method, health);
@@ -210,10 +214,12 @@ export function ActiveCarrierCard({
       )}
       {/* The relay could not carry this machine, so the direct address it was paired over does: say that, plainly. */}
       {relayFallback === undefined ? null : <RelayFallbackNotice line={relayFallback} />}
-      {/* The measured sentence, or the honest absence of one. Never a default. */}
-      <p className="mb-0 mt-1 text-cell leading-base text-muted">
-        {choice === undefined ? CARRIER_UNMEASURED : choice.reason}
-      </p>
+      {/* The measured sentence, or the honest absence of one. Never a default. The fallback's sentence IS the line above. */}
+      {relayFallback !== undefined && choice?.reason === relayFallback ? null : (
+        <p className="mb-0 mt-1 text-cell leading-base text-muted">
+          {choice === undefined ? CARRIER_UNMEASURED : choice.reason}
+        </p>
+      )}
       {/* A constraint the reader will otherwise discover as a screen that stops
           updating, or a daemon that stops answering from a café. `text-warn` because
           it is a limit on what works, not decoration. */}

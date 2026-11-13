@@ -7,8 +7,39 @@
  */
 
 import { type BackgroundViewProps } from '@ferretry/app';
-import { createElement, useSyncExternalStore } from 'react';
+import { createElement, useEffect, useSyncExternalStore } from 'react';
 import type { CarrierRouter } from '../../carriers/router.ts';
+
+/**
+ * The machines whose Connection card is on screen right now. The card says the line itself, so the frame's status line
+ * for that machine stays quiet: one screen, one telling. Everywhere else the frame's line is the only place to hear it.
+ */
+const cardsOnScreen = new Map<string, number>();
+const cardListeners = new Set<() => void>();
+const announceCards = (): void => {
+  for (const listener of cardListeners) listener();
+};
+const subscribeCards = (listener: () => void): (() => void) => {
+  cardListeners.add(listener);
+  return () => {
+    cardListeners.delete(listener);
+  };
+};
+
+/** Registers a Connection card for `daemon` while it is mounted, so the frame's status line does not repeat it. */
+export function useConnectionCardOnScreen(daemon: string | undefined): void {
+  useEffect(() => {
+    if (daemon === undefined) return undefined;
+    cardsOnScreen.set(daemon, (cardsOnScreen.get(daemon) ?? 0) + 1);
+    announceCards();
+    return () => {
+      const left = (cardsOnScreen.get(daemon) ?? 1) - 1;
+      if (left <= 0) cardsOnScreen.delete(daemon);
+      else cardsOnScreen.set(daemon, left);
+      announceCards();
+    };
+  }, [daemon]);
+}
 
 /** The line itself, as a status. */
 export function RelayFallbackNotice({ line }: { readonly line: string }) {
@@ -29,6 +60,11 @@ export function relayFallbackView(router: () => Pick<CarrierRouter, 'subscribe' 
     const held = router();
     const read = () => held?.relayFallback(daemon);
     const line = useSyncExternalStore(listener => held?.subscribe(listener) ?? (() => undefined), read, read);
-    return line === undefined ? null : createElement(RelayFallbackNotice, { line });
+    const cardSaysIt = useSyncExternalStore(
+      subscribeCards,
+      () => cardsOnScreen.has(daemon),
+      () => false,
+    );
+    return line === undefined || cardSaysIt ? null : createElement(RelayFallbackNotice, { line });
   };
 }

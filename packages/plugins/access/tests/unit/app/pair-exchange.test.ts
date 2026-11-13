@@ -84,8 +84,7 @@ describe('the pairing exchange', () => {
         machine: 'workstation',
         deviceId,
         address: 'https://daemon.example.test',
-        // The pairing crossed a relay, so the link's address is not one this device paired over (no direct fallback to it).
-        pairedViaRelay: true,
+        // The pairing crossed a relay, so nothing marks the link's address as one this device paired over.
         carriers: response().carriers,
       },
     ]);
@@ -103,8 +102,8 @@ describe('the pairing exchange', () => {
     };
 
     await exchangePairing({ ports, claims, store }, seed, 'My phone');
-    // A direct pairing records the address it crossed, and nothing that marks it as relayed.
-    should(added[0]).not.have.property('pairedViaRelay');
+    // A direct pairing records the address it crossed AND the positive mark that it paired over it.
+    should(added[0]).have.property('pairedOver', 'direct');
 
     should(inputs).have.length(1);
     should(inputs[0]?.address).equal(seed.daemonUrl);

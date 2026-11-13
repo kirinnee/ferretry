@@ -190,8 +190,7 @@ describe('the registered production carrier router, with its real default', () =
       expect(inventoryKind(session)).toBe('unreadable');
       expect(session.runtime.wholeDaemonLine(session.daemonId)).toContain('Could not read');
       const why = session.runtime.wholeDaemonDetail(session.daemonId) ?? '';
-      expect(why).toContain('the plugin list could not be read');
-      expect(why.toLowerCase()).toContain('relay');
+      expect(why).toBe('Relay only — there is no relay for this machine right now');
       // Strict: the daemon's own address is never dialled, so no line says it was used.
       expect(session.dialled.every(isRelayDial)).toBe(true);
       expect(session.relayFallbackLine()).toBeUndefined();
@@ -200,18 +199,35 @@ describe('the registered production carrier router, with its real default', () =
     });
   }, 60_000);
 
-  test('4. the relay comes back: the next session flips back to the relay and the line goes away', async () => {
+  test('4. the relay comes back: once nothing sends direct any more, the next session flips back to the relay and the line goes away', async () => {
     await withDevice({ relay: { up: false } }, async session => {
       await session.ready();
       expect(session.relayFallbackLine()).toBe(FALLBACK_LINE);
       session.setRelayUp(true);
+      // The app's own sessions were the ones standing in for the relay; with them gone the relay carries the next.
+      session.endAppSessions();
       await session.probe();
       expect(session.relayFallbackLine()).toBeUndefined();
     });
   }, 60_000);
 
-  test('5. a device that paired over a relay has no direct address to fall back to: blocked with the relay as the cause', async () => {
-    await withDevice({ pairedViaRelay: true }, async session => {
+  test('6. one lane on the relay does not hide the fallback while another lane of the same app still sends direct', async () => {
+    await withDevice({ relay: { up: false } }, async session => {
+      await session.ready();
+      expect(session.relayFallbackLine()).toBe(FALLBACK_LINE);
+      session.setRelayUp(true);
+      const before = session.dialled.length;
+      // A body too large for the ordinary lane opens the separate bulk lane, which the relay now carries.
+      await session.recording().request({ method: 'POST', path: '/v1/health', body: 'x'.repeat(40_000) });
+      expect(session.dialled.slice(before).some(isRelayDial)).toBe(true);
+      // The original lane has not moved: it is still direct, so the notice stays and the app never claims the relay.
+      await session.recording().request({ method: 'GET', path: '/v1/health' });
+      expect(session.relayFallbackLine()).toBe(FALLBACK_LINE);
+    });
+  }, 60_000);
+
+  test('5. a pairing without the "paired over direct" mark (every older record, a relayed pairing) has no fallback: blocked with the relay as the cause', async () => {
+    await withDevice({ unmarkedPairing: true }, async session => {
       await session.ready();
       expect(inventoryKind(session)).toBe('unreadable');
       expect(session.runtime.wholeDaemonLine(session.daemonId)).toContain('Could not read');

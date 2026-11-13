@@ -79,6 +79,24 @@
 .fy-search {
   flex: 1;
   max-width: 420px;
+  /* One line, whatever the bar's width: the shortcut hint never wraps under the word, against the edge. */
+  white-space: nowrap;
+}
+/* The machine picker is a themed field like every other (its popup list included), so a dark theme paints it with the
+   theme's surface and ink rather than the browser's mid-grey default. */
+.fy-daemon-picker {
+  min-width: 0;
+  max-width: 100%;
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--font-body);
+}
+.fy-daemon-picker option,
+.fy-daemon-picker optgroup {
+  background: var(--surface);
+  color: var(--fg);
 }
 
 .fy-columns {

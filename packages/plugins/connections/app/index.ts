@@ -229,6 +229,7 @@ export function buildConnectionsApp(
     return createElement(ActiveCarrierCard, {
       choice,
       relayAdvertised: carriers.some(c => c.kind === 'relay'),
+      ...(daemonId === undefined ? {} : { daemon: daemonId }),
       ...(relayFallback === undefined ? {} : { relayFallback }),
     });
   }

@@ -40,10 +40,10 @@ describe('DaemonList', () => {
     const storage = memoryStore();
     const list = new DaemonList({ storage, now: clock() });
     list.add(pairing('d1'));
-    list.add({ ...pairing('d2'), pairedViaRelay: true });
+    list.add({ ...pairing('d2'), pairedOver: 'direct' });
     const again = new DaemonList({ storage, now: clock() });
-    expect(again.get('d1')?.pairedViaRelay).toBeUndefined();
-    expect(again.get('d2')?.pairedViaRelay).toBe(true);
+    expect(again.get('d1')?.pairedOver).toBeUndefined();
+    expect(again.get('d2')?.pairedOver).toBe('direct');
   });
 
   test('a re-pair keeps the label and clears the daemon caches first', () => {

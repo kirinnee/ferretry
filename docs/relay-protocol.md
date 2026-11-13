@@ -2947,7 +2947,7 @@ walks, and in what order.
 The walk's rules from §13 are unchanged inside each preference: the carrier is chosen by **trying**
 it, only a transport failure from a replay-safe request advances, a winner is remembered for the
 life of the connection, and a surface always names the live carrier and why the others were passed
-over. A preference that leaves nothing to try is a stated failure — "Tunnel only: this machine has no
+over. A preference that leaves nothing to try is a stated failure — "Tunnel only — this machine has no
 tunnel yet" — never a silent fall back to a carrier the person excluded.
 
 **The default falls back to the address this device paired over.** Relay is the owner's default and
@@ -2955,12 +2955,20 @@ asks nothing, but a device that paired over a direct address and then cannot rea
 discovered, or one that does not answer — would otherwise be blocked for good, with the machine's own
 Connection setting hidden behind the block. So an **unchosen** Relay tries the relay first and, when it
 carries nothing, dials the address recorded at pairing (the link's address; nothing discovered, published
-later or guessed). A device whose pairing crossed a relay recorded that address without ever reaching it,
-so it has none and gets no fallback. The session is the ordinary authenticated one — same proof, same
+later or guessed). Only a record carrying the **positive mark** that this device paired over that address
+(`pairedOver: 'direct'`, written by the pairing that actually crossed it) has one. A record without the mark —
+every record made before it existed (relayed or not) and a pairing that crossed a relay — holds the link's
+address but no proof this device ever reached it, so it gets no fallback: it behaves as Relay only always did, with
+the relay Why line and the Connection link, and gains the mark only by pairing again. The stored preference has one
+reading — an absent entry is the default, Relay, unchosen — with no old-format branch. The session is the ordinary authenticated one — same proof, same
 device key, governed exactly as a relayed arrival. Every surface that names the live carrier says it
 is direct **because the relay failed** ("Couldn’t reach it through the relay, using the direct
-connection.") and the line goes when a relay session next answers; a direct session that ends does not
-clear it, a walk that finds nothing at all does. A chosen "Relay only" never falls back. When the read
+connection."), and says it for as long as **any** live session of that machine — a request lane, the bulk
+lane, a stream — is on the direct address: a relay session that answers on another lane does not clear it, and
+the Connection card never says "via relay" while a lane still sends direct. The line goes when the last such
+session ends with a relay session live (or when a relay session answers and none is direct); a walk that finds
+nothing at all clears it too. On one screen it is told once: the Connection card says it, and the frame's own
+status line for that machine stays quiet while the card is up. A chosen "Relay only" never falls back. When the read
 that opens a machine fails, the block page names the carrier's own cause and links Settings › This device
 › Connection, which needs no machine.
 
@@ -2971,7 +2979,7 @@ chosen: WebRTC needs a device key to signal and a tunnel is published only to a 
 operator or a paired device switched one on (`GET`/`PUT /v1/tunnel`, "The daemon end"). Choosing Tunnel
 only — or Auto, which walks a tunnel too — for a machine whose switch is off asks, under the choice,
 "Turn on a Cloudflare tunnel for this machine?"; the choice itself is kept either way, and Tunnel only's
-note says "Off for this machine — tunnels are opt-in." — as does the walk's stated failure, "Tunnel only:
+note says "Off for this machine — tunnels are opt-in." — as does the walk's stated failure, "Tunnel only —
 this machine's tunnel is off (opt-in)", ahead of the service's two reasons. The Connection status shows the daemon's own line
 about its tunnel ("Tunnel: off (opt-in) — …"). **Switching is carrier control, not a walk**: `GET` and
 `PUT /v1/tunnel` ride the daemon's direct address or a rendezvous — the introducers, with the hosted

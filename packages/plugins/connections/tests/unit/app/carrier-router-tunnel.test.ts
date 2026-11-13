@@ -225,7 +225,7 @@ describe('R636 tunnel lookup: one question over an introducer, answered for 30 s
       hosts: { [DIRECT_HOST]: { kind: 'carries', carrier: 'direct' } },
       service: 'available',
     });
-    expect(await refused.failure()).toContain(`Tunnel only: ${TUNNEL_NOT_YET}.`);
+    expect(await refused.failure()).toContain(`Tunnel only — ${TUNNEL_NOT_YET}.`);
     expect(refused.learned).toEqual([]);
     refused.r.fx.layer.close();
 
@@ -235,7 +235,7 @@ describe('R636 tunnel lookup: one question over an introducer, answered for 30 s
       status: { ...upAt(TUNNEL_URL), state: 'provisioning', tunnelUrl: null },
       service: 'available',
     });
-    expect(await coming.failure()).toContain(`Tunnel only: ${TUNNEL_NOT_YET}.`);
+    expect(await coming.failure()).toContain(`Tunnel only — ${TUNNEL_NOT_YET}.`);
     expect(coming.learned).toEqual([]);
     coming.r.fx.layer.close();
   });
@@ -263,7 +263,7 @@ describe('R636 tunnel lookup: one question over an introducer, answered for 30 s
       switchedOff: true,
     });
 
-    expect(await t.failure()).toContain(`Tunnel only: ${TUNNEL_SWITCHED_OFF}.`);
+    expect(await t.failure()).toContain(`Tunnel only — ${TUNNEL_SWITCHED_OFF}.`);
     expect(t.dialledHosts().filter(host => host === TUNNEL_HOST)).toEqual([]);
     t.r.fx.layer.close();
   });
@@ -276,7 +276,7 @@ describe('R636 tunnel lookup: one question over an introducer, answered for 30 s
       noClient: true,
     });
 
-    expect(await t.failure()).toContain(`Tunnel only: ${TUNNEL_NOT_YET}.`);
+    expect(await t.failure()).toContain(`Tunnel only — ${TUNNEL_NOT_YET}.`);
     expect(t.asked).toEqual([]);
     expect(t.dialledHosts().filter(host => host === TUNNEL_HOST)).toEqual([]);
     t.r.fx.layer.close();

@@ -32,7 +32,7 @@ const settle = async (): Promise<void> => {
 const go = (path: string): void => window.history.replaceState({}, '', path);
 afterEach(() => go('/'));
 
-const CAUSE = 'Relay only: there is no relay for this machine right now.';
+const CAUSE = 'Relay only — there is no relay for this machine right now.';
 
 async function render() {
   const transport = new FakeTransport(() => {
@@ -66,7 +66,7 @@ describe('a machine whose plugin list could not be read through its carrier', ()
     const view = await render();
     const main = view.container.querySelector('main')?.textContent ?? '';
     expect(main).toContain(UNREADABLE_INVENTORY_SENTENCE);
-    expect(main).toContain(`Why: the plugin list could not be read: ${CAUSE.replace(/\.$/u, '')}.`);
+    expect(main).toContain(`Why: ${CAUSE}`);
     const link = view.container.querySelector('[data-whole-daemon-connection] a') as HTMLAnchorElement;
     expect(link.textContent).toBe('Connection settings');
     expect(link.getAttribute('href')).toBe(DEVICE_SETTINGS_HREF);

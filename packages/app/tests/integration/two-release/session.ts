@@ -51,6 +51,8 @@ export interface AppSession {
   readonly dialled: readonly string[];
   /** With {@link ProductionCarrier}: whether the relay stand-in answers. Takes effect on the next session. */
   setRelayUp(up: boolean): void;
+  /** With {@link ProductionCarrier}: ends every session the app itself holds (its lanes and streams), as a closed tab would. */
+  endAppSessions(): void;
   /** With {@link ProductionCarrier}: opens one more session through the registered carrier and asks the daemon a read. */
   probe(): Promise<void>;
   /** With {@link ProductionCarrier}: the line the registered Connections background view draws for this daemon. */
@@ -79,8 +81,11 @@ export interface ProductionCarrier {
   readonly relay?: { readonly up: boolean };
   /** The person chose "Relay only" for this machine (saved in the browser's storage, as Connections saves it). */
   readonly chosenRelayOnly?: boolean;
-  /** The pairing crossed a relay, so the link's address is not one this device paired over. */
-  readonly pairedViaRelay?: boolean;
+  /**
+   * The record carries no `pairedOver` mark — the shape of every pairing made before the mark existed (relayed or not),
+   * and of a new pairing that crossed a relay: the link's address is not known to be one this device paired over.
+   */
+  readonly unmarkedPairing?: boolean;
 }
 
 const poll = async <T>(read: () => T | undefined, what: string, ms = 30_000): Promise<T> => {
@@ -199,7 +204,7 @@ export async function openApp(
     machine: 'fixture',
     deviceId,
     address: daemon.url,
-    ...(options.production?.pairedViaRelay === true ? { pairedViaRelay: true as const } : {}),
+    ...(options.production?.unmarkedPairing === true ? {} : { pairedOver: 'direct' as const }),
   });
 
   const dialled: string[] = [];
@@ -287,6 +292,9 @@ export async function openApp(
     dialled,
     setRelayUp: up => {
       relayState.up = up;
+    },
+    endAppSessions: () => {
+      opened?.close?.();
     },
     probe: async () => {
       const paired = daemons.get(daemonId);

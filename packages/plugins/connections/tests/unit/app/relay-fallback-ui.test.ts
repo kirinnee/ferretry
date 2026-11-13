@@ -4,6 +4,7 @@
  * background view draw, and this device's own Connection panel — the place the whole-machine block links to.
  */
 import type { PairedDaemon } from '@ferretry/app';
+import { render, run } from '@ferretry/app/testing';
 import { expect, test } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -94,6 +95,48 @@ test('the background view draws the line for a daemon the router carries by the 
       ),
     ),
   ).toBe('');
+});
+
+const times = (tree: unknown): number => JSON.stringify(tree).split(RELAY_FALLBACK_LINE).length - 1;
+
+test('on one screen the line is told ONCE: the card says it, the frame’s status line stays quiet, and returns when the card goes', () => {
+  // The fallback's own choice carries the same sentence as its reason: the card must not draw it twice either.
+  const choice = { ...chooseConnection([{ method: direct, reachable: true }]), reason: RELAY_FALLBACK_LINE };
+  const router = { subscribe: () => () => undefined, relayFallback: () => RELAY_FALLBACK_LINE };
+  const Watcher = relayFallbackView(() => router);
+  const watcher = createElement(Watcher, { daemon: 'fy_daemon_a', client: {} as never });
+  const card = createElement(ActiveCarrierCard, {
+    choice,
+    relayAdvertised: true,
+    relayFallback: RELAY_FALLBACK_LINE,
+    daemon: 'fy_daemon_a',
+  });
+  // Another screen (no card): the frame's line is the only telling.
+  const alone = render(watcher);
+  expect(times(alone.toJSON())).toBe(1);
+  // The Connection screen: the card and the frame's line together say it once.
+  const both = render(createElement('div', null, watcher, card));
+  expect(times(both.toJSON())).toBe(1);
+  // While that card is up, the frame's own line (a second mount) stays quiet; once the card goes, it speaks again.
+  expect(times(alone.toJSON())).toBe(0);
+  run(() => both.unmount());
+  expect(times(alone.toJSON())).toBe(1);
+  // The card of ANOTHER machine does not silence this machine's line.
+  const other = render(
+    createElement(
+      'div',
+      null,
+      watcher,
+      createElement(ActiveCarrierCard, {
+        choice: chooseConnection([{ method: direct, reachable: true }]),
+        relayAdvertised: true,
+        daemon: 'fy_daemon_b',
+      }),
+    ),
+  );
+  expect(times(other.toJSON())).toBe(1);
+  run(() => other.unmount());
+  run(() => alone.unmount());
 });
 
 const memory = (seed: Record<string, string> = {}): CarrierPreferenceStorage => {
