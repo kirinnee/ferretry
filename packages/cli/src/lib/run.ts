@@ -19,6 +19,16 @@ import {
   daemonUninstall,
   daemonWhich,
 } from './commands/daemon.ts';
+import {
+  configCheck,
+  configConfirm,
+  configGuide,
+  configPath,
+  configSchema,
+  configShow,
+  configStatus,
+  configWrite,
+} from './commands/config.ts';
 import { doctorVerb } from './commands/doctor.ts';
 import { pluginInstall, pluginList, pluginOff, pluginOn, pluginShow } from './commands/plugin.ts';
 import {
@@ -59,6 +69,15 @@ const SHELL_HANDLERS: Readonly<Record<string, ShellVerb>> = {
   'daemon which': daemonWhich,
   'daemon reset': daemonReset,
   ask: askVerb,
+  config: configCheck,
+  'config check': configCheck,
+  'config confirm': configConfirm,
+  'config guide': configGuide,
+  'config path': configPath,
+  'config schema': configSchema,
+  'config show': configShow,
+  'config status': configStatus,
+  'config write': configWrite,
   machine: machineShowVerb,
   'machine set': machineSetVerb,
   'machine install': machineInstallVerb,

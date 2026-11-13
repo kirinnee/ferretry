@@ -24,6 +24,7 @@ import {
 import type { DaemonRequest } from '../../src/lib/request.ts';
 import type { AnyCliImplementation, CommandRegistry, KernelEntry, RegistryEntry } from '../../src/lib/registry.ts';
 import { createPluginHost } from '../../src/adapters/plugin-host.ts';
+import type { ConfigFilesPort } from '../../src/lib/config/ports.ts';
 import type { CliWorld, Connection, LaunchResult, PluginHost, Probe } from '../../src/lib/world.ts';
 
 export interface CapturedIo extends TerminalIo {
@@ -92,6 +93,10 @@ const kernelEntry: KernelEntry = {
       routes: [
         route('GET /v1/glossary', { ...SCOPE, caller: 'any' }),
         route('GET /v1/doctor', { ...SCOPE, caller: 'any' }),
+        route('GET /v1/config/status', { ...SCOPE, caller: 'any' }),
+        route('GET /v1/config/file', { ...SCOPE, caller: 'any' }),
+        route('PUT /v1/config/file', { ...SCOPE, caller: 'person' }),
+        route('POST /v1/config/confirm', { ...SCOPE, caller: 'person' }),
       ],
     },
   }),
@@ -223,6 +228,8 @@ export interface FakeWorldOptions {
   /** What every half is handed beyond its client; by default the real adapter over a throwaway in-memory home. */
   readonly host?: PluginHost;
   readonly transport?: RecordingTransport;
+  /** The configuration directory, read without a daemon (`fy config check|path`); absent: the world offers none. */
+  readonly config?: ConfigFilesPort;
   /** Reads the inventory through the connection, instead of answering `inventory`. */
   readonly readInventory?: () => Promise<PluginInventory>;
 }
@@ -272,6 +279,7 @@ export function fakeWorld(options: FakeWorldOptions = {}): {
     environment: options.environment ?? {},
     identity: { binary: 'fy', version: '5.0.0' },
     registry: options.registry ?? registryOf(),
+    ...(options.config === undefined ? {} : { config: options.config }),
     probe: async () => probe,
     launch: async () => options.launch ?? { started: true, baseUrl: probe.baseUrl },
     connect: async ({ asOwner }): Promise<Connection> => {

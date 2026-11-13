@@ -50,6 +50,30 @@ const SHELL_VERB_LINES = [
       'copy a setup exported from another machine; a repeat copy is an update that shows only what differs (--dry-run to look first)',
   },
   { verb: 'ask', summary: 'list the asks waiting for an answer, and answer one' },
+  { verb: 'config', summary: "check and find this machine's configuration files (bare: `config check`)" },
+  {
+    verb: 'config check',
+    summary: 'check every configuration file, as the daemon would; exits non-zero on an error (--json)',
+  },
+  {
+    verb: 'config confirm',
+    summary: 'put into effect a change that loosens what this machine allows, or list what waits',
+  },
+  { verb: 'config guide', summary: 'print the built-in "Set up Ferretry" skill (a SKILL.md)' },
+  { verb: 'config path', summary: 'print the configuration directory, or one file in it' },
+  { verb: 'config schema', summary: 'print the JSON Schema of one kind of file, or list the kinds' },
+  {
+    verb: 'config show',
+    summary: 'show one file as the daemon holds it: where it stands, its etag, its issues and its text (--json)',
+  },
+  {
+    verb: 'config status',
+    summary: 'what the daemon has in effect: every file, every problem, every change waiting (--json)',
+  },
+  {
+    verb: 'config write',
+    summary: 'write one file through the daemon from stdin; refused unless it checks (--if-match <etag>)',
+  },
 ] as const satisfies readonly { readonly verb: string; readonly summary: string }[];
 
 export interface VerbEntry {

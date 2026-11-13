@@ -7,8 +7,9 @@ import { StdinSecretValue } from './lib/stdin-secret-value.ts';
 import { ExitStatus } from './shell.ts';
 
 /**
- * Vault's `fy` half (§2.3): `fy secret set <name>`, the value read from stdin and never from an argument (S1, S33).
- * `ls`, `rm` and `use` are not declared yet (they come after merge), so the manifest has nothing else to answer.
+ * Vault's `fy` half (§2.3): `fy secret set <name>`, the value read from stdin and never from an argument (S1, S33),
+ * `ls` (names and instants), `rm <name>` and `use <command...>` (a command run with secrets in ITS environment).
+ * Nothing printed here is a value: a use's output comes back from the daemon already masked.
  */
 export default implementCli(manifest, {
   build(ctx) {
@@ -16,8 +17,14 @@ export default implementCli(manifest, {
     const exit = new ExitStatus();
     const controller = new SecretController(
       new RouteSecretGateway(client),
-      { success: (message: string) => io.out(`${message}\n`) },
+      {
+        success: (message: string) => io.out(`${message}\n`),
+        error: (message: string) => io.err(`${message}\n`),
+        setExitCode: (code: number) => exit.setExitCode(code),
+        raw: (stream, text) => (stream === 'stdout' ? io.out(text) : io.err(text)),
+      },
       new StdinSecretValue('fy', ctx.readText),
+      ctx.env?.PWD,
     );
     return { verbs: secretVerbs(controller, io, exit) };
   },

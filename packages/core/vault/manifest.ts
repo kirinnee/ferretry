@@ -170,8 +170,31 @@ export default definePlugin({
           'wait for the owner to answer your input card, or approve a sign-in on their phone (a pa_ id): where it stands, never the value or the number',
       }),
     ],
-    /** `fy secret set <name>` takes the value from stdin only, never from an argument (S1, S33). */
-    cli: [verb('secret set', { summary: 'save or replace a secret, reading its VALUE from stdin' })],
+    /**
+     * `fy secret set <name>` takes the value from stdin only, never from an argument (S1, S33). `ls` prints names and
+     * instants, `rm` deletes one, and `use` runs a command with secrets in ITS environment: no verb prints a value.
+     */
+    cli: [
+      verb('secret', { summary: 'daemon secrets agents can use without ever holding one (bare: `secret ls`)' }),
+      verb('secret set', { summary: 'save or replace a secret, reading its VALUE from stdin' }),
+      verb('secret ls', {
+        summary: 'list the secrets this daemon holds — names and when they changed, never values',
+        options: [{ flag: '--json', help: 'print the protocol document instead of the human listing' }],
+      }),
+      verb('secret rm', { summary: 'delete a secret' }),
+      verb('secret use', {
+        summary: 'run a command with secrets in ITS environment; output comes back masked',
+        options: [
+          {
+            flag: '-w, --with <name>',
+            help: 'a secret to put in the command environment, by name (repeat for more than one)',
+          },
+          { flag: '--cwd <path>', help: 'where to run (defaults to the current directory)' },
+          { flag: '--timeout <ms>', help: 'how long the command may take' },
+          { flag: '--json', help: 'print the protocol result instead of relaying the streams' },
+        ],
+      }),
+    ],
   },
   ui: {
     settings: [settingsTab('secrets', { label: 'Secrets', order: 42 })],

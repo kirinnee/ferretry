@@ -24,6 +24,8 @@ export class DaemonRefusal extends ShellError {
     message: string,
     readonly status: number,
     readonly code?: string,
+    /** The daemon's whole answer, for a verb that reads more of it than its sentence (`config write`'s located issues). */
+    readonly body?: unknown,
   ) {
     super(message, EXIT.failure);
     this.name = 'DaemonRefusal';

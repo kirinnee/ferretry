@@ -19,6 +19,7 @@ import { DAEMON_BINARY, type LaunchPorts, launchDaemon } from './daemon/launcher
 import { assertOwnLoopbackListener } from './daemon/listener-guard.ts';
 import { probeHealth } from './daemon/probe.ts';
 import { readAdminToken } from './daemon/token-file.ts';
+import { createConfigFiles } from './config-files.ts';
 import { createPluginHost } from './plugin-host.ts';
 import { terminalPrompt } from './terminal/prompt.ts';
 import { buildDaemonController } from './daemon/control.ts';
@@ -81,6 +82,7 @@ export function createWorld(inputs: WorldInputs): CliWorld {
     prompt: terminalPrompt,
     readText: path => Bun.file(path).text(),
     host: createPluginHost({ home }),
+    config: createConfigFiles({ home }),
     daemon: reads =>
       buildDaemonController(
         {

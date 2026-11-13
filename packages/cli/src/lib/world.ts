@@ -8,6 +8,7 @@ import type { Duration } from '@ferretry/std';
 import type { DaemonTransport, InventoryCache } from './client.ts';
 import type { Environment } from './credential.ts';
 import type { CommandRegistry } from './registry.ts';
+import type { ConfigFilesPort } from './config/ports.ts';
 import type { DaemonController, DaemonControlReads } from './daemon/controller.ts';
 import type { IDaemonPrompt } from './update/machine.ts';
 import type { DaemonUpdateOptions } from './update/updater.ts';
@@ -73,6 +74,8 @@ export interface CliWorld {
    * The verb hands in the two reads that need a connection; this world opens none of its own for them.
    */
   daemon?(reads: DaemonControlReads): { readonly controller: DaemonController; exitCode(): number };
+  /** The configuration directory, read without a daemon (`fy config check|path`). Read only. */
+  readonly config?: ConfigFilesPort;
   /** Asks a person one question on the terminal and reads the line they type. Never used off a terminal. */
   readonly prompt?: IDaemonPrompt;
   /** A local file's text; throws when it cannot be read. */
