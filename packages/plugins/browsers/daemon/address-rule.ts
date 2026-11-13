@@ -29,6 +29,12 @@
  * such as `Issue #1 code=5` is hidden from its `#` on, because a credential-looking part is a reason to hide, and an
  * ordinary fragment (`#section`, `#/route/3`) next to ordinary words is untouched.
  *
+ * A CODE's end comes from the parse, not from the words. The codec reads `code=FA KE FA KE` as FAKE-FAKE: whitespace
+ * inside a code is no boundary. So the span walks the fragment's parts the way the codec cuts them (at separators) and,
+ * for a `c=`, `code=` or `share=` part, reads its value across any whitespace until the characters add up to a code
+ * (eight, dashes and escapes aside); what follows a complete code is ordinary text and stays. A value the parse cannot
+ * bound as a code (too long, a symbol the codec refuses) fails closed to its part's end or its line's end.
+ *
  * It is replaced by {@link HIDDEN_FRAGMENT}; the path and query stay, so the agent still knows where it is.
  *
  * FAILS CLOSED. A string that is a single address (one run, a scheme) that `URL` cannot parse is returned with
@@ -152,14 +158,101 @@ function runEnd(text: string, from: number, stopAtAmpersand: boolean): number {
   return at;
 }
 
+/** The codec's code once its whitespace and dashes are gone (`PAIRING_CODE_PATTERN`: four symbols, a dash, four). */
+const CODE_LENGTH = 8;
+
+/** How far past a part's start its NAME is looked for: a credential part's name is a word or two, never a paragraph. */
+const NAME_LOOKAHEAD = 64;
+
+/** What ends a part of a fragment: its own separators (raw or percent-encoded, however often) and the quote-like stops. */
+const PART_BREAK = /[;&#"'<>`\\]|%(?:25)*(?:3b|26|23)/iu;
+const EQUALS = /=|%(?:25)*3d/iu;
+const LINE_BREAK = /[\n\r]/u;
+const CODE_SYMBOLS = /^[a-z0-9-]*/u;
+
+/** The first part break in `text[from, to)` as an absolute offset and length; undefined when there is none. */
+function partBreak(text: string, from: number, to: number): { index: number; length: number } | undefined {
+  const found = PART_BREAK.exec(text.slice(from, to));
+  return found === null ? undefined : { index: from + found.index, length: found[0].length };
+}
+
+/** Where a value the parse cannot bound ends: at its next part break, else at the end of its line. Never before `from`. */
+function failClosedEnd(text: string, from: number): number {
+  const line = text.slice(from).search(LINE_BREAK);
+  const lineEnd = line === -1 ? text.length : from + line;
+  return partBreak(text, from, lineEnd)?.index ?? lineEnd;
+}
+
+/**
+ * Where the code value that starts at `from` (just past its `=`) ends, read the way the codec reads a code: words,
+ * across any whitespace, while their letters and digits (dashes ignored, escapes decoded) add up to fewer than
+ * {@link CODE_LENGTH}. It ends with the word that completes the code, or at the part's own end (a separator, a stop or
+ * the end of the text) when the value is shorter. A value that does not read as a code — more characters than a code
+ * has, a symbol the codec refuses — cannot be bounded by the parse, so it fails closed to its part's end or its line's
+ * end, whichever comes first.
+ */
+function codeValueEnd(text: string, from: number): number {
+  let at = from;
+  let accepted = from;
+  let counted = 0;
+  for (;;) {
+    while (at < text.length && /\s/u.test(text.charAt(at))) at++;
+    if (at >= text.length) return accepted;
+    const stop = partBreak(text, at, text.length)?.index ?? text.length;
+    let wordEnd = at;
+    while (wordEnd < stop && !/\s/u.test(text.charAt(wordEnd))) wordEnd++;
+    if (wordEnd === at) return accepted;
+    const word = decoded(text.slice(at, wordEnd)).replaceAll(/\s+/gu, '');
+    const symbols = CODE_SYMBOLS.exec(word)?.[0] ?? '';
+    const total = counted + symbols.replaceAll('-', '').length;
+    if (total > CODE_LENGTH || (symbols.length !== word.length && total !== CODE_LENGTH))
+      return failClosedEnd(text, accepted);
+    counted = total;
+    accepted = wordEnd;
+    if (counted === CODE_LENGTH || wordEnd === stop) return accepted;
+    at = wordEnd;
+  }
+}
+
+/**
+ * The end of the credential value of the first `c=`, `code=` or `share=` part, from `cursor.at` on, that begins
+ * inside `text[.., end)`; `end` itself when no such part reaches further. Parts are cut where the codec cuts them (at
+ * separators) and the value is bounded by {@link codeValueEnd}, so the span comes from the reading that decides what
+ * the code IS, not from a second scan for where words stop. `cursor.at` is left at the first part not yet judged, so
+ * a longer run is walked once, not once per word.
+ */
+function credentialValueEnd(text: string, cursor: { at: number }, end: number): number {
+  while (cursor.at <= end && cursor.at < text.length) {
+    const room = text.slice(cursor.at, cursor.at + NAME_LOOKAHEAD);
+    const equals = EQUALS.exec(room.slice(0, PART_BREAK.exec(room)?.index ?? room.length));
+    if (equals !== null && CREDENTIAL_PARTS.has(decoded(room.slice(0, equals.index)).replaceAll(/\s+/gu, ''))) {
+      const valueEnd = codeValueEnd(text, cursor.at + equals.index + equals[0].length);
+      cursor.at = valueEnd;
+      if (valueEnd > end) return valueEnd;
+      continue;
+    }
+    const next = partBreak(text, cursor.at, Math.min(end, text.length));
+    if (next === undefined) break;
+    cursor.at = next.index + next.length;
+  }
+  return end;
+}
+
 /**
  * Where the fragment that starts at `start` ends: the end of its run, then on across whitespace while the next word
- * continues it (see the file header). `stopAtAmpersand` is for a `%23` found inside a query, where a raw `&` is the
+ * continues it (see the file header), and across a credential value the codec reads through whitespace
+ * ({@link credentialValueEnd}). `stopAtAmpersand` is for a `%23` found inside a query, where a raw `&` is the
  * next query parameter, not part of the encoded fragment.
  */
 function spanEnd(text: string, start: number, stopAtAmpersand: boolean): number {
   let end = runEnd(text, start, stopAtAmpersand);
+  const cursor = { at: start };
   for (;;) {
+    const accepted = credentialValueEnd(text, cursor, end);
+    if (accepted > end) {
+      end = runEnd(text, accepted, stopAtAmpersand);
+      continue;
+    }
     let next = end;
     while (next < text.length && /\s/u.test(text.charAt(next))) next++;
     if (next === end || next >= text.length) return end;
