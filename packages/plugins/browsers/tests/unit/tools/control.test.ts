@@ -155,6 +155,7 @@ describe('SurfaceControl — a page that closed', () => {
       id: 'page-1',
       name: 'app',
       at: '2026-10-16T10:00:03.000Z',
+      closed: true,
     });
     should(standing).deepEqual({ sessionId: 's1', driving: [], takeovers: [], handed: [], opened: [], asked: [] });
     should(await replayed.takeoverOf('s1', page)).be.undefined();
@@ -205,5 +206,63 @@ describe('SurfaceControl — a page that closed', () => {
     should(told).deepEqual(['s1:page-1']);
     should(await control.takeoverOf('s1', page)).be.undefined();
     should(events.published.map(event => event.type)).deepEqual(['surface.takeover', 'surface.handback']);
+  });
+});
+
+describe('SurfaceControl — a page that closed, replayed from its journal', () => {
+  /** A control over the journal an earlier one wrote: what a daemon that kept its events reads at a start. */
+  async function replayed(setup: (control: SurfaceControl) => Promise<void>) {
+    const events = new RecordingEvents();
+    const control = new SurfaceControl(events, new ManualClock());
+    await setup(control);
+    events.earlier.set('s1', events.published as RecordedSurfaceEvent[]);
+    return await new SurfaceControl(events, new ManualClock()).view('s1', 'browser');
+  }
+
+  it('does not ask again for a page that closed with an ask and no takeover', async () => {
+    // Act
+    const view = await replayed(async control => {
+      await control.asked('s1', page, {});
+      await control.closed('s1', page);
+    });
+
+    // Assert
+    should(view.asked).deepEqual([]);
+  });
+
+  it('does not mark a closed page as handed or opened again', async () => {
+    // Act
+    const view = await replayed(async control => {
+      await control.opened('s1', page, {});
+      await control.hand('s1', page, { by: 'local' });
+      await control.takeover('s1', page, { by: 'local' });
+      await control.closed('s1', page);
+    });
+
+    // Assert
+    should([view.opened, view.handed, view.takeovers, view.asked]).deepEqual([[], [], [], []]);
+  });
+
+  it('does not mark a closed page as handed when it had no takeover at all', async () => {
+    // Act
+    const view = await replayed(async control => {
+      await control.hand('s1', page, { by: 'local' });
+      await control.closed('s1', page);
+    });
+
+    // Assert
+    should(view.handed).deepEqual([]);
+  });
+
+  it('journals nothing for a page that never carried a mark', async () => {
+    // Arrange
+    const events = new RecordingEvents();
+    const control = new SurfaceControl(events, new ManualClock());
+
+    // Act
+    await control.closed('s1', page);
+
+    // Assert
+    should(events.published).deepEqual([]);
   });
 });
