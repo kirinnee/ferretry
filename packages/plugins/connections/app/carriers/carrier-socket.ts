@@ -115,6 +115,11 @@ const once = (deps: CarrierSocketDependencies, delayMs: number, run: () => void)
 export interface WalkScope {
   /** Why this walk no longer describes the pairing's current entry, or `undefined` while it still does. */
   stale(): string | undefined;
+  /**
+   * Why this walk's sessions may no longer be counted: the pairing was unpaired, re-paired or given a new preference —
+   * NOT a republish. A session accepted after a republish, on a carrier the new set still names, is still the pairing's.
+   */
+  pairingEnded(): string | undefined;
   /** Registers one live session socket so the router can close it; answers the deregistration. */
   track(socket: ScopedSocket): () => void;
 }
@@ -129,7 +134,7 @@ export interface ScopedSocket {
   checkLiveness(): void;
 }
 
-const UNSCOPED: WalkScope = { stale: () => undefined, track: () => () => undefined };
+const UNSCOPED: WalkScope = { stale: () => undefined, pairingEnded: () => undefined, track: () => () => undefined };
 
 /**
  * One walk over `steps`, shared by every fresh session its unsent failures open: a leg tried by one session is never
@@ -443,8 +448,9 @@ class WalkingSocket implements ScopedSocket {
     this.#cancelAcceptance = undefined;
     this.#phase = 'accepted';
     this.#servingSince = this.deps.now();
-    // A stale walk publishes nothing: its entry was replaced, or its session is being closed under it.
-    if (this.walk.scope.stale() !== undefined) return;
+    // The walk of an ended pairing publishes nothing, nor does a session being closed under it. A walk whose entry a
+    // republish replaced is only stale (it dials nothing more): the session it carried is still counted.
+    if (this.walk.scope.pairingEnded() !== undefined) return;
     this.#onEnded = this.walk.observer.committed(this.#method);
   }
 

@@ -498,6 +498,10 @@ export class CarrierRouter {
     return {
       stale: () =>
         entry.generation.endedWith() ?? (this.#entries.get(daemonId) === entry ? undefined : STALE_WALK_REASON),
+      pairingEnded: () =>
+        this.#holding(daemonId, entry.generation) === undefined
+          ? (entry.generation.endedWith() ?? STALE_WALK_REASON)
+          : undefined,
       track: socket => entry.generation.track(socket),
     };
   }
@@ -527,10 +531,15 @@ export class CarrierRouter {
     const named = (method: ConnectionMethod): boolean => carriers.some(listed => sameCarrier(listed, method));
     const outlives = (method: ConnectionMethod): boolean =>
       winner !== undefined && outlivesRepublish(winner) && sameCarrier(method, winner);
+    const kept = winner !== undefined && (named(winner) || outlivesRepublish(winner));
+    // The live set belongs to the pairing, not to the entry, and is the one source of truth for the fallback: while any
+    // accepted session still stands in for the relay, a republish keeps the disclosure and the direct choice it shows,
+    // whether or not the remembered winner survived (a lost request lane forgets it; a lane is not every lane).
+    const standingIn = [...current.live].filter(live => live.standsIn);
     const entry: CarrierEntry = {
       published,
-      choice: winner !== undefined && (named(winner) || outlivesRepublish(winner)) ? chosen : undefined,
-      fellBack: current.fellBack && winner !== undefined && (named(winner) || outlivesRepublish(winner)),
+      choice: kept ? chosen : standingIn.at(-1)?.choice,
+      fellBack: (current.fellBack && kept) || standingIn.length > 0,
       live: current.live,
       generation: current.generation,
       lookup: current.lookup,
@@ -708,7 +717,9 @@ export class CarrierRouter {
         );
       },
       committed: (method: ConnectionMethod) => {
-        const entry = this.#current(daemonId, walked);
+        // The entry that holds the walk's pairing NOW: a session accepted after a republish, on a carrier the new set
+        // still names, is counted on the new entry (the live set is shared); one of an ended pairing is counted nowhere.
+        const entry = this.#holding(daemonId, walked.generation);
         if (entry === undefined) return undefined;
         this.deps.health?.answered(daemonId);
         this.deps.drops?.reconnected(daemonId);

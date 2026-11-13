@@ -7,6 +7,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { PairedDaemon } from '@ferretry/app';
+import type { BrowserSocket } from '../../../app/adapters/browser-relay-dial.ts';
 import { RELAY_FALLBACK_LINE } from '../../../app/carriers/router.ts';
 import type { ScriptedHost } from '../../support/browser-network.ts';
 import { carriedOver, rig } from '../../support/router-rig.ts';
@@ -277,5 +278,191 @@ describe('other preferences never fall back', () => {
     await expect(transport.request({ method: 'GET', path: '/v1/carriers' })).rejects.toBeDefined();
     expect(hostsDialled(r.network.dialled)).not.toContain(new URL(DIRECT).host);
     r.fx.layer.close();
+  });
+});
+
+describe('a carrier republish while a lane still sends direct', () => {
+  const RELAY_BACK = [
+    { kind: 'direct', url: DIRECT },
+    { kind: 'relay', url: HOSTED },
+  ];
+
+  test('a lost request lane then a republish cannot hide a still-live fallback stream', async () => {
+    const directSockets: { close: (code?: number, reason?: string) => void }[] = [];
+    const hosts = hostsOf({ kind: 'dead' }) as Record<string, ScriptedHost>;
+    const r = await rig(
+      hosts,
+      PUBLISHED,
+      'relay',
+      HOSTED,
+      network => url => {
+        const socket = network.openSocket(url);
+        if (new URL(url).host === new URL(DIRECT).host) directSockets.push(socket);
+        return socket;
+      },
+      { chosen: () => false },
+    );
+    try {
+      const frames: string[] = [];
+      r.fx.upgrade = async () => ({
+        outcome: 'accepted',
+        attach: async () => ({
+          open: async () => undefined,
+          fromClient: frame => {
+            frames.push(typeof frame === 'string' ? frame : 'bytes');
+          },
+          close: () => undefined,
+        }),
+      });
+      const transport = await r.connect();
+      if (transport === undefined) throw new Error('no transport');
+      const closed: string[] = [];
+      const stream = transport.socket('/v1/stream', { onFrame: () => undefined, onClose: why => closed.push(why) });
+      for (let i = 0; i < 50 && directSockets.length < 1; i++) await sleep(20);
+      await sleep(20);
+      await transport.request({ method: 'GET', path: '/v1/first' });
+      expect(directSockets).toHaveLength(2);
+      // The request lane is lost under a POST that waits for its answer: the winner it was is forgotten...
+      const answered = r.fx.route;
+      r.fx.route = async () => new Promise(() => undefined);
+      const write = transport.request({ method: 'POST', path: '/v1/slow' }).catch((error: unknown) => error);
+      await sleep(20);
+      directSockets[1]?.close(1011, 'lost request');
+      expect(await write).toBeInstanceOf(Error);
+      expect(r.router.choice(r.daemon.daemon)).toBeUndefined();
+      expect(r.router.relayFallback(r.daemon.daemon)).toBe(RELAY_FALLBACK_LINE);
+      // ...but the stream is still direct, so a republish that names a recovered relay keeps the notice and the label.
+      hosts['hosted.example'] = { kind: 'carries', carrier: 'relay' };
+      r.fx.route = answered;
+      const republished = await r.connect({ ...r.daemon, carriers: RELAY_BACK });
+      if (republished === undefined) throw new Error('no transport');
+      await republished.request({ method: 'GET', path: '/v1/after' });
+      await sleep(20);
+      stream.send('still direct');
+      await sleep(20);
+      expect(frames).toEqual(['still direct']);
+      expect(closed).toEqual([]);
+      expect(carriedOver(r.fx).at(-1)).toBe('/v1/after relay');
+      expect(r.router.relayFallback(r.daemon.daemon)).toBe(RELAY_FALLBACK_LINE);
+      expect(r.router.choice(r.daemon.daemon)).toMatchObject({ ok: true, method: { kind: 'direct' } });
+      stream.close();
+    } finally {
+      r.fx.layer.close();
+    }
+  });
+
+  test('a stream accepted AFTER a republish is still a live fallback: closing the earlier lane keeps the notice', async () => {
+    const hosts = hostsOf({ kind: 'dead' }) as Record<string, ScriptedHost>;
+    const directSockets: unknown[] = [];
+    const held: { data: unknown }[] = [];
+    let holding = true;
+    let delayed: BrowserSocket | undefined;
+    const r = await rig(
+      hosts,
+      PUBLISHED,
+      'relay',
+      HOSTED,
+      network => url => {
+        const real = network.openSocket(url);
+        if (new URL(url).host !== new URL(DIRECT).host) return real;
+        directSockets.push(real);
+        if (directSockets.length !== 2) return real;
+        // The second direct socket (the stream) has its incoming handshake frames held back, so it is accepted late.
+        const socket: BrowserSocket = {
+          binaryType: 'blob',
+          onopen: null,
+          onclose: null,
+          onerror: null,
+          onmessage: null,
+          send: data => real.send(data),
+          close: (code, reason) => real.close(code, reason),
+        };
+        real.onopen = () => socket.onopen?.();
+        real.onclose = event => socket.onclose?.(event);
+        real.onerror = () => socket.onerror?.();
+        real.onmessage = event => {
+          if (holding) held.push(event);
+          else socket.onmessage?.(event);
+        };
+        delayed = socket;
+        return socket;
+      },
+      { chosen: () => false },
+    );
+    try {
+      const frames: string[] = [];
+      r.fx.upgrade = async () => ({
+        outcome: 'accepted',
+        attach: async () => ({
+          open: async () => undefined,
+          fromClient: frame => {
+            frames.push(typeof frame === 'string' ? frame : 'bytes');
+          },
+          close: () => undefined,
+        }),
+      });
+      const first = await r.connect();
+      if (first === undefined) throw new Error('no transport');
+      await first.request({ method: 'GET', path: '/v1/first' });
+      const streaming = await r.connect();
+      if (streaming === undefined) throw new Error('no transport');
+      const closed: string[] = [];
+      const stream = streaming.socket('/v1/stream', { onFrame: () => undefined, onClose: why => closed.push(why) });
+      for (let i = 0; i < 50 && held.length === 0; i++) await sleep(20);
+      expect(held.length).toBeGreaterThan(0);
+      // The republish names the recovered relay and a request goes over it, THEN the stream's handshake is let through.
+      hosts['hosted.example'] = { kind: 'carries', carrier: 'relay' };
+      const relayed = await r.connect({ ...r.daemon, carriers: RELAY_BACK });
+      if (relayed === undefined) throw new Error('no transport');
+      await relayed.request({ method: 'GET', path: '/v1/relay' });
+      holding = false;
+      for (const event of held.splice(0)) delayed?.onmessage?.(event);
+      await sleep(40);
+      stream.send('before close');
+      await sleep(20);
+      expect(frames).toEqual(['before close']);
+      expect(r.router.relayFallback(r.daemon.daemon)).toBe(RELAY_FALLBACK_LINE);
+      // The earlier tracked direct lane ends: the late stream still sends direct, so the card does not flip to relay.
+      first.close?.();
+      await sleep(40);
+      stream.send('after close');
+      await sleep(20);
+      expect(frames).toEqual(['before close', 'after close']);
+      expect(closed).toEqual([]);
+      expect(r.router.relayFallback(r.daemon.daemon)).toBe(RELAY_FALLBACK_LINE);
+      expect(r.router.choice(r.daemon.daemon)).toMatchObject({ ok: true, method: { kind: 'direct' } });
+      // Ending the stream was its last stand-in: the relay lane is live, so the notice clears — exactly once.
+      stream.close();
+      await sleep(40);
+      expect(r.router.relayFallback(r.daemon.daemon)).toBeUndefined();
+      expect(r.router.choice(r.daemon.daemon)).toMatchObject({ ok: true, method: { kind: 'relay' } });
+    } finally {
+      r.fx.layer.close();
+    }
+  });
+
+  test('forgetting the pairing ends the count: a stand-in closing afterwards leaves nothing behind', async () => {
+    const r = await rig(hostsOf({ kind: 'dead' }), PUBLISHED, 'relay', HOSTED, undefined, { chosen: () => false });
+    try {
+      r.fx.upgrade = async () => ({
+        outcome: 'accepted',
+        attach: async () => ({ open: async () => undefined, fromClient: () => undefined, close: () => undefined }),
+      });
+      const transport = await r.connect();
+      if (transport === undefined) throw new Error('no transport');
+      const closed: string[] = [];
+      const stream = transport.socket('/v1/stream', { onFrame: () => undefined, onClose: why => closed.push(why) });
+      await transport.request({ method: 'GET', path: '/v1/first' });
+      await sleep(20);
+      expect(r.router.relayFallback(r.daemon.daemon)).toBe(RELAY_FALLBACK_LINE);
+      r.router.clearDaemon(r.daemon.daemon);
+      expect(r.router.relayFallback(r.daemon.daemon)).toBeUndefined();
+      stream.close();
+      await sleep(20);
+      expect(r.router.relayFallback(r.daemon.daemon)).toBeUndefined();
+      expect(r.router.choice(r.daemon.daemon)).toBeUndefined();
+    } finally {
+      r.fx.layer.close();
+    }
   });
 });
