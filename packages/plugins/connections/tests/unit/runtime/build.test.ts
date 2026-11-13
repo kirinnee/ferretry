@@ -313,7 +313,7 @@ describe('the carrier set is the daemon’s answer', () => {
     await host.runJob('relay-discovery');
     const daemonSet: PublishedCarriers = [
       { kind: 'direct', url: 'https://box.example' },
-      { kind: 'relay', url: 'https://mine.example' },
+      { kind: 'relay', url: 'https://mine.example', source: 'configured' },
     ];
     const queries: Record<string, string>[] = [{}, { kind: 'relay', url: 'https://evil.example' }, { carriers: '[]' }];
     for (const query of queries)
@@ -455,9 +455,9 @@ describe('the default relay dial through the Kernel restricted WebSocket port', 
     expect(h.dials.map(url => new URL(url).host)).toEqual(['one.example', 'hosted.example', 'two.example']);
     expect(h.half.resolvers.relay()).toEqual(['one.example', 'hosted.example', 'two.example']);
     expect(h.host.provided(ConnectionsPort).carriers()).toEqual([
-      { kind: 'relay', url: 'https://one.example' },
+      { kind: 'relay', url: 'https://one.example', source: 'configured' },
       { kind: 'relay', url: 'https://hosted.example' },
-      { kind: 'relay', url: 'https://two.example' },
+      { kind: 'relay', url: 'https://two.example', source: 'configured' },
     ]);
     expect(() => h.websocket.connect('wss://off.example/other')).toThrow('manifest does not declare it');
     await h.stop();
@@ -532,8 +532,14 @@ describe('the carrier set the daemon publishes (Appendix D, connections batch 3)
     }));
     expect(PublishedCarriersSchema.safeParse(nine.slice(0, 8)).success).toBe(true);
     expect(PublishedCarriersSchema.safeParse(nine).success).toBe(false);
-    // Every entry is exactly `{ kind, url }`: nothing else rides on the redemption response.
-    for (const carrier of set) expect(Object.keys(carrier).sort()).toEqual(['kind', 'url']);
+    // Every entry is `{ kind, url }`, and a relay the operator wrote also says so (`source: 'configured'`): nothing else
+    // rides on the redemption response, and a discovered relay says nothing about whose it is.
+    for (const carrier of set)
+      expect(Object.keys(carrier).sort()).toEqual(
+        carrier.kind === 'relay' && carrier.url !== 'https://hosted.example'
+          ? ['kind', 'source', 'url']
+          : ['kind', 'url'],
+      );
     await host.stop();
   });
 

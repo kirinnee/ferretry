@@ -62,6 +62,20 @@ function connectionPreferenceOrder(methods: readonly ConnectionMethod[]): readon
 }
 
 /**
+ * Whose relay a published relay is, for the SENTENCE a person reads and nothing else. Only positive evidence picks an
+ * ownership-specific answer: the address this browser discovered itself is Ferretry's hosted relay, and an entry the
+ * daemon says its operator wrote (`source: 'configured'`) is theirs. Anything else is NO `operator` at all — unknown — and is
+ * disclosed neutrally, because a directory that failed to answer is an ordinary state and proves nothing.
+ */
+function relayOperator(
+  carrier: { readonly url: string; readonly source?: 'configured' },
+  hostedRelayUrl: string | undefined,
+): { readonly operator?: 'hosted' | 'self' } {
+  if (carrier.url === hostedRelayUrl) return { operator: 'hosted' };
+  return carrier.source === 'configured' ? { operator: 'self' } : {};
+}
+
+/**
  * A daemon's PUBLISHED carrier set as carriers this browser will dial, in the order it will try them. An entry the
  * protocol will not dial is dropped rather than refusing the set; `operator` is disclosure only, derived by comparing
  * against the hosted address this browser discovered for itself. COPY of today's `publishedConnectionMethods`.
@@ -80,7 +94,7 @@ export function publishedConnectionMethods(
           : {
               kind: 'relay',
               relayUrl: carrier.url,
-              operator: carrier.url === hostedRelayUrl ? 'hosted' : 'self',
+              ...relayOperator(carrier, hostedRelayUrl),
             },
     );
     if (parsed.success) methods.push(parsed.data);

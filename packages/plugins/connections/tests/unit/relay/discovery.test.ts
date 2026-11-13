@@ -162,7 +162,7 @@ describe('choosing the carrier', () => {
     ]);
     should(publishedDaemonCarriers('http://box.lan:7431', sources)).deepEqual([
       { kind: 'direct', url: 'http://box.lan:7431' },
-      { kind: 'relay', url: 'https://mine.example' },
+      { kind: 'relay', url: 'https://mine.example', source: 'configured' },
       { kind: 'relay', url: HOSTED },
     ]);
   });
@@ -183,7 +183,9 @@ describe('choosing the carrier', () => {
       config: DaemonRelayConfigSchema.parse({ url: 'https://relay.example' }),
     };
 
-    should(publishedDaemonCarriers(undefined, [source])).deepEqual([{ kind: 'relay', url: 'https://relay.example' }]);
+    should(publishedDaemonCarriers(undefined, [source])).deepEqual([
+      { kind: 'relay', url: 'https://relay.example', source: 'configured' },
+    ]);
   });
 
   it('should accept a daemon origin and explain every wider URL shape the carrier wire refuses', () => {
@@ -259,7 +261,7 @@ describe('choosing the carrier', () => {
       ),
     ).deepEqual([
       { kind: 'direct', url: 'https://box.example' },
-      { kind: 'relay', url: 'https://mine.example' },
+      { kind: 'relay', url: 'https://mine.example', source: 'configured' },
       { kind: 'relay', url: HOSTED },
     ]);
   });

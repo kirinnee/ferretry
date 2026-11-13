@@ -43,7 +43,7 @@ describe('a profile’s instructions text', () => {
   });
 
   it('reads the text through a base profile, once', async () => {
-    const root = await open('Agent work');
+    const root = await open('Review');
     const items = [...root.querySelectorAll('[data-instruction-item]')].map(item =>
       item.getAttribute('data-instruction-item'),
     );
@@ -77,7 +77,7 @@ describe('a profile’s instructions text', () => {
     const markup = renderToStaticMarkup(
       <InstructionTexts
         profile={profile('P', ['instructions/Main instructions'])}
-        profiles={[]}
+        profiles={[profile('P', ['instructions/Main instructions'])]}
         components={[unread]}
       />,
     );
@@ -94,8 +94,54 @@ describe('a profile’s instructions text', () => {
   it('follows a base profile once, however many layers reach the same instructions', () => {
     const base = profile('Base', ['instructions/Main instructions']);
     const top = profile('Top', ['profile/Base', 'instructions/Main instructions', 'profile/Base']);
-    expect(profileInstructions(top, [base, top], [instructions]).map(held => held.reference)).toEqual([
+    expect(profileInstructions(top, [base, top], [instructions])?.map(held => held.component.reference)).toEqual([
       'instructions/Main instructions',
     ]);
+  });
+
+  it('says which base an item was inherited from, and nothing for an item the profile names itself', async () => {
+    const root = await open('Review');
+    const inherited = root.querySelector('[data-instruction-item="instructions/Main instructions"] summary');
+    expect(inherited?.textContent).toContain('Main instructions');
+    expect(inherited?.textContent).toContain('inherited from ‹Default›');
+    const own = await open('Default');
+    expect(own.querySelector('[data-instruction-inherited]')).toBeNull();
+  });
+
+  describe('the order is the resolver’s newest-occurrence layering', () => {
+    const doc = (name: string) => ({ ...instructions, reference: `instructions/${name}`, name });
+    const [a, b, c] = [doc('A'), doc('B'), doc('C')] as const;
+    const order = (top: ReturnType<typeof profile>, others: readonly ReturnType<typeof profile>[]) =>
+      profileInstructions(top, [top, ...others], [a, b, c])?.map(held => held.component.name);
+
+    it('Base [A, B], Top [Base, A] reads B then A: the repeat of an inherited item moves it to its newest place', () => {
+      const base = profile('Base', ['instructions/A', 'instructions/B']);
+      const top = profile('Top', ['profile/Base', 'instructions/A']);
+      expect(order(top, [base])).toEqual(['B', 'A']);
+    });
+
+    it('a later occurrence of the same base is expanded where it stands, not skipped', () => {
+      const base = profile('Base', ['instructions/A', 'instructions/B']);
+      const other = profile('Other', ['profile/Base']);
+      const top = profile('Top', ['profile/Base', 'instructions/C', 'profile/Other']);
+      expect(order(top, [base, other])).toEqual(['C', 'A', 'B']);
+    });
+
+    it('marks an item inherited through its outermost base', () => {
+      const base = profile('Base', ['instructions/A']);
+      const mid = profile('Mid', ['profile/Base']);
+      const top = profile('Top', ['profile/Mid', 'instructions/C']);
+      const held = profileInstructions(top, [top, mid, base], [a, b, c]);
+      expect(held?.map(item => [item.component.name, item.inheritedFrom])).toEqual([
+        ['A', 'Mid'],
+        ['C', undefined],
+      ]);
+    });
+
+    it('is undefined, not a guess, for a stack that cannot be expanded (a loop)', () => {
+      const one = profile('One', ['profile/Two', 'instructions/A']);
+      const two = profile('Two', ['profile/One']);
+      expect(profileInstructions(one, [one, two], [a])).toBeUndefined();
+    });
   });
 });

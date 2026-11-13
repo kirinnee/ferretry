@@ -1,8 +1,10 @@
 /**
  * Whose relay is the live carrier, as the Connection card says it (rehearsal 3, F1).
  *
- * The wire names no operator — a daemon's self-report is not something a device can check — so the browser decides:
- * the published relay that is the address it DISCOVERED is Ferretry's hosted relay, and any other is the owner's own.
+ * Only POSITIVE evidence picks an ownership-specific wording: the address the browser DISCOVERED is Ferretry's hosted
+ * relay, and a relay the daemon says its operator configured is theirs. Every other relay — the directory timed out,
+ * is switched off, names another address, or the daemon says nothing — reads as a neutral unknown-operator "Relay".
+ * Directory availability is not proof of ownership.
  * The decision must hold when the first session is asked for before the directory answered (a reload: the stored
  * pairing walks at once and the advertisement read is still in flight), because a carrier stamped "your own relay" in
  * that window told the owner a security disclosure that is false for the hosted default. So the walk waits for that one
@@ -57,29 +59,58 @@ describe('the live relay is labelled by who runs it', () => {
     r.fx.layer.close();
   });
 
-  test('a relay the directory did not name reads "Your own relay"', async () => {
-    const r = await rig(HOSTS, PUBLISHED, 'auto', 'wss://hosted.example');
+  /** What the card says for the live relay once a session has been carried over it. */
+  async function labelFor(
+    published: readonly unknown[],
+    hosted: string | null,
+    extra: Parameters<typeof rig>[5] = {},
+  ): Promise<ReturnType<typeof describeConnectionMethod>> {
+    const r = await rig(HOSTS, published, 'auto', hosted, undefined, extra);
     const transport = await r.connect();
     if (transport === undefined) throw new Error('no transport');
-
     await transport.request({ method: 'GET', path: '/v1/example' });
-
     const choice = r.router.choice(r.fx.daemonId);
     if (choice?.ok !== true) throw new Error('nothing carried');
-    expect(describeConnectionMethod(choice.method).label).toBe('Your own relay');
     r.fx.layer.close();
+    return describeConnectionMethod(choice.method);
+  }
+
+  const claimsNoOwner = (words: string): void => {
+    expect(words).not.toMatch(/your own|you are the relay operator|nobody outside your account/iu);
+  };
+
+  test('a relay the directory named differently, with no ownership claim, reads as an unknown-operator "Relay"', async () => {
+    const shown = await labelFor(PUBLISHED, 'wss://hosted.example');
+    expect(shown.label).toBe('Relay');
+    expect(shown.noun).toBe('a relay');
+    claimsNoOwner([shown.label, shown.noun, shown.summary, ...shown.observers].join(' '));
   });
 
-  test('a relay stays "Your own relay" when the directory never names one', async () => {
-    const r = await rig(HOSTS, PUBLISHED, 'auto', null);
-    const transport = await r.connect();
-    if (transport === undefined) throw new Error('no transport');
+  test('a relay reads as an unknown-operator "Relay" when the directory has no relay to name (disabled or absent)', async () => {
+    const shown = await labelFor(PUBLISHED, null);
+    expect(shown.label).toBe('Relay');
+    claimsNoOwner([shown.summary, ...shown.observers].join(' '));
+  });
 
-    await transport.request({ method: 'GET', path: '/v1/example' });
+  test('a relay reads as an unknown-operator "Relay" when the directory read times out or fails', async () => {
+    const shown = await labelFor(PUBLISHED, null, {
+      hostedRelay: () => Promise.reject(new Error('the directory did not answer in time')),
+    });
+    expect(shown.label).toBe('Relay');
+    claimsNoOwner([shown.summary, ...shown.observers].join(' '));
+  });
 
-    const choice = r.router.choice(r.fx.daemonId);
-    if (choice?.ok !== true) throw new Error('nothing carried');
-    expect(describeConnectionMethod(choice.method).label).toBe('Your own relay');
-    r.fx.layer.close();
+  test('the hosted relay stays "Hosted relay" however the daemon marked it', async () => {
+    const shown = await labelFor([{ kind: 'relay', url: RELAY, source: 'configured' }], RELAY);
+    expect(shown.label).toBe('Hosted relay');
+  });
+
+  test('a relay the daemon says its operator configured reads "Your own relay", whatever the directory said', async () => {
+    const configured = [{ kind: 'relay', url: RELAY, source: 'configured' }];
+    for (const hosted of [null, 'wss://hosted.example'])
+      expect((await labelFor(configured, hosted)).label).toBe('Your own relay');
+    expect(
+      (await labelFor(configured, null, { hostedRelay: () => Promise.reject(new Error('timed out')) })).label,
+    ).toBe('Your own relay');
   });
 });

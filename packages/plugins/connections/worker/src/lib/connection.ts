@@ -361,6 +361,20 @@ export function connectionPreferenceOrder(methods: readonly ConnectionMethod[]):
 }
 
 /**
+ * Whose relay a published relay is, for the SENTENCE a person reads and nothing else. Only positive evidence picks an
+ * ownership-specific answer: the address this browser discovered itself is Ferretry's hosted relay, and an entry the
+ * daemon says its operator wrote (`source: 'configured'`) is theirs. Anything else is NO `operator` at all — unknown — and is
+ * disclosed neutrally, because a directory that failed to answer is an ordinary state and proves nothing.
+ */
+function relayOperator(
+  carrier: { readonly url: string; readonly source?: 'configured' },
+  hostedRelayUrl: string | undefined,
+): { readonly operator?: 'hosted' | 'self' } {
+  if (carrier.url === hostedRelayUrl) return { operator: 'hosted' };
+  return carrier.source === 'configured' ? { operator: 'self' } : {};
+}
+
+/**
  * A daemon's PUBLISHED carrier set, as carriers this browser will dial, in the order it will try them.
  *
  * The order is `connectionPreferenceOrder`'s and nothing else's — every `direct` entry in the order the
@@ -379,10 +393,11 @@ export function connectionPreferenceOrder(methods: readonly ConnectionMethod[]):
  * A throw here would turn a single bad member into a device that cannot pair at all.
  *
  * `operator` IS DERIVED HERE AND IS DISCLOSURE ONLY. Who runs a rendezvous is not a wire fact and the
- * published set carries no claim about it — deliberately, because a daemon's self-report is not
- * something a device can check. What a device CAN check is whether the address equals the hosted one it
- * discovered for itself, so that comparison is the answer, and an unrecognised address is somebody's
- * own relay. Nothing about the path changes either way; only the sentence a person reads.
+ * published set carries no claim about it beyond a configured relay's `source` — a daemon's self-report, not something a
+ * device can check. What a device CAN check is whether the address equals the hosted one it discovered for itself, so
+ * that comparison comes first; an entry the daemon marks `configured` is the operator's own, and EVERYTHING ELSE IS
+ * UNKNOWN (`operator` absent), disclosed neutrally. A directory that failed to answer is not proof of ownership.
+ * Nothing about the path changes either way; only the sentence a person reads.
  *
  * A TUNNEL is mapped to its own kind (§15): dialled like a direct address, disclosed as Cloudflare's.
  */
@@ -400,7 +415,7 @@ export function publishedConnectionMethods(
           : {
               kind: 'relay',
               relayUrl: carrier.url,
-              operator: carrier.url === hostedRelayUrl ? 'hosted' : 'self',
+              ...relayOperator(carrier, hostedRelayUrl),
             },
     );
     if (parsed.success) methods.push(parsed.data);

@@ -388,7 +388,13 @@ export function publishedDaemonCarriers(
     ...(tunnelUrl === undefined ? [] : [{ kind: 'tunnel' as const, url: tunnelUrl }]),
     ...sources.flatMap(source => {
       const url = dialledRelayUrl(source);
-      return url === undefined ? [] : [{ kind: 'relay' as const, url }];
+      return url === undefined
+        ? []
+        : [
+            source.kind === 'configured'
+              ? { kind: 'relay' as const, url, source: 'configured' as const }
+              : { kind: 'relay' as const, url },
+          ];
     }),
   ]);
 }
