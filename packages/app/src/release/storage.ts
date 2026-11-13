@@ -111,8 +111,8 @@ export type ReleaseFetch = (input: string, init: RequestInit) => Promise<Respons
  * Fresh bytes from this site. `no-store` so neither the browser's HTTP cache nor a stale edge copy
  * can answer for the deploy, and `same-origin` credentials because nothing here is a daemon.
  *
- * A REDIRECT IS FOLLOWED, BUT ONLY WITHIN THIS ORIGIN. Cloudflare Pages answers `/app/index.html` with
- * a redirect to `/app/`, and the bytes there are the file the list names — which is all that matters,
+ * A REDIRECT IS FOLLOWED, BUT ONLY WITHIN THIS ORIGIN. Cloudflare Pages answers a request for an `index.html`
+ * file with a redirect to its directory (`/app/index.html` → `/app/`, unless a rewrite such as `/app/*` answers first), and the bytes there are the file the list names — which is all that matters,
  * because the hash, not the address, is what is checked. A redirect that LEAVES the origin answers
  * "not fetched": a release is this site's files, never anybody else's.
  */

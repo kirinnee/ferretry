@@ -8,6 +8,7 @@ import {
   HELD_FOR_MS,
   type HoldClock,
 } from '../../../src/router/address.ts';
+import { routeTable } from '../../../src/router/routes.ts';
 
 /**
  * DECLARED FRAGMENTS (shell contract S3): only a declared, stripping part leaves the address, before anything renders;
@@ -189,6 +190,17 @@ describe('path fragments', () => {
     const slot = taker.slotFor({ plugin: 'catalogs', place: 'daemonless', screen: 'join' }, 'join') as string;
     expect(taker.arrival(slot)).toBe(0);
     expect(taker.take(slot)).toBeUndefined();
+  });
+
+  test('a cold /pair#v1… served from the /app shell reaches the pair screen and hands its fragment to the pair taker', () => {
+    // Pages serves the shell for `/pair` with the visitor's path and fragment intact (public/_redirects → `/app/`).
+    // An obviously fake code: nothing here is, or may become, a real pairing code.
+    const browser = browserAt('/pair#v1;FAKE-NOT-A-REAL-CODE');
+    const taker = new AddressTaker(declared, browser);
+    expect(browser.href()).toBe('/pair');
+    expect(routeTable([pair]).parse(browser.location.pathname)).toEqual({ kind: 'screen', screen: pair, params: {} });
+    const slot = taker.slotFor({ plugin: 'access', place: 'daemonless', screen: 'pair' }, 'pair') as string;
+    expect(taker.take(slot)).toBe('#v1;FAKE-NOT-A-REAL-CODE');
   });
 
   test('a path fragment is taken only on its own declaring daemon-less screen', () => {
