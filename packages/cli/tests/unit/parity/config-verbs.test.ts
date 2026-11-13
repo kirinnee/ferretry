@@ -9,6 +9,7 @@ import { defineConfig } from '@ferretry/kernel/contract';
 import { definePlugin } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
 import type { AcceptedRecord, ConfigDiskFile, ConfigFilesPort } from '../../../src/lib/config/ports.ts';
+import { registry as productionRegistry } from '../../../src/generated/commands.ts';
 import { runFy } from '../../../src/lib/run.ts';
 import { fakeWorld, registryOf, skeletonEntry } from '../fakes.ts';
 
@@ -172,6 +173,18 @@ describe('fy config (check)', () => {
     expect(result.out).toContain('limits.yaml error: this file is not read: it is a link, or larger than');
   });
 
+  it('V-0190 a .yml file is named as ignored, with the .yaml it should be, instead of dropped from the count', async () => {
+    const result = await run(['config', 'check'], {
+      files: directory({ 'limits.yml': 'cap: 9\n', 'stray.yml': 'a: 1\n', 'limits.yaml': 'cap: 2\n' }),
+    });
+    expect(result.code).toBe(0);
+    expect(result.out).toContain('limits.yml warning: Ferretry does not read this file');
+    expect(result.out).toContain('rename it to limits.yaml');
+    expect(result.out).toContain('stray.yml warning: Ferretry does not read this file');
+    expect(result.out).toContain('rename it to a .yaml file a plugin declares');
+    expect(result.out).toContain('3 files');
+  });
+
   it('V-0190 a file that was in effect and is gone is judged as an edit to the defaults, and a tightening is not held', async () => {
     const result = await run(['config', 'check'], {
       files: directory({}, { 'limits.yaml': { etag: 'e', text: 'cap: 9\n', plugin: 'limits' } }),
@@ -238,6 +251,50 @@ describe('fy config schema', () => {
     const result = await run(['config', 'schema', 'nope']);
     expect(result.code).toBe(1);
     expect(result.err).toBe('no kind nope — one of items--item, limits\n');
+  });
+});
+
+describe('fy config schema, with the kind names v4 accepted', () => {
+  const production = async (kind: string) => {
+    const made = fakeWorld({ registry: productionRegistry });
+    const code = await runFy(['config', 'schema', kind], made.world);
+    return { code, out: made.io.stdout(), err: made.io.stderr() };
+  };
+
+  it('V-0194 answers each v4 kind name that 5.0 still has a file for with the schema of its successor stem', async () => {
+    for (const [oldName, stem] of [
+      ['login', 'logins--item'],
+      ['profile', 'profiles--item'],
+      ['runtime', 'runtimes--item'],
+      ['models', 'models--item'],
+      ['component-instructions', 'instructions--item'],
+      ['component-mcp', 'mcp--item'],
+      ['component-skills', 'skills--item'],
+      ['component-modelSets', 'model-sets--item'],
+      ['learning', 'lessons'],
+      ['pack', 'packs'],
+      ['accountDefaults', 'accounts'],
+    ] as const) {
+      const old = await production(oldName);
+      const now = await production(stem);
+      expect({ oldName, code: old.code, err: old.err }).toEqual({ oldName, code: 0, err: '' });
+      expect(old.out.length).toBeGreaterThan(2);
+      expect(old.out).toBe(now.out);
+    }
+  });
+
+  it('V-0194 keeps the names that never changed, lists only the stems, and invents nothing for a file 5.0 dropped', async () => {
+    for (const kept of ['warden', 'voice', 'limits']) expect((await production(kept)).code).toBe(0);
+    const listed = (await production('nope')).err;
+    expect(listed).toContain('no kind nope — one of ');
+    expect(listed).not.toMatch(/(^|, )(runtime|login|profile)(,|\n)/u);
+    for (const dropped of ['machine', 'component-settings', 'component-hooks', 'modelsGuide', 'preset']) {
+      const refused = await production(dropped);
+      expect(refused.code).toBe(1);
+      expect(refused.err).toContain(`no kind ${dropped} — one of `);
+    }
+    // A name that is only an object's own property is not a kind either.
+    expect((await production('constructor')).code).toBe(1);
   });
 });
 

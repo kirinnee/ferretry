@@ -1,5 +1,8 @@
 import type { config } from '@ferretry/kernel/host';
 
+/** The other spelling of YAML's extension: never read, but listed so a check can name the file as ignored (v4 listed it too). */
+export const MISSPELLED_EXTENSION = '.yml';
+
 /** One configuration file as the disk holds it: its path under `config/`, and what reading it came to. */
 export interface ConfigDiskFile {
   readonly path: string;

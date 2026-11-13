@@ -4,7 +4,7 @@
  * answer here and `fy config status` cannot disagree about a file. Pure: the caller reads the disk and the accepted record.
  */
 import { config } from '@ferretry/kernel/host';
-import type { ConfigFilesPort } from './ports.ts';
+import { type ConfigFilesPort, MISSPELLED_EXTENSION } from './ports.ts';
 import type { ConfigReport, PendingEdit } from './render.ts';
 
 export interface CheckInput {
@@ -47,6 +47,19 @@ export function checkConfigDirectory(input: CheckInput): ConfigReport {
     const target = config.targetOfPath(input.declarations, file.path);
     if (target === undefined) {
       files += 1;
+      if (file.path.endsWith(MISSPELLED_EXTENSION)) {
+        const proper = `${file.path.slice(0, -MISSPELLED_EXTENSION.length)}${config.CONFIG_EXTENSION}`;
+        issues.push({
+          path: file.path,
+          severity: 'warning',
+          message: `Ferretry does not read this file: only ${config.CONFIG_EXTENSION} files are read, so nothing in it is in effect`,
+          fix:
+            config.targetOfPath(input.declarations, proper) === undefined
+              ? `rename it to a ${config.CONFIG_EXTENSION} file a plugin declares (${input.binary} config guide lists them), or delete it`
+              : `rename it to ${proper}`,
+        });
+        continue;
+      }
       issues.push({
         path: file.path,
         severity: 'warning',

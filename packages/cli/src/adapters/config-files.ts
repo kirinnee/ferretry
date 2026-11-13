@@ -1,5 +1,6 @@
 /**
- * The configuration directory as `fy config` reads it, with no daemon: every `.yaml` file under `<home>/config`, and the
+ * The configuration directory as `fy config` reads it, with no daemon: every `.yaml` file (and every `.yml`, so it can be
+ * named as ignored) under `<home>/config`, and the
  * daemon's accepted record, read only.
  *
  * NEVER FOLLOWS A LINK, for the reason the daemon does not: a link in the config directory could point a reader at any
@@ -8,7 +9,12 @@
  */
 import { createHash } from 'node:crypto';
 import { config, state } from '@ferretry/kernel/host';
-import type { AcceptedRecord, ConfigDiskFile, ConfigFilesPort } from '../lib/config/ports.ts';
+import {
+  type AcceptedRecord,
+  type ConfigDiskFile,
+  type ConfigFilesPort,
+  MISSPELLED_EXTENSION,
+} from '../lib/config/ports.ts';
 
 /** How deep the layout goes below `config/`: a folder of items, one level (`runtimes/<name>.yaml`). */
 const MAX_DEPTH = 3;
@@ -42,7 +48,8 @@ export function createConfigFiles(inputs: ConfigFilesInputs): ConfigFilesPort {
             found.push({ path, disk: { kind: 'unreadable' } });
             continue;
           }
-          if (!entry.name.endsWith(config.CONFIG_EXTENSION)) continue;
+          // A `.yml` is listed too, though nothing reads it: `config check` then says so instead of reporting a clean directory.
+          if (!entry.name.endsWith(config.CONFIG_EXTENSION) && !entry.name.endsWith(MISSPELLED_EXTENSION)) continue;
           found.push({ path, disk: await config.readConfigDisk(fs, `${directory}/${path}`) });
         }
       };

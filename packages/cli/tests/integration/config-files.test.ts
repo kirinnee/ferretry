@@ -16,6 +16,16 @@ async function home() {
 }
 
 describe('the configuration directory, read without a daemon', () => {
+  it('lists a .yml file beside the .yaml ones, so a check can name it as ignored', async () => {
+    const { put, files } = await home();
+    await put('warden.yml', 'enabled: true\n');
+    await put('runtimes/a.yml', 'a: 1\n');
+    expect(await files.list()).toEqual([
+      { path: 'runtimes/a.yml', disk: { kind: 'text', text: 'a: 1\n' } },
+      { path: 'warden.yml', disk: { kind: 'text', text: 'enabled: true\n' } },
+    ]);
+  });
+
   it('names its directory and reads every .yaml file at every depth the layout has, in order', async () => {
     const { put, files } = await home();
     await put('warden.yaml', 'enabled: true\n');

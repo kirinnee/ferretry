@@ -120,6 +120,27 @@ export const configCheck: ShellVerb = async ctx => {
   return report.issues.some(issue => issue.severity === 'error') ? EXIT.failure : EXIT.ok;
 };
 
+/**
+ * The kind names v4 accepted (`protocol/config-files.ts` CONFIG_SCHEMA_IDS) for a file 5.0 still reads, each answered by
+ * the stem of the declaration that continues it, so a script written against the old help keeps working. Only a name whose
+ * successor is a declared file is here: `machine`, `component-settings` and `component-hooks` (now one per harness),
+ * `modelsGuide` and `preset` have no single 5.0 file, and a schema is never invented for them. `warden`, `voice` and
+ * `limits` kept their names and need no alias. An alias is never LISTED; the stems are the canonical names.
+ */
+const V4_KIND_NAMES: ReadonlyMap<string, string> = new Map([
+  ['login', 'logins--item'],
+  ['profile', 'profiles--item'],
+  ['runtime', 'runtimes--item'],
+  ['models', 'models--item'],
+  ['component-instructions', 'instructions--item'],
+  ['component-mcp', 'mcp--item'],
+  ['component-skills', 'skills--item'],
+  ['component-modelSets', 'model-sets--item'],
+  ['learning', 'lessons'],
+  ['pack', 'packs'],
+  ['accountDefaults', 'accounts'],
+]);
+
 /** `fy config schema [kind]`: the JSON Schema of one kind of file, or the list of kinds. */
 export const configSchema: ShellVerb = async ctx => {
   const { args } = readWords(ctx, { command: 'schema', required: [], optional: ['kind'] });
@@ -131,7 +152,10 @@ export const configSchema: ShellVerb = async ctx => {
     return EXIT.ok;
   }
   const wanted = kind.replace(/\.json$/u, '');
-  const found = declarations.find(each => kindOf(each) === wanted);
+  const stem = V4_KIND_NAMES.get(wanted);
+  const found =
+    declarations.find(each => kindOf(each) === wanted) ??
+    (stem === undefined ? undefined : declarations.find(each => kindOf(each) === stem));
   if (found === undefined) throw new ShellError(`no kind ${kind} — one of ${kinds.join(', ')}`);
   ctx.world.io.out(config.configJsonSchemaText(found.def));
   return EXIT.ok;
