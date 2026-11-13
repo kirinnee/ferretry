@@ -202,6 +202,27 @@ describe('the relay lookup retry', () => {
     should(scheduler.armed).have.length(1);
   });
 
+  it('should end quietly when the settled handler itself throws, without a second loop', async () => {
+    // Arrange
+    const scheduler = new ManualScheduler();
+    const retry = new RelayLookupRetry({
+      directory: scripted(AVAILABLE).port,
+      scheduler,
+      random: () => 0.5,
+      onSettled: () => {
+        throw new Error('carrier factory failed');
+      },
+    });
+
+    // Act
+    retry.start();
+    scheduler.fire();
+    await settle();
+
+    // Assert — the owner of the carriers reports its own failure; nothing is asked again.
+    should(scheduler.armed).be.empty();
+  });
+
   it('should treat a read that throws as transient rather than ending the loop', async () => {
     // Arrange
     const scheduler = new ManualScheduler();
