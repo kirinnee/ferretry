@@ -4,22 +4,25 @@
  *
  * THE SEAM. Every ask lives on ONE ferret's board (Asks, lead decision #13), and Asks declares the per-ferret routes
  * for it (`/v1/ferrets/:ferretId/agenda…`, v4's session agenda moved under the ferret). v4 had no cross-ferret ask
- * route and no `fy ask` verb, so none is invented: this verb composes the two CORE routes that always exist (the
- * ferret list, and one board) and so every refusal, projection and grant stays the route spine's. A ferret's pane
- * reads exactly what those routes let it read, and may not answer (answering is the owner's act).
+ * route and no `fy ask` verb, so none is invented: this verb composes the CORE routes that always exist (the live
+ * ferret list, the archived ferret list, and one board) and so every refusal, projection and grant stays the route
+ * spine's. The archived list matters: the live list leaves out a ferret that is archived AND stopped, yet an ask can
+ * still be raised on its board, and the Agenda app shows it. A ferret's pane reads exactly what those routes let it
+ * read, and answers exactly what the daemon lets it answer: an ordinary ask on its OWN board (the 2026-11-07 ruling
+ * recorded in the Asks owner-only-answers test). Any other answer is refused by the daemon, and its sentence is printed.
  *
  * An ask is named `<ferret>/<id>` (ids are per board: two ferrets both have an `A1`). A bare `A3` is accepted when
  * exactly one waiting ask carries it.
  */
 import { skeletonSentence } from '@ferretry/kernel/contract';
 import { optionOn, optionText } from '../argv.ts';
-import { inPane, PERSON_ONLY_REFUSAL } from '../credential.ts';
-import { DaemonRefusal, EXIT, ShellError } from '../errors.ts';
+import { EXIT, ShellError } from '../errors.ts';
 import { renderTable } from '../render.ts';
 import type { ShellContext, ShellVerb } from '../shell-context.ts';
 
 export const ASK_ROUTES = {
   ferrets: 'GET /v1/ferrets',
+  archived: 'GET /v1/archived-sessions',
   board: 'GET /v1/ferrets/:ferretId/agenda',
   item: 'GET /v1/ferrets/:ferretId/agenda/:id',
   answer: 'POST /v1/ferrets/:ferretId/agenda',
@@ -53,6 +56,27 @@ export function ferretsOf(body: unknown): readonly Ferret[] {
     if (typeof row?.id !== 'string' || row.id === '') throw shape('the ferret list');
     return { id: row.id, name: typeof row.name === 'string' && row.name !== '' ? row.name : row.id };
   });
+}
+
+/** The most archived ferrets one read returns (the route's own ceiling). */
+const ARCHIVED_LIMIT = 500;
+
+/** The archived ferrets an archive answer names (each is a full view: its identity is under `config`). */
+export function archivedOf(body: unknown): { readonly ferrets: readonly Ferret[]; readonly count: number } {
+  const answer = body as { count?: unknown; sessions?: unknown } | null;
+  if (
+    answer === null ||
+    typeof answer !== 'object' ||
+    !Array.isArray(answer.sessions) ||
+    typeof answer.count !== 'number'
+  )
+    throw shape('the archived ferret list');
+  const ferrets = answer.sessions.map(entry => {
+    const config = (entry as { config?: Record<string, unknown> } | null)?.config;
+    if (typeof config?.id !== 'string' || config.id === '') throw shape('the archived ferret list');
+    return { id: config.id, name: typeof config.name === 'string' && config.name !== '' ? config.name : config.id };
+  });
+  return { ferrets, count: answer.count };
 }
 
 /** One ask waiting on the owner. */
@@ -98,14 +122,35 @@ export function askRows(asks: readonly WaitingAsk[]): readonly string[][] {
 
 interface Boards {
   readonly asks: readonly WaitingAsk[];
-  /** Boards that could not be read, each with the daemon's own sentence. */
+  /** Boards (or ferret lists) that could not be read, each with what went wrong. */
   readonly unread: readonly string[];
 }
 
+const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** Every ferret a board could be on: the live ones, then the archived ones the live list leaves out. */
+async function ferretsToRead(ctx: ShellContext, unread: string[]): Promise<readonly Ferret[]> {
+  const live = ferretsOf(await ctx.client(FERRETS).call(ASK_ROUTES.ferrets));
+  const known = new Set(live.map(ferret => ferret.id));
+  try {
+    const { ferrets, count } = archivedOf(
+      await ctx.client(FERRETS).call(ASK_ROUTES.archived, { query: { limit: String(ARCHIVED_LIMIT) } }),
+    );
+    if (count > ferrets.length)
+      unread.push(
+        `${String(count - ferrets.length)} older archived ferrets (only the newest ${String(ferrets.length)} were read)`,
+      );
+    return [...live, ...ferrets.filter(ferret => !known.has(ferret.id))];
+  } catch (error) {
+    unread.push(`the archived ferrets: ${reason(error)}`);
+    return live;
+  }
+}
+
 async function readBoards(ctx: ShellContext): Promise<Boards> {
-  const ferrets = ferretsOf(await ctx.client(FERRETS).call(ASK_ROUTES.ferrets));
-  const asks: WaitingAsk[] = [];
   const unread: string[] = [];
+  const ferrets = await ferretsToRead(ctx, unread);
+  const asks: WaitingAsk[] = [];
   const client = ctx.client(ASKS);
   for (let start = 0; start < ferrets.length; start += READ_WIDTH) {
     const reads = await Promise.all(
@@ -113,8 +158,9 @@ async function readBoards(ctx: ShellContext): Promise<Boards> {
         try {
           return waitingOn(ferret, await client.call(ASK_ROUTES.board, { params: { ferretId: ferret.id } }));
         } catch (error) {
-          if (error instanceof DaemonRefusal) return `${ferret.id}: ${error.message}`;
-          throw error;
+          // A refusal, a timeout and a board in a shape this fy cannot read are all one board that could not be read:
+          // it is named, and the boards that could be read are still shown.
+          return `${ferret.id}: ${reason(error)}`;
         }
       }),
     );
@@ -126,11 +172,16 @@ async function readBoards(ctx: ShellContext): Promise<Boards> {
   return { asks, unread };
 }
 
-/** `<ferret>/<id>` is exact; a bare id is looked for among the waiting asks. */
+/** `<ferret>/<id>` is exact; a bare id is looked for among the waiting asks, and only when every board was read. */
 async function resolveRef(ctx: ShellContext, word: string): Promise<{ ferretId: string; id: string }> {
   const slash = word.lastIndexOf('/');
   if (slash > 0 && slash < word.length - 1) return { ferretId: word.slice(0, slash), id: word.slice(slash + 1) };
-  const { asks } = await readBoards(ctx);
+  const { asks, unread } = await readBoards(ctx);
+  // Ids are per board, so a bare id is unique only if every board was looked at: never act on an unproven match.
+  if (unread.length > 0)
+    throw new ShellError(
+      `cannot tell whether ${word} is on more than one ferret, because these could not be read: ${unread.join('; ')}. Say which ask, as <ferret>/${word}`,
+    );
   const found = asks.filter(ask => ask.id === word);
   const only = found[0];
   if (only === undefined) throw new ShellError(`no ask ${word} is waiting`);
@@ -221,8 +272,8 @@ export const askVerb: ShellVerb = async ctx => {
     return EXIT.ok;
   }
   if (first === 'answer') {
-    // Answering is the owner's act: a ferret's pane is refused here, before any connection, as a person-only route is.
-    if (inPane(ctx.world.environment)) throw new ShellError(PERSON_ONLY_REFUSAL, EXIT.failure);
+    // No pane refusal here: who may answer is the daemon's rule (an ordinary ask on a ferret's own board; the owner for
+    // every other), and its refusal sentence is what is printed.
     const word = rest[0];
     if (word === undefined)
       throw new ShellError(`usage: ${identity.binary} ask answer <ask> <text>  (or --text "...")`, EXIT.usage);

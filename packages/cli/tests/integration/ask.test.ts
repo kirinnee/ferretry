@@ -52,6 +52,7 @@ async function withDaemon<T>(
       if (path === '/v1/health') return Response.json(HEALTH);
       if (path === '/v1/plugins') return Response.json(PLUGINS);
       if (path === '/v1/ferrets') return Response.json(ferrets);
+      if (path === '/v1/archived-sessions') return Response.json({ count: 0, sessions: [] });
       if (path === '/v1/ferrets/f1/agenda' && request.method === 'GET')
         return Response.json(
           board({ id: 'A3', title: 'Move c1?', subject: 's', kind: 'yesno', waitingSince: '2026-11-12T00:00:00.000Z' }),
@@ -71,7 +72,7 @@ async function withDaemon<T>(
         product: 'ferretry',
         registry: registryOf(
           skeletonEntry(declare('asks', 'Asks', ASK_ROUTES.board, ASK_ROUTES.item, ASK_ROUTES.answer), 'h-asks'),
-          skeletonEntry(declare('ferrets', 'Ferrets', ASK_ROUTES.ferrets), 'h-ferrets'),
+          skeletonEntry(declare('ferrets', 'Ferrets', ASK_ROUTES.ferrets, ASK_ROUTES.archived), 'h-ferrets'),
         ),
         selfPath: join(home, 'bin', 'fy'),
         process: NO_PROCESS,

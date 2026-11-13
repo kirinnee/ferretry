@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { definePlugin, route } from '@ferretry/kernel/manifest';
 import should from 'should';
-import { askRows, ASK_ROUTES, ferretsOf, waitingOn } from '../../src/lib/commands/ask.ts';
+import { archivedOf, askRows, ASK_ROUTES, ferretsOf, waitingOn } from '../../src/lib/commands/ask.ts';
 import { runFy } from '../../src/lib/run.ts';
 import type { DaemonReply, SendOptions } from '../../src/lib/client.ts';
 import type { DaemonRequest } from '../../src/lib/request.ts';
@@ -19,20 +19,22 @@ const declare = (id: string, title: string, ...keys: string[]) =>
     actions: { routes: keys.map(key => route(key, open)) },
   });
 /** The routes Ferrets and Asks really declare for this verb (core/ferrets, core/asks manifests). */
-const ferretsManifest = declare('ferrets', 'Ferrets', ASK_ROUTES.ferrets);
+const ferretsManifest = declare('ferrets', 'Ferrets', ASK_ROUTES.ferrets, ASK_ROUTES.archived);
 const asksManifest = declare('asks', 'Asks', ASK_ROUTES.board, ASK_ROUTES.item, ASK_ROUTES.answer);
 const inventory = () => inventoryOf({ id: 'asks', contract: 'h-asks' }, { id: 'ferrets', contract: 'h-ferrets' });
 const registry = () => registryOf(skeletonEntry(asksManifest, 'h-asks'), skeletonEntry(ferretsManifest, 'h-ferrets'));
 
 /** A daemon answering by method and path, so the order boards are read in does not matter. */
 class RoutedTransport extends RecordingTransport {
-  constructor(private readonly answers: Record<string, DaemonReply>) {
+  constructor(private readonly answers: Record<string, DaemonReply | Error>) {
     super();
   }
   override async send(request: DaemonRequest, options?: SendOptions): Promise<DaemonReply> {
     this.sent.push(request);
     this.options.push(options);
-    return this.answers[`${request.method} ${request.path}`] ?? { status: 404, body: { error: 'nothing here' } };
+    const answer = this.answers[`${request.method} ${request.path}`];
+    if (answer instanceof Error) throw answer;
+    return answer ?? { status: 404, body: { error: 'nothing here' } };
   }
 }
 
@@ -52,8 +54,13 @@ const FERRETS = {
   ],
 };
 
-const world = (answers: Record<string, DaemonReply>, environment: Record<string, string> = {}) => {
-  const transport = new RoutedTransport(answers);
+const ARCHIVED = '/v1/archived-sessions?limit=500';
+/** Nothing archived, unless a test says otherwise. */
+const NONE_ARCHIVED = { status: 200, body: { count: 0, sessions: [] } };
+const archivedView = (id: string, name = id) => ({ config: { id, name }, state: 'stopped', directory: '/x' });
+
+const world = (answers: Record<string, DaemonReply | Error>, environment: Record<string, string> = {}) => {
+  const transport = new RoutedTransport({ [`GET ${ARCHIVED}`]: NONE_ARCHIVED, ...answers });
   return { ...fakeWorld({ registry: registry(), inventory: inventory(), transport, environment }), transport };
 };
 
@@ -86,6 +93,7 @@ describe('fy ask', () => {
     should(lines[1]).match(/^f2\/A1\s+beta\s+open-question\s+subject of A1$/u);
     should(lines[2]).match(/^f1\/A3\s+alpha\s+yesno\s+Move c1\?$/u);
     should(transport.sent.map(request => request.path).sort()).deepEqual([
+      '/v1/archived-sessions?limit=500',
       '/v1/ferrets',
       '/v1/ferrets/f1/agenda',
       '/v1/ferrets/f2/agenda',
@@ -193,12 +201,34 @@ describe('fy ask', () => {
     should(io.stderr()).containEql('the ask changed');
   });
 
-  it('S59 an answer from a ferret’s pane is refused before any connection is opened', async () => {
-    const { world: w, io, connects, transport } = world({}, { FY_SESSION_ID: 's1' });
-    should(await runFy(['ask', 'answer', 'f1/A3', 'yes'], w)).equal(1);
-    should(io.stderr()).containEql("this is the owner's command; a ferret's pane can't run it");
-    should(connects).deepEqual([]);
-    should(transport.sent).deepEqual([]);
+  it('lets a ferret’s pane answer an ordinary ask on its own board: the daemon decides, the CLI does not refuse first', async () => {
+    const {
+      world: w,
+      io,
+      transport,
+    } = world({ 'POST /v1/ferrets/s1/agenda': { status: 200, body: {} } }, { FY_SESSION_ID: 's1' });
+    should(await runFy(['ask', 'answer', 's1/A3', 'main'], w)).equal(0);
+    should(transport.sent.map(request => `${request.method} ${request.path}`)).deepEqual([
+      'POST /v1/ferrets/s1/agenda',
+    ]);
+    should(io.stdout()).equal('answered s1/A3\n');
+  });
+
+  it('prints the daemon’s own refusal when a pane answers on another ferret’s board or an owner-only ask', async () => {
+    const crossBoard = 'a ferret may only answer an ask on its own board';
+    const ownerOnly = 'this ask is the owner’s to answer';
+    for (const [ref, sentence] of [
+      ['f1/A3', crossBoard],
+      ['s1/A4', ownerOnly],
+    ] as const) {
+      const { world: w, io } = world(
+        { [`POST /v1/ferrets/${ref.split('/')[0]}/agenda`]: { status: 403, body: { error: sentence } } },
+        { FY_SESSION_ID: 's1' },
+      );
+      should(await runFy(['ask', 'answer', ref, 'x'], w)).equal(1);
+      should(io.stderr()).containEql(sentence);
+      should(io.stderr()).not.containEql("this is the owner's command");
+    }
   });
 
   it('should let a ferret’s pane read, as the routes it reads allow', async () => {
@@ -214,10 +244,93 @@ describe('fy ask', () => {
     should(await runFy(['ask', 'zap'], w)).equal(2);
   });
 
+  it('lists a waiting ask on an archived, stopped ferret the live list leaves out, as the app shows it', async () => {
+    const { world: w, io } = world({
+      'GET /v1/ferrets': { status: 200, body: [] },
+      [`GET ${ARCHIVED}`]: { status: 200, body: { count: 1, sessions: [archivedView('archived', 'old one')] } },
+      'GET /v1/ferrets/archived/agenda': board(item('A1', { title: 'Still waiting' })),
+    });
+    should(await runFy(['ask'], w)).equal(0);
+    should(io.stdout()).match(/archived\/A1\s+old one/u);
+  });
+
+  it('names the archived ferrets it could not read and still prints the live ones, exit 1', async () => {
+    const { world: w, io } = world({
+      'GET /v1/ferrets': FERRETS,
+      [`GET ${ARCHIVED}`]: { status: 500, body: { error: 'archive unavailable' } },
+      'GET /v1/ferrets/f1/agenda': board(item('A1')),
+      'GET /v1/ferrets/f2/agenda': board(),
+    });
+    should(await runFy(['ask'], w)).equal(1);
+    should(io.stdout()).containEql('f1/A1');
+    should(io.stderr()).containEql('the archived ferrets: archive unavailable');
+  });
+
+  it('says so when more ferrets are archived than one read returns', async () => {
+    const { world: w, io } = world({
+      'GET /v1/ferrets': { status: 200, body: [] },
+      [`GET ${ARCHIVED}`]: { status: 200, body: { count: 502, sessions: [archivedView('a1')] } },
+      'GET /v1/ferrets/a1/agenda': board(item('A1')),
+    });
+    should(await runFy(['ask'], w)).equal(1);
+    should(io.stdout()).containEql('a1/A1');
+    should(io.stderr()).containEql('501 older archived ferrets');
+  });
+
+  it('refuses a bare id when a board could not be read, names it, and answers nothing', async () => {
+    const {
+      world: w,
+      io,
+      transport,
+    } = world({
+      'GET /v1/ferrets': FERRETS,
+      'GET /v1/ferrets/f1/agenda': { status: 500, body: { error: 'ledger unavailable' } },
+      'GET /v1/ferrets/f2/agenda': board(item('A1')),
+      'POST /v1/ferrets/f2/agenda': { status: 200, body: {} },
+    });
+    should(await runFy(['ask', 'answer', 'A1', 'main'], w)).equal(1);
+    should(io.stderr()).containEql('f1: ledger unavailable');
+    should(io.stderr()).containEql('<ferret>/A1');
+    should(transport.sent.some(request => request.method === 'POST')).equal(false);
+  });
+
+  it('refuses a bare id for show too when the only board that could match is unreadable', async () => {
+    const { world: w, io } = world({
+      'GET /v1/ferrets': FERRETS,
+      'GET /v1/ferrets/f1/agenda': { status: 500, body: { error: 'ledger unavailable' } },
+      'GET /v1/ferrets/f2/agenda': board(),
+    });
+    should(await runFy(['ask', 'show', 'A1'], w)).equal(1);
+    should(io.stderr()).containEql('f1: ledger unavailable');
+    should(io.stderr()).not.containEql('no ask A1 is waiting');
+  });
+
+  it('treats a timed-out board and a malformed board like a refusal: names it, prints the rest, exit 1', async () => {
+    for (const failure of [new Error('board read timed out'), { status: 200, body: { unreadable: true } }]) {
+      const { world: w, io } = world({
+        'GET /v1/ferrets': FERRETS,
+        'GET /v1/ferrets/f1/agenda': failure,
+        'GET /v1/ferrets/f2/agenda': board(item('A1')),
+      });
+      should(await runFy(['ask'], w)).equal(1);
+      should(io.stdout()).containEql('f2/A1');
+      should(io.stderr()).containEql('could not read the asks of f1:');
+    }
+    const timeout = world({
+      'GET /v1/ferrets': FERRETS,
+      'GET /v1/ferrets/f1/agenda': new Error('board read timed out'),
+      'GET /v1/ferrets/f2/agenda': board(),
+    });
+    await runFy(['ask'], timeout.world);
+    should(timeout.io.stderr()).containEql('board read timed out');
+  });
+
   it('should read a shape it does not know as an error, not a crash', () => {
     should(() => ferretsOf({ nope: true })).throw(/shape this fy does not read/u);
     should(() => ferretsOf([{ name: 'x' }])).throw(/shape this fy does not read/u);
     should(() => waitingOn({ id: 'f1', name: 'a' }, { nope: true })).throw(/shape this fy does not read/u);
+    should(() => archivedOf({ count: 1 })).throw(/shape this fy does not read/u);
+    should(() => archivedOf({ count: 1, sessions: [{ nope: 1 }] })).throw(/shape this fy does not read/u);
     should(askRows([])).deepEqual([]);
   });
 });
