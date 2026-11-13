@@ -290,6 +290,25 @@ describe('fy doctor', () => {
       should(io.stdout()).containEql('fix: no repository work without it');
     });
 
+    it('should print FAIL and exit 1 when the daemon says tmux is absent (the Terminals tmux row, required)', async () => {
+      const { world, io } = healthyWorld(
+        report(
+          [
+            check({
+              name: 'terminals: tmux',
+              status: 'missing',
+              summary: 'not found on PATH',
+              impact: 'Sessions cannot start or be managed.',
+            }),
+          ],
+          false,
+        ),
+      );
+      should(await runFy(['doctor'], world)).equal(1);
+      should(io.stdout()).containEql('FAIL  host terminals: tmux: not found on PATH');
+      should(io.stdout()).containEql('fix: Sessions cannot start or be managed.');
+    });
+
     it('should exit 0 when every host check is present', async () => {
       const { world, io } = healthyWorld(report([check({}), check({ name: 'gh', requirement: 'optional' })]));
       should(await runFy(['doctor'], world)).equal(0);

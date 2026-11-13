@@ -72,6 +72,7 @@ import {
 import { ControlModeTmuxProcess, type ControlChild } from './adapters/tmux/control-tmux-process.ts';
 import { KernelTmuxProcess, TMUX_PROGRAM } from './adapters/tmux/kernel-tmux-process.ts';
 import { TmuxRunner, ferretTmuxSession } from './adapters/tmux/tmux-runner.ts';
+import { tmuxAvailabilityDoctor } from './adapters/tmux/tmux-availability-check.ts';
 import { RealHarnessLaunchGuard } from './adapters/tmux/harness-launch-guard.ts';
 import { boundedSpawn } from './adapters/tmux/bounded.ts';
 import { IDENTITY_SCRUB_TIMEOUT_MS, forgetFerretIdentity } from './adapters/tmux/forget-ferret-identity.ts';
@@ -684,7 +685,11 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
         log.warn('the tmux server identity scrub did not run');
       }
     },
-    doctor: { 'tmux-release': tmuxReleaseDoctor(async () => await reader.read()) },
+    doctor: {
+      // Required, as today: no tmux, no sessions. Resolved by the name every launch uses; nothing is run to find out.
+      tmux: tmuxAvailabilityDoctor(async name => await kernel.paths.which(name)),
+      'tmux-release': tmuxReleaseDoctor(async () => await reader.read()),
+    },
     hooks: {
       'input.targets:terminal': inputTarget,
       'runners:tmux': runner,
