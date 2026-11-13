@@ -972,6 +972,7 @@ import {
   type RelayLinkScheduler,
   RelayLookupRetry,
   recoverRelays,
+  relayDialGate,
   type RelayPairingRedeemer,
   type RelayStreamDispatch,
   RememberedHandoverReceipts,
@@ -6620,9 +6621,10 @@ function directCarrierPublication(
 async function resolveRelayCarrierSources(
   config: DaemonConfig,
   directory: RelayDirectoryPort,
+  signal?: AbortSignal,
 ): Promise<ReturnType<typeof chooseRelayCarrierSources> & { readonly advertisement: RelayAdvertisement }> {
   const advertisement = relayCarriersNeedDiscovery(config.carrierSet.relays)
-    ? await directory.read()
+    ? await directory.read(signal === undefined ? undefined : { signal })
     : RELAY_DIRECTORY_NOT_ASKED;
   // The advertisement travels with the choice so the boot can tell a TRANSIENT failure (asked again in
   // the background) from a definitive answer (final).
@@ -13257,7 +13259,24 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * one on their behalf, and that choice would change when the directory changes.
    */
   progress.enter('reading the relay advertisement');
-  const resolvedRelays = await resolveRelayCarrierSources(config, world.relayDirectory);
+  // ONE abort for all discovery — the boot's own read and the background retry. Aborted synchronously the
+  // instant a shutdown begins, so no late answer, first or later, is acted on while the daemon tears down.
+  const relayDiscovery = new AbortController();
+  // Ends the background lookup too once it exists; a no-op beyond the abort until then.
+  let stopRelayRecovery = (): void => relayDiscovery.abort();
+  // FIRST in the list, not last: cleanups run in registration order and each is awaited, so a stop at the
+  // END of the list would let a late answer start a carrier while queue delivery, tmux, storage and the
+  // tunnel were torn down. A boot interrupted before it serves releases this first; a serving daemon stops
+  // it the instant the shutdown wait ends (below), before any cleanup runs at all.
+  cleanups.unshift(() => stopRelayRecovery());
+  // The relay entries as they stand RIGHT NOW, read from the document and never from a cache: a document
+  // that cannot be read, or that has gone, REJECTS — an unreadable configuration is not "last good".
+  const readCurrentRelays = async () => {
+    const peeked = await world.config.peek();
+    if (peeked.document === undefined) throw new Error(`${world.config.path} is no longer there`);
+    return overriddenBy(peeked.config, world.overrides).carrierSet.relays;
+  };
+  const resolvedRelays = await resolveRelayCarrierSources(config, world.relayDirectory, relayDiscovery.signal);
   if (resolvedRelays.kind === 'refused') {
     world.notices.state(`relay carrier configuration refused — ${resolvedRelays.reason}`);
     return 1;
@@ -13672,7 +13691,27 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
       // public on the route table — unreachable over a relay.
       pairing.subsystem,
     );
-  const relay = await createRelays(relaySources);
+  let relay = await createRelays(relaySources);
+  // THE ONE GATE a discovered relay passes after its LAST await: still running, configuration read cleanly,
+  // and still the one this boot decided from. The factory awaited, and a stop or an edit can land in it.
+  if ('carriers' in relay && relaySources.some(source => source.kind === 'discovered')) {
+    const verdict = await relayDialGate({
+      bootRelays: config.carrierSet.relays,
+      readCurrentRelays,
+      stopped: () => relayDiscovery.signal.aborted,
+    });
+    if (verdict.kind !== 'go') {
+      for (const { carrier } of relay.carriers) carrier.stop();
+      relay = {
+        refusal:
+          verdict.kind === 'stopped'
+            ? 'the daemon is stopping'
+            : verdict.kind === 'unreadable'
+              ? 'this daemon’s relay configuration cannot be read now, so the discovered relay is not dialled'
+              : 'the relay configuration changed while this daemon was starting, and an explicit entry wins, so the discovered relay is not dialled',
+      };
+    }
+  }
   if ('carriers' in relay) {
     const started = new Map<string, ReturnType<BunRelayCarrier['status']>>();
     for (const { carrier, source } of relay.carriers) {
@@ -13736,19 +13775,16 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * indistinguishable from one found at boot except that the notice says it was recovered, and after how
    * many reads.
    */
-  // Ends the background lookup, synchronously and idempotently; a no-op when none was started.
-  let stopRelayRecovery = (): void => undefined;
-  if (isTransientAdvertisement(resolvedRelays.advertisement)) {
+  if (isTransientAdvertisement(resolvedRelays.advertisement) && !relayDiscovery.signal.aborted) {
     const bootFailure =
       resolvedRelays.advertisement.kind === 'undetermined' ? resolvedRelays.advertisement.reason : 'unknown';
-    let recoveryStopped = false;
     const retry = new RelayLookupRetry({
       directory: world.relayDirectory,
       scheduler: world.relayLookupTiming.scheduler,
       random: world.relayLookupTiming.random,
       // The decision is `recoverRelays`': it re-reads the CURRENT relay entries before it builds a carrier
       // and again right before it starts one (an explicit `relay` block, `enabled: false` included, always
-      // wins over a late answer), and it looks at `recoveryStopped` after every await.
+      // wins over a late answer), and it looks at the shared stop signal after every await.
       onSettled: async settled =>
         await recoverRelays(
           {
@@ -13757,11 +13793,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
             sourcesNow: () => relaySources,
             // The same document and the same overrides the boot decided from; a failure to read it rejects,
             // and a rejection drops the answer.
-            readCurrentRelays: async () => {
-              const current = overriddenBy((await world.config.peek()).config, world.overrides);
-              return current.carrierSet.relays;
-            },
-            stopped: () => recoveryStopped,
+            readCurrentRelays,
+            stopped: () => relayDiscovery.signal.aborted,
             build: createRelays,
             hold: carrier => {
               cleanups.push(() => carrier.stop());
@@ -13776,14 +13809,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
         ),
     });
     stopRelayRecovery = () => {
-      recoveryStopped = true;
+      relayDiscovery.abort();
       retry.stop();
     };
-    // FIRST in the list, not last: cleanups run in registration order and each is awaited, so a recovery
-    // stopped at the END of the list could still start a carrier while queue delivery, tmux, storage and
-    // the tunnel were being torn down. A boot interrupted before it serves releases this first; a serving
-    // daemon stops it the instant the shutdown wait ends (below), before any cleanup runs at all.
-    cleanups.unshift(() => stopRelayRecovery());
     world.notices.state(
       `the relay directory will be asked again in the background — a relay it advertises is dialled without a restart`,
     );

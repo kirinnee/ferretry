@@ -63,6 +63,36 @@ function sameRelayEntries(a: readonly DaemonRelayCarrierEntry[], b: readonly Dae
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+export interface RelayDialGatePorts {
+  /** The relay entries the decision to dial was taken from. */
+  readonly bootRelays: readonly DaemonRelayCarrierEntry[];
+  /** The relay entries in force RIGHT NOW; rejecting means the configuration cannot be read. */
+  readonly readCurrentRelays: () => Promise<readonly DaemonRelayCarrierEntry[]>;
+  /** Whether the daemon has begun to stop (or discovery was aborted). */
+  readonly stopped: () => boolean;
+}
+
+/**
+ * THE ONE GATE every discovered-relay dial passes, AFTER its last await: is the daemon still running,
+ * can the current configuration be read cleanly, and is it still the one the decision was taken from?
+ * Anything but `go` means no hosted socket is opened. The caller starts the carrier in the same
+ * synchronous step as a `go`, so nothing can land between the two. An unreadable configuration is never
+ * "last good": it fails closed.
+ */
+export type RelayDialVerdict = { readonly kind: 'go' | 'stopped' | 'unreadable' | 'changed' };
+
+export async function relayDialGate(ports: RelayDialGatePorts): Promise<RelayDialVerdict> {
+  if (ports.stopped()) return { kind: 'stopped' };
+  let current: readonly DaemonRelayCarrierEntry[];
+  try {
+    current = await ports.readCurrentRelays();
+  } catch {
+    return { kind: ports.stopped() ? 'stopped' : 'unreadable' };
+  }
+  if (ports.stopped()) return { kind: 'stopped' };
+  return { kind: sameRelayEntries(ports.bootRelays, current) ? 'go' : 'changed' };
+}
+
 /** Ends a carrier that was built and is not going to run. A failing stop is not this recovery's to report. */
 async function discard<C extends RecoverableCarrier>(carriers: readonly RecoveredCarrier<C>[]): Promise<void> {
   for (const { carrier } of carriers) {
@@ -85,19 +115,14 @@ export async function recoverRelays<C extends RecoverableCarrier>(
    * and is therefore always followed by a look at the stopping flag.
    */
   const stillPermitted = async (): Promise<boolean> => {
-    let current: readonly DaemonRelayCarrierEntry[];
-    try {
-      current = await ports.readCurrentRelays();
-    } catch {
-      if (!ports.stopped())
-        ports.say(`${asked}, but this daemon's relay configuration cannot be read now, so no relay carrier is started`);
-      return false;
-    }
-    if (ports.stopped()) return false;
-    if (sameRelayEntries(ports.bootRelays, current)) return true;
-    ports.say(
-      `${asked}, but the relay configuration changed while it was failing — an explicit entry wins, so no relay carrier is started from it`,
-    );
+    const verdict = await relayDialGate(ports);
+    if (verdict.kind === 'go') return true;
+    if (verdict.kind === 'unreadable')
+      ports.say(`${asked}, but this daemon’s relay configuration cannot be read now, so no relay carrier is started`);
+    if (verdict.kind === 'changed')
+      ports.say(
+        `${asked}, but the relay configuration changed while it was failing — an explicit entry wins, so no relay carrier is started from it`,
+      );
     return false;
   };
 

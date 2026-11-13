@@ -6837,6 +6837,105 @@ describe('daemon boot lifecycle', () => {
       should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
     });
 
+    it('should not dial a discovered relay at boot when the configuration changed while the directory was being read', async () => {
+      // Arrange: the boot's own read is slow; the operator switches the discovery entry off inside it.
+      const home = await tempDirectory('fyd-relay-boot-gate-changed');
+      const relay = refusingRelay();
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let answer: (value: RelayAdvertisement) => void = () => undefined;
+      let asked = false;
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = {
+        ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)),
+        notices: said.port,
+        relayDirectory: {
+          read: async (): Promise<RelayAdvertisement> => {
+            asked = true;
+            return await new Promise<RelayAdvertisement>(resolve => {
+              answer = resolve;
+            });
+          },
+        },
+      };
+
+      // Act
+      const booting = start(world, cleanups);
+      await waitFor(() => asked, 'the boot to ask the directory');
+      const document = JSON.parse(await readFile(world.config.path, 'utf8')) as { carriers: unknown[] };
+      document.carriers.push({ kind: 'relay', source: 'discovery', enabled: false });
+      await writeFile(world.config.path, `${JSON.stringify(document, null, 2)}\n`);
+      answer({ kind: 'available', relayUrl: relay.url });
+      const port = await recordedPort(home);
+      await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
+      await waitFor(
+        () => said.stated.some(line => line.startsWith('no relay carriers')),
+        'the boot to refuse the discovered relay',
+      );
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+      await relay.stop();
+
+      // Assert
+      should(code).equal(0);
+      should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
+      should(
+        said.stated.some(line => line.includes('relay configuration changed while this daemon was starting')),
+      ).be.true();
+    });
+
+    it('should abort the boot’s own directory read when the daemon is told to stop, and dial nothing it then answers', async () => {
+      // Arrange: a first read that has not answered when the stop arrives.
+      const home = await tempDirectory('fyd-relay-boot-stop');
+      const relay = refusingRelay();
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      const signals: AbortSignal[] = [];
+      let answer: (value: RelayAdvertisement) => void = () => undefined;
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = {
+        ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)),
+        notices: said.port,
+        relayDirectory: {
+          read: async (options?: { readonly signal?: AbortSignal }): Promise<RelayAdvertisement> => {
+            if (options?.signal !== undefined) signals.push(options.signal);
+            return await new Promise<RelayAdvertisement>(resolve => {
+              answer = resolve;
+            });
+          },
+        },
+      };
+
+      // Act — the stop is the FIRST registered cleanup, which is what a shutdown runs first.
+      const booting = start(world, cleanups);
+      await waitFor(() => signals.length === 1, 'the boot to ask the directory');
+      await cleanups[0]?.();
+      const abortedByStop = signals[0]?.aborted;
+      answer({ kind: 'available', relayUrl: relay.url });
+      const port = await recordedPort(home);
+      await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
+      await waitFor(
+        () => said.stated.some(line => line.startsWith('no relay carriers')),
+        'the boot to refuse the late answer',
+      );
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+      await relay.stop();
+
+      // Assert
+      should(code).equal(0);
+      should(abortedByStop).be.true();
+      should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
+    });
+
     it('should dial the carrier the directory advertises when this daemon configured none', async () => {
       // Arrange: a home with no `relay` block — which is every home, since nothing writes one — and
       // a directory advertising a rendezvous. The address is a port nothing is listening on: the

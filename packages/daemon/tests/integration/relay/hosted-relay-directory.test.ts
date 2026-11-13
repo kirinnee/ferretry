@@ -177,4 +177,22 @@ describe('the hosted relay directory', () => {
     // Assert
     should(advertisement).match({ kind: 'undetermined', reason: /could not reach/u });
   });
+
+  it('should read normally when the caller hands it a signal, and stop at once when that signal aborts', async () => {
+    // Arrange — one server that answers, one that never does.
+    const relayUrl = 'https://relay.example';
+    const answering = directoryServing(() => Response.json({ version: 1, relayUrl }));
+    const silent = directoryServing(() => new Promise<Response>(() => {}));
+    const caller = new AbortController();
+
+    // Act
+    const answered = await new HostedRelayDirectory(answering.origin).read({ signal: new AbortController().signal });
+    const reading = new HostedRelayDirectory(silent.origin, { timeoutMs: 60_000 }).read({ signal: caller.signal });
+    caller.abort();
+    const aborted = await reading;
+
+    // Assert — the abort ended a request that would otherwise have waited a minute, and said it was transient.
+    should(answered).match({ kind: 'available', relayUrl });
+    should(aborted).match({ kind: 'undetermined', transient: true });
+  });
 });

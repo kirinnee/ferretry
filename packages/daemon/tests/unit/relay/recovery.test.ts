@@ -17,6 +17,7 @@ import {
   type RelayCarrierSource,
   type RelayRecoveryPorts,
   recoverRelays,
+  relayDialGate,
 } from '../../../src/lib/relay/index.ts';
 import type { DaemonRelayCarrierEntry } from '../../../src/lib/runtime/carriers.ts';
 
@@ -237,5 +238,120 @@ describe('recoverRelays', () => {
     // Assert
     should(h.events).be.empty();
     should(h.said[0]).match(/stays direct-only/u);
+  });
+});
+
+describe('recoverRelays — the other answers', () => {
+  it('should refuse, said once, when the advertised relay is one the operator already wrote down', async () => {
+    // Arrange — the configured entry and the discovery entry resolve to one rendezvous.
+    const mine: DaemonRelayCarrierEntry = {
+      kind: 'relay',
+      url: 'wss://relay.example/rendezvous',
+      enabled: true,
+      reconnectSeconds: 5,
+    };
+    const h = harness({ bootRelays: [DISCOVERY, mine] });
+    h.configure([DISCOVERY, mine]);
+
+    // Act
+    await recoverRelays(h.ports, { advertisement: AVAILABLE, attempts: 2 });
+
+    // Assert
+    should(h.events).be.empty();
+    should(h.said[0]).match(/relay carrier configuration refused/u);
+  });
+
+  it('should say a definitive undetermined answer once and keep the daemon direct-only', async () => {
+    const h = harness();
+    await recoverRelays(h.ports, {
+      advertisement: { kind: 'undetermined', reason: 'a document it cannot read' },
+      attempts: 2,
+    });
+    should(h.events).be.empty();
+    should(h.said[0]).match(/a document it cannot read; this daemon stays direct-only/u);
+  });
+
+  it('should say the factory\u2019s refusal, and nothing when it was stopped meanwhile', async () => {
+    const refusing = harness({ build: async () => ({ refusal: 'no identity' }) });
+    await recoverRelays(refusing.ports, { advertisement: AVAILABLE, attempts: 2 });
+    should(refusing.said).deepEqual(['no relay carriers — no identity']);
+
+    const stoppedMeanwhile = harness();
+    const ports: RelayRecoveryPorts<FakeCarrier> = {
+      ...stoppedMeanwhile.ports,
+      build: async () => {
+        stoppedMeanwhile.stop();
+        return { refusal: 'no identity' };
+      },
+    };
+    await recoverRelays(ports, { advertisement: AVAILABLE, attempts: 2 });
+    should(stoppedMeanwhile.said).be.empty();
+  });
+
+  it('should not let a carrier that fails to stop keep a dropped recovery from ending', async () => {
+    // Arrange — the document changes while the factory runs, and the carrier it built throws on stop.
+    const h = harness();
+    const ports: RelayRecoveryPorts<FakeCarrier> = {
+      ...h.ports,
+      build: async fresh => {
+        h.configure([SWITCHED_OFF]);
+        return {
+          carriers: fresh.map(source => ({
+            carrier: {
+              start: () => undefined,
+              stop: () => {
+                throw new Error('stop failed');
+              },
+            } as unknown as FakeCarrier,
+            source,
+          })),
+        };
+      },
+    };
+
+    // Act / Assert
+    await recoverRelays(ports, { advertisement: AVAILABLE, attempts: 2 });
+    should(h.published).be.empty();
+  });
+});
+
+describe('relayDialGate', () => {
+  const passing = {
+    bootRelays: [DISCOVERY],
+    readCurrentRelays: async (): Promise<readonly DaemonRelayCarrierEntry[]> => [DISCOVERY],
+    stopped: () => false,
+  };
+
+  it('should say go only when running, readable and unchanged', async () => {
+    should(await relayDialGate(passing)).deepEqual({ kind: 'go' });
+  });
+
+  it('should refuse once stopped, without reading the configuration', async () => {
+    let reads = 0;
+    const verdict = await relayDialGate({
+      ...passing,
+      readCurrentRelays: async () => {
+        reads += 1;
+        return [DISCOVERY];
+      },
+      stopped: () => true,
+    });
+    should(verdict).deepEqual({ kind: 'stopped' });
+    should(reads).equal(0);
+  });
+
+  it('should fail closed on an unreadable configuration rather than accept a last-good one', async () => {
+    const verdict = await relayDialGate({
+      ...passing,
+      readCurrentRelays: async () => {
+        throw new Error('unreadable');
+      },
+    });
+    should(verdict).deepEqual({ kind: 'unreadable' });
+  });
+
+  it('should refuse a changed configuration', async () => {
+    const verdict = await relayDialGate({ ...passing, readCurrentRelays: async () => [SWITCHED_OFF] });
+    should(verdict).deepEqual({ kind: 'changed' });
   });
 });
