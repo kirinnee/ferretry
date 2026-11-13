@@ -47,7 +47,7 @@ async function startWorker(
     plugins: [workerInputGuard(undefined, inputs)],
     define: {
       __FY_RELEASE_KEY__: JSON.stringify(signer.publicKey),
-      __FY_RELEASE_REWRITES__: JSON.stringify([{ from: '/app/*', to: '/app/index.html' }]),
+      __FY_RELEASE_REWRITES__: JSON.stringify([{ from: '/app/*', to: '/app/' }]),
       __FY_RELEASE_HEADERS__: JSON.stringify([{ pattern: '/*', detach: [], set: [['X-Signed-Release', 'yes']] }]),
     },
   });

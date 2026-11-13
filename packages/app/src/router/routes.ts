@@ -39,7 +39,7 @@ const segments = (path: string): string[] => path.split('/').filter(part => part
 /** The segments the router reads an address by: the empty ones dropped, and the installed app's prefix with them. */
 function routeSegments(pathname: string): string[] {
   const parts = segments(pathname);
-  // The installed app's document is served at `/app/` (`public/_redirects`); that prefix is the app's home.
+  // The installed app's document is served at `/app/` (`public/_redirects`, a `200` rewrite to the directory `/app/` — the one target Pages serves without a redirect); that prefix is the app's home.
   if (parts[0] === 'app') parts.shift();
   return parts;
 }
