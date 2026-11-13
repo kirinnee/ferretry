@@ -36,6 +36,7 @@ import type { KeptItem } from '../report.ts';
 import { agentHomesRoot, inside, previewFolder } from '../v5/harness-paths.ts';
 import { info, json, type V4Config } from '../v4/ferrets.ts';
 import { MAX_AGENT_PINS, V4AgentPinFile, V4PinSnapshot } from '../v4/pins.ts';
+import { rebaseV4Path } from '../v4/rebase.ts';
 import type { StepContext } from './index.ts';
 
 /** One converted ferret, as the record half of the step decided it. */
@@ -79,7 +80,7 @@ const text = (value: unknown): string | undefined => (typeof value === 'string' 
 /** A wrapper path inside the v4 `fleet/bin`, moved to the same runtime's wrapper in the new home. */
 function wrapper(ctx: StepContext, runtime: string, value: unknown): unknown {
   if (typeof value !== 'string' || !isAbsolute(value)) return value;
-  const name = inside(join(ctx.v4.fleet, 'bin'), value);
+  const name = inside(join(ctx.v4.fleet, 'bin'), rebaseV4Path(ctx.v4.home, value));
   return name === undefined || name.length === 0 || name.includes(sep)
     ? value
     : ctx.v5.resolve(join('fleet/bin', runtime));
@@ -92,7 +93,7 @@ function conversion(ctx: StepContext, value: unknown): unknown {
   const harness = record.fromHarness;
   const from = text(record.fromFile);
   if ((harness !== 'claude' && harness !== 'codex') || from === undefined) return value;
-  const pooled = inside(join(ctx.v4.fleet, 'shared', harness), from);
+  const pooled = inside(join(ctx.v4.fleet, 'shared', harness), rebaseV4Path(ctx.v4.home, from));
   return pooled === undefined || pooled.length === 0
     ? value
     : { ...record, fromFile: ctx.v5.resolve(join(agentHomesRoot(harness), '_shared', pooled)) };

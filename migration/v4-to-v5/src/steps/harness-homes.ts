@@ -2,6 +2,7 @@ import { chmod, mkdir, readdir, utimes } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { moveSealed } from '../sealed.ts';
+import { rebaseV4Path } from '../v4/rebase.ts';
 import { configs, info, json, runtimeIds, runtimeName } from '../v4/ferrets.ts';
 import { agentHomesRoot as targetRoot } from '../v5/harness-paths.ts';
 import type { Step } from './index.ts';
@@ -60,12 +61,14 @@ export const harnessHomesStep: Step = {
       const ids = await runtimeIds(ctx.v4.fleet);
       const manifest = await json(join(ctx.v4.fleet, 'manifest.json'), Manifest);
       const known = new Map<string, { harness: 'claude' | 'codex'; home: string }>();
+      // A home that was moved or copied: the absolute paths v4 recorded inside its own home are re-based onto `--from`.
+      const rebase = (path: string): string => rebaseV4Path(ctx.v4.home, path);
       const inventory = [
-        ...(manifest?.accounts ?? []),
+        ...(manifest?.accounts ?? []).map(account => ({ ...account, home: rebase(account.home) })),
         ...(manifest?.runtimes ?? []).map(runtime => {
           const entry = ids?.runtimes[runtime.name];
           if (entry !== undefined && entry.id !== runtime.id) throw new Error('runtime identity mismatch');
-          return { id: runtime.id, kind: runtime.harness, home: resolve(homes, entry?.home ?? runtime.id) };
+          return { id: runtime.id, kind: runtime.harness, home: resolve(homes, rebase(entry?.home ?? runtime.id)) };
         }),
       ];
       for (const runtime of inventory) {
@@ -80,7 +83,10 @@ export const harnessHomesStep: Step = {
           ([current, value]) => current === name || value.formerNames.includes(name),
         )?.[1];
         if (entry === undefined) continue;
-        const home = config.transcript?.home ?? resolve(homes, entry.home ?? entry.id);
+        const home =
+          config.transcript?.home === undefined
+            ? resolve(homes, rebase(entry.home ?? entry.id))
+            : rebase(config.transcript.home);
         const previous = known.get(entry.id);
         if (previous !== undefined && (previous.harness !== config.harness || resolve(previous.home) !== resolve(home)))
           throw new Error('runtime identity mismatch');
