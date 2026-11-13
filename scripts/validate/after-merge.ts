@@ -51,6 +51,10 @@ export const OWNER_MOVED_ITEMS: readonly { readonly id: string; readonly decisio
     id: 'coverage-lag',
     decision: '!A484: the coverage lag (12 unit batches + 40 int files, #32 CI-only proof) moves after merge',
   },
+  {
+    id: 'v4-doctor-checks',
+    decision: 'lizzette 2026-11-13: the five v4 doctor checks move after merge (card &F3715)',
+  },
 ];
 
 export const COUNT_NAMES = ['parityOpen', 'portsPendingLines', 'guaranteesMissing'] as const;

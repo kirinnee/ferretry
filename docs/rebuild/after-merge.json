@@ -71,6 +71,11 @@
       "id": "links-keep-history-parse-worker",
       "what": "the harness conversation lists: the Conversations screen (list and preview), keep as a ferret and the harness history, which say \"Not in 5.0 yet\" in one sentence until Ferrets lists what a harness holds; and the transcript parse worker (the reader parses on the main thread, paced). Due 2026-11-27, card &F3447",
       "owner": "britnee"
+    },
+    {
+      "id": "v4-doctor-checks",
+      "what": "the five doctor checks v4 runs and 5.0 only declares (doctor lists them on one line as not built yet): tmux binary, user-slice, loopback-firewall (warn-only), notifications health, claude-code/codex paths. None gates a start, a pair or a session. Due 2026-11-27, card &F3715",
+      "owner": "britnee"
     }
   ]
 }
