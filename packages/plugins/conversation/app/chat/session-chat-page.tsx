@@ -17,7 +17,8 @@
 import { type ChatScrollSlot, LiveStreamIndicator, type LiveStreamIndicatorProps, PanelSlot } from '@ferretry/app';
 import { ReferenceSurfaceProvider, TERMINAL_STATUSES, statusMark, useLiveActivity } from '@ferretry/app';
 import type { LiveActivityFeed } from '@ferretry/app';
-import type { FerretLiveActivity, FerretView } from '@ferretry/core-ferrets/contract';
+import type { FerretLiveActivity } from '@ferretry/core-ferrets/contract';
+import { type ChatSession, isUnread } from './chat-session.ts';
 import { CONVERSATION_ABOVE_COMPOSER_SLOT, type ComposerAccount } from '../../contract/index.ts';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -51,7 +52,7 @@ import { hideWaiting } from './waiting-fold.ts';
 
 export interface SessionChatPageProps {
   readonly daemonId: string;
-  readonly session: FerretView;
+  readonly session: ChatSession;
   readonly entries: readonly TranscriptEntry[];
   readonly client: Pick<PluginClient, 'call'>;
   /**
@@ -99,8 +100,13 @@ export interface SessionChatPageProps {
   readonly liveActivity?: LiveActivityFeed<FerretLiveActivity>;
 }
 
-/** The account a ferret runs on, as the composer's tools may read it: its name and the usage its monitor stamped. */
-const composerAccountOf = (session: FerretView): ComposerAccount => {
+/**
+ * The account a ferret runs on, as the composer's tools may read it: its name and the usage its monitor stamped. None while
+ * the runtime is not known (a ferret the chat could not read).
+ */
+const composerAccountOf = (session: ChatSession): ComposerAccount | undefined => {
+  const agent = session.config.agent;
+  if (agent === undefined) return undefined;
   const { state } = session;
   const usage = {
     ...(state.usageAuthOk === undefined ? {} : { usageAuthOk: state.usageAuthOk }),
@@ -110,11 +116,11 @@ const composerAccountOf = (session: FerretView): ComposerAccount => {
     ...(state.usage5hResetAt === undefined ? {} : { usage5hResetAt: state.usage5hResetAt }),
     ...(state.usageWeeklyResetAt === undefined ? {} : { usageWeeklyResetAt: state.usageWeeklyResetAt }),
   };
-  return { agent: session.config.agent, ...(Object.keys(usage).length === 0 ? {} : { usage }) };
+  return { agent, ...(Object.keys(usage).length === 0 ? {} : { usage }) };
 };
 
 /** A ferret as its words name it: the callsign, else the task's name, else the id (today's `sessionDisplayName`). */
-const ferretDisplayName = (session: FerretView): string =>
+const ferretDisplayName = (session: ChatSession): string =>
   displayCallsign(session.config.teammate) || session.config.name || session.config.id;
 
 /**
@@ -155,6 +161,7 @@ export function SessionChatPage({
 }: SessionChatPageProps) {
   const ferretId = session.config.id;
   const agentName = ferretDisplayName(session);
+  const account = composerAccountOf(session);
   // This device's Enter-key choices, Vim mode and suggestion families, from the one device-controls store.
   const composerPreferences = useComposerPreferences(daemonId);
   // The ONE reference surface for every Markdown reader in this conversation, rebuilt only with the daemon, the ferret
@@ -186,7 +193,9 @@ export function SessionChatPage({
   // watcher (`state.turnState`, read through `session-activity.ts`). The pane is the Terminals plugin's to read, so the
   // chat reads none (`UNREAD_PANE`) and a ferret with no `turnState` falls back to its status mark.
   const working = session.state.turnState === 'working';
-  const statusLive = session.state.turnState === undefined && statusMark(session).klass === 'active';
+  // A ferret the chat could not read claims nothing: no spinner over a turn nobody saw start.
+  const statusLive =
+    !isUnread(session) && session.state.turnState === undefined && statusMark(session).klass === 'active';
   const liveSample = useLiveActivity(liveActivity);
   const turn = sessionTurn(session, UNREAD_PANE);
   const busy = turn === 'working' || (turn === null && statusLive);
@@ -321,7 +330,7 @@ export function SessionChatPage({
               {...composerPreferences}
               disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
               ferretId={ferretId}
-              account={composerAccountOf(session)}
+              {...(account === undefined ? {} : { account })}
               onSent={onSent}
             />
           )}

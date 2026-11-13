@@ -22,7 +22,6 @@
  */
 
 import { useChatScrollSlot, useDaemonControls, useOptionalRouter } from '@ferretry/app';
-import type { FerretView } from '@ferretry/core-ferrets/contract';
 import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -49,6 +48,7 @@ import { useSendView } from '../queue/use-send-view.ts';
 import { pendingQuestionOf, type PendingQuestion } from '../questions/question-form.tsx';
 import { logSearchOf, type ChatSearchPort } from '../search/chat-search.tsx';
 import { chatReadApi, readQuestion } from './chat-reads.ts';
+import { type ChatSession, unreadChatSession } from './chat-session.ts';
 import {
   type ChatRefreshControl,
   type ChatRefreshEnvironment,
@@ -127,7 +127,7 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
   const scope = useMemo(() => daemonFerretScope(daemonConnection(daemonId), ferretId), [daemonId, ferretId]);
   // Per ferret, not per history entry: coming back to a conversation by any route finds the reading position.
   const readingPosition = useChatScrollSlot(daemonFerretKey(scope));
-  const [view, setView] = useState<FerretView | null>(null);
+  const [view, setView] = useState<ChatSession | null>(null);
   const [entries, setEntries] = useState<readonly TranscriptEntry[]>([]);
   /** The ferret's send ledger — where each message the reader (or a teammate) sent actually went. */
   const [sends, setSends] = useState<readonly LedgerSendRecord[]>([]);
@@ -294,6 +294,13 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
 
   const chatState: ChatState = view !== null ? 'connected' : error !== null ? 'failed' : 'opening';
   const issue = error === null ? null : `Conversation issue: ${error}`;
+  /**
+   * DEGRADE, NEVER BLANK. A ferret whose read failed — refused, unreachable, or answered in a shape this build cannot
+   * read — still gets its page from the id alone: the toolbar and side panels (theirs to read), the transcript (read on
+   * its own route) and the composer, with the issue line naming what failed. Only the very first read is waited on.
+   */
+  const unread = useMemo(() => unreadChatSession(ferretId), [ferretId]);
+  const drawn = view ?? (error === null ? null : unread);
 
   return (
     <div className="h-full min-h-0 w-full" data-daemon={daemonId} data-session={ferretId}>
@@ -304,7 +311,7 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
       <p className="sr-only" data-session-error="" role="alert">
         {issue ?? ''}
       </p>
-      {view !== null ? (
+      {drawn !== null ? (
         <QueueActionsContext.Provider value={queueActionsValue}>
           <SessionChatPage
             chatWidth={controls.chatWidth}
@@ -323,13 +330,13 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
             {...(question === undefined ? {} : { question })}
             {...(readingPosition === undefined ? {} : { readingPosition })}
             refreshError={issue}
-            session={view}
+            session={drawn}
             transcriptUnbound={transcriptUnbound}
           />
         </QueueActionsContext.Provider>
       ) : (
         <p className="fy-shell-line fy-shell-line--info" data-session-opening="">
-          {error === null ? 'Opening…' : issue}
+          Opening…
         </p>
       )}
     </div>
