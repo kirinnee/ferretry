@@ -2,6 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- A pairing or share link's fragment leaves the address FIRST: this is the first script of the document, ahead of
+         the theme script and the module graph (public/arrival.js; shell contract S3). The build refuses an HTML page
+         where anything executable or render-blocking comes before it (scripts/get-started-page.ts). It stays a classic
+         same-origin script so it satisfies the page's CSP. -->
+    <script src="/arrival.js"></script>
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
@@ -34,9 +39,6 @@
     <!-- Pre-paint stays classic and same-origin so it runs before first paint under CSP. The signed-release
          service worker is registered by src/main.tsx. -->
     <script src="/pre-paint.js"></script>
-    <!-- A pairing or share link's fragment leaves the address FIRST, before the module graph is fetched
-         (public/arrival.js; shell contract S3). It stays a classic same-origin script for the same reason. -->
-    <script src="/arrival.js"></script>
   </head>
   <body>
     <div id="root"></div>

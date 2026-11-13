@@ -231,15 +231,35 @@ A pairing or share link's fragment must not sit in the tab's address while the a
 the address (an agent's browser tool, an extension, a shared screen) would see a live one-time code. The shell's
 `AddressTaker` strips it, but it is built only when the app's module graph has loaded: measured on a local 5.0 build, the
 fragment stayed ~0.5-0.7 s, through the first paint (the v4 app: ~0.8 s). So `packages/app/public/arrival.js`, a classic
-same-origin script in `app/index.html`'s head (it satisfies `script-src 'self'`), strips every
-fragment on a declared `path` screen (`/pair`, `/join`; also under `/app/`) and every pairing-shaped fragment (`#v1;…`) on
-ANY path (`/`, `/app/`, a typo), with `history.replaceState` while the document is still parsing (~20-45 ms on the same
-build, before first paint), and leaves the value in memory only, on one non-enumerable `window` property that
-`AddressTaker` takes once and deletes: it is held only if it arrived on a declared screen and dropped otherwise. The landing
-page (`/`, no taker) loads the same script with `data-drop`, so it strips and holds nothing. The script's path list is a
-second statement of the plugins' declared fragments and `tests/unit/arrival-script.test.ts` fails if they drift. Any other
-fragment (`#agenda/A3`) is not a credential, is not taken early and stays where it is. The hold's two minutes run from the
-moment the taker holds it, a moment after the strip.
+same-origin script (it satisfies `script-src 'self'`), is **the first script of every HTML document the build emits**: the
+app (`app/index.html`, ahead of the theme script), the landing page, `get-started/` and the OAuth callback page. The build
+refuses any emitted page that does not start with it, or that has a stylesheet before it (`scripts/get-started-page.ts`;
+the only exemptions are the generated `fy-render` shells, which `_headers` serves sandboxed with an opaque origin, where
+`replaceState` is refused and no link is ever aimed). With `history.replaceState` it strips every fragment on a declared
+`path` screen (`/pair`, `/join`; also under `/app/`) and every pairing-shaped fragment (`#v1;…`) on ANY path, while the
+document is still parsing (~20-45 ms on the same build, before first paint). It keeps listening for the life of the page:
+a fragment navigation (`hashchange`) or a history traversal (`popstate`) into a code is the same case as the first
+arrival. The router's own `pushState` is covered by `AddressTaker.read`, which the router calls after every write and which
+also drops a pairing-shaped fragment on an undeclared path.
+
+**What it keeps, and for whom.** Only a value that arrived on exactly a declared screen is held, in the script's own closure
+and on no property of `window`; a path beneath a screen, an undeclared path and a page with no taker (`data-drop`) are stripped
+and dropped at once. The hand-off is one non-enumerable function, `window.__fyArrival`, which `AddressTaker` calls once when
+it is built: it returns the value with **what is left of its two minutes, counted from the arrival**, and removes itself. A
+second call finds nothing; an unclaimed value is removed at its deadline whether or not the module ever boots; and a late boot
+holds it only for the time that remains. Once the taker has called it the taker owns the page: a later arrival on a declared
+screen is left for its own `hashchange` listener, and only the credential-shaped strays are still dropped by the script.
+
+**The guarantee, said narrowly.** The function is take-once; it is not secret from a script already running on this origin.
+`script-src 'self'` (plus the build's hashes) and Trusted Types allow only first-party code to run, so the one intended caller
+is the shell, which calls it before any plugin has a chance to; a script injected into the origin could call it first, but the
+same script could read the address earlier, so this is the boundary the whole app already has. **And the strip cannot be
+earlier than the file's download:** a classic external script must arrive before it runs, so the address holds the link from
+the moment the navigation commits until `arrival.js` has run (an inline strip would run sooner but would need a hashed CSP
+entry, and still cannot precede the commit). A tool that reads the address at commit, or echoes the URL its caller typed,
+has to redact it on its own side; nothing in the page can do that for it. The script's path list and credential pattern are
+second statements of the plugins' declarations and the access contract's `PAIRING_FRAGMENT_PATTERN`;
+`tests/unit/arrival-script.test.ts` fails if they drift.
 
 ### The link names no rendezvous; the device finds one itself
 

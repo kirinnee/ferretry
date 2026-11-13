@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  arrivalScriptIsFirst,
   carriesOwnPolicy,
   cspHashOf,
   servedPathOf,
@@ -11,7 +12,10 @@ import {
   getStartedPagePlugin,
   HEADERS_FILE,
   hasOwnPolicy,
+  htmlPagesUnder,
   inlineScriptsOf,
+  isSandboxedByHeader,
+  PUBLIC_DIR,
   scriptSrcOf,
   unlistedScriptHashes,
   unusedScriptHashes,
@@ -32,6 +36,7 @@ const release = JSON.parse(
 ) as { version: string };
 
 const landing = readFileSync(fileURLToPath(new URL('../../index.html', import.meta.url)), 'utf8');
+const appPage = readFileSync(fileURLToPath(new URL('../../app/index.html', import.meta.url)), 'utf8');
 const asBundle = (pages: Record<string, string>): Bundle =>
   Object.fromEntries(Object.entries(pages).map(([name, source]) => [name, { type: 'asset', fileName: name, source }]));
 
@@ -141,7 +146,7 @@ describe('S14 m3 every HTML page the build emits is checked, not just this one',
   });
 
   it('the real pages pass together', () => {
-    const { error, emitted } = build(real(), asBundle({ 'index.html': landing, 'app/index.html': '<html></html>' }));
+    const { error, emitted } = build(real(), asBundle({ 'index.html': landing, 'app/index.html': appPage }));
     expect(error).toBeUndefined();
     expect(emitted.map(file => file.fileName)).toEqual(['get-started/index.html']);
   });
@@ -258,6 +263,9 @@ describe('S14 m3 every HTML page the build emits is checked, not just this one',
   const base = headers.slice(0, headers.indexOf('# The `fy-render` sandbox shell'));
   const own = '<meta http-equiv="Content-Security-Policy" content="x"><script>shell()</script>';
   const bang = (path: string): string => `${base}\n${path}\n  ! Content-Security-Policy\n`;
+  /** The same rule as the real shells carry: out of `/*`, and a sandboxed (opaque-origin) document. */
+  const sandboxed = (path: string): string =>
+    `${bang(path)}  Content-Security-Policy: frame-ancestors 'self'; sandbox allow-scripts\n`;
 
   it('m1 a `!` rule on the REDIRECT spelling only does not skip the page; the SERVED spelling does', () => {
     // x.html is served at /x
@@ -265,11 +273,11 @@ describe('S14 m3 every HTML page the build emits is checked, not just this one',
     expect(onHtml).toContain('The x.html page');
     expect(onHtml).toContain('/x.html, a spelling Pages redirects');
     expect(onHtml).toContain('put the rule on /x');
-    expect(buildWith({ 'x.html': own }, bang('/x'))).toBeUndefined();
+    expect(buildWith({ 'x.html': own }, sandboxed('/x'))).toBeUndefined();
     // d/index.html is served at /d/
     expect(buildWith({ 'd/index.html': own }, bang('/d'))).toContain('The d/index.html page');
     expect(buildWith({ 'd/index.html': own }, bang('/d/index.html'))).toContain('The d/index.html page');
-    expect(buildWith({ 'd/index.html': own }, bang('/d/'))).toBeUndefined();
+    expect(buildWith({ 'd/index.html': own }, sandboxed('/d/'))).toBeUndefined();
   });
 
   it('m1 servedPathOf is the one spelling Pages serves', () => {
@@ -290,9 +298,9 @@ describe('S14 m3 every HTML page the build emits is checked, not just this one',
   it('n3 a skipped page with no policy of its own fails; a meta CSP or a `_headers` CSP line on its path passes', () => {
     const bare = '<script>shell()</script>';
     expect(buildWith({ 'x.html': bare }, bang('/x'))).toContain('carries no policy of its own');
-    expect(buildWith({ 'x.html': own }, bang('/x'))).toBeUndefined();
+    expect(buildWith({ 'x.html': own }, sandboxed('/x'))).toBeUndefined();
     expect(
-      buildWith({ 'x.html': bare }, `${bang('/x')}  Content-Security-Policy: frame-ancestors 'self'\n`),
+      buildWith({ 'x.html': bare }, `${bang('/x')}  Content-Security-Policy: frame-ancestors 'self'; sandbox\n`),
     ).toBeUndefined();
     expect(carriesOwnPolicy('x.html', bare, bang('/x'))).toBe(false);
   });
@@ -309,6 +317,87 @@ describe('S14 m3 every HTML page the build emits is checked, not just this one',
       const plugin = getStartedPagePlugin({ version: release.version, pagePath: stamped, headersPath: bare });
       const { error } = build(plugin as unknown as BuildPlugin);
       expect(error).toContain(cspHashOf(body.replace('%FY_RELEASE_VERSION%', release.version)));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * THE PAIRING FRAGMENT LEAVES THE ADDRESS FIRST, ON EVERY DOCUMENT (shell contract S3, early half). The build refuses
+ * any HTML page it emits whose first script is not `public/arrival.js`: a page the check does not name could keep a
+ * live code in the address for the whole load.
+ */
+describe('every emitted HTML page starts with the early-arrival script', () => {
+  const real = () => getStartedPagePlugin({ version: release.version }) as unknown as BuildPlugin;
+  const ARRIVAL = '<script src="/arrival.js"></script>';
+  const publicPages = htmlPagesUnder(PUBLIC_DIR).filter(([name]) => !hasOwnPolicy(name, headers));
+
+  it('the sources the build emits as served documents all begin with it (a page copied from public/ included)', () => {
+    expect(publicPages.map(([name]) => name)).toContain('oauth/mcp-callback.html');
+    for (const [name, source] of [
+      ['index.html', landing],
+      ['app/index.html', appPage],
+      ['get-started/index.html', page],
+      ...publicPages,
+    ] as const)
+      expect([name, arrivalScriptIsFirst(source)]).toEqual([name, true]);
+  });
+
+  it('the real pages pass, and the generated sandbox shells are exempt only because _headers sandboxes them', () => {
+    expect(isSandboxedByHeader('fy-render-sandbox.html', headers)).toBe(true);
+    expect(isSandboxedByHeader('fy-render-html.html', headers)).toBe(true);
+    expect(isSandboxedByHeader('index.html', headers)).toBe(false);
+    expect(build(real(), asBundle({ 'index.html': landing, 'app/index.html': appPage })).error).toBeUndefined();
+  });
+
+  it('a page whose theme script comes first fails the build, naming the page', () => {
+    const late = appPage
+      .replace(/<script src="\/arrival\.js"><\/script>/u, '')
+      .replace('<script src="/pre-paint.js"></script>', `<script src="/pre-paint.js"></script>\n${ARRIVAL}`);
+    expect(arrivalScriptIsFirst(late)).toBe(false);
+    const { error, emitted } = build(real(), asBundle({ 'index.html': landing, 'app/index.html': late }));
+    expect(error).toContain('The app/index.html page does not start with the early-arrival script');
+    expect(emitted).toEqual([]);
+  });
+
+  it('a page without it, one with only an inline script before it, or a stylesheet before it, fails', () => {
+    const cases: Record<string, string> = {
+      none: '<html><head><title>x</title></head><body></body></html>',
+      inline: `<head><script>1</script>${ARRIVAL}</head>`,
+      stylesheet: `<head><link rel="stylesheet" href="/a.css">${ARRIVAL}</head>`,
+      style: `<head><style>a{}</style>${ARRIVAL}</head>`,
+      other: '<head><script src="/arrival.js.map"></script></head>',
+      commented: `<head><!-- ${ARRIVAL} --><script src="/other.js"></script></head>`,
+    };
+    for (const [label, source] of Object.entries(cases))
+      expect([label, arrivalScriptIsFirst(source)]).toEqual([label, false]);
+    const { error } = build(real(), asBundle({ 'index.html': landing, 'x.html': cases.inline ?? '' }));
+    expect(error).toBeDefined();
+  });
+
+  it('what passes: it first, a data-drop attribute, favicons and comments before it, other scripts after', () => {
+    for (const source of [
+      `<head>${ARRIVAL}<script src="/pre-paint.js"></script></head>`,
+      '<head><script src="/arrival.js" data-drop></script><script>1</script></head>',
+      `<head><!-- <script src="/x.js"></script> --><link rel="icon" href="/i.svg">${ARRIVAL}</head>`,
+    ])
+      expect(arrivalScriptIsFirst(source)).toBe(true);
+  });
+
+  it('a page with a policy of its own that is NOT sandboxed fails: only a sandboxed shell is exempt', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fy-get-started-'));
+    try {
+      writeFileSync(
+        join(dir, 'x.html'),
+        '<meta http-equiv="Content-Security-Policy" content="x"><script>shell()</script>',
+      );
+      const own = `${headers.slice(0, headers.indexOf('# The \`fy-render\` sandbox shell'))}\n/x\n  ! Content-Security-Policy\n`;
+      const planted = join(dir, '_headers.txt');
+      writeFileSync(planted, own);
+      const plugin = getStartedPagePlugin({ version: release.version, publicDir: dir, headersPath: planted });
+      const { error } = build(plugin as unknown as BuildPlugin, asBundle({ 'index.html': landing }));
+      expect(error).toContain('The x.html page is served with a policy of its own and is not sandboxed');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
