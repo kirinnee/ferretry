@@ -11,7 +11,11 @@ export interface HiddenPromptInput {
   resume(): void;
   pause(): void;
   on(event: 'data', listener: (chunk: Uint8Array | string) => void): void;
+  on(event: 'end' | 'close', listener: () => void): void;
+  on(event: 'error', listener: (error: unknown) => void): void;
   off(event: 'data', listener: (chunk: Uint8Array | string) => void): void;
+  off(event: 'end' | 'close', listener: () => void): void;
+  off(event: 'error', listener: (error: unknown) => void): void;
 }
 
 export interface HiddenPromptDeps {
@@ -27,9 +31,10 @@ export interface HiddenPromptDeps {
  *
  * Answers `undefined` when standard input is not a terminal, so the caller keeps reading a pipe as it always did. The
  * typed value is returned to the caller and written NOWHERE here: the only text this prints is the question and one
- * newline. The terminal is put back in a `finally`-equivalent on every way out: Enter, Ctrl-C typed (raw mode delivers
- * it as a byte, which ends the read), and a SIGINT sent to the process. Both interrupts answer a `ShellError` with exit
- * status 130, after the terminal is restored.
+ * newline. The terminal is put back on EVERY way out, through one cleanup that runs exactly once: Enter, Ctrl-C typed (raw mode
+ * delivers it as a byte, which ends the read), a SIGINT sent to the process, the stream ending, closing or erroring, and
+ * any fault while setting the prompt up. Both interrupts answer a `ShellError` with exit status 130, after the terminal
+ * is restored. The promise always settles, and a fault while restoring REJECTS it rather than handing back a value.
  *
  * Backspace edits what was typed; an escape sequence (an arrow key) is skipped rather than stored.
  */
@@ -45,20 +50,43 @@ export function createHiddenPrompt(deps: HiddenPromptDeps): (question: string) =
       let finished = false;
       let stopListening = (): void => undefined;
 
-      const finish = (outcome: () => void): void => {
+      /** Undoes everything that was installed, each step on its own so one that throws cannot skip the rest; answers the first fault. */
+      const restore = (): { readonly fault: unknown } | undefined => {
+        let fault: { readonly fault: unknown } | undefined;
+        const attempt = (step: () => void): void => {
+          try {
+            step();
+          } catch (error) {
+            fault ??= { fault: error };
+          }
+        };
+        attempt(() => input.off('data', onData));
+        attempt(() => input.off('end', onEnd));
+        attempt(() => input.off('close', onEnd));
+        attempt(() => input.off('error', onError));
+        attempt(() => stopListening());
+        attempt(() => input.setRawMode(false));
+        attempt(() => input.pause());
+        attempt(() => deps.write('\n'));
+        return fault;
+      };
+
+      /** The ONE way out: restores exactly once, then settles exactly once. A restore fault wins over a read value. */
+      const finish = (outcome: { readonly ok: string } | { readonly fail: unknown }): void => {
         if (finished) return;
         finished = true;
-        input.off('data', onData);
-        stopListening();
-        try {
-          input.setRawMode(false);
-        } finally {
-          input.pause();
-          deps.write('\n');
-          outcome();
-        }
+        const restored = restore();
+        if (restored) reject(restored.fault);
+        else if ('fail' in outcome) reject(outcome.fail);
+        else resolve(outcome.ok);
       };
-      const interrupt = (): void => finish(() => reject(new ShellError('interrupted', INTERRUPTED)));
+      const interrupt = (): void => finish({ fail: new ShellError('interrupted', INTERRUPTED) });
+      function onEnd(): void {
+        finish({ fail: new ShellError('the terminal input closed before a value was entered') });
+      }
+      function onError(error: unknown): void {
+        finish({ fail: error });
+      }
 
       function onData(chunk: Uint8Array | string): void {
         const text = typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
@@ -73,7 +101,7 @@ export function createHiddenPrompt(deps: HiddenPromptDeps): (question: string) =
             continue;
           }
           if (char === '\r' || char === '\n' || char === '\u0004') {
-            finish(() => resolve(typed.join('')));
+            finish({ ok: typed.join('') });
             return;
           }
           if (char === '\u0003') {
@@ -86,15 +114,18 @@ export function createHiddenPrompt(deps: HiddenPromptDeps): (question: string) =
         }
       }
 
+      // Everything from here on is inside one try: whatever fails to install, the terminal is put back.
       try {
         input.setRawMode(true);
+        input.resume();
+        input.on('data', onData);
+        input.on('end', onEnd);
+        input.on('close', onEnd);
+        input.on('error', onError);
+        stopListening = deps.onInterrupt(interrupt);
       } catch (error) {
-        finish(() => reject(error));
-        return;
+        finish({ fail: error });
       }
-      input.resume();
-      input.on('data', onData);
-      stopListening = deps.onInterrupt(interrupt);
     });
   };
 }

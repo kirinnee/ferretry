@@ -4,6 +4,7 @@
  * is restored. No test touches the real terminal.
  */
 import { describe, expect, it } from 'bun:test';
+import { EventEmitter } from 'node:events';
 import { createHiddenPrompt, type HiddenPromptInput } from '../../../src/adapters/terminal/hidden-prompt.ts';
 import { ShellError } from '../../../src/lib/errors.ts';
 
@@ -20,9 +21,13 @@ function terminal(isTTY = true) {
     setRawMode: on => void events.push(`raw:${String(on)}`),
     resume: () => void events.push('resume'),
     pause: () => void events.push('pause'),
-    on: (_event, listener) => void listeners.add(listener),
-    off: (_event, listener) => void listeners.delete(listener),
-  };
+    on: (event: string, listener: (chunk: Uint8Array | string) => void) => {
+      if (event === 'data') listeners.add(listener);
+    },
+    off: (event: string, listener: (chunk: Uint8Array | string) => void) => {
+      if (event === 'data') listeners.delete(listener);
+    },
+  } as HiddenPromptInput;
   const prompt = createHiddenPrompt({
     input,
     write: text => void written.push(text),
@@ -142,5 +147,90 @@ describe('the hidden prompt', () => {
     });
     await expect(failing(QUESTION)).rejects.toThrow('no raw mode here');
     expect(t.events).toEqual(['raw:true', 'raw:false', 'pause']);
+  });
+});
+
+/**
+ * Every fault the reviewer injected: setup, stream and cleanup failures must leave raw mode OFF (restored exactly once),
+ * the listeners removed, and the promise SETTLED by rejection (never hanging, never resolved and then thrown).
+ */
+describe('the hidden prompt under faults', () => {
+  type Fault = 'resume' | 'on' | 'onInterrupt' | 'end' | 'close' | 'error' | 'restore';
+
+  async function run(fault: Fault) {
+    const stream = new EventEmitter();
+    const rawCalls: boolean[] = [];
+    let paused = 0;
+    let interruptHandlers = 0;
+    const input = Object.assign(stream, {
+      isTTY: true,
+      setRawMode(on: boolean) {
+        rawCalls.push(on);
+        if (!on && fault === 'restore') throw new Error('injected restore fault');
+      },
+      resume() {
+        if (fault === 'resume') throw new Error('injected resume fault');
+      },
+      pause() {
+        paused += 1;
+      },
+    });
+    const realOn = input.on.bind(input);
+    input.on = ((event: string, handler: (...args: unknown[]) => void) => {
+      if (fault === 'on') throw new Error('injected listener fault');
+      return realOn(event, handler);
+    }) as typeof input.on;
+    const written: string[] = [];
+    const prompt = createHiddenPrompt({
+      input: input as unknown as HiddenPromptInput,
+      write: text => void written.push(text),
+      onInterrupt: () => {
+        if (fault === 'onInterrupt') throw new Error('injected signal fault');
+        interruptHandlers += 1;
+        return () => {
+          interruptHandlers -= 1;
+        };
+      },
+    });
+    let settlement: { readonly resolved: string } | { readonly rejected: Error } | undefined;
+    const asked = prompt(QUESTION).then(
+      value => {
+        settlement = { resolved: String(value) };
+      },
+      (error: Error) => {
+        settlement = { rejected: error };
+      },
+    );
+    // Whatever happened during setup has already settled; a stream fault arrives afterwards, on its own event.
+    if (fault === 'end' || fault === 'close') stream.emit(fault);
+    else if (fault === 'error') stream.emit('error', new Error('injected read fault'));
+    else if (fault === 'restore') stream.emit('data', 'typed-fake-secret-000\r');
+    await Promise.race([asked, new Promise(r => setTimeout(r, 50))]);
+    const listenerCount = ['data', 'end', 'close', 'error'].reduce((n, e) => n + stream.listenerCount(e), 0);
+    return { settlement, rawCalls, paused, interruptHandlers, listenerCount, written };
+  }
+
+  for (const fault of ['resume', 'on', 'onInterrupt', 'end', 'close', 'error', 'restore'] as const) {
+    it(`settles by rejection, restores raw mode exactly once and removes every listener when ${fault} fails`, async () => {
+      const r = await run(fault);
+      expect(r.settlement).toBeDefined();
+      expect(r.settlement).toHaveProperty('rejected');
+      expect(r.rawCalls.filter(on => !on)).toHaveLength(1);
+      expect(r.rawCalls.at(-1)).toBe(false);
+      expect(r.paused).toBe(1);
+      expect(r.interruptHandlers).toBe(0);
+      expect(r.listenerCount).toBe(0);
+      expect(r.written.join('')).not.toContain('typed-fake-secret-000');
+    });
+  }
+
+  it('does not hand back a value when the restore itself fails', async () => {
+    const r = await run('restore');
+    expect((r.settlement as { rejected: Error }).rejected.message).toBe('injected restore fault');
+  });
+
+  it('names the closed input when the stream ends before a value was entered', async () => {
+    const r = await run('end');
+    expect((r.settlement as { rejected: Error }).rejected.message).toContain('closed before a value');
   });
 });
