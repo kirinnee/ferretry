@@ -3,6 +3,7 @@
  * that one child (the handle goes to the spawn port), never expanded here. A name the Vault does not hold is said by name.
  */
 import { describe, expect, test } from 'bun:test';
+import type { MintedBody, MintedExchangeOutcome } from '@ferretry/core-vault/contract';
 import type { ChildEnvironment } from '@ferretry/kernel/contract';
 import { err, ok } from '@ferretry/std';
 import { type ProbePorts, TransportMcpProbe } from '../../daemon/adapters/probe.ts';
@@ -90,11 +91,14 @@ describe('a remote check that carries a held sign-in', () => {
     credential: { secret: 'MCP_X_0123456789ABCDEF_ACCESS', header: 'Authorization', scheme: 'Bearer' },
   } as Parameters<TransportMcpProbe['probe']>[0];
 
-  const reply = (id: number | undefined, result: unknown): Response =>
-    new Response(id === undefined ? '' : JSON.stringify({ jsonrpc: '2.0', id, result }), {
-      status: id === undefined ? 202 : 200,
-      headers: { 'content-type': 'application/json' },
-    });
+  /** The Vault's sanitized reply, as the real Vault builds it: status, allowlisted headers, a text body. */
+  const reply = (id: number | undefined, result: unknown, body?: MintedBody): MintedExchangeOutcome => ({
+    kind: 'response',
+    status: id === undefined ? 202 : 200,
+    statusText: '',
+    headers: { 'content-type': 'application/json' },
+    body: body ?? { kind: 'text', text: id === undefined ? '' : JSON.stringify({ jsonrpc: '2.0', id, result }) },
+  });
 
   test('is sent through the Vault’s minted exchange with the secret’s NAME, and never through the plain fetch', async () => {
     const plain: string[] = [];
@@ -114,12 +118,11 @@ describe('a remote check that carries a held sign-in', () => {
       fetchMinted: async (secret, request, placement) => {
         asked.push({ secret, placement, method: request.method });
         const body = JSON.parse(request.body ?? '{}') as { id?: number; method?: string };
-        if (request.method === 'DELETE') return { kind: 'response', response: new Response('', { status: 200 }) };
-        if (body.method === 'initialize')
-          return { kind: 'response', response: reply(body.id, { serverInfo: { name: 'Remote' } }) };
-        if (body.method === 'tools/list')
-          return { kind: 'response', response: reply(body.id, { tools: [{ name: 'a' }] }) };
-        return { kind: 'response', response: reply(undefined, {}) };
+        if (request.method === 'DELETE')
+          return { kind: 'response', status: 200, statusText: '', headers: {}, body: { kind: 'text', text: '' } };
+        if (body.method === 'initialize') return reply(body.id, { serverInfo: { name: 'Remote' } });
+        if (body.method === 'tools/list') return reply(body.id, { tools: [{ name: 'a' }] });
+        return reply(undefined, {});
       },
     });
 
@@ -154,5 +157,51 @@ describe('a remote check that carries a held sign-in', () => {
     const failure = await probe.probe(remote, AbortSignal.timeout(2000)).catch((e: unknown) => e);
 
     expect(failure).toBeInstanceOf(McpProbeFailure);
+  });
+
+  test('reads the Vault’s event-stream reply, whole masked events, until the answer arrives', async () => {
+    const event = (id: number, result: unknown): string =>
+      `event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id, result })}\n\n`;
+    const stream = (...events: string[]): MintedBody => ({
+      kind: 'events',
+      events: new ReadableStream<string>({
+        start: controller => {
+          for (const piece of events) controller.enqueue(piece);
+          // never closed: a server that keeps the stream open after it answered
+        },
+      }),
+    });
+    const stub = { spawn: {}, clock: {}, fetch: { request: async () => new Response('') } } as unknown as ProbePorts;
+    const probe = new TransportMcpProbe(stub, {
+      childEnvironment: async () => ok(HANDLE),
+      fetchMinted: async (_secret, request) => {
+        const body = JSON.parse(request.body ?? '{}') as { id?: number; method?: string };
+        if (request.method === 'DELETE')
+          return { kind: 'response', status: 200, statusText: '', headers: {}, body: { kind: 'text', text: '' } };
+        const sse = (id: number | undefined, result: unknown) => ({
+          ...reply(id, result, id === undefined ? undefined : stream(event(id, result))),
+          headers: { 'content-type': 'text/event-stream' },
+        });
+        if (body.method === 'initialize') return sse(body.id, { serverInfo: { name: 'Streamed' } });
+        if (body.method === 'tools/list') return sse(body.id, { tools: [{ name: 'b' }] });
+        return sse(undefined, {});
+      },
+    });
+
+    expect(await probe.probe(remote, AbortSignal.timeout(2000))).toEqual({ serverName: 'Streamed', tools: ['b'] });
+  });
+
+  test('says in words that it could not check an answer the Vault kept back', async () => {
+    const stub = { spawn: {}, clock: {}, fetch: { request: async () => new Response('') } } as unknown as ProbePorts;
+    const probe = new TransportMcpProbe(stub, {
+      childEnvironment: async () => ok(HANDLE),
+      fetchMinted: async () =>
+        reply(1, {}, { kind: 'dropped', why: 'The server’s answer is not plain text, so the Vault kept it.' }),
+    });
+
+    const failure = await probe.probe(remote, AbortSignal.timeout(2000)).catch((e: unknown) => e);
+
+    expect(failure).toBeInstanceOf(McpProbeFailure);
+    expect((failure as McpProbeFailure).message).toContain('the Vault kept it');
   });
 });

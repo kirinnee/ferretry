@@ -102,6 +102,41 @@ export function runnerLookCases(): void {
       should(JSON.stringify(prompt.dialog)).containEql('Yes, trust ***********');
     });
 
+    it('should carry the limit a rate-limited session records, masked, and none for a session that is not limited', () => {
+      // Arrange
+      const mask = (text: string) => text.replaceAll('example.com', '***********');
+      const limited = {
+        status: 'rate_limited',
+        quota: { limitNotice: 'example.com spend limit', unavailableReason: 'spend_limit', retryAt: 1_700_000_000_000 },
+      } as never;
+
+      // Act
+      const prompt = promptOf(limited, mask);
+
+      // Assert
+      should(prompt.limit).deepEqual({ notice: '*********** spend limit', spend: true, retryAt: 1_700_000_000_000 });
+      should(promptOf({ status: 'running', quota: (limited as { quota: never }).quota }, mask).limit).be.undefined();
+      should(promptOf({ status: 'rate_limited' } as never, mask).limit).be.undefined();
+    });
+
+    it('should read the limit from the usage-limit dialog a session is parked on when its quota names none', () => {
+      // Act
+      const prompt = promptOf(
+        {
+          status: 'rate_limited',
+          harnessDialog: {
+            kind: 'usage-limit',
+            title: 'Usage limit',
+            body: 'You hit your limit\nresets at 5pm',
+          } as never,
+        },
+        text => text,
+      );
+
+      // Assert
+      should(prompt.limit).deepEqual({ notice: 'You hit your limit', spend: false });
+    });
+
     it('should keep the shape and every non-string of a value it masks', () => {
       // Act
       const masked = maskedStrings({ a: [1, true, null, 'secret'], b: { c: 'secret' } }, text => text.toUpperCase());

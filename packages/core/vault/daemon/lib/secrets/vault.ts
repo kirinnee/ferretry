@@ -239,4 +239,19 @@ export class SecretVault {
     if (stored === undefined) return new Map();
     return await this.cipher.openAll(requireCipherMatch(stored, this.cipher.algorithm).entries);
   }
+
+  /**
+   * ONE entry, opened from ONE reading of the document, with the identity of THAT entry's write (its seal nonce). What
+   * a caller authorizes by the identity is exactly what it then holds: a write that lands after this read cannot make
+   * the identity belong to one value and the value to another. Nothing but this entry is opened. `undefined` when
+   * the name is not held; a store that cannot be opened raises, as {@link values}.
+   */
+  async openEntry(name: SecretName): Promise<{ readonly write: string; readonly value: string } | undefined> {
+    const stored = await this.store.read();
+    if (stored === undefined) return undefined;
+    const entry = requireCipherMatch(stored, this.cipher.algorithm).entries[name];
+    if (entry === undefined) return undefined;
+    const value = (await this.cipher.openAll({ [name]: entry } as Record<SecretName, SealedSecret>)).get(name);
+    return value === undefined ? undefined : { write: entry.iv, value };
+  }
 }

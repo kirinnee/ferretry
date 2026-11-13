@@ -72,7 +72,7 @@ export default implementDaemon(manifest, {
       (await uses.logins.current()?.models())?.catalogs ?? [];
     const quota = new LoginQuotaFacts(
       () => uses.logins.current(),
-      async () => await ferrets().list(),
+      () => ferrets(),
       () => kernel.clock.nowMs(),
     );
     const fleet = new FleetFacts(

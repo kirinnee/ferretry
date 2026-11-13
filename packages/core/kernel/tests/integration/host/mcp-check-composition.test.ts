@@ -84,6 +84,8 @@ async function world(options: {
   readonly mcpNames: readonly string[];
   readonly servers: Record<string, unknown>;
   readonly answer?: FakeServer;
+  /** Runs when a request reaches the fake server, before it answers: what else happens "while the reply is in flight". */
+  readonly onRequest?: () => Promise<void>;
 }) {
   const ferrets = new FakeFerrets();
   ferrets.add({ id: ferretId('f1'), folder: '/work/app', runtime: RUNTIME.id });
@@ -194,6 +196,7 @@ async function world(options: {
     uses: { runtimes },
     config: options.config,
     fetch: async (url, init) => {
+      await options.onRequest?.();
       const headers = new Headers(init?.headers);
       seen.push({ url: url.toString(), method: init?.method ?? 'GET', authorization: headers.get('authorization') });
       if (init?.method === 'DELETE') return new Response('', { status: 200 });
@@ -321,6 +324,35 @@ describe('what a server says is scrubbed before it is shown, clipped or not', ()
       expect(checked.body).not.toContain(FAKE_TOKEN);
       expect(checked.body).not.toContain('FAKE-M');
       expect(checked.json<{ tools?: string[] }>().tools).toContain('plain');
+    } finally {
+      await w.host.stop();
+    }
+  });
+});
+
+describe('the answer is masked against the token as it was SENT', () => {
+  test('an owner who replaces the token while the server answers cannot make the old one show', async () => {
+    const names = mcpOAuthSecretNames('linear', URL_OF_SERVER);
+    let replace: () => Promise<void> = async () => undefined;
+    const w = await world({
+      ...linear(names),
+      answer: { name: '', tools: [], reflect: { prefix: 'a server called ' } },
+      onRequest: async () => await replace(),
+    });
+    try {
+      await w.mint();
+      // the owner overwrites the sign-in's name the moment the first request lands: the current Vault no longer holds the
+      // token the server was sent, and its reply spells it in \u escapes
+      replace = async () => {
+        replace = async () => undefined;
+        await w.host.provided(VaultPort).put(w.names.access, 'FAKE-OWNER-REPLACEMENT-0000');
+      };
+
+      const checked = await w.check('linear');
+
+      expect(checked.body).not.toContain(FAKE_TOKEN);
+      expect(checked.body).not.toContain('FAKE-M');
+      expect(JSON.stringify(w.host.logs)).not.toContain(FAKE_TOKEN);
     } finally {
       await w.host.stop();
     }

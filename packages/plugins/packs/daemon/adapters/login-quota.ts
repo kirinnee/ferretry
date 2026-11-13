@@ -1,4 +1,4 @@
-import type { FerretSummary } from '@ferretry/core-ferrets/contract';
+import type { FerretsApi } from '@ferretry/core-ferrets/contract';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
 import type { PackCredentialFacts, PackQuotaSource, PaneLimit } from '../../contract/index.ts';
 
@@ -8,14 +8,16 @@ import type { PackCredentialFacts, PackQuotaSource, PaneLimit } from '../../cont
  *
  * The PANE limits: a spend limit only the harness announces ("You've hit your org's monthly spend limit") shows in no
  * provider window, so a login whose ferret is parked `rate_limited` on one is exhausted until the time the harness gave.
- * It is read from Ferrets' own summaries (the limit notice a rate-limited ferret's quota records), live, nothing remembered:
- * it ends the moment the last such ferret is released or its reset passes. A read that fails is no limit, never a failed
- * recommend: pane evidence only ever ADDS a limit the provider did not say.
+ * The evidence is read from the REAL Ferrets port: `list()` names the live ferrets and the login each runs on (the
+ * summary carries no quota), and `prompt()` answers, per ferret, the `limit` its session document records while it is
+ * `rate_limited` (`FerretPrompt.limit`). Live, nothing remembered: it ends the moment the last such ferret is released or
+ * its reset passes. A read that fails is no limit, never a failed recommend: pane evidence only ever ADDS a limit the
+ * provider did not say.
  */
 export class LoginQuotaFacts implements PackQuotaSource {
   constructor(
     private readonly logins: () => LoginsApi | undefined,
-    private readonly ferrets: () => Promise<readonly FerretSummary[]> = async () => [],
+    private readonly ferrets: () => Pick<FerretsApi, 'list' | 'prompt'> | undefined = () => undefined,
     private readonly nowMs: () => number = () => Date.now(),
   ) {}
 
@@ -24,23 +26,29 @@ export class LoginQuotaFacts implements PackQuotaSource {
   }
 
   async paneLimits(): Promise<ReadonlyMap<string, PaneLimit>> {
-    let summaries: readonly FerretSummary[];
+    const ferrets = this.ferrets();
+    if (ferrets?.prompt === undefined) return new Map();
+    const ask = ferrets.prompt.bind(ferrets);
+    let live: Awaited<ReturnType<FerretsApi['list']>>;
     try {
-      summaries = await this.ferrets();
+      live = (await ferrets.list()).filter(ferret => ferret.state !== 'stopped' && ferret.login !== undefined);
     } catch {
       return new Map();
     }
     const now = this.nowMs();
     const limits = new Map<string, PaneLimit>();
-    for (const ferret of summaries) {
-      const notice = ferret.quota?.limitNotice;
-      // `limitNotice` is present exactly while Ferretry reads the ferret as rate limited: the harness's own words for it.
-      if (notice === undefined || ferret.login === undefined) continue;
-      const retryAt = ferret.quota?.retryAt;
+    // One ferret's failed read is that ferret's evidence missing, not the others'.
+    const asked = await Promise.all(
+      live.map(async ferret => [ferret, await ask(ferret.id).catch(() => undefined)] as const),
+    );
+    for (const [ferret, prompt] of asked) {
+      const found = prompt?.limit;
+      if (found === undefined || ferret.login === undefined) continue;
+      const retryAt = found.retryAt;
       if (retryAt !== undefined && retryAt <= now) continue;
       const limit: PaneLimit = {
-        notice,
-        spend: ferret.quota?.unavailableReason === 'spend_limit',
+        notice: found.notice,
+        spend: found.spend,
         ...(retryAt === undefined ? {} : { retryAt }),
       };
       const kept = limits.get(ferret.login);

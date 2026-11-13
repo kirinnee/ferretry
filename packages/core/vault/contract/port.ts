@@ -58,8 +58,9 @@ export interface VaultApi {
     placement?: CredentialPlacement,
   ): Promise<AuthorizedOutcome>;
   /**
-   * Sends ONE request with a secret the CALLER MINTED placed on it (default `authorization: Bearer`), and answers the
-   * reply itself, the credential masked out of it. Additive, and offered to NON-core needers only: a core needer is
+   * Sends ONE request with a secret the CALLER MINTED placed on it (default `authorization: Bearer`), and answers a
+   * SANITIZED reply built inside the Vault (status, masked statusText, allowlisted headers, a masked or dropped body),
+   * never the raw one. Additive, and offered to NON-core needers only: a core needer is
    * never narrowed to what it minted. Refused (nothing sent) unless the Vault's own mint ledger says this needer wrote
    * the secret's CURRENT value: an owner's value under a matching name, a name another plugin minted and a name a
    * manifest merely declares are all refused, whatever a pattern says. The destination must be a host the needer's own

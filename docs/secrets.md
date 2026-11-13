@@ -1546,16 +1546,38 @@ A plugin that FILES a secret itself (MCP's sign-in access tokens, `permissions.m
 names it, so `kernel.secrets.resolve` and `send` refuse it as they refuse anything undeclared, and **no pattern of
 names turns a plugin into a reader**. What the plugin gets instead is a Vault operation:
 `vault.fetchMinted(name, request, placement?)` (non-core needers only). The Vault puts the value on ONE request and
-answers the reply, so the plugin never holds it.
+answers a SANITIZED reply, so the plugin never holds it.
 
 - **Only a value the plugin wrote.** The Vault's own mint ledger (`state/vault/mints.json`, ids and a per-write nonce,
   never a value) records the plugin and the identity of its write whenever a plugin `put`s. A secret the owner put under a
   matching name, one the owner replaced afterwards, one another plugin minted, and one a manifest only declares are all
-  refused and nothing is sent. A ledger that cannot be read refuses.
+  refused and nothing is sent. A ledger that cannot be read refuses. **Authorization and value are one entry**: the Vault
+  opens the ciphertext entry ONCE (`SecretVault.openEntry`), checks THAT entry's write identity against the ledger and
+  sends exactly that entry's value, so an owner overwrite or another plugin's write that lands between the steps makes
+  the call refuse, and can never make it send the replacement.
 - **Only to a host the plugin's own `network` allows**, `https:` or `http:` to this machine, no userinfo. A request that
-  already carries the placement header is refused. A redirect is answered, never followed.
-- **The reply comes back with the credential masked** out of its body (across chunk boundaries) and its headers. It is
-  still a stranger's text: a caller scrubs it with the redactor like any server's words before it keeps or shows it.
+  already carries the placement header, or a `Host` header, is refused (as `kernel.secrets.send`). A redirect is
+  answered, never followed. The request asks for an unencoded reply (`accept-encoding: identity`).
+- **The reply is built inside the Vault**, the holder of what was sent, never a raw `Response`: the status, a masked
+  `statusText`, an ALLOWLIST of headers (`content-type`, `mcp-session-id`, `mcp-protocol-version`, `www-authenticate`,
+  `retry-after`; names and values masked, everything else stays in the Vault), and a body masked against the value AS SENT
+  (and the whole header value it travelled in) in these spellings: literal, JSON-escaped (`\"`, `\/`, `\uXXXX`), URL- and
+  form-encoded, base64 and base64url at any alignment, hex. The text is masked whole, so a value split across chunks is
+  found; a body that parses as JSON is masked again string by string after the parse (keys included), so any mix of
+  escapes is covered, and NDJSON is masked line by line. An event stream arrives as COMPLETE masked events.
+  **It fails closed**: a compressed, binary, undecodable, non-text or over-bound body (`maxBodyBytes`, 1 MiB by default,
+  4 MiB at most) is dropped, with a sentence saying so. The mask uses the value AS SENT, so an owner replacing the secret
+  while the reply is in flight changes nothing. The reply is still a stranger's text: a caller scrubs it with the redactor
+  like any server's words before it keeps or shows it.
+- **Declared GAP: a check's `PATH` and stored-secret variables.** A check fills `${VAR}` from the runtime's PLAIN launch
+  variables and the machine's home; `PATH` is not among them (the kernel offers no plugin the daemon's `PATH`, by design),
+  and a variable held in a stored secret is named, not filled. Closing it takes (1) a kernel `paths` offer that answers a
+  `which`-permitted plugin the inherited `PATH` (a doctrine decision, since it widens what plugins read), and (2) a
+  Vault operation that fills such a template INSIDE the Vault for one check child's argv, URL or header (the child
+  environment already takes `${secret:NAME}`; argv, URL and header do not), with the runtime publishing the variable to
+  secret-name mapping. Neither is a small additive offer, so neither is built here.
+- **Declared GAPs.** A spelling no rule above produces (a cipher, a split a server invented) is not found; the mask is
+  literal search plus the encodings listed, not a proof. A value shorter than four characters is searched for only as is.
 
 ## Device-held speed-up keys
 

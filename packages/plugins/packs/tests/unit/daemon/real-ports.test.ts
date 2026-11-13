@@ -136,12 +136,12 @@ describe('Pack mode on a healthy machine', () => {
   test('a login a ferret is parked on with the harness’s own limit notice is not offered, though its windows look usable', async () => {
     const machine = healthyMachine();
     const ferrets = new FakeFerrets();
-    ferrets.add({
-      id: ferretId('f1'),
-      state: 'working',
-      login: 'work-login',
-      quota: { limitNotice: 'You have hit your org’s monthly spend limit', unavailableReason: 'spend_limit' },
-    } as never);
+    // The REAL port's shape: the summary names the ferret and its login and carries no quota; the limit is what `prompt()`
+    // answers (`FerretPrompt.limit`, which the real Ferrets fills from the session document).
+    ferrets.add({ id: ferretId('f1'), state: 'working', login: 'work-login' } as never);
+    ferrets.setPrompt(ferretId('f1'), {
+      limit: { notice: 'You have hit your org’s monthly spend limit', spend: true },
+    });
     const h = await testHost({ plugins: [daemon], fakes: { ferrets }, uses: machine });
     try {
       const recommended = await h.request('POST', '/v1/pack/recommend', { body: {} });
@@ -152,6 +152,22 @@ describe('Pack mode on a healthy machine', () => {
       }>().available[0];
       expect(option).toMatchObject({ ready: false, quota: { state: 'exhausted' } });
       expect(option?.command).toBeUndefined();
+    } finally {
+      await h.stop();
+    }
+  });
+
+  test('a login whose ferret is working with no limit recorded is offered as before, and a past reset ends the limit', async () => {
+    const machine = healthyMachine();
+    const ferrets = new FakeFerrets();
+    ferrets.add({ id: ferretId('f1'), state: 'working', login: 'work-login' } as never);
+    ferrets.add({ id: ferretId('f2'), state: 'working', login: 'work-login' } as never);
+    ferrets.setPrompt(ferretId('f2'), { limit: { notice: 'old limit', spend: false, retryAt: 1 } });
+    const h = await testHost({ plugins: [daemon], fakes: { ferrets }, uses: machine });
+    try {
+      const recommended = await h.request('POST', '/v1/pack/recommend', { body: {} });
+
+      expect(recommended.json<{ available: { ready: boolean }[] }>().available[0]?.ready).toBe(true);
     } finally {
       await h.stop();
     }

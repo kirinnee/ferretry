@@ -44,6 +44,7 @@ import {
   optionalSecretReference,
   optionalSecretReferenceOf,
   MINTED_ECHO_MASK,
+  MINTED_REPLY_HEADERS,
   type MintedExchangeOutcome,
   type MintedExchangeRequest,
   type OutboundHttpRequest,
@@ -492,8 +493,34 @@ export class FakeVault implements VaultApi {
     const sent = { ...request, headers: { ...request.headers, [placement.header]: credential } };
     this.mintedSent.push(sent);
     const reply = await this.mintedServer(sent);
-    const text = (await reply.text()).split(value).join(MINTED_ECHO_MASK);
-    return { kind: 'response', response: new Response(text, { status: reply.status, headers: reply.headers }) };
+    const mask = (raw: string): string => raw.split(value).join(MINTED_ECHO_MASK);
+    const headers: Record<string, string> = {};
+    for (const name of MINTED_REPLY_HEADERS) {
+      const held = reply.headers.get(name);
+      if (held !== null) headers[name] = mask(held);
+    }
+    // The twin keeps the real shape (status, allowlisted headers, a text body or complete events) with a literal mask: the
+    // real Vault's every-spelling masking is proved in the Vault's own tests.
+    const raw = mask(await reply.text());
+    const events = (reply.headers.get('content-type') ?? '').startsWith('text/event-stream');
+    return {
+      kind: 'response',
+      status: reply.status,
+      statusText: mask(reply.statusText),
+      headers,
+      body: events
+        ? {
+            kind: 'events',
+            events: new ReadableStream<string>({
+              start(controller) {
+                for (const block of raw.split(/\n\n/u).filter(part => part.trim() !== ''))
+                  controller.enqueue(`${block}\n\n`);
+                controller.close();
+              },
+            }),
+          }
+        : { kind: 'text', text: raw },
+    };
   }
   async has(name: SecretName): Promise<boolean> {
     return this.#values.has(name);

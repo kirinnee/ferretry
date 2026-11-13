@@ -198,15 +198,58 @@ export interface MintedExchangeRequest {
   readonly headers: Readonly<Record<string, string>>;
   readonly body?: string;
   readonly signal?: AbortSignal;
+  /** The most of the reply body to keep ({@link MINTED_DEFAULT_BODY_BYTES} when absent); a larger one is dropped. */
+  readonly maxBodyBytes?: number;
 }
 
 /**
- * What a minted exchange answered. `response` is the server's own reply with the credential MASKED out of its body and
- * its headers: it is still a stranger's text, so a caller scrubs it as it scrubs any server's words. No branch carries
- * the request it built. `unreachable.certificate` says the failure was a certificate or TLS refusal.
+ * The most a caller may ask a minted exchange to keep of one reply body, and what it gets when it does not say: a
+ * reply larger than this is DROPPED, never clipped (a clip could split the credential and leave half of it unmasked).
+ */
+export const MINTED_DEFAULT_BODY_BYTES = 1024 * 1024;
+export const MINTED_MAX_BODY_BYTES = 4 * 1024 * 1024;
+
+/**
+ * The reply headers a minted exchange passes on, by name. Everything else the server sent stays inside the Vault: a
+ * header is a place a credential can be echoed that nobody thinks to look, so the answer is a short list, not a mask.
+ * The values of these are masked too.
+ */
+export const MINTED_REPLY_HEADERS: readonly string[] = [
+  'content-type',
+  'mcp-session-id',
+  'mcp-protocol-version',
+  'www-authenticate',
+  'retry-after',
+];
+
+/**
+ * A reply's body as the Vault sanitized it, never the stranger's own bytes. `text` is the whole (bounded) body;
+ * `events` is an event stream as COMPLETE masked events, one string each (an event ends with its blank line), which the
+ * caller reads until it has what it needs and then cancels. `dropped` is the fail-closed answer: the Vault could not be
+ * sure it had masked the credential (binary, compressed or undecodable bytes, a type that is not text, a body past the
+ * bound), so it keeps the body and says why in a sentence of its own.
+ */
+export type MintedBody =
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'events'; readonly events: ReadableStream<string> }
+  | { readonly kind: 'dropped'; readonly why: string };
+
+/**
+ * What a minted exchange answered. A `response` is REQUEST-SCOPED DATA built inside the Vault, the holder of the
+ * credential that was sent: the status, a masked `statusText`, the allowlisted headers ({@link MINTED_REPLY_HEADERS}) with
+ * names and values masked, and a {@link MintedBody} masked against the value AS SENT in the forms it can be echoed in
+ * (literal, JSON-escaped, URL-encoded, base64, base64url, hex), across chunk boundaries and after a JSON parse. It is
+ * still a stranger's text, so a caller scrubs it as it scrubs any server's words. No branch carries the request it
+ * built. `unreachable.certificate` says the failure was a certificate or TLS refusal.
  */
 export type MintedExchangeOutcome =
-  | { readonly kind: 'response'; readonly response: Response }
+  | {
+      readonly kind: 'response';
+      readonly status: number;
+      readonly statusText: string;
+      readonly headers: Readonly<Record<string, string>>;
+      readonly body: MintedBody;
+    }
   | { readonly kind: 'refused' }
   | { readonly kind: 'secret_missing' }
   | { readonly kind: 'vault_damaged' }
@@ -223,4 +266,5 @@ export const MintedExchangeRequestSchema = z.strictObject({
   headers: z.record(z.string(), z.string()),
   body: z.string().optional(),
   signal: z.instanceof(AbortSignal).optional(),
+  maxBodyBytes: z.number().int().positive().max(MINTED_MAX_BODY_BYTES).optional(),
 });

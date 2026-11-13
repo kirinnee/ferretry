@@ -6,6 +6,7 @@ import manifest from '../manifest.ts';
 import {
   type AuthorizedOutcome,
   type CredentialPlacement,
+  MINTED_DEFAULT_BODY_BYTES,
   MINTED_ECHO_MASK,
   type MintedExchangeOutcome,
   MintedExchangeRequestSchema,
@@ -42,7 +43,7 @@ import { EphemeralValues } from './lib/inputs/ephemeral-values.ts';
 import { InputRequestError } from './lib/inputs/errors.ts';
 import { secretRouteHandlers } from './lib/runtime/mounts/secrets.ts';
 import { OutboundProviderAuthorizer } from './lib/secrets/authorizer.ts';
-import { maskEchoHeaders, maskEchoStream } from './lib/secrets/echo-mask.ts';
+import { echoMask, maskReplyHeaders, maskText, sanitizeBody } from './lib/secrets/echo-mask.ts';
 import { MintLedger } from './lib/secrets/mint-ledger.ts';
 import {
   isCoreNeeder,
@@ -305,25 +306,31 @@ export default implementDaemon(manifest, {
       if (!allowedDestination(request.data.url, [parsed.host.toLowerCase()]) || !mayReach(parsed.hostname, parsed.host))
         return { kind: 'refused' };
       const placement = placed.data;
-      if (Object.keys(request.data.headers).some(header => header.toLowerCase() === placement.header.toLowerCase()))
-        return { kind: 'refused' };
-      let value: string | undefined;
+      const carries = (header: string): boolean =>
+        Object.keys(request.data.headers).some(name => name.toLowerCase() === header.toLowerCase());
+      if (carries(placement.header)) return { kind: 'refused' };
+      // A caller `Host` header is never forwarded (as `kernel.secrets.send`): the connection goes to the host the
+      // permission was checked for, and nothing re-aims it.
+      if (carries('host')) return { kind: 'refused' };
+      // ONE reading of the store gives both the entry's write identity and its value, so what the ledger authorizes is
+      // exactly what is sent: a write that lands after this read cannot swap in a value the plugin did not mint.
+      let opened: { readonly write: string; readonly value: string } | undefined;
       try {
-        if (
-          !(await mints.mintedBy(needer.id, secret as SecretName, await directory.writeIdentity(secret as SecretName)))
-        )
-          return { kind: 'refused' };
-        value = (await vault.values()).get(secret as SecretName)?.trim();
+        opened = await vault.openEntry(secret as SecretName);
       } catch {
         return { kind: 'vault_damaged' };
       }
-      if (value === undefined || value.length === 0) return { kind: 'secret_missing' };
+      if (opened === undefined || !(await mints.mintedBy(needer.id, secret as SecretName, opened.write)))
+        return { kind: 'refused' };
+      const value = opened.value.trim();
+      if (value.length === 0) return { kind: 'secret_missing' };
       const credential = placement.scheme === undefined ? value : `${placement.scheme} ${value}`;
       let response: Response;
       try {
         response = await kernel.fetch.request(request.data.url, {
           method: request.data.method,
-          headers: { ...request.data.headers, [placement.header]: credential },
+          // A body the Vault cannot read is a body it cannot mask: it asks for the plain one.
+          headers: { 'accept-encoding': 'identity', ...request.data.headers, [placement.header]: credential },
           ...(request.data.body === undefined ? {} : { body: request.data.body }),
           ...(request.data.signal === undefined ? {} : { signal: request.data.signal }),
           redirect: 'manual',
@@ -335,14 +342,20 @@ export default implementDaemon(manifest, {
           certificate: error instanceof Error && /certificate|ssl|tls/iu.test(error.message),
         };
       }
-      return {
-        kind: 'response',
-        response: new Response(response.body === null ? null : maskEchoStream(response.body, value, MINTED_ECHO_MASK), {
+      // Sanitized HERE, by the holder of what was sent, against the value AS SENT (not whatever the store holds now).
+      const around = echoMask([value, credential], MINTED_ECHO_MASK);
+      try {
+        return {
+          kind: 'response',
           status: response.status,
-          statusText: response.statusText,
-          headers: maskEchoHeaders(response.headers, value, MINTED_ECHO_MASK),
-        }),
-      };
+          statusText: maskText(response.statusText, around),
+          headers: maskReplyHeaders(response.headers, around),
+          body: await sanitizeBody(response, around, request.data.maxBodyBytes ?? MINTED_DEFAULT_BODY_BYTES),
+        };
+      } catch {
+        if (request.data.signal?.aborted === true) return { kind: 'aborted' };
+        return { kind: 'unreachable', certificate: false };
+      }
     };
 
     const apiFor = (needer: Needer): VaultApi => {

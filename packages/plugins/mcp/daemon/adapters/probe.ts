@@ -58,6 +58,15 @@ const MAX_STDERR_BYTES = 8 * 1024;
 
 const clip = (text: string, max = 200): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
+/** Drops a reply's body unread; a body the Vault dropped has nothing to cancel. */
+const discard = async (reply: Reply): Promise<void> => {
+  try {
+    await reply.pieces().cancel();
+  } catch {
+    // a dropped body has no pieces to cancel
+  }
+};
+
 const timedOut = (signal: AbortSignal): McpProbeFailure | undefined =>
   signal.aborted ? new McpProbeFailure('timeout', '') : undefined;
 
@@ -196,13 +205,93 @@ const statusFailure = (status: number): McpProbeFailure =>
         `It answered HTTP ${status}${status === 404 || status === 405 ? ' — is this the MCP endpoint, and the right transport?' : '.'}`,
       );
 
+/** A reply body as text pieces, whoever sanitized it; `next` answers `undefined` at the end. */
+interface TextPieces {
+  next(): Promise<string | undefined>;
+  cancel(): Promise<void>;
+}
+
+/** What a check needs of a reply, from a plain fetch or from the Vault's sanitized one. */
+interface Reply {
+  readonly status: number;
+  readonly ok: boolean;
+  /** Whether the server sent a body at all (a legacy event stream needs one). */
+  readonly hasBody: boolean;
+  header(name: string): string | undefined;
+  /** The body as text pieces. A body the Vault dropped (it could not be checked for the sign-in) says why, as a failure. */
+  pieces(): TextPieces;
+}
+
+const noPieces: TextPieces = { next: async () => undefined, cancel: async () => undefined };
+
+function replyOf(response: Response): Reply {
+  return {
+    status: response.status,
+    ok: response.ok,
+    hasBody: response.body !== null,
+    header: name => response.headers.get(name) ?? undefined,
+    pieces: () => {
+      if (response.body === null) return noPieces;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      return {
+        next: async () => {
+          const read = await reader.read();
+          return read.done ? undefined : decoder.decode(read.value, { stream: true });
+        },
+        cancel: async () => await reader.cancel().catch(() => undefined),
+      };
+    },
+  };
+}
+
+type MintedResponse = Extract<MintedExchangeOutcome, { readonly kind: 'response' }>;
+
+/** The Vault's sanitized reply: the credential is already masked out of everything in it. */
+function replyOfMinted(outcome: MintedResponse): Reply {
+  const headers = new Map(Object.entries(outcome.headers).map(([name, value]) => [name.toLowerCase(), value]));
+  return {
+    status: outcome.status,
+    ok: outcome.status >= 200 && outcome.status < 300,
+    hasBody: outcome.body.kind !== 'text' || outcome.body.text.length > 0,
+    header: name => headers.get(name.toLowerCase()),
+    pieces: () => {
+      const body = outcome.body;
+      if (body.kind === 'dropped') throw new McpProbeFailure('protocol', body.why);
+      if (body.kind === 'events') {
+        const reader = body.events.getReader();
+        return {
+          next: async () => {
+            try {
+              const read = await reader.read();
+              return read.done ? undefined : read.value;
+            } catch {
+              throw new McpProbeFailure('protocol', 'Its answer could not be read as text.');
+            }
+          },
+          cancel: async () => await reader.cancel().catch(() => undefined),
+        };
+      }
+      let spent = body.text.length === 0;
+      return {
+        next: async () => {
+          if (spent) return undefined;
+          spent = true;
+          return body.text;
+        },
+        cancel: async () => undefined,
+      };
+    },
+  };
+}
+
 /** The reply for a request that carries a held sign-in: placed by the Vault, never by this plugin. */
 async function sendCredentialed(
   secrets: ProbeSecrets | undefined,
   credential: NonNullable<RemoteSpec['credential']>,
   url: string,
   init: RequestInit,
-): Promise<Response> {
+): Promise<Reply> {
   const host = new URL(url).host;
   if (secrets?.fetchMinted === undefined)
     throw new McpProbeFailure('unreachable', 'This machine has no way to present a held sign-in, so it was not sent.');
@@ -215,12 +304,13 @@ async function sendCredentialed(
       headers: { ...(init.headers as Record<string, string>) },
       ...(typeof init.body === 'string' ? { body: init.body } : {}),
       ...(init.signal === undefined || init.signal === null ? {} : { signal: init.signal }),
+      maxBodyBytes: MAX_BODY_BYTES,
     },
     { header: credential.header, ...(credential.scheme === undefined ? {} : { scheme: credential.scheme }) },
   );
   switch (outcome.kind) {
     case 'response':
-      return outcome.response;
+      return replyOfMinted(outcome);
     case 'aborted':
       throw new McpProbeFailure('timeout', '');
     case 'secret_missing':
@@ -245,10 +335,10 @@ async function send(
   url: string,
   init: RequestInit,
   carried?: { readonly secrets: ProbeSecrets | undefined; readonly credential: RemoteSpec['credential'] },
-): Promise<Response> {
+): Promise<Reply> {
   if (carried?.credential !== undefined) return await sendCredentialed(carried.secrets, carried.credential, url, init);
   try {
-    return await ports.fetch.request(url, { ...init, redirect: 'manual' });
+    return replyOf(await ports.fetch.request(url, { ...init, redirect: 'manual' }));
   } catch (error) {
     if (init.signal?.aborted === true) throw new McpProbeFailure('timeout', '');
     const reason =
@@ -258,21 +348,19 @@ async function send(
 }
 
 /** Reads a body as messages: one JSON document, or every `data` of an event stream until `id` answers. */
-async function messagesOf(response: Response, id: number | undefined): Promise<unknown[]> {
-  if (response.body === null) return [];
-  const type = response.headers.get('content-type') ?? '';
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
+async function messagesOf(response: Reply, id: number | undefined): Promise<unknown[]> {
+  const type = response.header('content-type') ?? '';
+  const body = response.pieces();
   let text = '';
-  let bytes = 0;
+  let size = 0;
   const messages: unknown[] = [];
   try {
     for (;;) {
-      const read = await reader.read();
-      if (read.done) break;
-      bytes += read.value.byteLength;
-      if (bytes > MAX_BODY_BYTES) throw new McpProbeFailure('protocol', 'Its answer was too large.');
-      text += decoder.decode(read.value, { stream: true });
+      const piece = await body.next();
+      if (piece === undefined) break;
+      size += piece.length;
+      if (size > MAX_BODY_BYTES) throw new McpProbeFailure('protocol', 'Its answer was too large.');
+      text += piece;
       if (type.includes('text/event-stream')) {
         const parsed = sseEvents(text);
         text = parsed.rest;
@@ -284,7 +372,7 @@ async function messagesOf(response: Response, id: number | undefined): Promise<u
       }
     }
   } finally {
-    await reader.cancel().catch(() => undefined);
+    await body.cancel();
   }
   if (!type.includes('text/event-stream')) {
     const message = parseMessage(text);
@@ -318,12 +406,12 @@ async function probeHttp(ports: ProbePorts, secrets: ProbeSecrets | undefined, s
     if (response.status >= 300 && response.status < 400)
       throw new McpProbeFailure('protocol', `It redirected (HTTP ${response.status}); use the address it moved to.`);
     if (!response.ok) {
-      await response.body?.cancel().catch(() => undefined);
+      await discard(response);
       throw statusFailure(response.status);
     }
-    session ??= response.headers.get('mcp-session-id') ?? undefined;
+    session ??= response.header('mcp-session-id');
     if (id === undefined) {
-      await response.body?.cancel().catch(() => undefined);
+      await discard(response);
       return undefined;
     }
     const found = responseFor(await messagesOf(response, id), id);
@@ -341,7 +429,7 @@ async function probeHttp(ports: ProbePorts, secrets: ProbeSecrets | undefined, s
       },
       carried,
     ).then(
-      reply => reply.body?.cancel().catch(() => undefined),
+      reply => discard(reply),
       () => undefined,
     );
   return answer;
@@ -357,19 +445,18 @@ async function probeSse(ports: ProbePorts, secrets: ProbeSecrets | undefined, sp
     { method: 'GET', signal, headers: { ...spec.headers, accept: 'text/event-stream' } },
     carried,
   );
-  if (!stream.ok || stream.body === null) {
-    await stream.body?.cancel().catch(() => undefined);
+  if (!stream.ok || !stream.hasBody) {
+    await discard(stream);
     throw statusFailure(stream.status);
   }
-  const reader = stream.body.getReader();
-  const decoder = new TextDecoder();
+  const body = stream.pieces();
   let text = '';
   let endpoint: string | undefined;
   const messages: unknown[] = [];
   const pump = async (): Promise<boolean> => {
-    const read = await reader.read();
-    if (read.done) return false;
-    text += decoder.decode(read.value, { stream: true });
+    const piece = await body.next();
+    if (piece === undefined) return false;
+    text += piece;
     const parsed = sseEvents(text);
     text = parsed.rest;
     for (const event of parsed.events) {
@@ -397,7 +484,7 @@ async function probeSse(ports: ProbePorts, secrets: ProbeSecrets | undefined, sp
         { method: 'POST', signal, headers: { ...spec.headers, 'content-type': 'application/json' }, body: message },
         carried,
       );
-      await response.body?.cancel().catch(() => undefined);
+      await discard(response);
       if (!response.ok) throw statusFailure(response.status);
       if (id === undefined) return undefined;
       for (;;) {
@@ -409,7 +496,7 @@ async function probeSse(ports: ProbePorts, secrets: ProbeSecrets | undefined, sp
   } catch (error) {
     throw timedOut(signal) ?? error;
   } finally {
-    await reader.cancel().catch(() => undefined);
+    await body.cancel();
   }
 }
 
