@@ -369,7 +369,7 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
   starts** — through the next whitespace, in a raw link and in one percent-encoded into another address — because the
   fields come in any order and an ignored one may hold any punctuation, so no field is parsed to find the code. Any
   other fragment (`#section`) is left as it is, and the page and its navigation are untouched: only what is printed
-  changes. The pairing screen's own code and QR are a separate matter (a picture or a visible code in a page).
+  changes. **The pairing screens themselves are refused whole.** While the app shows a live code or its QR (the Add-a-device panel, the pair screen holding a link) it puts `<meta name="ferretry-pairing-screen">` in the document head (`usePairingScreenMarker`), and the daemon's browser looks for it with a DOM query (`describeInputDocument`, fails closed) before an agent's `browser_read`, `screenshot`, `pdf`, `eval`, `console` or `network` — or `fy browser read`/`screenshot` — answers: the agent gets `hidden: this page shows a pairing code` and no content, an owner's view is unchanged, and navigating or closing still works. The mint route (`POST /v1/pair/code`) is `caller: 'person'`, so no agent route returns a mint, its response body is never shown by `browser_network`, and the viewer stream refuses an agent caller.
 
 ## Revoking
 

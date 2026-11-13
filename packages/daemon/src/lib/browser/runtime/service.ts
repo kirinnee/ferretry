@@ -70,6 +70,11 @@ export interface BrowserIdlePolicy {
  */
 export interface BrowserGuardPage {
   document(): Promise<string | undefined>;
+  /**
+   * Whether the page shows a live pairing code (it carries the pairing-screen marker), read from the live page inside
+   * its queue. `true` when the browser cannot say, so a guard that refuses on it fails closed.
+   */
+  pairingScreen?(): Promise<boolean>;
   /** The host the page is on now, read from the live page inside its queue; `undefined` when it can't be read. */
   host?(): Promise<string | undefined>;
 }
@@ -163,7 +168,7 @@ export interface BrowserSubsystem extends BrowserViewerHost {
   /** This session's view of the machine's browser: its own pages, and the one its person is viewing. */
   status(sessionId: string): Promise<BrowserStatus>;
   /** A person's toolbar: everything acts on the page this session's person is viewing. */
-  act(sessionId: string, action: BrowserAction): Promise<BrowserActionResult>;
+  act(sessionId: string, action: BrowserAction, guard?: BrowserActGuard): Promise<BrowserActionResult>;
   /**
    * Opens a page with a human NAME in its own window, starting the browser when it is not running. A
    * name already in use in this session is refused, and so is a page past the session's or the
@@ -294,7 +299,7 @@ export class BrowserSessionService implements BrowserSubsystem {
     return this.project(run, sessionId);
   }
 
-  async act(sessionId: string, action: BrowserAction): Promise<BrowserActionResult> {
+  async act(sessionId: string, action: BrowserAction, guard?: BrowserActGuard): Promise<BrowserActionResult> {
     await this.requireSession(sessionId);
     if (action.action === 'stop') {
       this.signIns?.forget(sessionId);
@@ -343,6 +348,7 @@ export class BrowserSessionService implements BrowserSubsystem {
       run,
       viewed,
       async () => {
+        await guard?.(this.guardPage(run, viewed));
         if (!toolbarActLeavesSignIn(action)) this.signIns?.cleared(sessionId, viewed);
         return await this.perform(run, viewed, action);
       },
@@ -861,6 +867,11 @@ export class BrowserSessionService implements BrowserSubsystem {
           .inputDocument(pageId)
           .then(found => found.host)
           .catch(() => undefined),
+      pairingScreen: async () =>
+        await run.driver
+          .inputDocument(pageId)
+          .then(found => found.pairingScreen === true)
+          .catch(() => true),
     };
   }
 

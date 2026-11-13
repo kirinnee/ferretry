@@ -35,6 +35,7 @@ import {
   type InputAgentView,
   type LoginRecipeProposed,
   loginHintSite,
+  PAIRING_SCREEN_REFUSAL,
   type PhoneApprovalAgentView,
   PhoneApprovalRaiseSchema,
   type SignInChoiceContext,
@@ -257,6 +258,22 @@ const PAGE_TYPING: ReadonlySet<string> = new Set([
   'browser.fill_form',
   'browser.press',
   'browser.eval',
+]);
+
+/**
+ * Page tools that hand an AGENT what a page shows (its words, markup, picture, log or script result): refused outright
+ * while the page carries the pairing-screen marker (docs/pairing.md, "Never show it to an agent"). `browser.wait_for`
+ * answers yes or no and `browser.navigate`, `browser.close` and the rest carry no page content, so an agent can always
+ * leave such a page.
+ */
+const PAIRING_SCREEN_GUARDED: ReadonlySet<string> = new Set([
+  'browser.read',
+  'browser.eval',
+  'browser.screenshot',
+  'browser.highlight',
+  'browser.pdf',
+  'browser.console',
+  'browser.network',
 ]);
 
 /** The tools that change what a person would see, and so put up the driving marker. */
@@ -1276,6 +1293,8 @@ export class AgentToolService {
     if (caller.kind !== 'agent' && !gated) return undefined;
     return async page => {
       if (caller.kind === 'agent') await this.assertFree(caller.sessionId, surface);
+      if (caller.kind === 'agent' && reads && tool !== undefined && PAIRING_SCREEN_GUARDED.has(tool))
+        if ((await page.pairingScreen?.()) === true) throw new AgentToolError('forbidden', PAIRING_SCREEN_REFUSAL);
       if (gated) await this.guardPage(caller, tool, surface, async () => await page.document());
       if (reads && tool !== undefined) await this.sawPage(caller, tool, surface, page);
     };

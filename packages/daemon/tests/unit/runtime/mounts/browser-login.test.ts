@@ -14,7 +14,7 @@ import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { ApiSocketDispatcher, type SocketDownstream, type SocketHandler } from '../../../../src/lib/api/socket.ts';
 import { BrowserControlError } from '../../../../src/lib/browser/control/index.ts';
-import { BrowserSessionError } from '../../../../src/lib/browser/runtime/index.ts';
+import { type BrowserActGuard, BrowserSessionError } from '../../../../src/lib/browser/runtime/index.ts';
 import {
   type BrowserMountedSubsystem,
   browserLoginRoutes,
@@ -475,6 +475,93 @@ describe('the mounted per-session browser, for an agent', () => {
   });
 });
 
+/**
+ * A screen showing a live pairing code (docs/pairing.md): the page carries the pairing-screen marker, which the
+ * browser reports to a guard from inside the page's queue. A page's own reads run the guard the route hands in.
+ */
+class OnPairingScreen extends FakeBrowser {
+  constructor(private readonly marked: boolean) {
+    super();
+  }
+  override async act(sessionId: string, action: BrowserAction, guard?: BrowserActGuard): Promise<BrowserActionResult> {
+    await guard?.({ document: async () => 'loader-1', pairingScreen: async () => this.marked });
+    this.calls.push(`act:${action.action}`);
+    const status = await this.status(sessionId);
+    return {
+      status: status as Extract<BrowserActionResult, { result: unknown }>['status'],
+      result: { ...SNAPSHOT, text: this.marked ? `Code ${FAKE_CODE}` : 'an ordinary page' },
+    };
+  }
+}
+
+describe('the mounted per-session browser, on a screen showing a pairing code', () => {
+  const post = (browser: FakeBrowser, headers: Record<string, string>, body: unknown) =>
+    served(browser).dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/sessions/s1/browser',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  it('should refuse an agent’s read, picture and highlight of the page, with no content', async () => {
+    for (const action of [{ action: 'read' }, { action: 'screenshot' }, { action: 'highlight', selector: 'body' }]) {
+      // Act
+      const response = await post(new OnPairingScreen(true), agentIn('s1'), action);
+
+      // Assert
+      should(response.status).equal(403);
+      should(response.body).containEql('hidden: this page shows a pairing code');
+      should(response.body).not.containEql(FAKE_CODE);
+    }
+  });
+
+  it('should answer an agent’s read of an ordinary page as before', async () => {
+    // Act
+    const response = await post(new OnPairingScreen(false), agentIn('s1'), { action: 'read' });
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.body).containEql('an ordinary page');
+  });
+
+  it('should still let an agent leave the page, which carries no page content', async () => {
+    // Act
+    const response = await post(new OnPairingScreen(true), agentIn('s1'), { action: 'back' });
+
+    // Assert
+    should(response.status).equal(200);
+  });
+
+  it('should still render the page for its owner', async () => {
+    // Act
+    const response = await post(new OnPairingScreen(true), human, { action: 'read' });
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.body).containEql(FAKE_CODE);
+  });
+
+  it('should refuse an agent the picture stream, which is the owner’s view, and serve the owner', async () => {
+    // Arrange
+    const sockets = (browser: FakeBrowser): ApiSocketDispatcher =>
+      new ApiSocketDispatcher(new ApiRouter(browserSocketRoutes(browser)), CREDENTIALS, GRANTED);
+
+    // Act
+    const agent = await sockets(new OnPairingScreen(true)).upgrade(
+      request({ path: '/v1/sessions/s1/browser/stream', headers: agentIn('s1') }),
+    );
+    const owner = await sockets(new OnPairingScreen(true)).upgrade(
+      request({ path: '/v1/sessions/s1/browser/stream', headers: human }),
+    );
+
+    // Assert
+    should(agent.outcome).equal('refused');
+    should(agent.outcome === 'refused' ? agent.response.status : 0).equal(403);
+    should(owner.outcome).equal('accepted');
+  });
+});
 /**
  * The session browser STREAM — a protocol switch rather than a response.
  *

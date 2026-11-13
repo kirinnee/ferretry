@@ -513,7 +513,12 @@ export class BrowserWorkerClient implements BrowserAutomation {
     if (typeof navigationId !== 'string' || navigationId === '' || navigationId.length > 128)
       throw new BrowserTransportError('upstream_failed', 'the browser did not say which document the page shows', 502);
     const host = (raw as { document?: { host?: unknown } } | null)?.document?.host;
-    return typeof host === 'string' && host !== '' && host.length <= 260 ? { navigationId, host } : { navigationId };
+    const pairingScreen = (raw as { document?: { pairingScreen?: unknown } } | null)?.document?.pairingScreen === true;
+    return {
+      navigationId,
+      ...(typeof host === 'string' && host !== '' && host.length <= 260 ? { host } : {}),
+      ...(pairingScreen ? { pairingScreen } : {}),
+    };
   }
 
   /** The page's visible text, for the daemon's own look for a just-typed value. A malformed answer is refused. */

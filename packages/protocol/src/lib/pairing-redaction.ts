@@ -66,3 +66,22 @@ function walk(value: unknown): unknown {
     Object.entries(value).map(([key, item]) => [key, key === 'screenshotBase64' ? item : walk(item)]),
   );
 }
+
+/**
+ * THE ONE MARKER A SCREEN SHOWING A LIVE PAIRING CODE CARRIES (docs/pairing.md, "Never show it to an agent").
+ *
+ * The app puts `<meta name="ferretry-pairing-screen" content="shown">` in the document's head for as long as the
+ * page shows a pairing code or its QR — the Add-a-device panel while a minted code is on it, the pair screen while
+ * it holds a pasted or arriving link — and removes it the moment that is gone. The browser the daemon drives reads
+ * the marker (a DOM query, no page script) before it answers an agent, so the code is never read from the PAGE: its
+ * words, its picture or its markup. One name, owned here, so the app that sets it and the daemon that looks for it
+ * cannot drift apart.
+ */
+export const PAIRING_SCREEN_META_NAME = 'ferretry-pairing-screen';
+
+/** The CSS selector that finds {@link PAIRING_SCREEN_META_NAME}'s element. */
+export const PAIRING_SCREEN_SELECTOR = `meta[name="${PAIRING_SCREEN_META_NAME}"]`;
+
+/** What an agent is told instead of a page that shows a pairing code: no content, and no hint of what it held. */
+export const PAIRING_SCREEN_REFUSAL =
+  'hidden: this page shows a pairing code, so it cannot be read or pictured. Ask the owner to finish or close it; navigating away or closing the page works.';

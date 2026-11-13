@@ -117,6 +117,9 @@ class FakeSession implements InputCdpSession {
     switch (method) {
       case 'DOM.getDocument':
         return { root: { nodeId: 1 } };
+      case 'DOM.querySelector':
+        if (params.selector !== 'meta[name="ferretry-pairing-screen"]') throw new Error('not the marker');
+        return { nodeId: this.world.pairingMarker ? 77 : 0 };
       case 'DOM.getOuterHTML':
         return { outerHTML: this.world.markup };
       case 'Page.getFrameTree': {
@@ -289,6 +292,8 @@ class FakeWorld {
   socketsEver = 0;
   /** Runs on every insert: a page that fires a request or navigates as you type. */
   onInput: (() => void) | undefined;
+  /** Whether the document carries the pairing-screen marker (a meta the app sets while a code is shown). */
+  pairingMarker = false;
   readonly listeners = new Set<() => void>();
   listening = true;
   aria = '- textbox "Email": kirin@example.test';
@@ -812,7 +817,11 @@ describe('describeInputDocument', () => {
       navigationId: 'loader-5',
       host: new URL(PAGE_URL).host,
     });
-    should(world.session('page-target').calls.map(call => call.method)).eql(['Page.getFrameTree']);
+    should(world.session('page-target').calls.map(call => call.method)).eql([
+      'Page.getFrameTree',
+      'DOM.getDocument',
+      'DOM.querySelector',
+    ]);
   });
 
   it('says the host the page is on, so a login’s facts can watch it leave the sign-in hosts', async () => {
@@ -825,6 +834,27 @@ describe('describeInputDocument', () => {
     const { world } = loginWorld();
     world.pageUrl = '';
     should(await describeInputDocument(world.subject)).eql({ navigationId: world.loaderId });
+  });
+
+  it('says nothing of a pairing screen for an ordinary page', async () => {
+    const { world } = loginWorld();
+    should((await describeInputDocument(world.subject)).pairingScreen).be.undefined();
+  });
+
+  it('says a page shows a pairing code when it carries the marker, found by a DOM query and no page script', async () => {
+    const { world } = loginWorld();
+    world.pairingMarker = true;
+    should((await describeInputDocument(world.subject)).pairingScreen).equal(true);
+    const session = world.session('page-target');
+    should(session.count('DOM.querySelector')).equal(1);
+    should(session.pageWorld).eql([]);
+  });
+
+  it('fails closed: a page whose marker cannot be looked for is treated as showing a pairing code', async () => {
+    const { world } = loginWorld();
+    world.session('page-target').failOn = method =>
+      method === 'DOM.querySelector' ? new Error('Cannot find context') : undefined;
+    should((await describeInputDocument(world.subject)).pairingScreen).equal(true);
   });
 
   it('refuses a closed page', async () => {

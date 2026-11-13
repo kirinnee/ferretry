@@ -14,6 +14,7 @@ import {
   type WaitableLocator,
   type WaitablePage,
   consoleLevelOf,
+  isPairingMintUrl,
   isCredentialHeader,
   runLifecycleRequest,
   waitForCondition,
@@ -481,6 +482,28 @@ describe('network log', () => {
     should(text).containEql('z'.repeat(65_536));
     should(text).not.containEql('z'.repeat(65_537));
     should(text).containEql('(body clipped to 65536 bytes of 70000)');
+  });
+
+  it('should never show the body of a pairing mint, the code and link it answered with', async () => {
+    // Arrange
+    const log = new NetworkLog();
+    const request = new FakeRequest('https://box.example.test/v1/pair/code', 'fetch', 'POST');
+    log.started(request);
+    const minted = '{"code":"7F3K-Q2ND","pairUrl":"https://ferretry.pages.dev/pair#v1;url=x;code=7F3K-Q2ND;fp=y"}';
+    await finish(
+      log,
+      request,
+      new FakeResponse(201, { 'content-type': 'application/json' }, new TextEncoder().encode(minted)),
+    );
+
+    // Act
+    const text = await log.get('r1');
+
+    // Assert
+    should(text).containEql('(body not shown: a pairing code)');
+    should(text).not.containEql('7F3K-Q2ND');
+    should(text).not.containEql('#v1;');
+    should(log.list()).containEql('/v1/pair/code');
   });
 
   it('should not show a binary body', async () => {
@@ -1038,5 +1061,23 @@ describe('running a lifecycle request', () => {
 
     // Assert
     should(reply.text).equal('Emulating: cpu 6x slower');
+  });
+});
+
+describe('isPairingMintUrl', () => {
+  it('should recognise the mint route in any address form, and nothing ordinary', () => {
+    for (const address of [
+      'https://box.example.test/v1/pair/code',
+      'https://box.example.test/v1/pair/code?x=1',
+      'http://localhost:7421/v1/pair/code/pr_123',
+      '/v1/pair/code',
+    ])
+      should(isPairingMintUrl(address)).equal(true);
+    for (const address of [
+      'https://box.example.test/v1/pair/devices',
+      'https://box.example.test/v1/pair/codex',
+      'https://docs.example.test/pairing',
+    ])
+      should(isPairingMintUrl(address)).equal(false);
   });
 });

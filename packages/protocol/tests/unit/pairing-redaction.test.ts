@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import { hidePairingFragments, hidePairingFragmentsIn, PAIRING_FRAGMENT_HIDDEN } from '@ferretry/protocol';
+import {
+  hidePairingFragments,
+  hidePairingFragmentsIn,
+  PAIRING_FRAGMENT_HIDDEN,
+  PAIRING_SCREEN_META_NAME,
+  PAIRING_SCREEN_SELECTOR,
+} from '@ferretry/protocol';
 import should from 'should';
 
 const FAKE_CODE = '7F3K-Q2ND';
@@ -147,5 +153,12 @@ describe('hidePairingFragmentsIn', () => {
     should(hidden.result.screenshotBase64).equal(result.result.screenshotBase64);
     // The input is not touched.
     should(result.status.url).equal(link);
+  });
+});
+
+describe('the pairing-screen marker', () => {
+  it('should name one meta element, and select exactly it', () => {
+    should(PAIRING_SCREEN_META_NAME).equal('ferretry-pairing-screen');
+    should(PAIRING_SCREEN_SELECTOR).equal('meta[name="ferretry-pairing-screen"]');
   });
 });

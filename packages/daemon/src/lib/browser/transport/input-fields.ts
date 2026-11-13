@@ -1,4 +1,4 @@
-import type { BrowserElementTarget, InputBrowserFieldFacts } from '@ferretry/protocol';
+import { type BrowserElementTarget, type InputBrowserFieldFacts, PAIRING_SCREEN_SELECTOR } from '@ferretry/protocol';
 import { recogniseBrowserChallenge } from './challenge.ts';
 import {
   BROWSER_INPUT_SHOT_MARGIN,
@@ -281,7 +281,25 @@ export async function describeInputDocument(subject: InputSubject): Promise<Brow
   } catch {
     host = undefined;
   }
-  return { navigationId, ...(host === undefined ? {} : { host }) };
+  const pairingScreen = await showsPairingCode(await subject.cdp.page());
+  return { navigationId, ...(host === undefined ? {} : { host }), ...(pairingScreen ? { pairingScreen } : {}) };
+}
+
+/**
+ * Whether the main document carries the pairing-screen marker (docs/pairing.md, "Never show it to an agent"). A plain
+ * DOM query through DevTools: no page script runs, so a page cannot answer for itself, and a page that forges the marker
+ * only loses its own reads. FAILS CLOSED: a query that cannot be answered says the marker is there, because a refusal
+ * costs one read and a miss hands an agent a credential.
+ */
+async function showsPairingCode(session: InputCdpSession): Promise<boolean> {
+  try {
+    const root = objectOf(objectOf(await ask(session, 'DOM.getDocument', { depth: 0 })).root).nodeId;
+    if (typeof root !== 'number') return true;
+    const found = (await ask(session, 'DOM.querySelector', { nodeId: root, selector: PAIRING_SCREEN_SELECTOR })).nodeId;
+    return typeof found !== 'number' || found !== 0;
+  } catch {
+    return true;
+  }
 }
 
 /** How long the daemon waits for a page's text after a sign-in. */

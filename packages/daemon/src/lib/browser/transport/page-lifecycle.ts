@@ -325,6 +325,11 @@ export class NetworkLog {
     }
     const headers = Object.entries(response.headers()).filter(([name]) => !isCredentialHeader(name));
     if (headers.length > 0) lines.push('response headers:', ...headers.map(([name, value]) => `  ${name}: ${value}`));
+    // A pairing mint's response IS a live code, its link and its QR's text: no tool shows it (docs/pairing.md).
+    if (isPairingMintUrl(entry.url)) {
+      lines.push('(body not shown: a pairing code)');
+      return lines.join('\n');
+    }
     const contentType = Object.entries(response.headers()).find(([name]) => name.toLowerCase() === 'content-type');
     if (contentType !== undefined && !TEXT_BODY.test(contentType[1])) {
       lines.push(`(body not shown: ${contentType[1].split(';')[0] ?? 'binary'})`);
@@ -632,5 +637,18 @@ export async function runLifecycleRequest(
       };
     case 'emulate':
       return { text: await scope.emulation.apply(scope.targets, request.emulation) };
+  }
+}
+
+/** The route that mints a pairing code: its response IS the code, the link and the QR's text (docs/pairing.md). */
+const PAIRING_MINT_PATH = '/v1/pair/code';
+
+/** Whether a request address is the pairing mint route (or under it): its response body is never shown. */
+export function isPairingMintUrl(address: string): boolean {
+  try {
+    const { pathname } = new URL(address, 'http://placeholder.invalid');
+    return pathname === PAIRING_MINT_PATH || pathname.startsWith(`${PAIRING_MINT_PATH}/`);
+  } catch {
+    return address.includes(PAIRING_MINT_PATH);
   }
 }

@@ -71,6 +71,11 @@ export interface BrowserInputDocument {
   readonly navigationId: string;
   /** The host the page is on now (`accounts.google.com`): a login's facts watch it leave the sign-in hosts. */
   readonly host?: string;
+  /**
+   * Whether the page carries the pairing-screen marker (`PAIRING_SCREEN_META_NAME`): it shows a live pairing code or its
+   * QR, so no agent may read or picture it. Read by a DOM query, never a page script; absent means it does not.
+   */
+  readonly pairingScreen?: boolean;
 }
 
 /**

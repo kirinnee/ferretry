@@ -189,8 +189,11 @@ class FakeBrowserPages
   readonly beforeGuard: (() => void | Promise<void>)[] = [];
   /** The host every page is on, as an act's in-queue guard reads it from the live page; `undefined`: unreadable. */
   host: string | undefined = 'github.com';
+  /** Whether every page carries the pairing-screen marker, as an act's in-queue guard reads it from the live page. */
+  pairingScreen = false;
   private readonly guardPage = {
     document: async (): Promise<string | undefined> => this.document,
+    pairingScreen: async (): Promise<boolean> => this.pairingScreen,
     host: async (): Promise<string | undefined> => this.host,
   };
 
