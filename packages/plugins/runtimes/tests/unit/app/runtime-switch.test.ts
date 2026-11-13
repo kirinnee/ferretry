@@ -8,11 +8,10 @@ import {
 } from '../../../app/lib/runtime-switch.ts';
 import { launchedModel } from '../../../app/lib/session-view.ts';
 import { type Call, scripted } from './support/client.ts';
+import { summaryOf } from './support/ferret-summary.ts';
 
-const FERRET = {
-  config: { id: 's-1', harness: 'codex', model: 'gpt-5.6', harnessFlags: ['--model=gpt-6'], launchFast: true },
-  state: { status: 'running', turnState: 'your-turn', observedModel: 'gpt-6', unrelated: 1 },
-};
+// What `GET /v1/ferrets/:ferretId` serves: Ferrets' summary, built from the contract (not a hand-written view).
+const FERRET = summaryOf({ harness: 'codex', model: 'gpt-5.6', effort: 'high', fast: true, state: 'idle' });
 
 describe('runtimeControlApi', () => {
   it('sends the command to the ferret through the route key and the session parameter', async () => {
@@ -36,24 +35,34 @@ describe('runtimeControlApi', () => {
 });
 
 describe('readRuntimeSessionView', () => {
-  it('keeps only the fields the pickers read', async () => {
+  it('reads the summary the route serves and keeps what the pickers read of it', async () => {
     const view = await readRuntimeSessionView(scripted({ [FERRET_ROUTE]: FERRET }), 's-1');
-    expect(view.config.id).toBe('s-1');
-    expect(view.config.harness).toBe('codex');
-    expect(view.state.turnState).toBe('your-turn');
-    expect(view.state.observedModel).toBe('gpt-6');
-    expect(view.state).not.toHaveProperty('unrelated');
-    expect(launchedModel(view.config)).toBe('gpt-6');
+    expect(view.config).toEqual({
+      id: 's-1',
+      harness: 'codex',
+      model: 'gpt-5.6',
+      launchReasoningEffort: 'high',
+      launchFast: true,
+    });
+    expect(view.state).toEqual({ status: 'running', turnState: 'your-turn' });
+    expect(launchedModel(view.config)).toBe('gpt-5.6');
   });
 
-  it('refuses a document that is not a ferret, or whose harness is not one Ferretry runs', () => {
-    expect(() => parseRuntimeSessionView(null)).toThrow('invalid ferret');
-    expect(() => parseRuntimeSessionView({ config: { id: 's', harness: 'claude' }, state: { status: 'x' } })).toThrow(
-      'invalid ferret',
-    );
-    expect(() => parseRuntimeSessionView({ config: { id: 's', harness: 'codex' }, state: {} })).toThrow(
-      'invalid ferret',
-    );
+  it('says a live ferret is running with the turn the daemon decided, and a stopped one is stopped', () => {
+    expect(parseRuntimeSessionView(summaryOf({ state: 'working' })).state).toEqual({
+      status: 'running',
+      turnState: 'working',
+    });
+    expect(parseRuntimeSessionView(summaryOf({ state: 'starting' })).state).toEqual({ status: 'starting' });
+    expect(parseRuntimeSessionView(summaryOf({ state: 'stopped' })).state).toEqual({ status: 'stopped' });
+  });
+
+  it("refuses a document that is not a ferret summary, including today's { config, state } view no route serves", () => {
+    expect(() => parseRuntimeSessionView(null)).toThrow('cannot read as a ferret');
+    expect(() =>
+      parseRuntimeSessionView({ config: { id: 's', harness: 'codex' }, state: { status: 'running' } }),
+    ).toThrow('cannot read as a ferret');
+    expect(() => parseRuntimeSessionView({ ...summaryOf(), harness: 'claude' })).toThrow('cannot read as a ferret');
   });
 });
 

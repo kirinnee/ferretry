@@ -27,6 +27,7 @@ import {
 import manifest from '../../../manifest.ts';
 import { READS, RUNTIMES, runtime, scripted, stagedFrom, DATA } from '../app/features/fleet/account-support.ts';
 import type { Call } from '../app/features/fleet/account-support.ts';
+import { summaryOf } from '../app/support/ferret-summary.ts';
 import {
   component,
   componentCatalog,
@@ -295,10 +296,7 @@ describe('the runtime picker above the composer', () => {
         { value: 'claude-haiku-5', label: 'Haiku 5', reasoningEfforts: [] },
       ],
     };
-    const ferret = {
-      config: { id: 's-1', harness: 'claude-code', model: 'claude-sonnet-5' },
-      state: { status: 'running', promptReady: true },
-    };
+    const ferret = summaryOf({ id: 's-1', harness: 'claude-code', model: 'claude-sonnet-5', state: 'idle' });
     const calls: Call[] = [];
     const client = scripted(
       {
