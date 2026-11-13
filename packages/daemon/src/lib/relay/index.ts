@@ -6,3 +6,4 @@ export * from './link.ts';
 export * from './member-port.ts';
 export * from './tunnel.ts';
 export * from './lookup-retry.ts';
+export * from './recovery.ts';

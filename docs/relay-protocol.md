@@ -1512,7 +1512,7 @@ outstanding:
    **definitive** answer is never retried: an explicit `relay`/`carriers` entry (which wins and is never
    overwritten, `enabled: false` included), an advertisement of `relayUrl: null`, a 4xx, a document that
    cannot be read, and a build with no discovery origin all stay as they are, with the same fail-closed
-   sentences and remedies. What a build compiles in is unchanged. In the browser the same read supplies the last-resort hosted carrier and
+   sentences and remedies. **A late answer re-checks the world it arrives in:** the CURRENT relay entries are read again before the carrier is built and again right before it starts, and the answer is dropped (and the retry ends) if they are no longer the entries the boot decided from — an explicit `relay` block written meanwhile, `enabled: false` included, always wins — or cannot be read; and shutdown stops the retry first, synchronously, aborting the read in flight, before any awaited teardown. What a build compiles in is unchanged. In the browser the same read supplies the last-resort hosted carrier and
    the only relayed first-pairing candidate, as well as labelling a published address as Ferretry's
    hosted rendezvous or somebody's own.
 3. **A relay-capable transport on both ends** — **built.** `packages/daemon/src/lib/relay` dials out,

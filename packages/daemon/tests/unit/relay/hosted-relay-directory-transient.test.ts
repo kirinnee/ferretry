@@ -73,3 +73,28 @@ describe('the hosted relay directory’s transient failures', () => {
     should(answer).deepEqual({ kind: 'available', relayUrl: 'https://relay.example' });
   });
 });
+
+describe('the hosted relay directory’s caller-owned abort', () => {
+  it('should abort the request in flight when the caller’s signal aborts, ahead of the timeout', async () => {
+    // Arrange — a request that never answers, with a timeout far beyond the test.
+    let seen: AbortSignal | undefined;
+    const directory = new HostedRelayDirectory('https://relay.example', {
+      fetcher: async (_input, init) =>
+        await new Promise<Response>((_resolve, reject) => {
+          seen = init?.signal ?? undefined;
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        }),
+      timeoutMs: 60_000,
+    });
+    const caller = new AbortController();
+
+    // Act
+    const reading = directory.read({ signal: caller.signal });
+    caller.abort();
+    const answer = await reading;
+
+    // Assert
+    should(seen?.aborted).be.true();
+    should(isTransientAdvertisement(answer)).be.true();
+  });
+});

@@ -440,5 +440,6 @@ export function relayCarrierRemedy(source: RelayCarrierSource, configFile: strin
  * sentences above, so a directory that is down cannot take a boot with it.
  */
 export interface RelayDirectoryPort {
-  read(): Promise<RelayAdvertisement>;
+  /** `signal` ends a read nobody is waiting for any more (the background retry, on shutdown). */
+  read(options?: { readonly signal?: AbortSignal }): Promise<RelayAdvertisement>;
 }

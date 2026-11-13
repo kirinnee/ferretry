@@ -6708,6 +6708,135 @@ describe('daemon boot lifecycle', () => {
       should(transient[0]?.cancelled).be.true();
     });
 
+    it('should not start the hosted carrier when the discovery entry was switched off while the lookup was failing', async () => {
+      // Arrange: transient failure at boot; the operator then switches the discovery entry off; the
+      // directory finally answers. An explicit entry wins over a late success.
+      const home = await tempDirectory('fyd-relay-retry-veto');
+      const relay = refusingRelay();
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      const timers: Array<{ readonly action: () => void; cancelled: boolean }> = [];
+      const answers: RelayAdvertisement[] = [
+        { kind: 'undetermined', reason: 'this daemon could not reach the relay directory', transient: true },
+        { kind: 'available', relayUrl: relay.url },
+      ];
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = {
+        ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)),
+        notices: said.port,
+        relayDirectory: { read: async (): Promise<RelayAdvertisement> => answers.shift() ?? NO_RELAY_DIRECTORY },
+        relayLookupTiming: {
+          scheduler: {
+            after: (_milliseconds: number, action: () => void) => {
+              const timer = { action, cancelled: false };
+              timers.push(timer);
+              return {
+                cancel: () => {
+                  timer.cancelled = true;
+                },
+              };
+            },
+          },
+          random: () => 0.5,
+        },
+      };
+
+      // Act
+      const booting = start(world, cleanups);
+      const port = await recordedPort(home);
+      await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
+      const document = JSON.parse(await readFile(world.config.path, 'utf8')) as { carriers: unknown[] };
+      document.carriers.push({ kind: 'relay', source: 'discovery', enabled: false });
+      await writeFile(world.config.path, `${JSON.stringify(document, null, 2)}\n`);
+      for (const timer of timers.splice(0)) timer.action();
+      await waitFor(
+        () => said.stated.some(line => line.includes('relay configuration changed while it was failing')),
+        'the late answer to be dropped because the configuration changed',
+      );
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+      await relay.stop();
+
+      // Assert
+      should(code).equal(0);
+      should(said.stated.filter(line => line.startsWith('relay carrier recovered'))).be.empty();
+      should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
+    });
+
+    it('should end the lookup retry, and abort its read in flight, the instant the daemon is told to stop', async () => {
+      // Arrange: a retry read that has been sent and not answered when the daemon stops.
+      const home = await tempDirectory('fyd-relay-retry-stop');
+      const relay = refusingRelay();
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      const timers: Array<{ readonly action: () => void; cancelled: boolean }> = [];
+      const signals: AbortSignal[] = [];
+      let answer: (value: RelayAdvertisement) => void = () => undefined;
+      let reads = 0;
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = {
+        ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)),
+        notices: said.port,
+        relayDirectory: {
+          read: async (options?: { readonly signal?: AbortSignal }): Promise<RelayAdvertisement> => {
+            reads += 1;
+            if (reads === 1)
+              return {
+                kind: 'undetermined',
+                reason: 'this daemon could not reach the relay directory',
+                transient: true,
+              };
+            if (options?.signal !== undefined) signals.push(options.signal);
+            return await new Promise<RelayAdvertisement>(resolve => {
+              answer = resolve;
+            });
+          },
+        },
+        relayLookupTiming: {
+          scheduler: {
+            after: (_milliseconds: number, action: () => void) => {
+              const timer = { action, cancelled: false };
+              timers.push(timer);
+              return {
+                cancel: () => {
+                  timer.cancelled = true;
+                },
+              };
+            },
+          },
+          random: () => 0.5,
+        },
+      };
+
+      // Act
+      const booting = start(world, cleanups);
+      const port = await recordedPort(home);
+      await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
+      for (const timer of timers.splice(0)) timer.action();
+      await waitFor(() => signals.length === 1, 'the retry read to be sent');
+      release();
+      const code = await booting;
+      // `start` has returned, and NO cleanup has run yet: the retry is already over.
+      const abortedBeforeAnyCleanup = signals[0]?.aborted;
+      answer({ kind: 'available', relayUrl: relay.url });
+      await new Promise(resolve => setTimeout(resolve, 20));
+      await runCleanups(cleanups);
+      await relay.stop();
+
+      // Assert — the late answer started and published nothing.
+      should(code).equal(0);
+      should(abortedBeforeAnyCleanup).be.true();
+      should(said.stated.filter(line => line.startsWith('relay carrier recovered'))).be.empty();
+      should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
+    });
+
     it('should dial the carrier the directory advertises when this daemon configured none', async () => {
       // Arrange: a home with no `relay` block — which is every home, since nothing writes one — and
       // a directory advertising a rendezvous. The address is a port nothing is listening on: the

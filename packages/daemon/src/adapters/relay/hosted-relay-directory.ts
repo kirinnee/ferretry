@@ -66,7 +66,7 @@ export class HostedRelayDirectory implements RelayDirectoryPort {
     this.timeoutMs = options.timeoutMs ?? RELAY_DISCOVERY_TIMEOUT_MS;
   }
 
-  async read(): Promise<RelayAdvertisement> {
+  async read(options: { readonly signal?: AbortSignal } = {}): Promise<RelayAdvertisement> {
     if (this.origin === undefined) return NO_RELAY_DIRECTORY;
     const address = relayAdvertisementAddress(this.origin);
     if (address === undefined) {
@@ -76,7 +76,10 @@ export class HostedRelayDirectory implements RelayDirectoryPort {
     try {
       response = await this.fetcher(address, {
         cache: 'no-store',
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal:
+          options.signal === undefined
+            ? AbortSignal.timeout(this.timeoutMs)
+            : AbortSignal.any([AbortSignal.timeout(this.timeoutMs), options.signal]),
       });
     } catch {
       return { kind: 'undetermined', reason: 'this daemon could not reach the relay directory', transient: true };

@@ -49,7 +49,7 @@ export interface RelayLookupSettled {
 }
 
 export interface RelayLookupRetryOptions {
-  readonly directory: { read(): Promise<RelayAdvertisement> };
+  readonly directory: { read(options?: { readonly signal?: AbortSignal }): Promise<RelayAdvertisement> };
   readonly scheduler: RelayLinkScheduler;
   readonly random: () => number;
   readonly backoff?: BackoffPolicy;
@@ -62,6 +62,8 @@ export class RelayLookupRetry {
   #timer: RelayLinkTimer | undefined;
   #started = false;
   #stopped = false;
+  /** Aborts the read in flight, so a stop does not leave a request running to an answer nobody wants. */
+  #inFlight: AbortController | undefined;
   /** Reads made by this loop; the boot's failed read that started it is attempt 1. */
   #retries = 0;
 
@@ -79,11 +81,16 @@ export class RelayLookupRetry {
     this.#arm(retryAfterMs);
   }
 
-  /** Cancels the pending wait and makes any read still in flight settle into nothing. Idempotent. */
+  /**
+   * Cancels the pending wait, ABORTS the read in flight, and makes whatever that read still answers settle
+   * into nothing. Synchronous and idempotent: it is the first thing a shutdown does, before any awaited teardown.
+   */
   stop(): void {
     this.#stopped = true;
     this.#timer?.cancel();
     this.#timer = undefined;
+    this.#inFlight?.abort();
+    this.#inFlight = undefined;
   }
 
   /**
@@ -104,12 +111,15 @@ export class RelayLookupRetry {
     if (this.#stopped) return;
     this.#retries += 1;
     let advertisement: RelayAdvertisement;
+    const inFlight = new AbortController();
+    this.#inFlight = inFlight;
     try {
-      advertisement = await this.#options.directory.read();
+      advertisement = await this.#options.directory.read({ signal: inFlight.signal });
     } catch {
       // The port promises never to throw; a breach is a failed read, not the end of the loop.
       advertisement = { kind: 'undetermined', reason: 'the relay directory read failed', transient: true };
     }
+    if (this.#inFlight === inFlight) this.#inFlight = undefined;
     if (this.#stopped) return;
     if (isTransientAdvertisement(advertisement)) {
       this.#arm(retryAfterOf(advertisement));

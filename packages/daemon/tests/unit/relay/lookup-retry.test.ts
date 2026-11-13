@@ -299,3 +299,33 @@ describe('newlyDiscoveredRelays', () => {
     should(newlyDiscoveredRelays([direct('a')], [direct('b')])).be.empty();
   });
 });
+
+describe('the relay lookup retry — stopping synchronously', () => {
+  it('should abort the read in flight the moment it is stopped, not only drop its answer', async () => {
+    // Arrange — a read that has been sent and not answered.
+    const scheduler = new ManualScheduler();
+    const signals: AbortSignal[] = [];
+    const retry = new RelayLookupRetry({
+      directory: {
+        read: async options => {
+          if (options?.signal !== undefined) signals.push(options.signal);
+          return await new Promise<RelayAdvertisement>(() => undefined);
+        },
+      },
+      scheduler,
+      random: () => 0.5,
+      onSettled: () => undefined,
+    });
+    retry.start();
+    scheduler.fire();
+    await settle();
+    should(signals).have.length(1);
+    should(signals[0]?.aborted).be.false();
+
+    // Act
+    retry.stop();
+
+    // Assert — synchronous: no await between the stop and the abort.
+    should(signals[0]?.aborted).be.true();
+  });
+});
