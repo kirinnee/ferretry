@@ -18,6 +18,7 @@
  * environment, their own tmux socket, and the fake claude/codex first on PATH. No real model is ever called.
  */
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   chmod,
   copyFile,
@@ -439,8 +440,10 @@ async function upInner(slot: Slot, reuse: boolean): Promise<void> {
     die(`the rich v4 build failed (exit ${String(build.code)}); its log is ${join(slot.dir, 'build.log')}`);
   }
 
-  // 2. The port pin, written into the v4 home BEFORE any daemon verb can run.
+  // 2. The port pin, written into the v4 home BEFORE any daemon verb can run; limits OFF and accepted; the orphaned Chrome stopped.
   await pinV4(slot);
+  await limitsOffV4(slot);
+  await stopSlotChrome(slot, 'v4 build');
 
   // 3. A COPY of the (stopped) v4 home goes through the converter. The copy leaves sockets and locks behind.
   const copy = join(slot.v5.dir, 'conv-src');
@@ -472,6 +475,7 @@ async function upInner(slot: Slot, reuse: boolean): Promise<void> {
   }
   await freshIdentityForV5(slot);
   await pinV5(slot);
+  await verifyLimitsOffV5(slot);
 
   // 5. Both daemons. v4 first (its panes are still in the builder's tmux server, which it adopts).
   startDaemon(
@@ -502,6 +506,7 @@ async function upInner(slot: Slot, reuse: boolean): Promise<void> {
   );
 
   // 6. The wrappers, then the one setting lizzette's rehearsal ruling allows on the 5.0 FAKE home.
+  await stopSlotChrome(slot, 'up');
   await writeWrappers(slot);
   const note: Record<string, unknown> = { slot: slot.n, builtAt: new Date().toISOString(), v4Version: version };
   const before = await cli(slot, 'v5', ['daemon', 'security', 'show']);
@@ -564,6 +569,77 @@ async function freshIdentityForV5(slot: Slot): Promise<void> {
   await rm(join(slot.v5.home, 'state', 'kernel', 'identity.json'), { force: true });
   // Access refuses device grants that belong to a different identity, so the carried device records go with it.
   await rm(join(slot.v5.home, 'state', 'access', 'devices.json'), { force: true });
+}
+
+/**
+ * Ferret limits are OFF in a sandbox, and that is ACCEPTED, before any daemon starts. Limits launch every ferret of EVERY daemon
+ * this Linux user runs into ONE shared `<product>_fleet.slice` and correct that slice's properties at each launch, so a sandbox
+ * daemon would run its fake ferrets beside the owner's REAL ones and could re-set the caps they live under. Writing
+ * `enabled: false` alone is not enough: switching limits off is a loosening, and a home that has an accepted-config record HOLDS
+ * it for the owner (the limits stay ON). So the kit also records the file as accepted, the way v4 does
+ * (`state/config-accepted.json`, `{ "limits.yaml": { etag: sha256(text), text } }`, merged into what is there). This is fixture
+ * setup in a FAKE home the kit made, like the rehearsal's --owner. It is done in the v4 home, with its daemon stopped, BEFORE the
+ * copy, so the converter carries the file and its acceptance into the 5.0 home (verified by `sweep-up.sh`, see verifyLimitsOff).
+ */
+const LIMITS_OFF_TEXT = 'enabled: false\n';
+
+async function limitsOffV4(slot: Slot): Promise<void> {
+  const file = join(slot.v4.home, 'config', 'limits.yaml');
+  await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+  await writeFile(file, LIMITS_OFF_TEXT, { mode: 0o600 });
+  const record = join(slot.v4.home, 'state', 'config-accepted.json');
+  const parsed: unknown = JSON.parse((await readFile(record, 'utf8').catch(() => '{}')) || '{}');
+  const accepted = isRecord(parsed) ? parsed : {};
+  accepted['limits.yaml'] = {
+    etag: createHash('sha256').update(LIMITS_OFF_TEXT, 'utf8').digest('hex'),
+    text: LIMITS_OFF_TEXT,
+  };
+  await mkdir(dirname(record), { recursive: true, mode: 0o700 });
+  await writeFile(record, `${JSON.stringify(accepted, null, 2)}\n`, { mode: 0o600 });
+}
+
+/** The 5.0 side must carry the same: the converted file says off, and its accepted record holds that text. */
+async function verifyLimitsOffV5(slot: Slot): Promise<void> {
+  const text = await readFile(join(slot.v5.home, 'config', 'limits.yaml'), 'utf8').catch(() => '');
+  const dir = join(slot.v5.home, 'state', 'kernel', 'accepted-config');
+  const records = await readdir(dir).catch(() => [] as string[]);
+  const name = records.find(entry => entry.startsWith('limits.yaml'));
+  const recordText =
+    name === undefined ? '' : ((JSON.parse(await readFile(join(dir, name), 'utf8')) as { text?: string }).text ?? '');
+  if (!/^enabled:\s*false\s*$/mu.test(text) || !/^enabled:\s*false\s*$/mu.test(recordText))
+    die(
+      `the 5.0 home does not carry "limits off, accepted" (config/limits.yaml: ${text === '' ? 'absent' : 'present'}, accepted record: ${name ?? 'absent'}); a sandbox daemon would share the owner's fleet slice`,
+    );
+}
+
+/**
+ * K1: the rich fixture leaves a headless Chrome on the v4 browser profile; v4 then refuses `browser page open` ("live orphaned
+ * Chrome pid"). Stops ONLY Chrome processes whose own `--user-data-dir` is inside this slot's folder (read from each candidate's
+ * command line, never matched by name alone).
+ */
+async function stopSlotChrome(slot: Slot, label: string): Promise<void> {
+  const prefix = `--user-data-dir=${slot.dir}${'/'}`;
+  const listed = await run('pgrep', ['-f', '--', `--user-data-dir=${slot.dir}/`], baseEnvironment());
+  const mine: number[] = [];
+  for (const text of listed.out.split('\n')) {
+    const pid = Number.parseInt(text, 10);
+    if (!Number.isInteger(pid) || pid === process.pid) continue;
+    const argv = (await readFile(`/proc/${String(pid)}/cmdline`, 'utf8').catch(() => '')).split('\0');
+    if (argv.some(arg => arg.startsWith(prefix))) mine.push(pid);
+  }
+  if (mine.length === 0) return;
+  for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
+    for (const pid of mine)
+      try {
+        process.kill(pid, signal);
+      } catch {
+        // already gone
+      }
+    await new Promise(resolve => setTimeout(resolve, 1500));
+  }
+  console.log(
+    `  ${label}: stopped ${String(mine.length)} headless Chrome process(es) on this slot's own browser profile`,
+  );
 }
 
 /** The v4 home pins its bind port: written by this kit, once, with the daemon stopped. */
@@ -684,6 +760,7 @@ async function down(slot: Slot, options: { keepFiles: boolean; quiet?: boolean }
   await stopByLock(slot.v4.lock, 'v4 daemon');
   await killTmux(slot.v5.tmux, '5.0');
   await killTmux(slot.v4.tmux, 'v4');
+  await stopSlotChrome(slot, 'down');
   for (const which of ['4', '5']) await rm(join(slot.bin, `fy${which}s${String(slot.n)}`), { force: true });
   if (!options.keepFiles) await rm(slot.dir, { recursive: true, force: true });
   if (options.quiet !== true)
