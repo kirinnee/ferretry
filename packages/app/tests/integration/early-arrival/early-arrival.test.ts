@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Page } from 'playwright-core';
 import { sharedChromium } from '../../support/browser/index.ts';
 
 /**
@@ -29,15 +30,20 @@ const csp = /^\s*Content-Security-Policy: (.*)$/mu.exec(here('public/_headers'))
 
 /** A request the server holds until the test lets it go. */
 function gate() {
-  let open: () => void = () => {};
+  let released = false;
+  let release: () => void = () => {};
   const opened = new Promise<void>(resolve => {
-    open = resolve;
+    release = resolve;
   });
+  const open = () => {
+    released = true;
+    release();
+  };
   let asked: () => void = () => {};
   const wasAsked = new Promise<void>(resolve => {
     asked = resolve;
   });
-  return { open, opened, asked, wasAsked };
+  return { open, opened, asked, wasAsked, isReleased: () => released };
 }
 let theme = gate();
 let module = gate();
@@ -105,13 +111,23 @@ const open = async (path: string, wait: 'theme' | 'module' | 'load') => {
   return { page, context, base: `http://127.0.0.1:${server.port}` };
 };
 
+/**
+ * Wait (bounded) until `arrival.js` has RUN. A held script or module is requested as soon as the preload scanner sees
+ * it, which can be BEFORE the parser has executed the first classic script, so "it was requested" proves nothing about
+ * the strip. `arrival.js` defines the hand-off and strips in ONE synchronous run: once the hand-off exists the strip has
+ * already happened. The guarantee under test is "stripped before the later script or module can run", not "eventually".
+ */
+const arrived = (page: Page) => page.waitForFunction(() => '__fyArrival' in window, undefined, { timeout: 5000 });
+
 describe('early arrival in a real browser, under the real CSP', () => {
   test.each(['/pair', '/app/pair', '/app/', '/'])(
     'on %s the fragment is gone while the THEME script is still downloading (the strip is the first script)',
     async path => {
       const { page, context, base } = await open(`${path}?hold-theme=1`, 'theme');
       try {
-        // The parser has reached `pre-paint.js` and waits for it: everything before it has already run.
+        // The parser is held at `pre-paint.js`: `arrival.js`, the script before it, has run by the time it is seen.
+        await arrived(page);
+        expect(theme.isReleased()).toBe(false);
         expect(await page.evaluate(() => location.href)).toBe(`${base}${path}?hold-theme=1`);
         expect(await page.evaluate(() => (window as unknown as { __booted?: boolean }).__booted === true)).toBe(false);
       } finally {
@@ -126,6 +142,8 @@ describe('early arrival in a real browser, under the real CSP', () => {
     async path => {
       const { page, context, base } = await open(path, 'module');
       try {
+        await arrived(page);
+        expect(module.isReleased()).toBe(false); // the module graph is still held while the address is read
         expect(await page.evaluate(() => location.href)).toBe(`${base}${path}`);
         const memory = await page.evaluate(() => {
           const w = window as unknown as Record<string, unknown>;
@@ -217,6 +235,7 @@ describe('early arrival in a real browser, under the real CSP', () => {
   test('a second pairing link on /pair while the module is still loading replaces the first, off the address', async () => {
     const { page, context } = await open('/pair', 'module');
     try {
+      await arrived(page); // the hashchange listener below is `arrival.js`'s
       await page.evaluate(() => {
         location.hash = '#v1;a=127.0.0.1:9;c=SECONDFAKE;fp=00';
       });
