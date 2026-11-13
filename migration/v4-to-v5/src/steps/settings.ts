@@ -51,7 +51,7 @@ import {
 } from '../v4/config.ts';
 import { failureNote, V4InputError } from '../v4/documents.ts';
 import { PREVIEW_CODEX_RUNTIMES, PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
-import { buildShell } from './preview-logins.ts';
+import { type Budget, buildShell, rebuildBudget } from './preview-logins.ts';
 import {
   CODEX_HELD_SENTENCE,
   heldReason,
@@ -179,6 +179,11 @@ interface Plan {
   readonly dropped: NotCarried[];
   readonly kept: Map<string, number>;
   readonly uncarried: Uncarried[];
+  /**
+   * Each login's spend cap, rebuilt from numbers, by login id. 5.0 enforces a budget only from `config/usage.yaml`
+   * (`budgets.<login>`), so a cap is moved there ({@link writeBudgets}); the login file carries none.
+   */
+  readonly budgets: Map<string, Budget>;
 }
 
 // ── yaml Document helpers ────────────────────────────────────────────────────────────────────────────────────────
@@ -370,8 +375,56 @@ function splitMachine(plan: Plan, file: V4ConfigFile, document: Document, resolv
   }
 }
 
+/**
+ * Takes a v4 login's `budget` out of its document and returns it REBUILT from numbers through v5's budget schema, or
+ * `undefined` when there is none to move. A budget that does not parse stays where it is, so the config check below
+ * refuses the file exactly as it always did (the real converter never writes a login capless). The comment on the removed
+ * key goes with it.
+ */
+function takeBudget(document: Document): Budget | undefined {
+  const map = contents(document);
+  if (pairOf(map, 'budget') === undefined) return undefined;
+  let value: unknown;
+  try {
+    value = (document.toJS({ maxAliasCount: 100 }) as Record<string, unknown>).budget;
+  } catch {
+    return undefined;
+  }
+  const rebuilt = rebuildBudget(value, true);
+  if (rebuilt === 'invalid' || rebuilt === undefined) return undefined;
+  take(map, 'budget');
+  return rebuilt;
+}
+
+/** The dollars of a cap as the report says them: a number and nothing else. */
+const dollars = (n: number): string => `$${String(n)}`;
+
+/**
+ * Writes every login's cap into `config/usage.yaml` `budgets.<login>`, a fresh object from numbers, merged into the
+ * file machine.yaml's split may already have planned (`timeZone`, `publicFeed` stay). The login files are its sources,
+ * so a login v4 holds an unconfirmed edit on holds this file's record too. The report names each carried limit by login
+ * id, period, level and dollars only.
+ */
+function writeBudgets(plan: Plan): void {
+  if (plan.budgets.size === 0) return;
+  const budgets: Record<string, Budget> = {};
+  let planned: Planned | undefined;
+  for (const [login, budget] of [...plan.budgets].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    budgets[login] = budget;
+    planned = place(plan, USAGE_CONFIG, undefined, `config/logins/${login}.yaml`);
+    for (const [period, limit] of Object.entries(budget))
+      for (const [level, amount] of Object.entries(limit))
+        count(plan, `login ${login} ${period} ${level} limit ${dollars(amount)}`);
+  }
+  if (planned === undefined) return;
+  if (!isMap(planned.document.contents)) planned.document.contents = planned.document.createNode({}) as YAMLMap;
+  const map = contents(planned.document);
+  take(map, 'budgets');
+  map.items.push(planned.document.createPair('budgets', budgets));
+}
+
 /** v4's 256 KiB cap on a config file, as the preview applies it to a login read from the v4 source. */
-const MAX_LOGIN_BYTES = 256 * 1024;
+export const MAX_LOGIN_BYTES = 256 * 1024;
 
 async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolve: Resolve): Promise<void> {
   const { address, label } = file;
@@ -426,6 +479,7 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
       return;
     }
     document = shell.document;
+    if (shell.budget !== undefined) plan.budgets.set(address.name, shell.budget);
     // The built shell is what the plain and enforced passes compare: its digest joins the login's fingerprint.
     ctx.loginKeys?.sealShell(address.name, document.toString());
     document.commentBefore = ` Carried from v4 ${label} by the v4 → v5 converter, as a signed-out shell.`;
@@ -444,10 +498,13 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
         what: `login ${address.name}: store host`,
         why: "the preview's HOME is empty, so a host login would find no sign-in; it is written as a Ferretry-store login you sign in to",
       });
-  } else if (document !== undefined && address.kind === 'login' && ctx.loginKeys !== undefined) {
+  } else if (document !== undefined && address.kind === 'login') {
     // A plain key in a login's env is parked for the vault and written here as a reference; any other secret-shaped value
     // (and a key when no hold exists) still fails the step below, so nothing is ever left plain.
-    takeLoginKeys(document, address.name, ctx.loginKeys);
+    if (ctx.loginKeys !== undefined) takeLoginKeys(document, address.name, ctx.loginKeys);
+    // The login's spend cap moves to usage.yaml (the only place 5.0 enforces one); the login file then carries none.
+    const budget = takeBudget(document);
+    if (budget !== undefined) plan.budgets.set(address.name, budget);
   }
   if (document === undefined) return; // unreachable: only a preview login is undefined, and it returned above
   const secrets = rawSecretPaths(document.toJS());
@@ -858,7 +915,7 @@ export async function buildPlan(
   // home, and read from there. Every pass that lists them (the preview run, its plain comparison and its enforced
   // conversion) builds the SAME shell from them (`planFile`), never a plain conversion: a plain conversion of a login
   // document keeps its comments and `store: host`, and the accepted-config step would write it to disk as a snapshot.
-  // The shell carries the login's budget, so the snapshot (and the comparison) keep the cap v4 enforced.
+  // The shell carries no budget: the cap is rebuilt from numbers into usage.yaml, so the same cap v4 enforced is kept.
   const staged = new Set(listing.files.map(file => file.label));
   const loginFiles =
     ctx.previewV4Home === undefined
@@ -876,6 +933,7 @@ export async function buildPlan(
     dropped: [],
     kept: new Map(),
     uncarried: [],
+    budgets: new Map(),
   };
   // machine.yaml last: it adds to files other v4 files may also own (limits.yaml).
   const machine = `config/${V4_SINGLETONS.machine}`;
@@ -883,6 +941,7 @@ export async function buildPlan(
     (a, b) => Number(a.label === machine) - Number(b.label === machine),
   );
   for (const file of ordered) await planFile(ctx, plan, file, resolve);
+  writeBudgets(plan);
   if (ctx.preview === true) {
     // The preview never resumes a ferret by itself, whatever v4's machine.yaml said (or did not say). `limits.yaml` is
     // written off too (5.0 reads that file for launches, so once accepted it is a third layer); what the preview

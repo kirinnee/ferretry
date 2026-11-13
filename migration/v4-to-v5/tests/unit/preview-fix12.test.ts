@@ -126,7 +126,9 @@ test('MAJOR-1 a held login whose enforced key differs from the live one gets no 
   await put('config/logins/work.yaml', login(KEY, RAISED));
   await accept({ 'logins/work.yaml': login(OLD_KEY, LOWER) });
   const report = await run(STEPS);
-  expect(await records()).toEqual([]);
+  // fix4: the login's cap lives in usage.yaml, whose record (v4's ACCEPTED cap, 5) is written; the login file gets none.
+  expect((await records()).filter(name => !name.includes('usage'))).toEqual([]);
+  expect(await recordText('usage.yaml')).toContain('hard: 5');
   const step = report.steps.find(item => item.id === 'accepted-config');
   expect(step?.notCarried.map(item => item.what).join('\n')).toContain('config/logins/work.yaml');
   for (const [, text] of await walk(f.to)) expect(text.includes(KEY) || text.includes(OLD_KEY)).toBe(false);

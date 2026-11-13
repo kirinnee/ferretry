@@ -394,11 +394,12 @@ describe('the preview is a clean copy (C1, M1, M2, M3)', () => {
     expect(said).toContain('this dry run reads no login file');
     const done = await prepare({ v4Home: v4, target, lock, now, home: join(root, 'home') });
     expect(done.report?.complete).toBe(true);
-    // The shell: harness, store and the budget (store: host is the preview's ferretry store; the cap v4 enforced is kept,
-    // rebuilt from its numbers).
+    // The shell: harness and store (store: host is the preview's ferretry store); the cap v4 enforced is in usage.yaml,
+    // rebuilt from its numbers.
     const shell = await readFile(join(target, 'config/logins/work.yaml'), 'utf8');
     expect(shell).toContain('store: ferretry');
-    expect(shell).toContain('budget:\n  daily:\n    hard: 20');
+    expect(shell).not.toContain('budget');
+    expect(await readFile(join(target, 'config/usage.yaml'), 'utf8')).toContain('work:\n    daily:\n      hard: 20');
     expect((await everyFile(target)).some(file => file.includes('fleet/credentials'))).toBe(false);
     expect((await everyFile(target)).some(file => file.endsWith('.credentials.json'))).toBe(false);
   });

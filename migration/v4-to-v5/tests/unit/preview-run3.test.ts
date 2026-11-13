@@ -160,12 +160,15 @@ describe('problem 2: held means what v4 `fy config confirm` lists', () => {
     return result.kind === 'done' ? result.report : undefined;
   };
 
-  test('v4 would list nothing (logins are left out of the preview on purpose): both files are accepted', async () => {
+  test('v4 would list nothing (the logins are in the real home, read in memory): both files are accepted', async () => {
     await put('config/machine.yaml', MACHINE);
+    // fix4: the preview reads the logins from the real v4 home, so an accepted login with its file in place is not a deletion.
+    const aLogin = 'harness: claude\nbudget:\n  daily:\n    hard: 10\n';
+    await put('config/logins/a-login.yaml', aLogin);
+    await put('config/logins/b-login.yaml', 'harness: codex\n');
     await accept({
       'machine.yaml': MACHINE,
-      // The preview does not copy logins, so these look "deleted"; v4 has them and holds nothing.
-      'logins/a-login.yaml': 'harness: claude\nbudget:\n  daily:\n    hard: 10\n',
+      'logins/a-login.yaml': aLogin,
       'logins/b-login.yaml': 'harness: codex\n',
     });
     // An accepted file v4 never reads (not a config path) and one on disk: neither is a held edit.
@@ -209,15 +212,27 @@ describe('problem 2: held means what v4 `fy config confirm` lists', () => {
     expect(previewHeldFiles(report?.steps ?? [])).toEqual([]);
   });
 
+  test('fix4: an accepted login with a budget whose file is gone is a held deletion in the preview too (the cap stays)', async () => {
+    await put('config/machine.yaml', MACHINE);
+    await accept({
+      'machine.yaml': MACHINE,
+      'logins/a-login.yaml': 'harness: claude\nbudget:\n  daily:\n    hard: 10\n',
+    });
+    const report = await run(true);
+    expect(v4HeldFiles(report?.steps ?? [])).toEqual(['config/logins/a-login.yaml (a held deletion)']);
+  });
+
   test('a runtime moved off a login whose budget was in effect is a held edit', async () => {
     await put('config/machine.yaml', MACHINE);
+    const aLogin = 'harness: claude\nbudget:\n  daily:\n    hard: 10\n';
+    await put('config/logins/a-login.yaml', aLogin);
     await put('config/profiles/main.yaml', 'contents: []\n');
     await put('config/runtimes/r.yaml', 'credential: b-login\nprofile: main\n');
     await accept({
       'machine.yaml': MACHINE,
       'profiles/main.yaml': 'contents: []\n',
       'runtimes/r.yaml': 'credential: a-login\nprofile: main\n',
-      'logins/a-login.yaml': 'harness: claude\nbudget:\n  daily:\n    hard: 10\n',
+      'logins/a-login.yaml': aLogin,
     });
     const report = await run(true);
     expect(v4HeldFiles(report?.steps ?? [])).toEqual(['config/runtimes/r.yaml (an unconfirmed edit)']);

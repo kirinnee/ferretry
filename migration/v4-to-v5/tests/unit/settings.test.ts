@@ -197,7 +197,9 @@ test('converts every v4 config kind into the v5 file that owns it, read back wit
 
   const login = await read('logins/work-login.yaml', LoginFileSchema);
   expect(login.env?.ANTHROPIC_AUTH_TOKEN).toBe('${secret:FAKE_API_KEY}');
-  expect(login.budget).toEqual({ daily: { hard: 20 } });
+  // The cap moved to usage.yaml (the only place 5.0 enforces a budget); the login file carries none.
+  expect(login.budget).toBeUndefined();
+  expect(await text('logins/work-login.yaml')).not.toContain('budget');
   expect(login.harness).toBe('claude-code');
   expect(await text('logins/work-login.yaml')).toContain('# a gateway login');
   expect((await read('endpoints/fake-gateway.yaml', EndpointFileSchema)).label).toBe('Fake gateway');
@@ -232,7 +234,11 @@ test('converts every v4 config kind into the v5 file that owns it, read back wit
   expect(browsers.mode).toBe('window');
   expect(browsers.proxy?.password).toBe('${secret:FAKE_PROXY_PASS}');
   expect(await read('agenda.yaml', AgendaConfigSchema)).toMatchObject({ agendaNudge: false, agendaMode: false });
-  expect(await read('usage.yaml', UsageFileSchema)).toEqual({ timeZone: 'Europe/Berlin', publicFeed: true });
+  expect(await read('usage.yaml', UsageFileSchema)).toEqual({
+    timeZone: 'Europe/Berlin',
+    publicFeed: true,
+    budgets: { 'work-login': { daily: { hard: 20 } } },
+  });
   expect(await text('usage.yaml')).toContain('Carried from v4 config/machine.yaml');
 
   expect((await stat(join(f.to, 'config/runtimes/claude-work.yaml'))).mode & 0o777).toBe(0o600);

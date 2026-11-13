@@ -132,7 +132,7 @@ export class LoginKeyHold {
   }
 
   /**
-   * Preview only: the digest of the BUILT shell (its text, a budget included) joins the login's fingerprint, so two
+   * Preview only: the digest of the BUILT shell (its text; the budget is usage.yaml's, not the shell's) joins the login's fingerprint, so two
    * conversions that give the same fingerprint built the same shell. Only the digest is kept, never the text.
    */
   sealShell(login: string, shellText: string): void {

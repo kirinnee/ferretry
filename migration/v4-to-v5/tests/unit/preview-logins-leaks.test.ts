@@ -288,7 +288,7 @@ describe('fix2: no credential reaches disk through any preview representation of
       else expect((await run()).report?.complete).toBe(true);
       const seen = await everything();
       expect(seen).not.toContain(COMMENT_MARKER);
-      // The login IS in the accepted record, but as the BUILT SHELL (its budget rebuilt from numbers), never the plain
+      // The login IS in the accepted record, but as the BUILT SHELL (no budget: the cap is usage.yaml's), never the plain
       // conversion of the v4 document (comments, `store: host`).
       const snapshots = (
         await readdir(join(target(), 'state/kernel/accepted-config')).catch(() => [] as string[])
@@ -298,7 +298,20 @@ describe('fix2: no credential reaches disk through any preview representation of
         await readFile(join(target(), 'state/kernel/accepted-config', snapshots[0] ?? ''), 'utf8'),
       ) as { readonly text: string };
       expect(snapshot.text).toBe(await readFile(join(target(), 'config/logins/work.yaml'), 'utf8'));
-      expect(parse(snapshot.text)).toMatchObject({ store: 'ferretry', budget: { daily: { hard: 20 } } });
+      expect(parse(snapshot.text)).toMatchObject({ store: 'ferretry' });
+      expect(parse(snapshot.text)).not.toHaveProperty('budget');
+      // The usage.yaml record carries v4's ACCEPTED cap (10), the file the raised one (20): the raise stays held.
+      const usage = (await readdir(join(target(), 'state/kernel/accepted-config'))).filter(name =>
+        name.includes('usage'),
+      );
+      expect(usage).toHaveLength(1);
+      const record = JSON.parse(
+        await readFile(join(target(), 'state/kernel/accepted-config', usage[0] ?? ''), 'utf8'),
+      ) as { readonly text: string };
+      expect(parse(record.text)).toMatchObject({ budgets: { work: { daily: { hard: 10 } } } });
+      expect(parse(await readFile(join(target(), 'config/usage.yaml'), 'utf8'))).toMatchObject({
+        budgets: { work: { daily: { hard: 20 } } },
+      });
       expect(seen).not.toContain('store: host');
     });
 

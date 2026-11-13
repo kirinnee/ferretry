@@ -16,10 +16,12 @@
  *   carried: it is written as a `${secret:NAME}` reference (the real converter's `LOGIN_<ID>_<VAR>` naming) and the value
  *   is discarded, never sealed, never staged. The owner stores the secret with `fy secret set NAME`.
  *
- * - `budget`, REBUILT: it is parsed through v5's own budget schema and a fresh object is built from the numbers of its
- *   known keys (`daily` / `weekly`, each `trigger` / `hard`), so no comment, unknown key, alias or string survives and the
- *   shell enforces the SAME spend cap v4 did. A budget that does not parse is not carried, and the login is HELD by name
- *   (never written budgetless when v4 had a cap); its runtimes are held too.
+ * - `budget`, REBUILT and MOVED: it is parsed through v5's own budget schema and a fresh object is built from the numbers
+ *   of its known keys (`daily` / `weekly`, each `trigger` / `hard`), so no comment, unknown key, alias or string
+ *   survives. The shell itself carries NO budget: 5.0's Usage plugin enforces spend only from `config/usage.yaml`
+ *   (`budgets.<login>`), so the Settings step writes the rebuilt cap there ({@link LoginShell}'s `budget`), one owner for
+ *   the fact. A budget that does not parse is not carried, and the login is HELD by name (never written capless when v4
+ *   had a cap); its runtimes are held too.
  *
  * Everything else (disabled, clonedFrom*, cloudCredential, codexProvider, a half's codexProvider, unknown keys) is
  * left behind, named by field. `fleet/credentials` (the sign-in itself) stays denied by the plan. This is the PREVIEW
@@ -119,6 +121,8 @@ export type LoginShell =
       readonly kind: 'carried';
       /** The shell to serialise as a NEW document: built from the allowlist, nothing copied from the v4 one. */
       readonly document: Document;
+      /** The spend cap, rebuilt from numbers, for `config/usage.yaml` `budgets.<login>` (the shell holds none); absent: v4 had none. */
+      readonly budget?: Budget;
       readonly removed: readonly string[];
       readonly storeMoved: boolean;
       /** The variables whose literal value was replaced by a reference (names only). */
@@ -127,8 +131,11 @@ export type LoginShell =
   /** Not carried: a Codex login while Codex is held, one whose harness is not named, one with no way to sign in, or one whose budget cannot be rebuilt. */
   | { readonly kind: 'held'; readonly harness: 'codex' | 'unknown' | 'no-sign-in' | 'budget' };
 
-/** v5's own budget schema (the login file's `budget` field), so the shell's cap is judged by the rule v5 enforces. */
+/** v5's own budget schema (the login file's `budget` field, which Usage reads from `usage.yaml`), so a cap is judged by the rule v5 enforces. */
 const BudgetFieldSchema = LoginFileSchema.shape.budget.unwrap();
+
+/** A rebuilt cap: fresh objects holding numbers only. */
+export type Budget = Readonly<Record<string, Readonly<Record<string, number>>>>;
 
 /** A period's numbers as a fresh object (known keys, finite numbers only), or `undefined` when it has none. */
 const periodOf = (period: { readonly trigger?: number | undefined; readonly hard?: number | undefined } | undefined) =>
@@ -143,10 +150,7 @@ const periodOf = (period: { readonly trigger?: number | undefined; readonly hard
  * A login's `budget` rebuilt into a FRESH object from the numbers of its known keys, after v5's own schema accepted it,
  * or `'invalid'` when it does not parse (the login is then held). `undefined` (no `budget` key) is no budget.
  */
-export function rebuildBudget(
-  value: unknown,
-  present: boolean,
-): Record<string, Record<string, number>> | 'invalid' | undefined {
+export function rebuildBudget(value: unknown, present: boolean): Budget | 'invalid' | undefined {
   if (!present) return undefined;
   const parsed = BudgetFieldSchema.safeParse(value);
   if (!parsed.success) return 'invalid';
@@ -202,10 +206,8 @@ export function buildShell(document: Document, login: string, holdCodex: boolean
   if (store !== undefined) shell.store = store;
   const environment = store === 'environment';
 
-  if (budget !== undefined) {
-    shell.budget = budget;
-    kept.add('budget');
-  }
+  // The cap is carried to usage.yaml, not into the shell: the field is accounted for here, so it is not "left behind".
+  if (budget !== undefined) kept.add('budget');
   const label = plainText(data.label, 200);
   if (label !== undefined) {
     shell.label = label;
@@ -261,7 +263,14 @@ export function buildShell(document: Document, login: string, holdCodex: boolean
 
   const built = LoginFileSchema.safeParse(shell);
   if (!built.success || signInIssue(shell, harness) !== undefined) return { kind: 'held', harness: 'no-sign-in' };
-  return { kind: 'carried', document: new Document(shell, YAML_OPTIONS), removed, storeMoved, replaced };
+  return {
+    kind: 'carried',
+    document: new Document(shell, YAML_OPTIONS),
+    ...(budget === undefined ? {} : { budget }),
+    removed,
+    storeMoved,
+    replaced,
+  };
 }
 
 /**

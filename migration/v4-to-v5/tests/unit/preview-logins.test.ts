@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Document, parseDocument } from 'yaml';
+import { Document, parse, parseDocument } from 'yaml';
 import { LoginKeyHold } from '../../src/steps/login-keys.ts';
 import { heldSection, prepare } from '../../preview/driver.ts';
 import { decide, DENIED } from '../../preview/plan.ts';
@@ -98,23 +98,15 @@ describe('buildShell: the fields a shell has', () => {
   const build = (text: string, holdCodex = false) =>
     buildShell(parseDocument(text), 'work', holdCodex, new LoginKeyHold());
 
-  test('harness, store, label, preset, budget and env stay; everything else is named and dropped', () => {
+  test('harness, store, label, preset and env stay (the budget moves to usage.yaml); everything else is named and dropped', () => {
     const shell = build(FULL);
     expect(shell.kind).toBe('carried');
     if (shell.kind !== 'carried') return;
     const kept = shell.document.toJS() as Record<string, unknown>;
-    expect(Object.keys(kept).sort()).toEqual([
-      'budget',
-      'claude',
-      'codex',
-      'env',
-      'harness',
-      'label',
-      'preset',
-      'store',
-    ]);
-    // The budget is REBUILT from numbers: the same cap v4 enforced, as a fresh object.
-    expect(kept.budget).toEqual({ daily: { hard: 5 } });
+    expect(Object.keys(kept).sort()).toEqual(['claude', 'codex', 'env', 'harness', 'label', 'preset', 'store']);
+    // The budget is REBUILT from numbers (the same cap v4 enforced) and handed on for usage.yaml: the shell holds none.
+    expect(kept).not.toHaveProperty('budget');
+    expect(shell.budget).toEqual({ daily: { hard: 5 } });
     expect(kept.claude).toEqual({ env: { C: '${secret:C_KEY}' } });
     // A, a literal that is not a whole reference or a provider URL, is replaced; the provider URL stays.
     expect(kept.env).toEqual({
@@ -186,8 +178,11 @@ describe('a prepared preview', () => {
     const you = await readFile(join(f.to, 'config/logins/claude-you.yaml'), 'utf8');
     expect(you).toContain('store: ferretry');
     expect(you).not.toContain('host');
-    // The cap v4 enforced travels with the shell (rebuilt from its numbers).
-    expect(parseDocument(you).toJS()).toMatchObject({ budget: { daily: { hard: 20 } } });
+    // The cap v4 enforced is in usage.yaml (rebuilt from its numbers), the one place 5.0 enforces it; the shell has none.
+    expect(parseDocument(you).toJS()).not.toHaveProperty('budget');
+    expect(parse(await readFile(join(f.to, 'config/usage.yaml'), 'utf8'))).toMatchObject({
+      budgets: { 'claude-you': { daily: { hard: 20 } } },
+    });
     expect(you).toContain('label: Me');
 
     const glm = await readFile(join(f.to, 'config/logins/glm-a.yaml'), 'utf8');
@@ -229,7 +224,11 @@ describe('a prepared preview', () => {
     expect(report.status).toBe('converted');
     const text = await readFile(join(f.to, 'config/logins/claude-you.yaml'), 'utf8');
     expect(text).toContain('store: host');
-    expect(text).toContain('budget');
+    // The cap moves to usage.yaml (the only place 5.0 enforces one); the login file then carries none.
+    expect(text).not.toContain('budget');
+    expect(parse(await readFile(join(f.to, 'config/usage.yaml'), 'utf8'))).toMatchObject({
+      budgets: { 'claude-you': { daily: { hard: 20 } } },
+    });
   });
 });
 

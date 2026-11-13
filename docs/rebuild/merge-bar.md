@@ -77,6 +77,18 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
     `migration/v4-to-v5/tests/unit/preview-logins-leaks.test.ts` holds the shells to it: built from an allowlist, no login
     file staged, no marker (comment, credential path, literal key, webhook token) in any `.ferretry-v5*` path after a
     passing or a failing `prepare`.
+11. **A converted home keeps its v4 spend caps, enforced** (lead ruling on #F3703; 5.0's Usage plugin enforces a budget
+    ONLY from `config/usage.yaml` `budgets.<login>`, so the converter moves each login's cap there, rebuilt from numbers):
+    `migration/v4-to-v5/tests/unit/preview-logins-usage.test.ts` converts a home (the real converter AND the preview, owner
+    and non-owner, with and without an unrelated held deletion), reads it back through the kernel's configuration service
+    and runs the REAL Usage `start.decide` on a synthetic meter reading. It must hold three lines:
+    - (a) a converted home stops a start at the login's v4 hard cap, and a later harmless login label apply keeps it;
+    - (b) an unaccepted v4 raise stays held: the start is judged at the ACCEPTED cap until the owner accepts, then at the
+      new one, and the migration report says "held: accepted X, pending Y" in numbers only;
+    - (c) every period and level v4 had (daily, weekly; trigger and hard) carries: past a trigger nothing new starts
+      (docs/budgets.md), and past the hard limit nothing new starts either.
+      The whole-artifact scan (every `<HOME>/.ferretry-v5*` path, a passing and a throwing `prepare`) finds no comment, key,
+      path or token marker in `usage.yaml` or its accepted-config snapshot beside a credential-shaped comment on the budget.
 
 ## After merge
 
