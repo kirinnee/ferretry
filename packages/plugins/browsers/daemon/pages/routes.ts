@@ -4,12 +4,14 @@ import {
   type CallContext,
   type KernelPorts,
   jsonResponse,
+  type Redaction,
   type RouteHandler,
   type SocketAccept,
   type SocketDownstream,
   type SocketHandler,
 } from '@ferretry/kernel/contract';
 import { BrowserLoginActionSchema } from '../../contract/index.ts';
+import { mapStrings } from '../address-rule.ts';
 import { BrowserControlError, type BrowserLoginLifecycle, type BrowserLoginStatus } from '../worker/control/index.ts';
 import { acted, maskedSnapshot, maskedStatus, opOfAction, targetOfAction, writeAct } from './acts.ts';
 import { parseBody } from './body.ts';
@@ -59,8 +61,39 @@ async function loginAct(window: BrowserLoginLifecycle, call: CallContext): Promi
   });
 }
 
-export function browserFailure(error: unknown): never {
-  if (!(error instanceof BrowserSessionError)) throw error;
+/** What a refusal says when its own message could not be masked: the status and code stay, the words do not. */
+export const WITHHELD_REFUSAL = 'the browser reported an error that cannot be shown';
+
+/**
+ * A refusal with its message and its `extra` passed through the redaction seam, or withheld whole when the seam
+ * cannot be read (FAIL CLOSED): an owner-visible error is text a page or a launch error may have written, so it is
+ * masked on the way out exactly as a success result is. A thrown value that is no `ApiError` is returned as it is — the
+ * kernel answers it with its own fixed 500 sentence, never its message.
+ */
+export async function maskedRefusal(redaction: Redaction, error: unknown): Promise<unknown> {
+  if (!(error instanceof ApiError)) return error;
+  try {
+    return await redaction.read(
+      scope =>
+        new ApiError(
+          error.status,
+          scope.text(error.message),
+          error.code,
+          error.validationIssues === undefined
+            ? undefined
+            : mapStrings(error.validationIssues, text => scope.text(text)),
+          error.extra === undefined ? undefined : mapStrings(error.extra, text => scope.text(text)),
+        ),
+    );
+  } catch {
+    return new ApiError(error.status, WITHHELD_REFUSAL, error.code);
+  }
+}
+
+/** Every failure a handler of this file can end in, as the transport's own refusal (never masked here: see {@link guarded}). */
+export function refusalOf(error: unknown): unknown {
+  if (error instanceof BrowserControlError) return refusal(error);
+  if (!(error instanceof BrowserSessionError)) return error;
   const status = (
     {
       not_found: 404,
@@ -71,7 +104,30 @@ export function browserFailure(error: unknown): never {
       upstream_failed: 502,
     } as const
   )[error.code];
-  throw new ApiError(status, error.message, error.code);
+  return new ApiError(status, error.message, error.code);
+}
+
+/** Translates a browser session's refusal into the transport's, unmasked: {@link guarded} masks it on its way out. */
+function browserFailure(error: unknown): never {
+  throw refusalOf(error);
+}
+
+/**
+ * The ONE exit every route and socket accept of this file leaves by on failure: any refusal it raises — a worker's
+ * launch error, a page-error sentence, a body's validation message, the sign-in window's — is translated and then
+ * masked by the redaction seam before it is serialised (the kernel serialises an `ApiError`'s message as it is).
+ */
+export function guarded<Call, Answer>(
+  redaction: Redaction,
+  handler: (call: Call) => Promise<Answer>,
+): (call: Call) => Promise<Answer> {
+  return async call => {
+    try {
+      return await handler(call);
+    } catch (error) {
+      throw await maskedRefusal(redaction, refusalOf(error));
+    }
+  };
 }
 
 export function sessionIdOf(call: CallContext): string {
@@ -137,21 +193,24 @@ async function browserAction(kernel: KernelPorts, browser: BrowserSubsystem, cal
 
 /** The routes this file serves, keyed as the manifest declares them. */
 export function pageRoutes(kernel: KernelPorts, window: BrowserLoginLifecycle, browser: BrowserSubsystem) {
+  const guard = (handler: RouteHandler): RouteHandler => guarded(kernel.redaction, handler);
   return {
-    'GET /v1/browser/login': (async () => await answer(async () => await window.status())) satisfies RouteHandler,
-    'POST /v1/browser/login': (async call => await loginAct(window, call)) satisfies RouteHandler,
-    'GET /v1/sessions/:sessionId/browser': (async call =>
-      await browserStatus(kernel, browser, call)) satisfies RouteHandler,
-    'POST /v1/sessions/:sessionId/browser': (async call =>
-      await browserAction(kernel, browser, call)) satisfies RouteHandler,
+    'GET /v1/browser/login': guard(async () => await answer(async () => await window.status())),
+    'POST /v1/browser/login': guard(async call => await loginAct(window, call)),
+    'GET /v1/sessions/:sessionId/browser': guard(async call => await browserStatus(kernel, browser, call)),
+    'POST /v1/sessions/:sessionId/browser': guard(async call => await browserAction(kernel, browser, call)),
   } as const;
 }
 
 /** `GET /v1/sessions/:sessionId/browser/stream`: proves the session, then hands the socket to the viewer stream. */
-export function streamSocket(browser: Pick<BrowserSubsystem, 'status'>, stream: BrowserStreamOpener): SocketAccept {
-  return async call => {
+export function streamSocket(
+  redaction: Redaction,
+  browser: Pick<BrowserSubsystem, 'status'>,
+  stream: BrowserStreamOpener,
+): SocketAccept {
+  return guarded(redaction, async call => {
     const id = sessionIdOf(call);
     await browser.status(id).catch(browserFailure);
     return async downstream => await stream(id, downstream);
-  };
+  });
 }

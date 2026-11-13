@@ -3,6 +3,7 @@ import type { ActRunner, Op, RedactionScope, ResultOf, TargetRef } from '@ferret
 import { ApiError, REFUSAL_SENTENCES } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
 import type { BrowserAction, BrowserPageSnapshot, BrowserStatus } from '../../contract/wire/browser.ts';
+import { mapStrings } from '../address-rule.ts';
 
 /**
  * How a browser act reaches a page through the kernel's act runner (§4.7). Every page act names its `Op`; the kernel
@@ -84,26 +85,18 @@ export async function writeAct(act: ActRunner, target: TargetRef, op: Op, work: 
 }
 
 /**
- * A page snapshot with its address, its title and its error masked (S16, for agent and person alike). The error is
- * the worker's first line of a failed navigation, which ends with the address it failed at.
+ * A page snapshot with EVERY string in it masked (S16, for agent and person alike): its address, title and error, the
+ * nested `pages` list, a download's name, a dialog's text, the text itself. Structural, not field by field — a snapshot
+ * is the worker's own object, and a field it grows tomorrow is masked without anyone naming it here.
  */
 export function maskedSnapshot<T extends Pick<BrowserPageSnapshot, 'url' | 'title'> & { readonly pageError?: string }>(
   scope: RedactionScope,
   page: T,
 ): T {
-  return {
-    ...page,
-    url: scope.text(page.url),
-    title: scope.text(page.title),
-    ...(page.pageError === undefined ? {} : { pageError: scope.text(page.pageError) }),
-  };
+  return mapStrings(page, text => scope.text(text));
 }
 
-/** The status with every page's address and title, and the viewed page's error, masked (S16). */
+/** The status with every string in it masked, in every state (a stopped or failed browser's `error` too) (S16). */
 export function maskedStatus(scope: RedactionScope, status: BrowserStatus): BrowserStatus {
-  if (status.state !== 'running' || !('url' in status)) return status;
-  return {
-    ...maskedSnapshot(scope, status as typeof status & { readonly pageError?: string }),
-    pages: status.pages.map(page => maskedSnapshot(scope, page)),
-  } as BrowserStatus;
+  return mapStrings(status, text => scope.text(text));
 }

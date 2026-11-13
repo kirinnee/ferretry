@@ -23,11 +23,18 @@ const HIDDEN_URL = `https://app.example.test/pair?lang=en${HIDDEN_FRAGMENT}`;
 let host: TestHost | undefined;
 let built: DaemonHalf<typeof manifest> | undefined;
 
-async function boot(): Promise<{ readonly host: TestHost; readonly tabs: Tabs }> {
+async function boot(launchFailure?: string): Promise<{ readonly host: TestHost; readonly tabs: Tabs }> {
   const tabs = new Tabs();
   const half = implementDaemon(daemon.manifest, {
     build: ctx => {
-      built = buildBrowsers(ctx, { launcher: { launch: async () => tabs.automation } });
+      built = buildBrowsers(ctx, {
+        launcher: {
+          launch: async () => {
+            if (launchFailure !== undefined) throw new Error(launchFailure);
+            return tabs.automation;
+          },
+        },
+      });
       return built;
     },
   });
@@ -159,5 +166,46 @@ describe('every surface of the browsers plugin returns an address through the on
 
     expect(failed).not.toContain(FAKE_CODE);
     expect(failed).toContain(HIDDEN_URL);
+  });
+
+  for (const action of ['read', 'screenshot'] as const)
+    test(`the owner's ${action} result masks every string in it, nested page summaries included`, async () => {
+      const world = await boot();
+      await world.host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, agent);
+      setPage(world.tabs, PAIRING_URL, `Pair ${FAKE_FRAGMENT}`);
+
+      const answer = await world.host.request('POST', '/v1/sessions/f1/browser', { body: { action } });
+
+      expect(answer.status).toBe(200);
+      expect(answer.body).not.toContain(FAKE_CODE);
+      expect(answer.body).not.toContain('#v1;');
+      const body = answer.json<{
+        result: { url: string; title: string; pages: { url: string; title: string }[] };
+        status: { pages: { url: string }[] };
+      }>();
+      expect(body.result.url).toBe(HIDDEN_URL);
+      expect(body.result.pages.find(page => page.url === HIDDEN_URL)?.title).toBe(`Pair ${HIDDEN_FRAGMENT}`);
+    });
+
+  test('the owner’s error answers (a launch that failed at the address) never carry the fragment, and keep status and code', async () => {
+    const world = await boot(`worker failed at ${PAIRING_URL}`);
+
+    const started = await world.host.request('POST', '/v1/sessions/f1/browser', { body: { action: 'start' } });
+
+    expect(started.status).toBe(503);
+    expect(started.body).not.toContain(FAKE_CODE);
+    expect(started.json<{ code: string; error: string }>().code).toBe('launch_failed');
+    expect(started.json<{ error: string }>().error).toContain(HIDDEN_URL);
+  });
+
+  test('a published event carries no page address: a page id echoing the fragment is hidden (events seam)', async () => {
+    const world = await boot();
+    world.tabs.idSuffix = FAKE_FRAGMENT;
+    await world.host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, agent);
+
+    const events = world.host.published.filter(each => each.event === 'browsers.page-changed');
+    expect(events.length).toBeGreaterThan(0);
+    expect(JSON.stringify(events)).not.toContain(FAKE_CODE);
+    expect(JSON.stringify(events)).toContain(HIDDEN_FRAGMENT);
   });
 });

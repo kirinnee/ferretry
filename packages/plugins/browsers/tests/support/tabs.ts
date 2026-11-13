@@ -35,6 +35,8 @@ export class Tabs {
   /** What a page in the error state says went wrong (the worker's first line of a failed navigation). */
   pageError = 'it broke';
   private minted = 0;
+  /** Appended to every id the browser mints, for a case that needs an id which echoes an address. */
+  idSuffix = '';
   private exited!: (code: number) => void;
   readonly exit = new Promise<number>(resolve => {
     this.exited = resolve;
@@ -126,7 +128,7 @@ export class Tabs {
     },
     newPage: async options => {
       this.minted += 1;
-      const id = `p${String(this.minted)}`;
+      const id = `p${String(this.minted)}${this.idSuffix}`;
       this.pages.push({
         id,
         url: options.url ?? 'about:blank',
