@@ -29,6 +29,7 @@ import {
   copyPlanOf,
   durationWords,
   hidePairingFragments,
+  hidePairingFragmentsIn,
   INPUT_QUARANTINE_SECONDS,
   INPUT_SINGLE_FIELD_ID,
   type InputAgentView,
@@ -2631,7 +2632,7 @@ function hiddenFor(tool: string, text: string): string {
  * address-carrying fields all pass through, so no field needs to remember to. A picture's bytes pass.
  */
 function withoutPairingFragments(tool: string, result: AgentToolResult): AgentToolResult {
-  return tool.startsWith('browser.') ? (masked(result, hidePairingFragments) as AgentToolResult) : result;
+  return tool.startsWith('browser.') ? hidePairingFragmentsIn(result) : result;
 }
 
 /** Every string in a result, masked; a picture's base64 bytes are not text and pass as they are. */

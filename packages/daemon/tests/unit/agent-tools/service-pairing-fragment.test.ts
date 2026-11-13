@@ -44,6 +44,23 @@ describe('AgentToolService — a pairing fragment in a browser result', () => {
     should(everything(tabs)).containEql(PAIRING_FRAGMENT_HIDDEN);
   });
 
+  it('should hide the code that follows an ignored field holding punctuation', async () => {
+    // Arrange
+    const world = await opened();
+    const link = `https://ferretry.pages.dev/pair#v1;note=(a)'b[c];code=${FAKE_CODE};fp=fy_daemon_${'a'.repeat(43)}`;
+    world.browser.actedUrl = link;
+    world.browser.readText = `Pair this device: ${link}`;
+
+    // Act
+    const read = await world.service.call(agent, { tool: 'browser.read', name: 'app' });
+    const navigated = await world.service.call(agent, { tool: 'browser.navigate', name: 'app', url: link });
+
+    // Assert
+    seeNothingOf(read);
+    seeNothingOf(navigated);
+    should(read.output).equal(`Pair this device: https://ferretry.pages.dev/pair${PAIRING_FRAGMENT_HIDDEN}`);
+  });
+
   it('should hide it in the address every act reports, whoever asks', async () => {
     // Arrange
     const world = await opened();
