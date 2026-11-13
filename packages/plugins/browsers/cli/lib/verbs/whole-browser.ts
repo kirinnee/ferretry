@@ -34,6 +34,13 @@ function viewport(rawWidth: string, rawHeight: string): { readonly width: number
 
 const act = (action: string) => onBrowser([], {}, (): Plan => ({ kind: 'whole', body: { action } }));
 
+/** Each of these is also spelled as v4 spelled it (`close`, `goto`): the same row under a second declared verb. */
+const STOP = act('stop');
+const NAVIGATE = onBrowser([{ name: 'url' }], {}, words => ({
+  kind: 'whole',
+  body: { action: 'navigate', url: required(words.need(0), 'URL') },
+}));
+
 /**
  * `fy browser <verb>`: the ferret's whole browser, through the per-ferret route (v4's `registerBrowserCommands`, the
  * session verbs). The ferret is `--ferret <id>` or the one this runs inside.
@@ -41,7 +48,8 @@ const act = (action: string) => onBrowser([], {}, (): Plan => ({ kind: 'whole', 
 export const WHOLE_BROWSER_VERBS = {
   'browser status': onBrowser([], {}, (): Plan => ({ kind: 'whole' })),
   'browser start': act('start'),
-  'browser stop': act('stop'),
+  'browser stop': STOP,
+  'browser close': STOP,
   'browser back': act('back'),
   'browser forward': act('forward'),
   'browser reload': act('reload'),
@@ -66,10 +74,8 @@ export const WHOLE_BROWSER_VERBS = {
     body: { action: 'close-page', pageId: required(words.need(0), 'page id') },
   })),
 
-  'browser navigate': onBrowser([{ name: 'url' }], {}, words => ({
-    kind: 'whole',
-    body: { action: 'navigate', url: required(words.need(0), 'URL') },
-  })),
+  'browser navigate': NAVIGATE,
+  'browser goto': NAVIGATE,
 
   'browser click': onBrowser([{ name: 'selector' }], {}, words => ({
     kind: 'whole',

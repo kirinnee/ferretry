@@ -119,7 +119,7 @@ function controllerOf(call: CallContext): SurfaceController {
 }
 
 /** A route's refusal as its status; the message already passed the hold answer and the redactor (I120). */
-async function refusing<T>(work: () => Promise<T>): Promise<T> {
+export async function refusing<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work();
   } catch (error) {

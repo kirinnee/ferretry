@@ -70,8 +70,19 @@ history. For anything sensitive give the text another way:
   Ferretry never reads a secret back, so the verb says so and types nothing. Until the Vault grows a use that
   reaches a page, ask the owner to type it (`browser_request_input`) or use `--stdin`.
 
-Whatever the source, the typed text is never printed back: the answer, an error and `--json` show a placeholder where the daemon
-echoed it.
+Whatever the source, the typed text is never printed back: the answer, an error and `--json` show `[typed text]` where the
+daemon echoed it, however it spelled it (as it is, as JSON writes it with `\"`, `\\`, `\n` and `\/`, as `\uXXXX`, or
+percent-encoded in a URL). A value too short to hide without hiding the words around it (under three characters) is not
+masked: an answer that repeats it is withheld whole, and says so.
+
+## Where `--ferret` goes, and the older spellings
+
+`--ferret <id>` (also `-s` and `--session`) may be written before the verb, between its words or after it
+(`fy browser --session f1 page click app '#go'`); the one nearest the end wins. `browser close`, `browser goto` and
+`browser login close` still work as `stop`, `navigate` and `login stop`.
+
+A **ferret's own** whole-browser verbs (`fy browser click`, `navigate`, `status`, …) pass the same checks as its page
+verbs: the owner's Browsers switch, its own browser only, a page that is its own, and nobody holding the page.
 
 ## Captchas and "checking your browser" pages
 

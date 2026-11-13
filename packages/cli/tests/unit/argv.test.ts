@@ -48,3 +48,21 @@ describe('parseArgs negative numbers', () => {
     should(parsed.options).deepEqual({ json: true });
   });
 });
+
+describe('parseArgs swallowed words', () => {
+  it('should record each word an option took, with the positional words that came before it', () => {
+    // Arrange / Act
+    const parsed = parseArgs(['app', '--double', '#go', 'more', '--level', 'error']);
+
+    // Assert
+    should(parsed.args).deepEqual(['app', 'more']);
+    should(parsed.swallowed).deepEqual([
+      { option: 'double', word: '#go', at: 1 },
+      { option: 'level', word: 'error', at: 2 },
+    ]);
+  });
+
+  it('should leave the field out when no option took a word, so the result is what it always was', () => {
+    should(parseArgs(['c1', '--force', '--to=done'])).deepEqual({ args: ['c1'], options: { force: true, to: 'done' } });
+  });
+});

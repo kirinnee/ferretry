@@ -48,8 +48,5 @@ export async function typedText(words: Parsed, from: number, context: PlanContex
   return { text: given ?? '' };
 }
 
-/** The shortest typed text that is scrubbed from what a verb prints: shorter would blank out ordinary words. */
-export const SCRUB_MIN_LENGTH = 3;
-
-/** The text to scrub from output, if it is long enough to be told apart. */
-export const scrubbing = (text: string): readonly string[] => (text.length >= SCRUB_MIN_LENGTH ? [text] : []);
+/** The text to hide from output: every typed value, however short (`../private-text.ts` decides how). */
+export const scrubbing = (text: string): readonly string[] => (text === '' ? [] : [text]);

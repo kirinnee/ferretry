@@ -15,8 +15,9 @@ describe('the browser verb table', () => {
     should(held).deepEqual(declared);
   });
 
-  it('should declare all 56 verbs of the v4 browser surface', () => {
-    should(declared).have.length(56);
+  it('should declare all 56 verbs of the v4 browser surface, and the three spellings v4 also took', () => {
+    should(declared).have.length(59);
+    for (const alias of ['browser close', 'browser goto', 'browser login close']) should(declared).containEql(alias);
   });
 
   it('should let every verb that talks to a daemon name a ferret three ways and print JSON', () => {

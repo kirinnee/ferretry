@@ -60,4 +60,42 @@ describe('reading a verb’s words', () => {
     should(read('dev', '#go', '--ask', 'type the code').either('ask')).equal('type the code');
     should(read('dev', '#go').either('ask')).be.undefined();
   });
+
+  it('should keep every word where it was written when a switch sits between the arguments', () => {
+    // Arrange / Act: the shell reads `#go` as the value of `--double`; its place among the words is recorded.
+    const middle = read('app', '--double', '#go');
+    const first = read('--double', 'app', '#go');
+    const last = read('app', '#go', '--double');
+    const two = read('app', '--double', '#go', '--double', 'more');
+
+    // Assert
+    should(middle.args).deepEqual(['app', '#go']);
+    should(first.args).deepEqual(['app', '#go']);
+    should(last.args).deepEqual(['app', '#go']);
+    should(two.args).deepEqual(['app', '#go', 'more']);
+    should(middle.on('double')).be.true();
+  });
+
+  it('should keep the words of two different switches in the order they were written', () => {
+    // Arrange
+    const shape: VerbShape = {
+      args: [{ name: 'a' }, { name: 'b' }, { name: 'c' }, { name: 'd' }],
+      flags: { one: flag.on('one'), two: flag.on('two') },
+    };
+
+    // Act
+    const words = parseVerb('v', shape, parseArgs(['a', '--two', 'b', '--one', 'c', 'd']));
+
+    // Assert
+    should(words.args).deepEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('should not move the value of an option that takes one', () => {
+    should(read('app', '--timeout', '500', '#go').args).deepEqual(['app', '#go']);
+    should(read('app', '--timeout', '500', '#go').num('timeout')).equal(500);
+  });
+
+  it('should refuse a value given to a switch with an equals sign, naming the switch', () => {
+    should(() => read('app', '#go', '--double=yes')).throw('--double is a switch and takes no value');
+  });
 });

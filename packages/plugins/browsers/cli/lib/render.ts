@@ -6,22 +6,11 @@ import type {
   SurfaceControlView,
 } from '../../contract/index.ts';
 import type { ToolAnswer } from './client.ts';
-import { SCRUB_MIN_LENGTH } from './verbs/typed-text.ts';
 
 /**
  * Every browser verb's words on screen, as pure functions of what the daemon answered (v4's `renderToolResult`,
  * `renderControlView`, `renderBrowserStatus`, `renderBrowserAction`, `renderLoginStatus`, `renderProxyTest`).
  */
-
-/** What typed text becomes where it would otherwise be repeated. */
-const SCRUBBED = '[typed text]';
-
-/** `text` with every occurrence of each typed value replaced: whatever the daemon says, a typed value is not echoed. */
-export function scrubbed(text: string, values: readonly string[]): string {
-  let out = text;
-  for (const value of values) if (value.length >= SCRUB_MIN_LENGTH) out = out.split(value).join(SCRUBBED);
-  return out;
-}
 
 /** A tool's answer as lines: its sentence, then the pages it lists (the sentence already carries what it read). */
 export function renderToolAnswer(answer: ToolAnswer): string {

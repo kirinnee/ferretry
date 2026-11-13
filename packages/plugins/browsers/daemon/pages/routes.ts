@@ -9,12 +9,18 @@ import {
   type SocketDownstream,
   type SocketHandler,
 } from '@ferretry/kernel/contract';
+import { ferretOf } from '@ferretry/core-gate/contract';
 import { BrowserLoginActionSchema } from '../../contract/index.ts';
 import { BrowserControlError, type BrowserLoginLifecycle, type BrowserLoginStatus } from '../worker/control/index.ts';
 import { acted, maskedSnapshot, maskedStatus, opOfAction, targetOfAction, writeAct } from './acts.ts';
 import { parseBody } from './body.ts';
 import { BrowserSessionError, type BrowserSubsystem } from './service.ts';
-import { type BrowserActionResult, BrowserActionSchema } from '../../contract/wire/browser.ts';
+import {
+  type BrowserAction,
+  type BrowserActionResult,
+  BrowserActionSchema,
+  type BrowserStatus,
+} from '../../contract/wire/browser.ts';
 
 /**
  * The per-session browser and the human sign-in window (today's `runtime/mounts/browser-login.ts`).
@@ -81,17 +87,42 @@ export function sessionIdOf(call: CallContext): string {
   return id;
 }
 
+/**
+ * What a FERRET's call on the whole-browser routes must pass before it runs: the same ownership, takeover and
+ * agent-control checks its own page tools make (`BrowserTools.guardFerretBrowser`). A person's call is not asked:
+ * the toolbar is theirs. Throws the refusal (an `ApiError`).
+ */
+export interface FerretBrowserGuard {
+  check(ferret: string, target: string, pageId: string | undefined): Promise<void>;
+}
+
 /** `GET /v1/ferrets/:ferretId/browser`: the status, every page's address and title masked (S16). */
-async function browserStatus(kernel: KernelPorts, browser: BrowserSubsystem, call: CallContext): Promise<ApiResponse> {
+async function browserStatus(
+  kernel: KernelPorts,
+  browser: BrowserSubsystem,
+  guard: FerretBrowserGuard,
+  call: CallContext,
+): Promise<ApiResponse> {
+  const caller = ferretOf(call);
+  if (caller !== undefined) await guard.check(caller, sessionIdOf(call), undefined);
   const status = await browser.status(sessionIdOf(call)).catch(browserFailure);
   return jsonResponse(await kernel.redaction.read(scope => maskedStatus(scope, status)));
 }
 
 /** `POST /v1/ferrets/:ferretId/browser`: one action on its page, through the act runner. */
-async function browserAction(kernel: KernelPorts, browser: BrowserSubsystem, call: CallContext): Promise<ApiResponse> {
+async function browserAction(
+  kernel: KernelPorts,
+  browser: BrowserSubsystem,
+  guard: FerretBrowserGuard,
+  call: CallContext,
+): Promise<ApiResponse> {
   const sessionId = sessionIdOf(call);
+  const caller = ferretOf(call);
+  // A ferret's own browser and the switch first, before anything about it is read; then the page the act would touch.
+  if (caller !== undefined) await guard.check(caller, sessionId, undefined);
   const action = await parseBody(call.request, BrowserActionSchema);
   const before = await browser.status(sessionId).catch(browserFailure);
+  if (caller !== undefined) await guard.check(caller, sessionId, pageTouchedBy(action, before));
   const target = targetOfAction(sessionId, action, before);
   const op = opOfAction(action);
   if (op === 'read') {
@@ -135,15 +166,28 @@ async function browserAction(kernel: KernelPorts, browser: BrowserSubsystem, cal
   return jsonResponse({ status: await kernel.redaction.read(scope => maskedStatus(scope, after)) });
 }
 
+/** The page an act would touch, when it touches one: the page it names, else the one the session is viewing. */
+function pageTouchedBy(action: BrowserAction, status: BrowserStatus): string | undefined {
+  if (action.action === 'start' || action.action === 'stop' || action.action === 'new-page') return undefined;
+  const named = (action as { readonly pageId?: unknown }).pageId;
+  if (typeof named === 'string' && named !== '') return named;
+  return status.state === 'running' && 'activePageId' in status ? status.activePageId : undefined;
+}
+
 /** The routes this file serves, keyed as the manifest declares them. */
-export function pageRoutes(kernel: KernelPorts, window: BrowserLoginLifecycle, browser: BrowserSubsystem) {
+export function pageRoutes(
+  kernel: KernelPorts,
+  window: BrowserLoginLifecycle,
+  browser: BrowserSubsystem,
+  guard: FerretBrowserGuard,
+) {
   return {
     'GET /v1/browser/login': (async () => await answer(async () => await window.status())) satisfies RouteHandler,
     'POST /v1/browser/login': (async call => await loginAct(window, call)) satisfies RouteHandler,
     'GET /v1/ferrets/:ferretId/browser': (async call =>
-      await browserStatus(kernel, browser, call)) satisfies RouteHandler,
+      await browserStatus(kernel, browser, guard, call)) satisfies RouteHandler,
     'POST /v1/ferrets/:ferretId/browser': (async call =>
-      await browserAction(kernel, browser, call)) satisfies RouteHandler,
+      await browserAction(kernel, browser, guard, call)) satisfies RouteHandler,
   } as const;
 }
 

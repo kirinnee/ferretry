@@ -363,6 +363,25 @@ export class BrowserTools {
     return { ...page, hosts: [...new Set(hosts as string[])] };
   }
 
+  /**
+   * The checks a FERRET's own act on its whole browser passes (`GET|POST /v1/ferrets/:ferretId/browser`), the same the
+   * page tools make: the Browsers switch is on, the browser is the ferret's own (never another ferret's), and the page
+   * the act would touch — when it touches one — is the ferret's (opened, handed, or a popup of those) and nobody
+   * holds it. A person's call needs none of this: the toolbar is theirs.
+   */
+  async guardFerretBrowser(ferret: string, target: string, pageId: string | undefined): Promise<void> {
+    try {
+      if (ferret !== target)
+        throw new BrowserToolError('forbidden', 'A ferret acts only on its own browser, not another ferret’s.');
+      if (!(await this.ports.policy.allows(ferret, 'browser')))
+        throw new BrowserToolError('forbidden', controlRefusal('browser'));
+      if (pageId === undefined) return;
+      await this.assertAgentMay(ferret, await this.resolve(ferret, pageId));
+    } catch (error) {
+      throw translate(error) ?? error;
+    }
+  }
+
   /** Every live driving marker, standing takeover and hand-over of a ferret's pages. */
   async controlView(sessionId: string): Promise<SurfaceControlView> {
     try {

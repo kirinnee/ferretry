@@ -17,7 +17,7 @@ import { VaultPageApprovals } from './target/tools/phone-approvals.ts';
 import { nodeStagedFiles } from './tools/adapters/staged-files.ts';
 import { SurfaceControl } from './tools/control.ts';
 import { rootFiles } from './tools/files.ts';
-import { controlRoutes, toolHandlers } from './tools/index.ts';
+import { controlRoutes, refusing, toolHandlers } from './tools/index.ts';
 import { pageToolHost } from './tools/page-host.ts';
 import { agentControlPolicy } from './tools/agent-control.ts';
 import { BrowserTools } from './tools/service.ts';
@@ -271,7 +271,11 @@ export function buildBrowsers(
 
   return {
     routes: {
-      ...pageRoutes(kernel, login, pages),
+      ...pageRoutes(kernel, login, pages, {
+        // A ferret on its own whole-browser routes passes the checks its page tools pass (docs: a refusal keeps its code).
+        check: async (ferret, target, pageId) =>
+          await refusing(async () => await tools.guardFerretBrowser(ferret, target, pageId)),
+      }),
       ...proxyRoutes({ tester, state: () => pages.overview() }),
       ...controlRoutes(tools),
       ...systemOpenRoutes(openUrl),

@@ -68,6 +68,11 @@ function proxySetting(flags: {
  * and the loopback firewall's files for a host admin (printed from what the binary carries, no daemon).
  */
 export function machineVerbs(files: FirewallFiles) {
+  /** `login close` is v4's other spelling of `login stop`: the same row under a second declared verb. */
+  const loginStop = onMachine([], { primed: flag.on('primed') }, words => ({
+    kind: 'login',
+    body: { action: 'stop', ...(words.on('primed') ? { primed: true } : {}) },
+  }));
   const print = (text: string) => onThisHost([], {}, (): Plan => ({ kind: 'print', text: withoutFinalNewline(text) }));
   return {
     'browser login status': onMachine([], {}, (): Plan => ({ kind: 'login' })),
@@ -76,10 +81,8 @@ export function machineVerbs(files: FirewallFiles) {
       return { kind: 'login', body: { action: 'start', ...(raw === undefined ? {} : { minutes: minutes(raw) }) } };
     }),
     'browser login confirm': onMachine([], {}, (): Plan => ({ kind: 'login', body: { action: 'confirm' } })),
-    'browser login stop': onMachine([], { primed: flag.on('primed') }, words => ({
-      kind: 'login',
-      body: { action: 'stop', ...(words.on('primed') ? { primed: true } : {}) },
-    })),
+    'browser login stop': loginStop,
+    'browser login close': loginStop,
     'browser proxy test': onMachine(
       [],
       {

@@ -9,11 +9,12 @@
  * - A negative number (`-1`, `-0.5`, `-300,0`) is a word, never an option: `--pages -1` has the value `-1`.
  * - A repeated option becomes a list, in the order given.
  * - `--` ends options; everything after it is positional.
- * - Write positionals before options, or end options with `--`, when a switch is followed by a positional.
+ * - Write positionals before options, or end options with `--`, when a switch is followed by a positional. A verb that
+ *   declares an option a switch still gets that word back where it was written (`swallowed`).
  *
  * Pure: no IO, no globals.
  */
-import type { VerbInvocation } from '@ferretry/kernel/manifest';
+import type { SwallowedWord, VerbInvocation } from '@ferretry/kernel/manifest';
 
 type OptionValue = string | boolean | readonly string[];
 
@@ -23,6 +24,7 @@ const isWord = (token: string): boolean => !token.startsWith('-') || token === '
 export function parseArgs(tokens: readonly string[]): VerbInvocation {
   const args: string[] = [];
   const options: Record<string, OptionValue> = {};
+  const swallowed: SwallowedWord[] = [];
   const put = (name: string, value: string | boolean): void => {
     const known = options[name];
     if (known === undefined) options[name] = value;
@@ -52,10 +54,11 @@ export function parseArgs(tokens: readonly string[]): VerbInvocation {
     const next = tokens[index + 1];
     if (next !== undefined && isWord(next)) {
       put(body, next);
+      swallowed.push({ option: body, word: next, at: args.length });
       index += 1;
     } else put(body, true);
   }
-  return { args, options };
+  return swallowed.length === 0 ? { args, options } : { args, options, swallowed };
 }
 
 /** The first string value of an option, if it has one. */

@@ -371,3 +371,32 @@ describe('the loopback firewall', () => {
     await should(world.run(['browser', 'firewall', 'nope'])).rejectedWith(/no verb in/u);
   });
 });
+
+describe('the spellings v4 also took', () => {
+  it('should send close as stop and goto as navigate, exactly as the main verbs do', async () => {
+    // Arrange
+    daemon.answer(BROWSER, { status: STATUS, result: { ...PAGE, actedPageId: 'p1' } });
+    const world = cliWorld(daemon, { ownFerret: 'f1' });
+
+    // Act
+    const closed = await world.run(['browser', 'close']);
+    const went = await world.run(['browser', 'goto', 'https://x.test/']);
+
+    // Assert
+    should([closed, went]).deepEqual([0, 0]);
+    should(bodies()).deepEqual([{ action: 'stop' }, { action: 'navigate', url: 'https://x.test/' }]);
+  });
+
+  it('should send login close as login stop, with --primed', async () => {
+    // Arrange
+    daemon.answer('POST /v1/browser/login', { state: 'closed', profilePrimed: true });
+    const world = cliWorld(daemon);
+
+    // Act
+    const code = await world.run(['browser', 'login', 'close', '--primed']);
+
+    // Assert
+    should(code).equal(0);
+    should(bodies()).deepEqual([{ action: 'stop', primed: true }]);
+  });
+});

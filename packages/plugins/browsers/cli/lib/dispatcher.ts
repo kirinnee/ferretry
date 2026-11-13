@@ -1,6 +1,7 @@
 import type { TerminalIo, VerbInvocation } from '@ferretry/kernel/manifest';
 import { EXIT_USAGE, flag, parseVerb, UsageError } from './args.ts';
 import type { BrowserClient, ToolAnswer } from './client.ts';
+import { PrivateText } from './private-text.ts';
 import type { Plan, VerbSpec } from './plan.ts';
 import {
   renderBrowserAction,
@@ -8,7 +9,6 @@ import {
   renderLoginStatus,
   renderProxyTest,
   renderToolAnswer,
-  scrubbed,
   screenshotPayload,
 } from './render.ts';
 
@@ -53,23 +53,36 @@ export class BrowserDispatcher {
   }
 
   async run(line: string, invocation: VerbInvocation): Promise<number> {
-    let scrub: readonly string[] = [];
+    // Whatever standard input gave a verb, and whatever a plan says was typed: none of it is ever printed back.
+    const typed: string[] = [];
+    let hidden = new PrivateText(typed);
+    const readStdin = async (): Promise<string> => {
+      const text = await this.ports.readStdin();
+      typed.push(text.replace(/\r?\n$/u, ''));
+      hidden = new PrivateText(typed);
+      return text;
+    };
     try {
       const spec = this.table[line];
       if (spec === undefined) throw new UsageError(`${line} is not a browser verb`);
       const shape =
         spec.scope === 'local' ? spec.shape : { ...spec.shape, flags: { ...spec.shape.flags, ...JSON_FLAG } };
       const words = parseVerb(line, shape, invocation);
-      const plan = await spec.plan(words, { readStdin: this.ports.readStdin });
-      scrub = 'scrub' in plan && plan.scrub !== undefined ? plan.scrub : [];
+      const plan = await spec.plan(words, { readStdin });
+      if ('scrub' in plan && plan.scrub !== undefined) {
+        typed.push(...plan.scrub);
+        hidden = new PrivateText(typed);
+      }
       const ferret = this.ferretOf(line, spec, words.text('ferret'));
       const outcome = await this.perform(plan, ferret);
-      const text = scrubbed(words.on('json') ? JSON.stringify(outcome.data) : outcome.text, scrub);
+      const text = hidden.sealed(
+        words.on('json') ? JSON.stringify(hidden.cleanData(outcome.data)) : hidden.clean(outcome.text),
+      );
       if (outcome.ok) this.io.out(`${text}\n`);
       else this.io.err(`${text}\n`);
       return outcome.ok ? 0 : 1;
     } catch (error) {
-      const message = scrubbed(error instanceof Error ? error.message : String(error), scrub);
+      const message = hidden.sealed(hidden.clean(error instanceof Error ? error.message : String(error)));
       this.io.err(`${message}\n`);
       return error instanceof UsageError ? EXIT_USAGE : 1;
     }

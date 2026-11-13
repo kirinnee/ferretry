@@ -455,9 +455,22 @@ export interface TerminalIo {
   readonly isTty: boolean;
 }
 
+/** A word the shell read as an option's value, and how many positional words came before it. */
+export interface SwallowedWord {
+  readonly option: string;
+  readonly word: string;
+  /** The number of positional words written before this one, so a verb that declares the option a switch can put it back. */
+  readonly at: number;
+}
+
 export interface VerbInvocation {
   readonly args: readonly string[];
   readonly options: Readonly<Record<string, string | boolean | readonly string[]>>;
+  /**
+   * Every word taken as the value of `--name word`, in the order written. The shell knows no verb's options, so a
+   * verb whose option is a switch reads these to give the word back its place among the arguments. Absent when none.
+   */
+  readonly swallowed?: readonly SwallowedWord[];
 }
 
 /**

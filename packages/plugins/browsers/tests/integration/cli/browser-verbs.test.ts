@@ -30,7 +30,9 @@ import { unprovenListenerProver } from '../../support/listener-prover.ts';
 const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
 const SENTINEL = 'sentinel-Pa55w0rd-7f3a9c';
 
-const ALL_ON: AgentControlReader = { allows: async () => true };
+/** The owner's "What agents may control" switches: every one on, until a test turns the Browsers one off. */
+let switchesOn = true;
+const SWITCHES: AgentControlReader = { allows: async () => switchesOn };
 const FERRETS = { get: async (id: string) => (id === 'f1' ? { name: 'f1' } : undefined) };
 
 let root = '';
@@ -115,7 +117,7 @@ beforeAll(async () => {
   );
   host = await testHost({
     plugins: [half],
-    uses: { ferrets: FERRETS, agentControl: ALL_ON },
+    uses: { ferrets: FERRETS, agentControl: SWITCHES },
     fakes: { vault: new FakeVault(), gate: new FakeGate() },
     gate,
     secrets: [],
@@ -237,6 +239,74 @@ describe('a takeover', () => {
     should(agent.err.join('')).match(/taken over/iu);
     should(shown).equal(0);
     should(person.out.join('')).containEql('taken over by');
+  });
+});
+
+describe('a ferret’s whole-browser verbs pass the same checks as its page verbs', () => {
+  it('should refuse them while a person has taken the page over, and work again once it is handed back', async () => {
+    // Arrange
+    const person = typing('person');
+    const agent = typing('ferret');
+    await person.run('browser page handover app --ferret f1');
+    const before = await agent.run('browser read h1');
+
+    // Act
+    await person.run('browser page takeover app --ferret f1');
+    const refusedClick = await agent.run('browser click #go');
+    const refusedNavigate = await agent.run(`browser navigate ${base}/taken`);
+    await person.run('browser page handback app --ferret f1');
+    const after = await agent.run('browser read h1');
+
+    // Assert
+    should([before, after]).deepEqual([0, 0]);
+    should([refusedClick, refusedNavigate]).deepEqual([1, 1]);
+    should(agent.err.join('')).match(/taken over/iu);
+  });
+
+  it('should refuse them, status included, while the owner’s Browsers switch is off', async () => {
+    // Arrange
+    const agent = typing('ferret');
+    switchesOn = false;
+
+    // Act
+    const status = await agent.run('browser status');
+    const read = await agent.run('browser read h1');
+    switchesOn = true;
+
+    // Assert
+    should([status, read]).deepEqual([1, 1]);
+    should(agent.err.join('')).match(/does not let agents control browsers/iu);
+  });
+
+  it('should refuse a ferret that names another ferret’s browser', async () => {
+    // Arrange
+    const agent = typing('ferret');
+
+    // Act
+    const status = await agent.run('browser status --ferret f2');
+    const click = await agent.run('browser click #go --ferret f2');
+
+    // Assert
+    should([status, click]).deepEqual([1, 1]);
+    should(agent.err.join('')).match(/only on its own browser/iu);
+  });
+
+  it('should refuse them on a page that is a person’s, not the ferret’s', async () => {
+    // Arrange
+    const person = typing('person');
+    const agent = typing('ferret');
+    await person.run(`browser page open theirs ${base}/theirs --ferret f1`);
+    const listing = typing('person');
+    await listing.run('browser status --ferret f1');
+    const theirs = /^[ *] (\S+)\s.*\/theirs$/mu.exec(listing.out.join(''))?.[1] ?? '';
+
+    // Act
+    const code = await agent.run(`browser activate-page ${theirs}`);
+
+    // Assert
+    should(theirs).not.equal('');
+    should(code).equal(1);
+    should(agent.err.join('')).match(/is a person's, not yours/iu);
   });
 });
 

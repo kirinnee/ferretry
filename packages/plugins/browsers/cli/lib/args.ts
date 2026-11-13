@@ -9,8 +9,9 @@ import type { VerbInvocation } from '@ferretry/kernel/manifest';
  * reads the words against it:
  *
  * - an option the verb does not declare is refused by name (never ignored, never silently dropped);
- * - a switch that swallowed the next word hands it back as an argument, in the order given: write a switch AFTER the
- *   arguments it does not take (`page check dev '#box' --off`), as the shell's own rule says;
+ * - a switch that swallowed the next word hands it back as an argument, IN THE PLACE it was written
+ *   (`page click app --double '#go'` is the words `app`, `#go`): the shell records where each swallowed word stood
+ *   (`VerbInvocation.swallowed`). A switch given a value with `=` (`--double=yes`) is refused;
  * - every option is read under each of its names (`--timeout`, `-t`), as the number or text it is.
  *
  * Pure: no IO, no globals.
@@ -166,7 +167,8 @@ export function parseVerb(verb: string, shape: VerbShape, invocation: VerbInvoca
   for (const [key, spec] of Object.entries(shape.flags)) for (const name of spec.names) byName.set(name, { key, spec });
 
   const values = new Map<string, FlagValue>();
-  const strays: string[] = [];
+  /** The names under which a switch was written: the words they swallowed go back among the arguments. */
+  const switches = new Set<string>();
   for (const [name, given] of Object.entries(invocation.options)) {
     const known = byName.get(name);
     if (known === undefined) throw new UsageError(unknownOption(verb, name, shape));
@@ -174,11 +176,15 @@ export function parseVerb(verb: string, shape: VerbShape, invocation: VerbInvoca
     const label = dashed(spec.names[0] as string);
     if (given === false) continue;
     switch (spec.kind) {
-      case 'switch':
-        // `--double dev`: the word it took is an argument again; `--double=yes` is the word `yes` and refused.
-        for (const word of stringsOf(given)) if (word !== 'true') strays.push(word);
+      case 'switch': {
+        // `--double dev`: the word it took is an argument again, where it stood; `--double=yes` is refused.
+        const words = stringsOf(given).filter(word => word !== 'true');
+        const taken = (invocation.swallowed ?? []).filter(entry => entry.option === name).length;
+        if (words.length > taken) throw new UsageError(`${label} is a switch and takes no value`);
+        switches.add(name);
         values.set(key, true);
         break;
+      }
       case 'either': {
         const words = stringsOf(given);
         values.set(key, words.length === 0 ? true : (words[words.length - 1] as string));
@@ -207,7 +213,9 @@ export function parseVerb(verb: string, shape: VerbShape, invocation: VerbInvoca
     }
   }
 
-  const args = [...strays, ...invocation.args];
+  const args = [...invocation.args];
+  const restored = (invocation.swallowed ?? []).filter(entry => switches.has(entry.option));
+  for (const [done, entry] of restored.entries()) args.splice(Math.min(entry.at + done, args.length), 0, entry.word);
   checkArguments(verb, shape.args, args);
   return new Parsed(args, values);
 }

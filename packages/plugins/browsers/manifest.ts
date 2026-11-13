@@ -214,6 +214,10 @@ export default definePlugin({
         summary: 'stop the browser processes; the persistent sign-in profile remains',
         options: [FERRET_OPTION, JSON_OPTION],
       }),
+      verb('browser close', {
+        summary: 'the same as stop (the v4 spelling)',
+        options: [FERRET_OPTION, JSON_OPTION],
+      }),
       verb('browser back', { summary: 'navigate back', options: [FERRET_OPTION, JSON_OPTION] }),
       verb('browser forward', { summary: 'navigate forward', options: [FERRET_OPTION, JSON_OPTION] }),
       verb('browser reload', { summary: 'reload the current page', options: [FERRET_OPTION, JSON_OPTION] }),
@@ -228,6 +232,10 @@ export default definePlugin({
       verb('browser activate-page', { summary: 'make a browser page active', options: [FERRET_OPTION, JSON_OPTION] }),
       verb('browser close-page', { summary: 'close a browser page', options: [FERRET_OPTION, JSON_OPTION] }),
       verb('browser navigate', { summary: 'navigate the shared browser', options: [FERRET_OPTION, JSON_OPTION] }),
+      verb('browser goto', {
+        summary: 'the same as navigate (the v4 spelling)',
+        options: [FERRET_OPTION, JSON_OPTION],
+      }),
       verb('browser click', { summary: 'click a selector', options: [FERRET_OPTION, JSON_OPTION] }),
       verb('browser type', {
         summary: 'fill a selector; the text is never logged',
@@ -267,6 +275,10 @@ export default definePlugin({
       }),
       verb('browser login stop', {
         summary: 'close it',
+        options: [{ flag: '--primed', help: 'also mark the profile signed in' }, JSON_OPTION],
+      }),
+      verb('browser login close', {
+        summary: 'the same as stop for the sign-in window (the v4 spelling)',
         options: [{ flag: '--primed', help: 'also mark the profile signed in' }, JSON_OPTION],
       }),
       verb('browser proxy test', {
