@@ -108,8 +108,24 @@ describe('Retry-After', () => {
     expect(parseRetryAfterMs('120')).toBe(120_000);
     expect(parseRetryAfterMs(' 7 ')).toBe(7_000);
   });
+  test('should clamp a valid whole-seconds value of any length instead of discarding it', () => {
+    expect(parseRetryAfterMs('1000000')).toBe(1_000_000_000);
+    expect(parseRetryAfterMs('0000000000000000000120')).toBe(120_000);
+    expect(parseRetryAfterMs('0'.repeat(400))).toBe(0);
+    expect(parseRetryAfterMs('9'.repeat(400))).toBe(999_999_999_000);
+    expect(parseRetryAfterMs('1234567890123')).toBe(999_999_999_000);
+    // …and whatever it returns, the retry never waits past the 300 s cap.
+    for (const header of ['1000000', '0000000000000000000120', '9'.repeat(400)]) {
+      const ms = parseRetryAfterMs(header);
+      expect(Number.isFinite(ms)).toBe(true);
+      expect(directoryRetryDelayMs(1, 1, ms)).toBeLessThanOrEqual(DIRECTORY_RETRY_CAP_MS);
+    }
+    expect(directoryRetryDelayMs(1, 1, parseRetryAfterMs('1000000'))).toBe(300_000);
+    expect(directoryRetryDelayMs(1, 1, parseRetryAfterMs('9'.repeat(400)))).toBe(300_000);
+    expect(directoryRetryDelayMs(1, 1, parseRetryAfterMs('0'.repeat(400)))).toBe(2_000);
+  });
   test('should ignore anything it cannot trust', () => {
-    for (const bad of [null, '', 'soon', '-3', '1.5', 'Wed, 21 Oct 2026 07:28:00 GMT', 'NaN', 'Infinity'])
+    for (const bad of [null, '', 'soon', '-3', '+3', '1.5', '1e9', 'Wed, 21 Oct 2026 07:28:00 GMT', 'NaN', 'Infinity'])
       expect(parseRetryAfterMs(bad)).toBeUndefined();
   });
 });
@@ -188,6 +204,48 @@ describe('the hosted directory adapter, with a fake fetch', () => {
       }),
     );
     expect(isTransientAdvertisement(await read(async () => broken))).toBe(true);
+  });
+
+  test('should answer a 429 whose Retry-After has many digits as transient, waiting the capped time', async () => {
+    for (const header of ['1000000', '00000000000000000030', '9'.repeat(400)]) {
+      const answer = await read(async () => new Response('', { status: 429, headers: { 'retry-after': header } }));
+      expect(isTransientAdvertisement(answer)).toBe(true);
+      expect(answer).toMatchObject({ retry: { retryAfterMs: expect.any(Number) } });
+    }
+  });
+
+  test('should answer a network break or a deadline AFTER the headers, while the body is read, as transient', async () => {
+    const bodyThatFails = (failure: () => unknown) =>
+      new Response(new ReadableStream({ start: controller => controller.error(failure()) }));
+    for (const failure of [
+      () => new TypeError('terminated'),
+      () => new DOMException('The operation timed out.', 'TimeoutError'),
+      () => new DOMException('The operation was aborted.', 'AbortError'),
+      () => new Error('connection reset'),
+    ])
+      expect(isTransientAdvertisement(await read(async () => bodyThatFails(failure)))).toBe(true);
+  });
+
+  test('should answer a body still streaming when the read deadline passes as transient', async () => {
+    const answer = await read(async (_input, init) => {
+      const signal = init?.signal;
+      return new Response(
+        new ReadableStream({
+          start: controller => {
+            signal?.addEventListener('abort', () => controller.error(signal.reason));
+          },
+        }),
+      );
+    }, 20);
+    expect(isTransientAdvertisement(answer)).toBe(true);
+    expect(answer).toMatchObject({ reason: expect.stringContaining('cut off') });
+  });
+
+  test('should keep a malformed-but-complete body definitive', async () => {
+    for (const body of ['{"version":1,', '', 'null', '<html>']) {
+      const answer = await read(async () => new Response(body));
+      expect(isTransientAdvertisement(answer)).toBe(false);
+    }
   });
 
   test('should answer a document the schema refuses as definitive', async () => {

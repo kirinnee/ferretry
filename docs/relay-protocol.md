@@ -1456,8 +1456,9 @@ names the posture in one line: direct-only, hosted, or self-hosted, and which.
 
 **A transient failure is asked again; an answer is not.** The first read stays the after-listen job and
 never holds the boot. When it ends in a failure that time can fix — the fetch threw (network, DNS,
-refused), the read timed out, HTTP 5xx, or HTTP 429 (a `Retry-After` in whole seconds is honoured, up to
-the cap) — the daemon asks again **in the background**, with jittered exponential delays (a window that
+refused), the read timed out, the network broke or the deadline passed while the body was still being read,
+HTTP 5xx, or HTTP 429 (a `Retry-After` in whole seconds, of any number of digits, is honoured up to the cap —
+a longer value is clamped, never discarded; an HTTP-date is ignored) — the daemon asks again **in the background**, with jittered exponential delays (a window that
 starts at 2 s and doubles to a 5 min cap, the delay landing in its upper half), until the directory
 answers. A relay that finally answers is applied exactly as a first-read success would be: the same
 `discovered` source, the carrier started, `discoveredRelayUrl` on links and pairing, and the boot trail
@@ -1465,14 +1466,33 @@ and `connections.reachability` row move from the "retrying in the background, ne
 sentence to the hosted one. Everything else is a **definitive answer** and is asked once: an explicit relay
 entry (`enabled: false` included — the directory is not even asked), the directory advertising
 `relayUrl: null`, an advertisement that fails the schema, a body that is not JSON, a build with no origin
-or an origin this daemon may not ask, and any other 4xx. An explicit relay written to
-`config/connections.yaml` while a retry is pending wins and ends the retries without dialling anything
-(it takes effect on restart, as any relay edit does). `stop()` cancels the pending timer and aborts a read
-in flight, and nothing fires afterwards. Every read keeps `cache: 'no-store'`.
+or an origin this daemon may not ask, and any other 4xx. Any change to the relay list in
+`config/connections.yaml` while a retry is pending — a relay of the operator's own (`enabled: false`
+included), a discovery entry switched off or removed, any other edit, or a file that cannot be read —
+wins and ends the retries without resolving, publishing or dialling anything (it takes effect on restart,
+as any relay edit does). **One gate decides, and every path asks it after its last `await`:** a
+DISCOVERED relay is published or dialled only while the daemon is not stopping, the CURRENT file is a clean
+read, and its relay list still says what this boot resolved. The gate is asked before every ask and when an
+answer arrives (first read and retries alike), when a recovery adopts its answer, at the boot carrier start
+after the first read, and immediately before **each** discovered carrier is built and started (so a change
+that lands while an earlier carrier is starting stops the next one); there is no path that dials a discovered
+relay without it. A file the kernel cannot read (invalid or oversized — the config service then answers
+`undefined` or its last good version, never an error) is not a clean read, so it vetoes whatever its effective
+value says; a file that is simply absent is clean. **The boundary is the boot:** a file that is already
+`invalid` when the daemon starts, with its accepted last good version in effect (the kernel keeps that version across
+a restart), is governed by that accepted document — discovery runs from it, and the veto stays for any change
+after boot (an explicit disable, a changed relay list, or a file that becomes invalid or unreadable only during this
+run). An invalid file at boot with NO accepted version in effect has no authority, so the daemon stays direct-only. A veto that lands after the discovered relay was already
+published withdraws it again, so the published carriers, the hosts a redial may reach and the doctor row agree.
+Relays the operator wrote are not discovery: they keep their behaviour and stop only for shutdown. Discovery has
+ONE abort controller, aborted synchronously when shutdown begins: the Kernel aborts every carrier's signal
+before it stops the jobs or any plugin's own cleanup, so that signal (not the plugin's later `onStop`)
+aborts the first read and every retry read, cancels the timer, and nothing is adopted or published afterwards —
+a configured sibling included — whatever a slower teardown lets arrive. Every read keeps `cache: 'no-store'`.
 
-The same two guards apply to the **first** read, not only to the retries: an answer that arrives after the
-daemon stopped is dropped, and a relay written to `config/connections.yaml` during that read (`enabled: false`
-included) wins over the answer. In a **mixed** list (a configured relay beside a `source: discovery` entry)
+The same gate applies to the **first** read, not only to the retries: an answer that arrives after
+shutdown began is dropped and publishes nothing, and a change to the relay list in `config/connections.yaml` during that read
+(`enabled: false` included) wins over the answer. In a **mixed** list (a configured relay beside a `source: discovery` entry)
 a recovery never disturbs a relay that is already running — it is not restarted, not re-reported as inactive,
 and not displaced. If the recovered address turns out to be the configured one, the **configured relay
 keeps running and stays published** and only the discovered entry is refused, with the duplicate-rendezvous
