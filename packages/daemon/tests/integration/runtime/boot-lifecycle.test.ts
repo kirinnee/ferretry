@@ -6852,11 +6852,11 @@ describe('daemon boot lifecycle', () => {
             readonly discovered: () => string | undefined;
           }
         | undefined;
-      const underlying = await worldAt(home, OS_CHOSEN_PORT, async () => await stopped);
       let release = (): void => {};
       const stopped = new Promise<void>(resolve => {
         release = resolve;
       });
+      const underlying = await worldAt(home, OS_CHOSEN_PORT, async () => await stopped);
       const world = {
         ...underlying,
         createPairing: async (...args: Parameters<typeof underlying.createPairing>) => {
