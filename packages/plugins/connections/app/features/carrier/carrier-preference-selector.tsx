@@ -18,18 +18,26 @@
 
 import { Check } from 'lucide-react';
 import { useId, useState } from 'react';
-import { CARRIER_PREFERENCE_LABEL, CARRIER_PREFERENCES, type CarrierPreference } from '../../lib/carrier-preference.ts';
+import {
+  CARRIER_PREFERENCE_LABEL,
+  CARRIER_SETTINGS,
+  type CarrierSetting,
+  DEFAULT_SETTING_LABEL,
+} from '../../lib/carrier-preference.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { TunnelStatusView } from '../../../contract/index.ts';
 type TunnelSwitchState = { readonly kind: 'unknown' } | { readonly kind: 'known'; readonly view: TunnelStatusView };
 import { Button } from '../../shell/primitives.tsx';
 
 /** What each preference does, in one line. WebRTC's says the relay only introduces — §15's own words. */
-const CARRIER_PREFERENCE_DESCRIPTION: Readonly<Record<CarrierPreference, string>> = {
+const CARRIER_PREFERENCE_DESCRIPTION: Readonly<Record<CarrierSetting, string>> = {
+  default:
+    'Through a relay. If the relay can’t be reached, this device uses the direct connection it was paired over, and says so.',
   auto: 'Direct first, then WebRTC, then a Cloudflare tunnel, then a relay — whichever answers.',
   webrtc: 'Peer to peer. The relay is used only to introduce the two ends.',
   tunnel: 'Through this machine’s Cloudflare tunnel, and nothing else.',
-  relay: 'Through a relay — the machine’s own, or Ferretry’s hosted one. The default.',
+  relay:
+    'Through a relay — the machine’s own, or Ferretry’s hosted one — and nothing else, even when it can’t be reached.',
 };
 
 /** What a selector needs to know about one machine to say what each option would do. */
@@ -85,14 +93,14 @@ const TUNNEL_OFFER_DETAIL =
 const TUNNEL_OFF_NOTE = 'Off for this machine — tunnels are opt-in.';
 
 /** The preferences that walk a tunnel, and so are worth turning one on for. */
-const walksTunnel = (preference: CarrierPreference): boolean => preference === 'tunnel' || preference === 'auto';
+const walksTunnel = (preference: CarrierSetting): boolean => preference === 'tunnel' || preference === 'auto';
 
 /** Said under WebRTC only in a build with no dialer. */
 const WEBRTC_UNAVAILABLE_NOTE = 'WebRTC isn’t available in this build yet.';
 
 export interface CarrierPreferenceSelectorProps {
-  readonly value: CarrierPreference;
-  readonly onChange: (preference: CarrierPreference) => void;
+  readonly value: CarrierSetting;
+  readonly onChange: (setting: CarrierSetting) => void;
   readonly availability: CarrierPreferenceAvailability;
   /** The group's visible name: "Connection preference", or the machine's name in a list of machines. */
   readonly legend: string;
@@ -100,7 +108,7 @@ export interface CarrierPreferenceSelectorProps {
   readonly legendHidden?: boolean;
 }
 
-const noteFor = (preference: CarrierPreference, availability: CarrierPreferenceAvailability): string | undefined => {
+const noteFor = (preference: CarrierSetting, availability: CarrierPreferenceAvailability): string | undefined => {
   if (preference === 'webrtc' && !availability.webrtc) return WEBRTC_UNAVAILABLE_NOTE;
   if (preference === 'tunnel') return availability.tunnel?.off === true ? TUNNEL_OFF_NOTE : availability.tunnelNote;
   return undefined;
@@ -181,7 +189,7 @@ export function CarrierPreferenceSelector({
       data-carrier-preference={value}
     >
       <legend className={legendHidden ? 'sr-only' : 'mb-1 text-ui font-semibold text-fg'}>{legend}</legend>
-      {CARRIER_PREFERENCES.map(preference => {
+      {CARRIER_SETTINGS.map(preference => {
         const checked = preference === value;
         const note = noteFor(preference, availability);
         const noteId = `${name}-${preference}-note`;
@@ -206,7 +214,7 @@ export function CarrierPreferenceSelector({
               {...(note === undefined ? {} : { 'aria-describedby': noteId })}
             />
             <span className="flex w-full items-center gap-2 text-ui font-semibold">
-              {CARRIER_PREFERENCE_LABEL[preference]}
+              {preference === 'default' ? DEFAULT_SETTING_LABEL : CARRIER_PREFERENCE_LABEL[preference]}
               {checked ? <Check size={14} className="ml-auto shrink-0" aria-hidden="true" /> : null}
             </span>
             <span className="text-meta leading-tight text-muted">{CARRIER_PREFERENCE_DESCRIPTION[preference]}</span>

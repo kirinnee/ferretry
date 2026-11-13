@@ -51,6 +51,8 @@ export async function rig(
     machine: 'laptop',
     deviceId: device.deviceId,
     address: DIRECT,
+    // A pairing made by the current code over the direct address: the positive mark the fallback requires.
+    pairedOver: 'direct',
     carriers: [...carriers],
     pairedAt: 1,
     lastSelectedAt: 1,

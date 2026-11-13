@@ -6,8 +6,10 @@ import manifest from '../manifest.ts';
 import { CarrierRouter } from './carriers/router.ts';
 import { bundledRelayDirectory, documentRelayDiscovery } from './discovery/hosted-relay.ts';
 import { ActiveCarrierCard } from './features/carrier/active-carrier-card.tsx';
+import { DeviceConnectionPanel } from './features/carrier/device-connection-panel.tsx';
+import { relayFallbackView } from './features/carrier/relay-fallback-notice.tsx';
 import { CarrierPreferenceSelector, tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
-import { CarrierPreferenceStore } from './lib/carrier-preference.ts';
+import { CarrierPreferenceStore, settingOf } from './lib/carrier-preference.ts';
 import { watchCarriers } from './lib/carrier-watch.ts';
 import { type CarrierWriteBack, carrierWriteBack } from './lib/carrier-write-back.ts';
 import {
@@ -32,6 +34,8 @@ import { pairingWalk } from './pairing/walk.ts';
 /** What the panel reads: the router's measured choice for one daemon, and its changes. */
 export interface ConnectionMeasurements {
   choice(daemonId: string): ConnectionChoice | undefined;
+  /** The line to say while the paired direct address stands in for an unreachable relay; `undefined` otherwise. */
+  relayFallback?(daemonId: string): string | undefined;
   subscribe(listener: () => void): () => void;
 }
 
@@ -86,6 +90,7 @@ export function buildConnect(
     after: ports.after,
     now: ports.now,
     preference: preferences.preference,
+    chosen: preferences.chosen,
     hostedRelay: discovery.hostedRelay,
     ...(webrtc === undefined ? {} : { webrtc }),
     introduce: daemonId => introducers.request(daemonId),
@@ -120,7 +125,17 @@ export function buildConnect(
   });
   ports.daemons.registerCache({ clearDaemon: daemonId => router.clearDaemon(daemonId) });
   const pairing = pairingWalk({ openSocket: ports.openSocket, after: ports.after, hostedRelay: discovery.hostedRelay });
-  return { router, preferences, discovery, pairing, carrierSets, introducers, tunnelSwitch, webrtc };
+  return {
+    router,
+    preferences,
+    discovery,
+    pairing,
+    carrierSets,
+    introducers,
+    tunnelSwitch,
+    webrtc,
+    daemons: ports.daemons,
+  };
 }
 
 export function buildConnectionsApp(
@@ -185,8 +200,8 @@ export function buildConnectionsApp(
     if (daemonId === undefined) return null;
     return createElement(CarrierPreferenceSelector, {
       legend: 'Connection preference',
-      value: snapshot[daemonId] ?? 'relay',
-      onChange: value => preferences.set(daemonId, value),
+      value: settingOf(snapshot[daemonId]),
+      onChange: value => (value === 'default' ? preferences.reset(daemonId) : preferences.set(daemonId, value)),
       availability: {
         // Without an RTCPeerConnection (a browser that switched WebRTC off) the walk passes WebRTC over untried and
         // says so.
@@ -210,9 +225,16 @@ export function buildConnectionsApp(
       [],
     );
     const choice = useCarrierRtt(measured, webrtc === undefined ? undefined : measureRtt);
-    return createElement(ActiveCarrierCard, { choice, relayAdvertised: carriers.some(c => c.kind === 'relay') });
+    const relayFallback = daemonId === undefined ? undefined : measurements.relayFallback?.(daemonId);
+    return createElement(ActiveCarrierCard, {
+      choice,
+      relayAdvertised: carriers.some(c => c.kind === 'relay'),
+      ...(daemonId === undefined ? {} : { daemon: daemonId }),
+      ...(relayFallback === undefined ? {} : { relayFallback }),
+    });
   }
-  return { panels: { carrier: Panel }, settings: { connection: Preference } };
+  // `connection` is drawn from `shell.deviceSettings` (no machine), never from a machine's half, so this entry draws nothing.
+  return { panels: { carrier: Panel, connection: () => null }, settings: { connection: Preference } };
 }
 
 /**
@@ -255,8 +277,21 @@ export function carrierWriteBackView(
   };
 }
 
+/** This device's Connection panel (Settings › This device): drawn with no machine, over the document's own preference store. */
+function DeviceConnection() {
+  return connect === undefined
+    ? null
+    : createElement(DeviceConnectionPanel, {
+        daemons: connect.daemons,
+        preferences: connect.preferences,
+        webrtc: connect.webrtc !== undefined,
+      });
+}
+
 export default provideToShell(implementApp(manifest, { build: ctx => buildConnectionsApp(ctx) }), {
+  deviceSettings: { connection: DeviceConnection },
   background: {
+    'relay-fallback': relayFallbackView(() => connect?.router),
     'carrier-set': carrierWriteBackView(
       () => connect?.carrierSets,
       () => connect,

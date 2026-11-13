@@ -74,8 +74,12 @@ export interface WalkObserver {
   untried(method: ConnectionMethod, detail: string): void;
   /** A leg failed before the daemon accepted a session over it; the walk tries the next. */
   failed(failure: LegFailure): void;
-  /** The daemon accepted a session over this leg: this is the session's carrier now, and the walk's answer. */
-  committed(method: ConnectionMethod): void;
+  /**
+   * The daemon accepted a session over this leg: this is the session's carrier now, and the walk's answer. Answers a
+   * callback run once when THAT session ends (it closed, was cancelled, or its carrier dropped), so the router knows
+   * which accepted sessions are still live.
+   */
+  committed(method: ConnectionMethod): (() => void) | undefined;
   /** Every leg failed (or there were none): the session ends with this close. */
   exhausted(failures: readonly LegFailure[]): { readonly code: number; readonly reason: string };
   /** A request on an accepted session was lost because its carrier ended under this browser: it stopped carrying. */
@@ -111,6 +115,11 @@ const once = (deps: CarrierSocketDependencies, delayMs: number, run: () => void)
 export interface WalkScope {
   /** Why this walk no longer describes the pairing's current entry, or `undefined` while it still does. */
   stale(): string | undefined;
+  /**
+   * Why this walk's sessions may no longer be counted: the pairing was unpaired, re-paired or given a new preference —
+   * NOT a republish. A session accepted after a republish, on a carrier the new set still names, is still the pairing's.
+   */
+  pairingEnded(): string | undefined;
   /** Registers one live session socket so the router can close it; answers the deregistration. */
   track(socket: ScopedSocket): () => void;
 }
@@ -125,7 +134,7 @@ export interface ScopedSocket {
   checkLiveness(): void;
 }
 
-const UNSCOPED: WalkScope = { stale: () => undefined, track: () => () => undefined };
+const UNSCOPED: WalkScope = { stale: () => undefined, pairingEnded: () => undefined, track: () => () => undefined };
 
 /**
  * One walk over `steps`, shared by every fresh session its unsent failures open: a leg tried by one session is never
@@ -213,6 +222,8 @@ class WalkingSocket implements ScopedSocket {
    * the drop), and the next session redials it first.
    */
   #droppedWith: number | undefined;
+  /** Told by the observer at acceptance: run once when this accepted session ends. */
+  #onEnded: (() => void) | undefined;
   readonly #untrack: () => void;
 
   constructor(
@@ -437,9 +448,10 @@ class WalkingSocket implements ScopedSocket {
     this.#cancelAcceptance = undefined;
     this.#phase = 'accepted';
     this.#servingSince = this.deps.now();
-    // A stale walk publishes nothing: its entry was replaced, or its session is being closed under it.
-    if (this.walk.scope.stale() !== undefined) return;
-    this.walk.observer.committed(this.#method);
+    // The walk of an ended pairing publishes nothing, nor does a session being closed under it. A walk whose entry a
+    // republish replaced is only stale (it dials nothing more): the session it carried is still counted.
+    if (this.walk.scope.pairingEnded() !== undefined) return;
+    this.#onEnded = this.walk.observer.committed(this.#method);
   }
 
   /** The dial for a fresh session on the walk's next leg, when this session ended unsent and the walk is current. */
@@ -562,6 +574,9 @@ class WalkingSocket implements ScopedSocket {
     if (this.#ended) return;
     this.#ended = true;
     this.#untrack();
+    const onEnded = this.#onEnded;
+    this.#onEnded = undefined;
+    onEnded?.();
     this.events.onClose(code, reason);
   }
 }

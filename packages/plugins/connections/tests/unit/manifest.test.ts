@@ -32,10 +32,14 @@ describe('connections manifest', () => {
     expect(manifest.hooks.takes.some(take => take.hook.name === 'doctor.checks')).toBe(true);
   });
   test('R225 first run has no carrier chooser: Connections offers a machine tab and a status panel, nothing on the onboarding rail', () => {
-    // What Connections contributes to any screen: one settings tab (a machine already paired) and one status panel.
+    // What Connections contributes to any screen: one settings tab (a machine already paired), one status panel and a device-level Connection panel.
     expect(manifest.ui.settings).toHaveLength(1);
     expect(manifest.ui.settings[0]).toMatchObject({ id: 'connection' });
-    expect(manifest.ui.panels).toHaveLength(1);
+    // The status panel, and this device's own Connection panel (device settings: no machine needed to change the carrier).
+    expect(manifest.ui.panels.map(panel => `${panel.slot}:${panel.id}`)).toEqual([
+      'daemon.status:carrier',
+      'device.settings:connection',
+    ]);
     expect(JSON.stringify(manifest.ui)).not.toMatch(/onboarding|first-run|setup/iu);
     // And the first-run screen, in the package that owns it, never mounts the chooser: it states the carrier order.
     const onboarding = join(import.meta.dir, '..', '..', '..', 'onboarding', 'app');

@@ -257,7 +257,7 @@ describe('the background view and the clients the router asks through', () => {
     const quietList = storedList([DIRECT]);
     const quiet = connectWith(quietList, undefined, tunnelOnly).connect;
     const reason = await walkFailure(quiet, quietList);
-    expect(reason).toContain('Tunnel only: ');
+    expect(reason).toContain('Tunnel only — ');
     expect(reason).not.toContain(TUNNEL_SWITCHED_OFF);
   });
 });

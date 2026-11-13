@@ -131,6 +131,23 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
       (`preview-logins-deletion.test.ts`): the unrelated runtime still loads, no unrelated login or runtime is held.
       The whole-artifact scan (every `<HOME>/.ferretry-v5*` path, a passing and a throwing `prepare`) finds no comment, key,
       path or token marker in `usage.yaml` or its accepted-config snapshot beside a credential-shaped comment on the budget.
+14. **A paired device on a same-commit daemon opens the fleet, not the reload block** (preview rehearsal #F3708 step 3c: an
+    app and a daemon of one commit, a device paired, and every screen on "Reload to get the new app."):
+    `packages/app/tests/integration/real-registry/paired-device-opens.test.ts` boots the REAL daemon over the real generated
+    registry (all 31 packages, the hashes `fyd` reads), pairs a full device and a limited one over the real direct carrier,
+    and feeds the app's own `standings()` / `wholeDaemonBlocked()` the inventory the daemon answered, over the app's real
+    compiled registry. Every core piece must be allowed, no full-screen line or reason may show, a full device must see every
+    package, and a limited device must still lose what its grants do not reach (never a core piece). The two registries
+    must also carry one effective hash per package. The reading side is held by
+    `packages/app/tests/unit/client/inventory-reread.test.ts` (a plugin list that failed to read is asked again, not left as
+    the verdict) and `packages/app/tests/unit/shell/whole-daemon-line.test.ts` (a failed read is not the "reload" sentence;
+    a different core contract names the piece). The same file then runs the **registered production Connections carrier
+    router with its real default preference** (`registeredConnect` over the real generated registry, not `carriers: []`):
+    the unchosen default falls back to the address the device paired over when no relay is discovered or the relay does not
+    answer, says so, and flips back when the relay answers; a chosen "Relay only" stays blocked with the relay named as the
+    cause and Settings › This device › Connection reachable from the block; a record without the positive "paired over direct" mark (every older record, a
+    relayed pairing) has no direct address to fall back to, and the fallback notice holds while any lane of the same app
+    still sends direct.
 
 ## After merge
 
