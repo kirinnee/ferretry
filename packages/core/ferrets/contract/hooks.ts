@@ -1,0 +1,308 @@
+import { defineHook, type FerretId } from '@ferretry/kernel/contract';
+import { z } from 'zod';
+import { CompactAtSchema } from './view/compact-at.ts';
+import {
+  FerretIdSchema,
+  FerretRoleSchema,
+  FerretStateSchema,
+  HarnessKeySchema,
+  LoginKindKeySchema,
+  RunnerKeySchema,
+} from './ids.ts';
+import type {
+  Harness,
+  LaunchPartSource,
+  LoginKind,
+  OpeningAttachmentsSource,
+  Runner,
+  SitrepLineSource,
+} from './kinds.ts';
+
+/** The hooks Ferrets offers (§3.5 table). Taker lists on the security path are reviewed changes. */
+
+export const Harnesses = defineHook('harnesses', {
+  mode: 'provide',
+  key: HarnessKeySchema,
+  value: z.custom<Harness>(),
+  takers: ['claude-code', 'codex'],
+});
+
+export const Runners = defineHook('runners', {
+  mode: 'provide',
+  key: RunnerKeySchema,
+  value: z.custom<Runner>(),
+  takers: ['terminals'],
+});
+
+export const Logins = defineHook('logins', {
+  mode: 'provide',
+  key: LoginKindKeySchema,
+  value: z.custom<LoginKind>(),
+  takers: ['logins'],
+});
+
+/** Lessons, MCP, Skills, Shells add to every launch. Any plugin may take it. */
+export const LaunchParts = defineHook('launch.parts', { mode: 'contribute', item: z.custom<LaunchPartSource>() });
+
+/** The one key `opening.attachments` is provided under: a start's attachments have exactly one owner. */
+export const OPENING_ATTACHMENTS_KEY = 'opening';
+
+/**
+ * The owner of attachments plans the files a start was given (`fy start -f`). On the security path: its answer decides
+ * the bytes written into the agent-readable `attachments/` folder and the words of turn-001, so ONE named plugin provides
+ * it and a second taker refuses the build. With no provider a start that carries attachments is refused rather than
+ * started without them.
+ */
+export const OpeningAttachments = defineHook('opening.attachments', {
+  mode: 'provide',
+  key: z.literal(OPENING_ATTACHMENTS_KEY),
+  value: z.custom<OpeningAttachmentsSource>(),
+  takers: ['conversation'],
+});
+
+/** What `start.decide` takers are asked: a ferret is about to start. The first no wins, with its reason. */
+export const StartDecideInputSchema = z.strictObject({
+  ferret: FerretIdSchema,
+  name: z.string().min(1),
+  role: FerretRoleSchema,
+  parent: FerretIdSchema.optional(),
+  pack: z.string().optional(),
+  harness: HarnessKeySchema,
+  runtime: z.string().optional(),
+  login: z.string().optional(),
+  folder: z.string().min(1),
+  /** Who asked for the start. */
+  by: z.enum(['owner', 'ferret', 'pack', 'board', 'warden', 'resume']),
+  /** The model the start NAMED (`options.model`); absent when it named none (the harness then picks its own). */
+  model: z.string().min(1).optional(),
+  /** The start asked for the harness's fast mode (`options.fast`); absent when it did not. */
+  fast: z.boolean().optional(),
+  /**
+   * The compaction trigger the START named (`options.compactAt`); absent when it named none, and ALWAYS absent on a resume
+   * (a relaunch falls back to Auto for a value its model cannot honour, as v4 did). A taker that knows the model's window
+   * refuses a number larger than it before anything is written, as v4's start did.
+   */
+  compactAt: CompactAtSchema.optional(),
+});
+export type StartDecideInput = z.infer<typeof StartDecideInputSchema>;
+
+/**
+ * The refusal codes a `start.decide` taker may attach to its `no`: CLOSED, declared here, so a plugin can never mint a
+ * code or a status. `unservable_model` is a start that asked for something its model cannot give (fast mode on a model
+ * without it); Ferrets answers it `409 unservable_model`. A code outside this list reads as a plain `refused`.
+ */
+export const StartRefusalCodeSchema = z.enum(['unservable_model']);
+export type StartRefusalCode = z.infer<typeof StartRefusalCodeSchema>;
+
+/**
+ * Board, Packs, Usage may refuse a start (a budget, a pause, a card rule). Packs' OWN answer is also a helper's
+ * admission (ruling #43): Ferrets starts a child only on it. No other taker can pose as Packs, because plugin ids are
+ * unique (the graph refuses a duplicate) and the registry is generated at build time.
+ */
+export const StartDecide = defineHook('start.decide', { mode: 'decide', input: StartDecideInputSchema });
+
+/**
+ * What `auto-resume.decide` takers are asked (W2-a, RULING #27 Q5) before the daemon spends anything bringing back a
+ * ferret a host restart took down. Two questions, each the one today's pass asked of the account model:
+ *
+ * - `switch`: is the machine's "Auto-resume after restart" on (today's `machine.autoResume`)? Asked once per pass,
+ *   before any ferret. No yes: the pass resumes nothing and forgets what it was owed, as today's switch off did.
+ * - `runtime`: can the runtime this ferret ran on serve a launch right now (today's `resolveStartAccount`)? Asked per
+ *   ferret, right before its resume. No yes: that ferret is skipped with the reason, and stays down.
+ */
+export const AutoResumeDecideInputSchema = z.discriminatedUnion('ask', [
+  z.strictObject({ ask: z.literal('switch') }),
+  z.strictObject({
+    ask: z.literal('runtime'),
+    ferret: FerretIdSchema,
+    harness: HarnessKeySchema,
+    runtime: z.string().min(1),
+  }),
+]);
+export type AutoResumeDecideInput = z.infer<typeof AutoResumeDecideInputSchema>;
+
+/**
+ * Runtimes answers whether an automatic resume may spend (W2-a). It FAILS CLOSED, unlike `start.decide`: Ferrets
+ * resumes only on Runtimes' OWN yes (`AUTO_RESUME_ANSWERER`); no taker, a failed, hung, throwing or garbage answer, or
+ * a yes from any other plugin is a no. The wait is the kernel's decide bound, on the kernel clock.
+ */
+export const AutoResumeDecide = defineHook('auto-resume.decide', {
+  mode: 'decide',
+  input: AutoResumeDecideInputSchema,
+});
+
+/** Conversation and Board add sitrep lines. */
+export const SitrepLines = defineHook('sitrep.lines', { mode: 'contribute', item: z.custom<SitrepLineSource>() });
+
+export const FerretChangedPayloadSchema = z.strictObject({
+  ferret: FerretIdSchema,
+  state: FerretStateSchema,
+  previous: FerretStateSchema.optional(),
+  /** What changed besides the state. */
+  change: z.enum(['started', 'state', 'stopped', 'renamed', 'moved', 'archived', 'removed']),
+});
+export type FerretChangedPayload = z.infer<typeof FerretChangedPayloadSchema>;
+
+/** What `ferret.stopping` says: a stop of this ferret is being attempted. */
+export const FerretStoppingPayloadSchema = z.strictObject({ ferret: FerretIdSchema });
+export type FerretStoppingPayload = z.infer<typeof FerretStoppingPayloadSchema>;
+
+/**
+ * A stop of this ferret is being attempted: said BEFORE anything that can fail (a missing harness or runner, a harness
+ * stop that throws), so it is heard whether or not the stop then succeeds. Conversation zeroes the ferret's decrypted
+ * attachments on it (today's `releasingAttachmentsOnStop`, a `finally` around the stop): a half-stopped ferret holding
+ * a decrypted document is the case worth failing closed for. `ferret.changed` still follows a stop that succeeds.
+ */
+export const FerretStopping = defineHook('ferret.stopping', { mode: 'observe', payload: FerretStoppingPayloadSchema });
+
+/** Updates, Warden, Tidy hear that a ferret changed, after Ferrets' write. */
+export const FerretChanged = defineHook('ferret.changed', { mode: 'observe', payload: FerretChangedPayloadSchema });
+
+/**
+ * A ferret was started (its record written, its launch under way): who it is, where it runs, who started it and the
+ * brief it was given. Additive (lead decision D2 #12), for Board's session-start card path (today's `SessionCards.open`
+ * and the `--card` handover). `card` is the existing card the start named (`StartOptions.card`).
+ */
+export const FerretStartedPayloadSchema = z.strictObject({
+  ferret: FerretIdSchema,
+  name: z.string().min(1),
+  role: FerretRoleSchema,
+  parent: FerretIdSchema.optional(),
+  pack: z.string().optional(),
+  folder: z.string().min(1),
+  by: z.enum(['owner', 'ferret', 'pack', 'board', 'warden']),
+  /** The prompt the ferret was started with: its brief. Absent for a start with none (an interactive terminal). */
+  brief: z.string().min(1).optional(),
+  /** The ownership label given to start (`start --label`). */
+  label: z.string().min(1).optional(),
+  card: z.string().min(1).optional(),
+});
+export type FerretStartedPayload = z.infer<typeof FerretStartedPayloadSchema>;
+
+/** Board hears that a ferret started, after Ferrets wrote its record (observe; a taker never fails a start). */
+export const FerretStarted = defineHook('ferret.started', { mode: 'observe', payload: FerretStartedPayloadSchema });
+
+// ─── what keeps a finished ferret live (the session archive, docs/session-archive.md) ──────────────────────────────
+
+/**
+ * One card as the archive's keep rule reads it (Board's answer): who owns and holds it, whether it was dropped, and
+ * the category of its lane as Board resolved it. A category Ferrets does not know, or none, reads as "in flight".
+ * `owner` and `assignee` are FERRET IDS, never callsigns: the rule matches them against the ids it is deciding about,
+ * so a callsign would keep nobody.
+ */
+export interface ArchiveCardStanding {
+  /** The ferret id that owns the card (never a callsign). */
+  readonly owner: FerretId;
+  /** The ferret id the card is assigned to (never a callsign), or `null` for nobody. */
+  readonly assignee: FerretId | null;
+  readonly dropped: boolean;
+  readonly category: string | undefined;
+}
+
+/**
+ * Board's whole answer exactly as {@link ArchiveCardStanding} types it, which Ferrets parses at its boundary: anything
+ * else (an owner that is not a ferret id, a `dropped` that is not a boolean, an extra key) is unreadable, never a guess,
+ * and one bad standing makes the whole answer unreadable. Board parses its own answer with it too, so the two cannot drift.
+ */
+export const ArchiveCardStandingsSchema = z.array(
+  z.strictObject({
+    owner: FerretIdSchema,
+    assignee: FerretIdSchema.nullable(),
+    dropped: z.boolean(),
+    category: z.string().optional(),
+  }),
+);
+
+/**
+ * A fact another plugin owns that keeps a finished ferret in the live set. Ferrets imports no plugin, so each owner
+ * contributes its half: Board says which ferrets own or hold a card still in flight, Agenda says whether a ferret's own
+ * board holds an item still open. A source that throws, or that nobody contributes, keeps every ferret live.
+ */
+export type ArchiveKeepSource =
+  | { readonly kind: 'board'; cards(): Promise<readonly ArchiveCardStanding[]> }
+  | { readonly kind: 'agenda'; hasOpenItem(ferret: FerretId): Promise<boolean> };
+
+/** Whether a contributed item is a keep source at all: a known kind with its answering function. */
+const isArchiveKeepSource = (value: unknown): value is ArchiveKeepSource => {
+  if (typeof value !== 'object' || value === null) return false;
+  const item = value as { readonly kind?: unknown; readonly cards?: unknown; readonly hasOpenItem?: unknown };
+  if (item.kind === 'board') return typeof item.cards === 'function';
+  if (item.kind === 'agenda') return typeof item.hasOpenItem === 'function';
+  return false;
+};
+
+/**
+ * Board and Agenda add what keeps a ferret live. FAIL SAFE: the archive runs only while BOTH kinds are contributed
+ * (an absent answer is "keep live"), and a source that fails keeps every ferret it was asked about. An item that is
+ * not a keep source is left out by the kernel, which reads as that kind not answering; and every ANSWER a source gives
+ * is parsed by Ferrets (`daemon/modules/archive.ts`), so an answer of the wrong shape keeps every ferret too.
+ */
+export const ArchiveKeeps = defineHook('session.archive-keeps', {
+  mode: 'contribute',
+  item: z.custom<ArchiveKeepSource>(
+    isArchiveKeepSource,
+    'a keep source is a board with cards() or an agenda with hasOpenItem()',
+  ),
+});
+
+/** The project folders a governed device may start a ferret in without terminal access (absolute paths). */
+export interface LaunchRootsSource {
+  roots(): Promise<readonly string[]>;
+}
+
+/** The one key `launch.roots` is provided under. */
+export const LAUNCH_ROOTS_KEY = 'projects';
+
+/**
+ * Which folders count as known projects. On the security path: what it lists decides whether a governed device's start
+ * is an ordinary act or terminal access (`terminal.use`), so ONE named plugin provides it. With no provider the list is
+ * empty and every governed start asks for `terminal.use` (narrower, never wider); a throw is a 503.
+ */
+export const LaunchRoots = defineHook('launch.roots', {
+  mode: 'provide',
+  key: z.literal(LAUNCH_ROOTS_KEY),
+  value: z.custom<LaunchRootsSource>(),
+  takers: ['projects'],
+});
+
+/** What a start needs of the runtime it names: the harness it runs and the login it spends. */
+export type RuntimeStartResolution =
+  | { readonly ok: true; readonly harness: z.infer<typeof HarnessKeySchema>; readonly login: string }
+  | { readonly ok: false; readonly sentence: string };
+
+/** Whether a login may be spent by a launch now: yes, or the plain sentence naming the login and why not. */
+export type LoginStartResolution = { readonly ok: true } | { readonly ok: false; readonly sentence: string };
+
+/** Runtimes' answer to "what does this runtime start with?" (`fy new --runtime`, the app's new-ferret). */
+export interface RuntimeStartSource {
+  /**
+   * Whether the login NAMED (`--login`, or the one a stored record holds) may be spent now: a login that is switched off or
+   * over its spend budget is refused here, so it can never be spent whether it is named directly or reached through a runtime.
+   */
+  login(login: string): Promise<LoginStartResolution>;
+  /** The runtime NAMED `runtime`, resolved; or the plain sentence saying why it cannot serve a launch now. */
+  resolve(runtime: string): Promise<RuntimeStartResolution>;
+}
+
+/** The one key `runtime.start` is provided under: a runtime has exactly one owner. */
+export const RUNTIME_START_KEY = 'runtimes';
+
+/**
+ * How long Ferrets waits for Runtimes' `runtime.start` answer (`resolve` or `login`) before it refuses. A provide hook has
+ * no kernel bound of its own (the decide hooks' is 200 ms, `defineHook`'s default, and not exported), and an answer reads
+ * the login list, so this is longer than a decide's; it is still short enough that a resolver that never settles cannot
+ * hold a ferret's lifecycle queue (a resume that waits on it holds up the stop behind it).
+ */
+export const RUNTIME_START_DEADLINE_MS = 5_000;
+
+/**
+ * Which harness and login a start that names a RUNTIME spends. On the security path: it decides which credential a
+ * launch holds, so ONE named plugin provides it. Ferrets cannot reach Runtimes by port (Runtimes needs Ferrets), so it
+ * asks through this hook; with no provider a start that names a runtime is refused rather than launched signed out.
+ */
+export const RuntimeStart = defineHook('runtime.start', {
+  mode: 'provide',
+  key: z.literal(RUNTIME_START_KEY),
+  value: z.custom<RuntimeStartSource>(),
+  takers: ['runtimes'],
+});

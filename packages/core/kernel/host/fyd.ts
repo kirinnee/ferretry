@@ -1,0 +1,150 @@
+/**
+ * `fyd` — the daemon entry (§8: at most 150 lines, names no subsystem; `host-files`). Everything a plugin adds comes
+ * from the generated registry; everything IO from the kernel's adapters.
+ */
+import { clearYamlLogSwitches } from '@ferretry/std/yaml';
+import { appendFileSync } from 'node:fs';
+import { chmod, rm, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import type { DaemonImplementation } from '../manifest/implement.ts';
+import pkg from '../package.json' with { type: 'json' };
+import { toolEnvironment } from './adapters/process.ts';
+import { answerArguments, EXIT_USAGE } from './arguments.ts';
+import { PRODUCT_BINARIES } from './binaries.ts';
+import { runCheck } from './check-run.ts';
+import { bootLog } from './boot-log.ts';
+import { bootHost } from './host.ts';
+import { parseBackgroundDelay } from './jobs.ts';
+import { listenLocal } from './listener.ts';
+import { holdUntilStopped, startedByLaunchd } from './refusal-hold.ts';
+import { filterByLevel, renderSettings, resolveSettings } from './settings.ts';
+import { stopOnSignalReporting } from './stop-signals.ts';
+import { bootTimings } from './session/timings.ts';
+import { fileLogSink, realAdapters } from './wiring.ts';
+
+interface GeneratedRegistry {
+  readonly daemonImplementations: readonly DaemonImplementation[];
+  readonly contractHashes?: Readonly<Record<string, { readonly effective: string; readonly member?: string }>>;
+}
+
+/** The manifest's version, which `scripts/release/bump.sh` stamps; the JSON import is bundled into the compiled binary. */
+const VERSION = pkg.version;
+/** The client's binary name: the `bin` key of `packages/cli/package.json` (see `binaries.ts`), unless the operator names it. */
+const BINARY = process.env.FY_BINARY_NAME ?? PRODUCT_BINARIES.client;
+
+async function main(): Promise<number> {
+  // FIRST: the yaml library prints what it parses when these are set, and a config may hold a credential.
+  clearYamlLogSwitches();
+  // The command line is answered BEFORE anything with a side effect: a query (--version, --help) stays a query.
+  const usage = { daemonName: PRODUCT_BINARIES.daemon, clientName: BINARY, version: VERSION };
+  const answer = answerArguments(process.argv.slice(2), usage);
+  if (answer.kind === 'print' || answer.kind === 'refuse') {
+    (answer.kind === 'print' ? process.stdout : process.stderr).write(`${answer.text}\n`);
+    return answer.exitCode;
+  }
+  if (answer.overrides.configFile !== undefined) {
+    process.stderr.write(
+      `${usage.daemonName}: --config is not an option in 5.0: configuration is read from $FY_HOME/config/ (one file per building block), so there is no single document to point at. Remove --config from the unit file or script that passes it.\n`,
+    );
+    return EXIT_USAGE;
+  }
+  const resolved = resolveSettings(process.env, answer.overrides, homedir());
+  if (resolved.kind === 'refused') {
+    process.stderr.write(`${usage.daemonName}: ${resolved.sentence}\n`);
+    return EXIT_USAGE;
+  }
+  if (answer.kind === 'print-config') {
+    for (const line of renderSettings(resolved.settings)) process.stdout.write(`${line}\n`);
+    return 0;
+  }
+  const home = resolved.settings.home.value;
+  const port = resolved.settings.port.value;
+  if (answer.kind === 'check') {
+    // The registry is read by `--check` (and not at boot) only so the plugins' preflights, selftests and workers can
+    // be asked, and only AFTER the home and address verdict is printed: a module that fails to load costs a line.
+    return await runCheck({
+      home,
+      host: resolved.settings.host.value,
+      port,
+      daemonName: usage.daemonName,
+      version: VERSION,
+      loadImplementations: async () =>
+        ((await import('../src/generated/plugins.ts')) as unknown as GeneratedRegistry).daemonImplementations,
+    });
+  }
+  // §9.3: nothing is written before the home is decided (a v4 home has a `logs/fyd.log`): dropped until `onHomeOpened`.
+  const log = bootLog(line => {
+    try {
+      appendFileSync(`${home}/logs/fyd.log`, line, { mode: 0o600 });
+    } catch {
+      // `logs/` is not there
+    }
+  });
+  const sink = filterByLevel(fileLogSink(log.append), resolved.settings.logLevel.value);
+  // R247: read once; a value that would lengthen anything refuses the boot, a shortened one is said once.
+  const timings = bootTimings(process.env.FYD_TEST_TIMINGS, line => {
+    process.stderr.write(`fyd: ${line}\n`);
+    sink({ level: 'warn', scope: 'kernel', message: line });
+  });
+  if (!timings.ok) {
+    process.stderr.write(`${timings.sentence}\n`);
+    return 78;
+  }
+  let backgroundDelayMs: number;
+  try {
+    backgroundDelayMs = parseBackgroundDelay(process.env.FYD_BACKGROUND_DELAY_SECONDS);
+  } catch (error) {
+    process.stderr.write(`fyd: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 78;
+  }
+  // Written by `scripts/gen/registries.ts` (git-ignored, regenerated by install, build, test and typecheck). The path is
+  // a LITERAL: `bun build --compile` bundles only an import it can read, so a path held in a variable leaves the
+  // registry out of the binary and `fyd` cannot start.
+  const registry = (await import('../src/generated/plugins.ts')) as unknown as GeneratedRegistry;
+  const outcome = await bootHost({
+    home,
+    version: VERSION,
+    binaries: { ...PRODUCT_BINARIES, client: BINARY },
+    implementations: registry.daemonImplementations,
+    adapters: realAdapters(home, sink, {
+      binary: BINARY,
+      release: VERSION,
+      childEnv: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: homedir() },
+      toolEnv: toolEnvironment(process.env),
+    }),
+    contractHash: (id, surface) =>
+      (surface === 'member' ? registry.contractHashes?.[id]?.member : registry.contractHashes?.[id]?.effective) ??
+      'unhashed',
+    timings: timings.timings,
+    onHomeOpened: log.open,
+    backgroundDelayMs,
+    pid: process.pid,
+    listen: async host =>
+      await listenLocal(host, {
+        home,
+        port,
+        hostname: resolved.settings.host.value,
+        pid: process.pid,
+        version: VERSION,
+        write: (path, text) => writeFile(path, text, { mode: 0o600 }),
+        chmod: (path, mode) => chmod(path, mode),
+        remove: path => rm(path, { force: true }),
+      }),
+  });
+  if (outcome.kind === 'refused') {
+    process.stderr.write(`${outcome.sentence}\n`);
+    // Under launchd an exit is a respawn every 10 s, so a refused home is held idle instead (see `holdUntilStopped`).
+    return outcome.cause === 'home' && startedByLaunchd(process.env) ? await holdUntilStopped(78) : 78;
+  }
+  const { host } = outcome;
+  for (const line of await host.doctor()) if (line.state === 'fail') process.stderr.write(`fyd: ${line.detail}\n`);
+  process.stderr.write(`fyd ${VERSION} ready (${host.identity.fingerprint.slice(0, 12)})\n`);
+  // The stop is bounded (jobs.ts, stop-signals.ts); a job that ignored its signal never keeps the process alive.
+  await stopOnSignalReporting(
+    () => host.stop(),
+    line => process.stderr.write(line),
+  );
+  process.exit(0);
+}
+
+process.exitCode = await main();

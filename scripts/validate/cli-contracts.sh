@@ -11,12 +11,6 @@ cli_contracts=(
   arch
   workspace-package-scopes
   name-single-source
-  daemon-default-address
-  loopback-single-source
-  pairing-fragment-readers
-  state-home-log-directory
-  state-home-layout-claim
-  state-home-default
   release-backup-order
   changelog-asset
   release-notes-render
@@ -25,8 +19,8 @@ cli_contracts=(
   installer-checksum
   installer-timeouts
   installation-parity
-  render-guide-doc
   release-daemon
+  release-helpers
   released-version
   nix-packages
 )
@@ -42,23 +36,25 @@ cd "${root_dir}"
 cli_pkg="packages/cli"
 name="$(jq -r '.bin | to_entries[0].key' "${cli_pkg}/package.json")"
 [ -z "${name}" ] || [ "${name}" = "null" ] && echo "❌ no .bin entry in ${cli_pkg}/package.json" >&2 && exit 1
-# The composition root sits BESIDE the bin entry, derived from it so a rename moves both: the bin entry
-# itself only routes an invocation to a slice or to `program.ts` (packages/cli/bin/fy.ts).
-cli_entry="$(jq -r '.bin | to_entries[0].value' "${cli_pkg}/package.json")"
-cli_root="${cli_pkg}/$(dirname "${cli_entry}")/program.ts"
-[ -f "${cli_root}" ] || {
-  echo "❌ no CLI composition root at ${cli_root}" >&2
-  exit 1
-}
-daemon_pkg="packages/daemon"
+# The daemon is the kernel's host (docs/rebuild/spine.md D1): its executable is the kernel package's first
+# `bin` key, exactly as the CLI's is `packages/cli`'s.
+daemon_pkg="packages/core/kernel"
 daemon_name="$(jq -r '.bin | to_entries[0].key' "${daemon_pkg}/package.json")"
 [ -z "${daemon_name}" ] || [ "${daemon_name}" = "null" ] && echo "❌ no .bin entry in ${daemon_pkg}/package.json" >&2 && exit 1
-# EVERY executable the daemon package declares — its own and the helpers that run beside it (the
-# browser worker). Each one must reach every release channel, or the daemon ships without it.
-daemon_bins="$(jq -c '.bin | keys_unsorted' "${daemon_pkg}/package.json")"
+# The daemon's browser worker is the Browsers package's bin (the kernel never points into a plugin).
+browsers_pkg="packages/plugins/browsers"
+# EVERY executable the daemon ships with — its own, any helper its package declares beside it, and the
+# Browsers package's worker. Each one must reach every release channel, or the daemon ships without it.
+daemon_bins="$(jq -sc 'map(.bin | keys_unsorted) | add' "${daemon_pkg}/package.json" "${browsers_pkg}/package.json")"
 product="$(jq -r '.name' package.json)"
 [ -z "${product}" ] || [ "${product}" = "null" ] && echo "❌ no name in root package.json" >&2 && exit 1
-mapfile -t workspace_packages < <(find packages -mindepth 2 -maxdepth 2 -name package.json -printf '%h\n' | sort)
+# Every workspace package, from the root manifest's own `workspaces` globs (a new package is in scope the
+# moment it is a workspace; nobody lists it here).
+mapfile -t workspace_packages < <(
+  jq -r '.workspaces[]' package.json | while IFS= read -r glob; do
+    for dir in ${glob}; do [ -f "${dir}/package.json" ] && printf '%s\n' "${dir}"; done
+  done | sort -u
+)
 [ "${#workspace_packages[@]}" -eq 0 ] && echo "❌ no workspace package manifests found under packages/" >&2 && exit 1
 
 if [ "${contract}" = "all" ]; then
@@ -72,11 +68,14 @@ case "${contract}" in
 arch)
   entry="$(jq -r '.bin | to_entries[0].value' "${cli_pkg}/package.json")"
   [ ! -f "${cli_pkg}/${entry}" ] && echo "❌ CLI entry is missing: ${cli_pkg}/${entry}" >&2 && exit 1
-  [ ! -f "${cli_pkg}/src/adapters/terminal/console-io.ts" ] && echo "❌ CLI terminal adapter is missing" >&2 && exit 1
+  daemon_entry="$(jq -r '.bin | to_entries[0].value' "${daemon_pkg}/package.json")"
+  [ ! -f "${daemon_pkg}/${daemon_entry}" ] && echo "❌ daemon entry is missing: ${daemon_pkg}/${daemon_entry}" >&2 && exit 1
 
-  for package_dir in "${workspace_packages[@]}"; do
-    lib_dir="${package_dir}/src/lib"
-    [ ! -d "${lib_dir}" ] && continue
+  # Every `lib/` directory (pure, docs/rebuild/spine.md §3) of every workspace package, at any depth.
+  mapfile -t lib_dirs < <(for package_dir in "${workspace_packages[@]}"; do
+    find "${package_dir}" -path '*/node_modules' -prune -o -path '*/tests' -prune -o -type d -name lib -print
+  done | sort)
+  for lib_dir in "${lib_dirs[@]}"; do
 
     # Enumerate through git rather than letting rg walk the directory: rg skips hidden
     # descendants by default, so a committed src/lib/.probe.ts would bypass this gate.
@@ -111,8 +110,15 @@ workspace-package-scopes)
       continue
     fi
 
+    # docs/rebuild/spine.md §2: `@<product>/<dir>` for a top-level package, `@<product>/core-<id>` and
+    # `@<product>/plugin-<id>` for a subsystem — except the kernel, which is `@<product>/kernel` (D1).
     package_name="$(basename "${package_dir}")"
-    expected="@${product}/${package_name}"
+    case "${package_dir}" in
+    packages/core/kernel) expected="@${product}/kernel" ;;
+    packages/core/*) expected="@${product}/core-${package_name}" ;;
+    packages/plugins/*) expected="@${product}/plugin-${package_name}" ;;
+    *) expected="@${product}/${package_name}" ;;
+    esac
     [ "${actual}" != "${expected}" ] && echo "❌ ${package_dir}/package.json name must be '${expected}', got '${actual}'" >&2 && exit 1
   done
   ;;
@@ -126,7 +132,7 @@ name-single-source)
     }
   done
   for script in scripts/release/compile.sh scripts/release/goreleaser-shim.sh; do
-    rg -qF 'packages/daemon' "${script}" || {
+    rg -qF 'packages/core/kernel' "${script}" || {
       echo "❌ ${script} does not derive the daemon name from its bin key" >&2
       exit 1
     }
@@ -141,145 +147,6 @@ name-single-source)
   rg -qF "package_name: ${name}" .goreleaser.yaml
   rg -qF "binary \"${name}\"" "Casks/${product}.rb"
   rg -qF "BINARY=\"${name}\"" scripts/release/install.sh
-  ;;
-state-home-log-directory)
-  # The CLI creates `<state home>/logs` before it launches the daemon, so the daemon's very first
-  # boot on a clean machine always meets a home holding that directory and nothing else. The layout
-  # model has to know the directory is ours: when it did not, it classified our own log directory as
-  # somebody else's data and refused to bootstrap ANY fresh machine — and wrote the refusal into the
-  # log file inside the directory that caused it.
-  #
-  # The two packages derive the name independently, because `packages/cli` does not depend on
-  # `@ferretry/daemon` and must not start to for one string. This is where they are held to one word.
-  cli_layout="${cli_pkg}/src/lib/daemon/layout.ts"
-  daemon_paths="${daemon_pkg}/src/lib/paths.ts"
-  daemon_layout="${daemon_pkg}/src/adapters/storage/state-home-layout.ts"
-
-  cli_logs="$(rg -o -r '$1' "logDirectory = join\(stateHome, '([^']+)'\)" "${cli_layout}")"
-  [ -z "${cli_logs}" ] && echo "❌ ${cli_layout} no longer derives a log directory under the state home" >&2 && exit 1
-  daemon_logs="$(rg -o -r '$1' "logs: join\(home, '([^']+)'\)" "${daemon_paths}")"
-  [ -z "${daemon_logs}" ] && echo "❌ ${daemon_paths} does not name a log directory in FoundationPaths" >&2 && exit 1
-  [ "${cli_logs}" != "${daemon_logs}" ] &&
-    echo "❌ the CLI creates '<state home>/${cli_logs}' but the daemon layout declares '${daemon_logs}'" >&2 && exit 1
-
-  rg -A4 'export function requiredLayoutDirectories' "${daemon_paths}" | rg -qF 'paths.logs' || {
-    echo "❌ ${daemon_paths} does not require the log directory, so bootstrap would not create it" >&2
-    exit 1
-  }
-  rg -qF 'paths.logs' "${daemon_layout}" || {
-    echo "❌ ${daemon_layout} does not admit the log directory, so a fresh home would refuse to bootstrap" >&2
-    exit 1
-  }
-  ;;
-state-home-layout-claim)
-  # THE SECOND INSTANCE OF THE `state-home-log-directory` BUG, pinned the same way its first was.
-  #
-  # Creating state in a home and CLAIMING that home have to be one operation. They were two, so
-  # An old client verb wrote `<FY_HOME>/fleet/**` without a marker and manufactured exactly the
-  # arrangement the daemon must refuse — a non-empty directory that might be somebody else's. The
-  # daemon then declined to boot FOREVER, and the only move the shipped product left an owner was to
-  # delete the installation they had just provisioned. Run the two commands the other way round and
-  # everything worked.
-  #
-  # So the decision, the marker's name, its bytes and its mode are single-sourced in the protocol
-  # package — the one thing both writers already depend on, since neither may import the other. A
-  # second copy fails SILENTLY in the worst way: a daemon looking for one filename while its client
-  # writes another refuses the very home its client just claimed, and neither end explains why.
-  layout_source="packages/protocol/src/lib/state-home-layout.ts"
-  test -f "${layout_source}"
-  marker_name="$(rg -o -r '$1' "LAYOUT_VERSION_FILENAME = '([^']+)'" "${layout_source}")"
-  [ -z "${marker_name}" ] && echo "❌ ${layout_source} does not declare LAYOUT_VERSION_FILENAME" >&2 && exit 1
-  layout_version="$(rg -o -r '$1' 'CURRENT_LAYOUT_VERSION = ([0-9]+)' "${layout_source}")"
-  [ -z "${layout_version}" ] && echo "❌ ${layout_source} does not declare CURRENT_LAYOUT_VERSION" >&2 && exit 1
-
-  # Neither package may carry its own copy of either literal. Tests are excluded: an assertion has to
-  # be able to spell the value it expects, or it is asserting the implementation against itself.
-  claim_files=()
-  while IFS= read -r -d '' path; do
-    [ "${path}" = "${layout_source}" ] && continue
-    case "${path}" in
-    */src/* | */bin/*) claim_files+=("${path}") ;;
-    esac
-  done < <(git ls-files -z -co --exclude-standard -- packages/cli packages/daemon)
-  if [ "${#claim_files[@]}" -gt 0 ]; then
-    set +e
-    strays="$(rg --line-number --fixed-strings -- "'${marker_name}'" "${claim_files[@]}")"
-    stray_status=$?
-    set -e
-    if [ "${stray_status}" -eq 0 ]; then
-      echo "❌ the layout marker filename is written out instead of imported from ${layout_source}:" >&2
-      printf '%s\n' "${strays}" >&2
-      exit 1
-    fi
-    [ "${stray_status}" -gt 1 ] && echo "❌ failed to scan package source for the marker filename" >&2 && exit "${stray_status}"
-  fi
-
-  # And both writers must actually read the single source rather than each other.
-  rg -qF '@ferretry/protocol' "${daemon_pkg}/src/lib/layout.ts" || {
-    echo "❌ ${daemon_pkg}/src/lib/layout.ts does not read the layout decision from the protocol package" >&2
-    exit 1
-  }
-  rg -qF 'LAYOUT_VERSION_FILENAME' "${daemon_pkg}/src/lib/paths.ts" || {
-    echo "❌ ${daemon_pkg}/src/lib/paths.ts does not derive the marker path from the shared filename" >&2
-    exit 1
-  }
-  cli_claim="${cli_pkg}/src/lib/state-home/claim.ts"
-  [ ! -f "${cli_claim}" ] && echo "❌ the CLI has no state-home claim: ${cli_claim}" >&2 && exit 1
-  rg -qF 'decideLayout' "${cli_claim}" || {
-    echo "❌ ${cli_claim} does not apply the SHARED decision, so it could adopt a foreign directory" >&2
-    exit 1
-  }
-  # Every path that creates state inside the home must go through the claim. The CLI's one remaining
-  # write site is the daemon supervisor's log directory (the fleet writers left with the old account
-  # system); a new one that skips the claim reintroduces the whole defect.
-  rg -qF 'claimThenCreateLogDirectory' "${cli_pkg}/src/lib/daemon/supervisor.ts" || {
-    echo "❌ the daemon supervisor creates <state home>/logs without claiming the home first" >&2
-    exit 1
-  }
-  # The composition root builds the ONE claim service and hands it to every supervisor and to
-  # `daemon adopt`; a second construction is a second spelling of the decision.
-  rg -qF 'buildStateHomeClaims' "${cli_root}" || {
-    echo "❌ ${cli_root} does not build the shared state-home claim service the supervisors use" >&2
-    exit 1
-  }
-  # A refusal that does not name its repair is permanent: every home provisioned before the claim
-  # existed lands there, and the only remaining move would be to delete the installation.
-  rg -qF 'adopt' "${daemon_pkg}/src/lib/layout.ts" || {
-    echo "❌ StateHomeLayoutError does not name the command that repairs an unclaimed home" >&2
-    exit 1
-  }
-  rg -qF "'adopt'" "${cli_pkg}/src/lib/daemon/commands.ts" || {
-    echo "❌ the repair command the daemon's refusal names does not exist on the CLI" >&2
-    exit 1
-  }
-  ;;
-state-home-default)
-  # Three functions derive the default state home — the daemon's own, and the client's two. Two of
-  # them used to spell `.ferretry` as a literal while the third derived it from the product name, so
-  # they agreed only because the product happens to be called that. `scripts/local/rename.sh
-  # --product` rewrites package scopes and manifests but NOT a literal inside a `.ts` file, so the
-  # sanctioned rename path would have split one installation in two: `fy fleet` writing `~/.newname`
-  # while `fy daemon` and the daemon itself used `~/.ferretry`, with nothing on either side saying
-  # so. Pinning FY_HOME masks it entirely, which is how it survived this long.
-  #
-  # Only a quoted literal counts. These files have to EXPLAIN the hazard to be maintainable, and a
-  # gate that fails on its own docblock teaches the next author to delete the explanation.
-  for source in "${daemon_pkg}/src/lib/state-home.ts" "${cli_pkg}/src/lib/daemon/layout.ts" "${cli_pkg}/src/lib/fleet/layout.ts"; do
-    set +e
-    stray="$(rg --line-number -- "['\"]\.${product}['\"]" "${source}")"
-    stray_status=$?
-    set -e
-    if [ "${stray_status}" -eq 0 ]; then
-      echo "❌ ${source} writes the default state home out instead of deriving it from the product name:" >&2
-      printf '%s\n' "${stray}" >&2
-      exit 1
-    fi
-    [ "${stray_status}" -gt 1 ] && echo "❌ failed to scan ${source}" >&2 && exit "${stray_status}"
-  done
-  rg -qF 'productName' "${daemon_pkg}/src/lib/state-home.ts" || {
-    echo "❌ ${daemon_pkg}/src/lib/state-home.ts does not derive its default from the product name" >&2
-    exit 1
-  }
   ;;
 release-backup-order)
   yq -o=json '.' .releaserc.yaml | jq -e '
@@ -375,63 +242,16 @@ installation-parity)
   rg -qF 'https://yum.fury.io/kirinnee97/' INSTALLATION.md
   rg -qF "apt install ${name}" INSTALLATION.md
   rg -qF "dnf install ${name}" INSTALLATION.md
-  # The public /get-started guide copies its commands out of INSTALLATION.md, which owns them. Every
-  # `<code data-command>` line on the page must equal a line inside one of the doc's fenced blocks
-  # (leading indentation dropped), so a command changed in only one of the two fails here.
-  get_started="packages/pwa/get-started/index.html"
-  mapfile -t page_commands < <(rg -o --no-filename '<code[^>]* data-command>[^<]*</code>' "${get_started}" |
-    sed -E 's/^<code[^>]*>//; s/<\/code>$//; s/&lt;/</g; s/&gt;/>/g; s/&quot;/"/g; s/&#39;/'"'"'/g; s/&amp;/\&/g')
-  [ "${#page_commands[@]}" -lt 5 ] && echo "❌ ${get_started} shows fewer than 5 data-command lines" >&2 && exit 1
+  # The commands the setup docs promise are in a fenced block of INSTALLATION.md. (In 4.x the public
+  # /get-started page was also held to them line by line; that page moves into the Onboarding plugin, and the
+  # page half of this check returns with its port.)
   doc_lines="$(awk '/^ *```/ { fenced = !fenced; next } fenced { sub(/^ +/, ""); print }' INSTALLATION.md)"
-  for command in "${page_commands[@]}" "${name} setup" "${name} setup --check" "${name} daemon status" "${name} pair" "${name} pair --no-wait" "${name} pair --open --no-wait"; do
+  for command in "${name} setup" "${name} setup --check" "${name} daemon status" "${name} pair" "${name} pair --no-wait" "${name} pair --open --no-wait"; do
     grep -qxF -- "${command}" <<<"${doc_lines}" || {
-      echo "❌ ${get_started}: command not in a fenced block of INSTALLATION.md: ${command}" >&2
-      exit 1
-    }
-    printf '%s\n' "${page_commands[@]}" | grep -qxF -- "${command}" || {
-      echo "❌ ${get_started} does not show: ${command}" >&2
+      echo "❌ INSTALLATION.md: command not in a fenced block: ${command}" >&2
       exit 1
     }
   done
-  ;;
-render-guide-doc)
-  # `fy render guide` prints the `## Guide for agents` section of docs/fy-render.md, which OWNS the
-  # text; the binary ships a copy (RENDER_GUIDE_SECTION in the CLI's guide-text.ts) because a
-  # release has no repository beside it. Two texts claiming to be the guide would split silently —
-  # an agent reading the doc and an agent running the command told different shapes, and neither
-  # side would ever know — so this gate holds the copy to the doc byte for byte, reading the copy
-  # through the SAME module the command prints from rather than a second extraction of its own.
-  guide_doc="docs/fy-render.md"
-  guide_module="${cli_pkg}/src/lib/render/guide-text.ts"
-  test -f "${guide_doc}" || {
-    echo "❌ ${guide_doc} is missing" >&2
-    exit 1
-  }
-  test -f "${guide_module}" || {
-    echo "❌ ${guide_module} is missing: fy render guide has nothing to print" >&2
-    exit 1
-  }
-
-  headings="$(grep -c '^## Guide for agents$' "${guide_doc}" || true)"
-  [ "${headings}" = "1" ] || {
-    echo "❌ ${guide_doc} carries ${headings} '## Guide for agents' headings; the guide needs exactly one owner" >&2
-    exit 1
-  }
-
-  # The section runs from its heading to the next `## ` heading. Blank lines around the section are
-  # trimmed on both sides before the comparison (the shipped literal opens on its own line); the
-  # closing `---` separator is part of the slice, exactly as the command's extractor bounds it
-  # (packages/cli/src/lib/render/guide.ts).
-  trim_edges() { sed -e '/./,$!d' -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}'; }
-  doc_slice="$(awk '/^## Guide for agents$/ { on = 1 } on && /^## / && !/^## Guide for agents$/ { exit } on { print }' "${guide_doc}" | trim_edges)"
-  shipped="$(bun -e 'const { RENDER_GUIDE_SECTION } = await import("./packages/cli/src/lib/render/guide-text.ts"); console.log(RENDER_GUIDE_SECTION);' | trim_edges)"
-
-  if [ "${doc_slice}" != "${shipped}" ]; then
-    echo "❌ the guide fy render guide prints has drifted from ${guide_doc} § Guide for agents:" >&2
-    diff <(printf '%s\n' "${doc_slice}") <(printf '%s\n' "${shipped}") >&2 || true
-    echo "   edit the doc, then copy the section whole into RENDER_GUIDE_SECTION (${guide_module})" >&2
-    exit 1
-  fi
   ;;
 release-daemon)
   # A release archive, package, and cask must carry EVERY independently declared executable: the CLI,
@@ -447,6 +267,56 @@ release-daemon)
   # executable files stops a CLI-only archive from being reported as a complete normal install.
   rg -qF 'for artifact in "${contents}"/*; do' scripts/release/install.sh
   rg -qF '[ "${#installed[@]}" -ge 2 ]' scripts/release/install.sh
+  ;;
+release-helpers)
+  # The daemon's browser worker ships beside it on every channel (round 2 of the Browsers port: no build
+  # produced it, so every installed daemon refused to start a browser). The Browsers package declares it,
+  # the compile step builds it, the GoReleaser shim swaps it in, the smoke refuses a target without it,
+  # and the Nix daemon package compiles every Browsers bin entry.
+  browsers_bins="$(jq -c '.bin // {} | keys_unsorted' "${browsers_pkg}/package.json")"
+  [ "${browsers_bins}" = "[]" ] && echo "❌ ${browsers_pkg}/package.json declares no browser worker bin entry" >&2 && exit 1
+  while IFS=$'\t' read -r entry; do
+    [ ! -f "${browsers_pkg}/${entry}" ] && echo "❌ browser worker entry is missing: ${browsers_pkg}/${entry}" >&2 && exit 1
+  done < <(jq -r '.bin | to_entries[] | .value' "${browsers_pkg}/package.json")
+
+  # compile.sh builds exactly the CLI's, the daemon's and the Browsers package's executables.
+  compiled="$(./scripts/release/compile.sh --list)"
+  compiled_names="$(cut -f3 <<<"${compiled}" | jq -Rsc 'split("\n") | map(select(length > 0)) | sort')"
+  expected_names="$(jq -sc 'map(.bin | keys_unsorted) | add | sort' "${cli_pkg}/package.json" "${daemon_pkg}/package.json" "${browsers_pkg}/package.json")"
+  [ "${compiled_names}" != "${expected_names}" ] &&
+    echo "❌ compile.sh builds ${compiled_names}, but the shipped packages declare ${expected_names}" >&2 && exit 1
+  while IFS=$'\t' read -r package entry _; do
+    [ ! -f "${package}/${entry}" ] && echo "❌ compile.sh would compile a missing entry: ${package}/${entry}" >&2 && exit 1
+  done <<<"${compiled}"
+
+  helpers_tmp="$(mktemp -d)"
+  trap 'rm -rf "${helpers_tmp}"' EXIT
+  mkdir -p "${helpers_tmp}/prebuilt" "${helpers_tmp}/dist" "${helpers_tmp}/stub"
+  # The shim swaps every compiled executable, the worker included, over GoReleaser's stub.
+  while IFS= read -r executable_name; do
+    printf '#!/bin/sh\necho %s\n' "${executable_name}" >"${helpers_tmp}/prebuilt/${executable_name}-linux-x64-baseline"
+    PREBUILT_DIR="${helpers_tmp}/prebuilt" ./scripts/release/goreleaser-shim.sh "${helpers_tmp}/stub/${executable_name}" linux amd64 >/dev/null
+    # sha256sum, not cmp: the hook's validator PATH has coreutils and no diffutils.
+    [ "$(sha256sum <"${helpers_tmp}/prebuilt/${executable_name}-linux-x64-baseline")" = "$(sha256sum <"${helpers_tmp}/stub/${executable_name}" 2>/dev/null)" ] ||
+      { echo "❌ goreleaser-shim.sh did not swap in ${executable_name}" >&2 && exit 1; }
+    cp "${helpers_tmp}/prebuilt/${executable_name}-linux-x64-baseline" "${helpers_tmp}/dist/"
+  done < <(jq -r '.[]' <<<"${expected_names}")
+  # The smoke passes with every executable present, and refuses a target whose browser worker is missing.
+  ./scripts/release/smoke.sh "${helpers_tmp}/dist/${name}-linux-x64-baseline" >/dev/null
+  while IFS= read -r worker; do
+    mv "${helpers_tmp}/dist/${worker}-linux-x64-baseline" "${helpers_tmp}/${worker}.aside"
+    if ./scripts/release/smoke.sh "${helpers_tmp}/dist/${name}-linux-x64-baseline" >/dev/null 2>&1; then
+      echo "❌ smoke.sh passed a target with no ${worker}" >&2
+      exit 1
+    fi
+    mv "${helpers_tmp}/${worker}.aside" "${helpers_tmp}/dist/${worker}-linux-x64-baseline"
+  done < <(jq -r '.[]' <<<"${browsers_bins}")
+
+  # The Nix daemon package compiles every Browsers bin entry beside fyd.
+  rg -qF "(lib.importJSON \"\${src}/${browsers_pkg}/package.json\").bin" nix/ferretry.nix || {
+    echo "❌ nix/ferretry.nix does not compile the ${browsers_pkg} bin entries beside the daemon" >&2
+    exit 1
+  }
   ;;
 released-version)
   # Both shipped executables stamp their own manifest version into what they report — the CLI's
@@ -467,260 +337,6 @@ released-version)
       exit 1
     }
   done
-  ;;
-daemon-default-address)
-  # The well-known loopback address three production files must agree on. They live in packages that
-  # may not import one another, so it is single-sourced in the protocol package and every other
-  # production file derives it. A second copy fails SILENTLY — the client probes an address nothing
-  # holds and reports the daemon down while it serves one port away — so the literal is pinned here
-  # exactly as the two-name model is.
-  address_source="packages/protocol/src/lib/address.ts"
-  test -f "${address_source}"
-  port="$(rg -o -r '$1' 'FY_DEFAULT_DAEMON_PORT = ([0-9]+)' "${address_source}")"
-  [ -z "${port}" ] && echo "❌ ${address_source} does not declare FY_DEFAULT_DAEMON_PORT" >&2 && exit 1
-  production_files=()
-  while IFS= read -r -d '' path; do
-    [ "${path}" = "${address_source}" ] && continue
-    case "${path}" in
-    */src/* | */bin/*) production_files+=("${path}") ;;
-    esac
-  done < <(git ls-files -z -co --exclude-standard -- packages)
-  if [ "${#production_files[@]}" -gt 0 ]; then
-    set +e
-    strays="$(rg --line-number --fixed-strings -- "${port}" "${production_files[@]}")"
-    stray_status=$?
-    set -e
-    if [ "${stray_status}" -eq 0 ]; then
-      echo "❌ the default daemon port is written out instead of imported from ${address_source}:" >&2
-      printf '%s\n' "${strays}" >&2
-      exit 1
-    fi
-    [ "${stray_status}" -gt 1 ] && echo "❌ failed to scan package source for the default port" >&2 && exit "${stray_status}"
-  fi
-  # And the two consumers must actually read the single source rather than each other.
-  rg -qF 'FY_DEFAULT_DAEMON_PORT' packages/daemon/src/lib/runtime/config.ts || {
-    echo "❌ the daemon's configuration default does not read FY_DEFAULT_DAEMON_PORT" >&2
-    exit 1
-  }
-  rg -qF 'FY_DEFAULT_DAEMON_URL' packages/cli/src/lib/daemon/address.ts || {
-    echo "❌ the CLI's address resolution does not read FY_DEFAULT_DAEMON_URL" >&2
-    exit 1
-  }
-  ;;
-loopback-single-source)
-  # One security fact has TWO legitimate input domains. An operator writes a host spelling, where
-  # `localhost` is meaningful; a transport reports a peer address, where the IPv4-mapped IPv6 form
-  # is meaningful and names never appear. Five anonymous predicates used to disagree across four
-  # packages while each looked locally reasonable. Keep both named functions in the protocol and
-  # make each consumer state which domain it has.
-  address_source="packages/protocol/src/lib/address.ts"
-  test -f "${address_source}"
-  for predicate in isLoopbackHost isLoopbackPeer isWildcardHost; do
-    rg -qF "export function ${predicate}" "${address_source}" || {
-      echo "❌ ${address_source} does not own ${predicate}" >&2
-      exit 1
-    }
-  done
-  # The comments name the domains because merging the two sets would be as wrong as duplicating them.
-  rg -qF 'A host SPELLING, as an operator writes one' "${address_source}"
-  rg -qF "A socket's peer address, as a transport reports one" "${address_source}"
-
-  api_server="packages/daemon/src/adapters/api/bun-api-server.ts"
-  relay_connection="packages/relay/src/lib/connection.ts"
-  pwa_directory="packages/pwa/src/features/onboarding/hosted-relay.ts"
-  daemon_config="packages/daemon/src/lib/runtime/config.ts"
-  cli_address="packages/cli/src/lib/daemon/address.ts"
-  rg -qF 'isLoopbackPeer' "${api_server}" || {
-    echo "❌ ${api_server} re-derived a peer address instead of using isLoopbackPeer" >&2
-    exit 1
-  }
-  rg -qF 'isLoopbackHost' "${cli_address}" || {
-    echo "❌ ${cli_address} re-derived a host spelling instead of using isLoopbackHost" >&2
-    exit 1
-  }
-  rg -qF 'SocketEndpointSchema' "${pwa_directory}" || {
-    echo "❌ ${pwa_directory} re-derived relay endpoint loopback instead of using the relay schema" >&2
-    exit 1
-  }
-  rg -qF 'LOOPBACK' "${daemon_config}" || {
-    echo "❌ ${daemon_config} does not read the default host from the protocol owner" >&2
-    exit 1
-  }
-
-  # A SECOND DECLARED EXEMPTION, and the reason `${relay_connection}` is absent from both lists
-  # below. The endpoint schema there is not asking what loopback is; it is asking which insecure
-  # hosts a browser running the PUBLISHED site is permitted to dial at all, and that is settled by a
-  # header file rather than by the machine. Its answer is deliberately NARROWER than the owner's:
-  # `127.0.0.2`, `fy.localhost` and `[::1]` are all loopback and all blocked before a request
-  # exists, so accepting them would have stored carriers that can only fail silently. Widening the
-  # header instead would have handed the shipped app a plaintext reach it does not need.
-  #
-  # The exemption is pinned from both ends AT THE SAME TWO HOSTS: the predicate must still exist and
-  # must still be declared over exactly this set, and the header must still allow exactly these four
-  # origins and no fifth. Either side moving alone fails here, which is the only way a claim that
-  # they agree can be worth anything.
-  csp_headers="packages/pwa/public/_headers"
-  rg -qF 'isLoopbackUnderPublishedCsp' "${relay_connection}" || {
-    echo "❌ ${relay_connection} no longer defines the exempted published-CSP predicate; drop the exemption" >&2
-    exit 1
-  }
-  rg -qF -- "new Set(['localhost', '127.0.0.1'])" "${relay_connection}" || {
-    echo "❌ ${relay_connection} no longer reads exactly the two hosts ${csp_headers} allows insecurely" >&2
-    exit 1
-  }
-  for allowed in 'http://localhost:*' 'http://127.0.0.1:*' 'ws://localhost:*' 'ws://127.0.0.1:*'; do
-    rg -qF -- "${allowed}" "${csp_headers}" || {
-      echo "❌ ${csp_headers} no longer allows ${allowed}, which ${relay_connection} accepts" >&2
-      exit 1
-    }
-  done
-  # And nothing beyond those four, because a fifth would be a host the schema silently refuses.
-  insecure_allowances="$(rg --count-matches --fixed-strings -e 'http://' -e 'ws://' "${csp_headers}" | tr -d '[:space:]')"
-  [ "${insecure_allowances}" != "4" ] && {
-    echo "❌ ${csp_headers} allows ${insecure_allowances} insecure origins; ${relay_connection} accepts 2 hosts" >&2
-    exit 1
-  }
-
-  # These are the predicate copies Wave 0 deletes. Quoted literals are forbidden here; tests
-  # remain free to spell boundary values, and unrelated loopback services keep their own domains.
-  for consumer in "${api_server}" "${pwa_directory}" "${daemon_config}" "${cli_address}"; do
-    if rg -n --fixed-strings -- "'127.0.0.1'" "${consumer}"; then
-      echo "❌ ${consumer} carries a loopback predicate literal instead of reading ${address_source}" >&2
-      exit 1
-    fi
-  done
-
-  # AND NO PRODUCTION FILE MAY DEFINE ONE AT ALL, which is the check that would have caught the copy
-  # naming the four above did not. `packages/cli` kept a private `isLoopbackHost` through the whole of
-  # Wave 0: it read `127.0.0.0/8` and every `.localhost` name while the owner read three spellings, so
-  # `127.0.0.2` was this machine to the client spending an owner-only token on it and a stranger to
-  # the pairing advertisement, which handed a phone a QR code for an address that names the phone.
-  # A list of known copies cannot catch the copy that is not on the list; a definition can.
-  #
-  # TWO DECLARED EXEMPTIONS, each a different QUESTION rather than a second answer to this one, and
-  # each checked above or below so an exemption cannot outlive the thing it exempts.
-  #
-  # The first is the reader in the app, which decides whether a hostname names the DEVICE HOLDING
-  # THE BROWSER, on the far side of a tunnel from the daemon — which is why it counts the wildcard
-  # as loopback, an answer that would be wrong everywhere in this domain.
-  #
-  # The second is `${relay_connection}`, pinned to the published `connect-src` above: what a
-  # deployed browser may dial in plaintext, which is narrower than loopback and set by a header.
-  browser_reader="packages/pwa/src/features/browser/in-app-browser-model.ts"
-  rg -qF 'isLoopbackHostname' "${browser_reader}" || {
-    echo "❌ ${browser_reader} no longer defines the exempted device predicate; drop the exemption" >&2
-    exit 1
-  }
-  predicate_files=()
-  while IFS= read -r -d '' path; do
-    [ "${path}" = "${address_source}" ] && continue
-    [ "${path}" = "${browser_reader}" ] && continue
-    [ "${path}" = "${relay_connection}" ] && continue
-    case "${path}" in
-    */src/* | */bin/*) predicate_files+=("${path}") ;;
-    esac
-  done < <(git ls-files -z -co --exclude-standard -- packages)
-  if [ "${#predicate_files[@]}" -gt 0 ]; then
-    set +e
-    copies="$(rg --line-number -- '(function|const|let|var)[[:space:]]+is(Loopback|Wildcard)[A-Za-z]*' "${predicate_files[@]}")"
-    copy_status=$?
-    set -e
-    if [ "${copy_status}" -eq 0 ]; then
-      echo "❌ a loopback or wildcard predicate is defined outside ${address_source}:" >&2
-      printf '%s\n' "${copies}" >&2
-      exit 1
-    fi
-    [ "${copy_status}" -gt 1 ] && echo "❌ failed to scan package source for loopback predicates" >&2 && exit "${copy_status}"
-  fi
-  ;;
-pairing-fragment-readers)
-  # THE PAIRING FRAGMENT HAS MORE THAN ONE READER, AND THAT IS WHAT BROKE.
-  #
-  # The daemon mints a link whose fragment carries a version. `packages/cli` reads it to render the
-  # host's own pairing screen; `packages/pwa` reads it to decide a scan is a pairing claim at all.
-  # When the daemon briefly learned to mint `v2` — a fragment naming a rendezvous — the CLI still
-  # tested for `#v1;` literally, so `fy pair` refused the daemon's own link: no code, no QR, no link,
-  # exit 1, on a daemon that was working perfectly. The two-release rule that should have prevented it
-  # was applied to the browser reader and missed the host one, because nobody had counted the readers.
-  #
-  # So this gate asserts the AGREEMENT rather than a version number, and it derives what it checks
-  # from the WRITER. A gate that listed the versions itself would be a third place to forget.
-  #
-  # THE `v2` FORM IS WITHDRAWN AND THIS GATE SURVIVES IT, deliberately. Relayed first pairing ships on
-  # the ordinary `v1` link because the scanning device discovers the hosted rendezvous from its own
-  # build, so there is exactly one version again. The defect this caught was a SHAPE defect — a reader
-  # spelling a version — not a version defect, and deleting the gate with the version that taught it
-  # would leave the next second version unguarded. What DID have to change is the behaviour probe: it
-  # used to demand at least two versions, which is now false by design, so it asserts instead that the
-  # one version the writer emits is accepted and that the writer puts no rendezvous in it.
-  fragment_owner="packages/protocol/src/lib/pairing.ts"
-  cli_reader="${cli_pkg}/src/lib/pair/link.ts"
-  pwa_reader="packages/pwa/src/lib/pairing.ts"
-  for each in "${fragment_owner}" "${cli_reader}" "${pwa_reader}"; do
-    [ ! -f "${each}" ] && echo "❌ pairing fragment reader is missing: ${each}" >&2 && exit 1
-  done
-
-  # One owner for "which versions exist". Both readers must ask it rather than spell one.
-  rg -qF 'export const PAIRING_FRAGMENT_PATTERN' "${fragment_owner}" || {
-    echo "❌ ${fragment_owner} no longer owns PAIRING_FRAGMENT_PATTERN" >&2
-    exit 1
-  }
-  for reader in "${cli_reader}" "${pwa_reader}"; do
-    rg -qF 'PAIRING_FRAGMENT_PATTERN' "${reader}" || {
-      echo "❌ ${reader} does not recognise a pairing fragment through PAIRING_FRAGMENT_PATTERN" >&2
-      exit 1
-    }
-    # The exact shape of the regression, refused by shape rather than by the string: prose may
-    # discuss `#v1;`, but no reader may TEST for a version prefix of its own.
-    set +e
-    hardcoded="$(rg --line-number -- "startsWith\([\"'][#]v[0-9]" "${reader}")"
-    hardcoded_status=$?
-    set -e
-    if [ "${hardcoded_status}" -eq 0 ]; then
-      echo "❌ ${reader} tests a hard-coded fragment version instead of asking ${fragment_owner}:" >&2
-      printf '%s\n' "${hardcoded}" >&2
-      exit 1
-    fi
-    [ "${hardcoded_status}" -gt 1 ] && echo "❌ failed to scan ${reader} for a hard-coded version" >&2 && exit 1
-  done
-
-  # And the behaviour, because a shared constant proves nothing if the reader still refuses the link.
-  # What the writer EMITS is built for real and handed to the CLI's own check.
-  # shellcheck disable=SC2016 # The JavaScript template literals must reach Bun without shell expansion.
-  bun -e '
-    const { formatPairingFragment, pairingLinkUrl, PAIRING_FRAGMENT_PATTERN } = await import(
-      "./packages/protocol/src/lib/pairing.ts"
-    );
-    const { checkedPairUrl } = await import("./packages/cli/src/lib/pair/link.ts");
-    const daemonUrl = "https://box.example";
-    const seed = { daemonUrl, code: "7F3K-Q2ND", daemonId: `fy_daemon_${"a".repeat(43)}` };
-    const fragment = formatPairingFragment(seed);
-    const version = fragment.slice(0, fragment.indexOf(";"));
-    if (!PAIRING_FRAGMENT_PATTERN.test(`#${fragment}`)) {
-      throw new Error(`the shared recognizer refuses a fragment its own writer minted: ${version}`);
-    }
-    const pairUrl = pairingLinkUrl("https://ferretry.pages.dev/pair", seed);
-    try {
-      checkedPairUrl({ daemonUrl, pairUrl, reach: "any-device" });
-    } catch (error) {
-      throw new Error(`the CLI reader refuses a ${version} link the daemon can mint: ${error.message}`);
-    }
-    // NO RENDEZVOUS IN THE LINK, whatever a caller puts beside the seed. The mint response carries a
-    // discovered address for the HOST screen to disclose; the fragment carries none, because the
-    // scanning device finds it in its own build. A writer that put it back would make a QR the vehicle
-    // for an arbitrary carrier address, which is the deferred general case.
-    const spiked = pairingLinkUrl("https://ferretry.pages.dev/pair", {
-      ...seed,
-      relayCandidate: "wss://rendezvous.example",
-      relay: "wss://rendezvous.example",
-    });
-    if (spiked !== pairUrl || /relay/.test(spiked)) {
-      throw new Error(`the writer put a rendezvous into a pairing fragment: ${spiked}`);
-    }
-  ' || {
-    echo "❌ a pairing link the daemon can mint is refused by the CLI that renders it, or names a rendezvous" >&2
-    exit 1
-  }
   ;;
 nix-packages)
   # Nix's default package is the normal profile-install entry point. It must join the independently

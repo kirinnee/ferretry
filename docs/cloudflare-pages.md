@@ -31,11 +31,7 @@ GitHub Actions; a connected repo would set up a second, competing build.
 
 - Pull requests receive no Pages preview URL. This keeps unreviewed branches from becoming public
   deployment surfaces; CI still validates pull requests.
-- `_redirects` makes client-side routes serve the app shell. Its targets are the DIRECTORY `/app/`, never
-  `/app/index.html`: Pages answers a rewrite to an `index.html` file with a `308` to its directory (an exact
-  path such as `/pair` loses its route) or falls through to the landing page (a splat such as `/pair/x`), so
-  only a first visit with no service worker sees it. `scripts/validate/pages-config.sh` and
-  `packages/pwa/tests/unit/pages-rewrites.test.ts` pin the spelling. `_headers` keeps `index.html` and the
+- `_redirects` makes client-side routes serve the app shell. Its targets are the DIRECTORY `/app/`, never `/app/index.html`: Pages answers a rewrite to an `index.html` file with a `308` to its directory (an exact path such as `/pair` loses its route) or falls through to the landing page (a splat such as `/pair/x`), so only a first visit with no service worker sees it. `scripts/validate/pages-config.sh` and `packages/app/tests/unit/release/pages-rewrites.test.ts` pin the spelling. `_headers` keeps `index.html` and the
   future generated manifests and service worker fresh so an installed PWA can discover a new
   release. Hashed Vite assets stay immutable.
 - The CSP permits daemon connections to any secure HTTPS/WSS origin because pairing chooses that

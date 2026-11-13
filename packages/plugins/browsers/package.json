@@ -1,0 +1,46 @@
+{
+  "name": "@ferretry/plugin-browsers",
+  "version": "5.0.0",
+  "private": true,
+  "description": "Browsers (plugins piece of Ferretry 5)",
+  "type": "module",
+  "bin": {
+    "fyd-browser-worker": "daemon/worker/main.ts"
+  },
+  "ferretry": {
+    "id": "browsers",
+    "manifest": "./manifest.ts"
+  },
+  "exports": {
+    "./contract": "./contract/index.ts",
+    "./contract/testing": "./contract/testing/index.ts",
+    "./manifest": "./manifest.ts",
+    "./daemon": "./daemon/index.ts",
+    "./app": "./app/index.ts",
+    "./cli": "./cli/index.ts"
+  },
+  "dependencies": {
+    "@ferretry/core-ferrets": "workspace:*",
+    "@ferretry/core-gate": "workspace:*",
+    "@ferretry/core-vault": "workspace:*",
+    "@ferretry/kernel": "workspace:*",
+    "@ferretry/std": "workspace:*",
+    "playwright-core": "1.62.1",
+    "zod": "4.4.3",
+    "@ferretry/plugin-conversation": "workspace:*",
+    "@ferretry/plugin-terminals": "workspace:*",
+    "@ferretry/app": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "lucide-react": "^0.468.0"
+  },
+  "sideEffects": false,
+  "devDependencies": {
+    "happy-dom": "20.14.6",
+    "@happy-dom/global-registrator": "^20.11.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react-test-renderer": "^19.0.0",
+    "@types/react-test-renderer": "^19.0.0"
+  }
+}

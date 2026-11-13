@@ -1,0 +1,188 @@
+import { describe, it } from 'bun:test';
+import { COPY_AFTER_MASK_SECONDS, COPY_MAX_LIFETIME_SECONDS } from '../../../../daemon/lib/inputs/borrowed.ts';
+import { INPUT_MAX_REDACTION_SECONDS } from '../../../../contract/index.ts';
+import should from 'should';
+import { EphemeralValues } from '../../../../daemon/lib/inputs/ephemeral-values.ts';
+
+const clock = { ms: 1_000_000 };
+const build = () => new EphemeralValues({ now: () => clock.ms });
+
+describe('EphemeralValues', () => {
+  it('should mask a held value for one session only, longest value first', () => {
+    const values = build();
+    values.hold('s1', 'abc', 'A1');
+    values.hold('s1', 'abcdef', 'A2');
+
+    should(values.scrub('s1', 'x abcdef y abc')).equal('x [redacted:input A2] y [redacted:input A1]');
+    should(values.scrub('s2', 'abc')).equal('abc');
+    should(values.scrubAll('abc')).equal('[redacted:input A1]');
+  });
+
+  it('should hold nothing for an empty value', () => {
+    const values = build();
+    values.hold('s1', '', 'A1');
+
+    should(values.heldCount()).equal(0);
+  });
+
+  it('I108 should REPLACE the stored arrays on a prune, so an expired value is no longer reachable', () => {
+    const values = build();
+    values.hold('s1', 'old-value', 'A1', 10);
+    values.hold('s1', 'new-value', 'A2', 100);
+    clock.ms += 50_000;
+    values.purge();
+
+    should(values.heldCount('s1')).equal(1);
+    should(values.scrub('s1', 'old-value new-value')).equal('old-value [redacted:input A2]');
+    should(JSON.stringify([...values.sessions()])).not.containEql('old-value');
+    clock.ms += 100_000;
+    values.purge();
+    should(values.sessions()).eql([]);
+    should(values.heldCount()).equal(0);
+  });
+
+  it('should purge on a hold, a scrub and a scrubAll without anyone calling purge', () => {
+    const values = build();
+    values.hold('s1', 'gone-soon', 'A1', 5);
+    clock.ms += 6_000;
+    values.hold('s2', 'fresh', 'A2');
+    should(values.heldCount('s1')).equal(0);
+
+    values.hold('s3', 'gone-soon-too', 'A3', 5);
+    clock.ms += 6_000;
+    should(values.scrub('s3', 'gone-soon-too')).equal('gone-soon-too');
+    values.hold('s4', 'again', 'A4', 5);
+    clock.ms += 6_000;
+    should(values.scrubAll('again')).equal('again');
+    should(values.heldCount()).equal(1);
+  });
+
+  it('should cap the window and drop a whole session when it ends', () => {
+    const values = build();
+    values.hold('s1', 'capped', 'A1', INPUT_MAX_REDACTION_SECONDS * 100);
+    values.hold('s1', 'short', 'A2', 0);
+    clock.ms += INPUT_MAX_REDACTION_SECONDS * 1000 + 1;
+
+    should(values.scrub('s1', 'capped')).equal('capped');
+    values.hold('s1', 'again', 'A3');
+    values.drop('s1');
+    values.drop('never-held');
+    should(values.heldCount('s1')).equal(0);
+    should(values.heldCount('never-held')).equal(0);
+  });
+});
+
+describe('EphemeralValues.fragments', () => {
+  it('should say yes for a line ending with the start of a held value, or starting with its end', () => {
+    const values = build();
+    values.hold('s1', 'hunter2-UNIQUE', 'A1');
+
+    should(values.fragments('s1', 'Password: hunter2-UN')).be.true();
+    should(values.fragments('s1', 'IQUE rest of the line')).be.true();
+  });
+
+  it('should say no for an ordinary line, for fewer than three characters, for the whole value and for another session', () => {
+    const values = build();
+    values.hold('s1', 'hunter2-UNIQUE', 'A1');
+
+    should(values.fragments('s1', '[sudo] password for kirin:')).be.false();
+    should(values.fragments('s1', 'Password: hu')).be.false();
+    should(values.fragments('s1', 'Password: hunter2-UNIQUE')).be.false();
+    should(values.fragments('s2', 'Password: hunter2-UN')).be.false();
+  });
+
+  it('should count half of a value shorter than six characters as a piece of it, and forget an expired value', () => {
+    const values = build();
+    values.hold('s1', 'ab', 'A1');
+    values.hold('s1', 'gone-value', 'A2', 1);
+    clock.ms += 5_000;
+
+    should(values.fragments('s1', 'xa')).be.true();
+    should(values.fragments('s1', 'xb')).be.false();
+    should(values.fragments('s1', 'gone-val')).be.false();
+  });
+});
+
+describe('EphemeralValues for a secure copy', () => {
+  it("should mask a copy with its own marker until the time it names, past a typed value's cap", () => {
+    const values = build();
+    const lasting = (INPUT_MAX_REDACTION_SECONDS + 600) * 1000;
+    values.holdUntil('s1', 'ghp_SEALED', '[sealed:token]', clock.ms + lasting);
+
+    should(values.scrub('s1', 'token ghp_SEALED here')).equal('token [sealed:token] here');
+    should(values.scrubAll('ghp_SEALED')).equal('[sealed:token]');
+    clock.ms += lasting - 1;
+    should(values.scrub('s1', 'ghp_SEALED')).equal('[sealed:token]');
+    clock.ms += 1;
+    should(values.scrub('s1', 'ghp_SEALED')).equal('ghp_SEALED');
+    should(values.heldCount()).equal(0);
+  });
+
+  it('should cap a copy at its longest life plus the after-mask window', () => {
+    const values = build();
+    const cap = (COPY_MAX_LIFETIME_SECONDS + COPY_AFTER_MASK_SECONDS) * 1000;
+    values.holdUntil('s1', 'forever-value', '[sealed:x]', clock.ms + cap * 10);
+    clock.ms += cap;
+
+    should(values.scrub('s1', 'forever-value')).equal('forever-value');
+  });
+
+  it("should bring a copy's end forward, never push it back, and leave other holds alone", () => {
+    const values = build();
+    values.holdUntil('s1', 'copy-one', '[sealed:one]', clock.ms + 100_000);
+    values.holdUntil('s1', 'copy-two', '[sealed:two]', clock.ms + 100_000);
+    values.hold('s1', 'typed-value', 'A1', 60);
+    values.retime('s1', '[sealed:one]', clock.ms + 10_000);
+    values.retime('s1', '[sealed:two]', clock.ms + 1_000_000);
+    values.retime('s2', '[sealed:one]', clock.ms);
+    clock.ms += 10_000;
+
+    should(values.scrub('s1', 'copy-one copy-two typed-value')).equal('copy-one [sealed:two] [redacted:input A1]');
+    clock.ms += 90_000;
+    should(values.scrub('s1', 'copy-two')).equal('copy-two');
+  });
+
+  it('should hold nothing for an empty copy', () => {
+    const values = build();
+    values.holdUntil('s1', '', '[sealed:x]', clock.ms + 1000);
+
+    should(values.heldCount()).equal(0);
+  });
+});
+
+describe('EphemeralValues when a session ends', () => {
+  it('should let go of typed values at once, and keep a copy masked for its after-mask window only', () => {
+    const values = build();
+    values.hold('s1', 'typed-value', 'A1');
+    values.holdUntil('s1', 'sealed-value', '[sealed:t]', clock.ms + 3_600_000);
+
+    values.drop('s1');
+
+    should(values.scrubAll('typed-value sealed-value')).equal('typed-value [sealed:t]');
+    clock.ms += COPY_AFTER_MASK_SECONDS * 1000;
+    should(values.scrubAll('sealed-value')).equal('sealed-value');
+  });
+});
+
+describe('EphemeralValues coverage by position', () => {
+  it('should say where any session’s held value sits in a text, by position and never by value', () => {
+    const values = build();
+    values.hold('s1', 'abc', 'A1');
+    values.hold('s2', 'xyz', 'A2');
+
+    should(values.coverAll('abc and xyz and abc')).eql([
+      { start: 0, end: 3 },
+      { start: 8, end: 11 },
+      { start: 16, end: 19 },
+    ]);
+    should(values.coverAll('nothing held here')).eql([]);
+  });
+
+  it('should stop covering a value once its window has ended', () => {
+    const values = build();
+    values.hold('s1', 'gone-soon', 'A1', 5);
+    clock.ms += 6_000;
+
+    should(values.coverAll('gone-soon')).eql([]);
+  });
+});

@@ -10,7 +10,7 @@ export interface InstalledDaemonBinary {
 }
 
 /** Raised when this host has no daemon executable a service definition could name. */
-export class DaemonBinaryUnavailableError extends Error {
+class DaemonBinaryUnavailableError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'DaemonBinaryUnavailableError';

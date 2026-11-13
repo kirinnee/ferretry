@@ -1,0 +1,21 @@
+import type { Instant } from '@ferretry/std';
+import type { AuthorizedOutcome } from '@ferretry/core-vault/contract';
+import type { ProviderProbePlan } from './plan.ts';
+
+/**
+ * The one boundary a login Test crosses (docs/provider-presets.md).
+ *
+ * The adapter sends an `authorized` plan through the outbound holder (`OutboundProviderAuthorizer`,
+ * the fifth vault holder in docs/secrets.md), which puts the named secret on that one request and hands
+ * back only what came back; a `local` plan carries no key and reads a server on this machine. Either
+ * way the answer is facts — a status, a parsed reply, a refusal — never the request it built.
+ */
+export interface ProviderProbePort {
+  probe(plan: ProviderProbePlan): Promise<AuthorizedOutcome>;
+}
+
+/** Monotonic milliseconds for latency, and the wall-clock instant a result is stamped with. */
+export interface ProviderProbeClock {
+  monotonicMs(): number;
+  now(): Instant;
+}

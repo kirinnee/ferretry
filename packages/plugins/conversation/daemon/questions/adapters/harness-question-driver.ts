@@ -1,0 +1,784 @@
+import type { SessionId } from '../../seams/ferret-id.ts';
+import type { InputExpectation } from '../lib/input-frame.ts';
+import type { PendingQuestion, StructuredQuestionAnswer } from '../../seams/protocol.ts';
+import {
+  type BoundQuestionForm,
+  formFrame,
+  freeFormPageShown,
+  numberedFormShown,
+  bindQuestionForm,
+  bindReviewPage,
+  bindTabStrip,
+  boundQuestionIndex,
+  type QuestionScreen,
+  questionScreen,
+  type RenderedQuestion,
+  reviewShowsAnswer,
+  surfaceOf,
+  type TypedRow,
+} from '../lib/rendered-form.ts';
+import {
+  type StructuredQuestionCancellation,
+  StructuredQuestionDriveFailure,
+  type StructuredQuestionDriveJournal,
+  StructuredQuestionDrivePaused,
+  type StructuredQuestionDriver,
+  type StructuredQuestionDriveStep,
+} from '../lib/service.ts';
+
+/**
+ * ONE capture of a ferret's pane, as the form seam gives it (`FerretHarness.form.capture`). `activeWork` is the
+ * runner's reading of the visible frame (its owner is the terminals runner), so this file holds no copy of that heuristic.
+ */
+export interface QuestionPaneState {
+  readonly alive: boolean;
+  readonly dead: boolean;
+  readonly promptReady: boolean;
+  readonly activeWork: boolean;
+  readonly visible: string;
+  readonly history: string;
+  /** The runner's own permission and dialog readers say the visible pane is one of these, not a question form. */
+  readonly blocking?: 'permission' | 'dialog' | undefined;
+}
+
+/**
+ * The narrow pane seam the structured answer driver needs: the form seam, addressed by the ferret's id. Every key and
+ * paste is the runner's, under `kernel.act(<pane>, 'keys')`, so a Vault hold types nothing and rejects.
+ */
+export interface StructuredQuestionPane {
+  state(session: string): Promise<QuestionPaneState>;
+  /**
+   * `expect` names the surface the key is meant for and where its cursor must be; an implementation that guards the
+   * input boundary re-reads the pane and types nothing unless it still shows exactly that.
+   */
+  sendKey(session: string, key: string, expect?: InputExpectation): Promise<void>;
+  paste(session: string, text: string, expect?: InputExpectation): Promise<void>;
+  /**
+   * Positive evidence, from outside the pane, that this question's tool call is over (the question watch retired it and
+   * stamped it, or the transcript carries its result). A changed pane is never evidence; a seam that cannot say answers no.
+   */
+  completed?(session: string, toolUseId: string): Promise<boolean>;
+}
+
+export class StructuredQuestionDriveError extends StructuredQuestionDriveFailure {
+  constructor(
+    message: string,
+    acceptance: 'none' | 'ambiguous' = 'none',
+    diagnostics: Readonly<Record<string, unknown>> = {},
+  ) {
+    super(message, acceptance, diagnostics);
+    this.name = 'StructuredQuestionDriveError';
+  }
+}
+
+type Confirmation = 'next-question' | 'turn-started' | 'prompt-ready' | 'pane-advanced';
+
+/** The two inputs a drive types, each marking that an answer may have reached the harness. */
+interface Keys {
+  readonly sendKey: (key: string, expect: InputExpectation) => Promise<void>;
+  readonly paste: (text: string, expect: InputExpectation) => Promise<void>;
+}
+
+const compact = (value: string): string => value.replace(/\s+/gu, ' ').trim();
+const screenOf = (pane: QuestionPaneState): QuestionScreen => questionScreen(pane.visible, pane.history);
+/** Codex's footer once Tab has opened a note under its free-form row. */
+const NOTES_OPEN = /tab or esc to clear notes/iu;
+/** How many times one tab's answer is chosen before the drive stops rather than loop. */
+const CHOICES_PER_TAB = 2;
+
+/** Drives only a positively bound visible selector and waits for it to advance. */
+export class HarnessQuestionDriver implements StructuredQuestionDriver {
+  constructor(
+    private readonly tmux: StructuredQuestionPane,
+    private readonly session: (id: SessionId) => Promise<string>,
+    private readonly sleep: (milliseconds: number) => Promise<void>,
+    private readonly polls = 12,
+    private readonly pollMs = 250,
+    private readonly journal: StructuredQuestionDriveJournal = async () => {},
+  ) {}
+
+  /**
+   * Answer every pending question on the pane.
+   *
+   * A Claude form with a tab strip is driven tab by tab ({@link driveTabs}); anything else — a single
+   * question, Codex's pages — page by page. A tabbed drive that stops before `Submit answers` leaves
+   * the form open and says so with {@link StructuredQuestionDrivePaused}, because Escape would discard
+   * every question already answered and nothing has been submitted yet.
+   */
+  async drive(
+    id: SessionId,
+    pending: PendingQuestion,
+    answers: readonly StructuredQuestionAnswer[],
+  ): Promise<{ readonly confirmedBy: Confirmation }> {
+    let mayHaveAccepted = false;
+    let tabbed = false;
+    let submitting = false;
+    let session: string | undefined;
+    try {
+      session = await this.session(id);
+      const pane = session;
+      const keys: Keys = {
+        sendKey: async (key, expect) => {
+          // Set before awaiting tmux: a command that loses its response may still have delivered input.
+          mayHaveAccepted = true;
+          await this.tmux.sendKey(pane, key, expect);
+        },
+        paste: async (text, expect) => {
+          mayHaveAccepted = true;
+          await this.tmux.paste(pane, text, expect);
+        },
+      };
+      const first = await this.tmux.state(session);
+      if (!first.alive || first.dead)
+        throw new StructuredQuestionDriveError('session pane is dead; use resume', 'none', {
+          phase: 'preflight',
+          questionIndex: 0,
+          paneAlive: first.alive,
+          paneDead: first.dead,
+        });
+      const strip = bindTabStrip(screenOf(first), pending.questions);
+      if (strip !== undefined) {
+        tabbed = true;
+        await this.step(id, { step: 'started', mode: 'tabs', answered: strip.answered });
+        const confirmedBy = await this.driveTabs(id, session, pending, answers, first, keys, () => {
+          submitting = true;
+        });
+        return { confirmedBy };
+      }
+      await this.step(id, { step: 'started', mode: 'pages' });
+      return { confirmedBy: await this.drivePages(id, session, pending, answers, first, keys) };
+    } catch (error) {
+      const failure = settled(error, mayHaveAccepted);
+      if (!tabbed || submitting || session === undefined) throw failure;
+      throw (await this.pausedOn(session, pending, failure)) ?? failure;
+    }
+  }
+
+  /** Page by page: each question is bound, answered, and proved to have moved on before the next. */
+  private async drivePages(
+    id: SessionId,
+    session: string,
+    pending: PendingQuestion,
+    answers: readonly StructuredQuestionAnswer[],
+    first: QuestionPaneState,
+    keys: Keys,
+  ): Promise<Confirmation> {
+    let confirmation: Confirmation = 'pane-advanced';
+    for (let index = 0; index < pending.questions.length; index++) {
+      const question = pending.questions[index];
+      const answer = answers[index];
+      if (question === undefined || answer === undefined)
+        throw new StructuredQuestionDriveError(`question ${index + 1} vanished before it could be driven`, 'none', {
+          phase: 'preflight',
+          questionIndex: index,
+        });
+      const before = index === 0 ? first : await this.tmux.state(session);
+      if (!before.alive || before.dead)
+        throw new StructuredQuestionDriveError('session pane is dead; use resume', 'none', {
+          phase: 'preflight',
+          questionIndex: index,
+          paneAlive: before.alive,
+          paneDead: before.dead,
+        });
+      const form = bindQuestionForm(screenOf(before), question);
+      if (form === undefined)
+        throw atQuestion(
+          pending,
+          index,
+          new StructuredQuestionDriveError(
+            'the rendered form is not the exact pending question; no keys were sent',
+            'none',
+            { phase: 'preflight', questionIndex: index, reason: 'question-unbound' },
+          ),
+        );
+      await this.choose(session, pending, index, question, answer, form, keys);
+      const last = index === pending.questions.length - 1;
+      const advanced = await this.waitForAdvance(session, pending, index, before.visible, last);
+      await this.step(id, { step: 'answered', questionIndex: index });
+      if (advanced !== 'review') {
+        confirmation = advanced;
+        continue;
+      }
+      const review = await this.tmux.state(session);
+      confirmation = await this.submitReview(session, pending, answers, review, keys);
+      await this.step(id, { step: 'submitted' });
+    }
+    return confirmation;
+  }
+
+  /**
+   * Tab by tab, from whichever tab the form is on — so a form already part-answered, in the Console
+   * or by a drive that stopped, is finished rather than refused.
+   *
+   * Each step reads the pane once and acts on what it shows:
+   *   - a question tab: choose the requested answer (or, if the tab is already ticked with exactly that
+   *     answer, pass over it with →), then prove its tab is ticked and the form moved on;
+   *   - the review page: if every tab is ticked and the page lists exactly the requested answers, choose
+   *     `Submit answers`; otherwise go back with ← to the first tab that disagrees.
+   * `Submit answers` is the one key that finishes the form, and it is pressed only on that proof.
+   */
+  private async driveTabs(
+    id: SessionId,
+    session: string,
+    pending: PendingQuestion,
+    answers: readonly StructuredQuestionAnswer[],
+    first: QuestionPaneState,
+    keys: Keys,
+    submitting: () => void,
+  ): Promise<Confirmation> {
+    const total = pending.questions.length;
+    const chosen = pending.questions.map(() => 0);
+    // The typed answer each tab is known to hold: the text this drive asked for, and whatever the review page listed for it.
+    // A `✔` row on a tab is its answer only when it is one of these; any other is a foreign row.
+    const holds = pending.questions.map((_, index) => {
+      const asked = answers[index];
+      return asked?.kind === 'other' ? [asked.text] : [];
+    });
+    let state = first;
+    let at = 0;
+    for (let step = 0; step < total * 6 + 4; step++) {
+      if (step > 0) state = await this.livePane(session, 'pane died while driving the question tabs');
+      const screen = screenOf(state);
+      const review = bindReviewPage(screen, pending.questions);
+      if (review !== undefined)
+        for (const [index, shown] of review.shown.entries())
+          if (shown !== undefined && !holds[index]?.includes(shown)) holds[index] = [shown, ...(holds[index] ?? [])];
+      const answered = bindTabStrip(screen, pending.questions)?.answered ?? review?.shown.map(shown => !!shown);
+      if (answered === undefined)
+        throw atQuestion(
+          pending,
+          at,
+          new StructuredQuestionDriveError('the question tabs are no longer on screen', 'none', {
+            phase: 'drive',
+            reason: 'tabs-unbound',
+          }),
+        );
+      if (review !== undefined) {
+        const wrong = pending.questions.findIndex(
+          (question, index) =>
+            answered[index] !== true || !reviewShowsAnswer(review.shown[index], question, answers[index] ?? none),
+        );
+        if (wrong < 0) {
+          await this.step(id, { step: 'review-verified' });
+          submitting();
+          const confirmation = await this.submitReview(session, pending, answers, state, keys);
+          await this.step(id, { step: 'submitted' });
+          return confirmation;
+        }
+        at = wrong;
+        await this.step(id, { step: 'revisited', questionIndex: wrong, shown: review.shown[wrong] });
+        // The review is the tab after the last question.
+        // Each step is typed on the page it starts from: the review, then the tab before it, and so on. A tab passed on
+        // the way holds the answer this drive typed when the review lists exactly that: it draws it, so it is a known row.
+        for (let move = 0; move < total - wrong; move++) {
+          const passing = total - move;
+          const typed = answers[passing];
+          const passed = pending.questions[passing];
+          const held =
+            typed?.kind === 'other' && passed !== undefined && reviewShowsAnswer(review.shown[passing], passed, typed)
+              ? typed.text
+              : undefined;
+          await keys.sendKey('Left', move === 0 ? { kind: 'review' } : { kind: 'question', index: passing, held });
+        }
+        await this.waitForTab(
+          session,
+          pane => boundQuestionIndex(screenOf(pane), pending.questions, holds) === wrong,
+          atQuestion(pending, wrong, new StructuredQuestionDriveError('← did not bring its tab back')),
+        );
+        continue;
+      }
+      const current = boundQuestionIndex(screen, pending.questions, holds);
+      const question = current === undefined ? undefined : pending.questions[current];
+      const answer = current === undefined ? undefined : answers[current];
+      if (current === undefined || question === undefined || answer === undefined)
+        throw atQuestion(
+          pending,
+          Math.max(0, answered.indexOf(false)),
+          new StructuredQuestionDriveError(
+            'the tab on screen is not one of the pending questions; no keys were sent to it',
+            'none',
+            { phase: 'drive', reason: 'question-unbound' },
+          ),
+        );
+      at = current;
+      const form = bindQuestionForm(screen, question, undefined, holds[current]) as BoundQuestionForm;
+      const moved = (pane: QuestionPaneState): boolean => {
+        const next = screenOf(pane);
+        const ticked = bindTabStrip(next, pending.questions)?.answered[current] === true;
+        return (
+          bindReviewPage(next, pending.questions) !== undefined ||
+          (ticked && boundQuestionIndex(next, pending.questions, holds) !== current)
+        );
+      };
+      if (answered[current] === true && keeps(form, question, answer)) {
+        await keys.sendKey('Right', {
+          kind: 'question',
+          index: current,
+          surface: surfaceOf(form),
+          cursor: form.cursor,
+        });
+        await this.waitForTab(
+          session,
+          moved,
+          atQuestion(pending, current, new StructuredQuestionDriveError('→ did not move past its tab')),
+        );
+        await this.step(id, { step: 'kept', questionIndex: current });
+        continue;
+      }
+      // Text typed into this tab earlier replaced its `Type something.` row; pasting would append to it.
+      if (answer.kind === 'other' && form.freeForm === undefined && form.chosen !== undefined)
+        throw atQuestion(
+          pending,
+          current,
+          new StructuredQuestionDriveError(
+            `it already holds the typed answer «${form.labels[form.chosen]}», which is not replaced automatically; change it in the terminal`,
+            'none',
+            { phase: 'drive', reason: 'typed-answer-held' },
+          ),
+        );
+      chosen[current] = (chosen[current] ?? 0) + 1;
+      if ((chosen[current] ?? 0) > CHOICES_PER_TAB)
+        throw atQuestion(
+          pending,
+          current,
+          new StructuredQuestionDriveError(`its answer was chosen ${CHOICES_PER_TAB} times and did not hold`, 'none', {
+            phase: 'drive',
+            reason: 'answer-not-held',
+          }),
+        );
+      await this.choose(session, pending, current, question, answer, form, keys);
+      await this.waitForTab(
+        session,
+        moved,
+        atQuestion(
+          pending,
+          current,
+          new StructuredQuestionDriveError(
+            'the answer keys were sent, but its tab was not ticked and the form did not move on',
+          ),
+        ),
+      );
+      await this.step(id, { step: 'answered', questionIndex: current });
+    }
+    throw atQuestion(
+      pending,
+      at,
+      new StructuredQuestionDriveError('the form did not reach a review page listing the requested answers', 'none', {
+        phase: 'drive',
+        reason: 'steps-exhausted',
+      }),
+    );
+  }
+
+  /** Type one question's answer into its bound form: the keys the harness takes for that kind. */
+  private async choose(
+    session: string,
+    pending: PendingQuestion,
+    index: number,
+    question: RenderedQuestion,
+    answer: StructuredQuestionAnswer,
+    form: BoundQuestionForm,
+    keys: Keys,
+  ): Promise<void> {
+    if (form.cursor === undefined)
+      throw atQuestion(
+        pending,
+        index,
+        new StructuredQuestionDriveError(
+          'the form cursor is not visible; a selection origin cannot be guessed',
+          'none',
+          { phase: 'preflight', questionIndex: index, reason: 'cursor-missing' },
+        ),
+      );
+    const refusal = (): StructuredQuestionDriveFailure =>
+      atQuestion(
+        pending,
+        index,
+        new StructuredQuestionDriveError('the requested answer is not an option in the bound rendered form', 'none', {
+          phase: 'preflight',
+          questionIndex: index,
+          reason: 'choice-missing',
+        }),
+      );
+    const choices = answer.kind === 'selection' ? answer.labels.map(compact) : [];
+    if (choices.some(label => !form.labels.includes(label))) throw refusal();
+    // Every key names the form it is for and the row the cursor must be on when it is typed (see `InputExpectation`).
+    const cursor: { at: number; typed: TypedRow | undefined } = { at: form.cursor, typed: undefined };
+    const surface = surfaceOf(form);
+    const here = (): InputExpectation => ({
+      kind: 'question',
+      index,
+      surface,
+      cursor: cursor.at,
+      typed: cursor.typed,
+    });
+    const moveTo = async (target: number): Promise<void> => {
+      const key = target >= cursor.at ? 'Down' : 'Up';
+      const steps = Math.abs(target - cursor.at);
+      for (let step = 0; step < steps; step++) {
+        await keys.sendKey(key, here());
+        cursor.at += key === 'Down' ? 1 : -1;
+      }
+    };
+    if (answer.kind === 'other') {
+      if (form.freeForm === undefined) throw refusal();
+      await this.enterFreeForm(session, pending, index, form, form.freeForm, answer.text, moveTo, here, cursor, keys);
+      return;
+    }
+    if (question.multiSelect === true) {
+      // Toggle exactly the rows whose box disagrees with the answer: Claude's Enter toggles a row
+      // rather than finishing the page, so the page is finished from its own Submit row.
+      for (const [row, label] of form.labels.entries()) {
+        if (choices.includes(label) === (form.checked[row] ?? false)) continue;
+        await moveTo(row);
+        await keys.sendKey('Space', here());
+      }
+      if (form.submit !== undefined) await moveTo(form.submit);
+      await keys.sendKey('Enter', here());
+      return;
+    }
+    await moveTo(form.labels.indexOf(choices[0] ?? ''));
+    await keys.sendKey('Enter', here());
+  }
+
+  /**
+   * The failure a stopped tabbed drive becomes when its form is still open: paused, with which tabs are
+   * ticked — or `undefined` when the pane no longer shows the form, and the failure stands as it is.
+   */
+  private async pausedOn(
+    session: string,
+    pending: PendingQuestion,
+    failure: StructuredQuestionDriveFailure,
+  ): Promise<StructuredQuestionDrivePaused | undefined> {
+    const pane = await this.tmux.state(session).catch(() => undefined);
+    if (pane === undefined || !pane.alive || pane.dead) return undefined;
+    const answered = bindTabStrip(screenOf(pane), pending.questions)?.answered;
+    if (answered === undefined) return undefined;
+    const index = failure.diagnostics.questionIndex;
+    const stoppedAt = typeof index === 'number' ? index : Math.max(0, answered.indexOf(false));
+    return new StructuredQuestionDrivePaused(
+      failure.message,
+      { stoppedAt, answered },
+      failure.acceptance,
+      failure.diagnostics,
+    );
+  }
+
+  /** Best-effort release after a failed drive: positively bind, send one Escape, then prove advance. */
+  async cancel(id: SessionId, pending: PendingQuestion): Promise<StructuredQuestionCancellation> {
+    const session = await this.session(id);
+    let current = await this.tmux.state(session);
+    if (!current.alive || current.dead)
+      throw new StructuredQuestionDriveError('session pane is dead; use resume', 'none', {
+        phase: 'cancel-preflight',
+      });
+    const visible = (pane: QuestionPaneState): boolean => {
+      const screen = screenOf(pane);
+      return (
+        pending.questions.some(question => bindQuestionForm(screen, question) !== undefined) ||
+        bindReviewPage(screen, pending.questions) !== undefined
+      );
+    };
+    const advanced = (
+      pane: QuestionPaneState,
+      allowActiveWork: boolean,
+    ): StructuredQuestionCancellation['confirmedBy'] | undefined => {
+      // A numbered form on the pane — whole, cursorless or cropped — is a prompt still waiting, never a ready prompt or a turn.
+      if (visible(pane) || pane.blocking !== undefined || numberedFormShown(screenOf(pane))) return undefined;
+      if (pane.promptReady) return 'prompt-ready';
+      // Active-work text is meaningful only after this method positively bound the form and sent
+      // Escape. Before that, the form's own "esc to interrupt" footer describes the blocked tool
+      // call and is not evidence that the modal advanced.
+      if (allowActiveWork && pane.activeWork) return 'turn-started';
+      return undefined;
+    };
+    const already = advanced(current, false);
+    if (already !== undefined) return { confirmedBy: 'already-advanced', pane: current };
+    if (!visible(current))
+      throw new StructuredQuestionDriveError(
+        'the failed answer no longer has a positively bound question menu; refusing automatic Escape',
+        'none',
+        { phase: 'cancel-preflight', reason: 'question-unbound' },
+      );
+    // Escape is an input like any other: a form whose selection cannot be read exactly once is not one to type into, so
+    // nothing is sent (not even this), the question is kept, and the owner is told to answer it at the terminal.
+    if (formFrame(screenOf(current))?.cursors !== 1)
+      throw new StructuredQuestionDriveError(
+        'the form cursor is not visible exactly once; refusing automatic Escape',
+        'none',
+        { phase: 'cancel-preflight', reason: 'cursor-missing' },
+      );
+    const before = current.visible;
+    // Exactly once. A failed tmux response is not permission to send another Escape.
+    await this.tmux.sendKey(session, 'Escape', { kind: 'cancel' });
+    for (let poll = 0; poll < this.polls; poll++) {
+      await this.sleep(this.pollMs);
+      current = await this.tmux.state(session);
+      if (!current.alive || current.dead)
+        throw new StructuredQuestionDriveError('session pane died while releasing the structured question', 'none', {
+          phase: 'cancel-confirm',
+        });
+      const confirmation = advanced(current, true);
+      if (confirmation !== undefined) return { confirmedBy: confirmation, pane: current };
+      if (
+        !visible(current) &&
+        current.blocking === undefined &&
+        !numberedFormShown(screenOf(current)) &&
+        current.visible !== before
+      )
+        return { confirmedBy: 'pane-advanced', pane: current };
+    }
+    throw new StructuredQuestionDriveError('Escape was sent, but the question pane did not visibly advance', 'none', {
+      phase: 'cancel-confirm',
+    });
+  }
+
+  /**
+   * Type a free-form answer the way THIS harness takes one, read off the row it rendered:
+   * Claude's row is its own text field, Codex's opens a note with Tab, and a plain `Other` row opens a
+   * separate page that is bound again before any text reaches it.
+   */
+  private async enterFreeForm(
+    session: string,
+    pending: PendingQuestion,
+    index: number,
+    form: BoundQuestionForm,
+    free: NonNullable<BoundQuestionForm['freeForm']>,
+    text: string,
+    moveTo: (target: number) => Promise<void>,
+    here: () => InputExpectation,
+    cursor: { at: number; typed: TypedRow | undefined },
+    keys: Keys,
+  ): Promise<void> {
+    const question = pending.questions[index] as RenderedQuestion;
+    await moveTo(free.index);
+    if (free.entry === 'page') {
+      const opened = (await this.tmux.state(session)).visible;
+      await keys.sendKey('Enter', here());
+      // The page is positively the question's own text-entry page, read again before the paste and before the Enter.
+      await this.waitForScreen(
+        session,
+        pane => pane.visible !== opened && pane.blocking === undefined && freeFormPageShown(screenOf(pane), question),
+        'selecting Other did not produce a bound free-form page',
+      );
+      await keys.paste(text, { kind: 'page', index });
+      await keys.sendKey('Enter', { kind: 'page', index, typed: text });
+      return;
+    }
+    if (free.entry === 'notes') {
+      await keys.sendKey('Tab', here());
+      await this.waitForScreen(
+        session,
+        pane => NOTES_OPEN.test(pane.visible),
+        'Tab did not open a note under the free-form row',
+      );
+    }
+    await keys.paste(text, here());
+    // Claude's row is itself the text field: from here on that one row draws the typed text. Codex's note sits under its row.
+    if (free.entry === 'inline') cursor.typed = { index: free.index, text };
+    if (question.multiSelect === true && form.submit !== undefined) await moveTo(form.submit);
+    await keys.sendKey('Enter', here());
+  }
+
+  // read-scoped: none — reads the form capture the runner already masked inside its own Redaction.read, and never shows or returns it
+  private async waitForScreen(
+    session: string,
+    ready: (pane: QuestionPaneState) => boolean,
+    failure: string,
+  ): Promise<void> {
+    for (let poll = 0; poll < this.polls; poll++) {
+      await this.sleep(this.pollMs);
+      const state = await this.tmux.state(session);
+      if (!state.alive || state.dead)
+        throw new StructuredQuestionDriveError('session pane died while opening free-form input');
+      if (ready(state)) return;
+    }
+    throw new StructuredQuestionDriveError(failure);
+  }
+
+  /** Poll until a tab move shows, or throw `failure`; a dead pane is its own failure. */
+  // read-scoped: none — reads the form capture the runner already masked inside its own Redaction.read, and never shows or returns it
+  private async waitForTab(
+    session: string,
+    ready: (pane: QuestionPaneState) => boolean,
+    failure: StructuredQuestionDriveFailure,
+  ): Promise<void> {
+    for (let poll = 0; poll < this.polls; poll++) {
+      await this.sleep(this.pollMs);
+      if (ready(await this.livePane(session, 'session pane died while confirming the structured answer'))) return;
+    }
+    throw failure;
+  }
+
+  private async livePane(session: string, died: string): Promise<QuestionPaneState> {
+    const state = await this.tmux.state(session);
+    if (!state.alive || state.dead) throw new StructuredQuestionDriveError(died);
+    return state;
+  }
+
+  private async step(id: SessionId, step: StructuredQuestionDriveStep): Promise<void> {
+    await this.journal(id, step).catch(() => undefined);
+  }
+
+  /**
+   * Finish Claude's closing review page: choose `Submit answers`, then prove the page went away.
+   *
+   * Pressed only when the page lists exactly the requested answer for every question: whatever was
+   * typed into the form — by this drive, an earlier one, or a person in the Console — is what Claude
+   * receives, so it is read back before it is sent.
+   */
+  private async submitReview(
+    session: string,
+    pending: PendingQuestion,
+    answers: readonly StructuredQuestionAnswer[],
+    state: QuestionPaneState,
+    keys: Keys,
+  ): Promise<Confirmation> {
+    const review = bindReviewPage(screenOf(state), pending.questions);
+    if (review?.cursor === undefined)
+      throw new StructuredQuestionDriveError('the answers reached a review page whose cursor is not visible');
+    const wrong = pending.questions.findIndex(
+      (question, index) => !reviewShowsAnswer(review.shown[index], question, answers[index] ?? none),
+    );
+    if (wrong >= 0)
+      throw atQuestion(
+        pending,
+        wrong,
+        new StructuredQuestionDriveError(
+          `the review page lists «${review.shown[wrong] ?? 'no answer'}», not the requested answer; Submit answers was not pressed`,
+          'none',
+          { phase: 'review', reason: 'review-mismatch' },
+        ),
+      );
+    const key = review.submit >= review.cursor ? 'Down' : 'Up';
+    let at = review.cursor;
+    const steps = Math.abs(review.submit - review.cursor);
+    for (let step = 0; step < steps; step++) {
+      await keys.sendKey(key, { kind: 'review', cursor: at });
+      at += key === 'Down' ? 1 : -1;
+    }
+    await keys.sendKey('Enter', { kind: 'review', cursor: at });
+    return await this.waitForAdvance(session, pending, pending.questions.length - 1, state.visible, false);
+  }
+
+  private waitForAdvance(
+    session: string,
+    pending: PendingQuestion,
+    index: number,
+    before: string,
+    reviewMayFollow: false,
+  ): Promise<Confirmation>;
+  private waitForAdvance(
+    session: string,
+    pending: PendingQuestion,
+    index: number,
+    before: string,
+    reviewMayFollow: boolean,
+  ): Promise<Confirmation | 'review'>;
+  /**
+   * Prove the answered page moved on. A review page is returned as such only when it may follow — after
+   * the LAST question — and is otherwise waited out, because a review is the form still owning the pane.
+   */
+  // read-scoped: none — reads the form capture the runner already masked inside its own Redaction.read, and never shows or returns it
+  private async waitForAdvance(
+    session: string,
+    pending: PendingQuestion,
+    index: number,
+    before: string,
+    reviewMayFollow: boolean,
+  ): Promise<Confirmation | 'review'> {
+    let reviewing = false;
+    let other = false;
+    for (let poll = 0; poll < this.polls; poll++) {
+      await this.sleep(this.pollMs);
+      const state = await this.tmux.state(session);
+      if (!state.alive || state.dead)
+        throw new StructuredQuestionDriveError('session pane died while confirming the structured answer');
+      const screen = screenOf(state);
+      // A permission prompt or dialog that replaced the form is a NEW blocking prompt: the keys did not land on this
+      // question, and nothing that follows may be read as its answer.
+      if (state.blocking !== undefined)
+        throw new StructuredQuestionDriveError(
+          `the answer keys were sent, but the pane now shows a ${state.blocking === 'permission' ? 'permission prompt' : 'dialog'} instead of taking the answer; nothing further was typed`,
+          'none',
+          { phase: 'confirm', reason: 'blocking-prompt' },
+        );
+      const next = pending.questions[index + 1];
+      if (next !== undefined && bindQuestionForm(screen, next) !== undefined) return 'next-question';
+      reviewing = bindReviewPage(screen, pending.questions) !== undefined;
+      // A review page is not an advance: the form still owns the pane until it is submitted.
+      if (reviewing && reviewMayFollow) return 'review';
+      if (reviewing) continue;
+      const anyQuestion = pending.questions.some(question => bindQuestionForm(screen, question) !== undefined);
+      // A numbered form (another question, a permission prompt, a dialog — its footer may say "esc to interrupt") is the
+      // pane still BLOCKED, never a running turn or a ready prompt: whole, with its cursor gone, or cropped at the top.
+      const blocked = numberedFormShown(screen);
+      if (blocked && !anyQuestion) other = true;
+      if (!anyQuestion && !blocked && state.activeWork) return 'turn-started';
+      if (!anyQuestion && !blocked && state.promptReady) return 'prompt-ready';
+      // A changed pane proves nothing: another form can replace this one. Only the question's own end does — the watch
+      // retired it, or the transcript carries its result — and only when no numbered form is on the pane in its place.
+      if (
+        !anyQuestion &&
+        state.visible !== before &&
+        !blocked &&
+        formFrame(screen) === undefined &&
+        (await this.tmux.completed?.(session, pending.toolUseId)) === true
+      )
+        return 'pane-advanced';
+    }
+    throw new StructuredQuestionDriveError(
+      reviewing
+        ? 'Submit answers was chosen, but the review page did not close'
+        : other
+          ? 'the answer keys were sent, but the pane now shows a different question or prompt that is still waiting; nothing further was typed'
+          : 'the answer keys were sent, but the rendered form did not visibly advance',
+    );
+  }
+}
+
+/** Stands in for an answer the request did not carry, which no review page can list. */
+const none: StructuredQuestionAnswer = { kind: 'other', text: '' };
+
+/**
+ * Whether a ticked tab already holds exactly this answer, so → may pass over it. Text typed into a
+ * tab is drawn in place of its `Type something.` row, marked `✔` like a chosen row.
+ */
+function keeps(form: BoundQuestionForm, question: RenderedQuestion, answer: StructuredQuestionAnswer): boolean {
+  const wanted = answer.kind === 'other' ? [compact(answer.text)] : answer.labels.map(compact);
+  if (question.multiSelect === true && answer.kind === 'selection')
+    return form.labels.every((label, row) => wanted.includes(label) === (form.checked[row] ?? false));
+  return form.chosen !== undefined && form.labels[form.chosen] === wanted[0];
+}
+
+/**
+ * Name the question a multi-question drive stopped at, ahead of why: "stopped at question 3 of 4
+ * (Meet&Greet): …". A single question needs no such prefix.
+ */
+function atQuestion(
+  pending: PendingQuestion,
+  index: number,
+  failure: StructuredQuestionDriveFailure,
+): StructuredQuestionDriveFailure {
+  const total = pending.questions.length;
+  if (total < 2) return failure;
+  const header = pending.questions[index]?.header;
+  return new StructuredQuestionDriveError(
+    `stopped at question ${index + 1} of ${total}${header === undefined ? '' : ` (${header})`}: ${failure.message}`,
+    failure.acceptance,
+    { phase: 'drive', ...failure.diagnostics, questionIndex: index },
+  );
+}
+
+/** A failure as the caller must see it: any failure after the first key may have reached the form. */
+function settled(error: unknown, mayHaveAccepted: boolean): StructuredQuestionDriveFailure {
+  if (error instanceof StructuredQuestionDriveFailure) {
+    if (!mayHaveAccepted || error.acceptance === 'ambiguous') return error;
+    return new StructuredQuestionDriveError(error.message, 'ambiguous', error.diagnostics);
+  }
+  return new StructuredQuestionDriveError(
+    error instanceof Error ? error.message : String(error),
+    mayHaveAccepted ? 'ambiguous' : 'none',
+    { phase: mayHaveAccepted ? 'drive' : 'preflight' },
+  );
+}

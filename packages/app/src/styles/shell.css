@@ -1,0 +1,192 @@
+/* ============================================================================
+   The frame (§5.2): nav, top, main, side, bottom — placed by the layout (`data-layout`, `fy-frame--nav-<side>`).
+   Token-driven only; sizes multiply by `--fy-text-scale` so the text-size setting reaches the shell.
+   ============================================================================ */
+
+.fy-frame {
+  display: flex;
+  min-height: 100dvh;
+}
+.fy-frame--nav-right {
+  flex-direction: row-reverse;
+}
+.fy-frame--nav-top {
+  flex-direction: column;
+}
+.fy-frame--nav-bottom {
+  flex-direction: column-reverse;
+}
+
+.fy-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fy-nav {
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+  background: var(--bar-bg);
+  color: var(--chrome-fg);
+  border-color: var(--border);
+  border-style: solid;
+  border-width: 0;
+}
+.fy-nav--left,
+.fy-nav--right {
+  flex-direction: column;
+  width: calc(var(--fy-text-scale, 1) * 168px);
+}
+.fy-nav--left {
+  border-right-width: var(--border-width);
+}
+.fy-nav--right {
+  border-left-width: var(--border-width);
+}
+.fy-nav--top {
+  border-bottom-width: var(--border-width);
+}
+.fy-nav--bottom {
+  justify-content: space-around;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  border-top-width: var(--border-width);
+}
+.fy-nav--rail.fy-nav--left,
+.fy-nav--rail.fy-nav--right {
+  width: calc(var(--fy-text-scale, 1) * 96px);
+}
+
+.fy-nav__item {
+  display: block;
+  padding: 8px 10px;
+  min-height: 44px;
+  color: inherit;
+  border-radius: var(--radius-sm);
+}
+.fy-nav__item--off {
+  color: var(--faint);
+}
+
+.fy-top {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: var(--border-width) solid var(--border);
+}
+.fy-search {
+  flex: 1;
+  max-width: 420px;
+  /* One line, whatever the bar's width: the shortcut hint never wraps under the word, against the edge. */
+  white-space: nowrap;
+}
+/* The machine picker is a themed field like every other (its popup list included), so a dark theme paints it with the
+   theme's surface and ink rather than the browser's mid-grey default. */
+.fy-daemon-picker {
+  min-width: 0;
+  max-width: 100%;
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--font-body);
+}
+.fy-daemon-picker option,
+.fy-daemon-picker optgroup {
+  background: var(--surface);
+  color: var(--fg);
+}
+
+.fy-columns {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.fy-main {
+  flex: 1;
+  min-width: 0;
+  padding: 16px;
+}
+.fy-side {
+  width: 360px;
+  border-left: var(--border-width) solid var(--border);
+  padding: 16px;
+}
+
+.fy-page h1 {
+  margin: 0 0 12px;
+  font-size: calc(var(--fy-text-scale, 1) * 1.4rem);
+}
+.fy-page label {
+  display: block;
+  margin: 8px 0;
+}
+.fy-machine ul {
+  list-style: none;
+  padding: 0;
+}
+
+.fy-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.fy-tab--active {
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.fy-shell-line {
+  margin: 8px 0;
+  color: var(--fg-soft);
+}
+.fy-shell-line--warn {
+  color: var(--err);
+}
+
+.fy-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* The page scroll region adds a node to listen on, never a box (scroll/page-scroll-region.tsx). */
+.contents {
+  display: contents;
+}
+
+/* A nav entry's count (S4): a filled pill, capped at "99+" so it never widens its entry. Decoration; the words are for a screen reader. */
+.fy-nav__item {
+  position: relative;
+}
+.fy-nav__badge {
+  display: inline-block;
+  margin-left: 6px;
+  min-width: 1.4em;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  font-size: calc(var(--fy-text-scale, 1) * 0.75rem);
+  line-height: 1.5;
+  text-align: center;
+}
+.fy-nav__badge .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.fy-slot--device {
+  margin-top: 12px;
+}
+/* A nav panel in a rail (S4): the rail is narrow, so what a panel draws there stays inside it. */
+.fy-nav--rail .fy-slot--device {
+  min-width: 0;
+  overflow: hidden;
+}

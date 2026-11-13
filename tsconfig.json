@@ -1,15 +1,12 @@
 {
   "compilerOptions": {
-    "lib": ["ESNext"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "target": "ESNext",
     "module": "Preserve",
     "moduleDetection": "force",
     "allowJs": true,
     "jsx": "react-jsx",
     "moduleResolution": "bundler",
-    "paths": {
-      "@ferretry/relay/adapters": ["./packages/relay/src/adapters/index.ts"]
-    },
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
@@ -20,16 +17,27 @@
     "noUnusedParameters": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": false,
     "types": ["bun"]
   },
   "include": [
-    "packages/*/bin",
-    "packages/*/src",
-    "packages/*/tests",
-    "scripts/validate",
-    "scripts/local",
-    "scripts/ci",
-    "scripts/release"
+    "packages/std",
+    "packages/core/*/**/*",
+    "packages/plugins/*/**/*",
+    "packages/cli/bin",
+    "packages/cli/src",
+    "packages/cli/tests"
   ],
-  "exclude": ["packages/pwa"]
+  "exclude": [
+    "packages/app",
+    "**/node_modules",
+    // Agenda browser fixtures await app-shell-fill; preserve the port's integration-test exclusion.
+    "packages/plugins/agenda/tests/integration/app",
+    // Conversation's fy-render browser tests need playwright-core, the Vite harness and the built sandbox shell, which the
+    // test tier has not got; they are never run locally (app/NEEDS-APP-SHELL.txt).
+    "packages/plugins/conversation/tests/integration/app",
+    "packages/plugins/conversation/tests/realworld/app",
+    // Claude Code's card screenshots (the same browser harness): they need playwright-core, which only the app package has.
+    "packages/plugins/claude-code/tests/integration/app"
+  ]
 }

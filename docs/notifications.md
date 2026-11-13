@@ -237,7 +237,7 @@ worker turns each tag into its own machine's namespace (`fy-push:<daemonId>:<tag
 down another's lines.
 
 **What each device does with it** (owner decision !A324). Which push service delivers it is read from the
-registration's own subscription endpoint (`mustShowForEveryPush`, from the protocol's `PUSH_SERVICE_ALLOWS_SILENT`): only FCM (`fcm.googleapis.com`) and WNS
+registration's own subscription endpoint (`mustShowForEveryPush`, from `PUSH_SERVICE_ALLOWS_SILENT`, declared in the kernel contract's push envelope so the signed worker can apply it, and re-exported by Access): only FCM (`fcm.googleapis.com`) and WNS
 (`*.notify.windows.com`) are known to let a push show nothing; every other service — Apple's, Mozilla's, one not
 known — and an endpoint the worker cannot read need every push to show something.
 
@@ -337,23 +337,74 @@ in a clear.
 
 ## Where a tap goes
 
-The push's `url` is relative to the machine's own pages: `/session/<id>?attention=A3`
-(`agendaNotificationPath`). The daemon never knows which name a browser files it under. The
-browser's per-machine push worker places the path under that machine, so it opens
-`/d/<daemonId>/session/<id>?attention=A3` (`packages/pwa/src/lib/push-scope.ts`). It reuses an open app
-window when there is one, whichever worker controls it, and never a sign-in popup.
+A push's `url` is **not trusted input**. The worker (`packages/app/src/worker/`) reads only the push's **envelope** —
+`title`, `body` and `url`, a strict, length-capped schema (`push-envelope.ts`; Access's push payload is built on it) —
+and shows the notification with the page the push named **only if that page passes** `notificationUrl`
+(`notifications.ts`). That one function is the whole rule; Access and Agenda import it, they keep no copy. The envelope
+itself — the three fields and their caps — is declared once, in the kernel contract
+(`@ferretry/kernel/contract/push-envelope`): the worker imports that one file by its own subpath, and Access's push
+payload is built on the same fields, so the two cannot drift. The worker's build allows that file and zod, never the
+contract barrel.
+
+The same file declares what the worker reads beyond the three (ruling #53), as declarative data, because the worker runs
+no plugin code: a show's optional `tag`, `kind`, `count` (1–999) and `urgency`, a tags-only `clear`, and
+`readPushMessage`, which picks those fields by name and parses them strictly. Beside it,
+`@ferretry/kernel/contract/notification-filter` declares this device's filter document (its JSON text, under the
+IndexedDB names Agenda's mirror already uses) and `shouldShowPush`, the one show-or-hide decision; a document that does
+not parse reads as "show everything". GAP(worker-reads-message): the worker still reads only the three fields through
+`readPushEnvelope` until the shell's notification item (S6) moves it onto `readPushMessage` and the filter document,
+and Agenda writes version 2 of the document with it. A tag outside the kernel's grammar (`[A-Za-z0-9._:-]{1,128}`) is
+sent untagged by Access, never refused: the line is shown, but not replaced or cleared by tag.
+
+The daemon names a ferret's page relative to the machine's own pages — `/ferrets/<id>/chat?ask=A3`
+(`agendaNotificationPath`; `ask` is `ASK_LINK_PARAMETER`), or `/agenda?ask=A3` for a machine ask (`askBuzzPath`) — since
+it never knows which name a browser files the machine under. The machine's per-machine push worker places the path under
+that machine and parses it with the shell's own route parse. Only these open, rebuilt from the parsed route (the query
+keeps `ask` and nothing else; the fragment is dropped):
+
+- the machine's chat, `/d/<daemonId>/ferrets/<id>/chat` with an optional `?ask=<id>` — `<id>` is a ferret id
+  (`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`, Ferrets' `FerretIdSchema`) and `ask` an Agenda id (`^A[1-9][0-9]*$`, Asks'
+  `AgendaIdSchema`); a unit test beside each plugin pins the worker's copy to its schema;
+- the machine's Agenda page, `/d/<daemonId>/agenda` with an optional `?ask=<id>`;
+- the machine's home, `/d/<daemonId>`.
+
+**Anything else opens the app, `/app/`:** another origin, `javascript:`, `//host`, a backslash, literal or encoded
+traversal (`..`, `%2e%2e`), an encoded slash in a segment, another machine's page, an unknown route (the old `/session/`
+spelling too), `/` and a daemon-less screen such as `/join`. A push that reached the **app-wide** registration is titled
+"Unverified" and carries `/app/` whatever it named (the boundary at show time). A payload with no readable envelope is
+shown plainly ("Something is waiting in your Agenda.") and carries no page.
+
+**On a tap** the worker reads back the `data.url` the notification carries (a relative one is read against the site) through
+the same rule. A machine's worker keeps its own machine. The **app-wide** worker knows no machine, so it keeps a stored
+address only if it is an absolute `/d/<id>/…` page on the closed list above — rebuilt, not passed through — and a
+machine-relative or hostile one opens `/app/`. That is what lets a line the **page itself** showed ("needs input", "failed",
+"done" for a machine's ferret, through the app-wide registration, with its own deep link) still open its chat.
+
+The worker holds no pairings, so **the page decides the rest**: `notificationTapTarget`
+(`packages/app/src/router/tap-target.ts`) is run by the page's open handler (`useNotificationOpen`, with the shell's route
+table and the set of paired machines) on every open message before it routes. It refuses `/`, a daemon-less screen, an
+address the table does not draw, and a machine this browser has not paired — each opens the app (an unknown page under a
+paired machine opens that machine's home). **Declared gap:** with no window open the worker opens the rebuilt address
+itself, so the paired-machine check there is the shell's own route handling (`GAP(notification-open)` also covers that no
+shell root mounts the open handler yet).
+
+It reuses an open app window when there is one, whichever worker controls it, and never a sign-in popup.
 
 Every push names a page, and the worker opens a page even when one does not:
 
-- **A push with no item** (a legacy notify) opens the conversation it came from: `/session/<id>`
+- **A machine ask** (no ferret named, or the machine's own ledger) has no chat: it opens the machine's Agenda page at the ask,
+  `/agenda?ask=A3` (`askBuzzPath`), which becomes `/d/<daemonId>/agenda?ask=A3`. The Agenda reads `?ask=` (`useAskFocus`); so does the chat's side panel, `ferret-agenda`, which opens the filter the
+  ask is in and rings its row, so `/ferrets/<id>/chat?ask=A3` lands AT the ask.
+  Opening that page while the owner is present also marks the alert seen on their other devices (`POST /v1/push/seen`, as
+  today); this happens when the owner is present, as today.
+- **A push with no item** opens the chat it came from: `/ferrets/<id>/chat`
   (`sessionNotificationPath`).
-- **A push that names no page it may open** opens the conversation its `sessionId` names, on its
-  machine. A daemon older than #768 sent every push with `url: '/'`, an ask included. A push about no
-  conversation (a new device, enrolment, a passkey) opens that machine's sessions.
+- **A push that names no page it may open** (`/`, an enrolment confirmation, a new-device alert) opens the app. There is no
+  `sessionId` fallback.
 - **Which window.** An app window wins over the landing page, which has no router. Among app windows,
   the one the reader is looking at wins.
 - **How the window gets there.** The worker brings the window forward and asks the app to route there
-  in place (`packages/pwa/src/lib/notification-open.ts`). The app's entry point listens before React
+  in place (`packages/plugins/agenda/app/lib/notification-open.ts`). The app's entry point listens before React
   mounts, so a tap that lands while the app is still starting is routed once it is up. It moves the app
   to the tapped machine, and the conversation opens at the item — scrolled to its ask — again on every new tap (each tap carries its own number, and paging or closing leaves the request, so the same item opened from the list starts at its top).
 - **A window that never answers** (an app too old for the message) cannot be navigated by a machine's
@@ -362,7 +413,7 @@ Every push names a page, and the worker opens a page even when one does not:
   under `/push/<daemonId>/`. So the app asks for each machine's worker update at every start
   (`containerPushEnrolment.reconcile`). Without that, a phone enrolled before a fix kept the old tap.
 
-`packages/pwa/tests/integration/notification-open.test.ts` proves each case in Chromium, through the
+`packages/plugins/agenda/tests/integration/app/notification-open.test.ts` proves each case in Chromium, through the
 built worker.
 
 Every notification carries the Ferretry mark: `icons/icon-192.png` as its icon, and `icons/badge-96.png`

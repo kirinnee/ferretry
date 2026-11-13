@@ -5,36 +5,287 @@
       "entry": [],
       "project": []
     },
+    "packages/std": {
+      "entry": [],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/core/kernel": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**", "!testing/**"]
+    },
+    "packages/core/*": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/*": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
     "packages/cli": {
       "entry": ["bin/*.ts"],
-      "project": ["src/**/*.ts", "bin/**/*.ts"]
+      "project": ["src/**/*.ts", "bin/**/*.ts"],
+      "ignore": ["src/lib/tool-client.ts", "src/lib/update/status.ts"]
     },
-    "packages/daemon": {
-      "entry": ["bin/*.ts"],
-      "project": ["src/**/*.ts", "bin/**/*.ts"]
-    },
-    "packages/fleet": {
-      "entry": ["src/lib/index.ts"],
-      "project": ["src/**/*.ts"]
-    },
-    "packages/relay": {
-      "entry": ["src/lib/index.ts", "src/adapters/index.ts"],
-      "project": ["src/**/*.ts"]
-    },
-    "packages/protocol": {
-      "entry": ["src/lib/index.ts"],
-      "project": ["src/**/*.ts"]
-    },
-    "packages/pwa": {
-      "entry": ["src/main.tsx", "src/worker/service-worker.ts"],
-      "project": ["src/**/*.{ts,tsx}"],
-      "ignoreDependencies": ["sherpa-glue", "sherpa-runtime-wasm"],
+    "packages/app": {
+      "entry": ["src/main.tsx"],
+      "project": ["src/**/*.{ts,tsx,css}"],
       "ignore": [
-        "src/lib/stt/speed-bench-report.ts",
-        "src/lib/shared-draft-client.ts",
-        "src/lib/voice-chat/turn-endpointer.ts",
-        "src/lib/voice-chat/turn-endpointer-scoring.ts"
+        "src/worker/service-worker.ts",
+        "src/worker/filter-document.ts",
+        "src/worker/notifications.ts",
+        "src/release/keeper.ts",
+        "src/release/storage.ts"
       ]
+    },
+    "packages/core/ferrets": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "daemon/adapters/session/lifecycle/process-incarnation.ts",
+        "daemon/adapters/session/resume/tmux-resume-launcher.ts",
+        "daemon/lib/session/health/watched-panes.ts",
+        "daemon/lib/session/events/index.ts",
+        "daemon/lib/session/events/service.ts",
+        "daemon/lib/session/observer/index.ts",
+        "daemon/lib/session/observer/pane.ts",
+        "daemon/lib/session/observer/plan.ts",
+        "daemon/lib/session/observer/protocol.ts",
+        "daemon/lib/session/observer/restart.ts",
+        "daemon/lib/session/observer/send-evidence.ts",
+        "daemon/adapters/session/observer/index.ts",
+        "daemon/adapters/session/observer/session-worker-runtime.ts",
+        "daemon/adapters/session/observer/worker-children.ts",
+        "daemon/adapters/session/observer/worker-observer-host.ts",
+        "daemon/adapters/session/observer/worker-supervisor.ts",
+        "daemon/workers/session.worker.ts",
+        "daemon/lib/session/peers/harness-observation.ts",
+        "daemon/lib/session/peers/send-lifecycle.ts",
+        "daemon/lib/session/restart/index.ts",
+        "daemon/lib/session/restart/outdated-view.ts",
+        "daemon/lib/session/live/index.ts",
+        "daemon/lib/session/live/compaction.ts",
+        "daemon/adapters/session/live/index.ts",
+        "daemon/adapters/session/live/file-compaction-history.ts",
+        "daemon/adapters/session/archive/index.ts",
+        "daemon/lib/session/directory/session-directory.ts",
+        "daemon/adapters/session/session-address-candidates.ts",
+        "daemon/lib/session/monitor/index.ts",
+        "daemon/lib/session/monitor/policy.ts",
+        "daemon/lib/session/monitor/service.ts",
+        "daemon/lib/session/monitor/settings.ts",
+        "daemon/lib/session/monitor/types.ts",
+        "daemon/adapters/session/monitor/index.ts",
+        "daemon/adapters/session/monitor/atomic-json.ts",
+        "daemon/adapters/session/monitor/file-wait-heartbeat.ts",
+        "daemon/adapters/session/monitor/monitor-tick-runner.ts",
+        "daemon/adapters/session/monitor/send-monitor-nudge.ts",
+        "daemon/adapters/session/monitor/storage-monitor-waits.ts",
+        "daemon/adapters/session/signal/index.ts",
+        "daemon/adapters/session/signal/file-signal-artifacts.ts",
+        "daemon/adapters/session/signal/launcher-signal-terminal.ts",
+        "daemon/adapters/session/signal/storage-signal-repository.ts",
+        "daemon/lib/session/signal/index.ts",
+        "daemon/lib/session/runtime-control/index.ts",
+        "daemon/lib/session/runtime-control/ledger.ts",
+        "daemon/lib/session/runtime-control/policy.ts",
+        "daemon/lib/session/runtime-control/service.ts"
+      ]
+    },
+    "packages/plugins/agenda": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/components/agenda-message.tsx",
+        "app/hooks/use-agenda-replies.ts",
+        "app/hooks/use-agenda.ts",
+        "app/hooks/use-answered-suggestion-sweep.ts",
+        "app/hooks/use-notifications.ts",
+        "app/lib/answer-chip.ts",
+        "app/lib/item-conversation.ts",
+        "app/lib/notification-ledger.ts",
+        "app/lib/notification-preferences.ts",
+        "app/lib/notify.ts",
+        "app/lib/permission-request.ts",
+        "app/lib/push-delivery.ts",
+        "app/features/permission-request/approval-card.tsx",
+        "app/features/agenda/agenda-inbox-composer.tsx",
+        "app/features/agenda/agenda-nav.tsx",
+        "app/features/agenda/agenda-replies-notice.tsx",
+        "app/features/agenda/agenda.tsx",
+        "app/lib/agenda-source-refs.ts"
+      ]
+    },
+    "packages/plugins/board": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/claude-code": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/packs": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/projects": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/hooks/use-project-scope.ts",
+        "app/lib/project-scope.ts",
+        "app/hooks/use-work-project-names.ts",
+        "app/lib/work-project-names.ts"
+      ]
+    },
+    "packages/plugins/runtimes": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "daemon/adapters/ports.ts",
+        "daemon/adapters/runtime-ids-file.ts",
+        "daemon/adapters/runtime-session-records.ts",
+        "daemon/adapters/setup-files.ts",
+        "daemon/lib/env-profiles.ts",
+        "daemon/lib/harness-env.ts",
+        "daemon/lib/harness.ts"
+      ]
+    },
+    "packages/plugins/updates": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": ["app/lib/changelog.ts", "app/lib/install-prompt.ts"]
+    },
+    "packages/plugins/warden": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": ["daemon/lib/auto-move-failures.ts"]
+    },
+    "packages/plugins/connections": {
+      "entry": ["worker/src/adapters/worker.ts"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": ["daemon/adapters/tunnel/cloudflared-locator.ts"]
+    },
+    "packages/plugins/catalogs": {
+      "entry": ["worker/src/adapters/link-store-worker.ts"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/features/catalogs/catalog-item-row.tsx",
+        "app/features/catalogs/catalog-add-toast.tsx",
+        "app/features/shared/shared-entry.tsx"
+      ],
+      "ignoreDependencies": ["react-dom"]
+    },
+    "packages/plugins/conversation": {
+      "entry": ["app/surfaces.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/render/fy-render-workspace-media.ts",
+        "app/render/workspace-path.ts",
+        "daemon/questions/lib/projection.ts"
+      ]
+    },
+    "packages/plugins/mcp": {
+      "entry": ["app/views/surfaces.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/skills": {
+      "entry": ["app/views/surfaces.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/accounts": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": ["daemon/lib/sign-in-grants/**"]
+    },
+    "packages/plugins/shells": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/layouts": {
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/terminals": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/browsers": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "daemon/holds/site.ts",
+        "daemon/stream/socket-downstream.ts",
+        "daemon/proxy/firewall/marker-reader.ts",
+        "daemon/proxy/firewall/state.ts",
+        "daemon/proxy/wire/firewall.ts"
+      ]
+    },
+    "packages/plugins/access": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/features/onboarding/device-kind.ts",
+        "app/harness/pair-from-menu.tsx",
+        "app/lib/device-preference.ts",
+        "app/lib/push-seen.ts",
+        "cli/lib/grants/commands.ts",
+        "cli/lib/grants/controller.ts",
+        "cli/lib/grants/gateway.ts",
+        "cli/lib/grants/ports.ts",
+        "cli/lib/grants/render.ts",
+        "daemon/adapters/grants/index.ts",
+        "daemon/adapters/pairing/index.ts",
+        "daemon/adapters/push/index.ts"
+      ]
+    },
+    "packages/plugins/voice": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/components/auto-read-chip.tsx",
+        "app/hooks/use-auto-read.ts",
+        "app/lib/stt/parakeet-vocabulary.ts",
+        "app/lib/stt/pthread-workers.ts",
+        "app/lib/stt/speed-bench-report.ts",
+        "app/lib/voice-chat/auto-read.ts",
+        "app/lib/voice-chat/reply-picker.ts",
+        "app/lib/voice-chat/turn-endpointer-scoring.ts",
+        "app/lib/voice-chat/turn-endpointer.ts",
+        "app/vite-voice.ts",
+        "app/worker/parakeet-worker.ts",
+        "app/worker/sherpa-worker.ts",
+        "app/worker/vosk-worker.ts",
+        "app/worker/whisper-worker.ts",
+        "daemon/lib/speedups/index.ts",
+        "daemon/lib/stt/index.ts"
+      ],
+      "ignoreDependencies": [
+        "@huggingface/transformers",
+        "@lichess-org/vosk-browser",
+        "@sherpaw/asr",
+        "onnxruntime-web",
+        "parakeet.js"
+      ]
+    },
+    "packages/plugins/usage": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/lib/move-triggers.ts",
+        "daemon/adapters/usage/index.ts",
+        "daemon/adapters/usage/provider-quota/index.ts",
+        "daemon/lib/performance/fallbacks.ts",
+        "daemon/lib/performance/sampler-tee.ts"
+      ]
+    },
+    "packages/plugins/onboarding": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": ["app/landing-geometry.ts"]
+    },
+    "packages/plugins/codex": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     }
   },
   "bun": false,
@@ -52,6 +303,8 @@
     "devDependencies": "off",
     "optionalPeerDependencies": "off",
     "binaries": "off",
-    "enumMembers": "off"
-  }
+    "enumMembers": "off",
+    "dependencies": "warn"
+  },
+  "tags": ["-pending"]
 }

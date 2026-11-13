@@ -1,0 +1,634 @@
+import { describe, expect, it } from 'bun:test';
+import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
+import { AgendaSwipeDeck, dragOffset } from '../../../../app/features/agenda/agenda-swipe-deck.tsx';
+import { swipeTargets } from '../../../../app/lib/agenda-answers.ts';
+import type { InboxCard } from '../../../../app/lib/agenda-inbox.ts';
+import { daemonConnection, daemonId } from '../../../../app/shell.ts';
+import { registerComposerQuoteTarget } from '../../../../app/shell.ts';
+import {
+  agendaItem,
+  choices,
+  type FakeInbox,
+  fakeInbox,
+  InboxHarness,
+  inboxCard,
+} from '../../../support/app/agenda-inbox.tsx';
+import { openConversation } from '../../../support/app/agenda-folds.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { sessionView } from '../../../support/app/sessions.ts';
+
+const NOW = Date.parse('2026-08-01T12:00:00.000Z');
+const laptop = daemonConnection({ daemonId: 'laptop' });
+
+const shipIt = inboxCard(
+  agendaItem('A2', {
+    subject: 'Ship it?',
+    ask: choices('Ship', 'Hold'),
+    waitingSince: '2026-08-01T10:00:00.000Z',
+    task: { id: 'F12' },
+  } as never),
+  sessionView('sess-2', { config: { teammate: 'kai', name: 'Release train', focusTask: { id: 'F9' } } as never }),
+  'Laptop',
+  daemonId('laptop'),
+);
+const rebase = inboxCard(
+  agendaItem('A3', { subject: 'Rebase onto main?', ask: choices('Rebase now', 'Wait', 'Later') }),
+  sessionView('sess-1', { config: { teammate: 'zoe', name: 'Fix the build', focusTask: { id: 'F4' } } as never }),
+);
+
+const suggestionCard = inboxCard(
+  agendaItem('A6', {
+    kind: 'permission',
+    subject: 'A ferret suggests a standing rule for a sign-in on github.com.',
+    signInRuleSuggestion: { suggestion: 'srg_dddddddddddddddd' },
+  } as never),
+  sessionView('sess-4', { config: { teammate: 'pip', name: 'Deploy' } as never }),
+);
+
+const page = (
+  fake: FakeInbox,
+  cards: readonly InboxCard[],
+  props: Partial<AgendaInboxPageProps> = {},
+  navigated: string[] = [],
+) => (
+  <InboxHarness
+    cards={cards}
+    fake={fake}
+    reading={false}
+    render={inbox => (
+      <AgendaInboxPage
+        clock={fake.clock.now}
+        inbox={inbox}
+        now={NOW}
+        onNavigate={to => navigated.push(to)}
+        phone
+        reducedMotion
+        {...props}
+      />
+    )}
+  />
+);
+
+const pointer = (type: string, x: number, y: number): PointerEvent =>
+  new PointerEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: x,
+    clientY: y,
+    pointerId: 7,
+    pointerType: 'touch',
+  });
+
+/** Drags from `start` by (dx, dy) and lets go. */
+const swipeFrom = async (start: Element, dx: number, dy: number, letGo = true): Promise<void> => {
+  await interact(() => start.dispatchEvent(pointer('pointerdown', 100, 300)));
+  await interact(() => start.dispatchEvent(pointer('pointermove', 100 + dx / 2, 300 + dy / 2)));
+  await interact(() => start.dispatchEvent(pointer('pointermove', 100 + dx, 300 + dy)));
+  if (letGo) await interact(() => start.dispatchEvent(pointer('pointerup', 100 + dx, 300 + dy)));
+};
+
+const topView = (mounted: Mounted): HTMLElement =>
+  must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-view]'), 'the open item');
+const head = (mounted: Mounted): HTMLElement =>
+  must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-top]'), 'the item head');
+const answerRow = (mounted: Mounted): HTMLElement =>
+  must(
+    mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-quick-replies]'),
+    'the answer row',
+  );
+/** The deck's own handle on a phone: the who-and-what line (the view's head and row swipe on their own there). */
+const whoLine = (mounted: Mounted): HTMLElement =>
+  must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-inbox-who]'), 'the who line');
+const pending = (fake: FakeInbox): string[] => fake.deferred.getSnapshot().pending.map(entry => entry.action.label);
+const key = (target: Element, name: string) =>
+  interact(() => target.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true })));
+
+describe('the open Inbox item', () => {
+  it('is the chat’s own full item view, under a line that says who, what and where', async () => {
+    const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
+    expect(topView(mounted).getAttribute('data-agenda-view')).toBe('A2');
+    const who = must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-inbox-who]'), 'who');
+    expect(who.querySelector('[data-inbox-who-ferret]')?.textContent).toBe('Kai');
+    expect(who.querySelector('[data-inbox-who-task]')?.textContent).toBe('Release train');
+    // The item's own card wins over the conversation's focus card.
+    expect(who.querySelector('[data-inbox-who-card]')?.textContent).toBe('&F12');
+    expect(who.textContent).toContain('Laptop');
+    const chat = must(who.querySelector<HTMLAnchorElement>('[data-inbox-open-chat]'), 'Open chat');
+    expect(chat.getAttribute('href')).toBe('/d/laptop/agenda/sess-2/A2');
+    // ✕ goes back to the Inbox, and says so.
+    expect(mounted.container.querySelector('[data-agenda-close]')?.getAttribute('aria-label')).toBe(
+      'Back to the Inbox',
+    );
+    await mounted.unmount();
+  });
+
+  it('keeps Not needed under the head’s ⓘ with Skip, never as a pill in the card body', async () => {
+    const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
+    expect(topView(mounted).querySelector('[data-agenda-dismiss]')).toBeNull();
+    expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).toBeNull();
+    await interact(() =>
+      must(topView(mounted).querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), 'the ⋯ button').click(),
+    );
+    expect(topView(mounted).querySelector('[data-inbox-tool="skip"]')).not.toBeNull();
+    expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).not.toBeNull();
+    await mounted.unmount();
+  });
+
+  it('offers no Snooze and no composer on a ferret’s rule suggestion: the ferret reads its own board (C2)', async () => {
+    const snoozeOf = async (root: HTMLElement): Promise<Element | null> => {
+      await interact(() => root.querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]')?.click());
+      return root.querySelector('[data-agenda-menu-group="snooze"]');
+    };
+    const plain = await mount(
+      page(fakeInbox(), [shipIt], { initialOpen: shipIt.key, renderComposer: () => <textarea /> }),
+    );
+    const offered =
+      (await snoozeOf(topView(plain))) !== null && plain.container.querySelector('[data-inbox-composer]') !== null;
+    await plain.unmount();
+    const mounted = await mount(
+      page(fakeInbox(), [suggestionCard], {
+        initialOpen: suggestionCard.key,
+        renderComposer: () => <textarea aria-label="Message this session" data-fake-composer="" />,
+      }),
+    );
+    expect(offered).toBe(true);
+    expect(await snoozeOf(topView(mounted))).toBeNull();
+    expect(mounted.container.querySelector('[data-inbox-composer]')).toBeNull();
+    await mounted.unmount();
+  });
+
+  it('offers Skip and no Not needed on a ferret’s rule suggestion: its card’s own Dismiss says no (C2)', async () => {
+    const suggested = inboxCard(
+      agendaItem('A5', {
+        kind: 'permission',
+        subject: 'A ferret suggests a standing rule for a sign-in on github.com.',
+        signInRuleSuggestion: { suggestion: 'srg_dddddddddddddddd' },
+      } as never),
+      sessionView('sess-3', { config: { teammate: 'pip', name: 'Deploy' } as never }),
+    );
+    const mounted = await mount(page(fakeInbox(), [suggested], { initialOpen: suggested.key }));
+    await interact(() =>
+      must(topView(mounted).querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), 'the ⋯ button').click(),
+    );
+    expect(topView(mounted).querySelector('[data-inbox-tool="skip"]')).not.toBeNull();
+    expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).toBeNull();
+    await mounted.unmount();
+  });
+
+  it('says who and where on one line that cuts its facts, not the way to the chat', async () => {
+    const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
+    const who = whoLine(mounted);
+    expect(who.classList.contains('fy-meta-line')).toBe(true);
+    expect(who.children).toHaveLength(2);
+    expect(who.children[0]?.classList.contains('fy-meta-line__facts')).toBe(true);
+    expect(who.children[1]?.getAttribute('data-inbox-open-chat')).toBe('');
+    await mounted.unmount();
+  });
+
+  it('takes the conversation’s focus card when the item names none, and says no card when there is none', async () => {
+    const mounted = await mount(page(fakeInbox(), [rebase], { initialOpen: rebase.key }));
+    expect(mounted.container.querySelector('[data-inbox-who-card]')?.textContent).toBe('&F4');
+    await mounted.unmount();
+    const bare = inboxCard(
+      agendaItem('A7', { subject: 'Look' }),
+      sessionView('sess-7', { config: { teammate: 'moe' } }),
+    );
+    const none = await mount(page(fakeInbox(), [bare], { initialOpen: bare.key }));
+    expect(none.container.querySelector('[data-inbox-who-card]')).toBeNull();
+    await none.unmount();
+  });
+
+  it('answers the middle reply — the second option — on a swipe up from its who-and-what line, into the undo window', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(page(fake, [shipIt, rebase], { initialOpen: rebase.key }));
+    await swipeFrom(whoLine(mounted), 0, -200);
+    expect(pending(fake)).toEqual(['Wait']);
+    expect(fake.commits).toEqual([]);
+    await mounted.unmount();
+  });
+
+  it('skips on a swipe down of the item’s title head — nothing sent, nothing dismissed — and the next item comes on top', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(page(fake, [shipIt, rebase], { initialOpen: shipIt.key }));
+    const first = topView(mounted).getAttribute('data-agenda-view');
+    await swipeFrom(head(mounted), 0, 120);
+    expect(pending(fake)).toEqual([]);
+    expect(fake.commits).toEqual([]);
+    expect(topView(mounted).getAttribute('data-agenda-view')).not.toBe(first);
+    await mounted.unmount();
+  });
+
+  it('stamps what a drag would do while it is held: ← the first option, ↓ Skip', async () => {
+    const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
+    await swipeFrom(whoLine(mounted), -200, 0, false);
+    const up = must(mounted.container.querySelector('.fy-attn-deck__top[data-swipe-direction]'), 'the card mid-drag');
+    expect(up.getAttribute('data-swipe-direction')).toBe('left');
+    expect(up.getAttribute('data-swipe-answer')).toBe('Ship');
+    await interact(() => whoLine(mounted).dispatchEvent(pointer('pointercancel', 100, 100)));
+    await swipeFrom(whoLine(mounted), 0, 120, false);
+    const down = must(mounted.container.querySelector('.fy-attn-deck__top[data-swipe-direction]'), 'the card mid-drag');
+    expect(down.getAttribute('data-swipe-direction')).toBe('down');
+    expect(down.getAttribute('data-swipe-answer')).toBe('Skip');
+    expect(down.hasAttribute('data-swipe-committed')).toBe(true);
+    await mounted.unmount();
+  });
+
+  it('leaves a drag on a phone’s answer row to the view: the deck neither stamps it nor moves the card', async () => {
+    const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
+    await swipeFrom(answerRow(mounted), 0, -200, false);
+    expect(mounted.container.querySelector('.fy-attn-deck__top[data-swipe-direction]')).toBeNull();
+    expect(mounted.container.querySelector('.fy-attn-deck__top')?.hasAttribute('data-dragging')).toBe(false);
+    await mounted.unmount();
+  });
+
+  it('answers ↑, skips on ↓ from the keyboard (nothing sent), and Escape goes back', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(page(fake, [shipIt, rebase], { initialOpen: shipIt.key, phone: false }));
+    const first = topView(mounted).getAttribute('data-agenda-view');
+    await key(topView(mounted), 'ArrowDown');
+    expect(pending(fake)).toEqual([]);
+    expect(fake.commits).toEqual([]);
+    expect(topView(mounted).getAttribute('data-agenda-view')).not.toBe(first);
+    await key(topView(mounted), 'ArrowUp');
+    expect(pending(fake)).toHaveLength(1);
+    await mounted.unmount();
+    const back = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
+    await key(topView(back), 'Escape');
+    expect(back.container.querySelector('[data-agenda-inbox]')?.getAttribute('data-agenda-inbox')).toBe('list');
+    await back.unmount();
+  });
+
+  it('draws the ferret’s own composer under the item, for the item on top', async () => {
+    const asked: string[] = [];
+    const mounted = await mount(
+      page(fakeInbox(), [shipIt], {
+        initialOpen: shipIt.key,
+        renderComposer: card => {
+          asked.push(card.item.id);
+          return <textarea aria-label="Message this session" data-fake-composer={card.view.config.id} />;
+        },
+      }),
+    );
+    const composer = must(mounted.container.querySelector('[data-inbox-composer]'), 'the composer');
+    expect(composer.querySelector('[data-fake-composer]')?.getAttribute('data-fake-composer')).toBe('sess-2');
+    expect(asked.at(-1)).toBe('A2');
+    // Typing in it is the reader's: a drag never starts there.
+    await mounted.unmount();
+  });
+
+  it('answers a form from its composer’s one Send: the picks and the typed words go into the undo window together', async () => {
+    const fake = fakeInbox();
+    let draft = 'and keep the logs';
+    const formCard = inboxCard(
+      agendaItem('A4', {
+        kind: 'form',
+        ask: { kind: 'open-question' },
+        fields: [{ id: '1', type: 'yesno', label: 'OK to restart?', recommended: ['Yes'] }],
+      } as never),
+      sessionView('sess-3'),
+    );
+    const unregister = registerComposerQuoteTarget({
+      daemonId: formCard.daemonId,
+      sessionId: formCard.view.config.id,
+      item: formCard.item.id,
+      draft: () => draft,
+      replaceDraft: next => {
+        draft = next;
+      },
+    });
+    const mounted = await mount(
+      page(fake, [formCard], {
+        initialOpen: formCard.key,
+        renderComposer: (_card, answerForm) => (
+          <button data-fake-send="" onClick={answerForm} type="button">
+            Send
+          </button>
+        ),
+      }),
+    );
+    await interact(() => must(mounted.container.querySelector<HTMLButtonElement>('[data-fake-send]'), 'Send').click());
+    expect(fake.deferred.getSnapshot().pending).toHaveLength(1);
+    expect(draft).toBe('');
+    unregister();
+    await mounted.unmount();
+  });
+
+  it('carries what is typed in the ferret’s composer as a quick reply’s note, and empties it', async () => {
+    const fake = fakeInbox();
+    let draft = 'only after the smoke test';
+    const unregister = registerComposerQuoteTarget({
+      daemonId: shipIt.daemonId,
+      sessionId: shipIt.view.config.id,
+      item: shipIt.item.id,
+      draft: () => draft,
+      replaceDraft: next => {
+        draft = next;
+      },
+    });
+    const mounted = await mount(page(fake, [shipIt], { initialOpen: shipIt.key }));
+    const ship = must(
+      [
+        ...mounted.container.querySelectorAll<HTMLButtonElement>(
+          '.fy-attn-deck__top [data-agenda-quick-replies] button',
+        ),
+      ].find(button => button.textContent?.includes('Ship')),
+      'Ship',
+    );
+    await interact(() => ship.click());
+    expect(
+      fake.deferred.getSnapshot().pending.map(entry => ('note' in entry.action ? entry.action.note : undefined)),
+    ).toEqual(['only after the smoke test']);
+    expect(draft).toBe('');
+    unregister();
+    await mounted.unmount();
+  });
+
+  it('opens on a wide screen too, from a row, and the row still links to the chat', async () => {
+    const navigated: string[] = [];
+    const mounted = await mount(page(fakeInbox(), [shipIt], { phone: false }, navigated));
+    const row = must(mounted.container.querySelector<HTMLAnchorElement>('[data-agenda-row]'), 'the row');
+    await interact(() => row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
+    expect(navigated).toEqual([]);
+    expect(topView(mounted).getAttribute('data-agenda-view')).toBe('A2');
+    await mounted.unmount();
+  });
+});
+
+describe('the Inbox list says who and what', () => {
+  it('puts the ferret’s card on its group head, and an item’s other card on its row', async () => {
+    const mounted = await mount(page(fakeInbox(), [shipIt, rebase], { phone: false }));
+    const cards = [...mounted.container.querySelectorAll('[data-agenda-group-card]')].map(node => node.textContent);
+    expect(cards.sort()).toEqual(['&F4', '&F9']);
+    // A2 is about &F12, not the &F9 its ferret is on: its row says so; A3 is about its ferret's own card.
+    expect([...mounted.container.querySelectorAll('[data-agenda-row-card]')].map(node => node.textContent)).toEqual([
+      '&F12',
+    ]);
+    await mounted.unmount();
+  });
+});
+
+describe('the deck: ↓ is Skip', () => {
+  const targets = swipeTargets(agendaItem('A1', { ask: choices('Yes', 'No') }));
+
+  it('follows a downward drag only when it can skip', () => {
+    expect(dragOffset(0, 80, targets, true)).toEqual({ dx: 0, dy: 80 });
+    expect(dragOffset(0, 80, targets)).toEqual({ dx: 0, dy: 0 });
+  });
+
+  it('skips on ↓ and flies the card down; nothing is ever answered or dismissed by it', async () => {
+    const skipped: string[] = [];
+    const acted: string[] = [];
+    const cards = [inboxCard(agendaItem('A1', { ask: choices('Ship', 'Hold') }))];
+    const mounted = await mount(
+      <AgendaSwipeDeck
+        cards={cards}
+        onAct={(_card, action) => acted.push(action.kind)}
+        onSkip={card => skipped.push(card.item.id)}
+        reducedMotion={false}
+        renderCard={(card, _act, skip) => (
+          <button data-skip-here="" onClick={skip} type="button">
+            {card.item.id}
+          </button>
+        )}
+      />,
+    );
+    const frame = must(mounted.container.querySelector<HTMLElement>('[data-agenda-frame]'), 'the frame');
+    expect(frame.textContent).toContain('Arrow down: skip.');
+    // The card's own row, in the options list's order: the first option on ←.
+    expect(frame.textContent).toContain('Arrow left: Ship.');
+    await key(frame, 'ArrowDown');
+    expect([acted, skipped]).toEqual([[], ['A1']]);
+    expect(mounted.container.querySelector('.fy-attn-deck__leaving')?.getAttribute('data-direction')).toBe('down');
+    await interact(() => must(mounted.container.querySelector<HTMLButtonElement>('[data-skip-here]'), 'skip').click());
+    expect([acted, skipped]).toEqual([[], ['A1', 'A1']]);
+    await mounted.unmount();
+  });
+});
+
+describe('the open Inbox item’s History', () => {
+  it('shows the owner’s replies and the ferret’s answers as chat bubbles, read for the card on top', async () => {
+    const asked: string[] = [];
+    const mounted = await mount(
+      page(fakeInbox(), [shipIt], {
+        initialOpen: shipIt.key,
+        readConversation: async card => {
+          asked.push(card.key);
+          return [
+            { id: '1', kind: 'assistant', text: 'Asking about !A2 — ship it?', at: NOW - 3_600_000 },
+            { id: '2', kind: 'user', text: 'Hold until Monday !A2', at: NOW - 1_800_000 },
+          ];
+        },
+      }),
+    );
+    await interact(() => Promise.resolve());
+    await openConversation(mounted.container);
+    const owner = [...mounted.container.querySelectorAll('[data-history="owner"]')].map(node => node.textContent);
+    const ferret = [...mounted.container.querySelectorAll('[data-history="ferret"]')].map(node => node.textContent);
+    expect(owner.some(text => text?.includes('Hold until Monday'))).toBe(true);
+    expect(ferret.some(text => text?.includes('Asking about'))).toBe(true);
+    expect(asked).toEqual([shipIt.key]);
+    await mounted.unmount();
+  });
+
+  it('draws the item’s own stored words', async () => {
+    const stored = inboxCard(
+      agendaItem('A8', {
+        subject: 'Stored?',
+        ask: choices('Yes', 'No'),
+        conversationCount: 1,
+        conversation: [{ at: '2026-08-01T10:30:00.000Z', by: 'owner', via: 'reply', text: 'Words kept on the item' }],
+      } as never),
+      sessionView('sess-8', { config: { teammate: 'kai', name: 'Stored' } as never }),
+      'Laptop',
+      daemonId('laptop'),
+    );
+    const mounted = await mount(
+      <>
+        <InboxHarness
+          cards={[stored]}
+          fake={fakeInbox()}
+          reading={false}
+          render={inbox => (
+            <AgendaInboxPage
+              clock={Date.now}
+              inbox={{ ...inbox, connectionFor: () => laptop }}
+              initialOpen={stored.key}
+              now={NOW}
+              onNavigate={() => undefined}
+              phone
+              reducedMotion
+            />
+          )}
+        />
+      </>,
+    );
+    await interact(() => Promise.resolve());
+    await openConversation(mounted.container);
+    const owner = [...mounted.container.querySelectorAll('[data-history="owner"]')].map(node => node.textContent);
+    expect(owner.some(text => text?.includes('Words kept on the item'))).toBe(true);
+    await mounted.unmount();
+  });
+
+  it('keeps the revisions when the conversation cannot be read', async () => {
+    const mounted = await mount(
+      page(fakeInbox(), [shipIt], {
+        initialOpen: shipIt.key,
+        readConversation: async () => {
+          throw new Error('offline');
+        },
+      }),
+    );
+    await interact(() => Promise.resolve());
+    expect(topView(mounted).getAttribute('data-agenda-view')).toBe('A2');
+    expect(mounted.container.querySelector('[role="alert"]')?.textContent).toContain('offline');
+    await mounted.unmount();
+  });
+
+  it('names a sub-ferret on a line under its owner’s thread, and a conversation that is its own thread says nothing', async () => {
+    const root = sessionView('sess-root', { config: { teammate: 'ada', name: 'Billing rewrite' } as never });
+    const kid = sessionView('sess-kid', {
+      config: { teammate: 'vena', name: 'Revive Button Flaky', parent: 'sess-root' } as never,
+    });
+    const underRoot = { ...inboxCard(agendaItem('A7', { subject: 'Ship it?' }), kid), root };
+    const mounted = await mount(page(fakeInbox(), [underRoot, shipIt], { phone: false }));
+    const vias = [...mounted.container.querySelectorAll('[data-agenda-group-via]')].map(node => node.textContent);
+    expect(vias).toEqual(['via Vena']);
+    await mounted.unmount();
+  });
+});
+
+describe('opening an item takes its alerts down (docs/notifications.md § When an alert is cleared)', () => {
+  it('tells the host once for the item on top, and not for the list', async () => {
+    // Arrange
+    const openedOnList: string[] = [];
+    const openedOnDeck: string[] = [];
+
+    // Act
+    const list = await mount(
+      page(fakeInbox(), [shipIt, rebase], { onItemOpened: card => openedOnList.push(card.key) }),
+    );
+    await list.unmount();
+    const deck = await mount(
+      page(fakeInbox(), [shipIt, rebase], {
+        initialOpen: shipIt.key,
+        onItemOpened: card => openedOnDeck.push(card.key),
+      }),
+    );
+    await interact(() => undefined);
+    const first = [...openedOnDeck];
+    await interact(() =>
+      must(topView(deck).querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), 'the ⋯ button').click(),
+    );
+    await interact(() =>
+      must(topView(deck).querySelector<HTMLButtonElement>('[data-inbox-tool="skip"]'), 'Skip').click(),
+    );
+
+    // Assert
+    expect(openedOnList).toEqual([]);
+    expect(first).toEqual([shipIt.key]);
+    expect(openedOnDeck).toEqual([shipIt.key, rebase.key]);
+    await deck.unmount();
+  });
+
+  it('does not tell of a card the deck moved on to by itself while nobody used the page, until someone does (review round 9)', async () => {
+    // Arrange — the deck is open on Ship it on a screen nobody has touched for a while.
+    const fake = fakeInbox();
+    const opened: string[] = [];
+    const props = { initialOpen: shipIt.key, onItemOpened: (card: InboxCard) => opened.push(card.key) };
+    const deck = await mount(page(fake, [shipIt, rebase], props));
+    fake.clock.advance(61_000);
+
+    // Act — Ship it is answered on another device, so the deck deals Rebase; later someone presses a key here.
+    await deck.render(page(fake, [rebase], props));
+    const unattended = [...opened];
+    await key(document.body, 'Shift');
+
+    // Assert
+    expect(unattended).toEqual([shipIt.key]);
+    expect(opened).toEqual([shipIt.key, rebase.key]);
+    expect(topView(deck).getAttribute('data-agenda-view')).toBe('A3');
+    await deck.unmount();
+  });
+
+  it('does not tell of a card on a hidden page, whatever is pressed', async () => {
+    // Arrange
+    const opened: string[] = [];
+    const visibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+
+    // Act
+    const deck = await mount(
+      page(fakeInbox(), [shipIt], { initialOpen: shipIt.key, onItemOpened: card => opened.push(card.key) }),
+    );
+    await key(document.body, 'Shift');
+    if (visibility === undefined) delete (document as { visibilityState?: unknown }).visibilityState;
+    else Object.defineProperty(document, 'visibilityState', visibility);
+
+    // Assert
+    expect(opened).toEqual([]);
+    await deck.unmount();
+  });
+});
+
+describe('the open Inbox item’s steps', () => {
+  const withSteps = inboxCard(
+    agendaItem('A7', {
+      subject: 'Try it',
+      steps: ['Open the app', 'Press the button'],
+      ask: { kind: 'task' },
+    } as never),
+    sessionView('sess-5', { config: { teammate: 'kai', name: 'Try it' } as never }),
+    'Laptop',
+    daemonId('laptop'),
+  );
+
+  it('ticks a step on the machine the card came from when its checkbox is clicked (#B161)', async () => {
+    // Arrange
+    const ticks: unknown[][] = [];
+    const fake = fakeInbox();
+    const mounted = await mount(
+      <InboxHarness
+        cards={[withSteps]}
+        fake={fake}
+        reading={false}
+        render={inbox => (
+          <AgendaInboxPage
+            clock={fake.clock.now}
+            inbox={{
+              ...inbox,
+              connectionFor: () => laptop,
+              agendaClient: {
+                progress: (...args: unknown[]) => {
+                  ticks.push(args);
+                  return Promise.resolve();
+                },
+              } as never,
+            }}
+            initialOpen={withSteps.key}
+            now={NOW}
+            onNavigate={() => undefined}
+            phone
+            reducedMotion
+          />
+        )}
+      />,
+    );
+
+    // Act
+    const box = must(topView(mounted).querySelector<HTMLInputElement>('[data-agenda-tick="1"]'), 'the second step');
+    expect(box.disabled).toBe(false);
+    await interact(() => box.click());
+
+    // Assert
+    expect(ticks).toHaveLength(1);
+    expect(ticks[0]?.slice(2)).toEqual(['A7', 1, true]);
+    await mounted.unmount();
+  });
+
+  it('leaves the steps read-only, never a live-looking box, when no machine can take the tick', async () => {
+    const mounted = await mount(page(fakeInbox(), [withSteps], { initialOpen: withSteps.key }));
+    const box = must(topView(mounted).querySelector<HTMLInputElement>('[data-agenda-tick="0"]'), 'the first step');
+    expect(box.disabled).toBe(true);
+    await mounted.unmount();
+  });
+});

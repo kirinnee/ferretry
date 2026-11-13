@@ -1,10 +1,4 @@
-import { CommanderError } from 'commander';
-import { registerDomain } from '../../bin/program';
-import { createProgram } from '../../bin/wiring';
-import type { ICliIo } from '../../src/adapters/terminal/console-io';
-import type { IPrompt } from '../../src/adapters/terminal/prompt';
-import type { ISpinner } from '../../src/adapters/terminal/spinner';
-import { NO_PROGRESS } from '../../src/lib/progress/index';
+import { join } from 'node:path';
 
 export interface CliResult {
   readonly code: number;
@@ -12,18 +6,29 @@ export interface CliResult {
   readonly err: string;
 }
 
-/** Runs one CLI journey and reports its transport result — the single seam the SIT suite drives. */
+/** Runs one CLI journey and reports its transport result: the single seam the SIT suite drives. */
 export interface CliDriver {
   run(args: string[], env?: Record<string, string>): Promise<CliResult>;
 }
 
-/** Black-box driver: spawns the compiled standalone binary. The true SIT tier — no coverage. */
-export class BinaryCliDriver implements CliDriver {
-  constructor(private readonly bin: string) {}
+/** The ambient environment minus every `FY_*` variable: a journey must not inherit this machine's daemon or credential. */
+function cleanEnvironment(extra: Record<string, string>): Record<string, string> {
+  const base: Record<string, string> = {};
+  for (const [name, value] of Object.entries(process.env))
+    if (value !== undefined && !name.startsWith('FY_')) base[name] = value;
+  return { ...base, NO_COLOR: '1', ...extra };
+}
+
+/**
+ * Black-box driver: spawns the entry as a separate process. `command` is the compiled binary when `CLI_BIN` names
+ * one, else `bun <package>/bin/<bin>.ts`: the same file the compiled binary is built from.
+ */
+export class ProcessCliDriver implements CliDriver {
+  constructor(private readonly command: readonly string[]) {}
 
   async run(args: string[], env: Record<string, string> = {}): Promise<CliResult> {
-    const proc = Bun.spawn([this.bin, ...args], {
-      env: { ...process.env, NO_COLOR: '1', ...env },
+    const proc = Bun.spawn([...this.command, ...args], {
+      env: cleanEnvironment(env),
       stdout: 'pipe',
       stderr: 'pipe',
       timeout: 30_000,
@@ -38,93 +43,7 @@ export class BinaryCliDriver implements CliDriver {
   }
 }
 
-/** In-process driver: same journeys via the composition factory with captured IO — instrumentable full-system coverage. */
-export class InProcessCliDriver implements CliDriver {
-  async run(args: string[], environment: Record<string, string> = {}): Promise<CliResult> {
-    let out = '';
-    let err = '';
-    const io: ICliIo = {
-      success: message => {
-        out += `${message}\n`;
-      },
-      report: message => {
-        out += `${message}\n`;
-      },
-      warn: message => {
-        out += `${message}\n`;
-      },
-      error: message => {
-        err += `${message}\n`;
-      },
-      diagnostic: message => {
-        err += `${message}\n`;
-      },
-      setExitCode: code => {
-        process.exitCode = code;
-      },
-      interactive: () => false,
-    };
-    // ora renders status on stderr in the shipped binary — mirror that so (out+err) assertions match.
-    const spinner: ISpinner = {
-      start: text => {
-        err += `${text}\n`;
-      },
-      succeed: text => {
-        err += `${text}\n`;
-      },
-      fail: text => {
-        err += `${text}\n`;
-      },
-    };
-    const prompt: IPrompt = {
-      ask: () => Promise.reject(new Error('interactive prompt is unavailable in-process')),
-      askHidden: () => Promise.reject(new Error('interactive prompt is unavailable in-process')),
-    };
-
-    const program = createProgram();
-    // Capture and exit-override BEFORE registering: commander copies both to each subcommand at
-    // creation time, so a later call would leave `browser --help` writing to the real stdout and
-    // calling process.exit() out from under the test runner.
-    program.configureOutput({
-      writeOut: str => {
-        out += str;
-      },
-      writeErr: str => {
-        err += str;
-      },
-    });
-    program.exitOverride();
-    registerDomain(program, {
-      io,
-      spinner,
-      progress: NO_PROGRESS,
-      prompt,
-      interactive: false,
-      cwd: process.cwd(),
-      homeDirectory: process.cwd(),
-      // Hermetic: an in-process journey receives only its explicit FY_* environment. With no token
-      // the shared client refuses before it opens a socket, so no journey reaches a live daemon.
-      environment,
-    });
-
-    const previousExitCode = process.exitCode;
-    process.exitCode = 0;
-    let code = 0;
-    try {
-      await program.parseAsync(['node', 'cli', ...args]);
-    } catch (error) {
-      // --version/--help throw a zero-code CommanderError; parse errors throw a non-zero one.
-      if (error instanceof CommanderError) {
-        if (error.exitCode !== 0) process.exitCode = error.exitCode;
-      } else {
-        // Mirror the composition root: an unexpected throw reports its message on stderr and exits 1.
-        err += `${(error as Error).message}\n`;
-        process.exitCode = 1;
-      }
-    } finally {
-      code = typeof process.exitCode === 'number' ? process.exitCode : 0;
-      process.exitCode = previousExitCode ?? 0; // a journey's exit code must never leak into the test runner
-    }
-    return { code, out, err };
-  }
+export function defaultCommand(binEntry: string, packageDirectory: string): readonly string[] {
+  const compiled = process.env.CLI_BIN;
+  return compiled !== undefined && compiled !== '' ? [compiled] : ['bun', join(packageDirectory, binEntry)];
 }

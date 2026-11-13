@@ -1,0 +1,34 @@
+{
+  "name": "@ferretry/plugin-shells",
+  "version": "5.0.0",
+  "private": true,
+  "description": "Shells (plugins piece of Ferretry 5)",
+  "type": "module",
+  "ferretry": {
+    "id": "shells",
+    "manifest": "./manifest.ts"
+  },
+  "exports": {
+    "./contract": "./contract/index.ts",
+    "./contract/testing": "./contract/testing/index.ts",
+    "./manifest": "./manifest.ts",
+    "./daemon": "./daemon/index.ts",
+    "./app": "./app/index.ts",
+    "./cli": "./cli/index.ts"
+  },
+  "dependencies": {
+    "@ferretry/kernel": "workspace:*",
+    "@ferretry/std": "workspace:*",
+    "zod": "4.4.3",
+    "@ferretry/core-gate": "workspace:*",
+    "@ferretry/core-ferrets": "workspace:*",
+    "@ferretry/app": "workspace:*",
+    "react": "^19.0.0"
+  },
+  "sideEffects": false,
+  "devDependencies": {
+    "@happy-dom/global-registrator": "^20.11.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
+  }
+}

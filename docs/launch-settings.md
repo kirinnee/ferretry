@@ -13,7 +13,7 @@ when a ferret is created).
 | Fast mode, from the ⚡ switch or `/fast`                          | sent to the running CLI and confirmed by what it reports ([fast-mode.md](fast-mode.md))  |
 | What other devices may do (grants, operator password)             | the daemon decides every request with the document as it is now ([grants.md](grants.md)) |
 | What agents may control (terminals, browsers, files, …)           | the daemon asks the policy on every agent call ([agent-tools.md](agent-tools.md))        |
-| Passive learning, per ferret (Actions)                            | re-instructs the running ferret with a queued message ([learning.md](learning.md))       |
+| Passive learning, per ferret (Actions)                            | re-instructs the running ferret with a queued message ([lessons.md](lessons.md))         |
 | Warden, speed-up keys, secrets in the secret store                | the daemon reads them when it uses them, never the CLI                                   |
 
 ## On restart
@@ -59,13 +59,26 @@ Moving between harnesses is not a restart: a plain move stays refused (`harness_
 [migration-cross-harness.md](migration-cross-harness.md).
 
 **Info › Runtime › Settings** says whether a restart would change anything: "Running with older settings —
-Restart to apply", with the reason, and a one-tap Restart. It compares two things
-(`GET /v1/sessions/:id/relaunch-settings`):
+Restart to apply", with the reason, and a one-tap Restart. It reads
+`GET /v1/ferrets/:ferretId/relaunch-settings`, which answers `{ current, reasons }`:
 
-- **arguments** — the daemon-owned launch arguments a relaunch would build now differ from the ones the
-  process runs with (a `Read(...)` rule it predates, the remote-control surface, the owner's flags);
-- **settings** — a digest of the login's wrapper and fixed settings file differs from the one recorded when
-  the process was launched (a permission-mode, profile or fixed-layer change since).
+- **settings** — the ferret's own harness says what it launched the process under differs from what it would
+  launch it under now. Ferrets never reads a harness's files: Claude Code and Codex each keep, per ferret, one
+  fingerprint per section of their OWN launch settings (`state/<harness>/launch-settings/<ferret>.json`, written
+  at every start and resume) and compare it with their configuration on each read (`Harness.launchSettings`).
+  The sections are the permission mode and the fixed layer, and for Claude Code also its settings and hooks
+  items. Only hashes are kept, never a value, a path or an environment value, and the answer names a kind of
+  drift and nothing else. The hashes are plain SHA-256 with no salt, so a low-entropy input (the permission
+  mode, or a short secret in a settings item) could be confirmed by guessing it: accepted, because the record is
+  0600 in the daemon's own state and no route serves it. A harness reads the configuration once per launch and
+  records exactly the settings it launched with.
+- **arguments** — today's second reason (the launch arguments a relaunch would build differ from the recorded
+  ones) is not answered yet in 5.0: each harness builds the argv from the launch at each launch, and nothing
+  records one to compare (declared gap below).
+
+A ferret may read only its own and its helpers' answer, as for every move route. A harness that is not loaded,
+offers no comparison, has no record for the ferret (launched before this, or its record could not be written),
+or cannot read it answers `{ current: true, reasons: [] }`: nothing to say, so no Restart is offered on it.
 
 **Info › Runtime › Instructions** says what the running process was told: which Ferretry sections of its
 appended system prompt it carries (the tools, the settings rules, the Notify rule, the Board rules, and each of Hypermedia, Pack mode, Agenda mode and
@@ -191,7 +204,7 @@ count. It covers the ferrets of the machine whose page it is, even in the all-ma
 | Setting                                                                                                                 | Decided                                |
 | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
 | The default runtime for new agents                                                                                      | when a start names no runtime          |
-| The machine's passive-learning default                                                                                  | at start ([learning.md](learning.md))  |
+| The machine's passive-learning default                                                                                  | at start ([lessons.md](lessons.md))    |
 | What the start asked for: mode, board access, remote control, the owner's harness flags, name, parent, folder, timeouts | at start, then kept for every relaunch |
 
 ## How a launch is built
@@ -281,5 +294,10 @@ a handover freezes the provenance with the resolved model in its plan, so a fork
   move it back first, then go back.
 - Only the transcript file is carried between logins. Claude's per-conversation side folders (file history,
   todos) stay in the home that wrote them.
-- The digest covers the wrapper and the fixed settings file. An MCP server, skill or instruction file
-  changed inside the harness home or the project is not detected; restart the ferret to load it.
+- The comparison covers each harness's own launch settings only. An MCP server, skill or instruction file
+  Ferretry hands the launch, or one changed inside the project, is not detected; restart the ferret to load it.
+- The `arguments` reason is never answered in 5.0, and a new harness binary or version is not a setting, so
+  neither shows as "Running with older settings".
+- A change of the runtime, the profile or the credential's environment since the launch is not detected either:
+  today's wrapper digest covered them, but in 5.0 nothing Runtimes or the Vault supply is compared. Restart the
+  ferret to apply it.

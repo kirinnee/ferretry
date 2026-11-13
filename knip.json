@@ -2,63 +2,155 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
     ".": {
-      "entry": ["tests/e2e/**/*.test.ts", "tests/e2e/support/teardown.ts", "scripts/test/*.ts"],
-      "project": ["tests/e2e/**/*.ts", "scripts/test/*.ts"]
+      "entry": ["scripts/test/*.ts"],
+      "project": ["scripts/test/*.ts"]
+    },
+    "packages/std": {
+      "entry": ["tests/**/*.test.ts"],
+      "project": ["**/*.ts"]
+    },
+    "packages/core/kernel": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/core/*": {
+      "entry": ["tests/**/*.test.{ts,tsx}"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/*": {
+      "entry": ["tests/**/*.test.{ts,tsx}"],
+      "project": ["**/*.{ts,tsx}"]
     },
     "packages/cli": {
       "entry": ["bin/*.ts", "tests/**/*.test.ts"],
-      "project": ["src/**/*.ts", "bin/**/*.ts", "tests/**/*.ts"]
+      "project": ["**/*.ts"]
     },
-    "packages/daemon": {
-      "entry": [
-        "bin/*.ts",
-        "tests/**/*.test.ts",
-        "tests/integration/support/housekeeping-run.ts",
-        "tests/integration/support/slow-index-writer.worker.ts",
-        "tests/integration/support/slow-analytics-writer.worker.ts",
-        "tests/integration/support/worker-rss.ts",
-        "tests/integration/support/session-worker-rss.ts",
-        "tests/integration/support/parse-window-finalization.ts"
-      ],
-      "project": ["src/**/*.ts", "bin/**/*.ts", "tests/**/*.ts"]
+    "packages/app": {
+      "entry": ["src/main.tsx", "src/worker/service-worker.ts", "scripts/**/*.ts", "tests/**/*.test.{ts,tsx}"],
+      "project": ["**/*.{ts,tsx,css}"],
+      "ignore": ["tests/support/dom-leak-guard.ts"]
     },
-    "packages/fleet": {
-      "entry": ["tests/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tests/**/*.ts"]
+    "packages/core/gate": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],
+      "project": ["**/*.{ts,tsx}"]
     },
-    "packages/relay": {
-      "entry": ["tests/**/*.test.ts", "src/adapters/link-store-worker.ts"],
-      "project": ["src/**/*.ts", "tests/**/*.ts"]
-    },
-    "packages/protocol": {
-      "entry": ["tests/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tests/**/*.ts"]
-    },
-    "packages/pwa": {
-      "entry": [
-        "src/main.tsx",
-        "src/worker/service-worker.ts",
-        "vite.config.ts",
-        "tests/**/*.test.{ts,tsx}",
-        "tests/support/dom-leak-guard.ts",
-        "tests/integration/support/*-probe.{ts,tsx}",
-        "tests/integration/fixtures/*-scene.tsx",
-        "harness/main.tsx",
-        "harness/screenshot.ts",
-        "harness/*-{screenshot,page,smoke,bench,noise}.{ts,tsx}",
-        "harness/fy-render-safari/{probe,parent,probe-shell}.ts",
-        "speed-bench/{main,make-clip}.ts",
-        "scripts/build-{fy-render,composer}-*.ts",
-        "scripts/fy-render-shell/*.ts"
-      ],
-      "project": [
-        "src/**/*.{ts,tsx}",
-        "tests/**/*.{ts,tsx}",
-        "harness/**/*.{ts,tsx}",
-        "speed-bench/**/*.ts",
-        "scripts/**/*.ts",
-        "vite.config.ts"
+    "packages/core/ferrets": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"],
+      "ignore": [
+        "daemon/lib/session/events/service.ts",
+        "daemon/lib/session/peers/reads.ts",
+        "daemon/lib/session/observer/facts.ts",
+        "daemon/lib/session/observer/observer.ts",
+        "daemon/lib/session/observer/plan.ts",
+        "daemon/lib/session/observer/protocol.ts",
+        "daemon/lib/session/observer/restart.ts",
+        "daemon/adapters/session/observer/index.ts",
+        "daemon/adapters/session/observer/session-worker-runtime.ts",
+        "daemon/adapters/session/observer/worker-observer-host.ts",
+        "daemon/adapters/session/observer/worker-supervisor.ts",
+        "daemon/lib/session/peers/turn.ts",
+        "daemon/lib/session/peers/transcript.ts",
+        "daemon/lib/session/peers/question.ts",
+        "daemon/lib/session/peers/send.ts",
+        "daemon/lib/session/restart/index.ts",
+        "daemon/lib/session/live/index.ts",
+        "daemon/adapters/session/archive/index.ts",
+        "daemon/lib/session/directory/session-directory.ts",
+        "daemon/lib/session/monitor/types.ts",
+        "daemon/lib/session/runtime-control/index.ts",
+        "daemon/lib/session/runtime-control/service.ts"
       ]
+    },
+    "packages/plugins/agenda": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx", "tests/**/fixtures/**/*.{ts,tsx}"],
+      "project": ["**/*.{ts,tsx}"],
+      "ignore": ["app/lib/agenda-source-refs.ts"]
+    },
+    "packages/plugins/board": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/claude-code": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/packs": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/projects": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"],
+      "ignore": [
+        "app/hooks/use-project-scope.ts",
+        "app/hooks/use-work-project-names.ts",
+        "app/lib/work-project-names.ts"
+      ]
+    },
+    "packages/plugins/runtimes": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/updates": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/warden": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/connections": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "worker/src/adapters/worker.ts"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/catalogs": {
+      "entry": [
+        "tests/**/*.test.{ts,tsx}",
+        "tests/integration/app/*.harness.tsx",
+        "tests/**/fixtures/**/*.{ts,tsx}",
+        "worker/src/adapters/link-store-worker.ts"
+      ],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/conversation": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "app/surfaces.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/usage": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/voice": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/realworld/dev/**/*.ts"],
+      "project": ["**/*.{ts,tsx}"],
+      "ignore": ["daemon/lib/speedups/index.ts"]
+    },
+    "packages/plugins/access": {
+      "entry": ["tests/**/*.test.{ts,tsx}"],
+      "project": ["**/*.{ts,tsx}"],
+      "ignore": ["app/lib/device-preference.ts"]
+    },
+    "packages/plugins/shells": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/layouts": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/mcp": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/skills": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/onboarding": {
+      "entry": ["tests/**/*.test.{ts,tsx}"],
+      "project": ["**/*.{ts,tsx}"],
+      "ignore": ["app/landing-geometry.ts"]
     }
   },
   "rules": {
@@ -75,5 +167,11 @@
     "unresolved": "off",
     "binaries": "off",
     "enumMembers": "off"
-  }
+  },
+  "ignoreIssues": {
+    "packages/plugins/catalogs/contract/wire/shared-catalog-diff.ts": ["exports"],
+    "packages/plugins/catalogs/contract/wire/shared-catalog-owner.ts": ["exports"],
+    "packages/plugins/shells/contract/wire.ts": ["duplicates"]
+  },
+  "tags": ["-pending"]
 }

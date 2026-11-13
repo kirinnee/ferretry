@@ -1,0 +1,169 @@
+import { join } from 'node:path';
+import type { SessionId } from './session-id.ts';
+import type { StateHome } from './state-home.ts';
+/** Today's `protocol/src/lib/state-home-layout.ts` layout marker file name. */
+const LAYOUT_VERSION_FILENAME = 'layout-version';
+
+export interface FoundationPaths {
+  readonly home: StateHome;
+  /**
+   * The layout claim.
+   *
+   * The path is derived here, but the NAME is not ours alone: the command-line client writes this
+   * same file when it creates a home, before this daemon has ever run. Both sides take the name from
+   * `@ferretry/protocol` so a daemon cannot look for one file while its client writes another.
+   */
+  readonly layoutVersion: string;
+  readonly daemonLock: string;
+  readonly config: string;
+  readonly daemonConfig: string;
+  /** The operator's routing doctrine: which models exist and which accounts may serve them. */
+  readonly routingCatalog: string;
+  readonly fleet: string;
+  readonly fleetManifest: string;
+  /**
+   * Where the daemon's own log is written, by whoever supervises it.
+   *
+   * Declared here even though nothing in this package writes to it. The CLI creates this directory
+   * before it launches the daemon, so it is the ONE entry that can legitimately exist in an
+   * otherwise-fresh state home — and a layout model that did not name it read our own log directory
+   * as somebody else's data and refused to bootstrap any clean machine.
+   */
+  readonly logs: string;
+  readonly state: string;
+  readonly index: string;
+  readonly sessionIndex: string;
+  /**
+   * The analytics materialization: finished sessions, priced when they were ingested.
+   *
+   * A SEPARATE database from the session index, not another pair of tables in it. The two are dropped
+   * for different reasons and on different schedules — a session index is rebuilt from journals when a
+   * journal moves, and this one is rebuilt from session documents when a derivation changes — and the
+   * session index refuses to open a file carrying tables it does not recognise, so an extra table in it
+   * would make every daemon drop its whole event index on upgrade.
+   */
+  readonly analyticsIndex: string;
+  readonly sessions: string;
+  /**
+   * Which sessions have left the live set (docs/session-archive.md): one document, the ONLY fact that says "archived".
+   * Their directories under `sessions` stay where they are.
+   */
+  readonly archivedSessions: string;
+  readonly temporary: string;
+  /**
+   * Where a change to the grants is written down, one JSON line per change.
+   *
+   * IN THE STATE HOME, so it is keyed by daemon by construction — a state home has exactly one owner,
+   * and one daemon's record can therefore never be read as another's. It holds actors and axes, never
+   * a token and never anything about the password.
+   */
+  readonly grantAudit: string;
+  /** Who changed this machine's security settings, and every device key replaced (B6). */
+  readonly securityAudit: string;
+  /**
+   * The catalogs this machine PUBLISHES: the document that lists them and the frozen item versions
+   * beside it (docs/catalogs.md § The publisher side). STATE, never config: nobody hand-edits a
+   * revision, and a damaged document is an error rather than an empty list.
+   */
+  readonly catalogs: string;
+  readonly catalogsDocument: string;
+  /** The version 1 document as it was when the upgrade to version 2 ran: how an older daemon is gone back to. */
+  readonly catalogsBackupV1: string;
+  readonly catalogsBackupV2: string;
+  readonly catalogBlobs: string;
+  /**
+   * The people this machine shares catalogs with and the codes that let them in (docs/catalogs.md § Members).
+   * STATE: a damaged file is an error, never an empty list. `catalogShares` holds the SHA-256 of each code and
+   * never a code.
+   */
+  /**
+   * The download links this machine made, and what it must remember about each (docs/catalogs.md § Links).
+   * STATE: a damaged file is an error, never an empty list. It holds no key and no URL.
+   */
+  readonly catalogLinks: string;
+  /** The keys of public links, sealed under `secrets.key`: the one file that can rebuild a link URL. Never read by a route. */
+  readonly catalogLinkKeys: string;
+  readonly catalogMembers: string;
+  /** The members file as it was before duplicate names were made unique: kept once, never read. */
+  readonly catalogMembersBeforeUniqueNames: string;
+  readonly catalogShares: string;
+  /** The passkeys and unlocks of members' browsers, by member KEY id: public keys and instants, never a secret. */
+  readonly catalogMemberPasskeys: string;
+  readonly catalogMemberUnlocks: string;
+}
+export interface SessionPaths {
+  readonly directory: string;
+  readonly marker: string;
+  readonly config: string;
+  readonly state: string;
+  readonly events: string;
+  readonly lastSnapshot: string;
+  readonly terminalPane: string;
+  /**
+   * Where the session's agent puts media it made to SHOW the person — a chart, a recording, a report.
+   * Inside the daemon's own session state rather than the working tree, so a generated file never
+   * dirties a repository and no repository's ignore rules decide whether it can be shown. Handed to
+   * the pane as `FY_MEDIA_DIR` and read back by `/fs/file?scope=media` (docs/hypermedia.md).
+   */
+  readonly media: string;
+  /**
+   * Where Claude's `PreToolUse` hook records the `AskUserQuestion` it is asking — which its transcript
+   * holds back until the form is answered (`lib/session/question/asked.ts`). Handed to the pane as
+   * `FY_QUESTION_FILE`; replaced whole by every question, read by both observer hosts.
+   */
+  readonly questionAsked: string;
+}
+
+export function createFoundationPaths(home: StateHome): FoundationPaths {
+  const config = join(home, 'config');
+  const fleet = join(home, 'fleet');
+  const state = join(home, 'state');
+  const index = join(state, 'index');
+  return {
+    home,
+    layoutVersion: join(home, LAYOUT_VERSION_FILENAME),
+    daemonLock: join(home, 'daemon.lock'),
+    config,
+    daemonConfig: join(config, 'daemon.json'),
+    routingCatalog: join(config, 'routing.json'),
+    fleet,
+    fleetManifest: join(fleet, 'manifest.json'),
+    logs: join(home, 'logs'),
+    state,
+    index,
+    sessionIndex: join(index, 'sessions.sqlite'),
+    analyticsIndex: join(index, 'analytics.sqlite'),
+    sessions: join(state, 'sessions'),
+    archivedSessions: join(state, 'archived-sessions.json'),
+    temporary: join(state, 'tmp'),
+    grantAudit: join(state, 'grant-audit.jsonl'),
+    securityAudit: join(state, 'security-audit.jsonl'),
+    catalogs: join(state, 'catalogs'),
+    catalogsDocument: join(state, 'catalogs', 'catalogs.json'),
+    catalogsBackupV1: join(state, 'catalogs', 'catalogs.v1.json'),
+    catalogsBackupV2: join(state, 'catalogs', 'catalogs.v2.json'),
+    catalogBlobs: join(state, 'catalogs', 'blobs'),
+    catalogLinks: join(state, 'catalogs', 'links.json'),
+    catalogLinkKeys: join(state, 'catalogs', 'link-keys.json'),
+    catalogMembers: join(state, 'catalogs', 'members.json'),
+    catalogMembersBeforeUniqueNames: join(state, 'catalogs', 'members.before-unique-names.json'),
+    catalogShares: join(state, 'catalogs', 'shares.json'),
+    catalogMemberPasskeys: join(state, 'catalogs', 'member-passkeys.json'),
+    catalogMemberUnlocks: join(state, 'catalogs', 'member-unlocks.json'),
+  };
+}
+
+export function createSessionPaths(paths: FoundationPaths, sessionId: SessionId): SessionPaths {
+  const directory = join(paths.sessions, sessionId);
+  return {
+    directory,
+    marker: join(directory, 'session-version'),
+    config: join(directory, 'config.json'),
+    state: join(directory, 'state.json'),
+    events: join(directory, 'events.jsonl'),
+    lastSnapshot: join(directory, 'last-snapshot.txt'),
+    terminalPane: join(directory, 'terminal-pane.json'),
+    media: join(directory, 'media'),
+    questionAsked: join(directory, 'question-asked.json'),
+  };
+}

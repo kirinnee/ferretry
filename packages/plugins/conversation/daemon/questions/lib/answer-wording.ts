@@ -1,0 +1,46 @@
+/**
+ * What a person is told when a structured answer could not be delivered.
+ *
+ * The driver's own sentences ("the rendered form is not the exact pending question; no keys were
+ * sent…") are evidence for whoever debugs the pane, not instructions for whoever is holding a phone.
+ * They travel as the refusal's `detail`; the sentence below is what the screen leads with, and it names
+ * the two ways the person can still answer.
+ */
+export const ANSWER_NOT_DELIVERED =
+  "Couldn't answer automatically. Answer it in the Console tab, or type your choice in chat.";
+
+/**
+ * For a form whose selected row could not be read exactly once: nothing was typed (no key, no paste, not even a recovery
+ * Escape), the question is still pending, and the terminal is the way on. A sentence, because a bare code tells a person
+ * nothing they can do.
+ */
+export const FORM_UNREADABLE =
+  "Couldn't read this question's form safely, so nothing was sent. Answer it at the terminal (the Console tab).";
+
+/** For an earlier attempt that may have reached the form: answering again could answer something else. */
+export const ANSWER_MAY_HAVE_LANDED =
+  'An earlier answer may already have reached this question. Check the Console tab before answering again.';
+
+/** For a request from an app built before answers carried their own id. */
+export const RELOAD_THE_APP = 'This app is out of date for this question. Reload the app, then answer again.';
+
+/**
+ * Whether a request id has the shape the app minted before #771: `question:<daemon>:<session>:<tool>`,
+ * one id per QUESTION. The current app adds a digest of the answer as a fifth part, so one id is one
+ * answer. A stale app that re-sends a changed answer under its old id is refused as a reused id — and
+ * the remedy for that is a reload, not anything about the answer.
+ */
+export function isQuestionScopedRequestId(requestId: string): boolean {
+  return /^question:[^:]+:[^:]+:[^:]+$/u.test(requestId);
+}
+
+/**
+ * For a multi-question form a drive stopped part-way through, before submitting it: nothing has reached
+ * the agent, and the form is still open on the pane with what was answered so far. The person can send
+ * the same answer again to resume it, or finish it in the Console.
+ */
+export function answerPaused(progress: { readonly stoppedAt: number; readonly answered: readonly boolean[] }): string {
+  const total = progress.answered.length;
+  const done = progress.answered.filter(Boolean).length;
+  return `Stopped at question ${progress.stoppedAt + 1} of ${total} (${done} of ${total} answered). Nothing was sent yet and the form is still open: resume to answer the rest, or finish it in the Console tab.`;
+}

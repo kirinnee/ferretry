@@ -1,0 +1,21 @@
+{
+  "name": "@ferretry/std",
+  "version": "5.0.0",
+  "private": true,
+  "description": "Generic helpers with no Ferretry noun (results, brands, instants, durations, JSON, the bounded YAML text reader), plus the one Ferretry-shaped fact two contracts must agree on: the `${secret:NAME}` pointer grammar and the pure credential-word rules built on it (the word cutter and the write rule), and Claude's compaction status line grammar every pane reader shares",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./yaml": "./src/yaml-text.ts",
+    "./secret-reference": "./src/secret-reference.ts",
+    "./compaction-line": "./src/compaction-line.ts",
+    "./credential-words": "./src/credential-words/index.ts",
+    "./testing/linear-time": "./testing/linear-time.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "yaml": "2.9.0",
+    "zod": "4.4.3"
+  },
+  "sideEffects": false
+}

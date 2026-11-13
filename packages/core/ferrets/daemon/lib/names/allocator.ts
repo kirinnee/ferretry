@@ -1,0 +1,146 @@
+import { availableCallsigns, normalizeCallsign } from './policy.ts';
+import { DEFAULT_CALLSIGN_POOL } from './pool.ts';
+import {
+  CALLSIGN_WINDOW_MS,
+  type NameAllocationRequest,
+  type NameAllocationResult,
+  type NameClaim,
+  type NameClaimAttempt,
+  type NameClaimStore,
+  type NameRandomSource,
+} from './types.ts';
+
+/**
+ * A store failure becomes a FIXED, path-free public message.
+ *
+ * The adapter's own error carries the ledger path and the decode detail — exactly what an operator
+ * wants in a log and exactly what the API must not hand to every agent on the host. The allocator is
+ * the boundary that scrubs it: the diagnostic stays internal to the adapter, and the public result
+ * states only that persistence failed.
+ */
+// read-scoped: none — returns one fixed failure sentence that carries no ledger path, decode detail or user text
+function storeFailure(): NameAllocationResult {
+  return { ok: false, error: { code: 'claim_store_failed', message: 'callsign persistence failed' } };
+}
+
+export class NameAllocator {
+  constructor(
+    private readonly store: NameClaimStore,
+    private readonly random: NameRandomSource,
+    private readonly pool: readonly string[] = DEFAULT_CALLSIGN_POOL,
+  ) {}
+
+  async allocate(request: NameAllocationRequest): Promise<NameAllocationResult> {
+    const windowMs = Math.max(1, Math.floor(request.windowMs ?? CALLSIGN_WINDOW_MS));
+    const requested = request.requested?.trim();
+    let extraConflict: NameClaim | undefined;
+
+    if (requested) {
+      const callsign = normalizeCallsign(requested);
+      if (callsign === null) {
+        return {
+          ok: false,
+          error: {
+            code: 'invalid_callsign',
+            message: 'callsign must start with a letter and contain only letters, digits, or hyphens',
+          },
+        };
+      }
+
+      const claim: NameClaim = {
+        callsign,
+        ownerId: request.ownerId,
+        claimedAtMs: request.nowMs,
+        expiresAtMs: request.nowMs + windowMs,
+      };
+      let attempt: NameClaimAttempt;
+      try {
+        attempt = await this.store.tryClaim(claim);
+      } catch {
+        return storeFailure();
+      }
+      if (attempt.claimed) return { ok: true, claim: attempt.claim, source: 'requested' };
+      if (!request.fallback) {
+        return {
+          ok: false,
+          error: {
+            code: 'callsign_taken',
+            message: `callsign ${JSON.stringify(callsign)} is already claimed`,
+            conflict: attempt.conflict,
+          },
+        };
+      }
+      extraConflict = attempt.conflict;
+    }
+
+    let claims: readonly NameClaim[];
+    try {
+      const stored = await this.store.listClaims();
+      claims = extraConflict === undefined ? stored : [...stored, extraConflict];
+    } catch {
+      return storeFailure();
+    }
+
+    if (this.pool.length === 0) {
+      return { ok: false, error: { code: 'pool_exhausted', message: 'no callsigns are configured' } };
+    }
+
+    const available = availableCallsigns(this.pool, claims, request.nowMs, 0);
+    if (available.length === 0) {
+      return {
+        ok: false,
+        error: {
+          code: 'pool_exhausted',
+          message: 'every callsign is claimed in the active resolution window',
+        },
+      };
+    }
+
+    let availableIndex: number;
+    try {
+      // Match kteam's pickTeammateName: choose uniformly from the names that are unused now.
+      // A random pool start plus a circular scan weights names by the occupied gaps before them.
+      availableIndex = this.random.nextIndex(available.length);
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: 'random_source_failed',
+          message: `callsign random source failed: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      };
+    }
+    const source = requested ? ('fallback' as const) : ('automatic' as const);
+    const selected = available[availableIndex];
+    if (selected === undefined) {
+      return {
+        ok: false,
+        error: { code: 'random_source_failed', message: 'callsign random source returned an invalid index' },
+      };
+    }
+    const startIndex = this.pool.indexOf(selected);
+    for (const callsign of availableCallsigns(this.pool, claims, request.nowMs, startIndex)) {
+      const claim: NameClaim = {
+        callsign,
+        ownerId: request.ownerId,
+        claimedAtMs: request.nowMs,
+        expiresAtMs: request.nowMs + windowMs,
+      };
+      let attempt: NameClaimAttempt;
+      try {
+        attempt = await this.store.tryClaim(claim);
+      } catch {
+        return storeFailure();
+      }
+      if (attempt.claimed) return { ok: true, claim: attempt.claim, source };
+    }
+
+    return {
+      ok: false,
+      error: {
+        code: 'pool_exhausted',
+        message: 'every callsign is claimed in the active resolution window',
+      },
+    };
+  }
+}

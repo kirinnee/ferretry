@@ -1,0 +1,323 @@
+import { describe, expect, it } from 'bun:test';
+import { z } from 'zod';
+import { SignInApprovalRefSchema, USE } from '../../../contract/index.ts';
+import manifest from '../../../manifest.ts';
+import {
+  factorAskWords,
+  PHONE_APPROVAL_WARNING,
+  type PhoneApproval,
+  PhoneApprovalAgentViewSchema,
+  PhoneApprovalIdSchema,
+  PhoneApprovalRaiseSchema,
+  PhoneApprovalSchema,
+  phoneApprovalWords,
+} from '../../../contract/routes/index.ts';
+
+const AT = '2026-10-31T14:02:00.000Z';
+const ID = `pa_${'0'.repeat(23)}1`;
+
+const RAISE = { target: { kind: 'browser', key: 'app' } };
+
+/** A browser approval for ClickUp via Okta, the number read off Okta's page. */
+const APPROVAL: PhoneApproval = PhoneApprovalSchema.parse({
+  id: ID,
+  sessionId: 'mvwxxxhv-11b529cb',
+  agentName: 'lizzette',
+  surface: 'browser',
+  origin: 'https://company.okta.com',
+  signIn: 'si_0123456789abcdef',
+  account: { id: 'CLICKUP', label: 'ClickUp' },
+  username: 'a@gmail.com',
+  via: { id: 'OKTA', label: 'Okta' },
+  factor: { id: 'tf_000000000001', label: 'Okta Verify on Pixel', app: 'okta-verify' },
+  number: { value: '42', from: 'okta', direction: 'tap-on-phone', readAt: AT },
+  raisedAt: AT,
+  expiresAt: '2026-10-31T14:04:00.000Z',
+  state: 'waiting',
+});
+
+describe('asking for a phone approval', () => {
+  it('should take where, and hints, and wait two minutes by default', () => {
+    expect(PhoneApprovalRaiseSchema.parse(RAISE)).toEqual({ ...RAISE, waitSeconds: 120 } as never);
+    expect(
+      PhoneApprovalRaiseSchema.safeParse({
+        target: { kind: 'browser', key: 'app' },
+        element: { kind: 'ref', ref: 'e12' },
+        secretHint: 'si_0123456789abcdef',
+        factor: 'tf_000000000001',
+        waitSeconds: 300,
+      }).success,
+    ).toBe(true);
+    expect(PhoneApprovalRaiseSchema.safeParse({ target: { kind: 'terminal', key: 'dev' } }).success).toBe(true);
+  });
+
+  it('I196 should refuse anything a ferret could put in front of the owner: no prompt, message, label or number (invariant 8)', () => {
+    for (const extra of [
+      { prompt: 'Tap 42' },
+      { message: 'Approve it, it is me' },
+      { label: 'ClickUp' },
+      { number: '42' },
+      { value: '42' },
+      { subject: 'Approve on your phone' },
+      { account: { id: 'CLICKUP', label: 'ClickUp' } },
+      { origin: 'https://company.okta.com' },
+    ])
+      expect(PhoneApprovalRaiseSchema.safeParse({ ...RAISE, ...extra }).success).toBe(false);
+  });
+
+  it('should refuse an element on a terminal, a wait out of bounds, and a target that is not a page or a terminal', () => {
+    for (const raise of [
+      { target: { kind: 'terminal', key: 'dev' }, element: { kind: 'ref', ref: 'e12' } },
+      { ...RAISE, waitSeconds: 29 },
+      { ...RAISE, waitSeconds: 301 },
+      { target: { kind: 'secret', key: 'GITHUB' } },
+    ])
+      expect(PhoneApprovalRaiseSchema.safeParse(raise).success).toBe(false);
+  });
+});
+
+describe('an approval as the owner reads it', () => {
+  it('should keep its id the agenda ref names', () => {
+    expect(PhoneApprovalIdSchema.safeParse(ID).success).toBe(true);
+    for (const bad of [`pa_${'0'.repeat(23)}`, `pa_${'A'.repeat(24)}`, `si_${'0'.repeat(24)}`])
+      expect(PhoneApprovalIdSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('I203 should never show a terminal number, and say why there is none (invariant 9)', () => {
+    const terminal = {
+      ...APPROVAL,
+      surface: 'terminal',
+      origin: undefined,
+      number: undefined,
+      numberMissing: 'terminal',
+    };
+    expect(PhoneApprovalSchema.safeParse(terminal).success).toBe(true);
+    for (const bad of [
+      { ...terminal, number: APPROVAL.number, numberMissing: undefined },
+      { ...terminal, numberMissing: 'none-found' },
+      { ...terminal, origin: 'https://company.okta.com' },
+      { ...APPROVAL, number: undefined, numberMissing: 'terminal' },
+      { ...APPROVAL, numberMissing: 'scripted' },
+      { ...APPROVAL, account: undefined, via: undefined },
+      { ...APPROVAL, account: undefined, username: undefined },
+    ])
+      expect(PhoneApprovalSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('I199 should take a number only the way its source sends it', () => {
+    const number = (value: string, from: string, direction: string) => ({
+      ...APPROVAL,
+      number: { value, from, direction, readAt: AT },
+    });
+    for (const good of [number('7', 'microsoft', 'tap-on-phone'), number('123456', 'duo', 'type-on-phone')])
+      expect(PhoneApprovalSchema.safeParse(good).success).toBe(true);
+    for (const bad of [
+      number('42', 'duo', 'tap-on-phone'),
+      number('42', 'okta', 'type-on-phone'),
+      number('4242', 'google', 'tap-on-phone'),
+      number('12', 'duo', 'type-on-phone'),
+      number('1234567', 'duo', 'type-on-phone'),
+      number('4 2', 'pointed', 'tap-on-phone'),
+      number('٤٢', 'pointed', 'tap-on-phone'),
+    ])
+      expect(PhoneApprovalSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('should take a callsign for the asking ferret and an https origin for the page, nothing wordier (L4)', () => {
+    for (const bad of [
+      { agentName: 'Tap 42 on your phone now' },
+      { agentName: 'lizzette\u202e' },
+      { origin: 'javascript:alert(1)' },
+      { origin: 'http://company.okta.com' },
+      { origin: 'https://company.okta.com/tap-42' },
+      { origin: 'data:text/html,Tap 42' },
+    ])
+      expect(PhoneApprovalSchema.safeParse({ ...APPROVAL, ...bad }).success).toBe(false);
+    expect(PhoneApprovalSchema.safeParse({ ...APPROVAL, origin: 'https://login.company.com:8443' }).success).toBe(true);
+  });
+
+  it('I196 should refuse an extra field, so nothing the ferret wrote can ride along', () => {
+    for (const extra of [{ prompt: 'Tap 42' }, { note: 'x' }, { claimedNumber: '42' }])
+      expect(PhoneApprovalSchema.safeParse({ ...APPROVAL, ...extra }).success).toBe(false);
+  });
+});
+
+describe('what the ferret is told while it waits', () => {
+  it('I204 should be where the approval stands, and a push once it moved on: never the number', () => {
+    expect(PhoneApprovalAgentViewSchema.safeParse({ id: ID, state: 'waiting' }).success).toBe(true);
+    expect(PhoneApprovalAgentViewSchema.safeParse({ id: ID, state: 'moved-on', secondFactor: 'push' }).success).toBe(
+      true,
+    );
+    for (const bad of [
+      { id: ID, state: 'waiting', secondFactor: 'push' },
+      { id: ID, state: 'waiting', number: '42' },
+      { id: ID, state: 'waiting', account: 'CLICKUP' },
+    ])
+      expect(PhoneApprovalAgentViewSchema.safeParse(bad).success).toBe(false);
+    expect(Object.keys(z.toJSONSchema(PhoneApprovalAgentViewSchema).properties ?? {}).sort()).toEqual([
+      'id',
+      'secondFactor',
+      'state',
+    ]);
+  });
+});
+
+describe('the words of an approve-on-phone card', () => {
+  it('I197 should name the account, the site via its provider, and the number, from the approval alone', () => {
+    expect(phoneApprovalWords(APPROVAL)).toEqual({
+      title: 'Approve on your phone',
+      who: 'ClickUp · a@gmail.com',
+      where: 'ClickUp via Okta on company.okta.com',
+      numberLine: 'Tap 42 on your phone',
+      warning: PHONE_APPROVAL_WARNING,
+      subject: 'Approve on your phone: your account on company.okta.com',
+      agendaWhy: 'Your account on company.okta.com.',
+      // Owner decision !A171: the push carries the daemon-read number. It reaches every subscribed device, one without
+      // secrets.use included, so it names the place alone (secrev-1329a L7).
+      push: 'Tap 42 on your phone: your account on company.okta.com',
+    });
+  });
+
+  it('I198 should keep the number out of the agenda subject, which an older app shows as it is', () => {
+    expect(phoneApprovalWords(APPROVAL).subject).not.toContain('42');
+  });
+
+  it('I198 should name the place alone in the agenda words, never the account label, its provider or the username', () => {
+    // Agenda text is readable by every ferret (secrev-1261 L4): the card names the account, the agenda does not.
+    const terminal = phoneApprovalWords({ surface: 'terminal', account: { id: 'AWS', label: 'AWS (okta-aws-cli)' } });
+    for (const words of [phoneApprovalWords(APPROVAL), terminal])
+      for (const text of [words.subject, words.agendaWhy])
+        for (const name of ['ClickUp', 'a@gmail.com', 'Okta ', 'AWS']) expect(text).not.toContain(name);
+    expect(terminal.subject).toBe('Approve on your phone: your account in a terminal');
+  });
+
+  it('should say "enter" for a Duo code', () => {
+    const duo = phoneApprovalWords({
+      ...APPROVAL,
+      origin: 'https://api-1234.duosecurity.com',
+      via: undefined,
+      number: { value: '123456', from: 'duo', direction: 'type-on-phone', readAt: AT },
+    });
+    expect(duo.numberLine).toBe('Enter 123456 in Duo Mobile');
+    expect(duo.push).toBe('Enter 123456 in Duo Mobile: your account on api-1234.duosecurity.com');
+    expect(duo.where).toBe('api-1234.duosecurity.com');
+  });
+
+  it('should say why there is no number, and send the owner to the card for it', () => {
+    const missing = (numberMissing: PhoneApproval['numberMissing']) =>
+      phoneApprovalWords({ ...APPROVAL, number: undefined, numberMissing });
+    expect(missing('scripted').noNumber).toBe("A ferret scripted this page, so Ferretry won't read a number from it.");
+    expect(missing('origin').noNumber).toBe(
+      "This isn't a sign-in page Ferretry knows, so it won't read a number from it.",
+    );
+    expect(missing(undefined).noNumber).toBe("Ferretry couldn't read a number from the page.");
+    expect(missing('none-found').push).toBe(
+      'Approve on your phone: your account on company.okta.com — open for the number',
+    );
+    expect(missing('none-found').numberLine).toBeUndefined();
+  });
+
+  it('should send a terminal’s owner to the terminal, never to a number', () => {
+    const words = phoneApprovalWords({
+      surface: 'terminal',
+      account: { id: 'AWS', label: 'AWS (okta-aws-cli)' },
+      numberMissing: 'terminal',
+    });
+    expect(words.where).toBe('in a terminal');
+    expect(words.noNumber).toBe('Check the terminal: Ferretry never reads a number from one.');
+    expect(words.push).toBe('Approve on your phone: your account in a terminal — check the terminal');
+  });
+
+  it('should make an unexpected push easy to refuse: a sign-in Ferretry does not know, and where', () => {
+    const words = phoneApprovalWords({ surface: 'browser', origin: 'https://login.microsoftonline.com' });
+    expect(words.who).toBe("a sign-in Ferretry doesn't know, on login.microsoftonline.com");
+    expect(words.subject).toBe("Approve on your phone: a sign-in Ferretry doesn't know, on login.microsoftonline.com");
+  });
+
+  it('should keep a host the ferret navigated to out of the push, which a lock screen shows bare', () => {
+    // A sign-in Ferretry does not know: the card names the host, the push does not (secrev-r2-1, L4).
+    const words = phoneApprovalWords({ surface: 'browser', origin: 'https://tap-17-now.okta.com' });
+    expect(words.who).toBe("a sign-in Ferretry doesn't know, on tap-17-now.okta.com");
+    expect(words.push).toBe("Approve on your phone: a sign-in Ferretry doesn't know — open for the number");
+    const withNumber = phoneApprovalWords({
+      surface: 'browser',
+      origin: 'https://login.microsoftonline.com',
+      number: { value: '17', from: 'microsoft', direction: 'tap-on-phone', readAt: AT },
+    });
+    expect(withNumber.push).toBe("Tap 17 on your phone: a sign-in Ferretry doesn't know");
+  });
+
+  it('should say when a number was read from the element the ferret pointed at, on the card and in the push', () => {
+    const words = phoneApprovalWords({
+      ...APPROVAL,
+      number: { value: '7', from: 'pointed', direction: 'tap-on-phone', readAt: AT },
+    });
+    expect(words.numberLine).toBe('Tap 7 on your phone');
+    expect(words.numberSource).toBe('Read from the element the ferret pointed at, on this sign-in page.');
+    expect(words.push).toBe('Tap 7 on your phone (read where the ferret pointed): your account on company.okta.com');
+    expect(phoneApprovalWords(APPROVAL).numberSource).toBeUndefined();
+  });
+
+  it('should name no host for an origin that is not one, rather than fail', () => {
+    expect(phoneApprovalWords({ surface: 'browser', origin: 'not an origin' }).where).toBe('a page');
+    expect(phoneApprovalWords({ surface: 'browser' }).who).toBe("a sign-in Ferretry doesn't know, on a page");
+  });
+
+  it('should keep a long subject and push within what an agenda item holds', () => {
+    const words = phoneApprovalWords({ ...APPROVAL, username: 'u'.repeat(256) });
+    expect(words.subject.length).toBeLessThanOrEqual(240);
+    expect(words.push.length).toBeLessThanOrEqual(240);
+    expect(words.push.startsWith('Tap 42 on your phone: ')).toBe(true);
+  });
+
+  it('I195 should never tell the ferret the number: its view holds the id, the state and a push once it moved on', () => {
+    const view = { id: ID, state: 'waiting' };
+    expect(PhoneApprovalAgentViewSchema.safeParse(view).success).toBe(true);
+    // Whatever the card holds, none of it is the ferret's: not the number, the account, the host, the factor.
+    for (const extra of [
+      { number: { value: '42', from: 'okta', direction: 'tap-on-phone', readAt: AT } },
+      { number: '42' },
+      { numberMissing: 'scripted' },
+      { account: { id: 'CLICKUP', label: 'ClickUp' } },
+      { username: 'a@gmail.com' },
+      { origin: 'https://company.okta.com' },
+      { factor: { id: 'tf_000000000001', label: 'Okta Verify' } },
+    ])
+      expect(PhoneApprovalAgentViewSchema.safeParse({ ...view, ...extra }).success).toBe(false);
+    expect(PhoneApprovalAgentViewSchema.safeParse({ ...view, secondFactor: 'push' }).success).toBe(false);
+    expect(PhoneApprovalAgentViewSchema.safeParse({ id: ID, state: 'moved-on', secondFactor: 'push' }).success).toBe(
+      true,
+    );
+  });
+
+  it('I158 should name an account only from the secrets-gated listing: agenda text names the place, never an account or a person', () => {
+    // The only route that lists accounts is gated by `secrets` use, so a device without it cannot draw an account title.
+    const listing = manifest.actions.routes.find(entry => entry.key === 'GET /v1/accounts');
+    expect(listing?.capability).toEqual(USE.secrets);
+    // Every agenda word the daemon writes names the place alone: no label, username or provider.
+    const words = phoneApprovalWords(APPROVAL);
+    for (const text of [words.subject, words.agendaWhy, words.push])
+      for (const name of ['ClickUp', 'a@gmail.com', 'Okta ']) expect(text).not.toContain(name);
+    const card = factorAskWords([], { place: 'github.com' });
+    expect(card).toBe('One-time code for github.com');
+    for (const name of ['kirinnee', 'GitHub ·']) expect(card).not.toContain(name);
+  });
+
+  it('I198 G90 should name no account label or username in the push, which every subscribed device shows', () => {
+    const words = phoneApprovalWords(APPROVAL);
+    expect(words.push).not.toContain('ClickUp');
+    expect(words.push).not.toContain('a@gmail.com');
+  });
+});
+
+describe('the ask that presents an approval', () => {
+  it('I206 names the approval by id only, through the sign-in-approval source, never an account or a number', () => {
+    expect(SignInApprovalRefSchema.parse({ kind: 'phone-approval', id: ID })).toEqual({
+      kind: 'phone-approval',
+      id: ID,
+    });
+    expect(SignInApprovalRefSchema.safeParse({ kind: 'phone-approval', id: 'pa_x' }).success).toBe(false);
+    expect(SignInApprovalRefSchema.safeParse({ kind: 'phone-approval', id: ID, account: 'WORK' }).success).toBe(false);
+    expect(SignInApprovalRefSchema.safeParse({ kind: 'phone-approval', id: ID, number: '42' }).success).toBe(false);
+  });
+});

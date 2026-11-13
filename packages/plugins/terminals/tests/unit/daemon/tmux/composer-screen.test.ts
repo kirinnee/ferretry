@@ -1,0 +1,779 @@
+import { describe, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import should from 'should';
+import {
+  type ComposerCursor,
+  composerHoldsOtherText,
+  composerInput,
+  composerRows,
+  heldAt,
+  paneHoldOf,
+  readComposer,
+  readHarnessQueue,
+  readPendingInputs,
+  showsPayload,
+} from '../../../../daemon/lib/tmux/composer-screen.ts';
+import { countlessPasteOf } from '../../../../daemon/lib/tmux/composer.ts';
+import {
+  composerLanding,
+  composerState,
+  type DeliveryFrame,
+  occupiedComposer,
+} from '../../../../daemon/lib/tmux/delivery.ts';
+import { needsQueueKey } from '../../../../daemon/lib/tmux/queue.ts';
+
+/**
+ * What a Codex composer holds, read from REAL pane captures.
+ *
+ * Every fixture under `tests/fixtures/composer/` is a `capture-pane -p` of a real Codex TUI (0.145.0,
+ * 0.156.1, 0.163.0) driven against a local fake model API, with `#{cursor_x}|#{cursor_y}` beside it.
+ * The states are the ones the bug lived in: an idle composer showing its placeholder, a typed draft, a
+ * draft a swallowed Enter turned into two lines, and a busy pane holding messages in its pending block.
+ */
+
+const VERSIONS = ['0.145.0', '0.156.1', '0.163.0'] as const;
+const FIXTURES = join(import.meta.dir, '../../../fixtures/composer');
+
+function capture(version: string, state: string): DeliveryFrame {
+  const visible = readFileSync(join(FIXTURES, `codex-${version}-${state}.txt`), 'utf8');
+  const [x, y] = readFileSync(join(FIXTURES, `codex-${version}-${state}.cursor`), 'utf8')
+    .trim()
+    .split('|');
+  return { alive: true, dead: false, promptReady: false, visible, cursorX: Number(x), cursorY: Number(y) };
+}
+
+function cursorOf(frame: DeliveryFrame): { x?: number; y?: number } {
+  return { x: frame.cursorX, y: frame.cursorY };
+}
+
+describe('readComposer on real Codex captures', () => {
+  for (const version of VERSIONS) {
+    it(`should read the ${version} placeholder as a placeholder, whatever words it uses`, () => {
+      // Arrange — 0.145 rotates to `Run /review on my current changes`, the later ones show
+      // `Ask Codex to do anything`; both contain words a short message is made of.
+      const frame = capture(version, 'idle-empty');
+
+      // Act
+      const composer = readComposer(frame.visible, cursorOf(frame));
+
+      // Assert
+      should(composer?.placeholder).be.true();
+      should(composerInput(composer)).equal('');
+      should(occupiedComposer(frame)).be.undefined();
+    });
+
+    it(`should read a ${version} typed draft as input, and a draft a swallowed Enter split as input too`, () => {
+      const typed = capture(version, 'idle-typed');
+      const split = capture(version, 'idle-typed-newline');
+
+      should(readComposer(typed.visible, cursorOf(typed))).deepEqual({
+        text: 'fix the flaky test',
+        placeholder: false,
+        pasted: false,
+      });
+      // The cursor sits on the blank row the newline opened, one row below the text.
+      should(readComposer(split.visible, cursorOf(split))?.placeholder).be.false();
+      should(occupiedComposer(typed)).equal('fix the flaky test');
+    });
+
+    it(`should find nothing typed after a ${version} composer was cleared`, () => {
+      const frame = capture(version, 'after-clear');
+      should(occupiedComposer(frame)).be.undefined();
+    });
+  }
+});
+
+describe('readPendingInputs on real Codex captures', () => {
+  it('should read the messages a busy Codex holds above its composer, in order', () => {
+    should(readPendingInputs(capture('0.145.0', 'busy-pending-tab').visible)).deepEqual(['hello', 'hey?']);
+    should(readPendingInputs(capture('0.156.1', 'busy-pending').visible)).deepEqual(['hello']);
+  });
+
+  it('should read no queue where there is none, including a frame with no composer at all', () => {
+    should(readPendingInputs(capture('0.163.0', 'busy-pending').visible)).deepEqual([]);
+    should(readPendingInputs('• Working (3s • esc to interrupt)\n  ↳ stale')).deepEqual(['stale']);
+    should(readPendingInputs('')).deepEqual([]);
+  });
+
+  it('should stop at the conversation above a pending block', () => {
+    // Arrange — an arrow that scrolled up with the conversation is history.
+    const frame = ['  ↳ old entry', '• ack 3: done', '', '• Queued follow-up inputs', '  ↳ new one', '', '› '].join(
+      '\n',
+    );
+
+    should(readPendingInputs(frame)).deepEqual(['new one']);
+  });
+
+  it('should join an entry that wrapped onto deeper-indented rows', () => {
+    const frame = ['• Queued follow-up inputs', '  ↳ please read the brief', '    and then report back', '', '› '].join(
+      '\n',
+    );
+
+    should(readPendingInputs(frame)).deepEqual(['please read the brief and then report back']);
+  });
+});
+
+describe('heldAt', () => {
+  it('should say "queue" only for the pending block and never for the conversation above it', () => {
+    // Arrange — 0.156.1 shows `› hihello` in its history AND `↳ hello` pending.
+    const frame = capture('0.156.1', 'busy-pending');
+
+    should(heldAt(frame.visible, cursorOf(frame), 'hello', false)).equal('queue');
+    should(heldAt(frame.visible, cursorOf(frame), 'hihello', false)).be.undefined();
+  });
+
+  it('should say "composer" for a typed draft and nothing for words the placeholder happens to contain', () => {
+    const typed = capture('0.163.0', 'busy-typed');
+    const empty = capture('0.156.1', 'idle-empty');
+
+    should(heldAt(typed.visible, cursorOf(typed), 'hello', false)).equal('composer');
+    should(heldAt(empty.visible, cursorOf(empty), 'hi', false)).be.undefined();
+  });
+
+  it('should count a collapsed paste in the composer as the pasted payload', () => {
+    const frame = '› [Pasted Content 1204 chars]\n\n  gpt-5 default';
+    const cursor = { x: 30, y: 0 };
+
+    should(heldAt(frame, cursor, 'x'.repeat(1204), true)).equal('composer');
+    should(heldAt(frame, cursor, 'x'.repeat(1204), false)).be.undefined();
+  });
+});
+
+describe('composerLanding', () => {
+  it('should prove a payload by the composer showing exactly it', () => {
+    should(composerLanding(capture('0.156.1', 'idle-typed'), 'fix the flaky test', false)).equal('chars');
+  });
+
+  it('should prove nothing from a placeholder that contains the payload — the `hi` bug', () => {
+    should(composerLanding(capture('0.156.1', 'idle-empty'), 'hi', false)).be.undefined();
+    should(composerLanding(capture('0.145.0', 'idle-empty'), 'review', false)).be.undefined();
+  });
+
+  it('should take a collapsed paste as the paste it is', () => {
+    const frame: DeliveryFrame = {
+      alive: true,
+      dead: false,
+      promptReady: false,
+      visible: '› [Pasted Content 900 chars]',
+      cursorX: 28,
+      cursorY: 0,
+    };
+
+    should(composerLanding(frame, 'y'.repeat(900), true)).equal('placeholder');
+    should(composerLanding({ ...frame, visible: '› something else' }, 'y'.repeat(900), true)).be.undefined();
+  });
+
+  it('should say "unreadable" when there is no composer or no cursor on it', () => {
+    should(composerLanding({ alive: true, dead: false, promptReady: false, visible: 'booting' }, 'hi', false)).equal(
+      'unreadable',
+    );
+    should(composerLanding({ alive: true, dead: false, promptReady: false, visible: '› hi' }, 'hi', false)).equal(
+      'unreadable',
+    );
+  });
+});
+
+describe('readComposer edge shapes', () => {
+  it('should read a boxed composer and stop at its closing rule', () => {
+    const frame = ['╭────────╮', '│ > hello │', '╰────────╯'].join('\n');
+
+    should(readComposer(frame, { x: 9, y: 1 })).deepEqual({ text: 'hello', placeholder: false, pasted: false });
+  });
+
+  it('should read a multi-line draft up to the blank row above the footer', () => {
+    // A small multi-line paste is drawn as its lines (Codex 0.156.1, measured), wrapped rows indented.
+    const frame = ['› line1', '  line2', '  line3 xxx', '', '  gpt-5 default · ~/work'].join('\n');
+
+    should(readComposer(frame, { x: 12, y: 2 })).deepEqual({
+      text: 'line1\nline2\nline3 xxx',
+      placeholder: false,
+      pasted: false,
+    });
+  });
+
+  it('should treat an empty prompt as empty and a numbered selector as no composer', () => {
+    should(readComposer('› ', { x: 2, y: 0 })).deepEqual({ text: '', placeholder: false, pasted: false });
+    should(readComposer('› 1. Yes, proceed', { x: 2, y: 0 })).be.undefined();
+  });
+
+  it('should not claim a placeholder when the cursor is elsewhere on screen', () => {
+    should(readComposer('› Ask Codex to do anything', { x: 0, y: 9 })?.placeholder).be.undefined();
+  });
+});
+
+describe('showsPayload', () => {
+  it('should ignore how the TUI wrapped the text', () => {
+    should(showsPayload('fix the\nflaky test', 'fix the flaky test')).be.true();
+  });
+
+  it('should match a long entry the harness clipped, but never a short one', () => {
+    should(showsPayload('please read the attached…', 'please read the attached brief carefully')).be.true();
+    should(showsPayload('ok…', 'ok then, carry on')).be.false();
+    should(showsPayload('hello there', 'hello')).be.false();
+  });
+
+  it('should never match empty text', () => {
+    should(showsPayload('', 'hi')).be.false();
+    should(showsPayload('hi', ' ')).be.false();
+  });
+});
+
+/**
+ * Claude Code 2.1.281's queue, read from REAL pane captures of the incident: one `fy send` typed four
+ * times into a mid-turn Claude ferret, because the daemon did not recognise this rendering as holding
+ * it. The captures carry no cursor, so every claim is checked under each cursor tmux could report.
+ */
+describe('Claude Code 2.1.281 queue on real captures', () => {
+  const COMPOSER_ROW = 77;
+  const CURSORS: ReadonlyArray<{ readonly name: string; readonly cursor: ComposerCursor }> = [
+    { name: 'no cursor', cursor: {} },
+    { name: 'the cursor at the placeholder', cursor: { x: 2, y: COMPOSER_ROW } },
+    { name: 'the cursor past the placeholder', cursor: { x: 34, y: COMPOSER_ROW } },
+    { name: 'the cursor on the row below', cursor: { x: 0, y: COMPOSER_ROW + 1 } },
+  ];
+
+  // The banner as it was typed when these panes were captured: the payload must be what is on screen.
+  const envelope = (name: string, session: string): string =>
+    `[message from ferret ${name} (session ${session}) — not from the owner]\nNo reply needed. To reply: fy send ${name} "<reply>"\n\n`;
+  const LIZZETTE = envelope('lizzette', 'mvgt2oz9-04e28935');
+  const CONFIRMED =
+    `${LIZZETTE}lizzette: CONFIRMED on the owner's Mac — after manual ProcessType=Interactive ` +
+    '(spawn type = interactive (4)), 4.67.0: lag 0.1ms, 1 stall total (0.4s at boot, dlopen of WebRTC lib) ' +
+    'vs 381 stalls/worst 7.9s/lag 3.1s minutes earlier on the same build. QoS was the root cause. Please make ' +
+    "sure rozanne's plist fix ships ASAP (and that update/restart never drops the key).";
+  const RESEND =
+    `${LIZZETTE}lizzette (resend): QoS CONFIRMED as the Mac root cause — ProcessType=Interactive took the ` +
+    "owner's 4.67.0 from 381 stalls/lag 3.1s to lag 0.1ms. I told rozanne to ship the plist fix first.";
+  const ROOT_CAUSE =
+    `${LIZZETTE}lizzette: CONFIRMED root cause on the owner's Mac — manual ProcessType=Interactive took ` +
+    '4.67.0 from 381 stalls / worst 7.9s / lag 3.1s to lag 0.1ms, 1 boot-only stall. Ship the plist fix ' +
+    "first (own PR if the cleanups aren't ready), and make sure update/restart/install never drop the key.";
+  const LEAD =
+    `${envelope('sheilah', 'mvir1r5g-90731a4e')}lead: thanks for #706 — good call keeping load() fresh for ` +
+    'authority. The per-string redaction follow-up is the biggest remaining secrets.key source on the live ' +
+    'box (6.1/s on the operator read path: events/messages rows, triage). Could you take it as your next PR ' +
+    '(one vault open per read batch/request, or an identity-keyed ciphertext cache — never plaintext)? ' +
+    "I'm at my sub-ferret limit. If you can't, tell me and I'll queue it.";
+
+  const claude = (state: string): string =>
+    readFileSync(join(FIXTURES, `claude-2.1.281-busy-queued-${state}.txt`), 'utf8');
+
+  it('should read every queued message above the spinner, in order, as the harness drew it', () => {
+    const queue = readHarnessQueue(claude('copies'));
+
+    should(queue.entries).have.length(8);
+    for (const entry of queue.entries.slice(0, 4)) should(showsPayload(entry, CONFIRMED)).be.true();
+    for (const entry of queue.entries.slice(4)) should(showsPayload(entry, RESEND)).be.true();
+    should(readPendingInputs(claude('copies'))).deepEqual(queue.entries);
+  });
+
+  for (const { name, cursor } of CURSORS) {
+    it(`should call the payload held in the queue, with ${name}`, () => {
+      should(heldAt(claude('copies'), cursor, CONFIRMED, true)).equal('queue');
+      should(paneHoldOf(claude('copies'), cursor, RESEND, true)).equal('queue');
+      should(paneHoldOf(claude('clipped'), cursor, ROOT_CAUSE, true)).equal('queue');
+      should(paneHoldOf(claude('clipped'), cursor, LEAD, true)).equal('queue');
+    });
+
+    it(`should never read "Press up to edit queued messages" as a typed draft, with ${name}`, () => {
+      const frame: DeliveryFrame = {
+        alive: true,
+        dead: false,
+        promptReady: false,
+        visible: claude('copies'),
+        ...(cursor.x === undefined ? {} : { cursorX: cursor.x, cursorY: cursor.y }),
+      };
+      const composer = readComposer(frame.visible, cursor);
+
+      should(composer?.text).equal('Press up to edit queued messages');
+      should(composer?.placeholder).be.true();
+      should(composerInput(composer)).equal('');
+      should(occupiedComposer(frame)).be.undefined();
+      should(composerLanding(frame, CONFIRMED, true)).be.undefined();
+    });
+  }
+
+  it('should say UNKNOWN, never absent, for a payload the clipped top of the queue could be hiding', () => {
+    // Both captures start inside the queue: whatever scrolled off above may be this payload.
+    const unseen = `${LIZZETTE}a message the pane does not show`;
+
+    should(readHarnessQueue(claude('clipped')).complete).be.false();
+    should(paneHoldOf(claude('clipped'), {}, unseen, true)).equal('unknown');
+    should(paneHoldOf(claude('copies'), {}, unseen, true)).equal('unknown');
+    should(heldAt(claude('clipped'), {}, unseen, true)).be.undefined();
+  });
+
+  it('should read a whole queue as complete, and the person’s past prompts above it as history', () => {
+    const tail = claude('copies').split('\n').slice(70).join('\n');
+    const frame = [
+      '❯ the old prompt this turn answers',
+      '',
+      '⏺ Working on it.',
+      '  ⎿  Read 3 files',
+      '',
+      '❯ check the queue too',
+      '  ctrl+x ctrl+s to send now',
+      '',
+      tail.slice(tail.indexOf('✽')),
+    ].join('\n');
+
+    should(readHarnessQueue(frame)).deepEqual({ entries: ['check the queue too'], complete: true });
+    should(paneHoldOf(frame, {}, 'check the queue too', false)).equal('queue');
+    should(paneHoldOf(frame, {}, 'the old prompt this turn answers', false)).equal('absent');
+  });
+
+  it('should say UNKNOWN when the composer says messages are queued but no queue can be read', () => {
+    // A rendering drift that moved or reworded the hint: the placeholder alone proves a queue exists.
+    const frame = claude('copies').replace('ctrl+x ctrl+s to send now', 'something new');
+
+    should(readHarnessQueue(frame)).deepEqual({ entries: [], complete: false });
+    should(paneHoldOf(frame, {}, CONFIRMED, true)).equal('unknown');
+  });
+
+  it('should leave Codex’s pending block exactly as it read before, and complete', () => {
+    for (const version of VERSIONS) {
+      const frame = capture(version, 'busy-pending');
+      should(readHarnessQueue(frame.visible).complete).be.true();
+      should(readHarnessQueue(frame.visible).entries).deepEqual(readPendingInputs(frame.visible));
+    }
+    should(paneHoldOf(capture('0.156.1', 'busy-pending').visible, {}, 'hello', false)).equal('queue');
+    // 0.163.0 steered `hello` into the turn: absent from the queue, and provably so.
+    const steered = capture('0.163.0', 'busy-pending');
+    should(paneHoldOf(steered.visible, cursorOf(steered), 'hello', false)).equal('absent');
+  });
+});
+
+/**
+ * A NAMED Claude Code session — `claude -n "[Aime] MXO OCI Upgrading"` — read from live 2.1.281
+ * captures at the 82 columns of the incident pane, plus the incident's own frame rebuilt from the
+ * owner's screenshot: one person's question with SIX copies of one turn pointer typed onto it.
+ */
+describe('the composer of a titled Claude Code session', () => {
+  const POINTER =
+    'Read the file /Users/erng/.ferretry/state/sessions/mvgf1elu-2a90237a/turns/turn-026.md now, then ' +
+    'carefully follow every instruction inside it. This is your complete task for this turn.';
+  const DRAFT =
+    "before contiuing, i need to know -- for OCI's warpstream agent -- say they need to talk to OOS " +
+    "(OCI's s3), where do i get the permission?";
+
+  function titled(state: string): DeliveryFrame {
+    const name = state === 'screenshot' ? 'claude-pileup-screenshot' : `claude-2.1.281-titled-${state}`;
+    const visible = readFileSync(join(FIXTURES, `${name}.txt`), 'utf8');
+    const [x, y] = readFileSync(join(FIXTURES, `${name}.cursor`), 'utf8')
+      .trim()
+      .split('|');
+    return { alive: true, dead: false, promptReady: false, visible, cursorX: Number(x), cursorY: Number(y) };
+  }
+
+  const squeeze = (value: string): string => value.replace(/\s+/gu, '');
+  const withoutCursor = (frame: DeliveryFrame): DeliveryFrame => {
+    const { cursorX: _x, cursorY: _y, ...rest } = frame;
+    return rest;
+  };
+
+  it('should read past the title in the rule above it, to the suggestion an empty composer shows', () => {
+    const empty = titled('idle-empty');
+
+    should(empty.visible).containEql('[Aime] MXO OCI Upgrading');
+    should(readComposer(empty.visible, cursorOf(empty))?.placeholder).be.true();
+    should(composerState(empty)).deepEqual({ kind: 'empty' });
+    // The suggestion's own wording proves it is a placeholder when tmux reports no cursor.
+    should(composerState(withoutCursor(empty))).deepEqual({ kind: 'empty' });
+  });
+
+  it("should read the person's two-row question as their draft under the titled rule", () => {
+    const draft = titled('idle-draft');
+
+    should(squeeze(occupiedComposer(draft) ?? '')).equal(squeeze(DRAFT));
+    should(composerState(draft)).have.property('kind', 'input');
+  });
+
+  it('should call a composer whose cursor cannot place it unreadable, never empty', () => {
+    const draft = titled('idle-draft');
+    const elsewhere = { ...draft, cursorX: 0, cursorY: draft.visible.split('\n').length - 2 };
+
+    should(occupiedComposer(withoutCursor(draft))).be.undefined();
+    should(composerState(withoutCursor(draft))).deepEqual({ kind: 'unreadable' });
+    should(composerState(elsewhere)).deepEqual({ kind: 'unreadable' });
+  });
+
+  it('should find a pointer typed after a draft IN the composer, so it is never typed again', () => {
+    const typed = titled('draft-pointer');
+
+    should(squeeze(occupiedComposer(typed) ?? '')).equal(squeeze(DRAFT + POINTER));
+    // Exact equality said "absent" here, and absent is what licensed every retype.
+    should(paneHoldOf(typed.visible, cursorOf(typed), POINTER, false)).equal('composer');
+    should(paneHoldOf(typed.visible, {}, POINTER, false)).equal('composer');
+    should(heldAt(typed.visible, cursorOf(typed), POINTER, false)).equal('composer');
+    // A short payload that happens to be a word of the draft is not claimed.
+    should(paneHoldOf(typed.visible, cursorOf(typed), 'permission', false)).equal('absent');
+  });
+
+  it('should show that C-u erased only the last wrapped row, leaving a clipped pointer behind', () => {
+    // Measured live: one `C-u` took `for this turn.` and nothing else. A clear-and-retype on top of
+    // that is the screenshot's `This is your Read the file`.
+    const after = titled('draft-pointer-after-cu');
+    const text = occupiedComposer(after) ?? '';
+
+    should(squeeze(text)).equal(squeeze(`${DRAFT}${POINTER}`.replace(/for this turn\.$/u, '')));
+    should(paneHoldOf(after.visible, cursorOf(after), POINTER, false)).equal('absent');
+  });
+
+  it("should read the incident frame as the person's draft with the pointer held, from any cursor", () => {
+    const pileup = titled('screenshot');
+    const text = readComposer(pileup.visible, cursorOf(pileup))?.text ?? '';
+
+    should(squeeze(text).startsWith(squeeze(DRAFT))).be.true();
+    should(squeeze(text).split(squeeze(POINTER)).length - 1).equal(5, 'five whole copies, and one clipped');
+    should(composerState(pileup)).have.property('kind', 'input');
+    should(composerState(withoutCursor(pileup))).deepEqual({ kind: 'unreadable' });
+    should(paneHoldOf(pileup.visible, cursorOf(pileup), POINTER, false)).equal('composer');
+    should(paneHoldOf(pileup.visible, {}, POINTER, false)).equal('composer');
+  });
+});
+
+describe("the owner's Mac Claude pane: a ghost suggestion, a titled rule, and an auto-compact line", () => {
+  /**
+   * `capture-pane` of the owner's Mac ferret (Claude Code 2.1.281, tmux 3.6a), trimmed to the composer
+   * and its status lines: `go ahead with all three` after a `❯` and a no-break space, the session
+   * title in the rule above, and a right-aligned `2% until auto-compact` under the status lines — the
+   * line a 200k-context session shows near compaction. tmux reported the cursor at `2|17` (row 17 of the
+   * full 24-row pane; this fixture keeps its last nine rows): the first
+   * column of the composer row, which is where Claude parks it under its dim ghost SUGGESTION of the
+   * person's next prompt — the same shape as `❯ ok` captured with `capture-pane -e` in a soak here.
+   */
+  const MAC = readFileSync(join(FIXTURES, 'claude-2.1.281-mac-draft-autocompact.txt'), 'utf8');
+  const ROW = MAC.split('\n').findIndex(line => line.startsWith('❯'));
+  const at = (visible: string, cursorX?: number, cursorY?: number): DeliveryFrame => ({
+    alive: true,
+    dead: false,
+    promptReady: false,
+    visible,
+    ...(cursorX === undefined ? {} : { cursorX }),
+    ...(cursorY === undefined ? {} : { cursorY }),
+  });
+
+  it('should read the same words as a typed draft when the cursor sits after them, status lines or not', () => {
+    const frame = at(MAC, 25, ROW);
+
+    should(composerState(frame)).deepEqual({ kind: 'input', text: 'go ahead with all three' });
+    should(occupiedComposer(frame)).equal('go ahead with all three');
+  });
+
+  it('should hold for any status line Claude draws there instead', () => {
+    for (const line of ['14% until auto-compact', 'Context low · Run /compact to compact & continue', ''])
+      should(composerState(at(MAC.replace('2% until auto-compact', line), 25, ROW))).deepEqual({
+        kind: 'input',
+        text: 'go ahead with all three',
+      });
+  });
+
+  it('should read the frame tmux reported on the Mac, cursor 2|17, as the ghost suggestion it is — empty', () => {
+    // Any words at all, so no list of wordings could tell this from a draft; the cursor does. An empty
+    // reading is right — and is exactly why a send's own keys, unread by a stalled pane, leave the
+    // frame looking empty: the reason a fill types ONCE.
+    for (const column of [0, 2]) {
+      should(composerState(at(MAC, column, ROW))).deepEqual({ kind: 'empty' });
+      should(composerLanding(at(MAC, column, ROW), 'go ahead with all three', false)).be.undefined();
+    }
+  });
+});
+
+describe('the ink of a composer outranks where its cursor sits', () => {
+  // The Home-key twin of the Mac ghost: the same words, the cursor at the same col 2, one of them typed.
+  const GHOST = '❯ go ahead with all three\n';
+  const at = (ink?: 'dim' | 'plain') => ({ x: 2, y: 0, ...(ink === undefined ? {} : { ink }) });
+
+  it('should read dim words as the placeholder and plain words as a draft, the cursor at col 2 in both', () => {
+    // Act
+    const dim = readComposer(GHOST, at('dim'));
+    const plain = readComposer(GHOST, at('plain'));
+
+    // Assert
+    should(dim?.placeholder).be.true();
+    should(plain?.placeholder).be.false();
+    should(composerInput(plain)).equal('go ahead with all three');
+  });
+
+  it('should fall back to the cursor and the wording when the ink could not be read', () => {
+    should(readComposer(GHOST, at())?.placeholder).be.true('col 2 on a single row is the placeholder rule');
+    should(readComposer(GHOST, { x: 9, y: 0 })?.placeholder).be.false();
+    should(readComposer(GHOST, {})?.placeholder).be.undefined();
+  });
+
+  it('should still call an empty prompt empty whatever the ink says', () => {
+    should(readComposer('❯ \n', at('plain'))?.placeholder).be.false();
+    should(composerInput(readComposer('❯ \n', at('plain')))).equal('');
+  });
+
+  it('should name the rows a composer occupies, or none when the frame has no prompt', () => {
+    should(composerRows('header\n❯ one\n  two\n\nfooter\n')).deepEqual({ first: 1, last: 2 });
+    should(composerRows('❯ one\n─────\n')).deepEqual({ first: 0, last: 0 });
+    should(composerRows('nothing to type into\n')).be.undefined();
+  });
+});
+
+/**
+ * Claude Code 2.1.281 in a 24-row pane, holding two queued peer messages. The first is a multi-line
+ * message long enough to push its own head off the top of the frame, so only its tail is on screen;
+ * it also draws that message without its lone ``` fence row. Captured from a real busy session.
+ */
+describe('a Claude queue that runs past the top of a short pane', () => {
+  const frame = readFileSync(join(FIXTURES, 'claude-2.1.281-busy-queued-overflow.txt'), 'utf8');
+  const cursor = { x: 2, y: 17 };
+  const envelope =
+    '[message from ferret geraldine (session mvsrxp4z-35ae1b1b) — not from the owner]\n' +
+    'No reply needed. To reply: fy send geraldine "<reply>"\n\n';
+  const FIRST =
+    `${envelope}First paragraph of a queued message that is long enough to wrap over several rows in a ` +
+    'standard width pane so the reader has to follow wrapped continuation rows properly.\n\n' +
+    '  - bullet one\n  - bullet two\n\nSecond paragraph: ```\ncode line\n```\nEnd.';
+  const SECOND = `${envelope}short second queued message`;
+
+  it('should prove the message whose head scrolled off by the tail still on screen', () => {
+    should(paneHoldOf(frame, cursor, FIRST, false)).equal('queue');
+  });
+
+  it('should still prove the message drawn in full', () => {
+    should(paneHoldOf(frame, cursor, SECOND, false)).equal('queue');
+  });
+
+  it('should report the queue as incomplete, and a message it cannot find as unknown rather than absent', () => {
+    const queue = readHarnessQueue(frame);
+    should(queue.complete).be.false();
+    should(queue.cutOff).startWith('- bullet two');
+    should(paneHoldOf(frame, cursor, `${envelope}a message that was never typed here at all`, false)).equal('unknown');
+  });
+
+  it('should not take a short tail of the cut-off message for a different payload', () => {
+    should(paneHoldOf(frame, cursor, 'Second paragraph: ``` code line End.', false)).equal('unknown');
+    should(paneHoldOf(frame, cursor, 'End.', false)).equal('unknown');
+  });
+});
+
+/**
+ * A Warden notice is three paragraphs. Typed into a busy Claude pane and never submitted, it sat in the
+ * composer with its blank rows drawn INSIDE the composer and the cursor at the end of the last
+ * paragraph. The composer ended at the first blank row, so the cursor sat below it and the reading was
+ * `unreadable`: every later send — the owner's own message among them — was withdrawn as "could not
+ * be read" and never retried. Captured from the live pane that was stuck that way.
+ */
+describe('a multi-paragraph Claude draft closed by its rule', () => {
+  const visible = readFileSync(join(FIXTURES, 'claude-2.1.281-warden-notice-draft.txt'), 'utf8');
+  const [x, y] = readFileSync(join(FIXTURES, 'claude-2.1.281-warden-notice-draft.cursor'), 'utf8').trim().split('|');
+  const frame: DeliveryFrame = {
+    alive: true,
+    dead: false,
+    promptReady: false,
+    visible,
+    cursorX: Number(x),
+    cursorY: Number(y),
+  };
+  const NOTICE =
+    '[ferretry] The Warden: your card &F91 “U6 GitHub watcher” has nobody on it. It is in Doing, but its ' +
+    'ferret :joziah is completed and nothing under it is alive.\n\n' +
+    'This notice is from Ferretry, not from the owner. You own the card, so pick it up: Resume its ferret ' +
+    '(`fy resume mvurrvhm-6973f733`), hand the card to another ferret (`fy task assign F91 <ferret>`), or ' +
+    'drop it (`fy task drop F91 --reason "<why>"`).';
+
+  it('should read every paragraph as the composer, up to the rule that closes it', () => {
+    const rows = composerRows(visible);
+    should(rows).deepEqual({ first: 9, last: 16 });
+    const composer = readComposer(visible, cursorOf(frame));
+    should(composer?.placeholder).be.false();
+    should(composer?.text).endWith('F91 --reason "<why>"`).');
+  });
+
+  it('should call the composer occupied, never unreadable, so a send is refused over a draft it can name', () => {
+    should(composerState(frame).kind).equal('input');
+    should(occupiedComposer(frame)).startWith('[ferretry] The Warden');
+  });
+
+  it('should prove the notice landed in the composer, so the fill that typed it presses Enter', () => {
+    should(composerLanding(frame, NOTICE, true)).equal('chars');
+  });
+
+  it('should still end a Codex composer at its first blank row, where its footer begins', () => {
+    const codex = '› fix the flaky test\n\n  gpt-5 default · ~/work\n────────\n';
+    should(composerRows(codex)).deepEqual({ first: 0, last: 0 });
+  });
+
+  it('should not swallow rows that are not an indented draft before a rule', () => {
+    const claude = '❯ hello\n\n⏺ assistant output\n────────\n';
+    should(composerRows(claude)).deepEqual({ first: 0, last: 0 });
+  });
+});
+
+/**
+ * A ferret's message typed into a busy Codex 0.156.1 pane: an envelope line, a blank row, then paragraphs,
+ * with no rule under the composer and the cursor at the end of the last paragraph. The composer ended at
+ * its first blank row, so the landing proof never saw the message, nothing pressed Tab, and it sat in the
+ * box under "tab to queue message" (2026-10-30). Rebuilt from the live capture.
+ */
+describe('a multi-paragraph Codex draft the cursor reaches', () => {
+  const visible = readFileSync(join(FIXTURES, 'codex-0.156.1-peer-message-draft.txt'), 'utf8');
+  const [x, y] = readFileSync(join(FIXTURES, 'codex-0.156.1-peer-message-draft.cursor'), 'utf8').trim().split('|');
+  const frame: DeliveryFrame = {
+    alive: true,
+    dead: false,
+    promptReady: false,
+    visible,
+    cursorX: Number(x),
+    cursorY: Number(y),
+  };
+  const MESSAGE =
+    '[message from ferret lainey (session mvvakqjy-1f2d2f45) — not from the owner]\n\n' +
+    'No reply needed. To reply: fy send lainey "<reply>"\n\n' +
+    'I have likely issues in split hex/Enter delivery, missing per-pane serialization, target facts rechecked ' +
+    'only before separate pane-proof check, incomplete ephemeral redaction wiring, values retained past TTL, ' +
+    'and terminal.wait testing raw text before scrubbing output (substring oracle). Please cover ' +
+    'authorization, service idempotency/restart and generic agenda route only; send concrete findings when ready.';
+
+  it('should read every paragraph down to the cursor as the composer’s input', () => {
+    const composer = readComposer(visible, cursorOf(frame));
+    should(composer?.placeholder).be.false();
+    should(composer?.text).endWith('send concrete findings when ready.');
+    should(composerState(frame).kind).equal('input');
+  });
+
+  it('should prove the message landed, and that the pane wants Tab while it sits in the box', () => {
+    should(composerLanding(frame, MESSAGE, true)).equal('chars');
+    should(needsQueueKey(frame, MESSAGE, 'chars')).be.true();
+  });
+
+  it('should not carry the composer past a row that is not a draft, nor to a cursor outside it', () => {
+    const conversation = '› fix the flaky test\n\n• Working (5s • esc to interrupt)\n  more\n';
+    should(readComposer(conversation, { x: 4, y: 3 })?.text).equal('fix the flaky test');
+    const ruled = '› hello\n\n────────\n  more\n';
+    should(readComposer(ruled, { x: 4, y: 3 })?.text).equal('hello');
+    should(readComposer('› hello\n', { x: 4, y: 9 })?.text).equal('hello');
+  });
+});
+
+describe('B144: whether the composer holds text that is not the payload, right before an Enter', () => {
+  const typedAt = (text: string): [string, ComposerCursor] => [
+    `› ${text}\n\n  gpt-5 default`,
+    { x: 2 + text.length, y: 0 },
+  ];
+  const PASTE = 'first line of the message\nsecond line of the message';
+
+  it('should say no for the payload alone, an empty composer, or one it cannot read', () => {
+    should(composerHoldsOtherText(...typedAt('please rerun the suite'), 'please rerun the suite')).be.false();
+    should(composerHoldsOtherText('› \n', { x: 2, y: 0 }, 'please rerun the suite')).be.false();
+    should(composerHoldsOtherText('no prompt here\n', {}, 'please rerun the suite')).be.false();
+  });
+
+  it('should say yes for a person’s words beside the payload', () => {
+    should(
+      composerHoldsOtherText(...typedAt('please rerun the suite and delete my draft'), 'please rerun the suite'),
+    ).be.true();
+  });
+
+  it('should take a paste’s lone placeholder only when its count agrees, never a replacement paste', () => {
+    should(composerHoldsOtherText(...typedAt('[Pasted text #3 +2 lines]'), PASTE)).be.false();
+    should(composerHoldsOtherText(...typedAt('[Pasted text #999 +30 lines]'), PASTE)).be.true();
+    should(composerHoldsOtherText(...typedAt('[Pasted text #3 +2 lines]'), 'a literal message')).be.true();
+  });
+
+  it('&B153: should still refuse Claude’s countless chip: only the live fill may pin it by its counter', () => {
+    const oneLine = `approve — ${'every review thread is answered and CI is green. '.repeat(10)}`;
+    should(composerHoldsOtherText(...typedAt('[Pasted text #30]'), oneLine)).be.true();
+    should(countlessPasteOf('[Pasted text #30]', oneLine)).equal('30');
+    should(countlessPasteOf(' [Pasted text #7] ', oneLine)).equal('7');
+    should(countlessPasteOf('[Pasted text #30]', PASTE)).be.undefined();
+    should(countlessPasteOf('[Pasted text #30]', 'a short literal message')).be.undefined();
+    should(countlessPasteOf('[Pasted text #30 +2 lines]', oneLine)).be.undefined();
+    should(countlessPasteOf('[Pasted text #30] and my words', oneLine)).be.undefined();
+    should(countlessPasteOf('[Pasted Content 900 chars]', oneLine)).be.undefined();
+  });
+});
+
+describe('a submission Codex 0.166 parked until its startup ends', () => {
+  const held = (state: string, text: string) => {
+    const frame = capture('0.166.0', state);
+    return paneHoldOf(frame.visible, cursorOf(frame), text, false);
+  };
+
+  it('should say the harness holds it (its queue), never that an unsent composer does', () => {
+    // The text is drawn in the composer under `Waiting for startup · esc cancel`: Codex has taken it.
+    should(held('startup-queued-message', 'say hello')).equal('queue');
+    should(held('startup-queued-slash', '/model')).equal('queue');
+  });
+
+  it('should hold the same text in the composer again once the park is cancelled', () => {
+    should(held('startup-queued-cancelled', 'say hello')).equal('composer');
+  });
+
+  it('should say a payload that is not the parked one is absent', () => {
+    should(held('startup-queued-message', 'something else entirely')).equal('absent');
+  });
+});
+
+describe('B187: a daemon message drawn with a quoted or tree line is still read as the whole draft', () => {
+  const draft = readFileSync(join(FIXTURES, 'claude-2.1.30x-idle-draft-quote.txt'), 'utf8');
+  const [x, y] = readFileSync(join(FIXTURES, 'claude-2.1.30x-idle-draft-quote.cursor'), 'utf8').trim().split('|');
+  const cursor = { x: Number(x), y: Number(y) };
+  const ENVELOPE =
+    '[message · from :ireland · peer · 520e638b]\n' +
+    'Please keep the queue ordering as v4, like this:\n' +
+    '> keep the queue ordering as v4\n' +
+    'and tell me when the change is in.';
+
+  it('B187 a quoted body line inside a ruled Claude draft is a continuation, not the prompt line', () => {
+    should(composerRows(draft)).deepEqual({ first: 6, last: 9 });
+    const composer = readComposer(draft, cursor);
+    should(composer?.text).equal(
+      '[message · from :ireland · peer · 520e638b]\nPlease keep the queue ordering as v4, like this:\n' +
+        '> keep the queue ordering as v4\nand tell me when the change is in.',
+    );
+    should(composer?.placeholder).be.false();
+  });
+
+  it('B187 a └ or ─── body line does not close a ruled Claude draft', () => {
+    for (const row of ['└ keep the queue ordering', '─── keep the queue ordering']) {
+      const frame = draft.replace('> keep the queue ordering as v4', row);
+      should(composerRows(frame)).deepEqual({ first: 6, last: 9 });
+      should(readComposer(frame, cursor)?.text).endWith('and tell me when the change is in.');
+    }
+  });
+
+  it('B187 paneHoldOf finds a direct paste with a quoted line in the composer', () => {
+    should(paneHoldOf(draft, cursor, ENVELOPE, true)).equal('composer');
+    should(heldAt(draft, cursor, ENVELOPE, true)).equal('composer');
+  });
+
+  it('B187 a plain multi-line direct paste drawn in full is proven landing, so landing_unconfirmed means no frame showed it', () => {
+    // nelly's send was plain (no quoted line): the reader proves it from a frame that shows it, which pins the 6.16 s
+    // unconfirmed settle on a pane that drew nothing within the fill's window, not on how the text was read.
+    const rows = draft.split('\n');
+    const plain = [...rows.slice(0, 8), ...rows.slice(9)].join('\n');
+    const text =
+      '[message · from :ireland · peer · 520e638b]\nPlease keep the queue ordering as v4, like this:\n' +
+      'and tell me when the change is in.';
+    const frame: DeliveryFrame = {
+      alive: true,
+      dead: false,
+      promptReady: false,
+      visible: plain,
+      cursorX: 36,
+      cursorY: 8,
+    };
+
+    should(composerLanding(frame, text, true)).equal('chars');
+    should(composerLanding({ ...frame, visible: rows.slice(0, 5).join('\n') }, text, true)).not.equal('chars');
+  });
+
+  it('B187 an indented › row outside any rule is still not a prompt line', () => {
+    const codex = '› fix the flaky test\n\n  › a quoted line the assistant drew\n  gpt-5 default · ~/work\n';
+    should(composerRows(codex)?.first).equal(2);
+    const noRule = '  ❯ a quoted line\n────────\n';
+    should(composerRows(noRule)).deepEqual({ first: 0, last: 0 });
+    const notUnderRule = '────────\n⏺ assistant\n  > quoted\n────────\n';
+    should(composerRows(notUnderRule)).deepEqual({ first: 2, last: 2 });
+    const rowBetween = '────────\n❯ ask\n⏺ assistant\n  > quoted\n────────\n';
+    should(composerRows(rowBetween)).deepEqual({ first: 3, last: 3 });
+    const promptNotUnderRule = 'text\n❯ ask\n  > quoted\n────────\n';
+    should(composerRows(promptNotUnderRule)).deepEqual({ first: 2, last: 2 });
+  });
+});

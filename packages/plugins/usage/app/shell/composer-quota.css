@@ -1,0 +1,22 @@
+/* The account's quota on the composer's context row (composer-quota.tsx), and the colours a quota readout takes. Theme tokens only. */
+.fy-quota-divider {
+  color: var(--fy-border);
+}
+.fy-quota-warning {
+  color: var(--warn);
+}
+.fy-quota-error {
+  color: var(--err);
+}
+.fy-composer-quota {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  gap: 5px;
+  white-space: nowrap;
+}
+.fy-composer[data-composer-layout='phone'] .fy-composer-quota {
+  flex: 0 0 auto;
+}

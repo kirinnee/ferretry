@@ -1,0 +1,18 @@
+What the composer (porter C2) could not bring over, or brought over with a stand-in, and what each waits for.
+
+NOT COPIED (need a harness packages/app does not have)
+pwa/tests/integration/composer-editor.visual.test.ts | playwright-core, the Vite browser harness (pwa/tests/integration/support/{chromium,composer-scene}.ts) and today's Transcript (C3) and runtime controls (Runtimes); never run locally
+pwa/tests/integration/fixtures/composer-editor-scene.tsx | the scene the visual test serves; same reasons
+pwa/tests/integration/features/reference-actions.test.ts (second describe) | Skills' skills-composer.ts and skills-catalog.ts; the first describe is a unit test in tests/unit/app/composer/reference-actions.test.ts
+
+GAPS (stand-ins in seam.ts, seam-drafts.ts, seam-attachments.ts)
+carrierDelivery | the 5.0 client marks a carrier outage (isCarrierOutage) but cannot prove a request never left, so a marked outage reads "checking whether it arrived" and never "not sent — send it again"
+shared-draft stream | GAP(app-shell): PluginClient.socket takes no query and reports no close code, so an Agenda item's own draft has no live stream, every reconnect reads the whole draft, and the 4413 resync close is read from the close reason
+outbox retry | GAP(app-shell): a half hears no "machine recovered" moment; the outbox retries on the browser's online event, its 20 s timer, or a composer offering a sender
+foreground pin scope | GAP(ferrets): nothing sets the pinned pane in front until Ferrets' app half does, so a quote goes to the visible chat's composer only
+FerretContext / ContextUsage | GAP(ferrets, Q0): a local shape until the Ferrets contract exports today's SessionContext
+LedgerSendRecord (ferretry-sender.ts) | GAP(C3): a minimal local type until C3's chat/send-ledger.ts exports it
+transcript images (seam-attachments.ts) | GAP(C3): a copy of today's transcript-image-source.ts until C3's lands
+reference.catalog providers | GAP(board, agenda, skills, terminals, browsers, ferrets): no plugin takes the hook yet, so every prefix answers `provided: false` and its menu is empty (never an error); a provider declares the demand its own route asks (filesystem, terminal, browser, and fleet for cards) and the route asks it first
+dictation in the composer | moved to Voice's `composer.tools` panel (ComposerDraftProvider); the composer draws the slot only inside the shell
+composer quota line | moved to Usage's `composer.tools` panel (lead decision Q5)

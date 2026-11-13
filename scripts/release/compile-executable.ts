@@ -41,10 +41,19 @@
  * the path `packages/daemon/src/adapters/runtime/bundled-worker.ts` resolves it by. Without this, a
  * `new Worker` in a compiled binary names a file the binary does not have and never starts: the PDF
  * unlock shipped that way. `fyd --check` starts each worker, and the release smoke asserts it.
+ *
+ * AND SO IS EVERY PLUGIN'S. A plugin's worker lives in its own package and is named by URL from its daemon half, so it
+ * is not beside any entry. An entry whose package holds the generated plugin registry (the daemon host) embeds every
+ * worker that registry declares (`scripts/release/plugin-workers.ts`), flat beside the entry as `<root>/<file stem>.js`;
+ * the kernel's `bunWorkers` resolves a plugin's URL to that file when compiled. A declared worker with no program on
+ * disk, or two with one name, FAILS this compile rather than the release smoke.
  */
 import { createRequire } from 'node:module';
-import { dirname, join, normalize } from 'node:path';
+import { basename, dirname, join, normalize } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { BunPlugin } from 'bun';
+import { installedPrebuild, nodeDataChannelPrebuild } from './node-datachannel-prebuild.ts';
+import { pluginRegistryFor, pluginWorkers, type WorkerHalf } from './plugin-workers.ts';
 
 interface Rewrite {
   readonly file: RegExp;
@@ -93,31 +102,6 @@ const NODE_DATACHANNEL_LOADER = /node-datachannel[\\/]dist[\\/]esm[\\/]lib[\\/]n
 /** The anchor the replaced loader is pinned to: an upgrade that stops computing its path is noticed here. */
 const NODE_DATACHANNEL_ANCHOR = 'function loadBinding()';
 
-/**
- * The `@node-datachannel/*` prebuild for a Bun compile target, or for this machine when there is no
- * target (the Nix build compiles natively). glibc for Linux: every Linux target this repository ships
- * is a glibc one, and a musl target is mapped explicitly rather than guessed.
- */
-function nodeDataChannelPrebuild(target: string | undefined): string {
-  const host = `bun-${process.platform}-${process.arch}`;
-  const named = (target ?? host).replace(/-(baseline|modern)$/u, '');
-  const prebuilds: Record<string, string> = {
-    'bun-linux-x64': 'linux-x64-gnu',
-    'bun-linux-arm64': 'linux-arm64-gnu',
-    'bun-linux-x64-musl': 'linux-x64-musl',
-    'bun-linux-arm64-musl': 'linux-arm64-musl',
-    'bun-darwin-arm64': 'darwin-arm64',
-    'bun-darwin-x64': 'darwin-x64',
-  };
-  const prebuild = prebuilds[named];
-  if (prebuild === undefined) {
-    throw new Error(
-      `no node-datachannel prebuild is mapped for ${target ?? host}; add it to scripts/release/compile-executable.ts`,
-    );
-  }
-  return `@node-datachannel/${prebuild}/node_datachannel.node`;
-}
-
 const nodeDataChannelEmbedded = (target: string | undefined): BunPlugin => ({
   name: 'node-datachannel-embedded',
   setup(build) {
@@ -128,15 +112,8 @@ const nodeDataChannelEmbedded = (target: string | undefined): BunPlugin => ({
           `${args.path} no longer contains ${NODE_DATACHANNEL_ANCHOR}; re-measure the compiled WebRTC engine and update scripts/release/compile-executable.ts`,
         );
       }
-      const specifier = nodeDataChannelPrebuild(target);
-      let addon: string;
-      try {
-        addon = createRequire(args.path).resolve(specifier);
-      } catch {
-        throw new Error(
-          `${specifier} is not installed beside ${dirname(args.path)}; a cross-compile needs every target's prebuild (scripts/release/compile.sh installs them)`,
-        );
-      }
+      const specifier = nodeDataChannelPrebuild(target, `bun-${process.platform}-${process.arch}`);
+      const addon = installedPrebuild(specifier, args.path, name => createRequire(args.path).resolve(name));
       return {
         contents: [
           `import addon from ${JSON.stringify(addon)} with { type: 'file' };`,
@@ -193,11 +170,25 @@ const entry = normalize(options.entry);
 const workers = [...new Bun.Glob('*.worker.ts').scanSync({ cwd: dirname(entry) })]
   .sort()
   .map(name => join(dirname(entry), name));
+/** The plugin worker programs the generated registry declares, when this entry is the one that hosts the plugins. */
+const registry = pluginRegistryFor(entry);
+const pluginPrograms =
+  registry === undefined
+    ? []
+    : pluginWorkers(
+        ((await import(pathToFileURL(registry).href)) as { daemonImplementations: readonly WorkerHalf[] })
+          .daemonImplementations,
+        `${basename(entry).replace(/\.[cm]?[jt]sx?$/u, '')}.js`,
+        undefined,
+        workers.map(path => `${basename(path).replace(/\.[cm]?[jt]sx?$/u, '')}.js`),
+      );
 const result = await Bun.build({
-  entrypoints: [entry, ...workers],
+  entrypoints: [entry, ...workers, ...pluginPrograms.map(program => program.source)],
   // Bun 1.4 may otherwise retain the project path for extra entries even when their spelling agrees.
   // The runtime resolves every embedded worker beside the binary's root entry, so pin that common root.
   root: dirname(entry),
+  // Flat: the entry and every worker program land beside each other as `<root>/<name>.js`, whatever package they came from.
+  naming: { entry: '[name].[ext]' },
   compile: {
     outfile: options.outfile,
     ...(options.target === undefined ? {} : { target: options.target as Bun.Build.CompileTarget }),
@@ -210,6 +201,7 @@ if (!result.success) {
   for (const log of result.logs) console.error(log);
   process.exit(1);
 }
+const embedded = [...workers, ...pluginPrograms.map(program => program.source)];
 console.log(
-  `✅ compiled ${options.entry}${workers.length === 0 ? '' : ` (+ ${workers.join(', ')})`} -> ${options.outfile}`,
+  `✅ compiled ${options.entry}${embedded.length === 0 ? '' : ` (+ ${embedded.join(', ')})`} -> ${options.outfile}`,
 );

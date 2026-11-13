@@ -1,0 +1,54 @@
+/**
+ * The machine's DEFAULT speech engine (`voice.yaml`'s `defaultEngine`): what New machine setup's Voice
+ * step chooses, and what every device paired to the machine dictates with until that device picks its
+ * own in Settings › Dictation. Transcription always runs on the device; the machine only names a default.
+ *
+ * The file is read and written as TEXT through the configuration-file routes, so the owner's comments
+ * survive and the daemon validates what is written. Only the one top-level line is ever touched.
+ */
+
+import { type VoiceEngine, VoiceEngineSchema } from '../../../../contract/index.ts';
+import { useEffect, useRef, useState } from 'react';
+import type { DaemonConnection } from '../../../shell-voice.ts';
+import { useConfigChangeCounter, useDaemonClient } from '../../../lib/voice-store.tsx';
+import { readConfigFile } from '../../../shell-voice.ts';
+
+export const VOICE_FILE = 'voice.yaml';
+
+/** The engine `voice.yaml` names, or `null` when it names none (or names one this app does not know). */
+const machineVoiceEngine = (text: string): VoiceEngine | null => {
+  const value = /^defaultEngine:\s*["']?([\w-]+)["']?\s*(?:#.*)?$/mu.exec(text)?.[1];
+  const parsed = VoiceEngineSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+};
+
+/**
+ * The machine default for one paired machine, read once per machine and again whenever its `voice.yaml`
+ * moves (from setup on another device, `fy`, or a hand edit); `null` while unread, when the file names
+ * none, or when it could not be read — a device then simply has no default, as before.
+ */
+export function useMachineVoiceEngine(daemon: DaemonConnection | undefined): VoiceEngine | null {
+  const createClient = useDaemonClient();
+  const [engine, setEngine] = useState<{ readonly daemonId: string; readonly engine: VoiceEngine | null } | null>(null);
+  // Keyed by the machine's id, not the connection object, which can be re-created for the same machine.
+  const latest = useRef(daemon);
+  latest.current = daemon;
+  const daemonId = daemon?.daemonId;
+  const moved = useConfigChangeCounter(daemonId ?? ('' as DaemonConnection['daemonId']), ['voice']);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `moved` is the re-read trigger
+  useEffect(() => {
+    const target = latest.current;
+    if (daemonId === undefined || target === undefined) return;
+    let live = true;
+    void createClient(target)
+      .then(async client => machineVoiceEngine((await readConfigFile(client, VOICE_FILE)).text))
+      .catch(() => null)
+      .then(found => {
+        if (live) setEngine({ daemonId, engine: found });
+      });
+    return () => {
+      live = false;
+    };
+  }, [createClient, daemonId, moved]);
+  return engine !== null && engine.daemonId === daemonId ? engine.engine : null;
+}

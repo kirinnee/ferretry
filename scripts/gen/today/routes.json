@@ -1,0 +1,4857 @@
+{
+  "format": 1,
+  "source": "bb89d054d07da4c48a8d59d1b75bf609c37a2673",
+  "rows": [
+    {
+      "table": "member",
+      "key": "DELETE /v1/shared/me/keys/self",
+      "from": "packages/daemon/src/lib/catalog-members/shared-routes.ts:314",
+      "member": "unlocked"
+    },
+    {
+      "table": "member",
+      "key": "GET /v1/shared/catalogs/:catalogId/items/:itemId/:version",
+      "from": "packages/daemon/src/lib/catalog-members/shared-routes.ts:299",
+      "member": "unlocked"
+    },
+    {
+      "table": "member",
+      "key": "GET /v1/shared/catalogs/:catalogId/items/:itemId/versions",
+      "from": "packages/daemon/src/lib/catalog-members/shared-routes.ts:279",
+      "member": "unlocked"
+    },
+    {
+      "table": "member",
+      "key": "GET /v1/shared/catalogs/:catalogId/manifest",
+      "from": "packages/daemon/src/lib/catalog-members/shared-routes.ts:263",
+      "member": "unlocked"
+    },
+    {
+      "table": "member",
+      "key": "GET /v1/shared/me",
+      "from": "packages/daemon/src/lib/catalog-members/shared-routes.ts:237",
+      "member": "unlocked"
+    },
+    {
+      "table": "member",
+      "key": "POST /v1/shared/passkeys",
+      "from": "packages/daemon/src/lib/catalog-members/shared-routes.ts:207",
+      "member": "key"
+    },
+    {
+      "table": "member",
+      "key": "POST /v1/shared/passkeys/options",
+      "from": "packages/daemon/src/lib/catalog-members/shared-routes.ts:195",
+      "member": "key"
+    },
+    {
+      "table": "member",
+      "key": "POST /v1/shared/redeem",
+      "from": "packages/daemon/src/lib/catalog-members/shared-routes.ts:313",
+      "member": "unlocked"
+    },
+    {
+      "table": "member",
+      "key": "POST /v1/shared/unlock",
+      "from": "packages/daemon/src/lib/catalog-members/shared-routes.ts:227",
+      "member": "key"
+    },
+    {
+      "table": "member",
+      "key": "POST /v1/shared/unlock/options",
+      "from": "packages/daemon/src/lib/catalog-members/shared-routes.ts:217",
+      "member": "key"
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/accounts/:id",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:644",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/accounts/:id/factors/:factor",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:900",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/accounts/:id/factors/seed/:stage",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:864",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/accounts/sign-ins/:signIn",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:558",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/catalog-installs/project/:installId",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-installs.ts:254",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/catalog-installs/runtime/:installId",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-installs.ts:263",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/catalog-links/:linkId",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-links.ts:233",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use",
+        "narrowing": true
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/catalog-members/:memberId",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-members.ts:235",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/catalog-members/:memberId/catalogs/:catalogId",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-members.ts:262",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/catalog-members/:memberId/keys/:keyId",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-members.ts:248",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/catalog-shares/:shareId",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-members.ts:196",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/catalog-shares/:shareId/new-passkey",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-members.ts:174",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/catalogs/:id",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:324",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/catalogs/:id/items/:itemId",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:379",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/copy-rules/:ruleId",
+      "from": "packages/daemon/src/lib/runtime/mounts/secure-copy.ts:403",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use",
+        "narrowing": true
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/copy-rules/stages/:stage",
+      "from": "packages/daemon/src/lib/runtime/mounts/secure-copy.ts:384",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use",
+        "narrowing": true
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/fleet/login/:flowId",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-login.ts:138",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/fleet/mcp-auth/:component",
+      "from": "packages/daemon/src/lib/runtime/mounts/mcp-oauth.ts:94",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/fleet/mcp-auth/flows/:flowId",
+      "from": "packages/daemon/src/lib/runtime/mounts/mcp-oauth.ts:121",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/pair/code/:pairingId",
+      "from": "packages/daemon/src/lib/runtime/mounts/pairing.ts:260",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "pairing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/pair/devices/:deviceId",
+      "from": "packages/daemon/src/lib/runtime/mounts/pairing.ts:301",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "pairing",
+        "axis": "use",
+        "narrowing": true
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/push/subscriptions/:pushId",
+      "from": "packages/daemon/src/lib/runtime/mounts/push.ts:212",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/restarts",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-restart.ts:58",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/secrets/:name",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:1121",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/secrets/logins/:id",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:380",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-attachments.ts:140",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/sessions/:sessionId/queue/:messageId",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-send.ts:390",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/sessions/:sessionId/task-plans/:planId/approval/:stage",
+      "from": "packages/daemon/src/lib/runtime/mounts/task-plans.ts:256",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/sessions/:sessionId/terminals/:terminalId",
+      "from": "packages/daemon/src/lib/runtime/mounts/terminals.ts:295",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/sign-in-rules/:id",
+      "from": "packages/daemon/src/lib/runtime/mounts/sign-in-rules.ts:277",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use",
+        "narrowing": true
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/sign-in-rules/stages/:stage",
+      "from": "packages/daemon/src/lib/runtime/mounts/sign-in-rules.ts:252",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/sign-in-rules/suggestions/:sid",
+      "from": "packages/daemon/src/lib/runtime/mounts/sign-in-rules.ts:318",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/skill-installs/local/project/:installId",
+      "from": "packages/daemon/src/lib/runtime/mounts/local-skill-installs.ts:232",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "DELETE /v1/skill-installs/local/runtime/:installId",
+      "from": "packages/daemon/src/lib/runtime/mounts/local-skill-installs.ts:241",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /healthz",
+      "from": "packages/daemon/src/lib/api/routes/health.ts:128",
+      "minimum": "none",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /metrics",
+      "from": "packages/daemon/src/lib/api/routes/usage.ts:104",
+      "minimum": "none",
+      "caller": "any",
+      "noStore": true,
+      "available": true
+    },
+    {
+      "table": "route",
+      "key": "GET /usage",
+      "from": "packages/daemon/src/lib/api/routes/usage.ts:87",
+      "minimum": "none",
+      "caller": "any",
+      "noStore": true,
+      "available": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/accounts",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:499",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/accounts/:id/factors/seed/:stage",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:808",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/accounts/hint",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:513",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/accounts/look-alike",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:527",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/accounts/seed-stages/:stage",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:799",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/agenda/open",
+      "from": "packages/daemon/src/lib/runtime/mounts/agenda-open.ts:38",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/analytics",
+      "from": "packages/daemon/src/lib/runtime/mounts/analytics.ts:170",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/analytics/pricing",
+      "from": "packages/daemon/src/lib/runtime/mounts/analytics-pricing.ts:77",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/archived-sessions",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-archive.ts:48",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/audit",
+      "from": "packages/daemon/src/lib/runtime/mounts/audit.ts:40",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "pairing",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/board",
+      "from": "packages/daemon/src/lib/runtime/mounts/board.ts:174",
+      "minimum": "operator",
+      "caller": "any",
+      "compress": true,
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/board/ids",
+      "from": "packages/daemon/src/lib/runtime/mounts/board.ts:184",
+      "minimum": "operator",
+      "caller": "any",
+      "compress": true,
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/board/merge-gate",
+      "from": "packages/daemon/src/lib/runtime/mounts/board.ts:194",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/board/projects",
+      "from": "packages/daemon/src/lib/runtime/mounts/board-projects.ts:167",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/board/projects/:projectId/lanes",
+      "from": "packages/daemon/src/lib/runtime/mounts/board-projects.ts:175",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/board/projects/:projectId/switch",
+      "from": "packages/daemon/src/lib/runtime/mounts/board-projects.ts:192",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/board/tasks",
+      "from": "packages/daemon/src/lib/runtime/mounts/board.ts:233",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/board/tasks/:taskId",
+      "from": "packages/daemon/src/lib/runtime/mounts/board.ts:257",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/browser/login",
+      "from": "packages/daemon/src/lib/runtime/mounts/browser-login.ts:183",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "browser",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/browser/state",
+      "from": "packages/daemon/src/lib/runtime/mounts/browser-proxy.ts:28",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "browser",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/carriers",
+      "from": "packages/daemon/src/lib/runtime/mounts/carriers.ts:75",
+      "minimum": "authenticated",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/catalog-installs",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-installs.ts:245",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/catalog-items",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:184",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/catalog-items/:itemId",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:194",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/catalog-items/:itemId/changes",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:224",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/catalog-items/:itemId/versions/:version",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:208",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/catalog-links",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-links.ts:138",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/catalog-links/:linkId",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-links.ts:165",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/catalog-links/store",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-links.ts:116",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/catalog-members",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-members.ts:209",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/catalog-shares",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-members.ts:187",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/catalogs",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:174",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/cgroups/config",
+      "from": "packages/daemon/src/lib/runtime/mounts/cgroups.ts:27",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/config/file",
+      "from": "packages/daemon/src/lib/runtime/mounts/config-files.ts:366",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/config/status",
+      "from": "packages/daemon/src/lib/runtime/mounts/config-files.ts:357",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/copy-plans",
+      "from": "packages/daemon/src/lib/runtime/mounts/secure-copy.ts:416",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/copy-rules",
+      "from": "packages/daemon/src/lib/runtime/mounts/secure-copy.ts:178",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/copy-rules/settings",
+      "from": "packages/daemon/src/lib/runtime/mounts/secure-copy.ts:191",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/copy-rules/stages",
+      "from": "packages/daemon/src/lib/runtime/mounts/secure-copy.ts:304",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/copy-rules/stages/:stage",
+      "from": "packages/daemon/src/lib/runtime/mounts/secure-copy.ts:316",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/daemon/update",
+      "from": "packages/daemon/src/lib/runtime/mounts/daemon-update.ts:86",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/diagnostics/profile/:id",
+      "from": "packages/daemon/src/lib/runtime/mounts/performance.ts:39",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/doctor",
+      "from": "packages/daemon/src/lib/runtime/mounts/doctor.ts:12",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/fleet/components",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-catalog.ts:96",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/fleet/credentials",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-credentials.ts:67",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/fleet/export",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-setup.ts:84",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/fleet/login/:flowId",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-login.ts:108",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/fleet/machine",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-catalog.ts:87",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/fleet/mcp-auth",
+      "from": "packages/daemon/src/lib/runtime/mounts/mcp-oauth.ts:69",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/fleet/presets",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-credentials.ts:119",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      }
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/fleet/profiles",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-catalog.ts:105",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/fleet/proposals/:proposalId",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-catalog.ts:157",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/fleet/runtimes",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-catalog.ts:127",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/fleet/setup/scan",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-setup.ts:63",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/gc",
+      "from": "packages/daemon/src/lib/runtime/mounts/scratch-gc.ts:48",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/grants",
+      "from": "packages/daemon/src/lib/runtime/mounts/grants.ts:83",
+      "minimum": "authenticated",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/grants/audit",
+      "from": "packages/daemon/src/lib/runtime/mounts/grants.ts:93",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/harnesses/update",
+      "from": "packages/daemon/src/lib/runtime/mounts/harness-update.ts:63",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/health",
+      "from": "packages/daemon/src/lib/runtime/mounts/health.ts:167",
+      "minimum": "none",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/imports/conversations",
+      "from": "packages/daemon/src/lib/runtime/mounts/conversation-import.ts:38",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/imports/conversations/:harness/:conversationId/preview",
+      "from": "packages/daemon/src/lib/runtime/mounts/conversation-import.ts:61",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/imports/history",
+      "from": "packages/daemon/src/lib/runtime/mounts/foreign-history.ts:19",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/imports/history/:importId",
+      "from": "packages/daemon/src/lib/runtime/mounts/foreign-history.ts:45",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/input-requests",
+      "from": "packages/daemon/src/lib/runtime/mounts/input-requests.ts:119",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/learning/config",
+      "from": "packages/daemon/src/lib/runtime/mounts/learning.ts:502",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/learning/proposals",
+      "from": "packages/daemon/src/lib/runtime/mounts/learning.ts:510",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/learning/proposals/:id/apply-preview",
+      "from": "packages/daemon/src/lib/runtime/mounts/learning.ts:559",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/learning/proposals/:id/patch",
+      "from": "packages/daemon/src/lib/runtime/mounts/learning.ts:526",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/learning/scan",
+      "from": "packages/daemon/src/lib/runtime/mounts/learning.ts:617",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/learning/sessions",
+      "from": "packages/daemon/src/lib/runtime/mounts/learning.ts:577",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/learning/status",
+      "from": "packages/daemon/src/lib/runtime/mounts/learning.ts:494",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/machine/agenda",
+      "from": "packages/daemon/src/lib/runtime/mounts/agenda-machine.ts:34",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/machine/agenda/:id",
+      "from": "packages/daemon/src/lib/runtime/mounts/agenda-machine.ts:47",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/mcp",
+      "from": "packages/daemon/src/lib/runtime/mounts/mcp-inventory.ts:47",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/models",
+      "from": "packages/daemon/src/lib/runtime/mounts/models.ts:33",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/names",
+      "from": "packages/daemon/src/lib/runtime/mounts/names.ts:92",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/pack",
+      "from": "packages/daemon/src/lib/runtime/mounts/pack.ts:165",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/pack/inventory",
+      "from": "packages/daemon/src/lib/runtime/mounts/pack.ts:174",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/pack/routing/jobs/:jobId",
+      "from": "packages/daemon/src/lib/runtime/mounts/pack.ts:192",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/pair/code/:pairingId",
+      "from": "packages/daemon/src/lib/runtime/mounts/pairing.ts:244",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "pairing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/pair/devices",
+      "from": "packages/daemon/src/lib/runtime/mounts/pairing.ts:292",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "pairing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/pair/identity",
+      "from": "packages/daemon/src/lib/runtime/mounts/pairing.ts:282",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "pairing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/passkeys",
+      "from": "packages/daemon/src/lib/runtime/mounts/step-up.ts:143",
+      "minimum": "operator",
+      "caller": "person",
+      "unlockExempt": true,
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/phone-approvals",
+      "from": "packages/daemon/src/lib/runtime/mounts/input-requests.ts:263",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/projects",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalogs.ts:113",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/push/subscriptions",
+      "from": "packages/daemon/src/lib/runtime/mounts/push.ts:163",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/push/vapid",
+      "from": "packages/daemon/src/lib/runtime/mounts/push.ts:149",
+      "minimum": "operator",
+      "caller": "any"
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/renders/:id",
+      "from": "packages/daemon/src/lib/runtime/mounts/renders.ts:146",
+      "minimum": "operator",
+      "caller": "any"
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/renders/:id/meta",
+      "from": "packages/daemon/src/lib/runtime/mounts/renders.ts:138",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/restarts",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-restart.ts:50",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/search",
+      "from": "packages/daemon/src/lib/runtime/mounts/work-search.ts:62",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/secrets",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:1094",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/secrets/logins",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:331",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/secrets/logins/hint",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:340",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/security",
+      "from": "packages/daemon/src/lib/runtime/mounts/security.ts:33",
+      "minimum": "operator",
+      "caller": "any",
+      "unlockExempt": true,
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions",
+      "from": "packages/daemon/src/lib/runtime/mounts/sessions.ts:177",
+      "minimum": "operator",
+      "caller": "any",
+      "compress": true,
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId",
+      "from": "packages/daemon/src/lib/runtime/mounts/sessions.ts:186",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/agenda",
+      "from": "packages/daemon/src/lib/runtime/mounts/agenda.ts:386",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/agenda-mode",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-agenda-mode.ts:52",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/agenda/:id",
+      "from": "packages/daemon/src/lib/runtime/mounts/agenda.ts:370",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/agenda/:id/conversation",
+      "from": "packages/daemon/src/lib/runtime/mounts/agenda.ts:405",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/agenda/:id/versions",
+      "from": "packages/daemon/src/lib/runtime/mounts/agenda.ts:433",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/agenda/:id/versions/:version",
+      "from": "packages/daemon/src/lib/runtime/mounts/agenda.ts:441",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/attach",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-attach.ts:67",
+      "minimum": "operator",
+      "caller": "person",
+      "privilegedOnly": true,
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/attachments/:attachmentId",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-attachments.ts:124",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/browser",
+      "from": "packages/daemon/src/lib/runtime/mounts/browser-login.ts:139",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "browser",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/browser",
+      "from": "packages/daemon/src/lib/runtime/mounts/browser-login.ts:163",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "browser",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/compact-at",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-compact-at.ts:58",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/copies",
+      "from": "packages/daemon/src/lib/runtime/mounts/secure-copy.ts:166",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/events",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-reads.ts:344",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/fs",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-filesystem.ts:354",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/fs/changes",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-filesystem.ts:336",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/fs/diff",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-filesystem.ts:345",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/fs/file",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-filesystem.ts:318",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/fs/index",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-filesystem.ts:327",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/handoffs/:name",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-send.ts:410",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/handover",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-handover.ts:307",
+      "minimum": "authenticated",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/input-quarantines",
+      "from": "packages/daemon/src/lib/runtime/mounts/input-requests.ts:188",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/input-requests",
+      "from": "packages/daemon/src/lib/runtime/mounts/input-requests.ts:128",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/input-requests/:requestId/shot",
+      "from": "packages/daemon/src/lib/runtime/mounts/input-requests.ts:137",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "browser",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/log-page",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-reads.ts:368",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/log-search",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-reads.ts:376",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/logs",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-reads.ts:360",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/mcp",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-mcp.ts:136",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/mcp/servers",
+      "from": "packages/daemon/src/lib/runtime/mounts/mcp-inventory.ts:68",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/messages",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-reads.ts:384",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/phone-approvals/:approvalId",
+      "from": "packages/daemon/src/lib/runtime/mounts/input-requests.ts:277",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/pins",
+      "from": "packages/daemon/src/lib/runtime/mounts/pins.ts:99",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/processes",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-processes.ts:91",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/processes/:processId/output",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-processes.ts:104",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/queue",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-send.ts:366",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/relaunch-settings",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-migrate.ts:323",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/result",
+      "from": "packages/daemon/src/lib/runtime/mounts/pack.ts:240",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/runtime-models",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-runtime.ts:130",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/sends",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-send.ts:355",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/sends/:sendId",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-send.ts:399",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/shared-draft",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-drafts.ts:121",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/skills",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalogs.ts:130",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true,
+      "precedence": 1
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/skills/inventory",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalogs.ts:140",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/snapshot",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-reads.ts:352",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/subtree",
+      "from": "packages/daemon/src/lib/runtime/mounts/pack.ts:248",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/surfaces/browser/control",
+      "from": "packages/daemon/src/lib/runtime/mounts/agent-tools.ts:360",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "browser",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/surfaces/terminals/control",
+      "from": "packages/daemon/src/lib/runtime/mounts/agent-tools.ts:333",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/task-plans/:planId",
+      "from": "packages/daemon/src/lib/runtime/mounts/task-plans.ts:168",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/task-plans/:planId/approval/:stage",
+      "from": "packages/daemon/src/lib/runtime/mounts/task-plans.ts:198",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/tasks",
+      "from": "packages/daemon/src/lib/runtime/mounts/legacy-tasks.ts:51",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/terminals",
+      "from": "packages/daemon/src/lib/runtime/mounts/terminals.ts:259",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/terminals/:terminalId",
+      "from": "packages/daemon/src/lib/runtime/mounts/terminals.ts:277",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/:sessionId/transcript-images/:handle",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-reads.ts:393",
+      "minimum": "operator",
+      "caller": "any"
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sessions/by-request/:requestId",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-control.ts:441",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sign-in-rules",
+      "from": "packages/daemon/src/lib/runtime/mounts/sign-in-rules.ts:151",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sign-in-rules/eligibility",
+      "from": "packages/daemon/src/lib/runtime/mounts/sign-in-rules.ts:162",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sign-in-rules/stages/:stage",
+      "from": "packages/daemon/src/lib/runtime/mounts/sign-in-rules.ts:188",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/sign-in-rules/suggestions",
+      "from": "packages/daemon/src/lib/runtime/mounts/sign-in-rules.ts:307",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/skill-installs/local",
+      "from": "packages/daemon/src/lib/runtime/mounts/local-skill-installs.ts:214",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/skills",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalogs.ts:148",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/skills/file",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalogs.ts:157",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/speedups",
+      "from": "packages/daemon/src/lib/runtime/mounts/speedups.ts:44",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/task-plans",
+      "from": "packages/daemon/src/lib/runtime/mounts/task-plans.ts:154",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/tasks",
+      "from": "packages/daemon/src/lib/runtime/mounts/legacy-tasks.ts:34",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/terminals",
+      "from": "packages/daemon/src/lib/runtime/mounts/terminals.ts:241",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/tunnel",
+      "from": "packages/daemon/src/lib/runtime/mounts/tunnel.ts:31",
+      "minimum": "authenticated",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/usage",
+      "from": "packages/daemon/src/lib/api/routes/usage.ts:96",
+      "minimum": "authenticated",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/warden/agenda",
+      "from": "packages/daemon/src/lib/runtime/mounts/warden.ts:246",
+      "minimum": "authenticated",
+      "caller": "any",
+      "capability": {
+        "capability": "warden",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/warden/config",
+      "from": "packages/daemon/src/lib/runtime/mounts/warden.ts:277",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "warden",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/warden/report",
+      "from": "packages/daemon/src/lib/runtime/mounts/warden.ts:228",
+      "minimum": "authenticated",
+      "caller": "any",
+      "capability": {
+        "capability": "warden",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/warden/status",
+      "from": "packages/daemon/src/lib/runtime/mounts/warden.ts:210",
+      "minimum": "authenticated",
+      "caller": "any",
+      "capability": {
+        "capability": "warden",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/warden/verdicts",
+      "from": "packages/daemon/src/lib/runtime/mounts/warden.ts:219",
+      "minimum": "authenticated",
+      "caller": "any",
+      "capability": {
+        "capability": "warden",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/worktrees",
+      "from": "packages/daemon/src/lib/runtime/mounts/worktrees.ts:147",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "GET /v1/worktrees/removal",
+      "from": "packages/daemon/src/lib/runtime/mounts/worktrees.ts:129",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/accounts/:id/factors/:factor",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:890",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/analytics/pricing",
+      "from": "packages/daemon/src/lib/runtime/mounts/analytics-pricing.ts:85",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/catalog-installs/project/:installId",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-installs.ts:272",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/catalog-installs/runtime/:installId",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-installs.ts:281",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/catalog-items/:itemId/versions/:version",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:282",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/catalog-links/:linkId",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-links.ts:193",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use",
+        "narrowing": true
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/catalog-members/:memberId",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-members.ts:221",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/catalogs/:id",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:310",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/daemon/update/settings",
+      "from": "packages/daemon/src/lib/runtime/mounts/daemon-update.ts:104",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/grants",
+      "from": "packages/daemon/src/lib/runtime/mounts/grants.ts:104",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/learning/config",
+      "from": "packages/daemon/src/lib/runtime/mounts/learning.ts:549",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/pair/devices/:deviceId/grants",
+      "from": "packages/daemon/src/lib/runtime/mounts/pairing.ts:325",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "pairing",
+        "axis": "use",
+        "narrowing": true
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/security",
+      "from": "packages/daemon/src/lib/runtime/mounts/security.ts:43",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "pairing",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/sessions/:sessionId/agenda-mode",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-agenda-mode.ts:60",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/sessions/:sessionId/compact-at",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-compact-at.ts:66",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/sessions/:sessionId/hypermedia",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-hypermedia.ts:41",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/sessions/:sessionId/learning",
+      "from": "packages/daemon/src/lib/runtime/mounts/learning.ts:585",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/sessions/:sessionId/pack",
+      "from": "packages/daemon/src/lib/runtime/mounts/pack.ts:257",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/sessions/:sessionId/queue/:messageId",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-send.ts:377",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/sessions/:sessionId/terminals/:terminalId",
+      "from": "packages/daemon/src/lib/runtime/mounts/terminals.ts:286",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PATCH /v1/warden/config",
+      "from": "packages/daemon/src/lib/runtime/mounts/warden.ts:286",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "warden",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/accounts/:id/apart",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:678",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/accounts/:id/factors",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:877",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/accounts/:id/factors/seed",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:780",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/accounts/:id/factors/seed/:stage/commit",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:818",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:842",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/accounts/:id/merge",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:668",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/accounts/:id/rename",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:634",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/accounts/:id/sign-in-rules/revoke",
+      "from": "packages/daemon/src/lib/runtime/mounts/sign-in-rules.ts:289",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use",
+        "narrowing": true
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/accounts/:id/sign-ins",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:654",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:572",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/agenda/clear-agents",
+      "from": "packages/daemon/src/lib/runtime/mounts/agenda-clear.ts:17",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/agent/config",
+      "from": "packages/daemon/src/lib/runtime/mounts/config-files.ts:397",
+      "minimum": "none",
+      "caller": "any",
+      "privilegedOnly": true,
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/agent/lessons",
+      "from": "packages/daemon/src/lib/runtime/mounts/learning.ts:641",
+      "minimum": "none",
+      "caller": "any",
+      "privilegedOnly": true,
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/agent/tools",
+      "from": "packages/daemon/src/lib/runtime/mounts/agent-tools.ts:306",
+      "minimum": "none",
+      "caller": "any",
+      "privilegedOnly": true,
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/analytics/pricing/sync/apply",
+      "from": "packages/daemon/src/lib/runtime/mounts/analytics-pricing.ts:101",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/analytics/pricing/sync/preview",
+      "from": "packages/daemon/src/lib/runtime/mounts/analytics-pricing.ts:93",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/board/import",
+      "from": "packages/daemon/src/lib/runtime/mounts/board.ts:242",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/board/projects/:projectId/lanes",
+      "from": "packages/daemon/src/lib/runtime/mounts/board-projects.ts:183",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/board/skip",
+      "from": "packages/daemon/src/lib/runtime/mounts/board.ts:220",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/board/tasks",
+      "from": "packages/daemon/src/lib/runtime/mounts/board.ts:207",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/board/tasks/:taskId",
+      "from": "packages/daemon/src/lib/runtime/mounts/board.ts:266",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/board/tasks/:taskId/start",
+      "from": "packages/daemon/src/lib/runtime/mounts/board.ts:280",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/browser/login",
+      "from": "packages/daemon/src/lib/runtime/mounts/browser-login.ts:192",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "browser",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/browser/proxy/test",
+      "from": "packages/daemon/src/lib/runtime/mounts/browser-proxy.ts:40",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "browser",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalog-installs/project",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-installs.ts:227",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalog-installs/project/preview",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-installs.ts:209",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalog-installs/runtime",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-installs.ts:236",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalog-installs/runtime/preview",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-installs.ts:218",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalog-items/:itemId/versions",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:254",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalog-items/:itemId/versions/preview",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:241",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalog-items/quick-add",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:393",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalog-items/quick-add/undo",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:409",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalog-links",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-links.ts:150",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalog-links/:linkId/copy",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-links.ts:220",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use",
+        "narrowing": true
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalog-links/preview",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-links.ts:125",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalog-shares",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-members.ts:142",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalogs",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:297",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalogs/:id/export",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:422",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalogs/:id/items",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:350",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalogs/:id/items/:itemId/versions",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:364",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/catalogs/:id/items/preview",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:337",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/config/confirm",
+      "from": "packages/daemon/src/lib/runtime/mounts/config-files.ts:388",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/copy-rules",
+      "from": "packages/daemon/src/lib/runtime/mounts/secure-copy.ts:270",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/copy-rules/settings/stages",
+      "from": "packages/daemon/src/lib/runtime/mounts/secure-copy.ts:228",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/copy-rules/settings/stages/:stage/commit",
+      "from": "packages/daemon/src/lib/runtime/mounts/secure-copy.ts:244",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/copy-rules/stages",
+      "from": "packages/daemon/src/lib/runtime/mounts/secure-copy.ts:288",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/copy-rules/stages/:stage/bind",
+      "from": "packages/daemon/src/lib/runtime/mounts/secure-copy.ts:366",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/copy-rules/stages/:stage/commit",
+      "from": "packages/daemon/src/lib/runtime/mounts/secure-copy.ts:332",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/daemon/update",
+      "from": "packages/daemon/src/lib/runtime/mounts/daemon-update.ts:95",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/diagnostics/profile",
+      "from": "packages/daemon/src/lib/runtime/mounts/performance.ts:28",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/fleet/clone/forget",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-setup.ts:107",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/fleet/clone/keys",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-setup.ts:123",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/fleet/clone/review",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-setup.ts:93",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/fleet/credentials/:credentialId/check",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-credentials.ts:80",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/fleet/credentials/:credentialId/test",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-credentials.ts:97",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/fleet/login",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-login.ts:89",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/fleet/login/:flowId",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-login.ts:117",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/fleet/machine/tools/install",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-setup.ts:72",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/fleet/mcp-auth/:component",
+      "from": "packages/daemon/src/lib/runtime/mounts/mcp-oauth.ts:79",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/fleet/mcp-auth/flows/:flowId",
+      "from": "packages/daemon/src/lib/runtime/mounts/mcp-oauth.ts:106",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/fleet/profiles/preview",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-catalog.ts:114",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/fleet/proposals",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-catalog.ts:136",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/fleet/proposals/:proposalId/apply",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-catalog.ts:166",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/gc",
+      "from": "packages/daemon/src/lib/runtime/mounts/scratch-gc.ts:56",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/harnesses/update",
+      "from": "packages/daemon/src/lib/runtime/mounts/harness-update.ts:72",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/imports/conversations/adopt",
+      "from": "packages/daemon/src/lib/runtime/mounts/conversation-import.ts:80",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/learning/proposals/:id",
+      "from": "packages/daemon/src/lib/runtime/mounts/learning.ts:518",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/learning/proposals/:id/apply",
+      "from": "packages/daemon/src/lib/runtime/mounts/learning.ts:567",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/learning/run",
+      "from": "packages/daemon/src/lib/runtime/mounts/learning.ts:534",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/learning/scan",
+      "from": "packages/daemon/src/lib/runtime/mounts/learning.ts:627",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/learning/scan/cancel",
+      "from": "packages/daemon/src/lib/runtime/mounts/learning.ts:606",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/learning/scan/estimate",
+      "from": "packages/daemon/src/lib/runtime/mounts/learning.ts:593",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/machine/agenda",
+      "from": "packages/daemon/src/lib/runtime/mounts/agenda-machine.ts:64",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/mcp/check",
+      "from": "packages/daemon/src/lib/runtime/mounts/mcp-inventory.ts:56",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/models/local/refresh",
+      "from": "packages/daemon/src/lib/runtime/mounts/models.ts:51",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/models/refresh",
+      "from": "packages/daemon/src/lib/runtime/mounts/models.ts:42",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/pack/new",
+      "from": "packages/daemon/src/lib/runtime/mounts/pack.ts:232",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/pack/recommend",
+      "from": "packages/daemon/src/lib/runtime/mounts/pack.ts:223",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/pack/routing/accept",
+      "from": "packages/daemon/src/lib/runtime/mounts/pack.ts:201",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/pack/routing/clean-up",
+      "from": "packages/daemon/src/lib/runtime/mounts/pack.ts:183",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/pack/routing/undo",
+      "from": "packages/daemon/src/lib/runtime/mounts/pack.ts:213",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/pair/code",
+      "from": "packages/daemon/src/lib/runtime/mounts/pairing.ts:211",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "pairing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/passkeys",
+      "from": "packages/daemon/src/lib/runtime/mounts/step-up.ts:170",
+      "minimum": "operator",
+      "caller": "person",
+      "unlockExempt": true,
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/passkeys/options",
+      "from": "packages/daemon/src/lib/runtime/mounts/step-up.ts:153",
+      "minimum": "operator",
+      "caller": "person",
+      "unlockExempt": true,
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/passkeys/registration-window",
+      "from": "packages/daemon/src/lib/runtime/mounts/step-up.ts:303",
+      "minimum": "admin-token",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/projects",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalogs.ts:121",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/push/seen",
+      "from": "packages/daemon/src/lib/runtime/mounts/push.ts:238",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/push/subscriptions",
+      "from": "packages/daemon/src/lib/runtime/mounts/push.ts:183",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/recommend",
+      "from": "packages/daemon/src/lib/runtime/mounts/recommend.ts:140",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/renders",
+      "from": "packages/daemon/src/lib/runtime/mounts/renders.ts:130",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/restarts",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-restart.ts:38",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/search/related",
+      "from": "packages/daemon/src/lib/runtime/mounts/work-search.ts:71",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/secrets",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:1112",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/secrets/exports/:importId",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:1151",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/secrets/imports",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:1133",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/secrets/imports/:importId",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:1142",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/secrets/logins/:id/recipe/proposals/:proposalId",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:361",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/secrets/logins/:id/rename",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:371",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/secrets/use",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:1103",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-control.ts:423",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/agenda",
+      "from": "packages/daemon/src/lib/runtime/mounts/agenda.ts:394",
+      "minimum": "operator",
+      "caller": "any",
+      "consultsGrants": true,
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/agenda/replies",
+      "from": "packages/daemon/src/lib/runtime/mounts/agenda.ts:457",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/answer",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-answer.ts:120",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/attachments",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-attachments.ts:116",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-attachments.ts:132",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/browser",
+      "from": "packages/daemon/src/lib/runtime/mounts/browser-login.ts:150",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "browser",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/browser",
+      "from": "packages/daemon/src/lib/runtime/mounts/browser-login.ts:172",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "browser",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/composer",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-send.ts:468",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/console/input",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-console-input.ts:67",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/conversion-preview",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-migrate.ts:334",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/copy-plans/:planId/approve",
+      "from": "packages/daemon/src/lib/runtime/mounts/secure-copy.ts:429",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/dialog",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-dialog.ts:71",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/fork",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-fork.ts:181",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/handover",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-handover.ts:299",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/handover/cancel",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-handover.ts:315",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/input-quarantines/:key/end",
+      "from": "packages/daemon/src/lib/runtime/mounts/input-requests.ts:202",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/input-requests/:requestId/cancel",
+      "from": "packages/daemon/src/lib/runtime/mounts/input-requests.ts:216",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/input-requests/:requestId/deliver",
+      "from": "packages/daemon/src/lib/runtime/mounts/input-requests.ts:158",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/interrupt",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-send.ts:285",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/mcp/login",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-mcp.ts:117",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/mcp/login/preview",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-mcp.ts:91",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/mcp/project",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-mcp.ts:104",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/mcp/project/preview",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-mcp.ts:77",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/migrate",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-migrate.ts:354",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/migrate/ask-to-stop-jobs",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-migrate.ts:362",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/permission",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-permission.ts:71",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/phone-approvals/:approvalId/refuse",
+      "from": "packages/daemon/src/lib/runtime/mounts/input-requests.ts:290",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/pin",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-pin.ts:46",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/pins",
+      "from": "packages/daemon/src/lib/runtime/mounts/pins.ts:107",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/processes/:processId/stop",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-processes.ts:119",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/rename",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-rename.ts:58",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/resume",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-resume.ts:202",
+      "minimum": "operator",
+      "caller": "any",
+      "consultsGrants": true,
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/revoke-credential",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-credential.ts:60",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/runtime",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-runtime.ts:138",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/send",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-send.ts:277",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/sends/:sendId/cancel",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-send.ts:438",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/sends/:sendId/enter",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-send.ts:451",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/sends/:sendId/retry",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-send.ts:422",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/shared-draft",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-drafts.ts:129",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/signal",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-signal.ts:115",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/stop",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-control.ts:431",
+      "minimum": "operator",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/surfaces/browser/control",
+      "from": "packages/daemon/src/lib/runtime/mounts/agent-tools.ts:351",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "browser",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/surfaces/browser/tools",
+      "from": "packages/daemon/src/lib/runtime/mounts/agent-tools.ts:342",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "browser",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/surfaces/terminals/control",
+      "from": "packages/daemon/src/lib/runtime/mounts/agent-tools.ts:324",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/surfaces/terminals/tools",
+      "from": "packages/daemon/src/lib/runtime/mounts/agent-tools.ts:315",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/task-plans/:planId/approval",
+      "from": "packages/daemon/src/lib/runtime/mounts/task-plans.ts:179",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/commit",
+      "from": "packages/daemon/src/lib/runtime/mounts/task-plans.ts:212",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/confirm-in-app",
+      "from": "packages/daemon/src/lib/runtime/mounts/task-plans.ts:242",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/task-plans/:planId/revoke",
+      "from": "packages/daemon/src/lib/runtime/mounts/task-plans.ts:267",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use",
+        "narrowing": true
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/terminals",
+      "from": "packages/daemon/src/lib/runtime/mounts/terminals.ts:268",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sessions/:sessionId/unpin",
+      "from": "packages/daemon/src/lib/runtime/mounts/session-pin.ts:54",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sign-in-rules/:id/narrow",
+      "from": "packages/daemon/src/lib/runtime/mounts/sign-in-rules.ts:263",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use",
+        "narrowing": true
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sign-in-rules/stages",
+      "from": "packages/daemon/src/lib/runtime/mounts/sign-in-rules.ts:175",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sign-in-rules/stages/:stage/bind",
+      "from": "packages/daemon/src/lib/runtime/mounts/sign-in-rules.ts:213",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sign-in-rules/stages/:stage/commit",
+      "from": "packages/daemon/src/lib/runtime/mounts/sign-in-rules.ts:227",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/sign-in-rules/stages/:stage/confirm-in-app",
+      "from": "packages/daemon/src/lib/runtime/mounts/sign-in-rules.ts:200",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/skill-installs/local/project",
+      "from": "packages/daemon/src/lib/runtime/mounts/local-skill-installs.ts:196",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/skill-installs/local/project/preview",
+      "from": "packages/daemon/src/lib/runtime/mounts/local-skill-installs.ts:178",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/skill-installs/local/runtime",
+      "from": "packages/daemon/src/lib/runtime/mounts/local-skill-installs.ts:205",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/skill-installs/local/runtime/preview",
+      "from": "packages/daemon/src/lib/runtime/mounts/local-skill-installs.ts:187",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/speedups/:provider/test",
+      "from": "packages/daemon/src/lib/runtime/mounts/speedups.ts:53",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "secrets",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/step-up",
+      "from": "packages/daemon/src/lib/runtime/mounts/step-up.ts:264",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/step-up/options",
+      "from": "packages/daemon/src/lib/runtime/mounts/step-up.ts:182",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/stt/enhance",
+      "from": "packages/daemon/src/lib/runtime/mounts/stt.ts:84",
+      "minimum": "operator",
+      "caller": "any"
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/system/open-url",
+      "from": "packages/daemon/src/lib/runtime/mounts/system-open.ts:29",
+      "minimum": "operator",
+      "caller": "any",
+      "privilegedOnly": true,
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/terminals/close-finished",
+      "from": "packages/daemon/src/lib/runtime/mounts/terminals.ts:250",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/tidy/plan",
+      "from": "packages/daemon/src/lib/runtime/mounts/tidy.ts:22",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/unlock",
+      "from": "packages/daemon/src/lib/runtime/mounts/step-up.ts:291",
+      "minimum": "operator",
+      "caller": "person",
+      "unlockExempt": true,
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/unlock/options",
+      "from": "packages/daemon/src/lib/runtime/mounts/step-up.ts:277",
+      "minimum": "operator",
+      "caller": "person",
+      "unlockExempt": true,
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/warden/investigate",
+      "from": "packages/daemon/src/lib/runtime/mounts/warden.ts:257",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "warden",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/warden/leave",
+      "from": "packages/daemon/src/lib/runtime/mounts/warden.ts:268",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "warden",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/warden/run",
+      "from": "packages/daemon/src/lib/runtime/mounts/warden.ts:237",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "warden",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/webrtc/offer",
+      "from": "packages/daemon/src/lib/runtime/mounts/webrtc.ts:42",
+      "minimum": "authenticated",
+      "caller": "any",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/worktrees",
+      "from": "packages/daemon/src/lib/runtime/mounts/worktrees.ts:156",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "POST /v1/worktrees/remove",
+      "from": "packages/daemon/src/lib/runtime/mounts/worktrees.ts:138",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "filesystem",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PUT /v1/accounts/:id",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:625",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PUT /v1/accounts/defaults",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:599",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure",
+        "narrowing": true
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PUT /v1/accounts/sign-ins/:signIn",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:544",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PUT /v1/board/projects/:projectId/switch",
+      "from": "packages/daemon/src/lib/runtime/mounts/board-projects.ts:200",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "fleet",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PUT /v1/catalog-items/:itemId/current",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-catalogs.ts:268",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PUT /v1/catalog-links/:linkId/version",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-links.ts:177",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use",
+        "narrowing": true
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PUT /v1/catalog-shares/:shareId/new-passkey",
+      "from": "packages/daemon/src/lib/runtime/mounts/catalog-members.ts:157",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "sharing",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PUT /v1/config/file",
+      "from": "packages/daemon/src/lib/runtime/mounts/config-files.ts:378",
+      "minimum": "operator",
+      "caller": "person",
+      "ferretDoor": true,
+      "capability": {
+        "capability": "fleet",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PUT /v1/copy-rules/settings",
+      "from": "packages/daemon/src/lib/runtime/mounts/secure-copy.ts:207",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PUT /v1/secrets/logins/:id",
+      "from": "packages/daemon/src/lib/runtime/mounts/secrets.ts:349",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "secrets",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PUT /v1/sessions/:sessionId/agenda/:id/seen",
+      "from": "packages/daemon/src/lib/runtime/mounts/agenda.ts:449",
+      "minimum": "operator",
+      "caller": "person",
+      "noStore": true
+    },
+    {
+      "table": "route",
+      "key": "PUT /v1/tunnel",
+      "from": "packages/daemon/src/lib/runtime/mounts/tunnel.ts:40",
+      "minimum": "operator",
+      "caller": "person",
+      "capability": {
+        "capability": "pairing",
+        "axis": "configure"
+      },
+      "noStore": true
+    },
+    {
+      "table": "socket",
+      "key": "GET /v1/events",
+      "from": "packages/daemon/src/lib/runtime/mounts/fleet-events.ts:121",
+      "minimum": "operator",
+      "caller": "any"
+    },
+    {
+      "table": "socket",
+      "key": "GET /v1/rendezvous/:daemonId/client",
+      "from": "packages/daemon/src/lib/runtime/mounts/direct-carrier.ts:123",
+      "minimum": "none",
+      "caller": "any"
+    },
+    {
+      "table": "socket",
+      "key": "GET /v1/sessions/:sessionId/browser/stream",
+      "from": "packages/daemon/src/lib/runtime/mounts/browser-login.ts:209",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "browser",
+        "axis": "use"
+      }
+    },
+    {
+      "table": "socket",
+      "key": "GET /v1/sessions/:sessionId/shared-draft/stream",
+      "from": "packages/daemon/src/lib/runtime/mounts/shared-drafts.ts:193",
+      "minimum": "operator",
+      "caller": "person"
+    },
+    {
+      "table": "socket",
+      "key": "GET /v1/sessions/:sessionId/terminals/:terminalId/stream",
+      "from": "packages/daemon/src/lib/runtime/mounts/terminals.ts:326",
+      "minimum": "operator",
+      "caller": "any",
+      "capability": {
+        "capability": "terminal",
+        "axis": "use"
+      }
+    },
+    {
+      "table": "tool",
+      "key": "account_hint",
+      "from": "packages/cli/src/lib/mcp/tools.ts:212",
+      "wire": "account.hint"
+    },
+    {
+      "table": "tool",
+      "key": "account_propose",
+      "from": "packages/cli/src/lib/mcp/tools.ts:219",
+      "wire": "account.propose"
+    },
+    {
+      "table": "tool",
+      "key": "browser_ask_owner",
+      "from": "packages/cli/src/lib/mcp/tools.ts:674",
+      "wire": "browser.ask_owner"
+    },
+    {
+      "table": "tool",
+      "key": "browser_check",
+      "from": "packages/cli/src/lib/mcp/tools.ts:609",
+      "wire": "browser.check"
+    },
+    {
+      "table": "tool",
+      "key": "browser_click",
+      "from": "packages/cli/src/lib/mcp/tools.ts:266",
+      "wire": "browser.click"
+    },
+    {
+      "table": "tool",
+      "key": "browser_close",
+      "from": "packages/cli/src/lib/mcp/tools.ts:668",
+      "wire": "browser.close"
+    },
+    {
+      "table": "tool",
+      "key": "browser_console",
+      "from": "packages/cli/src/lib/mcp/tools.ts:391",
+      "wire": "browser.console"
+    },
+    {
+      "table": "tool",
+      "key": "browser_dialog",
+      "from": "packages/cli/src/lib/mcp/tools.ts:337",
+      "wire": "browser.dialog"
+    },
+    {
+      "table": "tool",
+      "key": "browser_download",
+      "from": "packages/cli/src/lib/mcp/tools.ts:488",
+      "wire": "browser.download"
+    },
+    {
+      "table": "tool",
+      "key": "browser_drag",
+      "from": "packages/cli/src/lib/mcp/tools.ts:523",
+      "wire": "browser.drag"
+    },
+    {
+      "table": "tool",
+      "key": "browser_emulate",
+      "from": "packages/cli/src/lib/mcp/tools.ts:426",
+      "wire": "browser.emulate"
+    },
+    {
+      "table": "tool",
+      "key": "browser_eval",
+      "from": "packages/cli/src/lib/mcp/tools.ts:649",
+      "wire": "browser.eval"
+    },
+    {
+      "table": "tool",
+      "key": "browser_fill_form",
+      "from": "packages/cli/src/lib/mcp/tools.ts:618",
+      "wire": "browser.fill_form"
+    },
+    {
+      "table": "tool",
+      "key": "browser_highlight",
+      "from": "packages/cli/src/lib/mcp/tools.ts:643",
+      "wire": "browser.highlight"
+    },
+    {
+      "table": "tool",
+      "key": "browser_hover",
+      "from": "packages/cli/src/lib/mcp/tools.ts:517",
+      "wire": "browser.hover"
+    },
+    {
+      "table": "tool",
+      "key": "browser_list",
+      "from": "packages/cli/src/lib/mcp/tools.ts:234",
+      "wire": "browser.list"
+    },
+    {
+      "table": "tool",
+      "key": "browser_mouse",
+      "from": "packages/cli/src/lib/mcp/tools.ts:549",
+      "wire": "browser.mouse"
+    },
+    {
+      "table": "tool",
+      "key": "browser_navigate",
+      "from": "packages/cli/src/lib/mcp/tools.ts:258",
+      "wire": "browser.navigate"
+    },
+    {
+      "table": "tool",
+      "key": "browser_network",
+      "from": "packages/cli/src/lib/mcp/tools.ts:406",
+      "wire": "browser.network"
+    },
+    {
+      "table": "tool",
+      "key": "browser_open",
+      "from": "packages/cli/src/lib/mcp/tools.ts:240",
+      "wire": "browser.open"
+    },
+    {
+      "table": "tool",
+      "key": "browser_pdf",
+      "from": "packages/cli/src/lib/mcp/tools.ts:503",
+      "wire": "browser.pdf"
+    },
+    {
+      "table": "tool",
+      "key": "browser_press",
+      "from": "packages/cli/src/lib/mcp/tools.ts:567",
+      "wire": "browser.press"
+    },
+    {
+      "table": "tool",
+      "key": "browser_read",
+      "from": "packages/cli/src/lib/mcp/tools.ts:304",
+      "wire": "browser.read"
+    },
+    {
+      "table": "tool",
+      "key": "browser_request_input",
+      "from": "packages/cli/src/lib/mcp/tools.ts:681",
+      "wire": "browser.request_input"
+    },
+    {
+      "table": "tool",
+      "key": "browser_screenshot",
+      "from": "packages/cli/src/lib/mcp/tools.ts:322",
+      "wire": "browser.screenshot"
+    },
+    {
+      "table": "tool",
+      "key": "browser_scroll",
+      "from": "packages/cli/src/lib/mcp/tools.ts:582",
+      "wire": "browser.scroll"
+    },
+    {
+      "table": "tool",
+      "key": "browser_select",
+      "from": "packages/cli/src/lib/mcp/tools.ts:600",
+      "wire": "browser.select"
+    },
+    {
+      "table": "tool",
+      "key": "browser_tabs",
+      "from": "packages/cli/src/lib/mcp/tools.ts:347",
+      "wire": "browser.tabs"
+    },
+    {
+      "table": "tool",
+      "key": "browser_type",
+      "from": "packages/cli/src/lib/mcp/tools.ts:287",
+      "wire": "browser.type"
+    },
+    {
+      "table": "tool",
+      "key": "browser_upload",
+      "from": "packages/cli/src/lib/mcp/tools.ts:462",
+      "wire": "browser.upload"
+    },
+    {
+      "table": "tool",
+      "key": "browser_wait_for",
+      "from": "packages/cli/src/lib/mcp/tools.ts:361",
+      "wire": "browser.wait_for"
+    },
+    {
+      "table": "tool",
+      "key": "config_read",
+      "from": "packages/cli/src/lib/mcp/tools.ts:787",
+      "wire": "config.read"
+    },
+    {
+      "table": "tool",
+      "key": "config_validate",
+      "from": "packages/cli/src/lib/mcp/tools.ts:794",
+      "wire": "config.validate"
+    },
+    {
+      "table": "tool",
+      "key": "config_write",
+      "from": "packages/cli/src/lib/mcp/tools.ts:801",
+      "wire": "config.write"
+    },
+    {
+      "table": "tool",
+      "key": "input_wait",
+      "from": "packages/cli/src/lib/mcp/tools.ts:194",
+      "wire": "input.wait"
+    },
+    {
+      "table": "tool",
+      "key": "instructions",
+      "from": "packages/cli/src/lib/mcp/tools.ts:868"
+    },
+    {
+      "table": "tool",
+      "key": "lessons_suggest",
+      "from": "packages/cli/src/lib/mcp/tools.ts:823",
+      "wire": "lessons.suggest"
+    },
+    {
+      "table": "tool",
+      "key": "search_work",
+      "from": "packages/cli/src/lib/mcp/tools.ts:847"
+    },
+    {
+      "table": "tool",
+      "key": "secure_copy",
+      "from": "packages/cli/src/lib/mcp/tools.ts:712",
+      "wire": "secure.copy"
+    },
+    {
+      "table": "tool",
+      "key": "secure_discard",
+      "from": "packages/cli/src/lib/mcp/tools.ts:729",
+      "wire": "secure.discard"
+    },
+    {
+      "table": "tool",
+      "key": "secure_list",
+      "from": "packages/cli/src/lib/mcp/tools.ts:728",
+      "wire": "secure.list"
+    },
+    {
+      "table": "tool",
+      "key": "secure_paste",
+      "from": "packages/cli/src/lib/mcp/tools.ts:735",
+      "wire": "secure.paste"
+    },
+    {
+      "table": "tool",
+      "key": "task_plan",
+      "from": "packages/cli/src/lib/mcp/tools.ts:753",
+      "wire": "task.plan"
+    },
+    {
+      "table": "tool",
+      "key": "terminal_ask_owner",
+      "from": "packages/cli/src/lib/mcp/tools.ts:170",
+      "wire": "terminal.ask_owner"
+    },
+    {
+      "table": "tool",
+      "key": "terminal_close",
+      "from": "packages/cli/src/lib/mcp/tools.ts:164",
+      "wire": "terminal.close"
+    },
+    {
+      "table": "tool",
+      "key": "terminal_list",
+      "from": "packages/cli/src/lib/mcp/tools.ts:99",
+      "wire": "terminal.list"
+    },
+    {
+      "table": "tool",
+      "key": "terminal_open",
+      "from": "packages/cli/src/lib/mcp/tools.ts:105",
+      "wire": "terminal.open"
+    },
+    {
+      "table": "tool",
+      "key": "terminal_read",
+      "from": "packages/cli/src/lib/mcp/tools.ts:137",
+      "wire": "terminal.read"
+    },
+    {
+      "table": "tool",
+      "key": "terminal_request_input",
+      "from": "packages/cli/src/lib/mcp/tools.ts:177",
+      "wire": "terminal.request_input"
+    },
+    {
+      "table": "tool",
+      "key": "terminal_send",
+      "from": "packages/cli/src/lib/mcp/tools.ts:120",
+      "wire": "terminal.send"
+    },
+    {
+      "table": "tool",
+      "key": "terminal_wait",
+      "from": "packages/cli/src/lib/mcp/tools.ts:145",
+      "wire": "terminal.wait"
+    }
+  ]
+}

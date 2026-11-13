@@ -1252,7 +1252,7 @@ The set crosses to the device at the one moment every device has: **redemption**
 "the one moment guaranteed to be direct", and §14 retired the guarantee without weakening the
 argument — see the rest of this paragraph. The pairing
 response carries `carriers`, at most **eight** entries, each one `{ kind: 'direct' | 'relay', url }`,
-in the daemon's own order. It is on the redemption response rather than the mint response because the
+in the daemon's own order. A relay the operator wrote in the daemon's own `carriers` list also carries `source: "configured"`; a discovered relay carries no `source`. It is the daemon's self-report — a device cannot check it — and it proves only that an address was ENTERED, never who runs it. It picks only the wording of the Connection card's disclosure (below), never what the path does. It is on the redemption response rather than the mint response because the
 two are read by different parties — the mint response is read by the **host's** own UI, which has the
 daemon in front of it, and this one is read by the **device**, which is who has to know where to look
 next time. No rendezvous has an opportunity to edit this answer on any carrier: a direct redemption
@@ -1298,6 +1298,23 @@ is already known to the rendezvous, and a daemon address is already known to who
 pair with it. The daemon **fingerprint** is a different matter. It is not on this list and is not
 named in any carrier diagnostic — it addresses the rendezvous, it travels in the pairing fragment, and
 it stays out of anything a reader might paste into an issue.
+
+**Whose relay a relay is, as the Connection card says it** — the app never states ownership as fact unless it is
+positively known, and it cannot know it. The browser decides in this order: an address equal to the hosted one this
+browser discovered itself is **Hosted relay**; an entry carrying `source: "configured"` that is NOT that address is
+**Configured relay** ("the relay this machine is set up to use"); everything else — a directory that timed out, failed or
+is switched off, an address it did not name, a daemon that says nothing — is the neutral **Relay**. All three say that the
+relay carries end-to-end-encrypted traffic and that whoever runs or hosts it can see addresses, timing and sizes. The
+configured wording adds one sentence and only conditionally: "If you run this relay yourself, only you and your hosting
+provider are on the path." It never says "your own account" or "you are the relay operator", because a configured address
+may as well be Ferretry's hosted relay (entered by hand while the directory is down) or a friend's. A directory that did not
+answer proves nothing about ownership, and neither does an entered address.
+
+**Compatibility of the `source` key.** Like `carriers` itself, the optional key is a breaking change for an older client:
+the entry is a strict object, and the pairing response and the carrier set are each parsed whole, so an older client rejects
+the WHOLE pairing response (or carrier set) that carries one configured entry — not just that entry. Within 5.0 every reader
+ships together, so the only case is a cached older preview app held against a newer daemon: reload the app together with the
+daemon. A newer app reading an older daemon sees no marker and uses the neutral wording.
 
 **No entry says whether it is privileged, and no such field may ever be added.** Privilege is binary
 and carrier-derived: it is answered by the carrier that **accepted** an arrival, per connection, on the
@@ -1437,6 +1454,53 @@ Every failure to discover narrows that entry to nothing rather than guessing an 
 trail plus `fyd --check` state the consequence and the remedy rather than one bare clause; `--check`
 names the posture in one line: direct-only, hosted, or self-hosted, and which.
 
+**A transient failure is asked again; an answer is not.** The first read stays the after-listen job and
+never holds the boot. When it ends in a failure that time can fix — the fetch threw (network, DNS,
+refused), the read timed out, the network broke or the deadline passed while the body was still being read,
+HTTP 5xx, or HTTP 429 (a `Retry-After` in whole seconds, of any number of digits, is honoured up to the cap —
+a longer value is clamped, never discarded; an HTTP-date is ignored) — the daemon asks again **in the background**, with jittered exponential delays (a window that
+starts at 2 s and doubles to a 5 min cap, the delay landing in its upper half), until the directory
+answers. A relay that finally answers is applied exactly as a first-read success would be: the same
+`discovered` source, the carrier started, `discoveredRelayUrl` on links and pairing, and the boot trail
+and `connections.reachability` row move from the "retrying in the background, next try at HH:MM:SSZ"
+sentence to the hosted one. Everything else is a **definitive answer** and is asked once: an explicit relay
+entry (`enabled: false` included — the directory is not even asked), the directory advertising
+`relayUrl: null`, an advertisement that fails the schema, a body that is not JSON, a build with no origin
+or an origin this daemon may not ask, and any other 4xx. Any change to the relay list in
+`config/connections.yaml` while a retry is pending — a relay of the operator's own (`enabled: false`
+included), a discovery entry switched off or removed, any other edit, or a file that cannot be read —
+wins and ends the retries without resolving, publishing or dialling anything (it takes effect on restart,
+as any relay edit does). **One gate decides, and every path asks it after its last `await`:** a
+DISCOVERED relay is published or dialled only while the daemon is not stopping, the CURRENT file is a clean
+read, and its relay list still says what this boot resolved. The gate is asked before every ask and when an
+answer arrives (first read and retries alike), when a recovery adopts its answer, at the boot carrier start
+after the first read, and immediately before **each** discovered carrier is built and started (so a change
+that lands while an earlier carrier is starting stops the next one); there is no path that dials a discovered
+relay without it. A file the kernel cannot read (invalid or oversized — the config service then answers
+`undefined` or its last good version, never an error) is not a clean read, so it vetoes whatever its effective
+value says; a file that is simply absent is clean. **The boundary is the boot:** a file that is already
+`invalid` when the daemon starts, with its accepted last good version in effect (the kernel keeps that version across
+a restart), is governed by that accepted document — discovery runs from it, and the veto stays for any change
+after boot (an explicit disable, a changed relay list, or a file that becomes invalid or unreadable only during this
+run). An invalid file at boot with NO accepted version in effect has no authority, so the daemon stays direct-only. A veto that lands after the discovered relay was already
+published withdraws it again, so the published carriers, the hosts a redial may reach and the doctor row agree.
+Relays the operator wrote are not discovery: they keep their behaviour and stop only for shutdown. Discovery has
+ONE abort controller, aborted synchronously when shutdown begins: the Kernel aborts every carrier's signal
+before it stops the jobs or any plugin's own cleanup, so that signal (not the plugin's later `onStop`)
+aborts the first read and every retry read, cancels the timer, and nothing is adopted or published afterwards —
+a configured sibling included — whatever a slower teardown lets arrive. Every read keeps `cache: 'no-store'`.
+
+The same gate applies to the **first** read, not only to the retries: an answer that arrives after
+shutdown began is dropped and publishes nothing, and a change to the relay list in `config/connections.yaml` during that read
+(`enabled: false` included) wins over the answer. In a **mixed** list (a configured relay beside a `source: discovery` entry)
+a recovery never disturbs a relay that is already running — it is not restarted, not re-reported as inactive,
+and not displaced. If the recovered address turns out to be the configured one, the **configured relay
+keeps running and stays published** and only the discovered entry is refused, with the duplicate-rendezvous
+sentence (on the doctor row and in the journal): sources, the published carrier set, the network permission
+for redials and the running socket therefore always agree. (At boot, with nothing running yet, the same
+collision still refuses the boot.) A switched-off configured entry reserves no address: a discovered relay
+at the same address still starts on recovery.
+
 **`fyd` now dials and carries a session.** `packages/daemon/src/lib/relay` is the daemon half of this
 protocol — the claim signed with the key pairing already minted, the per-session handshake, the record
 layer, the credit window, and the §14 tunnel that turns a relayed request into the same `ApiRequest`
@@ -1502,17 +1566,8 @@ outstanding:
    and any failure as "no hosted carrier". On the daemon the advertised address resolves whichever
    `source: 'discovery'` entry the carrier list holds, through the same schema an operator's own entry
    uses, so a discovered rendezvous and a configured one cannot acquire different redial cadences; an
-   entry that already carries a `url` never reads it, and one boot performs one read no matter how
-   many entries there are. **A transient failure of that read is retried.** A failure that changes by
-   itself — a connection that fails, a timeout, a 5xx or a 429 — is asked again in the background, never
-   holding the boot, on a jittered backoff from 2 s doubling to a 300 s cap (a `Retry-After` of whole seconds is honoured, within that cap), one request in flight at a
-   time, ending at the first answer and with the daemon. When a retry answers with a relay the daemon
-   dials it exactly as a boot-time answer would have (and publishes it in `carriers`), and the boot
-   notice that said direct-only is followed by one saying it was recovered and after how many reads. A
-   **definitive** answer is never retried: an explicit `relay`/`carriers` entry (which wins and is never
-   overwritten, `enabled: false` included), an advertisement of `relayUrl: null`, a 4xx, a document that
-   cannot be read, and a build with no discovery origin all stay as they are, with the same fail-closed
-   sentences and remedies. **A late answer re-checks the world it arrives in:** the CURRENT relay entries are read again before the carrier is built and again right before it starts, and the answer is dropped (and the retry ends) if they are no longer the entries the boot decided from — an explicit `relay` block written meanwhile, `enabled: false` included, always wins — or cannot be read; and shutdown stops the retry first, synchronously, aborting the read in flight, before any awaited teardown. What a build compiles in is unchanged. In the browser the same read supplies the last-resort hosted carrier and
+   entry that already carries a `url` never reads it, and one boot performs one read at a time no matter
+   how many entries there are — repeated only while the failure was transient (see above). In the browser the same read supplies the last-resort hosted carrier and
    the only relayed first-pairing candidate, as well as labelling a published address as Ferretry's
    hosted rendezvous or somebody's own.
 3. **A relay-capable transport on both ends** — **built.** `packages/daemon/src/lib/relay` dials out,
@@ -2941,7 +2996,7 @@ and §7's records, and nothing a carrier operator holds can read, alter or inser
 
 **A connection preference is per device and per machine**, chosen in the PWA's Settings › This
 device and in the Connection status popover, and stored in that browser keyed by the daemon's
-fingerprint. **Relay is the default**: a machine with no stored choice is walked as Relay only, and Auto is a value a person has to pick (so it is stored, where Relay is stored as nothing). A device that held the earlier Auto-by-absence default moves to Relay on its first read of the current storage key; a deliberate WebRTC-only or Tunnel-only choice is carried forward as it was. It is never sent to the daemon and the daemon never reads one: the daemon still
+fingerprint. **Relay is the default**: a machine with no stored choice is walked as Relay, and Auto is a value a person has to pick. **"Relay only" is a choice, and is stored** — a saved `relay` is told apart from no saved value, because only the unchosen default may fall back (below). A device that held the earlier Auto-by-absence default moves to Relay on its first read of the current storage key; a deliberate WebRTC-only or Tunnel-only choice is carried forward as it was. It is never sent to the daemon and the daemon never reads one: the daemon still
 publishes the carriers it holds (§13), and the preference decides only which of them this browser
 walks, and in what order.
 
@@ -2950,13 +3005,36 @@ walks, and in what order.
 | **Auto**        | direct → WebRTC → tunnel → relay            | Chosen, never the default. Direct stays first because it has the fewest parties; WebRTC is the first remote carrier. A tunnel is tried only when the daemon published one. A WebRTC attempt costs about 0.4 s when it works and is bounded by its ICE deadline when it does not (§16). |
 | **WebRTC only** | WebRTC                                      | The relay (or direct) session is still used to **introduce** the two ends — signalling only, never the session's bytes.                                                                                                                                                                |
 | **Tunnel only** | tunnel                                      | Dials the tunnel this device kept; when there is none, or it does not carry, asks the daemon where it is (below). Says "not set up by the operator" when the hosted service advertises `available: false`, and "this machine has no tunnel yet" when the daemon still names none.      |
-| **Relay only**  | relay (published, then the hosted fallback) | **The default** for every device and machine that has not chosen — exactly the pre-choice relay behaviour.                                                                                                                                                                             |
+| **Relay only**  | relay (published, then the hosted fallback) | Chosen, and strict: never anything else, even when the relay cannot be reached.                                                                                                                                                                                                        |
+| **Default**     | relay, then the address paired over         | What a machine that nobody chose for is on. It walks the relay first, every session; when the relay carries nothing, the **direct address this device paired over** does (below).                                                                                                      |
 
 The walk's rules from §13 are unchanged inside each preference: the carrier is chosen by **trying**
 it, only a transport failure from a replay-safe request advances, a winner is remembered for the
 life of the connection, and a surface always names the live carrier and why the others were passed
-over. A preference that leaves nothing to try is a stated failure — "Tunnel only: this machine has no
+over. A preference that leaves nothing to try is a stated failure — "Tunnel only — this machine has no
 tunnel yet" — never a silent fall back to a carrier the person excluded.
+
+**The default falls back to the address this device paired over.** Relay is the owner's default and
+asks nothing, but a device that paired over a direct address and then cannot reach a relay — none
+discovered, or one that does not answer — would otherwise be blocked for good, with the machine's own
+Connection setting hidden behind the block. So an **unchosen** Relay tries the relay first and, when it
+carries nothing, dials the address recorded at pairing (the link's address; nothing discovered, published
+later or guessed). Only a record carrying the **positive mark** that this device paired over that address
+(`pairedOver: 'direct'`, written by the pairing that actually crossed it) has one. A record without the mark —
+every record made before it existed (relayed or not) and a pairing that crossed a relay — holds the link's
+address but no proof this device ever reached it, so it gets no fallback: it behaves as Relay only always did, with
+the relay Why line and the Connection link, and gains the mark only by pairing again. The stored preference has one
+reading — an absent entry is the default, Relay, unchosen — with no old-format branch. The session is the ordinary authenticated one — same proof, same
+device key, governed exactly as a relayed arrival. Every surface that names the live carrier says it
+is direct **because the relay failed** ("Couldn’t reach it through the relay, using the direct
+connection."), and says it for as long as **any** live session of that machine — a request lane, the bulk
+lane, a stream — is on the direct address: a relay session that answers on another lane does not clear it, and
+the Connection card never says "via relay" while a lane still sends direct. The line goes when the last such
+session ends with a relay session live (or when a relay session answers and none is direct); a walk that finds
+nothing at all clears it too. On one screen it is told once: the Connection card says it, and the frame's own
+status line for that machine stays quiet while the card is up. A chosen "Relay only" never falls back. When the read
+that opens a machine fails, the block page names the carrier's own cause and links Settings › This device
+› Connection, which needs no machine.
 
 **Pairing ignores the preference.** First contact is direct, then the hosted relay (§14), whatever is
 chosen: WebRTC needs a device key to signal and a tunnel is published only to a paired device.
@@ -2965,7 +3043,7 @@ chosen: WebRTC needs a device key to signal and a tunnel is published only to a 
 operator or a paired device switched one on (`GET`/`PUT /v1/tunnel`, "The daemon end"). Choosing Tunnel
 only — or Auto, which walks a tunnel too — for a machine whose switch is off asks, under the choice,
 "Turn on a Cloudflare tunnel for this machine?"; the choice itself is kept either way, and Tunnel only's
-note says "Off for this machine — tunnels are opt-in." — as does the walk's stated failure, "Tunnel only:
+note says "Off for this machine — tunnels are opt-in." — as does the walk's stated failure, "Tunnel only —
 this machine's tunnel is off (opt-in)", ahead of the service's two reasons. The Connection status shows the daemon's own line
 about its tunnel ("Tunnel: off (opt-in) — …"). **Switching is carrier control, not a walk**: `GET` and
 `PUT /v1/tunnel` ride the daemon's direct address or a rendezvous — the introducers, with the hosted

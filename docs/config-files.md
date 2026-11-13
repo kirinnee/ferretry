@@ -17,7 +17,7 @@ wire).
 | `profiles/<name>.yaml`          | `contents:` — components and other profiles, in order; a later entry overrides an earlier one; optional `compactAt` ([compact-at.md](compact-at.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `runtimes/<name>.yaml`          | one runtime: `credential`, `profile`, `agent`, `disabled` ([disabling.md](disabling.md)), `compactAt` ([compact-at.md](compact-at.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `warden.yaml`                   | the Warden: on, its layers (rules always; Jev and LLM opt-in) and their caps — see [The Warden](#the-warden)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `learning.yaml`                 | lessons: `passiveDefault` for new ferrets, and the scan miner ([learning.md](learning.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `learning.yaml`                 | lessons: `passiveDefault` for new ferrets, and the scan miner ([lessons.md](lessons.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `pack.yaml`                     | Pack mode: on/off, who picks a sub-ferret's model (`agent` or `jev`), the sub-ferret `limits`, the start `probe`, Jev's cap ([pack-mode.md](pack-mode.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `limits.yaml`                   | how much of the machine the ferrets may take: `enabled`, `ionice`, `fleet` and `perFerret` caps (`memoryHigh`, `memoryMax`, `swapMax`, `tasksMax`, `cpuWeight`, `cpuPercent`); on by default, every number computed from the machine; a raise, a removed cap, `enabled: false` or `ionice: false` is held for the owner ([ferret-limits.md](ferret-limits.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `models-guide.yaml`             | the routing prompt: `prompt`, plain words naming which model runs which kind of sub-task (at most 1,200 characters), read by the asking ferret and by Jev alike; absent means the one built from the catalogs ([pack-mode.md](pack-mode.md#the-routing-prompt))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -27,7 +27,9 @@ wire).
 
 Every file Ferretry writes starts with `# yaml-language-server: $schema=…`, pointing at
 `config/.schema/<kind>.json`, which the daemon writes from the same zod schemas it checks with
-(`fy config schema <kind>` prints one). `config/daemon.json` and `config/routing.json` live in the same
+(`fy config schema <kind>` prints one). A file keeps its stem (`runtimes.yaml` is `runtimes.json`); a folder's schema
+describes one item, so it ends `--item` (`runtimes/` is `runtimes--item.json`). Two declarations that would publish one
+name are refused at start, in a sentence. `config/daemon.json` and `config/routing.json` live in the same
 directory and are not configuration files in this sense: they are the daemon's own documents. The shell
 terminals open is one of them (`terminals.shell`, [terminals.md](terminals.md)).
 
@@ -58,12 +60,32 @@ that is not there). Three rules, in order:
 1. **Last good wins.** A file that fails a check is reported with its path, line, column and a plain fix
    (`GET /v1/config/status`, `fy config check`, the daemon log, the app's Files panel), and the version the
    daemon accepted before stays in effect. Nothing half-applies. When the fleet does not assemble, every
-   fleet change of that round is held back and the machine keeps the fleet it had.
+   fleet change of that round is held back and the machine keeps the fleet it had. A YAML problem is said in
+   a fixed sentence with its line — never the parser's own words, which quote the file. A YAML alias (`*name`)
+   that names no anchor set before it, sits inside its own anchor, or reads out too large is such a problem:
+   read out in full, the file may weigh no more than 10 000 plus two per character of its text, where each value
+   weighs 1 and a string weighs its length more (an alias bomb, or one long string aliased many times, does not
+   fit). So is a key that is a mapping or a list, and a YAML 1.1 tag (`!!omap`, `!!set`, `!!binary`, …) is not
+   resolved: its value reads as the plain list, mapping or string it is written as. Every file is read in one pass
+   whatever its aliases do. One answer lists at most 50 problems, and one more sentence counts the rest. A key
+   set by `setConfigKey` does not expand aliases: an edit hands an alias bomb on as written, and the read refuses
+   it, so the last good version stays in effect (v4's `setConfigKey` had no bounds at all, so this is no wider than v4).
 2. **Loosening waits for the owner.** An edit that loosens what the machine may spend or what agents may do
    is HELD and the tighter version stays in effect: a Warden layer that spends switched on (Jev, LLM),
    a cap raised, something it may now do alone, its concurrency raised or its cadence shortened; lesson mining turned on or its caps raised; Pack mode switched on, Jev choosing sub-ferret models, a sub-ferret limit or depth raised; an agent control turned on (Ferretry
    settings and Page scripts included); Agent permissions set to `skip`; the public usage feed switched on; dictated text sent to a provider; a login's budget limit raised or removed, a budgeted login deleted or a runtime moved off one, or `timeZone` set or changed ([budgets.md](budgets.md)). Tightening always
-   applies at once. Deleting a file is an edit to its defaults and is judged the same way. The owner confirms
+   applies at once. A plugin's own write holds every `${secret:NAME}` reference it adds; its one exception is
+   `ConfigPort.writeAsCaller`, judged exactly as `write` except that the reference goes into effect when the
+   ambient call (read by the kernel, never passed by the plugin, and judged from the standing as it is when the write
+   happens — the scope includes work the call spawns) is the owner: the host admin where the request arrived on the
+   host, or a governed device holding the file's `configure` and a passkey that already existed when its call was
+   admitted, which the add claims once — what `PUT /v1/config/file` asks of an add (`loosen-config`; the unlock alone is
+   not enough). A passkey proved after the call was admitted is never taken by that call or by work it spawns, even
+   after a lock and an unlock: the add stays held and the later proof stays for the act it was given for. The same
+   bound applies to a plain `write` loosening from work a call spawned. Only
+   the references the caller's own edit adds are the owner's to answer for: one that only an edit already held names
+   keeps the whole write held (a PATCH of a file with an edit held is made to both versions, rule 3, so the caller's
+   one field never puts that held edit into effect; a WHOLE text is the caller's whole text). An agent's session credential, a job and a member call keep the hold. Deleting a file is an edit to its defaults and is judged the same way. The owner confirms
    a held edit by its etag — at the machine with `fy config confirm <file>`, in the app with a passkey
    proved for that act (`loosen-config`), or by answering **Allow** on the agenda card a ferret raised with
    `fy agenda add --confirms <file>` ([agenda.md](agenda.md#confirming-a-configuration-change)) — so a
@@ -76,7 +98,60 @@ that is not there). Three rules, in order:
    BOTH versions — the held edit, changed, stays in the file and stays held; the version in effect, changed,
    is what is recorded as accepted — and the form sends only the keys that changed, never a whole section.
    (On 2026-10-29 a save of the daily caps rendered the version in effect over the file and put a held price
-   correction, $2 → $0.042, back to $2 a minute after it was written.)
+   correction, $2 → $0.042, back to $2 a minute after it was written.) In the kernel this is
+   `ConfigPort.writeAsOwner`, and a section save names its section in `within`: for each top-level key named
+   there, the owner's mapping is merged into the mapping already in each version **one level deep** — a sub-key
+   it names is replaced whole (`undefined` removes it), and every sub-key it does not name is kept, so the held
+   version's own sub-keys survive. A named key whose new or current value is not a mapping is replaced, as any
+   patch replaces a key. The schema, the loosening hold and the judge see the merged versions. The two versions
+   are two writes (the version in effect is recorded as accepted, then the held text is written), so a crash
+   between them keeps the held edit held and never puts it into effect.
+   Every PATCH of a file with an edit held for the owner — `ConfigPort.write`, `writeAsCaller`, `writeAsOwner` and
+   Gate's own `gate.yaml` saves — is made to BOTH versions: the caller's change is judged against the version in
+   effect alone, and the held edit, changed, stays held. A WHOLE text is the caller's whole text and replaces the held
+   edit. The lessons settings and the default-account lines (`accounts.yaml`) go through `writeAsOwner` (with only
+   the changed keys, or lines, beside a held edit). In every case the caller's change is judged against the version
+   in effect alone. The held edit, changed too, is then judged afresh against the new version in effect and stays held
+   while it still loosens it, so a person changing one field puts another caller's held edit into effect only by making
+   it harmless — never by confirming it. Beside a held REMOVAL that happens when the change leaves removing the file no
+   longer a loosening (a confirmed raise of a limit, after which removing the file would lower it): the caller's change
+   is answered written, naming what it loosened, but it does not stay in effect — the other caller's held removal goes
+   into effect instead, the file stays gone and the defaults apply, never anything looser than the caller's change. A
+   patch made beside a held NEW file (no version in effect yet) is judged against no version, as the new file was. When
+   it is not held, it creates the version in effect from the defaults plus that patch, and the held new file, patched
+   too, stays held while it still loosens that version; when it is held, it waits with the held new file and nothing is
+   in effect. What is asked of that change differs by call. `writeAsCaller`: a loosening of its own asks Gate's judge, a secret reference it
+   adds asks the owner question, and one that only the held version names is never the caller's to confirm. `write`
+   and `writeAsOwner`: a loosening of their own asks Gate's judge, and a secret reference they add is always held
+   (they ask no owner question). Gate's own `gate.yaml` saves: Gate's routes have already decided the caller may
+   make the change and pass it as confirmed (`confirmedLoosening`), so the kernel asks no judge. When the caller
+   changes the very field the held edit staged, the caller's value is the value in both versions.
+4. **A change of several files lands whole or not at all.** A change that spans files — a runtime, its profile
+   and its model set — is ONE act in the kernel, `ConfigPort.writeAll`, never several writes a reader could see
+   half of. Every document of the set is checked as a single write checks one (its own file, its name, YAML, a
+   raw secret, the schema, its own `ifMatch`) and judged as a single write is judged — against the version in
+   effect, by the same Gate judge with the caller's actor, an added `${secret:NAME}` held for the owner whatever
+   the judge says — **before anything is written**. So one document refused refuses the set and names it; one
+   stale is a conflict that names it; and **one document that would be held holds the whole set**: nothing in it
+   is written or takes effect, and the answer names that document, what it loosens, and says the set is held, so
+   the owner makes the change in an act Gate's judge lets through. A set that touches a file with another edit
+   held is refused until that edit is confirmed or discarded (a set never discards a held edit and never carries
+   one into effect), as is one that touches a file the kernel cannot read back.
+
+   **What a crash does.** Before the first file is touched, the kernel writes an intent record
+   (`state/kernel/config-write-set.json`: every file of the set and its accepted record as they were) atomically
+   and synced. Files are then written one by one (each atomically, as a single write is), then their accepted
+   records, and the record's removal is the commit. A daemon that stops anywhere before that removal — between
+   two files included — finds the record on its next load (boot loads first) and puts every file and every
+   accepted record of the set back as they were before anything is evaluated: the last good version of every
+   document is in effect and none of the set is. A disk failure the daemon survives is put back the same way at
+   once, and the write throws. What it does not promise: the removal itself is not synced, so a power loss just
+   after a set was answered `written` can bring the record back and put the WHOLE set back — never half of it. A
+   record that cannot be read is said once in the log and left alone, and its files are judged as they are.
+
+   Gate's judge spends a remote device's one step-up proof on the first loosening it lets through, so a set with
+   **two** loosening documents is held for a remote device (the second ask finds the proof spent). It fails
+   closed; judging a set as one act is Gate's to add (declared GAP).
 
 What is in effect is recorded in the state home (`state/config-accepted.json`), file by file with its text,
 so a last good version survives a restart and a confirmed loosening is not asked about again. A missing or
@@ -99,7 +174,16 @@ so a tightening is in effect the moment it is saved and an edit made just before
 
 A link is never followed — not by the daemon, not by `fy config check`. `GET /v1/config/file` returns a
 file's text to a caller off the machine, so a link planted in the directory would otherwise read any file
-the user can. A link, or a file over 256 KiB, is reported as unreadable and keeps its last good version.
+the user can. A link, or a file over 256 KiB, is reported as unreadable and keeps its last good version; a
+text over 256 KiB from an agent (`config_validate`, `config_write`) is refused in one fixed sentence before any
+of it is read.
+
+A file that is not UTF-8 still reads and keeps its last good version, but every write over it (single, owner,
+held, set) is refused (re-save it as UTF-8): saving would replace the bytes nobody edited with U+FFFD. A set
+refuses it even when the set only removes it, because the set's intent record keeps each file as decoded text, so
+a roll-back would put U+FFFD back; the removal of the whole file by itself is not refused, as it journals
+nothing. Discarding a held edit over such a file is the owner's own act and is not refused: it restores the
+version in effect as UTF-8, and the held bytes go.
 
 ## Secrets never go in a file
 
@@ -107,7 +191,62 @@ A secret lives in the secret store (`fy secret set NAME`) and a file names it as
 ([secrets.md](secrets.md)). A file holding anything that looks like a raw key — a known provider prefix
 (`sk-`, `sk-ant-`, `sk-or-`, `AKIA…`, `ghp_`, `github_pat_`, `xox…-`, `gsk_`, `csk-`, `AIza…`, `glpat-`)
 anywhere, or a high-entropy value under a key ending `KEY`, `TOKEN`, `SECRET`, `PASSWORD` or `CREDENTIALS`
-— is refused like a file that does not parse, and the issue never repeats the value.
+— is refused like a file that does not parse, and the issue never repeats the value. The text is scanned
+line by line as well as by value, so a key left in a YAML comment or a tag is refused the same way, its issue
+naming only the line. Before 5.0 a comment was not scanned and such a file was accepted.
+
+## What a read shows
+
+`GET /v1/config/file` and the agent's `config_read` ask one function, so every caller is shown the same text: a
+ferret's token, a `--limited` device, the owner's paired device and the host admin alike. Who may read a file is the
+grant's answer; what a read shows has no "raw" class. The owner at the machine reads the raw file in their editor.
+
+- **A value that looks like a credential is replaced by `‹hidden›`.** A launch flag or an MCP argument holding a
+  token, a value after a secret-named flag or key (`--token v`, `API_KEY=v`, `Authorization: Bearer v`), a URL's
+  password and a URL's secret-named query parameter are cut, value only: the flag, the key, the URL's user and host
+  and every `${secret:NAME}` pointer stay. The rule is the one the Runtimes screens follow for a component's flags
+  ([secrets.md](secrets.md#secret-shaped-values-in-a-files-text)).
+- **Comments, key order and layout stay.** Only the changed scalars are rewritten. The YAML library's round trip
+  normalises the spacing of a flow list and the spacing before a trailing comment. A text with nothing to hide is
+  returned byte for byte.
+- **The etag is the sha256 of the text on disk**, not of what is shown, so a read of a masked file still names the
+  file a write must match (`If-Match`).
+- **A masked text saved back is refused.** A write that holds more `‹hidden›` than the file on disk, or a value that
+  holds one where the disk value at the same place does not, is refused as a `schema` issue at its line ("a value hidden
+  from the device or agent that read this file is still ‹hidden› here; nothing was written"), so the mask is never
+  written over a real value. The fix is to type the real value at the machine or replace the mark with
+  `${secret:NAME}`. A patch of another key of such a file is still applied.
+- **A name is read the way the write rule reads it.** A flag or key is a credential's when its name ENDS in `key`,
+  `token`, `secret`, `password`, `passwd` (plural too) or `credential(s)`, dashes ignored (`--key`, `--tokens`,
+  `--apitoken`, `--clientsecret`, `--ssh-key`, `SIGNING_KEY`), or holds a word such as `AUTH` or a pair such as
+  `API_KEY`. It over-hides on purpose (`--model-key v` is cut; so are a path after `--ssh-key`, `--public-key` or
+  `--signing-key`, `--monkey`, `--hockey`, `--key <anything of 8 or more characters>` and `--keys a,b,c`), and every
+  flag secret the write rule refuses is cut, or the file is withheld (`unmaskable`).
+- **Text glued to a `${secret:NAME}` pointer is cut.** `API_KEY=prefix${secret:X}`, `--token prefix${secret:X}`,
+  `API_KEY=${secret:X}?model=short` and `Authorization: Bearer v${secret:X}` hide the whole value (the raw part is a
+  credential written next to a pointer); one pointer alone, quoted or not, stays shown. A `,`, `;` or `&` right after
+  the pointer ends the key's value, and the text after it is cut too (`--key ${secret:X},v`), unless a key of its own
+  starts there (`--set=a=1,API_KEY=${secret:X},b=2` is shown). A key of its own followed by another `,`, `;` or `&`
+  and text with no key (`--key ${secret:X},b=2,v`, also with several keys or quotes) is cut whole; this over-cuts
+  innocent text of that shape too (`${secret:X},b=2,c`); keys only (`${secret:X},a=1,b=2`) or a trailing separator
+  (`${secret:X},b=2,`) stay shown where the write rule accepts them (`--set=a=1,API_KEY=${secret:X},a=1,b=2`); under a
+  credential flag (`--key ${secret:X},a=1,b=2`) it refuses them, so they are cut whole. A value that holds a pointer and raw text in any piece of it and that the write rule
+  refuses whole is cut whole, value start to word end, so this over-cuts the pointer and innocent text in it too (a
+  credential-named `--key prefix${secret:X},v`). A URL password glued to a pointer
+  (`https://u:${secret:X}abcdefgh@h/p`) is shown, and the write rule accepts it too: a shared GAP.
+- **Some texts are withheld whole.** The route (`GET /v1/config/file`) answers one comment line (a save of it is
+  refused, so it never wipes the file) and `config_read` answers an empty `text` with the reason in its summary; the
+  route's issues say why too. The reasons: `raw_secret` (it holds a raw secret, which is also refused on write),
+  `too_large` (over the cap), `unmaskable` (a value in it could not be hidden safely: a cut value still written
+  somewhere, or a text in which the write rule still finds a raw flag secret after the mask, so a mask that missed
+  something shows nothing) and `unparsed` (the file does not parse as YAML, so the values to hide cannot be told, but
+  only when the raw text holds a word the cutter would cut or a credential after a secret-named key; any other
+  unparsed text is shown as it is).
+
+What this does not do: a word shorter than 7 characters is never searched for a cut (`MIN_CUT_WORD`), and a value
+under 8 characters is no credential by a secret name (a URL's password is cut at any length); a JSON document inside a
+flag and a plain password stuck to a one-letter flag (`-p<password>`) are not cut; and a text that does not parse can
+show what neither check recognised. The full list is in [secrets.md](secrets.md#secret-shaped-values-in-a-files-text).
 
 ## Editing
 
@@ -126,14 +265,22 @@ left out.
 
 ## Routes
 
-| Route                       | Grant                                                                                                                                | Does                                                   |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
-| `GET /v1/config/status`     | `fleet.use`                                                                                                                          | every file, its state, every issue, every held edit    |
-| `GET /v1/config/file?path=` | the file's capability, `use`                                                                                                         | one file (or the starter a new one begins with) + etag |
-| `PUT /v1/config/file`       | the file's capability, `configure`; `If-Match: <etag>`                                                                               | write a file that checks; a loosening may be held      |
-| `POST /v1/config/confirm`   | the file's capability, `configure`; fresh passkey remotely                                                                           | confirm one held edit by its etag                      |
-| `PUT /v1/accounts/defaults` | `secrets.configure`, and the file's `configure` (fleet); fresh passkey remotely to set or change a line, none to remove one (!A243)¹ | the owner sets or clears one default account line      |
-| `POST /v1/agent/config`     | the agent's session credential; Ferretry settings on                                                                                 | the `config.*` tools                                   |
+| Route                          | Grant                                                                                                                                | Does                                                   |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
+| `GET /v1/config/status`        | `fleet.use`                                                                                                                          | every file, its state, every issue, every held edit    |
+| `GET /v1/config/file?path=`    | the file's capability, `use`                                                                                                         | one file (or the starter a new one begins with) + etag |
+| `PUT /v1/config/file`          | the file's capability, `configure`; `If-Match: <etag>`                                                                               | write a file that checks; a loosening may be held      |
+| `DELETE /v1/config/file?path=` | the file's capability, `configure`; `If-Match: <etag>` (or `?etag=`) required                                                        | remove one declared file; a loosening removal is held  |
+| `POST /v1/config/confirm`      | the file's capability, `configure`; fresh passkey remotely                                                                           | confirm one held edit by its etag                      |
+| `PUT /v1/accounts/defaults`    | `secrets.configure`, and the file's `configure` (fleet); fresh passkey remotely to set or change a line, none to remove one (!A243)¹ | the owner sets or clears one default account line      |
+| `POST /v1/agent/config`        | the agent's session credential; Ferretry settings on                                                                                 | the `config.*` tools                                   |
+
+**What `GET /v1/config/file` says differs in three values from the fixed file-kind list it replaces**: `kind` is the id of the
+plugin that declares the file (it was a file-kind name such as `machine`), `schema` is the schema file's name
+(`updates.json`; it was a schema id such as `warden`), and a file that is not there yet begins as its modeline alone
+(there are no per-kind starter texts). The members, their types and the other values are unchanged, and no consumer reads
+`kind` or `schema`. A confirmation names the held edit by its path and its FULL etag, and the daemon compares that etag
+with the disk inside its write queue, so a file that changed after the review is never confirmed.
 
 ¹ Removing one default can still change which account a card offers first: a narrower line (a project or a folder)
 that is removed lets a broader `sites` line for the same place apply. Removing never adds an account or a line, and
@@ -141,7 +288,10 @@ owner decision !A243 accepts it as tap-free.
 
 The file's capability is `warden` for `warden.yaml` and `fleet` for everything else. A loosening `PUT` is in
 effect at once only for somebody at the machine or a device that proved a passkey for the act; anyone
-else's is written and held. `PUT /v1/config/file` is a person's route (`caller: 'person'`): a ferret's
+else's is written and held. `DELETE /v1/config/file` is bounded the same way: a declared file only, Gate asked per file
+as for a write, the etag it was read at required (`428` without one, `409` when the file moved), and a removal that
+loosens (a budget, a rule) is held with the file still in effect unless somebody at the machine asked. GAP: a remote
+device's passkey proof is never spent on a removal, so its loosening removal is held. `PUT /v1/config/file` is a person's route (`caller: 'person'`): a ferret's
 credential, or the admin token naming a ferret's session, is refused with `403 owner_only` before the body is read,
 so `fy config write` from inside a ferret is refused too. A ferret's one write door is `config.write`
 (`POST /v1/agent/config`), where every loosening is held. An agent never confirms. The agenda's Allow
@@ -694,7 +844,42 @@ no file holds and no route returns.
 "What agents may control › **Ferretry settings**" decides whether an agent may use the `config.*` tools. It
 is **off by default**, and turning it on from another device needs a passkey like the other controls. It is a
 kill switch, not a boundary: an agent with plain file access can edit the files too. The real guard is rule
-2 — an agent's loosening waits for the owner either way.
+2 — an agent's loosening waits for the owner either way, and so does a `${secret:NAME}` reference it adds: an
+agent's write is as untrusted as a plugin's own. Every call is recorded in the security log as **Agent settings
+were changed** (`fleet.configured`, `action: agent-config`), naming the ferret and never the file's text,
+whether it came through a tool or through `POST /v1/agent/config` (that route's call is recorded as the tool it
+names). Every loosening the hold held before 5.0 is still held for an agent, in every file below; a test runs each
+one, extracted from the code before 5.0, through the agent's door. A runtime newly entering a shell is held too:
+that key is new in 5.0, and no agent had it before.
+
+The tools reach the files that now hold what they always reached, and no more:
+
+| Before 5.0                                       | The file the tools reach                                                |
+| ------------------------------------------------ | ----------------------------------------------------------------------- |
+| `warden.yaml`, `voice.yaml`, `limits.yaml`       | the same files (`limits.yaml` also holds the agent-control switches)    |
+| `learning.yaml`                                  | `lessons.yaml`                                                          |
+| `pack.yaml`, `models-guide.yaml`                 | `packs.yaml` (the routing prompt is its `routing` block)                |
+| `account-defaults.yaml`                          | `accounts.yaml`                                                         |
+| `machine.yaml`: the default runtime, agenda mode | `runtimes.yaml`, `agenda.yaml`                                          |
+| `machine.yaml`: keep conversations in sync       | `conversation.yaml` (its `keepInSync` was `conversations.listComputer`) |
+| `logins/`, `profiles/`, `runtimes/`, `models/`   | the same folders                                                        |
+| `components/mcp/`, `components/skills/`          | `mcp/`, `skills/`                                                       |
+| `components/settings/`, `components/hooks/`      | `claude-code/settings/`, `codex/settings/`, `claude-code/hooks/`        |
+| `components/modelSets/`                          | `model-sets/`                                                           |
+
+Any other file, and every person-only one (`gate.yaml`, `plugins.yaml`, `catalogs.yaml`), is refused on read,
+check and write. A file whose text holds anything shaped like a secret — parsed or not, in a comment or a tag
+included — is never shown, and an agent's text that holds one is refused. Not reached yet, each a declared GAP:
+
+- `browsers.yaml` (the browser mode, proxy and ports): a new or re-aimed proxy is not held yet; before 5.0 it was.
+- `usage.yaml` (the time zone and the public feed): a time-zone change is not held yet; before 5.0 it was.
+- `harness-claude-code.yaml`, `harness-codex.yaml` (the agent permission mode): each also holds the harness
+  binary and search paths, which no agent reached before, and only the permission mode is judged.
+- `components/instructions/` (now `instructions/<name>.yaml`, a `text:` document that Runtimes owns, which an agent does
+  not reach) and `presets/` (no successor declared yet).
+
+`agenda.yaml` also holds `deadlineWarnHours`, which before 5.0 lived in `daemon.json`, out of an agent's reach. It
+only moves when a deadline warning buzzes: no spend and no authority, so an agent may change it.
 
 The built-in **Set up Ferretry** skill teaches any agent the layout, the schemas, the commands and the rules.
 Every agent runtime's system prompt carries its short form (where the files are, no secret values,
@@ -724,6 +909,21 @@ what is shown until the new answer lands; an unsaved edit in a form or the file 
 on a timer. The revision is per boot (`epoch`), and it is how the app learns what it missed: the stream reopens
 whenever the app returns to the foreground or the network comes back, and if the first frame's revision moved —
 or names another boot — every screen reads again.
+
+**In the 5.0 kernel** a plugin that must pin an edit to what a caller read asks `ConfigPort.etag(def, name?)` for the
+disk etag of one of its OWN files (the one `write` and `writeAll` compare an `ifMatch` with, or `absent`): the etag only,
+never the text, and another plugin's file or a name that is no file of the def is refused.
+
+A file's own moves are their own signal. `ConfigPort.watch` still fires only when the version
+in effect moves; `ConfigPort.watchState` fires when one of the plugin's OWN files moves on disk or in state — an edit
+written or held for the owner, a held edit confirmed or discarded, a file broken or fixed, one removed — with the
+file's state (`absent`, `valid`, `invalid`, `held`) and its disk etag, never its text, a value or a sentence. The same
+moves reach an open app as one `kernel.config-changed` frame each on `GET /v1/bus` — `{ plugin, path, state, etag }`,
+the etag the one `GET /v1/config/file` answers — so a held edit arriving or a broken file wakes a settings card or a
+file editor at once. A frame reaches only a caller `GET /v1/config/file` would let read that file (that route's
+admission, then the per-file read judge, so `warden.yaml` asks for `warden`, and anything undetermined shows nothing),
+and no plugin hears the event in-process. Like every bus event it is a wake-up, at most once: the reader still reads
+the file.
 
 ## Declared gaps
 

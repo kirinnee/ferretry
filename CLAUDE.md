@@ -71,7 +71,8 @@ Bun workspaces monorepo — see [README.md](README.md#layout). `packages/cli`, `
 Cloudflare rendezvous that can carry it. The wire contract is
 [docs/relay-protocol.md](docs/relay-protocol.md) — implement against that document, not the code.
 Carriers are a per-device, per-machine **choice** (owner decision 2026-10-21, protocol §15): **Relay is the
-default** (a later same-day decision: no Auto unless chosen) and asks nothing; Auto walks direct → WebRTC →
+default** (a later same-day decision: no Auto unless chosen) and asks nothing — and an UNCHOSEN Relay that cannot reach its relay
+uses the direct address the device paired over (only a record carrying the positive `pairedOver: 'direct'` mark has one; older records behave as Relay only did) and says so for as long as any live lane or stream is on it, while a chosen "Relay only" never does; Auto walks direct → WebRTC →
 the hosted Cloudflare tunnel when the daemon published one → relay, and "WebRTC / tunnel / relay only"
 narrow that walk; every surface still names
 the live carrier and why the others were passed over. Pairing ignores the choice (direct, then the
@@ -95,8 +96,9 @@ no advertisement was reachable from nothing but its own host, which is why
 `scripts/validate/relay-config.sh` pins that source chain. An explicit relay
 carrier in `config/daemon.json` **wins and is never overwritten**, `enabled: false` included — the boot
 conversion carries a legacy `relay` block over into `carriers` unchanged, and adds no relay entry where
-none was written; a conversion that is refused or fails leaves the legacy spelling (and a recorded port is then written as the legacy `port`), because only the journalled conversion moves legacy keys — and every failure to discover fails closed to direct-only with the consequence and
-the remedy said out loud — a TRANSIENT one (no connection, timeout, 5xx, 429) is then retried in the background until the directory answers.
+none was written; a conversion that is refused or fails leaves the legacy spelling (and a recorded port is then written as the legacy `port`), because only the journalled conversion moves legacy keys — and a transient failure to discover (network, timeout, 5xx, 429) is retried in the background with capped
+jittered backoff and picked up without a restart, while every definitive one (relay switched off, an unreadable
+advertisement, no usable origin) fails closed to direct-only with the consequence and the remedy said out loud.
 Running your own relay stays supported as an **expert opt-in path** with its own runbook,
 [docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md), and its fingerprint
 allowlist remains independent of the hosted deployment. First-run onboarding asks no carrier
@@ -222,7 +224,7 @@ file is refused**, and every write edits only the changed keys so comments survi
 `fleet/config.yaml` is refused by sentence, never converted. The contract is
 [docs/config-files.md](docs/config-files.md).
 
-**Lessons** are rules learned from ferrets ([docs/learning.md](docs/learning.md)). The passive switch only
+**Lessons** are rules learned from ferrets ([docs/lessons.md](docs/lessons.md)). The passive switch only
 decides whether a ferret is **instructed** to file them (`fy lesson suggest "<rule>" --scope global|repo`);
 the daemon attaches the evidence from the session credential, so it cannot be forged. **Accept never
 writes**: **Apply** is a separate act — a diff preview with an etag, then a write of exactly that diff into
@@ -278,9 +280,11 @@ GitHub watcher that moves a card when its PR or release does, and the agenda and
 The contract, the CLI verbs and the declared gaps are [docs/board.md](docs/board.md); the one-time import of the
 old per-session task files is [docs/board-import.md](docs/board-import.md). Implement against those documents.
 
-**Finished autonomous sessions are archived, not kept live.** A session with `mode: auto` that ended more than a day
-ago leaves the daemon's live set — the index, `GET /v1/sessions`, the sweeps, the board's roster — while its directory
-stays where it was and every read of it still works; a write brings it back. Interactive sessions are never archived.
+**Finished autonomous sessions can be archived; the automatic pass is OFF by default** (`config/archive.yaml`
+`afterHours`), and it runs only once Board and Agenda both say what keeps a ferret live. When it runs, a session with
+`mode: auto` that ended longer ago than that leaves the session store's index and the live list (`GET /v1/ferrets`)
+while its record, its directory and every read of it stay; a write or a pin brings it back. Interactive sessions are
+never archived.
 The rule, what keeps a session live, the timer and the declared gaps are [docs/session-archive.md](docs/session-archive.md).
 
 ## Project record

@@ -1,0 +1,180 @@
+/**
+ * A real DOM for the shell components that genuinely need one.
+ *
+ * Focus traps, Escape stacks, pointer-capture swipes and outside-click dismiss
+ * are not renderable-tree facts — they are document facts. Asserting them
+ * against a shallow tree would test the port's shape and none of its
+ * behaviour, so these suites run against happy-dom.
+ *
+ * Registration is process-wide and idempotent: bun runs the whole suite in one
+ * process, and registering twice would replace globals mid-run.
+ */
+
+import { GlobalRegistrator } from '@happy-dom/global-registrator';
+import type { ReactElement } from 'react';
+import { act } from 'react';
+
+const registered = globalThis as typeof globalThis & {
+  __ferretryDomRegistered?: boolean;
+  __ferretryMutationObserverPatched?: boolean;
+  __ferretryNodeInspectPatched?: boolean;
+};
+/** Register a DOM only when mounting: connect-only test fakes keep the caller’s environment. */
+export function ensureDom(): void {
+  if (!registered.__ferretryDomRegistered) {
+    GlobalRegistrator.register({ url: 'https://pwa.example.test/' });
+    registered.__ferretryDomRegistered = true;
+  }
+  // DOM units assert app-side click and embedding contracts. They do not own a
+  // browser page loader, so keep happy-dom from resolving iframe, anchor, or
+  // popup navigation against the network after those contracts have been read.
+  const happyDOM = (
+    window as typeof window & {
+      happyDOM: {
+        settings: {
+          navigation: Record<
+            'disableMainFrameNavigation' | 'disableChildFrameNavigation' | 'disableChildPageNavigation',
+            boolean
+          >;
+        };
+      };
+    }
+  ).happyDOM;
+  happyDOM.settings.navigation.disableMainFrameNavigation = true;
+  happyDOM.settings.navigation.disableChildFrameNavigation = true;
+  happyDOM.settings.navigation.disableChildPageNavigation = true;
+
+  /**
+   * happy-dom 20.11.1 keeps its internal MutationObserver delivery closure only
+   * through a WeakRef, so an ordinary GC pass can permanently silence a still
+   * connected observer. Pin just that orphaned closure while `observe()` builds
+   * it; every other WeakRef in the test environment retains its real semantics.
+   *
+   * TODO: remove after https://github.com/capricorn86/happy-dom/issues/2264 is
+   * fixed and the dependency is updated.
+   */
+  if (!registered.__ferretryMutationObserverPatched) {
+    class StrongWeakRef<T extends WeakKey> {
+      readonly #target: T;
+
+      constructor(target: T) {
+        this.#target = target;
+      }
+
+      deref(): T {
+        return this.#target;
+      }
+    }
+
+    const originalObserve = MutationObserver.prototype.observe;
+    MutationObserver.prototype.observe = function (target: Node, options: MutationObserverInit): void {
+      const originalWeakRef = globalThis.WeakRef;
+      try {
+        globalThis.WeakRef = StrongWeakRef as unknown as typeof WeakRef;
+        originalObserve.call(this, target, options);
+      } finally {
+        globalThis.WeakRef = originalWeakRef;
+      }
+    };
+    registered.__ferretryMutationObserverPatched = true;
+  }
+
+  /**
+   * A failed `expect(node).toBeNull()` prints the node it received, and Bun's
+   * printer walks every own property: a connected happy-dom node reaches its
+   * parent, the document, the window and React's fibers, so one failed assertion
+   * printed for minutes, held the event loop past every test timeout, and grew
+   * past 2.8 GB until CI's 4 GB runner killed the whole group with no report.
+   * Every node prints as its text and then its markup instead, each capped,
+   * which is also what a reader of the failure wants to see.
+   */
+  const INSPECTED_NODE_LIMIT = 600;
+
+  const capped = (shown: string): string =>
+    shown.length > INSPECTED_NODE_LIMIT
+      ? `${shown.slice(0, INSPECTED_NODE_LIMIT)}… (${shown.length - INSPECTED_NODE_LIMIT} more characters)`
+      : shown;
+
+  if (!registered.__ferretryNodeInspectPatched) {
+    Object.defineProperty(Node.prototype, Symbol.for('nodejs.util.inspect.custom'), {
+      configurable: true,
+      value(this: Node): string {
+        const text = JSON.stringify(capped(this.textContent ?? ''));
+        return this instanceof Element
+          ? `${this.constructor.name} ${text} ${capped(this.outerHTML)}`
+          : `${this.constructor.name} ${text}`;
+      },
+    });
+    registered.__ferretryNodeInspectPatched = true;
+  }
+}
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+export interface Mounted {
+  readonly container: HTMLElement;
+  /** Re-render with new props, inside `act`. */
+  readonly render: (element: ReactElement) => Promise<void>;
+  readonly unmount: () => Promise<void>;
+}
+
+/**
+ * Every root `mount` made and nobody has unmounted yet. `dom-leak-guard.ts` (a preload, so it cannot
+ * import this module without registering a DOM in every tier) drains it after each test through this
+ * global, which is why a test that forgets `unmount()` leaves nothing for the next file to read.
+ */
+const mountRegistry = globalThis as { __ferretryLiveMounts?: Set<() => Promise<void>> };
+mountRegistry.__ferretryLiveMounts ??= new Set();
+const liveMounts = mountRegistry.__ferretryLiveMounts;
+
+/** Mounts into a fresh container attached to the live document. */
+export const mount = async (element: ReactElement): Promise<Mounted> => {
+  ensureDom();
+  const { createRoot } = await import('react-dom/client');
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+
+  const render = async (next: ReactElement): Promise<void> => {
+    await act(async () => {
+      root.render(next);
+    });
+  };
+
+  const unmount = async (): Promise<void> => {
+    if (!liveMounts.delete(unmount)) return;
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  };
+  liveMounts.add(unmount);
+
+  await render(element);
+
+  return { container, render, unmount };
+};
+
+/** Runs a callback (a click, a key press) inside `act` and flushes effects. Any
+ *  return value is discarded — `dispatchEvent` answers with a boolean. */
+export const interact = async (callback: () => unknown): Promise<void> => {
+  await act(async () => {
+    await callback();
+  });
+};
+
+/** Dispatches a trusted-shaped keyboard event at an element. */
+export const pressKey = (target: EventTarget, key: string, init: KeyboardEventInit = {}): void => {
+  target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }));
+};
+
+/**
+ * Narrows away a `null` the DOM cannot promise us, by FAILING rather than by
+ * asserting non-null. A missing element is a genuine test failure and deserves
+ * to say which one went missing; `!` would surface it as an unrelated
+ * `TypeError` several lines later.
+ */
+export const must = <T>(value: T | null | undefined, what: string): T => {
+  if (value === null || value === undefined) throw new Error(`expected ${what} to be present`);
+  return value;
+};

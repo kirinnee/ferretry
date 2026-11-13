@@ -2,7 +2,7 @@
 
 How a machine learns that a newer Ferretry exists, and how it gets onto it — by one click, by one
 command, or by the steps its install method needs. Read this before changing anything under
-`fy daemon update`, `/v1/daemon/update` or Settings › Machines › _machine_ › About.
+`fy update`, `/v1/daemon/update` or Settings › Machines › _machine_ › About.
 
 ## The one-sentence version
 
@@ -13,7 +13,7 @@ without rewriting somebody's configuration — every other method gets the exact
 ## Install methods
 
 The daemon and `fy` classify the same facts with the same pure function
-(`classifyInstallMethod` in `packages/protocol/src/lib/daemon-update.ts`), so `fy daemon status` and
+(`classifyInstallMethod` in `packages/plugins/updates/contract/install.ts`), so `fy daemon status` and
 the app can never disagree about what a machine is.
 
 The facts are: the path the daemon was **launched as** (what the unit file or `PATH` names), the same
@@ -41,7 +41,7 @@ Walking the launched path's links therefore shows it (`passes through home-manag
 
 | method           | how it is recognised                                                              | update                                                                         |
 | ---------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `homebrew`       | the resolved path is under `…/Caskroom/<product>/`                                | **self**: `brew update`, `brew upgrade --cask <product>`, restart              |
+| `homebrew`       | the resolved path is under `…/Caskroom/<product>/` or `…/Caskroom/<product>@4/`   | **self**: `brew update`, `brew upgrade --cask <product>`, restart              |
 | `nix-profile`    | a store path reached through the user's nix profile, held by a profile element    | **self**: install a guarded locked revision, replace the element, then restart |
 | `nix-shell`      | the launched path is itself a `/nix/store/…` path (an ephemeral `nix shell`)      | **switch**: offer a nix profile install; never silently                        |
 | `nix-module`     | a store path reached through home-manager, nix-darwin or NixOS (see above)        | **manual**: bump the flake input, then switch                                  |
@@ -72,7 +72,7 @@ profile install's unit names the profile link. Guarded updates replace that prof
 immutable revision before restarting (see [artifact checks](#the-version-judged-is-the-version-installed)). `fy daemon install` on a `nix-shell` daemon therefore offers to run
 `nix profile install github:kirinnee/ferretry` first (it asks; `--yes` does not answer it for you).
 
-`fy daemon update` on a `nix-shell` daemon explains this and offers the same switch; it changes
+`fy update` on a `nix-shell` daemon explains this and offers the same switch; it changes
 nothing unless asked (`--switch-to-profile`, or answering yes). The app's button for it is labelled
 as a switch, not as an update.
 
@@ -84,40 +84,42 @@ as a switch, not as an update.
 - **When**: once at boot, then at most every six hours — at the daemon's first look after that, which is
   never more than fifteen minutes late. A version compare only — nothing is
   downloaded until somebody asks for the update.
-- **Cache**: `<state home>/state/update/latest.json` (beside it: `config.json`, the setting; `report.json`, the last outcome; `update.log`, the client's output), so a restart inside the six hours does not ask again.
+- **Cache**: `<state home>/state/updates/update/latest.json` (beside it: `report.json`, the last outcome; `state/updates/update.log`, the client's output; the setting is `config/updates.yaml`, `autoInstall`, off by default and turned on by a held edit the owner confirms), so a restart inside the six hours does not ask again.
 - **Failure**: the check never fails a boot and never retries in a loop. A failed check is reported
   as such ("could not reach GitHub"), and the last good answer, if any, stays on screen with its age.
 - **Off**: a development build run from source never asks (it has no release to compare with), and
   `FY_UPDATE_CHECK=off` in the daemon's environment switches the check off — which is also how a
-  suite that boots a real daemon stays off the network.
+  suite that boots a real daemon stays off the network. The kernel reads the switch and folds it into
+  `kernel.updateHost.checks` (a compiled build AND not `off`), so the Updates plugin never reads the environment.
 
 ## Major versions
 
-**v4.291.10 refuses an update to a newer major version.** This applies to the latest release and
-an explicit `fy daemon update --to 5.0.0`, including `--yes`. The refusal happens before a package installation, binary swap or restart, and leaves the running
-daemon on its current version. Package metadata may be refreshed to make that decision. v4 patch
-and minor updates continue as before. Homebrew and Nix also judge the exact artifact they will install, even with `--to` naming v4.
-Unreadable or unparseable manager metadata refuses the update. A failed latest-release check also
-refuses an update without an explicit target; GitHub tags are never a substitute for a Nix revision check. Install this guard **before** v5 is released: an older v4
-client has no such protection.
+**The updater refuses a jump to a new major version.** From 5.x that means 6.0 and later. This
+applies to the latest release and to an explicit `fy update --to 6.0.0`, including `--yes`:
+`--yes` only answers the confirmation and never allows the jump. The refusal happens before a
+package installation, binary swap or restart, and leaves the running daemon on its current
+version. Package metadata may be refreshed to make that decision. Patch and minor updates continue
+as before. Homebrew and Nix also judge the exact artifact they will install, even with `--to`
+naming the current major. Unreadable or unparseable manager metadata refuses the update. A failed
+latest-release check also refuses an update without an explicit target; GitHub tags are never a
+substitute for a Nix revision check. The daemon's own check, the app and automatic installation
+never offer a new major as an update: it has no badge, no button and no automatic installation.
 
-v5 needs an explicit [v4 to v5 migration](https://github.com/kirinnee/ferretry/blob/main/docs/migration/v4-to-v5-prompt.md).
-It refuses an unmigrated v4 home, and Homebrew cannot automatically restore the previous cask if
-that new daemon will not start. The updater therefore **refuses**, rather than selecting an older
-v4 release. The manager source is resolved and guarded even when `--to` names v4; that option
-does not make an unversioned cask or flake source select the named release.
+The refusal says that the next major is not a plain update (it comes with its own steps), to read that release's notes, that the
+daemon stays on the current version, and that `--major` allows the move. No migration document
+exists yet for a 5-to-6 move, so nothing here links one; the release notes of that release are the
+place it will be described.
 
-The migration can explicitly allow the move with `fy daemon update --major --yes --to 5.0.0`.
-`--major` only removes this version guard; consent, install-method checks and health checks still
-apply. Use it as part of the migration instructions, after preparing the home. The app never passes
-this override: a newer major has no update badge, button or automatic installation. Its About panel
-says “5.0 is out: it needs the migration, not an update”.
+`--major` is a plain flag and combines with `--to`: `fy update --major --yes --to 6.0.0`.
+It only removes this version guard; consent, install-method checks and health checks still apply.
+Use it as part of that release's migration instructions, after preparing the home. The app never
+passes it.
 
 **Package managers bypass this guard.** Plain `brew upgrade`, `brew upgrade --cask ferretry` and
-tools such as topgrade still move the unversioned cask to v5. So do `nix profile upgrade` (including
-`--all`), a home-manager/nix-darwin/NixOS flake-input update followed by a switch, `apt upgrade`,
-`dnf upgrade`, and re-running `install.sh`. None calls the guarded updater. Keep those sources pinned
-to v4 until migration is intended.
+tools such as topgrade still move the unversioned cask to the next major. So do `nix profile upgrade`
+(including `--all`), a home-manager/nix-darwin/NixOS flake-input update followed by a switch,
+`apt upgrade`, `dnf upgrade`, and re-running `install.sh`. None calls the guarded updater. Keep
+those sources pinned until a migration is intended.
 
 ### The version judged is the version installed
 
@@ -146,22 +148,22 @@ from the intermediate generation. A shell switch installs the locked reference d
 Plain `nix profile upgrade` cannot advance that immutable reference. `fy daemon update` and app updates
 recognise `github:kirinnee/ferretry/<40-hex-revision>` as the updater's own pin: they resolve the product
 flake again, read and guard the next revision's version, then replace the element by the same safe
-sequence. A second v4 patch update works just like the first; a v5 candidate still requires the migration.
+sequence. A second patch update works just like the first; a next-major candidate still requires its migration.
 Tags, other repositories and unsupported sources remain explicit user pins and refuse an automatic
 source change.
 
 Immediately before every restart, including service-definition repair and rollback, the updater reads
 the installed executable's version again. Without `--major`, an unexpectedly installed newer major is
-refused without restarting: the running daemon stays up, and the message names
-`brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4 && fy daemon restart`
-or `nix profile rollback` as the way back. An unreadable
+refused without restarting: the running daemon stays up, and the message names the way back —
+`nix profile rollback`, putting the previous binaries back, or for Homebrew reinstalling the previous release
+(a v4 install has the `ferretry@4` cask for it: `brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4 && fy daemon restart`). An unreadable
 version also refuses a restart. Manager installs must report exactly the judged version in the final
 health check; a newer major can never pass merely by being greater than the requested version.
 
 Another process can refresh the Homebrew tap in the instant between the final local version check
-and `brew upgrade`. In that remaining race, brew can still install 5.0, just as a manual
-`brew upgrade` can. The updater does not restart it: it leaves the running daemon up and prints
-`brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4 && fy daemon restart`.
+and `brew upgrade`. In that remaining race, brew can still install the next major, just as a manual
+`brew upgrade` can. The updater does not restart it: it leaves the running daemon up and prints the way back
+(for a v4 install `brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4 && fy daemon restart`).
 
 ### Homebrew: the way back to v4
 
@@ -209,9 +211,9 @@ it does not require a still-existing old Caskroom executable.
 
 ## Applying an update
 
-`fy daemon update` is the one implementation. The app's **Update** button asks the daemon, which
-starts `fy daemon update --yes --to <version> --report <file>` (the `fy` beside the daemon
-executable) as a detached process and answers at once. Both service managers let that process
+`fy update` is the one implementation. The app's **Update** button asks the daemon, which
+starts `fy update --run --to <version> --report <file>` (the `fy` beside the daemon
+executable; `<file>` is the path Updates declares for its `report` state file) as a detached process and answers at once. Both service managers let that process
 survive the daemon's own restart: the systemd unit uses `KillMode=process` and the launchd agent
 `AbandonProcessGroup`, for the same reason the session panes do.
 
@@ -249,7 +251,7 @@ manager respawned onto a newer executable never passed through any of them. The 
 that matters is a launchd plist with no `ProcessType`, which macOS answers by throttling the daemon's
 CPU and I/O — and every agent's, because children inherit it. The plist now declares `Interactive`,
 `fy daemon status` names the job's `ProcessType` and warns "macOS is throttling the daemon — run
-`fy daemon update`" when it is anything else, and `fy daemon update` on an up-to-date daemon with
+`fy update`" when it is anything else, and `fy update` on an up-to-date daemon with
 such a plist restarts it (behind the same `--yes` or prompt an update asks for) so the plist is
 rewritten. A stopped daemon is left alone: its next start rewrites the plist.
 
@@ -276,7 +278,7 @@ The release carries `checksums.txt` (GoReleaser) and `checksums.txt.sig`, an Ed2
 keeps a signature made for this file from meaning anything anywhere else. The update:
 
 1. downloads `fy_<os>_<arch>.tar.gz`, `checksums.txt` and `checksums.txt.sig`;
-2. verifies the signature against a key compiled into `fy` (`packages/cli/src/lib/update/release-keys.ts`);
+2. verifies the signature against a key compiled into `fy` (`packages/plugins/updates/contract/keys.ts`);
 3. verifies the archive's SHA-256 against its line in `checksums.txt`;
 4. unpacks `fy`, `fyd` and `fyd-browser-worker` next to the current ones as `*.new`;
 5. renames each current binary to `*.previous` and each `*.new` into place (a rename is atomic on one
@@ -292,7 +294,7 @@ openssl pkey -in daemon-release-key.pem -pubout -outform DER | openssl base64 -A
 ```
 
 Put the private PEM in the `DAEMON_RELEASE_SIGNING_KEY` secret of the `daemon-release` environment,
-add the printed public key to `release-keys.ts`, and delete the local PEM. `cd.yaml` signs when the
+add the printed public key to `DAEMON_RELEASE_KEYS` in `packages/plugins/updates/contract/keys.ts`, and delete the local PEM. `cd.yaml` signs when the
 secret is present; `scripts/ci/sign-daemon-release.sh` refuses a key whose public half is not listed.
 
 ## Safety
@@ -301,6 +303,9 @@ secret is present; `scripts/ci/sign-daemon-release.sh` refuses a key whose publi
   (`turnState: working`) and the app and `fy` say so in one line, but an update asked for `now` goes
   ahead: ferrets keep running through the restart (below). **Update when idle** (`when: 'when-idle'`,
   `--when-idle`) is still there for whoever would rather wait for every turn to end.
+  `--when-idle` fails closed: if the daemon is up but how many ferrets are mid-turn cannot be read, `fy daemon
+restart` and `fy update` refuse with one sentence and change nothing (run again, or leave the flag out); a
+  daemon that is down has nothing to wait for. When none is mid-turn, `--when-idle` says so.
 - **Remote devices** may start an update or change the update setting only with the `fleet`
   capability's `configure` axis **and** a passkey step-up, like loosening a configuration file. A
   remote update downloads and runs new code on the machine, which is at least as much as the acts that
@@ -402,9 +407,9 @@ block `brew update`, `brew upgrade`, package installs and service changes, and C
 no network and no write access outside the project — both on purpose, and Ferretry does not try to get
 around either. The agent hands the person the command instead:
 
-- **Claude Code**: type `! fy daemon update` in the chat. A `!` command runs as you, not as the
+- **Claude Code**: type `! fy update` in the chat. A `!` command runs as you, not as the
   agent, so nothing blocks it, and its output lands in the conversation for the agent to read.
-- **Codex**: run `fy daemon update` in your own terminal.
+- **Codex**: run `fy update` in your own terminal.
 - **Either**: press **Update** in the app.
 
 `fy setup` and `fy setup --check --json` report an available update (`update.available`,
@@ -430,16 +435,16 @@ around either. The agent hands the person the command instead:
 
 ## Surface
 
-| surface                                | what                                                     |
-| -------------------------------------- | -------------------------------------------------------- |
-| `fy daemon status`                     | adds the install method and, when known, the update line |
-| `fy daemon update [--check] [--yes] …` | check, or apply the update for this install method       |
-| `fy daemon restart [--when-idle]`      | restart now (ferrets keep running), or once all are idle |
-| `fy daemon install`                    | on a `nix-shell` daemon, offers the nix profile install  |
-| `fy setup [--check] [--json]`          | reports the update and its command; never applies it     |
-| `GET /v1/daemon/update`                | the `DaemonUpdateView`                                   |
-| `POST /v1/daemon/update`               | start an update (`now` / `when-idle`)                    |
-| `PATCH /v1/daemon/update/settings`     | turn automatic install on or off                         |
+| surface                            | what                                                     |
+| ---------------------------------- | -------------------------------------------------------- |
+| `fy daemon status`                 | adds the install method and, when known, the update line |
+| `fy update [--check] [--yes] …`    | check, or apply the update for this install method       |
+| `fy daemon restart [--when-idle]`  | restart now (ferrets keep running), or once all are idle |
+| `fy daemon install`                | on a `nix-shell` daemon, offers the nix profile install  |
+| `fy setup [--check] [--json]`      | reports the update and its command; never applies it     |
+| `GET /v1/daemon/update`            | the `DaemonUpdateView`                                   |
+| `POST /v1/daemon/update`           | start an update (`now` / `when-idle`)                    |
+| `PATCH /v1/daemon/update/settings` | turn automatic install on or off                         |
 
 ## Declared GAPs
 
@@ -466,9 +471,9 @@ explicit yes, and never on a timer.**
   `FY_CLAUDE_BIN` / `FY_CODEX_BIN`, `harness.paths`, the declared search paths, then `PATH`. It is the
   file the wrapper `exec`s, so it is the one a new ferret runs; the panel names the rule that chose it.
 - **How it was installed** reuses the daemon's own detection, not a copy of it: the same link-chain
-  walk (`executableNixFacts` in `packages/daemon/src/adapters/update/install-facts.ts`), the same
+  walk (`executableNixFacts` in `packages/plugins/updates/daemon/adapters/install-facts.ts`), the same
   `nix profile list --json` reading, the same store-path rule (`classifyNixStorePath`) and the same
-  module steps (`nixModuleUpdate`) in `packages/protocol/src/lib/daemon-update.ts`.
+  module steps (`nixModuleUpdate`) in `packages/plugins/updates/contract/install.ts`.
   `classifyHarnessInstall` (`packages/protocol/src/lib/harness-update.ts`) adds only what a harness has
   and the daemon does not.
 
@@ -560,3 +565,24 @@ step-up from a remote device to start, and never a ferret. The start is audited 
 - The last outcome lives in memory: a daemon restart forgets it (the update itself is unaffected).
 - A Homebrew or nix update cannot be pinned to the verified version; it installs what that source has.
 - Codex standalone binaries are shown steps, not updated: Ferretry does not download harness binaries.
+
+## Where this lives in 5.0
+
+The Updates plugin (`packages/plugins/updates`) owns `/v1/daemon/update` (view, start, settings), the six-hourly check
+(a kernel job; the idle moment arrives as `ferret.changed`), `fy update`, and the Settings › Updates tab with the
+`behind` notice. The harness CLIs' updates are the harness plugins' (`/v1/claude-code/update`, `/v1/codex/update`).
+
+- **A new major is never a plain update.** `isNewerMajorVersion` and `isUpdateAvailable` live in the plugin's contract
+  (`contract/version.ts`, `contract/release.ts`), so the daemon's check, the app and automatic installation never offer
+  one; `fy update` (the shell's `DaemonUpdater`) refuses it unless given `--major` (see [Major versions](#major-versions)).
+- **Automatic installs ship OFF.** `config/updates.yaml` has `autoInstall: false`; turning it on is a loosening, so the
+  daemon holds the edit for the owner (`202` with the sentence) instead of applying it. Whether a remote device also
+  confirms with a passkey is Gate's step-up decision for the act, not a handler's.
+- **Two things the daemon half takes from the host, because the kernel ports do not carry them yet:** the running
+  build's facts (release number, `argv0`, `execPath`, links, a detached launch of `fy update --run`) and the config
+  write door. Without the first, the routes answer `503 update_host_unavailable` instead of guessing a version; without
+  the second, changing the setting answers `503 update_config_unavailable`. `fy update --run` (the transaction that
+  restarts the daemon) likewise needs the `fy` shell's machine ports and exits `69` without them.
+- **Release signing.** `DAEMON_RELEASE_KEYS` (empty until the owner sets up signing) and
+  `DAEMON_RELEASE_SIGNATURE_CONTEXT` are exported by the plugin's contract; `scripts/ci/sign-daemon-release.sh` finds
+  each by name and refuses to sign with a key that is not listed.

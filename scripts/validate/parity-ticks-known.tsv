@@ -1,0 +1,42 @@
+# Ticked parity rows that parity-ticks.ts cannot prove yet: id<TAB>reason. TEMPORARY - this list must shrink to empty
+# before 5.0 is green. Its ids are pinned in FROZEN_IDS (scripts/validate/parity-ticks.ts): an id not in that set fails, an
+# entry whose row passes (or is unticked) fails, so the list can only shrink, and the two sets must stay equal. Fix a row, then delete it from both.
+S-0010	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
+S-0255	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
+S-0262	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
+S-0304	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
+S-0388	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
+T-0003	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0003 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0004	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0004 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0005	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0005 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0006	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0006 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0007	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0007 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0008	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0008 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0009	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0009 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0010	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0010 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0011	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0011 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0012	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0012 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0013	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0013 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0014	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0014 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0015	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0015 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0016	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0016 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0017	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0017 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0018	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0018 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0019	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0019 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0020	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0020 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0021	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0021 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0022	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0022 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0023	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0023 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0024	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0024 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0025	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0025 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0026	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0026 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0027	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0027 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0028	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0028 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0029	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0029 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0030	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0030 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+T-0031	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0031 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+V-0293	no live test(), it() or describe() title in packages/plugins/lessons/tests/unit/parity/commands.test.ts names V-0293 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+V-0295	no live test(), it() or describe() title in packages/plugins/lessons/tests/unit/parity/commands.test.ts names V-0295 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+V-0297	no live test(), it() or describe() title in packages/plugins/lessons/tests/unit/parity/commands.test.ts names V-0297 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+V-0301	no live test(), it() or describe() title in packages/plugins/lessons/tests/unit/parity/commands.test.ts names V-0301 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
+V-0302	no live test(), it() or describe() title in packages/plugins/lessons/tests/unit/parity/commands.test.ts names V-0302 (a comment, a string elsewhere, or a skipped, todo or only title does not count)

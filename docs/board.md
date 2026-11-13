@@ -399,10 +399,10 @@ lane its workflow works in (In progress / Doing; Plan for `design-first`). A car
 where it is, and a failed move only warns: the session still starts. A card the lead makes with `fy task create`
 has no session yet, so it stays in Todo until the lead passes `--lane` or moves it.
 
-**Which lane, by what the work is.** `fy task move --help` and `fy board lanes show` give the rule by lane category,
+**Which lane, by what the work is.** `fy board lanes show`, and the refusal of `fy card move` to a lane the board lacks, give the rule by lane category,
 and `lanes show` adds a "use when" per lane (`laneUse`, single-sourced in `@ferretry/protocol`): planning or designing
 in the planning lane, building in the active lane, a PR, a merge, a release and
-`fy signal done` move a card by themselves, and blocked is not a lane (`fy task block`, `depend`).
+`fy signal done` move a card by themselves, and blocked is not a lane (`fy card block`, `depend`).
 
 A card's **workflow** (`quick`, `design-first`, `research-first`, `investigate`) selects its variant of the lane
 set and cannot change after creation. In the PR templates only `design-first` and `research-first` work walks
@@ -563,7 +563,7 @@ read from GitHub, never taken on a caller's word. The owner, the card's owner fe
 report one, and so may a sub-ferret on the card it is doing, since it is the one that saw the deploy; anyone else is
 `403 forbidden`. The move is the daemon's, through the same `triggerMove` every fact uses: into the first lane of
 the card's variant that enters on the trigger, recorded `auto` with the trigger and with `reportedBy` naming who
-reported it (and `reportedVia: "admin-token"` beside it, as `actorVia` is beside an actor). It never goes back: a
+reported it (an owner on the admin token is `{ kind: "owner", via: "admin-token" }`). It never goes back: a
 card already there or past it is unchanged, and the answer is the card as it is. A dependency holds it as it holds a
 move: a blocked card is not moved on to a later category (`409 blocked-by`, naming the blockers); sideways it moves,
 and says what blocked it, and the owner's report moves it on as a fact would. A sub-ferret reports only on the card it

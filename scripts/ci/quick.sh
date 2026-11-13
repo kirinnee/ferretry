@@ -42,5 +42,18 @@ limit=${FY_CI_QUICK_PARALLEL:-2}
 bun scripts/ci/unit-timings.ts || status=1
 # Judge even a red run: a missing group or uncovered source is reported alongside test failures.
 ./scripts/ci/coverage-ledger.sh unit --groups coverage/unit/groups || status=1
-./scripts/ci/parallel.sh coverage/ci/quick/static "${limit}" ./scripts/ci/quick.sh --part -- format gates build || status=1
+./scripts/ci/parallel.sh coverage/ci/quick/static "${limit}" ./scripts/ci/quick.sh --part -- format gates build scripts || status=1
+# THE GUARANTEE PROOF (redesign §10.5): every kept Appendix D row has a test named with its id AND that test passed in the
+# unit tier's JUnit reports (the unit groups, and the repository tooling's own `scripts` part). Judged after every part, so a
+# red run still reports it, and ANY default-mode finding fails the job. `--tier unit` leaves the rows tested only in the
+# integration tier to the integration job (scripts/ci/integration.sh), which judges them from its own report.
+# STRICT MODE is required (the count reached 0, merge-bar line 1): `--strict` also checks the rows of the packages still
+# pending, which were skipped by design until then, and check.ts passes it to `guarantee-owner` too (enforcer symbols
+# and the owner's own suite). integration.sh judges its own tier the same way.
+bun scripts/gen/check.ts guarantees --strict --tier unit --results coverage/unit --results coverage/scripts || status=1
+# THE TICK PROOF: every `[x]` parity row names a test that exists AND passed in these same reports (integration.sh judges its own tier).
+# LOAD-BEARING: a row whose test is under tests/integration/ is skipped here by design and judged only by the integration job, which
+# a pull request runs only with the `full-ci` label. Without that label such a tick is not proven by any run; keep the label on
+# the rebuild PR (or run integration.sh) before trusting an integration-tier tick.
+bun scripts/gen/check.ts parity-ticks --tier unit --results coverage/unit --results coverage/scripts || status=1
 exit "${status}"

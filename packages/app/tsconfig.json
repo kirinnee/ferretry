@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    // `vite/client` types what the bundler resolves: the stylesheet import in `src/main.tsx`, asset URLs and
+    // `import.meta.env`.
+    "types": ["bun", "vite/client"]
+  },
+  "include": ["src", "tests", "scripts", "vite.config.ts", "tailwind.config.ts"],
+  "exclude": []
+}

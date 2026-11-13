@@ -1,5 +1,5 @@
 import { dirname, resolve } from 'node:path';
-import { DAEMON_RUNTIME_TUNING } from '@ferretry/protocol/daemon-runtime-tuning';
+import { DAEMON_RUNTIME_TUNING } from './runtime-tuning.ts';
 import type { DaemonLayout } from './layout.ts';
 import { isBinaryPlist } from './plist.ts';
 import type {
@@ -30,7 +30,7 @@ export class UnsupportedServiceManagerError extends Error {
 }
 
 /** Raised when a service-manager command fails; carries whatever it said. */
-export class ServiceManagerCommandError extends Error {
+class ServiceManagerCommandError extends Error {
   constructor(argv: readonly string[], stderr: string) {
     super(stderr.trim() === '' ? `${argv.join(' ')} failed` : stderr.trim());
     this.name = 'ServiceManagerCommandError';
@@ -41,7 +41,7 @@ export class ServiceManagerCommandError extends Error {
  * Raised when a lifecycle verb would act on a daemon it cannot tie to the state home it was asked
  * about. Nothing has been stopped, signalled or rewritten when this is thrown.
  */
-export class DaemonOwnershipError extends Error {
+class DaemonOwnershipError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'DaemonOwnershipError';
@@ -119,20 +119,9 @@ async function assertDefinitionServes(
 /** The description both service definitions carry. */
 const description = (daemonName: string): string => `${daemonName} — per-host agent daemon`;
 
-/**
- * Claim the state home, then create the log directory inside it.
- *
- * ORDER MATTERS AND IS THE POINT. `<state home>/logs` is the first thing this CLI ever puts inside
- * the daemon's home, and it goes in before the daemon has run once — so an unclaimed home reaches
- * the daemon already non-empty, which is the arrangement it must refuse. Claiming first means the
- * marker is there before the directory is, and every ordering of `fy` and `fyd` works the same way.
- *
- * The daemon still tolerates a lone unclaimed `logs/` in its pre-bootstrap shape, and that allowance
- * must stay: an older `fy` on this same host creates one without claiming, and refusing those hosts
- * is the very failure this removes.
- */
+/** Validate the format-1 home before creating its log directory. */
 async function claimThenCreateLogDirectory(
-  claims: IStateHomeClaimPort,
+  claims: Pick<IStateHomeClaimPort, 'claim'>,
   files: IServiceFilePort,
   layout: DaemonLayout,
 ): Promise<void> {
@@ -148,7 +137,7 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
     private readonly layout: DaemonLayout,
     private readonly processes: IDaemonProcessPort,
     private readonly files: IServiceFilePort,
-    private readonly claims: IStateHomeClaimPort,
+    private readonly claims: Pick<IStateHomeClaimPort, 'claim'>,
   ) {}
 
   /** Where systemd reads this unit from, so an installer can name the file it wrote. */
@@ -272,7 +261,7 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
     private readonly layout: DaemonLayout,
     private readonly processes: IDaemonProcessPort,
     private readonly files: IServiceFilePort,
-    private readonly claims: IStateHomeClaimPort,
+    private readonly claims: Pick<IStateHomeClaimPort, 'claim'>,
   ) {}
 
   /** Where launchd reads this agent from, so an installer can name the file it wrote. */
@@ -399,7 +388,7 @@ export class DirectSupervisor implements IDaemonSupervisor {
     private readonly layout: DaemonLayout,
     private readonly processes: IDaemonProcessPort,
     private readonly files: IServiceFilePort,
-    private readonly claims: IStateHomeClaimPort,
+    private readonly claims: Pick<IStateHomeClaimPort, 'claim'>,
   ) {}
 
   installed(): Promise<boolean> {

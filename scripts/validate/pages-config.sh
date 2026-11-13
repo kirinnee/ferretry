@@ -5,38 +5,32 @@ root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
 
 config="wrangler.jsonc"
-headers="packages/pwa/public/_headers"
-redirects="packages/pwa/public/_redirects"
+app="packages/app"
+headers="${app}/public/_headers"
+redirects="${app}/public/_redirects"
 
 jq -e '
   .name == "ferretry"
-  and .pages_build_output_dir == "./packages/pwa/dist"
+  and .pages_build_output_dir == "./packages/app/dist"
   and (has("main") | not)
   and (has("vars") | not)
   and (has("kv_namespaces") | not)
   and (has("d1_databases") | not)
 ' "${config}" >/dev/null
 
+# The app shell copies today's `public/_headers` and `_redirects` (docs/rebuild/spine.md §9 slice 5). Until it
+# has, there is nothing to hold them to, and saying so is not a pass of the rules below: the Pages deploy
+# (scripts/ci/build-pwa.sh) still refuses to publish a bundle without them.
+if [[ ! -f ${headers} && ! -f ${redirects} ]]; then
+  echo "⏳ ${app}/public has no _headers or _redirects yet (app-shell port): only ${config} was checked"
+  exit 0
+fi
+
 rg -q '^/\*$' "${headers}"
 rg -q "^  Content-Security-Policy: .*connect-src 'self' https: wss: https://api.groq.com https://api.cerebras.ai http://localhost:\* http://127.0.0.1:\* ws://localhost:\* ws://127.0.0.1:\*;" "${headers}"
 # Dictation clean-up calls Groq and Cerebras straight from the browser with a key this device holds
-# (docs/secrets.md, "Device-held speed-up keys"). `connect-src` names exactly the hosts the shared
-# provider table sends a key to, so the two must agree: a provider added to the table without its
-# host here, or a host left here after its provider is gone, fails.
-cleanup_source="packages/protocol/src/lib/stt-cleanup.ts"
-table_hosts="$(rg --only-matching --no-filename --replace '$1' "^    host: '([a-z0-9.-]+)',$" "${cleanup_source}" | sort -u)"
-[ -n "${table_hosts}" ] || {
-  echo "❌ ${cleanup_source} names no provider host; this check would pass vacuously" >&2
-  exit 1
-}
-csp_hosts="$(rg --only-matching --no-filename "connect-src [^;]*" "${headers}" | tr ' ' '\n' | rg --replace '$1' '^https://([a-z0-9.-]+)$' | sort -u)"
-[ "${table_hosts}" = "${csp_hosts}" ] || {
-  echo "❌ ${headers} connect-src names https hosts {${csp_hosts//$'\n'/, }} but ${cleanup_source} sends keys to {${table_hosts//$'\n'/, }}" >&2
-  exit 1
-}
-# The pairing scanner needs the camera on this origin and nowhere else. Pinned
-# because `camera=()` silently disables `getUserMedia` for the whole site, and
-# the symptom is a scan button that does nothing rather than a build failure.
+# (docs/secrets.md, "Device-held speed-up keys"). In 4.x this also held `connect-src` to the provider table
+# in @ferretry/protocol; that table moves into the Voice plugin's contract, and the cross-check returns with it.
 rg -q '^  Permissions-Policy: camera=\(self\), geolocation=\(\), microphone=\(self\)$' "${headers}"
 # The `fy-render` sandbox shell and its two library bundles.
 #
@@ -56,17 +50,21 @@ block_of() {
   ' "${headers}"
 }
 
+# Both helpers capture the block first and match it from a here-string: `block_of | rg -q` under pipefail fails with
+# SIGPIPE when rg exits on its first match while awk is still writing, so the verdict would depend on timing.
 require_in_block() {
-  local path="$1" pattern="$2"
-  block_of "${path}" | rg -q "${pattern}" || {
+  local path="$1" pattern="$2" block
+  block="$(block_of "${path}")"
+  rg -q "${pattern}" <<<"${block}" || {
     echo "❌ ${headers}: rule ${path} is missing a line matching: ${pattern}" >&2
     exit 1
   }
 }
 
 refuse_in_block() {
-  local path="$1" pattern="$2" why="$3"
-  if block_of "${path}" | rg -q "${pattern}"; then
+  local path="$1" pattern="$2" why="$3" block
+  block="$(block_of "${path}")"
+  if rg -q "${pattern}" <<<"${block}"; then
     echo "❌ ${headers}: rule ${path} ${why}" >&2
     exit 1
   fi
@@ -139,22 +137,11 @@ rg -q '^/pair/\* /app/ 200$' "${redirects}"
 rg -q '^/join /app/ 200$' "${redirects}"
 rg -q '^/shared /app/ 200$' "${redirects}"
 require_in_block "/join" '^  Cache-Control: no-store$'
-tail -n 1 "${redirects}" | grep -qx '/\* /index.html 200'
+last_redirect="$(tail -n 1 "${redirects}")"
+[[ ${last_redirect} == '/* /index.html 200' ]]
 
-# The pairing URL the daemon mints — and so the QR `fy pair` draws from it — addresses this Pages
-# project by hostname, and neither the daemon nor the CLI can read wrangler.jsonc at runtime. Pinned
-# because a renamed project would leave every minted pairing link addressing a site that no longer
-# exists, and nothing would fail until somebody scanned one. The hostname has ONE owner, the protocol's
-# HOSTED_APP_ORIGIN; the daemon's pairing link is built from it.
-origin_owner="packages/protocol/src/lib/pairing.ts"
-rg -qF "export const HOSTED_APP_ORIGIN = 'https://$(jq -r '.name' "${config}").pages.dev';" "${origin_owner}" || {
-  echo "❌ ${origin_owner} HOSTED_APP_ORIGIN does not address the Pages project named in ${config}" >&2
-  exit 1
-}
-pair_service="packages/daemon/src/lib/pairing/service.ts"
-rg -qF '`${HOSTED_APP_ORIGIN}/pair`' "${pair_service}" || {
-  echo "❌ ${pair_service} does not build its pairing link from HOSTED_APP_ORIGIN" >&2
-  exit 1
-}
+# The pairing URL the daemon mints — and so the QR `fy pair` draws from it — addresses this Pages project by
+# hostname. In 4.x this held HOSTED_APP_ORIGIN (@ferretry/protocol) and the daemon's pairing link to the
+# project name in wrangler.jsonc; both move into the Access plugin, and the cross-check returns with its port.
 
 echo "✅ Cloudflare Pages configuration is static, scoped, and cache-safe"

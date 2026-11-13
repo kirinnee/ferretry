@@ -2,16 +2,49 @@
 set -euo pipefail
 
 # Cross-compile every standalone executable from EVERY .bin entry of each shipped package for every
-# supported target. Every entry, not the first: the daemon package also declares its browser worker,
-# and a release that compiled only the first entry shipped a daemon whose browser pane could never
-# start (the worker is run beside the daemon, see packages/daemon/src/lib/browser/runtime/worker-program.ts).
+# supported target. Every entry, not the first: a package may declare a helper beside its own executable,
+# and a 4.x release that compiled only the first entry shipped a daemon whose browser worker could never
+# start. The shipped packages are the CLI (`fy`, packages/cli), the daemon host (`fyd`, packages/core/kernel)
+# and the browser worker the daemon runs beside it (`fyd-browser-worker`, packages/plugins/browsers: the
+# kernel never points into a plugin, so the worker's bin entry is the Browsers package's own).
 #
 # `COMPILE_TARGETS` narrows that to the named artifact suffixes (space-separated, e.g. `linux-x64-baseline`)
-# for a caller that runs only some of them: the e2e tier drives the one binary of its own host
-# (scripts/ci/e2e.sh), and compiling the other eight binaries cost ~15s in every shard. UNSET, IT IS EVERY
+# for a caller that runs only some of them (a local check of its own host's binary: compiling every
+# target costs seconds per binary). UNSET, IT IS EVERY
 # TARGET (a whitespace-only value counts as unset): the release path (publish.sh, the `compile` job) never
 # sets it, and an unknown name fails
 # rather than silently compiling less.
+#
+# `compile.sh --list` prints what one target compiles (package<TAB>entry<TAB>name per executable) and
+# exits before installing or building anything: the release contracts read it to prove no compile omits
+# an executable a release channel ships (scripts/validate/cli-contracts.sh release-helpers).
+CLI_PKG="packages/cli"
+DAEMON_PKG="packages/core/kernel"
+# The daemon's helper executables that live in a plugin package and ship beside it.
+BROWSERS_PKG="packages/plugins/browsers"
+
+# The FIRST bin key is the package's own executable name (the two-name model reads
+# `.bin | to_entries[0].key`); the remaining entries are helpers that ship beside it.
+package_bins() {
+  local package="$1" prefix
+  prefix="$(jq -r '.bin | to_entries[0].key' "${package}/package.json")"
+  [ -z "${prefix}" ] || [ "${prefix}" = "null" ] && echo "❌ no .bin entry in ${package}/package.json" >&2 && exit 1
+  jq -r --arg package "${package}" '.bin | to_entries[] | [$package, .value, .key] | @tsv' "${package}/package.json"
+}
+
+# Every executable one target compiles, in order.
+shipped_bins() {
+  package_bins "${CLI_PKG}"
+  package_bins "${DAEMON_PKG}"
+  package_bins "${BROWSERS_PKG}"
+}
+
+if [ "${1:-}" = "--list" ]; then
+  shipped_bins
+  exit 0
+fi
+[ "$#" -gt 0 ] && echo "❌ usage: compile.sh [--list]" >&2 && exit 2
+
 ./scripts/ci/setup.sh
 
 # bunTarget<TAB>artifactSuffix<TAB>os<TAB>cpu — x64 uses the -baseline build (no AVX2) so it runs under QEMU too.
@@ -46,24 +79,26 @@ done <<<"${targets}"
 mapfile -t install_os < <(printf '%s\n' "${install_os[@]}" | sort -u)
 mapfile -t install_cpu < <(printf '%s\n' "${install_cpu[@]}" | sort -u)
 bun install --frozen-lockfile "${install_os[@]}" "${install_cpu[@]}"
-
-CLI_PKG="packages/cli"
-DAEMON_PKG="packages/daemon"
-
-# The FIRST bin key is the package's own executable name (the two-name model reads
-# `.bin | to_entries[0].key`); the remaining entries are helpers that ship beside it.
-package_bins() {
-  local package="$1" prefix
-  prefix="$(jq -r '.bin | to_entries[0].key' "${package}/package.json")"
-  [ -z "${prefix}" ] || [ "${prefix}" = "null" ] && echo "❌ no .bin entry in ${package}/package.json" >&2 && exit 1
-  jq -r --arg package "${package}" '.bin | to_entries[] | [$package, .value, .key] | @tsv' "${package}/package.json"
-}
+# The hosts import the git-ignored generated registries (the install above also runs it as postinstall).
+./scripts/local/gen.sh
 
 OUTDIR="${COMPILE_OUTDIR:-dist/bin}"
 mkdir -p "${OUTDIR}"
 
-# The daemon imports the hosted directory default from @ferretry/relay. Do not add a build define
+# The daemon compiles the hosted directory default from its one source constant. Do not add a build define
 # here: a release-only define was why Nix and GoReleaser could produce different reachability.
+#
+# The hosted APP's origin is the one build-time choice that may differ: `scripts/ci/hosted-app-origin.sh` (the
+# switch is FY_HOSTED_APP_ORIGIN) prints its defines, and prints NOTHING for the production app, so an ordinary
+# release compiles exactly as before. The 5.0 preview sets it to build a daemon that links to its own app.
+# Captured FIRST: a failure inside a process substitution is ignored even under `set -e`, so the loop would just get
+# no lines and compile a daemon with the production origin and key, silently. As an assignment, a failure stops here.
+hosted_app_defines=()
+hosted_app_output="$(./scripts/ci/hosted-app-origin.sh --defines)"
+while IFS= read -r define; do
+  [ -z "${define}" ] && continue
+  hosted_app_defines+=(--define "${define}")
+done <<<"${hosted_app_output}"
 
 count=0
 while IFS=$'\t' read -r target suffix _ _; do
@@ -72,12 +107,9 @@ while IFS=$'\t' read -r target suffix _ _; do
     artifact="${prefix}-${suffix}"
     echo "🔨 compiling ${package} for ${target} -> ${OUTDIR}/${artifact}"
     bun ./scripts/release/compile-executable.ts --entry "./${package}/${entry}" --target "${target}" \
-      --outfile "${OUTDIR}/${artifact}"
+      --outfile "${OUTDIR}/${artifact}" ${hosted_app_defines[@]+"${hosted_app_defines[@]}"}
     count=$((count + 1))
-  done < <(
-    package_bins "${CLI_PKG}"
-    package_bins "${DAEMON_PKG}"
-  )
+  done < <(shipped_bins)
 done <<<"${targets}"
 
 [ "${count}" -eq 0 ] && echo "❌ nothing was compiled: COMPILE_TARGETS names no target" >&2 && exit 1

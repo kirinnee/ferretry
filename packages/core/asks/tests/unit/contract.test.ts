@@ -1,0 +1,123 @@
+import { describe, expect, test } from 'bun:test';
+import { z } from 'zod';
+import {
+  AskAnswerSchema,
+  AskDraftSchema,
+  AskIdSchema,
+  AskOnScreenSchema,
+  AsksConfigFile,
+  AskSourceSchema,
+} from '../../contract/index.ts';
+import { askSourceConformance, asksConformance, FakeAsks, standingConformance } from '../../contract/testing/index.ts';
+
+standingConformance('FakeAsks', () => {
+  const asks = new FakeAsks();
+  return { asks, boardWrites: () => asks.boardWrites };
+});
+
+asksConformance('FakeAsks', () => {
+  const asks = new FakeAsks();
+  return {
+    asks: {
+      raise: asks.raise.bind(asks),
+      notify: asks.notify.bind(asks),
+      standing: asks.standing.bind(asks),
+      answers: asks.answers.bind(asks),
+      close: asks.close.bind(asks),
+      open: asks.open.bind(asks),
+      get: asks.get.bind(asks),
+      snapshots: asks.snapshots.bind(asks),
+      ownerAction: asks.ownerAction.bind(asks),
+    },
+    answer: (id, effect) => asks.answerAs(id, effect),
+  };
+});
+
+const CardRefSchema = z.strictObject({ card: z.string().regex(/^F[1-9][0-9]*$/u), lane: z.string().min(1) });
+
+askSourceConformance(
+  'a card-shaped source',
+  { schema: CardRefSchema, title: 'Card {card}', form: false },
+  {
+    valid: [{ card: 'F12', lane: 'try' }],
+    invalid: [{ card: 'nope', lane: 'try' }, 'string'],
+  },
+);
+
+describe('the envelope', () => {
+  test('ask ids are today’s A-numbers', () => {
+    expect(AskIdSchema.safeParse('A12').success).toBe(true);
+    expect(AskIdSchema.safeParse('A0').success).toBe(false);
+  });
+  test('the generic envelope carries an opaque ref', () => {
+    expect(
+      AskSourceSchema.safeParse({ source: 'card', ref: { card: 'F12', lane: 'try' }, entry: 'gate:F12:try:3' }).success,
+    ).toBe(true);
+  });
+  test('a choice names its options and only a choice does', () => {
+    const base = {
+      source: 'card',
+      ref: {},
+      entry: 'e1',
+      subject: 'Pick',
+      why: 'Because',
+      raisedBy: { kind: 'daemon' },
+    };
+    expect(
+      AskDraftSchema.safeParse({ ...base, kind: 'choice', options: [{ label: 'A' }, { label: 'B' }] }).success,
+    ).toBe(true);
+    expect(
+      AskDraftSchema.safeParse({ ...base, kind: 'yesno', options: [{ label: 'A' }, { label: 'B' }] }).success,
+    ).toBe(false);
+    expect(
+      AskDraftSchema.safeParse({ ...base, kind: 'choice', options: [{ label: 'A' }, { label: 'A' }] }).success,
+    ).toBe(false);
+  });
+  test('only the owner answers: a ferret is not an answerer', () => {
+    const answer = {
+      id: 'an_0123456789abcdef01234567',
+      ferret: 'f1',
+      ask: 'A1',
+      source: 'card',
+      entry: 'e1',
+      effect: 'approve',
+      at: '2026-11-07T12:00:00.000Z',
+    };
+    expect(AskAnswerSchema.safeParse({ ...answer, by: { kind: 'host' } }).success).toBe(true);
+    expect(AskAnswerSchema.safeParse({ ...answer, by: { kind: 'ferret', ferret: 'f1' } }).success).toBe(false);
+  });
+});
+
+describe('the asks configuration file (today: attention.resurfaceAfterMinutes)', () => {
+  const parse = (value: unknown) => AsksConfigFile.schema.safeParse(value);
+  test('is config/asks.yaml, off by default, and takes 1 to 10080 whole minutes', () => {
+    expect(AsksConfigFile.file).toBe('asks.yaml');
+    expect(parse({})).toMatchObject({ success: true, data: {} });
+    expect(parse({ resurfaceAfterMinutes: 45 }).success).toBe(true);
+    expect(parse({ resurfaceAfterMinutes: 1 }).success).toBe(true);
+    expect(parse({ resurfaceAfterMinutes: 10_080 }).success).toBe(true);
+    for (const bad of [0, 10_081, 1.5, '30']) expect(parse({ resurfaceAfterMinutes: bad }).success).toBe(false);
+    expect(parse({ resurfaceAfterMinutes: 30, other: 1 }).success).toBe(false);
+  });
+  test('never loosens: resurfacing is a reminder, not spend or authority', () => {
+    expect(AsksConfigFile.loosens(undefined, { resurfaceAfterMinutes: 5 })).toEqual([]);
+  });
+});
+
+describe('AskOnScreen: what an ask’s renderer receives (the one home for the shape Agenda sends and Accounts reads)', () => {
+  const onScreen = { ref: { kind: 'task-plan', planId: 'p1' }, subject: 's', ferret: 'sess-1', ferretName: 'judson' };
+
+  test('names the ref, the ask’s words and WHO it is from; the project and the extra words are optional', () => {
+    expect(AskOnScreenSchema.safeParse(onScreen).success).toBe(true);
+    expect(AskOnScreenSchema.safeParse({ ...onScreen, why: 'w', context: 'c', projectId: 'p-9' }).success).toBe(true);
+  });
+
+  test('refuses an ask that names no ferret, no spoken name or no ref kind', () => {
+    const { ferret: _ferret, ...noFerret } = onScreen;
+    const { ferretName: _name, ...noName } = onScreen;
+    expect(AskOnScreenSchema.safeParse(noFerret).success).toBe(false);
+    expect(AskOnScreenSchema.safeParse(noName).success).toBe(false);
+    expect(AskOnScreenSchema.safeParse({ ...onScreen, ferret: '' }).success).toBe(false);
+    expect(AskOnScreenSchema.safeParse({ ...onScreen, ref: {} }).success).toBe(false);
+  });
+});

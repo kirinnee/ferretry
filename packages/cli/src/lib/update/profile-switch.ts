@@ -1,6 +1,6 @@
-import { classifyInstallMethod, planUpdate, releaseFlakeReference } from '@ferretry/protocol';
-import type { InstalledDaemonBinary } from '../daemon/binary.ts';
-import type { IDaemonOutput, IDaemonPrompt } from '../daemon/ports.ts';
+import { classifyInstallMethod, planUpdate, releaseFlakeReference } from '@ferretry/plugin-updates/contract';
+import type { InstalledDaemonBinary } from './machine.ts';
+import type { IDaemonOutput, IDaemonPrompt } from './machine.ts';
 import type { IInstallFactsPort, IPackageManagerPort, IUpdateLifecyclePort, LockedNixTarget } from './ports.ts';
 
 export interface NixProfileSwitchDeps {
@@ -27,7 +27,7 @@ export const isYes = (answer: string): boolean => /^y(es)?$/iu.test(answer.trim(
  * link that follows the profile. Guarded updates replace its element with a locked revision;
  * the guarded updater recognises its own pin on later updates (docs/updating.md).
  *
- * NEVER SILENT. Both callers ask first: `fy daemon install` at a terminal, and `fy daemon update` only
+ * NEVER SILENT. Both callers ask first: `fy daemon install` at a terminal, and `fy update` only
  * with `--switch-to-profile` or a yes. Nothing here rewrites a service definition; the caller installs
  * the path this returns, through the ordinary install.
  */

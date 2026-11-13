@@ -95,6 +95,41 @@ Each read opens the vault **once**: a whole page of a journal or a transcript is
 open (`SecretRedactor.batch`), and the opened values are let go when that read returns. Nothing
 caches them between reads, so plaintext lives no longer than the read that needed it.
 
+### A file or diff that holds a value: refused to an agent, masked for a person
+
+`GET /v1/ferrets/:id/fs/file` and `fs/diff` mask every vault value found **whole** in the text (or, for a file that
+is not text, in its bytes), one `*` per character, as Terminals does. In a diff the section heading git prints after a
+hunk header's closing `@@` is read as the line before the hunk's first line, and the hunks of a file are looked at
+together when the next one has a heading, so a value split between the previous hunk's trailing context, that heading
+and the leading context is found whole and masked in every place. The heading stays in the header, masked where covered. An **agent** is refused instead: a masked copy
+looks like ordinary content and could be written back over the real file, so the answer is a 403 with the code
+`holds_secret` and one sentence that names the path only, whatever the count of values. A **person** keeps the masked
+text, and the file answer says `redacted: true`; the app says "private values masked — this is not the file" and offers
+no download or open of the masked bytes. Matching is whole-value only, never a prefix or a piece — with one fail-safe
+exception: because the heading's place in the file is not known, the joined look of a hunk can also match a value whose
+lines are all shown but are not next to each other in the file; that text is then masked, and an agent is refused
+(`holds_secret`) a diff that holds no value. It over-masks, and never under-masks.
+
+- **The whole-value oracle — GAP.** The refusal and the mask both tell a caller "this file contains a vault value", so an
+  agent that writes a guess into its own worktree can confirm a WHOLE-value guess. That is negligible for a
+  high-entropy secret and real for a short one (a PIN). Not closed: closing it would mean not saying so.
+- **A diff for an agent also asks the two sides.** `fs/diff` runs the file check over the HEAD bytes and the working
+  bytes the service has already read (no further read) and refuses with `holds_secret` if either holds a vault value,
+  whatever part of it the diff shows. A person's diff is masked, never refused.
+- Not found, so not masked: a value inside compressed bytes, in a UTF-16 file, or a non-ASCII value in bytes that are
+  not valid UTF-8 (valid UTF-8 is masked as text even when it holds a NUL), and, in a person's diff, a value the diff
+  shows only in part (a file, or one side of a diff, that holds only part of a value is shown as it is, even when the
+  other side holds it whole — apart from an identical line, which takes the other side's mask). A section heading that
+  git does not pick (a line that starts with a digit or a symbol is skipped) is not part of the diff, so a value
+  split across it is the same partial.
+  Git also cuts a section heading to 80 bytes and drops its trailing spaces and tabs, so a value whose line in the
+  heading (its first, middle or last) is longer than that, or ends in whitespace, is shown only in part (the same
+  partial; an agent is still refused by the two-sides check above).
+  A value is found in a CRLF file whether it was stored with `\r` (a CRLF key file, `token\r`) or without (LF), and a CRLF-stored value in an LF file: all
+  three looks are made and the coverage is their union; the `\r` and the line breaks are kept in the output, so a masked
+  multi-line value keeps one mask per line. Positions are
+  UTF-16 units, as Vault's own starring counts them.
+
 ### Text a component shows: recognised by shape
 
 A component's text on the fleet view (a settings file, an instructions file, a server's command) was
@@ -220,6 +255,78 @@ daemon cannot resolve refuses rather than guesses. The rules for each surface ar
 [agent-tools.md](agent-tools.md#the-state-home); the agent file tools (`browser_upload` and friends) apply the
 same guard ([agent-tools.md](agent-tools.md#files)).
 
+### Launch safety is a kernel fact: the directory chain and the bound launch folder
+
+Two checks every launch needs are not a plugin's to write, because a plugin cannot do them without a filesystem of its own.
+The kernel owns both, on the same roots every plugin already holds; there is no plugin filesystem exemption.
+
+**The directory chain (`RootHandle.checkPrivateChain`).** Before a credential-bearing file is written under a ferret's home —
+and again right before it is used — the kernel looks at EVERY folder from `FY_HOME` down to the target, each by its own
+`lstat`. A folder that is missing, is not a plain directory, is a **symbolic link**, is **owned by another user** than the
+daemon's, or is **writable by its group or by everyone** refuses the write with a sentence naming that folder (its path
+relative to the home, never a file's content). A healthy `0700` or `0755` chain passes. It never changes a mode: narrowing an
+open ancestor would hide that it was open. This is v4's launch-overlay rule (`FileLaunchOverlayFiles#ensureDirectory`), kept
+at the kernel. The home's own spelling may be a link (every internal root already anchors on its real path); what it reaches is
+judged like the rest. A root outside the home answers `outside_home`: it has no chain to judge.
+
+- **GAP — a check is not a lock.** The chain is judged, then the file is written. The write itself reaches its folder through
+  no-follow descriptors (`publish`), so a link swapped in after the check reaches nothing; but another user who becomes able to write a
+  folder, or the owner changing a mode, between the check and the write is seen only by the next check. Ask again right before use.
+- **GAP — folders above the home are not judged.** The chain starts at `FY_HOME`; `/home/<user>` and its parents are the machine's.
+
+**The bound launch folder (`kernel.paths.bindDirectory`).** `checkDirectory` answers a folder once, and a folder is a name: it
+can be renamed away and replaced by a link into the state home a moment after the answer. `bindDirectory` remembers the answer
+— the folder's real path, the device and inode of the directory it resolved to, and the state-home fence's answer (inside the
+home by name, by identity up every folder, or through a link that lives in the home) — and `verify()` looks again immediately
+before the process is started. Any difference is `changed` and the start is held; anything the kernel cannot read, including a
+fence it cannot compute, is `unresolved` and also held. `insideStateHome` is the fence's answer at the check: an agent is
+refused there by the caller, a person is not. A symlinked project root that stays outside the state home binds and verifies.
+
+- **GAP — the instant between `verify()` and the child's `chdir`.** The runner still starts the child by path. Every swap made
+  before `verify()` is held; one made inside that instant is not. Closing it takes a directory the
+  runner can start the child in by descriptor: on Linux a held descriptor's `/proc/<daemon pid>/fd/<n>` is accepted by `tmux
+new-session -c` and the pane then starts in that directory (measured; the session's recorded path stays the `/proc` spelling and
+  goes stale when the descriptor closes). macOS has no such path, so the kernel's `kernel.spawn` pin (`RootHandle.pin`: a held directory the child starts inside, installed for
+  the instant of the spawn) is the existing way. Neither is wired into the runner here; this is declared, not scheduled.
+
+**Where both are wired (the one launch path).**
+
+- **The chain** is checked by the Claude Code harness (`ClaudeHarness`) on every credential-bearing launch — a start, a stop/resume
+  and an adoption (a move launches nothing yet) — twice: right after it makes the ferret's home and before it writes any file of it
+  (`launch-settings.json` among them), and again immediately before the runner is asked to start the process. An unsafe folder anywhere
+  from `FY_HOME` down refuses the launch with the kernel's sentence (`the ferret was not started: state is writable by its group or
+by everyone …`), nothing is written or narrowed, and the runner is not called. The harness raises that as a `LaunchRefusal`, the
+  only harness error whose text Ferrets shows; any other failure there is still the generic "could not prepare this ferret's home".
+- **The folder** is bound by Ferrets where it first checks it (`startNamed` and `resume`, before `start.decide` is asked), carried
+  to `launchAttempt`, and `verify()`-ed as the LAST step before the harness is asked to start (after the home is prepared and
+  the child environment is resolved). A change refuses the launch (`409 refused`, "no longer what was checked") and nothing is spawned.
+  An **agent's** start of a folder inside the state home is refused `403 state_home` at the route (`stateHomeReach` now answers from
+  `bindDirectory`, so an ordinary agent start in a project works, and a fence the kernel cannot compute is `503 state_home_unresolved`)
+  and again by the service. **Every entry that can launch a process takes the launch's ORIGIN**, a required parameter with no default
+  (`LaunchOrigin`: `person`, `daemon` or `agent`), derived only from the admitted credential and never from an attribution field
+  (`actor`, `requestedBy`, `movedBy`, `by`), so a caller that forgets to say who it acts for does not compile: start, resume,
+  an immediate or a queued restart, the consumer port the Warden and the Conversation use, an adoption and a move's relaunch.
+  The folder the launch binds NOW is judged by the same state-home policy for every **agent** origin (a ferret's token, the admin
+  token with a ferret behind it, the Warden), so a project swapped for a link into the state home before the relaunch is refused
+  (`refused`, zero runner starts) and `verify()` is not the only defence. A queued restart keeps its origin in the queue, and an
+  item queued without one drains as an agent's (fails closed). The Warden's own sweep and auto-revive have no person behind
+  them and run as an agent's. **A ferret first started by an agent is fenced on EVERY relaunch, whoever triggers it** (a person,
+  the boot auto-resume, the Warden, a restart or its drain, a move, a send that revives): its record keeps the BIRTH origin
+  (`birth`: `person`, `daemon` or `agent`) stamped once when it is created and carried unchanged by every later launch, and a
+  launch is fenced when the call's origin is an agent OR the stored birth is `agent` OR the birth is missing (a doubt fences,
+  with a sentence naming the reason and the remedy: move it to a project folder). Only an owner-born or a daemon-born ferret
+  (Packs' clean-up, the Lessons miner, in Ferretry's own folders) relaunches unfenced. The v4 → v5 conversion sets the birth from
+  v4 data: a ferret with a lead, or one v4 stamped as created by another session or a warden, is `agent`; the rest are `person`.
+  An attach (an adoption of a live pane) launches nothing and takes the caller's origin, required, but may only **tighten** the
+  birth, never loosen it: a record that has a birth keeps it whoever attaches; a record with none is stamped `agent` when an
+  agent attaches it, and stays without one (so stays fenced) when a person or the daemon does. A port
+  caller whose origin is missing or not a `LaunchOrigin` is refused before anything is asked. A **move**'s route is mounted but
+  its relaunch dependencies are unbound on this base (503 `plugin_unavailable`); its relaunch binding already requires the
+  route's origin and refuses to launch without one, so enabling its dependencies cannot open a gap.
+- **Tests:** the launch-wiring table drives each of those through the real Ferrets, Runtimes and Claude Code halves for a start, a
+  stop/resume and an adoption (four ancestors at `0777`, a foreign owner, a link, and three kinds of folder swap), and removing the
+  `verify()` or either chain check turns them red.
+
 ### What a ferret's `fy` presents
 
 A ferret's `fy` and its MCP server (`fy mcp serve`) present the **ferret's own credential**, not the host
@@ -271,6 +378,12 @@ admin token. In order:
   from the shell its commands run in — `FY_SESSION_TOKEN` included. Ferretry does not override that choice.
   `FY_SESSION_BOARD_CAPABILITY`, which `fy` reads too, survives it, so a Codex ferret's `fy` still finds its
   credential (measured on Codex 0.156.1, whose default strips neither); that name stays while Codex runs ferrets.
+- **The yaml log switches are cleared, and the daemon's workers are told so.** The `yaml` library prints every token it
+  parses when `LOG_TOKENS` or `LOG_STREAM` is set, and a config text can hold a credential, so `fy`, `fyd` and the
+  converter delete both first. That deletion does not reach a Bun macro (it runs when a module is transpiled, so in
+  source runs), a `new Worker(url)` given no options object, or a default-env `Bun.spawn` child: those get the original
+  native environment. So the daemon always starts its workers with an options object (which carries the cleared
+  environment), and the macros that parse the shipped catalogs clear the switches themselves.
 - **Restart ferrets to wall them.** A running ferret's `fy` presents its credential at once, because its pane
   already carries one. Its MCP server is the `fy` it started with and keeps the admin token until the pane
   restarts (`fy restart --all`), and a pane launched before the prefix needs the same restart.
@@ -281,9 +394,82 @@ ferret that reads `api-token`, `secrets.key` or the sealed files through its own
 this daemon. That needs keeping ferrets out of the state home, which a later change adds where the agent's
 sandbox can enforce it.
 
+A `git` or `gh` child the daemon starts gets a short allow-list of non-secret names (`XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS`, `GH_CONFIG_DIR`, `SSH_AUTH_SOCK` and the proxy variables) and never `GH_TOKEN` or `GITHUB_TOKEN`. The proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, in both cases) pass through unchanged, and a proxy address may carry credentials (`user:pass@host`), so a credential written there reaches those children.
+
 ## References in configuration
 
 One grammar, everywhere: `${secret:NAME}`.
+
+There is one narrow exception, for a ferret's launch environment only. A variable whose **whole** value is
+`${secret?:NAME}` is set to the secret when the store holds it, and **left unset** when it does not.
+`${secret:NAME}` refuses the launch instead. MCP uses it for its sign-in variables, so a sign-out that
+lands while a ferret is starting does not stop that ferret. It names nothing a plain reference could not.
+Anywhere else, or inside a longer value, it is plain text.
+
+### A login's variables and a repository's own Claude settings
+
+**A project's own `.claude` settings win over a login's environment** (as in v4 before 4.291.9; owner decision, !A500). Claude Code
+ranks a repository's `.claude/settings*.json` `env` above the process environment, and a `--settings` file above the repository, so the
+only way a login's value could beat a repository's is by being written into a `--settings` file. Ferretry never does that:
+
+- A login's variables (`env`, `claude.env`, the catalog's `ANTHROPIC_DEFAULT_*_MODEL` tier slots) are **process environment only**. A
+  runtime's wrapper exports them; a ferret the daemon starts gets them in its child environment (below). Nothing of them goes into
+  `fixed.json`, into the `launch-settings.json` of a ferret's home, or into an argv.
+- `<home>/.fy/fixed.json` is the **fixed layer** and nothing else: for an agent runtime, the permission mode and the prompts it skips,
+  the hooks and the like (`plugins/runtimes/daemon/lib/account/fixed-layer.ts`). It has no `env`. An interactive Claude runtime gets no
+  `--settings` from Ferretry at all, so its profile may pass its own.
+- A start is **never refused over a key a folder sets**, a `${secret:…}` key and a bare `$OTHER` key included. Nothing reads a
+  launch folder's settings or its repository layout. The price is the plain one: a repository that sets or blanks a provider variable
+  in its own `.claude/settings*.json` replaces the login's value in that folder, and a ferret started there can sit on "Not logged in"
+  until the repository's entry is removed. That is what the owner chose.
+- A manifest an earlier version wrote may still carry `referencedEnv` (v4 4.291.9 to 4.291.11 published it for the refusal this
+  version no longer has); it is read and ignored, never written.
+
+**A value that names `${secret:…}` (or the optional `${secret?:…}`) is never written into a settings file or a command line.** It stays
+process environment, which the wrapper (or, for a ferret, the Vault's `childEnvironment`) resolves into one child when it execs.
+
+**A literal credential never reaches an argv, and there is ONE launch path.** A ferret the daemon starts, restarts, revives, moves or
+adopts is launched by exactly one thing, `FerretsService.launchAttempt` → the harness → the runner. For a Claude ferret:
+
+- **The Runtimes launch gate.** Runtimes takes `start.decide` and `launch.parts` (`plugins/runtimes/daemon/lib/launch-gate.ts`,
+  `LaunchGate`). It is about **compaction only**: `start.decide` judges a start's own `compactAt` against its model's window and reads the
+  published manifest ONCE (one publication read), and `launch.parts` contributes the login's compaction trigger from exactly that
+  snapshot, reading nothing again. It reads no `fixed.json`, no folder and no login environment. The source is **required**
+  (`LaunchPartSource.required`): if a launch reaches it with no checked snapshot, or it fails for any reason, Ferrets refuses the launch with
+  nothing started rather than skipping it (a source that is only an addition, such as lessons, is still skipped when it fails). Published
+  runtimes that cannot be read refuse the start of a Claude ferret that names one.
+- **Fast mode and compaction ride the harness's private settings file.** A start that names `fast` writes `fastMode` into `launch-settings.json`
+  (the start's options are kept, so a stop/resume writes it again), and the compaction trigger reaches it as `autoCompactWindow` through a
+  `compact` launch part, on a start, a resume and an adoption alike. Neither is ever in an argv. The trigger is v4's `resolveCompactAt`,
+  decided once in the Runtimes launch gate from the checked snapshot: **a ferret's own value** (its session config's `compactAt`, else the
+  `compactAt` its start asked for, kept in its details) **overrides the login's default**, and an own `auto` suppresses a numeric
+  default; **a login default, or a value on a LATER launch, larger than the model's context window falls back to Auto** (nothing is written, and
+  an oversized own value is dropped to Auto, not to the login's default). A start's OWN number larger than its model's window is
+  not that: it is **refused before anything is written** with v4's sentence (`200k is larger than this model's 128k window, so it
+could never trigger. Pick 128k or less.`) by the Runtimes launch gate on `start.decide`, for every harness; an unstated window is
+  judged against the 200k default. The window is v4's: a `[1m]` selector states 1M, else the model's declared `context`
+  in the published manifest, else 200k; the model is the one the launch names, else the login's default model. A session config that is
+  unreadable or holds a value outside the floor says "none recorded".
+- **The credential is never in an argv.** The command is `env CLAUDE_CONFIG_DIR=<home> … claude --settings <home>/launch-settings.json …`:
+  it names a path, never a value, so `ps`, the pane's command line and the session document's recorded `command` hold none. The file
+  is written through the kernel's `agent-homes` root: `0600`, inside the ferret's `0700` home, and a link or a file the root refuses fails the launch
+  (the same checks as every other file of the home). It is rewritten by every launch and holds no login environment; it lives and goes with
+  the ferret's home, which is why there is no sweep of launch files and no live-session guard for one.
+- **No inline overlay anywhere.** v4's fast-mode and compaction `--settings '<json>'` overlay, its per-launch file adapter, its argv
+  builder and its launch service were deleted: nothing in 5.0 builds a second argv. **A move launches nothing yet:** its
+  route is still a 503 skeleton on this base (`moves-deps.ts`). With a request id and a record that has a complete legacy lifecycle it answers
+  `503 plugin_unavailable` at the unbound account resolution; a freshly started record has no lifecycle command and answers
+  `409 session_unusable` first; without a request id it is `400 missing_request_id`. The launch-wiring table pins each answer and zero launches,
+  so the day the route is bound its relaunch must go through `launchAttempt` and the same checks.
+- A **literal** credential written in a login's YAML (an internal gateway's `ANTHROPIC_AUTH_TOKEN`) is plain text in the
+  configuration already; a real key belongs in the secret store.
+- **Tests that prove the rule:** `account-materialise.test.ts` (no `env` in `fixed.json`, no `--settings` for an interactive runtime, tier
+  slots and a `${secret:}` key left to the process environment), `launch-gate.test.ts` and `host-assembly.test.ts` (the gate reads no
+  folder and no `fixed.json`), `login-env-not-pinned.test.ts` and `claude-harness.test.ts` (the harness's file holds no `env`), and the
+  launch-wiring table (a folder that sets a store-held key, a symlinked `.git` or an unprovable worktree is not refused).
+- **GAP — the harness does not resolve a login's bare `$OTHER` variables.** A launched ferret gets the login's literals and `${secret:…}`
+  references resolved into its child environment, but a bare `$OTHER` reference is not yet resolved by Ferrets (`ports-pending.json`, the
+  `cross: ferrets` line).
 
 `config/daemon.json` may carry a `secretEnvironment` block of reusable recipes:
 
@@ -313,6 +499,229 @@ so no binding, so nothing to refuse. Every apply the daemon makes is exclusive, 
 published fleet — a start's account, the launch's bindings, the runtime names — waits for one in flight
 (`packages/daemon/src/lib/fleet/publication.ts`). A second apply landing between the judgment and the
 pane's exec is still fail-closed: the new wrapper carries its own guard for every secret-backed variable.
+
+### A ferret's launch carries its login's environment
+
+A ferret started on a login launches with that login's environment, and an agent still never holds a credential:
+
+- **Where it comes from.** Ferrets asks the `logins:<kind>` provider that holds the login (`LoginKind.holds`) for the
+  login file's `env` (`LoginKind.env`). Literal settings stay literal and a `${secret:NAME}` stays a **reference** until
+  the Vault's `childEnvironment` resolves it into that one child; a secret the Vault does not hold refuses the start
+  (`login_unavailable`). `LoginKind.env` already drops a value that looks like a raw secret.
+- **What it never sets.** `HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `FY_*` are dropped from a login's env. Its values go in
+  **before** the launch parts, so MCP, shell and profile env, and the `FY_*` switches, keep precedence.
+- **The Claude sign-in.** A Ferretry-kept `anthropic` login also gets exactly one variable Ferretry sets itself
+  (`LoginKind.launchEnvironment`, not the login file's `env`): `CLAUDE_SECURESTORAGE_CONFIG_DIR=<state/logins/credentials/<id>>`.
+  It goes in **after** the parts, so nothing overrides it, and the real `HOME` is kept (macOS finds the login keychain
+  through it; there the variable selects a keychain item hashed from the same directory, on Linux a file). A login with
+  no usable sign-in refuses the start instead of launching a signed-out pane. "Usable" is judged from a fresh look at the
+  local store (the file is there, is readable through the owned store, and parses as the JSON object Claude keeps), never
+  from the status the app displays, which keeps its last-known state when material cannot be read. A malformed, unreadable or
+  linked file is refused with one fixed sentence that names the login and quotes nothing. A **host-kept** Claude login gets
+  `CLAUDE_SECURESTORAGE_CONFIG_DIR=""` (the empty value, as v4 did) with the real `HOME` kept, so Claude selects the
+  person's own default store; this build has no authority over that store, so it is **admitted without being read** (as in
+  v4), and a host login that is not actually signed in shows up as a signed-out pane, not a refusal. Codex's `auth.json` is a
+  link in its home, not a variable, and is not done here (v4 linked the host's `auth.json` into the runtime home; that
+  needs a kernel- or Logins-owned credential-link operation and stays a declared gap).
+- **Not pinned in a file.** A project's own `.claude` settings win over the login's environment (see "A login's variables and a
+  repository's own Claude settings"): the login's values are in the child's environment only, and the `launch-settings.json` the harness
+  writes into the agent home carries no `env`.
+- **A `${secret:NAME}` in a Claude settings item, MCP config or instruction** reaches its file in the agent home as that literal reference,
+  which nothing resolves (the Vault resolves a reference only into a child's environment): a reference is a name, not a value.
+
+### The stored-login rule is a declared heuristic
+
+A login's `env` (a `logins/<id>.yaml` file, a `login.add` or `login.env` change, the paste screen) is judged by ONE
+rule, `plainPaste` in `packages/plugins/logins/contract/secret-shape.ts`. It is a **heuristic, not a proof**: a
+person who means to hide a key from it can. It is built to stop an accident (a key pasted into a plain field) and a
+casual agent edit. `config_read` withholds the text of ANY login file (or MCP server file: the kernel rule is for every
+config def marked `credentialRecords`) that fails its check, whatever the reason, with its located issues kept: one that
+does not parse as YAML, one with a key outside `env` or a mistyped one, one whose `env` is not a map of NAME: value
+strings, and one with a refusal of this rule. The cost: a file whose only fault is a typo key (`labl: x`) is withheld
+too. A def without the flag shows a failing file's text.
+
+- **Under a credential-named variable** (a credential word anywhere, a last word `KEY` or `KEYS`, or one glued word
+  such as `GATEWAYTOKEN`) a value must be exactly one allowed shape: a placeholder under 8 characters with no `$`; one
+  or more `${secret:NAME}`; a scheme word (letters and `-`, at most 16, no digit: `Bearer`, `Api-Token`, `ApiKey`) and references; a header name, `:` or `=` and either of those; `$NAME` or
+  `${NAME}`; a number or flag word; one `http`, `https`, `ws`, `wss`, `socks5` or `socks5h` address with no user key,
+  password, fragment or bare query, only short query values, and no key-like run; or an absolute or `~/` path with no
+  key-like run. A **key-like run** is 24 or more letters, digits and `_` with a digit in them and entropy of at least
+  3.5 bits per character, read on the text split at every character other than a letter, a digit and `_`; in the
+  path shape alone `+` and `=` also stay in a run, so a standard base64 key is one run.
+- **Under any name** a token shape (a provider prefix, a JWT, a PEM private-key header), a credential-named header or
+  JSON member (`x-api-key: …`, `"api_key":"…"`) with a literal value, and an address carrying a password, a user key or
+  a credential-named query value are refused. In a variable that IS a header list (`…HEADERS`), a header with no
+  credential name is refused when its value holds a token shape or a key-like run (`x-honeycomb-team=…`).
+- **A value over 4096 characters is refused and not scanned**, and so is a variable NAME over 128 characters.
+  Whatever else is wrong with a file, ONE failing check keeps `config_read` from showing the file's text (the kernel's
+  `credentialRecords`): a refusal of this rule, an `env` (or `claude.env` / `codex.env`) that is not a map, a value
+  under it that is not a string, a key outside `env`, a file that does not parse as YAML.
+
+Named residual heuristic GAPs (declared, not scheduled):
+
+- **GAP: a `$NAME` or `${NAME}` that is an all-upper-case base32 key** is read as a variable reference.
+- **GAP: a key cut into 7-character comma chunks** in a header value (`x-api-key: abcdefg,hijklmn,…`).
+- **GAP: a key shorter than 24 characters** in a path segment, host label or query value, and a key-like run with no
+  digit, are not seen by the run test.
+- **GAP: a header name with up to three words** may carry a key in a name word shorter than 17 characters.
+- **GAP: a header whose name has no credential word** (`x-honeycomb-team=…`) is judged by its value only in a variable
+  named `…HEADER` or `…HEADERS`; in any other variable it is not judged, so the Cloudflare AI Gateway's
+  `ANTHROPIC_BASE_URL` keeps working.
+- **GAP: a header name in the header shape** may carry key material in words of up to 16 characters: up to three words
+  when the name has no credential word, and up to 64 characters in all when it has one (`x-auth-…-token`).
+- **GAP: a variable whose name has no credential word** (`…_PASS`, `…_PWD`, `…_CRED`, a glued `…KEY`, `…_BEARER`) is
+  judged only by token shape and by entropy, and a value with whitespace in it (`Bearer <key>`) passes.
+- **GAP: an armored PGP private key** (`-----BEGIN PGP PRIVATE KEY BLOCK-----`) is not a token shape.
+- **GAP: a key cut by `-`, `.`, `&` or `/`** into pieces that are each shorter than 24 characters (or, for a query
+  value, shorter than 8), in an address or a path, is not seen; it extends the "shorter than 24" GAP above.
+- **GAP: whitespace other than tab, CR and LF inside an address** (a vertical tab, a no-break space) splits it for the
+  rule, so the part after it is not read as a password.
+- **GAP: only a login's `env` is judged by this rule.** Fields the owner fills in on purpose, such as
+  `codexProvider.baseUrl` and `queryParams`, are checked by the kernel's raw-secret scan only. A variable that slipped
+  out of `env` is not such a field: any login file that fails its check is withheld whole (see above).
+- **GAP (D11): `defaultsOf` is an unguarded `safeParse({})` on the reload path** (evaluate.ts, reached when a file that
+  was in effect is deleted; also check-config.ts). A schema that throws on `{}` would still stop a reload. No current
+  schema does.
+- **GAP (D12): the withheld summary always says the file "holds a raw secret, which the owner must move into the secret
+  store".** It says so too for a YAML-broken login or MCP file with no key in it, a blank `env:`, and an unquoted number
+  such as `API_TIMEOUT_MS: 600000` (refused as v4's string-only value was). The issues list carries the real cause, but an
+  agent may relay the wrong instruction to the owner.
+- **GAP (D13): a login's `label`** (or any other free-text field) holding `Bearer <key>` checks as `ok` and is shown.
+  An owner does not paste a key into a label by accident.
+- **GAP (D14): a variable named `__proto__` under `env`** is dropped by the parser, so the rule never sees it and the
+  file checks as `ok` with its text shown. The variable is also never exported. This is contrived.
+- **GAP (D15): the scheme word may carry up to 16 letters** (no digit) of key material before a reference
+  (`GATEWAY_TOKEN=XqvTmLpRzWkNcHbJ ${secret:K}` is accepted). It extends the header-name GAP: a scheme word up to 16
+  letters.
+- **GAP (D16): `credentialRecords` also withholds a failing MCP server file.** A broken or failing `mcp/<name>.yaml` is
+  withheld whole by `config_read`, as a login file is; it is documented here and in `define.ts`.
+- **Known refusals** (not GAPs, and they may surprise an owner): under a credential-named variable a query value of 8 or
+  more characters (`?api-version=2024-10-21`) is refused; in a header list a long hex id (`x-trace: <64 hex>`) is
+  refused; in any value a JSON member whose name ends in `tokens` with a value of 8 or more characters
+  (`"budget_tokens":1024000`) is read as a credential.
+
+**This is the last round of widening.** From here, a further finding is either a regression, a leak through
+`config_read`, `config_validate`, `config_write`, a log or a response body, or a false refusal of a real owner setting, and is fixed; anything else (a new way to hide a key from a
+heuristic) is recorded here as a named GAP and is not another round.
+
+## Secret-shaped values in a file's text
+
+A configuration file's text is read by every `fleet.use` caller and every ferret, so what a read shows and what a
+write may add are one pair of rules in the kernel (`host/config/`), and the pair is
+[config-files.md](config-files.md#what-a-read-shows)'s subject too. Plain words: the read hides what looks like a
+credential, and a write may not ADD one.
+
+**The read mask.** `GET /v1/config/file` and `config_read` cut each credential-shaped value in a launch flag, an MCP
+argument or a nested value to `‹hidden›`, for every caller, the owner's paired device and the host admin included
+(the owner at the machine edits the file itself). The cutter and the write rule are ONE implementation in
+`@ferretry/std/credential-words` (with the `${secret:NAME}` grammar in `@ferretry/std/secret-reference`), imported by the
+kernel's read mask and by Runtimes' views; there is no second copy to keep equal, and `HIDDEN_WORD_TEXT` is std's
+`HIDDEN_VALUE_TEXT`. The std corpus test (`credential-words-corpus.test.ts`) holds the cutter to every name the write
+rule's own tail test refuses, so a name only the write rule knows is in it. `std` also owns the cutter's two tests as an
+injected pair (`CutterTests`, `shownWordWith`; `shownWord` is `shownWordWith(SHOWN_TESTS)`), and a catalog's publish rule
+(`@ferretry/core-vault/contract`) is that same cutter with a pair of its own, never a second copy: it refuses everything
+the write rule refuses and everything std's secret-name words and token shapes catch, plus the names KEY, PASS, PWD,
+BEARER and BASIC with a value of 16 or more. The one thing the display hides that a catalog accepts: a plain value under a
+name that only ends in key, token, secret or password (`--sort-key modified_time`); this is v4 parity, not a gap, and a
+real token shape under such a name is refused by its shape.
+
+**The mask and W read a name the same way.** One name test, in the kernel, decides whether a flag or a key is a
+credential's for both: its name ENDS in `key`, `token`, `secret`, `password`, `passwd` (plural too) or
+`credential(s)`, dashes ignored (`--key`, `--tokens`, `--apitoken`, `--ssh-key`, `-e SIGNING_KEY=v`); the mask also
+keeps its older words (`AUTH`, `COOKIE`, a pair such as `API_KEY`). Runtimes imports the same test. A text that glues raw text to a `${secret:…}` pointer (`API_KEY=prefix${secret:X}`,
+`--token prefix${secret:X}`, `API_KEY=${secret:X}?model=short`, `Authorization: Bearer v${secret:X}`) has the whole
+value cut, from the start of the value to the end of the word with the pointer; one pointer alone stays shown. And a
+net sits under the mask: when the text the mask leaves still holds a raw flag secret by W's rule, the file is
+withheld (`unmaskable`) rather than shown.
+
+**The write rule (W): new only.** A write that gives a raw secret to a flag (`--token v`, `API_KEY=v`,
+`Authorization: Bearer v`, a URL password of 8 or more characters) that the file on disk does not already hold is
+refused as `raw_secret`; the issue names the path to the value, never the value. "Already hold" is by a digest of the
+flag's name and value, so the same value in the same file stays, a patch of another key is applied, and the same
+value moved to another file, or a changed one, is refused. W runs at the four places a text becomes a file: a single
+write, a held-file patch against the version in effect, the same patch against the held version, and `writeAll`'s
+per-document plan (one refused document writes nothing of the set).
+
+**Declared limits.**
+
+- **`MIN_CUT_WORD` is 7.** A word shorter than 7 characters is never searched for a cut (`a://:p@h` is the shortest
+  that holds a password); a value under a secret name is cut from 8 characters, and a URL's password at any length.
+  The entropy gate decides, on write and read alike: a 16-character value of entropy under 3.5 (`abababab12121212`) is
+  no credential to the write rule, so the mask and the net leave it shown, and 57 such lines of the 85,848-line review
+  corpus are listed and pinned (`net-low-entropy-pin.test.ts`): 0 shown that W refuses on the masked text; 57 listed
+  low-entropy values that W accepts bare.
+- **Residuals in a broken file.** A file that does not parse cannot be rebuilt around its cuts: it is withheld
+  (`unparsed`) when its raw text holds a word the cutter would cut, and shown as it is when none does. What neither
+  check recognises is shown.
+- **Not cut:** a JSON document inside a flag (its keys are quoted), a plain password stuck to a one-letter flag
+  (`-p<password>`), and the other cases named in the header of `packages/std/src/credential-words/words.ts`. (A value glued to a
+  pointer is cut, see above.)
+- **A flag's value in a file it was already in.** W is new-only, so a file that already holds such a value keeps
+  working and is shown masked on every read; nothing removes it.
+- **E3: a `--token-file` path is cut on read.** The read mask reads `--token-file` as a secret-named flag, so the path
+  after it is shown as `‹hidden›` (checked: `--token-file` then `/home/me/.config/tool/token`), though W accepts a path
+  there. A person sees `‹hidden›` where a path stood, and a text saved back with it is refused until the real text is
+  typed at the machine.
+- **W and the mask agree by construction.** The cutter and W are one implementation, and each consumer runs W on what
+  its cutter shows and withholds what W still refuses: the kernel doors withhold the file (`unmaskable`), and
+  Runtimes' views withhold the item in words (the Resolved view's server line or flag, a component's whole args or flags
+  list, the runtime list's overridden flag; an edit that keeps a word of a withheld list is refused, "retype the whole
+  list"). A credential value that holds a pointer and that W refuses whole is cut whole, value start to word end
+  (`--key a,v,${secret:X}`, `--key ${secret:X},b=v`); the pointer in it is cut with the rest. The families F1-F7 (a
+  look-alike of a pointer, a blank and a token shape, a pointer in a URL's user part, a value starting `.`, a pointer never
+  closed, past W's 4096-character window, one item holding blanks) are held by the net, not by the cutter
+  (`kernel-cutter-f1-f7-pin.test.ts`). **Every value Runtimes shows is netted**, place by place (one rule for a value of any shape beside its name,
+  `valueWithheld` / `valueSaid` in `command-line.ts`, judging the PARSED value under the name the document holds it by, the last
+  path segment, never the quoted display key):
+  - **Arguments and launch flags**, in the detail, the Resolved view and the runtime list's overridden flags: each list is
+    cut, then judged by W's flag rule AND its raw-secret rule (a token shape in a word withholds the list); a refused word
+    withholds the whole list in words.
+  - **An MCP server's `command`**, by ONE rule (`commandWithheld`) in the detail, the Resolved MCP line and the "command not found"
+    warning: withheld whole when W refuses it (as one string or as the words it splits into, so `srv --token` beside the
+    argument `v` is one pair) or when the word cutter, run on it as one string or word by word, cuts a VALUE
+    (`curl -H "Authorization: Bearer v"`, `srv -H Cookie: session=v`). A part the cutter cuts that is a pointer (`$X`,
+    `${X}`, `${secret:X}`) is no value: `env API_KEY=$API_KEY srv` is shown as written. A **`url`** (`writtenWithheld`) is withheld
+    whole when W refuses it or the cutter would cut any part of it (a `?token=v` query is W-accepted but real); a Resolved url
+    whose path W refuses (`/mcp --token v`, shown %-encoded) is withheld as the detail's is.
+  - **An environment or settings value shown under its name** (hidden when W refuses it, as when the name or shape says
+    credential), including a list or a nested table (`{x: ['--token', v]}`, `{servers: [{token: v}]}`), in the detail and in the
+    Resolved rows, and the Resolved model row.
+  - **A conflict sentence** (`GET /v1/runtimes/profiles`, the preview, `GET /v1/runtimes`, `fy profile` and `fy runtime` "Overrides:"): a
+    value W refuses, the winner or a beaten one, is replaced by "(a value that is not shown)" and the sentence stays readable.
+  - **A fixed-layer overridden setting row** (`GET /v1/runtimes`): the same rule on its value.
+  - **The text of an instructions or hooks file**: cut by its own line rule (`redactText`), pinned equal to v4 outside its
+    tightened lines, and then netted line by line: a line W's text test still refuses after that cut (a long bare value
+    under a plain key) is withheld, replaced by one plain sentence (`WITHHELD_LINE`) while every other line and the line
+    count stay. v4 showed those lines; the S26 pin exempts exactly the lines it replaces. W's text rule judges a
+    value under a credential key by the entropy of the whole value, so a long value that is mostly one repeated character is
+    accepted at any length; the 4,096-character window only bounds each pattern's cost. Netted by W's VALUE rule too:
+    instruction lines (an instruction Runtimes writes keeps its text in the component YAML, where a string with blanks is
+    read as words; a flag at the end of one line pairs with the value starting the next line (a blank or spaces-only
+    line between them breaks the pairing: a counted gap, `cfg-leak-d-residuals`)), and hooks by the parsed document
+    (the lines of each path W refuses are withheld; a refused list item withholds its whole list, because `--token` and its
+    value are two lines; a text that does not parse as JSON is netted by the lines alone, and a document nested past 200
+    levels is withheld whole).
+  - **The "command not found" warning** names the command only when the detail shows it.
+
+  The fields shown as written without a net are names and paths, not values: a component's `file` and `directory`, a skill's items,
+  a model set's models and default (the Resolved model row and a conflict sentence are netted), a profile, runtime or login
+  label, and the home-directory path a component points at (`checkPath`). W refuses one only when a credential is
+  typed AS that name or path, which v4 showed the same way, and none of them can hold a flag secret, a URL's user or a
+  token in a query by design. Measured over the 85,848-line review corpus (69,474 refused by W): 0 shown that W
+  refuses on the masked text; 57 listed low-entropy values that W accepts bare (see `MIN_CUT_WORD` above). The
+  price is over-redaction: the mask cuts every value under a name W reads as a credential, a path after `--token-file`
+  (E3) and the whole value of a word that glues text to a pointer. A word of blanks that does not start with a flag
+  (`srv --token v`) is no gap: the read splits it into words and cuts `v`.
+
+- **GAP: the etag is a digest oracle.** A file's etag is the sha256 of its disk text and goes to every `fleet.use`
+  reader (`GET /v1/config/file`, the `kernel.config-changed` frame, `GET /v1/config/status`). A hidden value that is
+  long and high-entropy cannot be recovered from it; a short or low-entropy one (an 8-14 character password) can be
+  guessed offline when the rest of the file is known. Remedy, after merge: a keyed etag (an HMAC with a daemon-local
+  key), kernel-wide.
+- **GAP: the route descriptor sentence.** The descriptor of `GET /v1/config/file` says a configuration file never
+  holds a raw value. That stays partly false for a file written before the flag rule: it can hold a secret under a
+  flag name, shown masked on every read. The descriptor is hashed (contract 9.6), so the sentence is corrected when the
+  contract next opens.
 
 ## Accounts and sign-ins: the store
 
@@ -825,7 +1234,7 @@ Every route is `caller: 'person'` ([grants.md](grants.md)).
 
 Each change is a kept `security.changed` record ([audit.md](audit.md)). None holds a username or a value.
 
-A ferret's suggestion of a rule (`account_propose` with `preapprove`) raises a card and a line in memory and nothing
+After merge (M2; the tool is not declared on 5.0 yet), a ferret's suggestion of a rule (`account_propose` with `preapprove`) raises a card and a line in memory and nothing
 else: [agent tools › Suggesting a standing rule](agent-tools.md#suggesting-a-standing-rule).
 
 ### The owner's command: `fy rules`
@@ -1097,6 +1506,40 @@ What it does NOT protect against: the provider. A key you hand Groq is a key Gro
 the daemon sends (a transcript, or the Warden's redacted snapshot) is text that provider receives — the
 Speed-ups screen says what leaves the machine for each one.
 
+## A plugin's own key, placed by the kernel
+
+In 5.0 a plugin that only ever spends a key on an HTTP request asks the kernel to place it:
+`kernel.secrets.send(name, request, placement?)` (`packages/core/kernel/host/secrets.ts`). The Warden's Jev guard is
+the first caller. It is the holder above with the same rules, held by the kernel. The plugin never holds the value.
+
+- **The name passes `kernel.secrets.resolve`'s rule, in that order.** It is in the plugin's manifest `secrets`. The
+  plugin's OWN configuration in effect names it as `${secret:NAME}`. The Vault knows it. A plugin can never put another
+  plugin's secret on a request, because its config would have to name it, and adding a reference is held for the owner.
+- **Only to an exactly declared host.** The URL must be `https:`, or `http:` to this machine. Its host must be a plain
+  host entry of the plugin's `permissions.network`. A wildcard, `'*'`, an installed-item entry or a resolver entry lets
+  no key out. The request goes through the plugin's own `kernel.fetch` guard, so a redirect is answered, never followed.
+- **Read once.** The request and the placement are parsed once into plain data, and only that copy is checked and
+  sent. A getter cannot show the check one host and the send another.
+- **The plugin cannot place a credential itself.** A request that already carries the placement header is refused.
+- **Facts only come back.** The answer is a 2xx reply's parsed JSON, a status, `timeout`, `network`, `too_large`,
+  `unreadable`, `vault_damaged` or a refusal. A reply that echoes the value is `unreadable`. A thrown error becomes a
+  kind, so its message never leaves. The Vault is asked last, after every other check.
+- **Logged by name and host only.**
+
+The Warden names its key in `warden.yaml`, as the owner writes it:
+
+```yaml
+jev:
+  key: ${secret:JEV_API_KEY}
+```
+
+`jev.key` takes only that one reference. An agent's write that adds it is held for the owner, like any new secret
+reference. Without it the guard answers `not_set` and nothing leaves the machine. It is not a setting: the settings
+screen neither shows it nor saves it, and a save keeps the line as it is.
+
+GAP: a send writes no `secrets.used` entry to the security log, and the Warden's settings card still says whether the
+key is set from Speed-ups, not whether `warden.yaml` names it.
+
 ## Device-held speed-up keys
 
 Settings › This device › **Speed-up keys** takes a Groq and/or a Cerebras key that lives in **one
@@ -1146,6 +1589,99 @@ secret — listed by name, redacted, never returned — and, like every value a 
 readable by that runtime's agent. The refresh token and any client secret are NOT in this store: they
 rest in a separate sealed document only the sign-in service reads, so `use` and `${secret:…}` cannot
 reach them. **Sign out** deletes all of them.
+
+## A harness sign-in file in a ferret's home
+
+A Codex OAuth (or key) sign-in is not a vault secret either. Logins keeps the harness's own `auth.json` in its private
+`credentials` root; when a ferret starts on that login, Logins mints a one-file _shared credential_ bound to Codex and
+the kernel makes ONE symlink to it at `<the ferret's Codex home>/auth.json` (and Codex is launched with
+`cli_auth_credentials_store="file"`). No plugin and not the daemon reads the file through that link: the child process
+Codex reads it, and refreshes it in place, so the link keeps pointing at the one file. A login with no usable sign-in
+refuses the start with one sentence, before any pane exists. The residual is the same-user one: the agent runs as the
+same user and Codex's sandbox reads anywhere, so an agent's shell command can `cat` that file, exactly as in the old
+account model. The link outlives a revocation until the next launch of that ferret clears it, and two ferrets refreshing
+one login in the same instant can race on its single-use refresh token (both declared gaps).
+
+Every ferret on a login shares that ONE `auth.json`, and each runs as the same user, so **any ferret on a login can
+rewrite the shared file** and so change the account for every other ferret on it (or hard-link it, which makes the next
+start on that login refuse until the extra link is removed or the login is signed out and in again). This is the same-user
+residual above, not a new reach. The kernel hands the credential over once (it is single-use, and only the harness is
+given it), and it refuses to move the placed link, or a folder holding it, out of the ferret home it was linked into (`link_escape`; removing it stays allowed), but it cannot stop the agent that then holds the file. When the kernel refuses the link at the last step, the
+start fails with the general "could not prepare this ferret's home" sentence (`failed`), not `login_unavailable`.
+
+Two more rules keep that one link the only door, both enforced identically on the real roots port and the testing host:
+
+- **No other link reaches a credential home.** `linkTo` and `copyTree` in link mode refuse (`link_escape`, nothing written)
+  any link whose own place OR whose source is inside a credential home, which is the whole `agent-homes` root (every
+  ferret's Codex home, the folder that holds a placed credential, the folders above it and the ones about to) and the whole
+  `credentials` root (every login's store). So a folder alias of a ferret home (`f2` linked to `f1`) cannot give a second
+  ferret the credential, and neither can a link made before the credential is placed. The one rule is
+  `credentialHomeLinkVerdict` in `packages/core/kernel/host/shared-credentials.ts`. `linkCredential` is unaffected. This is
+  NOT the whole "any login's store" rule: the fleet folder and the host harness homes are not credential homes to it (see
+  **Declared exception** below), so the rule covers `agent-homes` and `credentials` only.
+  A refusal writes nothing, not even the scoped agent home a link was to land in: the verdict is judged before anything is
+  resolved for creation, on the real roots port and the testing host.
+- **The move check is armed against a swap.** The device and inode recorded when the link was placed are kept through the
+  whole move decision and asked again at the held-source look, for the link and for any folder that holds it, so a writer on
+  the same filesystem who swaps the link for a file across the first look and puts it back at the next call does not get it
+  moved. **Declared GAP:** after that last look the move is a plain `rename(2)`, which cannot be made conditional on what
+  the look saw (no compare-and-rename in the standard library), so a same-user writer who restores the link inside that
+  single window is not stopped. It needs a concurrent writer already holding the same user's filesystem, which is the
+  same-user residual above.
+
+**Declared exception: Runtimes' fleet credential store and the host harness homes (not implemented, pinned).** The
+credential-home rule above does not reach the `fleet` root (the fleet credential store, `fleet/credentials/<id>`, and
+Runtimes' runtime homes) or the `harness-home` root (the host's own Claude Code and Codex homes). Generic `linkTo` and
+`copyTree` link mode from and into them remain allowed, within the root-specific refusals that still apply (a `harness-home`
+is a read-only destination, and `copyTree` link mode FROM `harness-home` is `not_declared`; the host reach this exception
+accepts is `linkTo` FROM `harness-home` INTO `fleet`), for **Runtimes' provisioning only** (`FleetDisk` in
+`fleet-disk.ts` and `FileFleetProvisioner` in `file-provisioner.ts`), because Runtimes provisions fleet homes, host sources
+and not-yet-existing sign-in slots, none of which the dedicated `linkCredential` (scoped `agent-homes` only) can place. So a
+Runtimes link can reach a real fleet or host sign-in outside `linkCredential`: a link in the fleet assets to a login in
+`fleet/credentials`, or to a host `auth.json`, succeeds on the real port and the testing host. The review also observed that
+the kernel does not constrain `harness-home` to an actual harness folder: Runtimes can scope it to an arbitrary absolute folder
+and link an ordinary file from it into the fleet credential store. Reach is limited to the trusted provisioner: only Runtimes may
+hold either root (the kernel's ownership rule), a project file is never a link source, an `agent-homes` link is refused, no
+route or tool lets a ferret choose the operation, and a shell already running as the user can use the filesystem directly (the
+same-user residual above). The exception is pinned by a fitness test, `scripts/gen/tests/fleet-link-callers.test.ts`, which
+asks the **TypeScript type checker** (TypeScript 7's native checker, over every production module; the repo's tsconfig projects)
+and not the spelling, in two layers. **(1) No read:** it fails if any production module other than `fleet-disk.ts` reads,
+aliases or destructures `linkTo` or `copyTree` off a value the checker types as the kernel `RootHandle` (an alias of it, a
+union or intersection containing it, an interface extending it, a `Pick`/`Readonly`/spread/rest of it), whatever the key is
+spelled through: a constant, an imported dispatch table, a reassigned or shadowed key, a parameter typed `'linkTo'`. A key the
+checker cannot narrow to string literals, on a handle (or on an `any` a handle was put into), fails closed. A cast does not hide
+the handle (`(fleet as never as Record<string, Function>)[name]`). **The disk is held to the same rule by TYPE**: every member of
+`FleetDisk` that reaches a `RootHandle` link operation, directly or through another member or helper of `fleet-disk.ts`
+(today `linkTo` and `copyInto`), is a link operation, and a read of one off any value the checker types as `FleetDisk` —
+`host.disk.linkTo` through `Pick<AdapterHost, 'disk'>`, a wrapper's parameter, an alias, a destructuring, an element access, a
+class field — fails outside `fleet-disk.ts` and `file-provisioner.ts`, the one module that drives it. The test also fails if
+either allowed module stops reading (a stale allowance). **(2) The authority surface is pinned** in
+`scripts/gen/tests/fleet-link-callers.snapshot.json` — whole surfaces, not spellings: the exported names, kinds and class members of
+`fleet-disk.ts` and `file-provisioner.ts`; every module importing either, directly or through a re-export; the link-capable
+members of `FleetDisk` and every module that holds a value the checker types as `FleetDisk` (declares a field, parameter,
+variable or return of that type, or reads one: found from the class's references and every identifier named like such a carrier,
+verified by type); every module that asks the kernel for a `fleet` / `harness-home` handle — a `RootsPort.root` call is found by
+what it **resolves** to, so a destructuring, a rename, an element access, `.bind`/`.call`, or passing `roots.root` as a value
+is followed to the calls it ends in, and a root name the checker cannot narrow counts as a fleet root; every module that handle is
+then passed to (variables, assignments, call arguments, returns, object-literal properties and class fields); and **the complete
+member list (name and kind) of the `RootHandle` interface and of every object literal or class that implements it**, so a new,
+removed or renamed handle operation — whatever it is called — fails with a message saying a reviewer must approve it **and decide
+its guard**, because no scan can infer link semantics from an unlisted name. Every change fails naming &F3537 and saying a
+reviewer must approve the snapshot change (`FLEET_LINK_SNAPSHOT_UPDATE=1` rewrites it). That is what closes a helper exported from
+an allowed module, re-exported by a barrel and called by a new module — no read-based scan can see that. The test also fails if
+either root is ever held by a plugin other than Runtimes, so a future caller cannot slip in before the move. No directory is exempt:
+a new kernel module (a host helper, a worker-grants write handler) that calls `fleet.linkTo` fails like any other, and the kernel's
+own definitions pass because a definition is not a read. **Not caught (declared):** reflection (`Reflect.get`,
+`Object.entries`, `Object.getOwnPropertyDescriptor`, any call that names the operation only as data), and a handle put into an
+`any` by a route the check does not follow (a property, a return, a container) then indexed by a key that is not a string literal
+— an `any` nothing demonstrably handed a handle to is ordinary JSON indexing and is deliberately left alone. A handle or a disk in
+a container is not followed by the receiver and holder lists, but layer 1 reads the TYPE at every use, so any link read of it is
+still caught wherever it ends up. It costs about 27 s of the quick test tier (it opens the type checker once, reads every
+production module and derives the surface; measured 2026-11-12, Linux x64). It is to be **removed by the after-merge move** (&F3537,
+"Dedicated credential link operation"): Runtimes onto a dedicated credential operation, the fleet store becoming a credential home,
+and ordinary asset links that land in a runtime credential home becoming copies. The ruling that scopes it, quoted exactly:
+
+> "if the re-review proves only Runtimes' provisioning (fleet-disk.ts, file-provisioner.ts) reaches fleet.linkTo on the fleet root, ALSO add a fitness test that fails if any other module calls it there, so a future caller can't slip in before the after-merge move. Then fix4 is fine for merge; the last-look-to-rename race stays a declared GAP."
 
 ## Sign-in tokens the usage read sends
 

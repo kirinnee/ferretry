@@ -1,0 +1,259 @@
+/* ============================================================================
+   THE FERRET LIST — today's sessions bar, over this daemon's ferrets. Every colour is a role token from the theme, so
+   each family draws it in its own voice: the open ferret is the family's soft filled pill (`--nav-sel-*`).
+   ========================================================================== */
+
+.fy-sbar__ferrets {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--font-ui);
+}
+.fy-sbar__filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding: var(--gap-sm);
+}
+/* Interactive · All · Agents: one segmented strip. A segment never shrinks below its own label, so the strip wraps
+   onto a second line before it would clip "Interactive". */
+.fy-sbar__segment {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  padding: 2px;
+  border: var(--stroke-control) solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-2, transparent);
+}
+.fy-sbar__seg {
+  display: inline-flex;
+  flex: 1 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: var(--stroke-control) solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  text-transform: var(--control-transform, none);
+}
+.fy-sbar__seg:hover {
+  color: var(--fg);
+}
+.fy-sbar__seg[aria-pressed='true'] {
+  border-color: var(--nav-sel-edge, var(--accent-border));
+  background: var(--nav-sel-bg, var(--accent-soft));
+  color: var(--nav-sel-fg, var(--accent));
+  font-weight: var(--weight-strong);
+}
+.fy-sbar__count {
+  color: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  opacity: 0.85;
+}
+.fy-sbar__stopped {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.fy-sbar__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 6px var(--gap-sm);
+}
+.fy-sbar__list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fy-sbar__empty {
+  margin: 0;
+  padding: var(--gap-sm) 8px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-sbar__project {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: 10px 8px 4px;
+  color: var(--muted);
+  font-family: var(--font-display);
+  font-size: var(--label-size);
+  font-weight: var(--label-weight);
+  letter-spacing: var(--tracking-label);
+  text-transform: var(--label-transform);
+  font-variant-caps: var(--label-variant);
+}
+.fy-sbar__row {
+  position: relative;
+}
+.fy-sbar__session {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  padding: 6px 8px;
+  border: var(--stroke-control) solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--fg-soft);
+  text-decoration: none;
+}
+.fy-sbar__session:hover {
+  background: var(--nav-hover, var(--surface-2));
+  color: var(--fg);
+}
+.fy-sbar__session[aria-current='page'] {
+  border-color: var(--nav-sel-edge, var(--accent-border));
+  background: var(--nav-sel-bg, var(--accent-soft));
+  box-shadow: var(--nav-sel-shadow, none);
+  color: var(--nav-sel-fg, var(--accent));
+}
+.fy-sbar__title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.fy-sbar__name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-sbar__session[aria-current='page'] .fy-sbar__name {
+  font-weight: var(--weight-strong);
+}
+/* The ferret on a row: a small initial disc and its name, the second line under the task. */
+.fy-sbar__detail {
+  display: contents;
+}
+.fy-sbar__ferret {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.fy-sbar__initial {
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  line-height: 1;
+}
+.fy-sbar__session[aria-current='page'] .fy-sbar__initial {
+  background: var(--surface);
+  color: inherit;
+}
+.fy-sbar__ferret-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-sbar__sub {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The directory: mono, the quietest ink, truncated from the LEFT so a worktree's own name survives. */
+.fy-sbar__dir {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint, var(--muted));
+  direction: rtl;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-sbar__session[aria-current='page'] .fy-sbar__sub,
+.fy-sbar__session[aria-current='page'] .fy-sbar__dir {
+  color: var(--nav-sel-sub, var(--nav-sel-fg, var(--accent)));
+}
+/* The owner's pinned ferrets, above the folders. A pinned ferret that is over is dimmed, not dropped. */
+.fy-sbar__pinned .fy-sbar__project {
+  color: var(--accent);
+}
+.fy-sbar__session[data-sbar-pinned][data-sbar-stopped] {
+  opacity: 0.6;
+}
+/* A row that opens a menu on a held finger: no callout or text selection stealing the press, and the
+   hold shows itself — the row sinks and tints over the dwell — before the sheet arrives. */
+.fy-sbar__session[aria-haspopup] {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.fy-sbar__session[data-sbar-pressing] {
+  background: var(--nav-sel-bg, var(--accent-soft));
+  border-color: var(--nav-sel-edge, var(--accent-border));
+  transform: scale(0.985);
+  transition:
+    transform 500ms ease-out,
+    background-color 500ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-sbar__session[data-sbar-pressing] {
+    transform: none;
+    transition: none;
+  }
+}
+/* The ⋯ button is drawn only where the host provides a row menu; always on a coarse pointer, on hover elsewhere. */
+.fy-sbar__more {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 28px;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  opacity: 0;
+}
+.fy-sbar__row:hover .fy-sbar__more,
+.fy-sbar__more:focus-visible {
+  opacity: 1;
+}
+@media (pointer: coarse) {
+  .fy-sbar__session {
+    min-height: var(--target-floor, 44px);
+  }
+  .fy-sbar__more {
+    min-width: var(--target-floor, 44px);
+    min-height: var(--target-floor, 44px);
+    top: 0;
+    right: 0;
+    opacity: 1;
+  }
+}

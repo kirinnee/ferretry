@@ -225,6 +225,42 @@ and the mint response carries that answer rather than making each renderer infer
   invariant, enforced by the schema, is that **a disclosed rendezvous only ever rides beside a link**:
   there is no address to disclose one beside, and no link to draw.
 
+### The code leaves the address bar before anything else loads
+
+A pairing or share link's fragment must not sit in the tab's address while the app downloads, because anything that reads
+the address (an agent's browser tool, an extension, a shared screen) would see a live one-time code. The shell's
+`AddressTaker` strips it, but it is built only when the app's module graph has loaded: measured on a local 5.0 build, the
+fragment stayed ~0.5-0.7 s, through the first paint (the v4 app: ~0.8 s). So `packages/app/public/arrival.js`, a classic
+same-origin script (it satisfies `script-src 'self'`), is **the first script of every HTML document the build emits**: the
+app (`app/index.html`, ahead of the theme script), the landing page, `get-started/` and the OAuth callback page. The build
+refuses any emitted page that does not start with it, or that has a stylesheet before it (`scripts/get-started-page.ts`;
+the only exemptions are the generated `fy-render` shells, which `_headers` serves sandboxed with an opaque origin, where
+`replaceState` is refused and no link is ever aimed). With `history.replaceState` it strips every fragment on a declared
+`path` screen (`/pair`, `/join`; also under `/app/`) and every pairing-shaped fragment (`#v1;…`) on ANY path, while the
+document is still parsing (~20-45 ms on the same build, before first paint). It keeps listening for the life of the page:
+a fragment navigation (`hashchange`) or a history traversal (`popstate`) into a code is the same case as the first
+arrival. The router's own `pushState` is covered by `AddressTaker.read`, which the router calls after every write and which
+also drops a pairing-shaped fragment on an undeclared path.
+
+**What it keeps, and for whom.** Only a value that arrived on exactly a declared screen is held, in the script's own closure
+and on no property of `window`; a path beneath a screen, an undeclared path and a page with no taker (`data-drop`) are stripped
+and dropped at once. The hand-off is one non-enumerable function, `window.__fyArrival`, which `AddressTaker` calls once when
+it is built: it returns the value with **what is left of its two minutes, counted from the arrival**, and removes itself. A
+second call finds nothing; an unclaimed value is removed at its deadline whether or not the module ever boots; and a late boot
+holds it only for the time that remains. Once the taker has called it the taker owns the page: a later arrival on a declared
+screen is left for its own `hashchange` listener, and only the credential-shaped strays are still dropped by the script.
+
+**The guarantee, said narrowly.** The function is take-once; it is not secret from a script already running on this origin.
+`script-src 'self'` (plus the build's hashes) and Trusted Types allow only first-party code to run, so the one intended caller
+is the shell, which calls it before any plugin has a chance to; a script injected into the origin could call it first, but the
+same script could read the address earlier, so this is the boundary the whole app already has. **And the strip cannot be
+earlier than the file's download:** a classic external script must arrive before it runs, so the address holds the link from
+the moment the navigation commits until `arrival.js` has run (an inline strip would run sooner but would need a hashed CSP
+entry, and still cannot precede the commit). A tool that reads the address at commit, or echoes the URL its caller typed,
+has to redact it on its own side; nothing in the page can do that for it. The script's path list and credential pattern are
+second statements of the plugins' declarations and the access contract's `PAIRING_FRAGMENT_PATTERN`;
+`tests/unit/arrival-script.test.ts` fails if they drift.
+
 ### The link names no rendezvous; the device finds one itself
 
 The fragment is one form, `#v1;url=…;code=…;fp=…`, byte-identical to every link a daemon has ever
@@ -270,34 +306,38 @@ together.
 than one for all of them — `localOnlyNotice` and `refusalNotice` in `@ferretry/protocol` own every
 sentence, and `fy pair`, the Add-a-device panel and `fyd --check` all render those and never their own.
 
-Each remedy below answers **the direct address**, which is the only thing these reasons describe. A
-`local-only` daemon that also dials a discoverable rendezvous is already redeemable from another
-device, so its remedy is the upgrade to a connection with no third party on the path rather than the
-remedy it reads as here — `localOnlyNotice` says so itself when a discovered address is present, and
-this table is the no-rendezvous wording:
+**The advertisement is decided at each mint, from the listener the kernel really bound.** The kernel binds after
+every plugin is built, so Access asks Connections for the advertisement on every `POST /v1/pair/code` (never once at
+build), and Connections takes the host and port from `kernel.bind` — whichever of `--host`, `--port`, `FY_PORT` or the
+default decided them — and falls back to `direct` in `config/connections.yaml` only while nothing is bound. A loopback
+bind with a relay source is therefore `local-only` with a link on its own port, and needs no `direct` block. Only the
+advertisement and the reachability check follow the bound listener. Connections' browser-origin allowlist remains
+configuration-based, independent of the bound listener; production Access passkeys remain restricted to the hosted app
+origin.
 
-| reason          | what actually fixes it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `local-only`    | **bind first, then advertise**: `"host": "0.0.0.0"` on the `bind` entry in `carriers` (or the top-level `host` if the document has no bind entry) _and_ `"publicUrl"` set to the address other devices reach this machine at, then restart. `publicUrl` alone changes nothing about the interface the daemon listens on, so on its own it turns an honest "only this machine can redeem it" into a QR a phone scans and then cannot connect to. The sentence names the exposure the wildcard opens — it accepts connections from other devices on the network — because that widening is the fix, not a side effect. The wildcard keeps loopback available, so commands on the machine are unaffected. |
-| `wildcard-bind` | `"publicUrl"` alone, then restart — the daemon is already listening everywhere and needs only a single address to hand out.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `no-port`       | start the daemon once so it records the port it takes, or write the `port` of the `bind` entry in `carriers` (or the top-level `port` if the document has no bind entry). `publicUrl` cannot supply an address nothing has bound.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+Each remedy below answers **the direct address**, which is the only thing these reasons describe. **The supported way
+to pair a phone is a loopback listener plus the discovered relay**: the link names the daemon's own loopback address,
+the phone finds the rendezvous in the same hosted directory the daemon read, and redeems through it. A `local-only`
+daemon that already holds a discovered relay therefore needs no change at all — `localOnlyNotice` says so itself.
+5.0 has **no separate public-address setting yet**, and the listener refuses a peer that is not on this machine, so no
+configuration turns the direct address into one another device can dial. The wording is the same at the terminal and in
+the browser:
 
-The example address in each sentence carries **this daemon's** port, taken from the address the reader
-was just shown — a first boot whose preferred port was taken is serving on another one, and an example
-naming the compiled-in default is advice to type the wrong number.
+| reason          | what actually fixes it                                                                                                                                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `local-only`    | keep the daemon on a loopback listener and let it use a discovered relay. Until a relay is discovered, pair from a browser on this machine. There is nothing to widen: a wider listener does not give another device a direct route.                         |
+| `wildcard-bind` | start the daemon on a loopback listener (`fyd --host 127.0.0.1`) and let it use a discovered relay. A wildcard listener stays refused: there is no single address to hand out, and no public-address setting to say which one.                               |
+| `no-port`       | start the daemon so it binds a port (`--port` or `FY_PORT` chooses it), or write `port` under `direct` in `config/connections.yaml` (a new `direct` block also needs `host`). `direct` answers only while nothing is bound, and the listener you start wins. |
 
-Because the wildcard-plus-`publicUrl` pair is the documented answer rather than a suspicious one,
-`advertisesForeignAddress` reports nothing for a wildcard bind: the boot notice that offers to remove a
-`publicUrl` which "is not deliberate" must never fire at the operator who just deliberately added it.
+`config/connections.yaml` has exactly one block for the direct carrier, `direct`, with a `host` and an optional `port`
+and nothing else; the listener itself is chosen by `fyd --host`, `--port` and `FY_PORT`.
 
-Where a client on the machine **dials** the daemon is a different fact and is read from the recorded
-bind (`recordedBindAddress`), never from `publicUrl`. "The recorded bind" is the one `declaredBind` names —
-the `carriers` bind entry when there is one, the top-level `host`/`port` otherwise — and the daemon
-asks the same function, so the two ends cannot disagree about which port a `carriers` document means.
-A wildcard bind resolves to loopback at the recorded port. Reading the advertisement there made an operator who followed the remedy unable to run
-`fy pair` at all — the local client classified the daemon on its own desk as remote and refused to send
-the owner-only token, which is the rule working correctly on the wrong input. `FY_URL` still wins
-outright, and a genuinely remote daemon still requires its own `FY_TOKEN`.
+Where a client on the machine **dials** the daemon is a different fact. The listener writes a run record,
+`run/daemon.json` (`DaemonRunSchema`: the Unix socket, the loopback bind's `host` and `port`, the pid and version), when
+it starts to listen. The CLI reads it through `daemonAddressing`, `parseDaemonRun` and `resolveDaemonUrl`, and both ends
+turn it into an address with the kernel's one `recordedBindAddress`, so they cannot disagree about the port. A wildcard
+bind resolves to loopback at the recorded port, so a daemon on `0.0.0.0` is still reachable by `fy pair` on its own
+desk. `FY_URL` still wins outright, and a genuinely remote daemon still requires its own `FY_TOKEN`.
 
 The requester's own carrier never changes this answer. `ApiRequest.loopback` says who is **minting**,
 not who will **redeem**; the normal phone journey is minted locally and redeemed elsewhere.

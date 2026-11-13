@@ -1,0 +1,508 @@
+import { afterEach, describe, it } from 'bun:test';
+import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
+import should from 'should';
+import { DiskFileSystem } from '../../../../support/daemon/disk-file-system.ts';
+import {
+  FileSignalArtifacts,
+  LauncherSignalTerminal,
+  StorageSignalRepository,
+} from '../../../../../daemon/adapters/session/signal/index.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
+import { FerretConfigFile, FerretStateFile } from '../../../../../contract/index.ts';
+import { memoryStorage, sessionConfig } from '../../../../support/daemon/storage.ts';
+
+/**
+ * The durable side of a signal: the record it rewrites, the evidence it leaves, and the pane it stops.
+ *
+ * Everything runs against a temp `FY_HOME` and a launcher the test owns. Nothing here starts a daemon,
+ * binds a port, or addresses a tmux server.
+ */
+
+const homes = new Set<string>();
+const NOW = '2026-08-01T12:00:00.000Z';
+const ID = parseSessionId('session-1');
+const PEER = parseSessionId('session-2');
+
+async function openStorage(instant = NOW) {
+  const { storage, folder } = await memoryStorage({ clock: { now: () => instant } });
+  return { opened: { storage, folder } };
+}
+
+/**
+ * A document the declared schema refuses, laid on disk as a damaged or foreign file would be: the storage's own
+ * write refuses it, so a test about reading one plants it straight into the state folder.
+ */
+function plantDocument(
+  folder: MemoryStateFolder,
+  file: typeof FerretConfigFile | typeof FerretStateFile,
+  id: SessionId,
+  document: Record<string, unknown>,
+): void {
+  folder.plant(file, JSON.stringify({ format: 1, ...document }), id);
+}
+
+function config(overrides: Record<string, unknown> = {}) {
+  return sessionConfig('session-1', {
+    name: 'Signal for yourself',
+    agent: '/opt/fleet/bin/claude-auto-loge',
+    command: ['/opt/fleet/bin/claude-auto-loge'],
+    cwd: '/workspace/project',
+    mode: 'auto',
+    turn: 3,
+    tmuxSession: 'fy-session-1',
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...overrides,
+  });
+}
+
+const clock = { now: () => NOW };
+
+afterEach(async () => {
+  for (const home of homes) await rm(home, { recursive: true, force: true });
+  homes.clear();
+});
+
+describe('the signal artifact store', () => {
+  it('should write the summary the teammate gave, and a default one when it gave none', async () => {
+    // Arrange
+    const home = await mkdtemp(join(tmpdir(), 'ferretry-signal-files-'));
+    homes.add(home);
+    const store = new FileSignalArtifacts(() => home, clock, new DiskFileSystem());
+
+    // Act
+    await store.writeSummary(ID, '  shipped the port  ');
+    const given = await readFile(join(home, 'summary.md'), 'utf8');
+    await store.writeSummary(ID, '   ');
+    const blank = await readFile(join(home, 'summary.md'), 'utf8');
+    await store.writeSummary(ID, undefined);
+    const absent = await readFile(join(home, 'summary.md'), 'utf8');
+
+    // Assert
+    // Trimmed and newline-terminated: it is a file a person opens, not a log line.
+    should(given).equal('shipped the port\n');
+    // A whitespace-only message is no message at all, so it gets the default rather than a blank file.
+    should(blank).equal(absent);
+    should(absent).match(/inspect chat and repository diff/u);
+    should((await stat(join(home, 'summary.md'))).mode & 0o777).equal(0o600);
+  });
+
+  it('should write the done marker under the name the revive already clears, carrying the turn', async () => {
+    // THE FILENAME IS A CONTRACT. `FileResumeTurnStore` removes `done.marker` before every relaunch; a
+    // completion written under any other name would survive a revive and end the new turn at once.
+    // Arrange
+    const home = await mkdtemp(join(tmpdir(), 'ferretry-signal-marker-'));
+    homes.add(home);
+    const store = new FileSignalArtifacts(() => home, clock, new DiskFileSystem());
+
+    // Act
+    await store.markDone(ID, 4);
+
+    // Assert
+    const marker = JSON.parse(await readFile(join(home, 'done.marker'), 'utf8')) as Record<string, unknown>;
+    should(marker).deepEqual({ at: NOW, type: 'done', turn: 4 });
+    // Nothing but the marker is left behind: the temporary file it was renamed from is gone.
+    should((await readdir(home)).toSorted()).deepEqual(['done.marker']);
+  });
+
+  it('should append every question to the outbox and keep the latest as the marker', async () => {
+    // Two places for two questions: the outbox is the conversation a lead reads in order, and the
+    // marker is the current condition a supervisor stats without parsing a log.
+    // Arrange
+    const home = await mkdtemp(join(tmpdir(), 'ferretry-signal-question-'));
+    homes.add(home);
+    const store = new FileSignalArtifacts(() => home, clock, new DiskFileSystem());
+
+    // Act
+    await store.raiseQuestion(ID, 'which branch?');
+    await store.raiseQuestion(ID, 'and which base?');
+
+    // Assert
+    const lines = (await readFile(join(home, 'channel', 'outbox.jsonl'), 'utf8')).trimEnd().split('\n');
+    should(lines).have.length(2);
+    should(JSON.parse(lines[0] ?? '')).deepEqual({ at: NOW, type: 'question', message: 'which branch?' });
+    should(JSON.parse(await readFile(join(home, 'needs-help.marker'), 'utf8'))).deepEqual({
+      at: NOW,
+      type: 'question',
+      message: 'and which base?',
+    });
+    should((await stat(join(home, 'channel', 'outbox.jsonl'))).mode & 0o777).equal(0o600);
+  });
+});
+
+describe('the storage signal repository', () => {
+  it('should read a durable session as a signal target, taking the turn that moves', async () => {
+    // Arrange
+    const { opened } = await openStorage();
+    await opened.storage.writeConfig(ID, config({ teammate: 'hayden' }));
+    await opened.storage.writeState(ID, {
+      id: 'session-1',
+      status: 'running',
+      turn: 7,
+      waitingCreditSeconds: 45,
+      waiting: { since: '2026-08-01T11:00:00.000Z', until: NOW, condition: 'CI', peer: 'session-2', peerName: 'iris' },
+    });
+
+    // Act
+    const actual = await new StorageSignalRepository(opened.storage, clock).read(ID);
+
+    // Assert
+    should(actual).deepEqual({
+      id: ID,
+      status: 'running',
+      mode: 'auto',
+      turn: 7,
+      teammate: 'hayden',
+      waitingCreditSeconds: 45,
+      waiting: { since: '2026-08-01T11:00:00.000Z', until: NOW, condition: 'CI', peer: 'session-2', peerName: 'iris' },
+    });
+    await opened.storage.close();
+  });
+
+  it('should read no target from a wait with no start instant, which the state schema refuses', async () => {
+    // A wait whose `since` is missing cannot be credited or expired, and the declared state schema no longer lets one
+    // be stored: a document that carries one is refused on read, so no target is guessed from it.
+    // Arrange
+    const { opened } = await openStorage();
+    await opened.storage.writeConfig(ID, config());
+    plantDocument(opened.folder, FerretStateFile, ID, {
+      id: 'session-1',
+      status: 'running',
+      turn: 0,
+      waiting: { condition: 'CI' },
+    });
+
+    // Act
+    const actual = await new StorageSignalRepository(opened.storage, clock).read(ID);
+
+    // Assert
+    should(actual).be.undefined();
+    await opened.storage.close();
+  });
+
+  it('should report nothing for an absent session, and refuse to guess an unreadable one', async () => {
+    // Arrange
+    const { opened } = await openStorage();
+    const subject = new StorageSignalRepository(opened.storage, clock);
+    plantDocument(opened.folder, FerretConfigFile, PEER, config({ id: 'session-2', mode: 'batch' }));
+    await opened.storage.writeState(PEER, { id: 'session-2', turn: 0, status: 'running' });
+
+    // Act
+    const absent = await subject.read(ID);
+    const unreadable = await subject.read(PEER);
+
+    // Assert
+    should(absent).be.undefined();
+    // A signal retires panes and writes terminal verdicts; a mode it cannot read is not a mode to guess.
+    should(unreadable).be.undefined();
+    await opened.storage.close();
+  });
+
+  it('should refuse to guess a session whose status is not one the protocol names', async () => {
+    // Arrange
+    const { opened } = await openStorage();
+    await opened.storage.writeConfig(ID, config());
+    plantDocument(opened.folder, FerretStateFile, ID, { id: 'session-1', turn: 0, status: 'finished' });
+
+    // Act
+    const actual = await new StorageSignalRepository(opened.storage, clock).read(ID);
+
+    // Assert
+    should(actual).be.undefined();
+    await opened.storage.close();
+  });
+
+  it('should write a completion onto the document and journal it after the state is durable', async () => {
+    // Arrange
+    const { opened } = await openStorage();
+    await opened.storage.writeConfig(ID, config());
+    await opened.storage.writeState(ID, { id: 'session-1', status: 'running', turn: 3 });
+    const subject = new StorageSignalRepository(opened.storage, clock);
+
+    // Act
+    const target = await subject.transition(ID, {
+      event: 'session.completed',
+      status: 'completed',
+      health: 'idle',
+      reason: 'done marker written',
+      finishedAt: NOW,
+      promptReady: false,
+    });
+
+    // Assert
+    should(target.status).equal('completed');
+    const state = (await opened.storage.readState(ID)) as Record<string, unknown>;
+    should(state.health).equal('idle');
+    should(state.finishedAt).equal(NOW);
+    should(state.promptReady).equal(false);
+    const page = await opened.storage.replay(ID);
+    should(page.events.map(event => event.type)).deepEqual(['session.completed']);
+    should(page.events[0]?.data).deepEqual({ reason: 'done marker written' });
+    await opened.storage.close();
+  });
+
+  it('should record a declared wait as an object and clear it by removing the field entirely', async () => {
+    // CLEARED MEANS ABSENT, NOT `null`. `SessionStateSchema` declares `waiting` as an optional OBJECT,
+    // so a null makes the document stop satisfying the protocol and every surface that parses before
+    // serving drops the session it just saw.
+    // Arrange
+    const { opened } = await openStorage();
+    await opened.storage.writeConfig(ID, config());
+    await opened.storage.writeState(ID, {
+      id: 'session-1',
+      turn: 0,
+      status: 'running',
+      nudgedAt: '2026-08-01T09:00:00.000Z',
+    });
+    const subject = new StorageSignalRepository(opened.storage, clock);
+
+    // Act
+    await subject.transition(ID, {
+      event: 'session.waiting',
+      status: 'waiting',
+      waiting: { since: NOW, until: '2026-08-01T13:00:00.000Z', condition: 'CI', peer: 'session-2', peerName: 'iris' },
+    });
+    const parked = (await opened.storage.readState(ID)) as Record<string, unknown>;
+    await subject.transition(ID, {
+      event: 'session.waiting_cleared',
+      status: 'running',
+      waiting: 'clear',
+      waitingCreditSeconds: 90,
+      reanchorActivity: true,
+    });
+    const working = (await opened.storage.readState(ID)) as Record<string, unknown>;
+
+    // Assert
+    should(parked.waiting).deepEqual({
+      since: NOW,
+      until: '2026-08-01T13:00:00.000Z',
+      condition: 'CI',
+      peer: 'session-2',
+      peerName: 'iris',
+    });
+    should(Object.hasOwn(working, 'waiting')).be.false();
+    should(working.waitingCreditSeconds).equal(90);
+    // The activity ledger is re-anchored and the nudge mark dropped, or the next supervision tick
+    // would nudge — or reap — the teammate the daemon just woke.
+    should(Object.hasOwn(working, 'nudgedAt')).be.false();
+    should(working.lastActivityAt).equal(NOW);
+    should(working.lastTranscriptAt).equal(NOW);
+    should(working.lastPaneAt).equal(NOW);
+    await opened.storage.close();
+  });
+
+  it('should record a wait with only the fields it was given', async () => {
+    // Arrange
+    const { opened } = await openStorage();
+    await opened.storage.writeConfig(ID, config());
+    await opened.storage.writeState(ID, { id: 'session-1', turn: 0, status: 'running' });
+
+    // Act
+    await new StorageSignalRepository(opened.storage, clock).transition(ID, {
+      event: 'session.waiting',
+      waiting: { since: NOW },
+    });
+
+    // Assert
+    should(((await opened.storage.readState(ID)) as Record<string, unknown>).waiting).deepEqual({ since: NOW });
+    await opened.storage.close();
+  });
+
+  it('should raise rather than answer with a target it cannot read back', async () => {
+    // A transition that leaves the document unreadable is a defect, not a refusal: answering with a
+    // guessed target would report a session state nothing on disk supports.
+    // Arrange
+    const { opened } = await openStorage();
+    plantDocument(opened.folder, FerretConfigFile, ID, config({ mode: 'batch' }));
+    await opened.storage.writeState(ID, { id: 'session-1', turn: 0, status: 'running' });
+
+    // Act
+    const failure = await new StorageSignalRepository(opened.storage, clock)
+      .transition(ID, { event: 'session.completed', status: 'completed' })
+      .catch((error: unknown) => error);
+
+    // Assert
+    should(failure).be.an.Error();
+    should((failure as Error).message).match(/unreadable after a signal transition/u);
+    await opened.storage.close();
+  });
+});
+
+describe('resolving the peer a wait names', () => {
+  it('should resolve an exact session id outright', async () => {
+    // Arrange
+    const { opened } = await openStorage();
+    await opened.storage.writeConfig(PEER, config({ id: 'session-2', teammate: 'iris' }));
+    await opened.storage.writeState(PEER, { id: 'session-2', turn: 0, status: 'running' });
+
+    // Act
+    const actual = await new StorageSignalRepository(opened.storage, clock).resolvePeer('session-2');
+
+    // Assert
+    should(actual?.id).equal(PEER);
+    should(actual?.teammate).equal('iris');
+    await opened.storage.close();
+  });
+
+  it('should resolve a callsign, case-insensitively, to the session claiming it', async () => {
+    // Arrange
+    const { opened } = await openStorage();
+    await opened.storage.writeConfig(PEER, config({ id: 'session-2', teammate: 'iris' }));
+    await opened.storage.writeState(PEER, { id: 'session-2', turn: 0, status: 'running' });
+
+    // Act
+    const actual = await new StorageSignalRepository(opened.storage, clock).resolvePeer('  IRIS ');
+
+    // Assert
+    should(actual?.id).equal(PEER);
+    await opened.storage.close();
+  });
+
+  it('should resolve nothing for a callsign nobody holds, so a typo cannot become a park', async () => {
+    // Arrange
+    const { opened } = await openStorage();
+    await opened.storage.writeConfig(PEER, config({ id: 'session-2', teammate: 'iris' }));
+    await opened.storage.writeState(PEER, { id: 'session-2', turn: 0, status: 'running' });
+
+    // Act
+    const typo = await new StorageSignalRepository(opened.storage, clock).resolvePeer('irs');
+
+    // Assert
+    should(typo).be.undefined();
+    await opened.storage.close();
+  });
+
+  it('should resolve nothing for a reference the state-home layout would refuse as a path', async () => {
+    // Arrange
+    const { opened } = await openStorage();
+    await opened.storage.writeConfig(PEER, config({ id: 'session-2' }));
+    await opened.storage.writeState(PEER, { id: 'session-2', turn: 0, status: 'running' });
+
+    // Act
+    const traversal = await new StorageSignalRepository(opened.storage, clock).resolvePeer('../etc/passwd');
+
+    // Assert
+    should(traversal).be.undefined();
+    await opened.storage.close();
+  });
+
+  it('should step over a session with no readable configuration rather than failing the lookup', async () => {
+    // A journalled session whose configuration is absent holds no callsign, so it cannot be the peer a
+    // wait names — and it must not stop the ones that can from being found.
+    // Arrange
+    const { opened } = await openStorage();
+    await opened.storage.writeState(ID, { id: 'session-1', turn: 0, status: 'running' });
+    await opened.storage.writeConfig(PEER, config({ id: 'session-2', teammate: 'iris' }));
+    await opened.storage.writeState(PEER, { id: 'session-2', turn: 0, status: 'running' });
+
+    // Act
+    const actual = await new StorageSignalRepository(opened.storage, clock).resolvePeer('iris');
+
+    // Assert
+    should(actual?.id).equal(PEER);
+    await opened.storage.close();
+  });
+
+  it('should resolve a name to its live holder, and refuse to pin a wait on a tie', async () => {
+    // A name freed by an aged-out session can be held twice: the dormant agent that aged out and the
+    // live one that took it. The live one is the peer; two live holders are a guess nobody may make,
+    // and the id always still works.
+    // Arrange
+    const { opened } = await openStorage();
+    await opened.storage.writeConfig(ID, config({ id: 'session-1', teammate: 'iris' }));
+    await opened.storage.writeState(ID, { id: 'session-1', turn: 0, status: 'stopped' });
+    await opened.storage.writeConfig(PEER, config({ id: 'session-2', teammate: 'iris' }));
+    await opened.storage.writeState(PEER, { id: 'session-2', turn: 0, status: 'running' });
+    const subject = new StorageSignalRepository(opened.storage, clock);
+
+    // Act
+    const live = await subject.resolvePeer('iris');
+    await opened.storage.writeState(ID, { id: 'session-1', turn: 0, status: 'running' });
+    const tie = await subject.resolvePeer('iris');
+    const byId = await subject.resolvePeer('session-1');
+
+    // Assert
+    should(live?.id).equal(PEER);
+    should(tie).be.undefined();
+    should(byId?.id).equal(ID);
+    await opened.storage.close();
+  });
+});
+
+describe('the signal terminal', () => {
+  it('should snapshot and stop through the launcher the revive already holds', async () => {
+    // A second tmux adapter would be a second final-frame ledger, so a completion's last screen would
+    // be filed where no revive could ever find it.
+    // Arrange
+    const calls: Array<readonly [string, SessionId, string | undefined]> = [];
+    const subject = new LauncherSignalTerminal({
+      snapshot: async id => void calls.push(['snapshot', id, undefined]),
+      kill: async (id, reason) => void calls.push(['kill', id, reason]),
+    });
+
+    // Act
+    await subject.snapshot(ID);
+    await subject.stop(ID, 'completion');
+
+    // Assert
+    should(calls).deepEqual([
+      ['snapshot', ID, undefined],
+      ['kill', ID, 'completion'],
+    ]);
+  });
+});
+
+describe('the storage signal repository when the storage itself fails', () => {
+  it('should raise a storage failure on a read instead of reading it as an absent session', async () => {
+    // Arrange: only a document the schema refuses is "no target"; a disk that cannot answer is a fault the caller must see.
+    const { opened } = await openStorage();
+    const failing = {
+      readConfig: async () => {
+        throw new Error('the state home is unreachable');
+      },
+      readState: async () => undefined,
+    } as unknown as typeof opened.storage;
+
+    // Act
+    const failure = await new StorageSignalRepository(failing, clock).read(ID).catch((error: unknown) => error);
+
+    // Assert
+    should((failure as Error).message).equal('the state home is unreachable');
+    await opened.storage.close();
+  });
+
+  it('should raise a storage failure while reading a transition back instead of calling the session unreadable', async () => {
+    // Arrange: the state is written and the journal entry appended, then the configuration read fails for a reason that is not a refusal.
+    const { opened } = await openStorage();
+    plantDocument(opened.folder, FerretConfigFile, ID, config({ mode: 'batch' }));
+    await opened.storage.writeState(ID, { id: 'session-1', turn: 0, status: 'running' });
+    const storage = opened.storage as unknown as {
+      append: (...args: unknown[]) => Promise<unknown>;
+      readConfig: (id: SessionId) => Promise<unknown>;
+    };
+    const append = storage.append.bind(storage);
+    const readConfig = storage.readConfig.bind(storage);
+    let appended = false;
+    storage.append = async (...args: unknown[]) => {
+      const written = await append(...args);
+      appended = true;
+      return written;
+    };
+    storage.readConfig = async (id: SessionId) => {
+      if (appended) throw new Error('the state home went away');
+      return await readConfig(id);
+    };
+
+    // Act
+    const failure = await new StorageSignalRepository(opened.storage, clock)
+      .transition(ID, { event: 'session.completed', status: 'completed' })
+      .catch((error: unknown) => error);
+
+    // Assert
+    should((failure as Error).message).equal('the state home went away');
+    await opened.storage.close();
+  });
+});

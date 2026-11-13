@@ -1,0 +1,316 @@
+import { randomUUID } from 'node:crypto';
+import { describe, expect, test } from 'bun:test';
+import { FakeHarness, FakeRunner } from '../../../../contract/testing/index.ts';
+import { directory, FakeRootPinner, textFile, treeOf } from '../session/filesystem/support.ts';
+import { as, fakePacks, host, record } from './route-fixture.ts';
+
+/**
+ * The state-home fence for an agent's start, now bound: the kernel's `bindDirectory` answers whether the folder lies
+ * inside the state home (by name, by identity or through a link), the route refuses an agent there with 403 `state_home`,
+ * and an ordinary project folder is served. The folder is bound where it is first checked and re-verified as the last step
+ * before the harness starts.
+ */
+const STATE = '/state';
+const PROJECT = '/work/project';
+
+test('S47 R-0332 an agent starts in an ordinary project folder (the fence is bound, not failing closed)', async () => {
+  const runner = new FakeRunner();
+  const h = await host([], {
+    harness: new FakeHarness(),
+    runner,
+    fenceHome: STATE,
+    plugins: [fakePacks().plugin],
+  });
+  const lead = await h.request('POST', '/v1/ferrets', {
+    headers: { 'x-fy-request-id': 'lead' },
+    body: { folder: PROJECT },
+  });
+  expect(lead.status).toBe(201);
+
+  const child = await h.request('POST', '/v1/ferrets', {
+    headers: { ...as(lead.json<{ id: string }>().id).headers, 'x-fy-request-id': 'child' },
+    body: { folder: PROJECT },
+  });
+
+  expect(child.status).toBe(201);
+  expect(runner.starts).toBe(2);
+});
+
+test('S47 R-0332 an agent is refused a folder inside the state home, one that is the state home, and a link into it, before anything starts', async () => {
+  const runner = new FakeRunner();
+  const h = await host([record('lead')], {
+    harness: new FakeHarness(),
+    runner,
+    fenceHome: STATE,
+    plugins: [fakePacks().plugin],
+    directories: { '/link-to-state': `${STATE}/credentials` },
+  });
+  for (const folder of [STATE, `${STATE}/credentials`, '/link-to-state']) {
+    const answer = await h.request('POST', '/v1/ferrets', {
+      ...as('lead'),
+      body: { folder },
+      headers: { ...as('lead').headers, 'x-fy-request-id': folder },
+    });
+    expect([folder, answer.status, answer.json<{ code: string }>().code]).toEqual([folder, 403, 'state_home']);
+  }
+  expect(runner.starts).toBe(0);
+  expect((await h.request('GET', '/v1/ferrets')).json<unknown[]>()).toHaveLength(1);
+});
+
+test('S47 R-0332 the owner may start in the state home: only an agent is fenced out', async () => {
+  const runner = new FakeRunner();
+  const h = await host([], { harness: new FakeHarness(), runner, fenceHome: STATE });
+
+  const answer = await h.request('POST', '/v1/ferrets', {
+    body: { folder: `${STATE}/credentials` },
+    headers: { 'x-fy-request-id': 'owner' },
+  });
+
+  expect(answer.status).toBe(201);
+  expect(runner.starts).toBe(1);
+});
+
+test('audit A B1: a folder swapped for a link into the state home AFTER it was checked starts nothing', async () => {
+  // The late swap: Packs' `start.decide` runs after the route and the service checked the folder. The project is then
+  // replaced by a link into the state home. The identity bound at the first check is re-verified as the last step before
+  // the harness, which holds the folder, so no runner is asked and no ferret is left running.
+  const runner = new FakeRunner();
+  const harness = new FakeHarness();
+  let swapped = false;
+  let h: Awaited<ReturnType<typeof host>> | undefined;
+  const packs = fakePacks(async input => {
+    if (input.by !== 'ferret') return { allow: true };
+    h?.setDirectory(PROJECT, `${STATE}/credentials`);
+    swapped = true;
+    return { allow: true };
+  });
+  h = await host([], { harness, runner, fenceHome: STATE, plugins: [packs.plugin] });
+  const lead = await h.request('POST', '/v1/ferrets', {
+    headers: { 'x-fy-request-id': 'lead' },
+    body: { folder: PROJECT },
+  });
+  expect(lead.status).toBe(201);
+  const before = runner.starts;
+
+  const child = await h.request('POST', '/v1/ferrets', {
+    headers: { ...as(lead.json<{ id: string }>().id).headers, 'x-fy-request-id': 'child' },
+    body: { folder: PROJECT },
+  });
+
+  expect(swapped).toBe(true);
+  expect(child.status).toBe(409);
+  expect(child.json<{ error: string }>().error).toContain('no longer what was checked');
+  expect(runner.starts).toBe(before);
+  expect(harness.launched).toHaveLength(1);
+});
+
+test('the late swap is held for a resume too: the folder bound at the resume is verified before the relaunch', async () => {
+  const runner = new FakeRunner();
+  const harness = new FakeHarness();
+  let h: Awaited<ReturnType<typeof host>> | undefined;
+  const packs = fakePacks(async input => {
+    if (input.by === 'resume') h?.replaceDirectory(PROJECT);
+    return { allow: true };
+  });
+  h = await host([], { harness, runner, fenceHome: STATE, plugins: [packs.plugin] });
+  const lead = await h.request('POST', '/v1/ferrets', {
+    headers: { 'x-fy-request-id': 'lead' },
+    body: { folder: PROJECT },
+  });
+  const id = lead.json<{ id: string }>().id;
+  await h.settle();
+  await h.request('POST', `/v1/ferrets/${id}/stop`, { query: { how: 'now' }, body: {} });
+  await h.settle();
+  const before = runner.starts;
+
+  const resumed = await h.request('POST', `/v1/ferrets/${id}/resume`, { body: {} });
+
+  expect(resumed.status).toBeGreaterThanOrEqual(400);
+  expect(runner.starts).toBe(before);
+});
+
+/** A refusal as the kernel's fenced pin raises it: named, and carrying the refusal word. */
+const fenced = (): Error => Object.assign(new Error('root refused: fenced'), { name: 'RootError', refusal: 'fenced' });
+
+test('S47 R-0151 an agent’s file-browser read is refused inside the state home beneath its work folder, and served beside it; a person is served beside it too', async () => {
+  // The ferret works in ~, so its work folder CONTAINS the state home. The kernel's pin judges every walk beneath the
+  // root against the fence (kernel `S40 S47` tests); this stands in for its refusal on the home's names.
+  const pinner = new FakeRootPinner({
+    tree: treeOf(
+      [
+        '',
+        directory([
+          { name: '.ferretry', type: 'dir' },
+          { name: 'sibling.txt', type: 'file' },
+        ]),
+      ],
+      ['.ferretry', { ...directory([{ name: 'secret.json', type: 'file' }]), error: fenced() }],
+      ['.ferretry/secret.json', { ...textFile('credential-bytes\n'), error: fenced() }],
+      ['sibling.txt', textFile('sibling-bytes\n')],
+    ),
+  });
+  const git = async () => ({ exitCode: 128, signal: null, stdout: '', stderr: 'fatal: not a git repository' });
+  const h = await host([record('lead', undefined, '/home/me')], { pinner, spawn: git });
+  for (const [route, query] of [
+    ['/v1/ferrets/lead/fs', { path: '.ferretry' }],
+    ['/v1/ferrets/lead/fs/file', { path: '.ferretry/secret.json' }],
+  ] as const) {
+    const answer = await h.request('GET', route, { ...as('lead'), query });
+    // Today's refusal for a path inside the state home: the viewer's `denied`, 403.
+    expect(answer.status).toBe(403);
+    expect(answer.json<{ code: string }>().code).toBe('denied');
+    expect(answer.body).not.toContain('credential-bytes');
+  }
+  const sibling = await h.request('GET', '/v1/ferrets/lead/fs/file', { ...as('lead'), query: { path: 'sibling.txt' } });
+  expect(sibling.status).toBe(200);
+  expect(sibling.body).toContain('sibling-bytes');
+  // Every request closed what it pinned.
+  expect(pinner.roots.every(root => root.closed)).toBe(true);
+  // A person at the machine is served beside the home as before.
+  const person = await h.request('GET', '/v1/ferrets/lead/fs/file', { query: { path: 'sibling.txt' } });
+  expect(person.status).toBe(200);
+  expect(person.body).toContain('sibling-bytes');
+});
+
+describe('an agent’s resume binds its folder under the same state-home policy as an agent’s start', () => {
+  /** A lead and its helper started in the project; the helper is stopped, so the next call is a resume. */
+  async function stoppedHelper(extra: { readonly directories?: Readonly<Record<string, string>> } = {}) {
+    const runner = new FakeRunner();
+    const harness = new FakeHarness();
+    const h = await host([], { harness, runner, fenceHome: STATE, plugins: [fakePacks().plugin], ...extra });
+    const lead = await h.request('POST', '/v1/ferrets', {
+      headers: { 'x-fy-request-id': 'lead' },
+      body: { folder: PROJECT },
+    });
+    const leadId = lead.json<{ id: string }>().id;
+    const child = await h.request('POST', '/v1/ferrets', {
+      headers: { ...as(leadId).headers, 'x-fy-request-id': 'child' },
+      body: { folder: PROJECT },
+    });
+    expect(child.status).toBe(201);
+    const childId = child.json<{ id: string }>().id;
+    await h.settle();
+    const stopped = await h.request('POST', `/v1/ferrets/${childId}/stop`, {
+      ...as(leadId),
+      query: { how: 'now' },
+      body: {},
+    });
+    expect(stopped.status).toBe(200);
+    await h.settle();
+    return { h, runner, harness, leadId, childId };
+  }
+
+  test('a project swapped for a link into the state home BEFORE the resume binds refuses an agent’s resume, with zero starts', async () => {
+    const { h, runner, harness, leadId, childId } = await stoppedHelper();
+    // The swap precedes the resume's own binding, so re-verifying that binding alone would accept it.
+    h.setDirectory(PROJECT, `${STATE}/credentials`);
+    const before = runner.starts;
+
+    const resumed = await h.request('POST', `/v1/ferrets/${childId}/resume`, { ...as(leadId), body: {} });
+
+    expect(resumed.status).toBeGreaterThanOrEqual(400);
+    expect(resumed.body).toContain('state home');
+    expect(runner.starts).toBe(before);
+    expect(harness.launched).toHaveLength(2);
+  });
+
+  test('the same swap fences the OWNER’S resume of a helper an agent first started: the birth stays fenced whoever asks', async () => {
+    const { h, runner, childId } = await stoppedHelper();
+    h.setDirectory(PROJECT, `${STATE}/credentials`);
+    const before = runner.starts;
+
+    const resumed = await h.request('POST', `/v1/ferrets/${childId}/resume`, { body: {} });
+
+    expect(resumed.status).toBeGreaterThanOrEqual(400);
+    expect(resumed.body).toContain('state home');
+    expect(runner.starts).toBe(before);
+  });
+
+  test('the same swap does not stop the owner’s resume of a ferret the owner first started', async () => {
+    const { h, runner, leadId } = await stoppedHelper();
+    expect((await h.request('POST', `/v1/ferrets/${leadId}/stop`, { query: { how: 'now' }, body: {} })).status).toBe(
+      200,
+    );
+    await h.settle();
+    h.setDirectory(PROJECT, `${STATE}/credentials`);
+    const before = runner.starts;
+
+    const resumed = await h.request('POST', `/v1/ferrets/${leadId}/resume`, { body: {} });
+
+    expect(resumed.status).toBe(200);
+    expect(runner.starts).toBe(before + 1);
+  });
+
+  test('an agent’s resume of a helper in an ordinary project folder still relaunches', async () => {
+    const { h, runner, leadId, childId } = await stoppedHelper();
+    const before = runner.starts;
+
+    const resumed = await h.request('POST', `/v1/ferrets/${childId}/resume`, { ...as(leadId), body: {} });
+
+    expect(resumed.status).toBe(200);
+    expect(runner.starts).toBe(before + 1);
+  });
+});
+
+/**
+ * The kernel's NAME-AND-LINK fence (`stateHomeHolding`, audit A) answers for an agent's start beside the bound directory
+ * above: a fence that names the home refuses (403), a fence that cannot be built refuses (503), and a person is never
+ * fenced. Either fence holding refuses; neither is a fallback for the other.
+ */
+describe('the kernel’s state-home fence names the home for an agent’s start (stateHomeHolding)', () => {
+  /** The kernel's fence stands in as a fake that names the home for a folder in it, or through a link to it. */
+  const NAMED_HOME = '/state/ferretry';
+  const namedHolding = async (path: string): Promise<string | undefined> =>
+    path === NAMED_HOME || path.startsWith(`${NAMED_HOME}/`) || path === '/link-to-state' ? NAMED_HOME : undefined;
+
+  type NamedHost = Awaited<ReturnType<typeof host>>;
+  const startNamedAs = async (h: NamedHost, folder: string, ferret?: string) =>
+    await h.request('POST', '/v1/ferrets', {
+      ...(ferret === undefined ? {} : as(ferret)),
+      headers: { ...(ferret === undefined ? {} : as(ferret).headers), 'x-fy-request-id': randomUUID() },
+      body: { folder },
+    });
+
+  /** A host with a started lead (an agent that can start helpers; Packs says yes to its child). */
+  const namedWorld = async (extra: Parameters<typeof host>[1] = {}) => {
+    const runner = new FakeRunner();
+    const h = await host([], { harness: new FakeHarness(), runner, plugins: [fakePacks().plugin], ...extra });
+    const lead = (await startNamedAs(h, '/work/lead')).json<{ id: string }>().id;
+    return { h, runner, lead };
+  };
+
+  test('S47 R-0332 an agent start is refused inside the state home or through a link to it, and passes in a project folder', async () => {
+    const { h, runner, lead } = await namedWorld({ stateHomeHolding: namedHolding });
+    const before = runner.starts;
+    for (const folder of [NAMED_HOME, `${NAMED_HOME}/credentials`, '/link-to-state']) {
+      const answer = await startNamedAs(h, folder, lead);
+      expect(answer.status).toBe(403);
+      expect(answer.json<{ code: string }>().code).toBe('state_home');
+    }
+    expect(runner.starts).toBe(before);
+    const ok = await startNamedAs(h, '/work/project', lead);
+    expect(ok.status).toBe(201);
+    expect(runner.starts).toBe(before + 1);
+  });
+
+  test('S47 R-0332 an agent start fails closed (503) when the kernel cannot build the fence', async () => {
+    const { h, runner, lead } = await namedWorld({
+      stateHomeHolding: async () => {
+        throw new Error('home.json cannot be identified');
+      },
+    });
+    const before = runner.starts;
+    const answer = await startNamedAs(h, '/work/project', lead);
+    expect(answer.status).toBe(503);
+    expect(answer.json<{ code: string }>().code).toBe('state_home_unresolved');
+    expect(runner.starts).toBe(before);
+  });
+
+  test('S47 R-0332 a person is not fenced: the owner starts in the state home (the fence is an agent rule)', async () => {
+    const { h, runner } = await namedWorld({ stateHomeHolding: namedHolding });
+    const before = runner.starts;
+    const answer = await startNamedAs(h, NAMED_HOME);
+    expect(answer.status).toBe(201);
+    expect(runner.starts).toBe(before + 1);
+  });
+});

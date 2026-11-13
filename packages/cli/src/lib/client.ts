@@ -1,0 +1,492 @@
+/**
+ * The one generated-style client every `fy` verb and agent tool talks through (§9.6). Per plugin it:
+ *
+ * 1. refuses a person-only route from a ferret's pane BEFORE any contact with the daemon (S59, S61);
+ * 2. reads the plugin inventory (the safe bootstrap read) and blocks the call, unsent, unless every core package and
+ *    the owning plugin are present, on and carry this fy's contract hashes. A block re-reads once, so a daemon that
+ *    restarted on a new build is not judged by its old inventory. The held inventory is dropped when the daemon
+ *    restarts (its run record names another process), when `kernel.plugins-changed` is heard, and before a request
+ *    is sent again after the daemon was away. A guarded resend therefore waits for a fresh inventory check; that
+ *    read, like every attempt of every request, goes through the transport's own per-attempt address check;
+ * 3. sends, and turns an HTTP refusal into a final `DaemonRefusal` (S54).
+ *
+ * What holds for the credential (S57) is the transport's, not this client's: the HTTP transport reads the daemon's
+ * address again on EVERY attempt, a resend after a restart included, and asks its locality and own-listener check
+ * about exactly that address before the request (and its credential) goes out. A refusal there is final. The
+ * remaining window is the moment between that check and the connect, which no user-space client can close.
+ */
+import { type Cancel, type EventDef, type PluginInventory, PluginsChanged } from '@ferretry/kernel/contract';
+import type { Manifest, PluginClient, PluginSocket, PluginSocketListeners } from '@ferretry/kernel/manifest';
+import { DaemonRefusal, EXIT, ShellError } from './errors.ts';
+import { type CompiledContracts, judgeCall, PluginPausedError, pausedSentence } from './guard.ts';
+import { PERSON_ONLY_REFUSAL } from './credential.ts';
+import type { CommandRegistry } from './registry.ts';
+import { buildRequest, type CallInit, type DaemonRequest, isRepeatable, refusalText } from './request.ts';
+
+export interface DaemonReply {
+  readonly status: number;
+  readonly body: unknown;
+}
+
+export interface SendOptions {
+  readonly repeatable: boolean;
+  /**
+   * Asked before the request is sent AGAIN after the daemon was away (a restart): the guard's fresh check. It throws
+   * to stop the resend. The first attempt does not ask it; the caller checked before sending.
+   */
+  readonly recheck?: () => Promise<void>;
+  /** The caller's own signal: once it aborts the send in flight ends and no resend is waited for. */
+  readonly signal?: AbortSignal;
+}
+
+/** Sends one request, with whatever credential the connection chose. Never throws for an HTTP status. */
+export interface DaemonTransport {
+  send(request: DaemonRequest, options: SendOptions): Promise<DaemonReply>;
+  /**
+   * Opens the daemon's event bus feed (`/v1/bus`): every event is handed over raw, and `onClose` says why it ended.
+   * Returns the cancel. Absent where a transport cannot hold a feed open.
+   */
+  events?(listener: (event: RawEvent) => void, onClose: (reason: string) => void): Cancel;
+  /**
+   * Opens one declared socket route at `path` (its path with the query already encoded), through the same address and
+   * credential rules as `send`: the credential is a header, never part of the URL. Absent where a transport cannot
+   * hold a stream open.
+   */
+  socket?(path: string, listeners: PluginSocketListeners): PluginSocket;
+}
+
+/**
+ * The inventory, read once per daemon process and re-read on demand. `instance` names the daemon process now
+ * recorded (its run record's pid), or `undefined` where none is known: a different answer drops the held inventory.
+ */
+export class InventoryCache {
+  #held: Promise<PluginInventory> | undefined;
+  #heldFor: string | undefined;
+
+  constructor(
+    private readonly read: () => Promise<PluginInventory>,
+    private readonly instance: () => Promise<string | undefined> = async () => undefined,
+  ) {}
+
+  async current(): Promise<PluginInventory> {
+    const now = await this.instance();
+    if (this.#held !== undefined && now !== this.#heldFor) this.#held = undefined;
+    if (this.#held === undefined) {
+      this.#heldFor = now;
+      this.#held = this.#fresh();
+    }
+    return await this.#held;
+  }
+
+  async refresh(): Promise<PluginInventory> {
+    this.#heldFor = await this.instance();
+    this.#held = this.#fresh();
+    return await this.#held;
+  }
+
+  /** Forgets the held answer: the next check reads the inventory again. */
+  invalidate(): void {
+    this.#held = undefined;
+  }
+
+  /** An event this connection heard. `kernel.plugins-changed` (a plugin turned on or off, a new build) drops the inventory. */
+  heard(eventName: string): void {
+    if (eventName === PluginsChanged.name) this.invalidate();
+  }
+
+  #fresh(): Promise<PluginInventory> {
+    const reading = this.read();
+    reading.catch(() => {
+      if (this.#held === reading) this.#held = undefined;
+    });
+    return reading;
+  }
+}
+
+interface RouteFacts {
+  readonly owner: string;
+  readonly caller: 'person' | 'any';
+}
+
+/** Every route and tool the registry's manifests declare, by key. The first declaration of a key keeps it. */
+export interface Surfaces {
+  readonly routes: ReadonlyMap<string, RouteFacts>;
+  readonly tools: ReadonlyMap<string, RouteFacts>;
+  readonly sockets: ReadonlyMap<string, RouteFacts>;
+  readonly titles: Readonly<Record<string, string>>;
+  readonly compiled: CompiledContracts;
+}
+
+export const toolKey = (plugin: string, name: string): string => `${plugin}/${name}`;
+
+export function surfacesOf(registry: CommandRegistry): Surfaces {
+  const routes = new Map<string, RouteFacts>();
+  const tools = new Map<string, RouteFacts>();
+  const sockets = new Map<string, RouteFacts>();
+  const titles: Record<string, string> = {};
+  const compiled: Record<string, string> = {};
+  for (const plugin of [{ id: registry.kernel.manifest.id, ...registry.kernel }, ...registry.plugins]) {
+    titles[plugin.id] = plugin.manifest.title;
+    compiled[plugin.id] = plugin.contract;
+    for (const route of plugin.manifest.actions?.routes ?? [])
+      if (!routes.has(route.key)) routes.set(route.key, { owner: plugin.id, caller: route.caller });
+    for (const declared of plugin.manifest.actions?.sockets ?? [])
+      if (!sockets.has(declared.key)) sockets.set(declared.key, { owner: plugin.id, caller: declared.caller });
+    for (const tool of plugin.manifest.actions?.agentTools ?? [])
+      tools.set(toolKey(plugin.id, tool.name), { owner: plugin.id, caller: tool.caller });
+  }
+  return { routes, tools, sockets, titles, compiled };
+}
+
+/**
+ * What a route call must pass before anything is opened (S59, S61): the route is declared, and a person-only route is
+ * not called from a ferret's pane. Asked before the connection exists, so a refusal never contacts or starts a daemon.
+ */
+export function routeFactsBeforeContact(surfaces: Surfaces, inPane: boolean, route: string): RouteFacts {
+  const facts = surfaces.routes.get(route);
+  if (facts === undefined) throw new ShellError(`no plugin declares the route ${route}`, EXIT.failure);
+  if (inPane && facts.caller === 'person') throw new ShellError(PERSON_ONLY_REFUSAL, EXIT.failure);
+  return facts;
+}
+
+export interface ClientDeps {
+  readonly transport: DaemonTransport;
+  readonly inventory: InventoryCache;
+  readonly surfaces: Surfaces;
+  /** Whether this process runs inside a ferret's pane. */
+  readonly inPane: boolean;
+  readonly binary: string;
+}
+
+/** Throws `PluginPausedError` when the plugin may not be called. Re-reads the inventory once before blocking. */
+export async function ensureAllowed(deps: ClientDeps, id: string): Promise<void> {
+  const { inventory, surfaces, binary } = deps;
+  let verdict = judgeCall(await inventory.current(), surfaces.compiled, id);
+  if (!verdict.ok) verdict = judgeCall(await inventory.refresh(), surfaces.compiled, id);
+  if (verdict.ok) return;
+  const named = verdict.reason === 'core' ? verdict.core : id;
+  throw new PluginPausedError(
+    named,
+    verdict.reason,
+    pausedSentence(verdict, surfaces.titles[named] ?? named, named, binary),
+  );
+}
+
+/** True while every package in `ids` is judged allowed by the HELD inventory: no re-read, so a frame costs no request. */
+async function allowedNow(deps: ClientDeps, ids: readonly string[]): Promise<boolean> {
+  const inventory = await deps.inventory.current();
+  for (const id of new Set(ids)) if (!judgeCall(inventory, deps.surfaces.compiled, id).ok) return false;
+  return true;
+}
+
+/** The guard for every package one request needs; also what is asked again before a resend after a restart. */
+async function ensureAllAllowed(deps: ClientDeps, ids: readonly string[]): Promise<void> {
+  for (const id of new Set(ids)) await ensureAllowed(deps, id);
+}
+
+/**
+ * Sends `request`, already guarded for `ids`. If the daemon was away and the request is to be sent again, the held
+ * inventory is dropped and `ids` are checked afresh first: a daemon that came back on another build or with a plugin
+ * off is judged by what it says now.
+ */
+export async function sendChecked(
+  deps: ClientDeps,
+  request: DaemonRequest,
+  ids: readonly string[],
+  signal?: AbortSignal,
+): Promise<unknown> {
+  signal?.throwIfAborted();
+  const reply = await deps.transport.send(request, {
+    repeatable: isRepeatable(request.method),
+    ...(signal === undefined ? {} : { signal }),
+    recheck: async () => {
+      deps.inventory.invalidate();
+      await ensureAllAllowed(deps, ids);
+    },
+  });
+  if (reply.status >= 400) {
+    const refusal = refusalText(reply.status, reply.body);
+    throw new DaemonRefusal(refusal.message, reply.status, refusal.code);
+  }
+  return reply.body;
+}
+
+/** One event as the daemon's feed carries it, before anyone has checked its payload. */
+export interface RawEvent {
+  readonly name: string;
+  readonly payload: unknown;
+}
+
+/** The package that owns an event: the words before its first dot (`ferrets.changed` is Ferrets'). */
+const eventOwner = (eventName: string): string => {
+  const dot = eventName.indexOf('.');
+  return dot === -1 ? eventName : eventName.slice(0, dot);
+};
+
+/**
+ * The agent tool door (`POST /v1/agent/tools`): a declared tool by name, run as the caller this process is. Inside a
+ * ferret's pane the transport presents that ferret's own credential, so the daemon derives the ferret from it and the
+ * call names none (today's unnamed-session case, `agent-tools/client.ts`).
+ */
+export const AGENT_TOOLS_ROUTE = 'POST /v1/agent/tools';
+
+/** The one declared tool of this name, or why there is not exactly one. Asked before anything is contacted. */
+export function toolFactsBeforeContact(surfaces: Surfaces, inPane: boolean, name: string): RouteFacts {
+  const found = [...surfaces.tools].filter(([key]) => key.slice(key.indexOf('/') + 1) === name);
+  if (found.length === 0) throw new ShellError(`no plugin declares the tool ${name}`, EXIT.failure);
+  const [first] = found;
+  if (found.length > 1 || first === undefined)
+    throw new ShellError(`more than one plugin declares the tool ${name}`, EXIT.failure);
+  if (inPane && first[1].caller === 'person') throw new ShellError(PERSON_ONLY_REFUSAL, EXIT.failure);
+  return first[1];
+}
+
+/**
+ * What a socket route needs before anything is opened: the key is declared as a socket, and a person-only socket is
+ * not opened from a ferret's pane. Asked before the connection exists, like a route's.
+ */
+export function socketFactsBeforeContact(surfaces: Surfaces, inPane: boolean, key: string): RouteFacts {
+  const facts = surfaces.sockets.get(key);
+  if (facts === undefined) throw new ShellError(`no plugin declares the socket ${key}`, EXIT.failure);
+  if (inPane && facts.caller === 'person') throw new ShellError(PERSON_ONLY_REFUSAL, EXIT.failure);
+  return facts;
+}
+
+/** The transport's stream opener; a transport that cannot hold a stream open is refused here, before anything is checked. */
+function socketOf(deps: ClientDeps): NonNullable<DaemonTransport['socket']> {
+  const open = deps.transport.socket;
+  if (open === undefined)
+    throw new ShellError(`${deps.binary} does not open streams on this connection`, EXIT.unavailable);
+  return open;
+}
+
+/** A client that can also be told when its feed ends, which a verb that follows events until interrupted needs. */
+export interface FollowingClient extends PluginClient {
+  /** Opens a declared socket route: guarded like `call`, then through `DaemonTransport.socket`. */
+  socket(
+    key: string,
+    params: Readonly<Record<string, string>>,
+    listeners: PluginSocketListeners,
+    query?: Readonly<Record<string, string>>,
+  ): PluginSocket;
+  /**
+   * Runs a declared agent tool: guarded exactly like `call` (the caller and the tool's owner must be present, on and
+   * carry this fy's contract hashes), then `POST /v1/agent/tools`. The answer is the tool's result, text already masked.
+   */
+  tool(name: string, input?: unknown): Promise<unknown>;
+  /**
+   * Like `subscribe`, and `onEnd` is told why when the feed can no longer deliver: the connection was refused, or the
+   * daemon went away. After `onEnd` nothing more is delivered. The returned cancel never calls `onEnd`.
+   */
+  follow<Name extends string, Payload>(
+    event: EventDef<Name, Payload>,
+    listener: (payload: Payload) => void,
+    onEnd: (reason: string) => void,
+  ): Cancel;
+}
+
+interface Following {
+  readonly event: EventDef;
+  readonly deliver: (payload: unknown) => void;
+  readonly end: (reason: string) => void;
+}
+
+/**
+ * The one event feed of a connection: opened on the first listener, closed when the last one leaves. A frame of an
+ * event nobody follows is dropped UNPARSED. `kernel.plugins-changed` is heard here too, so a held inventory is dropped
+ * by the same frame that tells a follower about it.
+ */
+class EventFeed {
+  readonly #following = new Set<Following>();
+  #stop: (() => void) | undefined;
+
+  constructor(private readonly deps: ClientDeps) {}
+
+  add(following: Following): Cancel {
+    const open = eventsOf(this.deps);
+    this.#following.add(following);
+    if (this.#stop === undefined) {
+      this.#stop = open.call(
+        this.deps.transport,
+        raw => this.#heard(raw),
+        reason => this.#closed(reason),
+      );
+    }
+    return () => {
+      this.#following.delete(following);
+      if (this.#following.size === 0) {
+        this.#stop?.();
+        this.#stop = undefined;
+      }
+    };
+  }
+
+  #heard(raw: RawEvent): void {
+    this.deps.inventory.heard(raw.name);
+    for (const following of this.#following) {
+      if (following.event.name !== raw.name) continue;
+      const parsed = following.event.schema.safeParse(raw.payload);
+      if (parsed.success) following.deliver(parsed.data);
+    }
+  }
+
+  #closed(reason: string): void {
+    const ended = [...this.#following];
+    this.#following.clear();
+    this.#stop = undefined;
+    for (const following of ended) following.end(reason);
+  }
+}
+
+/** The transport's feed opener; a transport that cannot hold a feed open is refused here, before anything is checked. */
+function eventsOf(deps: ClientDeps): NonNullable<DaemonTransport['events']> {
+  const open = deps.transport.events;
+  if (open === undefined)
+    throw new ShellError(`${deps.binary} does not subscribe to events on this connection`, EXIT.unavailable);
+  return open;
+}
+
+const feeds = new WeakMap<ClientDeps, EventFeed>();
+const feedOf = (deps: ClientDeps): EventFeed => {
+  let feed = feeds.get(deps);
+  if (feed === undefined) {
+    feed = new EventFeed(deps);
+    feeds.set(deps, feed);
+  }
+  return feed;
+};
+
+/**
+ * The client a plugin's half gets as `ctx.client`. A subscription is made only when the caller and the event's owner
+ * are allowed (§9.6): the check, with its one re-read, comes BEFORE the feed is opened, and a refused package ends the
+ * follow with the `PluginPausedError` sentence, the feed never opened. After that an event is heard only while both stay
+ * allowed by the held inventory; a frame that fails the check is dropped, unseen, and costs no request.
+ */
+export function pluginClient(deps: ClientDeps, caller: Manifest['id']): FollowingClient {
+  const follow: FollowingClient['follow'] = (event, listener, onEnd) => {
+    eventsOf(deps);
+    const ids = [caller, eventOwner(event.name)];
+    // One chain per listener, so frames reach it in the order they arrived even though each is checked asynchronously.
+    let chain: Promise<void> = Promise.resolve();
+    let live = true;
+    let cancel: Cancel | undefined;
+    void ensureAllAllowed(deps, ids).then(
+      () => {
+        if (!live) return;
+        try {
+          cancel = feedOf(deps).add({
+            event,
+            deliver: payload => {
+              chain = chain.then(async () => {
+                const allowed = await allowedNow(deps, ids).catch(() => false);
+                if (allowed && live) listener(payload as never);
+              });
+            },
+            end: reason => {
+              chain = chain.then(() => {
+                if (live) onEnd(reason);
+              });
+            },
+          });
+        } catch (error) {
+          onEnd(error instanceof Error ? error.message : String(error));
+        }
+      },
+      (error: unknown) => {
+        if (live) onEnd(error instanceof Error ? error.message : String(error));
+      },
+    );
+    return () => {
+      live = false;
+      cancel?.();
+    };
+  };
+  return {
+    async call<Answer = unknown>(route: string, init?: CallInit): Promise<Answer> {
+      const facts = routeFactsBeforeContact(deps.surfaces, deps.inPane, route);
+      const request = buildRequest(route, init);
+      const ids = [caller, facts.owner];
+      await ensureAllAllowed(deps, ids);
+      return (await sendChecked(deps, request, ids, init?.signal)) as Answer;
+    },
+    async tool(name: string, input?: unknown): Promise<unknown> {
+      const facts = toolFactsBeforeContact(deps.surfaces, deps.inPane, name);
+      const request = buildRequest(AGENT_TOOLS_ROUTE, {
+        body: { tool: name, ...(input === undefined ? {} : { input }) },
+      });
+      const ids = [caller, facts.owner];
+      await ensureAllAllowed(deps, ids);
+      return await sendChecked(deps, request, ids);
+    },
+    subscribe: (event, listener) => follow(event, listener, () => undefined),
+    follow,
+    socket(key, params, listeners, query) {
+      const facts = socketFactsBeforeContact(deps.surfaces, deps.inPane, key);
+      const open = socketOf(deps);
+      // Built before the guard, so a missing or unused parameter fails the caller, not a frame later.
+      const path = buildRequest(key, { params, ...(query === undefined ? {} : { query }) }).path;
+      const ids = [caller, facts.owner];
+      let closing = false;
+      let ended = false;
+      let socket: PluginSocket | undefined;
+      const end = (reason: string): void => {
+        if (closing || ended) return;
+        ended = true;
+        socket?.close();
+        listeners.onClose(reason);
+      };
+      // One chain, so frames reach the listener in the order they arrived although each is checked asynchronously.
+      let chain: Promise<void> = Promise.resolve();
+      void ensureAllAllowed(deps, ids).then(
+        () => {
+          if (closing) return;
+          try {
+            socket = open.call(deps.transport, path, {
+              ...(listeners.onOpen === undefined ? {} : { onOpen: listeners.onOpen }),
+              onFrame: frame => {
+                chain = chain.then(async () => {
+                  if (closing || ended) return;
+                  // A package that stopped being allowed mid-stream ends it, saying why, instead of dropping frames.
+                  const allowed = await allowedNow(deps, ids).catch(() => false);
+                  if (closing || ended) return;
+                  if (allowed) {
+                    listeners.onFrame(frame);
+                    return;
+                  }
+                  try {
+                    await ensureAllAllowed(deps, ids);
+                    listeners.onFrame(frame);
+                  } catch (error) {
+                    end(error instanceof Error ? error.message : String(error));
+                  }
+                });
+              },
+              onClose: (reason, code) => {
+                chain = chain.then(() => {
+                  if (!closing && !ended) {
+                    ended = true;
+                    if (code === undefined) listeners.onClose(reason);
+                    else listeners.onClose(reason, code);
+                  }
+                });
+              },
+            });
+          } catch (error) {
+            end(error instanceof Error ? error.message : String(error));
+          }
+        },
+        (error: unknown) => end(error instanceof Error ? error.message : String(error)),
+      );
+      return {
+        send: frame => {
+          if (!closing && !ended) socket?.send(frame);
+        },
+        close: (code, reason) => {
+          if (closing) return;
+          closing = true;
+          socket?.close(code, reason);
+        },
+      };
+    },
+  };
+}
