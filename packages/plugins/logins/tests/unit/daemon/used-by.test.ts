@@ -95,3 +95,40 @@ describe('removing a login asks which runtimes use it', () => {
     }
   });
 });
+
+describe('the logins list names the runtimes that use each login', () => {
+  async function listed(users: LoginUsers | undefined) {
+    const host = await testHost({
+      plugins: users === undefined ? [daemon] : [daemon, provider(users)],
+      fakes: { vault: emptyVault() },
+      config: files,
+    });
+    try {
+      const list = await host.request('GET', '/v1/logins');
+      expect(list.status).toBe(200);
+      return list.json<{ logins: readonly { id: string; usedBy: readonly string[] }[] }>().logins;
+    } finally {
+      await host.stop();
+    }
+  }
+
+  test('a login runtimes launch on lists them, sorted', async () => {
+    const logins = await listed({ of: id => (id === 'work' ? ['claude-b', 'claude-a'] : []) });
+    expect(logins.find(login => login.id === 'work')?.usedBy).toEqual(['claude-a', 'claude-b']);
+  });
+
+  test('an asynchronous answer is read too', async () => {
+    const logins = await listed({ of: async () => ['claude-a'] });
+    expect(logins.find(login => login.id === 'work')?.usedBy).toEqual(['claude-a']);
+  });
+
+  test('with no provider, or one that throws, the list still reads and names none', async () => {
+    expect((await listed(undefined)).find(login => login.id === 'work')?.usedBy).toEqual([]);
+    const throwing = await listed({
+      of: () => {
+        throw new Error('unreadable');
+      },
+    });
+    expect(throwing.find(login => login.id === 'work')?.usedBy).toEqual([]);
+  });
+});

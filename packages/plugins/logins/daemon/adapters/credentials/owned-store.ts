@@ -9,7 +9,11 @@
 import { dirname, relative } from 'node:path';
 import type { FencedPath, RootHandle, RootLstat } from '@ferretry/kernel/contract';
 import type { LoginFile } from '../../../contract/index.ts';
-import { FleetCredentialCatalog, type CredentialEmailSource } from '../../lib/credentials/credentials-service.ts';
+import {
+  FleetCredentialCatalog,
+  type CredentialEmailSource,
+  type FleetCredentialCatalogDeps,
+} from '../../lib/credentials/credentials-service.ts';
 import {
   InMemoryCredentialStatusStore,
   localCredentialFacts,
@@ -78,9 +82,13 @@ export class OwnedLoginStore {
   }
 
   /** Preserve today's store paths, substituting state/logins for the former fleet root. Host stores stay refused. */
-  catalog(logins: () => ReadonlyMap<string, LoginFile>): FleetCredentialCatalog {
+  catalog(
+    logins: () => ReadonlyMap<string, LoginFile>,
+    usedBy?: FleetCredentialCatalogDeps['usedBy'],
+  ): FleetCredentialCatalog {
     return new FleetCredentialCatalog({
       logins,
+      ...(usedBy === undefined ? {} : { usedBy }),
       paths: undefined,
       resolveStore: (id, credential) => {
         if (credential.store === 'host')
