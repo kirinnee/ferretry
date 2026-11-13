@@ -1,15 +1,24 @@
 /**
- * THE SECURE-COPY PIPELINE, REAL END TO END (secure-clip-1 fix1, P2-7).
+ * THE SECURE-COPY PIPELINE ON REAL PROCESSES (secure-clip-1 fix1 P2-7, narrowed and isolated in fix2 R1).
  *
- * Every layer a value crosses is production: the Accounts half (the copy service, the tools), the Vault half (the sealed
- * command child on a real process with the sealed environment, the input bridge, the secret store, the masking registry
- * and the kernel's redaction it binds), and the Browsers half (the tools and the page target over a REAL headless Chrome
- * through the existing integration harness). Only the surfaces that need a machine of their own are stood in: the terminal
- * (a recording adapter, so the typed text can be read back), the agenda and the audit sink (the kernel's fakes).
+ * What is production: the Accounts half (the copy service, the `secure_*` tools), the Vault half (the sealed command child on
+ * a real process with the sealed environment, the input bridge, the secret store, the masking registry and the kernel's
+ * redaction it binds), and the Browsers half (the tools and the page target, over a REAL headless Chrome and the production
+ * launcher). Stood in: the terminal (a recording adapter, so the typed text can be read back), the agenda and the audit sink
+ * (the kernel's fakes).
  *
- * The one secret-shaped string is the fake sentinel below. It must reach exactly three places: the sealed copy, the
- * destination it was pasted into, and the masking registry. It must appear in NO tool or MCP answer, no failure answer,
- * no audit record, no event, no journal or state file, no log line and no read an agent can make.
+ * ISOLATION (`secure-copy-isolation.ts`, self-checked by `secure-copy-isolation.test.ts`): every child the Browsers half
+ * starts has HOME, every XDG_* directory and TMPDIR under the test's own temporary home, whatever environment the launcher
+ * handed it; every Chrome gets a proxy switch to a loopback tripwire and a resolver that knows only loopback, and the
+ * Browsers half's fetch port refuses a non-loopback host. The first test below asserts that on the processes it launched.
+ *
+ * WHAT IT ASSERTS, and no more. The one secret-shaped string is the fake sentinel. It is searched for in: every tool answer
+ * and every owner route answer this file received (the text the tools return, as the test host serialised it, NOT the MCP
+ * server's own wire serializer), the gate's audit records, the host's logs and published events, and the state files the
+ * halves wrote. The value was typed into: the terminal adapter and the page's field, as the page's own script reported it.
+ * For the secret store it asserts the name exists and was audited; it does NOT read the stored value back (no getter exists, and
+ * none is added), so it does not prove the store holds THIS sentinel. It does not read agent transcript files, and its
+ * navigation case navigates BEFORE the capture and tests a stale reference, not navigation during the read.
  */
 import { afterAll, beforeAll, describe, it } from 'bun:test';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -28,6 +37,14 @@ import {
 } from '../../../../vault/contract/index.ts';
 import type { ChildEnvironmentOpener, FerretId, Redaction } from '../../../contract/index.ts';
 import { bunSpawn, effectivePermissions, globalFetch, restrictSpawn, systemClock } from '../../../host/index.ts';
+import {
+  BOUND_NAMES,
+  homeEnvironment,
+  isolatedSpawn,
+  type Launch,
+  loopbackFetch,
+  writeFontConfiguration,
+} from './secure-copy-isolation.ts';
 import { implementDaemon, perNeeder, providedFor } from '../../../manifest/index.ts';
 import { daemonImplementations } from '../../../src/generated/plugins.ts';
 import { ferret, type TestHost, testHost } from '../../../testing/index.ts';
@@ -47,6 +64,13 @@ const FERRET = 'F1';
 let calling = FERRET as FerretId;
 
 let root = '';
+/** The one home every child the Browsers half starts is bound to, and the tripwire every Chrome's traffic is sent to. */
+let home = '';
+let tripwire: ReturnType<typeof Bun.serve>;
+const tripped: string[] = [];
+const launches: Launch[] = [];
+/** The process environment this file replaced, put back after it. */
+const replaced = new Map<string, string | undefined>();
 let site: ReturnType<typeof Bun.serve>;
 let base = '';
 let host: TestHost;
@@ -144,9 +168,28 @@ async function trace(): Promise<string> {
 
 beforeAll(async () => {
   if (chrome === null) throw new Error('this test needs a real Chrome on PATH');
-  process.env.FY_CHROME_BIN = chrome;
   root = await mkdtemp(join(tmpdir(), 'ferretry-secure-copy-pipeline-'));
   await mkdir(join(root, 'work'), { recursive: true });
+  // Everything the production Browsers launcher reads from the process environment (`processHost`) is the temporary home's,
+  // BEFORE the half is built: HOME, the XDG directories, the profile's FY_HOME and the Chrome binary.
+  home = join(root, 'home');
+  const bound = { ...homeEnvironment(home), FY_HOME: join(home, '.ferretry'), FY_CHROME_BIN: chrome };
+  for (const path of [...Object.values(homeEnvironment(home)), bound.FY_HOME]) await mkdir(path, { recursive: true });
+  // Chrome lays text out only with a font, and a moved HOME can lose the profile's fonts: the home gets its own fonts.conf.
+  Object.assign(bound, { FONTCONFIG_FILE: await writeFontConfiguration(home) });
+  for (const [name, value] of Object.entries(bound)) {
+    replaced.set(name, process.env[name]);
+    process.env[name] = value;
+  }
+  // The tripwire is Chrome's only way out: a refused-by-design proxy on an ephemeral loopback port that records what it was asked.
+  tripwire = Bun.serve({
+    port: 0,
+    hostname: '127.0.0.1',
+    fetch: request => {
+      tripped.push(new URL(request.url).host);
+      return new Response('blocked by the test', { status: 403 });
+    },
+  });
   // The fake command a ferret would run: it prints the sentinel, a program of its own making (a path, never a rule match).
   await writeFile(join(root, 'work', 'fake-token'), `#!/bin/sh\necho ${SENTINEL}\n`);
   await chmod(join(root, 'work', 'fake-token'), 0o755);
@@ -217,7 +260,13 @@ beforeAll(async () => {
       const half = buildBrowsers({
         ...ctx,
         // The production launcher, on real processes and a real clock: the kernel host's own spawn, fetch and clock.
-        kernel: { ...ctx.kernel, spawn: realSpawn, fetch: globalFetch(), clock: systemClock() },
+        kernel: {
+          ...ctx.kernel,
+          // Every child bound to the temporary home, every Chrome kept off the network, every fetch loopback-only.
+          spawn: isolatedSpawn(realSpawn, { home, proxy: `http://127.0.0.1:${String(tripwire.port)}`, launches }),
+          fetch: loopbackFetch(globalFetch()),
+          clock: systemClock(),
+        },
         needs: {
           ...ctx.needs,
           vault: {
@@ -277,6 +326,11 @@ beforeAll(async () => {
 afterAll(async () => {
   await host?.stop();
   site?.stop(true);
+  tripwire?.stop(true);
+  for (const [name, value] of replaced) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
   if (root !== '') await rm(root, { recursive: true, force: true });
 });
 
@@ -304,6 +358,38 @@ const takeOver = async (key: string) => {
 };
 
 describe('the secure-copy pipeline, on real processes and a real Chrome', () => {
+  it('should run isolated: Chrome and its worker are bound to the temporary home, and an external URL goes nowhere', async () => {
+    // A loopback fixture loads (the block leaves loopback and the CDP pipe alone)…
+    const local = await tool('browser_open', { name: 'iso', url: `${base}/source` });
+    should(local.isError).not.equal(true);
+    // …and an external address never leaves the machine: Chrome sends it to the tripwire, which records it and refuses.
+    const external = await tool('browser_open', { name: 'iso-out', url: 'http://203.0.113.7/exfil' });
+    should(JSON.stringify(external)).not.containEql('Token created');
+    for (let waited = 0; !tripped.includes('203.0.113.7') && waited < 5_000; waited += 100) await Bun.sleep(100);
+    should(tripped).containEql('203.0.113.7');
+    should(tripped.filter(host => host.startsWith('127.0.0.1') || host.startsWith('localhost'))).eql([]);
+
+    const chromes = launches.filter(launch => launch.args.some(arg => arg.startsWith('--user-data-dir=')));
+    should(chromes.length).be.above(0);
+    for (const chromeLaunch of chromes) {
+      should(chromeLaunch.args).containEql(`--proxy-server=http://127.0.0.1:${String(tripwire.port)}`);
+      should(chromeLaunch.args.join(' ')).containEql('MAP * ~NOTFOUND');
+      should(chromeLaunch.env.FONTCONFIG_FILE?.startsWith(`${home}/`)).equal(true);
+      const profile = chromeLaunch.args.find(arg => arg.startsWith('--user-data-dir='));
+      should(profile?.slice('--user-data-dir='.length).startsWith(root)).equal(true);
+    }
+    // Every child the Browsers half started (Chrome and the worker alike) was bound to the temporary home.
+    should(launches.length).be.above(chromes.length);
+    for (const launch of launches) {
+      for (const name of BOUND_NAMES) {
+        const value = launch.env[name] as string;
+        should(value === home || value.startsWith(`${home}/`)).equal(true);
+      }
+      should(launch.env.HOME).equal(home);
+    }
+    // The pages stay open: closing the last one stops the browser, and the cases below start from a running one.
+  }, 120_000);
+
   it('should seal a page element and paste it into a terminal: typed once, said nowhere, masked in every read', async () => {
     const opened = await tool('browser_open', { name: 'src', url: `${base}/source` });
     should(opened.isError).not.equal(true);

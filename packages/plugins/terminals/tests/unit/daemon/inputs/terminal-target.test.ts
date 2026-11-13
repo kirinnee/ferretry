@@ -396,6 +396,36 @@ describe('typing into a terminal an input request aims at', () => {
     should(w.typed).deepEqual([]);
   });
 
+  it("should write nothing when a secure paste's last check refuses, asked after the last look (secure-clip-1 fix2, R4)", async () => {
+    const w = world();
+    const expected = await observed(w);
+    w.calls.length = 0;
+    let asked = 0;
+
+    const result = await target(w).type('s1', dev, SECRET, true, expected, {
+      refuse: async () => {
+        asked += 1;
+        return 'the copy ended';
+      },
+    });
+
+    should(result).equal('guard_refused');
+    should(asked).equal(1);
+    should(sends(w)).have.length(0);
+    should(w.typed).deepEqual([]);
+  });
+
+  it("should write when a secure paste's last check finds nothing to refuse", async () => {
+    const w = world();
+    const expected = await observed(w);
+    w.calls.length = 0;
+
+    const result = await target(w).type('s1', dev, SECRET, true, expected, { refuse: async () => undefined });
+
+    should(result).equal('typed');
+    should(w.typed).have.length(1);
+  });
+
   it('I48 should make tmux itself check the pane pid, program name, cursor row and liveness in the writing command', async () => {
     const w = world();
     const expected = await observed(w);

@@ -135,6 +135,8 @@ export function world(options: WorldOptions = {}) {
     pasteRefusals: [] as (string | undefined)[],
     /** Runs while the write waits its turn in the target's own queue, before the target's takeover check. */
     onQueue: undefined as (() => void) | undefined,
+    /** Runs while the attempt is journalled as delivering, before the target's turn (fix2, R4). */
+    onDelivering: undefined as (() => void) | undefined,
     journalFails: false,
     agendaFails: false,
     sessionEnded: false,
@@ -269,6 +271,7 @@ export function world(options: WorldOptions = {}) {
       publish: async (_session, event) => {
         if (state.journalFails) throw new Error('the journal is not writable');
         events.push(event);
+        if (event.state === 'delivering') state.onDelivering?.();
       },
       history: async () => options.history ?? [],
       quarantine: async () => undefined,

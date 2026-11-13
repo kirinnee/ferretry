@@ -2022,6 +2022,8 @@ export class InputRequestService {
       const arming = { armed: false };
       // The takeover check a paste repeats inside the target's own turn, right before the write (secure-clip-1 fix1, P1-1).
       const takeover: { sentence?: string } = {};
+      // The copy's end seen inside that same turn (secure-clip-1 fix2, R4): discarded, expired or captured again since it was opened.
+      const lost = { copy: false };
       const outcome: TypeResult = await this.deps.target
         .type(request.sessionId, request.target, values, submitted, seen.facts, {
           ...(follows
@@ -2038,10 +2040,17 @@ export class InputRequestService {
           ...(clear === undefined ? {} : { armClear: true }),
           // A secure paste asks the takeover check once more inside that turn: a person who took the page over while the
           // write waited in the queue, or while the attempt was journalled and the page held, receives nothing.
-          ...(pasted === undefined || this.deps.sealed?.refusal === undefined
+          // The same turn asks, first, whether the copy is still live and still the capture the card was raised for: one
+          // discarded, expired or captured again while the attempt was journalled, the page held or the write queued ends
+          // as copy_gone with nothing typed, whatever the value opened earlier was.
+          ...(pasted === undefined || this.deps.sealed === undefined
             ? {}
             : {
                 refuse: async () => {
+                  if (!this.copyPinned(request, pasted)) {
+                    lost.copy = true;
+                    return COPY_ENDED;
+                  }
                   const sentence = await this.deps.sealed?.refusal?.(request.sessionId, pasted, request.target);
                   if (sentence !== undefined) takeover.sentence = sentence;
                   return sentence;
@@ -2056,6 +2065,17 @@ export class InputRequestService {
         })
         .catch((): TypeResult => 'uncertain');
       wrote?.(outcome);
+      if (lost.copy && outcome !== 'typed' && outcome !== 'uncertain') {
+        // Refused inside the target's turn: the copy ended after it was opened. Nothing was typed; no value is returned.
+        await this.letGo(hold);
+        hold = undefined;
+        await this.finish(held, 'cancelled', 'copy_gone', undefined, { closeCard: true, tellAgent: true });
+        throw new InputRequestError(
+          'gone',
+          `${copyHandle(pasted as string)} was discarded or expired, so there is nothing to paste`,
+          INPUT_ERROR_CODES.gone,
+        );
+      }
       if (takeover.sentence !== undefined && outcome !== 'typed' && outcome !== 'uncertain') {
         // Refused inside the target's turn: nothing was typed. The request ends refused, like a takeover seen at the open.
         await this.letGo(hold);
@@ -2537,6 +2557,17 @@ export class InputRequestService {
    * The value of the copy a paste names, opened only to be typed. A copy that ended since the card was raised ends
    * the request: it can never be pasted now. One with a line break or a control character would press keys.
    */
+  /**
+   * Whether the copy under `name` is still live AND still the capture this card was raised for. Never the value: the
+   * daemon's own record of it (`describe`). Asked inside the target's turn, right before the write.
+   */
+  private copyPinned(request: InputRequest, name: string): boolean {
+    const meta = this.deps.sealed?.describe(request.sessionId, name);
+    if (meta === undefined || meta.state !== 'live') return false;
+    const pinned = request.source?.capturedAt;
+    return pinned === undefined || meta.capturedAt === pinned;
+  }
+
   private async openCopy(held: Held, name: string): Promise<string> {
     // A person may have taken the page over since the card was raised: nothing is typed, and the card ends.
     const refused = await this.deps.sealed?.refusal?.(held.request.sessionId, name, held.request.target);
@@ -3399,6 +3430,9 @@ function pasteAskOf(copy: CopyMeta, facts: InputTargetFacts): string {
         : `a field on ${hostOf(facts.origin)}`;
   return `Allow pasting ${copy.handle} (${String(copy.length)} characters from ${from}) into ${into}. You type nothing.`;
 }
+
+/** What the target's own turn answers when the copy ended after it was opened; it never reaches the ferret or the card. */
+const COPY_ENDED = 'the copy ended before it could be typed';
 
 const SEEN_FLAG = 'The ferret saw this value before it was sealed, so it is not protected; consider rotating it.';
 const UNKNOWN_FLAG =

@@ -313,6 +313,104 @@ describe('a copy replaced under the same name (secure-clip-1 fix1, P2-3)', () =>
   });
 });
 
+describe('a copy that ends after it was opened (secure-clip-1 fix2, R4)', () => {
+  const ended = async (setup: (w: ReturnType<typeof world>) => void, facts: InputTargetFacts, raise: InputRaise) => {
+    const w = world({ withSealed: true, facts });
+    w.copy();
+    await w.service.raise(SESSION_ID, raise);
+    const request = await w.pending();
+    setup(w);
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+    should(error.code).equal('gone');
+    should(w.writes).eql([]);
+    should(w.used).eql([]);
+    should(w.events.at(-1)).match({ state: 'cancelled', reason: 'copy_gone' });
+    should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql(COPY_VALUE);
+    should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql('FAKE-SC-RECAPTURED');
+  };
+
+  it('should type nothing when the copy is discarded while the attempt is journalled', async () => {
+    await ended(
+      w => {
+        w.state.onDelivering = () => void w.copies.delete('vercel');
+      },
+      githubPageFacts(),
+      FIELD_RAISE,
+    );
+  });
+
+  it('should type nothing when the copy expires while the attempt is journalled', async () => {
+    await ended(
+      w => {
+        w.state.onDelivering = () => void w.copy({ state: 'expired' });
+      },
+      githubPageFacts(),
+      FIELD_RAISE,
+    );
+  });
+
+  it('should type nothing when the name is captured again while the attempt is journalled', async () => {
+    await ended(
+      w => {
+        w.state.onDelivering = () => void w.copy({ capturedAt: '2026-11-01T11:30:00.000Z' }, 'FAKE-SC-RECAPTURED');
+      },
+      githubPageFacts(),
+      FIELD_RAISE,
+    );
+  });
+
+  it('should type nothing when the copy is discarded while the write waits in the page queue', async () => {
+    await ended(
+      w => {
+        w.state.onQueue = () => void w.copies.delete('vercel');
+      },
+      githubPageFacts(),
+      FIELD_RAISE,
+    );
+  });
+
+  it('should type nothing when the copy expires while the write waits in the page queue', async () => {
+    await ended(
+      w => {
+        w.state.onQueue = () => void w.copy({ state: 'expired' });
+      },
+      githubPageFacts(),
+      FIELD_RAISE,
+    );
+  });
+
+  it('should type nothing when the name is captured again while the write waits in the page queue', async () => {
+    await ended(
+      w => {
+        w.state.onQueue = () => void w.copy({ capturedAt: '2026-11-01T11:30:00.000Z' }, 'FAKE-SC-RECAPTURED');
+      },
+      githubPageFacts(),
+      FIELD_RAISE,
+    );
+  });
+
+  it('should type nothing into a terminal when the copy is discarded while the attempt is journalled', async () => {
+    await ended(
+      w => {
+        w.state.onDelivering = () => void w.copies.delete('vercel');
+      },
+      VERCEL,
+      PASTE_RAISE,
+    );
+  });
+
+  it('should still type a copy that is live and the pinned capture at the write', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    w.state.onQueue = () => void w.copy();
+    const result = await w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER);
+    should(result).match({ state: 'delivered' });
+    should(w.writes.map(write => write.values)).eql([[COPY_VALUE]]);
+  });
+});
+
 describe('allowing a paste', () => {
   it('should type the copy once when the owner allows it, count the use, and tell the agent it was pasted', async () => {
     const w = world({ withSealed: true, facts: VERCEL });

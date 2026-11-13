@@ -50,7 +50,9 @@ They are **per-needer**, and the precise rule is not "everyone but Accounts is s
 
 - **Accounts** is handed them (the Vault's own constant, `SECURE_COPY_OWNER`), and Browsers' `copy` reach too.
 - **A trusted core caller** (a plugin the kernel marks core) is handed the Vault's **full** reach, these members included
-  (`per-needer.test.ts` pins it). That is the existing trusted-core architecture, not a getter: nothing it can call returns a value.
+  (`per-needer.test.ts` pins it). That is the existing trusted-core architecture, not a getter for agents: no agent tool, route
+  or public API returns a value, but the trusted internal seam does hand raw output back (`captureCommand` returns the program's
+  stdout to the sealing service, which stores it and never forwards it).
 - **Every other plugin** gets fresh Vault objects without `captureCommand` or `maskCopy`, and Browsers' port without `copy`.
 - `pageTakenOver` (Browsers' report that a person took a page over, which ends waiting pastes) goes to Browsers and core callers
   only: any other plugin could only cancel cards with it.
@@ -176,8 +178,12 @@ value comes from the copy (`InputRaise.source`), so the card, the daemon-observe
   page over in any of those gaps, and nothing looked at earlier can see it). A paste card that is waiting when a person takes
   the page over is **refused at once** (Browsers tells the Vault of the takeover, and the Vault ends every waiting paste into
   that page as `refused`/`taken_over`, closing its card and telling the ferret), and one that is allowed anyway ends
-  `refused` (`taken_over`) at the check; both type nothing and never open the copy, whether the owner or a rule would have
-  allowed it. The app settles the card (refreshes it and takes Allow away) instead of offering another try. After a handback
+  `refused` (`taken_over`) at the check; both type nothing, whether the owner or a rule would have allowed it. A takeover
+  caught before the copy was opened (the raise, the proactive refusal, the check at the open) never opens it; one caught only
+  at the last check inside the page's queue has already opened it into the daemon's memory, and still types nothing. The
+  same turn also asks whether **the copy is still live and still the capture the card was raised for**: one discarded, expired
+  or captured again while the attempt was journalled, the page held or the write queued ends `cancelled` (`copy_gone`),
+  nothing typed, and no value is returned to anyone to decide it (the daemon's own record of the capture answers). The app settles the card (refreshes it and takes Allow away) instead of offering another try. After a handback
   the ferret raises it again.
 - **Audit**: `input.delivered` with `source: sealed` and the copy's name, never the value. Each tool call is one `agent.tool`
   record with the copy's length, the transcript answer, the program's base name and which route (never the value).
