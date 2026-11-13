@@ -231,12 +231,15 @@ A pairing or share link's fragment must not sit in the tab's address while the a
 the address (an agent's browser tool, an extension, a shared screen) would see a live one-time code. The shell's
 `AddressTaker` strips it, but it is built only when the app's module graph has loaded: measured on a local 5.0 build, the
 fragment stayed ~0.5-0.7 s, through the first paint (the v4 app: ~0.8 s). So `packages/app/public/arrival.js`, a classic
-same-origin script in `app/index.html`'s head (it satisfies `script-src 'self'`), strips a declared `path` fragment
-(`/pair`, `/join`; also under `/app/`) with `history.replaceState` while the document is still parsing (~20-45 ms on the
-same build, before first paint) and leaves the value in memory only, on one non-enumerable `window` property that
-`AddressTaker` takes once and deletes. The script's path list is a second statement of the plugins' declared fragments
-and `tests/unit/arrival-script.test.ts` fails if they drift. A fragment on any other path is not taken and stays where it
-is. The hold's two minutes run from the moment the taker holds it, a moment after the strip.
+same-origin script in `app/index.html`'s head (it satisfies `script-src 'self'`), strips every
+fragment on a declared `path` screen (`/pair`, `/join`; also under `/app/`) and every pairing-shaped fragment (`#v1;…`) on
+ANY path (`/`, `/app/`, a typo), with `history.replaceState` while the document is still parsing (~20-45 ms on the same
+build, before first paint), and leaves the value in memory only, on one non-enumerable `window` property that
+`AddressTaker` takes once and deletes: it is held only if it arrived on a declared screen and dropped otherwise. The landing
+page (`/`, no taker) loads the same script with `data-drop`, so it strips and holds nothing. The script's path list is a
+second statement of the plugins' declared fragments and `tests/unit/arrival-script.test.ts` fails if they drift. Any other
+fragment (`#agenda/A3`) is not a credential, is not taken early and stays where it is. The hold's two minutes run from the
+moment the taker holds it, a moment after the strip.
 
 ### The link names no rendezvous; the device finds one itself
 
