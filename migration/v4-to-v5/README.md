@@ -31,6 +31,20 @@ bun src/main.ts --from <stopped v4 home> --to <new folder> [--report <file>] [--
 
 The report (`<to>.conversion-report.json`, beside the new home, never inside it) holds counts, ids and names only.
 
+## The switch driver: `migrate.sh`
+
+The mechanics of one machine's switch (preflight, baseline, quiet window, backup, convert, install, start, verify,
+rollback) are ONE tested script, `migrate.sh <phase> [--notes FILE] [options]`, beside the converter and deleted with it.
+[The prompt](../../docs/migration/v4-to-v5-prompt.md) only carries the owner's decisions and tells the agent to run each
+phase, read its output and stop on a non-zero exit. A phase writes a milestone line to its notes file before acting and a
+done line after, so `rollback` knows how far the run got. It never reads a secret or credential file, never prints a
+value, never kills tmux, and never changes the calling shell (it records the original `PATH` and `FY_URL` and calls
+v4/v5 programs by absolute path with an environment it chose). `install --rehearsal-build <dir>` is for a sandbox proof
+with a fake home only: it refuses without `MIGRATE_REHEARSAL=1` and refuses the default home `$HOME/.ferretry`.
+
+Its tests (`tests/unit/migrate-sh-*.test.ts`, one file per process) run it in temp dirs with FAKE `fy`, `fyd`, `tmux`,
+`brew`, `nix`, `xattr`, `sleep`, `ps` and `bun`; they touch no real machine state.
+
 ## Safety properties
 
 - The v4 home is only read; the new home must not exist or be empty and must not overlap the source.
