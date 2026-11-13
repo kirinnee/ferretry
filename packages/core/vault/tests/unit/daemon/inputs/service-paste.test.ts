@@ -110,6 +110,17 @@ describe('raising a paste', () => {
     should(said[2]?.reason ?? '').not.containEql('protected');
   });
 
+  it('should keep the replacement warning when the copy is also uncertain: both are said, neither hides the other', async () => {
+    const w = world({ withSealed: true, facts: SECRET_STORE(true) });
+    w.copy({ exposure: { transcript: 'unknown' } });
+
+    await w.service.raise(SESSION_ID, STORE_RAISE);
+
+    const risk = (await w.pending()).risk;
+    should(risk?.level).equal('amber');
+    should(risk?.reason).containEql('the old value is gone for good').and.containEql('could not check');
+  });
+
   it('should make every field of a paste a secret, whatever the agent called it', async () => {
     const w = world({ withSealed: true, facts: VERCEL });
     w.copy();

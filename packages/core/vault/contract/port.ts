@@ -157,7 +157,8 @@ export interface VaultApi {
    */
   raisePhoneApproval?(ferret: FerretId, ask: PhoneApprovalAsk): Promise<Result<PhoneApprovalAgentView, string>>;
   /**
-   * SECURE COPY (docs/secure-copy.md). Additive, optional and ABSENT for every needer but Accounts: the Vault owns the
+   * SECURE COPY (docs/secure-copy.md). Additive, optional and present for Accounts and the trusted core callers (which are
+   * handed the Vault's full reach), and ABSENT for every other needer: the Vault owns the
    * child runner and the masking registry, so a copy reaches both only through these two members. An absent member means
    * no copy is captured (fail closed).
    *

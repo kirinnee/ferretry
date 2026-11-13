@@ -3421,7 +3421,10 @@ function pasteRisk(risk: InputRisk | undefined, copy: CopyMeta | undefined): Inp
         : copy.exposure.pageReadBeforeCapture === true
           ? PAGE_READ_FLAG
           : undefined;
-  return reason === undefined ? risk : { level: risk?.level === 'red' ? 'red' : 'amber', reason };
+  if (reason === undefined) return risk;
+  // What the target already said (a replaced secret is gone for good, say) stays: the exposure is said AFTER it, never instead.
+  const said = risk !== undefined && risk.level !== 'green' && risk.reason !== '' ? `${risk.reason} ` : '';
+  return { level: risk?.level === 'red' ? 'red' : 'amber', reason: `${said}${reason}` };
 }
 
 /**
