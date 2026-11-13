@@ -8,7 +8,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { PairedDaemon } from '@ferretry/app';
 import type { BrowserSocket } from '../../../app/adapters/browser-relay-dial.ts';
-import { RELAY_FALLBACK_LINE } from '../../../app/carriers/router.ts';
+import { RELAY_FALLBACK_LINE, WITHDRAWN_CARRIER_REASON } from '../../../app/carriers/router.ts';
 import type { ScriptedHost } from '../../support/browser-network.ts';
 import { carriedOver, rig } from '../../support/router-rig.ts';
 
@@ -436,6 +436,117 @@ describe('a carrier republish while a lane still sends direct', () => {
       await sleep(40);
       expect(r.router.relayFallback(r.daemon.daemon)).toBeUndefined();
       expect(r.router.choice(r.daemon.daemon)).toMatchObject({ ok: true, method: { kind: 'relay' } });
+    } finally {
+      r.fx.layer.close();
+    }
+  });
+
+  /**
+   * One live fallback stream and a request lane lost under a POST (the winner it was is forgotten), on the unchosen
+   * default with a relay that is down. `recover` brings the relay back for the next request.
+   */
+  const lostRequestLane = async (chosen: () => boolean = () => false) => {
+    const directSockets: { close: (code?: number, reason?: string) => void }[] = [];
+    const closeReasons: string[] = [];
+    const hosts = hostsOf({ kind: 'dead' }) as Record<string, ScriptedHost>;
+    const r = await rig(
+      hosts,
+      PUBLISHED,
+      'relay',
+      HOSTED,
+      network => url => {
+        const socket = network.openSocket(url);
+        if (new URL(url).host === new URL(DIRECT).host) {
+          directSockets.push(socket);
+          const close = socket.close.bind(socket);
+          socket.close = (code, reason) => {
+            closeReasons.push(reason ?? '');
+            close(code, reason);
+          };
+        }
+        return socket;
+      },
+      { chosen: () => chosen() },
+    );
+    const frames: string[] = [];
+    r.fx.upgrade = async () => ({
+      outcome: 'accepted',
+      attach: async () => ({
+        open: async () => undefined,
+        fromClient: frame => {
+          frames.push(typeof frame === 'string' ? frame : 'bytes');
+        },
+        close: () => undefined,
+      }),
+    });
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    const closed: string[] = [];
+    const stream = transport.socket('/v1/stream', { onFrame: () => undefined, onClose: why => closed.push(why) });
+    for (let i = 0; i < 50 && directSockets.length < 1; i++) await sleep(20);
+    await sleep(20);
+    await transport.request({ method: 'GET', path: '/v1/first' });
+    expect(directSockets).toHaveLength(2);
+    stream.send('before loss');
+    await sleep(20);
+    expect(frames).toEqual(['before loss']);
+    const answered = r.fx.route;
+    r.fx.route = async () => new Promise(() => undefined);
+    const write = transport.request({ method: 'POST', path: '/v1/slow' }).catch((error: unknown) => error);
+    await sleep(20);
+    directSockets[1]?.close(1011, 'lost request');
+    expect(await write).toBeInstanceOf(Error);
+    closeReasons.length = 0;
+    const recover = (): void => {
+      hosts['hosted.example'] = { kind: 'carries', carrier: 'relay' };
+      r.fx.route = answered;
+    };
+    return { r, stream, frames, closed, closeReasons, recover };
+  };
+
+  test('a relay-only republish keeps a live fallback stream on the paired direct address after a request lane was lost', async () => {
+    const { r, stream, frames, closed, closeReasons, recover } = await lostRequestLane();
+    try {
+      expect(r.router.relayFallback(r.daemon.daemon)).toBe(RELAY_FALLBACK_LINE);
+      recover();
+      // A publication that does not name the direct address (a daemon that cannot enumerate its bind address) is not a
+      // withdrawal of the positively marked pairing address: the stream stays, the next request goes over the relay.
+      const republished = await r.connect({ ...r.daemon, carriers: [{ kind: 'relay', url: HOSTED }] });
+      if (republished === undefined) throw new Error('no transport');
+      await republished.request({ method: 'GET', path: '/v1/after' });
+      await sleep(20);
+      expect(closeReasons).not.toContain(WITHDRAWN_CARRIER_REASON);
+      expect(closed).toEqual([]);
+      stream.send('still direct');
+      await sleep(20);
+      expect(frames).toEqual(['before loss', 'still direct']);
+      expect(carriedOver(r.fx).at(-1)).toBe('/v1/after relay');
+      expect(r.router.relayFallback(r.daemon.daemon)).toBe(RELAY_FALLBACK_LINE);
+      expect(r.router.choice(r.daemon.daemon)).toMatchObject({ ok: true, method: { kind: 'direct' } });
+      // Closing the stream ends the fallback: the relay is what carries now.
+      stream.close();
+      await sleep(20);
+      expect(r.router.relayFallback(r.daemon.daemon)).toBeUndefined();
+      expect(r.router.choice(r.daemon.daemon)).toMatchObject({ ok: true, method: { kind: 'relay' } });
+    } finally {
+      r.fx.layer.close();
+    }
+  });
+
+  test('a Relay only the person CHOSE withdraws the direct stream a relay-only republish no longer names', async () => {
+    let chosen = false;
+    const { r, stream, closed, closeReasons, recover } = await lostRequestLane(() => chosen);
+    try {
+      recover();
+      // The person has since chosen Relay only: the paired direct address is excluded, so nothing keeps it open.
+      chosen = true;
+      const republished = await r.connect({ ...r.daemon, carriers: [{ kind: 'relay', url: HOSTED }] });
+      if (republished === undefined) throw new Error('no transport');
+      await republished.request({ method: 'GET', path: '/v1/after' });
+      await sleep(20);
+      expect(closeReasons).toContain(WITHDRAWN_CARRIER_REASON);
+      expect(closed).toHaveLength(1);
+      stream.close();
     } finally {
       r.fx.layer.close();
     }
