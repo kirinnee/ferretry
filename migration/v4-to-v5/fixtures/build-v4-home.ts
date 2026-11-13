@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Builds a realistic Ferretry 4.291.5 home, in a throwaway folder, with the RELEASED v4 binaries.
+ * Builds a realistic Ferretry 4.291.15 home, in a throwaway folder, with the RELEASED v4 binaries.
  *
  *   bun fixtures/build-v4-home.ts --out <empty folder under the OS temp dir> --v4-dir <folder holding fy and fyd>
  *                                 [--keep-panes]
@@ -29,7 +29,7 @@ import { deviceSession, newTestDevice, pairOverSession, type TestDevice } from '
 /** The one secret the fixture stores. It is a constant on purpose: a fixture value, not a credential. */
 const FIXTURE_SECRET_NAME = 'FIXTURE_NOT_A_SECRET';
 const FIXTURE_SECRET_VALUE = 'fixture-not-a-secret';
-const V4_VERSION = '4.291.5';
+const DEFAULT_V4_VERSION = '4.291.15';
 const SUPPORT = join(import.meta.dir, 'support');
 
 // ─── what the run has made, and what it could not ────────────────────────────────────────────────────────────────
@@ -41,7 +41,7 @@ interface StepRecord {
   readonly reason?: string;
 }
 
-interface FerretRecord {
+export interface FerretRecord {
   readonly role: string;
   readonly id: string;
   readonly name: string;
@@ -55,7 +55,7 @@ interface FerretRecord {
 const made: Record<string, unknown> & { steps: StepRecord[]; ferrets: FerretRecord[] } = {
   format: 1,
   tool: 'ferretry-v4-fixture-builder',
-  v4Version: V4_VERSION,
+  v4Version: DEFAULT_V4_VERSION,
   createdAt: new Date().toISOString(),
   ferrets: [],
   steps: [],
@@ -100,7 +100,7 @@ function cannot(name: string, reason: string): void {
 
 // ─── running programs ────────────────────────────────────────────────────────────────────────────────────────────
 
-interface Ran {
+export interface Ran {
   readonly code: number;
   readonly out: string;
   readonly err: string;
@@ -175,13 +175,16 @@ async function freePort(): Promise<number> {
 // ─── arguments and the safety checks ─────────────────────────────────────────────────────────────────────────────
 
 const USAGE =
-  'usage: bun build-v4-home.ts --out <empty folder under the OS temp dir> --v4-dir <fy/fyd folder> [--keep-panes]';
+  'usage: bun build-v4-home.ts --out <empty folder under the OS temp dir> --v4-dir <fy/fyd folder> [--keep-panes] [--rich] [--v4-version <x.y.z>] [--port <n>]';
 
 const { values } = parseArgs({
   options: {
     out: { type: 'string' },
     'v4-dir': { type: 'string' },
     'keep-panes': { type: 'boolean', default: false },
+    'v4-version': { type: 'string' },
+    rich: { type: 'boolean', default: false },
+    port: { type: 'string' },
   },
   strict: true,
 });
@@ -193,6 +196,16 @@ if (values.out === undefined || (values['v4-dir'] ?? process.env.FY_V4_DIR) === 
 const out = resolve(values.out);
 const v4Dir = resolve(values['v4-dir'] ?? process.env.FY_V4_DIR ?? '');
 const keepPanes = values['keep-panes'] ?? false;
+/** The v4 release the binaries must report: the pinned one unless a rich home is built with the release the owner runs. */
+const v4Version = values['v4-version'] ?? DEFAULT_V4_VERSION;
+const rich = values.rich ?? false;
+/** A fixed daemon port (a sweep slot's), instead of a free one picked at random. */
+const fixedPort = values.port === undefined ? undefined : Number(values.port);
+if (fixedPort !== undefined && (!Number.isInteger(fixedPort) || fixedPort < 1024 || fixedPort > 65535)) {
+  console.error('--port must be a port from 1024 to 65535');
+  process.exit(64);
+}
+made.v4Version = v4Version;
 
 /** `<out>` must be inside the OS temp dir (so never a real home) and empty. Anything else refuses before a write. */
 class Refused extends Error {}
@@ -222,10 +235,52 @@ const paths = {
   fakeClaudeLog: join(out, 'fake-claude.log'),
   fakeCodexLog: join(out, 'fake-codex.log'),
   tmuxSocket: join(out, 'home', 'tmux.sock'),
+  runtimeDir: join(out, 'xdg-runtime'),
 };
 
 let baseUrl = '';
 let token = '';
+
+/** What the rich half (rich-home.ts) may use of this builder: its own helpers, never its state. */
+export interface RichContext {
+  readonly out: string;
+  readonly work: string;
+  readonly userHome: string;
+  readonly v4Dir: string;
+  readonly projectDir: string;
+  readonly existing: ReadonlyMap<string, FerretRecord>;
+  readonly made: Record<string, unknown>;
+  readonly step: (name: string, required: boolean, body: () => Promise<void>) => Promise<boolean>;
+  readonly cannot: (name: string, reason: string) => void;
+  readonly fy: (args: readonly string[], options?: { as?: string; stdin?: string; timeoutMs?: number }) => Promise<Ran>;
+  readonly fyOk: (
+    args: readonly string[],
+    options?: { as?: string; stdin?: string; timeoutMs?: number },
+  ) => Promise<string>;
+  readonly owner: (
+    method: string,
+    path: string,
+    body?: unknown,
+    headers?: Record<string, string>,
+  ) => Promise<{ status: number; body: unknown }>;
+  readonly run: (
+    executable: string,
+    args: readonly string[],
+    options: { env: Record<string, string>; cwd?: string; stdin?: string; timeoutMs?: number },
+  ) => Promise<Ran>;
+  readonly tmux: (args: readonly string[]) => Promise<Ran>;
+  readonly startFerret: (
+    role: string,
+    name: string,
+    prompt: string,
+    options: { mode: 'auto' | 'interactive'; parent?: string; cwd: string; agent?: string },
+  ) => Promise<FerretRecord>;
+  readonly childEnvironment: (extra?: Record<string, string>) => Record<string, string>;
+  readonly baseUrl: () => string;
+  readonly runtime: () => string;
+  readonly addRedaction: (value: string) => void;
+  readonly pairDevice: (daemonId: string, code: string, name: string) => Promise<{ deviceId: string }>;
+}
 
 function childEnvironment(extra: Record<string, string> = {}): Record<string, string> {
   const env: Record<string, string> = {};
@@ -233,6 +288,14 @@ function childEnvironment(extra: Record<string, string> = {}): Record<string, st
     if (value === undefined) continue;
     // Nothing that looks like a credential reaches the daemon or a command it runs.
     if (/(?:api_?key|token|secret|password|credential)/iu.test(name)) continue;
+    // Nothing ambient that names another Ferretry, a user systemd manager, a bus, an agent or a git/ssh identity: a build
+    // run from inside a ferret would otherwise start its sessions as children of THAT ferret.
+    if (
+      /^(?:FY_|FERRETRY_|XDG_RUNTIME_DIR$|DBUS_|SSH_|GIT_|GH_|GITHUB_|CLAUDE|CODEX|ANTHROPIC|OPENAI|NOTIFY_SOCKET$|INVOCATION_ID$|JOURNAL_STREAM$)/u.test(
+        name,
+      )
+    )
+      continue;
     if (name === 'CODEX_HOME' || name === 'CLAUDE_CONFIG_DIR' || name.startsWith('TMUX')) continue;
     env[name] = value;
   }
@@ -242,6 +305,8 @@ function childEnvironment(extra: Record<string, string> = {}): Record<string, st
     XDG_CONFIG_HOME: join(paths.userHome, '.config'),
     XDG_CACHE_HOME: join(paths.userHome, '.cache'),
     XDG_STATE_HOME: join(paths.userHome, '.local', 'state'),
+    // A private runtime dir with no user systemd manager and no session bus in it: nothing here can reach the owner's units.
+    XDG_RUNTIME_DIR: paths.runtimeDir,
     FY_HOME: paths.fyHome,
     PATH: [paths.harnessBin, process.env.PATH ?? ''].join(delimiter),
     NO_COLOR: '1',
@@ -256,6 +321,14 @@ function childEnvironment(extra: Record<string, string> = {}): Record<string, st
     FY_CODEX_BIN: join(paths.harnessBin, 'codex'),
     FY_E2E_FAKE_CLAUDE_LOG: paths.fakeClaudeLog,
     FY_E2E_FAKE_CODEX_LOG: paths.fakeCodexLog,
+    // A `--rich` home: the fake claude plays scripted exchanges (support/fake-claude-rich.ts); never set for the default fixture.
+    ...(rich
+      ? {
+          FY_FIXTURE_RICH: '1',
+          FY_FIXTURE_BUN: process.execPath,
+          FY_FIXTURE_HELPER: join(SUPPORT, 'fake-claude-rich.ts'),
+        }
+      : {}),
     ...extra,
   };
 }
@@ -288,13 +361,19 @@ async function fyOk(
   return ran.out;
 }
 
-async function owner(method: string, path: string, body?: unknown): Promise<{ status: number; body: unknown }> {
+async function owner(
+  method: string,
+  path: string,
+  body?: unknown,
+  extraHeaders: Record<string, string> = {},
+): Promise<{ status: number; body: unknown }> {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     signal: AbortSignal.timeout(20_000),
     headers: {
       Authorization: `Bearer ${token}`,
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...extraHeaders,
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
@@ -308,7 +387,7 @@ let daemon: ChildProcess | undefined;
 let daemonExit: Promise<number> | undefined;
 
 async function startDaemon(): Promise<void> {
-  const port = await freePort();
+  const port = fixedPort ?? (await freePort());
   baseUrl = `http://127.0.0.1:${String(port)}`;
   const logFd = openSync(paths.daemonLog, 'a', 0o600);
   daemon = spawn(join(v4Dir, 'fyd'), ['--host', '127.0.0.1', '--port', String(port)], {
@@ -363,12 +442,12 @@ async function startFerret(
   role: string,
   name: string,
   prompt: string,
-  options: { mode: 'auto' | 'interactive'; parent?: string; cwd: string },
+  options: { mode: 'auto' | 'interactive'; parent?: string; cwd: string; agent?: string },
 ): Promise<FerretRecord> {
   const args = [
     'start',
     '--agent',
-    runtime,
+    options.agent ?? runtime,
     '--mode',
     options.mode,
     '--name',
@@ -418,6 +497,7 @@ async function build(): Promise<void> {
   await step('prepare the disposable world', true, async () => {
     for (const folder of [paths.fyHome, paths.userHome, paths.harnessBin, paths.work, join(paths.userHome, '.claude')])
       await mkdir(folder, { recursive: true });
+    await mkdir(paths.runtimeDir, { recursive: true, mode: 0o700 });
     for (const folder of ['.config', '.cache', join('.local', 'state')])
       await mkdir(join(paths.userHome, folder), { recursive: true });
     await copyFile(join(SUPPORT, 'fake-claude-tui.sh'), join(paths.harnessBin, 'claude'));
@@ -438,8 +518,7 @@ async function build(): Promise<void> {
       { mode: 0o600 },
     );
     const version = await run(join(v4Dir, 'fyd'), ['--version'], { env: childEnvironment(), timeoutMs: 20_000 });
-    if (!version.out.includes(V4_VERSION))
-      throw new Error(`fyd reports "${version.out.trim()}", expected ${V4_VERSION}`);
+    if (!version.out.includes(v4Version)) throw new Error(`fyd reports "${version.out.trim()}", expected ${v4Version}`);
   });
 
   await step('start the v4 daemon on the disposable home', true, startDaemon);
@@ -757,6 +836,39 @@ async function build(): Promise<void> {
       pane: rows.find(row => row.session.includes(target) || row.windowName.includes(target)) ?? null,
     };
   });
+
+  if (rich) {
+    const { buildRich } = await import('./rich-home.ts');
+    const existing = new Map<string, FerretRecord>(made.ferrets.map(record => [record.role, record]));
+    await buildRich({
+      out,
+      work: paths.work,
+      userHome: paths.userHome,
+      v4Dir,
+      projectDir,
+      existing,
+      made,
+      step,
+      cannot,
+      fy,
+      fyOk,
+      owner,
+      run,
+      tmux,
+      startFerret,
+      childEnvironment,
+      baseUrl: () => baseUrl,
+      runtime: () => runtime,
+      addRedaction: value => void redactions.add(value),
+      pairDevice: async (daemonId, code, name) => {
+        await owner('PATCH', '/v1/security', { unlockOnOpen: false });
+        const device = await newTestDevice();
+        const paired = await pairOverSession(baseUrl, daemonId, code, name, device);
+        if (paired.kind !== 'paired') throw new Error('the daemon refused the fresh pairing code');
+        return { deviceId: paired.response.deviceId };
+      },
+    });
+  }
 }
 
 function collectIds(value: unknown, depth = 0): string[] {

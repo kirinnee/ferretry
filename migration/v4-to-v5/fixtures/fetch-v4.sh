@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Downloads the released v4 binaries ONCE and caches them. This is the ONLY network access the fixture tooling does.
 #
-# Source: GitHub release v4.291.5 of kirinnee/ferretry. The archive for this machine is checked against the release's
+# Source: GitHub release v4.291.15 of kirinnee/ferretry. The archive for this machine is checked against the release's
 # checksums.txt (SHA-256) before it is unpacked, and the cache is keyed by version, so a second run downloads nothing.
 #
 # stdout: the single line `<directory holding fy and fyd>`. Everything else goes to stderr, so
@@ -12,7 +12,7 @@ set -euo pipefail
 #
 # Environment: XDG_CACHE_HOME (default ~/.cache), FY_V4_FIXTURE_REPO (default kirinnee/ferretry, for a fork).
 
-version="4.291.5"
+version="4.291.15"
 repo="${FY_V4_FIXTURE_REPO:-kirinnee/ferretry}"
 cache="${XDG_CACHE_HOME:-${HOME}/.cache}/ferretry-v4-fixtures/${version}"
 

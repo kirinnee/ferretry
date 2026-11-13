@@ -1,7 +1,7 @@
 name: Migration v4 to v5
 
 # Proves the one-time v4 -> v5 converter (`migration/v4-to-v5/`) against REAL v4 output: it builds a v4 home with the
-# released 4.291.5 binaries (fixtures/build-v4-home.ts), runs the converter's unit tests, then runs the converter on
+# released 4.291.15 binaries (fixtures/build-v4-home.ts), runs the converter's unit tests, then runs the converter on
 # that home, dry then for real, and boots v5 from this repository on the result (fixtures/boot-v5.ts).
 #
 # CI-ONLY. The fixture builder starts a v4 daemon and a tmux server, which a shared developer box must not carry. It
@@ -42,7 +42,7 @@ jobs:
         run: |
           v4_dir="$(bash migration/v4-to-v5/fixtures/fetch-v4.sh)"
           v4_version="$("${v4_dir}/fy" --version)"
-          grep -qx '4.291.5' <<<"${v4_version}"
+          grep -qx '4.291.15' <<<"${v4_version}"
           echo "FY_V4_DIR=${v4_dir}" >>"${GITHUB_ENV}"
 
       - name: Install the converter's dependencies and the repository's

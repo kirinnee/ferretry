@@ -36,6 +36,11 @@ if [ "${1:-}" = "auth" ] && [ "${2:-}" = "login" ]; then
       expires=$((($(date +%s) + 3600) * 1000))
       printf '{"claudeAiOauth":{"accessToken":"fake-e2e-access","refreshToken":"fake-e2e-refresh","expiresAt":%s,"scopes":["user:inference"]}}' \
         "${expires}" >"${config}/.credentials.json"
+      # v4 signs a login in inside `<credential>/sign-in` and then looks for the file one folder up: the real CLI's own
+      # tidy-up. Only a run in a folder called sign-in (a daemon-driven sign-in of a `store: ferretry` login) copies it.
+      case "${config}" in
+      */sign-in) cp "${config}/.credentials.json" "${config%/sign-in}/.credentials.json" && chmod 600 "${config%/sign-in}/.credentials.json" ;;
+      esac
       printf 'Login successful.\n'
       exit 0
       ;;
@@ -49,6 +54,8 @@ sid=""
 prev=""
 for arg in "$@"; do
   [ "${prev}" = "--session-id" ] && sid="${arg}"
+  # `claude --resume <id>` carries on the same conversation, as the real CLI does.
+  [ "${prev}" = "--resume" ] && sid="${arg}"
   prev="${arg}"
 done
 [ -n "${sid}" ] || sid="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || date +%s)"
@@ -85,6 +92,39 @@ n=0
 last=""
 while IFS= read -r line; do
   n=$((n + 1))
+  # A `--rich` v4 home (FY_FIXTURE_RICH set by the builder; never set for the default fixture): two marked lines are the
+  # builder's own stage directions, not something a person said, so they are played and NOT recorded as a user turn.
+  #   FIXTURE-REC <script.json>   one scripted exchange (see fake-claude-rich.ts)
+  #   FIXTURE-RUN <out> <command> run a command in this pane's environment, as the ferret itself
+  if [ -n "${FY_FIXTURE_RICH:-}" ]; then
+    # An autonomous ferret is not typed to: the daemon types "Read the file <turn or queued message>.md now" and the words
+    # sit in that file. A stage direction in the file is played exactly as a typed one is.
+    case "${line}" in
+    "Read the "*.md*)
+      turn_file="$(printf '%s' "${line}" | grep -o '/[^ ]*\.md' | head -1)"
+      if [ -n "${turn_file}" ] && [ -f "${turn_file}" ]; then
+        direction="$(grep -m1 -E '^FIXTURE-(REC|RUN) ' "${turn_file}" || true)"
+        [ -n "${direction}" ] && line="${direction}"
+      fi
+      ;;
+    esac
+    case "${line}" in
+    FIXTURE-REC\ *)
+      "${FY_FIXTURE_BUN}" "${FY_FIXTURE_HELPER}" "${transcript}" "${sid}" "${line#FIXTURE-REC }"
+      printf '> '
+      continue
+      ;;
+    FIXTURE-RUN\ *)
+      run="${line#*FIXTURE-RUN }"
+      run_out="${run%% *}"
+      run_cmd="${run#* }"
+      sh -c "${run_cmd}" >"${run_out}" 2>&1 </dev/null
+      echo $? >"${run_out}.code"
+      printf '> '
+      continue
+      ;;
+    esac
+  fi
   record user "u${n}-${sid}" "${last}" "${line}"
   # FIXTURE-RUN <out> <command>: added for the v4 fixture builder (not in the 4.291.5 original). A real ferret runs
   # shell commands in its own environment; this stand-in does the same for exactly one marked line, so the builder can

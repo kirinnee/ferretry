@@ -1,6 +1,6 @@
 # v4 fixture homes
 
-Builds realistic **Ferretry 4.291.5** homes with the **released v4 binaries**, so the converter in `../` is tested
+Builds realistic **Ferretry 4.291.15** homes with the **released v4 binaries**, so the converter in `../` is tested
 against real v4 output rather than hand-written files. Nothing here is part of the product, and all of it is deleted
 with the converter.
 
@@ -25,14 +25,28 @@ never written by hand.
 ## Run it
 
 ```bash
-v4_dir="$(bash fetch-v4.sh)"          # the ONLY network access: one download of the v4.291.5 release, SHA-256 checked, cached
+v4_dir="$(bash fetch-v4.sh)"          # the ONLY network access: one download of the v4.291.15 release, SHA-256 checked, cached
 out="$(mktemp -d)"                    # must be under the OS temp dir and empty, or the builder refuses
 bun build-v4-home.ts --out "$out" --v4-dir "$v4_dir"
 bun ../src/main.ts --from "$out/home" --to "$out/v5" --dry-run
 ```
 
-`fetch-v4.sh` caches under `${XDG_CACHE_HOME:-~/.cache}/ferretry-v4-fixtures/4.291.5/`; it uses `gh` when signed in and
+`fetch-v4.sh` caches under `${XDG_CACHE_HOME:-~/.cache}/ferretry-v4-fixtures/4.291.15/`; it uses `gh` when signed in and
 the public URL otherwise.
+
+## `--rich`: a lived-in home (for side-by-side sweeps)
+
+`bun build-v4-home.ts --out <dir> --v4-dir <v4> --rich` keeps the default fixture untouched and adds `rich-home.ts` on top
+of it, still only through v4's own CLI and HTTP API: more projects; 23 ferrets in every state with real transcripts
+(tool calls, an image, an AskUserQuestion, a permission prompt, queued messages, a draft); board cards across lanes;
+agenda items in every state; five logins (two signed in through the daemon's own flow, fake credentials only) with
+budgets, runtimes, profiles and components; secrets by name; warden, voice, learning and pack config; terminals; a browser
+profile; a second device. What v4 cannot create is recorded as `skipped` in `made.json`. `--keep-panes` leaves v4's tmux
+alive and `--port <n>` pins the daemon's port. The directives that make the fake claude play a script
+(`FIXTURE-REC`, `FIXTURE-RUN`, in `support/fake-claude-rich.ts` and `fake-claude-tui.sh`) answer only when `FY_FIXTURE_RICH` is set.
+
+`sweep/` builds on it: `sweep-up.sh <1..8>` brings up a v4 daemon and a 5.0 daemon (a converted copy) side by side under
+`/tmp/claude-1000/sweep/slot<N>/`, `sweep-down.sh <N>` stops them. It is a developer tool (it starts daemons); CI does not run it.
 
 ## Boot v5 on the converted home
 
