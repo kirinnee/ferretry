@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { parseDocument } from 'yaml';
 import type { z } from 'zod';
 import { keyPath } from '../key-path.ts';
-import { refuseLinkOnPath } from './no-link.ts';
+import { type PinnedFolder, refuseLinkOnPath } from './no-link.ts';
 
 /**
  * The part of a v5 `defineConfig` declaration the writer needs: one file under `config/`, or a folder of
@@ -112,17 +112,21 @@ export function formatFirst(value: unknown, stamp?: number): unknown {
 export const UNKNOWN_SOURCE = '*';
 
 /**
- * `anchor` is the resolved folder above the home the write-time link checks start from (see `./resolved-place.ts`);
- * absent, they start at the home itself.
+ * `anchor` is the resolved folder above the home the write-time link checks start from, and `pins` the identity of
+ * every folder from `/` down to it, both from `./resolved-place.ts`; absent, the checks start at the home itself.
  */
-export function v5Writer(home: string, options: { readonly dryRun: boolean; readonly anchor?: string }): V5Writer {
+export function v5Writer(
+  home: string,
+  options: { readonly dryRun: boolean; readonly anchor?: string; readonly pins?: readonly PinnedFolder[] },
+): V5Writer {
   const anchor = options.anchor ?? home;
+  const pins = options.pins ?? [];
   const configs = new Map<string, string>();
   const sources = new Map<string, Set<string>>();
   const place = async (relativePath: string, text: string | Uint8Array, mode: number): Promise<void> => {
     if (options.dryRun) return;
     const target = join(home, relativePath);
-    refuseLinkOnPath(anchor, target);
+    refuseLinkOnPath(anchor, target, pins);
     await mkdir(dirname(target), { recursive: true, mode: 0o700 });
     const temporary = `${target}.tmp-${process.pid}`;
     await writeFile(temporary, text, { mode, flag: 'wx' });
@@ -174,7 +178,7 @@ export function v5Writer(home: string, options: { readonly dryRun: boolean; read
     },
     resolve(relativePath) {
       const path = join(home, relativePath);
-      refuseLinkOnPath(anchor, path);
+      refuseLinkOnPath(anchor, path, pins);
       return path;
     },
   };

@@ -77,13 +77,15 @@ export async function preflight(from: string, to: string, lock: LockProbe): Prom
   // The new home's parent is resolved ONCE; every write goes to the resolved place and is lstat-checked from its anchor.
   const place = await resolvePlace(to);
   try {
-    refuseLinkOnPath(place.anchor, place.path);
+    refuseLinkOnPath(place.anchor, place.path, place.pins);
   } catch (error) {
     if (error instanceof LinkOnWritePathError) {
       return {
         ok: false,
         problems: [
-          `${error.link} is a link, so the conversion did not start: replace it with a real folder, then run again`,
+          error.reason === 'link'
+            ? `${error.link} is a link, so the conversion did not start: replace it with a real folder, then run again`
+            : `${error.link} changed while the conversion was starting: put the real folder back, then run again`,
         ],
       };
     }

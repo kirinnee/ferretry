@@ -138,13 +138,13 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
   // its anchor down, so a link swapped in after preflight refuses instead of redirecting a write.
   const to = checked.to.path;
   if (!options.dryRun) {
-    refuseLinkOnPath(checked.to.anchor, to);
+    refuseLinkOnPath(checked.to.anchor, to, checked.to.pins);
     await mkdir(to, { recursive: true, mode: 0o700 });
-    refuseLinkOnPath(checked.to.anchor, to);
+    refuseLinkOnPath(checked.to.anchor, to, checked.to.pins);
   }
   const ctx = {
     v4: { ...v4Paths(options.from), fenced: await fenceV4(options.from) },
-    v5: v5Writer(to, { dryRun: options.dryRun, anchor: checked.to.anchor }),
+    v5: v5Writer(to, { dryRun: options.dryRun, anchor: checked.to.anchor, pins: checked.to.pins }),
     dryRun: options.dryRun,
     ...(options.preview === true
       ? {

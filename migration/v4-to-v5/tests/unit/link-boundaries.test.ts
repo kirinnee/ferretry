@@ -165,3 +165,102 @@ test('main: a report path that is itself a link refuses before anything is writt
   await expect(lstat(f.to)).rejects.toThrow();
   expect(dirname(path)).toBe(f.root);
 });
+
+// --- Fix 5.1: the folders ABOVE the resolved anchor are pinned (device + inode) and looked at again on every write ---
+
+/** A step that runs `swap` AFTER preflight, then tries one ordinary opaque write into the new home. */
+const swapThenOpaque = (swap: () => Promise<void>): Step => ({
+  id: 'swap-above',
+  title: 'swap-above',
+  owner: [],
+  reads: [],
+  sealed: [],
+  notCarried: [],
+  async run(ctx) {
+    await swap();
+    try {
+      await ctx.v5.opaque('state/review.txt', 'FAKE-REVIEW-WRITE');
+      return { id: 'swap-above', title: 'swap-above', status: 'converted', kept: [], notCarried: [], sealed: [] };
+    } catch (error) {
+      const note = error instanceof Error ? error.message : 'threw';
+      return { id: 'swap-above', title: 'swap-above', status: 'failed', note, kept: [], notCarried: [], sealed: [] };
+    }
+  },
+});
+
+test('a PERSISTENT link swapped in above the anchor (outer/parent/v5 -> outer is the link) refuses, nothing lands outside', async () => {
+  const outer = join(f.root, 'outer');
+  await mkdir(join(outer, 'parent'), { recursive: true, mode: 0o700 });
+  await mkdir(join(outside, 'parent/v5'), { recursive: true, mode: 0o700 });
+  const result = await run(join(outer, 'parent/v5'), [
+    swapThenOpaque(async () => {
+      await rename(outer, `${outer}-saved`);
+      await symlink(outside, outer);
+    }),
+  ]);
+  expect(result.kind).toBe('done');
+  if (result.kind !== 'done') return;
+  expect(result.report.complete).toBe(false);
+  expect(result.report.steps[0]?.status).toBe('failed');
+  expect(result.report.steps[0]?.note).toContain(`${outer} is a link, so nothing was written through it`);
+  expect(await readdir(join(outside, 'parent/v5'))).toEqual([]);
+  await expect(lstat(join(outside, 'parent/v5/home.json'))).rejects.toThrow();
+});
+
+test('a link swapped in far above the anchor (grandparent) refuses too, and so does home.json', async () => {
+  const top = join(f.root, 'top');
+  await mkdir(join(top, 'a/b'), { recursive: true, mode: 0o700 });
+  await mkdir(join(outside, 'a/b/v5'), { recursive: true, mode: 0o700 });
+  const result = await run(join(top, 'a/b/v5'), [
+    swapThenOpaque(async () => {
+      await rename(top, `${top}-saved`);
+      await symlink(outside, top);
+    }),
+  ]);
+  expect(result.kind).toBe('done');
+  if (result.kind !== 'done') return;
+  expect(result.report.complete).toBe(false);
+  expect(await readdir(join(outside, 'a/b/v5'))).toEqual([]);
+});
+
+test('a real folder put in place of an ancestor (same name, different identity) refuses with the plain sentence', async () => {
+  const outer = join(f.root, 'outer');
+  await mkdir(join(outer, 'parent'), { recursive: true, mode: 0o700 });
+  const result = await run(join(outer, 'parent/v5'), [
+    swapThenOpaque(async () => {
+      await rename(outer, `${outer}-saved`);
+      await mkdir(join(outer, 'parent'), { recursive: true, mode: 0o700 });
+    }),
+  ]);
+  expect(result.kind).toBe('done');
+  if (result.kind !== 'done') return;
+  expect(result.report.steps[0]?.status).toBe('failed');
+  expect(result.report.steps[0]?.note).toContain('is not the folder it was when the run started');
+  await expect(lstat(join(outer, 'parent/v5/state/review.txt'))).rejects.toThrow();
+});
+
+test('a system-style link made BEFORE the run is resolved once and the RESOLVED components are pinned (still converts)', async () => {
+  const alias = join(f.root, 'sys-alias');
+  await mkdir(join(outside, 'inner'), { recursive: true, mode: 0o700 });
+  await symlink(outside, alias);
+  const result = await run(join(alias, 'inner/v5'));
+  expect(result.kind).toBe('done');
+  if (result.kind !== 'done') return;
+  expect(result.report.complete).toBe(true);
+  expect(result.report.to).toBe(join(await realpath(outside), 'inner/v5'));
+});
+
+test('the report: a PERSISTENT link swapped in above its resolved anchor refuses and keeps the target', async () => {
+  const outer = join(f.root, 'outer');
+  await mkdir(join(outer, 'parent'), { recursive: true, mode: 0o700 });
+  await mkdir(join(outside, 'parent'), { recursive: true, mode: 0o700 });
+  await writeFile(join(outside, 'parent/report.json'), 'FAKE-PRECIOUS-KEEP');
+  const wanted = await resolveReport(join(outer, 'parent/report.json'));
+  expect(wanted.problem).toBeUndefined();
+  await rename(outer, `${outer}-saved`);
+  await symlink(outside, outer);
+  const written = await writeReportFile(wanted.place, '{}\n');
+  expect(written.problem).toContain(`${outer} is a link`);
+  expect(written.problem).not.toContain(outside);
+  expect(await readFile(join(outside, 'parent/report.json'), 'utf8')).toBe('FAKE-PRECIOUS-KEEP');
+});
