@@ -67,7 +67,7 @@ describe('verb table', () => {
       const typed = resolveVerb(table(), ['inbox', 'add', 'x']);
       should(typed.kind).equal('subverb');
       if (typed.kind !== 'subverb') return;
-      should(typed.parent.line).equal('inbox');
+      should(typed.parent.words).deepEqual(['inbox']);
       should(typed.word).equal('add');
       should(typed.subverbs.map(each => each.line)).deepEqual(['inbox open', 'inbox mode']);
     });

@@ -5,6 +5,7 @@ import {
   AgendaContext,
   AskAnswered,
   AskDeliveries,
+  AskOwnerChats,
   AsksConfigFile,
   AskSources,
   AsksChanged,
@@ -105,7 +106,7 @@ export default definePlugin({
     state: [...ASKS_STATE, AskVersionsFiles],
     publishes: [AskAnswered, AsksChanged],
   },
-  hooks: { offers: [{ hook: AskSources }, { hook: AskDeliveries }, { hook: AgendaContext }] },
+  hooks: { offers: [{ hook: AskSources }, { hook: AskDeliveries }, { hook: AskOwnerChats }, { hook: AgendaContext }] },
   actions: {
     routes: [
       route('GET /v1/ferrets/:ferretId/agenda/:id', read),

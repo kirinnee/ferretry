@@ -47,7 +47,15 @@ import {
   TURN_INTERRUPTED_AUDIT,
   TurnEnded,
 } from './contract/index.ts';
-import { ASK_DELIVERY_KEY, AskAnswered, AskDeliveries, AsksPort, AskSources } from '@ferretry/core-asks/contract';
+import {
+  ASK_DELIVERY_KEY,
+  ASK_OWNER_CHAT_KEY,
+  AskAnswered,
+  AskDeliveries,
+  AskOwnerChats,
+  AsksPort,
+  AskSources,
+} from '@ferretry/core-asks/contract';
 import {
   ACTIONS_ROW_SLOT,
   FerretChanged,
@@ -364,6 +372,9 @@ export default definePlugin({
       // How an owner's agenda answer reaches a ferret: typed through this plugin's own send path (queue + ledger). The
       // one provider of this security-path hook (`takers: ['conversation']`).
       { hook: AskDeliveries, key: ASK_DELIVERY_KEY },
+      // The owner's chat as `fy agenda log` copies it onto an item: this plugin's own queue and send ledger. The one
+      // provider of this hook (`takers: ['conversation']`).
+      { hook: AskOwnerChats, key: ASK_OWNER_CHAT_KEY },
     ],
     offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
   },

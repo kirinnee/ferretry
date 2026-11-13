@@ -1,5 +1,5 @@
 import { ApiError, type KernelPorts, type RouteHandler, type SocketAccept } from '@ferretry/kernel/contract';
-import { type AskId, AskIdSchema, type AsksApi } from '@ferretry/core-asks/contract';
+import { type AskId, AskIdSchema, type AskOwnerChat, type AsksApi } from '@ferretry/core-asks/contract';
 import {
   AGENT_ORIGIN,
   type FerretsApi,
@@ -75,6 +75,7 @@ import { buildQuestionAnswering, clearAskedQuestion, writeAskedQuestion } from '
 import { ANSWER_FAILURES, SessionAnswerError } from './questions/lib/mounts/session-answer.ts';
 import { QUESTION_WATCH_MS, QuestionWatch } from './questions/lib/watch.ts';
 import { OwnerWordsReader, TurnBoundaries, type TurnPhase } from './turns/lib/index.ts';
+import { SessionOwnerChat } from './turns/lib/owner-chat.ts';
 import { SharedDraftPresence, SharedDraftService, sharedDraftOrigin } from './drafts/lib/index.ts';
 import { StateQueueStore } from './queue/adapters/index.ts';
 import { answerOf } from './queue/lib/answer.ts';
@@ -272,6 +273,8 @@ export interface ConversationAHalf {
     | 'editDraft'
   >;
   readonly sitrep: SitrepLineSource;
+  /** The owner's messages to a ferret as `fy agenda log` copies them: the queue and the send ledger, by message id. */
+  readonly ownerChat: AskOwnerChat;
   /** The hypermedia switch the owner set for a ferret, or `undefined` when none (the launch reads it). */
   hypermediaRecorded(ferret: string): Promise<boolean | undefined>;
   /** The ferret stopped or went away: the question it was asking is withdrawn, so `question.json` goes. */
@@ -1009,7 +1012,17 @@ export function buildConversationA(deps: {
     startedByFerret: async id => (await ferrets.get(id))?.parent !== undefined,
   });
 
-  const queueMessages = async (id: string): Promise<readonly QueuedMessage[]> => await queue.list(parseSessionId(id));
+  /**
+   * What a ferret's queue holds. A ferret nobody knows and nothing was ever queued for is not "an empty queue": it is not a
+   * ferret, so `fy queue <typo>` is refused with the sentence the send path uses instead of reporting that nothing waits.
+   */
+  const queueMessages = async (id: string): Promise<readonly QueuedMessage[]> => {
+    const ferret = parseSessionId(id);
+    const held = await queue.list(ferret);
+    if (held.length === 0 && (await ferrets.get(ferret)) === undefined)
+      throw new SessionSendError('not_found', `session not found: ${id}`);
+    return held;
+  };
   const queueFailure = (error: unknown): never => {
     if (error instanceof QueueRefused)
       throw new SessionSendError(error.refusal === 'not_found' ? 'not_found' : 'refused', error.message);
@@ -1424,6 +1437,7 @@ export function buildConversationA(deps: {
     sockets: socketTable(sockets),
     api,
     sitrep,
+    ownerChat: new SessionOwnerChat(queue, ledger),
     hypermediaRecorded: async ferret => await hypermediaSwitch.recorded(ferret),
     withdrawQuestion: async ferret => {
       questionWatch.forget(ferret);

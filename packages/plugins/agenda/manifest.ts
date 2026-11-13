@@ -28,6 +28,11 @@ const SESSION: readonly VerbOptionDecl[] = [
   { flag: '--json', help: 'print the board as JSON instead of the human rendering' },
 ];
 
+const PAGING: readonly VerbOptionDecl[] = [
+  { flag: '--limit <n>', help: 'how many asks a page holds' },
+  { flag: '--after <cursor>', help: 'continue after the cursor a page named' },
+];
+
 const DONE_OPTIONS: readonly VerbOptionDecl[] = [
   { flag: '-n, --note <text>', help: 'a note recorded with the resolution' },
   {
@@ -196,10 +201,20 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('agenda', { summary: 'what is waiting on you, grouped' }),
-      verb('agenda open', { summary: 'every ferret’s open and parked asks, paged' }),
-      verb('agenda mode', { summary: 'switch agenda mode for a ferret or for new ferrets' }),
-      verb('agenda clear', { summary: 'dismiss the agent ferrets’ backlog (--dry-run counts it)' }),
+      verb('agenda', { summary: 'what is waiting on you, grouped', options: PAGING }),
+      verb('agenda open', { summary: 'every ferret’s open and parked asks, paged', options: PAGING }),
+      verb('agenda mode', {
+        summary: 'switch agenda mode for a ferret or for new ferrets',
+        options: [{ flag: '--ferret <id>', help: 'the ferret to read or switch' }],
+      }),
+      verb('agenda clear', {
+        summary: 'dismiss the agent ferrets’ backlog (--dry-run counts it)',
+        options: [
+          { flag: '--agents', help: 'clear the boards of the agent ferrets (the only thing there is to clear yet)' },
+          { flag: '--dry-run', help: 'say what would be cleared and clear nothing' },
+          { flag: '--yes', help: 'do not ask first' },
+        ],
+      }),
       verb('agenda add [ask...]', {
         summary: 'open an agenda for what the owner must decide or do: only when no open one fits',
         options: [...SESSION, ...ADD_OPTIONS],

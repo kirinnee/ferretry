@@ -12,7 +12,7 @@ import { RouteAgendaGateway } from './lib/gateway.ts';
 import { composeNoticeRequest } from './lib/notify.ts';
 import type { IAgendaPrompt } from './lib/ports.ts';
 import { describeClear, renderOpen } from './lib/render.ts';
-import { type Flags, readFlags } from './lib/verb-flags.ts';
+import { type Flags, type GrammarName, readVerb } from './lib/verb-flags.ts';
 
 const text = (value: string | boolean | readonly string[] | undefined): string | undefined =>
   typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
@@ -37,13 +37,16 @@ export default implementCli(manifest, {
     };
     const say = (message: string): void => io.out(`${message}\n`);
 
-    async function open(invocation: VerbInvocation, all: boolean): Promise<number> {
-      const limit = text(invocation.options.limit);
+    async function open(verb: 'open' | 'roll', invocation: VerbInvocation, all: boolean): Promise<number> {
+      const read = readVerb(verb, invocation);
+      if (!read.ok) return fail(read.message);
+      const given = read.flags as { readonly limit?: string; readonly after?: string; readonly json?: boolean };
+      const limit = text(given.limit);
       if (limit !== undefined && !/^[1-9][0-9]*$/u.test(limit))
         return fail('--limit is a whole number of asks, 1 or more');
       if (limit !== undefined && Number(limit) > AGENDA_OPEN_MAX_LIMIT)
         return fail(`--limit is at most ${String(AGENDA_OPEN_MAX_LIMIT)}`);
-      let after = text(invocation.options.after);
+      let after = text(given.after);
       const sessions: AgendaOpenPage['sessions'][number][] = [];
       let next: string | undefined;
       do {
@@ -56,7 +59,7 @@ export default implementCli(manifest, {
         next = page.next;
         after = page.next;
       } while (all && next !== undefined);
-      if (flag(invocation, 'json')) say(JSON.stringify({ sessions, ...(next === undefined ? {} : { next }) }, null, 2));
+      if (given.json === true) say(JSON.stringify({ sessions, ...(next === undefined ? {} : { next }) }, null, 2));
       else say(renderOpen({ sessions, ...(next === undefined ? {} : { next }) }));
       return 0;
     }
@@ -77,21 +80,19 @@ export default implementCli(manifest, {
         },
         prompt,
       );
-    /** One item verb: its positionals, its flags, and the controller; a failure is the controller's sentence, exit 1. */
+    /** What a refused flag or word costs: the sentence, and exit 1 as v4's parser did (an unknown SUB-VERB is the shell's exit 2). */
+    const refused = (message: string): number => {
+      io.err(`${message}\n`);
+      return 1;
+    };
+    /** One item verb: its grammar reads the words as typed, and the controller does the rest; a failure is its sentence, exit 1. */
     const item =
-      (
-        usage: string,
-        needs: number,
-        run: (c: AgendaController, args: readonly string[], flags: Flags) => Promise<void>,
-      ) =>
+      (verb: GrammarName, run: (c: AgendaController, args: readonly string[], flags: Flags) => Promise<void>) =>
       async (invocation: VerbInvocation): Promise<number> => {
-        const { flags, args } = readFlags(invocation);
-        if (args.length < needs) {
-          io.err(`usage: fy agenda ${usage}\n`);
-          return 2;
-        }
+        const read = readVerb(verb, invocation);
+        if (!read.ok) return refused(read.message);
         try {
-          await run(controller(), args, flags);
+          await run(controller(), read.args, read.flags);
         } catch (error) {
           io.err(`${error instanceof Error ? error.message : String(error)}\n`);
           return 1;
@@ -101,100 +102,49 @@ export default implementCli(manifest, {
 
     return {
       verbs: {
-        agenda: async invocation => await open(invocation, true),
-        'agenda add [ask...]': item(
-          'add --title "<what>" "<the ask>" …',
-          0,
-          async (c, args, f) => void (await c.add(args, f)),
-        ),
-        'agenda edit <id>': item('edit <id> [flags]', 1, async (c, [id], f) => void (await c.edit(id as string, f))),
+        agenda: async invocation => await open('roll', invocation, true),
+        'agenda add [ask...]': item('add', async (c, args, f) => void (await c.add(args, f))),
+        'agenda edit <id>': item('edit', async (c, [id], f) => void (await c.edit(id as string, f))),
         'agenda answer <id> <text...>': item(
-          'answer <id> "<text>"',
-          1,
+          'answer',
           async (c, [id, ...words], f) => void (await c.answer(id as string, words, f)),
         ),
-        'agenda rest <id>': item(
-          'rest <id> --why "<what you are doing>"',
-          1,
-          async (c, [id], f) => void (await c.rest(id as string, f)),
-        ),
-        'agenda log <id>': item(
-          'log <id> --reply "<text>" | --rest "<text>"',
-          1,
-          async (c, [id], f) => void (await c.log(id as string, f)),
-        ),
+        'agenda rest <id>': item('rest', async (c, [id], f) => void (await c.rest(id as string, f))),
+        'agenda log <id>': item('log', async (c, [id], f) => void (await c.log(id as string, f))),
         'agenda merge <into> <from>': item(
-          'merge <into> <from>',
-          2,
+          'merge',
           async (c, [into, from], f) => void (await c.merge(into as string, from as string, f)),
         ),
         'agenda split <id> <ask...>': item(
-          'split <id> --title "<what>" "<the new ask>" …',
-          1,
+          'split',
           async (c, [id, ...words], f) => void (await c.split(id as string, words, f)),
         ),
         'agenda step <id> <n>': item(
-          'step <id> <n> [--undo]',
-          2,
+          'step',
           async (c, [id, n], f) => void (await c.step(id as string, n as string, f)),
         ),
-        'agenda show <id>': item(
-          'show <id> [--tab <name>] [--yaml]',
-          1,
-          async (c, [id], f) => void (await c.show(id as string, f)),
-        ),
-        'agenda patch <id>': item(
-          'patch <id> [--file <path>]',
-          1,
-          async (c, [id], f) => void (await c.patch(id as string, f)),
-        ),
-        'agenda ls': item('ls', 0, async (c, _args, f) => void (await c.list(f))),
-        'agenda history': item('history', 0, async (c, _args, f) => void (await c.history(f))),
-        'agenda needs-info <id>': item(
-          'needs-info <id> [--note <text>]',
-          1,
-          async (c, [id], f) => void (await c.needsInfo(id as string, f)),
-        ),
-        'agenda discuss <id>': item(
-          'discuss <id> [--note <text>]',
-          1,
-          async (c, [id], f) => void (await c.discuss(id as string, f)),
-        ),
-        'agenda surface <id>': item(
-          'surface <id> [--why <line>] [--now]',
-          1,
-          async (c, [id], f) => void (await c.surface(id as string, f)),
-        ),
-        'agenda snooze <id>': item(
-          'snooze <id> --for <time> | --until <time>',
-          1,
-          async (c, [id], f) => void (await c.snooze(id as string, f)),
-        ),
-        'agenda unsnooze <id>': item(
-          'unsnooze <id>',
-          1,
-          async (c, [id], f) => void (await c.unsnooze(id as string, f)),
-        ),
-        'agenda send-now': item('send-now', 0, async (c, _args, f) => void (await c.sendNow(f))),
-        'agenda done <id>': item(
-          'done <id> [answer flags]',
-          1,
-          async (c, [id], f) => void (await c.resolve(id as string, f)),
-        ),
-        'agenda dismiss <id>': item(
-          'dismiss <id> [--note <text>]',
-          1,
-          async (c, [id], f) => void (await c.dismiss(id as string, f)),
-        ),
-        'agenda open': async invocation => await open(invocation, false),
+        'agenda show <id>': item('show', async (c, [id], f) => void (await c.show(id as string, f))),
+        'agenda patch <id>': item('patch', async (c, [id], f) => void (await c.patch(id as string, f))),
+        'agenda ls': item('ls', async (c, _args, f) => void (await c.list(f))),
+        'agenda history': item('history', async (c, _args, f) => void (await c.history(f))),
+        'agenda needs-info <id>': item('needs-info', async (c, [id], f) => void (await c.needsInfo(id as string, f))),
+        'agenda discuss <id>': item('discuss', async (c, [id], f) => void (await c.discuss(id as string, f))),
+        'agenda surface <id>': item('surface', async (c, [id], f) => void (await c.surface(id as string, f))),
+        'agenda snooze <id>': item('snooze', async (c, [id], f) => void (await c.snooze(id as string, f))),
+        'agenda unsnooze <id>': item('unsnooze', async (c, [id], f) => void (await c.unsnooze(id as string, f))),
+        'agenda send-now': item('send-now', async (c, _args, f) => void (await c.sendNow(f))),
+        'agenda done <id>': item('done', async (c, [id], f) => void (await c.resolve(id as string, f))),
+        'agenda dismiss <id>': item('dismiss', async (c, [id], f) => void (await c.dismiss(id as string, f))),
+        'agenda open': async invocation => await open('open', invocation, false),
 
         'agenda mode': async invocation => {
-          const ferret = text(invocation.options.ferret);
-          if (ferret === undefined) return fail('say which ferret: --ferret <id>');
-          const state = invocation.args[0]?.trim().toLowerCase();
+          const read = readVerb('mode', invocation);
+          if (!read.ok) return refused(read.message);
+          if (read.ferret === undefined || read.ferret.trim() === '') return fail('say which ferret: --ferret <id>');
+          const state = read.args[0]?.trim().toLowerCase();
           if (state !== undefined && state !== 'on' && state !== 'off')
-            return fail(`agenda mode is "on" or "off", not "${invocation.args[0] ?? ''}" — leave it out to read it`);
-          const params = { ferretId: ferret };
+            return fail(`agenda mode is "on" or "off", not "${read.args[0] ?? ''}" — leave it out to read it`);
+          const params = { ferretId: read.ferret.trim() };
           if (state === undefined) {
             const mode = AgendaModeSchema.parse(await client.call('GET /v1/ferrets/:ferretId/agenda-mode', { params }));
             say(`Agenda mode is ${mode.enabled ? 'on' : 'off'}. ${mode.note}`);
@@ -212,14 +162,22 @@ export default implementCli(manifest, {
         },
 
         'agenda clear': async invocation => {
-          if (!flag(invocation, 'agents'))
+          const read = readVerb('clear', invocation);
+          if (!read.ok) return refused(read.message);
+          const given = read.flags as {
+            readonly agents?: boolean;
+            readonly yes?: boolean;
+            readonly dryRun?: boolean;
+            readonly json?: boolean;
+          };
+          if (given.agents !== true)
             return fail(
               'say what to clear: `agenda clear --agents` clears every open ask on the agent ferrets’ boards',
             );
           const found = AgendaClearAgentsResultSchema.parse(
             await client.call('POST /v1/agenda/clear-agents', { body: { dryRun: true } }),
           );
-          if (flag(invocation, 'dry-run')) {
+          if (given.dryRun === true) {
             say(`would clear ${describeClear(found)}`);
             return 0;
           }
@@ -227,14 +185,27 @@ export default implementCli(manifest, {
             say('nothing to clear: the agent ferrets have no open asks');
             return 0;
           }
-          if (!flag(invocation, 'yes'))
-            return fail(
-              `this would dismiss ${describeClear(found)} and nobody can be asked here: re-run with --yes to go ahead`,
-            );
+          if (given.yes !== true) {
+            if (prompt === undefined)
+              return fail(
+                `this would dismiss ${describeClear(found)} and nobody can be asked here: re-run with --yes to go ahead`,
+              );
+            const answer = (await prompt.ask(`Dismiss ${describeClear(found)}? [y/N]`)).trim().toLowerCase();
+            if (answer !== 'y' && answer !== 'yes') {
+              say('Nothing was cleared.');
+              return 0;
+            }
+          }
           const done = AgendaClearAgentsResultSchema.parse(
             await client.call('POST /v1/agenda/clear-agents', { body: {} }),
           );
-          say(flag(invocation, 'json') ? JSON.stringify(done, null, 2) : `cleared ${describeClear(done)}`);
+          if (given.json === true) say(JSON.stringify(done, null, 2));
+          else say(`cleared ${describeClear(done)}`);
+          // The dry run said what would go; a clear that dismissed fewer left asks open, and says so rather than succeeding.
+          if (done.cleared < found.cleared)
+            return fail(
+              `only ${describeClear(done)} were cleared, of the ${describeClear(found)} it listed: the rest are still open (see \`fy agenda ls --session <id>\`)`,
+            );
           return 0;
         },
 

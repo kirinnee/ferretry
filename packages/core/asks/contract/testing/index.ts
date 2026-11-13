@@ -116,6 +116,14 @@ export class FakeAsks implements AsksApi {
     return (await this.snapshots({ ferret: action.ref.ferret }))[0]!;
   }
 
+  async ownerDismiss(ref: AskRef, note?: string): Promise<void> {
+    const key = keyOf(ref);
+    const ask = this.#asks.get(key);
+    if (ask === undefined || ask.state !== 'open') return;
+    this.#notes.set(key, note);
+    this.#asks.set(key, { ...ask, state: 'closed' });
+  }
+
   async raise(ask: AskDraft): Promise<AskRef> {
     const draft = AskDraftSchema.parse(ask);
     for (const existing of this.#asks.values())

@@ -156,9 +156,9 @@ describe('fy agenda item verbs', () => {
     }
   });
 
-  it('refuses an item verb with no id by saying how it is written, exit 2, before any daemon call', async () => {
+  it('refuses an item verb with no id by saying how it is written, exit 1 as v4 did, before any daemon call', async () => {
     const { world: w, io, transport } = world();
-    should(await runFy(['agenda', 'done'], w)).equal(2);
+    should(await runFy(['agenda', 'done'], w)).equal(1);
     should(io.stderr()).containEql('usage: fy agenda done <id>');
     should(transport.sent).deepEqual([]);
   });
@@ -184,16 +184,15 @@ describe('an unknown sub-verb under a known verb', () => {
     should(transport.sent).deepEqual([]);
   });
 
-  it('holds for board import and board lanes, which fell through to the board the same way', async () => {
-    for (const words of [
-      ['board', 'import'],
-      ['board', 'lanes'],
-    ]) {
-      const { world: w, io } = world();
-      should(await runFy(words, w)).equal(2);
-      should(io.stderr()).containEql(`"${words[1]}" is not a sub-verb of board`);
-      should(io.stderr()).containEql('fy board status');
-    }
+  it('holds for board import, which fell through to the board the same way, and board lanes, which needs one of its own', async () => {
+    const imported = world();
+    should(await runFy(['board', 'import'], imported.world)).equal(2);
+    should(imported.io.stderr()).containEql('"import" is not a sub-verb of board');
+    should(imported.io.stderr()).containEql('fy board status');
+    const lanes = world();
+    should(await runFy(['board', 'lanes'], lanes.world)).equal(2);
+    should(lanes.io.stderr()).containEql('board lanes needs a sub-verb');
+    should(lanes.io.stderr()).containEql('fy board lanes propose');
   });
 
   it('still runs a parent bare, with only options, and the parents that take their own first word', async () => {

@@ -51,7 +51,7 @@ export function parseArgs(tokens: readonly string[]): VerbInvocation {
       index += 1;
     } else put(body, true);
   }
-  return { args, options };
+  return { args, options, raw: tokens };
 }
 
 /** The first string value of an option, if it has one. */

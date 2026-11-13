@@ -252,7 +252,10 @@ describe('fy ask', () => {
   it('lists a waiting ask on an archived, stopped ferret the live list leaves out, as the app shows it', async () => {
     const { world: w, io } = world({
       'GET /v1/ferrets': { status: 200, body: [] },
-      [`GET ${ARCHIVED}`]: { status: 200, body: { count: 1, sessions: [archivedView('archived', 'old one')] } },
+      [`GET ${ARCHIVED}`]: {
+        status: 200,
+        body: { count: 1, sessions: [archivedView('archived', 'Fix the badge colour', 'old one')] },
+      },
       'GET /v1/ferrets/archived/agenda': board(item('A1', { title: 'Still waiting' })),
     });
     should(await runFy(['ask'], w)).equal(0);
@@ -344,6 +347,17 @@ describe('fy ask', () => {
     });
     await runFy(['ask'], timeout.world);
     should(timeout.io.stderr()).containEql('board read timed out');
+  });
+
+  it('should name an archived ferret by its callsign, and by its id when it has none, never by its task title', () => {
+    const named = archivedOf({
+      count: 2,
+      sessions: [
+        { config: { id: 'old-1', teammate: 'ada', name: 'Fix the badge colour' } },
+        { config: { id: 'old-2', name: 'Fix the badge colour' } },
+      ],
+    });
+    should(named.ferrets.map(each => each.name)).deepEqual(['ada', 'old-2']);
   });
 
   it('should read a shape it does not know as an error, not a crash', () => {

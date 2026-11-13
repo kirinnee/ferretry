@@ -150,9 +150,15 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
   if (resolved.kind === 'subverb') {
     const parent = resolved.parent.words.join(' ');
     const subs = resolved.subverbs.map(each => `  ${identity.binary} ${each.words.join(' ')}`);
-    io.err(
-      `${identity.binary}: "${resolved.word}" is not a sub-verb of ${parent}; its sub-verbs are:\n${subs.join('\n')}\n`,
-    );
+    const said =
+      resolved.word === undefined
+        ? `${identity.binary}: ${parent} needs a sub-verb:`
+        : `${identity.binary}: "${resolved.word}" is not a sub-verb of ${parent}${
+            resolved.didYouMean === undefined
+              ? ''
+              : ` (did you mean "${resolved.didYouMean.words.join(' ')}"? to use "${resolved.word}" as words, put it after --)`
+          }; its sub-verbs are:`;
+    io.err(`${said}\n${subs.join('\n')}\n`);
     return EXIT.usage;
   }
 

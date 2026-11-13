@@ -458,6 +458,12 @@ export interface TerminalIo {
 export interface VerbInvocation {
   readonly args: readonly string[];
   readonly options: Readonly<Record<string, string | boolean | readonly string[]>>;
+  /**
+   * The words after the verb exactly as typed, in order (`--` kept), for a verb whose grammar the shell cannot know:
+   * `args` and `options` are the shell's fixed-rule reading of these (a switch followed by a word reads the word as
+   * its value), so a verb that knows which of its flags are switches reads this instead of undoing that reading.
+   */
+  readonly raw?: readonly string[];
 }
 
 /**
