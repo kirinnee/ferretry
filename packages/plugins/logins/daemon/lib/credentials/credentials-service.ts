@@ -831,7 +831,7 @@ export class FleetCredentialsService {
       ...(entry.credential.label === undefined ? {} : { label: entry.credential.label }),
       needsLabel: needsLabel(entry, email, emails, entries),
       ...disabledField(entry.credential.disabled, this.deps.listCache?.now() ?? 0),
-      ...budgetField(entry.credential.budget === undefined ? undefined : this.deps.budget?.view(entry.id)),
+      ...budgetField(this.deps.budget?.view(entry.id)),
       ...(entry.credential.clonedFrom === undefined ? {} : { clonedFrom: entry.credential.clonedFrom }),
       ...(entry.credential.clonedFromDaemon === undefined
         ? {}
