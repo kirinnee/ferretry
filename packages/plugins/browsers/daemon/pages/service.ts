@@ -74,6 +74,8 @@ export interface BrowserGuardPage {
   document(): Promise<string | undefined>;
   /** The host the page is on now, read from the live page inside its queue; `undefined` when it can't be read. */
   host?(): Promise<string | undefined>;
+  /** What a read of the page could show now (visible text, accessibility tree, markup), read inside its queue; `undefined` when it can't be read. */
+  text?(): Promise<string | undefined>;
 }
 
 /**
@@ -885,6 +887,7 @@ export class BrowserSessionService implements BrowserSubsystem {
           .inputDocument(pageId)
           .then(found => found.host)
           .catch(() => undefined),
+      text: async () => await run.driver.inputText?.(pageId).catch(() => undefined),
     };
   }
 

@@ -168,6 +168,11 @@ export interface VaultApi {
   maskCopy?: {
     hold(ferret: FerretId, value: string, marker: string, until: number): void;
     retime(ferret: FerretId, marker: string, until: number): void;
+    /**
+     * A copy was PASTED INTO A TERMINAL: `value` stays masked as `marker` in that ferret's reads for the life of its session
+     * (the scrollback the terminal keeps), not for the copy's own life. A later `retime` of `marker` does not shorten it.
+     */
+    holdScrollback(ferret: FerretId, value: string, marker: string): void;
   };
 }
 

@@ -17,6 +17,8 @@ import type { MaskValue, Scrub } from '../secrets/redaction.ts';
 
 const MIN_MASKED_LENGTH = 1;
 const MAX_FRAGMENT_FLOOR = 3;
+/** How many values pasted into terminals one session keeps masked for the life of its scrollback. */
+const MAX_SCROLLBACK_HOLDS = 256;
 
 /** The shortest piece of a value that counts as the value: three characters, fewer for a value too short to have three. */
 /** The longest a secure copy is masked for: its longest life, then the time it may still sit on a screen. */
@@ -28,6 +30,8 @@ interface Held {
   readonly value: string;
   readonly label: string;
   readonly until: number;
+  /** A value pasted into a terminal: it lasts as long as that terminal's scrollback (the session's life), and `retime` never shortens it. */
+  readonly scrollback?: true;
   /** The whole replacement text, when it is not `[redacted:input <label>]` (a secure copy's `[sealed:<name>]`). */
   readonly marker?: string;
 }
@@ -62,13 +66,36 @@ export class EphemeralValues {
     ]);
   }
 
+  /**
+   * Masks `value` in `sessionId`'s reads for as long as the session lives (and the after-mask window past it): a value
+   * PASTED INTO A TERMINAL stays in that terminal's scrollback, which no clock empties, so the mask must not end with the
+   * copy. `retime` (a discarded copy) does not shorten it. Bounded: past {@link MAX_SCROLLBACK_HOLDS} the oldest is let go.
+   */
+  holdScrollback(sessionId: string, value: string, marker: string): void {
+    if (value.length < MIN_MASKED_LENGTH) return;
+    this.purge();
+    const entries = (this.held.get(sessionId) ?? []).filter(
+      entry => !(entry.scrollback === true && entry.value === value && entry.marker === marker),
+    );
+    const kept = entries.filter(entry => entry.scrollback === true);
+    const dropped = kept.length >= MAX_SCROLLBACK_HOLDS ? kept[0] : undefined;
+    this.held.set(sessionId, [
+      ...entries.filter(entry => entry !== dropped),
+      { value, label: marker, marker, until: Number.POSITIVE_INFINITY, scrollback: true },
+    ]);
+  }
+
   /** Brings forward the end of every hold of `sessionId` masked as `marker` to `until`, never later than it was. */
   retime(sessionId: string, marker: string, until: number): void {
     const entries = this.held.get(sessionId);
     if (entries === undefined) return;
     this.held.set(
       sessionId,
-      entries.map(entry => (entry.marker === marker ? { ...entry, until: Math.min(entry.until, until) } : entry)),
+      entries.map(entry =>
+        entry.marker === marker && entry.scrollback !== true
+          ? { ...entry, until: Math.min(entry.until, until) }
+          : entry,
+      ),
     );
     this.purge();
   }

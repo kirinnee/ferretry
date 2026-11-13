@@ -32,7 +32,7 @@ describe('the Vault’s secure copies, through the hook', () => {
     should(copies.reserve('s1', { kind: 'command', program: 'gh' }, FACTS)).equal(undefined);
     should(await copies.refusal('s1', 'vercel', { kind: 'page', key: 'app' })).equal(undefined);
     should(() => {
-      copies.used('s1', 'vercel');
+      copies.used('s1', 'vercel', { kind: 'terminal', key: 'dev' });
       copies.release('rule-1');
       copies.spent('rule-1');
     }).not.throw();

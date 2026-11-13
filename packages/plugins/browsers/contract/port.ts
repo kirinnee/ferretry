@@ -63,6 +63,19 @@ export interface BrowserCopyQueue {
   seal(read: Extract<BrowserCopyAnswer, { readonly ok: true }>): void;
 }
 
+/** What Accounts tells Browsers about the copies that live, so their pages stay closed (never a value). */
+export interface BrowserSealedPages {
+  /**
+   * A copy named `copy` now lives for `ferret` and sits on pages of these origins (none for a command's). `until` answers
+   * when it ends, or nothing once it has: a discarded or expired copy lifts its pages at once.
+   */
+  hold(ferret: FerretId, copy: string, origins: readonly string[], until: () => number | undefined): void;
+  /** A paste of the copy went into the page `key`: that page's origin joins the copy's. Nothing for a page not found. */
+  pastedInto(ferret: FerretId, copy: string, key: string, until: () => number | undefined): Promise<void>;
+  /** Every copy of this ferret's is let go of (its session ended). */
+  drop(ferret: FerretId): void;
+}
+
 /** Whether a ferret may paste into one of its pages, and the key that names it, or why not. */
 export type BrowserPasteTarget =
   | { readonly ok: true; readonly key: string }
@@ -83,8 +96,22 @@ export interface BrowsersCopyApi {
     attribute: string | undefined,
     queue: BrowserCopyQueue,
   ): Promise<BrowserCopyAnswer>;
+  /**
+   * What the agent browser's CLIPBOARD holds, read in the worker's own context and nowhere else (docs/secure-copy.md,
+   * "Capturing"): the page `key` is cleared and queued as for `copyRead`, the clipboard is read and then EMPTIED, so the
+   * value is no longer in the browser for a page's paste to carry into something the agent reads. No agent page is ever
+   * granted clipboard-read. While it runs, `browser.eval` is refused on every page of the ferret. The answer is the same
+   * as a page copy's (`origin` is the page's), or a refusal: a real window on this computer's own clipboard is refused.
+   */
+  clipboardRead(ferret: FerretId, key: string, queue: BrowserCopyQueue): Promise<BrowserCopyAnswer>;
   /** The page a paste may go to, cleared as a browser tool would, and the key the daemon knows it by. */
   pasteTarget(ferret: FerretId, key: string): Promise<BrowserPasteTarget>;
+  /**
+   * Which pages hold a sealed value (docs/secure-copy.md, "Pages that hold a value"). While a copy lives, an agent's read,
+   * script, console, network, picture or text wait on a page of one of these origins is refused with a sentence that says why
+   * and until when, and a picture of ANY page whose text shows a live copy is withheld. A person's own calls pass.
+   */
+  readonly sealed: BrowserSealedPages;
   /** Whether a person holds this page right now (any page not found counts as held: nothing is pasted there). */
   takenOver(ferret: FerretId, key: string): Promise<boolean>;
 }

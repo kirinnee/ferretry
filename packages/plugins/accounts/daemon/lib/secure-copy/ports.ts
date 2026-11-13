@@ -35,6 +35,8 @@ export interface CopyExposurePort {
 export interface CopyMasking {
   holdUntil(sessionId: string, value: string, marker: string, until: number): void;
   retime(sessionId: string, marker: string, until: number): void;
+  /** A copy was pasted into a terminal: it stays masked for the life of that session's scrollback, not the copy's own. */
+  holdScrollback(sessionId: string, value: string, marker: string): void;
 }
 
 /** One page element, read for a copy in that page's own queue: the value and where it was read, or why not. */
@@ -75,6 +77,22 @@ export interface CopyPagePort {
     attribute: string | undefined,
     queue: CopyPageQueue,
   ): Promise<CopyPageRead>;
+  /**
+   * What the agent browser's clipboard holds, read in the daemon's own context (never an agent page's) and emptied, filed under
+   * the page `key` (the one whose Copy button the agent pressed). The same queue and seal as a page read.
+   */
+  clipboard?(sessionId: string, key: string, queue: CopyPageQueue): Promise<CopyPageRead>;
+}
+
+/**
+ * Which pages stay closed while a copy lives (Browsers keeps the record: `BrowsersApi.copy.sealed`). Never a value: the copy's
+ * name, the origins it is on, and a function that answers when it ends (nothing once it has).
+ */
+export interface CopyGuards {
+  hold(sessionId: string, copy: string, origins: readonly string[], until: () => number | undefined): void;
+  /** A paste of the copy went into the page `key`. */
+  pastedInto(sessionId: string, copy: string, key: string, until: () => number | undefined): Promise<void>;
+  drop(sessionId: string): void;
 }
 
 /** Where pictures of a page wait while it shows the document a value was copied from (`PageCopyRecords`). */
@@ -104,4 +122,6 @@ export interface CopyPorts {
   readonly pages?: CopyPagePort;
   /** Holds pictures of a page a value was copied from. */
   readonly pageHolds?: CopyPageHolds;
+  /** Keeps the pages a live copy sits on closed to an agent's reads and pictures (`BrowsersApi.copy.sealed`). */
+  readonly guards?: CopyGuards;
 }

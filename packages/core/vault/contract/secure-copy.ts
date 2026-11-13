@@ -21,8 +21,8 @@ export interface SecureCopyProvider {
   describe(sessionId: string, name: string): unknown;
   /** The live copy's value, for the one write; nothing once it was discarded or expired. */
   open(sessionId: string, name: string): string | undefined;
-  /** A paste of it was typed. */
-  used(sessionId: string, name: string): void;
+  /** A paste of it was typed, into `target`: a terminal's scrollback and a page's document now hold it. */
+  used(sessionId: string, name: string, target: InputTarget): void;
   /**
    * A sentence when this paste may not go to `target` now, or nothing: a person has taken the page over. Asked when the
    * paste is raised, and again right before the write, so a takeover that lands while the card waits ends the paste.

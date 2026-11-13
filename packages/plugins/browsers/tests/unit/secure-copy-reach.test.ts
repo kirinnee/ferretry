@@ -199,3 +199,169 @@ describe('the secure-copy reach into the agent browser', () => {
     should(await copy.takenOver('f1' as FerretId, 'app')).equal(false);
   });
 });
+
+/** What a tool said: its refusal's sentence (an MCP error), or the word for "it ran". */
+const said =
+  (word: string) =>
+  (result: { readonly isError?: boolean; readonly text: string }): string =>
+    result.isError === true ? result.text : word;
+
+describe('the secure-copy reach into the clipboard', () => {
+  let held: TestHost | undefined;
+  afterEach(async () => {
+    await held?.stop();
+    held = undefined;
+  });
+  const CLIP = {
+    ok: true as const,
+    value: SENTINEL,
+    origin: 'https://example.test',
+    frameOrigin: 'https://example.test',
+    navigationId: 'loader-1',
+  };
+
+  it('should read the clipboard in the page’s queue, seal before the queue moves on, and file it under the page', async () => {
+    const { host, tabs, copy } = await built();
+    held = host;
+    tabs.clipboardAnswer = CLIP;
+    await host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, as('f1'));
+    const order: string[] = [];
+
+    const answer = await copy.clipboardRead('f1' as FerretId, 'app', {
+      guard: async page => void order.push(`guard:${String(await page.document())}`),
+      seal: read => void order.push(`seal:${read.pageId}`),
+    });
+
+    should(answer).match({ ok: true, pageId: 'p1', origin: 'https://example.test', navigationId: 'loader-1' });
+    should(order).eql(['guard:loader-1', 'seal:p1']);
+    should(tabs.calls.filter(call => call.startsWith('copyClipboard'))).eql(['copyClipboard:p1']);
+  });
+
+  it('should refuse a capture from a page a person holds before anything is read, and when the takeover lands while it waits', async () => {
+    const { host, tabs, copy } = await built();
+    held = host;
+    tabs.clipboardAnswer = CLIP;
+    await host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, as('f1'));
+    await takeOver(host, 'app');
+
+    const direct = await copy.clipboardRead('f1' as FerretId, 'app', { seal: () => undefined });
+    await host.request('POST', '/v1/sessions/f1/surfaces/browser/control', {
+      body: { action: 'handback', key: 'app' },
+    });
+    const release = Promise.withResolvers<void>();
+    tabs.readGate = release.promise;
+    const reading = host.tool('browser_read', { name: 'app' }, as('f1'));
+    const queued = copy.clipboardRead('f1' as FerretId, 'app', { seal: () => undefined });
+    await takeOver(host, 'app');
+    release.resolve();
+    const waited = await queued;
+    await reading;
+
+    should(direct).match({ ok: false, reason: 'refused', code: 'taken_over' });
+    should(waited).match({ ok: false, reason: 'refused', code: 'taken_over' });
+    should(tabs.calls.filter(call => call.startsWith('copyClipboard'))).eql([]);
+    should(JSON.stringify([direct, waited])).not.containEql(SENTINEL);
+  });
+
+  it('should pass an empty clipboard and a moved page through, sealing nothing', async () => {
+    const { host, tabs, copy } = await built();
+    held = host;
+    await host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, as('f1'));
+    let sealed = 0;
+    const seal = (): void => {
+      sealed += 1;
+    };
+
+    tabs.clipboardAnswer = { ok: false, reason: 'empty' };
+    const empty = await copy.clipboardRead('f1' as FerretId, 'app', { seal });
+    tabs.clipboardAnswer = { ok: false, reason: 'changed' };
+    const moved = await copy.clipboardRead('f1' as FerretId, 'app', { seal });
+
+    should([empty, moved]).eql([
+      { ok: false, reason: 'empty' },
+      { ok: false, reason: 'changed' },
+    ]);
+    should(sealed).equal(0);
+  });
+
+  it('should refuse, saying why, when this browser’s clipboard is the computer’s own (a real window)', async () => {
+    const { host, tabs, copy } = await built();
+    held = host;
+    tabs.clipboardAnswer = { ok: false, reason: 'shared' };
+    await host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, as('f1'));
+
+    const answer = await copy.clipboardRead('f1' as FerretId, 'app', { seal: () => undefined });
+
+    should(answer).match({ ok: false, reason: 'refused', code: 'unavailable' });
+    should((answer as Extract<BrowserCopyAnswer, { reason: 'refused' }>).message).containEql("computer's own");
+  });
+
+  it('should refuse a page script of the ferret while a capture runs, and only then', async () => {
+    const { host, tabs, copy } = await built();
+    held = host;
+    tabs.clipboardAnswer = CLIP;
+    await host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, as('f1'));
+    let during: unknown;
+    await copy.clipboardRead('f1' as FerretId, 'app', {
+      guard: async () => {
+        during = await host
+          .tool('browser_eval', { name: 'app', function: '() => 1' }, as('f1'))
+          .then(said('ran'), (error: unknown) => (error as Error).message);
+      },
+      seal: () => undefined,
+    });
+    const after = await host
+      .tool('browser_eval', { name: 'app', function: '() => 1' }, as('f1'))
+      .then(said('ran'), (error: unknown) => (error as Error).message);
+
+    should(String(during)).containEql('refused while a clipboard capture of yours is running');
+    should(after).equal('ran');
+  });
+
+  it('should keep a copy’s pages closed to the ferret’s tools from the moment it is told, until the copy ends or the session drops', async () => {
+    const { host, copy } = await built();
+    held = host;
+    await host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, as('f1'));
+    let ends: number | undefined = Date.now() + 60_000;
+
+    copy.sealed.hold('f1' as FerretId, 'key', ['https://example.test'], () => ends);
+    const closed = await host
+      .tool('browser_read', { name: 'app' }, as('f1'))
+      .then(said('read'), (error: unknown) => (error as Error).message);
+    ends = undefined;
+    const open = await host
+      .tool('browser_read', { name: 'app' }, as('f1'))
+      .then(said('read'), (error: unknown) => (error as Error).message);
+    copy.sealed.hold('f1' as FerretId, 'key2', ['https://example.test'], () => Date.now() + 60_000);
+    copy.sealed.drop('f1' as FerretId);
+    const dropped = await host
+      .tool('browser_read', { name: 'app' }, as('f1'))
+      .then(said('read'), (error: unknown) => (error as Error).message);
+
+    should(closed).containEql('browser.read is refused on %browser:app');
+    should(open).equal('read');
+    should(dropped).equal('read');
+  });
+
+  it('should close the origin of the page a paste went into, where the page is now', async () => {
+    const { host, copy, tabs } = await built();
+    held = host;
+    await host.tool('browser_open', { name: 'form', url: 'https://form.example.test/' }, as('f1'));
+    await host.tool('browser_open', { name: 'other', url: 'https://other.example.test/' }, as('f1'));
+
+    await copy.sealed.pastedInto('f1' as FerretId, 'key', 'form', () => Date.now() + 60_000);
+    await copy.sealed.pastedInto('f1' as FerretId, 'key', 'nowhere', () => Date.now() + 60_000);
+    // Inside the queue each page says where it IS now.
+    tabs.documentHost = 'form.example.test';
+    const form = await host
+      .tool('browser_read', { name: 'form' }, as('f1'))
+      .then(said('read'), (error: unknown) => (error as Error).message);
+    tabs.documentHost = 'other.example.test';
+    const other = await host
+      .tool('browser_read', { name: 'other' }, as('f1'))
+      .then(said('read'), (error: unknown) => (error as Error).message);
+
+    should(form).containEql('browser.read is refused on %browser:form');
+    should(other).equal('read');
+  });
+});

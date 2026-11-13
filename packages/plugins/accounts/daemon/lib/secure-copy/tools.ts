@@ -55,7 +55,10 @@ function copiedSummary(copy: CopyMeta): string {
       : copy.exposure.pageReadBeforeCapture === true
         ? ' NOTE: you may have read this page before sealing it, so the value may already be in your context; tell the owner it may need rotating.'
         : '';
-  const page = copy.from.kind === 'browser' ? ' Its text reads come back masked while the copy lives.' : '';
+  const page =
+    copy.from.kind === 'command'
+      ? ''
+      : ` Pages on ${copy.from.origin ?? 'that site'} are closed to your read, eval, console, network and screenshot until the copy ends (${copy.expiresAt}, or when you discard it); you can still click, type and navigate.`;
   return `Sealed ${plural(copy.length, 'character')} from ${from} as ${copy.handle}, until ${copy.expiresAt}. You cannot read it; paste it by handle.${page}${seen}`;
 }
 

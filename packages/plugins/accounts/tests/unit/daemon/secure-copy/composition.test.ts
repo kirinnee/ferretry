@@ -41,7 +41,11 @@ class SimVault extends FakeVault {
       this.held.push({ ferret, value, marker, until });
     },
     retime: () => undefined,
+    holdScrollback: (ferret: FerretId, value: string, marker: string) => {
+      this.scrollback.push({ ferret, value, marker });
+    },
   };
+  readonly scrollback: { ferret: FerretId; value: string; marker: string }[] = [];
   override async raiseInput(ferret: FerretId, raise: InputRaise): Promise<Result<InputRequestId, string>> {
     this.raises.push({ ferret, raise });
     return this.raiseRefusal === undefined ? await super.raiseInput(ferret, raise) : err(this.raiseRefusal);
@@ -82,9 +86,35 @@ class Browsers {
         this.takenOver
           ? { ok: false, code: 'taken_over', message: `A person has taken over %browser:${key}.` }
           : { ok: true, key },
+      clipboardRead: async (_ferret, key, queue): Promise<BrowserCopyAnswer> => {
+        this.reads.push(`clipboard:${key}`);
+        if (this.takenOver)
+          return {
+            ok: false,
+            reason: 'refused',
+            code: 'taken_over',
+            message: `A person has taken over %browser:${key}.`,
+          };
+        const found = {
+          ok: true as const,
+          value: this.value,
+          pageId: 'page-1',
+          origin: 'https://example.test',
+          frameOrigin: 'https://example.test',
+          navigationId: 'loader-1',
+        };
+        queue.seal(found);
+        return found;
+      },
+      sealed: {
+        hold: (ferret, copy, origins, until) => void this.sealed.push({ ferret, copy, origins, until }),
+        pastedInto: async (ferret, copy, key, until) => void this.sealed.push({ ferret, copy, origins: [key], until }),
+        drop: () => undefined,
+      },
       takenOver: async () => this.takenOver,
     },
   };
+  readonly sealed: { ferret: string; copy: string; origins: readonly string[]; until: () => number | undefined }[] = [];
 }
 
 async function world(allows = true) {
@@ -309,5 +339,64 @@ describe('secure copy, as the composition root wires it', () => {
 
     should(bad.isError).equal(true);
     should(vault.commands).have.length(0);
+  });
+});
+
+const CLIPBOARD = { name: 'pasted', source: { kind: 'clipboard', key: 'app' } };
+
+describe('secure copy of a page’s clipboard, as the composition root wires it', () => {
+  it('should seal the clipboard through Browsers’ reach: a handle and a length, the page’s pages closed, the Vault masking it', async () => {
+    const { h, vault, browsers, everything } = await world();
+
+    const sealed = await h.tool('secure_copy', CLIPBOARD, { as: ferret('F1') });
+
+    should(sealed.isError).not.equal(true);
+    should(sealed.text).containEql('sealed:pasted').and.containEql(`${SENTINEL.length} characters`);
+    should(sealed.text).containEql(
+      'https://example.test are closed to your read, eval, console, network and screenshot',
+    );
+    should(JSON.stringify(sealed)).not.containEql(SENTINEL);
+    should(browsers.reads).eql(['clipboard:app']);
+    should(vault.held.every(hold => hold.ferret === 'F1' && hold.marker === '[sealed:pasted]')).equal(true);
+    // Browsers was told which origins the copy sits on, and answers when it ends.
+    should(browsers.sealed).have.length(1);
+    should(browsers.sealed[0]).match({
+      ferret: 'F1',
+      copy: 'pasted',
+      origins: ['https://example.test', 'https://example.test'],
+    });
+    should(browsers.sealed[0]?.until()).be.a.Number();
+    should(everything()).not.containEql(SENTINEL);
+  });
+
+  it('should lift the pages the moment the agent discards the copy', async () => {
+    const { h, browsers } = await world();
+    await h.tool('secure_copy', CLIPBOARD, { as: ferret('F1') });
+
+    await h.tool('secure_discard', { handle: 'sealed:pasted' }, { as: ferret('F1') });
+
+    should(browsers.sealed[0]?.until()).equal(undefined);
+  });
+
+  it('should refuse a clipboard capture while a person holds the page, saying so, and keep nothing', async () => {
+    const { h, browsers, vault, everything } = await world();
+    browsers.takenOver = true;
+
+    const refused = await h.tool('secure_copy', CLIPBOARD, { as: ferret('F1') });
+
+    should(refused.isError).equal(true);
+    should(refused.text).containEql('taken over');
+    should(vault.held).have.length(0);
+    should(browsers.sealed).have.length(0);
+    should(everything()).not.containEql(SENTINEL);
+  });
+
+  it('should register a COMMAND copy with Browsers too, with no page, so a picture of any page that shows it is checked', async () => {
+    const { h, browsers } = await world();
+
+    await h.tool('secure_copy', COMMAND, { as: ferret('F1') });
+
+    should(browsers.sealed).have.length(1);
+    should(browsers.sealed[0]).match({ ferret: 'F1', copy: 'token', origins: [] });
   });
 });

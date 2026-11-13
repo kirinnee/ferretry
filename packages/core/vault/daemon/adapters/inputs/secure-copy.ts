@@ -40,9 +40,9 @@ export class SecureCopiesThroughHook implements InputSealedPort, InputPasteRules
     }
   }
 
-  used(sessionId: string, name: CopyName): void {
+  used(sessionId: string, name: CopyName, target: InputTarget): void {
     try {
-      this.provider()?.used(sessionId, name);
+      this.provider()?.used(sessionId, name, target);
     } catch {
       // Told after the write: a count that could not be kept changes nothing that was typed.
     }

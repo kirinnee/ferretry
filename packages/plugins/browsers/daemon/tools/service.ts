@@ -1,9 +1,19 @@
 import type { KernelPorts, Op, Picture, TargetRef } from '@ferretry/kernel/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import { heldOrMasked, PageHeld } from '../holds/index.ts';
+import {
+  capturePendingRefusal,
+  hostOfOrigin,
+  SHOWING_TOOLS,
+  pictureWithheld,
+  SEALED_REFUSED_TOOLS,
+  type SealedPages,
+  sealedPageRefusal,
+} from '../sealed/page-guards.ts';
 import { acted, browserTarget, pageTarget, writeAct } from '../pages/acts.ts';
 import {
   type BrowserActGuard,
+  type BrowserGuardPage,
   type BrowserFileAction,
   type BrowserPageAction,
   BrowserSessionError,
@@ -154,6 +164,8 @@ export interface BrowserToolPorts {
   readonly scriptedOrigins?: ScriptedOrigins;
   /** Told of every page act a ferret makes, before it runs (the Vault's sign-in lock, I99 and I100). */
   readonly pageActs?: PageActs;
+  /** Which pages hold a sealed value, and whether a clipboard capture is running (docs/secure-copy.md). */
+  readonly sealed?: SealedPages;
 }
 
 /** The tools that change what a person would see, and so put up the driving marker. */
@@ -325,6 +337,12 @@ export class BrowserTools {
       // must not read the shared profile's sign-ins through a script while the owner has them off.
       if (call.tool === 'browser.eval' && !(await this.ports.policy.allows(caller.sessionId, 'scripts')))
         throw new BrowserToolError('forbidden', pageScriptsRefusal(this.ports.binaryName));
+      if (
+        caller.kind === 'agent' &&
+        call.tool === 'browser.eval' &&
+        this.ports.sealed?.isCapturing(caller.sessionId) === true
+      )
+        throw new BrowserToolError('forbidden', capturePendingRefusal('browser.eval'));
       // Told BEFORE anything runs, for a ferret's call that may change a page: a sign-in's after-submit facts the
       // ferret could have steered are not kept. Until the call ends it counts on every page (I100).
       if (caller.kind === 'agent' && actsOnPage(call))
@@ -454,6 +472,15 @@ export class BrowserTools {
     return { surface, guard: async () => await this.assertFree(sessionId, surface) };
   }
 
+  /** Where this ferret's page `key` is now, with none of the checks a tool makes; nothing when it is not found. */
+  async addressOf(sessionId: string, key: string): Promise<string | undefined> {
+    try {
+      return (await this.resolve(sessionId, key)).url;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Whether a person holds this ferret's page `key` now. A page that is not found is held: nothing is pasted there. */
   async isTakenOver(sessionId: string, key: string): Promise<boolean> {
     try {
@@ -559,7 +586,10 @@ export class BrowserTools {
       default: {
         const surface = await this.resolve(sessionId, call.name);
         seen.surface = surface;
-        if (caller.kind === 'agent') await this.assertAgentMay(sessionId, surface);
+        if (caller.kind === 'agent') {
+          await this.assertAgentMay(sessionId, surface);
+          await this.assertSealedOpen(caller, call.tool, surface, undefined, call);
+        }
         const result = await this.onSurface(caller, call, surface);
         await this.drove(caller, call, surface);
         return result;
@@ -639,7 +669,7 @@ export class BrowserTools {
     surface: ResolvedSurface,
     reference: string,
   ): Promise<BrowserToolAnswer> {
-    const guard = this.browserGuard(caller, surface);
+    const guard = this.browserGuard(caller, surface, call);
     const target = pageTarget(surface.id);
     const send: LifecycleSend = async request =>
       await this.ports.browser.lifecycleOnPage(caller.sessionId, surface.id, request, guard);
@@ -770,7 +800,7 @@ export class BrowserTools {
           caller.sessionId,
           surface.id,
           pageActionOf(call),
-          this.browserGuard(caller, surface),
+          this.browserGuard(caller, surface, call),
         );
       } catch (error) {
         // An act that failed partway may still have moved the page or typed into it (the browser runtime clears too).
@@ -866,7 +896,7 @@ export class BrowserTools {
     reference: string,
   ): Promise<BrowserToolAnswer> {
     const element = call.ref !== undefined || call.selector !== undefined ? elementTargetOf(call) : undefined;
-    const guard = this.browserGuard(caller, surface);
+    const guard = this.browserGuard(caller, surface, call);
     const scripts = this.ports.scriptedOrigins;
     let ran = false;
     let finished: (() => void) | undefined;
@@ -926,7 +956,7 @@ export class BrowserTools {
     reference: string,
   ): Promise<BrowserToolAnswer> {
     const { sessionId } = caller;
-    const guard = this.browserGuard(caller, surface);
+    const guard = this.browserGuard(caller, surface, call);
     const target = pageTarget(surface.id);
     if (call.tool === 'browser.upload') {
       const prepared = await this.ports.files.prepareUpload(sessionId, call.files);
@@ -1051,9 +1081,63 @@ export class BrowserTools {
    * The check the browser runs INSIDE the page's own queue, right before an agent's act: a takeover that landed
    * while the act was waiting its turn still refuses it. Holds and pending input are the act runner's (§4.7).
    */
-  private browserGuard(caller: ToolCaller, surface: ResolvedSurface): BrowserActGuard | undefined {
+  private browserGuard(
+    caller: ToolCaller,
+    surface: ResolvedSurface,
+    call?: BrowserToolCall,
+  ): BrowserActGuard | undefined {
     if (caller.kind !== 'agent') return undefined;
-    return async () => await this.assertFree(caller.sessionId, surface);
+    return async page => {
+      await this.assertFree(caller.sessionId, surface);
+      if (call !== undefined) await this.assertSealedOpen(caller, call.tool, surface, page, call);
+    };
+  }
+
+  /**
+   * A page that holds a sealed value is closed to an agent's read, script, log, picture and text wait for as long as the copy lives
+   * (sealed/page-guards.ts), and a PICTURE of any page whose text shows a live copy is withheld. Asked before the call (by the
+   * address the page had) and again inside the page's queue (by the host it is on now).
+   */
+  private async assertSealedOpen(
+    caller: ToolCaller,
+    tool: BrowserToolCall['tool'],
+    surface: ResolvedSurface,
+    page: BrowserGuardPage | undefined,
+    call?: BrowserToolCall,
+  ): Promise<void> {
+    const sealed = this.ports.sealed;
+    if (sealed === undefined || caller.kind !== 'agent' || !SEALED_REFUSED_TOOLS.has(tool)) return;
+    // A wait for a duration reads nothing.
+    if (call?.tool === 'browser.wait_for' && waitConditionOf(call).kind === 'time') return;
+    const reference = surfaceReference(surface.name ?? surface.id);
+    // Inside the queue the page says where it IS; a page that cannot say is covered by every copy that sits on a page (fail closed).
+    const host = page?.host === undefined ? hostOfOrigin(surface.url ?? '') : await page.host().catch(() => undefined);
+    const covers = sealed.covering(caller.sessionId, host);
+    if (covers.length > 0)
+      throw new BrowserToolError(
+        'forbidden',
+        sealedPageRefusal(tool, reference, covers, epoch => new Date(epoch).toISOString()),
+      );
+    if (page === undefined || !SHOWING_TOOLS.has(tool) || !sealed.anyLive(caller.sessionId)) return;
+    const names = await this.sealedOnScreen(page);
+    if (names === undefined)
+      throw new BrowserToolError(
+        'forbidden',
+        `${tool} is withheld on ${reference}: a value you sealed lives, and Ferretry could not read this page's text to check that the picture would not show it. Read the page as text instead.`,
+      );
+    if (names.length > 0) throw new BrowserToolError('forbidden', pictureWithheld(tool, reference, names));
+  }
+
+  /** The names of the sealed copies a page's text shows (masked by the registry as `[sealed:name]`), or nothing when it could not be read. */
+  private async sealedOnScreen(page: BrowserGuardPage): Promise<readonly string[] | undefined> {
+    const text = await page.text?.().catch(() => undefined);
+    if (text === undefined) return undefined;
+    try {
+      const masked = await this.ports.kernel.redaction.read(scope => scope.text(text));
+      return [...new Set([...masked.matchAll(/\[sealed:([^\]\s]+)\]/gu)].map(found => found[1] as string))];
+    } catch {
+      return undefined;
+    }
   }
 
   /** The pages, each one an agent may not use left out (today's `listPages` + `listed`). */

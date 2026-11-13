@@ -2,6 +2,7 @@ import type { FerretId } from '@ferretry/kernel/contract';
 import type { BrowsersApi } from '@ferretry/plugin-browsers/contract';
 import type { CopyElementPart } from '../../../contract/routes/index.ts';
 import {
+  type CopyGuards,
   type CopyPagePort,
   type CopyPageQueue,
   type CopyPageRead,
@@ -32,5 +33,33 @@ export class BrowsersCopyPages implements CopyPagePort {
     const answer = await copy.copyRead(sessionId as FerretId, key, target, part, attribute, queue);
     if (answer.ok || answer.reason !== 'refused') return answer;
     throw new SecureCopyError(answer.code === 'unavailable' ? 'unavailable' : answer.code, answer.message);
+  }
+
+  async clipboard(sessionId: string, key: string, queue: CopyPageQueue): Promise<CopyPageRead> {
+    const copy = this.browsers()?.copy;
+    if (copy === undefined)
+      throw new SecureCopyError('unavailable', 'Copying from a page is not available on this daemon.');
+    const answer = await copy.clipboardRead(sessionId as FerretId, key, queue);
+    if (answer.ok || answer.reason !== 'refused') return answer;
+    throw new SecureCopyError(answer.code === 'unavailable' ? 'unavailable' : answer.code, answer.message);
+  }
+}
+
+/** Which pages stay closed while a copy lives: Browsers keeps the record (`BrowsersApi.copy.sealed`), told here. */
+export class BrowsersCopyGuards implements CopyGuards {
+  constructor(private readonly browsers: () => BrowsersApi | undefined) {}
+
+  hold(sessionId: string, copy: string, origins: readonly string[], until: () => number | undefined): void {
+    const sealed = this.browsers()?.copy?.sealed;
+    // Browsers off or without the reach: there is no page an agent could read, so there is nothing to keep closed.
+    sealed?.hold(sessionId as FerretId, copy, origins, until);
+  }
+
+  async pastedInto(sessionId: string, copy: string, key: string, until: () => number | undefined): Promise<void> {
+    await this.browsers()?.copy?.sealed.pastedInto(sessionId as FerretId, copy, key, until);
+  }
+
+  drop(sessionId: string): void {
+    this.browsers()?.copy?.sealed.drop(sessionId as FerretId);
   }
 }

@@ -2092,7 +2092,7 @@ export class InputRequestService {
           (held.request.lock?.seconds ?? INPUT_QUARANTINE_SECONDS) * 1000,
           holdNames(request, held.names),
         );
-      if (pasted !== undefined) this.deps.sealed?.used(request.sessionId, pasted);
+      if (pasted !== undefined) this.deps.sealed?.used(request.sessionId, pasted, request.target);
       await stored(false);
       const saved =
         body.save === undefined || kept === undefined ? undefined : await this.save(held, body.save, kept, by);

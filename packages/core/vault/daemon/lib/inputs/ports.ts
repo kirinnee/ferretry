@@ -357,8 +357,8 @@ export interface InputSealedPort {
   describe(sessionId: string, name: CopyName): CopyMeta | undefined;
   /** The live copy's value for the one write; nothing once it was discarded or expired. */
   open(sessionId: string, name: CopyName): string | undefined;
-  /** A paste of it was typed. */
-  used(sessionId: string, name: CopyName): void;
+  /** A paste of it was typed into `target`: a terminal's scrollback and a page's document now hold it. */
+  used(sessionId: string, name: CopyName, target: InputTarget): void;
   /**
    * A sentence when this paste may not go to `target` now (a person has taken the page over), or nothing. Asked when the
    * paste is raised and again right before the write. Absent: no check, as for a daemon that knows no takeover.

@@ -197,7 +197,8 @@ describe('allowing a paste', () => {
 
     should(result).match({ state: 'delivered', submitted: true });
     should(w.writes.map(write => write.values)).eql([[COPY_VALUE]]);
-    should(w.used).eql([{ copy: 'vercel' }]);
+    // The Vault says WHERE it was typed, so Accounts can keep that terminal's scrollback masked and that page's origin closed.
+    should(w.used).eql([{ copy: 'vercel', target: { kind: 'terminal', key: 'dev' } }]);
     should(after).match({ state: 'delivered', source: 'sealed' });
     should(w.told.at(-1)).containEql('sealed:vercel was pasted into %terminal:dev');
     should(w.events.at(-1)).match({ state: 'delivered', sealed: 'vercel' });

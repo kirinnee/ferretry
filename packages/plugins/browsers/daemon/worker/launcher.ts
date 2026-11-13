@@ -225,6 +225,8 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
         this.modes.shutdownTimeoutMs,
         relay,
         proxy === undefined ? undefined : browserProxyStatus(proxy.setting),
+        // A window on a desktop other than Linux's private display draws on this computer's own clipboard.
+        mode === 'window' && platform !== 'linux',
       );
     } catch (error) {
       // A failed launch owns the same ordering obligation as a close: the browser it started is still
@@ -280,6 +282,7 @@ class LeasedBrowser implements BrowserAutomation {
     private readonly shutdownTimeoutMs: number = CHROME_SHUTDOWN_TIMEOUT_MS,
     private readonly relay?: ProxySignInRelay,
     readonly proxy?: BrowserProxyStatus,
+    private readonly clipboardShared = false,
   ) {
     // Either child settling means the SESSION is over: the worker without Chrome drives nothing, and
     // Chrome without its worker is a window still holding the profile that nothing drives — and is never
@@ -309,6 +312,9 @@ class LeasedBrowser implements BrowserAutomation {
   reload: BrowserAutomation['reload'] = pageId => this.worker.reload(pageId);
   copyRead: BrowserAutomation['copyRead'] = (pageId, target, part, attribute) =>
     this.worker.copyRead(pageId, target, part, attribute);
+  /** A real window on a desktop shares this computer's own clipboard: nothing is read from it. */
+  copyClipboard: BrowserAutomation['copyClipboard'] = async pageId =>
+    this.clipboardShared ? { ok: false, reason: 'shared' } : await this.worker.copyClipboard(pageId);
   inputDocument: BrowserAutomation['inputDocument'] = pageId => this.worker.inputDocument(pageId);
   pushNumberRead: NonNullable<BrowserAutomation['pushNumberRead']> = pageId => this.worker.pushNumberRead(pageId);
   inputText = (pageId: string): Promise<string> => this.worker.inputText(pageId);

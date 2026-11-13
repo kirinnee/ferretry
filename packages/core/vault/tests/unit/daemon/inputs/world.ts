@@ -165,7 +165,7 @@ export function world(options: WorldOptions = {}) {
   const saves: unknown[] = [];
   const fills: { id: string; role: LoginFieldRole; factor?: string }[] = [];
   const timers: { ms: number; fire: () => void }[] = [];
-  const used: { copy: string }[] = [];
+  const used: { copy: string; target?: unknown }[] = [];
   const ruleLog: { reserved: unknown[][]; released: string[]; spent: string[] } = {
     reserved: [],
     released: [],
@@ -300,7 +300,7 @@ export function world(options: WorldOptions = {}) {
           sealed: {
             describe: (_session: string, name: string) => copies.get(name)?.meta,
             open: (_session: string, name: string) => copies.get(name)?.value,
-            used: (_session: string, name: string) => void used.push({ copy: name }),
+            used: (_session: string, name: string, target?: unknown) => void used.push({ copy: name, target }),
             refusal: async () => state.pasteRefusal,
           },
         }

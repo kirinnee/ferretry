@@ -9,7 +9,12 @@ import type {
 import type { BrowserPageLifecycleReply, BrowserPageLifecycleRequest } from '../../contract/wire/page-lifecycle.ts';
 import type { CopyElementPart } from '../pages/copy-contracts.ts';
 import { COPY_VALUE_MAX_BYTES } from '../pages/copy-contracts.ts';
-import { BROWSER_COPY_WORKER_METHODS, type BrowserCopyRead } from '../pages/copy-contracts.ts';
+import {
+  BROWSER_CLIPBOARD_WORKER_METHOD,
+  BROWSER_COPY_WORKER_METHODS,
+  type BrowserClipboardRead,
+  type BrowserCopyRead,
+} from '../pages/copy-contracts.ts';
 import {
   type BrowserInputClearJob,
   type BrowserInputClearOutcome,
@@ -483,6 +488,13 @@ export class BrowserWorkerClient implements BrowserAutomation {
       ...(attribute === undefined ? {} : { attribute }),
     });
     return parseCopyRead((raw as { read?: unknown } | null)?.read);
+  }
+
+  /** What the agent browser's clipboard holds, read by the worker in a context of its own and emptied. */
+  async copyClipboard(pageId: string): Promise<BrowserClipboardRead> {
+    const raw = await this.request(BROWSER_CLIPBOARD_WORKER_METHOD, { pageId });
+    const read = parseCopyRead((raw as { read?: unknown } | null)?.read);
+    return read;
   }
 
   inputObserve(pageId: string, fields: readonly BrowserInputFieldPointer[]): Promise<BrowserInputObservation> {

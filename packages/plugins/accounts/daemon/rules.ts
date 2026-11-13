@@ -43,6 +43,7 @@ import {
   secureCopyTools,
 } from './lib/secure-copy/index.ts';
 import {
+  BrowsersCopyGuards,
   BrowsersCopyPages,
   TranscriptFileExposure,
   VaultCopyMasking,
@@ -110,6 +111,7 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     redact,
     pages: new BrowsersCopyPages(browsersNow),
     pageHolds: pageRecords,
+    guards: new BrowsersCopyGuards(browsersNow),
   });
   const secureCopyHook = new SecureCopyHook(copies, pasteRules, browsersNow);
   const tools = secureCopyTools({

@@ -1,14 +1,7 @@
 import type { ConfigFileDef, FerretId } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import { type DaemonContext, type DaemonHalf, implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
-import {
-  type BrowserCopyAnswer,
-  type BrowserCopyRefusalCode,
-  type BrowsersApi,
-  type BrowsersConfig,
-  type BrowsersCopyApi,
-  PageChanged,
-} from '../contract/index.ts';
+import { type BrowsersApi, type BrowsersConfig, PageChanged } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { type BrowserSessionLauncher, BrowserSessionService } from './pages/service.ts';
 import { type BrowserStreamOpener, pageRoutes, streamSocket } from './pages/routes.ts';
@@ -27,7 +20,9 @@ import { rootFiles } from './tools/files.ts';
 import { controlRoutes, toolHandlers } from './tools/index.ts';
 import { pageToolHost } from './tools/page-host.ts';
 import { agentControlPolicy } from './tools/agent-control.ts';
-import { BrowserTools, BrowserToolError } from './tools/service.ts';
+import { BrowserTools } from './tools/service.ts';
+import { SealedPages } from './sealed/page-guards.ts';
+import { secureCopyReach } from './sealed/reach.ts';
 import type { RecordedSurfaceEvent } from './tools/types.ts';
 import { processHost } from './adapters/host.ts';
 import { KernelDetachedLauncher } from './open-url/launcher.ts';
@@ -232,6 +227,8 @@ export function buildBrowsers(
   // "What agents may control" is read from core's AgentControlPort on every call; unbound, or an answer that is not a
   // plain yes, refuses (fail closed). ONE policy for the browser tools and the page target.
   const policy = agentControlPolicy(() => ctx.uses.agentControl.current());
+  // Which pages hold a sealed value, and whether a clipboard capture is running: told by Accounts (secure copy's reach), asked by the tools.
+  const sealed = new SealedPages();
   const tools = new BrowserTools({
     browser: pages,
     control,
@@ -247,6 +244,7 @@ export function buildBrowsers(
       scriptedOn: scriptHost => vault.scriptedOn?.(scriptHost),
     },
     pageActs: { acted: (sessionId, script) => vault.pageActed?.(sessionId as FerretId, script) },
+    sealed,
   });
   // The `page` input target and the four tools that type into a page or hand it over, on the same checks as the rest.
   const target = pageTarget({
@@ -277,50 +275,7 @@ export function buildBrowsers(
   });
 
   // ── secure copy's reach (docs/secure-copy.md), for Accounts alone ─────────────────────────────────────────────
-  /** A refusal a browser tool would have given, as the copy's closed set of codes and the tool's own sentence. */
-  const refusal = (error: unknown): { readonly code: BrowserCopyRefusalCode; readonly message: string } => {
-    if (error instanceof BrowserToolError) {
-      const code: BrowserCopyRefusalCode =
-        error.code === 'taken_over' || error.code === 'forbidden' || error.code === 'not_found'
-          ? error.code
-          : 'unavailable';
-      return { code, message: error.message };
-    }
-    return { code: 'unavailable', message: 'The page could not be read right now.' };
-  };
-  const secureCopy: BrowsersCopyApi = {
-    copyRead: async (ferret, key, target, part, attribute, queue): Promise<BrowserCopyAnswer> => {
-      try {
-        const { surface, guard } = await tools.copyPageFor(ferret, key);
-        return await pages.copyOnPage<BrowserCopyAnswer>(ferret, surface.name ?? surface.id, {
-          // The takeover check, then the owner's: both run inside the page's queue, before the read.
-          guard: async page => {
-            await guard(page);
-            await queue.guard?.(page);
-          },
-          work: async (copy, pageId) => {
-            const read = await copy.copyRead(pageId, target, part, attribute);
-            if (!read.ok) return read;
-            const found = { ...read, pageId };
-            queue.seal(found);
-            return found;
-          },
-        });
-      } catch (error) {
-        // A refusal is the one thing that comes back as data: it carries a sentence, never the page's words.
-        return { ok: false, reason: 'refused', ...refusal(error) };
-      }
-    },
-    pasteTarget: async (ferret, key) => {
-      try {
-        const { surface } = await tools.copyPageFor(ferret, key);
-        return { ok: true, key: surface.name ?? surface.id };
-      } catch (error) {
-        return { ok: false, ...refusal(error) };
-      }
-    },
-    takenOver: async (ferret, key) => await tools.isTakenOver(ferret, key),
-  };
+  const secureCopy = secureCopyReach({ tools, pages, sealed });
 
   return {
     routes: {

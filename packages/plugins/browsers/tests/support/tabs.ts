@@ -1,4 +1,5 @@
 import type { BrowserAutomation } from '../../daemon/pages/automation.ts';
+import type { BrowserClipboardRead } from '../../daemon/pages/copy-contracts.ts';
 import type {
   BrowserInputEvent,
   BrowserPageActionSnapshot,
@@ -39,6 +40,8 @@ export class Tabs {
         readonly editable?: true;
       }
     | { readonly ok: false; readonly reason: 'missing' | 'empty' | 'changed' } = { ok: false, reason: 'empty' };
+  /** What the browser's clipboard held when the worker read it (nothing by default). */
+  clipboardAnswer: BrowserClipboardRead = { ok: false, reason: 'empty' };
   /** Held until a test lets go: a page read that takes as long as the test says, so the page's queue stays busy. */
   readGate: Promise<void> | undefined;
   /** The host the live page reports, when a case sets one. */
@@ -118,6 +121,10 @@ export class Tabs {
     copyRead: async pageId => {
       this.calls.push(`copyRead:${pageId}`);
       return this.copyAnswer;
+    },
+    copyClipboard: async pageId => {
+      this.calls.push(`copyClipboard:${pageId}`);
+      return this.clipboardAnswer;
     },
     inputDocument: async pageId => {
       this.calls.push(`inputDocument:${pageId}`);

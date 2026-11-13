@@ -23,13 +23,20 @@ const runner: SecretChildRunner = {
 
 async function world(browsers: () => BrowsersApi | undefined = () => undefined) {
   const clock = new Clock();
+  const masking = new EphemeralValues(clock);
+  const pasted: { copy: string; key: string; until: () => number | undefined }[] = [];
   const copies = new SecureCopyService({
     clock,
     runner,
     folders: { folderOf: async () => '/work' },
     exposure: { transcriptHolds: async () => 'clean' },
-    masking: new EphemeralValues(clock),
+    masking,
     redact: async text => text,
+    guards: {
+      hold: () => undefined,
+      pastedInto: async (_session, copy, key, until) => void pasted.push({ copy, key, until }),
+      drop: () => undefined,
+    },
   });
   await copies.capture('s1', { name: 'token', source: { kind: 'command', argv: ['gh', 'auth', 'token'] } });
   const reserved: unknown[][] = [];
@@ -41,7 +48,7 @@ async function world(browsers: () => BrowsersApi | undefined = () => undefined) 
     release: (id: string) => void reserved.push(['release', id]),
     spent: (id: string) => void reserved.push(['spent', id]),
   } as unknown as PasteRuleService;
-  return { copies, hook: new SecureCopyHook(copies, rules, browsers), reserved };
+  return { copies, hook: new SecureCopyHook(copies, rules, browsers), reserved, masking, pasted, clock };
 }
 
 const takenOver =
@@ -59,7 +66,7 @@ describe('what Accounts gives the Vault’s paste (input.secure-copy:copy)', () 
 
     const told = hook.describe('s1', 'token');
     const value = hook.open('s1', 'token');
-    hook.used('s1', 'token');
+    hook.used('s1', 'token', { kind: 'terminal', key: 'dev' });
 
     should(told).match({ handle: 'sealed:token', length: SENTINEL.length, state: 'live', uses: 0 });
     should(JSON.stringify(told)).not.containEql(SENTINEL);
@@ -114,5 +121,39 @@ describe('what Accounts gives the Vault’s paste (input.secure-copy:copy)', () 
       ['release', 'rule-1'],
       ['spent', 'rule-1'],
     ]);
+  });
+});
+
+describe('a paste, as the Vault tells the copy where it went', () => {
+  it('should mask a paste into a TERMINAL for the life of its scrollback, long after the copy’s own mask ended', async () => {
+    const { hook, masking, clock } = await world();
+
+    hook.used('s1', 'token', { kind: 'terminal', key: 'dev' });
+    clock.ms += 7 * 24 * 3_600_000;
+
+    should(masking.scrub('s1', `$ echo ${SENTINEL}`)).equal('$ echo [sealed:token]');
+  });
+
+  it('should close the origin of a PAGE a paste went into, until the copy ends', async () => {
+    const { hook, pasted, copies } = await world();
+
+    hook.used('s1', 'token', { kind: 'page', key: 'form' });
+    await Promise.resolve();
+
+    should(pasted).have.length(1);
+    should(pasted[0]).match({ copy: 'token', key: 'form' });
+    should(pasted[0]?.until()).be.a.Number();
+    copies.discard('s1', 'token');
+    should(pasted[0]?.until()).equal(undefined);
+  });
+
+  it('should hold nothing for a paste into the secret store, or for a name that is not a copy', async () => {
+    const { hook, masking, pasted } = await world();
+
+    hook.used('s1', 'token', { kind: 'secret', key: 'VERCEL_TOKEN' });
+    hook.used('s1', 'not a copy!', { kind: 'terminal', key: 'dev' });
+
+    should(pasted).eql([]);
+    should(masking.scrub('s1', SENTINEL)).equal('[sealed:token]');
   });
 });

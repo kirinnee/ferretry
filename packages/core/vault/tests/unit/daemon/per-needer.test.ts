@@ -661,6 +661,7 @@ describe('secure copy’s reach through the Vault is by name', () => {
     expect(typeof of('accounts').captureCommand).toBe('function');
     expect(typeof of('accounts').maskCopy?.hold).toBe('function');
     expect(typeof of('accounts').maskCopy?.retime).toBe('function');
+    expect(typeof of('accounts').maskCopy?.holdScrollback).toBe('function');
     expect(typeof core.captureCommand).toBe('function');
   });
 
@@ -672,7 +673,9 @@ describe('secure copy’s reach through the Vault is by name', () => {
     registry.hold('ferret_1' as never, 'FAKE-SC-7f3a91', '[sealed:token]', Date.now() + 60_000);
     registry.retime('ferret_1' as never, '[sealed:token]', Date.now() + 1_000);
     registry.retime('ferret_9' as never, '[sealed:nothing]', Date.now());
+    registry.holdScrollback('ferret_1' as never, 'FAKE-SC-7f3a91', '[sealed:token]');
 
-    expect(Object.keys(registry).sort()).toEqual(['hold', 'retime']);
+    // Three members, and not one of them answers a value.
+    expect(Object.keys(registry).sort()).toEqual(['hold', 'holdScrollback', 'retime']);
   });
 });
