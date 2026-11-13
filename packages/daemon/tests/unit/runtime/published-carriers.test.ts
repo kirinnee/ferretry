@@ -30,6 +30,22 @@ describe('the published carrier set', () => {
     should(during).not.equal(before);
   });
 
+  it('should publish a relay recovered after boot, keeping a registered tunnel', () => {
+    // Arrange — booted direct-only, with the tunnel already up.
+    const published = new PublishedCarrierSet('https://workstation.example', [
+      { kind: 'direct-only', reason: 'no relay could be discovered' },
+    ]);
+    published.tunnel('https://quiet-otter.tunnels.example');
+
+    // Act
+    published.relaysChanged([RELAY]);
+
+    // Assert
+    should(published.current().map(carrier => carrier.kind)).deepEqual(['direct', 'tunnel', 'relay']);
+    published.tunnel(undefined);
+    should(published.current().map(carrier => carrier.kind)).deepEqual(['direct', 'relay']);
+  });
+
   it('should refuse a tunnel address no device could dial, where the change is made', () => {
     // Arrange
     const published = new PublishedCarrierSet(undefined, []);

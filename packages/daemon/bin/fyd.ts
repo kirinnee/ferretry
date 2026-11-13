@@ -717,6 +717,8 @@ import {
   CredentialUsageSource,
   canServeModel,
   chooseRelayCarrierSources,
+  isTransientAdvertisement,
+  newlyDiscoveredRelays,
   choosesPortAtBind,
   claimStartName,
   classifyPaneProcesses,
@@ -962,10 +964,13 @@ import {
   RecipeAgendaAdapter,
   RecommendError,
   type RecommendSubsystem,
+  type RelayAdvertisement,
   type RelayApiDispatch,
   type RelayCarrierSource,
   type RelayDeviceDirectory,
   type RelayDirectoryPort,
+  type RelayLinkScheduler,
+  RelayLookupRetry,
   type RelayPairingRedeemer,
   type RelayStreamDispatch,
   RememberedHandoverReceipts,
@@ -1675,12 +1680,12 @@ export interface DaemonWorld {
     /**
      * The rendezvous a fresh device can discover for itself — see {@link discoverableRelayUrl}.
      *
-     * REQUIRED RATHER THAN OPTIONAL, because the interesting value is `undefined` and an omitted
+     * A FUNCTION, because the background lookup retry can discover the rendezvous after boot. REQUIRED RATHER THAN OPTIONAL, because the interesting value is `undefined` and an omitted
      * argument and a deliberate "there is none" would be the same call. A boot that forgot to derive
      * it would silently stop drawing the default install's QR, which is the regression this whole
      * field exists to prevent.
      */
-    discoveredRelayUrl: string | undefined,
+    discoveredRelayUrl: () => string | undefined,
   ) => Promise<{
     readonly subsystem: PairingService;
     readonly credentials: PairingDeviceRegistry;
@@ -1803,6 +1808,14 @@ export interface DaemonWorld {
    * builds them.
    */
   readonly relayDirectory: RelayDirectoryPort;
+  /**
+   * THE CLOCK AND DICE OF THE BACKGROUND RELAY LOOKUP RETRY, a world field so a test fires its timers
+   * itself and no suite waits for a real backoff. Read only when the boot-time read failed transiently.
+   */
+  readonly relayLookupTiming: {
+    readonly scheduler: RelayLinkScheduler;
+    readonly random: () => number;
+  };
   /**
    * WHETHER THE HOSTED SERVICE PROVISIONS TUNNELS — one read per boot, from the relay directory's own
    * origin (`docs/relay-protocol.md` §15). A world field for the reason `relayDirectory` is one:
@@ -6606,11 +6619,13 @@ function directCarrierPublication(
 async function resolveRelayCarrierSources(
   config: DaemonConfig,
   directory: RelayDirectoryPort,
-): Promise<ReturnType<typeof chooseRelayCarrierSources>> {
+): Promise<ReturnType<typeof chooseRelayCarrierSources> & { readonly advertisement: RelayAdvertisement }> {
   const advertisement = relayCarriersNeedDiscovery(config.carrierSet.relays)
     ? await directory.read()
     : RELAY_DIRECTORY_NOT_ASKED;
-  return chooseRelayCarrierSources(config.carrierSet.relays, advertisement);
+  // The advertisement travels with the choice so the boot can tell a TRANSIENT failure (asked again in
+  // the background) from a definitive answer (final).
+  return { ...chooseRelayCarrierSources(config.carrierSet.relays, advertisement), advertisement };
 }
 
 /**
@@ -6886,7 +6901,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   let shareAdvertisement: Advertisement | undefined;
   // The rendezvous another person's browser can find for itself, the value pairing's QR is drawn from: beside a
   // loopback advertisement it is what makes a share link openable at all.
-  let shareDiscoveredRelayUrl: string | undefined;
+  let shareDiscoveredRelayUrl: () => string | undefined = () => undefined;
   // The name pairing gave this machine, stamped on analytics rows as the `machine` label.
   let analyticsMachineName: string | undefined;
   const clock = new SystemClock();
@@ -8687,7 +8702,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // Provenance, not the first entry of `carriers`. The service cannot tell a discovered
           // rendezvous from an operator's own one, and only the first is something the phone reading
           // the QR can find for itself.
-          ...(discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl }),
+          discoveredRelayUrl,
           clock: pairingClock,
           cryptography,
           devices: repository,
@@ -8785,6 +8800,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       },
     ),
     relayDirectory: new HostedRelayDirectory(environment.relayDirectoryOrigin()),
+    relayLookupTiming: {
+      scheduler: {
+        after: (milliseconds, action) => {
+          const handle = setTimeout(action, milliseconds);
+          return { cancel: () => clearTimeout(handle) };
+        },
+      },
+      random: Math.random,
+    },
     tunnelService: new HostedTunnelService(environment.relayDirectoryOrigin()),
     cloudflared: new CloudflaredLocator(process.env),
     tunnelEntry: {
@@ -12693,7 +12717,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         links: {
           target: () =>
-            shareLinkTarget(shareAdvertisement, attachmentDaemonId, HOSTED_APP_ORIGIN, shareDiscoveredRelayUrl),
+            shareLinkTarget(shareAdvertisement, attachmentDaemonId, HOSTED_APP_ORIGIN, shareDiscoveredRelayUrl()),
         },
         // A revoke writes first, drops the grants, then ends this member's live sessions (and forgets a removed
         // browser's passkeys, so a key id that is reused can never inherit them).
@@ -13237,7 +13261,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.notices.state(`relay carrier configuration refused — ${resolvedRelays.reason}`);
     return 1;
   }
-  const relaySources = resolvedRelays.sources;
+  // `let`: the one place it changes is the background lookup retry below, which replaces it once when a
+  // transient failure of the boot-time read finally gets an answer.
+  let relaySources = resolvedRelays.sources;
   // ONE VALUE, in wire order: the externally declared direct origin first, then every enabled relay
   // in document order. The advertisement decision owns whether this boot has a publishable direct
   // origin; pairing and refresh receive this exact frozen array reference below.
@@ -13284,7 +13310,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   progress.enter('opening the usage feed');
   const usage = await world.createUsageFeed(config);
   progress.enter('opening the pairing identity');
-  const pairing = await world.createPairing(config, world.clock, carriers, discoverableRelayUrl(relaySources));
+  const pairing = await world.createPairing(config, world.clock, carriers, () => discoverableRelayUrl(relaySources));
   world.notices.step('pairing identity opened');
   if (pairing.securityNotice !== undefined) world.notices.state(pairing.securityNotice);
   if (pairing.unlockNotice !== undefined) world.notices.state(pairing.unlockNotice);
@@ -13631,19 +13657,21 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * this daemon could not dial, and the sentence is what stops "no relay configured" from looking
    * exactly like "the relay is broken" — the two are indistinguishable from outside without it.
    */
-  const relay = await world.createRelayCarriers(
-    relaySources,
-    request => dispatcher.dispatch(request),
-    {
-      upgrade: async request => await socketDispatcher.upgrade(request),
-      reauthorize: request => socketDispatcher.reauthorize(request),
-    },
-    sessionDevices,
-    // The pairing state machine itself, NOT the route table. A pre-credential session redeems
-    // through this port and constructs no request at all, which is what keeps `POST /v1/pair` —
-    // public on the route table — unreachable over a relay.
-    pairing.subsystem,
-  );
+  const createRelays = async (sources: readonly RelayCarrierSource[]) =>
+    await world.createRelayCarriers(
+      sources,
+      request => dispatcher.dispatch(request),
+      {
+        upgrade: async request => await socketDispatcher.upgrade(request),
+        reauthorize: request => socketDispatcher.reauthorize(request),
+      },
+      sessionDevices,
+      // The pairing state machine itself, NOT the route table. A pre-credential session redeems
+      // through this port and constructs no request at all, which is what keeps `POST /v1/pair` —
+      // public on the route table — unreachable over a relay.
+      pairing.subsystem,
+    );
+  const relay = await createRelays(relaySources);
   if ('carriers' in relay) {
     const started = new Map<string, ReturnType<BunRelayCarrier['status']>>();
     for (const { carrier, source } of relay.carriers) {
@@ -13692,6 +13720,79 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     }
   } else {
     world.notices.state(`no relay carriers — ${relay.refusal}`);
+  }
+  /**
+   * A TRANSIENT FAILURE OF THE BOOT-TIME READ IS ASKED AGAIN, IN THE BACKGROUND, and never holds the boot.
+   *
+   * Without this a daemon that came up before its network did stayed direct-only until somebody
+   * restarted it — the same outcome as the relay being withdrawn, and indistinguishable from it. Only a
+   * failure the adapter marked transient starts the loop; every definitive answer (no origin compiled in,
+   * a disabled advertisement, a document it cannot read, an explicit `relay` block) was settled above and
+   * stays settled. The loop is one timer long, ends at the first answer, and ends with the daemon.
+   *
+   * WHAT IT DOES ON AN ANSWER is exactly what the boot does with one: choose the carrier by the same
+   * rule, build it through the same factory, start it, and publish it — so a relay found late is
+   * indistinguishable from one found at boot except that the notice says it was recovered, and after how
+   * many reads.
+   */
+  if (isTransientAdvertisement(resolvedRelays.advertisement)) {
+    const bootFailure =
+      resolvedRelays.advertisement.kind === 'undetermined' ? resolvedRelays.advertisement.reason : 'unknown';
+    let recoveryStopped = false;
+    const retry = new RelayLookupRetry({
+      directory: world.relayDirectory,
+      scheduler: world.relayLookupTiming.scheduler,
+      random: world.relayLookupTiming.random,
+      onSettled: async ({ advertisement, attempts }) => {
+        const asked = `the relay directory answered on read ${String(attempts)}`;
+        const next = chooseRelayCarrierSources(config.carrierSet.relays, advertisement);
+        if (next.kind === 'refused') {
+          world.notices.state(`relay carrier configuration refused — ${asked}, and ${next.reason}`);
+          return;
+        }
+        const fresh = newlyDiscoveredRelays(relaySources, next.sources);
+        if (fresh.length === 0) {
+          // A definitive answer: said once, and the posture it leaves is the one the boot already described.
+          const why =
+            advertisement.kind === 'undetermined'
+              ? advertisement.reason
+              : 'Ferretry’s relay is switched off right now, so there is no carrier to fall back to';
+          world.notices.state(`${asked} — ${why}; this daemon stays direct-only`);
+          return;
+        }
+        const made = await createRelays(fresh);
+        if (!('carriers' in made)) {
+          world.notices.state(`no relay carriers — ${made.refusal}`);
+          return;
+        }
+        const dialled: string[] = [];
+        for (const { carrier, source } of made.carriers) {
+          // A stop that arrived while this was being built must not leave a carrier nothing ever stops.
+          if (recoveryStopped) {
+            carrier.stop();
+            continue;
+          }
+          cleanups.push(() => carrier.stop());
+          carrier.start();
+          const url = dialledRelayUrl(source);
+          if (url !== undefined) dialled.push(url);
+        }
+        if (recoveryStopped) return;
+        relaySources = next.sources;
+        carriers.relaysChanged(next.sources);
+        world.notices.state(
+          `relay carrier recovered — ${asked}, after the boot-time read failed (${bootFailure}); now dialling ${dialled.join(', ')}`,
+        );
+      },
+    });
+    cleanups.push(() => {
+      recoveryStopped = true;
+      retry.stop();
+    });
+    world.notices.state(
+      `the relay directory will be asked again in the background — a relay it advertises is dialled without a restart`,
+    );
+    retry.start();
   }
   /**
    * THE HOSTED TUNNEL (`docs/relay-protocol.md` §15), after the bind and the relays, for the reason

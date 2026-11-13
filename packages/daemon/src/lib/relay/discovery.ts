@@ -17,8 +17,9 @@
  * DISCOVERY ORIGIN: a service address that identifies the relay directory and never a daemon, a
  * person, or a carrier. The carrier itself is whatever that directory says today, which is the whole
  * point — `relayUrl: null` withdraws it without a release, and a cached answer is that switch not
- * working. Nothing here caches; the read happens once per boot, which is the shortest life a value
- * a daemon holds can have.
+ * working. Nothing here caches: an answer lives for one boot and no longer, and the only second
+ * read is the background retry of a TRANSIENT failure (`lookup-retry.ts`), which ends the moment the
+ * directory has given any answer at all.
  *
  * AN EXPLICIT BLOCK WINS AND IS NEVER OVERWRITTEN. Somebody who wrote a `relay` block chose it, and
  * `enabled: false` is a decision rather than an omission — so a configured block short-circuits this
@@ -60,7 +61,16 @@ export type RelayAdvertisement =
   /** The operator has withdrawn it. `null` is disabled, not an empty address and not a guess. */
   | { readonly kind: 'disabled' }
   /** This daemon could not find out. Treated as no carrier, and said as ignorance. */
-  | { readonly kind: 'undetermined'; readonly reason: string };
+  | {
+      readonly kind: 'undetermined';
+      readonly reason: string;
+      /**
+       * The failure is one that changes by itself — no connection, a timeout, a 5xx or a 429 — so asking
+       * again later can get an answer. Absent means the answer is final: nothing the directory says
+       * differently on the next try is worth waiting for.
+       */
+      readonly transient?: true;
+    };
 
 /**
  * The answer when a build carries no directory to ask.

@@ -362,7 +362,7 @@ interface PairingServiceOptions {
    * this value exists so the HOST's own screens know a loopback-bound daemon is redeemable anyway and
    * can draw the QR plus the metadata disclosure.
    */
-  readonly discoveredRelayUrl?: string;
+  readonly discoveredRelayUrl?: string | (() => string | undefined);
   readonly clock: PairingClock;
   readonly cryptography: PairingCryptography;
   readonly devices: PairingDeviceStore;
@@ -518,6 +518,9 @@ export class PairingService {
     | { readonly refusal: AdvertisementRefusal } {
     if (this.advertisement.kind === 'none') return { refusal: this.advertisement.refusal };
     const daemonUrl = this.advertisement.url;
+    // A function, because the background lookup retry can discover the rendezvous after boot.
+    const discoveredOption = this.options.discoveredRelayUrl;
+    const discoveredRelayUrl = typeof discoveredOption === 'function' ? discoveredOption() : discoveredOption;
     return {
       daemonUrl,
       // Composed by the protocol's own writer rather than spelled here. The mint schema verifies this
@@ -536,7 +539,7 @@ export class PairingService {
       // Passed through from the composition root, never derived from `options.carriers`: only a
       // DISCOVERED rendezvous is something a fresh device can find, and this list cannot say which
       // entry that is. See the option's own comment for why the difference is not cosmetic.
-      ...(this.options.discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl: this.options.discoveredRelayUrl }),
+      ...(discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl }),
     };
   }
 

@@ -1503,7 +1503,16 @@ outstanding:
    `source: 'discovery'` entry the carrier list holds, through the same schema an operator's own entry
    uses, so a discovered rendezvous and a configured one cannot acquire different redial cadences; an
    entry that already carries a `url` never reads it, and one boot performs one read no matter how
-   many entries there are. In the browser the same read supplies the last-resort hosted carrier and
+   many entries there are. **A transient failure of that read is retried.** A failure that changes by
+   itself — a connection that fails, a timeout, a 5xx or a 429 — is asked again in the background, never
+   holding the boot, on a jittered backoff from 5 s doubling to a 5 minute cap, one request in flight at a
+   time, ending at the first answer and with the daemon. When a retry answers with a relay the daemon
+   dials it exactly as a boot-time answer would have (and publishes it in `carriers`), and the boot
+   notice that said direct-only is followed by one saying it was recovered and after how many reads. A
+   **definitive** answer is never retried: an explicit `relay`/`carriers` entry (which wins and is never
+   overwritten, `enabled: false` included), an advertisement of `relayUrl: null`, a 4xx, a document that
+   cannot be read, and a build with no discovery origin all stay as they are, with the same fail-closed
+   sentences and remedies. What a build compiles in is unchanged. In the browser the same read supplies the last-resort hosted carrier and
    the only relayed first-pairing candidate, as well as labelling a published address as Ferretry's
    hosted rendezvous or somebody's own.
 3. **A relay-capable transport on both ends** — **built.** `packages/daemon/src/lib/relay` dials out,

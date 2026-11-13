@@ -1,5 +1,5 @@
 /**
- * ONE HTTP READ, ONCE PER BOOT: what carrier does Ferretry advertise today?
+ * ONE HTTP READ: what carrier does Ferretry advertise today?
  *
  * THE ORIGIN IS A BUILD CONSTANT AND THE CARRIER IS NOT. What a release may carry is the address of
  * the DIRECTORY — a service, never a daemon and never a person. The relay it names is a runtime
@@ -7,11 +7,19 @@
  * the answer is asked rather than assumed and why `cache: 'no-store'` is not optional: a cached
  * advertisement is the kill switch not working.
  *
- * IT NEVER THROWS AND IT NEVER RETRIES. Every failure — no origin, an origin that is not an address
- * this daemon may ask, a refusal, a timeout, a document in the wrong shape — becomes one
+ * IT NEVER THROWS, AND IT NEVER RETRIES BY ITSELF. Every failure — no origin, an origin that is not an
+ * address this daemon may ask, a refusal, a timeout, a document in the wrong shape — becomes one
  * `undetermined` sentence, and the boot carries on direct-only and says so. A daemon that failed to
  * start because a discovery service was down would be a worse product than one that cannot be
  * reached remotely.
+ *
+ * A FAILURE THAT CHANGES BY ITSELF IS MARKED `transient`, and only that kind is asked again. The boot
+ * reads once; if that read failed because the network was not up yet, the connection was refused or
+ * timed out, or the service answered 5xx or 429, `lookup-retry.ts` repeats the read in the background
+ * on a capped, jittered backoff until the directory answers. A DEFINITIVE answer — no origin compiled
+ * in, an address this daemon may not ask, a 4xx, a body that is not a readable advertisement, a
+ * disabled advertisement — is not marked, and is never retried: asking again is how a withdrawn relay
+ * would come back.
  */
 
 import {
@@ -62,9 +70,16 @@ export class HostedRelayDirectory implements RelayDirectoryPort {
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch {
-      return { kind: 'undetermined', reason: 'this daemon could not reach the relay directory' };
+      return { kind: 'undetermined', reason: 'this daemon could not reach the relay directory', transient: true };
     }
-    if (!response.ok) return { kind: 'undetermined', reason: `the relay directory answered ${response.status}` };
+    if (!response.ok) {
+      return {
+        kind: 'undetermined',
+        reason: `the relay directory answered ${response.status}`,
+        // A 5xx or a 429 is the service saying "not now"; any other refusal is an answer.
+        ...(response.status >= 500 || response.status === 429 ? { transient: true as const } : {}),
+      };
+    }
     try {
       return parseRelayAdvertisement(await response.json());
     } catch {
