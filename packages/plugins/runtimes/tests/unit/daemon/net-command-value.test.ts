@@ -146,21 +146,27 @@ describe('(I) a command is withheld in every view when the cutter cuts a value i
     should(WITHHELD).equal('withheld');
   });
 
-  it('should stay linear to 256 KiB on a long command of blanks and words and of pointers', () => {
-    // Arrange
-    const shapes: Readonly<Record<string, (size: number) => string>> = {
-      'a long command of words': size => `srv ${'ab '.repeat(size / 3)}`,
-      'a long command of pointers': size => `env ${'K=$K '.repeat(size / 5)}srv`,
-      'a long command of header pairs': size => `curl ${`-H "X: ${V}" `.repeat(size / 24)}`,
-    };
+  // One test per shape. The timeout is the shape's local time (words 1.5 s, pointers 3.6 s, header pairs 1.8 s) with at
+  // least four times the headroom; it is a margin for a loaded runner, not a speed claim.
+  const shapes: readonly (readonly [string, (size: number) => string, number])[] = [
+    ['a long command of words', size => `srv ${'ab '.repeat(size / 3)}`, 15_000],
+    ['a long command of pointers', size => `env ${'K=$K '.repeat(size / 5)}srv`, 20_000],
+    ['a long command of header pairs', size => `curl ${`-H "X: ${V}" `.repeat(size / 24)}`, 15_000],
+  ];
+  for (const [name, make, timeoutMs] of shapes) {
+    it(
+      `should stay linear to 256 KiB on a long command of blanks and words and of pointers: ${name}`,
+      () => {
+        // Act: the ratio of 256 to 128 KiB stays under 3 (a quadratic rule would give about 4).
+        const ratio = ratioOf(
+          () => commandWithheld(make(256 * 1024)),
+          () => commandWithheld(make(128 * 1024)),
+        );
 
-    // Act + Assert: the ratio of 256 to 128 KiB stays under 3 (a quadratic rule would give about 4).
-    for (const [name, make] of Object.entries(shapes)) {
-      const ratio = ratioOf(
-        () => commandWithheld(make(256 * 1024)),
-        () => commandWithheld(make(128 * 1024)),
-      );
-      should(ratio).be.below(3, name);
-    }
-  }, 60_000);
+        // Assert
+        should(ratio).be.below(3, name);
+      },
+      timeoutMs,
+    );
+  }
 });

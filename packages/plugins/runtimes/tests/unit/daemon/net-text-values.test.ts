@@ -335,41 +335,64 @@ describe('the nets withhold nothing the write rule accepts', () => {
     should(overWithheld).deepEqual([]);
   }, 60_000);
 
-  it('should stay linear to 256 KiB on every shape of text and of document', () => {
-    // Arrange
-    const shapes: Readonly<Record<string, (size: number) => string>> = {
-      'one very long instructions line': size => `key: ${'a1B2'.repeat(size / 4)}`,
-      'many short instructions lines': size => 'ab\n'.repeat(size / 3),
-      'many instructions lines each holding a flag secret': size => `run --token ${V}\n`.repeat(Math.ceil(size / 23)),
-      'one very long hooks command': size =>
-        JSON.stringify(hook(`tool ${'a1B2 '.repeat(size / 5)} --token ${V}`), undefined, 2),
-      'a hooks args list of 50,000 words': size =>
+  // One test per shape. The timeout is the shape's local time (0.6, 6.0, 2.8, 1.0, 1.9 and 2.2 s, in the order below)
+  // with at least four times the headroom; it is a margin for a loaded runner, not a speed claim.
+  const shapes: readonly (readonly [string, (size: number) => string, number])[] = [
+    ['one very long instructions line', size => `key: ${'a1B2'.repeat(size / 4)}`, 10_000],
+    ['many short instructions lines', size => 'ab\n'.repeat(size / 3), 30_000],
+    [
+      'many instructions lines each holding a flag secret',
+      size => `run --token ${V}\n`.repeat(Math.ceil(size / 23)),
+      15_000,
+    ],
+    [
+      'one very long hooks command',
+      size => JSON.stringify(hook(`tool ${'a1B2 '.repeat(size / 5)} --token ${V}`), undefined, 2),
+      10_000,
+    ],
+    [
+      'a hooks args list of 50,000 words',
+      size =>
         JSON.stringify(
           hook('tool', ['--token', V, ...Array.from({ length: size / 8 }, () => 'ab'), '--x']),
           undefined,
           2,
         ),
-      'many hooks each holding a flag secret': size =>
+      15_000,
+    ],
+    [
+      'many hooks each holding a flag secret',
+      size =>
         JSON.stringify(
           Array.from({ length: Math.ceil(size / 40) }, () => ({ command: `t --token ${V}` })),
           undefined,
           2,
         ),
-    };
-    const shown = (name: string, text: string): void => {
-      if (name.includes('hooks')) hooksShown(text);
-      else instructionsShown(text, true);
-    };
+      15_000,
+    ],
+  ];
+  for (const [name, make, timeoutMs] of shapes) {
+    it(
+      `should stay linear to 256 KiB on every shape of text and of document: ${name}`,
+      () => {
+        // Arrange
+        const shown = (text: string): void => {
+          if (name.includes('hooks')) hooksShown(text);
+          else instructionsShown(text, true);
+        };
+        const small128 = make(128 * 1024);
+        const large256 = make(256 * 1024);
 
-    // Act + Assert: the ratio of 256 to 128 KiB stays under 3 (a quadratic net would give about 4).
-    for (const [name, make] of Object.entries(shapes)) {
-      const small128 = make(128 * 1024);
-      const large256 = make(256 * 1024);
-      const ratio = ratioOf(
-        () => shown(name, large256),
-        () => shown(name, small128),
-      );
-      should(ratio).be.below(3, name);
-    }
-  }, 120_000);
+        // Act: the ratio of 256 to 128 KiB stays under 3 (a quadratic net would give about 4).
+        const ratio = ratioOf(
+          () => shown(large256),
+          () => shown(small128),
+        );
+
+        // Assert
+        should(ratio).be.below(3, name);
+      },
+      timeoutMs,
+    );
+  }
 });
