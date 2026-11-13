@@ -23,7 +23,7 @@ export const UNKNOWN_HELD_SENTENCE = `held: its harness is unknown (its runtime 
 export const BOTH_HELD_SENTENCE = `held: its login drives both CLIs and its profile includes a model set without a harness, which v4 scopes by model ids the preview does not read, so its harness is unknown and it is held like a Codex runtime. ${CODEX_HELD_SENTENCE.replace(/^held: /u, 'Why Codex is held: ')}`;
 
 /** Why a runtime is held when the login it names is not in the preview (a held Codex login, or one the preview cannot read). */
-export const NO_LOGIN_HELD_SENTENCE = `held: the login it names is not carried into the preview (it is a Codex login, its file could not be read, or it has no way to sign in), and a runtime without its login would make the whole fleet configuration unreadable. ${CODEX_HELD_SENTENCE.replace(/^held: /u, 'Why Codex is held: ')}`;
+export const NO_LOGIN_HELD_SENTENCE = `held: the login it names is not carried into the preview (it is a Codex login, its file could not be read, it has no way to sign in, or its budget cannot be carried), and a runtime without its login would make the whole fleet configuration unreadable. ${CODEX_HELD_SENTENCE.replace(/^held: /u, 'Why Codex is held: ')}`;
 
 /** Why a login file is held when it does not name a harness the preview can prove is Claude Code. */
 export const LOGIN_UNNAMED_HELD_SENTENCE =
@@ -33,6 +33,10 @@ export const LOGIN_UNNAMED_HELD_SENTENCE =
 export const LOGIN_NO_SIGN_IN_HELD_SENTENCE =
   'held: the login has no way to sign in once the preview carries no credential (it holds no environment variable of its own, only a host cloud credential reference, which is never carried), so a shell of it would be invalid; the runtimes that name it are held too. Add the login fresh';
 
+/** Why a login file is held when its budget does not parse: a shell without the cap v4 enforced would spend past it. */
+export const LOGIN_BUDGET_HELD_SENTENCE =
+  'held: the login has a budget the preview cannot rebuild from numbers (it does not parse as a daily / weekly limit), and a shell written without the cap v4 enforced would spend past it; the runtimes that name it are held too. Fix the budget in v4, or add the login fresh';
+
 /** Every sentence that says a runtime (or what uses one) is held; the dry run and the report list a held item by these. */
 export const HELD_SENTENCES: readonly string[] = [
   CODEX_HELD_SENTENCE,
@@ -41,6 +45,7 @@ export const HELD_SENTENCES: readonly string[] = [
   NO_LOGIN_HELD_SENTENCE,
   LOGIN_UNNAMED_HELD_SENTENCE,
   LOGIN_NO_SIGN_IN_HELD_SENTENCE,
+  LOGIN_BUDGET_HELD_SENTENCE,
 ];
 
 /** What the stage knows of one v4 login: its harness, and whether it drives both CLIs (halves for both). */

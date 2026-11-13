@@ -98,12 +98,23 @@ describe('buildShell: the fields a shell has', () => {
   const build = (text: string, holdCodex = false) =>
     buildShell(parseDocument(text), 'work', holdCodex, new LoginKeyHold());
 
-  test('harness, store, label, preset and env stay; everything else is named and dropped', () => {
+  test('harness, store, label, preset, budget and env stay; everything else is named and dropped', () => {
     const shell = build(FULL);
     expect(shell.kind).toBe('carried');
     if (shell.kind !== 'carried') return;
     const kept = shell.document.toJS() as Record<string, unknown>;
-    expect(Object.keys(kept).sort()).toEqual(['claude', 'codex', 'env', 'harness', 'label', 'preset', 'store']);
+    expect(Object.keys(kept).sort()).toEqual([
+      'budget',
+      'claude',
+      'codex',
+      'env',
+      'harness',
+      'label',
+      'preset',
+      'store',
+    ]);
+    // The budget is REBUILT from numbers: the same cap v4 enforced, as a fresh object.
+    expect(kept.budget).toEqual({ daily: { hard: 5 } });
     expect(kept.claude).toEqual({ env: { C: '${secret:C_KEY}' } });
     // A, a literal that is not a whole reference or a provider URL, is replaced; the provider URL stays.
     expect(kept.env).toEqual({
@@ -112,15 +123,7 @@ describe('buildShell: the fields a shell has', () => {
       ANTHROPIC_BASE_URL: 'https://api.example.com/anthropic',
     });
     expect([...shell.removed].sort()).toEqual(
-      [
-        'budget',
-        'claude.codexProvider',
-        'clonedFrom',
-        'clonedFromKey',
-        'cloudCredential',
-        'codexProvider',
-        'disabled',
-      ].sort(),
+      ['claude.codexProvider', 'clonedFrom', 'clonedFromKey', 'cloudCredential', 'codexProvider', 'disabled'].sort(),
     );
     expect(shell.replaced).toEqual(['B']);
     // A NEW document: not one comment of the v4 file is in it.
@@ -183,7 +186,8 @@ describe('a prepared preview', () => {
     const you = await readFile(join(f.to, 'config/logins/claude-you.yaml'), 'utf8');
     expect(you).toContain('store: ferretry');
     expect(you).not.toContain('host');
-    expect(you).not.toContain('budget');
+    // The cap v4 enforced travels with the shell (rebuilt from its numbers).
+    expect(parseDocument(you).toJS()).toMatchObject({ budget: { daily: { hard: 20 } } });
     expect(you).toContain('label: Me');
 
     const glm = await readFile(join(f.to, 'config/logins/glm-a.yaml'), 'utf8');

@@ -16,7 +16,12 @@
  *   carried: it is written as a `${secret:NAME}` reference (the real converter's `LOGIN_<ID>_<VAR>` naming) and the value
  *   is discarded, never sealed, never staged. The owner stores the secret with `fy secret set NAME`.
  *
- * Everything else (budget, disabled, clonedFrom*, cloudCredential, codexProvider, a half's codexProvider, unknown keys) is
+ * - `budget`, REBUILT: it is parsed through v5's own budget schema and a fresh object is built from the numbers of its
+ *   known keys (`daily` / `weekly`, each `trigger` / `hard`), so no comment, unknown key, alias or string survives and the
+ *   shell enforces the SAME spend cap v4 did. A budget that does not parse is not carried, and the login is HELD by name
+ *   (never written budgetless when v4 had a cap); its runtimes are held too.
+ *
+ * Everything else (disabled, clonedFrom*, cloudCredential, codexProvider, a half's codexProvider, unknown keys) is
  * left behind, named by field. `fleet/credentials` (the sign-in itself) stays denied by the plan. This is the PREVIEW
  * only; the real converter keeps `store: host` and the whole file.
  *
@@ -119,8 +124,36 @@ export type LoginShell =
       /** The variables whose literal value was replaced by a reference (names only). */
       readonly replaced: readonly string[];
     }
-  /** Not carried: a Codex login while Codex is held, one whose harness is not named, or one with no way to sign in. */
-  | { readonly kind: 'held'; readonly harness: 'codex' | 'unknown' | 'no-sign-in' };
+  /** Not carried: a Codex login while Codex is held, one whose harness is not named, one with no way to sign in, or one whose budget cannot be rebuilt. */
+  | { readonly kind: 'held'; readonly harness: 'codex' | 'unknown' | 'no-sign-in' | 'budget' };
+
+/** v5's own budget schema (the login file's `budget` field), so the shell's cap is judged by the rule v5 enforces. */
+const BudgetFieldSchema = LoginFileSchema.shape.budget.unwrap();
+
+/** A period's numbers as a fresh object (known keys, finite numbers only), or `undefined` when it has none. */
+const periodOf = (period: { readonly trigger?: number | undefined; readonly hard?: number | undefined } | undefined) =>
+  period === undefined
+    ? undefined
+    : {
+        ...(period.trigger === undefined ? {} : { trigger: Number(period.trigger) }),
+        ...(period.hard === undefined ? {} : { hard: Number(period.hard) }),
+      };
+
+/**
+ * A login's `budget` rebuilt into a FRESH object from the numbers of its known keys, after v5's own schema accepted it,
+ * or `'invalid'` when it does not parse (the login is then held). `undefined` (no `budget` key) is no budget.
+ */
+export function rebuildBudget(
+  value: unknown,
+  present: boolean,
+): Record<string, Record<string, number>> | 'invalid' | undefined {
+  if (!present) return undefined;
+  const parsed = BudgetFieldSchema.safeParse(value);
+  if (!parsed.success) return 'invalid';
+  const daily = periodOf(parsed.data.daily);
+  const weekly = periodOf(parsed.data.weekly);
+  return { ...(daily === undefined ? {} : { daily }), ...(weekly === undefined ? {} : { weekly }) };
+}
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -155,6 +188,8 @@ export function buildShell(document: Document, login: string, holdCodex: boolean
   if (isCodex && holdCodex) return { kind: 'held', harness: 'codex' };
 
   const kept = new Set<string>(['harness', 'store']);
+  const budget = rebuildBudget(data.budget, Object.hasOwn(data, 'budget'));
+  if (budget === 'invalid') return { kind: 'held', harness: 'budget' };
   const removed: string[] = [];
   const replaced: string[] = [];
   // v5 spells v4's `claude` as `claude-code` (the Settings step would rewrite it later; the shell is checked in v5's spelling).
@@ -167,6 +202,10 @@ export function buildShell(document: Document, login: string, holdCodex: boolean
   if (store !== undefined) shell.store = store;
   const environment = store === 'environment';
 
+  if (budget !== undefined) {
+    shell.budget = budget;
+    kept.add('budget');
+  }
   const label = plainText(data.label, 200);
   if (label !== undefined) {
     shell.label = label;

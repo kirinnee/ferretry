@@ -55,9 +55,9 @@ import { buildShell } from './preview-logins.ts';
 import {
   CODEX_HELD_SENTENCE,
   heldReason,
+  LOGIN_BUDGET_HELD_SENTENCE,
   LOGIN_NO_SIGN_IN_HELD_SENTENCE,
   LOGIN_UNNAMED_HELD_SENTENCE,
-  holdsCodex,
   type ProfileScopes,
   previewProfileScopes,
   type RuntimeHarness,
@@ -376,7 +376,10 @@ const MAX_LOGIN_BYTES = 256 * 1024;
 async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolve: Resolve): Promise<void> {
   const { address, label } = file;
   if (address.kind === 'learning' || address.kind === 'pack' || address.kind === 'modelsGuide') return;
-  const previewLogin = address.kind === 'login' && ctx.preview === true;
+  // The preview run AND its plain comparison / enforced passes (they carry `previewV4Home`; the real converter never does)
+  // see a login only as the BUILT shell, so no plain conversion of a login document is ever computed, and the accepted
+  // record of a login is the shell's, never the v4 file's.
+  const previewLogin = address.kind === 'login' && ctx.previewV4Home !== undefined;
   // A preview login is read straight from the v4 source (no login file is staged) through the one safe reader: a link, a
   // hard link, an oversized file or YAML with any error is "cannot be read", and the login is held.
   let document: Document | undefined;
@@ -399,14 +402,16 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
     const shell =
       document === undefined
         ? ({ kind: 'held', harness: 'unknown' } as const)
-        : buildShell(document, address.name, holdsCodex(ctx), ctx.loginKeys ?? new LoginKeyHold());
+        : buildShell(document, address.name, !PREVIEW_CODEX_RUNTIMES, ctx.loginKeys ?? new LoginKeyHold());
     if (shell.kind === 'held') {
       const what =
         shell.harness === 'codex'
           ? ' (Codex)'
           : shell.harness === 'unknown'
             ? ' (its harness is not named)'
-            : ' (it has no way to sign in)';
+            : shell.harness === 'budget'
+              ? ' (its budget cannot be carried)'
+              : ' (it has no way to sign in)';
       plan.dropped.push({
         what: `login ${address.name}${what}`,
         why:
@@ -414,11 +419,15 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
             ? CODEX_HELD_SENTENCE
             : shell.harness === 'unknown'
               ? LOGIN_UNNAMED_HELD_SENTENCE
-              : LOGIN_NO_SIGN_IN_HELD_SENTENCE,
+              : shell.harness === 'budget'
+                ? LOGIN_BUDGET_HELD_SENTENCE
+                : LOGIN_NO_SIGN_IN_HELD_SENTENCE,
       });
       return;
     }
     document = shell.document;
+    // The built shell is what the plain and enforced passes compare: its digest joins the login's fingerprint.
+    ctx.loginKeys?.sealShell(address.name, document.toString());
     document.commentBefore = ` Carried from v4 ${label} by the v4 → v5 converter, as a signed-out shell.`;
     if (shell.removed.length > 0)
       plan.dropped.push({
@@ -846,13 +855,13 @@ export async function buildPlan(
       : (Object.entries(ids?.runtimes ?? {}).find(([, entry]) => entry.formerNames.includes(name))?.[0] ?? name);
   const listing = await listV4Config(ctx.v4.home, ctx.v4.configOverrides);
   // The preview stages no login file (a failed prepare must leave no login bytes): its logins are listed from the real v4
-  // home, and read from there, by the PREVIEW run alone. The plain comparison and enforced passes (`ctx.preview` absent)
-  // never read a login: a plain conversion of a login document keeps its comments, `store: host` and budget, and the
-  // accepted-config step would write it to disk as a snapshot. A login shell is therefore always "authored" (the plain
-  // conversion has none to equal), and v4's enforced conversion carries no login to record.
+  // home, and read from there. Every pass that lists them (the preview run, its plain comparison and its enforced
+  // conversion) builds the SAME shell from them (`planFile`), never a plain conversion: a plain conversion of a login
+  // document keeps its comments and `store: host`, and the accepted-config step would write it to disk as a snapshot.
+  // The shell carries the login's budget, so the snapshot (and the comparison) keep the cap v4 enforced.
   const staged = new Set(listing.files.map(file => file.label));
   const loginFiles =
-    ctx.preview !== true || ctx.previewV4Home === undefined
+    ctx.previewV4Home === undefined
       ? []
       : (await listV4Config(ctx.previewV4Home)).files.filter(
           file =>

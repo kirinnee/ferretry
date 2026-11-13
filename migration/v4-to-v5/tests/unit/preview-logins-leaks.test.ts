@@ -288,14 +288,18 @@ describe('fix2: no credential reaches disk through any preview representation of
       else expect((await run()).report?.complete).toBe(true);
       const seen = await everything();
       expect(seen).not.toContain(COMMENT_MARKER);
-      // No accepted-config snapshot of the login exists at all: the preview shell has no budget to hold, and a plain
-      // conversion of the v4 document (comments, `store: host`, budget) is never computed into anything that persists.
+      // The login IS in the accepted record, but as the BUILT SHELL (its budget rebuilt from numbers), never the plain
+      // conversion of the v4 document (comments, `store: host`).
       const snapshots = (
         await readdir(join(target(), 'state/kernel/accepted-config')).catch(() => [] as string[])
       ).filter(name => name.includes('logins'));
-      expect(snapshots).toEqual([]);
+      expect(snapshots).toHaveLength(1);
+      const snapshot = JSON.parse(
+        await readFile(join(target(), 'state/kernel/accepted-config', snapshots[0] ?? ''), 'utf8'),
+      ) as { readonly text: string };
+      expect(snapshot.text).toBe(await readFile(join(target(), 'config/logins/work.yaml'), 'utf8'));
+      expect(parse(snapshot.text)).toMatchObject({ store: 'ferretry', budget: { daily: { hard: 20 } } });
       expect(seen).not.toContain('store: host');
-      expect(seen).not.toContain('hard: 20');
     });
 
   for (const failure of ['conversion', 'report', 'none'] as const)

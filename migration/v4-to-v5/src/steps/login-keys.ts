@@ -132,6 +132,15 @@ export class LoginKeyHold {
   }
 
   /**
+   * Preview only: the digest of the BUILT shell (its text, a budget included) joins the login's fingerprint, so two
+   * conversions that give the same fingerprint built the same shell. Only the digest is kept, never the text.
+   */
+  sealShell(login: string, shellText: string): void {
+    const digest = createHmac('sha256', RUN_KEY).update(shellText, 'utf8').digest('hex');
+    this.#ledger.set(login, [...(this.#ledger.get(login) ?? []), `shell=${digest}`]);
+  }
+
+  /**
    * What this run took out of one login's file, as a comparable string of `variable=NAME:digest` (no value): empty when
    * it took nothing. Two holds that give the same string put the same keys in the vault under the same names.
    */
