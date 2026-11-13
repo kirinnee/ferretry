@@ -10,9 +10,10 @@ import {
 } from '../../contract/index.ts';
 import { renderSecretList } from './secret-render.ts';
 
-/** Where a secret VALUE comes from when one is being stored. Never argv: stdin only. */
+/** Where a secret VALUE comes from when one is being stored: typed hidden at a terminal, or piped. Never argv. */
 export interface SecretValueSource {
-  read(): Promise<string>;
+  /** `name` only words the question put to a person at a terminal; the value is the answer. */
+  read(name: string): Promise<string>;
 }
 
 /**
@@ -112,7 +113,7 @@ export class SecretController {
    */
   async set(name: string): Promise<void> {
     const parsed = secretName(name);
-    const value = await this.values.read();
+    const value = await this.values.read(parsed);
     if (value.length < MIN_SECRET_VALUE_LENGTH)
       throw new Error(
         `a secret must be at least ${MIN_SECRET_VALUE_LENGTH} characters — shorter values cannot be masked out of output safely`,

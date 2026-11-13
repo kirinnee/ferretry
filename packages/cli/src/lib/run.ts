@@ -237,6 +237,7 @@ async function runPluginVerb(
     readBytes: path => world.host.readBytes(path),
     exists: path => world.host.exists(path),
     stdin: () => world.host.stdin(),
+    ...(world.promptHidden === undefined ? {} : { promptHidden: world.promptHidden }),
     env: pluginEnvironment(world.environment, world.host.cwd()),
     ownState: world.host.ownState(plugin.manifest),
   });

@@ -23,7 +23,7 @@ export default implementCli(manifest, {
         setExitCode: (code: number) => exit.setExitCode(code),
         raw: (stream, text) => (stream === 'stdout' ? io.out(text) : io.err(text)),
       },
-      new StdinSecretValue('fy', ctx.readText),
+      new StdinSecretValue('fy', ctx.readText, ctx.promptHidden),
       ctx.env?.PWD,
     );
     return { verbs: secretVerbs(controller, io, exit) };
