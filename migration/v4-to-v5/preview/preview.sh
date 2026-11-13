@@ -11,7 +11,7 @@ set -euo pipefail
 #             `harness` field (and whether it has both claude and codex halves) only, to know which runtimes are Claude
 #             Code ones; no other key of a login is kept, and an agent's dry-run reads no login file.
 #             --owner (OWNER ONLY, never an agent): records as accepted every config file the preview wrote or
-#             changed (found by comparing with the plain conversion: terminals.yaml, claude-code/settings/fy-preview.yaml,
+#             changed (found by comparing with the plain conversion: terminals.yaml, runtimes.yaml, claude-code/settings/fy-preview.yaml,
 #             the forced limits.yaml), EXCEPT any that comes from a v4 file with an unconfirmed edit: each stays held
 #             (the printed note and the report name every one, with the reason). Confirm the edit in v4,
 #             then `clean` and `prepare --owner`. Without --owner they are all held and `start` stops the daemon.

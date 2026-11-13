@@ -129,7 +129,7 @@ export interface FleetCredentialCatalogDeps {
   /** The logins on this machine (`config/logins/*.yaml`, parsed and live), by id. */
   logins(): ReadonlyMap<string, LoginFile>;
   /** The runtimes that use a login, by name (Runtimes owns the fact; absent, a login reads as used by none). */
-  usedBy?(id: string): readonly string[];
+  usedBy?(id: string): Promise<readonly string[]> | readonly string[];
   /**
    * The absolute directories a login's store lives in. Absent when this build cannot name them, and every login that
    * keeps its sign-in in a store then reads as unreachable, with the sentence that says so.
@@ -185,7 +185,7 @@ export class FleetCredentialCatalog {
         }`,
       );
     }
-    return { format: 1, entries: this.#modelEntries(logins) };
+    return { format: 1, entries: await this.#modelEntries(logins) };
   }
 
   /** One credential, or a refusal naming the id. */
@@ -197,19 +197,21 @@ export class FleetCredentialCatalog {
     return found;
   }
 
-  #modelEntries(logins: ReadonlyMap<string, LoginFile>): readonly CredentialEntry[] {
-    return [...logins.entries()]
-      .toSorted(([left], [right]) => (left < right ? -1 : 1))
-      .map(([id, file]) => {
-        const credential = credentialOf(file);
-        return {
-          id,
-          credential,
-          resolution:
-            this.deps.resolveStore?.(id, credential) ?? resolveCredentialStore(id, credential, this.deps.paths),
-          usedBy: [...(this.deps.usedBy?.(id) ?? [])].sort(),
-        };
-      });
+  async #modelEntries(logins: ReadonlyMap<string, LoginFile>): Promise<readonly CredentialEntry[]> {
+    return await Promise.all(
+      [...logins.entries()]
+        .toSorted(([left], [right]) => (left < right ? -1 : 1))
+        .map(async ([id, file]) => {
+          const credential = credentialOf(file);
+          return {
+            id,
+            credential,
+            resolution:
+              this.deps.resolveStore?.(id, credential) ?? resolveCredentialStore(id, credential, this.deps.paths),
+            usedBy: [...((await this.deps.usedBy?.(id)) ?? [])].sort(),
+          };
+        }),
+    );
   }
 
   /** Where the harness recorded this login's email, for display. */

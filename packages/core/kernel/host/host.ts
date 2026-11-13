@@ -1,6 +1,7 @@
 import { relative } from 'node:path';
 import type { BinaryNames, BoundAddress, ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import type { Instant } from '@ferretry/std';
+import { notBuiltSummary } from '../contract/doctor.ts';
 import { decideHome } from '../contract/home.ts';
 import { milliseconds } from '@ferretry/std';
 import type {
@@ -1665,7 +1666,13 @@ async function doctorLines(
     for (const check of record.manifest.doctor ?? []) {
       const run = runs[check];
       if (run === undefined) {
-        lines.push({ plugin: id, check, state: 'fail', detail: `The check ${check} has no implementation.` });
+        // Declared and not built yet is a note, never a failure: nothing was found wrong, only nothing was checked.
+        lines.push({
+          plugin: id,
+          check,
+          state: 'warn',
+          detail: notBuiltSummary(check),
+        });
         continue;
       }
       try {
