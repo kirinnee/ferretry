@@ -1453,6 +1453,17 @@ or an origin this daemon may not ask, and any other 4xx. An explicit relay writt
 (it takes effect on restart, as any relay edit does). `stop()` cancels the pending timer and aborts a read
 in flight, and nothing fires afterwards. Every read keeps `cache: 'no-store'`.
 
+The same two guards apply to the **first** read, not only to the retries: an answer that arrives after the
+daemon stopped is dropped, and a relay written to `config/connections.yaml` during that read (`enabled: false`
+included) wins over the answer. In a **mixed** list (a configured relay beside a `source: discovery` entry)
+a recovery never disturbs a relay that is already running — it is not restarted, not re-reported as inactive,
+and not displaced. If the recovered address turns out to be the configured one, the **configured relay
+keeps running and stays published** and only the discovered entry is refused, with the duplicate-rendezvous
+sentence (on the doctor row and in the journal): sources, the published carrier set, the network permission
+for redials and the running socket therefore always agree. (At boot, with nothing running yet, the same
+collision still refuses the boot.) A switched-off configured entry reserves no address: a discovered relay
+at the same address still starts on recovery.
+
 **`fyd` now dials and carries a session.** `packages/daemon/src/lib/relay` is the daemon half of this
 protocol — the claim signed with the key pairing already minted, the per-session handshake, the record
 layer, the credit window, and the §14 tunnel that turns a relayed request into the same `ApiRequest`

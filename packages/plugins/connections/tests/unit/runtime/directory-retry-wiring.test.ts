@@ -49,6 +49,7 @@ function scriptedDirectory(script: Array<RelayAdvertisement | Promise<RelayAdver
 
 function build(directory: RelayDirectoryPort, extra: Partial<ConnectionBindings> = {}) {
   const dialled: string[] = [];
+  const closed: string[] = [];
   let half: ReturnType<typeof buildConnections> | undefined;
   const plugin = implementDaemon(manifest, {
     build: ctx =>
@@ -68,14 +69,14 @@ function build(directory: RelayDirectoryPort, extra: Partial<ConnectionBindings>
             onclose: null,
             onerror: null,
             send: () => undefined,
-            close: () => undefined,
+            close: () => void closed.push(url),
           };
           return socket;
         },
         ...extra,
       })),
   });
-  return { plugin, dialled, half: () => half! };
+  return { plugin, dialled, closed, half: () => half! };
 }
 
 async function doctorRow(half: ReturnType<typeof buildConnections>) {
@@ -308,6 +309,171 @@ describe('boot is never held by the directory', () => {
     const host = await testHost({ plugins: [rig.plugin] });
     await rig.half().hooks['carriers:relay'].start(new FakeSessions() as SessionLayer, new AbortController().signal);
     expect(rig.dialled).toHaveLength(1);
+    await host.stop();
+  });
+});
+
+const settle = async () => {
+  for (let tick = 0; tick < 30; tick++) await Promise.resolve();
+};
+const relayStart = async (rig: ReturnType<typeof build>) =>
+  await rig.half().hooks['carriers:relay'].start(new FakeSessions(), new AbortController().signal);
+
+describe('recovery with a mixed configured and discovered relay list', () => {
+  test('should dial the recovered relay when a DISABLED configured entry shares its address', async () => {
+    const directory = scriptedDirectory([transient, available]);
+    const rig = build(directory.port);
+    const host = await testHost({
+      plugins: [rig.plugin],
+      config: { 'connections.yaml': { relay: [{ url: available.relayUrl, enabled: false }, { source: 'discovery' }] } },
+    });
+    await host.runJob('relay-discovery');
+    await relayStart(rig);
+    expect(rig.dialled).toEqual([]);
+    await host.clock.advance(2_000);
+    await settle();
+    // A switched-off entry opens no socket, so it must not reserve the address an enabled one recovers onto.
+    expect(rig.dialled).toHaveLength(1);
+    expect(rig.dialled[0]).toContain('hosted.example');
+    expect(rig.half().hooks['carriers:relay'].status().state).not.toBe('off');
+    await host.stop();
+  });
+
+  test('should keep ONE coherent state when the recovered address is the configured one: the configured relay wins', async () => {
+    const directory = scriptedDirectory([transient, available]);
+    const rig = build(directory.port);
+    const host = await testHost({
+      plugins: [rig.plugin],
+      config: { 'connections.yaml': { relay: [{ url: available.relayUrl }, { source: 'discovery' }] } },
+    });
+    await host.runJob('relay-discovery');
+    await relayStart(rig);
+    expect(rig.dialled).toHaveLength(1);
+    const logsBefore = host.logs.length;
+
+    await host.clock.advance(2_000);
+    await settle();
+
+    // Sources, published set, redial permission and sockets all say the same thing: the configured relay runs.
+    expect(directory.reads()).toBe(2);
+    expect(kinds(host)).toEqual(['direct', 'relay']);
+    expect(
+      host
+        .provided(ConnectionsPort)
+        .carriers()
+        .find(c => c.kind === 'relay')?.url,
+    ).toBe(available.relayUrl);
+    expect(rig.half().resolvers.relay()).toEqual(['hosted.example']);
+    expect(rig.dialled).toHaveLength(1);
+    expect(rig.closed).toEqual([]);
+    expect(host.provided(ConnectionsPort).advertisement().discoveredRelayUrl).toBeUndefined();
+    const doctor = await doctorRow(rig.half());
+    expect(doctor.state).toBe('ok');
+    expect(doctor.detail).toContain(`self-hosted — ${available.relayUrl}`);
+    expect(doctor.detail).toContain('two relay carriers resolved to the same rendezvous');
+    expect(doctor.detail).not.toContain('nothing off this host');
+    const recovery = host.logs.slice(logsBefore).map(entry => entry.message);
+    expect(recovery.some(line => line.includes('two relay carriers resolved to the same rendezvous'))).toBe(true);
+    await host.stop();
+  });
+
+  test('should keep the same state when the duplicate recovers before the relay carrier starts', async () => {
+    const directory = scriptedDirectory([transient, available]);
+    const rig = build(directory.port);
+    const host = await testHost({
+      plugins: [rig.plugin],
+      config: { 'connections.yaml': { relay: [{ url: available.relayUrl }, { source: 'discovery' }] } },
+    });
+    await host.runJob('relay-discovery');
+    await host.clock.advance(2_000);
+    await settle();
+    await relayStart(rig);
+    expect(rig.dialled).toHaveLength(1);
+    expect(kinds(host)).toEqual(['direct', 'relay']);
+    expect(rig.half().resolvers.relay()).toEqual(['hosted.example']);
+    await host.stop();
+  });
+
+  test('should not call an already running configured relay inactive when a different relay is discovered', async () => {
+    const directory = scriptedDirectory([transient, available]);
+    const rig = build(directory.port);
+    const host = await testHost({
+      plugins: [rig.plugin],
+      config: { 'connections.yaml': { relay: [{ url: 'https://mine.example' }, { source: 'discovery' }] } },
+    });
+    await host.runJob('relay-discovery');
+    await relayStart(rig);
+    const logsBefore = host.logs.length;
+    await host.clock.advance(2_000);
+    await settle();
+
+    const recovery = host.logs.slice(logsBefore).map(entry => entry.message);
+    expect(recovery.join('\n')).not.toContain('did not produce an active carrier');
+    expect(recovery.join('\n')).not.toContain('relay carrier inactive');
+    expect(recovery).toContain('dialling the relay — https://mine.example');
+    expect(recovery).toContain('dialling the relay — https://hosted.example');
+    // The configured socket was neither restarted nor closed.
+    expect(rig.dialled.filter(url => url.includes('mine.example'))).toHaveLength(1);
+    expect(rig.closed).toEqual([]);
+    expect(rig.dialled.filter(url => url.includes('hosted.example'))).toHaveLength(1);
+    await host.stop();
+  });
+});
+
+describe('the FIRST read honours stop and a relay written meanwhile, like every retry', () => {
+  test('should drop a first-read answer that arrives after the daemon stopped', async () => {
+    let answer!: (value: RelayAdvertisement) => void;
+    const late = new Promise<RelayAdvertisement>(resolve => (answer = resolve));
+    const directory = scriptedDirectory([late]);
+    const rig = build(directory.port);
+    const host = await testHost({ plugins: [rig.plugin] });
+    const job = host.runJob('relay-discovery');
+    await settle();
+    expect(directory.reads()).toBe(1);
+    await host.stop();
+    answer(available);
+    await job;
+    expect(kinds(host)).toEqual(['direct']);
+    expect(rig.half().resolvers.relay()).toEqual([]);
+    expect(rig.half().provides.connections.advertisement().discoveredRelayUrl).toBeUndefined();
+    await relayStart(rig);
+    expect(rig.dialled).toEqual([]);
+  });
+
+  test('should not adopt a first-read answer when an explicit relay (enabled:false too) was written during that read', async () => {
+    let answer!: (value: RelayAdvertisement) => void;
+    const slow = new Promise<RelayAdvertisement>(resolve => (answer = resolve));
+    const directory = scriptedDirectory([slow]);
+    const rig = build(directory.port);
+    const host = await testHost({ plugins: [rig.plugin] });
+    const job = host.runJob('relay-discovery');
+    await settle();
+    host.setConfig('connections.yaml', { relay: [{ url: 'https://mine.example', enabled: false }] });
+    answer(available);
+    await job;
+    await relayStart(rig);
+    expect(rig.dialled).toEqual([]);
+    expect(kinds(host)).toEqual(['direct']);
+    expect(rig.half().resolvers.relay()).toEqual([]);
+    expect((await doctorRow(rig.half())).detail).toContain('restart to dial it');
+    await host.stop();
+  });
+
+  test('should not schedule a retry for a transient first read when an explicit relay was written during it', async () => {
+    let answer!: (value: RelayAdvertisement) => void;
+    const slow = new Promise<RelayAdvertisement>(resolve => (answer = resolve));
+    const directory = scriptedDirectory([slow, available]);
+    const rig = build(directory.port);
+    const host = await testHost({ plugins: [rig.plugin] });
+    const job = host.runJob('relay-discovery');
+    await settle();
+    host.setConfig('connections.yaml', { relay: [{ url: 'https://mine.example' }] });
+    answer(transient);
+    await job;
+    await host.clock.advance(60 * MINUTE);
+    await settle();
+    expect(directory.reads()).toBe(1);
+    expect(rig.dialled).toEqual([]);
     await host.stop();
   });
 });
