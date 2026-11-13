@@ -257,11 +257,14 @@ function ShellCommandBar(props: {
  */
 function WholeLine({ daemon, line }: { readonly daemon: string | undefined; readonly line: string }) {
   const { runtime } = useShell();
+  // Which core piece (or that the list could not be read): the sentence above is the same for every cause.
+  const why = daemon === undefined ? undefined : runtime.wholeDaemonDetail(daemon);
   const { navigate } = useRouter();
   const refused = daemon !== undefined && runtime.isRefused(daemon) ? daemon : undefined;
   return (
     <>
       <ShellLine tone="warn">{line}</ShellLine>
+      {why === undefined ? null : <ShellLine>{`Why: ${why}.`}</ShellLine>}
       {refused === undefined ? null : (
         <button
           type="button"

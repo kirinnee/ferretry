@@ -28,6 +28,13 @@ export function compareVersions(a: string, b: string): number {
 
 export type Remedy = 'update-daemon' | 'reload-app';
 
+/**
+ * Said full-screen when the daemon answered the plugin list but what came back was not a plugin list, or the read failed
+ * on the way (a carrier that dropped, a daemon still starting). It is NOT the "reload" sentence: reloading the app does
+ * not mend a read that failed, and the app reads again by itself until it works.
+ */
+export const UNREADABLE_INVENTORY_SENTENCE = `Could not read what this daemon offers. Trying again — if this stays, check that the machine is running and reachable.`;
+
 export function remedyFor(appVersion: string, daemonVersion: string | undefined): Remedy {
   if (daemonVersion === undefined) return 'reload-app';
   return compareVersions(appVersion, daemonVersion) > 0 ? 'update-daemon' : 'reload-app';

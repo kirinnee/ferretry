@@ -130,3 +130,36 @@ export function eventOwner(eventName: string): string {
   const dot = eventName.indexOf('.');
   return dot === -1 ? eventName : eventName.slice(0, dot);
 }
+
+/**
+ * Why a whole daemon is blocked, in words an owner can read to a person helping: which core piece, and how it failed
+ * (`kernel: its contract differs`), or that the protocol differs, or that the answer could not be read at all. Names
+ * ids and reasons only, never a hash or a body. `undefined` when nothing is blocked (or the answer has not come).
+ *
+ * The one full-screen sentence is the same for every core cause, so without this a mismatch, a missing piece and a
+ * damaged answer all read "Reload to get the new app." and cannot be told apart.
+ */
+export function wholeDaemonWhy(
+  inventory: Inventory | undefined,
+  compiled: readonly SurfaceEntry[],
+): string | undefined {
+  if (inventory === undefined) return undefined;
+  if (inventory.kind === 'unreadable') return 'the plugin list this daemon sent could not be read';
+  if (inventory.kind === 'protocol-mismatch')
+    return `this app speaks protocol ${PROTOCOL}, this daemon speaks protocol ${inventory.daemonProtocol}`;
+  const coreIds: readonly string[] = CORE_IDS;
+  const words: Record<'missing' | 'off' | 'different', string> = {
+    missing: 'is not in the list',
+    off: 'is off',
+    different: 'has a different contract',
+  };
+  const causes = compiled
+    .filter(entry => coreIds.includes(entry.id))
+    .flatMap(entry => {
+      const own = ownStanding(entry, inventory.entries);
+      return own.state === 'blocked' && own.reason !== 'core' && own.reason in words
+        ? [`${entry.id} ${words[own.reason as keyof typeof words]}`]
+        : [];
+    });
+  return causes.length === 0 ? undefined : causes.join('; ');
+}
