@@ -7,7 +7,8 @@
  * never a body the server sent (which the check service redacts anyway).
  */
 
-import type { ChildHandle, KernelPorts } from '@ferretry/kernel/contract';
+import type { ChildEnvironment, ChildHandle, KernelPorts } from '@ferretry/kernel/contract';
+import type { Result } from '@ferretry/std';
 import { type McpProbe, type McpProbeAnswer, McpProbeFailure, type McpProbeSpec } from '../lib/inventory/check.ts';
 import {
   initializedNotification,
@@ -26,6 +27,19 @@ type RemoteSpec = Extract<McpProbeSpec, { readonly url: string }>;
 
 /** What a check reaches the world with: the kernel's spawn, fetch and clock, nothing else. */
 export type ProbePorts = Pick<KernelPorts, 'spawn' | 'fetch' | 'clock'>;
+
+/**
+ * What opens a command's `${secret:NAME}` references for ONE child: the Vault's child environment (use, never read). The
+ * values are in that child's environment and nowhere else; a name the Vault does not hold comes back as a name.
+ */
+export interface ProbeSecrets {
+  childEnvironment(
+    env: Readonly<Record<string, string>>,
+  ): Promise<Result<ChildEnvironment, { readonly unknown: readonly string[] }>>;
+}
+
+/** Whether a value names a stored secret (`${secret:NAME}`, or the optional `${secret?:NAME}`). */
+const namesSecret = (value: string): boolean => /\$\{secret\??:/u.test(value);
 
 /** The most a check reads of one response body. */
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
@@ -65,12 +79,28 @@ async function exchange(
 
 // ── stdio ────────────────────────────────────────────────────────────────────────────────────────
 
-async function probeStdio(ports: ProbePorts, spec: Extract<McpProbeSpec, { transport: 'stdio' }>, signal: AbortSignal) {
+async function probeStdio(
+  ports: ProbePorts,
+  secrets: ProbeSecrets | undefined,
+  spec: Extract<McpProbeSpec, { transport: 'stdio' }>,
+  signal: AbortSignal,
+) {
   let child: ChildHandle;
+  // A value that names a stored secret is opened by the Vault for this one child; every other value passes as it is.
+  let env: Readonly<Record<string, string>> | ChildEnvironment = { ...spec.env };
+  if (secrets !== undefined && Object.values(spec.env).some(namesSecret)) {
+    const opened = await secrets.childEnvironment(spec.env);
+    if (!opened.ok)
+      throw new McpProbeFailure(
+        'unreachable',
+        `It names ${opened.error.unknown.length === 1 ? 'a secret' : 'secrets'} that ${opened.error.unknown.length === 1 ? 'is' : 'are'} not stored: ${opened.error.unknown.join(', ')}.`,
+      );
+    env = opened.value;
+  }
   try {
     child = ports.spawn.start(spec.command, spec.args, {
       ...(spec.cwd === undefined ? {} : { cwd: spec.cwd as never }),
-      env: { ...spec.env },
+      env,
     });
   } catch {
     throw new McpProbeFailure(
@@ -309,10 +339,13 @@ async function probeSse(ports: ProbePorts, spec: RemoteSpec, signal: AbortSignal
 }
 
 export class TransportMcpProbe implements McpProbe {
-  constructor(private readonly ports: ProbePorts) {}
+  constructor(
+    private readonly ports: ProbePorts,
+    private readonly secrets?: ProbeSecrets,
+  ) {}
 
   async probe(spec: McpProbeSpec, signal: AbortSignal): Promise<McpProbeAnswer> {
-    if (spec.transport === 'stdio') return await probeStdio(this.ports, spec, signal);
+    if (spec.transport === 'stdio') return await probeStdio(this.ports, this.secrets, spec, signal);
     try {
       return spec.transport === 'sse'
         ? await probeSse(this.ports, spec, signal)

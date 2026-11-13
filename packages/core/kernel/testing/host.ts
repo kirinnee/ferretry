@@ -2378,6 +2378,7 @@ async function start(world: World): Promise<TestHost> {
           transport: outboundSecretTransport(fetchPort, clock),
           log: logFor(manifest.id),
         },
+        manifest.permissions?.mintedSecrets ?? [],
       ),
       signer: signerFor(manifest.id, identitySigner),
       act: testActRunner({

@@ -1,7 +1,14 @@
 import type { ConfigCollectionDef, FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import type { SecretName, SecretSummary } from '@ferretry/core-vault/contract';
-import { MCP_CONFIG, McpServerAdded, McpSignInChanged, type McpApi, type McpItem } from '../contract/index.ts';
+import {
+  MCP_CONFIG,
+  mcpOAuthSecretNames,
+  McpServerAdded,
+  McpSignInChanged,
+  type McpApi,
+  type McpItem,
+} from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { ConfigMcpServers } from './adapters/config-servers.ts';
 import { harnessProjectApprovals } from './adapters/harness-approvals.ts';
@@ -211,12 +218,48 @@ export default implementDaemon(manifest, {
         },
       },
     });
+    /**
+     * A held sign-in's access token for a check, renewed first when it is about to expire (as a launch renews it). The
+     * Vault has no value getter, so it is read the one way a plugin may read what it itself minted
+     * (`kernel.secrets`, `permissions.mintedSecrets`), and only to put on one request's `Authorization` header.
+     * `undefined` when nothing is held or the Vault cannot say: the server then answers `needs-sign-in`.
+     */
+    const heldToken = async (
+      subject: string,
+      url: string,
+    ): Promise<{ variable: string; token: string } | undefined> => {
+      const names = mcpOAuthSecretNames(subject, url);
+      await oauth.refreshForLaunch([names.access]);
+      const found = await kernel.secrets.resolve(names.access);
+      return 'refused' in found ? undefined : { variable: names.variable, token: found.reveal() };
+    };
     const check = new McpCheckService({
       inventory,
-      probe: new TransportMcpProbe(kernel),
-      launchEnvironment: async () => ({}),
-      baseEnvironment: () => ({}),
-      bearer: async () => undefined,
+      // A command's `${secret:NAME}` values are opened by the Vault into that one child's environment. The Vault reads no
+      // ferret for a plugin's own handle, and a check is the machine's, not a ferret's, so none is named.
+      probe: new TransportMcpProbe(kernel, {
+        childEnvironment: async env => {
+          const opened = await vault.childEnvironment('' as FerretId, env);
+          return opened.ok ? opened : { ok: false, error: { unknown: opened.error.unknown.map(String) } };
+        },
+      }),
+      // What this runtime's launch carries from MCP: each signed-in server its profile stack names, as the variable the
+      // harness's header (`${FY_MCP_…_TOKEN}`, `bearer_token_env_var`) reads it from. GAP: the rest of a runtime's
+      // launch environment (its login's variables, its profile's `env`) is not offered by Runtimes' port.
+      launchEnvironment: async runtime => {
+        const carried = await layeredMcp(runtimes.current(), runtime);
+        const environment: Record<string, string> = {};
+        for (const [name, item] of items()) {
+          if (!carried.has(name) || item.auth !== 'oauth' || item.url === undefined) continue;
+          const held = await heldToken(name, item.url);
+          if (held !== undefined) environment[held.variable] = held.token;
+        }
+        return environment;
+      },
+      // The daemon's own spawn already gives a child its `PATH` and `HOME`; the machine's home is what a `${HOME}` in
+      // a server's own command or arguments fills from. GAP: `PATH` is not readable from a plugin.
+      baseEnvironment: () => ({ HOME: kernel.paths.home() }),
+      bearer: async (subject, url) => (await heldToken(subject, url))?.token,
       redactor: { redact: async text => await kernel.redaction.read(scope => scope.text(text)) },
       now: () => kernel.clock.nowMs(),
     });

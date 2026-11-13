@@ -971,6 +971,7 @@ async function bootLocked(
           transport: outboundSecretTransport(fetchPort, clock),
           log: scopedLog(adapters.logSink, manifest.id),
         },
+        manifest.permissions?.mintedSecrets ?? [],
       ),
       signer: signerFor(manifest.id, sessionSigner),
       ...(manifest.id === 'gate' && configWriter !== undefined ? { configFiles: configWriter } : {}),

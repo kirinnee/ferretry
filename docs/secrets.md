@@ -1515,6 +1515,12 @@ the first caller. It is the holder above with the same rules, held by the kernel
 - **The name passes `kernel.secrets.resolve`'s rule, in that order.** It is in the plugin's manifest `secrets`. The
   plugin's OWN configuration in effect names it as `${secret:NAME}`. The Vault knows it. A plugin can never put another
   plugin's secret on a request, because its config would have to name it, and adding a reference is held for the owner.
+  **A secret the plugin itself mints is its own too:** a name its manifest's `permissions.mintedSecrets` pattern
+  matches whole (MCP's sign-in access tokens) needs no `secrets` entry and no reference, because the plugin put the
+  value there and no configuration names it. Only that pattern and the Vault are asked. A plugin that mints nothing is
+  refused the same name, and a name outside the pattern is refused whatever else the Vault holds. This is what lets MCP
+  present a signed-in server's access token on a **Check** (`kernel.secrets.resolve(name).reveal()` into one request's
+  `Authorization` header, never logged); nothing else of MCP's reads a token back.
 - **Only to an exactly declared host.** The URL must be `https:`, or `http:` to this machine. Its host must be a plain
   host entry of the plugin's `permissions.network`. A wildcard, `'*'`, an installed-item entry or a resolver entry lets
   no key out. The request goes through the plugin's own `kernel.fetch` guard, so a redirect is answered, never followed.
