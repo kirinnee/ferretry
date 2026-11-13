@@ -4,7 +4,7 @@
  * The daemon says which page an agent is acting on, and which ones a person holds (`docs/agent-tools.md`). This hook
  * reads that for one session and answers per page:
  *
- *   READ     `GET /v1/sessions/:sessionId/surfaces/browser/control` when the panel opens, again on every
+ *   READ     `GET /v1/ferrets/:ferretId/surfaces/browser/control` when the panel opens, again on every
  *            `browsers.page-changed` event of the session (the agent driving included), and every
  *            {@link PAGE_POLL_MS} while there is no live feed or {@link PAGE_LIVE_POLL_MS} as the safety net while
  *            there is, never while the tab is hidden (`startFeedAwarePoll`). That read is what makes a takeover survive a reload: the daemon keeps it and the page asks.
@@ -34,8 +34,8 @@ import type { BrowserDaemon, BrowserSessionScope } from '../lib/scope.ts';
 import { type SurfaceControlView, SurfaceControlViewSchema } from '../../contract/wire/control.ts';
 
 const BROWSER_CONTROL_ROUTES = {
-  read: 'GET /v1/sessions/:sessionId/surfaces/browser/control',
-  act: 'POST /v1/sessions/:sessionId/surfaces/browser/control',
+  read: 'GET /v1/ferrets/:ferretId/surfaces/browser/control',
+  act: 'POST /v1/ferrets/:ferretId/surfaces/browser/control',
 } as const;
 
 /** A one-shot timer, injectable so a suite drives the lapse without waiting for it. */
@@ -97,7 +97,7 @@ export function useBrowserControl(
     // Returned, so the feed-aware poll skips a tick while this read is parked (behind a locked machine's unlock).
     const read = (): Promise<void> =>
       daemon.client
-        .call(BROWSER_CONTROL_ROUTES.read, { params: { sessionId: scope.sessionId } })
+        .call(BROWSER_CONTROL_ROUTES.read, { params: { ferretId: scope.sessionId } })
         .then(answer => {
           const parsed = SurfaceControlViewSchema.parse(answer);
           if (epoch.current === mine) setView(current => withControlView(current, scope.sessionId, parsed));
@@ -128,7 +128,7 @@ export function useBrowserControl(
       setFailure(null);
       daemon.client
         .call(BROWSER_CONTROL_ROUTES.act, {
-          params: { sessionId: scope.sessionId },
+          params: { ferretId: scope.sessionId },
           body: SurfaceControlRequestSchema.parse({ action, key }),
         })
         .then(answer => {

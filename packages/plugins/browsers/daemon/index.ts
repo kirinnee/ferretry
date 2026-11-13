@@ -276,7 +276,7 @@ export function buildBrowsers(
       ...controlRoutes(tools),
       ...systemOpenRoutes(openUrl),
     },
-    sockets: { 'GET /v1/sessions/:sessionId/browser/stream': streamSocket(pages, stream) },
+    sockets: { 'GET /v1/ferrets/:ferretId/browser/stream': streamSocket(pages, stream) },
     tools: { ...toolHandlers(tools), ...target.tools },
     provides: {
       browsers: {

@@ -198,8 +198,8 @@ describe('the browsers daemon half', () => {
     const kept = world.identities.at('f1', 'p1', 'example.test');
 
     // Act: the person's toolbar reloads the page this ferret's session is viewing.
-    await host.request('POST', '/v1/sessions/f1/browser', { body: { action: 'activate-page', pageId: 'p1' } });
-    const reloaded = await host.request('POST', '/v1/sessions/f1/browser', { body: { action: 'reload' } });
+    await host.request('POST', '/v1/ferrets/f1/browser', { body: { action: 'activate-page', pageId: 'p1' } });
+    const reloaded = await host.request('POST', '/v1/ferrets/f1/browser', { body: { action: 'reload' } });
 
     // Assert
     should(kept).equal('alice@example.test');
@@ -217,10 +217,10 @@ describe('the browsers daemon half', () => {
     page.pageState = 'error';
     page.url = `https://login.example.test/?token=${SECRET}`;
     world.tabs.pageError = `page.goto: net::ERR_NAME_NOT_RESOLVED at https://login.example.test/?token=${SECRET}`;
-    await host.request('POST', '/v1/sessions/f1/browser', { body: { action: 'activate-page', pageId: 'p1' } });
+    await host.request('POST', '/v1/ferrets/f1/browser', { body: { action: 'activate-page', pageId: 'p1' } });
 
     // Act
-    const status = await host.request('GET', '/v1/sessions/f1/browser');
+    const status = await host.request('GET', '/v1/ferrets/f1/browser');
 
     // Assert
     should(status.status).equal(200);
@@ -261,7 +261,7 @@ describe('the browsers daemon half', () => {
     // Act
     const closed = await host.tool('browser_close', { name: 'app' }, as('f1'));
     const afterClose = closes();
-    const stopped = await host.request('POST', '/v1/sessions/f1/browser', { body: { action: 'stop' } });
+    const stopped = await host.request('POST', '/v1/ferrets/f1/browser', { body: { action: 'stop' } });
 
     // Assert
     should(closed.isError).not.be.true();

@@ -275,7 +275,7 @@ that is not a listing proves nothing rather than promoting a path.
 **Surfaces have a third answer, and it is visible.** For every other family "we cannot prove it" and
 "it is not there" are the same answer, so both render as prose. For a surface they are not: the
 daemon's terminal listing for a session is a COMPLETE enumeration, so an id missing from it is proved
-gone — and so is the session's browser status (`GET /v1/sessions/:id/browser`) for pages, while the
+gone — and so is the session's browser status (`GET /v1/ferrets/:ferretId/browser`) for pages, while the
 browser is `running`, `stopping` or `stopped` (a stopped browser holds no pages: they end with it).
 While it is `starting` or in `error` its list proves nothing either way. A proved-closed surface renders as an inert tombstone (struck through, never a link) rather than
 as prose, because silently reprinting the token would leave the reader and the agent believing they

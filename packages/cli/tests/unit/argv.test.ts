@@ -36,3 +36,15 @@ describe('parseArgs', () => {
     should(optionOn(parsed, 'nope')).be.false();
   });
 });
+
+describe('parseArgs negative numbers', () => {
+  it('should read a negative number after an option as its value, not as an option', () => {
+    should(parseArgs(['dev', '--pages', '-1', '--by', '-300,0']).options).deepEqual({ pages: '-1', by: '-300,0' });
+  });
+
+  it('should keep a negative number as a positional word', () => {
+    const parsed = parseArgs(['-1', '--json']);
+    should(parsed.args).deepEqual(['-1']);
+    should(parsed.options).deepEqual({ json: true });
+  });
+});

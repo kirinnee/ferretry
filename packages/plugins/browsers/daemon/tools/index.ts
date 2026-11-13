@@ -132,15 +132,15 @@ async function refusing<T>(work: () => Promise<T>): Promise<T> {
 /** The surface control routes and the person's tool route (today's `agent-tools.ts` browser surface routes). */
 export function controlRoutes(tools: BrowserTools) {
   return {
-    'GET /v1/sessions/:sessionId/surfaces/browser/control': (async call =>
+    'GET /v1/ferrets/:ferretId/surfaces/browser/control': (async call =>
       jsonResponse(await refusing(async () => await tools.controlView(sessionIdOf(call))))) satisfies RouteHandler,
-    'POST /v1/sessions/:sessionId/surfaces/browser/control': (async call => {
+    'POST /v1/ferrets/:ferretId/surfaces/browser/control': (async call => {
       const request = await parseBody(call.request, SurfaceControlRequestSchema);
       return jsonResponse(
         await refusing(async () => await tools.control(sessionIdOf(call), request, controllerOf(call))),
       );
     }) satisfies RouteHandler,
-    'POST /v1/sessions/:sessionId/surfaces/browser/tools': (async call => {
+    'POST /v1/ferrets/:ferretId/surfaces/browser/tools': (async call => {
       const parsed = await parseBody(call.request, BrowserToolCallSchema);
       const answer = await refusing(async () => await tools.call(callerOf(call, sessionIdOf(call)), parsed));
       return jsonResponse(toolResult(answer));

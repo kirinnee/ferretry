@@ -105,7 +105,7 @@ export const SurfaceHandedSchema = z.strictObject({
 export type SurfaceHanded = z.infer<typeof SurfaceHandedSchema>;
 
 /**
- * `GET /v1/sessions/:sessionId/surfaces/terminals/control` and `…/surfaces/browser/control` — one kind
+ * `GET /v1/ferrets/:ferretId/surfaces/terminals/control` and `…/surfaces/browser/control` — one kind
  * each, so each is governed by that kind's grant — and the answer to every control change.
  */
 export const SurfaceControlViewSchema = z.strictObject({
@@ -121,7 +121,7 @@ export const SurfaceControlViewSchema = z.strictObject({
 export type SurfaceControlView = z.infer<typeof SurfaceControlViewSchema>;
 
 /**
- * `POST /v1/sessions/:sessionId/surfaces/terminals/control` and `…/surfaces/browser/control`: a person takes a surface
+ * `POST /v1/ferrets/:ferretId/surfaces/terminals/control` and `…/surfaces/browser/control`: a person takes a surface
  * over from the agent, or hands it back. The answer is the session's {@link SurfaceControlViewSchema}.
  */
 

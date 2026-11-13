@@ -186,7 +186,9 @@ export function movedPairs(
   const broken = new Map<string, string>();
   const claim = (was: DescriptorRow, now: DescriptorRow): void => {
     pairs.push({ was, now });
-    claims.set(`${now.table}	${now.key}`, [...(claims.get(`${now.table}	${now.key}`) ?? []), was.key]);
+    // One old key declared twice today (a route two mounts both serve) is still one route to claim the new one.
+    const held = claims.get(`${now.table}	${now.key}`) ?? [];
+    if (!held.includes(was.key)) claims.set(`${now.table}	${now.key}`, [...held, was.key]);
   };
   for (const was of today) {
     const record = changes.get(`${was.table}	${was.key}`);

@@ -89,7 +89,7 @@ interface AgendaReference {
  * The addressable live surfaces of a session.
  *
  * `terminal` is real today. `browser` is declared here on purpose: the daemon
- * serves `/v1/sessions/:id/browser` for real now, but no resolver has been
+ * serves `/v1/ferrets/:ferretId/browser` for real now, but no resolver has been
  * taught to read the page list it answers with, so nothing proves a page yet —
  * and the grammar, the envelope, the identity and the tombstone are all
  * key-agnostic, so a page slots in by teaching one resolver about it. Declaring

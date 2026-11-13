@@ -44,13 +44,13 @@ export type RemoteViewportMode = 'responsive' | 'desktop';
 
 /** The route of one session's browser: its status on GET, an action on POST. */
 const SESSION_BROWSER_ROUTES = {
-  status: 'GET /v1/sessions/:sessionId/browser',
-  act: 'POST /v1/sessions/:sessionId/browser',
-  stream: 'GET /v1/sessions/:sessionId/browser/stream',
+  status: 'GET /v1/ferrets/:ferretId/browser',
+  act: 'POST /v1/ferrets/:ferretId/browser',
+  stream: 'GET /v1/ferrets/:ferretId/browser/stream',
 } as const;
 
 const sessionParams = (scope: BrowserSessionScope): Readonly<Record<string, string>> => ({
-  sessionId: scope.sessionId,
+  ferretId: scope.sessionId,
 });
 
 const assertScopeDaemon = (daemon: BrowserDaemon, scope: BrowserSessionScope): void => {

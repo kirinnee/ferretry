@@ -318,7 +318,6 @@
   },
   "pendingHalves": {
     "gate": ["app"],
-    "browsers": ["cli"],
     "skills": ["cli"]
   },
   "pendingAppPorts": [],

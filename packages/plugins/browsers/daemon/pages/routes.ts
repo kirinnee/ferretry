@@ -75,19 +75,19 @@ export function browserFailure(error: unknown): never {
 }
 
 export function sessionIdOf(call: CallContext): string {
-  const id = call.params.get('sessionId') ?? '';
+  const id = call.params.get('ferretId') ?? '';
   if (id === '' || id.includes('/') || id.includes('\\'))
-    throw new ApiError(400, 'the session id in the path is not usable', 'bad_request');
+    throw new ApiError(400, 'the ferret id in the path is not usable', 'bad_request');
   return id;
 }
 
-/** `GET /v1/sessions/:sessionId/browser`: the status, every page's address and title masked (S16). */
+/** `GET /v1/ferrets/:ferretId/browser`: the status, every page's address and title masked (S16). */
 async function browserStatus(kernel: KernelPorts, browser: BrowserSubsystem, call: CallContext): Promise<ApiResponse> {
   const status = await browser.status(sessionIdOf(call)).catch(browserFailure);
   return jsonResponse(await kernel.redaction.read(scope => maskedStatus(scope, status)));
 }
 
-/** `POST /v1/sessions/:sessionId/browser`: one action on its page, through the act runner. */
+/** `POST /v1/ferrets/:ferretId/browser`: one action on its page, through the act runner. */
 async function browserAction(kernel: KernelPorts, browser: BrowserSubsystem, call: CallContext): Promise<ApiResponse> {
   const sessionId = sessionIdOf(call);
   const action = await parseBody(call.request, BrowserActionSchema);
@@ -140,14 +140,14 @@ export function pageRoutes(kernel: KernelPorts, window: BrowserLoginLifecycle, b
   return {
     'GET /v1/browser/login': (async () => await answer(async () => await window.status())) satisfies RouteHandler,
     'POST /v1/browser/login': (async call => await loginAct(window, call)) satisfies RouteHandler,
-    'GET /v1/sessions/:sessionId/browser': (async call =>
+    'GET /v1/ferrets/:ferretId/browser': (async call =>
       await browserStatus(kernel, browser, call)) satisfies RouteHandler,
-    'POST /v1/sessions/:sessionId/browser': (async call =>
+    'POST /v1/ferrets/:ferretId/browser': (async call =>
       await browserAction(kernel, browser, call)) satisfies RouteHandler,
   } as const;
 }
 
-/** `GET /v1/sessions/:sessionId/browser/stream`: proves the session, then hands the socket to the viewer stream. */
+/** `GET /v1/ferrets/:ferretId/browser/stream`: proves the session, then hands the socket to the viewer stream. */
 export function streamSocket(browser: Pick<BrowserSubsystem, 'status'>, stream: BrowserStreamOpener): SocketAccept {
   return async call => {
     const id = sessionIdOf(call);

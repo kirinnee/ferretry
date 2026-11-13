@@ -212,11 +212,11 @@ async function failure(work: Promise<unknown>): Promise<unknown> {
   throw new Error('expected the call to fail');
 }
 
-/** The person's tools route for ferret `s1` (`POST /v1/sessions/:sessionId/surfaces/browser/tools`). */
+/** The person's tools route for ferret `s1` (`POST /v1/ferrets/:ferretId/surfaces/browser/tools`). */
 function personRoute(tools: BrowserTools, body: unknown): Promise<unknown> {
-  const { call } = callOf({ method: 'POST', path: '/v1/sessions/s1/surfaces/browser/tools', body, kind: 'host' });
-  const withSession = { ...call, params: new Map([['sessionId', 's1']]) } as unknown as CallContext;
-  return Promise.resolve(controlRoutes(tools)['POST /v1/sessions/:sessionId/surfaces/browser/tools'](withSession));
+  const { call } = callOf({ method: 'POST', path: '/v1/ferrets/s1/surfaces/browser/tools', body, kind: 'host' });
+  const withSession = { ...call, params: new Map([['ferretId', 's1']]) } as unknown as CallContext;
+  return Promise.resolve(controlRoutes(tools)['POST /v1/ferrets/:ferretId/surfaces/browser/tools'](withSession));
 }
 
 async function refusal(work: Promise<unknown>): Promise<BrowserToolError> {

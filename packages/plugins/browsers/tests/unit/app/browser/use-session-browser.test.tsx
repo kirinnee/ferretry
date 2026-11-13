@@ -15,8 +15,8 @@ import { browserDaemon, recordingClient, refusal } from '../../../support/app/cl
 import { handPoll } from '../../../support/app/poll.ts';
 import { daemonSessionScope } from '../../../support/app/scope.ts';
 
-const STATUS = 'GET /v1/sessions/:sessionId/browser';
-const ACT = 'POST /v1/sessions/:sessionId/browser';
+const STATUS = 'GET /v1/ferrets/:ferretId/browser';
+const ACT = 'POST /v1/ferrets/:ferretId/browser';
 
 const alphaId = { daemonId: 'alpha' };
 const scope = daemonSessionScope(alphaId, 'sess-1');
@@ -50,7 +50,7 @@ const running = (pages: readonly BrowserPageSummary[], active = pages[0]?.id, se
 /** A daemon whose answers the test writes: `answer` is told the route and the session it was asked for. */
 const fakeDaemon = (answer: (route: string, sessionId: string, body: unknown) => unknown) => {
   const { client, calls, heard } = recordingClient((route, init) =>
-    answer(route, init?.params?.sessionId ?? '', init?.body),
+    answer(route, init?.params?.ferretId ?? '', init?.body),
   );
   return { daemon: browserDaemon(client, 'alpha'), calls, heard };
 };
@@ -89,7 +89,7 @@ describe('useSessionBrowser', () => {
     });
 
     // Assert
-    expect(calls[0]).toEqual({ route: STATUS, init: { params: { sessionId: 'sess-1' } } });
+    expect(calls[0]).toEqual({ route: STATUS, init: { params: { ferretId: 'sess-1' } } });
     expect(calls.length).toBeGreaterThan(1);
     expect(first?.pages[0]?.name).toBe('app');
     expect(seen.current.status).toBe(first);

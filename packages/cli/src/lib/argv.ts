@@ -6,6 +6,7 @@
  *
  * - `--name=value` is a value. `--name value` is a value when `value` does not start with `-`.
  * - `--name` followed by another option, by `--` or by nothing is a switch (`true`). `--no-name` is `false`.
+ * - A negative number (`-1`, `-0.5`, `-300,0`) is a word, never an option: `--pages -1` has the value `-1`.
  * - A repeated option becomes a list, in the order given.
  * - `--` ends options; everything after it is positional.
  * - Write positionals before options, or end options with `--`, when a switch is followed by a positional.
@@ -15,6 +16,9 @@
 import type { VerbInvocation } from '@ferretry/kernel/manifest';
 
 type OptionValue = string | boolean | readonly string[];
+
+/** A negative number (`-1`, `-0.5`, `-300,0`) is a word: an option's name never starts with a digit. */
+const isWord = (token: string): boolean => !token.startsWith('-') || token === '-' || /^-\d/u.test(token);
 
 export function parseArgs(tokens: readonly string[]): VerbInvocation {
   const args: string[] = [];
@@ -31,7 +35,7 @@ export function parseArgs(tokens: readonly string[]): VerbInvocation {
       args.push(...tokens.slice(index + 1));
       break;
     }
-    if (!token.startsWith('-') || token === '-') {
+    if (isWord(token)) {
       args.push(token);
       continue;
     }
@@ -46,7 +50,7 @@ export function parseArgs(tokens: readonly string[]): VerbInvocation {
       continue;
     }
     const next = tokens[index + 1];
-    if (next !== undefined && (!next.startsWith('-') || next === '-')) {
+    if (next !== undefined && isWord(next)) {
       put(body, next);
       index += 1;
     } else put(body, true);
