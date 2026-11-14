@@ -11,6 +11,7 @@ import {
   signOutMcp,
   startMcpSignIn,
 } from '../../../app/lib/client.ts';
+import { ferretSummary } from '@ferretry/core-ferrets/contract/testing';
 import { type Call, CALLBACK, completion, MCP, mcpConnection, mcpFlow, scriptedClient } from './mcp-fixtures.ts';
 
 describe('the inventory reads', () => {
@@ -136,7 +137,14 @@ describe('the MCP sign-in client', () => {
 
 describe('mcp#1 the ferret reads, through Ferrets’ own routes', () => {
   // The daemon answers a whole summary; MCP keeps the five fields it uses and ignores the rest.
-  const summary = { id: 'f1', name: 'Marin', runtime: 'marin', state: 'idle', harness: 'claude-code', folder: '/w' };
+  const summary = ferretSummary({
+    id: 'f1',
+    name: 'Marin',
+    runtime: 'marin',
+    state: 'idle',
+    harness: 'claude-code',
+    folder: '/w',
+  });
 
   it('reads one ferret by id and the whole list, keeping only what MCP uses', async () => {
     const calls: Call[] = [];

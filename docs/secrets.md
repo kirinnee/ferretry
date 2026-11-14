@@ -380,10 +380,11 @@ admin token. In order:
   credential (measured on Codex 0.156.1, whose default strips neither); that name stays while Codex runs ferrets.
 - **The yaml log switches are cleared, and the daemon's workers are told so.** The `yaml` library prints every token it
   parses when `LOG_TOKENS` or `LOG_STREAM` is set, and a config text can hold a credential, so `fy`, `fyd` and the
-  converter delete both first. That deletion does not reach a Bun macro (it runs when a module is transpiled, so in
-  source runs), a `new Worker(url)` given no options object, or a default-env `Bun.spawn` child: those get the original
-  native environment. So the daemon always starts its workers with an options object (which carries the cleared
-  environment), and the macros that parse the shipped catalogs clear the switches themselves.
+  converter delete both first. That deletion does not reach a `new Worker(url)` given no options object or a
+  default-env `Bun.spawn` child: those get the original native environment. So the daemon always starts its workers
+  with an options object (which carries the cleared environment). The shipped model catalogs and endpoint presets are
+  parsed when Logins' `built-ins.json` is written, never in a running daemon, and the script that writes it clears the
+  switches itself (Bun macros, which also ran in an environment of their own, are refused by `no-macros`).
 - **Restart ferrets to wall them.** A running ferret's `fy` presents its credential at once, because its pane
   already carries one. Its MCP server is the `fy` it started with and keeps the admin token until the pane
   restarts (`fy restart --all`), and a pane launched before the prefix needs the same restart.

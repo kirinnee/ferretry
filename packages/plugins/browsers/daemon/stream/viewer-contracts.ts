@@ -54,3 +54,11 @@ export const VIEWER_CLOSE_NORMAL = 1000;
 export const VIEWER_CLOSE_POLICY = 1008;
 export const VIEWER_CLOSE_TOO_LARGE = 1009;
 export const VIEWER_CLOSE_INTERNAL = 1011;
+
+/** A viewer that may only watch tried to type: the host refuses the input and the stream ends on a policy close. */
+export class ViewerInputRefused extends Error {
+  constructor() {
+    super('this viewer may watch the page, not type into it');
+    this.name = 'ViewerInputRefused';
+  }
+}

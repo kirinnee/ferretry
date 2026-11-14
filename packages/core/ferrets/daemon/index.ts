@@ -1268,7 +1268,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       'GET /v1/ferrets/:ferretId': async call => {
         const id = await pathFerret(call);
         const summary = await service.get(id);
-        return jsonResponse(summary === undefined ? summary : await outdatedMarks.one(summary));
+        // `pathFerret` already refused an id the registry does not hold; a ferret gone in between is still a 404 with a
+        // sentence, never a 200 with no body.
+        if (summary === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
+        return jsonResponse(await outdatedMarks.one(summary));
       },
       'POST /v1/ferrets': async call => {
         await ready();

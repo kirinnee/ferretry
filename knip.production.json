@@ -123,6 +123,10 @@
       "entry": ["app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
+    "packages/plugins/logins": {
+      "entry": ["scripts/built-ins.ts"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
     "packages/plugins/packs": {
       "entry": ["app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}", "!tests/**"]
