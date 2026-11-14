@@ -127,6 +127,12 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
       reason: 'a build-time script the app build runs to write dist/catalog; it never runs inside a daemon',
     },
     {
+      pkg: 'logins',
+      folder: 'scripts/built-ins.ts',
+      reason:
+        'a developer-run generator that writes daemon/lib/built-ins.json from the shipped YAML (and its --check); it never runs inside a daemon',
+    },
+    {
       pkg: 'connections',
       folder: 'daemon/adapters/webrtc/node-datachannel-engine.ts',
       reason: 'the WebRTC native engine (node-datachannel), loaded below the carrier rather than through a port',

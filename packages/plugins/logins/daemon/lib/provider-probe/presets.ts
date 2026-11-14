@@ -9,8 +9,8 @@ import { catalogModelValue, type ModelCatalog } from '../catalog/schema.ts';
 import { type HarnessKind, harnessKey } from '../shared/harness.ts';
 import { type PresetTest, type ProviderPreset, presetHarnesses } from '../presets/schema.ts';
 import { presetCatalog } from '../presets/catalog.ts';
-// Parsed when this build is made, never at boot: `../built-ins.ts` says why.
-import { checkedBuiltInPresets } from '../built-ins.ts' with { type: 'macro' };
+// Parsed when `built-ins.json` is written, never at boot: `../built-ins.ts` says why.
+import { checkedBuiltInPresets } from '../built-ins.ts';
 import type { LoginAct, LoginTestAct, ProviderPresetCatalog, ProviderPresetView } from '../../../contract/index.ts';
 
 /** This machine's own preset files that check, by id: the configuration in effect. */
