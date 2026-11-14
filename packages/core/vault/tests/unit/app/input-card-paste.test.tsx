@@ -345,6 +345,92 @@ describe('the paste card’s layout and weight (secure-clip-1 fix1, P2-6, P3-10)
     }
   });
 
+  it('should show an amber could-not-check risk as a visible warning, not footer help (secure-clip-1 fix2, R2)', async () => {
+    const { mounted } = await card(
+      pasteRequest({
+        risk: {
+          level: 'amber',
+          reason: 'The ferret may have read this value on the page before it was sealed, so it may not be protected.',
+        },
+      }),
+    );
+    try {
+      const warning = q(mounted.container, '[data-input-warning]');
+      expect(warning.getAttribute('data-input-risk')).toBe('amber');
+      expect(warning.textContent).toContain('may not be protected');
+      expect(warning.className).toContain('border-warn');
+      expect(warning.className).not.toContain('text-muted');
+      expect(warning.getAttribute('role')).toBe('status');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('should keep a green or replace risk out of the warning treatment', async () => {
+    const replacing = await card(
+      pasteRequest({
+        target: { kind: 'secret', key: 'VERCEL_TOKEN' },
+        observed: { kind: 'secret', name: 'VERCEL_TOKEN', exists: true },
+        risk: {
+          level: 'amber',
+          reason: 'This replaces the value the secret holds now; the old value is gone for good.',
+        },
+      }),
+    );
+    try {
+      expect(replacing.mounted.container.querySelector('[data-input-warning]')).toBeNull();
+      expect(q(replacing.mounted.container, '[data-input-replace]')).not.toBeNull();
+    } finally {
+      await replacing.mounted.unmount();
+    }
+  });
+
+  it('should stop counting down once a takeover ended the paste, before any refresh arrives (secure-clip-1 fix2, R3)', async () => {
+    const { mounted } = await card(
+      pasteRequest({ target: { kind: 'page', key: 'app' }, observed: pageRequest().observed }),
+      async () => {
+        throw { status: 409, code: 'taken_over', message: 'A person has taken over that page.' };
+      },
+    );
+    try {
+      expect(q(mounted.container, '[data-input-expiry]').textContent).toContain('left');
+      await click(q(mounted.container, '[data-input-allow]'));
+      await settle();
+
+      expect(q(mounted.container, '[data-input-ended]')).not.toBeNull();
+      const header = q(mounted.container, '[data-input-expiry]').textContent ?? '';
+      expect(header).toBe('ended');
+      expect(header).not.toContain('left');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('should stop counting down when its copy is gone, and when the daemon already reports the request final', async () => {
+    const gone = await card(pasteRequest(), async () => {
+      throw {
+        status: 410,
+        code: 'gone',
+        message: 'sealed:vercel was discarded or expired, so there is nothing to paste',
+      };
+    });
+    try {
+      await click(q(gone.mounted.container, '[data-input-allow]'));
+      await settle();
+      expect(q(gone.mounted.container, '[data-input-expiry]').textContent).toBe('ended');
+    } finally {
+      await gone.mounted.unmount();
+    }
+    for (const state of ['refused', 'cancelled', 'delivered'] as const) {
+      const final = await card(pasteRequest({ state }));
+      try {
+        expect(q(final.mounted.container, '[data-input-expiry]').textContent).toBe('ended');
+      } finally {
+        await final.mounted.unmount();
+      }
+    }
+  });
+
   it('should read a takeover and a gone copy as final, and a changed target as retryable', () => {
     expect(inputFailure({ status: 409, code: 'taken_over', message: 'A person took it.' }, 'page')).toMatchObject({
       kind: 'ended',

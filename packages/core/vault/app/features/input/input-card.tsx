@@ -334,6 +334,8 @@ interface PasteSectionProps {
   readonly cancel: ReactNode;
   readonly onSettled: (words: string) => void;
   readonly onRefresh?: (() => void) | undefined;
+  /** The daemon ended the request for good here: the card's header stops counting down. */
+  readonly onEnded: () => void;
   /** A paste from here is on its way (`true`) or came back (`false`). */
   readonly onSending: (sending: boolean) => void;
 }
@@ -351,6 +353,7 @@ function SealedPasteSection({
   cancel,
   onSettled,
   onRefresh,
+  onEnded,
   onSending,
 }: PasteSectionProps) {
   const [sending, setSending] = useState(false);
@@ -386,7 +389,10 @@ function SealedPasteSection({
       const words = inputFailure(cause, request.target.kind);
       if (words.definitive) pending.current = null;
       setFailure(words.text);
-      if (words.kind === 'ended' || words.kind === 'gone') setEnded(true);
+      if (words.kind === 'ended' || words.kind === 'gone') {
+        setEnded(true);
+        onEnded();
+      }
       if (words.kind === 'changed' || words.kind === 'ended' || words.kind === 'gone') onRefresh?.();
     } finally {
       setSending(false);
@@ -476,6 +482,8 @@ export function InputCard({
   const now = useNow(fixedNow);
   const fields = fieldsOf(request);
   const [settled, setSettled] = useState<string | null>(null);
+  // The paste section ended the request (a takeover, a gone copy) before the refreshed request arrived.
+  const [pasteEnded, setPasteEnded] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -544,7 +552,12 @@ export function InputCard({
           </p>
         </div>
         <span className="shrink-0 whitespace-nowrap text-meta text-faint" data-input-expiry="">
-          {expiryWords(request.expiresAt, now)}
+          {/* No time left to count once the request is over, however it ended and before any refresh says so. */}
+          {settled !== null || pasteEnded || (request.state !== 'pending' && request.state !== 'delivering')
+            ? request.state === 'expired'
+              ? 'expired'
+              : 'ended'
+            : expiryWords(request.expiresAt, now)}
         </span>
       </header>
 
@@ -597,6 +610,17 @@ export function InputCard({
           <ShieldAlert aria-hidden="true" className="mt-0.5 shrink-0" size={16} />
           <span>{request.risk.reason}</span>
         </div>
+      ) : request.risk.level === 'amber' ? (
+        // The daemon could not promise the value was never seen: a warning the owner must be able to notice, never footer help.
+        <div
+          className="flex gap-2 rounded-control border border-warn bg-warn/10 p-3 text-ui font-semibold text-fg"
+          data-input-risk={request.risk.level}
+          data-input-warning=""
+          role="status"
+        >
+          <ShieldAlert aria-hidden="true" className="mt-0.5 shrink-0 text-warn" size={16} />
+          <span>{request.risk.reason}</span>
+        </div>
       ) : (
         <p className="m-0 text-cell text-muted" data-input-risk={request.risk.level}>
           {request.risk.reason}
@@ -627,6 +651,7 @@ export function InputCard({
             busy={cancelling}
             cancel={cancelButton}
             client={client}
+            onEnded={() => setPasteEnded(true)}
             onRefresh={onRefresh}
             onSending={setSending}
             onSettled={words => {
