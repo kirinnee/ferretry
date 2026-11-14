@@ -107,20 +107,32 @@ describe('the config writer over the kernel’s all-or-none write', () => {
     expect(keysOf(port, RUNTIME_ITEMS)).toEqual(['r']);
   });
 
-  it('patches the keys that moved, and removes a file the change drops', async () => {
+  it('patches the keys that moved', async () => {
+    const { port, configDirectory } = await world(BASE);
+    const writer = writeAllConfigWriter(port, configDirectory);
+
+    await writer.write([
+      { path: join(configDirectory, 'runtimes.yaml'), content: '', mode: 0o600, patch: { autoResume: false } },
+    ]);
+
+    expect(await readFile(join(configDirectory, 'runtimes.yaml'), 'utf8')).toContain('autoResume: false');
+  });
+
+  it('B01 holds a file the change drops (the file cannot see a login budget): none of the set is written and the runtime stays', async () => {
     const { port, configDirectory } = await world({
       ...BASE,
       'runtimes/gone.yaml': 'login: claude-you\nprofile: default\n',
     });
     const writer = writeAllConfigWriter(port, configDirectory);
 
-    await writer.write([
+    const act = writer.write([
       { path: join(configDirectory, 'runtimes.yaml'), content: '', mode: 0o600, patch: { autoResume: false } },
       { path: join(configDirectory, 'runtimes', 'gone.yaml'), content: '', mode: 0o600, remove: true },
     ]);
 
-    expect(await readFile(join(configDirectory, 'runtimes.yaml'), 'utf8')).toContain('autoResume: false');
-    expect(await readdir(join(configDirectory, 'runtimes'))).toEqual(['claude-default.yaml']);
+    await expect(act).rejects.toThrow(/a runtime is removed from login "claude-you".*held for the owner/su);
+    expect((await readdir(join(configDirectory, 'runtimes'))).toSorted()).toEqual(['claude-default.yaml', 'gone.yaml']);
+    expect(await readdir(configDirectory)).not.toContain('runtimes.yaml');
   });
 
   it('writes none of the set when one document moved since it was read', async () => {

@@ -174,13 +174,14 @@ describe('a catalogue read through the composed daemon', () => {
     expect(machine.json<{ error: string }>().error).toContain(UNAVAILABLE);
   });
 
-  it('answers a login that is not there as the files’ own problem, in a sentence naming the rule', async () => {
+  it('does not take the machine down for a runtime whose login is not there: that runtime is unavailable and not listed', async () => {
     const { host } = await compose({ logins: [] });
 
     const machine = await host.request('GET', '/v1/runtimes/machine');
 
-    expect(machine.status).toBeGreaterThanOrEqual(400);
-    expect(JSON.stringify(machine.json())).toContain('uses unknown credential');
+    expect(machine.status).toBe(200);
+    expect(JSON.stringify(machine.json())).not.toContain('uses unknown credential');
+    expect(JSON.stringify(machine.json())).not.toContain('claude-default');
   });
 });
 
