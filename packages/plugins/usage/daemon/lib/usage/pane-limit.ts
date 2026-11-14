@@ -96,3 +96,45 @@ export function limitedCredentials(
   }
   return byCredential;
 }
+
+/** What a live ferret's pane proves, as Ferrets reports it (`FerretsApi.paneLimits`): one row per limited ferret. */
+interface FerretPaneEvidence {
+  readonly login?: string | undefined;
+  readonly runtime?: string | undefined;
+  readonly notice: string;
+  readonly spend: boolean;
+  readonly retryAt?: number | undefined;
+}
+
+/** A login's limit, or a runtime's where its ferret recorded no login. */
+interface KeyedPaneLimit extends PaneLimit {
+  readonly login?: string;
+  readonly runtime?: string;
+}
+
+/**
+ * The limits live ferrets prove, one per login (a ferret with no recorded login is keyed by its runtime). Where several
+ * prove one, a limit with no reset time outranks a timed one (it holds as long as its ferret is limited) and among
+ * timed ones the latest reset wins; a limit whose reset has passed holds nothing.
+ */
+export function aggregatePaneLimits(rows: Iterable<FerretPaneEvidence>, nowMs: number): readonly KeyedPaneLimit[] {
+  const kept = new Map<string, KeyedPaneLimit>();
+  for (const row of rows) {
+    const key =
+      row.login !== undefined ? `login:${row.login}` : row.runtime !== undefined ? `runtime:${row.runtime}` : undefined;
+    if (key === undefined) continue;
+    const limit: KeyedPaneLimit = {
+      ...(row.login !== undefined ? { login: row.login } : { runtime: row.runtime as string }),
+      notice: row.notice,
+      spend: row.spend,
+      ...(row.retryAt === undefined ? {} : { retryAt: row.retryAt }),
+    };
+    if (!paneLimitHolds(limit, nowMs)) continue;
+    const before = kept.get(key);
+    const outranks =
+      before === undefined ||
+      (before.retryAt !== undefined && (limit.retryAt === undefined || limit.retryAt > before.retryAt));
+    if (outranks) kept.set(key, limit);
+  }
+  return [...kept.values()];
+}

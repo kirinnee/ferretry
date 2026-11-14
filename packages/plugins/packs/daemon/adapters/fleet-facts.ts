@@ -1,27 +1,33 @@
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
-import { RuntimeIdSchema, type RuntimesApi } from '@ferretry/plugin-runtimes/contract';
-import type { UsageApi, UsageFeedView } from '@ferretry/plugin-usage/contract';
+import { RuntimeIdSchema, type RuntimesApi, type RuntimeView } from '@ferretry/plugin-runtimes/contract';
+import type { PaneLimitView, UsageApi } from '@ferretry/plugin-usage/contract';
 import type { PackCredentialFacts, PaneLimit } from '../../contract/index.ts';
 import type { PackFleetFacts } from '../lib/recommend.ts';
 
 /**
- * The limits a ferret's pane proved, as Usage's feed carries them (`credentialUsageRows`): a row marked `spend_limit` is a
- * spend limit the provider only announces on a pane, and a row with a `retryAt` is a login a pane proved out of its usage
- * window until then. Only those two reach a feed row from a pane, so only those are read here; a window measured full is
- * judged from the login's own windows (`quotaOf`).
+ * The limits live panes prove, as Usage owns them (`UsageApi.paneLimits`), by the login each runtime spends: a limit is
+ * the login's whichever runtime's ferret hit it (v4's `limitedCredentials`). A ferret whose record names no login is
+ * known by its runtime, which the catalog maps to a login here.
  */
-function paneLimitsOf(feed: UsageFeedView): ReadonlyMap<string, PaneLimit> {
-  const limits = new Map<string, PaneLimit>();
-  for (const account of feed.accounts) {
-    const spend = account.unavailableReason === 'spend_limit';
-    if (!spend && account.retryAt === undefined) continue;
-    limits.set(account.agent, {
-      notice: spend ? 'spend limit reached' : 'usage limit reached',
-      spend,
-      ...(account.retryAt === undefined ? {} : { retryAt: account.retryAt }),
+function paneLimitsOf(
+  limits: readonly PaneLimitView[],
+  runtimes: readonly Pick<RuntimeView, 'name' | 'credential'>[],
+): ReadonlyMap<string, PaneLimit> {
+  const byCredential = new Map<string, PaneLimit>();
+  const add = (credential: string, limit: PaneLimitView): void => {
+    if (byCredential.has(credential)) return;
+    byCredential.set(credential, {
+      notice: limit.notice,
+      spend: limit.spend,
+      ...(limit.retryAt === undefined ? {} : { retryAt: limit.retryAt }),
     });
+  };
+  for (const limit of limits) if (limit.login !== undefined) add(limit.login, limit);
+  for (const runtime of runtimes) {
+    const limit = limits.find(candidate => candidate.login === undefined && candidate.runtime === runtime.name);
+    if (limit !== undefined) add(runtime.credential.id, limit);
   }
-  return limits;
+  return byCredential;
 }
 
 /**
@@ -35,7 +41,7 @@ export class FleetFacts {
   constructor(
     private readonly runtimes: () => RuntimesApi | undefined,
     private readonly logins: () => Pick<LoginsApi, 'list'> | undefined,
-    private readonly usage: () => Pick<UsageApi, 'feed'> | undefined,
+    private readonly usage: () => Pick<UsageApi, 'paneLimits'> | undefined,
     private readonly now: () => string,
   ) {}
 
@@ -43,16 +49,15 @@ export class FleetFacts {
     const runtimes = this.runtimes();
     const logins = this.logins();
     const usage = this.usage();
-    const [catalog, tools, credentials, paneLimits] = await Promise.all([
+    const [catalog, tools, credentials, panes] = await Promise.all([
       runtimes === undefined ? [] : runtimes.catalog(),
       runtimes === undefined ? [] : runtimes.tools(),
       logins === undefined
         ? ([] as readonly PackCredentialFacts[])
         : settle(async () => (await logins.list()).logins as readonly PackCredentialFacts[], []),
-      usage === undefined
-        ? new Map<string, PaneLimit>()
-        : settle(async () => paneLimitsOf(await usage.feed({ watched: false })), new Map<string, PaneLimit>()),
+      usage === undefined ? ([] as readonly PaneLimitView[]) : settle(async () => await usage.paneLimits(), []),
     ]);
+    const paneLimits = paneLimitsOf(panes, catalog);
     // The start's own resolution, per agent runtime: a runtime a start would refuse is not ready.
     const refusals =
       runtimes === undefined

@@ -301,8 +301,8 @@ describe('the start check and the fleet facts, from the Runtimes provider', () =
       }) as never,
   };
   const usage = {
-    feed: async () =>
-      ({ stale: false, accounts: [{ agent: 'main', atLimit: true, retryAt: 4_000_000_000_000 }] }) as never,
+    paneLimits: async () =>
+      [{ login: 'main', notice: 'limit reached', spend: false, retryAt: 4_000_000_000_000 }] as never,
   };
 
   it('should gather the catalog, tools, logins and pane limits, naming the runtimes a start would refuse', async () => {
@@ -336,7 +336,7 @@ describe('the start check and the fleet facts, from the Runtimes provider', () =
     should(facts.tools).deepEqual([{ name: 'claude', installed: true }]);
     should(facts.credentials.map(login => login.id)).deepEqual(['main']);
     should([...(facts.paneLimits?.entries() ?? [])]).deepEqual([
-      ['main', { notice: 'usage limit reached', spend: false, retryAt: 4_000_000_000_000 }],
+      ['main', { notice: 'limit reached', spend: false, retryAt: 4_000_000_000_000 }],
     ]);
     should(facts.now).equal('2026-10-18T08:00:00Z');
     should(facts.unlaunchable).deepEqual({
@@ -350,7 +350,7 @@ describe('the start check and the fleet facts, from the Runtimes provider', () =
       list: async (): Promise<never> => {
         throw new Error('logins are down');
       },
-      feed: async (): Promise<never> => {
+      paneLimits: async (): Promise<never> => {
         throw new Error('usage is down');
       },
     };
@@ -366,25 +366,31 @@ describe('the start check and the fleet facts, from the Runtimes provider', () =
     should(facts.paneLimits).deepEqual(new Map());
   });
 
-  it('should read a spend limit the feed marks as a spend limit, and ignore a row nothing proved by a pane', async () => {
+  it('should key a limit by the login a runtime spends: the login a ferret names, else the one its runtime maps to', async () => {
     const facts = await new FleetFacts(
-      () => runtimes(),
+      () =>
+        withCatalog(runtimes(), [
+          { ...(view('claude-main') as object), credential: { id: 'claude-login' } },
+          { ...(view('codex-main') as object), credential: { id: 'codex-login' } },
+        ]),
       () => undefined,
       () => ({
-        feed: async () =>
-          ({
-            stale: false,
-            accounts: [
-              { agent: 'spent', atLimit: true, unavailableReason: 'spend_limit' },
-              { agent: 'plain', fiveHourPercent: 100, atLimit: true },
-            ],
-          }) as never,
+        paneLimits: async () =>
+          [
+            // No reset time, not a spend limit: held for as long as the ferret is limited.
+            { login: 'claude-login', notice: 'usage limit', spend: false },
+            // A ferret that recorded no login is known by its runtime.
+            { runtime: 'codex-main', notice: 'spend limit', spend: true },
+            // A runtime nothing here runs on proves nothing here.
+            { runtime: 'elsewhere', notice: 'x', spend: false },
+          ] as never,
       }),
       () => '2026-10-18T08:00:00Z',
     ).facts();
 
     should([...(facts.paneLimits?.entries() ?? [])]).deepEqual([
-      ['spent', { notice: 'spend limit reached', spend: true }],
+      ['claude-login', { notice: 'usage limit', spend: false }],
+      ['codex-login', { notice: 'spend limit', spend: true }],
     ]);
   });
 

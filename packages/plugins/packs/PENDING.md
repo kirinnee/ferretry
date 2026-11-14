@@ -30,9 +30,11 @@ Each line names the seam it waits on and who owns it. Nothing here is stood in f
   Conversation read; until then the newest dated sitrep line is used, masked whole before it is cut.
 - **`POST /v1/recommend`** (R-0321, the account recommender) is still declared by Runtimes at that path; the placement
   lists it with Packs. V-0260/V-0261 (`fy fleet`, `fy fleet recommend`) have no verb here. Both are the lead's to settle.
-- **Pane limits** are read from Usage's feed: a row marked `spend_limit`, or one carrying a `retryAt` (the only two a pane
-  puts there). `UsageApi` has no pane-limit read of its own, so a non-spend pane limit with no reset time reads as
-  the login's own windows say. A Usage or Logins that fails to answer reads as nothing known (quota `unknown`).
+- **Pane limits** (the logins live panes prove spent) are Usage's own read, `UsageApi.paneLimits()`, which aggregates what
+  Ferrets reports from live session documents (`FerretsApi.paneLimits`, derived on every call, kept nowhere): each carries
+  presence, the harness sentence, spend and the optional reset time, so a non-spend limit with no reset time holds until its
+  ferret is released or stops. A ferret that records no login is known by its runtime and mapped to a login here. A Usage,
+  Ferrets or Logins that fails to answer reads as nothing known (quota `unknown`).
 
 ## CLI
 

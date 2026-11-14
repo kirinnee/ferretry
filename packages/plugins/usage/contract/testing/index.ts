@@ -51,6 +51,7 @@ export function fakeUsage(options: { readonly paused?: readonly LoginPause[] } =
   return {
     headroomPercent: async () => undefined,
     feed: async (): Promise<UsageFeedView> => ({ stale: true, accounts: [] }),
+    paneLimits: async () => [],
     pauses: () => paused,
     pauseOf: login => paused.find(entry => entry.login === login),
     budgets: async () => ({ budgets: [] }),
