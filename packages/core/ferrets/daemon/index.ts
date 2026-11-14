@@ -1205,7 +1205,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
 
   return {
     provides: {
-      ferrets: perNeeder(needer => ferretsPort(service, needer.id)),
+      ferrets: perNeeder(needer => ({
+        ...ferretsPort(service, needer.id),
+        lastAutoResume: async () => await autoResume.summary.read(),
+      })),
       workFolders,
       agentControl: agentControlReader(ferret => service.agentControl(ferret)),
     },

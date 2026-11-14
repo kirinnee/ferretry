@@ -220,3 +220,46 @@ describe('board daemon half', () => {
     expect(host.jobIds()).toEqual(expect.arrayContaining(['board-sweep', 'board-gates', 'board-github-watch']));
   });
 });
+
+describe('the sitrep a lead reads a card from', () => {
+  type CardLine = { kind: string; ref?: string; lane?: string; pr?: Record<string, unknown> };
+  const linesOf = async (world: Awaited<ReturnType<typeof boot>>, ferret: string): Promise<CardLine[]> => {
+    const [board] = world.contribution('sitrep.lines') as { item: { lines(ferret: string): Promise<CardLine[]> } }[];
+    return await (board as NonNullable<typeof board>).item.lines(ferret);
+  };
+
+  test('a card line names the lane the card sits in, and says nothing of a PR it does not have', async () => {
+    const world = await boot();
+    const card = await makeCard(world.host, { assignee: 'f1' });
+
+    const [line] = await linesOf(world, 'f1');
+
+    expect(line).toMatchObject({ kind: 'card', ref: `&${card.id}` });
+    expect(typeof line?.lane).toBe('string');
+    expect(line?.lane).not.toBe('');
+    expect(line?.pr).toBeUndefined();
+  });
+
+  test('a card line carries the card’s PR as its board last read it, the newest live one', async () => {
+    const world = await boot();
+    const card = await makeCard(world.host, { assignee: 'f1' });
+    for (const number of [940, 941]) {
+      const linked = await world.host.request('POST', `/v1/board/cards/${card.id}`, {
+        body: { action: 'link', pr: `https://github.com/kirinnee/ferretry/pull/${String(number)}` },
+        headers: as('owner'),
+      });
+      expect(linked.status).toBe(200);
+    }
+
+    const [line] = await linesOf(world, 'f1');
+
+    // A PR nobody has polled yet is `unknown`: still live, so the newest live one (941) is the one shown.
+    expect(line?.pr).toEqual({
+      number: 941,
+      url: 'https://github.com/kirinnee/ferretry/pull/941',
+      state: 'unknown',
+      draft: false,
+      checks: 'none',
+    });
+  });
+});

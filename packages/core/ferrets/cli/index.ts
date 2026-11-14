@@ -105,7 +105,9 @@ function refuseElsewhere(invocation: VerbInvocation, names: readonly string[], v
 export default implementCli(manifest, {
   build({ client, io: terminal, env, clock, sleep, exists, readText, readBytes }) {
     const api = new ClientSessionApi(client);
-    const environment: SessionEnvironment = { cwd: process.cwd() };
+    // The folder `fy` was typed in: the shell hands it as `PWD` (its real working directory, never a parent's stale
+    // variable), so a start from work/alpha begins in work/alpha, as today.
+    const environment: SessionEnvironment = { cwd: env?.PWD ?? process.cwd() };
 
     const verb =
       (work: (invocation: VerbInvocation, presenter: SessionPresenter, io: VerbIo) => Promise<void>) =>
@@ -133,9 +135,13 @@ export default implementCli(manifest, {
     });
 
     const status = verb(async (invocation, presenter) => {
-      const [id] = invocation.args;
-      if (on(invocation, 'subtree'))
-        return await new SessionSubtreeController(api, presenter, environment).execute(id, json(invocation));
+      // The shell cannot know `--subtree` is a switch, so `status --subtree wren` arrives as the option VALUE `wren`
+      // (v4 took the id as the positional): either spelling names the ferret.
+      const spaced = text(invocation, 'subtree');
+      const named = spaced === undefined || spaced === 'true' || spaced === 'false' ? undefined : spaced;
+      const subtree = on(invocation, 'subtree') || named !== undefined;
+      const id = invocation.args[0] ?? named;
+      if (subtree) return await new SessionSubtreeController(api, presenter, environment).execute(id, json(invocation));
       if (id === undefined)
         throw new SessionCommandError('missing the ferret id: status <id>, or status --subtree <id>');
       await new SessionStatusController(api, presenter).execute(id, json(invocation));

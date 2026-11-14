@@ -146,7 +146,12 @@ function excerptEligible(members: readonly SubtreeMember[], limits: SubtreeLimit
   return new Set([...liveChosen, ...endedChosen]);
 }
 
-function rowOf(member: SubtreeMember, last: SubtreeRow['last']): SubtreeRow {
+/** The card line a plugin added (the Board's), whose reference, lane and PR the table shows. */
+function cardLine(lines: readonly SitrepLine[]): SitrepLine | undefined {
+  return lines.find(line => line.kind === 'card' && line.ref !== undefined);
+}
+
+function rowOf(member: SubtreeMember, last: SubtreeRow['last'], card: SitrepLine | undefined): SubtreeRow {
   const { ferret, depth } = member;
   const state = subtreeStateOf(ferret);
   return {
@@ -154,8 +159,13 @@ function rowOf(member: SubtreeMember, last: SubtreeRow['last']): SubtreeRow {
     name: ferret.name,
     ...(ferret.parent === undefined ? {} : { parent: ferret.parent }),
     depth,
+    model: ferret.model ?? 'default',
     state,
     ferretState: ferret.state,
+    ...(card?.ref === undefined
+      ? {}
+      : { card: { ref: card.ref, ...(card.lane === undefined ? {} : { lane: card.lane }) } }),
+    ...(card?.pr === undefined ? {} : { pr: card.pr }),
     ...(last === undefined ? {} : { last }),
     ...(state === 'ended' ? { endedAt: ferret.stateAt } : {}),
   };
@@ -178,21 +188,24 @@ export class SubtreeService {
     const order = [...eligible];
     const found = await mapBounded(order, this.limits.concurrency, async index => {
       try {
-        return newestLine(await this.ports.lines((members[index] as SubtreeMember).ferret.id));
+        const lines = await this.ports.lines((members[index] as SubtreeMember).ferret.id);
+        return { newest: newestLine(lines), card: cardLine(lines) };
       } catch {
         return undefined;
       }
     });
     const candidates: (SitrepLine | undefined)[] = members.map(() => undefined);
+    const cards: (SitrepLine | undefined)[] = members.map(() => undefined);
     order.forEach((index, position) => {
-      candidates[index] = found[position];
+      candidates[index] = found[position]?.newest;
+      cards[index] = found[position]?.card;
     });
     const lasts = await this.excerpts(candidates);
     return {
       root: { id: rootFerret.id, name: rootFerret.name },
       at: instantFromEpochMs(nowMs),
       endedWindowMs: SUBTREE_ENDED_WINDOW_MS,
-      rows: members.map((member, index) => rowOf(member, lasts[index])),
+      rows: members.map((member, index) => rowOf(member, lasts[index], cards[index])),
     };
   }
 

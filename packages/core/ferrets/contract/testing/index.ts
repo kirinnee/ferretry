@@ -57,6 +57,7 @@ import {
   type Started,
 } from '../kinds.ts';
 import type {
+  AutoResumeReport,
   FerretPrompt,
   FerretsApi,
   ManagedWorktreeSummary,
@@ -845,6 +846,14 @@ export class FakeFerrets implements FerretsApi {
   async agentControl(ferret: FerretId): Promise<AgentControl> {
     if (!this.#ferrets.has(ferret)) return NO_AGENT_CONTROL;
     return { ...DEFAULT_AGENT_CONTROL, ...this.#controls.get(ferret) };
+  }
+  #autoResume: AutoResumeReport | null = null;
+  /** TEST ONLY: what the last auto-resume pass did, as the Machine view reads it; `null` (the default) is no pass yet. */
+  setLastAutoResume(report: AutoResumeReport | null): void {
+    this.#autoResume = report;
+  }
+  async lastAutoResume(): Promise<AutoResumeReport | null> {
+    return this.#autoResume;
   }
   readonly #turns = new Map<FerretId, readonly TurnUsage[]>();
   /** TEST ONLY: the turns one ferret's harness reports; a ferret with none planted reads as spending nothing. */

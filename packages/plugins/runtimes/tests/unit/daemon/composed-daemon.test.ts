@@ -17,6 +17,7 @@ import { type DaemonImplementation, definePlugin, type HookInvoker, implementDae
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { LoginPaused, LoginResumed } from '@ferretry/plugin-usage/contract';
+import type { Instant } from '@ferretry/std';
 import type { KernelPorts } from '@ferretry/kernel/contract';
 import { PROFILE_ITEMS, RuntimeHomeUnreadable, RuntimesPort } from '../../../contract/index.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
@@ -51,6 +52,7 @@ async function compose(
     readonly config?: Record<string, unknown>;
     readonly logins?: ReturnType<typeof sampleLogin>[];
     readonly executables?: readonly string[];
+    readonly ferrets?: FakeFerrets;
   } = {},
 ): Promise<Composed> {
   const world = await fleetWorld();
@@ -60,7 +62,7 @@ async function compose(
   const host = await testHost({
     plugins: [runtimesDaemon(real) as DaemonImplementation<any>],
     fakes: {
-      ferrets: new FakeFerrets(),
+      ferrets: options.ferrets ?? new FakeFerrets(),
       logins: fakeLogins(options.logins ?? [sampleLogin('claude-you', { store: 'ferretry' })]),
       loginChanges: fakeLoginChanges(),
     },
@@ -129,6 +131,34 @@ describe('a catalogue read through the composed daemon', () => {
     expect(JSON.stringify(runtimes.json())).toContain('claude-default');
     expect(profiles.status).toBe(200);
     expect(JSON.stringify(profiles.json())).toContain('modelSets/heavy');
+  });
+
+  it('names the machine by the daemon’s own name and carries what the last auto-resume pass did', async () => {
+    const ferrets = new FakeFerrets();
+    const none = await compose({ ferrets });
+    const before = (await none.host.request('GET', '/v1/runtimes/machine')).json<{
+      name: string;
+      lastAutoResume: unknown;
+    }>();
+    ferrets.setLastAutoResume({
+      at: '2027-01-15T08:00:00.000Z' as Instant,
+      resumed: 2,
+      skipped: [{ sessionId: 'ses-9', reason: 'its login needs sign-in' }],
+    });
+    const after = (await none.host.request('GET', '/v1/runtimes/machine')).json<{
+      name: string;
+      lastAutoResume: unknown;
+    }>();
+
+    // `fy machine` printed "this machine" and no restart line, whatever the host was called or had done.
+    expect(before.name).not.toBe('this machine');
+    expect(before.lastAutoResume).toBeNull();
+    expect(after.name).toBe(before.name);
+    expect(after.lastAutoResume).toEqual({
+      at: '2027-01-15T08:00:00.000Z',
+      resumed: 2,
+      skipped: [{ sessionId: 'ses-9', reason: 'its login needs sign-in' }],
+    });
   });
 
   it('answers in a sentence, not a stack, when the composition falls back to the unavailable assembly (fail closed)', async () => {

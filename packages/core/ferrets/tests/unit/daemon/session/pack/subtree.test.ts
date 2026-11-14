@@ -129,6 +129,31 @@ describe('the subtree table', () => {
     ]);
   });
 
+  it('should show the model it runs, and the card, lane and PR its card line carries', async () => {
+    const registry = new FerretRegistry([
+      ferret('root'),
+      ferret('a', { parent: 'root' }),
+      ferret('b', { parent: 'root' }),
+    ]);
+    const pr = {
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      state: 'open',
+      draft: false,
+      checks: 'pending',
+    } as const;
+    const view = await new SubtreeService(
+      registry,
+      ports({ a: [{ kind: 'card', text: 'Fix it', ref: '&F7', lane: 'Implement', pr }] }),
+    ).view('root' as FerretId);
+    const [a, b] = view?.rows ?? [];
+    // A ferret that named no model runs the default; a card line adds its reference, its lane and its PR (and no excerpt).
+    expect(a).toMatchObject({ id: 'a', model: 'default', card: { ref: '&F7', lane: 'Implement' }, pr });
+    expect(a?.last).toBeUndefined();
+    expect(b?.card).toBeUndefined();
+    expect(b?.pr).toBeUndefined();
+  });
+
   it('should answer undefined for a ferret the registry does not hold', async () => {
     expect(await new SubtreeService(new FerretRegistry(), ports({})).view('nobody' as FerretId)).toBeUndefined();
   });

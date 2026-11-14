@@ -26,6 +26,7 @@ function run(
   fail?: Error,
   exists?: NonNullable<CliContext<Manifest>['exists']>,
   readText?: NonNullable<CliContext<Manifest>['readText']>,
+  env?: NonNullable<CliContext<Manifest>['env']>,
 ) {
   const calls: Call[] = [];
   const out: string[] = [];
@@ -42,13 +43,14 @@ function run(
   const half = cli.build?.({
     manifest,
     client,
-    io: { out: t => out.push(t), err: t => err.push(t), isTty: false },
+    io: { out: t => out.push(t.replace(/\n$/u, '')), err: t => err.push(t.replace(/\n$/u, '')), isTty: false },
     clock: { now: () => '2026-11-06T09:00:00.000Z' as never, nowMs: () => time },
     sleep: async delay => {
       time += Number(delay);
     },
     ...(exists === undefined ? {} : { exists }),
     ...(readText === undefined ? {} : { readText }),
+    ...(env === undefined ? {} : { env }),
   });
   if (half === undefined) throw new Error('the cli half is real');
   const verbs = half.verbs as Readonly<Record<string, (invocation: VerbInvocation) => Promise<number>>>;
@@ -92,6 +94,16 @@ describe('the ferrets cli half', () => {
     expect(calls).toEqual([{ route: 'GET /v1/ferrets/:ferretId', init: { params: { ferretId: 'wren' } } }]);
     expect(await verb('status [id]')).toBe(2);
     expect(err.at(-1)).toContain('status <id>');
+  });
+
+  test('row 51 start from a nested folder begins the ferret in THAT folder, and --cwd is read against it', async () => {
+    const answers = { [FERRET_ROUTES.start]: { id: 'lead' }, [FERRET_ROUTES.get]: ferret };
+    const nested = run(answers, undefined, undefined, undefined, { PWD: '/home/me/work/alpha' });
+    expect(await nested.verb('start [prompt...]', ['go'])).toBe(0);
+    expect(sentBody(nested.calls[0])?.folder).toBe('/home/me/work/alpha');
+    const relative = run(answers, undefined, undefined, undefined, { PWD: '/home/me/work/alpha' });
+    expect(await relative.verb('start [prompt...]', ['go'], { cwd: '../beta' })).toBe(0);
+    expect(sentBody(relative.calls[0])?.folder).toBe('/home/me/work/beta');
   });
 
   test('V-0443 start posts the body Ferrets start takes and refuses, by name, a flag another plugin decides now', async () => {
@@ -395,7 +407,11 @@ describe('the ferrets cli half', () => {
           : { status: 304, etag: '"t1"' };
       },
     };
-    const half = cli.build?.({ manifest, client, io: { out: t => out.push(t), err: () => undefined, isTty: false } });
+    const half = cli.build?.({
+      manifest,
+      client,
+      io: { out: t => out.push(t.replace(/\n$/u, '')), err: () => undefined, isTty: false },
+    });
     const ps = ((half?.verbs ?? {}) as Readonly<Record<string, (invocation: VerbInvocation) => Promise<number>>>).ps;
     if (ps === undefined) throw new Error('ps is implemented');
     expect(await ps({ args: [], options: {} })).toBe(0);

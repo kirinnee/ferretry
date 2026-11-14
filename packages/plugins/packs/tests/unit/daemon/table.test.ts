@@ -120,13 +120,23 @@ describe('readPackTable', () => {
   it('should build rows a reader can parse: state, card, newest line and when it ended', async () => {
     // Arrange
     const ferrets = [
-      ferret('w', { parent: 'lead' as FerretSummary['id'], runtime: 'claude-main' as FerretSummary['runtime'] }),
+      ferret('w', {
+        parent: 'lead' as FerretSummary['id'],
+        runtime: 'claude-main' as FerretSummary['runtime'],
+        model: 'opus-5.5',
+      }),
       ferret('i', { parent: 'lead' as FerretSummary['id'], state: 'idle' }),
       ferret('e', { parent: 'lead' as FerretSummary['id'], state: 'stopped', stateAt: at(5) }),
     ];
     const lines = {
       w: [
-        { kind: 'card', text: 'Fix the bug', ref: '&F7' },
+        {
+          kind: 'card',
+          text: 'Fix the bug',
+          ref: '&F7',
+          lane: 'Implement',
+          pr: { number: 42, url: 'https://github.com/o/r/pull/42', state: 'open', draft: false, checks: 'passing' },
+        },
         { kind: 'doing', text: 'running tests\nsecond line', at: at(3) },
         { kind: 'note', text: 'halfway', at: at(3) },
       ] satisfies SitrepLine[],
@@ -140,10 +150,19 @@ describe('readPackTable', () => {
     should(table.root).deepEqual({ id: 'lead', name: 'lead' });
     should(table.at).equal(new Date(NOW).toISOString());
     const [e, i, w] = table.rows;
-    should(w).containEql({ id: 'w', model: 'claude-main', state: 'running', depth: 1, card: { ref: '&F7' } });
+    // The MODEL column is the model it runs, never its runtime; the PR and the card's lane come from the card line.
+    should(w).containEql({
+      id: 'w',
+      model: 'opus-5.5',
+      state: 'running',
+      depth: 1,
+      card: { ref: '&F7', lane: 'Implement' },
+      pr: { number: 42, url: 'https://github.com/o/r/pull/42', state: 'open', draft: false, checks: 'passing' },
+    });
     should(w?.last).deepEqual({ at: at(3), source: 'note', text: 'halfway' });
     should(i?.state).equal('needs-you');
-    should(i?.model).equal('claude-code');
+    should(i?.model).equal('default');
+    should(i?.pr).be.undefined();
     should(e).containEql({ state: 'ended', endedAt: at(5), ferretState: 'stopped' });
   });
 

@@ -46,7 +46,11 @@ function run(world: World = {}) {
   const half = cli.build?.({
     manifest,
     client,
-    io: { out: text => out.push(text), err: text => err.push(text), isTty: false },
+    io: {
+      out: text => out.push(text.replace(/\n$/u, '')),
+      err: text => err.push(text.replace(/\n$/u, '')),
+      isTty: false,
+    },
     clock: { now: () => '2026-11-06T09:00:00.000Z' as never, nowMs: () => time },
     sleep: async delay => {
       time += Number(delay);
@@ -243,21 +247,24 @@ describe('commands parity', () => {
       const json = run({ answers: { [FERRET_ROUTES.get]: lead } });
       expect(await json.verb('status [id]', ['wren'], { json: true })).toBe(0);
       expect(JSON.parse(json.out.join('\n'))).toMatchObject({ id: 'lead', name: 'wren' });
-      const tree = run({
-        answers: {
-          [FERRET_ROUTES.subtree]: {
-            root: { id: 'lead', name: 'wren' },
-            at: '2026-11-06T09:00:00.000Z',
-            endedWindowMs: 7_200_000,
-            rows: [{ id: 'mid', parent: 'lead', name: 'fern', depth: 1, state: 'running', ferretState: 'working' }],
-          },
-        },
-      });
+      const subtreeView = {
+        root: { id: 'lead', name: 'wren' },
+        at: '2026-11-06T09:00:00.000Z',
+        endedWindowMs: 7_200_000,
+        rows: [{ id: 'mid', parent: 'lead', name: 'fern', depth: 1, state: 'running', ferretState: 'working' }],
+      };
+      const tree = run({ answers: { [FERRET_ROUTES.subtree]: subtreeView } });
       expect(await tree.verb('status [id]', ['wren'], { subtree: true })).toBe(0);
       expect(tree.calls).toEqual([
         { route: 'GET /v1/ferrets/:ferretId/subtree', init: { params: { ferretId: 'wren' } } },
       ]);
       expect(tree.out.join('\n')).toContain('fern');
+      // The shell cannot know `--subtree` is a switch, so `fy status --subtree wren` arrives as the option VALUE `wren`.
+      const spaced = run({ answers: { [FERRET_ROUTES.subtree]: subtreeView } });
+      expect(await spaced.verb('status [id]', [], { subtree: 'wren' })).toBe(0);
+      expect(spaced.calls).toEqual([
+        { route: 'GET /v1/ferrets/:ferretId/subtree', init: { params: { ferretId: 'wren' } } },
+      ]);
       const none = run();
       expect(await none.verb('status [id]')).toBe(2);
       expect(none.err.join('\n')).toContain('status <id>');
