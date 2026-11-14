@@ -63,7 +63,11 @@ describe('parseArgs swallowed words', () => {
   });
 
   it('should leave the field out when no option took a word, so the result is what it always was', () => {
-    should(parseArgs(['c1', '--force', '--to=done'])).deepEqual({ args: ['c1'], options: { force: true, to: 'done' } });
+    should(parseArgs(['c1', '--force', '--to=done'])).deepEqual({
+      args: ['c1'],
+      options: { force: true, to: 'done' },
+      raw: ['c1', '--force', '--to=done'],
+    });
   });
 });
 

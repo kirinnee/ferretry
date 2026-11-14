@@ -385,7 +385,7 @@ const requests = async () =>
     requests: { id: string; state: string; reason?: string }[];
   }>().requests;
 const takeOver = async (key: string) => {
-  const taken = await host.request('POST', `/v1/sessions/${FERRET}/surfaces/browser/control`, {
+  const taken = await host.request('POST', `/v1/ferrets/${FERRET}/surfaces/browser/control`, {
     body: { action: 'takeover', key },
   });
   should(taken.status).equal(200);
@@ -608,7 +608,7 @@ describe('the secure-copy pipeline, on real processes and a real Chrome', () => 
   }, 120_000);
 
   describe('what a sealed value’s page still says, through every other channel (secure-clip-2 fix1)', () => {
-    const route = `/v1/sessions/${FERRET}/browser`;
+    const route = `/v1/ferrets/${FERRET}/browser`;
     const asAgent = { as: ferret(FERRET) };
     const localhost = () => base.replace('127.0.0.1', 'localhost');
 
@@ -780,9 +780,9 @@ describe('the secure-copy pipeline, on real processes and a real Chrome', () => 
     for (const answer of [await tool('browser_list', {}), await tool('browser_tabs', { action: 'list' })])
       for (const form of forms(SENTINEL)) should(JSON.stringify(answer)).not.containEql(form);
     // The HTTP status and an agent's own picture of the viewed page, through the route an agent credential can reach.
-    const status = await host.request('GET', `/v1/sessions/${FERRET}/browser`, { as: ferret(FERRET) });
+    const status = await host.request('GET', `/v1/ferrets/${FERRET}/browser`, { as: ferret(FERRET) });
     said.push(status.body);
-    const picture = await host.request('POST', `/v1/sessions/${FERRET}/browser`, {
+    const picture = await host.request('POST', `/v1/ferrets/${FERRET}/browser`, {
       body: { action: 'screenshot' },
       as: ferret(FERRET),
     });

@@ -107,9 +107,9 @@ describe('every surface of the browsers plugin returns an address through the on
     if (page === undefined) throw new Error('the page should be open');
     page.pageState = 'error';
     world.tabs.pageError = `page.goto: failed at ${PAIRING_URL}`;
-    await world.host.request('POST', '/v1/sessions/f1/browser', { body: { action: 'activate-page', pageId: 'p1' } });
+    await world.host.request('POST', '/v1/ferrets/f1/browser', { body: { action: 'activate-page', pageId: 'p1' } });
 
-    const status = await world.host.request('GET', '/v1/sessions/f1/browser');
+    const status = await world.host.request('GET', '/v1/ferrets/f1/browser');
 
     expect(status.status).toBe(200);
     expect(status.body).not.toContain(FAKE_CODE);
@@ -128,9 +128,9 @@ describe('every surface of the browsers plugin returns an address through the on
   test('the owner’s action route answers a navigation with the address hidden', async () => {
     const world = await boot();
     await world.host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, agent);
-    await world.host.request('POST', '/v1/sessions/f1/browser', { body: { action: 'activate-page', pageId: 'p1' } });
+    await world.host.request('POST', '/v1/ferrets/f1/browser', { body: { action: 'activate-page', pageId: 'p1' } });
 
-    const acted = await world.host.request('POST', '/v1/sessions/f1/browser', {
+    const acted = await world.host.request('POST', '/v1/ferrets/f1/browser', {
       body: { action: 'navigate', url: PAIRING_URL },
     });
 
@@ -174,7 +174,7 @@ describe('every surface of the browsers plugin returns an address through the on
       await world.host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, agent);
       setPage(world.tabs, PAIRING_URL, `Pair ${FAKE_FRAGMENT}`);
 
-      const answer = await world.host.request('POST', '/v1/sessions/f1/browser', { body: { action } });
+      const answer = await world.host.request('POST', '/v1/ferrets/f1/browser', { body: { action } });
 
       expect(answer.status).toBe(200);
       expect(answer.body).not.toContain(FAKE_CODE);
@@ -190,7 +190,7 @@ describe('every surface of the browsers plugin returns an address through the on
   test('the owner’s error answers (a launch that failed at the address) never carry the fragment, and keep status and code', async () => {
     const world = await boot(`worker failed at ${PAIRING_URL}`);
 
-    const started = await world.host.request('POST', '/v1/sessions/f1/browser', { body: { action: 'start' } });
+    const started = await world.host.request('POST', '/v1/ferrets/f1/browser', { body: { action: 'start' } });
 
     expect(started.status).toBe(503);
     expect(started.body).not.toContain(FAKE_CODE);
