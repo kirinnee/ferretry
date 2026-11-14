@@ -55,6 +55,23 @@ export const OWNER_MOVED_ITEMS: readonly { readonly id: string; readonly decisio
     id: 'v4-doctor-checks',
     decision: 'lizzette 2026-11-13: the v4 doctor checks and readiness move after merge (card &F3715); tmux is in 5.0',
   },
+  {
+    id: 'app-component-editing',
+    decision: '!A510 (owner 2026-11-13): component editing in the app moves after merge; the CLI way stays before',
+  },
+  {
+    id: 'fy-ask-archive-paging',
+    decision: 'lizzette 2026-11-13: fy ask past 500 archived ferrets moves after merge (not parity, fails loudly)',
+  },
+  {
+    id: 'fy-browser-firewall-entry',
+    decision: 'lizzette 2026-11-13: fy browser firewall entry stays a declared gap after merge (no 5.0 route)',
+  },
+  {
+    id: 'contract-hooks-restore',
+    decision:
+      'lizzette 2026-11-13: the four contract hooks stay out of 5.0 hook config; card &C57 restores 5.0 versions after merge',
+  },
 ];
 
 export const COUNT_NAMES = ['parityOpen', 'portsPendingLines', 'guaranteesMissing'] as const;

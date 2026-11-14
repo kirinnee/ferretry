@@ -213,7 +213,7 @@ A control request is `{ action: 'takeover' | 'handback' | 'handover', key }` and
 
 Control changes are published on the session's journal, so `/v1/events` streams them:
 `surface.driving` (`SurfaceDrivingSchema`, carrying `until` — show the marker while `now < until`, and
-`incognito` for an incognito page), `surface.takeover`, `surface.handback`, `surface.handed`,
+`incognito` for an incognito page), `surface.takeover`, `surface.handback` (with `closed: true` when the page itself closed, which ends every mark on it), `surface.handed`,
 `surface.opened` (`SurfaceOpenedSchema`) and `surface.asked` (`SurfaceAskedSchema`). The daemon replays its
 journal on start, so a takeover, a hand-over, an open or an ask outlives a restart.
 

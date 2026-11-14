@@ -1255,7 +1255,10 @@ export function buildConversationA(deps: {
     ),
     ...sessionAnswerRoutes({ question: askedQuestion, answer: answerQuestion }),
     ...sessionCompactAtRoutes({ get: async () => pending(), set: async () => pending() }),
-    ...sessionHypermediaRoutes({ set: async (ferret, enabled) => await hypermedia.set(ferret, enabled) }),
+    ...sessionHypermediaRoutes({
+      read: async ferret => await hypermedia.read(ferret),
+      set: async (ferret, enabled) => await hypermedia.set(ferret, enabled),
+    }),
     ...sharedDraftRoutes(drafts),
   ];
   const sockets = sharedDraftSocketRoutes(drafts, {

@@ -14,7 +14,7 @@
  * memory never serves text from before a mask change.
  */
 
-import { type FerretView, FerretViewSchema } from '@ferretry/core-ferrets/contract';
+import { FerretSummarySchema } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
   AskedQuestionViewSchema,
@@ -30,6 +30,7 @@ import {
 } from '../../contract/index.ts';
 import { readFerretQueue } from '../queue/send-queue.ts';
 import type { ChatReadApi } from './chat-refresh.ts';
+import { type ChatSession, chatSessionOf } from './chat-session.ts';
 import { readLedgerSends } from './send-ledger.ts';
 
 /** How many transcript reads keep their validator. A few open chats each; past that the oldest re-reads whole. */
@@ -124,9 +125,12 @@ export const readLogPage = async (
   return page;
 };
 
-/** The ferret's view; the refresh checks it is the ferret it asked for. */
-const readFerretView = async (client: Pick<PluginClient, 'call'>, ferretId: string): Promise<FerretView> =>
-  FerretViewSchema.parse(await client.call('GET /v1/ferrets/:ferretId', { params: { ferretId } }));
+/**
+ * The ferret, as the chat draws it; the refresh checks it is the ferret it asked for. Parsed with the schema of what
+ * Ferrets' route SERVES (its summary), never today's whole session view, which no 5.0 route answers (`chat-session.ts`).
+ */
+const readChatSession = async (client: Pick<PluginClient, 'call'>, ferretId: string): Promise<ChatSession> =>
+  chatSessionOf(FerretSummarySchema.parse(await client.call('GET /v1/ferrets/:ferretId', { params: { ferretId } })));
 
 /** The question the ferret is waiting on, as Conversation proved it against the transcript, or null. */
 export const readQuestion = async (client: Pick<PluginClient, 'call'>, ferretId: string): Promise<Question | null> =>
@@ -177,7 +181,7 @@ export const submitSend = async (
 
 /** The refresh's reads, bound to one client. */
 export const chatReadApi = (client: Pick<PluginClient, 'call' | 'conditional'>): ChatReadApi => ({
-  get: id => readFerretView(client, id),
+  get: id => readChatSession(client, id),
   logPage: (id, options) => readLogPage(client, id, options),
   // The ledger is read UNPARSED and degraded field by field (`send-ledger.ts`): one unknown value never drops a row.
   sends: id => readLedgerSends(client, id),

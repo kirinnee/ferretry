@@ -22,6 +22,8 @@ function launching(
     readonly session?: string;
     readonly dead?: boolean;
     readonly noPane?: boolean;
+    readonly noServer?: boolean;
+    readonly exitEmpty?: 'on' | 'off';
   } = {},
 ) {
   const sent: Array<readonly string[]> = [];
@@ -32,8 +34,11 @@ function launching(
       execute: async args => {
         sent.push(args);
         if (args[0] === 'has-session') return options.sessionExists === true ? done() : refused("can't find session");
-        if (args[0] === 'start-server') return done();
-        if (args[0] === 'show-options') return done('PATH TERM\n');
+        // One client starts the server and reads its options (`exit-empty` first, then `update-environment`).
+        if (args[0] === 'start-server')
+          return options.noServer === true
+            ? refused('no server running')
+            : done(`${options.exitEmpty ?? 'on'}\nPATH TERM\n`);
         if (args[0] === 'display-message')
           return options.noPane === true
             ? refused("can't find pane")
@@ -141,7 +146,73 @@ describe('TmuxRunner launch', () => {
     // Assert
     should(started.ok ? undefined : started.error).equal('failed');
     const last = world.sent.at(-1);
-    should(last).deepEqual(['set-option', '-g', 'update-environment', 'PATH TERM']);
+    should(last).deepEqual([
+      'set-option',
+      '-g',
+      'update-environment',
+      'PATH TERM',
+      ';',
+      'set-option',
+      '-s',
+      'exit-empty',
+      'on',
+    ]);
+  });
+
+  it('should start the server and read its options in ONE tmux client, and keep the server alive until the session exists', async () => {
+    // A server with no session exits at once, so a bare `start-server` is gone before the next command asks it anything.
+    // Arrange
+    const world = launching();
+
+    // Act
+    const started = await world.runner.start(world.spec);
+
+    // Assert
+    should(started.ok).equal(true);
+    should(world.sent.some(args => args[0] === 'show-options')).equal(false);
+    const boot = world.sent.find(args => args[0] === 'start-server');
+    should(boot).deepEqual([
+      'start-server',
+      ';',
+      'show-options',
+      '-sv',
+      'exit-empty',
+      ';',
+      'set-option',
+      '-s',
+      'exit-empty',
+      'off',
+      ';',
+      'show-options',
+      '-gv',
+      'update-environment',
+    ]);
+    const script = String(world.spawned[0]?.stdin);
+    should(script.indexOf('new-session')).be.above(-1);
+    should(script.indexOf("'exit-empty' 'on'")).be.above(script.indexOf('new-session'));
+  });
+
+  it('should put exit-empty back to a value the server already had off, not to the default', async () => {
+    // Arrange
+    const world = launching({ exitEmpty: 'off' });
+
+    // Act
+    await world.runner.start(world.spec);
+
+    // Assert
+    should(String(world.spawned[0]?.stdin)).containEql("'set-option' '-s' 'exit-empty' 'off'");
+  });
+
+  it('should refuse as unavailable only when tmux itself cannot start a server', async () => {
+    // Arrange
+    const world = launching({ noServer: true });
+
+    // Act
+    const started = await world.runner.start(world.spec);
+
+    // Assert
+    should(started.ok ? undefined : started.error).equal('unavailable');
+    should(world.spawned).deepEqual([]);
   });
 
   it('should refuse a command that is empty or names an environment variable that is not one', async () => {

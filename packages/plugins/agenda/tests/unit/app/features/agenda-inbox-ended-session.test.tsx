@@ -1,4 +1,4 @@
-import { type SessionAgendaSummary } from '../../../../contract/wire.ts';
+import type { SessionAgendaSummary } from '../../../../contract/wire.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaItem, AgendaSnapshot } from '@ferretry/core-asks/contract';
 import type { SessionView } from '../../../../app/shell.ts';
@@ -198,7 +198,7 @@ describe('an open agenda item on a session that has ended (&B59)', () => {
       must(open.querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), 'the ⋯ button').click(),
     );
     await interact(() =>
-      must(open.querySelector<HTMLButtonElement>('[data-inbox-tool="not-needed"]'), 'Not needed…').click(),
+      must(document.body.querySelector<HTMLButtonElement>('[data-inbox-tool="not-needed"]'), 'Not needed…').click(),
     );
     await interact(() => fire());
     await settle();

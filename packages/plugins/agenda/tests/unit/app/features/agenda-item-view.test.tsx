@@ -107,13 +107,14 @@ const TOOLS = (
 const openMenu = async (): Promise<HTMLElement> => {
   const toggle = one<HTMLButtonElement>('.fy-item-view__bar [data-agenda-menu-toggle]');
   if (toggle.getAttribute('aria-expanded') !== 'true') await interact(() => toggle.click());
-  return one('[data-agenda-menu="popover"]');
+  // The popover is drawn on the page body (so no card clips it), not inside the item.
+  return must(document.body.querySelector<HTMLElement>('[data-agenda-menu="popover"]'), 'the popover');
 };
 
 describe('the item view’s ⋯ menu', () => {
   test('holds a host’s quiet tools even when the item has nothing else to put there', async () => {
     await draw(agendaItem('A49', { title: 'Same', subject: 'Same' } as Partial<AgendaItem>), { tools: TOOLS });
-    expect(root().querySelector('[data-test-tool]')).toBeNull();
+    expect(document.body.querySelector('[data-test-tool]')).toBeNull();
     const menu = await openMenu();
     expect(must(menu.querySelector('[data-test-tool]'), 'tool').textContent).toBe('Skip');
   });
@@ -128,11 +129,11 @@ describe('the item view’s ⋯ menu', () => {
     expect(toggle.getAttribute('aria-controls')).toBe(menu.id);
     expect(menu.getAttribute('role')).toBe('dialog');
     await press('Escape', {}, must(menu.querySelector('button, select'), 'a control'));
-    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
+    expect(document.body.querySelector('[data-agenda-menu="popover"]')).toBeNull();
     expect(spy.closed).toBe(0);
     await openMenu();
     await interact(() => toggle.click());
-    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
+    expect(document.body.querySelector('[data-agenda-menu="popover"]')).toBeNull();
   });
 
   test('closes on a press outside it', async () => {
@@ -141,7 +142,7 @@ describe('the item view’s ⋯ menu', () => {
     await interact(() => {
       one('[data-agenda-description]').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     });
-    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
+    expect(document.body.querySelector('[data-agenda-menu="popover"]')).toBeNull();
   });
 
   test('a new item opens with its ⋯ closed', async () => {
@@ -157,7 +158,7 @@ describe('the item view’s ⋯ menu', () => {
     await draw(agendaItem('A49', { title: 'Same', subject: 'Same', why: 'Same' } as Partial<AgendaItem>), {
       settled: <p>Done.</p>,
     });
-    expect(root().querySelector('[data-agenda-menu-toggle]')).toBeNull();
+    expect(document.body.querySelector('[data-agenda-menu-toggle]')).toBeNull();
   });
 });
 
@@ -165,7 +166,7 @@ describe('the item view snooze control', () => {
   test('offers no Snooze when it is given nothing to snooze with', async () => {
     await draw(richItem);
     await openMenu();
-    expect(root().querySelector('[data-agenda-menu-group="snooze"]')).toBeNull();
+    expect(document.body.querySelector('[data-agenda-menu-group="snooze"]')).toBeNull();
     expect(root().querySelector('[data-agenda-snooze]')).toBeNull();
   });
 
@@ -178,12 +179,14 @@ describe('the item view snooze control', () => {
     expect(picks.map(pick => pick.textContent)).toEqual(['1 hour', '4 hours', 'Tomorrow 9:00', 'Custom…']);
     await interact(() => must(menu.querySelector<HTMLElement>('[data-agenda-menu-snooze="hour"]'), '1 hour').click());
     expect(snoozed).toEqual([new Date(NOW + 3_600_000).toISOString()]);
-    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
+    expect(document.body.querySelector('[data-agenda-menu="popover"]')).toBeNull();
     await view?.unmount();
     view = null;
     await draw(richItem, { onSnooze: () => undefined, busy: true });
     await openMenu();
-    expect(one<HTMLButtonElement>('[data-agenda-menu-snooze="hour"]').disabled).toBe(true);
+    expect(
+      must(document.body.querySelector<HTMLButtonElement>('[data-agenda-menu-snooze="hour"]'), '1 hour').disabled,
+    ).toBe(true);
   });
 
   test('opens Custom… in place, with a time field and its own Snooze', async () => {
@@ -421,7 +424,7 @@ describe('Not needed', () => {
     expect(root().querySelector('.fy-qr [data-agenda-dismiss]')).toBeNull();
     await interact(() => button.click());
     expect(spy.acted).toEqual([DISMISS_ACTION]);
-    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
+    expect(document.body.querySelector('[data-agenda-menu="popover"]')).toBeNull();
   });
 
   test('is left to the host where it hands its own tools (the Inbox’s Skip and Not needed): said once', async () => {
@@ -515,7 +518,7 @@ describe('the version picker', () => {
       picker.dispatchEvent(new Event('change', { bubbles: true }));
     });
     // Picking closes the menu, and the head says an earlier version is on screen.
-    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
+    expect(document.body.querySelector('[data-agenda-menu="popover"]')).toBeNull();
     // The picked control went with the menu: focus is back on ⋯, never dropped on the page.
     expect(document.activeElement).toBe(one('[data-agenda-menu-toggle]'));
     expect(one('[data-agenda-shown-version]').textContent).toBe('Showing v1');
@@ -544,7 +547,7 @@ describe('the version picker', () => {
     const picker = must((await openMenu()).querySelector<HTMLSelectElement>('[data-agenda-version-picker]'), 'picker');
     expect(picker.getAttribute('aria-label')).toBe('Edit');
     expect(
-      must(root().querySelector('[data-agenda-version-slot] [data-agenda-diff-toggle]'), 'Changes').textContent,
+      must(document.body.querySelector('[data-agenda-version-slot] [data-agenda-diff-toggle]'), 'Changes').textContent,
     ).toBe('Changes');
     expect(picker.options[0]?.textContent).toMatch(/^Edit 2 of 2/u);
     expect(picker.options[1]?.textContent).toMatch(/^Edit 1 of 2/u);
@@ -552,7 +555,7 @@ describe('the version picker', () => {
 
   test('is not drawn for an item never edited', async () => {
     await draw(agendaItem('A3', { ask: choices('Yes', 'No') } as Partial<AgendaItem>));
-    expect(root().querySelector('[data-agenda-version-picker]')).toBeNull();
+    expect(document.body.querySelector('[data-agenda-version-picker]')).toBeNull();
   });
 });
 

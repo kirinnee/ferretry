@@ -412,8 +412,20 @@ export type AppComponent<Props> = (props: Props) => unknown;
 export interface ScreenProps {
   readonly params: Readonly<Record<string, string | undefined>>;
 }
+/**
+ * A ONE-SHOT REQUEST from the host that draws a slot to the panels in it: "start a new terminal", "open a new page". The
+ * host cannot reach a panel's state, and a panel never imports another's, so the request rides the panel's own props.
+ * `id` changes with every request (a panel acts when it sees an id it has not handled, never on the one it mounted with);
+ * `action` names the act. A panel answers the actions it owns and ignores the rest.
+ */
+export interface PanelIntent {
+  readonly id: number;
+  readonly action: string;
+}
 export interface PanelProps {
   readonly subject?: string;
+  /** What the host just asked for, if anything. */
+  readonly intent?: PanelIntent;
 }
 export type SettingsProps = {};
 export interface RendererProps {

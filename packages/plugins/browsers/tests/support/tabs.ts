@@ -35,10 +35,22 @@ export class Tabs {
   /** What a page in the error state says went wrong (the worker's first line of a failed navigation). */
   pageError = 'it broke';
   private minted = 0;
+  /** Appended to every id the browser mints, for a case that needs an id which echoes an address. */
+  idSuffix = '';
   private exited!: (code: number) => void;
   readonly exit = new Promise<number>(resolve => {
     this.exited = resolve;
   });
+
+  /**
+   * The agent Chrome started again: its pages are gone and its worker numbers pages from the start, as a fresh worker
+   * does — so a page opened now can carry an id an earlier page had.
+   */
+  restart(): void {
+    this.pages = [{ id: 'p0', url: 'about:blank', title: '' }];
+    this.minted = 0;
+    this.casts.clear();
+  }
 
   die(): void {
     this.exited(1);
@@ -126,7 +138,7 @@ export class Tabs {
     },
     newPage: async options => {
       this.minted += 1;
-      const id = `p${String(this.minted)}`;
+      const id = `p${String(this.minted)}${this.idSuffix}`;
       this.pages.push({
         id,
         url: options.url ?? 'about:blank',

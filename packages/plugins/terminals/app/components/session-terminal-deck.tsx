@@ -51,7 +51,9 @@ import {
   type SurfaceOwnership,
   useDocumentVisible,
   useFullscreen,
+  usePanelIntent,
 } from '@ferretry/app';
+import type { PanelIntent } from '@ferretry/kernel/manifest';
 import { Button, FullscreenToggle, KEYBOARD_CAPTURE_ATTRIBUTE, useLinkBehaviour } from '@ferretry/app/ui';
 import { type DaemonConnection, type DaemonSessionScope, grantRefusalNotice } from '../shell.ts';
 import {
@@ -157,6 +159,8 @@ export const browserTerminalDeckHost = (): TerminalDeckHost => ({
 });
 
 export interface SessionTerminalDeckProps {
+  /** What the host just asked of this panel: "new-terminal" starts a shell (the phone's "+ New terminal"). */
+  readonly intent?: PanelIntent;
   readonly connection: DaemonConnection;
   readonly scope: DaemonSessionScope;
   /** Display only — the daemon derives and enforces the shell's cwd itself. */
@@ -652,6 +656,7 @@ export function SessionTerminalDeck({
   active: onScreen = true,
   interceptInput = passInput,
   onInputPort,
+  intent,
 }: SessionTerminalDeckProps) {
   // Not on screen is not attached: a hidden tab or a backgrounded page holds no stream.
   const streaming = useDocumentVisible() && onScreen;
@@ -775,6 +780,8 @@ export function SessionTerminalDeck({
       setBusy(false);
     }
   };
+
+  usePanelIntent(intent, 'new-terminal', () => void createTerminal());
 
   const createTerminal = async (): Promise<void> => {
     if (busy || atSessionCap || atGlobalCap) return;
