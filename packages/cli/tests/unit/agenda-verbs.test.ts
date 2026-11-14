@@ -184,7 +184,7 @@ describe('an unknown sub-verb under a known verb', () => {
     should(transport.sent).deepEqual([]);
   });
 
-  it('holds for board import, which fell through to the board the same way, and board lanes, which needs one of its own', async () => {
+  it('V-0086 holds for board import (removed by design: the converter’s job), which fell through to the board the same way, and board lanes, which needs one of its own', async () => {
     const imported = world();
     should(await runFy(['board', 'import'], imported.world)).equal(2);
     should(imported.io.stderr()).containEql('"import" is not a sub-verb of board');

@@ -35,7 +35,9 @@ Each line names the seam it waits on and who owns it. Nothing here is stood in f
   the AUTHENTICATED CALLER. The sitrep lines carry no addressee, so the "message to the caller" half needs a
   Conversation read; until then the newest dated sitrep line is used, masked whole before it is cut.
 - **`POST /v1/recommend`** (R-0321, the account recommender) is still declared by Runtimes at that path; the placement
-  lists it with Packs. V-0260/V-0261 (`fy fleet`, `fy fleet recommend`) have no verb here. Both are the lead's to settle.
+  lists it with Packs. V-0260/V-0261 (`fy fleet`, `fy fleet recommend`) are removed by design: v4's verb read a
+  `routing.json` that 4.291.17 no longer ships and printed only "no routing catalog at …/routing.json", and
+  `fy recommend` is the one way to ask which models suit a piece of work.
 - **Pane limits** (the logins live panes prove spent) are Usage's own read, `UsageApi.paneLimits()`, which aggregates what
   Ferrets reports from live session documents (`FerretsApi.paneLimits`, derived on every call, kept nowhere): each carries
   presence, the harness sentence, spend and the optional reset time, so a non-spend limit with no reset time holds until its

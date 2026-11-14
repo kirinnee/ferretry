@@ -63,12 +63,13 @@ export default definePlugin({
       }),
       verb('tidy', {
         summary:
-          'drop your own cards nobody asked for and close your own asks that only track work (dry run unless --yes)',
+          'drop your own cards nobody asked for and close your own asks that only track work (dry run unless --yes; the owner names a ferret with --ferret <id>)',
         args: [],
         options: [
           { flag: '--yes', help: 'do it: drop the cards and close the items listed' },
           { flag: '--reason <why>', help: 'the reason written on every card dropped and item closed' },
           { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
+          { flag: '--ferret <id>', help: 'the ferret to tidy: the owner names it here (a ferret tidies only itself)' },
           { flag: '--json', help: 'print the plan (and, with --yes, the result) as JSON' },
         ],
       }),
