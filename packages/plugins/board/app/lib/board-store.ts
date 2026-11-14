@@ -23,6 +23,7 @@
  * abandons its reads in flight, so nothing read under a replaced credential is shown or kept.
  */
 
+import type { AskListSnapshot } from '@ferretry/core-asks/contract';
 import {
   BoardChangedSchema,
   type BoardCounts,
@@ -163,6 +164,19 @@ interface View {
   readonly fullStamp: Map<DaemonId, number>;
 }
 
+/** One ferret's agenda, watched: its last good read, a stamp that moves with every read that lands, and who holds it. */
+interface AgendaWatch {
+  readonly daemonId: DaemonId;
+  readonly ferret: string;
+  refs: number;
+  snapshot: AskListSnapshot | null;
+  stamp: number;
+  /** The latest read started: an older one that lands after it is dropped. */
+  reads: number;
+}
+
+const agendaKey = (daemonId: DaemonId, ferret: string): string => `${daemonId}\u0000${ferret}`;
+
 interface TaskWatch {
   readonly daemonId: DaemonId;
   readonly id: CardId;
@@ -186,6 +200,7 @@ export class DaemonBoardStore {
   readonly #port: BoardPort;
   readonly #env: BoardEnvironment;
   readonly #views = new Map<string, View>();
+  readonly #agendas = new Map<string, AgendaWatch>();
   readonly #tasks = new Map<string, TaskWatch>();
   readonly #projects = new Map<DaemonId, BoardProjectsState>();
   readonly #projectRefs = new Map<DaemonId, number>();
@@ -296,6 +311,65 @@ export class DaemonBoardStore {
     return this.#generations.get(daemonId) ?? 0;
   }
 
+  // -------------------------------------------------------------------------------------------------
+  // Agendas: where a card's asks are read from, kept live
+  // -------------------------------------------------------------------------------------------------
+
+  /**
+   * Keeps one ferret's agenda read and current (machine- and ferret-scoped) until the returned release is called:
+   * the first watcher reads it, and `noteAsksChanged` re-reads it when the machine says its asks changed. Every
+   * watcher of the same ferret shares the one read.
+   */
+  watchAgenda(machine: DaemonConnection, ferret: string): () => void {
+    this.#connections.set(machine.daemonId, machine);
+    const key = agendaKey(machine.daemonId, ferret);
+    let watch = this.#agendas.get(key);
+    if (watch === undefined) {
+      watch = { daemonId: machine.daemonId, ferret, refs: 0, snapshot: null, stamp: 0, reads: 0 };
+      this.#agendas.set(key, watch);
+    }
+    watch.refs += 1;
+    if (watch.refs === 1 && watch.stamp === 0) void this.#readAgenda(watch);
+    const held = watch;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      held.refs -= 1;
+      if (held.refs === 0 && this.#agendas.get(key) === held) this.#agendas.delete(key);
+    };
+  }
+
+  /** The ferret's agenda as last read, or `null` until it has been (or when the machine would not say). */
+  agendaSnapshot(daemonId: DaemonId, ferret: string): AskListSnapshot | null {
+    return this.#agendas.get(agendaKey(daemonId, ferret))?.snapshot ?? null;
+  }
+
+  /** Changes whenever any of these ferrets' agendas does: a store snapshot for `useSyncExternalStore`. */
+  agendaStamp(daemonId: DaemonId, ferrets: readonly string[]): string {
+    return ferrets.map(ferret => this.#agendas.get(agendaKey(daemonId, ferret))?.stamp ?? 0).join(',');
+  }
+
+  /** `asks.changed` for one ferret's board: re-reads that agenda if anything watches it, and only that one. */
+  noteAsksChanged(daemonId: DaemonId, ferret: string): void {
+    const watch = this.#agendas.get(agendaKey(daemonId, ferret));
+    if (watch !== undefined) void this.#readAgenda(watch);
+  }
+
+  async #readAgenda(watch: AgendaWatch): Promise<void> {
+    const machine = this.#connections.get(watch.daemonId);
+    if (machine === undefined) return;
+    const generation = this.#generation(watch.daemonId);
+    const read = ++watch.reads;
+    const answer = await this.#port.agenda(machine, watch.ferret).catch(() => null);
+    // A later read, a forgotten machine or a released watch publishes nothing; a failed read keeps the last good agenda.
+    if (read !== watch.reads || this.#generation(watch.daemonId) !== generation) return;
+    if (this.#agendas.get(agendaKey(watch.daemonId, watch.ferret)) !== watch) return;
+    if (answer === null && watch.snapshot !== null) return;
+    watch.snapshot = answer;
+    watch.stamp += 1;
+    this.#publish();
+  }
   /** The whole board of one machine, with its lane sets and version. */
   async #readWhole(view: View, daemonId: DaemonId): Promise<void> {
     const machine = view.machines.get(daemonId);

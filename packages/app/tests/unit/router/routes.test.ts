@@ -49,6 +49,28 @@ describe('routes', () => {
     expect(table.parse('/d/d1/board/new')).toMatchObject({ screen: newCard });
   });
 
+  test('board-app: a trailing optional param (`board/:project?`) matches with and without its segment', () => {
+    const board: ScreenRef = { plugin: 'board', id: 'board', path: 'board/:project?', label: 'Board' };
+    const optional = routeTable([board]);
+    expect(optional.parse('/d/d1/board')).toEqual({ kind: 'screen', daemon: 'd1', screen: board, params: {} });
+    expect(optional.parse('/d/d1/board/')).toEqual({ kind: 'screen', daemon: 'd1', screen: board, params: {} });
+    // The card id a v4 deep link carries (`/d/<id>/board/<card>`) is the param, named without its `?`.
+    expect(optional.parse('/d/d1/board/I1')).toEqual({
+      kind: 'screen',
+      daemon: 'd1',
+      screen: board,
+      params: { project: 'I1' },
+    });
+    expect(optional.parse('/d/d1/board/I1/extra')).toEqual({ kind: 'not-found', path: '/d/d1/board/I1/extra' });
+    expect(optional.href(board, {}, 'd1')).toBe('/d/d1/board');
+    expect(optional.href(board, { project: 'I 1' }, 'd1')).toBe('/d/d1/board/I%201');
+  });
+
+  test('board-app: an exact route wins over an optional one at the same address', () => {
+    const board: ScreenRef = { plugin: 'board', id: 'board', path: 'board/:project?', label: 'Board' };
+    expect(routeTable([board, newCard]).parse('/d/d1/board/new')).toMatchObject({ screen: newCard });
+  });
+
   test('an absolute screen has no daemon', () => {
     expect(table.parse('/join')).toEqual({ kind: 'screen', screen: join, params: {} });
     expect(table.parse('/d/d1/join')).toEqual({ kind: 'not-found', path: '/d/d1/join' });

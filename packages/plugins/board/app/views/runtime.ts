@@ -3,6 +3,7 @@
  * builds this half once per daemon (§9.6), so the runtime is built once per half and shared by every view.
  */
 
+import { AsksChanged } from '@ferretry/core-asks/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { BoardChanged } from '../../contract/index.ts';
 import { clientBoardPort } from '../lib/board-client.ts';
@@ -24,6 +25,8 @@ export interface BoardRuntime {
 const createBoardRuntime = (client: PluginClient): BoardRuntime => {
   const store = new DaemonBoardStore(clientBoardPort(client));
   client.subscribe(BoardChanged, payload => store.noteEvent(THIS_MACHINE.daemonId, payload));
+  // A ferret's asks changed (raised, answered, closed, retitled): the open card's Agenda asks follow it, live.
+  client.subscribe(AsksChanged, payload => store.noteAsksChanged(THIS_MACHINE.daemonId, payload.ferret));
   return {
     client,
     store,
