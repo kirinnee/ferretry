@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { AnalyticsResponse } from '../../../../contract/index.ts';
 import type { ReactElement } from 'react';
 import { act, type ReactTestRenderer } from 'react-test-renderer';
@@ -16,6 +16,7 @@ import {
 } from '../../../../app/features/analytics/analytics-overview-page.tsx';
 import { analyticsLinkQuery, GlobalAnalyticsPage } from '../../../../app/features/analytics/global-analytics-page.tsx';
 import { fakeClient } from '../support/client.ts';
+import { ownDomAtAppOrigin } from '../support/dom.ts';
 import { type DaemonConnection, daemonConnection } from '../support/shell.ts';
 import {
   DEVICE_TIME_ZONE,
@@ -30,6 +31,8 @@ import { dayAggregate, rawResponse, rawRow } from '../support/analytics-rows.ts'
 const noClient = fakeClient({});
 
 const renderers: ReactTestRenderer[] = [];
+beforeEach(ownDomAtAppOrigin);
+
 afterEach(() => {
   act(() => {
     for (const renderer of renderers) renderer.unmount();

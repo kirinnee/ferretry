@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
 import type { AnalyticsResponse } from '../../../../contract/index.ts';
 import {
   AnalyticsResponseView,
@@ -7,6 +7,9 @@ import {
 import { act } from 'react-test-renderer';
 import { render, RouterProvider } from '@ferretry/app/testing';
 import { DaemonResponseError } from '../support/shell.ts';
+import { ownDomAtAppOrigin } from '../support/dom.ts';
+
+beforeEach(ownDomAtAppOrigin);
 
 const index = {
   schemaVersion: 6,
