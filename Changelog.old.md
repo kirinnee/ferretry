@@ -1,3 +1,9 @@
+## [4.291.17](https://github.com/kirinnee/ferretry/compare/v4.291.16...v4.291.17) (2026-11-14)
+
+### Fixes
+
+* **browser:** refuse agent reads of a screen showing a live pairing code ([#1597](https://github.com/kirinnee/ferretry/issues/1597)) ([547ac82](https://github.com/kirinnee/ferretry/commit/547ac82f6abcccb78df2ddb0f6706d1582ea1d82))
+
 ## [4.291.16](https://github.com/kirinnee/ferretry/compare/v4.291.15...v4.291.16) (2026-11-13)
 
 ### Fixes
