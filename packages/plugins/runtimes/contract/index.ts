@@ -91,7 +91,10 @@ export interface RuntimesApi extends RuntimeHomesApi, RuntimeLayersApi {
   default(): Promise<RuntimeId | undefined>;
   /** What a start on this runtime (or the default, when `id` is omitted) would use, or why it cannot start. */
   resolve(id?: RuntimeId): Promise<ResolveResult>;
-  /** Every runtime with its models, wrapper and login, as `GET /v1/runtimes` answers (Packs reads what can start now). */
+  /**
+   * Every runtime with its models, wrapper and login, as `GET /v1/runtimes` answers: what `fy recommend` offers a start
+   * from (Packs reads what can start now).
+   */
   catalog(): Promise<readonly RuntimeView[]>;
   /** The harness CLIs on this machine and whether each is installed, as `GET /v1/runtimes/machine` answers. */
   tools(): Promise<readonly MachineTool[]>;

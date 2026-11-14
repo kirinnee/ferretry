@@ -2443,7 +2443,18 @@ async function start(world: World): Promise<TestHost> {
     if (kernelOnly !== undefined)
       throw new Error(`testHost: ${manifest.id} asks for ${kernelOnly.name}, which only the kernel may hold`);
     const needs: Record<string, unknown> = {};
-    const needer = neederOf(manifest, () => ownedReferences(manifest, 'credential-records'));
+    const needer = neederOf(
+      manifest,
+      () => ownedReferences(manifest, 'credential-records'),
+      (hostname, host) =>
+        hostPermitted(
+          effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
+          itemsOf,
+          hostname,
+          resolversOf(manifest.id),
+          host,
+        ),
+    );
     for (const [field, token] of Object.entries(manifest.needs ?? {})) {
       const fake = lookup(options.fakes ?? {}, field, token);
       const value = boundFor(
@@ -2766,7 +2777,18 @@ async function start(world: World): Promise<TestHost> {
       if (typeof as === 'string') {
         const manifest = options.plugins.find(plugin => plugin.manifest.id === as)?.manifest;
         if (manifest === undefined) throw new Error(`provided: no loaded plugin ${as}`);
-        needer = neederOf(manifest as Manifest, () => ownedReferences(manifest as Manifest, 'credential-records'));
+        needer = neederOf(
+          manifest as Manifest,
+          () => ownedReferences(manifest as Manifest, 'credential-records'),
+          (hostname, host) =>
+            hostPermitted(
+              effectivePermissions(manifest.id, (manifest as Manifest).permissions?.network ?? []),
+              itemsOf,
+              hostname,
+              resolversOf(manifest.id),
+              host,
+            ),
+        );
       } else if (as !== undefined) needer = as;
       return boundFor(token as PortToken<unknown>, providedBy.get(token.name), needer) as Api;
     },

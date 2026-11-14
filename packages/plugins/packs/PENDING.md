@@ -41,6 +41,10 @@ Each line names the seam it waits on and who owns it. Nothing here is stood in f
   presence, the harness sentence, spend and the optional reset time, so a non-spend limit with no reset time holds until its
   ferret is released or stops. A ferret that records no login is known by its runtime and mapped to a login here. A Usage,
   Ferrets or Logins that fails to answer reads as nothing known (quota `unknown`).
+- **Pane limits, second reader**: Packs reads each login's sign-in, quota windows and budget from the Logins port
+  (`LoginView`), and also asks the REAL Ferrets port directly (`list()` + `prompt().limit`, `adapters/login-quota.ts`):
+  a limit a live ferret's own session records wins for the login it names; Usage's read adds the rest. Both only ever
+  ADD a limit the provider's windows did not say.
 
 ## CLI
 

@@ -1543,6 +1543,66 @@ screen neither shows it nor saves it, and a save keeps the line as it is.
 GAP: a send writes no `secrets.used` entry to the security log, and the Warden's settings card still says whether the
 key is set from Speed-ups, not whether `warden.yaml` names it.
 
+## A secret a plugin minted, placed on its request by the Vault
+
+A plugin that FILES a secret itself (MCP's sign-in access tokens, `permissions.mintedSecrets`) has no configuration that
+names it, so `kernel.secrets.resolve` and `send` refuse it as they refuse anything undeclared, and **no pattern of
+names turns a plugin into a reader**. What the plugin gets instead is a Vault operation:
+`vault.fetchMinted(name, request, placement?)` (non-core needers only). The Vault puts the value on ONE request and
+answers a SANITIZED reply, so the plugin never holds it.
+
+- **Only a value the plugin wrote.** The Vault's own mint ledger (`state/vault/mints.json`, ids and a per-write nonce,
+  never a value) records the plugin and the identity of its write whenever a plugin `put`s. A secret the owner put under a
+  matching name, one the owner replaced afterwards, one another plugin minted, and one a manifest only declares are all
+  refused and nothing is sent. A ledger that cannot be read refuses. **Authorization and value are one entry**: the Vault
+  opens the ciphertext entry ONCE (`SecretVault.openEntry`), checks THAT entry's write identity against the ledger and
+  sends exactly that entry's value. What a write that lands between the steps does: **it can never make the call send
+  the replacement.** A write by the owner or by another plugin made BEFORE the Vault opens the entry refuses the call
+  (the ledger no longer names that write); one that lands AFTER the open cannot change what is sent, and the call may
+  still send the value the plugin itself minted (the previous snapshot), which is not a replacement and not a leak. This is
+  snapshot semantics, not immediate revocation of an exchange already started.
+- **Only to a host the plugin's own `network` allows**, `https:` or `http:` to this machine, no userinfo. A request that
+  already carries the placement header, or a `Host` header, is refused (as `kernel.secrets.send`). A redirect is
+  answered, never followed. The request asks for an unencoded reply (`accept-encoding: identity`).
+- **The reply is built inside the Vault**, the holder of what was sent, never a raw `Response`: the status, a
+  `statusText`, an ALLOWLIST of headers (`content-type`, `mcp-session-id`, `mcp-protocol-version`, `www-authenticate`,
+  `retry-after`; everything else stays in the Vault) and a body. **The Vault does not list spellings; it decodes, checks
+  and drops** (`daemon/lib/secrets/echo-mask.ts`), against the value AS SENT (and the whole header value it travelled in):
+  1. **Only a body the Vault can parse is returned**: JSON (`application/json`, `+json`, UTF-8), or an event stream whose
+     `data` is parsed the same way. HTML, XML, plain text, NDJSON, binary and compressed bodies are DROPPED with
+     "The server’s answer is not JSON, so the Vault could not check it for the sign-in and kept it." (or the compressed /
+     not-valid-text / not-valid-JSON sentence). The body is read whole and parsed whole, so a value split across network
+     chunks is found.
+  2. **Every string is walked, keys and values, and each is read in every form the Vault can decode**: as it is, repeatedly
+     URI-decoded (partial and mixed-case `%xX` too, `+` as a space), HTML-entity decoded (`&#x..;`, `&#..;`, the named ASCII
+     ones), backslash-unescaped, hex runs decoded (either case), base64 / base64url runs decoded with whitespace folded
+     away (at every alignment), and NFKC-folded; the forms are decoded further, to a bound. Each form is compared
+     lower-cased with whitespace removed. If ANY form holds the value, the WHOLE string is replaced by `[redacted]`. A JSON
+     number is checked as its digits.
+  3. **`statusText` and every kept header value get the same check**, a string at a time (a string the check cannot
+     finish is replaced). An event's `event` and `id` are checked the same way, `retry` is kept only as digits, and a
+     comment or any other field is dropped. A `data` that is not JSON (an older transport's endpoint path) is checked as one
+     string.
+  4. **It fails closed**: a body that is not parseable, or past a bound (`maxBodyBytes`, 1 MiB by default, 4 MiB at most;
+     200 000 values; 64 levels of nesting; 1 024 decoded forms and 64 MiB of decoding work for one string) is dropped
+     with a sentence saying so, never clipped. The check uses the value AS SENT, so an owner replacing the secret while
+     the reply is in flight changes nothing. The reply is still a stranger's text: a caller scrubs it with the redactor
+     like any server's words before it keeps or shows it (a second layer, not the first).
+- **Declared GAP: a check's `PATH` and stored-secret variables.** A check fills `${VAR}` from the runtime's PLAIN launch
+  variables and the machine's home; `PATH` is not among them (the kernel offers no plugin the daemon's `PATH`, by design),
+  and a variable held in a stored secret is named, not filled. Closing it takes (1) a kernel `paths` offer that answers a
+  `which`-permitted plugin the inherited `PATH` (a doctrine decision, since it widens what plugins read), and (2) a
+  Vault operation that fills such a template INSIDE the Vault for one check child's argv, URL or header (the child
+  environment already takes `${secret:NAME}`; argv, URL and header do not), with the runtime publishing the variable to
+  secret-name mapping. Neither is a small additive offer, so neither is built here.
+- **Declared GAPs.** The check is "decode and look", not a proof. **A value split across TWO JSON strings** (or two
+  events) is not found, because no one string holds it. A cipher, a reversal, a hash, or any form none of the decoders
+  above produces is not found. A value shorter than four characters is searched for only as it is, never in a decoded form.
+  A string that reads as the value is replaced whole, so an ordinary field that happens to contain it is lost too (a
+  server that reflects the token into its own name has that name replaced, and a check says so). A large binary blob
+  inside JSON can pass a bound and drop the whole body. The Vault keeps the status and the allowlisted headers of a
+  dropped body.
+
 ## Device-held speed-up keys
 
 Settings › This device › **Speed-up keys** takes a Groq and/or a Cerebras key that lives in **one

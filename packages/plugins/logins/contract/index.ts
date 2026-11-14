@@ -22,6 +22,7 @@ import {
   EndpointFileSchema,
   type EnvironmentLoginTemplate,
   type LocalModels,
+  type LoginBudget,
   type LoginFile,
   LoginFileSchema,
   LoginIdSchema,
@@ -145,6 +146,24 @@ export const LoginsUsedBy = defineHook('logins.used-by', {
   key: z.literal('runtimes'),
   value: z.custom<LoginUsers>(),
   takers: ['runtimes'],
+});
+
+/** What Logins asks the plugin that measures spend: where a login stands against its budget. */
+export interface LoginBudgets {
+  /** The standing of one login, or `undefined` when it has no budget. Synchronous: Usage keeps it in memory. */
+  view(loginId: string): LoginBudget | undefined;
+}
+
+/**
+ * `logins.budget:<key>`: offered by Logins, provided by Usage (which owns the budgets and meters the spend). Logins
+ * cannot see Usage (Usage needs Logins), so the list and the check ask here for the line they show. With no provider
+ * a login shows no budget line, as a machine with no budgets does.
+ */
+export const LoginsBudget = defineHook('logins.budget', {
+  mode: 'provide',
+  key: z.literal('usage'),
+  value: z.custom<LoginBudgets>(),
+  takers: ['usage'],
 });
 
 /** A change refused, in the transport's taxonomy: a code a client branches on and a sentence for the person. */

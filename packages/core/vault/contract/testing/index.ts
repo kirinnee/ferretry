@@ -43,6 +43,10 @@ import {
   type CredentialPlacement,
   optionalSecretReference,
   optionalSecretReferenceOf,
+  MINTED_ECHO_MASK,
+  MINTED_REPLY_HEADERS,
+  type MintedExchangeOutcome,
+  type MintedExchangeRequest,
   type OutboundHttpRequest,
   type SecretName,
   type SecretSummary,
@@ -425,6 +429,12 @@ export class FakeVault implements VaultApi {
   scriptsRunning = 0;
   readonly #inputs = new Map<InputRequestId, InputRequestState>();
   #nextInput = 0;
+  /** The names a PLUGIN wrote with `put` (what the real Vault's mint ledger records); `plant` writes one that is not. */
+  readonly #minted = new Set<SecretName>();
+  /** What a minted exchange reaches: the server's reply to a request that carries the credential. Unset: unreachable. */
+  mintedServer: ((request: MintedExchangeRequest) => Response | Promise<Response>) | undefined;
+  /** Every request a minted exchange sent, headers as the server saw them (the credential is in them: a fake's own view). */
+  readonly mintedSent: MintedExchangeRequest[] = [];
 
   constructor(
     private readonly child: FakeChild = command => ({ stdout: command.command.join(' '), stderr: '' }),
@@ -492,6 +502,57 @@ export class FakeVault implements VaultApi {
   async put(name: SecretName, value: string): Promise<void> {
     const at = '2026-11-07T12:00:00.000Z';
     this.#values.set(name, { value, createdAt: this.#values.get(name)?.createdAt ?? at, updatedAt: at });
+    this.#minted.add(name);
+  }
+  /** A value somebody OTHER than the plugin put (the owner's): held, usable by name, but never the plugin's mint. */
+  plant(name: SecretName, value: string): void {
+    const at = '2026-11-07T12:00:00.000Z';
+    this.#values.set(name, { value, createdAt: at, updatedAt: at });
+    this.#minted.delete(name);
+  }
+  /** The real Vault's minted exchange in a fake: refused unless the plugin put the value; the reply has the value masked. */
+  async fetchMinted(
+    name: SecretName,
+    request: MintedExchangeRequest,
+    placement: CredentialPlacement = { header: 'authorization', scheme: 'Bearer' },
+  ): Promise<MintedExchangeOutcome> {
+    if (!this.#minted.has(name) || this.mintedServer === undefined) return { kind: 'refused' };
+    if (Object.keys(request.headers).some(header => header.toLowerCase() === placement.header.toLowerCase()))
+      return { kind: 'refused' };
+    const value = this.#values.get(name)?.value;
+    if (value === undefined) return { kind: 'secret_missing' };
+    const credential = placement.scheme === undefined ? value : `${placement.scheme} ${value}`;
+    const sent = { ...request, headers: { ...request.headers, [placement.header]: credential } };
+    this.mintedSent.push(sent);
+    const reply = await this.mintedServer(sent);
+    const mask = (raw: string): string => raw.split(value).join(MINTED_ECHO_MASK);
+    const headers: Record<string, string> = {};
+    for (const name of MINTED_REPLY_HEADERS) {
+      const held = reply.headers.get(name);
+      if (held !== null) headers[name] = mask(held);
+    }
+    // The twin keeps the real shape (status, allowlisted headers, a text body or complete events) with a literal mask: the
+    // real Vault's every-spelling masking is proved in the Vault's own tests.
+    const raw = mask(await reply.text());
+    const events = (reply.headers.get('content-type') ?? '').startsWith('text/event-stream');
+    return {
+      kind: 'response',
+      status: reply.status,
+      statusText: mask(reply.statusText),
+      headers,
+      body: events
+        ? {
+            kind: 'events',
+            events: new ReadableStream<string>({
+              start(controller) {
+                for (const block of raw.split(/\n\n/u).filter(part => part.trim() !== ''))
+                  controller.enqueue(`${block}\n\n`);
+                controller.close();
+              },
+            }),
+          }
+        : { kind: 'text', text: raw },
+    };
   }
   async has(name: SecretName): Promise<boolean> {
     return this.#values.has(name);

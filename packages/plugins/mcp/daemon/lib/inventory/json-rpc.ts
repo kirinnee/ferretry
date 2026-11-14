@@ -30,7 +30,7 @@ export const initializedNotification = (): string =>
 export const toolsListRequest = (id: number, cursor?: string): string =>
   JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/list', ...(cursor === undefined ? {} : { params: { cursor } }) });
 
-/** A JSON-RPC error the server answered with, in its own words (clipped). */
+/** A JSON-RPC error the server answered with, in its own words (whole: the check scrubs it, THEN clips it). */
 export class McpRpcError extends Error {
   constructor(message: string) {
     super(message);
@@ -41,8 +41,10 @@ export class McpRpcError extends Error {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const clip = (text: string, max = 200): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
-
+/**
+ * NOTHING HERE CLIPS a string a server sent: a credential the server reflects can straddle any cut, and a clipped half is
+ * a half-token. The check scrubs every such string against the secrets it used, then clips (`check.ts`).
+ */
 /**
  * The response with `id` among parsed messages, or undefined when none of them is it. A server may
  * send notifications or requests first; they are skipped. An error response raises its message.
@@ -52,7 +54,7 @@ export function responseFor(messages: readonly unknown[], id: number): Record<st
     if (!isRecord(message) || message.id !== id) continue;
     if (isRecord(message.error))
       throw new McpRpcError(
-        typeof message.error.message === 'string' ? clip(message.error.message) : 'the server answered with an error',
+        typeof message.error.message === 'string' ? message.error.message : 'the server answered with an error',
       );
     return isRecord(message.result) ? message.result : {};
   }
@@ -61,14 +63,12 @@ export function responseFor(messages: readonly unknown[], id: number): Record<st
 
 /** What `initialize` says the server calls itself. */
 export const serverNameOf = (result: Record<string, unknown>): string | undefined =>
-  isRecord(result.serverInfo) && typeof result.serverInfo.name === 'string'
-    ? clip(result.serverInfo.name, 256)
-    : undefined;
+  isRecord(result.serverInfo) && typeof result.serverInfo.name === 'string' ? result.serverInfo.name : undefined;
 
 /** One `tools/list` page: the tool names, and the cursor to the next page. */
 export function toolsPage(result: Record<string, unknown>): { readonly names: string[]; readonly next?: string } {
   const names = Array.isArray(result.tools)
-    ? result.tools.flatMap(tool => (isRecord(tool) && typeof tool.name === 'string' ? [clip(tool.name, 256)] : []))
+    ? result.tools.flatMap(tool => (isRecord(tool) && typeof tool.name === 'string' ? [tool.name] : []))
     : [];
   return typeof result.nextCursor === 'string' && result.nextCursor !== ''
     ? { names, next: result.nextCursor }

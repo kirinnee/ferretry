@@ -365,6 +365,13 @@ export interface Needer {
    * these names as the needer's own, beside `permissions.secrets`.
    */
   readonly ownedSecretReferences: () => ReadonlySet<string>;
+  /**
+   * The KERNEL's own answer to "may this plugin reach this host", asked at the call: its `network` entries of every
+   * kind (a plain host, an installed item's, a `{ resolver }` answer), exactly what its own `kernel.fetch` allows. A
+   * provider that sends a request for the needer asks THIS rather than reading `permissions.network`, which a resolver
+   * entry grants nothing through. Absent (a bare needer): only the literal entries count, as `neederMayReach` reads them.
+   */
+  readonly mayReach?: (hostname: string, host: string) => boolean;
 }
 
 /** A state file that names itself like a secret but is not one, with the reason a reviewer can check. */

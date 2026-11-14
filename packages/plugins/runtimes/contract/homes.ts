@@ -28,6 +28,17 @@ export interface RuntimeHome {
   readonly secretEnv?: Readonly<Record<string, string>>;
 }
 
+/**
+ * The variables a published runtime's launch carries, for a consumer that fills `${VAR}` as the harness does (MCP's
+ * check). `values` are the ones whose value names no secret; `opaque` are the NAMES of those that do (a login's API key,
+ * a profile's token): their values are the Vault's alone and are never offered here, so a consumer reports them as
+ * "not presentable" instead of guessing.
+ */
+export interface RuntimeCheckEnvironment {
+  readonly values: Readonly<Record<string, string>>;
+  readonly opaque: readonly string[];
+}
+
 /** The only files of a home the reader can serve, by name. */
 export const RUNTIME_HOME_DOCUMENTS = ['.claude.json', 'settings.json', 'config.toml'] as const;
 export type RuntimeHomeDocument = (typeof RUNTIME_HOME_DOCUMENTS)[number];
@@ -108,6 +119,12 @@ export interface RuntimeAssetSkills {
 
 /** The homes half of `RuntimesApi`. */
 export interface RuntimeHomesApi {
+  /**
+   * What this runtime's launch carries, as {@link RuntimeCheckEnvironment}: from the published fleet, never from a
+   * process environment. `undefined` for a runtime that is not published. Additive and optional: absent, a consumer
+   * fills nothing from the runtime.
+   */
+  checkEnvironment?(runtime: RuntimeId): Promise<RuntimeCheckEnvironment | undefined>;
   /** The fleet's own installed skills; absent on a runtime provider that has no asset tree. */
   assetSkills?(): RuntimeAssetSkills;
   homes(): Promise<readonly RuntimeHome[]>;
@@ -119,4 +136,4 @@ export interface RuntimeHomesApi {
 }
 
 /** The read models this half adds to `RUNTIMES_READ_MODELS`. */
-export const RUNTIME_HOME_READ_MODELS = ['homes'] as const;
+export const RUNTIME_HOME_READ_MODELS = ['homes', 'checkEnvironment'] as const;

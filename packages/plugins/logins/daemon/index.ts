@@ -16,6 +16,7 @@ import {
   type LoginsApi,
   LOGINS_CONFIG,
   LoginChanged,
+  LoginsBudget,
   LoginsUsedBy,
   LoginSignedIn,
   ModelsChanged,
@@ -174,6 +175,13 @@ export function buildLoginsDaemon() {
           test: (subject, consent) => providerProbe.test(subject, consent),
         },
         listCache: { now: () => clock.nowMs(), freshMs: CREDENTIAL_LIST_FRESH_MS },
+        // Usage owns the budgets and meters the spend: the standing shown is the one it measures (none when it is off).
+        budget: {
+          view: id => {
+            const budgets = hooks.provider(LoginsBudget, 'usage');
+            return budgets === 'unavailable' ? undefined : budgets.view(id);
+          },
+        },
       });
 
       const harnessLogin = new HarnessLoginService({

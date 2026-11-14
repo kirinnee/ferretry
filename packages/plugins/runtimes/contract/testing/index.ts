@@ -13,6 +13,7 @@ import {
   type RuntimeAssetSkills,
   type RuntimeHome,
   type MachineTool,
+  type RuntimeCheckEnvironment,
   type RuntimeHomeReader,
   type RuntimeId,
   type RuntimeLayers,
@@ -31,6 +32,8 @@ export interface FakeRuntimes extends RuntimesApi {
   setAssetSkills(assetSkills: RuntimeAssetSkills): void;
   /** The runtimes `catalog()` and the machine tools `tools()` answer (none until set). */
   setCatalog(runtimes: readonly RuntimeView[], tools?: readonly MachineTool[]): void;
+  /** What `checkEnvironment(runtime)` answers for a runtime (nothing for any other). */
+  setCheckEnvironment(runtime: RuntimeId, environment: RuntimeCheckEnvironment): void;
   /**
    * The profiles the fake holds (what `profiles()` answers and `changeProfileLayers` edits), and the layers `layers(id)`
    * answers for each runtime. The layers are exactly what a test sets: a change edits the PROFILES, not these.
@@ -92,6 +95,7 @@ export function fakeRuntimes(): FakeRuntimes {
   let homes: readonly RuntimeHome[] = [];
   let readers: Readonly<Record<string, RuntimeHomeReader>> = {};
   let assetSkills: RuntimeAssetSkills = { skills: async () => [], skillManifest: async () => undefined };
+  const checkEnvironments = new Map<string, RuntimeCheckEnvironment>();
   let catalog: readonly RuntimeView[] = [];
   let machineTools: readonly MachineTool[] = [];
   let profiles: readonly ProfileSummary[] = [];
@@ -180,6 +184,10 @@ export function fakeRuntimes(): FakeRuntimes {
     setCatalog: (next, nextTools = []) => {
       catalog = next;
       machineTools = nextTools;
+    },
+    checkEnvironment: async runtime => checkEnvironments.get(runtime),
+    setCheckEnvironment: (runtime, environment) => {
+      checkEnvironments.set(runtime, environment);
     },
     setHomes: (next, nextReaders = {}) => {
       homes = next;

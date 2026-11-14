@@ -1,11 +1,16 @@
 import type { ChildEnvironment, FerretId, SecretResolver } from '@ferretry/kernel/contract';
 import type { FerretState } from '@ferretry/core-ferrets/contract';
-import { implementDaemon, type Needer, perNeeder } from '@ferretry/kernel/manifest';
+import { implementDaemon, type Needer, neederMayReach, perNeeder } from '@ferretry/kernel/manifest';
 import { err, ok, type Result } from '@ferretry/std';
 import manifest from '../manifest.ts';
 import {
   type AuthorizedOutcome,
   type CredentialPlacement,
+  MINTED_DEFAULT_BODY_BYTES,
+  MINTED_ECHO_MASK,
+  type MintedExchangeOutcome,
+  MintedExchangeRequestSchema,
+  MintsFile,
   CredentialPlacementSchema,
   type OutboundHttpRequest,
   OutboundHttpRequestSchema,
@@ -39,6 +44,8 @@ import { EphemeralValues } from './lib/inputs/ephemeral-values.ts';
 import { InputRequestError } from './lib/inputs/errors.ts';
 import { secretRouteHandlers } from './lib/runtime/mounts/secrets.ts';
 import { OutboundProviderAuthorizer } from './lib/secrets/authorizer.ts';
+import { echoMask, maskReplyHeaders, maskText, sanitizeBody } from './lib/secrets/echo-mask.ts';
+import { MintLedger } from './lib/secrets/mint-ledger.ts';
 import {
   isCoreNeeder,
   isMintedSecret,
@@ -60,6 +67,7 @@ import { DeclaredMaskSource } from './lib/secrets/mask-source.ts';
 import { combinedValues, SecretRedactor } from './lib/secrets/redaction.ts';
 import { UnknownSecretError } from './lib/secrets/types.ts';
 import { SecretUseError, SecretUseService } from './lib/secrets/use.ts';
+import { allowedDestination } from '../contract/index.ts';
 import { SecretDirectory, SecretVault } from './lib/secrets/vault.ts';
 
 /**
@@ -139,6 +147,17 @@ export default implementDaemon(manifest, {
       recipes,
       masks,
     );
+    const mints = new MintLedger({
+      read: async () => {
+        const read = await kernel.state.read(MintsFile);
+        if (!read.ok) throw new Error('the mint ledger could not be read');
+        return read.value;
+      },
+      update: async change => {
+        const done = await kernel.state.update(MintsFile, current => change(current ?? { format: 1, entries: {} }));
+        if (!done.ok) throw new Error('the mint ledger could not be written');
+      },
+    });
     const authorizer = new OutboundProviderAuthorizer(vault, new KernelOutboundTransport(kernel.fetch, kernel.clock));
     const crypto = new WebCryptoCloneCrypto();
     const imports = new SecretImportService({ crypto, identity: IDENTITY_NOT_OFFERED, directory, clock: kernel.clock });
@@ -274,13 +293,6 @@ export default implementDaemon(manifest, {
       },
     };
 
-    /**
-     * THE PORT EACH PLUGIN IS HANDED (§3.7), built once per needing plugin by the kernel. A core caller gets the
-     * Vault's own reach; any other plugin gets the same port with the three calls that spend something narrowed to
-     * what it is already allowed: a host its manifest's `network` names, a secret its manifest or its own records
-     * name ({@link mayUseSecret}), a program its manifest's `spawn` names. A request outside is refused the way
-     * today's Vault refuses a host, secret or program it does not allow.
-     */
     /** The names a runtime's profile references, from Runtimes (the hook's one provider); none when it is off or fails. */
     const profileReferences = async (runtime: string): Promise<ReadonlySet<string>> => {
       try {
@@ -292,6 +304,95 @@ export default implementDaemon(manifest, {
       }
     };
 
+    /**
+     * ONE request with a secret the needer MINTED placed on it, answered as the reply (a stream a caller reads for itself),
+     * the credential masked out of it. The name must be one the ledger says THIS needer wrote the current value of; the
+     * request is parsed once into plain data; the destination must be a host the needer's own `network` allows; nothing
+     * the caller sent already carries the credential header; a redirect is never followed.
+     */
+    const fetchMinted = async (
+      needer: Needer,
+      name: SecretName,
+      asked: unknown,
+      placementAsked?: unknown,
+    ): Promise<MintedExchangeOutcome> => {
+      const request = MintedExchangeRequestSchema.safeParse(asked);
+      const placed = CredentialPlacementSchema.safeParse(
+        placementAsked ?? { header: 'authorization', scheme: 'Bearer' },
+      );
+      if (!request.success || !placed.success) return { kind: 'refused' };
+      const secret = String(name);
+      let parsed: URL;
+      try {
+        parsed = new URL(request.data.url);
+      } catch {
+        return { kind: 'refused' };
+      }
+      // The destination is one the KERNEL says this plugin may reach (its `network` of every kind, a resolver's answer
+      // included), and a plain https (or this machine's http) address.
+      const mayReach = needer.mayReach ?? ((hostname: string) => neederMayReach(needer, hostname));
+      if (!allowedDestination(request.data.url, [parsed.host.toLowerCase()]) || !mayReach(parsed.hostname, parsed.host))
+        return { kind: 'refused' };
+      const placement = placed.data;
+      const carries = (header: string): boolean =>
+        Object.keys(request.data.headers).some(name => name.toLowerCase() === header.toLowerCase());
+      if (carries(placement.header)) return { kind: 'refused' };
+      // A caller `Host` header is never forwarded (as `kernel.secrets.send`): the connection goes to the host the
+      // permission was checked for, and nothing re-aims it.
+      if (carries('host')) return { kind: 'refused' };
+      // ONE reading of the store gives both the entry's write identity and its value, so what the ledger authorizes is
+      // exactly what is sent: a write that lands after this read cannot swap in a value the plugin did not mint.
+      let opened: { readonly write: string; readonly value: string } | undefined;
+      try {
+        opened = await vault.openEntry(secret as SecretName);
+      } catch {
+        return { kind: 'vault_damaged' };
+      }
+      if (opened === undefined || !(await mints.mintedBy(needer.id, secret as SecretName, opened.write)))
+        return { kind: 'refused' };
+      const value = opened.value.trim();
+      if (value.length === 0) return { kind: 'secret_missing' };
+      const credential = placement.scheme === undefined ? value : `${placement.scheme} ${value}`;
+      let response: Response;
+      try {
+        response = await kernel.fetch.request(request.data.url, {
+          method: request.data.method,
+          // A body the Vault cannot read is a body it cannot mask: it asks for the plain one.
+          headers: { 'accept-encoding': 'identity', ...request.data.headers, [placement.header]: credential },
+          ...(request.data.body === undefined ? {} : { body: request.data.body }),
+          ...(request.data.signal === undefined ? {} : { signal: request.data.signal }),
+          redirect: 'manual',
+        });
+      } catch (error) {
+        if (request.data.signal?.aborted === true) return { kind: 'aborted' };
+        return {
+          kind: 'unreachable',
+          certificate: error instanceof Error && /certificate|ssl|tls/iu.test(error.message),
+        };
+      }
+      // Sanitized HERE, by the holder of what was sent, against the value AS SENT (not whatever the store holds now).
+      const around = echoMask([value, credential], MINTED_ECHO_MASK);
+      try {
+        return {
+          kind: 'response',
+          status: response.status,
+          statusText: maskText(response.statusText, around),
+          headers: maskReplyHeaders(response.headers, around),
+          body: await sanitizeBody(response, around, request.data.maxBodyBytes ?? MINTED_DEFAULT_BODY_BYTES),
+        };
+      } catch {
+        if (request.data.signal?.aborted === true) return { kind: 'aborted' };
+        return { kind: 'unreachable', certificate: false };
+      }
+    };
+
+    /**
+     * THE PORT EACH PLUGIN IS HANDED (§3.7), built once per needing plugin by the kernel. A core caller gets the
+     * Vault's own reach; any other plugin gets the same port with the three calls that spend something narrowed to
+     * what it is already allowed: a host its manifest's `network` names, a secret its manifest or its own records
+     * name ({@link mayUseSecret}), a program its manifest's `spawn` names. A request outside is refused the way
+     * today's Vault refuses a host, secret or program it does not allow.
+     */
     const apiFor = (needer: Needer): VaultApi => {
       // Every needer's handles name it as their requester (`searchPathOf`), the core ones included.
       const ownChildEnvironment: VaultApi['childEnvironment'] = async (_ferret, env) =>
@@ -328,13 +429,22 @@ export default implementDaemon(manifest, {
         put: async (name, value) => {
           const secret = String(name);
           if (!isMintedSecret(needer, secret)) throw new UndeclaredSecretError(needer, secret, 'write');
-          await full.put(secret as SecretName, value);
+          // The write is recorded as THIS plugin's: only a value a plugin wrote itself is one it may place on a request.
+          await mints.record(
+            needer.id,
+            secret as SecretName,
+            await directory.putIdentified(secret as SecretName, value),
+          );
+          changed();
         },
         remove: async name => {
           const secret = String(name);
           if (!isMintedSecret(needer, secret)) throw new UndeclaredSecretError(needer, secret, 'remove');
-          return await full.remove(secret as SecretName);
+          const removed = await full.remove(secret as SecretName);
+          await mints.forget(secret as SecretName).catch(() => undefined);
+          return removed;
         },
+        fetchMinted: async (name, asked, placement) => await fetchMinted(needer, name, asked, placement),
         // Every narrowed call reads what the caller passed ONCE, into plain data of its own, checks that copy and uses
         // only that copy: a getter on the caller's object cannot show a declared value to the check and another to the use.
         run: async (asked, ferret) => {

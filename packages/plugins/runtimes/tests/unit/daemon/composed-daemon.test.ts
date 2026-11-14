@@ -180,6 +180,17 @@ describe('a catalogue read through the composed daemon', () => {
   });
 });
 
+describe('a machine export through the composed daemon', () => {
+  it('copies this machine once the kernel knows who it is: the bundle is answered, not "still starting"', async () => {
+    const { host } = await compose();
+
+    const exported = await host.request('GET', '/v1/runtimes/export');
+
+    expect([exported.status, exported.status === 200 ? '' : JSON.stringify(exported.json())]).toEqual([200, '']);
+    expect(exported.body).not.toContain('still starting');
+  });
+});
+
 describe('a real apply through the composed daemon', () => {
   it('R-0295 writes fleet/manifest.json and the runtime’s home through the provisioner, and its file through writeAll', async () => {
     const { host, world } = await compose();

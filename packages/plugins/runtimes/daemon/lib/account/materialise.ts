@@ -32,6 +32,7 @@
  * Pure: bodies are read by the caller, an id is minted by an injected function, the clock is a string.
  */
 import { secretReferencesIn } from '@ferretry/core-vault/contract';
+import { looksSecret, namesCredential } from '@ferretry/std/credential-words';
 import type { z } from 'zod';
 import type { CompactAtSchema } from '../../../contract/index.ts';
 import { HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, harnessAsset } from '../assets.ts';
@@ -196,6 +197,8 @@ interface PlannedRuntime {
   /** The runtime's own `compactAt`, else its profile's. Absent is `auto`. */
   readonly compactAt?: z.infer<typeof CompactAtSchema>;
   readonly secretEnv: Readonly<Record<string, string>>;
+  /** The login's, profile's and model variables whose value names no secret (an MCP check fills `${VAR}` from them). */
+  readonly launchEnv?: Readonly<Record<string, string>>;
   /** Why it cannot launch, when it cannot. */
   readonly blocked?: string;
 }
@@ -413,6 +416,15 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     for (const [variable, reason] of Object.entries(REFUSED_LAUNCH_VARIABLES)) {
       if (variable in env) problems.push({ runtime: name, message: `it may not set ${variable}: ${reason}` });
     }
+    // The variables a person's own configuration sets that carry no secret: what a check may fill from. A name that is a
+    // credential's (a token, a key) or a value that looks like one is never published, whether or not it names a secret.
+    const plainLaunchEnv: Record<string, string> = Object.fromEntries(
+      // The login's OWN variables (an environment login's), not Ferretry's credential-store plumbing.
+      Object.entries({ ...(store.store === 'environment' ? store.env : {}), ...derived.env, ...profileEnv }).filter(
+        ([variable, value]) =>
+          secretReferencesIn(value).length === 0 && !namesCredential(variable) && !looksSecret(variable, value),
+      ),
+    );
     env[CREDENTIAL_ENV] = runtime.credential;
     env[RUNTIME_NAME_ENV] = name;
     env[STATE_HOME_ENV] = layout.stateHome;
@@ -493,6 +505,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       secretEnv: sorted(
         Object.fromEntries(Object.entries(env).filter(([, value]) => secretReferencesIn(value).length > 0)),
       ),
+      ...(Object.keys(plainLaunchEnv).length === 0 ? {} : { launchEnv: sorted(plainLaunchEnv) }),
       ...(blocked === undefined ? {} : { blocked }),
     });
   }
@@ -532,6 +545,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         available: reason === undefined,
         unavailableReason: reason ?? null,
         secretEnv: runtime.secretEnv,
+        ...(runtime.launchEnv === undefined ? {} : { launchEnv: runtime.launchEnv }),
       };
     }),
     runtimes: planned.map(runtime => ({

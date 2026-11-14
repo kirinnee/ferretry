@@ -6,7 +6,11 @@ import { effectivePermissions } from './permissions.ts';
  * The needer a per-needer `provides` entry is built for: the plugin's id and the permissions the kernel's own ports
  * enforce for it, so a `'*'` from a piece that is not core reaches nothing through a provider either.
  */
-export function neederOf(manifest: Manifest, owned: () => ReadonlySet<string> = () => new Set()): Needer {
+export function neederOf(
+  manifest: Manifest,
+  owned: () => ReadonlySet<string> = () => new Set(),
+  mayReach?: (hostname: string, host: string) => boolean,
+): Needer {
   const declared = manifest.permissions ?? {};
   return Object.freeze({
     id: manifest.id,
@@ -17,6 +21,7 @@ export function neederOf(manifest: Manifest, owned: () => ReadonlySet<string> = 
       secrets: declared.secrets ?? [],
     }),
     ownedSecretReferences: owned,
+    ...(mayReach === undefined ? {} : { mayReach }),
   });
 }
 

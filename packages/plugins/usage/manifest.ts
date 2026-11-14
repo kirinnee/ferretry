@@ -1,7 +1,7 @@
 import { FerretsPort, StartDecide } from '@ferretry/core-ferrets/contract';
 import { definePlugin, panel, route, screen, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
-import { LoginsPort } from '@ferretry/plugin-logins/contract';
+import { LoginsBudget, LoginsPort } from '@ferretry/plugin-logins/contract';
 import {
   BudgetReached,
   INSIGHTS_STATE,
@@ -209,7 +209,7 @@ export default definePlugin({
     publishes: [LoginPaused, LoginResumed, InsightsChanged, BudgetReached],
   },
 
-  hooks: { takes: [{ hook: StartDecide }, { hook: TurnEnded }] },
+  hooks: { takes: [{ hook: StartDecide }, { hook: TurnEnded }, { hook: LoginsBudget, key: 'usage' }] },
 
   doctor: ['usage-meter'],
 

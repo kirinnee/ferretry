@@ -4,6 +4,9 @@
  * The ports themselves are the providers' own: Packs `uses` Runtimes (`RuntimesApi`: the catalog and tools), Logins
  * (`LoginsApi`: each login's status, windows and budget, and the model catalogs) and Usage (`UsageApi`: the feed, which
  * carries the limits a ferret's pane proved). `daemon/adapters/fleet-facts.ts` reads them; nothing here is a port.
+ *
+ * The login facts Packs reads are declared here, structurally, exactly as today's `FleetCredentialView` carried them;
+ * Logins' own `LoginView` is assignable to them. They are views, never ports: the generator matches ports by name.
  */
 // ─── usage facts ─────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -55,4 +58,17 @@ export interface PaneLimit {
   readonly spend: boolean;
   /** When the login is usable again, epoch milliseconds; absent when the harness gave no time. */
   readonly retryAt?: number | undefined;
+}
+
+/**
+ * What Packs reads of the limits live ferrets prove (and, structurally, each login's sign-in, quota and budget). It is
+ * NOT a port: a port is matched by name, and a second shape under the name `usage` is handed the real Usage plugin's
+ * object, which has none of these methods. The facts come from the Logins and Ferrets ports
+ * (`daemon/adapters/login-quota.ts`).
+ */
+export interface PackQuotaSource {
+  /** Every login with its quota windows and budget, as the app shows them. */
+  credentials(): Promise<readonly PackCredentialFacts[]>;
+  /** Logins the panes say are out of quota, by login id. */
+  paneLimits(): Promise<ReadonlyMap<string, PaneLimit>>;
 }

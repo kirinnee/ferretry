@@ -22,6 +22,7 @@ import {
   SecretResolverPort,
   SecretsChanged,
   VaultConfigFile,
+  MintsFile,
   VaultFile,
   VaultKeyFile,
   VaultPort,
@@ -203,12 +204,12 @@ export default definePlugin({
   },
   /** Never reached by a ferret, through any root: the sealed secrets and the key that opens them (`PrivacyDecl`). */
   privacy: {
-    private: ['vault.key', 'vault.json'],
+    private: ['vault.key', 'vault.json', 'mints.json'],
   },
   data: {
     // biome-ignore lint/suspicious/noExplicitAny: the leaf cast Gate, Asks and Ferrets use for a typed config def
     config: [VaultConfigFile as ConfigDef<any>],
-    state: [VaultFile, VaultKeyFile, HoldsFile, InputRequestFiles],
+    state: [VaultFile, VaultKeyFile, MintsFile, HoldsFile, InputRequestFiles],
     publishes: [SecretsChanged, HoldsChanged],
     subscribes: [AsksChanged, FerretsChanged],
   },

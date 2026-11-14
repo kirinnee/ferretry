@@ -10,10 +10,12 @@
  * the harness asks before it runs a repository's code. A web address is reached whatever its approval
  * — reaching it runs nothing here — and the result says the approval too.
  *
- * NO SECRET LEAVES. The environment and headers are filled exactly as the harness fills them (the
- * runtime's launch environment, a held sign-in's access token), handed to the probe, and dropped. Every
- * sentence a check answers passes through the secret redactor first, because a server's own error text
- * is the one thing here nobody controls.
+ * NO SECRET LEAVES. The environment and headers are filled as the harness fills them from the runtime's launch
+ * environment, handed to the probe, and dropped. A held sign-in's access token is NEVER held here: the probe is told the
+ * NAME of the secret this plugin minted and the Vault places it on the request. EVERY string a server supplies (its name,
+ * its tool names, its error text, a command's last stderr line) is scrubbed against the secrets this check used BEFORE it
+ * is clipped, because a server's words are the one thing here nobody controls and a clipped half-token is still a token's
+ * start. A scrub that cannot run reports nothing from the answer (fail closed).
  */
 import {
   MCP_CHECK_TIMEOUT_MS,
@@ -35,6 +37,9 @@ import {
   type ResolvedMcpServer,
 } from './service.ts';
 
+/** A scrub that could not run: nothing from the answer may be shown. */
+class McpScrubFailed extends Error {}
+
 /** How a probe reaches a server: the exact process or request the harness would make. */
 export type McpProbeSpec =
   | {
@@ -49,6 +54,8 @@ export type McpProbeSpec =
       readonly transport: 'http' | 'sse';
       readonly url: string;
       readonly headers: Readonly<Record<string, string>>;
+      /** A secret this plugin minted, by NAME, and where the Vault places it on every request. Never a value. */
+      readonly credential?: { readonly secret: string; readonly header: string; readonly scheme?: string };
     };
 
 export interface McpProbeAnswer {
@@ -82,27 +89,36 @@ export interface McpCheckDeps {
    * component's `${VAR}` fills as it does in the agent. Never answered to anybody.
    */
   launchEnvironment(runtime: string | undefined): Promise<Readonly<Record<string, string>>>;
+  /**
+   * The NAMES of the runtime's variables whose value is a stored secret: a check never holds those values, so a `${NAME}`
+   * that needs one is reported as such instead of as unset. Absent: none.
+   */
+  opaqueVariables?(runtime: string | undefined): Promise<readonly string[]>;
   /** The small inherited environment a command starts with (`PATH`, `HOME`, …) — never the daemon's tokens. */
   baseEnvironment(): Readonly<Record<string, string>>;
-  /** A held access token for a sign-in subject at an address, renewed first when it is about to expire. */
-  bearer(subject: string, url: string): Promise<string | undefined>;
+  /**
+   * A stdio command is about to be started by this check: its program is allowed (and only it) until the returned call
+   * is made. The kernel refuses every program a manifest does not declare, so a check could not start anything
+   * otherwise. Absent: this service allows nothing itself (the daemon's probe, `ReachedProbe`, holds the one
+   * command of the one check for the length of its probe instead).
+   */
+  allowCommand?(command: string): () => void;
   /**
    * The environment of a command whose values name secrets, as one handle for one child (the Vault resolves each
    * `${secret:NAME}`, the kernel opens it at exec time; use, never read). Absent: a secret reference cannot be
    * resolved here and the check says so rather than start the command with the literal text.
    */
-  /**
-   * A stdio command is about to be started by this check: its program is allowed (and only it) until the returned call
-   * is made. The kernel refuses every program a manifest does not declare, so a check could not start anything
-   * otherwise. Absent: nothing is allowed.
-   */
-  allowCommand?(command: string): () => void;
   sealEnvironment?(
     env: Readonly<Record<string, string>>,
     runtime: string | undefined,
   ): Promise<
     { readonly ok: true; readonly env: ChildEnvironment } | { readonly ok: false; readonly unknown: readonly string[] }
   >;
+  /**
+   * The held sign-in for a subject at an address, renewed first when it is about to expire: the NAME of the access-token
+   * secret this plugin minted (never its value) and the variable a harness reads it from. `undefined` when none is held.
+   */
+  credential(subject: string, url: string): Promise<{ readonly secret: string; readonly variable: string } | undefined>;
   readonly redactor: Pick<TextRedactor, 'redact'>;
   now(): number;
 }
@@ -151,17 +167,49 @@ export class McpCheckService {
       return finish({ outcome: 'not-approved', message: NOT_RUN[blocked] });
 
     const missing = new Set<string>();
+    const used = new Set<string>();
+    const opaque = new Set(await this.deps.opaqueVariables?.(server.runtimes[0]?.runtime));
     let spec: McpProbeSpec;
     try {
-      spec = await this.#spec(server, missing);
+      spec = await this.#spec(server, missing, used);
     } catch (error) {
       if (!(error instanceof SecretsNotAvailable)) throw error;
       return finish({ outcome: 'error', message: clip(error.message) });
     }
     const deadline = AbortSignal.timeout(MCP_CHECK_TIMEOUT_MS);
     const release = spec.transport === 'stdio' ? this.deps.allowCommand?.(spec.command) : undefined;
+    // Scrubbed against the kernel's secrets AND every value this check filled in from the launch environment.
+    const scrub = async (text: string): Promise<string> => {
+      let scrubbed: string;
+      try {
+        scrubbed = await this.deps.redactor.redact(text);
+      } catch {
+        throw new McpScrubFailed();
+      }
+      for (const value of used) scrubbed = scrubbed.split(value).join('[redacted]');
+      return scrubbed;
+    };
     try {
-      const answer = await this.deps.probe.probe(spec, deadline);
+      const probed = await this.deps.probe.probe(spec, deadline);
+      let answer: McpProbeAnswer;
+      try {
+        answer = {
+          ...(probed.serverName === undefined ? {} : { serverName: clip(await scrub(probed.serverName), 256) }),
+          // Every name is a stranger's string: the ones shown are scrubbed first, the count is the server's own count.
+          tools: [
+            ...(await Promise.all(
+              probed.tools.slice(0, MCP_CHECK_TOOL_NAMES).map(async tool => clip(await scrub(tool), 256)),
+            )),
+            ...probed.tools.slice(MCP_CHECK_TOOL_NAMES).map(() => ''),
+          ],
+        };
+      } catch (error) {
+        if (!(error instanceof McpScrubFailed)) throw error;
+        return finish({
+          outcome: 'error',
+          message: 'It answered, but Ferretry could not scrub what it said, so none of it is shown.',
+        });
+      }
       const note =
         blocked === undefined
           ? undefined
@@ -176,8 +224,18 @@ export class McpCheckService {
     } catch (error) {
       if (!(error instanceof McpProbeFailure)) throw error;
       const lead = FAILURE_LEAD[error.kind];
-      const unset = missing.size === 0 ? '' : ` Not set for this check: ${[...missing].sort().join(', ')}.`;
-      const detail = error.message === '' ? '' : ` ${await this.deps.redactor.redact(error.message)}`;
+      const stored = [...missing].filter(name => opaque.has(name)).sort();
+      const unsetNames = [...missing].filter(name => !opaque.has(name)).sort();
+      const unset =
+        (unsetNames.length === 0 ? '' : ` Not set for this check: ${unsetNames.join(', ')}.`) +
+        (stored.length === 0 ? '' : ` Held in a stored secret, which a check does not present: ${stored.join(', ')}.`);
+      let detail = '';
+      try {
+        detail = error.message === '' ? '' : ` ${await scrub(error.message)}`;
+      } catch (failure) {
+        if (!(failure instanceof McpScrubFailed)) throw failure;
+        detail = ' Ferretry could not scrub what it said, so none of it is shown.';
+      }
       return finish({
         outcome: error.kind === 'unauthorized' ? 'needs-sign-in' : 'error',
         message: clip(`${lead}${detail}${unset}`),
@@ -209,7 +267,7 @@ export class McpCheckService {
     return sealed.env;
   }
 
-  async #spec(server: ResolvedMcpServer, missing: Set<string>): Promise<McpProbeSpec> {
+  async #spec(server: ResolvedMcpServer, missing: Set<string>, used: Set<string>): Promise<McpProbeSpec> {
     const declaration = server.declaration;
     if (declaration === null) throw new Error('unreachable: the tools server is refused before this');
     const runtime = server.runtimes[0]?.runtime;
@@ -217,7 +275,10 @@ export class McpCheckService {
     const base = this.deps.baseEnvironment();
     // A variable bound to a secret is a REFERENCE here: it fills no `${VAR}` (that would put the reference text in an
     // argument); it only reaches the child, sealed, as its environment.
-    const environment = { ...base, ...plainOnly(launch) };
+    const plainLaunch = plainOnly(launch);
+    const environment = { ...base, ...plainLaunch };
+    // Values the launch environment supplied: anything a server reflects of them is masked from the answer.
+    for (const value of Object.values(plainLaunch)) if (value.length >= 8) used.add(value);
     if (declaration.transport === 'stdio') {
       const env = Object.fromEntries(
         Object.entries(declaration.env).map(([name, value]) => [name, expandVariables(value, environment, missing)]),
@@ -232,21 +293,56 @@ export class McpCheckService {
       };
     }
     const url = expandVariables(declaration.url, environment, missing);
-    const headers: Record<string, string> = Object.fromEntries(
-      Object.entries(declaration.headers).map(([name, value]) => [name, expandVariables(value, environment, missing)]),
-    );
+    const held =
+      server.signIn === undefined ? undefined : await this.deps.credential(server.signIn.subject, declaration.url);
+    // The held sign-in's token is never filled in here: a header the harness fills with it (`${VARIABLE}`, or
+    // `<scheme> ${VARIABLE}`) is the Vault's to place instead.
+    let credential: { secret: string; header: string; scheme?: string } | undefined;
+    const filled: [string, string][] = [];
+    for (const [name, value] of Object.entries(declaration.headers)) {
+      const placed = held === undefined ? undefined : placementOf(value, held.variable);
+      if (held !== undefined && placed !== undefined && credential === undefined)
+        credential = {
+          secret: held.secret,
+          header: name,
+          ...(placed.scheme === undefined ? {} : { scheme: placed.scheme }),
+        };
+      else filled.push([name, expandVariables(value, environment, missing)]);
+    }
+    const headers: Record<string, string> = Object.fromEntries(filled);
     if (declaration.bearerVariable !== undefined) {
-      const token = environment[declaration.bearerVariable];
-      if (token === undefined) missing.add(declaration.bearerVariable);
-      else headers.Authorization = `Bearer ${token}`;
+      if (held !== undefined && declaration.bearerVariable === held.variable)
+        credential ??= { secret: held.secret, header: 'Authorization', scheme: 'Bearer' };
+      else {
+        const token = environment[declaration.bearerVariable];
+        if (token === undefined) missing.add(declaration.bearerVariable);
+        else {
+          headers.Authorization = `Bearer ${token}`;
+          if (token.length >= 8) used.add(token);
+        }
+      }
     }
     const hasAuthorization = Object.keys(headers).some(name => name.toLowerCase() === 'authorization');
-    if (!hasAuthorization && server.signIn !== undefined) {
-      const token = await this.deps.bearer(server.signIn.subject, declaration.url);
-      if (token !== undefined) headers.Authorization = `Bearer ${token}`;
-    }
-    return { transport: declaration.transport, url, headers };
+    if (credential === undefined && !hasAuthorization && held !== undefined)
+      credential = { secret: held.secret, header: 'Authorization', scheme: 'Bearer' };
+    // The Vault refuses a request that already carries the credential's header, so it is never set twice.
+    const clash =
+      credential !== undefined &&
+      Object.keys(headers).some(name => name.toLowerCase() === credential?.header.toLowerCase());
+    return {
+      transport: declaration.transport,
+      url,
+      headers,
+      ...(credential === undefined || clash ? {} : { credential }),
+    };
   }
+}
+
+/** `${VARIABLE}` or `<scheme> ${VARIABLE}` as a header's whole value: where a held sign-in's token goes. */
+function placementOf(value: string, variable: string): { readonly scheme?: string } | undefined {
+  const found = /^(?:(\S+) )?\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/u.exec(value.trim());
+  if (found === null || found[2] !== variable) return undefined;
+  return found[1] === undefined ? {} : { scheme: found[1] };
 }
 
 /** For a project server: the approval that keeps the checking runtime from running it, if any. */

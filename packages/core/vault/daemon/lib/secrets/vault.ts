@@ -89,7 +89,20 @@ export class SecretDirectory {
    * Tuesday" is two different facts, and collapsing them loses the one an operator audits by.
    */
   async put(name: SecretName, value: string): Promise<SecretSummary> {
-    return await this.inTurn(async () => await this.write(await this.document(), name, value));
+    return await this.inTurn(async () => (await this.write(await this.document(), name, value)).summary);
+  }
+
+  /**
+   * {@link put}, answering also the identity of THIS write (the entry's random seal nonce, not a secret): what a mint
+   * ledger records so it can tell a later write by somebody else from this one.
+   */
+  async putIdentified(name: SecretName, value: string): Promise<string> {
+    return await this.inTurn(async () => (await this.write(await this.document(), name, value)).write);
+  }
+
+  /** The identity of the write that produced a name's current value, or nothing when it holds none. */
+  async writeIdentity(name: SecretName): Promise<string | undefined> {
+    return (await this.document()).entries[name]?.iv;
   }
 
   /**
@@ -166,7 +179,11 @@ export class SecretDirectory {
     });
   }
 
-  private async write(document: SecretVaultDocument, name: SecretName, value: string): Promise<SecretSummary> {
+  private async write(
+    document: SecretVaultDocument,
+    name: SecretName,
+    value: string,
+  ): Promise<{ readonly summary: SecretSummary; readonly write: string }> {
     const existing = document.entries[name];
     if (existing === undefined && Object.keys(document.entries).length >= MAX_SECRETS_PER_DAEMON)
       throw new SecretStoreError('full', `this daemon already holds ${MAX_SECRETS_PER_DAEMON} secrets`);
@@ -177,7 +194,10 @@ export class SecretDirectory {
       updatedAt: at,
     };
     await this.store.write({ ...document, entries: { ...document.entries, [name]: sealed } });
-    return { name, createdAt: sealed.createdAt as Instant, updatedAt: sealed.updatedAt as Instant };
+    return {
+      summary: { name, createdAt: sealed.createdAt as Instant, updatedAt: sealed.updatedAt as Instant },
+      write: sealed.iv,
+    };
   }
 
   /** Removes a secret. Answers whether there was one, so a caller can report an honest 404. */
@@ -229,5 +249,20 @@ export class SecretVault {
     const stored = await this.store.read();
     if (stored === undefined) return new Map();
     return await this.cipher.openAll(requireCipherMatch(stored, this.cipher.algorithm).entries);
+  }
+
+  /**
+   * ONE entry, opened from ONE reading of the document, with the identity of THAT entry's write (its seal nonce). What
+   * a caller authorizes by the identity is exactly what it then holds: a write that lands after this read cannot make
+   * the identity belong to one value and the value to another. Nothing but this entry is opened. `undefined` when
+   * the name is not held; a store that cannot be opened raises, as {@link values}.
+   */
+  async openEntry(name: SecretName): Promise<{ readonly write: string; readonly value: string } | undefined> {
+    const stored = await this.store.read();
+    if (stored === undefined) return undefined;
+    const entry = requireCipherMatch(stored, this.cipher.algorithm).entries[name];
+    if (entry === undefined) return undefined;
+    const value = (await this.cipher.openAll({ [name]: entry } as Record<SecretName, SealedSecret>)).get(name);
+    return value === undefined ? undefined : { write: entry.iv, value };
   }
 }

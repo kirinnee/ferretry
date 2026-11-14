@@ -17,6 +17,7 @@ import {
 import manifest from '../manifest.ts';
 import { FleetFacts } from './adapters/fleet-facts.ts';
 import { ConfigGuideWriter } from './adapters/guide-config.ts';
+import { LoginQuotaFacts } from './adapters/login-quota.ts';
 import { PackFerrets } from './adapters/ferrets.ts';
 import { RuntimeLaunchProbe } from './adapters/launch-probe.ts';
 import { StateReplacedRouting } from './adapters/replaced.ts';
@@ -67,11 +68,18 @@ export default implementDaemon(manifest, {
         return [];
       }
     };
+    // The limits live ferrets prove, read from the REAL Ferrets port (`list()` + `prompt().limit`).
+    const quota = new LoginQuotaFacts(
+      () => uses.logins.current(),
+      () => ferrets(),
+      () => kernel.clock.nowMs(),
+    );
     const fleet = new FleetFacts(
       runtimes,
       () => uses.logins.current(),
       () => uses.usage.current(),
       () => kernel.clock.now(),
+      () => quota,
     );
     const probes = new ProbeCache(new RuntimeLaunchProbe(runtimes, () => kernel.clock.nowMs()), () =>
       kernel.clock.nowMs(),
@@ -226,6 +234,7 @@ export default implementDaemon(manifest, {
           setSwitch,
         },
         kernel.redaction,
+        kernel.log,
       ),
       provides: {
         packs: {

@@ -14,6 +14,7 @@ import { type McpInventoryRefusal, McpInventoryService } from '../../../daemon/l
 import { inventoryWorld, PROJECT, PROJECT_KEY, session } from './support.ts';
 
 const TOKEN = 'project-access-token-value';
+const ACCESS_SECRET = 'MCP_DOCS_0123456789ABCDEF_ACCESS';
 
 class FakeProbe implements McpProbe {
   readonly specs: McpProbeSpec[] = [];
@@ -42,9 +43,11 @@ function checker(
     launchEnvironment: async runtime => (runtime === 'claude-work' ? launch : {}),
     baseEnvironment: () => ({ PATH: '/usr/bin', HOME: '/home/me' }),
     ...(sealEnvironment === undefined ? {} : { sealEnvironment }),
-    bearer: async subject => {
+    credential: async subject => {
       bearers.push(subject);
-      return subject === mcpProjectSubject('docs', PROJECT_KEY) ? TOKEN : undefined;
+      return subject === mcpProjectSubject('docs', PROJECT_KEY)
+        ? { secret: ACCESS_SECRET, variable: 'FY_MCP_DOCS_0123456789ABCDEF_TOKEN' }
+        : undefined;
     },
     redactor: { redact: async text => text.replaceAll(TOKEN, '••••') },
     now: () => {
@@ -79,11 +82,14 @@ describe('McpCheckService', () => {
       toolCount: 2,
     });
     should(result.tools).deepEqual(['search', 'read']);
+    // The probe is told the NAME of the secret to present, and the Vault places it: no token is ever in the spec.
     should(probe.specs[0]).deepEqual({
       transport: 'http',
       url: 'https://docs.example.com/mcp?team=1',
-      headers: { Authorization: `Bearer ${TOKEN}` },
+      headers: {},
+      credential: { secret: ACCESS_SECRET, header: 'Authorization', scheme: 'Bearer' },
     });
+    should(JSON.stringify(probe.specs)).not.containEql(TOKEN);
     should(JSON.stringify(result)).not.containEql(TOKEN);
     should(result.elapsedMs).be.above(0);
   });
@@ -192,7 +198,7 @@ describe('McpCheckService', () => {
         return () => seen.push('release');
       },
       sealEnvironment: async () => ({ ok: true, env: { names: [] } as never }),
-      bearer: async () => undefined,
+      credential: async () => undefined,
       redactor: { redact: async text => text },
       now: () => 0,
     });
@@ -262,7 +268,7 @@ describe('McpCheckService', () => {
         probe,
         launchEnvironment: async runtime => (runtime === 'codex-work' ? launch : {}),
         baseEnvironment: () => ({ PATH: '/usr/bin' }),
-        bearer: async () => undefined,
+        credential: async () => undefined,
         redactor: { redact: async text => text },
         now: () => 0,
       });
@@ -344,7 +350,7 @@ describe('McpCheckService', () => {
       probe,
       launchEnvironment: async () => ({}),
       baseEnvironment: () => ({ HOME: '/home/me' }),
-      bearer: async () => undefined,
+      credential: async () => undefined,
       redactor: { redact: async text => text },
       now: () => 0,
     });
@@ -355,5 +361,71 @@ describe('McpCheckService', () => {
     // Assert
     should(result.outcome).equal('connected');
     should(probe.specs[0]).containEql({ cwd: PROJECT, env: { HOME: '/home/me', LINT_HOME: '/home/me' } });
+  });
+});
+
+describe('what a server supplies is scrubbed before it is shown', () => {
+  const SECRET = 'FAKE-MCP-TOKEN-0123456789';
+
+  function scrubbing(probe: FakeProbe, redact: (text: string) => Promise<string>) {
+    const inventory = new McpInventoryService(inventoryWorld().deps);
+    const service = new McpCheckService({
+      inventory,
+      probe,
+      launchEnvironment: async () => ({}),
+      baseEnvironment: () => ({ HOME: '/home/me' }),
+      credential: async () => undefined,
+      redactor: { redact },
+      now: () => 0,
+    });
+    return { inventory, service };
+  }
+
+  it('should scrub a server name and tool names BEFORE clipping them, so a cut cannot leave half a token', async () => {
+    // Arrange — the token starts 250 characters in: a 256-character clip taken first would keep its first six.
+    const probe = new FakeProbe({ serverName: `${'x'.repeat(250)}${SECRET}`, tools: [SECRET, `t ${SECRET}`, 'plain'] });
+    const { inventory, service } = scrubbing(probe, async text => text.replaceAll(SECRET, '[redacted:K]'));
+
+    // Act
+    const result = await service.check(await idOf(inventory, 'docs', 'project'), 's1');
+
+    // Assert
+    should(result.outcome).equal('connected');
+    should(JSON.stringify(result)).not.containEql('FAKE-M');
+    should(result.tools).deepEqual(['[redacted:K]', 't [redacted:K]', 'plain']);
+    should(result.toolCount).equal(3);
+  });
+
+  it('should show nothing of an answer it cannot scrub (fail closed)', async () => {
+    // Arrange
+    const probe = new FakeProbe({ serverName: 'Docs', tools: ['search'] });
+    const { inventory, service } = scrubbing(probe, async () => {
+      throw new Error('the secret store is damaged');
+    });
+
+    // Act
+    const result = await service.check(await idOf(inventory, 'docs', 'project'), 's1');
+
+    // Assert
+    should(result.outcome).equal('error');
+    should(result.message).match(/could not scrub/u);
+    should(result).not.have.property('serverName');
+    should(result).not.have.property('tools');
+    should(JSON.stringify(result)).not.containEql('search');
+  });
+
+  it('should scrub a failure’s own words and show none of them when the scrub cannot run', async () => {
+    // Arrange
+    const probe = new FakeProbe(new McpProbeFailure('protocol', `It refused: ${SECRET}`));
+    const { inventory, service } = scrubbing(probe, async () => {
+      throw new Error('damaged');
+    });
+
+    // Act
+    const result = await service.check(await idOf(inventory, 'docs', 'project'), 's1');
+
+    // Assert
+    should(result.outcome).equal('error');
+    should(JSON.stringify(result)).not.containEql(SECRET);
   });
 });
