@@ -5,6 +5,8 @@
  */
 import { describe, expect, it } from 'bun:test';
 import { interact, mount, must } from '@ferretry/app/testing';
+import { commandBarResults } from '@ferretry/app/ui';
+import type { PluginCommandSource } from '@ferretry/app';
 import { createElement, type FunctionComponent } from 'react';
 import app from '../../../app/index.ts';
 import { ConfigFilesPanel, configSummaryWords, groupWords } from '../../../app/config-files/panel.tsx';
@@ -103,6 +105,29 @@ describe('the Kernel app half draws the surfaces today’s Settings had for conf
   it('S-0478 the settings navigation lists Files (the configuration files) beside the host checks', () => {
     const ids = (manifest.ui?.settings ?? []).map(setting => setting.id).sort();
     expect(ids).toEqual(['doctor', 'files', 'host-checks']);
+  });
+
+  it('S-0478 the command bar finds Configuration files by "yaml", "config" or a file name, and opens this machine\'s Files tab', () => {
+    const commands = (app as { shell?: { commands?: PluginCommandSource } }).shell?.commands;
+    if (commands === undefined) throw new Error('the kernel half offers no command bar entries');
+    const opened: string[] = [];
+    const source = commands({
+      client: daemon().client as never,
+      daemon: 'd 1',
+      navigate: href => opened.push(href),
+      screenHref: () => '',
+      changed: () => undefined,
+    });
+    for (const query of ['yaml', 'config', 'warden.yaml', 'edit as yaml']) {
+      const found = commandBarResults([source], query).results.map(entry => entry.label);
+      expect(found, `"${query}" finds it`).toContain('Configuration files');
+    }
+    // Nothing is offered before something is typed (it is not a resting entry), and an unrelated word finds nothing.
+    expect(commandBarResults([source], '').results).toEqual([]);
+    expect(commandBarResults([source], 'zzzz').results).toEqual([]);
+    const hit = commandBarResults([source], 'yaml').results.find(entry => entry.label === 'Configuration files');
+    hit?.run();
+    expect(opened).toEqual(['/d/d%201/settings/kernel/files']);
   });
 
   it('S-0479 S-0417 the Files tab is labelled Files and sits in the Advanced end of the tabs, after the host checks', () => {
@@ -257,6 +282,15 @@ describe('the Kernel app half draws the surfaces today’s Settings had for conf
     expect(view.container.querySelector('[data-doctor-check="launchctl"]')?.getAttribute('data-doctor-status')).toBe(
       'not_applicable',
     );
+    // A consequence is said only on a row with a miss: a passing row, and a not-applicable one, say what they found once.
+    expect(view.container.querySelector('[data-doctor-check="bash"]')?.textContent).not.toContain(
+      'Generated fleet wrappers cannot run.',
+    );
+    const notUsed = view.container.querySelector('[data-doctor-check="launchctl"]')?.textContent ?? '';
+    expect(notUsed.split('not used on this operating system').length - 1).toBe(1);
+    // It is headed Doctor, not the name of the tab beside it.
+    expect(view.container.querySelector('#doctor-settings-heading')?.textContent).toBe('Doctor');
+    expect(text).not.toContain('Host checks');
     expect(text.endsWith('Resolving a program is all this report proves.')).toBe(true);
     await view.unmount();
   });
@@ -264,7 +298,7 @@ describe('the Kernel app half draws the surfaces today’s Settings had for conf
   it('S-0416 a daemon that gives no report says so and does not read as healthy', async () => {
     const view = await shown(recordingClient(() => new Error('refused')).client, 'doctor');
     await settle();
-    expect(view.container.textContent).toContain('Host checks unavailable');
+    expect(view.container.textContent).toContain('Doctor unavailable');
     expect(view.container.textContent).toContain('No missing evidence is treated as a healthy host.');
     expect(view.container.textContent).not.toContain('Required dependencies are present.');
     await view.unmount();

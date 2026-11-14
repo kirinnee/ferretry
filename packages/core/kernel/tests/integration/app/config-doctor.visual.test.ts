@@ -73,10 +73,19 @@ const VIEWS = [
   { view: 'editor', words: ['Edit as YAML', 'Never paste a key here'] },
   {
     view: 'doctor',
-    words: ['Host checks', 'Required dependencies are present.', 'alternative', 'is all this report proves'],
+    words: ['Doctor', 'Required dependencies are present.', 'alternative', 'is all this report proves'],
   },
-  { view: 'doctor-down', words: ['A required dependency is missing; sessions will not work yet.'] },
+  {
+    view: 'doctor-missing',
+    words: ['A required dependency is missing; sessions will not work yet.', 'Sessions cannot start or be managed.'],
+  },
+  {
+    view: 'doctor-unavailable',
+    words: ['Doctor unavailable', 'No missing evidence is treated as a healthy host.', 'Try again'],
+  },
   { view: 'host-checks', words: ['Reachable', 'Technical identity'] },
+  { view: 'host-checks-checking', words: ['Checking', 'Technical identity'] },
+  { view: 'host-checks-unreachable', words: ['Unreachable', 'Technical identity'] },
 ] as const;
 
 const open = async (viewport: (typeof VIEWPORTS)[number], scheme: 'light' | 'dark', view: string) => {
@@ -107,6 +116,45 @@ describe('Settings › Files, Doctor and Host checks', () => {
           try {
             const text = await tab.evaluate(() => document.body.innerText);
             for (const word of words) expect(text, `${view} says "${word}"`).toContain(word);
+            if (view === 'doctor') {
+              // A passing row does not repeat what a miss would break, and the not-applicable row says it once.
+              expect(text).not.toContain('Generated fleet wrappers cannot run.');
+              expect(text.split('not used on this operating system').length - 1).toBe(1);
+              expect(text.split('Host checks').length - 1, 'the Doctor tab is not headed like the tab beside it').toBe(
+                0,
+              );
+            }
+            if (view === 'files') {
+              // A file's full path is one line cut with an ellipsis, with the whole of it a hover away.
+              const path = await tab.evaluate(() => {
+                const element = document.querySelector<HTMLElement>('[data-config-file-path]');
+                return {
+                  title: element?.title ?? '',
+                  fits: element !== null && element.scrollWidth <= element.clientWidth,
+                };
+              });
+              expect(path.title).toContain('/home/demo/.ferretry/config/');
+              if (viewport.phone) expect(path.fits, 'a long path is cut, not scrolled').toBe(false);
+            }
+            if (view === 'editor') {
+              // The sheet has finished rising, and Cancel and Save are whole inside the window.
+              await tab.waitForFunction(() => {
+                const sheet = document.querySelector<HTMLElement>('[data-bottom-sheet] [role="dialog"]');
+                return sheet !== null && new DOMMatrixReadOnly(getComputedStyle(sheet).transform).m42 === 0;
+              });
+              const inside = await tab.evaluate(() =>
+                ['[data-config-cancel]', '[data-config-submit]'].map(selector => {
+                  const box = document.querySelector(selector)?.getBoundingClientRect();
+                  return (
+                    box !== undefined &&
+                    box.top >= 0 &&
+                    box.bottom <= window.innerHeight &&
+                    box.right <= window.innerWidth
+                  );
+                }),
+              );
+              expect(inside, 'Cancel and Save are inside the window').toEqual([true, true]);
+            }
             const overflow = await tab.evaluate(
               () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
             );

@@ -1,5 +1,6 @@
 /**
- * SETTINGS › DOCTOR: the daemon's host checks (today's `DoctorSettings`), read from `GET /v1/doctor` — the SAME report
+ * SETTINGS › DOCTOR: the daemon's host checks (today's `DoctorSettings`, headed "Host checks" there; here "Doctor", so it is
+ * not the tab beside it), read from `GET /v1/doctor` — the SAME report
  * `fy doctor` prints, so the two can never disagree about what is wrong. A daemon that did not answer says so; no
  * missing evidence is treated as a healthy host. The report never carries a secret and never claims a harness is signed
  * in (its `limitation` says so, last).
@@ -25,7 +26,7 @@ export function DoctorReportView({ report }: { readonly report: DoctorReport }) 
       <div className="flex items-center gap-2">
         <Stethoscope size={17} className="text-accent" aria-hidden="true" />
         <h3 id="doctor-settings-heading" className="m-0 text-row font-semibold text-fg">
-          Host checks
+          Doctor
         </h3>
       </div>
       <p className="mb-3 mt-1 text-cell leading-base text-muted" data-doctor-headline="">
@@ -50,7 +51,9 @@ export function DoctorReportView({ report }: { readonly report: DoctorReport }) 
               </div>
               {/* `break-words`: a summary can carry an absolute path, one unbreakable token that would scroll a phone sideways. */}
               <p className="mb-0 mt-1 break-words text-meta leading-base text-muted">
-                {check.summary}. {check.impact}
+                {/* What a miss breaks is said only where there is a miss: a row that passes, or does not apply here, says
+                    what it found, once. */}
+                {check.status === 'missing' ? `${check.summary}. ${check.impact}` : check.summary}
               </p>
             </li>
           );
@@ -85,7 +88,7 @@ export function DoctorSettings({ client }: { readonly client: KernelClient }) {
   return (
     <section className="kt-panel p-panel" role="status" aria-label="Doctor report unavailable">
       <h3 className="m-0 text-row font-semibold text-fg">
-        {held.status === 'loading' ? 'Reading the host checks…' : 'Host checks unavailable'}
+        {held.status === 'loading' ? 'Reading the host checks…' : 'Doctor unavailable'}
       </h3>
       {held.status === 'unavailable' ? (
         <>

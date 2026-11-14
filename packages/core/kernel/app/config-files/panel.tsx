@@ -141,7 +141,15 @@ function FileRow({
         </Badge>
       </div>
       <div className="flex min-w-0 items-center gap-1">
-        <PanelPath value={absolute} className="min-w-0 text-meta text-muted" label="Full path" />
+        {/* One line cut with an ellipsis rather than a box that scrolls: the whole path is in the title, the copy button and the DOM text, so a screen reader reads it all
+         */}
+        <code
+          className="min-w-0 flex-1 truncate font-mono text-meta text-muted"
+          title={absolute}
+          data-config-file-path=""
+        >
+          {absolute}
+        </code>
         <CopyButton text={absolute} label={`Copy the full path of ${file.path}`} write={write} />
       </div>
       <div>

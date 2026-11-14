@@ -2,10 +2,12 @@ import type { DoctorFinding } from '@ferretry/kernel/contract';
 import type { DoctorRun } from '@ferretry/kernel/manifest';
 
 /** The newest push this daemon made since it started, as its fan-out answered. */
-interface PushOutcome {
+export interface PushOutcome {
   readonly at: string;
   readonly delivered: number;
   readonly failed: number;
+  /** The push threw before it could say what reached whom (a read, a key, the fan-out). Nothing of the error is kept. */
+  readonly thrown?: true;
 }
 
 /** What `fy doctor` reports about this daemon's pushes. */
@@ -28,14 +30,27 @@ const plural = (count: number, one: string): string => `${String(count)} ${one}$
  */
 export function notificationsDoctor(read: () => Promise<PushHealth>): DoctorRun {
   return async (): Promise<DoctorFinding | undefined> => {
+    const base = { name: 'notifications', requirement: 'capability' } as const;
     let health: PushHealth;
     try {
       health = await read();
     } catch {
-      return undefined;
+      // A read that fails is no reason to hide the row: nothing can be said about pushes, and that is said (never why).
+      return {
+        ...base,
+        state: 'warn',
+        detail: 'the daemon could not read its push state, so it cannot say whether a phone can be buzzed',
+        fix: 'The phone may stay silent for stops, deadlines and pings. Restart the daemon; if this stays, report it.',
+      };
     }
-    const base = { name: 'notifications', requirement: 'capability' } as const;
     const { enrolled, latest } = health;
+    if (latest?.thrown === true)
+      return {
+        ...base,
+        state: 'warn',
+        detail: `the newest push failed at ${latest.at}`,
+        fix: 'The phone stays silent for stops, deadlines and pings until a push goes out again.',
+      };
     if (enrolled === 0)
       return {
         ...base,

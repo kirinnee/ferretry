@@ -281,6 +281,12 @@ export function ConfigFileEditor({
               ) : null}
             </>
           ) : null}
+        </div>
+      </div>
+      {/* Pinned under the scroller, never inside it: a tall issue list or a short window scrolls the text, and Cancel
+          and Save stay in view. */}
+      <div className="shrink-0 border-t border-border bg-surface px-panel py-3" data-config-editor-actions="">
+        <div className="mx-auto w-full max-w-3xl min-w-0">
           <div className="flex flex-col-reverse gap-sm sm:flex-row sm:justify-end">
             <Button type="button" className="min-h-[44px]" data-config-cancel="" onClick={onClose}>
               {save.status === 'applied' || save.status === 'pending' ? 'Close' : 'Cancel'}

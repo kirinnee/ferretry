@@ -2,12 +2,13 @@
  * The browser entry for the Kernel's Settings views over FAKE data (no daemon, no secret, no real path):
  *
  *   ?theme=<family>-<mode>
- *   ?view=files | editor | files-empty | doctor | doctor-down | host-checks
+ *   ?view=files | editor | files-empty | doctor | doctor-missing | doctor-unavailable | host-checks |
+ *         host-checks-checking | host-checks-unreachable
  */
 import { createRoot } from 'react-dom/client';
 import { ConfigFilesPanel } from '../../../../app/config-files/panel.tsx';
 import { ConfigFileEditor } from '../../../../app/config-files/editor.tsx';
-import { DoctorReportView } from '../../../../app/doctor/doctor-settings.tsx';
+import { DoctorReportView, DoctorSettings } from '../../../../app/doctor/doctor-settings.tsx';
 import { HostChecksView } from '../../../../app/doctor/host-checks.tsx';
 import type { DoctorReport } from '../../../../contract/index.ts';
 import type { KernelClient } from '../../../../app/lib/client.ts';
@@ -140,7 +141,18 @@ function Scene() {
       );
     case 'doctor':
       return <DoctorReportView report={report} />;
-    case 'doctor-down':
+    case 'doctor-unavailable':
+      // The real down state: the daemon does not answer, so the tab says so and offers Try again.
+      return (
+        <DoctorSettings
+          client={{
+            call: async () => {
+              throw new Error('this machine did not answer');
+            },
+          }}
+        />
+      );
+    case 'doctor-missing':
       return (
         <DoctorReportView
           report={{
@@ -150,6 +162,24 @@ function Scene() {
               check.name === 'tmux' ? { ...check, status: 'missing' as const, summary: 'not found on PATH' } : check,
             ),
           }}
+        />
+      );
+    case 'host-checks-checking':
+      return (
+        <HostChecksView
+          value="checking"
+          refreshing
+          refresh={() => undefined}
+          fingerprint="fy_daemon_LhGT7RTh8wRuBminOE2wLDWDga0Nj57qdemo"
+        />
+      );
+    case 'host-checks-unreachable':
+      return (
+        <HostChecksView
+          value="unreachable"
+          refreshing={false}
+          refresh={() => undefined}
+          fingerprint="fy_daemon_LhGT7RTh8wRuBminOE2wLDWDga0Nj57qdemo"
         />
       );
     case 'host-checks':

@@ -1,6 +1,8 @@
 import { createElement } from 'react';
+import { provideToShell } from '@ferretry/app';
 import { implementApp } from '../manifest/index.ts';
 import manifest from '../plugin.ts';
+import { configFilesCommands } from './config-files/commands.ts';
 import { ConfigFilesSurface } from './config-files/panel.tsx';
 import { DoctorSettings } from './doctor/doctor-settings.tsx';
 import { HostChecks } from './doctor/host-checks.tsx';
@@ -12,12 +14,16 @@ import { HostChecks } from './doctor/host-checks.tsx';
  * `PUT /v1/config/file`, `POST /v1/config/confirm`, `GET /v1/doctor`, `GET /v1/health`) through the client the shell
  * builds per daemon.
  */
-export default implementApp(manifest, {
-  build: ({ client }) => ({
-    settings: {
-      files: () => createElement(ConfigFilesSurface, { client }),
-      doctor: () => createElement(DoctorSettings, { client }),
-      'host-checks': () => createElement(HostChecks, { client }),
-    },
+export default provideToShell(
+  implementApp(manifest, {
+    build: ({ client }) => ({
+      settings: {
+        files: () => createElement(ConfigFilesSurface, { client }),
+        doctor: () => createElement(DoctorSettings, { client }),
+        'host-checks': () => createElement(HostChecks, { client }),
+      },
+    }),
   }),
-});
+  // "Configuration files" in the command bar, as today's settings search offered it.
+  { commands: configFilesCommands },
+);

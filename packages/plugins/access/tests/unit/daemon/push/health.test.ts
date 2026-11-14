@@ -43,12 +43,28 @@ describe('notifications: whether this daemon can buzz a phone (v4 notificationHe
     });
   });
 
-  test('V-0257 the silence sentence is the one v4 used, and a read that throws is no row', async () => {
-    expect(SILENT).toContain('silent');
+  test('V-0257 a newest push that threw is a warning that names when, and keeps no error text', async () => {
     expect(
-      await notificationsDoctor(async () => {
-        throw new Error('boom');
-      })(),
-    ).toBeUndefined();
+      await run({ enrolled: 2, latest: { at: '2026-11-14T10:01:00Z', delivered: 0, failed: 0, thrown: true } }),
+    ).toEqual({
+      state: 'warn',
+      name: 'notifications',
+      requirement: 'capability',
+      detail: 'the newest push failed at 2026-11-14T10:01:00Z',
+      fix: 'The phone stays silent for stops, deadlines and pings until a push goes out again.',
+    });
+  });
+
+  test('V-0257 a health read that fails is a safe warning row, never a hidden one and never the error’s own text', async () => {
+    const finding = await notificationsDoctor(async () => {
+      throw new Error('ENOENT /secret/subscriptions.json endpoint=https://push.example/abc');
+    })();
+    expect(finding).toMatchObject({ state: 'warn', name: 'notifications', requirement: 'capability' });
+    expect(JSON.stringify(finding)).not.toContain('secret');
+    expect(JSON.stringify(finding)).not.toContain('push.example');
+  });
+
+  test('V-0257 the silence sentence is the one v4 used', () => {
+    expect(SILENT).toContain('silent');
   });
 });
