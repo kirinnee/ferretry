@@ -14,6 +14,7 @@ import { boardReader } from './board.ts';
 import {
   ConfigWardenConfigStore,
   FileWardenArtifacts,
+  ScratchWardenWorkFolders,
   kernelSecretSender,
   StateMachineMembers,
   StateWardenJevCheckLog,
@@ -31,6 +32,7 @@ import {
   withLiveness,
 } from './fleet.ts';
 import { createWardenRemedies } from './remedies.ts';
+import { ferretsWardenSpawner } from './spawner.ts';
 import { conversationStuckInbox, conversationStuckInput } from './stuck-ports.ts';
 import {
   INBOX_STUCK_REF,
@@ -107,10 +109,6 @@ export const WARDEN_LIVENESS_TICK_SECONDS = 30;
 /** The binary's name, for sentences that name a command a ferret types; the other halves quote it the same way. */
 const BINARY = 'fy';
 
-const refuse = (what: string): never => {
-  throw new Error(`${what} is not available on this machine yet.`);
-};
-
 export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   const { kernel, ferrets, conversation, asks } = host;
   const nowMs = (): number => kernel.clock.nowMs();
@@ -121,7 +119,12 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   const nowIso = (): string => new Date(kernel.clock.nowMs()).toISOString();
   const files = new StateWardenReportFiles(kernel.state);
   const reader = new WardenReportReader(files, REPORTS_DIRECTORY);
-  const artifacts = new FileWardenArtifacts(files, reader, REPORTS_DIRECTORY);
+  // A finished investigator's report is the summary of its last `signal done`, masked before it is filed.
+  const artifacts = new FileWardenArtifacts(files, reader, REPORTS_DIRECTORY, async investigator => {
+    const summary = await ferrets.summary(investigator as FerretId);
+    if (summary === undefined) return undefined;
+    return await kernel.redaction.read(async scope => scope.text(summary));
+  });
   const configStore = new ConfigWardenConfigStore(kernel.config);
   // A settings screen hears warden.yaml move the moment the kernel reloads it, from any editor (not only on mount).
   kernel.config.watch(WARDEN_CONFIG, () => kernel.events.publish(WardenConfigChanged, {}));
@@ -209,20 +212,17 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   });
 
   // ── investigators ────────────────────────────────────────────────────────────────────────────────────────────────────
-  // GAP(warden folder): Ferrets now starts a ferret in a `workFolder` and hands back what it wrote with
-  // `summary(ferret)`, but the Warden has no folder of its own to pass: its manifest declares no root and the kernel
-  // offers no path to its state. Without one, no investigator starts and nothing is spent.
-  const spawner: WardenSpawner = {
-    spawn: async request => {
-      if (request.cwd === '') {
-        return refuse('Starting a warden investigation (it has no folder to work and write its report in)');
-      }
-      return refuse('Starting a warden investigation');
-    },
-  };
+  // Each starts through Ferrets as the Warden, in a folder of its own that the kernel's scratch port made outside the
+  // Ferretry home (never the home, never a project), and hands its report back with `signal done` (`spawner.ts`).
+  const workFolders = new ScratchWardenWorkFolders(kernel.scratch);
+  const spawner: WardenSpawner = ferretsWardenSpawner({ ferrets, folders: workFolders });
 
   const agents: WardenAgentInventory = {
-    installed: async () => ferrets.harnesses(),
+    // Empty is "the inventory is unreadable" (`WardenAgentInventory`): it condemns no account. The harness keys Ferrets
+    // lists are not runtime names, so answering with them made EVERY account unknown and no investigator could start.
+    // Ferrets resolves the runtime at the start itself and refuses an unknown or signed-out one: the sweep then strikes
+    // that account and tries the next, which is the check that matters.
+    installed: async () => [],
     currentName: async reference => reference,
     defaultRuntime: async () => undefined,
   };
@@ -409,6 +409,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
         if (livenessArmed) liveness.disarm();
         livenessArmed = false;
         disarm?.();
+        void workFolders.close().catch(() => undefined);
       };
     },
   };

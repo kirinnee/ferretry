@@ -1716,7 +1716,7 @@ export class WardenSweepService {
         state,
         {
           name: `Investigate ${target.config.teammate === undefined ? targetId.slice(0, 8) : displayAgentName(target.config.teammate)}`,
-          prompt: buildAssignedWardenPrompt(anomaly, target, reportPath, this.settings),
+          prompt: buildAssignedWardenPrompt(anomaly, target, this.settings),
           cwd: this.settings.wardenCwd,
           effort: input.config.investigation.effort,
           stopCapability: capability,
@@ -3180,6 +3180,11 @@ export class WardenSweepService {
       const finished = record.finishedAt ?? (live.has(record.id) || record.startedAt === at ? undefined : at);
       const finishedMs = finished === undefined ? undefined : Date.parse(finished);
       const worthAsking = record.costUsd === undefined && finishedMs !== undefined && nowMs - finishedMs < 86_400_000;
+      // A finished investigator's report is the summary of its last `signal done`; only a read through the artifacts
+      // adapter files it (masked, never over a report already filed). Done for every finished record, not only an
+      // assignment's, and for a day — the summary may land after the session stops, so an absent one is retried.
+      if (finishedMs !== undefined && nowMs - finishedMs < 86_400_000)
+        await this.ports.artifacts.readReport(record.reportPath).catch(() => undefined);
       const costUsd = worthAsking ? await this.ports.costs.costUsd(record.id).catch(() => undefined) : undefined;
       if (costUsd !== undefined && Number.isFinite(costUsd) && costUsd >= 0)
         average = { count: average.count + 1, totalUsd: average.totalUsd + costUsd };
@@ -3269,7 +3274,6 @@ export class WardenSweepService {
         prompt: buildWardenSweepPrompt({
           anomalies,
           sessions: input.fleet,
-          reportPath,
           at: input.at,
           moveCandidates: await this.moveCandidates(anomalies, input.fleet, config),
           settings: this.settings,

@@ -6,3 +6,4 @@ export * from './kernel-secret-sender.ts';
 export * from './report-files.ts';
 export * from './report-reader.ts';
 export * from './state-store.ts';
+export * from './work-folders.ts';

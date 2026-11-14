@@ -7,6 +7,7 @@ import type { ApiRequest, CallContext, ConfigWriteOutcome } from '@ferretry/kern
 import { WardenFlagSchema } from '../../contract/index.ts';
 import { wardenRoutes } from '../../daemon/routes.ts';
 import { createWardenSubsystem } from '../../daemon/subsystem.ts';
+import { instantFromEpochMs } from '@ferretry/std';
 import { fakeKernel, wardenConfig } from '../support/kernel.ts';
 
 const call = (method: string, path: string, body?: unknown, query: Record<string, string> = {}): CallContext => ({
@@ -273,5 +274,53 @@ describe('B187 the stuck-message checks run in the sweep', () => {
     const entries = notices.map(notice => notice.entry);
     should(entries).containEql(entryId('warden:input-stuck'));
     should(entries).containEql(entryId('warden:inbox-stuck'));
+  });
+});
+
+describe('B09 a finished fleet investigator files its report', () => {
+  it('B09 files the summary of a fleet investigator started for an overdue declared wait', async () => {
+    // Arrange: an auto ferret whose declared wait deadline passed; the sweep starts a fleet investigator.
+    const world = warden({
+      config: {
+        enabled: true,
+        layers: { jev: false, llm: true },
+        minSpawnGapMinutes: 0,
+        accounts: [{ agent: 'acct' }],
+        caps: { investigationUsdPerDay: 50 },
+      },
+    });
+    try {
+      world.ferrets.add({
+        id: ferretId('f1'),
+        mode: 'auto',
+        state: 'idle',
+        stateAt: T0,
+        waiting: {
+          since: instantFromEpochMs(Date.parse('2026-11-07T00:00:00.000Z')),
+          until: instantFromEpochMs(Date.parse('2026-11-07T01:00:00.000Z')),
+          condition: 'wait for build',
+        },
+      });
+      await world.subsystem.run(true);
+      const investigator = (await world.ferrets.list()).find(ferret => ferret.label === 'fleet-warden');
+      should(investigator).not.be.undefined();
+      should((await world.subsystem.status()).investigations?.[0]?.scope).equal('fleet');
+      should(await world.subsystem.verdicts()).have.length(0);
+
+      // Act: it finishes with `signal done` and the next sweep runs.
+      world.ferrets.setSummary(
+        investigator!.id,
+        '# Warden sweep\n\n## Anomaly: f1\nVERDICT: LEAVE\n- **Recommended action:** LEAVE\n',
+      );
+      world.ferrets.setState(investigator!.id, 'stopped');
+      await world.clock.advance(60 * 60 * 1000);
+      await world.subsystem.run(false);
+
+      // Assert: the summary is the filed report, so the verdict and the latest report exist.
+      should((await world.subsystem.verdicts()).length).be.aboveOrEqual(1);
+      should((await world.subsystem.status()).lastReport).not.be.undefined();
+    } finally {
+      await world.scratch.closeAll();
+    }
   });
 });

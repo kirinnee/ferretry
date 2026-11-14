@@ -33,6 +33,11 @@ export class FileWardenArtifacts implements WardenArtifacts {
     private readonly files: WardenReportFileSystem,
     private readonly reader: WardenReportReader,
     private readonly reportsDirectory: string,
+    /**
+     * What a finished investigator said with its last `signal done`, already masked, by its id (Ferrets keeps it as
+     * the ferret's summary). Absent: only a report file is ever read.
+     */
+    private readonly summaryOf?: (investigator: string) => Promise<string | undefined>,
   ) {}
 
   reportPath(at: string, targetId?: string): string {
@@ -44,8 +49,22 @@ export class FileWardenArtifacts implements WardenArtifacts {
     await this.files.writeTextAtomic(provenancePath(reportPath), `${JSON.stringify(provenance, null, 2)}\n`);
   }
 
-  /** The report a finished warden left, with its provenance block on top. */
+  /**
+   * The report a finished warden left, with its provenance block on top.
+   *
+   * An investigator cannot write into the warden's state (it works in a folder of its own and is fenced out of the
+   * home), so its report is the summary of its last `signal done`. The first read after it finished files that
+   * summary as the report, under the name its provenance sidecar was written for, and every later read finds the file.
+   * A report already filed is never replaced.
+   */
   async readReport(reportPath: string): Promise<string | undefined> {
+    const filed = await this.reader.readReport(reportPath);
+    if (filed !== undefined) return filed;
+    const provenance = await this.reader.readProvenance(reportPath);
+    if (provenance === undefined || this.summaryOf === undefined) return undefined;
+    const summary = await this.summaryOf(provenance.wardenSessionId);
+    if (summary === undefined || summary.trim() === '') return undefined;
+    await this.files.writeTextAtomic(reportPath, summary);
     return await this.reader.readReport(reportPath);
   }
 
