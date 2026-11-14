@@ -1,3 +1,6 @@
+import { ensureDom } from '@ferretry/app/testing';
+ensureDom();
+
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { FerretView } from '@ferretry/core-ferrets/contract';
 import type { ReactTestInstance } from 'react-test-renderer';

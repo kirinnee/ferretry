@@ -141,3 +141,32 @@ describe('a ferret page, in the built app, against the daemon that serves it', (
     }
   }, 60_000);
 });
+
+describe('the runtime picker above the composer, against the daemon that serves the ferret', () => {
+  test('the picker loads for a seeded ferret: its summary is read as the route serves it, no refusal drawn', async () => {
+    if (session === undefined) throw new Error('the app session did not open');
+    window.history.replaceState({}, '', `/d/${session.daemonId}/ferrets/${FERRET}/chat`);
+    const view = await dom.mount(
+      <App
+        browser={browser()}
+        layouts={new DeviceLayoutStore(session.storage)}
+        runtime={session.runtime}
+        scroll={new ScrollMemory(null)}
+        themes={new ThemePreferenceStore(session.storage)}
+      />,
+    );
+    try {
+      const page = view.container;
+      const said = () => page.textContent ?? '';
+      const picker = () => page.querySelector(`[data-runtime-picker="${FERRET}"]`);
+      const refused = () => page.textContent?.includes('daemon returned an invalid ferret') === true;
+      await until(() => picker() !== null || refused(), 'the runtime picker to read the ferret', said);
+
+      // The picker is drawn for the ferret, and the read was not refused as "an invalid ferret".
+      expect(refused()).toBe(false);
+      expect(picker()).not.toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  }, 60_000);
+});
