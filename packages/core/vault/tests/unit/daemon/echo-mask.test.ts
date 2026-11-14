@@ -94,6 +94,38 @@ describe('checking a stranger’s reply for the credential: parse, decode every 
     await expect(read(deep.events)).rejects.toThrow('too complex');
   });
 
+  describe('FAILS CLOSED when the decoder round cap ends a chain that is not finished', () => {
+    /** The value wrapped in `layers` rounds of base64: each layer is one more round of decoding to reach it. */
+    const nested = (layers: number): string => {
+      let text = `id=${FAKE};`;
+      for (let layer = 0; layer < layers; layer += 1) text = Buffer.from(text).toString('base64');
+      return text;
+    };
+    const DEEP = nested(9);
+
+    test('a chain inside the cap is found and replaced; the same chain deeper than the cap is NOT passed as checked', () => {
+      expect(maskText(nested(3), around)).toBe('[x]');
+      // not found by decoding (the cap stops it), so it must be replaced because the check did not finish
+      expect(maskText(DEEP, around)).toBe('[x]');
+    });
+
+    test('a JSON body holding an unfinished chain is refused (key or value), not returned', async () => {
+      expect(() => maskJson(JSON.stringify({ a: DEEP }), around)).toThrow();
+      expect(() => maskJson(JSON.stringify({ [DEEP]: 1 }), around)).toThrow();
+      const body = await sanitizeBody(reply(streamOf(JSON.stringify({ a: DEEP }))), around);
+      expect(body.kind).toBe('dropped');
+    });
+
+    test('an event stream holding an unfinished chain ends with an error instead of passing the event', async () => {
+      const body = await sanitizeBody(
+        reply(streamOf(`data: ${JSON.stringify({ a: DEEP })}\n\n`), 'text/event-stream'),
+        around,
+      );
+      if (body.kind !== 'events') throw new Error('not events');
+      await expect(read(body.events)).rejects.toThrow('too complex');
+    });
+  });
+
   test('a body of any type that is not JSON is dropped, whatever it says', async () => {
     for (const type of ['text/plain', 'text/html', 'application/xml', 'application/x-ndjson', 'image/png']) {
       const body = await sanitizeBody(reply(streamOf('hello'), type), around);

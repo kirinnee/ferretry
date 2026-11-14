@@ -200,7 +200,7 @@ function folded(text: string): string[] {
 
 const DECODERS: readonly ((text: string) => string[])[] = [percent, entities, backslashes, hexes, base64s, folded];
 
-/** Every form `text` can be read in, each decoded further until nothing new appears (bounded: over it, the check gives up). */
+/** Every form `text` can be read in, each decoded further until nothing new appears (bounded: over a bound, including the round cap with forms left to decode, the check throws `Bound`). */
 function formsOf(text: string, work: Work): Set<string> {
   const seen = new Set<string>([text]);
   let frontier = [text];
@@ -220,6 +220,9 @@ function formsOf(text: string, work: Work): Set<string> {
     }
     frontier = next;
   }
+  // The round cap ended the walk with forms still undecoded: the set is NOT complete, so it must not be reported as
+  // checked. Failing closed here lets every caller drop the body or replace the field.
+  if (frontier.length > 0) throw new Bound('too many decoding rounds');
   return seen;
 }
 

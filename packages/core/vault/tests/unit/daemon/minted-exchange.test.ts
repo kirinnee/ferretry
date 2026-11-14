@@ -565,6 +565,30 @@ describe('decode, check, drop: what the reply says is parsed in the Vault and a 
       });
     });
 
+  test('FAILS CLOSED past the decoder round cap: a chain too deep to finish is dropped (body) or replaced (metadata), never returned as checked', async () => {
+    const layered = (token: string) => {
+      let value = `id=${token};`;
+      for (let layer = 0; layer < 9; layer += 1) value = Buffer.from(value).toString('base64');
+      return value;
+    };
+    const { of } = await world(
+      bearer =>
+        new Response(JSON.stringify({ echo: layered(sent(bearer)) }), {
+          statusText: `Nope ${layered(sent(bearer))}`,
+          headers: { 'content-type': 'application/json', 'mcp-session-id': layered(sent(bearer)) },
+        }),
+    );
+    await of('mcp').put(ACCESS, TOKEN);
+    const outcome = await of('mcp').fetchMinted?.(ACCESS, exchange());
+    if (outcome?.kind !== 'response') throw new Error('no response');
+    expect(outcome.body).toEqual({
+      kind: 'dropped',
+      why: 'The server’s answer was too deep or too long to check for the sign-in, so the Vault kept it.',
+    });
+    expect(outcome.statusText).toBe(MARK);
+    expect(outcome.headers['mcp-session-id']).toBe(MARK);
+  });
+
   test('a body with a JSON type that is not JSON is dropped with its own sentence', async () => {
     const { of } = await world(() => jsonReply('{"a": FAKE/MCP+TOKEN"0123456789'));
     await of('mcp').put(ACCESS, TOKEN);
