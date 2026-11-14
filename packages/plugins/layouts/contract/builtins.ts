@@ -12,7 +12,26 @@ export const DEFAULT_LAYOUT = LayoutSchema.parse({
   side: { show: 'wide-only', holds: 'ferrets' },
   top: ['daemon-picker', 'search'],
   'composer.tools': ['attachments', 'dictation', 'runtime-picker', 'composer-quota'],
-  panels: { 'ferret.side': ['ferret-agenda', 'cards-of-ferret', 'files', 'ferret-warden', 'queue', 'insights'] },
+  // Every panel a plugin declares for the ferret's side pane: a slot a layout lists draws exactly what it lists, so an
+  // omitted panel is never drawn (`default-side-panels.test.ts` reads the real manifests and fails on a missing one).
+  panels: {
+    'ferret.side': [
+      'ferret-agenda',
+      'queue',
+      'cards-of-ferret',
+      'terminals',
+      'console',
+      'processes',
+      'browser',
+      'files',
+      'ferret-warden',
+      'mcp-servers',
+      'helpers',
+      'skills',
+      'usage',
+      'insights',
+    ],
+  },
   density: 'comfortable',
   phone: { nav: { side: 'bottom', items: ['ferrets', 'agenda', 'board'] } },
 });

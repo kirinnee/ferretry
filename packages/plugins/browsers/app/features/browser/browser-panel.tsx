@@ -9,7 +9,8 @@
  * daemon already masked, and an input request is raised through the Vault, not here.
  */
 
-import { useFullscreen } from '@ferretry/app';
+import { useFullscreen, usePanelIntent } from '@ferretry/app';
+import type { PanelIntent } from '@ferretry/kernel/manifest';
 import { useCallback, useId, useMemo } from 'react';
 import { useBrowserControl } from '../../hooks/use-browser-control.ts';
 import { browserPageForKey, useSessionBrowser } from './use-session-browser.ts';
@@ -30,10 +31,12 @@ export interface BrowserPanelProps {
   /** The two engines, as injectable dependencies (a test substitutes them). */
   readonly dependencies?: UnifiedBrowserDependencies;
   readonly onOpenLoginWindow?: UnifiedBrowserSurfaceProps['onOpenLoginWindow'];
+  /** What the host just asked of this panel: "new-page" opens a page (the phone's "+ New browser"). */
+  readonly intent?: PanelIntent;
 }
 
 /** The panel for one ferret. Without a ferret there is no browser to show. */
-export function BrowserPanel({ daemon, sessionId, dependencies, onOpenLoginWindow }: BrowserPanelProps) {
+export function BrowserPanel({ daemon, sessionId, dependencies, onOpenLoginWindow, intent }: BrowserPanelProps) {
   const scope = useMemo(() => browserSessionScope(daemon, sessionId), [daemon, sessionId]);
   const titleId = useId();
   const pages = useSessionBrowser(scope, daemon);
@@ -45,6 +48,7 @@ export function BrowserPanel({ daemon, sessionId, dependencies, onOpenLoginWindo
   const key = page === undefined ? undefined : (page.name ?? page.id);
 
   const newPage = useCallback((): void => void pages.act({ action: 'new-page' }), [pages]);
+  usePanelIntent(intent, 'new-page', newPage);
 
   return (
     <div

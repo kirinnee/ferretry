@@ -1,10 +1,13 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { ferret, type TestHost } from '@ferretry/kernel/testing';
 import { type InputRaise, type SecretName, targetRef } from '@ferretry/core-vault/contract';
 import { FakeInputHolds, FakeRedaction } from '@ferretry/core-vault/contract/testing';
 import type { Actor, CallContext, FerretId, InputHolds } from '@ferretry/kernel/contract';
 import { type ActRecord, TestMintedIds, testActRunner } from '@ferretry/kernel/testing';
 import { err, ok } from '@ferretry/std';
 import { pageHoldTarget } from '../../../daemon/holds/index.ts';
+import { handoverHost } from '../../support/handover-host.ts';
+import type { Tabs } from '../../support/tabs.ts';
 import { TypedIdentities } from '../../../daemon/target/sign-in/identities.ts';
 import {
   type ActedPage,
@@ -358,5 +361,99 @@ describe('browser_ask_owner', () => {
   test('a page of another session is not there, and the sentence names nothing else', async () => {
     const answer = await world().tools.browser_ask_owner(CALL, { name: 'other' });
     expect(answer).toEqual({ text: 'there is no page other in this session', isError: true });
+  });
+});
+
+/**
+ * The four tools over the REAL browser tools and daemon half, on a page a person took over: the checks the page tools
+ * make are the browser tools' own (`pageToolHost`), so a held page is refused here exactly as it is by `browser_click`.
+ */
+describe('a page a person took over', () => {
+  const TAKEN = 'A person has taken over %browser:app; wait or ask them.';
+  let running: TestHost | undefined;
+  afterEach(async () => {
+    await running?.stop();
+    running = undefined;
+  });
+
+  async function opened(): Promise<{ host: TestHost; tabs: Tabs }> {
+    const world = await handoverHost();
+    running = world.host;
+    await world.host.tool('browser_open', { name: 'app', url: 'https://example.test/login' }, world.as('f1'));
+    return world;
+  }
+
+  const control = (host: TestHost, action: 'takeover' | 'handback') =>
+    host.request('POST', '/v1/sessions/f1/surfaces/browser/control', { body: { action, key: 'app' } });
+
+  test('browser_type, browser_fill_form, browser_request_input and browser_ask_owner are all refused as taken over', async () => {
+    const { host, tabs } = await opened();
+    expect((await control(host, 'takeover')).status).toBe(200);
+    const as = { as: ferret('f1') };
+
+    const answers = [
+      await host.tool('browser_type', { name: 'app', selector: '#user', text: 'alice' }, as),
+      await host.tool('browser_fill_form', { name: 'app', fields: [{ selector: '#user', text: 'alice' }] }, as),
+      await host.tool(
+        'browser_request_input',
+        { name: 'app', prompt: 'Sign in', fields: [{ id: 'pw', sensitivity: 'secret', selector: '#pw' }] },
+        as,
+      ),
+      await host.tool('browser_ask_owner', { name: 'app', message: 'Your turn' }, as),
+    ];
+
+    expect(answers.map(answer => answer.isError)).toEqual([true, true, true, true]);
+    expect(answers.map(answer => answer.text)).toEqual([TAKEN, TAKEN, TAKEN, TAKEN]);
+    expect(tabs.typed).toEqual([]);
+  });
+
+  test('the same four tools work again once the person hands the page back', async () => {
+    const { host, tabs } = await opened();
+    await control(host, 'takeover');
+    await control(host, 'handback');
+    const as = { as: ferret('f1') };
+
+    const typed = await host.tool('browser_type', { name: 'app', selector: '#user', text: 'alice' }, as);
+    const asked = await host.tool('browser_ask_owner', { name: 'app' }, as);
+
+    expect(typed).toEqual({ text: 'Done on %browser:app.' });
+    expect(asked.isError).toBeUndefined();
+    expect(tabs.typed).toEqual([{ pageId: 'p1', text: 'alice' }]);
+  });
+
+  test('a type already queued behind another act when the person takes the page over is refused inside the page’s queue', async () => {
+    const { host, tabs } = await opened();
+    const as = { as: ferret('f1') };
+    // A click holds the page's queue; the type waits its turn behind it, having already passed the first check.
+    const turn = () => new Promise<void>(resolve => setImmediate(resolve));
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let inPage: () => void = () => undefined;
+    const clickInPage = new Promise<void>(resolve => {
+      inPage = resolve;
+    });
+    const click = tabs.automation.click;
+    tabs.automation.click = async (...args) => {
+      inPage();
+      await gate;
+      return await click(...args);
+    };
+    const clicking = host.tool('browser_click', { name: 'app', selector: '#go' }, as);
+    await clickInPage;
+    const typing = host.tool('browser_type', { name: 'app', selector: '#user', text: 'alice' }, as);
+    await turn();
+
+    // Act — the takeover lands while the type is queued.
+    expect((await control(host, 'takeover')).status).toBe(200);
+    release();
+    const [clicked, typed] = await Promise.all([clicking, typing]);
+
+    // Assert
+    expect(clicked.isError).toBeUndefined();
+    expect(typed.isError).toBe(true);
+    expect(typed.text).toBe(TAKEN);
+    expect(tabs.typed).toEqual([]);
   });
 });

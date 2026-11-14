@@ -26,7 +26,13 @@
       "project": ["**/*.ts"]
     },
     "packages/app": {
-      "entry": ["src/main.tsx", "src/worker/service-worker.ts", "scripts/**/*.ts", "tests/**/*.test.{ts,tsx}"],
+      "entry": [
+        "src/main.tsx",
+        "src/worker/service-worker.ts",
+        "scripts/**/*.ts",
+        "tests/**/*.test.{ts,tsx}",
+        "tests/**/fixtures/**/*.{ts,tsx}"
+      ],
       "project": ["**/*.{ts,tsx,css}"],
       "ignore": ["tests/support/dom-leak-guard.ts"]
     },

@@ -54,14 +54,15 @@ const draw = async (
 /** Opens the head's ⋯ menu and returns it. */
 const openMenu = async (root: HTMLElement): Promise<HTMLElement> => {
   await interact(() => must(root.querySelector<HTMLElement>('[data-agenda-menu-toggle]'), '⋯').click());
-  return must(root.querySelector<HTMLElement>('[data-agenda-menu]'), 'the menu');
+  // The menu is drawn on the page body, so no card clips it: it is looked for there, not under the item.
+  return must(document.body.querySelector<HTMLElement>('[data-agenda-menu]'), 'the menu');
 };
 
 describe('the item head’s version slot and lineage', () => {
   test('shows no diff control on a machine without versions', async () => {
     const root = await draw({});
     await openMenu(root);
-    expect(root.querySelector('[data-agenda-diff-toggle]')).toBeNull();
+    expect(document.body.querySelector('[data-agenda-diff-toggle]')).toBeNull();
     expect(root.querySelector('[data-agenda-lineage]')).toBeNull();
   });
 
@@ -72,7 +73,7 @@ describe('the item head’s version slot and lineage', () => {
     expect(root.querySelector('[data-agenda-diff]')).toBeNull();
     await interact(() => toggle.click());
     // Changes closes the menu; the panel opens under the card's head.
-    expect(root.querySelector('[data-agenda-menu]')).toBeNull();
+    expect(document.body.querySelector('[data-agenda-menu]')).toBeNull();
     await settleUntil(
       () => root.querySelector('[data-agenda-diff-section="whereWeAre"]') !== null,
       'the diff',
@@ -93,7 +94,7 @@ describe('the item head’s version slot and lineage', () => {
     const open = must((await openMenu(root)).querySelector<HTMLElement>('[data-agenda-merge-open]'), 'Merge with…');
     expect(open.textContent).toBe('Merge with…');
     await interact(() => open.click());
-    expect(root.querySelector('[data-agenda-menu]')).toBeNull();
+    expect(document.body.querySelector('[data-agenda-menu]')).toBeNull();
     expect(root.querySelector('.fy-card [data-agenda-merge-picker]')).not.toBeNull();
     await interact(() => must(root.querySelector<HTMLElement>('.fy-merge__quiet'), 'Cancel').click());
     expect(root.querySelector('[data-agenda-merge-picker]')).toBeNull();

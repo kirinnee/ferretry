@@ -25,10 +25,15 @@ export default implementApp(manifest, {
     const slots = pluginTerminalSlotsClient(client);
     return {
       panels: {
-        terminals: ({ subject }) =>
+        terminals: ({ subject, intent }) =>
           subject === undefined
             ? null
-            : createElement(TerminalsPanel, { connection: THIS_DAEMON, subject, dependencies }),
+            : createElement(TerminalsPanel, {
+                connection: THIS_DAEMON,
+                subject,
+                dependencies,
+                ...(intent === undefined ? {} : { intent }),
+              }),
         console: ({ subject }) =>
           subject === undefined ? null : createElement(ConsolePanel, { connection: THIS_DAEMON, subject, client }),
         processes: ({ subject }) =>

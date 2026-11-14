@@ -34,10 +34,10 @@ import {
  * parsed text and `LOG_STREAM` dumps every token the composer sees, and a configuration text may carry a credential.
  * They are read at parse time, so every entry point (`fy`, `fyd`, the converter) calls this before anything is parsed.
  * The environment is a parameter so a test can hand it a copy; it defaults to the process's own.
- * This deletion does not reach everything Bun runs: a Bun macro (it runs when a module is transpiled, in source runs), a
- * `new Worker(url)` given no options object and a default-env `Bun.spawn` child all get the ORIGINAL native environment.
- * So the daemon's workers are always started with an options object (the current environment), and the macros that parse
- * the shipped catalogs call this themselves first.
+ * This deletion does not reach everything Bun runs: a `new Worker(url)` given no options object and a default-env
+ * `Bun.spawn` child get the ORIGINAL native environment. So the daemon's workers are always started with an options
+ * object (the current environment). The shipped catalogs are parsed by the script that writes Logins' `built-ins.json`,
+ * which calls this itself first; the daemon parses none of them.
  */
 export function clearYamlLogSwitches(environment: Record<string, string | undefined> = process.env): void {
   delete environment.LOG_TOKENS;

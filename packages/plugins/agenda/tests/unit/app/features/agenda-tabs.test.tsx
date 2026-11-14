@@ -278,7 +278,9 @@ describe('the tabs and the versions this device saw', () => {
     await draw(tabbed, 'laptop/sess-1/A23', versionsOf(tabbed));
     // Changes is in the item's ⋯ menu.
     await interact(() => one<HTMLButtonElement>('.fy-item-view__bar [data-agenda-menu-toggle]').click());
-    await interact(() => one<HTMLButtonElement>('[data-agenda-diff-toggle]').click());
+    await interact(() =>
+      must(document.body.querySelector<HTMLButtonElement>('[data-agenda-diff-toggle]'), 'Changes').click(),
+    );
     await settleUntil(() => root().querySelector('[data-agenda-diff-open-tab]') !== null, 'the diff', interact);
     const open = one<HTMLButtonElement>('[data-agenda-diff-open-tab="risks"]');
     expect(open.getAttribute('aria-label')).toBe('Open the tab Risks');
