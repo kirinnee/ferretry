@@ -29,18 +29,27 @@ function refuse(error: unknown): never {
   throw error;
 }
 
-async function change(apply: (reference: string) => Promise<PinnedFerret>, call: CallContext): Promise<ApiResponse> {
+async function change(
+  apply: (reference: string) => Promise<PinnedFerret>,
+  call: CallContext,
+  changed: ((ferret: string) => void) | undefined,
+): Promise<ApiResponse> {
   const decoded = decodeParameter(call.params.get('ferretId') ?? '');
   if (decoded === undefined || decoded === '')
     throw new ApiError(400, 'the ferret id in the path is not usable', 'invalid_session_id');
-  return jsonResponse(await apply(decoded).catch(refuse));
+  const answer = await apply(decoded).catch(refuse);
+  // A pin lives in the owner's pin file, not in the registry, so no registry change wakes the ferret list: the list's
+  // rail kept the old order until a reload. Said here, after the write, once per change.
+  changed?.(answer.id);
+  return jsonResponse(answer);
 }
 
 /** The handlers for `POST /v1/ferrets/:ferretId/pin` and `…/unpin`; `noStore` in the manifest (a live answer). */
-export function sessionPinRoutes(subsystem: SessionPinSubsystem) {
+export function sessionPinRoutes(subsystem: SessionPinSubsystem, changed?: (ferret: string) => void) {
   return {
-    pin: async (call: CallContext): Promise<ApiResponse> => await change(reference => subsystem.pin(reference), call),
+    pin: async (call: CallContext): Promise<ApiResponse> =>
+      await change(reference => subsystem.pin(reference), call, changed),
     unpin: async (call: CallContext): Promise<ApiResponse> =>
-      await change(reference => subsystem.unpin(reference), call),
+      await change(reference => subsystem.unpin(reference), call, changed),
   } as const;
 }

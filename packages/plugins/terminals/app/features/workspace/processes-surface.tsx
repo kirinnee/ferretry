@@ -20,7 +20,6 @@ import { ChevronRight, ListTree } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   groupProcesses,
-  PROCESSES_FORBIDDEN_TEXT,
   type ProcessCalls,
   type ProcessRow,
   processElapsedText,
@@ -324,7 +323,7 @@ export function ProcessesSurface({
     if (state.status === 'forbidden')
       return (
         <p className="fy-proc-empty text-err" data-processes-forbidden="" role="alert">
-          {PROCESSES_FORBIDDEN_TEXT}
+          {state.reason}
         </p>
       );
     if (state.status === 'error')

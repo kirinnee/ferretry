@@ -312,7 +312,7 @@ describe('the page theme switch', () => {
 
   test('the software keyboard closes it, and a narrow screen slides the panel inside', async () => {
     await openSwitch();
-    const rect = HTMLElement.prototype.getBoundingClientRect;
+    const rect = Element.prototype.getBoundingClientRect;
     HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
       return this.getAttribute('role') === 'dialog'
         ? ({ left: -20, right: 252, top: 0, bottom: 10 } as DOMRect)
@@ -322,7 +322,8 @@ describe('the page theme switch', () => {
       await click(trigger());
       expect((panel() as HTMLElement).style.transform).toBe('translateX(28px)');
     } finally {
-      HTMLElement.prototype.getBoundingClientRect = rect;
+      // happy-dom defines it on Element.prototype only: assigning the inherited original back would leave an own property here that shadows every later file's Element.prototype stub in the shared process.
+      Reflect.deleteProperty(HTMLElement.prototype, 'getBoundingClientRect');
     }
     await interact(async () => {
       document.documentElement.setAttribute('data-keyboard', 'open');

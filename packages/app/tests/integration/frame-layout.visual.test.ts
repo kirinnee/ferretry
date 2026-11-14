@@ -70,7 +70,7 @@ const VIEWPORTS = [
 ] as const;
 
 const open = async (
-  viewport: (typeof VIEWPORTS)[number],
+  viewport: { readonly name: string; readonly width: number; readonly height: number; readonly phone: boolean },
   path: string,
   ready: string,
   query = '',
@@ -219,6 +219,30 @@ describe('the ferret page', () => {
       await close();
     }
   });
+
+  // The toolbar (name, status, chips, Info, Actions, the switches, Lessons' scan bar) used to be one control per line, about
+  // 330px of the page; the conversation got what was left: ~40px on a 713px laptop window, nothing on a phone.
+  for (const viewport of [
+    { name: '1280x713', width: 1_280, height: 713, phone: false },
+    { name: '390x844', width: 390, height: 844, phone: true },
+  ] as const)
+    it(`at ${viewport.name} the toolbar is a compact row and the conversation keeps at least a third of the window`, async () => {
+      const { tab, close } = await open(viewport, '/d/ws/ferrets/zoe', '[data-chat]');
+      try {
+        await shotOf(tab, `${viewport.name}-ferret-toolbar`);
+        const boxes = await tab.evaluate(() => {
+          const box = (query: string) => document.querySelector(query)?.getBoundingClientRect();
+          return { toolbar: box('[data-slot="ferret.toolbar"]')?.height ?? -1, chat: box('[data-chat]')?.height ?? -1 };
+        });
+        expect(boxes.toolbar, 'the toolbar is drawn').toBeGreaterThan(0);
+        expect(boxes.toolbar, 'the toolbar takes at most a third of the window').toBeLessThanOrEqual(
+          viewport.height / 3,
+        );
+        expect(boxes.chat, 'the conversation keeps a third of the window').toBeGreaterThanOrEqual(viewport.height / 3);
+      } finally {
+        await close();
+      }
+    });
 
   it('at 390 the side pane does not crush the chat', async () => {
     const { tab, close } = await open(VIEWPORTS[1], '/d/ws/ferrets/zoe', '[data-chat]');

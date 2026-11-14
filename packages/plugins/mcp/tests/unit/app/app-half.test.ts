@@ -1,4 +1,4 @@
-import { ensureDom, mount } from '@ferretry/app/testing';
+import { ensureDom, interact, mount, settleUntil } from '@ferretry/app/testing';
 import { describe, expect, it } from 'bun:test';
 import { createElement, Suspense, type ReactNode } from 'react';
 import mcpApp from '../../../app/index.ts';
@@ -26,7 +26,16 @@ describe('the MCP app half', () => {
       createElement(Suspense, { fallback: createElement('p', null, 'loading') }, createElement(View, {})),
     );
     try {
-      // `mount` waits for the module: the fallback gave way to the real settings view (its scripted client has no route).
+      // The view's module is a real dynamic import, on the disk's and the coverage instrumenter's clock, not the event
+      // loop's: one `act` flush (or a few hundred immediates) can end before it arrives. So wait in real time, in
+      // `act`, for the fallback to give way to the real settings view (its scripted client has no route).
+      await settleUntil(
+        () => view.container.textContent !== 'loading',
+        'the lazy MCP settings view to replace its fallback',
+        callback =>
+          interact(async () => void (await Promise.all([callback(), new Promise(done => setTimeout(done, 25))]))),
+        160,
+      );
       expect(view.container.textContent).toContain('MCP servers');
     } finally {
       await view.unmount();

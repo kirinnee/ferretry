@@ -35,6 +35,17 @@ describe('the ferret pin mount', () => {
     should(subsystem.calls).deepEqual(['pin s1', 'unpin s1']);
   });
 
+  it('should say a ferret changed after a pin or an unpin, and not after a refusal', async () => {
+    const changed: string[] = [];
+    const routes = sessionPinRoutes(new FakePins(), ferret => changed.push(ferret));
+
+    await routes.pin(at('s1'));
+    await routes.unpin(at('s1'));
+    await routes.pin(at('ghost')).catch(() => undefined);
+
+    should(changed).deepEqual(['s1', 's1']);
+  });
+
   it('should restate the domain refusals in HTTP, and refuse an unusable id', async () => {
     const routes = sessionPinRoutes(new FakePins());
     should(await refusalOf(routes.pin(at('ghost')))).deepEqual({ status: 404, code: 'not-found' });

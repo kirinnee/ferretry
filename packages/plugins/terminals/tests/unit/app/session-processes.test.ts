@@ -15,6 +15,7 @@ import {
   PROCESSES_FORBIDDEN_TEXT,
   processElapsedText,
   processErrorText,
+  processForbiddenText,
   processTitle,
   readSessionProcessOutput,
   stopSessionProcess,
@@ -141,6 +142,21 @@ describe('what a failure says', () => {
     expect(PROCESSES_FORBIDDEN_TEXT).toBe(
       'This device can’t see this ferret’s processes. Allow Terminals for it in Settings › Devices.',
     );
+  });
+
+  it('words a grant refusal in the grant’s own words, one remedy per cause, and keeps the plain 403 copy for the rest', () => {
+    const passkey = processErrorText(new DaemonCallError(403, 'grant_step_up_required', 'needs a passkey'));
+    expect(passkey).toContain('This needs your passkey');
+    expect(passkey).toContain('needs a passkey');
+    expect(passkey).not.toContain('Settings › Devices');
+    expect(processForbiddenText(new DaemonCallError(403, 'grant_device_not_granted', 'x'))).toContain(
+      'this device has not been given it',
+    );
+    expect(processForbiddenText(new DaemonCallError(403, 'grant_not_granted', ''))).toBe(
+      'The operator of this machine switched this off. It is turned back on on the host.',
+    );
+    expect(processForbiddenText(new DaemonCallError(403, 'forbidden', 'forbidden'))).toBe(PROCESSES_FORBIDDEN_TEXT);
+    expect(processForbiddenText(new Error('network down'))).toBe(PROCESSES_FORBIDDEN_TEXT);
   });
 
   it('says nothing was stopped when the process changed under the request', () => {

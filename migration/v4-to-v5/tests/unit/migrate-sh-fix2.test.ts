@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { advance, DAEMON_UP_SH, makeSandbox, type Sandbox } from './migrate-harness.ts';
+import { advance, configCheckJson, DAEMON_UP_SH, makeSandbox, type Sandbox } from './migrate-harness.ts';
 
 /**
  * Round-4 review of migrate.sh (the fix1 re-check, findings F1, F2 and F4). Each test here failed on the script as it
@@ -66,7 +66,7 @@ describe('F1 (round 4, still holds): a live daemon after the v5 start is stopped
     await advance(sb, 'install');
     await sb.fake('fy', [
       { match: '--version', run: 'cat "$D/fy.version"' },
-      { match: 'config check', out: 'config ok' },
+      { match: 'config check --json', out: configCheckJson([]) },
       { match: 'daemon start', run: DAEMON_UP_SH, code: 1 },
     ]);
     const result = await sb.run('start');
