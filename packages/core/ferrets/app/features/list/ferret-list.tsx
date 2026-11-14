@@ -19,6 +19,9 @@ import type { LiveFerretsClient } from '../../lib/client.ts';
 import { useNeedsYou } from './use-needs-you.ts';
 import { daemonOfRoute, ferretOfRoute } from '../header/header-paths.ts';
 import { newFerretHref } from '../new-ferret/hrefs.ts';
+import { ListOptions } from '../restart-outdated/restart-outdated-menu.tsx';
+import { restartFerrets } from '../restart-outdated/restart-outdated-api.ts';
+import { RestartOutdatedResult, useRestartOutdated } from '../restart-outdated/restart-outdated.tsx';
 import { FerretRow } from './ferret-row.tsx';
 import {
   DEFAULT_LIST_FILTER,
@@ -52,6 +55,9 @@ export function FerretListBody({
   const { read, retry } = useFerretList(client);
   const { device, set } = useDeviceControls();
   const [showStopped, setShowStopped] = useState(DEFAULT_LIST_FILTER.showStopped);
+  const restart = useRestartOutdated(client, read.kind === 'ready' ? read.ferrets : null, request =>
+    restartFerrets(client, request),
+  );
   const filter: FerretListFilter = { mode: device.sessionsMode ?? DEFAULT_LIST_FILTER.mode, showStopped };
   if (daemon === undefined) return null;
   const onNavigate = router === null ? undefined : (to: string) => router.navigate(to);
@@ -85,6 +91,7 @@ export function FerretListBody({
         daemon={daemon}
         ferret={ferret}
         key={ferret.id}
+        overlayKey={client}
         {...(waiting === undefined ? {} : { needsYou: waiting })}
         {...navigation}
       />
@@ -110,16 +117,20 @@ export function FerretListBody({
             </button>
           ))}
         </fieldset>
-        <label className="fy-sbar__stopped" data-sbar-show-stopped="">
-          <input
-            checked={showStopped}
-            onChange={event => setShowStopped(event.currentTarget.checked)}
-            type="checkbox"
-          />
-          <span>Show stopped</span>
-          {view.hiddenStopped > 0 ? <span className="fy-sbar__count">({view.hiddenStopped})</span> : null}
-        </label>
+        <div className="fy-sbar__tools">
+          <label className="fy-sbar__stopped" data-sbar-show-stopped="">
+            <input
+              checked={showStopped}
+              onChange={event => setShowStopped(event.currentTarget.checked)}
+              type="checkbox"
+            />
+            <span>Show stopped</span>
+            {view.hiddenStopped > 0 ? <span className="fy-sbar__count">({view.hiddenStopped})</span> : null}
+          </label>
+          <ListOptions restart={restart} />
+        </div>
       </div>
+      <RestartOutdatedResult restart={restart} />
       <div className="fy-sbar__list scroll-thin">
         {empty ? (
           <div className="fy-sbar__empty">

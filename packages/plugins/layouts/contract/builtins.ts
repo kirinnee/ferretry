@@ -28,6 +28,7 @@ export const DEFAULT_LAYOUT = LayoutSchema.parse({
       'mcp-servers',
       'helpers',
       'skills',
+      'instructions',
       'usage',
       'insights',
     ],

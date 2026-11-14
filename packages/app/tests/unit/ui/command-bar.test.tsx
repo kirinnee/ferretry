@@ -116,6 +116,26 @@ describe('the command bar', () => {
     ]);
   });
 
+  it('S-0386 two daemon-less addresses of one plugin that read as one place are listed once (Onboarding’s /onboarding and the /setup link’s)', () => {
+    const screens = [
+      { plugin: 'onboarding', id: 'onboarding', path: '/onboarding', label: 'Onboarding' },
+      { plugin: 'onboarding', id: 'handoff', path: '/setup', label: 'Onboarding' },
+      { plugin: 'access', id: 'pair', path: '/pair', label: 'Devices' },
+    ];
+    const source = placeSource({
+      daemons: [],
+      daemon: undefined,
+      screens,
+      routes: routeTable(screens),
+      navigate: () => {},
+    });
+    const places = commandBarResults([source], '').results.filter(entry => entry.id.startsWith('screen-'));
+    expect(places.map(entry => [entry.id, entry.label])).toEqual([
+      ['screen-onboarding.onboarding', 'Onboarding'],
+      ['screen-access.pair', 'Devices'],
+    ]);
+  });
+
   it('K5: when no source has anything at rest it says so, instead of a blank panel', async () => {
     const view = await mount(<CommandBar open focusSignal={1} onClose={() => {}} sources={[]} />);
     expect(document.body.querySelectorAll('[role="option"]')).toHaveLength(0);

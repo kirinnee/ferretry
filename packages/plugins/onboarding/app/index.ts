@@ -41,7 +41,7 @@ export default provideToShell(
     build: ({ client }) => {
       const steps = stepsScreen(client);
       return {
-        screens: { onboarding: daemonlessPlaceholder, steps, setup: steps },
+        screens: { onboarding: daemonlessPlaceholder, handoff: daemonlessPlaceholder, steps, setup: steps },
         panels: {},
         settings: { setup: setupTab(client) },
         renderers: {},
@@ -55,12 +55,14 @@ export default provideToShell(
         ((await loadViews()).createStepsOpener as () => AppComponent<DeviceViewProps>)(),
       ) as NonNullable<ShellProvides['device']>[string],
     },
-    daemonless: ports => ({
-      onboarding: lazyComponent<DaemonlessScreenProps>(async () =>
+    daemonless: ports => {
+      // `/onboarding` and the hand-off link's `/setup` are one page: the same view answers both addresses.
+      const firstRun = lazyComponent<DaemonlessScreenProps>(async () =>
         ((await loadViews()).createOnboardingRoute as (ports: DaemonlessPorts) => AppComponent<DaemonlessScreenProps>)(
           ports,
         ),
-      ) as DaemonlessViews[string],
-    }),
+      ) as DaemonlessViews[string];
+      return { onboarding: firstRun, handoff: firstRun };
+    },
   },
 );

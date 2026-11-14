@@ -7,6 +7,7 @@ import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
 import { InfoToggle } from '../features/info/ferret-info.tsx';
 import type { LiveFerretsClient } from '../lib/client.ts';
 import '../features/info/info.css';
+import '../features/restart-outdated/restart-outdated.css';
 
 export function createInfoPanel(client: LiveFerretsClient): AppComponent<PanelProps> {
   return function InfoPanelView({ subject }: PanelProps) {

@@ -159,7 +159,7 @@ describe('the ferret page', () => {
     const { tab, close } = await open(VIEWPORTS[0], '/d/ws/ferrets/zoe', '[data-slot="ferret.side"] [data-side-panel]');
     try {
       const panels = await tab.locator('[data-slot="ferret.side"] [data-side-panel]').count();
-      expect(panels, 'every panel the default layout lists is drawn').toBe(14);
+      expect(panels, 'every panel the default layout lists is drawn').toBe(15);
       const slot = await tab.evaluate(() => {
         const element = document.querySelector('[data-slot="ferret.side"]') as HTMLElement;
         const box = element.getBoundingClientRect();
@@ -283,7 +283,7 @@ describe('the ferret page on a phone (390)', () => {
     try {
       const labels = await tab.locator('[data-phone-tab-row] [role="tab"]').allInnerTexts();
       expect(labels.slice(0, 6)).toEqual(CHIPS.map(([label]) => label));
-      expect(labels.length, 'one chip per panel the default layout places, and Chat').toBe(15);
+      expect(labels.length, 'one chip per panel the default layout places, and Chat').toBe(16);
       await shotOf(tab, '390-ferret-chip-chat');
     } finally {
       await close();
@@ -321,6 +321,26 @@ describe('the ferret page on a phone (390)', () => {
       await tab.locator('[data-phone-chip="stubs.insights"]').scrollIntoViewIfNeeded();
       await tab.click('[data-phone-chip="stubs.insights"]');
       expect((await hitsItself(tab, '[data-side-panel="insights"]')).hit).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
+  it('S-0075 a press in the Instructions list brings Files on screen: the workspace moves the chip, alone and full width', async () => {
+    const { tab, close } = await open(PHONE, '/d/ws/ferrets/zoe', READY);
+    try {
+      await tab.locator('[data-phone-chip="stubs.instructions"]').scrollIntoViewIfNeeded();
+      await tab.click('[data-phone-chip="stubs.instructions"]');
+      expect(await tab.getAttribute('[data-phone-chip="stubs.instructions"]', 'aria-selected')).toBe('true');
+      expect(await tab.locator('[data-side-panel="files"]:visible').count(), 'Files is behind Instructions').toBe(0);
+      await tab.click('[data-open-in-files]');
+      expect(
+        await tab.getAttribute('[data-phone-chip="stubs.files"]', 'aria-selected'),
+        'Files is the chip on show',
+      ).toBe('true');
+      expect(await tab.getAttribute('[data-phone-chip="stubs.instructions"]', 'aria-selected')).toBe('false');
+      expect((await hitsItself(tab, '[data-side-panel="files"]')).hit, 'Files is on screen and takes a tap').toBe(true);
+      expect(await tab.locator('[data-side-panel]:visible').count(), 'one panel at a time').toBe(1);
     } finally {
       await close();
     }

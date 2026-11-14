@@ -106,7 +106,7 @@ does not stop it.
 
 ## What you see
 
-`fy daemon status` has a **Limits** block, the app's Settings › Machine › Ferret limits panel shows the same
+`fy daemon status` has a **Limits** block, the app's Settings › Ferret limits tab (read-only; a Terminals tab, found in the command bar by "memory", "slow", "limits.yaml"…) shows the same
 lines, and a ferret's Info › Overview says when _it_ was slowed or stopped. For the box above:
 
 ```text

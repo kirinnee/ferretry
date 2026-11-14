@@ -19,6 +19,7 @@ panels:
       mcp-servers,
       helpers,
       skills,
+      instructions,
       usage,
       insights,
     ]

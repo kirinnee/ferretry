@@ -15,6 +15,7 @@ import { ferretTitles } from '../../lib/ferret-title.ts';
 import { StatusMark } from '../../lib/status-mark.tsx';
 import { RouteLink } from '../../ui.ts';
 import { ferretChatHref } from '../new-ferret/hrefs.ts';
+import { OutdatedMark } from '../restart-outdated/outdated-mark.tsx';
 import { ferretDirectory, isPinned, isStopped } from './list-model.ts';
 import { useRowContextGesture } from './row-context-gesture.ts';
 import { RowMenuContext, type RowMenuTrigger } from './row-menu-context.ts';
@@ -26,12 +27,14 @@ export interface FerretRowProps {
   /** Open items waiting on the owner (`ferrets.needs-you`): a bold name, a count and the ask. Absent: none. */
   readonly needsYou?: FerretNeedsYou;
   readonly onNavigate?: (to: string) => void;
+  /** The daemon's client, which keys what "Restart outdated" last answered (`restart-outdated/restart-overlay.ts`). */
+  readonly overlayKey?: object;
 }
 
 /** What a count badge says aloud: "3 open Inbox items". */
 const waitingWords = (count: number): string => `${count} open Inbox ${count === 1 ? 'item' : 'items'}`;
 
-export function FerretRow({ ferret, daemon, active, needsYou, onNavigate }: FerretRowProps): ReactNode {
+export function FerretRow({ ferret, daemon, active, needsYou, onNavigate, overlayKey }: FerretRowProps): ReactNode {
   const { title, ferret: callsign } = ferretTitles(ferret);
   const openMenu = useContext(RowMenuContext);
   const link = useRef<HTMLAnchorElement | null>(null);
@@ -81,6 +84,7 @@ export function FerretRow({ ferret, daemon, active, needsYou, onNavigate }: Ferr
               {needsYou.count}
             </span>
           )}
+          <OutdatedMark ferret={ferret} overlayKey={overlayKey} />
         </span>
         <span className="fy-sbar__detail" data-sbar-detail="">
           {callsign === null ? null : (

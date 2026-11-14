@@ -6,6 +6,7 @@
 import type { AppComponent, ScreenProps } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
 import '../features/list/ferret-list.css';
+import '../features/restart-outdated/restart-outdated.css';
 import { FerretList } from '../features/list/ferret-list.tsx';
 import { FerretRowMenuProvider } from '../features/list/row-actions-host.tsx';
 import type { LiveFerretsClient } from '../lib/client.ts';
