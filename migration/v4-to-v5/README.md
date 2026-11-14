@@ -226,11 +226,13 @@ carried: v5's `quotas/<login>.json` holds a provider-endpoint reading with no st
 holds a runtime uuid; the analytics index that does is a cache.
 
 Catalogs (`src/steps/catalogs.ts`) writes `state/catalogs/`: `catalogs.json`, `links.json`, `members.json`,
-`shares.json` and `member-passkeys.json` keep every v4 value under `format: 1` (`schemaVersion` dropped; a version-2
+`shares.json` and `member-passkeys.json` keep every v4 value under `format: 1` AND `schemaVersion: 1` (the kernel's stamp plus the key the daemon's strict
+document schemas still require; v4's catalogs.json said 3; a version-2
 `catalogs.json` is upgraded as v4 does, a version-1 one or a members file with two people of one name fails with
 "start v4.291.5 once"), `catalog-installs.json` becomes `installs.json` with every pin, publisher and revision (an
 install stays at its pinned version), and each `blobs/<sha256>.json` is copied as the same bytes (its name re-checked
-as the hash). v5 Catalogs declares these files but not yet their bodies, so the landing check is every joining id and
+as the hash). The test reads every converted file back through the real kernel state port and the daemon's own document schemas (a
+subprocess, so the converter imports nothing from the daemon); the landing check is every joining id and
 digest through the contract's id schemas, and each install must read as `CatalogInstallSummarySchema`. Nothing signed
 is stored: the signed manifest is rebuilt from unchanged fields and blobs with the unchanged identity key, so nothing
 is re-signed. The sealed `link-keys.json` (AAD `catalog-link:<linkId>`, unstamped, under the vault key) is re-labelled
