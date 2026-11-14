@@ -66,6 +66,7 @@ const originalResponse = globalThis.Response;
 
 beforeAll(async () => {
   dom = await import('../../support/dom.ts');
+  dom.registerDom();
   // The daemon in this process answers through the global `Response`, and `Bun.serve` accepts only Bun's own.
   globalThis.Response = NativeResponse;
   daemonRegistry = await realDaemonRegistry();
@@ -86,9 +87,7 @@ afterAll(async () => {
   await daemon?.stop();
   globalThis.Response = originalResponse;
   window.history.replaceState({}, '', '/');
-  const { GlobalRegistrator } = await import('@happy-dom/global-registrator');
-  await GlobalRegistrator.unregister();
-  (globalThis as { __ferretryDomRegistered?: boolean }).__ferretryDomRegistered = false;
+  await dom.unregisterDom();
 });
 
 const browser = (): ShellWindow => ({

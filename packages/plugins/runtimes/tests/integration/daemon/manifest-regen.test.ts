@@ -894,6 +894,9 @@ async function scheduledCompose(failures = 0, unpublishable = false) {
   const silent = { debug() {}, info() {}, warn() {}, error() {}, child: () => silent };
   const runner = new JobRunner(clock, silent as never);
   let attempts = 0;
+  // A publish the apply's own change event fires (`fromFiles.soon`) has no promise a test can await, yet it repairs a
+  // damaged manifest just as the job does, outside the counted `republish`: tracked so a test damages only once it is quiet.
+  const strays = new Set<Promise<unknown>>();
   let assembled: ReturnType<typeof hostAssembly> | undefined;
   const host = await testHost({
     plugins: [
@@ -908,6 +911,16 @@ async function scheduledCompose(failures = 0, unpublishable = false) {
         const assembly = hostAssembly({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never);
         const catalog = new Proxy(assembly.catalog, {
           get(target, property) {
+            if (property === 'publishFromFiles')
+              return () => {
+                const stray = Promise.resolve(target.publishFromFiles?.());
+                strays.add(stray);
+                void stray.then(
+                  () => strays.delete(stray),
+                  () => strays.delete(stray),
+                );
+                return stray;
+              };
             if (property === 'republish')
               return async (options: never) => {
                 attempts += 1;
@@ -938,6 +951,15 @@ async function scheduledCompose(failures = 0, unpublishable = false) {
     await clock.advance(ms);
     await runner.settle();
   };
+  // The apply of the fixture's one runtime, then every publish its change event started has finished: what follows
+  // (a damaged manifest, a count of the job's attempts) is the repair job's alone, however slowly the machine runs.
+  const published = async (): Promise<void> => {
+    await publishOnce(host);
+    while (strays.size > 0) {
+      await Promise.allSettled([...strays]);
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+  };
   const boot = async (): Promise<void> => {
     runner.start();
     await Promise.resolve();
@@ -947,14 +969,25 @@ async function scheduledCompose(failures = 0, unpublishable = false) {
     if (assembled?.launchFacts === undefined) throw new Error('the composed daemon has no launch facts');
     return assembled.launchFacts;
   };
-  return { host, world, runner, clock, advance, boot, facts, assembly: () => assembled, attempts: () => attempts };
+  return {
+    host,
+    world,
+    runner,
+    clock,
+    advance,
+    boot,
+    published,
+    facts,
+    assembly: () => assembled,
+    attempts: () => attempts,
+  };
 }
 
 describe('the repair is retried by the real JobRunner until it works', () => {
   it('one transient failure: the job fails (not a successful terminal run), is retried with backoff, and then repairs on its own', async () => {
     const f = await scheduledCompose(1);
     try {
-      await publishOnce(f.host);
+      await f.published();
       await writeFile(manifestPathOf(f.world), truncated());
 
       await f.boot();
@@ -978,7 +1011,7 @@ describe('the repair is retried by the real JobRunner until it works', () => {
   it('a repair that keeps failing keeps being retried, and a later success ends it', async () => {
     const f = await scheduledCompose(3);
     try {
-      await publishOnce(f.host);
+      await f.published();
       await writeFile(manifestPathOf(f.world), withUnknownKey());
       await f.boot();
       await f.advance(1_000);
@@ -1002,7 +1035,7 @@ describe('damage after a healthy boot is repaired without anyone asking', () => 
   it('a healthy boot and healthy starts never publish', async () => {
     const f = await scheduledCompose();
     try {
-      await publishOnce(f.host);
+      await f.published();
       const before = await readFile(manifestPathOf(f.world), 'utf8');
       await f.boot();
       const gate = new LaunchGate({ source: f.facts() });
@@ -1021,7 +1054,7 @@ describe('damage after a healthy boot is repaired without anyone asking', () => 
   it('healthy boot, then truncation: a start is refused retryably, the repair runs by itself, the next start passes', async () => {
     const f = await scheduledCompose();
     try {
-      await publishOnce(f.host);
+      await f.published();
       await f.boot();
       expect(f.attempts()).toBe(0);
       await writeFile(manifestPathOf(f.world), truncated());
@@ -1044,7 +1077,7 @@ describe('damage after a healthy boot is repaired without anyone asking', () => 
   it('a refused start never publishes by itself: only the repair job does, one at a time', async () => {
     const f = await scheduledCompose();
     try {
-      await publishOnce(f.host);
+      await f.published();
       await f.boot();
       await writeFile(manifestPathOf(f.world), truncated());
       const source = f.facts();
@@ -1065,7 +1098,7 @@ describe('damage after a healthy boot is repaired without anyone asking', () => 
   it('the homes reader asks for the repair too (a Codex start never reads the launch facts)', async () => {
     const f = await scheduledCompose();
     try {
-      await publishOnce(f.host);
+      await f.published();
       await f.boot();
       await writeFile(manifestPathOf(f.world), withUnknownKey());
       const homes = f.assembly()?.homes;
@@ -1163,7 +1196,7 @@ describe('ONE repair owner across running and backoff', () => {
   it('the backoff still retries by itself and a success hands the repair back: the next damage is repaired at once', async () => {
     const f = await scheduledCompose(1);
     try {
-      await publishOnce(f.host);
+      await f.published();
       await writeFile(manifestPathOf(f.world), truncated());
       await f.boot();
       expect(f.attempts()).toBe(1);
