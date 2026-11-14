@@ -57,6 +57,33 @@ that arrives at a point the pointer never moved to (a phone tap, typically) is p
 to that point, because a real pointer is always somewhere before it presses. No curve, jitter or delay
 is ever invented.
 
+## Typing something sensitive from the command line
+
+`fy browser page type <page> <target> [text…]` (and `fy browser type`) take the text as words, as they always did. **A word on
+the command line is not private**: every user of the machine can read it in `ps` and `/proc`, and it lands in shell
+history. For anything sensitive give the text another way:
+
+- `--stdin` reads it from standard input (one trailing newline is dropped): `pass show site | fy browser page type app '#pw' --stdin`.
+  Leave the text off the command line when you use it.
+- `--secret NAME` names a stored secret instead of carrying a value. **This is a declared gap, not a feature yet**: the
+  Vault runs a command with a secret in that child's environment but has no way to hand one to a page act, and
+  Ferretry never reads a secret back, so the verb says so and types nothing. Until the Vault grows a use that
+  reaches a page, ask the owner to type it (`browser_request_input`) or use `--stdin`.
+
+Whatever the source, the typed text is never printed back: the answer, an error and `--json` show `[typed text]` where the
+daemon echoed it, however it spelled it (as it is, as JSON writes it with `\"`, `\\`, `\n` and `\/`, as `\uXXXX`, or
+percent-encoded in a URL). A value too short to hide without hiding the words around it (under three characters) is not
+masked: an answer that repeats it is withheld whole, and says so.
+
+## Where `--ferret` goes, and the older spellings
+
+`--ferret <id>` (also `-s` and `--session`) may be written before the verb, between its words or after it
+(`fy browser --session f1 page click app '#go'`); the one nearest the end wins. `browser close`, `browser goto` and
+`browser login close` still work as `stop`, `navigate` and `login stop`.
+
+A **ferret's own** whole-browser verbs (`fy browser click`, `navigate`, `status`, …) pass the same checks as its page
+verbs: the owner's Browsers switch, its own browser only, a page that is its own, and nobody holding the page.
+
 ## Captchas and "checking your browser" pages
 
 Ferretry **never solves, skips or works around** a captcha or a bot check. What it does:

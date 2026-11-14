@@ -44,7 +44,7 @@ const labelOf = (page: BrowserPageSummary): string => {
  *
  * Only open pages are listed (a stopped browser holds none), so no entry is `closed`.
  *
- * DEMAND: `browser` use — exactly what `GET /v1/sessions/:sessionId/browser` declares, so a caller who could not read
+ * DEMAND: `browser` use — exactly what `GET /v1/ferrets/:ferretId/browser` declares, so a caller who could not read
  * the page list through that route is refused before `entries` runs. Titles and hosts are read inside ONE
  * `Redaction.read` like that route's (S16). Only keys, labels and an opener CLASS leave (a label is the address only when
  * the page has neither a title nor a host, as today's tab label): never a device id,

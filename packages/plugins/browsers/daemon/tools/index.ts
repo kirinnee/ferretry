@@ -119,7 +119,7 @@ function controllerOf(call: CallContext): SurfaceController {
 }
 
 /** A route's refusal as its status; the message already passed the hold answer and the redactor (I120). */
-async function refusing<T>(work: () => Promise<T>): Promise<T> {
+export async function refusing<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work();
   } catch (error) {
@@ -132,15 +132,24 @@ async function refusing<T>(work: () => Promise<T>): Promise<T> {
 /** The surface control routes and the person's tool route (today's `agent-tools.ts` browser surface routes). */
 export function controlRoutes(tools: BrowserTools) {
   return {
-    'GET /v1/sessions/:sessionId/surfaces/browser/control': (async call =>
-      jsonResponse(await refusing(async () => await tools.controlView(sessionIdOf(call))))) satisfies RouteHandler,
-    'POST /v1/sessions/:sessionId/surfaces/browser/control': (async call => {
+    // A person sees every record; a ferret only its own ferret's, and in it only its own pages (others' are left out).
+    'GET /v1/ferrets/:ferretId/surfaces/browser/control': (async call => {
+      const ferret = ferretOf(call);
+      const target = sessionIdOf(call);
+      return jsonResponse(
+        await refusing(
+          async () =>
+            await (ferret === undefined ? tools.controlView(target) : tools.ferretControlView(ferret, target)),
+        ),
+      );
+    }) satisfies RouteHandler,
+    'POST /v1/ferrets/:ferretId/surfaces/browser/control': (async call => {
       const request = await parseBody(call.request, SurfaceControlRequestSchema);
       return jsonResponse(
         await refusing(async () => await tools.control(sessionIdOf(call), request, controllerOf(call))),
       );
     }) satisfies RouteHandler,
-    'POST /v1/sessions/:sessionId/surfaces/browser/tools': (async call => {
+    'POST /v1/ferrets/:ferretId/surfaces/browser/tools': (async call => {
       const parsed = await parseBody(call.request, BrowserToolCallSchema);
       const answer = await refusing(async () => await tools.call(callerOf(call, sessionIdOf(call)), parsed));
       return jsonResponse(toolResult(answer));

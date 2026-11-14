@@ -467,6 +467,14 @@ export interface TerminalIo {
   readonly isTty: boolean;
 }
 
+/** A word the shell read as an option's value, and how many positional words came before it. */
+export interface SwallowedWord {
+  readonly option: string;
+  readonly word: string;
+  /** The number of positional words written before this one, so a verb that declares the option a switch can put it back. */
+  readonly at: number;
+}
+
 export interface VerbInvocation {
   readonly args: readonly string[];
   readonly options: Readonly<Record<string, string | boolean | readonly string[]>>;
@@ -476,6 +484,17 @@ export interface VerbInvocation {
    * its value), so a verb that knows which of its flags are switches reads this instead of undoing that reading.
    */
   readonly raw?: readonly string[];
+  /**
+   * Every word taken as the value of `--name word`, in the order written. The shell knows no verb's options, so a
+   * verb whose option is a switch reads these to give the word back its place among the arguments. Absent when none.
+   */
+  readonly swallowed?: readonly SwallowedWord[];
+  /**
+   * Every option name as it was written, in order, one entry per occurrence (`--session`, `-s`, `--no-color`, `--x=1`).
+   * Present only when some name was written more than once: the options map then cannot say which of two spellings of
+   * one flag came last, and a verb that reads a flag under several names needs the order. Absent otherwise.
+   */
+  readonly written?: readonly string[];
 }
 
 /**

@@ -32,6 +32,12 @@ export class KernelSecretChildRunner implements SecretChildRunner {
     private readonly spawn: SpawnPort,
     private readonly clock: Clock,
     private readonly locator: ProgramLocator = NO_PROGRAM_LOCATOR,
+    /**
+     * A SEALED runner (a secure copy's command capture): every child it starts is `sealed`, so it inherits only the host's
+     * sealed allowlist and never the git/gh tool overlay, whatever the executable is called. Its stdout is a value no
+     * redaction can know yet, so nothing of the daemon's own environment may reach it.
+     */
+    private readonly sealed: boolean = false,
   ) {}
 
   async run(spec: SecretChildSpec): Promise<SecretChildOutcome> {
@@ -51,6 +57,7 @@ export class KernelSecretChildRunner implements SecretChildRunner {
       child = this.spawn.start(ran.program ?? program, rest, {
         cwd: spec.cwd as FencedPath,
         env: spec.env,
+        ...(this.sealed ? { sealed: true as const } : {}),
         // Never an open stdin: every use is non-interactive, and an open stdin with nothing written can only hang
         // the daemon on a prompt nobody will answer. An empty write closes it.
         stdin: '',

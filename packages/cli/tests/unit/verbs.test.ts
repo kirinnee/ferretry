@@ -138,3 +138,81 @@ describe('verb table', () => {
     ).be.false();
   });
 });
+
+describe('a group’s own options written before its verb', () => {
+  /** A group shaped like Browsers: `-s, --session <id>` on every verb, `--json`, and a two-word group verb. */
+  const group = definePlugin({
+    id: 'grouped',
+    title: 'Grouped',
+    version: '5.0.0',
+    api: 5,
+    core: false,
+    kinds: ['command'],
+    actions: {
+      cli: [
+        verb('grp status', {
+          options: [
+            { flag: '-s, --session, --ferret <id>', help: 'a ferret' },
+            { flag: '--json', help: 'json' },
+          ],
+        }),
+        verb('grp page click', {
+          options: [
+            { flag: '-s, --session, --ferret <id>', help: 'a ferret' },
+            { flag: '--double', help: 'double' },
+            { flag: '--ask [message]', help: 'ask' },
+          ],
+        }),
+      ],
+    },
+  });
+  const table = buildVerbTable(registryOf(skeletonEntry(group)));
+  const resolved = (...tokens: string[]) => {
+    const found = resolveVerb(table, tokens);
+    return found.kind === 'verb' ? { line: found.entry.line, rest: found.rest } : found.kind;
+  };
+
+  it('should find the verb after an option written before it, and hand the option on in front of the arguments', () => {
+    should(resolved('grp', '--session', 'f1', 'status')).deepEqual({ line: 'grp status', rest: ['--session', 'f1'] });
+    should(resolved('grp', '-s', 'f1', 'page', 'click', 'app', '#go')).deepEqual({
+      line: 'grp page click',
+      rest: ['-s', 'f1', 'app', '#go'],
+    });
+  });
+
+  it('should find the verb after an option written between its own words', () => {
+    should(resolved('grp', 'page', '--session=f1', 'click', 'app')).deepEqual({
+      line: 'grp page click',
+      rest: ['--session=f1', 'app'],
+    });
+    should(resolved('grp', 'page', '--ferret', 'f1', 'click', 'app', '--json')).deepEqual({
+      line: 'grp page click',
+      rest: ['--ferret', 'f1', 'app', '--json'],
+    });
+  });
+
+  it('should keep the option written on the verb after the one written before it, so the nearest wins', () => {
+    should(resolved('grp', '-s', 'outer', 'status', '--session', 'inner')).deepEqual({
+      line: 'grp status',
+      rest: ['-s', 'outer', '--session', 'inner'],
+    });
+  });
+
+  it('should keep resolving a line that has no option before its verb exactly as it did', () => {
+    should(resolved('grp', 'page', 'click', 'app', '--double', '#go')).deepEqual({
+      line: 'grp page click',
+      rest: ['app', '--double', '#go'],
+    });
+  });
+
+  it('should still stop at a mistyped verb or an option the group does not declare', () => {
+    should(resolved('grp', '--session', 'f1', 'nope')).equal('unknown');
+    should(resolved('grp', '--bogus', 'status')).equal('unknown');
+    should(resolved('grp', 'page', '--session', 'f1', 'clack', 'app')).equal('unknown');
+  });
+
+  it('should not take the word after an option that declares no value', () => {
+    // `--double` declares no `<value>`: `status` stays a word of the verb line instead of becoming its value.
+    should(resolved('grp', '--double', 'status')).deepEqual({ line: 'grp status', rest: ['--double'] });
+  });
+});

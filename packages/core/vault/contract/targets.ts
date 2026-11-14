@@ -210,7 +210,19 @@ export interface TypeOptions {
   readonly armed?: (armed: boolean) => void;
   /** Asked synchronously right before the write; false types nothing. */
   readonly proceed?: () => boolean;
+  /**
+   * Installs a sealed paste's protection from INSIDE the target's own write turn, after every check that can refuse and
+   * before the first byte: `origins` are the document and frame origins the target reports now (empty for a terminal). It
+   * throws when it cannot protect, and the target then types nothing.
+   */
+  readonly protect?: (where: { readonly origins: readonly string[] }) => void;
   readonly reprove?: boolean;
+  /**
+   * A secure paste's takeover check, asked INSIDE the target's own turn (the page's queue) right before the write, after
+   * every other check. A sentence refuses: nothing is typed and the target answers `guard_refused`. It exists because a
+   * person can take a page over while the write waits its turn, and nothing the Vault looked at earlier can see that.
+   */
+  readonly refuse?: () => Promise<string | undefined>;
 }
 
 /** A picture of the target for the card (a page only; a terminal's card draws its own text). */

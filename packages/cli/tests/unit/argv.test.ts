@@ -36,3 +36,45 @@ describe('parseArgs', () => {
     should(optionOn(parsed, 'nope')).be.false();
   });
 });
+
+describe('parseArgs negative numbers', () => {
+  it('should read a negative number after an option as its value, not as an option', () => {
+    should(parseArgs(['dev', '--pages', '-1', '--by', '-300,0']).options).deepEqual({ pages: '-1', by: '-300,0' });
+  });
+
+  it('should keep a negative number as a positional word', () => {
+    const parsed = parseArgs(['-1', '--json']);
+    should(parsed.args).deepEqual(['-1']);
+    should(parsed.options).deepEqual({ json: true });
+  });
+});
+
+describe('parseArgs swallowed words', () => {
+  it('should record each word an option took, with the positional words that came before it', () => {
+    // Arrange / Act
+    const parsed = parseArgs(['app', '--double', '#go', 'more', '--level', 'error']);
+
+    // Assert
+    should(parsed.args).deepEqual(['app', 'more']);
+    should(parsed.swallowed).deepEqual([
+      { option: 'double', word: '#go', at: 1 },
+      { option: 'level', word: 'error', at: 2 },
+    ]);
+  });
+
+  it('should leave the field out when no option took a word, so the result is what it always was', () => {
+    should(parseArgs(['c1', '--force', '--to=done'])).deepEqual({ args: ['c1'], options: { force: true, to: 'done' } });
+  });
+});
+
+describe('parseArgs: the order every option was written in', () => {
+  it('should record each written occurrence, whatever its spelling, in order', () => {
+    const parsed = parseArgs(['--session', 'outer', 'x', '-s', 'middle', '--session=inner', '--no-color', '--force']);
+    should(parsed.written).deepEqual(['session', 's', 'session', 'color', 'force']);
+  });
+
+  it('should say nothing when no option name was repeated (the order is then the order of the options)', () => {
+    should(parseArgs(['a', '--', '--b']).written).be.undefined();
+    should(parseArgs(['-s', 'a', '--session', 'b']).written).be.undefined();
+  });
+});

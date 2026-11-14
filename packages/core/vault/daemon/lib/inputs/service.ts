@@ -382,6 +382,8 @@ export class InputRequestService {
       if (raise.source === undefined) return await this.admit(sessionId, raise, raise.target);
       // A paste is always a secret, whatever the agent said: the value is one it must not see.
       const copy = this.describeCopy(sessionId, raise.source.name);
+      const refused = await this.deps.sealed?.refusal?.(sessionId, raise.source.name, raise.target);
+      if (refused !== undefined) throw new InputRequestError('conflict', refused, 'taken_over');
       const secret: InputRaise =
         raise.fields === undefined
           ? { ...raise, sensitivity: 'secret' }
@@ -566,7 +568,17 @@ export class InputRequestService {
         id: requestId,
         sessionId,
         agendaItemId: card.id,
-        ...(copy === undefined ? {} : { source: { kind: 'sealed' as const, name: copy.name, from: copy.from } }),
+        ...(copy === undefined
+          ? {}
+          : {
+              source: {
+                kind: 'sealed' as const,
+                name: copy.name,
+                from: copy.from,
+                length: copy.length,
+                capturedAt: copy.capturedAt,
+              },
+            }),
         target: raise.target,
         prompt: raise.prompt,
         sensitivity,
@@ -1524,6 +1536,32 @@ export class InputRequestService {
   }
 
   /**
+   * A person took a page over (told by Browsers): every paste still waiting for the owner into THAT page ends as refused
+   * (`taken_over`) now, rather than only when someone allows it. Nothing is opened or typed; the card closes and the ferret
+   * is told. A paste into another page, a terminal or another session is untouched. `keys` are the page's name and id: a
+   * request names it by either.
+   */
+  async pageTakenOver(sessionId: string, keys: readonly string[]): Promise<void> {
+    const named = new Set(keys);
+    for (const held of [...this.held.values()]) {
+      const { request } = held;
+      if (
+        request.sessionId !== sessionId ||
+        request.source === undefined ||
+        request.state !== 'pending' ||
+        request.target.kind !== 'page' ||
+        !named.has(request.target.key)
+      )
+        continue;
+      await this.lock.run(sessionId, async () => {
+        // A delivery that held the lock ended it first: only a card still waiting is refused.
+        if (held.request.state !== 'pending') return;
+        await this.finish(held, 'refused', 'taken_over', undefined, { closeCard: true, tellAgent: true });
+      });
+    }
+  }
+
+  /**
    * A session ended: whatever it was holding for redaction is let go, and a request still waiting on its
    * owner ends as interrupted, because the agent that asked is gone.
    */
@@ -1982,6 +2020,39 @@ export class InputRequestService {
       const follows =
         clear === undefined && seen.facts.kind === 'page' && held.request.lock?.reason === 'until-moved-on';
       const arming = { armed: false };
+      // The takeover check a paste repeats inside the target's own turn, right before the write (secure-clip-1 fix1, P1-1).
+      const takeover: { sentence?: string } = {};
+      // A sealed paste's protection (the scrollback mask, the page's origins) is installed INSIDE the target's own write turn,
+      // before the first byte, and stays on whatever the write comes to: bytes may have landed. A protection that cannot be
+      // installed types nothing.
+      const unprotected: { sentence?: string } = {};
+      const sealed = this.deps.sealed;
+      const protect =
+        pasted === undefined || sealed === undefined
+          ? undefined
+          : (where: { readonly origins: readonly string[] }): void => {
+              try {
+                // The copy check repeated HERE, synchronously, right before the protection and the write: the target's own check
+                // can be followed by an await, and a copy discarded, expired or captured again since is not protected or typed.
+                if (!this.copyPinned(request, pasted)) {
+                  lost.copy = true;
+                  throw new Error(COPY_ENDED);
+                }
+                // Bound to the capture this card is for, so the protection can never reopen another one under the name.
+                sealed.protect(request.sessionId, pasted, request.target, where, request.source?.capturedAt);
+              } catch (error) {
+                if (lost.copy) throw error;
+                unprotected.sentence =
+                  error instanceof Error && error.message !== ''
+                    ? error.message
+                    : 'Ferretry could not protect this paste, so nothing was typed.';
+                throw error;
+              }
+            };
+      if (pasted !== undefined && sealed === undefined)
+        throw new InputRequestError('unavailable', 'Secure copy is not available, so nothing was pasted.');
+      // The copy's end seen inside that same turn (secure-clip-1 fix2, R4): discarded, expired or captured again since it was opened.
+      const lost = { copy: false };
       const outcome: TypeResult = await this.deps.target
         .type(request.sessionId, request.target, values, submitted, seen.facts, {
           ...(follows
@@ -1996,15 +2067,60 @@ export class InputRequestService {
           codeProgram: seen.codeProgram === true && fields.some(field => field.sensitivity === 'code'),
           ...(by.kind === 'rule' && held.pastedInto !== undefined ? { profileProgram: held.pastedInto } : {}),
           ...(clear === undefined ? {} : { armClear: true }),
+          // A secure paste asks the takeover check once more inside that turn: a person who took the page over while the
+          // write waited in the queue, or while the attempt was journalled and the page held, receives nothing.
+          // The same turn asks, first, whether the copy is still live and still the capture the card was raised for: one
+          // discarded, expired or captured again while the attempt was journalled, the page held or the write queued ends
+          // as copy_gone with nothing typed, whatever the value opened earlier was.
+          ...(pasted === undefined || this.deps.sealed === undefined
+            ? {}
+            : {
+                refuse: async () => {
+                  if (!this.copyPinned(request, pasted)) {
+                    lost.copy = true;
+                    return COPY_ENDED;
+                  }
+                  const sentence = await this.deps.sealed?.refusal?.(request.sessionId, pasted, request.target);
+                  if (sentence !== undefined) takeover.sentence = sentence;
+                  return sentence;
+                },
+              }),
           // Asked again inside the target's own turn: a write that waited in the page's queue may find the line gone.
           ...(grant === undefined ? {} : { proceed: () => grant.held() }),
+          ...(protect === undefined ? {} : { protect }),
           // A standing rule's terminal fill: the reader proved again before Enter, and a refused guard said as such.
           ...(grant !== undefined && by.kind === 'sign-in-rule' && request.target.kind === 'terminal'
             ? { reprove: true }
             : {}),
         })
-        .catch((): TypeResult => 'uncertain');
+        // A copy that ended before the protection typed nothing either: the protection's own throw is not an uncertain write.
+        .catch((): TypeResult => (unprotected.sentence === undefined && !lost.copy ? 'uncertain' : 'target_gone'));
       wrote?.(outcome);
+      if (lost.copy && outcome !== 'typed' && outcome !== 'uncertain') {
+        // Refused inside the target's turn: the copy ended after it was opened. Nothing was typed; no value is returned.
+        await this.letGo(hold);
+        hold = undefined;
+        await this.finish(held, 'cancelled', 'copy_gone', undefined, { closeCard: true, tellAgent: true });
+        throw new InputRequestError(
+          'gone',
+          `${copyHandle(pasted as string)} was discarded or expired, so there is nothing to paste`,
+          INPUT_ERROR_CODES.gone,
+        );
+      }
+      if (takeover.sentence !== undefined && outcome !== 'typed' && outcome !== 'uncertain') {
+        // Refused inside the target's turn: nothing was typed. The request ends refused, like a takeover seen at the open.
+        await this.letGo(hold);
+        hold = undefined;
+        await this.finish(held, 'refused', 'taken_over', undefined, { closeCard: true, tellAgent: true });
+        throw new InputRequestError('conflict', takeover.sentence, 'taken_over');
+      }
+      if (unprotected.sentence !== undefined) {
+        // Nothing was typed: the protection could not be installed first. The card ends with the sentence.
+        await this.letGo(hold);
+        hold = undefined;
+        await this.finish(held, 'refused', 'interrupted', undefined, { closeCard: true, tellAgent: true });
+        throw new InputRequestError('unavailable', unprotected.sentence);
+      }
       // Taken before anything else is awaited: what the ferret does after this counts against a sign-in's facts.
       const deliveredAt = this.deps.clock.now();
       const stored = async (uncertain: boolean): Promise<void> => {
@@ -2090,7 +2206,7 @@ export class InputRequestService {
           (held.request.lock?.seconds ?? INPUT_QUARANTINE_SECONDS) * 1000,
           holdNames(request, held.names),
         );
-      if (pasted !== undefined) this.deps.sealed?.used(request.sessionId, pasted);
+      if (pasted !== undefined) this.deps.sealed?.used(request.sessionId, pasted, request.target);
       await stored(false);
       const saved =
         body.save === undefined || kept === undefined ? undefined : await this.save(held, body.save, kept, by);
@@ -2479,8 +2595,26 @@ export class InputRequestService {
    * The value of the copy a paste names, opened only to be typed. A copy that ended since the card was raised ends
    * the request: it can never be pasted now. One with a line break or a control character would press keys.
    */
+  /**
+   * Whether the copy under `name` is still live AND still the capture this card was raised for. Never the value: the
+   * daemon's own record of it (`describe`). Asked inside the target's turn, right before the write.
+   */
+  private copyPinned(request: InputRequest, name: string): boolean {
+    const meta = this.deps.sealed?.describe(request.sessionId, name);
+    if (meta === undefined || meta.state !== 'live') return false;
+    const pinned = request.source?.capturedAt;
+    return pinned === undefined || meta.capturedAt === pinned;
+  }
+
   private async openCopy(held: Held, name: string): Promise<string> {
-    const value = this.deps.sealed?.open(held.request.sessionId, name);
+    // A person may have taken the page over since the card was raised: nothing is typed, and the card ends.
+    const refused = await this.deps.sealed?.refusal?.(held.request.sessionId, name, held.request.target);
+    if (refused !== undefined) {
+      await this.finish(held, 'refused', 'taken_over', undefined, { closeCard: true, tellAgent: true });
+      throw new InputRequestError('conflict', refused, 'taken_over');
+    }
+    // Opened for the capture THIS card was raised for: a copy discarded and captured again under the name is another value.
+    const value = this.deps.sealed?.open(held.request.sessionId, name, held.request.source?.capturedAt);
     if (value === undefined) {
       await this.finish(held, 'cancelled', 'copy_gone', undefined, { closeCard: true, tellAgent: true });
       throw new InputRequestError(
@@ -3335,12 +3469,34 @@ function pasteAskOf(copy: CopyMeta, facts: InputTargetFacts): string {
   return `Allow pasting ${copy.handle} (${String(copy.length)} characters from ${from}) into ${into}. You type nothing.`;
 }
 
-const SEEN_FLAG = 'The ferret saw this value before it was sealed, so it is not protected; consider rotating it.';
+/** What the target's own turn answers when the copy ended after it was opened; it never reaches the ferret or the card. */
+const COPY_ENDED = 'the copy ended before it could be typed';
 
-/** A copy the agent had already seen is never green: the owner is told it is not protected. */
+const SEEN_FLAG = 'The ferret saw this value before it was sealed, so it is not protected; consider rotating it.';
+const UNKNOWN_FLAG =
+  'Ferretry could not check whether the ferret already saw this value, so it may not be protected; consider rotating it if it matters.';
+const PAGE_READ_FLAG =
+  'The ferret may have read this value on the page before it was sealed, so it may not be protected; consider rotating it if it matters.';
+
+/**
+ * A copy is green only when nothing says the ferret may have seen it. One it saw (`found`) is not protected, and one whose
+ * confidentiality was never established (a transcript that could not be read, a page the ferret may have read first) may
+ * not be: both are amber, and the card says which without claiming that anything leaked.
+ */
 function pasteRisk(risk: InputRisk | undefined, copy: CopyMeta | undefined): InputRisk | undefined {
-  if (copy?.exposure.transcript !== 'found') return risk;
-  return { level: risk?.level === 'red' ? 'red' : 'amber', reason: SEEN_FLAG };
+  if (copy === undefined) return risk;
+  const reason =
+    copy.exposure.transcript === 'found'
+      ? SEEN_FLAG
+      : copy.exposure.transcript === 'unknown'
+        ? UNKNOWN_FLAG
+        : copy.exposure.pageReadBeforeCapture === true
+          ? PAGE_READ_FLAG
+          : undefined;
+  if (reason === undefined) return risk;
+  // What the target already said (a replaced secret is gone for good, say) stays: the exposure is said AFTER it, never instead.
+  const said = risk !== undefined && risk.level !== 'green' && risk.reason !== '' ? `${risk.reason} ` : '';
+  return { level: risk?.level === 'red' ? 'red' : 'amber', reason: `${said}${reason}` };
 }
 
 /**
@@ -3349,7 +3505,9 @@ function pasteRisk(risk: InputRisk | undefined, copy: CopyMeta | undefined): Inp
  * for good), or paste into a page field the card would flag. Each waits for the owner on the card, which says so.
  */
 function ruleMayPaste(copy: CopyMeta, facts: InputTargetFacts, fields: readonly InputRequestField[]): boolean {
-  if (copy.exposure.transcript === 'found') return false;
+  // An exposed value always asks: one the ferret saw, one it MAY have seen (a transcript that could not be read, a page it
+  // read before the copy), and so one nothing can promise is still a secret.
+  if (copy.exposure.transcript !== 'clean' || copy.exposure.pageReadBeforeCapture === true) return false;
   if (facts.kind === 'secret') return !facts.exists;
   // On a page, a rule names the TOP page's origin, so it pastes unasked only where the card would be green for
   // every field: a visible, uncovered password field of that very page (not a frame from another site), on https,

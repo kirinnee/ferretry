@@ -185,6 +185,18 @@ export interface TypeOptions {
    * `reader_changed` (the line is erased); a guard that refuses answers `guard_refused`, never a plain `target_changed`.
    */
   readonly reprove?: boolean;
+  /**
+   * A secure paste's takeover check, asked INSIDE the target's own turn (the page's queue) right before the write, after
+   * every other check. A sentence refuses: nothing is typed and the target answers `guard_refused`. It exists because a
+   * person can take a page over while the write waits its turn, and nothing the Vault looked at earlier can see that.
+   */
+  readonly refuse?: () => Promise<string | undefined>;
+  /**
+   * A sealed paste's protection, installed from INSIDE the target's own write turn after every check that can refuse and
+   * before the first byte: `origins` are the document and frame origins the target reports now (empty for a terminal). It
+   * throws when it cannot protect, and the target then types nothing.
+   */
+  readonly protect?: (where: { readonly origins: readonly string[] }) => void;
 }
 
 /** The card the owner answers. The daemon words the title and ask; the agent's prompt rides as `prompt` only. */
@@ -355,10 +367,31 @@ export type InputCaller =
 export interface InputSealedPort {
   /** What the daemon recorded about a live copy of this session, or nothing: never the value. */
   describe(sessionId: string, name: CopyName): CopyMeta | undefined;
-  /** The live copy's value for the one write; nothing once it was discarded or expired. */
-  open(sessionId: string, name: CopyName): string | undefined;
-  /** A paste of it was typed. */
-  used(sessionId: string, name: CopyName): void;
+  /**
+   * The live copy's value, for the one write; nothing once it was discarded or expired, and nothing when `capturedAt` is
+   * given and the copy now under that name was captured at another instant: a card is for ONE capture, never for
+   * whatever value happens to hold its name by the time the owner allows it.
+   */
+  open(sessionId: string, name: CopyName, capturedAt?: string): string | undefined;
+  /** A paste of it was typed into `target` (a count: the protection was installed by {@link protect}, before the write). */
+  used(sessionId: string, name: CopyName, target: InputTarget): void;
+  /**
+   * Installs the protection a paste needs (a terminal's scrollback kept masked, a page's origins kept closed) from inside the
+   * target's own write turn, before any byte can land. THROWS when it cannot, with a sentence: then nothing is typed.
+   */
+  protect(
+    sessionId: string,
+    name: CopyName,
+    target: InputTarget,
+    where: { readonly origins: readonly string[] },
+    /** The capture the card is for: the protection is for THAT capture, never for whatever holds the name now. */
+    capturedAt?: string,
+  ): void;
+  /**
+   * A sentence when this paste may not go to `target` now (a person has taken the page over), or nothing. Asked when the
+   * paste is raised and again right before the write. Absent: no check, as for a daemon that knows no takeover.
+   */
+  refusal?(sessionId: string, name: CopyName, target: InputTarget): Promise<string | undefined>;
 }
 
 /**

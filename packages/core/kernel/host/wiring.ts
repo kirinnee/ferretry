@@ -153,6 +153,8 @@ export function realAdapters(
     readonly childEnv?: Readonly<Record<string, string>>;
     /** The allow-listed non-secret names `git` and `gh` children get (see `toolEnvironment`). */
     readonly toolEnv?: Readonly<Record<string, string>>;
+    /** The names a SEALED child (a secure copy's command capture) inherits (see `sealedEnvironment`). */
+    readonly sealedEnv?: Readonly<Record<string, string>>;
     /** The release this build carries, for `kernel.updateHost`; absent, no plugin can launch an update. */
     readonly release?: string;
   },
@@ -167,7 +169,7 @@ export function realAdapters(
     random,
     state: stateOpener(home, stateFs, clock, log.child('state')),
     config: configService(home, stateFs, clock, log.child('config'), options.binary),
-    spawn: bunSpawn(options.childEnv ?? {}, undefined, options.toolEnv ?? {}),
+    spawn: bunSpawn(options.childEnv ?? {}, undefined, options.toolEnv ?? {}, options.sealedEnv ?? {}),
     fetch: globalFetch(),
     workers: bunWorkers(),
     websocket: bunWebSockets(),

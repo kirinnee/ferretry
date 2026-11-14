@@ -6,8 +6,8 @@ import manifest from '../../../manifest.ts';
 import { handoverHost } from '../../support/handover-host.ts';
 import type { Tabs } from '../../support/tabs.ts';
 
-const CONTROL = '/v1/sessions/f1/surfaces/browser/control';
-const TOOLS = '/v1/sessions/f1/surfaces/browser/tools';
+const CONTROL = '/v1/ferrets/f1/surfaces/browser/control';
+const TOOLS = '/v1/ferrets/f1/surfaces/browser/tools';
 
 /**
  * Take over, hand back and hand over, as the daemon answers them: the real routes, the real tools and Gate's stand-in
@@ -111,12 +111,12 @@ describe('take over and hand back — the control routes', () => {
     should(tools.status).equal(403);
     should(view(own).takeovers).deepEqual([]);
     const callerOf = (key: string) => manifest.actions.routes.find(route => route.key === key)?.caller;
-    should(callerOf('POST /v1/sessions/:sessionId/surfaces/browser/control')).equal('person');
-    should(callerOf('POST /v1/sessions/:sessionId/surfaces/browser/tools')).equal('person');
+    should(callerOf('POST /v1/ferrets/:ferretId/surfaces/browser/control')).equal('person');
+    should(callerOf('POST /v1/ferrets/:ferretId/surfaces/browser/tools')).equal('person');
   });
 
   describe('a takeover does not outlive its page', () => {
-    const BROWSER = '/v1/sessions/f1/browser';
+    const BROWSER = '/v1/ferrets/f1/browser';
 
     it('forgets a takeover and an ask the moment the person closes the held page in the viewer', async () => {
       // Arrange

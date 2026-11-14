@@ -21,7 +21,7 @@ import {
 } from '../../../contract/routes/index.ts';
 import type { InputSealedPort } from '../vault-inputs.ts';
 import { SecureCopyError } from './errors.ts';
-import type { CopyPageGuard, CopyPorts } from './ports.ts';
+import type { CopyPageGuard, CopyPageRead, CopyPorts } from './ports.ts';
 
 /**
  * SECURE COPY: values an agent may name and never read (docs/secure-copy.md).
@@ -159,7 +159,12 @@ export class SecureCopyService implements InputSealedPort {
   /** Reads the value and holds it: the second half of a capture, run with its name taken. */
   private async hold(sessionId: string, request: CopyCapture, context: CopyCaptureContext): Promise<CopyCaptured> {
     const read = await this.read(sessionId, request, context);
-    const capturedAt = this.ports.clock.now();
+    // Strictly later than the copy this name held before (an ended copy stays listed), so two captures under one name are
+    // never one generation, even in one instant of a coarse clock: the capture time is the identity a paste card pins.
+    const capturedAt = Math.max(
+      this.ports.clock.now(),
+      (this.copies.get(sessionId)?.get(request.name)?.capturedAt ?? 0) + 1,
+    );
     const expiresAt = capturedAt + (request.expiresInSeconds ?? COPY_DEFAULT_LIFETIME_SECONDS) * 1000;
     // Masked BEFORE anything else is awaited or returned, in every spelling a reader may meet it in: no read after
     // this point can carry the value, whether a program printed it with its newline or without.
@@ -169,8 +174,14 @@ export class SecureCopyService implements InputSealedPort {
       read.command === undefined
         ? undefined
         : await this.report(read.command, [read.command.stdout, read.value], request.name);
+    // A caller that records which documents the agent has read says so; one that records nothing cannot say the agent did
+    // NOT read this page, so the copy says it MAY have (the conservative answer: no rule pastes it unasked).
     const pageReadBeforeCapture =
-      read.page === undefined ? undefined : (context.seen?.() ?? []).includes(read.page.navigationId);
+      read.page === undefined
+        ? undefined
+        : context.seen === undefined
+          ? true
+          : context.seen().includes(read.page.navigationId);
     const found: readonly ('found' | 'clean' | 'unknown')[] = await Promise.all(
       spellings(read.value).map(async spelling => await this.ports.exposure.transcriptHolds(sessionId, spelling)),
     ).catch(() => ['unknown']);
@@ -193,6 +204,9 @@ export class SecureCopyService implements InputSealedPort {
     const session = this.copies.get(sessionId) ?? new Map<CopyName, Entry>();
     session.set(request.name, entry);
     this.copies.set(sessionId, session);
+    // A copy with no page (a command's) closes no page, but a picture of any page that SHOWS it is withheld while it lives.
+    if (read.page === undefined)
+      this.ports.guards?.hold(sessionId, request.name, [], () => this.livesUntil(sessionId, request.name, expiresAt));
     return { copy: meta(entry), ...(command === undefined ? {} : { command }) };
   }
 
@@ -244,6 +258,7 @@ export class SecureCopyService implements InputSealedPort {
     this.copies.delete(sessionId);
     this.captures.delete(sessionId);
     this.ports.pageHolds?.drop(sessionId);
+    this.ports.guards?.drop(sessionId);
   }
 
   /** What the daemon recorded about a LIVE copy, for a paste's card: never the value. */
@@ -257,10 +272,13 @@ export class SecureCopyService implements InputSealedPort {
    * THE ONE PLACE A COPY'S VALUE LEAVES THIS SERVICE: to the input bridge's single guarded write, for a paste the
    * owner allowed (or approved in advance). It is not on any port a route or an agent tool is given.
    */
-  open(sessionId: string, name: CopyName): string | undefined {
+  open(sessionId: string, name: CopyName, capturedAt?: string): string | undefined {
     this.purge();
     const entry = this.copies.get(sessionId)?.get(name);
-    return entry?.state === 'live' ? entry.value : undefined;
+    if (entry?.state !== 'live') return undefined;
+    // A card is for ONE capture: a copy discarded and captured again under the name is another value.
+    if (capturedAt !== undefined && new Date(entry.capturedAt).toISOString() !== capturedAt) return undefined;
+    return entry.value;
   }
 
   /** A paste of the copy was typed. */
@@ -292,10 +310,7 @@ export class SecureCopyService implements InputSealedPort {
       case 'browser':
         return await this.readPage(sessionId, { ...request, source }, context);
       case 'clipboard':
-        throw new SecureCopyError(
-          'unavailable',
-          "Copying from a page's clipboard is not here yet; copy the element that shows the value instead.",
-        );
+        return await this.readClipboard(sessionId, { ...request, source }, context);
     }
   }
 
@@ -323,11 +338,7 @@ export class SecureCopyService implements InputSealedPort {
       ...(context.guard === undefined ? {} : { guard: context.guard }),
       // Inside the page's queue, before it moves on: an act queued behind the copy already meets the mask and the
       // hold. A value the copy will refuse is not masked.
-      seal: found => {
-        if (pageValueProblem(found.value) !== undefined) return;
-        this.mask(sessionId, request.name, found.value, until);
-        this.ports.pageHolds?.hold(sessionId, request.name, [source.key, found.pageId], found.navigationId, until);
-      },
+      seal: found => this.sealPage(sessionId, request, source.key, found, until),
     });
     if (!read.ok)
       throw new SecureCopyError(
@@ -350,6 +361,131 @@ export class SecureCopyService implements InputSealedPort {
         // too: no rule ever matches it.
         ...(source.read === 'value' || read.editable === true ? { editable: true as const } : {}),
       },
+      page: { names: [source.key, read.pageId], navigationId: read.navigationId },
+    };
+  }
+
+  /**
+   * Inside the page's queue, right after a read that found a value, before the queue moves on: the value is masked, and the
+   * pages it sits on (the page's origin and its frame's) are closed to an agent's reads and pictures until the copy ends. A
+   * value the copy will refuse is neither masked nor guarded.
+   */
+  private sealPage(
+    sessionId: string,
+    request: CopyCapture,
+    key: string,
+    found: Extract<CopyPageRead, { readonly ok: true }>,
+    until: number,
+  ): void {
+    if (pageValueProblem(found.value) !== undefined) return;
+    this.mask(sessionId, request.name, found.value, until);
+    this.ports.pageHolds?.hold(sessionId, request.name, [key, found.pageId], found.navigationId, until);
+    const ends = until - AFTER_MASK_MS;
+    this.ports.guards?.hold(sessionId, request.name, [found.origin, found.frameOrigin], () =>
+      this.livesUntil(sessionId, request.name, ends),
+    );
+  }
+
+  /**
+   * When a copy ends, while it lives: a copy still being captured lives to `expectedEnd`; one that was sealed lives to its
+   * own end; one that was discarded, expired or never was, nothing. Browsers asks this each time, so a discarded copy opens
+   * its pages at once.
+   */
+  private livesUntil(sessionId: string, name: CopyName, expectedEnd: number): number | undefined {
+    const entry = this.copies.get(sessionId)?.get(name);
+    if (entry?.state === 'live') return entry.expiresAt > this.ports.clock.now() ? entry.expiresAt : undefined;
+    return this.capturing.get(sessionId)?.has(name) === true ? expectedEnd : undefined;
+  }
+
+  /**
+   * A sentence when a paste of this copy into a TERMINAL cannot be made because its scrollback mask has nowhere to live: a mask
+   * whose value can still be read is never dropped to make room, so a session that already keeps as many different copies masked
+   * as it may refuses one more, until the session ends. Nothing for any other target or a copy it already keeps.
+   */
+  scrollbackRefusal(sessionId: string, name: CopyName, target: { readonly kind: string }): string | undefined {
+    if (target.kind !== 'terminal') return undefined;
+    if (!this.ports.masking.scrollbackFull(sessionId, copyMask(name))) return undefined;
+    return `Ferretry will not paste ${copyMask(name)} into a terminal: this session already keeps the most pasted values it can mask in terminal history, and a mask is never dropped while the history that shows the value can still be read. Nothing was typed. It ends with the session; type the value yourself, or start a new session.`;
+  }
+
+  /**
+   * THE PROTECTION A PASTE NEEDS, installed inside the target's own write turn, BEFORE any byte can land, and left on whatever the
+   * write comes to (bytes may have landed). Into a TERMINAL the value will be in that terminal's scrollback, which no clock
+   * empties: it stays masked for the life of the session, not the copy. Into a PAGE the document (and frame) origins it lands on
+   * join the pages the copy keeps closed. It THROWS when it cannot, and then nothing is typed.
+   */
+  protectPaste(
+    sessionId: string,
+    name: CopyName,
+    target: { readonly kind: string },
+    where: { readonly origins: readonly string[] },
+    /** The capture the write was opened for: another capture under the name is not this paste's, and is not protected for it. */
+    capturedAt?: string,
+  ): void {
+    const entry = this.copies.get(sessionId)?.get(name);
+    if (
+      entry?.value === undefined ||
+      entry.state !== 'live' ||
+      (capturedAt !== undefined && new Date(entry.capturedAt).toISOString() !== capturedAt)
+    )
+      throw new SecureCopyError(
+        'not_found',
+        `${copyMask(name)} ended before it could be protected, so nothing was typed.`,
+      );
+    if (target.kind === 'terminal') {
+      const refused = this.scrollbackRefusal(sessionId, name, target);
+      if (refused !== undefined) throw new SecureCopyError('unavailable', refused);
+      for (const spelling of maskSpellings(entry.value))
+        if (!this.ports.masking.holdScrollback(sessionId, spelling, copyMask(name)))
+          throw new SecureCopyError(
+            'unavailable',
+            'Ferretry could not keep this value masked in the terminal history, so nothing was typed.',
+          );
+      return;
+    }
+    if (target.kind !== 'page') return;
+    const guards = this.ports.guards;
+    if (guards === undefined)
+      throw new SecureCopyError(
+        'unavailable',
+        'Ferretry could not guard the page this value goes to, so nothing was typed.',
+      );
+    guards.pastedOn(sessionId, name, where.origins, () => this.livesUntil(sessionId, name, entry.expiresAt));
+  }
+
+  /**
+   * What the agent browser's clipboard holds after the agent pressed a page's own Copy button, filed under that page. Read by
+   * Browsers' worker in a context of its own and emptied; no agent page is ever granted the clipboard. The value is sealed
+   * in the same queue turn as a page read, and refused when it is too short or too long to seal.
+   */
+  private async readClipboard(
+    sessionId: string,
+    request: CopyCapture & { readonly source: Extract<CopySource, { readonly kind: 'clipboard' }> },
+    context: CopyCaptureContext,
+  ): Promise<Read> {
+    const { source } = request;
+    const pages = this.ports.pages;
+    if (pages?.clipboard === undefined)
+      throw new SecureCopyError('unavailable', "Copying from a page's clipboard is not available on this daemon.");
+    const until =
+      this.ports.clock.now() + (request.expiresInSeconds ?? COPY_DEFAULT_LIFETIME_SECONDS) * 1000 + AFTER_MASK_MS;
+    const read = await pages.clipboard(sessionId, source.key, {
+      ...(context.guard === undefined ? {} : { guard: context.guard }),
+      seal: found => this.sealPage(sessionId, request, source.key, found, until),
+    });
+    if (!read.ok)
+      throw new SecureCopyError(
+        'bad_request',
+        read.reason === 'changed'
+          ? 'The page moved to another document while the clipboard was read; nothing was copied.'
+          : "The clipboard holds nothing: press the page's own Copy button first, then capture. Nothing was copied.",
+      );
+    const problem = pageValueProblem(read.value);
+    if (problem !== undefined)
+      throw new SecureCopyError('bad_request', problem.replace('The element', 'The clipboard'));
+    return {
+      value: read.value.trim(),
+      from: { kind: 'clipboard', origin: read.origin, surface: source.key },
       page: { names: [source.key, read.pageId], navigationId: read.navigationId },
     };
   }

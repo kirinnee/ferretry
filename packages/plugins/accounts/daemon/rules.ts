@@ -15,13 +15,14 @@
  * - the passkeys-changed signal and pairing's purge: Access's `DevicesChanged` subscriber is the one live path.
  */
 import { gateAuditSink } from './adapters/gate-audit.ts';
+import { workFolderOf } from './adapters/pending-reads.ts';
 import { machineName } from './adapters/host.ts';
 import { PhoneApprovalAuditAdapter } from './adapters/phone-approval/audit.ts';
 import { AccessPhoneApprovalPush } from './adapters/phone-approval/push.ts';
 import { VaultPhoneLooks } from './adapters/phone-approval/vault-reach.ts';
 import { accountSecurity } from './adapters/access-security.ts';
 import { randomUUID } from 'node:crypto';
-import type { StateFileDef } from '@ferretry/kernel/contract';
+import type { FerretId, StateFileDef } from '@ferretry/kernel/contract';
 import { milliseconds, seconds } from '@ferretry/std';
 import type { DaemonContext } from '@ferretry/kernel/manifest';
 import { AccountKeySchema } from '../contract/routes/index.ts';
@@ -33,7 +34,21 @@ import { LoginEntryError } from './lib/accounts.ts';
 import type { AuditSink } from './lib/local-ports.ts';
 import { PhoneApprovalService } from './lib/phone-approval/service.ts';
 import { LoginRecipeService } from './lib/secrets/login-recipes.ts';
-import { PasteRuleService, PasteRuleStages } from './lib/secure-copy/index.ts';
+import {
+  PageCopyRecords,
+  PasteRuleService,
+  PasteRuleStages,
+  SecureCopyHook,
+  SecureCopyService,
+  secureCopyTools,
+} from './lib/secure-copy/index.ts';
+import {
+  BrowsersCopyGuards,
+  BrowsersCopyPages,
+  TranscriptFileExposure,
+  VaultCopyMasking,
+  VaultCopyRunner,
+} from './adapters/secure-copy/index.ts';
 import {
   PhoneApprovalAsksAdapter,
   RecipeAsksAdapter,
@@ -79,6 +94,39 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     clock,
     ids: { ruleId: id },
     warn: message => kernel.log.warn(`secure copy: ${message}`),
+  });
+  // ── secure copy (docs/secure-copy.md) ───────────────────────────────────────────────────────────────────────────
+  // Every port is looked up on use, never captured: a plugin that is off, or not bound yet, copies and pastes nothing.
+  const vaultNow = () => ctx.needs.vault;
+  const browsersNow = () => ctx.uses.browsers.current();
+  const pageRecords = new PageCopyRecords(clock);
+  const copies = new SecureCopyService({
+    clock,
+    runner: new VaultCopyRunner(vaultNow),
+    folders: { folderOf: async sessionId => await workFolderOf(ctx.uses.ferrets, sessionId) },
+    // GAP: Ferrets publishes no transcript FILE to search, so a capture says `exposure.transcript: unknown` and never
+    // `clean` (docs/secure-copy.md). An unknown exposure is treated as exposed: no rule pastes it unasked.
+    exposure: new TranscriptFileExposure({ file: async () => undefined }),
+    masking: new VaultCopyMasking(vaultNow),
+    redact,
+    pages: new BrowsersCopyPages(browsersNow),
+    pageHolds: pageRecords,
+    guards: new BrowsersCopyGuards(browsersNow),
+  });
+  const secureCopyHook = new SecureCopyHook(copies, pasteRules, browsersNow);
+  const tools = secureCopyTools({
+    copies,
+    vault: vaultNow,
+    browsers: browsersNow,
+    mayControl: async (ferret, kind) => {
+      try {
+        return (await ctx.uses.agentControl.current()?.allows(ferret as FerretId, kind)) === true;
+      } catch {
+        return false;
+      }
+    },
+    redact,
+    audit,
   });
   const plans = new TaskPlanService({
     agenda: new TaskPlanAsksAdapter(asks),
@@ -169,6 +217,7 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     schedule: { every: SWEEP_EVERY },
     run: async () => {
       plans.sweep();
+      copies.purge();
       suggestions.sweep();
       rules.sweep();
       await rules.sweepRules().catch(() => undefined);
@@ -180,7 +229,13 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     suggestions,
     plans,
     phone,
-    copies: { list: () => [] },
+    copies,
+    secureCopyHook,
+    secureCopyTools: tools,
+    sessionEnded: ferret => {
+      copies.drop(ferret);
+      pageRecords.drop(ferret);
+    },
     pasteRules,
     pasteRuleStages,
     purgeFailed: error =>

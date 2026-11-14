@@ -6,7 +6,7 @@ import { pageTarget } from '../../../daemon/pages/acts.ts';
 import { handoverHost } from '../../support/handover-host.ts';
 import type { Tabs } from '../../support/tabs.ts';
 
-const STREAM = '/v1/sessions/f1/browser/stream';
+const STREAM = '/v1/ferrets/f1/browser/stream';
 /** The page the agent's person views is the one `browser_open` just made (the browser's own first page is not it). */
 const viewed = (tabs: Tabs): { id: string } => tabs.pages.at(-1) as { id: string };
 const TYPE = JSON.stringify({ kind: 'insertText', text: 'typed at the viewer' });

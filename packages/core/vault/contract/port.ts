@@ -36,6 +36,25 @@ export interface PageActNote {
   placed(page: ActedPage | undefined): void;
 }
 
+/** What a secure copy runs: no shell, an allowlisted environment, a timeout and a byte cap (`VaultApi.captureCommand`). */
+export interface SecureCopyCommand {
+  readonly command: readonly string[];
+  readonly cwd: string;
+  readonly timeoutMs: number;
+  readonly maxOutputBytes: number;
+}
+
+/** What running it produced. Raw: the caller seals stdout and masks stderr before anybody else sees either. */
+export interface SecureCopyCommandOutcome {
+  readonly outcome: 'exited' | 'timeout' | 'spawn_failed';
+  readonly program?: string;
+  readonly replaceable?: true;
+  readonly exitCode?: number;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly truncated: boolean;
+}
+
 /**
  * The Vault port (§2.2, §3.7): secrets by NAME only. There is no getter, and none may be added (it would delete the
  * feature): `run` executes a command with the values in that child's environment and returns masked output;
@@ -75,6 +94,12 @@ export interface VaultApi {
    * host-less act notes are all the lock hears (stricter, never looser).
    */
   pageActed?(ferret: FerretId, script: boolean): PageActNote;
+  /**
+   * A person took a ferret's page over, told by Browsers with the page's name and id: a secure paste still waiting for the
+   * owner into it ends as refused (`taken_over`) at once, instead of only when someone allows it. Browsers alone is handed
+   * it (any other plugin could only cancel cards with it). Additive: absent, a waiting paste is refused when it is allowed.
+   */
+  pageTakenOver?(ferret: FerretId, keys: readonly string[]): Promise<void>;
   /**
    * A page script is about to run, anywhere on the machine (today's `RuleSignInGrants.running`): until the returned
    * call, every page card counts as scripted. Memory only: a restart ends every script.
@@ -131,6 +156,36 @@ export interface VaultApi {
    * Present only for the plugins whose tools carry the raise; the ferret is the CALLER's credential, never a body.
    */
   raisePhoneApproval?(ferret: FerretId, ask: PhoneApprovalAsk): Promise<Result<PhoneApprovalAgentView, string>>;
+  /**
+   * SECURE COPY (docs/secure-copy.md). Additive, optional and present for Accounts and the trusted core callers (which are
+   * handed the Vault's full reach), and ABSENT for every other needer: the Vault owns the
+   * child runner and the masking registry, so a copy reaches both only through these two members. An absent member means
+   * no copy is captured (fail closed).
+   *
+   * Runs `command` with NO shell, in `cwd`, with an allowlisted environment (no admin token, none of the daemon's own
+   * secrets), stdin closed, a timeout and a byte cap, and answers its raw output ONCE, to the service that seals it.
+   * Never a log line, never an error message: the caller masks before anyone else sees a byte.
+   */
+  captureCommand?(spec: SecureCopyCommand): Promise<SecureCopyCommandOutcome>;
+  /**
+   * The masking registry (`EphemeralValues`), for a secure copy: from `hold` on, `value` is masked as `marker` in every
+   * read of the ferret's surfaces, the owner's transcript and the journal, until `until` (epoch milliseconds); `retime`
+   * brings the end of every hold of `marker` forward. Neither returns a value.
+   */
+  maskCopy?: {
+    hold(ferret: FerretId, value: string, marker: string, until: number): void;
+    retime(ferret: FerretId, marker: string, until: number): void;
+    /**
+     * A copy was PASTED INTO A TERMINAL: `value` stays masked as `marker` in that ferret's reads for the life of its session
+     * (the scrollback the terminal keeps), not for the copy's own life. A later `retime` of `marker` does not shorten it.
+     */
+    holdScrollback(ferret: FerretId, value: string, marker: string): boolean;
+    /**
+     * Whether this ferret already keeps as many DIFFERENT copies masked in scrollback as it may, and `marker` is not one of
+     * them: a mask is never dropped while its value can still be read, so a new paste is refused instead.
+     */
+    scrollbackFull(ferret: FerretId, marker: string): boolean;
+  };
 }
 
 export const VaultPort = definePort<VaultApi>('vault');

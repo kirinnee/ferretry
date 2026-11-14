@@ -36,9 +36,9 @@ const status = {
   capacity: { running: 0, maximum: 3 },
 } satisfies BrowserStatus;
 
-const STATUS = 'GET /v1/sessions/:sessionId/browser';
-const ACT = 'POST /v1/sessions/:sessionId/browser';
-const STREAM = 'GET /v1/sessions/:sessionId/browser/stream';
+const STATUS = 'GET /v1/ferrets/:ferretId/browser';
+const ACT = 'POST /v1/ferrets/:ferretId/browser';
+const STREAM = 'GET /v1/ferrets/:ferretId/browser/stream';
 
 /** Every event a display socket raised, in order. */
 const recordEvents = (socket: RemoteBrowserSocket) => {
@@ -63,9 +63,9 @@ describe('remote browser transport', () => {
     const scope = daemonSessionScope(daemon, 'same/session');
     expect(await fetchRemoteBrowserStatus(daemon, scope)).toEqual(status);
     expect(await runRemoteBrowserAction(daemon, scope, { action: 'start' })).toEqual({ status });
-    expect(calls[0]).toEqual({ route: STATUS, init: { params: { sessionId: 'same/session' } } });
+    expect(calls[0]).toEqual({ route: STATUS, init: { params: { ferretId: 'same/session' } } });
     expect(calls[1]?.route).toBe(ACT);
-    expect(calls[1]?.init?.params).toEqual({ sessionId: 'same/session' });
+    expect(calls[1]?.init?.params).toEqual({ ferretId: 'same/session' });
     expect(calls[1]?.init?.body).toEqual({ action: 'start' });
     const other = daemonSessionScope(daemonConnection({ daemonId: 'daemon-b' }), 'same/session');
     await expect(fetchRemoteBrowserStatus(daemon, other)).rejects.toThrow('browser scope must belong');
@@ -110,7 +110,7 @@ describe('remote browser transport', () => {
     const scope = daemonSessionScope(daemon, 'same/session');
     const socket = remoteBrowserSocketFactory(daemon, scope);
     const events = recordEvents(socket);
-    expect(sockets.opened).toEqual([{ key: STREAM, params: { sessionId: 'same/session' } }]);
+    expect(sockets.opened).toEqual([{ key: STREAM, params: { ferretId: 'same/session' } }]);
     sockets.daemon.open();
     expect(socket.readyState).toBe(1);
 

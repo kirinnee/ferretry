@@ -6,20 +6,28 @@
  *
  * - `--name=value` is a value. `--name value` is a value when `value` does not start with `-`.
  * - `--name` followed by another option, by `--` or by nothing is a switch (`true`). `--no-name` is `false`.
+ * - A negative number (`-1`, `-0.5`, `-300,0`) is a word, never an option: `--pages -1` has the value `-1`.
  * - A repeated option becomes a list, in the order given.
  * - `--` ends options; everything after it is positional.
- * - Write positionals before options, or end options with `--`, when a switch is followed by a positional.
+ * - Write positionals before options, or end options with `--`, when a switch is followed by a positional. A verb that
+ *   declares an option a switch still gets that word back where it was written (`swallowed`).
  *
  * Pure: no IO, no globals.
  */
-import type { VerbInvocation } from '@ferretry/kernel/manifest';
+import type { SwallowedWord, VerbInvocation } from '@ferretry/kernel/manifest';
 
 type OptionValue = string | boolean | readonly string[];
+
+/** A negative number (`-1`, `-0.5`, `-300,0`) is a word: an option's name never starts with a digit. */
+const isWord = (token: string): boolean => !token.startsWith('-') || token === '-' || /^-\d/u.test(token);
 
 export function parseArgs(tokens: readonly string[]): VerbInvocation {
   const args: string[] = [];
   const options: Record<string, OptionValue> = {};
+  const swallowed: SwallowedWord[] = [];
+  const written: string[] = [];
   const put = (name: string, value: string | boolean): void => {
+    written.push(name);
     const known = options[name];
     if (known === undefined) options[name] = value;
     else if (typeof value === 'boolean' || typeof known === 'boolean') options[name] = value;
@@ -31,7 +39,7 @@ export function parseArgs(tokens: readonly string[]): VerbInvocation {
       args.push(...tokens.slice(index + 1));
       break;
     }
-    if (!token.startsWith('-') || token === '-') {
+    if (isWord(token)) {
       args.push(token);
       continue;
     }
@@ -46,12 +54,20 @@ export function parseArgs(tokens: readonly string[]): VerbInvocation {
       continue;
     }
     const next = tokens[index + 1];
-    if (next !== undefined && (!next.startsWith('-') || next === '-')) {
+    if (next !== undefined && isWord(next)) {
       put(body, next);
+      swallowed.push({ option: body, word: next, at: args.length });
       index += 1;
     } else put(body, true);
   }
-  return { args, options, raw: tokens };
+  const repeated = new Set(written).size < written.length;
+  return {
+    args,
+    options,
+    raw: tokens,
+    ...(swallowed.length === 0 ? {} : { swallowed }),
+    ...(repeated ? { written } : {}),
+  };
 }
 
 /** The first string value of an option, if it has one. */

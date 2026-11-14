@@ -15,8 +15,8 @@ import { browserDaemon, recordingClient } from '../../support/app/client.ts';
 import { handPoll } from '../../support/app/poll.ts';
 import { daemonSessionScope } from '../../support/app/scope.ts';
 
-const READ = 'GET /v1/sessions/:sessionId/surfaces/browser/control';
-const ACT = 'POST /v1/sessions/:sessionId/surfaces/browser/control';
+const READ = 'GET /v1/ferrets/:ferretId/surfaces/browser/control';
+const ACT = 'POST /v1/ferrets/:ferretId/surfaces/browser/control';
 
 const T0 = Date.parse('2026-07-31T00:00:00.000Z');
 const at = (offsetMs: number) => new Date(T0 + offsetMs).toISOString() as never;
@@ -129,7 +129,7 @@ const harness = async (answer: (route: string) => unknown, clock = { now: T0 }):
 describe('the browser control hook', () => {
   it('reads the session’s control view by route key and shows who is driving', async () => {
     const h = await harness(() => view({ driving: [driving('p1', 5_000, { agentName: 'Hadi' })] }));
-    expect(h.calls[0]).toEqual({ route: READ, init: { params: { sessionId: 'session-a' } } });
+    expect(h.calls[0]).toEqual({ route: READ, init: { params: { ferretId: 'session-a' } } });
     expect(h.control().driverFor('p1')).toEqual({ name: 'Hadi' });
     expect(h.control().takenOver('p1')).toBe(false);
     // A re-render is scheduled for the instant the marker lapses.
@@ -215,7 +215,7 @@ describe('the browser control hook', () => {
     await runAsync(async () => await Promise.resolve());
     expect(h.calls.at(-1)).toEqual({
       route: ACT,
-      init: { params: { sessionId: 'session-a' }, body: { action: 'takeover', key: 'p1' } },
+      init: { params: { ferretId: 'session-a' }, body: { action: 'takeover', key: 'p1' } },
     });
     expect(h.control().takenOver('p1')).toBe(true);
     h.unmount();

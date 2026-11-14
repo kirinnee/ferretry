@@ -24,8 +24,15 @@ import {
   type InputCardField,
   inputFailure,
   offersPressEnter,
+  allowWords,
+  pastedWords,
+  pasteField,
+  pasteRoute,
+  pasteSize,
   plainFlagWords,
+  replacesSecret,
   revealable,
+  sealedBody,
   sendBlock,
   sentWords,
   targetRef,
@@ -319,6 +326,148 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
   );
 }
 
+interface PasteSectionProps {
+  readonly request: InputRequestView;
+  readonly client: VaultClient;
+  readonly blocked: string | undefined;
+  readonly busy: boolean;
+  readonly cancel: ReactNode;
+  readonly onSettled: (words: string) => void;
+  readonly onRefresh?: (() => void) | undefined;
+  /** The daemon ended the request for good here: the card's header stops counting down. */
+  readonly onEnded: () => void;
+  /** A paste from here is on its way (`true`) or came back (`false`). */
+  readonly onSending: (sending: boolean) => void;
+}
+
+/**
+ * A PASTE (docs/secure-copy.md): the ferret asks to paste a secure copy it holds. There is no field: the owner allows it
+ * or cancels, and the daemon types the copy the request names. The card shows WHERE the copy was read (the page's own
+ * origin or the program that printed it) and WHAT the daemon saw reading the destination, never the value.
+ */
+function SealedPasteSection({
+  request,
+  client,
+  blocked,
+  busy,
+  cancel,
+  onSettled,
+  onRefresh,
+  onEnded,
+  onSending,
+}: PasteSectionProps) {
+  const [sending, setSending] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  // The daemon ended the request for good (a takeover, a copy that is gone): nothing was pasted and nothing can be, so the card
+  // settles here and Allow is taken away, whatever the refresh brings.
+  const [ended, setEnded] = useState(false);
+  // A paste the daemon never answered keeps its id, so pressing Allow again cannot paste twice.
+  const pending = useRef<string | null>(null);
+  const off = blocked !== undefined || sending || busy || ended;
+  const route = pasteRoute(request);
+  const size = pasteSize(request);
+  const field = pasteField(request);
+  const replacing = replacesSecret(request);
+
+  const allow = async (): Promise<void> => {
+    if (off) return;
+    pending.current ??= crypto.randomUUID();
+    const built = sealedBody(request, defaultSubmit(request), pending.current);
+    // Unreachable while re-observing (Allow is disabled then), and said in words if it ever is.
+    if (!built.ok) {
+      setFailure(built.problem);
+      return;
+    }
+    setFailure(null);
+    setSending(true);
+    onSending(true);
+    try {
+      await deliverInput(client, request, built.body);
+      pending.current = null;
+      onSettled(`Pasted into ${targetRef(request)}.`);
+    } catch (cause) {
+      const words = inputFailure(cause, request.target.kind);
+      if (words.definitive) pending.current = null;
+      setFailure(words.text);
+      if (words.kind === 'ended' || words.kind === 'gone') {
+        setEnded(true);
+        onEnded();
+      }
+      if (words.kind === 'changed' || words.kind === 'ended' || words.kind === 'gone') onRefresh?.();
+    } finally {
+      setSending(false);
+      onSending(false);
+    }
+  };
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2" data-input-paste="">
+      <dl
+        className="m-0 grid min-w-0 grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-control border border-border-strong bg-surface-2 p-3 text-ui"
+        data-input-paste-route=""
+      >
+        <dt className="text-faint">Copy</dt>
+        <dd className="m-0 min-w-0 break-words mono text-fg" data-input-paste-copy="">
+          {pastedWords(request)}
+        </dd>
+        {size === undefined ? null : (
+          <>
+            <dt className="text-faint">Size</dt>
+            <dd className="m-0 min-w-0 break-words text-fg" data-input-paste-size="">
+              {size}
+            </dd>
+          </>
+        )}
+        <dt className="text-faint">From</dt>
+        <dd className="m-0 min-w-0 break-words text-fg" data-input-paste-from="">
+          {/* A path from the ferret's own files: isolated, so a right-to-left folder name cannot reorder it. */}
+          <bdi dir="ltr">{route?.from}</bdi>
+        </dd>
+        <dt className="text-faint">Into</dt>
+        <dd className="m-0 min-w-0 break-words font-medium text-fg" data-input-paste-to="">
+          {route?.to}
+        </dd>
+        {field === undefined ? null : (
+          <>
+            <dt className="text-faint">Field</dt>
+            <dd className="m-0 min-w-0 break-words text-fg" data-input-paste-field="">
+              {field}
+            </dd>
+          </>
+        )}
+      </dl>
+      <p className="m-0 text-meta text-faint">
+        You type nothing: Ferretry pastes the sealed value, which the ferret never sees.
+      </p>
+      {failure === null ? null : (
+        <p className="m-0 text-ui text-err" data-input-failure="" role="alert">
+          {failure}
+        </p>
+      )}
+      {ended ? (
+        <p className="m-0 text-ui font-semibold text-fg" data-input-ended="" role="status">
+          This paste has ended. Nothing was pasted.
+        </p>
+      ) : null}
+      <div className="flex flex-wrap items-center justify-end gap-2" data-input-actions="">
+        {ended ? null : cancel}
+        {ended ? null : (
+          <button
+            className="kt-btn min-h-[44px]"
+            data-input-allow=""
+            data-variant={replacing ? 'danger' : 'primary'}
+            disabled={off}
+            onClick={() => void allow()}
+            type="button"
+          >
+            {sending ? (replacing ? 'Replacing…' : 'Pasting…') : allowWords(request)}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function InputCard({
   request,
   client,
@@ -333,6 +482,8 @@ export function InputCard({
   const now = useNow(fixedNow);
   const fields = fieldsOf(request);
   const [settled, setSettled] = useState<string | null>(null);
+  // The paste section ended the request (a takeover, a gone copy) before the refreshed request arrived.
+  const [pasteEnded, setPasteEnded] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -385,20 +536,28 @@ export function InputCard({
       data-input-request={request.id}
       data-input-state={settled === null ? request.state : 'settled'}
     >
-      <header className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        {embedded ? null : (
-          <h3 className="m-0 min-w-0 text-row font-semibold text-fg" data-input-title="" id={headingId}>
-            {title}
-          </h3>
-        )}
-        <p className="m-0 text-cell text-muted">
-          Goes to{' '}
-          <code className="mono text-fg" data-input-target="">
-            {targetRef(request)}
-          </code>
-        </p>
-        <span className="ml-auto whitespace-nowrap text-meta text-faint" data-input-expiry="">
-          {expiryWords(request.expiresAt, now)}
+      <header className="flex items-baseline gap-x-2">
+        {/* The title and the target wrap among themselves; the time left keeps its own column, never a line of its own. */}
+        <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1">
+          {embedded ? null : (
+            <h3 className="m-0 min-w-0 text-row font-semibold text-fg" data-input-title="" id={headingId}>
+              {title}
+            </h3>
+          )}
+          <p className="m-0 text-cell text-muted">
+            Goes to{' '}
+            <code className="mono text-fg" data-input-target="">
+              {targetRef(request)}
+            </code>
+          </p>
+        </div>
+        <span className="shrink-0 whitespace-nowrap text-meta text-faint" data-input-expiry="">
+          {/* No time left to count once the request is over, however it ended and before any refresh says so. */}
+          {settled !== null || pasteEnded || (request.state !== 'pending' && request.state !== 'delivering')
+            ? request.state === 'expired'
+              ? 'expired'
+              : 'ended'
+            : expiryWords(request.expiresAt, now)}
         </span>
       </header>
 
@@ -438,7 +597,31 @@ export function InputCard({
         )}
       </div>
 
-      {request.risk === undefined ? null : (
+      {request.risk === undefined ||
+      // A paste card says "you type nothing" once, below: the generic green hidden-typing line is not repeated on it.
+      (request.source !== undefined && request.risk.level === 'green') ? null : replacesSecret(request) ? (
+        // Overwriting a secret cannot be undone: said loudly, in its own box, and the approval below is a destructive one.
+        <div
+          className="flex gap-2 rounded-control border border-err bg-surface-2 p-3 text-ui font-semibold text-err"
+          data-input-replace=""
+          data-input-risk={request.risk.level}
+          role="alert"
+        >
+          <ShieldAlert aria-hidden="true" className="mt-0.5 shrink-0" size={16} />
+          <span>{request.risk.reason}</span>
+        </div>
+      ) : request.risk.level === 'amber' ? (
+        // The daemon could not promise the value was never seen: a warning the owner must be able to notice, never footer help.
+        <div
+          className="flex gap-2 rounded-control border border-warn bg-warn/10 p-3 text-ui font-semibold text-fg"
+          data-input-risk={request.risk.level}
+          data-input-warning=""
+          role="status"
+        >
+          <ShieldAlert aria-hidden="true" className="mt-0.5 shrink-0 text-warn" size={16} />
+          <span>{request.risk.reason}</span>
+        </div>
+      ) : (
         <p className="m-0 text-cell text-muted" data-input-risk={request.risk.level}>
           {request.risk.reason}
         </p>
@@ -456,14 +639,32 @@ export function InputCard({
           {settled}
         </p>
       ) : request.source !== undefined ? (
-        // A paste of a secure copy has nothing to type; approving one is Accounts' card, not drawn here. No field.
+        // A paste of a secure copy has nothing to type: the owner allows it, and the daemon pastes what the request names.
         <>
-          <p className="m-0 text-ui text-muted" data-input-paste="" role="status">
-            This request pastes a secure copy, so there is nothing to type. Answer it with fy, or cancel it.
-          </p>
-          <div className="flex flex-wrap items-center justify-end gap-2" data-input-actions="">
-            {cancelButton}
-          </div>
+          {blocked !== undefined && facts !== undefined ? (
+            <p className="m-0 text-meta text-warn" data-input-blocked="" role="status">
+              {blocked}
+            </p>
+          ) : null}
+          <SealedPasteSection
+            blocked={blocked}
+            busy={cancelling}
+            cancel={cancelButton}
+            client={client}
+            onEnded={() => setPasteEnded(true)}
+            onRefresh={onRefresh}
+            onSending={setSending}
+            onSettled={words => {
+              setSettled(words);
+              onDone();
+            }}
+            request={request}
+          />
+          {problem === null ? null : (
+            <p className="m-0 text-meta text-err" data-input-cancel-failure="" role="alert">
+              {problem}
+            </p>
+          )}
         </>
       ) : (
         <>

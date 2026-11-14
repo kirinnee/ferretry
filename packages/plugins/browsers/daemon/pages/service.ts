@@ -74,6 +74,10 @@ export interface BrowserGuardPage {
   document(): Promise<string | undefined>;
   /** The host the page is on now, read from the live page inside its queue; `undefined` when it can't be read. */
   host?(): Promise<string | undefined>;
+  /** The host of the page AND of every frame in it (`undefined` when any cannot be told), read inside its queue. */
+  hosts?(): Promise<readonly (string | undefined)[] | undefined>;
+  /** What a read of the page and its frames could show now (visible text, accessibility tree, markup), read inside its queue; `undefined` when it can't be read. */
+  text?(): Promise<string | undefined>;
 }
 
 /**
@@ -81,6 +85,24 @@ export interface BrowserGuardPage {
  * waited, or an owner's value pending on or just typed into the page (the input bridge's holds).
  */
 export type BrowserActGuard = (page: BrowserGuardPage) => Promise<void>;
+
+/**
+ * What a ferret's act on its WHOLE browser must pass for each page it touches, run inside that page's own queue and told
+ * which page it is about to touch — so what was checked is exactly what the act then does, with no gap between them.
+ */
+export type BrowserPageGuard = (pageId: string, page: BrowserGuardPage) => Promise<void>;
+
+/** What a toolbar act may carry besides the action: a ferret's guard, and the page its caller already resolved. */
+export interface BrowserActOptions {
+  readonly guard?: BrowserPageGuard;
+  /**
+   * The page the caller resolved for this act (its hold target, its check). When the session now views another page the
+   * act is refused with a conflict instead of landing on a page nobody checked.
+   */
+  readonly pinned?: string;
+  /** Who a page this act opens belongs to, as the daemon attests it: a ferret's own page is its own, never a person's. */
+  readonly openedBy?: SurfaceOpener;
+}
 
 /** Told when a page of a session closes, whoever closed it (a tool, the toolbar, the session's end, the browser stopping). */
 export interface BrowserPageClosed {
@@ -168,7 +190,11 @@ export interface BrowserSubsystem extends BrowserViewerHost {
   /** This session's view of the machine's browser: its own pages, and the one its person is viewing. */
   status(sessionId: string): Promise<BrowserStatus>;
   /** A person's toolbar: everything acts on the page this session's person is viewing. */
-  act(sessionId: string, action: BrowserAction): Promise<BrowserActionResult>;
+  act(sessionId: string, action: BrowserAction, options?: BrowserActOptions): Promise<BrowserActionResult>;
+  /**
+   * Empties the browser's clipboard: `true` only when it was CONFIRMED empty. A browser that is not running holds none.
+   */
+  clearClipboard(): Promise<boolean>;
   /**
    * Opens a page with a human NAME in its own window, starting the browser when it is not running. A
    * name already in use in this session is refused, and so is a page past the session's or the
@@ -226,10 +252,16 @@ export interface BrowserSubsystem extends BrowserViewerHost {
     key: string,
     work: (fields: BrowserInputFieldsPort, pageId: string) => Promise<T>,
   ): Promise<T>;
+  /**
+   * The host of this session's page `key` and of every frame in it, read from the live page and not through its queue (nothing
+   * is acted on): for what a LISTING or a status may say of a page a sealed value covers. `undefined` when the browser is not
+   * running or any host cannot be told (the caller then fails closed).
+   */
+  pageHosts(sessionId: string, key: string): Promise<readonly (string | undefined)[] | undefined>;
   /** Closes this session's page with this name (or id). An incognito page's whole context goes with it. */
   closePage(sessionId: string, key: string, guard?: BrowserActGuard): Promise<void>;
   /** A session ended: every page it owns closes, and every incognito context it held is discarded. */
-  releaseSession(sessionId: string): Promise<void>;
+  releaseSession(sessionId: string, guard?: BrowserPageGuard): Promise<void>;
   closeAll(): Promise<void>;
 }
 
@@ -310,21 +342,30 @@ export class BrowserSessionService implements BrowserSubsystem {
     return this.project(run, sessionId);
   }
 
-  async act(sessionId: string, action: BrowserAction): Promise<BrowserActionResult> {
+  async act(sessionId: string, action: BrowserAction, options: BrowserActOptions = {}): Promise<BrowserActionResult> {
     await this.requireSession(sessionId);
+    const { guard, pinned, openedBy } = options;
     if (action.action === 'stop') {
+      // Every page the stop will close is asked FIRST: one that is not the caller's to close refuses the whole stop and
+      // nothing is closed. Each is asked again in its own queue as it closes.
+      if (guard !== undefined && this.run !== undefined) {
+        const run = this.run;
+        for (const page of this.owned(run, sessionId)) await guard(page.id, this.guardPage(run, page.id));
+      }
       this.signIns?.forget(sessionId);
-      await this.releaseSession(sessionId);
+      await this.releaseSession(sessionId, guard);
       return { status: await this.status(sessionId) };
     }
     if (action.action === 'start' || action.action === 'open' || action.action === 'new-page') {
       const run = await this.ensure();
       const viewed = this.viewedPage(run, sessionId);
+      if (action.action !== 'new-page' && viewed !== undefined) this.assertPinned(pinned, viewed);
       if (action.action === 'new-page' || viewed === undefined) {
         const opened = await this.openIn(run, sessionId, {
           ...(action.action !== 'start' && action.url !== undefined ? { url: action.url } : {}),
           ...(action.action === 'new-page' && action.incognito === true ? { incognito: true } : {}),
         });
+        if (openedBy !== undefined) run.openers.set(opened.actedPageId, openedBy);
         await this.view(run, sessionId, opened.actedPageId);
         return { status: this.project(run, sessionId), result: opened };
       }
@@ -338,21 +379,32 @@ export class BrowserSessionService implements BrowserSubsystem {
           return await run.driver.navigate(viewed, url);
         },
         sessionId,
+        guard,
       );
     }
     const run = this.requireRunning();
     if (action.action === 'activate-page' || action.action === 'close-page') {
       const page = this.requirePage(run, sessionId, action.pageId);
+      // A ferret's act waits its turn in the page's queue and is asked there; a person's never has, and still does not.
+      const turn = async (work: () => Promise<void>): Promise<void> =>
+        guard === undefined ? await work() : await this.exclusive(page.id, work);
       if (action.action === 'activate-page') {
-        await this.view(run, sessionId, page.id);
+        await turn(async () => {
+          await guard?.(page.id, this.guardPage(run, page.id));
+          await this.view(run, sessionId, page.id);
+        });
         return { status: await this.status(sessionId), result: { ...run.snapshot, actedPageId: page.id } };
       }
-      this.signIns?.cleared(sessionId, page.id);
-      await this.closeIn(run, sessionId, page.id);
+      await turn(async () => {
+        await guard?.(page.id, this.guardPage(run, page.id));
+        this.signIns?.cleared(sessionId, page.id);
+        await this.closeIn(run, sessionId, page.id);
+      });
       return { status: await this.status(sessionId) };
     }
     const viewed = this.viewedPage(run, sessionId);
     if (viewed === undefined) throw new BrowserSessionError('not_running', 'this session has no browser page open');
+    this.assertPinned(pinned, viewed);
     // Who posted it is not known (the owner's address bar or a ferret's `fy browser`): anything but a read clears who
     // the page signs in, before it runs, so an act that fails partway leaves nothing behind either.
     return await this.onPage(
@@ -363,6 +415,7 @@ export class BrowserSessionService implements BrowserSubsystem {
         return await this.perform(run, viewed, action);
       },
       sessionId,
+      guard,
     );
   }
 
@@ -417,6 +470,13 @@ export class BrowserSessionService implements BrowserSubsystem {
       this.touch(run);
       return await work(run.driver, page.id);
     });
+  }
+
+  async pageHosts(sessionId: string, key: string): Promise<readonly (string | undefined)[] | undefined> {
+    const run = this.run;
+    if (run === undefined || run.closed) return undefined;
+    const page = this.requirePage(run, sessionId, key);
+    return await this.guardPage(run, page.id).hosts?.();
   }
 
   /** Secure copy's read of one page, in that page's own queue (copy-contracts.ts). */
@@ -551,11 +611,15 @@ export class BrowserSessionService implements BrowserSubsystem {
     });
   }
 
-  async releaseSession(sessionId: string): Promise<void> {
+  async releaseSession(sessionId: string, guard?: BrowserPageGuard): Promise<void> {
     const run = this.run;
     if (run === undefined) return;
     for (const page of this.owned(run, sessionId))
-      await this.exclusive(page.id, async () => await this.closeIn(run, sessionId, page.id)).catch(() => undefined);
+      await this.exclusive(page.id, async () => {
+        // A refusal is the caller's to hear; only a close that failed is let go, as a session's end always did.
+        await guard?.(page.id, this.guardPage(run, page.id));
+        await this.closeIn(run, sessionId, page.id).catch(() => undefined);
+      });
     run.viewed.delete(sessionId);
   }
 
@@ -612,6 +676,13 @@ export class BrowserSessionService implements BrowserSubsystem {
 
   async closeAll(): Promise<void> {
     await this.stop();
+  }
+
+  async clearClipboard(): Promise<boolean> {
+    const run = this.run;
+    // No browser, no clipboard of its: a restarted private browser starts empty.
+    if (run === undefined) return true;
+    return await run.driver.clearClipboard().catch(() => false);
   }
 
   /** The machine's browser, started on first need; concurrent first needs share one launch. */
@@ -782,8 +853,11 @@ export class BrowserSessionService implements BrowserSubsystem {
     pageId: string,
     work: () => Promise<BrowserPageActionSnapshot>,
     sessionId: string,
+    guard?: BrowserPageGuard,
   ): Promise<BrowserActionResult> {
     return await this.exclusive(pageId, async () => {
+      // The page this act was resolved to, asked in ITS queue right before the act: nothing lands between the two.
+      await guard?.(pageId, this.guardPage(run, pageId));
       const result = withoutDialog(await work());
       this.observe(run, pageOf(result));
       this.touch(run);
@@ -905,6 +979,12 @@ export class BrowserSessionService implements BrowserSubsystem {
     return page;
   }
 
+  /** The page the caller resolved is the page this session views now, or the act is refused rather than land elsewhere. */
+  private assertPinned(pinned: string | undefined, viewed: string): void {
+    if (pinned !== undefined && pinned !== viewed)
+      throw new BrowserSessionError('conflict', 'the page this was meant for is no longer the one in view; try again');
+  }
+
   private requireRunning(): Running {
     const run = this.run;
     if (run === undefined) throw new BrowserSessionError('not_running', 'the browser is not running');
@@ -935,6 +1015,16 @@ export class BrowserSessionService implements BrowserSubsystem {
           .inputDocument(pageId)
           .then(found => found.host)
           .catch(() => undefined),
+      hosts: async () =>
+        await run.driver
+          .inputDocument(pageId)
+          .then(found =>
+            found.host === undefined || found.framesUnreadable === true
+              ? undefined
+              : [found.host, ...(found.frameHosts ?? [])],
+          )
+          .catch(() => undefined),
+      text: async () => await run.driver.inputText?.(pageId).catch(() => undefined),
     };
   }
 

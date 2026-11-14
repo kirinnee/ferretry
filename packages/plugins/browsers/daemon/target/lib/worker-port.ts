@@ -126,15 +126,33 @@ export function workerInputFields(request: WorkerRequest): Required<BrowserInput
       const navigationId = ((raw as { document?: { navigationId?: unknown } } | null)?.document ?? {}).navigationId;
       if (typeof navigationId !== 'string' || navigationId === '' || navigationId.length > 128)
         throw new InputAnswerRefused('the browser did not say which document the page shows');
-      const host = (raw as { document?: { host?: unknown } } | null)?.document?.host;
-      return typeof host === 'string' && host !== '' && host.length <= 260 ? { navigationId, host } : { navigationId };
+      const document = (
+        raw as { document?: { host?: unknown; frameHosts?: unknown; framesUnreadable?: unknown } } | null
+      )?.document;
+      const host = document?.host;
+      const frameHosts = Array.isArray(document?.frameHosts)
+        ? (document.frameHosts as unknown[]).filter(
+            (each): each is string => typeof each === 'string' && each !== '' && each.length <= 260,
+          )
+        : [];
+      // Frame hosts that do not parse are frames that cannot be told: the page's frames are unreadable, not absent.
+      const unreadable =
+        document?.framesUnreadable === true ||
+        (Array.isArray(document?.frameHosts) && frameHosts.length !== (document.frameHosts as unknown[]).length) ||
+        frameHosts.length > 64;
+      return {
+        navigationId,
+        ...(typeof host === 'string' && host !== '' && host.length <= 260 ? { host } : {}),
+        ...(frameHosts.length === 0 || unreadable ? {} : { frameHosts }),
+        ...(unreadable ? { framesUnreadable: true as const } : {}),
+      };
     },
 
     /** The page's visible text, for the daemon's own look for a just-typed value. A malformed answer is refused. */
     async inputText(pageId: string): Promise<string> {
       const raw = await request(BROWSER_INPUT_WORKER_METHODS.text, { pageId });
       const text = (raw as { text?: unknown } | null)?.text;
-      if (typeof text !== 'string' || text.length > BROWSER_INPUT_TEXT_MAX_CHARS * 3 + 2)
+      if (typeof text !== 'string' || text.length > BROWSER_INPUT_TEXT_MAX_CHARS * 7 + 2)
         throw new InputAnswerRefused('the browser did not answer with the page text');
       return text;
     },

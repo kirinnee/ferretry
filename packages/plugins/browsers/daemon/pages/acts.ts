@@ -17,7 +17,7 @@ export const pageTarget = (pageId: string): TargetRef => targetRef('page', pageI
 /** The browser as a whole when an act names no page yet (start, stop, open before any page exists). */
 export const browserTarget = (sessionId: string): TargetRef => targetRef('page', `browser:${sessionId}`);
 
-/** The `Op` of each per-session browser action (`POST /v1/sessions/:sessionId/browser`). */
+/** The `Op` of each per-session browser action (`POST /v1/ferrets/:ferretId/browser`). */
 export function opOfAction(action: BrowserAction): Op {
   switch (action.action) {
     case 'start':

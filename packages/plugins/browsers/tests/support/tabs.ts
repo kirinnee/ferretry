@@ -1,4 +1,5 @@
 import type { BrowserAutomation } from '../../daemon/pages/automation.ts';
+import type { BrowserClipboardRead } from '../../daemon/pages/copy-contracts.ts';
 import type {
   BrowserInputEvent,
   BrowserPageActionSnapshot,
@@ -28,8 +29,30 @@ export class Tabs {
   dialog: { type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'; message: string } | undefined;
   /** The browser cannot say which document a page shows. */
   documentFails = false;
+  /** What a secure copy's read of one element found (an empty element by default). */
+  copyAnswer:
+    | {
+        readonly ok: true;
+        readonly value: string;
+        readonly origin: string;
+        readonly frameOrigin: string;
+        readonly navigationId: string;
+        readonly editable?: true;
+      }
+    | { readonly ok: false; readonly reason: 'missing' | 'empty' | 'changed' } = { ok: false, reason: 'empty' };
+  /** What the browser's clipboard held when the worker read it (nothing by default). */
+  clipboardAnswer: BrowserClipboardRead = { ok: false, reason: 'empty' };
+  /** Held until a test lets go: a page read that takes as long as the test says, so the page's queue stays busy. */
+  readGate: Promise<void> | undefined;
   /** The host the live page reports, when a case sets one. */
   documentHost: string | undefined;
+  /** The hosts of the frames inside the live page, and whether one of them cannot be told. */
+  frameHosts: readonly string[] | undefined;
+  framesUnreadable = false;
+  /** What a read of the page and its frames could show (the worker's `inputText`); unreadable when not set. */
+  pageText: string | undefined;
+  /** Whether the browser's clipboard is confirmed empty by a clear. */
+  clearAnswer = true;
   /** While set, a click does not return: the page's queue is stuck behind it, as it is behind a dialog. */
   clickGate: Promise<void> | undefined;
   /** What a page in the error state says went wrong (the worker's first line of a failed navigation). */
@@ -82,6 +105,12 @@ export class Tabs {
 
   readonly automation: BrowserAutomation = {
     unexpectedExit: this.exit,
+    clearClipboard: async () => this.clearAnswer,
+    inputText: async pageId => {
+      this.calls.push(`inputText:${pageId}`);
+      if (this.pageText === undefined) throw new Error('the page text cannot be read');
+      return this.pageText;
+    },
     navigate: async (pageId, url) => {
       this.pages = this.pages.map(page => (page.id === pageId ? { ...page, url } : page));
       return this.acted('navigate', pageId);
@@ -95,7 +124,10 @@ export class Tabs {
       return { ...this.acted('type', pageId), ...this.typeAnswer };
     },
     pointer: async (pageId, act) => this.acted(`pointer-${act.action}`, pageId),
-    read: async (pageId, options) => ({ ...this.acted(`read-${options?.mode ?? 'text'}`, pageId), text: 'hello' }),
+    read: async (pageId, options) => {
+      await this.readGate;
+      return { ...this.acted(`read-${options?.mode ?? 'text'}`, pageId), text: 'hello' };
+    },
     screenshot: async pageId => ({ ...this.acted('screenshot', pageId), screenshotBase64: 'iVBOR' }),
     upload: async pageId => this.acted('upload', pageId),
     download: async pageId => ({
@@ -113,12 +145,21 @@ export class Tabs {
     location: async pageId => this.state(pageId),
     copyRead: async pageId => {
       this.calls.push(`copyRead:${pageId}`);
-      return { ok: false, reason: 'empty' };
+      return this.copyAnswer;
+    },
+    copyClipboard: async pageId => {
+      this.calls.push(`copyClipboard:${pageId}`);
+      return this.clipboardAnswer;
     },
     inputDocument: async pageId => {
       this.calls.push(`inputDocument:${pageId}`);
       if (this.documentFails) throw new Error('the page is gone');
-      return { navigationId: 'loader-1', ...(this.documentHost === undefined ? {} : { host: this.documentHost }) };
+      return {
+        navigationId: 'loader-1',
+        ...(this.documentHost === undefined ? {} : { host: this.documentHost }),
+        ...(this.frameHosts === undefined ? {} : { frameHosts: this.frameHosts }),
+        ...(this.framesUnreadable ? { framesUnreadable: true as const } : {}),
+      };
     },
     inputObserve: async pageId => {
       this.calls.push(`inputObserve:${pageId}`);

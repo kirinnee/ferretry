@@ -273,11 +273,11 @@ async function failure(work: Promise<unknown>): Promise<unknown> {
   throw new Error('expected the call to fail');
 }
 
-/** The person's tools route for ferret `s1` (`POST /v1/sessions/:sessionId/surfaces/browser/tools`). */
+/** The person's tools route for ferret `s1` (`POST /v1/ferrets/:ferretId/surfaces/browser/tools`). */
 function personRoute(tools: BrowserTools, body: unknown): Promise<unknown> {
-  const { call } = callOf({ method: 'POST', path: '/v1/sessions/s1/surfaces/browser/tools', body, kind: 'host' });
-  const withSession = { ...call, params: new Map([['sessionId', 's1']]) } as unknown as CallContext;
-  return Promise.resolve(controlRoutes(tools)['POST /v1/sessions/:sessionId/surfaces/browser/tools'](withSession));
+  const { call } = callOf({ method: 'POST', path: '/v1/ferrets/s1/surfaces/browser/tools', body, kind: 'host' });
+  const withSession = { ...call, params: new Map([['ferretId', 's1']]) } as unknown as CallContext;
+  return Promise.resolve(controlRoutes(tools)['POST /v1/ferrets/:ferretId/surfaces/browser/tools'](withSession));
 }
 
 async function refusal(work: Promise<unknown>): Promise<BrowserToolError> {
@@ -473,7 +473,7 @@ describe('the viewer stream’s input, through the act runner (R549)', () => {
     // Arrange
     const { browser, kernel, tools } = await harness();
     await tools.call(person, { tool: 'browser.open', name: 'app' });
-    const host = heldViewerHost(kernel.kernel, browser as never, true);
+    const host = heldViewerHost(kernel.kernel, browser as never, { mayType: true });
     const text = 'a whole sentence, typed at once';
 
     // Act
@@ -488,7 +488,7 @@ describe('the viewer stream’s input, through the act runner (R549)', () => {
     const { browser, kernel, tools } = await harness();
     await tools.call(agent, { tool: 'browser.open', name: 'app' });
     kernel.hold(pageTarget((browser.pages[0] as FakePage).id), 'held', ['type', 'press']);
-    const host = heldViewerHost(kernel.kernel, browser as never, true);
+    const host = heldViewerHost(kernel.kernel, browser as never, { mayType: true });
 
     // Act
     const byAgent = await failure(tools.call(agent, { tool: 'browser.type', name: 'app', selector: '#q', text: 'x' }));
@@ -955,14 +955,12 @@ describe('the browser tools — who took a page over, as the control route recor
     const post = (kind: 'device' | 'host', key: string) => {
       const { call } = callOf({
         method: 'POST',
-        path: '/v1/sessions/s1/surfaces/browser/control',
+        path: '/v1/ferrets/s1/surfaces/browser/control',
         body: { action: 'takeover', key },
         kind,
       });
-      const withSession = { ...call, params: new Map([['sessionId', 's1']]) } as unknown as CallContext;
-      return Promise.resolve(
-        controlRoutes(tools)['POST /v1/sessions/:sessionId/surfaces/browser/control'](withSession),
-      );
+      const withSession = { ...call, params: new Map([['ferretId', 's1']]) } as unknown as CallContext;
+      return Promise.resolve(controlRoutes(tools)['POST /v1/ferrets/:ferretId/surfaces/browser/control'](withSession));
     };
 
     // Act
@@ -986,15 +984,15 @@ describe('the browser tools — a takeover refusal on the route', () => {
     await takeOver(tools, 'app');
     const { call } = callOf({
       method: 'POST',
-      path: '/v1/sessions/s1/surfaces/browser/tools',
+      path: '/v1/ferrets/s1/surfaces/browser/tools',
       body: { tool: 'browser.click', name: 'app', selector: 'a' },
       kind: 'agent',
     });
-    const withSession = { ...call, params: new Map([['sessionId', 's1']]) } as unknown as CallContext;
+    const withSession = { ...call, params: new Map([['ferretId', 's1']]) } as unknown as CallContext;
 
     // Act
     const refused = await failure(
-      Promise.resolve(controlRoutes(tools)['POST /v1/sessions/:sessionId/surfaces/browser/tools'](withSession)),
+      Promise.resolve(controlRoutes(tools)['POST /v1/ferrets/:ferretId/surfaces/browser/tools'](withSession)),
     );
 
     // Assert

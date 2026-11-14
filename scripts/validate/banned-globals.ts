@@ -201,6 +201,12 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
       reason: 'fy at the person terminal: the hidden-read prompt and the pane session variables (lead ruling)',
     },
     {
+      pkg: 'browsers',
+      folder: 'cli/adapters/picture-file.ts',
+      reason:
+        'fy at the person terminal writes the screenshot to the file the person named, a path outside every declared root; the file holds only the picture bytes the daemon sent (owner-ruled gap: the CLI half has no file-write port)',
+    },
+    {
       pkg: 'terminals',
       folder: 'cli/adapters/attach/tmux-attacher.ts',
       reason: 'fy itself attaches the person terminal to tmux (lead ruling)',

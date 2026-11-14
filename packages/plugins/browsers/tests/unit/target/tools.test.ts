@@ -384,7 +384,7 @@ describe('a page a person took over', () => {
   }
 
   const control = (host: TestHost, action: 'takeover' | 'handback') =>
-    host.request('POST', '/v1/sessions/f1/surfaces/browser/control', { body: { action, key: 'app' } });
+    host.request('POST', '/v1/ferrets/f1/surfaces/browser/control', { body: { action, key: 'app' } });
 
   test('browser_type, browser_fill_form, browser_request_input and browser_ask_owner are all refused as taken over', async () => {
     const { host, tabs } = await opened();

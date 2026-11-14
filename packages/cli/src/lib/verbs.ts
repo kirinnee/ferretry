@@ -252,9 +252,59 @@ export function resolveVerb(table: VerbTable, tokens: readonly string[]): Resolu
       return { kind: 'subverb', parent: { words }, word, subverbs };
     }
   }
+  const around = resolveAroundOptions(table, tokens);
+  if (around !== undefined) return around;
   const first = leading[0];
   const nearby = first === undefined ? [] : table.entries.filter(entry => entry.words[0] === first);
   return { kind: 'unknown', typed: leading, nearby };
+}
+
+/** How an option is written in a declared flag (`-s, --session, --ferret <id>`): its names, and whether it takes a value. */
+function declaredFlag(flag: string): { readonly names: readonly string[]; readonly takesValue: boolean } {
+  const names = [...flag.matchAll(/(?:^|[ ,])-{1,2}([a-z][a-z0-9-]*)/gu)].map(match => match[1] as string);
+  return { names, takesValue: flag.includes('<') };
+}
+
+const optionName = (token: string): string => token.replace(/^-{1,2}/u, '').split('=')[0] as string;
+const isOptionToken = (token: string): boolean => token.startsWith('-') && token !== '-' && !/^-\d/u.test(token);
+
+/**
+ * A group's own options written BEFORE its verb (`browser --session f1 page click app`, `browser page --session f1
+ * click app`): the verb line is the leading words with those options set aside, and the options keep their place in
+ * front of the verb's arguments. Only options the group's verbs DECLARE as taking a value (`<id>`) swallow the word
+ * after them here; any other word is read as part of the verb line, so a mistyped line still stops as an unknown verb.
+ * Used only when the plain longest-run match found nothing, so no line that resolved before resolves differently.
+ */
+function resolveAroundOptions(table: VerbTable, tokens: readonly string[]): Resolution | undefined {
+  const first = tokens[0];
+  if (first === undefined || isOptionToken(first)) return undefined;
+  const group = table.entries.filter(entry => entry.words[0] === first);
+  const declared = group.flatMap(entry => (entry.options ?? []).map(option => declaredFlag(option.flag)));
+  const takesValue = (token: string): boolean =>
+    !token.includes('=') && declared.some(flag => flag.takesValue && flag.names.includes(optionName(token)));
+  const words: { readonly at: number; readonly text: string }[] = [];
+  let moved = false;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index] as string;
+    if (token === '--') break;
+    if (isOptionToken(token)) {
+      // An option that is not declared ends the verb line, as it always did.
+      if (!declared.some(flag => flag.names.includes(optionName(token.replace(/^--no-/u, '--'))))) break;
+      moved = true;
+      if (takesValue(token) && index + 1 < tokens.length) index += 1;
+      continue;
+    }
+    words.push({ at: index, text: token });
+  }
+  if (!moved) return undefined;
+  for (let length = words.length; length > 0; length -= 1) {
+    const key = keyOf(words.slice(0, length).map(word => word.text));
+    const entry = table.entries.find(candidate => keyOf(candidate.words) === key);
+    if (entry === undefined) continue;
+    const used = new Set(words.slice(0, length).map(word => word.at));
+    return { kind: 'verb', entry, rest: tokens.filter((_, index) => !used.has(index)) };
+  }
+  return undefined;
 }
 
 /** Expands a data plugin's alias into the verb line it runs, once. Returns the tokens to resolve again. */
