@@ -152,3 +152,41 @@ describe('fy lesson suggest without --scope (V-0308)', () => {
     should(transport.sent.length).be.above(0);
   });
 });
+
+/**
+ * The account groups' defaults take their argument, as in v4 (account-commands.ts:207, 246, 288; its test :446): the word
+ * reaches `ls` / `show` instead of being refused as an unknown sub-verb.
+ */
+describe('a default that takes words keeps them (fy account site / factor / site recipe)', () => {
+  const ran = async (...argv: string[]) => {
+    const { world: w, io, transport } = world({});
+    const code = await runFy(argv, w);
+    return { code, err: io.stderr(), requests: transport.sent.map(request => `${request.method} ${request.path}`) };
+  };
+
+  it('V-0019 should list one account’s sign-ins for `fy account site GITHUB`, not refuse the word', async () => {
+    const { err, requests } = await ran('account', 'site', 'GITHUB');
+    should(err).not.containEql('sub-verb');
+    should(requests.length).be.above(0);
+  });
+
+  it('V-0009 should list one account’s 2FA keys for `fy account factor GITHUB --json`, not refuse the word', async () => {
+    const { err, requests } = await ran('account', 'factor', 'GITHUB', '--json');
+    should(err).not.containEql('sub-verb');
+    should(requests.length).be.above(0);
+  });
+
+  it('V-0023 should show the recipe for `fy account site recipe si_…`, not refuse the word', async () => {
+    const { err, requests } = await ran('account', 'site', 'recipe', 'si_0123456789abcdef');
+    // `show` ran: it asked the daemon (which this fixture does not serve) instead of the shell refusing a sub-verb.
+    should(err).not.containEql('sub-verb');
+    should(requests.length).be.above(0);
+  });
+
+  it('V-0023 should refuse a misspelt sub-verb instead of running show on it, and run a typed one', async () => {
+    const typo = await ran('account', 'site', 'recipe', 'aprove', 'si_0123456789abcdef');
+    should(typo.code).equal(2);
+    should(typo.err).containEql('did you mean "account site recipe approve"');
+    should(typo.requests).deepEqual([]);
+  });
+});

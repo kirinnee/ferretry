@@ -285,6 +285,9 @@ const defaultBelow = (table: VerbTable, words: readonly string[]): VerbEntry | u
       words.every((word, at) => candidate.words[at] === word),
   );
 
+/** Whether a default takes words of its own (`account site ls [account]`): declared `args`, or placeholders in its line. */
+const defaultTakesWords = (entry: VerbEntry): boolean => (entry.args?.length ?? 0) > 0 || takesArguments(entry);
+
 /** The verbs below these words, at any depth (`agenda open` and `agenda add` under `agenda`). */
 const subverbsBelow = (table: VerbTable, words: readonly string[]): readonly VerbEntry[] =>
   table.entries.filter(
@@ -398,6 +401,16 @@ export function resolveVerb(table: VerbTable, tokens: readonly string[]): Resolu
         if (rest.slice(0, at).includes('--')) return { kind: 'verb', entry: current, rest };
         const likely = subverbs.find(candidate => nearly(word, candidate.words[words.length] as string));
         if (likely === undefined) return { kind: 'verb', entry: current, rest };
+        return { kind: 'subverb', parent: { words }, word, subverbs, didYouMean: likely };
+      }
+      // A group whose default takes words of its own (v4: `fy account site GITHUB` is `account site ls GITHUB`) hands it a word
+      // that names no sub-verb, as the verb that takes words does; a near misspelling of a real sub-verb is still refused,
+      // so a mutating child never runs by a typo, and past a bare `--` every word is the default's own.
+      const chosen = current === undefined ? defaultBelow(table, words) : undefined;
+      if (chosen !== undefined && defaultTakesWords(chosen)) {
+        if (rest.slice(0, at).includes('--')) return { kind: 'verb', entry: chosen, rest };
+        const likely = subverbs.find(candidate => nearly(word, candidate.words[words.length] as string));
+        if (likely === undefined) return { kind: 'verb', entry: chosen, rest };
         return { kind: 'subverb', parent: { words }, word, subverbs, didYouMean: likely };
       }
       return { kind: 'subverb', parent: { words }, word, subverbs };

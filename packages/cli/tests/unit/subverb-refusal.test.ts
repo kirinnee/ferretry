@@ -50,7 +50,12 @@ const hasDefault = (words: readonly string[]): boolean =>
 
 const takesWords = (words: readonly string[]): boolean => {
   const own = table.entries.find(entry => entry.words.join(' ') === words.join(' '));
-  return own !== undefined && /[<[]/u.test(own.line);
+  if (own !== undefined && /[<[]/u.test(own.line)) return true;
+  // A group whose declared default takes words of its own (`account site ls [account]`) hands it a word that names no
+  // sub-verb, as a verb that takes words does: it is refused only as a near misspelling of a real sub-verb.
+  return subverbsBelow(words).some(
+    entry => entry.default === true && entry.words.length === words.length + 1 && (entry.args?.length ?? 0) > 0,
+  );
 };
 
 describe('every verb with sub-verbs, from the real registry', () => {
