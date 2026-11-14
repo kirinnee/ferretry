@@ -87,6 +87,18 @@
   padding: 0;
   list-style: none;
 }
+/* The list's foot: the one primary door to a new ferret, always in reach under the rows. */
+.fy-sbar__footer {
+  display: flex;
+  flex-shrink: 0;
+  padding: var(--gap-sm);
+  border-top: var(--stroke-control) solid var(--border);
+}
+.fy-sbar__footer .kt-btn {
+  flex: 1;
+  justify-content: center;
+  min-height: 44px;
+}
 .fy-sbar__empty {
   margin: 0;
   padding: var(--gap-sm) 8px;
