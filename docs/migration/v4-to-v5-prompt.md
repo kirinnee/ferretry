@@ -100,6 +100,13 @@ the owner:
 | `start`                                           | `fyd --check` (offline: nothing can start a daemon), the home holds only what v5 makes (plus the asset files under `fleet/assets`: skills, hook files; regular files and folders only), then **the one deliberate daemon start**, proved by asking it, then `fy config check` against that running daemon                                                                                                                                                                                       | show every `!` line                                                         |
 | `verify`                                          | compares v5 with the baseline and prints a table: ferret ids, parents, callsigns (v4 callsign = v5 name), titles, panes, board ids (lanes are shown to the owner), logins, secret names, asks, `fy doctor`                                                                                                                                                                                                                                                                                      | a `FAIL` row is a stop; a `REVIEW` row is for the owner to decide           |
 
+### Before any `fy` command after `start`
+
+Every step after `start` that runs `fy ...` (the credential repair, the logins, "Check by eye", `fy ask`, `fy secret`, the
+Rollback) first runs `fy --version`. It must print **5.x**. If it prints 4.x, stop: a v4 `fy` left first on the PATH talks to
+the v4 daemon (or to whatever it finds), not to v5. Call the v5 `fy` by its full path, or fix the PATH with the owner, and
+run the check again.
+
 ### If `quiet` exits 1
 
 **v4 is now stopped** (`quiet` stops its daemon before it checks): the owner has no working Ferretry until you act. The
