@@ -1,4 +1,4 @@
-import { implementCli, type VerbHandler, type VerbInvocation } from '@ferretry/kernel/manifest';
+import { configItemVerbs, implementCli, MCP_ITEM_KEYS, type VerbInvocation } from '@ferretry/kernel/manifest';
 import { TOOLS_SERVER_INSTRUCTIONS } from '@ferretry/plugin-runtimes/contract';
 import manifest from '../manifest.ts';
 import { serveTools } from './serve.ts';
@@ -15,21 +15,18 @@ const text = (invocation: VerbInvocation, name: string): string | undefined => {
   return Array.isArray(value) ? (value[value.length - 1] as string | undefined) : undefined;
 };
 
-/**
- * The item verbs edit MCP server items, and the item service that serves them has no route in this build. Said plainly
- * rather than pretended (the claude-code `itemVerb` pattern).
- */
-const itemVerb =
-  (io: { err(text: string): void }): VerbHandler =>
-  async () => {
-    io.err(
-      'MCP server items are edited through the item service, which is not served by this daemon yet; nothing was changed.\n',
-    );
-    return 69;
-  };
-
 export default implementCli(manifest, {
-  build: ({ client, io, stdin, env }) => {
+  build: ({ client, io, stdin, env, readText, confirm }) => {
+    const items = configItemVerbs({
+      collection: 'mcp',
+      noun: 'MCP server',
+      verbPrefix: 'mcp',
+      client,
+      io,
+      readText,
+      confirm,
+      keys: MCP_ITEM_KEYS,
+    });
     const servers = new McpServersController(clientServersGateway(client), io, env?.FY_SESSION_ID);
     return {
       verbs: {
@@ -60,10 +57,10 @@ export default implementCli(manifest, {
             json: on(invocation, 'json'),
           });
         },
-        'mcp add': itemVerb(io),
-        'mcp show': itemVerb(io),
-        'mcp edit': itemVerb(io),
-        'mcp rm': itemVerb(io),
+        'mcp add': items.add,
+        'mcp show': items.show,
+        'mcp edit': items.edit,
+        'mcp rm': items.rm,
       },
     };
   },

@@ -7,3 +7,4 @@ export * from './reach.ts';
 export * from './settings-groups.ts';
 export * from './privacy.ts';
 export * from './project-files.ts';
+export * from './config-items.ts';

@@ -90,8 +90,6 @@ export default definePlugin({
         args: [{ name: 'name', help: 'the settings item’s name' }],
         options: [
           { flag: '--file <path>', help: "the item's text, from a local file" },
-          { flag: '--env <NAME=value>', help: 'MCP or settings: one environment variable; repeat it' },
-          { flag: '--flag <flag>', help: 'settings: one launch flag; repeat it' },
           { flag: '--dry-run', help: 'show what would change, and change nothing' },
           { flag: '-y, --yes', help: 'go ahead without asking' },
           { flag: '--json', help: 'print the answer as JSON' },
@@ -102,8 +100,6 @@ export default definePlugin({
         args: [{ name: 'name', help: 'the settings item’s name' }],
         options: [
           { flag: '--file <path>', help: "the item's text, from a local file" },
-          { flag: '--env <NAME=value>', help: 'MCP or settings: one environment variable; repeat it' },
-          { flag: '--flag <flag>', help: 'settings: one launch flag; repeat it' },
           { flag: '--dry-run', help: 'show what would change, and change nothing' },
           { flag: '-y, --yes', help: 'go ahead without asking' },
           { flag: '--json', help: 'print the answer as JSON' },

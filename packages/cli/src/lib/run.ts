@@ -19,6 +19,16 @@ import {
   daemonUninstall,
   daemonWhich,
 } from './commands/daemon.ts';
+import {
+  configCheckVerb,
+  configConfirmVerb,
+  configGuideVerb,
+  configPathVerb,
+  configSchemaVerb,
+  configShowVerb,
+  configStatusVerb,
+  configWriteVerb,
+} from './commands/config.ts';
 import { doctorVerb } from './commands/doctor.ts';
 import { pluginInstall, pluginList, pluginOff, pluginOn, pluginShow } from './commands/plugin.ts';
 import {
@@ -51,6 +61,14 @@ const SHELL_HANDLERS: Readonly<Record<string, ShellVerb>> = {
   'plugin check': pluginInstall,
   words: wordsVerb,
   doctor: doctorVerb,
+  'config check': configCheckVerb,
+  'config path': configPathVerb,
+  'config schema': configSchemaVerb,
+  'config status': configStatusVerb,
+  'config show': configShowVerb,
+  'config write': configWriteVerb,
+  'config confirm': configConfirmVerb,
+  'config guide': configGuideVerb,
   'daemon status': daemonStatus,
   'daemon start': daemonStart,
   'daemon stop': daemonStop,

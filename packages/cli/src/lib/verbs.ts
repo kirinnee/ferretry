@@ -11,6 +11,8 @@ interface ShellVerbLine {
   readonly summary: string;
   readonly args: readonly VerbArgDecl[];
   readonly options?: readonly VerbOptionDecl[];
+  /** The default of its group: the bare group (`fy config`) runs it. */
+  readonly default?: true;
 }
 
 const JSON_OPTION = { flag: '--json', help: 'print the answer as JSON' } as const;
@@ -51,6 +53,49 @@ const SHELL_VERB_LINES: readonly ShellVerbLine[] = [
     args: [{ name: 'word', help: 'the word to look up; all of them when left out', optional: true }],
   },
   { verb: 'doctor', summary: 'check this fy against the daemon, plugin by plugin', args: [] },
+  {
+    verb: 'config check',
+    summary: 'check every configuration file, as the daemon would; exits non-zero on an error',
+    args: [],
+    options: [{ flag: '--json', help: 'print the report as JSON' }],
+    default: true,
+  },
+  {
+    verb: 'config path',
+    summary: 'print the configuration directory, or one file in it',
+    args: [
+      { name: 'file', help: 'a file, relative to the directory: machine.yaml, logins/<id>.yaml, …', optional: true },
+    ],
+  },
+  {
+    verb: 'config schema',
+    summary: 'print the JSON Schema of one kind of file, or list the kinds',
+    args: [{ name: 'kind', help: 'a schema from the list, or a file it checks', optional: true }],
+  },
+  {
+    verb: 'config status',
+    summary: 'what the daemon has in effect: every file, every problem, every change waiting',
+    args: [],
+    options: [JSON_OPTION],
+  },
+  {
+    verb: 'config show',
+    summary: 'show one file as the daemon holds it: where it stands, its etag, its issues and its text',
+    args: [{ name: 'file', help: 'a file, relative to the directory: machine.yaml, logins/<id>.yaml, …' }],
+    options: [JSON_OPTION],
+  },
+  {
+    verb: 'config write',
+    summary: 'write one file through the daemon from stdin; refused unless it checks',
+    args: [{ name: 'file', help: 'a file, relative to the directory' }],
+    options: [{ flag: '--if-match <etag>', help: 'refuse if the file changed since this etag (from `config show`)' }],
+  },
+  {
+    verb: 'config confirm',
+    summary: 'put into effect a change that loosens what this machine allows, or list what waits',
+    args: [{ name: 'file', help: 'the file whose waiting change to confirm', optional: true }],
+  },
+  { verb: 'config guide', summary: 'print the built-in "Set up Ferretry" skill (a SKILL.md)', args: [] },
   {
     verb: 'daemon status',
     summary: 'is the daemon up, which build, which plugins agree',
@@ -256,6 +301,7 @@ export function buildVerbTable(registry: CommandRegistry): VerbTable {
       summary: shell.summary,
       args: shell.args,
       ...(shell.options === undefined ? {} : { options: shell.options }),
+      ...(shell.default === true ? { default: true as const } : {}),
     });
   for (const old of SHELL_ALIAS_LINES)
     add({

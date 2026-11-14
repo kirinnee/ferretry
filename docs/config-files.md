@@ -33,8 +33,19 @@ name are refused at start, in a sentence. `config/daemon.json` and `config/routi
 directory and are not configuration files in this sense: they are the daemon's own documents. The shell
 terminals open is one of them (`terminals.shell`, [terminals.md](terminals.md)).
 
-`fy config path`, `check`, `schema` and `guide` need no daemon. `status`, `show`, `write` and `confirm` ask it:
-`fy config write <file> [--if-match <etag>]` reads the text from stdin and is refused whole unless it checks.
+`fy config guide` needs no daemon. Every other verb asks it, because the daemon owns the checker and the files' state
+(any `fy` command starts one): `check` and `status` read `GET /v1/config/status`, `path` its directory, `schema` the
+file the daemon published under `config/.schema/`, `show` one file with its etag, `write` and `confirm` change
+one. `fy config write <file> [--if-match <etag>]` reads the text from stdin and is refused whole unless it checks, with
+every located problem said, and `fy config confirm <file>` names the etag it reviewed. A bare `fy config` is
+`check`. (Declared GAP: v4 checked and read schemas with the daemon stopped.)
+
+One item of a component folder has its own verbs, composed over the same routes: `fy mcp ls|show|add|edit|rm <name>` and
+`fy harness claude-code|codex settings|hooks ls|show|add|edit|rm <name>`. An item is a file, so an `add` or `edit`
+writes against the etag it read (`--file <path>`, or `--command`, `--arg`, `--url`, `--env` for an MCP server, which
+edit only those keys and keep comments and hidden values), an edit or `rm` asks first unless `--yes`, and a held edit
+says how to confirm it. Declared GAPs: `show` does not list which profiles use the item, and `rm
+--remove-from-profiles` is refused (take it out of the profiles first).
 
 ## Daemon archive setting
 
