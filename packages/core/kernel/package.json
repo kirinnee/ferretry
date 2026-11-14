@@ -13,6 +13,7 @@
   },
   "exports": {
     "./contract": "./contract/index.ts",
+    "./contract/home-port": "./contract/home-port.ts",
     "./contract/push-envelope": "./contract/push-envelope.ts",
     "./contract/hosted-app": "./contract/hosted-app.ts",
     "./contract/notification-filter": "./contract/notification-filter.ts",

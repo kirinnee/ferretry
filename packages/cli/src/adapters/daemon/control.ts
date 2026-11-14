@@ -26,7 +26,7 @@ import { BunDaemonProcess } from './process.ts';
 import { HostProcessIncarnations } from './process-incarnation.ts';
 import { FileResetTrees } from './reset-trees.ts';
 import { privateRuntimeDirectory } from './runtime-directory.ts';
-import { readDaemonRunDocument } from './run-file.ts';
+import { readDaemonRunDocument, readHomePort } from './run-file.ts';
 import { FileServiceStore } from './service-files.ts';
 import { TmuxSessionTerminalServer } from './session-terminals.ts';
 import { terminalPrompt } from '../terminal/prompt.ts';
@@ -101,7 +101,12 @@ export function buildDaemonController(
     service,
     direct: new DirectSupervisor(layout, processes, files, claims),
     health: new RunRecordDaemonHealth(
-      async () => resolveDaemonUrl('', parseDaemonRun(await readDaemonRunDocument(daemonRunPath(inputs.home)))),
+      async () =>
+        resolveDaemonUrl(
+          '',
+          parseDaemonRun(await readDaemonRunDocument(daemonRunPath(inputs.home))),
+          await readHomePort(inputs.home),
+        ),
       inputs.fetcher,
     ),
     logs: new TailDaemonLog(),

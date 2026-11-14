@@ -81,6 +81,9 @@ function areaOfSubpath(pkg: WorkspacePackage, subpath: string): Area {
       // The hosted app origin alone, for the app's build config: Node's type stripping loads it, and the barrel
       // carries syntax it refuses.
       'contract/hosted-app': 'kernel-contract',
+      // The one reader of the port a home's own configuration names (`direct.port`): the daemon binds it and `fy` dials
+      // it, so neither keeps a second copy. It parses YAML, so it stays out of the barrel the app bundles.
+      'contract/home-port': 'kernel-contract',
       // The pure wire and the browser-safe session codec: no IO, so another package may import them as it imports
       // the contract (the files themselves sit outside contract/ because they re-export the host's session wire).
       wire: 'kernel-contract',

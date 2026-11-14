@@ -17,7 +17,7 @@ import { bootHost } from './host.ts';
 import { parseBackgroundDelay } from './jobs.ts';
 import { listenLocal } from './listener.ts';
 import { holdUntilStopped, startedByLaunchd } from './refusal-hold.ts';
-import { filterByLevel, renderSettings, resolveSettings } from './settings.ts';
+import { filterByLevel, renderSettings, settingsForRun } from './home-settings.ts';
 import { stopOnSignalReporting } from './stop-signals.ts';
 import { bootTimings } from './session/timings.ts';
 import { fileLogSink, realAdapters } from './wiring.ts';
@@ -48,28 +48,28 @@ async function main(): Promise<number> {
     );
     return EXIT_USAGE;
   }
-  const resolved = resolveSettings(process.env, answer.overrides, homedir());
+  const loadImplementations = async () =>
+    ((await import('../src/generated/plugins.ts')) as unknown as GeneratedRegistry).daemonImplementations;
+  const resolved = await settingsForRun(process.env, answer.overrides, homedir(), loadImplementations);
   if (resolved.kind === 'refused') {
     process.stderr.write(`${usage.daemonName}: ${resolved.sentence}\n`);
     return EXIT_USAGE;
   }
   if (answer.kind === 'print-config') {
-    for (const line of renderSettings(resolved.settings)) process.stdout.write(`${line}\n`);
+    process.stdout.write(`${renderSettings(resolved.settings).join('\n')}\n`);
     return 0;
   }
   const home = resolved.settings.home.value;
-  const port = resolved.settings.port.value;
   if (answer.kind === 'check') {
-    // The registry is read by `--check` (and not at boot) only so the plugins' preflights, selftests and workers can
-    // be asked, and only AFTER the home and address verdict is printed: a module that fails to load costs a line.
+    // The registry is read here, and to find which plugin owns the home's port file, so the plugins' preflights, selftests
+    // and workers can be asked, and only AFTER the home and address verdict is printed: a module that fails costs a line.
     return await runCheck({
       home,
       host: resolved.settings.host.value,
-      port,
+      port: resolved.settings.port.value,
       daemonName: usage.daemonName,
       version: VERSION,
-      loadImplementations: async () =>
-        ((await import('../src/generated/plugins.ts')) as unknown as GeneratedRegistry).daemonImplementations,
+      loadImplementations,
     });
   }
   // §9.3: nothing is written before the home is decided (a v4 home has a `logs/fyd.log`): dropped until `onHomeOpened`.
@@ -122,7 +122,7 @@ async function main(): Promise<number> {
     listen: async host =>
       await listenLocal(host, {
         home,
-        port,
+        port: resolved.settings.port.value,
         hostname: resolved.settings.host.value,
         pid: process.pid,
         version: VERSION,
