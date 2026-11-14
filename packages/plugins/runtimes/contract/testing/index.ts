@@ -12,12 +12,14 @@ import {
   type ResolveResult,
   type RuntimeAssetSkills,
   type RuntimeHome,
+  type MachineTool,
   type RuntimeHomeReader,
   type RuntimeId,
   type RuntimeLayers,
   RuntimeIdSchema,
   type RuntimesApi,
   type RuntimeSummary,
+  type RuntimeView,
   RuntimeSummarySchema,
 } from '../index.ts';
 
@@ -27,6 +29,8 @@ export interface FakeRuntimes extends RuntimesApi {
   setHomes(homes: readonly RuntimeHome[], readers?: Readonly<Record<string, RuntimeHomeReader>>): void;
   /** The fleet's installed skills `assetSkills()` answers (none until set). */
   setAssetSkills(assetSkills: RuntimeAssetSkills): void;
+  /** The runtimes `catalog()` and the machine tools `tools()` answer (none until set). */
+  setCatalog(runtimes: readonly RuntimeView[], tools?: readonly MachineTool[]): void;
   /**
    * The profiles the fake holds (what `profiles()` answers and `changeProfileLayers` edits), and the layers `layers(id)`
    * answers for each runtime. The layers are exactly what a test sets: a change edits the PROFILES, not these.
@@ -88,6 +92,8 @@ export function fakeRuntimes(): FakeRuntimes {
   let homes: readonly RuntimeHome[] = [];
   let readers: Readonly<Record<string, RuntimeHomeReader>> = {};
   let assetSkills: RuntimeAssetSkills = { skills: async () => [], skillManifest: async () => undefined };
+  let catalog: readonly RuntimeView[] = [];
+  let machineTools: readonly MachineTool[] = [];
   let profiles: readonly ProfileSummary[] = [];
   let layerSets: ReadonlyMap<RuntimeId, RuntimeLayers> = new Map();
   let forced: Parameters<FakeRuntimes['setChangeOutcome']>[0];
@@ -139,6 +145,8 @@ export function fakeRuntimes(): FakeRuntimes {
       if (!found.launch.available) return { ok: false, refusal: 'not_signed_in', sentence: found.launch.reason };
       return { ok: true, runtime: found };
     },
+    catalog: async () => catalog,
+    tools: async () => machineTools,
     // No fleet is published in memory: there are no homes until a test sets them, and a reader only for a listed id.
     homes: async () => homes,
     home: id => (homes.some(home => home.id === id) ? readers[id] : undefined),
@@ -168,6 +176,10 @@ export function fakeRuntimes(): FakeRuntimes {
     },
     setAssetSkills: next => {
       assetSkills = next;
+    },
+    setCatalog: (next, nextTools = []) => {
+      catalog = next;
+      machineTools = nextTools;
     },
     setHomes: (next, nextReaders = {}) => {
       homes = next;

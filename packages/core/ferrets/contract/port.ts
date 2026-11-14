@@ -537,6 +537,26 @@ export interface Sitrep {
 }
 
 /**
+ * A limit a LIVE ferret's pane proves its login has reached (today's `storagePaneLimits` row): the harness announced a
+ * usage or spend limit that the provider's own reading cannot see. One row per limited live ferret, derived from its
+ * state each time it is read and kept nowhere, so it ends the moment the ferret is released (the pane shows no limit
+ * any more, or it is stopped) or its reset time passes.
+ *
+ * `notice` is the harness's own sentence, read from a masked screen. `login` is the login the ferret launched on;
+ * `runtime` is the runtime it was started on, for a ferret whose record names no login.
+ */
+export interface FerretPaneLimit {
+  readonly ferret: FerretId;
+  readonly runtime?: string;
+  readonly login?: string;
+  readonly notice: string;
+  /** Whether it is a spend limit (money), as opposed to a usage window. */
+  readonly spend: boolean;
+  /** When the login is usable again, epoch milliseconds; absent when the harness gave no time. */
+  readonly retryAt?: number;
+}
+
+/**
  * The Ferrets port (§2.2): who each ferret is, its lineage, its state; start, stop and resume through the harness
  * and runner plugins. "A ferret touches only its own; a lead also its helpers'" is `mayTouch`, decided here and
  * nowhere else.
@@ -669,6 +689,11 @@ export interface FerretsApi {
     options: MoveOptions,
     caller?: FerretId,
   ): Promise<Result<FerretSummary, MoveFailure>>;
+  /**
+   * Additive (usage and Packs read it): the limits live ferrets' panes prove, one row per limited ferret, derived from
+   * their state now (see {@link FerretPaneLimit}). A reader that wants them by login aggregates them (Usage owns that).
+   */
+  paneLimits?(): Promise<readonly FerretPaneLimit[]>;
 }
 
 export const FerretsPort = definePort<FerretsApi>('ferrets');

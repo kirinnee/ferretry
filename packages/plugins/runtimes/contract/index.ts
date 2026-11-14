@@ -19,6 +19,7 @@ import {
 } from './config.ts';
 import { RUNTIME_HOME_READ_MODELS, type RuntimeHomesApi } from './homes.ts';
 import { RUNTIME_LAYER_READ_MODELS, type RuntimeLayersApi } from './layers.ts';
+import type { MachineTool, RuntimeView } from './wire/index.ts';
 
 export * from './codex-launch.ts';
 export * from './component-source.ts';
@@ -90,7 +91,13 @@ export interface RuntimesApi extends RuntimeHomesApi, RuntimeLayersApi {
   default(): Promise<RuntimeId | undefined>;
   /** What a start on this runtime (or the default, when `id` is omitted) would use, or why it cannot start. */
   resolve(id?: RuntimeId): Promise<ResolveResult>;
+  /** Every runtime with its models, wrapper and login, as `GET /v1/runtimes` answers (Packs reads what can start now). */
+  catalog(): Promise<readonly RuntimeView[]>;
+  /** The harness CLIs on this machine and whether each is installed, as `GET /v1/runtimes/machine` answers. */
+  tools(): Promise<readonly MachineTool[]>;
 }
+/** The two members of {@link RuntimesApi} that read the published catalogue rather than the configuration files. */
+export type RuntimeFactsApi = Pick<RuntimesApi, 'catalog' | 'tools'>;
 export const RuntimesPort = definePort<RuntimesApi>('runtimes');
 export { FerretsPort };
 
@@ -100,6 +107,8 @@ export const RUNTIMES_READ_MODELS = [
   'get',
   'default',
   'resolve',
+  'catalog',
+  'tools',
   ...RUNTIME_HOME_READ_MODELS,
   ...RUNTIME_LAYER_READ_MODELS,
 ] as const;

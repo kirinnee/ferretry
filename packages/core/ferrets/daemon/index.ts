@@ -121,6 +121,7 @@ import { callerIsAgent, launchOriginOf } from './lib/ferrets/launch-origin.ts';
 import type { ResumeActor } from './lib/session/resume/types.ts';
 import { SessionConfigSchema, SessionStateSchema } from './lib/protocol/session.ts';
 import { displayModel } from './lib/protocol/session-subtree.ts';
+import { livePaneLimits } from './lib/ferrets/pane-limits.ts';
 import { promptOf } from './lib/ferrets/prompt.ts';
 import { buildTurnWatch, turnWatchFailureFields } from './modules/turn-watch.ts';
 import { buildLiveEvents } from './modules/live-events.ts';
@@ -1227,6 +1228,14 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         ...ferretsPort(service, needer.id),
         lastAutoResume: async () => await autoResume.summary.read(),
         displayModel: displayModelOf,
+        // What live panes prove about their logins, read from the session documents each time and kept nowhere.
+        paneLimits: async () =>
+          await livePaneLimits({
+            sessions: () => sessionStore.listSessions(),
+            readState: async id => await sessionStore.readState(id as unknown as SessionId),
+            record: id => registry.get(id as FerretId),
+            nowMs: () => kernel.clock.nowMs(),
+          }),
       })),
       workFolders,
       agentControl: agentControlReader(ferret => service.agentControl(ferret)),

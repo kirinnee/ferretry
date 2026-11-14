@@ -16,6 +16,7 @@ import {
   LoginPaused,
   LoginResumed,
   type LoginPause,
+  type PaneLimitView,
   type Pause,
   pausePhrase,
   QUOTAS_STATE,
@@ -24,6 +25,7 @@ import {
   type UsageAccountView,
 } from '../contract/index.ts';
 import { FerretBudgetSessions, PausesStore, ToldStore } from './adapters/budget/ports.ts';
+import { aggregatePaneLimits } from './lib/usage/pane-limit.ts';
 import { HttpAnalyticsPricingFeed } from './adapters/analytics/pricing-feed-source.ts';
 import { openAnalyticsIndexStore } from './adapters/analytics/sqlite-analytics-store.ts';
 import { StatePricingConfiguration } from './adapters/pricing/pricing-state.ts';
@@ -236,12 +238,46 @@ export default implementDaemon(manifest, {
       clock: { nowMs },
     });
 
+    // ── the limits live panes prove: read from Ferrets' session documents each time, kept nowhere ────────────────────────────
+    // A Ferrets that cannot say (the member is optional, or the read fails) proves no limit: the pane evidence only ever
+    // ADDS a limit the provider's own reading did not show, so its absence is never a reason to fail a feed.
+    const paneLimits = async (): Promise<readonly PaneLimitView[]> => {
+      const rows = (await needs.ferrets.paneLimits?.().catch(() => undefined)) ?? [];
+      return aggregatePaneLimits(rows, nowMs()).map(
+        ({ login, runtime, notice, spend, retryAt }): PaneLimitView => ({
+          ...(login === undefined ? {} : { login }),
+          ...(runtime === undefined ? {} : { runtime }),
+          notice,
+          spend,
+          ...(retryAt === undefined ? {} : { retryAt }),
+        }),
+      );
+    };
+
     // ── the feed: one reading per daemon, shared by every reader ───────────────────────────────────────────────────────────
     const inner = new CachedUsageFeed(
       [
         new CredentialUsageSource({
           enabled: async () => true,
           credentials: async () => (await needs.logins.list()).logins,
+          // The feed row of a login a pane proves spent says so (`atLimit`, `spend_limit`, `retryAt`).
+          limits: async () =>
+            new Map(
+              (await paneLimits()).flatMap(limit =>
+                limit.login === undefined
+                  ? []
+                  : [
+                      [
+                        limit.login,
+                        {
+                          notice: limit.notice,
+                          spend: limit.spend,
+                          ...(limit.retryAt === undefined ? {} : { retryAt: limit.retryAt }),
+                        },
+                      ] as const,
+                    ],
+              ),
+            ),
         }),
       ],
       { now: nowMs },
@@ -441,6 +477,7 @@ export default implementDaemon(manifest, {
         usage: {
           headroomPercent: async login => headroomOf((await feedView(feed)).accounts.find(row => row.agent === login)),
           feed: async read => await feedView(read.watched ? feed : scraped),
+          paneLimits,
           pauses: () => Object.keys(budget.holds()).flatMap(login => pauseOf(login) ?? []),
           pauseOf: login => pauseOf(login),
           budgets: async () => budgetsView(),

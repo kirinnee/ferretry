@@ -13,12 +13,7 @@ import { fakeRuntimes } from '@ferretry/plugin-runtimes/contract/testing';
 import { RuntimeIdSchema, type RuntimeSummary, type RuntimesApi } from '@ferretry/plugin-runtimes/contract';
 import { instantFromEpochMs } from '@ferretry/std';
 import should from 'should';
-import {
-  PACK_CLEAN_UP_PACK,
-  type PackCredentialFacts,
-  type RuntimeFactsApi,
-  type UsageQuotaApi,
-} from '../../../contract/index.ts';
+import { PACK_CLEAN_UP_PACK } from '../../../contract/index.ts';
 import { PackFerrets } from '../../../daemon/adapters/ferrets.ts';
 import { FleetFacts } from '../../../daemon/adapters/fleet-facts.ts';
 import { RuntimeLaunchProbe } from '../../../daemon/adapters/launch-probe.ts';
@@ -293,16 +288,21 @@ describe('the start check and the fleet facts, from the Runtimes provider', () =
 
   const view = (id: string, agent = true) =>
     ({ id, name: id, wrapper: `${id}-wrapper`, harness: 'claude-code', agent }) as never;
-  const factsApi = (rows: readonly unknown[]): RuntimeFactsApi => ({
+  /** The catalog and tools a Runtimes provider answers, over a provider whose list and resolution are as given. */
+  const withCatalog = (api: RuntimesApi, rows: readonly unknown[]): RuntimesApi => ({
+    ...api,
     catalog: async () => rows as never,
     tools: async () => [{ name: 'claude', installed: true }] as never,
   });
-  const usage: UsageQuotaApi = {
-    logins: async () =>
-      [
-        { id: 'main', status: { word: 'ready' }, usage: { fiveHour: {}, weekly: {} } },
-      ] as readonly PackCredentialFacts[],
-    paneLimits: async () => new Map([['main', { notice: 'limit', spend: false }]]),
+  const logins = {
+    list: async () =>
+      ({
+        logins: [{ id: 'main', status: { word: 'ready' }, usage: { fiveHour: {}, weekly: {} } }],
+      }) as never,
+  };
+  const usage = {
+    paneLimits: async () =>
+      [{ login: 'main', notice: 'limit reached', spend: false, retryAt: 4_000_000_000_000 }] as never,
   };
 
   it('should gather the catalog, tools, logins and pane limits, naming the runtimes a start would refuse', async () => {
@@ -319,9 +319,15 @@ describe('the start check and the fleet facts, from the Runtimes provider', () =
               : { ok: false, refusal: 'not_signed_in', sentence: 'Sign in first.' },
     };
     const facts = await new FleetFacts(
-      () => broken,
       () =>
-        factsApi([view('launchable'), view('unbuildable'), view('paused'), view('Bad Name!'), view('chore', false)]),
+        withCatalog(broken, [
+          view('launchable'),
+          view('unbuildable'),
+          view('paused'),
+          view('Bad Name!'),
+          view('chore', false),
+        ]),
+      () => logins,
       () => usage,
       () => '2026-10-18T08:00:00Z',
     ).facts();
@@ -329,7 +335,9 @@ describe('the start check and the fleet facts, from the Runtimes provider', () =
     should(facts.runtimes.length).equal(5);
     should(facts.tools).deepEqual([{ name: 'claude', installed: true }]);
     should(facts.credentials.map(login => login.id)).deepEqual(['main']);
-    should([...(facts.paneLimits?.keys() ?? [])]).deepEqual(['main']);
+    should([...(facts.paneLimits?.entries() ?? [])]).deepEqual([
+      ['main', { notice: 'limit reached', spend: false, retryAt: 4_000_000_000_000 }],
+    ]);
     should(facts.now).equal('2026-10-18T08:00:00Z');
     should(facts.unlaunchable).deepEqual({
       'unbuildable-wrapper': 'unbuildable has no profile.',
@@ -337,10 +345,59 @@ describe('the start check and the fleet facts, from the Runtimes provider', () =
     });
   });
 
+  it('should read a login list or feed that cannot answer as nothing known, never as a failed list', async () => {
+    const failing = {
+      list: async (): Promise<never> => {
+        throw new Error('logins are down');
+      },
+      paneLimits: async (): Promise<never> => {
+        throw new Error('usage is down');
+      },
+    };
+    const facts = await new FleetFacts(
+      () => withCatalog(runtimes(), [view('claude-main')]),
+      () => failing,
+      () => failing,
+      () => '2026-10-18T08:00:00Z',
+    ).facts();
+
+    should(facts.runtimes.length).equal(1);
+    should(facts.credentials).deepEqual([]);
+    should(facts.paneLimits).deepEqual(new Map());
+  });
+
+  it('should key a limit by the login a runtime spends: the login a ferret names, else the one its runtime maps to', async () => {
+    const facts = await new FleetFacts(
+      () =>
+        withCatalog(runtimes(), [
+          { ...(view('claude-main') as object), credential: { id: 'claude-login' } },
+          { ...(view('codex-main') as object), credential: { id: 'codex-login' } },
+        ]),
+      () => undefined,
+      () => ({
+        paneLimits: async () =>
+          [
+            // No reset time, not a spend limit: held for as long as the ferret is limited.
+            { login: 'claude-login', notice: 'usage limit', spend: false },
+            // A ferret that recorded no login is known by its runtime.
+            { runtime: 'codex-main', notice: 'spend limit', spend: true },
+            // A runtime nothing here runs on proves nothing here.
+            { runtime: 'elsewhere', notice: 'x', spend: false },
+          ] as never,
+      }),
+      () => '2026-10-18T08:00:00Z',
+    ).facts();
+
+    should([...(facts.paneLimits?.entries() ?? [])]).deepEqual([
+      ['claude-login', { notice: 'usage limit', spend: false }],
+      ['codex-login', { notice: 'spend limit', spend: true }],
+    ]);
+  });
+
   it('should offer no runtime, and no quota, when the providers are off', async () => {
     const facts = await new FleetFacts(
       () => undefined,
-      () => factsApi([view('ignored')]),
+      () => undefined,
       () => undefined,
       () => '2026-10-18T08:00:00Z',
     ).facts();

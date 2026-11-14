@@ -65,6 +65,7 @@ import {
 } from '../kinds.ts';
 import type {
   AutoResumeReport,
+  FerretPaneLimit,
   FerretPrompt,
   FerretsApi,
   ManagedWorktreeSummary,
@@ -736,6 +737,7 @@ export const ferretSummary = (over: Readonly<Record<string, unknown>> & { readon
 /** An in-memory Ferrets port: lineage, `mayTouch`, start through nothing (records only). */
 export class FakeFerrets implements FerretsApi {
   readonly #ferrets = new Map<FerretId, FerretSummary>();
+  #paneLimits: readonly FerretPaneLimit[] = [];
   /** Every start request, stop and resume, in order, so a test can assert what reached the port. */
   readonly starts: StartRequest[] = [];
   readonly stops: { readonly ferret: FerretId; readonly how: 'polite' | 'now'; readonly reason?: string }[] = [];
@@ -756,6 +758,13 @@ export class FakeFerrets implements FerretsApi {
     };
     this.#ferrets.set(full.id, full);
     return full;
+  }
+  /** The limits `paneLimits()` answers: what live panes prove (none until set). */
+  setPaneLimits(limits: readonly FerretPaneLimit[]): void {
+    this.#paneLimits = [...limits];
+  }
+  async paneLimits(): Promise<readonly FerretPaneLimit[]> {
+    return this.#paneLimits;
   }
   setState(ferret: FerretId, state: FerretState): void {
     const current = this.#ferrets.get(ferret);

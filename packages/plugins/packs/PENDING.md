@@ -23,8 +23,6 @@ Each line names the seam it waits on and who owns it. Nothing here is stood in f
 - **Warden lineage** is read from labels: a ferret whose own label, or any ancestor's, is `fleet-warden` is never told
   about Pack mode. Today's start also stamped `provenance.wardenLineage`, which outlived a pruned warden; no 5.0 start
   writes that stamp yet (Ferrets'), so it is read only as a second guard.
-- **Runtimes facts**: `catalog()`, `tools()` and `modelCatalogs()` are additive Runtimes members (D2 #15) not on this
-  base. Until they are, Pack mode lists no usable model and says so.
 - **Routing prompt accept and undo** answer `503 config_write_unavailable` until the kernel's config write port
   (D2 #16) lands.
 - **A pack table's last line**: today's was the newer of the card's last note and the last message the member sent to
@@ -32,8 +30,11 @@ Each line names the seam it waits on and who owns it. Nothing here is stood in f
   Conversation read; until then the newest dated sitrep line is used, masked whole before it is cut.
 - **`POST /v1/recommend`** (R-0321, the account recommender) is still declared by Runtimes at that path; the placement
   lists it with Packs. V-0260/V-0261 (`fy fleet`, `fy fleet recommend`) have no verb here. Both are the lead's to settle.
-- **Usage**: Packs reads quota through its own stand-in port (`UsagePort`, D2 #15); it is dropped once Packs binds the
-  merged Usage contract.
+- **Pane limits** (the logins live panes prove spent) are Usage's own read, `UsageApi.paneLimits()`, which aggregates what
+  Ferrets reports from live session documents (`FerretsApi.paneLimits`, derived on every call, kept nowhere): each carries
+  presence, the harness sentence, spend and the optional reset time, so a non-spend limit with no reset time holds until its
+  ferret is released or stops. A ferret that records no login is known by its runtime and mapped to a login here. A Usage,
+  Ferrets or Logins that fails to answer reads as nothing known (quota `unknown`).
 
 ## CLI
 
