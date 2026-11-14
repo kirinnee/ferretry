@@ -181,9 +181,11 @@ value comes from the copy (`InputRaise.source`), so the card, the daemon-observe
   `refused` (`taken_over`) at the check; both type nothing, whether the owner or a rule would have allowed it. A takeover
   caught before the copy was opened (the raise, the proactive refusal, the check at the open) never opens it; one caught only
   at the last check inside the page's queue has already opened it into the daemon's memory, and still types nothing. The
-  same turn also asks whether **the copy is still live and still the capture the card was raised for**: one discarded, expired
-  or captured again while the attempt was journalled, the page held or the write queued ends `cancelled` (`copy_gone`),
-  nothing typed, and no value is returned to anyone to decide it (the daemon's own record of the capture answers). The app settles the card (refreshes it and takes Allow away) instead of offering another try. After a handback
+  same turn also asks whether **the copy is still live and still the capture the card was raised for**. That live-copy check at
+  the write is enforced by exactly three destinations, each inside its own serialized turn right before it commits: a page
+  (its queue), a terminal (just before its guarded write) and a named secret (the store's write turn, see below). A copy
+  discarded, expired or captured again while the attempt was journalled, the page held or the write queued ends `cancelled`
+  (`copy_gone`), nothing typed, and no value is returned to anyone to decide it (the daemon's own record of the capture answers). The app settles the card (refreshes it and takes Allow away) instead of offering another try. After a handback
   the ferret raises it again.
 - **Audit**: `input.delivered` with `source: sealed` and the copy's name, never the value. Each tool call is one `agent.tool`
   record with the copy's length, the transcript answer, the program's base name and which route (never the value).
@@ -202,6 +204,9 @@ without ever reading it. It is the same input request, with the store as the des
   and nothing is stored. The check and the write are one turn of the store's own, which every writer shares
   (the secrets routes, an import, an MCP sign-in refresh), so nothing lands between them and no write is lost.
   A full or unreadable store refuses before writing, so nothing is uncertain and a rule's use is given back.
+  The live-copy check is asked in that same turn, after those checks and immediately before the commit: a copy
+  discarded, expired or captured again after it was opened, even while the write waited behind another writer, ends
+  the request as `copy_gone` and changes nothing under NAME.
 - **It needs the secrets grant too.** Allowing a store paste, adding a `secret:` rule and approving a plan
   item into the store are `terminal` routes, but they change the store, so a governed device also needs
   `secrets.configure` (or its passkey confirmation), exactly as `POST /v1/secrets` does
