@@ -203,6 +203,7 @@ export default definePlugin({
         ],
       }),
       verb('device ls', {
+        default: true,
         summary: 'list the devices that may reach this machine',
         args: [],
         options: [{ flag: '--json', help: 'print the protocol document instead of the human report' }],

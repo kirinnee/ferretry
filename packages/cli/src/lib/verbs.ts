@@ -191,6 +191,8 @@ export interface VerbEntry {
   readonly options?: readonly VerbOptionDecl[];
   /** Data plugins only: the verb line this alias runs. */
   readonly alias?: string;
+  /** Declared the default of its group: the bare group runs it. */
+  readonly default?: true;
 }
 
 export interface VerbConflict {
@@ -247,6 +249,7 @@ export function buildVerbTable(registry: CommandRegistry): VerbTable {
         ...(decl.args === undefined ? {} : { args: decl.args }),
         ...(decl.options === undefined ? {} : { options: decl.options }),
         ...(decl.alias === undefined ? {} : { alias: decl.alias }),
+        ...(decl.default === true ? { default: true as const } : {}),
       });
     }
   return { entries: [...held.values()], conflicts };
@@ -272,6 +275,15 @@ export type Resolution =
 
 /** Whether a declared verb line names arguments of its own (`voice [text...]`, `show <id>`). */
 const takesArguments = (entry: VerbEntry): boolean => /[<[]/u.test(entry.line);
+
+/** The verb a group declares its default (`catalog ls` for `catalog`), when it declares one among its direct children. */
+const defaultBelow = (table: VerbTable, words: readonly string[]): VerbEntry | undefined =>
+  table.entries.find(
+    candidate =>
+      candidate.default === true &&
+      candidate.words.length === words.length + 1 &&
+      words.every((word, at) => candidate.words[at] === word),
+  );
 
 /** The verbs below these words, at any depth (`agenda open` and `agenda add` under `agenda`). */
 const subverbsBelow = (table: VerbTable, words: readonly string[]): readonly VerbEntry[] =>
@@ -355,9 +367,10 @@ export function resolveVerb(table: VerbTable, tokens: readonly string[]): Resolu
   for (let length = leading.length; length > 0; length -= 1) {
     const key = keyOf(leading.slice(0, length));
     const found = table.entries.find(candidate => keyOf(candidate.words) === key);
-    if (found === undefined) continue;
+    // Words that are no verb but front a group which declares a default sub-verb are walked like a verb that has sub-verbs.
+    if (found === undefined && defaultBelow(table, leading.slice(0, length)) === undefined) continue;
     let current: VerbEntry | undefined = found;
-    let words: readonly string[] = found.words;
+    let words: readonly string[] = found?.words ?? leading.slice(0, length);
     let rest = tokens.slice(length);
     for (;;) {
       if (current?.alias !== undefined) return { kind: 'verb', entry: current, rest };
@@ -366,6 +379,9 @@ export function resolveVerb(table: VerbTable, tokens: readonly string[]): Resolu
       const at = firstWord(rest, valuedOptions(current));
       if (at === undefined) {
         if (current !== undefined) return { kind: 'verb', entry: current, rest };
+        // A bare group (`fy catalog`) runs the sub-verb it declares its default, with whatever flags were typed.
+        const chosen = defaultBelow(table, words);
+        if (chosen !== undefined) return { kind: 'verb', entry: chosen, rest };
         return { kind: 'subverb', parent: { words }, subverbs };
       }
       const word = rest[at] as string;

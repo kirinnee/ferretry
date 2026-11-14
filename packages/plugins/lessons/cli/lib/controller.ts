@@ -85,6 +85,13 @@ export class LessonsController {
    * outside a ferret the daemon's own refusal is what the human sees.
    */
   async suggest(rule: string, scope: string, options: LessonsCommandOptions): Promise<void> {
+    // A scope that is neither is said in words, not in the schema's: the schema still owns what a rule may be.
+    if (scope !== 'global' && scope !== 'repo')
+      throw new Error(
+        scope === ''
+          ? '--scope needs a value: global (every ferret should follow it) or repo (a fact about this project).'
+          : `--scope is "global" or "repo", not "${scope}".`,
+      );
     const parsed = AgentLessonToolCallSchema.safeParse({ tool: 'lessons.suggest', rule, scope });
     if (!parsed.success) {
       const [issue] = parsed.error.issues as [z.core.$ZodIssue];

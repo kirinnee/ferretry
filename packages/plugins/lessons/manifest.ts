@@ -304,6 +304,7 @@ export default definePlugin({
           {
             flag: '--scope <scope>',
             help: 'global (every ferret should follow it) or repo (a fact about this project)',
+            required: true,
           },
           { flag: '--json', help: "print the protocol payload instead of the daemon's sentence" },
         ],

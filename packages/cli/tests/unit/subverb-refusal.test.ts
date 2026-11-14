@@ -39,6 +39,15 @@ const isVerb = (words: readonly string[]): boolean =>
 /** A front word the shell can attribute to a verb: `board lanes` is not a verb, but `board` is, and answers for it. */
 const underAVerb = (words: readonly string[]): boolean => words.some((_, at) => isVerb(words.slice(0, at + 1)));
 
+/**
+ * Whether the words sit in (or are) a group that declares a default sub-verb (`account`, `account default`): the shell walks
+ * such a group like a verb that has sub-verbs, so an unknown sub-verb is a sub-verb refusal, not an unknown verb.
+ */
+const hasDefault = (words: readonly string[]): boolean =>
+  words.some((_, at) =>
+    subverbsBelow(words.slice(0, at + 1)).some(entry => entry.default === true && entry.words.length === at + 2),
+  );
+
 const takesWords = (words: readonly string[]): boolean => {
   const own = table.entries.find(entry => entry.words.join(' ') === words.join(' '));
   return own !== undefined && /[<[]/u.test(own.line);
@@ -75,7 +84,7 @@ describe('every verb with sub-verbs, from the real registry', () => {
         it(`should refuse an unknown sub-verb ${label}, naming the real ones`, () => {
           const resolved = resolveVerb(table, [...words, ...after]);
           // A front word that is no verb itself (`terminal`) is an unknown verb; either way it is refused.
-          should(resolved.kind).equal(underAVerb(words) ? 'subverb' : 'unknown');
+          should(resolved.kind).equal(underAVerb(words) || hasDefault(words) ? 'subverb' : 'unknown');
           if (resolved.kind !== 'subverb') return;
           should(resolved.parent.words).deepEqual(words);
           should(resolved.word).equal('frobnicate');
@@ -124,7 +133,9 @@ describe('every verb with sub-verbs, from the real registry', () => {
         should(`${words.join(' ')} ${after.join(' ')}: ${String(code)}`).equal(
           `${words.join(' ')} ${after.join(' ')}: 2`,
         );
-        should(io.stderr()).containEql(underAVerb(words) ? '"frobnicate" is not a sub-verb of' : 'unknown verb');
+        should(io.stderr()).containEql(
+          underAVerb(words) || hasDefault(words) ? '"frobnicate" is not a sub-verb of' : 'unknown verb',
+        );
         should(io.stdout()).equal('');
         should(transport.sent).deepEqual([]);
       }

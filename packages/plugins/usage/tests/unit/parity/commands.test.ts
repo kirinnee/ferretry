@@ -40,6 +40,8 @@ function run(answers: Record<string, unknown | ((call: Call) => unknown)>) {
 }
 
 const FILE = (text: string) => ({ path: 'usage.yaml', exists: true, text, etag: 'e1' });
+/** `GET /v1/logins` as the daemon answers it: the logins this machine has (`work` and `claude-a`). */
+const LOGINS = { 'GET /v1/logins': { format: 1, machine: 'laptop', logins: [{ id: 'work' }, { id: 'claude-a' }] } };
 const EMPTY_FILE = { path: 'usage.yaml', exists: false, text: '', etag: 'e0' };
 
 describe('fy usage (was fy analytics)', () => {
@@ -64,6 +66,7 @@ describe('fy usage (was fy analytics)', () => {
 describe('fy login budget (was fy credential budget)', () => {
   test('V-0211 with no level it shows the login’s budget and its standing', async () => {
     const t = run({
+      ...LOGINS,
       'GET /v1/config/file': FILE('budgets:\n  work:\n    daily:\n      hard: 60\n'),
       'GET /v1/usage/budgets': { budgets: [] },
     });
@@ -72,10 +75,24 @@ describe('fy login budget (was fy credential budget)', () => {
 
     expect(t.out[0]).toContain('work:');
     expect(t.out[0]).toContain('60');
+    // v4's line ends with where to see what it spent.
+    expect(t.out[0]).toEndWith('What it spent: `fy login check work`.');
+  });
+
+  test('V-0211 / F6 a login this machine does not have is refused as v4 refused it, and nothing is read or written', async () => {
+    const t = run({ ...LOGINS, 'GET /v1/config/file': EMPTY_FILE, 'PUT /v1/config/file': { outcome: 'applied' } });
+
+    expect(await t.verb('login budget', ['nope'])).toBe(1);
+    expect(await t.verb('login budget', ['nope'], { 'daily-hard': '60' })).toBe(1);
+
+    expect(t.err[0]).toBe('No login "nope" on this machine.');
+    expect(t.out).toEqual([]);
+    expect(t.calls.map(call => call.route)).toEqual(['GET /v1/logins', 'GET /v1/logins']);
   });
 
   test('V-0211 a level is written into usage.yaml through the checked config write, with the etag it read', async () => {
     const t = run({
+      ...LOGINS,
       'GET /v1/config/file': EMPTY_FILE,
       'PUT /v1/config/file': { outcome: 'applied' },
     });
@@ -89,12 +106,13 @@ describe('fy login budget (was fy credential budget)', () => {
   });
 
   test('V-0211 --dry-run says what would change and writes nothing; a raised limit is held for the owner', async () => {
-    const dry = run({ 'GET /v1/config/file': EMPTY_FILE });
+    const dry = run({ ...LOGINS, 'GET /v1/config/file': EMPTY_FILE });
     expect(await dry.verb('login budget', ['work'], { 'daily-hard': '60', 'dry-run': true })).toBe(0);
-    expect(dry.calls.map(call => call.route)).toEqual(['GET /v1/config/file']);
+    expect(dry.calls.map(call => call.route)).toEqual(['GET /v1/logins', 'GET /v1/config/file']);
     expect(dry.out[0]).toContain('Would set');
 
     const held = run({
+      ...LOGINS,
       'GET /v1/config/file': FILE('budgets:\n  work:\n    daily:\n      hard: 60\n'),
       'PUT /v1/config/file': { outcome: 'pending', pending: { changes: ['a limit goes up'] } },
     });

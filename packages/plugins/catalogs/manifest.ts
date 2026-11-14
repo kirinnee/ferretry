@@ -573,6 +573,7 @@ export default definePlugin({
         ],
       }),
       verb('catalog ls', {
+        default: true,
         summary: 'every catalog on this machine, with its items',
         args: [],
         options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
@@ -702,6 +703,7 @@ export default definePlugin({
         options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
       }),
       verb('member ls', {
+        default: true,
         summary: 'everyone who has joined, with their catalogs and browsers',
         args: [],
         options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],

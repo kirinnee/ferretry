@@ -782,6 +782,7 @@ export default definePlugin({
         ],
       }),
       verb('account ls', {
+        default: true,
         summary: 'list the accounts, with their 2FA keys and sign-ins',
         args: [],
         options: [{ flag: '--json', help: 'print the protocol document instead of the human listing' }],
@@ -871,6 +872,7 @@ export default definePlugin({
         ],
       }),
       verb('account site ls', {
+        default: true,
         summary: 'list the sign-ins (one account, or all), each with its si_ id',
         args: [{ name: 'account', help: 'the account whose sign-in sites to list', optional: true }],
         options: [{ flag: '--json', help: 'print the sign-ins as JSON instead' }],
@@ -918,6 +920,7 @@ export default definePlugin({
         options: [{ flag: '-y, --yes', help: 'do not ask first' }],
       }),
       verb('account site recipe show', {
+        default: true,
         summary: 'the recipe, what was seen when it was typed, and each waiting proposal as a change',
         args: [{ name: 'sign-in', help: 'the sign-in whose recipe to show' }],
         options: [{ flag: '--json', help: 'print the sign-in as JSON instead' }],
@@ -946,6 +949,7 @@ export default definePlugin({
         ],
       }),
       verb('account factor ls', {
+        default: true,
         summary: 'list the 2FA keys (one account, or all), each with its tf_ id',
         args: [{ name: 'account', help: 'the account whose 2FA keys to list', optional: true }],
         options: [{ flag: '--json', help: 'print the keys as JSON instead' }],
