@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { AnalyticsResponse } from '../../../../contract/index.ts';
 import type { ReactElement } from 'react';
 import { act, type ReactTestRenderer } from 'react-test-renderer';
@@ -10,6 +10,7 @@ import {
   sessionAnalyticsLinkQuery,
 } from '../../../../app/features/analytics/session-analytics-surface.tsx';
 import { fakeClient } from '../support/client.ts';
+import { ownDomAtAppOrigin } from '../support/dom.ts';
 import { daemonConnection } from '../support/shell.ts';
 import { daemonSessionScope } from '../support/shell.ts';
 import { render, RouterProvider, run, runAsync } from '@ferretry/app/testing';
@@ -20,6 +21,8 @@ import { rawResponse, rawRow } from '../support/analytics-rows.ts';
 const noClient = fakeClient({});
 
 const renderers: ReactTestRenderer[] = [];
+beforeEach(ownDomAtAppOrigin);
+
 afterEach(() => {
   act(() => {
     for (const renderer of renderers) renderer.unmount();

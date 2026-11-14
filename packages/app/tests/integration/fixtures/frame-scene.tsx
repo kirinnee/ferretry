@@ -26,6 +26,7 @@ import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { App } from '../../../src/shell/app.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { FerretWorkspace } from '../../../src/shell/ferret-workspace.tsx';
+import { PanelSlot } from '../../../src/shell/views.tsx';
 import { useFerretWorkspace } from '../../../src/shell/ferret-workspace-actions.tsx';
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
@@ -108,7 +109,7 @@ function FerretListScreen(): ReactNode {
 function FerretPageScreen(): ReactNode {
   return (
     <main className="flex h-full min-h-0 min-w-0 flex-col overflow-clip" data-session="zoe">
-      <header style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>Fixture running · zoe</header>
+      <PanelSlot daemon="ws" slot="ferret.toolbar" subject="zoe" />
       <FerretWorkspace
         chat={
           <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-chat="" style={{ padding: 16, overflowY: 'auto' }}>
@@ -143,6 +144,44 @@ const OWNER: Readonly<Record<string, string>> = {
   insights: 'usage',
 };
 const SIDE = DEFAULT_LAYOUT.panels['ferret.side'] ?? [];
+
+/**
+ * The ferret's toolbar as the real plugins draw it (the ids and order are the manifests'): the name, the status, the
+ * Hypermedia and Compact-memory chips, Info, Actions, and the Agenda-mode and Lessons switches with Lessons' full-width scan
+ * bar. Only the shapes matter here (a heading, small buttons, a switch row, one bar); the words are the real ones.
+ */
+const chip = (label: string, value?: string) => () => (
+  <button className="kt-btn" type="button">
+    {label}
+    {value === undefined ? null : <span style={{ marginLeft: 6, opacity: 0.7 }}>{value}</span>}
+  </button>
+);
+const toggle = (label: string) => () => (
+  <label style={{ display: 'flex', gap: 8, alignItems: 'center', minHeight: 32 }}>
+    <input defaultChecked type="checkbox" />
+    {label} <span style={{ opacity: 0.7 }}>On</span>
+  </label>
+);
+const TOOLBAR: ReadonlyArray<readonly [string, () => ReactNode]> = [
+  ['name', () => <strong>Fixture running</strong>],
+  ['status', () => <span>Your turn</span>],
+  ['hypermedia', chip('Hypermedia', 'Off')],
+  ['compact-at', chip('Compact memory at…', 'Default')],
+  ['info', chip('Info')],
+  ['actions', chip('Actions')],
+  ['ferret-agenda-mode', toggle('Agenda mode')],
+  [
+    'ferret-lessons',
+    () => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {toggle('Passive lessons')()}
+        <button className="kt-btn w-full" type="button">
+          Scan this ferret for lessons…
+        </button>
+      </div>
+    ),
+  ],
+];
 const panelStand = (id: string) =>
   function SidePanel({ intent, subject }: PanelProps): ReactNode {
     // Ferrets' Instructions list opens a file in Files and brings Files on screen through the ferret's workspace.
@@ -193,7 +232,12 @@ const usageManifest = manifestOf('usage', {
   },
 });
 const panelsManifest = manifestOf('stubs', {
-  ui: { panels: SIDE.map((id, order) => ({ id, slot: 'ferret.side', order })) },
+  ui: {
+    panels: [
+      ...SIDE.map((id, order) => ({ id, slot: 'ferret.side', order })),
+      ...TOOLBAR.map(([id], order) => ({ id, slot: 'ferret.toolbar', order })),
+    ],
+  },
 });
 
 // A background view drawing a status line in flow, hosted by a stub plugin (a background view the frame mounts once per paired machine), over a router that
@@ -248,7 +292,12 @@ const surfaces: readonly SurfaceEntry[] = [
     panelsManifest,
     provideToShell(
       implementApp(panelsManifest, {
-        build: () => ({ panels: Object.fromEntries(SIDE.map(id => [id, panelStand(id)])) }),
+        build: () => ({
+          panels: {
+            ...Object.fromEntries(SIDE.map(id => [id, panelStand(id)])),
+            ...Object.fromEntries(TOOLBAR.map(([id, stand]) => [id, stand])),
+          },
+        }),
       } as never),
       {},
     ),
