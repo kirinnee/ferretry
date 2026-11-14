@@ -1,0 +1,2789 @@
+{
+  "models": {
+    "anthropic": {
+      "label": "Anthropic",
+      "docs": "https://platform.claude.com/docs/en/about-claude/models/overview",
+      "verified": "2026-10-18",
+      "unverified": [
+        "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted."
+      ],
+      "customIds": false,
+      "claude": {
+        "docs": "https://code.claude.com/docs/en/model-config",
+        "tiers": {
+          "opus": "claude-opus-5-5",
+          "sonnet": "claude-sonnet-5-5",
+          "haiku": "claude-haiku-5-5"
+        },
+        "models": [
+          {
+            "id": "claude-opus-5-5",
+            "label": "Opus 5.5",
+            "tier": "best",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": true,
+            "price": {
+              "provider": "anthropic",
+              "input": 4,
+              "output": 20,
+              "cacheRead": 0.2,
+              "cacheWrite5m": 5,
+              "cacheWrite1h": 8,
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "claude-sonnet-5-5",
+            "label": "Sonnet 5.5",
+            "tier": "balanced",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "high",
+            "default": false,
+            "price": {
+              "provider": "anthropic",
+              "input": 2,
+              "output": 10,
+              "cacheRead": 0.1,
+              "cacheWrite5m": 2.5,
+              "cacheWrite1h": 4,
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "claude-haiku-5-5",
+            "label": "Haiku 5.5",
+            "tier": "fast",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": false,
+            "price": {
+              "provider": "anthropic",
+              "input": 0.1,
+              "output": 0.5,
+              "cacheRead": 0.01,
+              "cacheWrite5m": 0.125,
+              "cacheWrite1h": 0.2,
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "id": "anthropic",
+      "origin": "built-in"
+    },
+    "openai": {
+      "label": "OpenAI",
+      "docs": "https://learn.chatgpt.com/docs/models",
+      "verified": "2026-10-18",
+      "unverified": [
+        "GPT-6 models cost more for a request over 272K input tokens; analytics prices whole sessions, so the price is the short-context one and a long-context session is under-counted."
+      ],
+      "customIds": false,
+      "codex": {
+        "models": [
+          {
+            "id": "gpt-6-astra",
+            "label": "GPT-6 Astra",
+            "tier": "best",
+            "context": 1050000,
+            "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+            "defaultEffort": "medium",
+            "default": false,
+            "price": {
+              "provider": "openai",
+              "input": 10,
+              "output": 50,
+              "cacheRead": 1,
+              "cacheWrite": 12.5,
+              "source": "https://developers.openai.com/api/docs/pricing",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "gpt-6.1-sol",
+            "label": "GPT-6.1 Sol",
+            "tier": "balanced",
+            "context": 1050000,
+            "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+            "defaultEffort": "medium",
+            "default": true,
+            "price": {
+              "provider": "openai",
+              "input": 2,
+              "output": 10,
+              "cacheRead": 0.1,
+              "cacheWrite": 2.5,
+              "source": "https://developers.openai.com/api/docs/pricing",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "gpt-6-luna",
+            "label": "GPT-6 Luna",
+            "tier": "fast",
+            "context": 1050000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": false,
+            "price": {
+              "provider": "openai",
+              "input": 0.1,
+              "output": 0.5,
+              "cacheRead": 0.01,
+              "cacheWrite": 0.125,
+              "source": "https://developers.openai.com/api/docs/pricing",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "id": "openai",
+      "origin": "built-in"
+    },
+    "amazon-bedrock": {
+      "label": "Amazon Bedrock",
+      "docs": "https://code.claude.com/docs/en/amazon-bedrock",
+      "verified": "2026-10-18",
+      "unverified": [
+        "The ids are the us. inference profiles; a login whose AWS_REGION is outside the US needs the matching eu., au., jp. or global. prefix.",
+        "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted.",
+        "The prices are Bedrock's US regional ones (10% above its global endpoint), matching the us. ids."
+      ],
+      "customIds": true,
+      "claude": {
+        "tiers": {
+          "opus": "us.anthropic.claude-opus-5-5",
+          "sonnet": "us.anthropic.claude-sonnet-5-5",
+          "haiku": "us.anthropic.claude-haiku-5-5"
+        },
+        "models": [
+          {
+            "id": "us.anthropic.claude-opus-5-5",
+            "label": "Opus 5.5",
+            "tier": "best",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": true,
+            "price": {
+              "provider": "anthropic",
+              "input": 4.4,
+              "output": 22,
+              "cacheRead": 0.22,
+              "cacheWrite5m": 5.5,
+              "cacheWrite1h": 8.8,
+              "source": "https://aws.amazon.com/bedrock/pricing/",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "us.anthropic.claude-sonnet-5-5",
+            "label": "Sonnet 5.5",
+            "tier": "balanced",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "high",
+            "default": false,
+            "price": {
+              "provider": "anthropic",
+              "input": 2.2,
+              "output": 11,
+              "cacheRead": 0.11,
+              "cacheWrite5m": 2.75,
+              "cacheWrite1h": 4.4,
+              "source": "https://aws.amazon.com/bedrock/pricing/",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "us.anthropic.claude-haiku-5-5",
+            "label": "Haiku 5.5",
+            "tier": "fast",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": false,
+            "price": {
+              "provider": "anthropic",
+              "input": 0.11,
+              "output": 0.55,
+              "cacheRead": 0.011,
+              "cacheWrite5m": 0.1375,
+              "cacheWrite1h": 0.22,
+              "source": "https://aws.amazon.com/bedrock/pricing/",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "id": "amazon-bedrock",
+      "origin": "built-in"
+    },
+    "bedrock-mantle": {
+      "label": "Bedrock Mantle",
+      "docs": "https://code.claude.com/docs/en/amazon-bedrock",
+      "verified": "2026-10-18",
+      "unverified": [
+        "AWS lists the 5.5 models on Mantle in very few regions (Opus 5.5 in us-east-1); a region without one answers that the model is not found.",
+        "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted.",
+        "AWS does not say whether Mantle bills at Bedrock's global or regional (10% higher) rate; the global one is used."
+      ],
+      "customIds": true,
+      "claude": {
+        "tiers": {
+          "opus": "anthropic.claude-opus-5-5",
+          "sonnet": "anthropic.claude-sonnet-5-5",
+          "haiku": "anthropic.claude-haiku-5-5"
+        },
+        "models": [
+          {
+            "id": "anthropic.claude-opus-5-5",
+            "label": "Opus 5.5",
+            "tier": "best",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": true,
+            "price": {
+              "provider": "anthropic",
+              "input": 4,
+              "output": 20,
+              "cacheRead": 0.2,
+              "cacheWrite5m": 5,
+              "cacheWrite1h": 8,
+              "source": "https://aws.amazon.com/bedrock/pricing/",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "anthropic.claude-sonnet-5-5",
+            "label": "Sonnet 5.5",
+            "tier": "balanced",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "high",
+            "default": false,
+            "price": {
+              "provider": "anthropic",
+              "input": 2,
+              "output": 10,
+              "cacheRead": 0.1,
+              "cacheWrite5m": 2.5,
+              "cacheWrite1h": 4,
+              "source": "https://aws.amazon.com/bedrock/pricing/",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "anthropic.claude-haiku-5-5",
+            "label": "Haiku 5.5",
+            "tier": "fast",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": false,
+            "price": {
+              "provider": "anthropic",
+              "input": 0.1,
+              "output": 0.5,
+              "cacheRead": 0.01,
+              "cacheWrite5m": 0.125,
+              "cacheWrite1h": 0.2,
+              "source": "https://aws.amazon.com/bedrock/pricing/",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "id": "bedrock-mantle",
+      "origin": "built-in"
+    },
+    "google-vertex": {
+      "label": "Google Vertex AI",
+      "docs": "https://code.claude.com/docs/en/google-vertex-ai",
+      "verified": "2026-10-18",
+      "unverified": [
+        "Haiku 5.5 is served in the US and EU multi-regions and global; a single region may not have it.",
+        "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted.",
+        "The prices are Vertex AI's global-endpoint ones; a regional or multi-region endpoint costs 10% more."
+      ],
+      "customIds": true,
+      "claude": {
+        "tiers": {
+          "opus": "claude-opus-5-5",
+          "sonnet": "claude-sonnet-5-5",
+          "haiku": "claude-haiku-5-5"
+        },
+        "models": [
+          {
+            "id": "claude-opus-5-5",
+            "label": "Opus 5.5",
+            "tier": "best",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": true,
+            "price": {
+              "provider": "anthropic",
+              "input": 4,
+              "output": 20,
+              "cacheRead": 0.2,
+              "cacheWrite5m": 5,
+              "cacheWrite1h": 8,
+              "source": "https://cloud.google.com/vertex-ai/generative-ai/pricing",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "claude-sonnet-5-5",
+            "label": "Sonnet 5.5",
+            "tier": "balanced",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "high",
+            "default": false,
+            "price": {
+              "provider": "anthropic",
+              "input": 2,
+              "output": 10,
+              "cacheRead": 0.1,
+              "cacheWrite5m": 2.5,
+              "cacheWrite1h": 4,
+              "source": "https://cloud.google.com/vertex-ai/generative-ai/pricing",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "claude-haiku-5-5",
+            "label": "Haiku 5.5",
+            "tier": "fast",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": false,
+            "price": {
+              "provider": "anthropic",
+              "input": 0.1,
+              "output": 0.5,
+              "cacheRead": 0.01,
+              "cacheWrite5m": 0.125,
+              "cacheWrite1h": 0.2,
+              "source": "https://cloud.google.com/vertex-ai/generative-ai/pricing",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "id": "google-vertex",
+      "origin": "built-in"
+    },
+    "microsoft-foundry": {
+      "label": "Microsoft Foundry",
+      "docs": "https://code.claude.com/docs/en/microsoft-foundry",
+      "verified": "2026-10-18",
+      "unverified": [
+        "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted.",
+        "Foundry bills Anthropic's standard rates, which are the prices here; a transcript names your deployment rather than these aliases, so a session is priced only when the two match."
+      ],
+      "customIds": true,
+      "claude": {
+        "models": [
+          {
+            "id": "opus",
+            "label": "Opus 5.5 (your Opus deployment)",
+            "tier": "best",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": true,
+            "price": {
+              "provider": "anthropic",
+              "input": 4,
+              "output": 20,
+              "cacheRead": 0.2,
+              "cacheWrite5m": 5,
+              "cacheWrite1h": 8,
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "sonnet",
+            "label": "Sonnet 5.5 (your Sonnet deployment)",
+            "tier": "balanced",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "high",
+            "default": false,
+            "price": {
+              "provider": "anthropic",
+              "input": 2,
+              "output": 10,
+              "cacheRead": 0.1,
+              "cacheWrite5m": 2.5,
+              "cacheWrite1h": 4,
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "haiku",
+            "label": "Haiku 5.5 (your Haiku deployment)",
+            "tier": "fast",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": false,
+            "price": {
+              "provider": "anthropic",
+              "input": 0.1,
+              "output": 0.5,
+              "cacheRead": 0.01,
+              "cacheWrite5m": 0.125,
+              "cacheWrite1h": 0.2,
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "id": "microsoft-foundry",
+      "origin": "built-in"
+    },
+    "zai": {
+      "label": "GLM / Z.ai",
+      "docs": "https://docs.z.ai/devpack/tool/claude",
+      "verified": "2026-10-18",
+      "unverified": [
+        "Z.ai's Claude Code page shows two mappings; this one (GLM-5.3 for opus and sonnet, GLM-5.3-Flash for haiku) is its manual setup.",
+        "Z.ai lists no cache-write price (cached storage is free for now); a written token is charged as input."
+      ],
+      "customIds": false,
+      "claude": {
+        "tiers": {
+          "opus": "glm-5.3",
+          "sonnet": "glm-5.3",
+          "haiku": "glm-5.3-flash"
+        },
+        "models": [
+          {
+            "id": "glm-5.3",
+            "label": "GLM-5.3",
+            "tier": "best",
+            "context": 1000000,
+            "efforts": ["low", "high", "max"],
+            "defaultEffort": "max",
+            "default": true,
+            "price": {
+              "provider": "zai",
+              "input": 1.4,
+              "output": 4.4,
+              "cacheRead": 0.26,
+              "cacheWrite": 1.4,
+              "source": "https://docs.z.ai/guides/overview/pricing",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "glm-5.3-flash",
+            "label": "GLM-5.3-Flash",
+            "tier": "fast",
+            "context": 1000000,
+            "reasoning": true,
+            "efforts": [],
+            "default": false,
+            "price": {
+              "provider": "zai",
+              "input": 0.15,
+              "output": 0.5,
+              "cacheRead": 0.03,
+              "cacheWrite": 0.15,
+              "source": "https://docs.z.ai/guides/overview/pricing",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "id": "zai",
+      "origin": "built-in"
+    },
+    "kimi": {
+      "label": "Kimi / Moonshot",
+      "docs": "https://platform.kimi.ai/docs/guide/claude-code-kimi",
+      "verified": "2026-10-18",
+      "unverified": [
+        "Kimi's guide says kimi-k2.7-code always thinks, while its model table says it does not; Ferretry offers no effort choice for it.",
+        "Kimi charges one cache-write price per request in analytics: K3's 5-minute one ($3); its 1-hour write costs $6.",
+        "Kimi lists no cache-write price for the K2.7 Code models; a written token is charged as input."
+      ],
+      "customIds": false,
+      "claude": {
+        "tiers": {
+          "opus": "kimi-k3[1m]",
+          "sonnet": "kimi-k3[1m]",
+          "haiku": "kimi-k2.7-code",
+          "subagent": "kimi-k3[1m]"
+        },
+        "models": [
+          {
+            "id": "kimi-k3",
+            "label": "Kimi K3",
+            "tier": "best",
+            "suffix": "[1m]",
+            "context": 1000000,
+            "reasoning": true,
+            "efforts": [],
+            "default": true,
+            "price": {
+              "provider": "moonshot",
+              "input": 3,
+              "output": 15,
+              "cacheRead": 0.3,
+              "cacheWrite": 3,
+              "source": "https://platform.kimi.ai/docs/pricing/chat",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "kimi-k2.7-code",
+            "label": "Kimi K2.7 Code",
+            "tier": "fast",
+            "context": 256000,
+            "reasoning": true,
+            "efforts": [],
+            "default": false,
+            "price": {
+              "provider": "moonshot",
+              "input": 0.95,
+              "output": 4,
+              "cacheRead": 0.19,
+              "cacheWrite": 0.95,
+              "source": "https://platform.kimi.ai/docs/pricing/chat",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "kimi-k2.7-code-highspeed",
+            "label": "Kimi K2.7 Code (high speed)",
+            "tier": "fast",
+            "context": 256000,
+            "reasoning": true,
+            "efforts": [],
+            "default": false,
+            "price": {
+              "provider": "moonshot",
+              "input": 1.9,
+              "output": 8,
+              "cacheRead": 0.38,
+              "cacheWrite": 1.9,
+              "source": "https://platform.kimi.ai/docs/pricing/chat",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "codex": {
+        "docs": "https://platform.kimi.ai/docs/guide/codex-kimi",
+        "models": [
+          {
+            "id": "kimi-k3",
+            "label": "Kimi K3",
+            "tier": "best",
+            "context": 1000000,
+            "reasoning": true,
+            "efforts": [],
+            "default": true,
+            "price": {
+              "provider": "moonshot",
+              "input": 3,
+              "output": 15,
+              "cacheRead": 0.3,
+              "cacheWrite": 3,
+              "source": "https://platform.kimi.ai/docs/pricing/chat",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "id": "kimi",
+      "origin": "built-in"
+    },
+    "minimax": {
+      "label": "MiniMax",
+      "docs": "https://platform.minimax.io/docs/coding-plan/claude-code",
+      "verified": "2026-10-18",
+      "unverified": [
+        "MiniMax maps every Claude Code slot to MiniMax-M3.1-Flash-Preview; MiniMax-M3's reasoning controls are not documented on that page.",
+        "MiniMax lists no cache-write price; a written token is charged as input.",
+        "MiniMax-M3 costs twice as much over 512K input tokens; the price is the lower one.",
+        "MiniMax's pricing page lists MiniMax-M3.1-Flash, without -Preview; its price is used for the preview id.",
+        "MiniMax-M2.7 is not on MiniMax's pricing page, so it has no price."
+      ],
+      "customIds": false,
+      "claude": {
+        "tiers": {
+          "opus": "MiniMax-M3.1-Flash-Preview[1m]",
+          "sonnet": "MiniMax-M3.1-Flash-Preview[1m]",
+          "haiku": "MiniMax-M3.1-Flash-Preview[1m]"
+        },
+        "models": [
+          {
+            "id": "MiniMax-M3",
+            "label": "MiniMax M3",
+            "tier": "best",
+            "context": 1000000,
+            "efforts": [],
+            "default": false,
+            "price": {
+              "provider": "minimax",
+              "input": 0.3,
+              "output": 1.2,
+              "cacheRead": 0.06,
+              "cacheWrite": 0.3,
+              "source": "https://platform.minimax.io/docs/guides/pricing-paygo",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "MiniMax-M3.1-Flash-Preview",
+            "label": "MiniMax M3.1 Flash (preview)",
+            "tier": "fast",
+            "suffix": "[1m]",
+            "context": 1000000,
+            "reasoning": true,
+            "efforts": [],
+            "default": true,
+            "price": {
+              "provider": "minimax",
+              "input": 0.15,
+              "output": 0.6,
+              "cacheRead": 0.015,
+              "cacheWrite": 0.15,
+              "source": "https://platform.minimax.io/docs/guides/pricing-paygo",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "MiniMax-M2.7",
+            "label": "MiniMax M2.7 (retires 2026-11-18)",
+            "tier": "balanced",
+            "context": 200000,
+            "efforts": [],
+            "default": false
+          }
+        ]
+      },
+      "codex": {
+        "docs": "https://platform.minimax.io/docs/token-plan/codex.md",
+        "models": [
+          {
+            "id": "MiniMax-M3.1-Flash-Preview",
+            "label": "MiniMax M3.1 Flash (preview)",
+            "tier": "fast",
+            "context": 1000000,
+            "reasoning": true,
+            "efforts": [],
+            "default": true,
+            "price": {
+              "provider": "minimax",
+              "input": 0.15,
+              "output": 0.6,
+              "cacheRead": 0.015,
+              "cacheWrite": 0.15,
+              "source": "https://platform.minimax.io/docs/guides/pricing-paygo",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "MiniMax-M3",
+            "label": "MiniMax M3",
+            "tier": "best",
+            "context": 1000000,
+            "efforts": [],
+            "default": false,
+            "price": {
+              "provider": "minimax",
+              "input": 0.3,
+              "output": 1.2,
+              "cacheRead": 0.06,
+              "cacheWrite": 0.3,
+              "source": "https://platform.minimax.io/docs/guides/pricing-paygo",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "id": "minimax",
+      "origin": "built-in"
+    },
+    "deepseek": {
+      "label": "DeepSeek",
+      "docs": "https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code",
+      "verified": "2026-10-18",
+      "unverified": [
+        "DeepSeek charges half price off-peak; the prices are its peak (full) ones.",
+        "DeepSeek lists no cache-write price; a written token is a cache miss, charged as input."
+      ],
+      "customIds": false,
+      "claude": {
+        "tiers": {
+          "opus": "deepseek-flash[1m]",
+          "sonnet": "deepseek-flash[1m]",
+          "haiku": "deepseek-flash",
+          "subagent": "deepseek-flash"
+        },
+        "models": [
+          {
+            "id": "deepseek-v4-pro",
+            "label": "DeepSeek V4 Pro",
+            "tier": "best",
+            "suffix": "[1m]",
+            "context": 1000000,
+            "efforts": ["low", "high", "max"],
+            "defaultEffort": "high",
+            "default": false,
+            "price": {
+              "provider": "deepseek",
+              "input": 1.32,
+              "output": 3.96,
+              "cacheRead": 0.044,
+              "cacheWrite": 1.32,
+              "source": "https://api-docs.deepseek.com/quick_start/pricing",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "deepseek-flash",
+            "label": "DeepSeek Flash",
+            "tier": "fast",
+            "suffix": "[1m]",
+            "context": 1000000,
+            "efforts": ["low", "high", "max"],
+            "defaultEffort": "max",
+            "default": true,
+            "price": {
+              "provider": "deepseek",
+              "input": 0.3,
+              "output": 1.2,
+              "cacheRead": 0.006,
+              "cacheWrite": 0.3,
+              "source": "https://api-docs.deepseek.com/quick_start/pricing",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "codex": {
+        "docs": "https://api-docs.deepseek.com/quick_start/agent_integrations/codex",
+        "models": [
+          {
+            "id": "deepseek-v4-pro",
+            "label": "DeepSeek V4 Pro",
+            "tier": "best",
+            "context": 1000000,
+            "efforts": ["low", "high", "max"],
+            "defaultEffort": "high",
+            "default": false,
+            "price": {
+              "provider": "deepseek",
+              "input": 1.32,
+              "output": 3.96,
+              "cacheRead": 0.044,
+              "cacheWrite": 1.32,
+              "source": "https://api-docs.deepseek.com/quick_start/pricing",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "deepseek-flash",
+            "label": "DeepSeek Flash",
+            "tier": "fast",
+            "context": 1000000,
+            "efforts": ["low", "high", "max"],
+            "defaultEffort": "high",
+            "default": true,
+            "price": {
+              "provider": "deepseek",
+              "input": 0.3,
+              "output": 1.2,
+              "cacheRead": 0.006,
+              "cacheWrite": 0.3,
+              "source": "https://api-docs.deepseek.com/quick_start/pricing",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "id": "deepseek",
+      "origin": "built-in"
+    },
+    "qwen": {
+      "label": "Qwen / Model Studio",
+      "docs": "https://www.alibabacloud.com/help/en/model-studio/claude-code",
+      "verified": "2026-10-18",
+      "unverified": [
+        "Per-model context windows and reasoning controls are not on Alibaba's Claude Code page.",
+        "Qwen prices rise with a request's input length; the prices are the lowest tier.",
+        "Cache reads (10% of input) and cache writes (125% of input) are Model Studio's general rule, not per-model prices.",
+        "qwen3.7-plus shows a limited-time discount; whether its price is the discounted one is not stated."
+      ],
+      "customIds": false,
+      "claude": {
+        "tiers": {
+          "opus": "qwen3.7-plus",
+          "sonnet": "qwen3.7-plus",
+          "haiku": "qwen3.7-plus",
+          "subagent": "qwen3.7-plus"
+        },
+        "models": [
+          {
+            "id": "qwen3.7-max",
+            "label": "Qwen3.7 Max (pay-as-you-go)",
+            "tier": "best",
+            "context": 1000000,
+            "efforts": [],
+            "default": false,
+            "price": {
+              "provider": "alibaba",
+              "input": 2.5,
+              "output": 7.5,
+              "cacheRead": 0.25,
+              "cacheWrite": 3.125,
+              "source": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "qwen3.7-plus",
+            "label": "Qwen3.7 Plus",
+            "tier": "balanced",
+            "context": 1000000,
+            "efforts": [],
+            "default": true,
+            "price": {
+              "provider": "alibaba",
+              "input": 0.4,
+              "output": 1.6,
+              "cacheRead": 0.04,
+              "cacheWrite": 0.5,
+              "source": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "qwen3.6-flash",
+            "label": "Qwen3.6 Flash (pay-as-you-go)",
+            "tier": "fast",
+            "context": 1000000,
+            "efforts": [],
+            "default": false,
+            "price": {
+              "provider": "alibaba",
+              "input": 0.25,
+              "output": 1.5,
+              "cacheRead": 0.025,
+              "cacheWrite": 0.3125,
+              "source": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "id": "qwen",
+      "origin": "built-in"
+    },
+    "openrouter": {
+      "label": "OpenRouter",
+      "docs": "https://openrouter.ai/docs/guides/guides/claude-code-integration",
+      "verified": "2026-10-18",
+      "unverified": [
+        "OpenRouter's Codex guide names only ~openai/gpt-sol-latest; whether Astra and Luna have ~latest aliases is not documented.",
+        "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted.",
+        "The prices are those of the models the ~latest aliases resolve to today (Opus, Sonnet and Haiku 5.5, GPT-6.1 Sol); OpenRouter may move an alias.",
+        "A transcript may name the resolved model (anthropic/claude-opus-5.5) rather than the alias, and that spelling is not priced."
+      ],
+      "customIds": true,
+      "claude": {
+        "tiers": {
+          "opus": "~anthropic/claude-opus-latest[1m]",
+          "sonnet": "~anthropic/claude-sonnet-latest[1m]",
+          "haiku": "~anthropic/claude-haiku-latest"
+        },
+        "models": [
+          {
+            "id": "~anthropic/claude-opus-latest",
+            "label": "Claude Opus (latest)",
+            "tier": "best",
+            "suffix": "[1m]",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": false,
+            "price": {
+              "provider": "anthropic",
+              "input": 4,
+              "output": 20,
+              "cacheRead": 0.2,
+              "cacheWrite5m": 5,
+              "cacheWrite1h": 8,
+              "source": "https://openrouter.ai/api/v1/models",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "~anthropic/claude-sonnet-latest",
+            "label": "Claude Sonnet (latest)",
+            "tier": "balanced",
+            "suffix": "[1m]",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "high",
+            "default": true,
+            "price": {
+              "provider": "anthropic",
+              "input": 2,
+              "output": 10,
+              "cacheRead": 0.1,
+              "cacheWrite5m": 2.5,
+              "cacheWrite1h": 4,
+              "source": "https://openrouter.ai/api/v1/models",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "~anthropic/claude-haiku-latest",
+            "label": "Claude Haiku (latest)",
+            "tier": "fast",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": false,
+            "price": {
+              "provider": "anthropic",
+              "input": 0.1,
+              "output": 0.5,
+              "cacheRead": 0.01,
+              "cacheWrite5m": 0.125,
+              "cacheWrite1h": 0.2,
+              "source": "https://openrouter.ai/api/v1/models",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "codex": {
+        "docs": "https://openrouter.ai/docs/cookbook/coding-agents/codex-cli",
+        "models": [
+          {
+            "id": "~openai/gpt-sol-latest",
+            "label": "GPT Sol (latest)",
+            "tier": "balanced",
+            "context": 1050000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": true,
+            "price": {
+              "provider": "openai",
+              "input": 2,
+              "output": 10,
+              "cacheRead": 0.1,
+              "cacheWrite": 2.5,
+              "source": "https://openrouter.ai/api/v1/models",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "id": "openrouter",
+      "origin": "built-in"
+    },
+    "vercel-ai-gateway": {
+      "label": "Vercel AI Gateway",
+      "docs": "https://vercel.com/docs/ai-gateway/coding-agents/claude-code",
+      "verified": "2026-10-18",
+      "unverified": [
+        "Vercel's guide shows claude-code/anthropic/claude-opus-5; the 5.5 ids here follow its documented format and were not read on that page.",
+        "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted.",
+        "Vercel lists no 1-hour cache write price; Anthropic's, which every other Vercel price matches, is used."
+      ],
+      "customIds": true,
+      "claude": {
+        "tiers": {
+          "opus": "claude-code/anthropic/claude-opus-5.5[1m]",
+          "sonnet": "claude-code/anthropic/claude-sonnet-5.5[1m]",
+          "haiku": "claude-code/anthropic/claude-haiku-5.5[1m]"
+        },
+        "models": [
+          {
+            "id": "claude-code/anthropic/claude-opus-5.5",
+            "label": "Opus 5.5",
+            "tier": "best",
+            "suffix": "[1m]",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": true,
+            "price": {
+              "provider": "anthropic",
+              "input": 4,
+              "output": 20,
+              "cacheRead": 0.2,
+              "cacheWrite5m": 5,
+              "cacheWrite1h": 8,
+              "source": "https://ai-gateway.vercel.sh/v1/models",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "claude-code/anthropic/claude-sonnet-5.5",
+            "label": "Sonnet 5.5",
+            "tier": "balanced",
+            "suffix": "[1m]",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "high",
+            "default": false,
+            "price": {
+              "provider": "anthropic",
+              "input": 2,
+              "output": 10,
+              "cacheRead": 0.1,
+              "cacheWrite5m": 2.5,
+              "cacheWrite1h": 4,
+              "source": "https://ai-gateway.vercel.sh/v1/models",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "claude-code/anthropic/claude-haiku-5.5",
+            "label": "Haiku 5.5",
+            "tier": "fast",
+            "suffix": "[1m]",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": false,
+            "price": {
+              "provider": "anthropic",
+              "input": 0.1,
+              "output": 0.5,
+              "cacheRead": 0.01,
+              "cacheWrite5m": 0.125,
+              "cacheWrite1h": 0.2,
+              "source": "https://ai-gateway.vercel.sh/v1/models",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "id": "vercel-ai-gateway",
+      "origin": "built-in"
+    },
+    "gateway": {
+      "label": "Your gateway",
+      "docs": "https://code.claude.com/docs/en/llm-gateway",
+      "verified": "2026-10-18",
+      "unverified": [
+        "A gateway serves whatever names its owner configured; these are Anthropic's ids, which a gateway may rename.",
+        "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted.",
+        "A gateway charges whatever its owner arranged; the prices are Anthropic's list prices for these ids."
+      ],
+      "customIds": true,
+      "claude": {
+        "models": [
+          {
+            "id": "claude-opus-5-5",
+            "label": "Opus 5.5",
+            "tier": "best",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": false,
+            "price": {
+              "provider": "anthropic",
+              "input": 4,
+              "output": 20,
+              "cacheRead": 0.2,
+              "cacheWrite5m": 5,
+              "cacheWrite1h": 8,
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "claude-sonnet-5-5",
+            "label": "Sonnet 5.5",
+            "tier": "balanced",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "high",
+            "default": true,
+            "price": {
+              "provider": "anthropic",
+              "input": 2,
+              "output": 10,
+              "cacheRead": 0.1,
+              "cacheWrite5m": 2.5,
+              "cacheWrite1h": 4,
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "claude-haiku-5-5",
+            "label": "Haiku 5.5",
+            "tier": "fast",
+            "context": 1000000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": false,
+            "price": {
+              "provider": "anthropic",
+              "input": 0.1,
+              "output": 0.5,
+              "cacheRead": 0.01,
+              "cacheWrite5m": 0.125,
+              "cacheWrite1h": 0.2,
+              "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "id": "gateway",
+      "origin": "built-in"
+    },
+    "azure-openai": {
+      "label": "Azure OpenAI",
+      "docs": "https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/codex",
+      "verified": "2026-10-18",
+      "unverified": [
+        "Which GPT-6 models a given Azure region offers is not on Microsoft's Codex page.",
+        "GPT-6 models cost more for a request over 272K input tokens; analytics prices whole sessions, so the price is the short-context one and a long-context session is under-counted.",
+        "The prices are Azure's global deployment ones; a Data Zone deployment costs 10-20% more."
+      ],
+      "customIds": true,
+      "codex": {
+        "models": [
+          {
+            "id": "gpt-6-astra",
+            "label": "GPT-6 Astra",
+            "tier": "best",
+            "context": 1050000,
+            "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+            "defaultEffort": "medium",
+            "default": false,
+            "price": {
+              "provider": "openai",
+              "input": 10,
+              "output": 50,
+              "cacheRead": 1,
+              "cacheWrite": 12.5,
+              "source": "https://azure.microsoft.com/en-us/pricing/details/azure-openai/",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "gpt-6.1-sol",
+            "label": "GPT-6.1 Sol",
+            "tier": "balanced",
+            "context": 1050000,
+            "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+            "defaultEffort": "medium",
+            "default": true,
+            "price": {
+              "provider": "openai",
+              "input": 2,
+              "output": 10,
+              "cacheRead": 0.1,
+              "cacheWrite": 2.5,
+              "source": "https://azure.microsoft.com/en-us/pricing/details/azure-openai/",
+              "verified": "2026-10-20"
+            }
+          },
+          {
+            "id": "gpt-6-luna",
+            "label": "GPT-6 Luna",
+            "tier": "fast",
+            "context": 1050000,
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium",
+            "default": false,
+            "price": {
+              "provider": "openai",
+              "input": 0.1,
+              "output": 0.5,
+              "cacheRead": 0.01,
+              "cacheWrite": 0.125,
+              "source": "https://azure.microsoft.com/en-us/pricing/details/azure-openai/",
+              "verified": "2026-10-20"
+            }
+          }
+        ]
+      },
+      "id": "azure-openai",
+      "origin": "built-in"
+    },
+    "ollama": {
+      "label": "Ollama (local)",
+      "docs": "https://docs.ollama.com/integrations/codex",
+      "verified": "2026-10-18",
+      "unverified": [
+        "gpt-oss:20b and gpt-oss:120b run on this machine through Ollama; there is no per-token price, so they have none."
+      ],
+      "customIds": true,
+      "detect": "ollama",
+      "codex": {
+        "models": [
+          {
+            "id": "gpt-oss:20b",
+            "label": "gpt-oss 20B",
+            "tier": "fast",
+            "context": 128000,
+            "efforts": ["low", "medium", "high"],
+            "defaultEffort": "medium",
+            "default": true
+          },
+          {
+            "id": "gpt-oss:120b",
+            "label": "gpt-oss 120B",
+            "tier": "best",
+            "context": 128000,
+            "efforts": ["low", "medium", "high"],
+            "defaultEffort": "medium",
+            "default": false
+          }
+        ]
+      },
+      "id": "ollama",
+      "origin": "built-in"
+    }
+  },
+  "presets": [
+    {
+      "id": "anthropic-api-key",
+      "origin": "built-in",
+      "label": "Anthropic API key",
+      "summary": "Claude Code with an API key from the Claude Platform console, billed per token.",
+      "group": "popular",
+      "docs": "https://code.claude.com/docs/en/model-config",
+      "verified": "2026-10-16",
+      "unverified": [],
+      "halves": {
+        "claude": {
+          "env": {
+            "ANTHROPIC_API_KEY": {
+              "secretName": "ANTHROPIC_API_KEY",
+              "required": true,
+              "allowEmpty": false,
+              "description": "the API key, sent as x-api-key"
+            }
+          },
+          "models": []
+        }
+      },
+      "harness": "claude",
+      "env": {
+        "ANTHROPIC_API_KEY": {
+          "secretName": "ANTHROPIC_API_KEY",
+          "required": true,
+          "allowEmpty": false,
+          "description": "the API key, sent as x-api-key"
+        }
+      },
+      "models": [],
+      "test": {
+        "kind": "request",
+        "url": "https://api.anthropic.com/v1/models",
+        "keyVariable": "ANTHROPIC_API_KEY",
+        "header": "x-api-key",
+        "scheme": "",
+        "headers": {
+          "anthropic-version": "2023-06-01"
+        },
+        "note": "Lists the models the key can use. Spends nothing."
+      },
+      "quota": {
+        "source": "transcript-pricing",
+        "note": "An API key has no usage endpoint of its own, so cost is counted from the transcript at Anthropic's prices."
+      },
+      "catalog": "anthropic",
+      "pricing": "anthropic",
+      "detect": {
+        "hosts": ["api.anthropic.com"],
+        "variables": [],
+        "keyPrefixes": ["sk-ant-api"]
+      }
+    },
+    {
+      "id": "amazon-bedrock",
+      "origin": "built-in",
+      "label": "Amazon Bedrock (AWS profile)",
+      "summary": "Claude Code through Amazon Bedrock, using an AWS profile from ~/.aws on this machine. The profile is named, never copied.",
+      "group": "cloud",
+      "docs": "https://code.claude.com/docs/en/amazon-bedrock",
+      "verified": "2026-10-16",
+      "unverified": [
+        "No free read proves Bedrock invoke rights; ListInferenceProfiles proves the profile signs in, not that it may run a model."
+      ],
+      "halves": {
+        "claude": {
+          "env": {
+            "CLAUDE_CODE_USE_BEDROCK": {
+              "value": "1",
+              "required": true,
+              "allowEmpty": false
+            },
+            "AWS_REGION": {
+              "value": "us-east-1",
+              "required": true,
+              "allowEmpty": false,
+              "description": "the region Bedrock is called in"
+            }
+          },
+          "models": []
+        }
+      },
+      "harness": "claude",
+      "env": {
+        "CLAUDE_CODE_USE_BEDROCK": {
+          "value": "1",
+          "required": true,
+          "allowEmpty": false
+        },
+        "AWS_REGION": {
+          "value": "us-east-1",
+          "required": true,
+          "allowEmpty": false,
+          "description": "the region Bedrock is called in"
+        }
+      },
+      "models": [],
+      "cloudCredential": {
+        "kinds": ["aws-profile"],
+        "suggested": "aws-profile:default"
+      },
+      "test": {
+        "kind": "none",
+        "reason": "Bedrock needs AWS request signing, which Ferretry does not do. Check the profile with `aws sts get-caller-identity --profile <name>`."
+      },
+      "quota": {
+        "source": "transcript-pricing",
+        "note": "AWS Service Quotas reports limits, not what is used, so cost is counted from the transcript at Bedrock's prices."
+      },
+      "catalog": "amazon-bedrock",
+      "pricing": "anthropic",
+      "detect": {
+        "hosts": [],
+        "variables": ["CLAUDE_CODE_USE_BEDROCK", "AWS_PROFILE"],
+        "keyPrefixes": []
+      }
+    },
+    {
+      "id": "amazon-bedrock-api-key",
+      "origin": "built-in",
+      "label": "Amazon Bedrock (API key)",
+      "summary": "Claude Code through Amazon Bedrock with a Bedrock API key, which skips the AWS credential chain.",
+      "group": "cloud",
+      "docs": "https://code.claude.com/docs/en/amazon-bedrock",
+      "verified": "2026-10-16",
+      "unverified": [
+        "No free read is documented for a Bedrock API key; CountTokens does not support every Claude model."
+      ],
+      "halves": {
+        "claude": {
+          "env": {
+            "CLAUDE_CODE_USE_BEDROCK": {
+              "value": "1",
+              "required": true,
+              "allowEmpty": false
+            },
+            "AWS_REGION": {
+              "value": "us-east-1",
+              "required": true,
+              "allowEmpty": false,
+              "description": "the region Bedrock is called in"
+            },
+            "AWS_BEARER_TOKEN_BEDROCK": {
+              "secretName": "AWS_BEARER_TOKEN_BEDROCK",
+              "required": true,
+              "allowEmpty": false,
+              "description": "the Bedrock API key"
+            }
+          },
+          "models": []
+        }
+      },
+      "harness": "claude",
+      "env": {
+        "CLAUDE_CODE_USE_BEDROCK": {
+          "value": "1",
+          "required": true,
+          "allowEmpty": false
+        },
+        "AWS_REGION": {
+          "value": "us-east-1",
+          "required": true,
+          "allowEmpty": false,
+          "description": "the region Bedrock is called in"
+        },
+        "AWS_BEARER_TOKEN_BEDROCK": {
+          "secretName": "AWS_BEARER_TOKEN_BEDROCK",
+          "required": true,
+          "allowEmpty": false,
+          "description": "the Bedrock API key"
+        }
+      },
+      "models": [],
+      "test": {
+        "kind": "none",
+        "reason": "Bedrock documents no free read for an API key, so Ferretry does not spend one to test it. Start an agent on it to check."
+      },
+      "quota": {
+        "source": "transcript-pricing",
+        "note": "AWS Service Quotas reports limits, not what is used, so cost is counted from the transcript at Bedrock's prices."
+      },
+      "catalog": "amazon-bedrock",
+      "pricing": "anthropic",
+      "detect": {
+        "hosts": [],
+        "variables": ["CLAUDE_CODE_USE_BEDROCK", "AWS_BEARER_TOKEN_BEDROCK"],
+        "keyPrefixes": []
+      }
+    },
+    {
+      "id": "bedrock-mantle",
+      "origin": "built-in",
+      "label": "Bedrock Mantle (AWS profile)",
+      "summary": "Claude Code through Bedrock Mantle, using an AWS profile from ~/.aws on this machine. Mantle model ids have no version suffix.",
+      "group": "cloud",
+      "docs": "https://code.claude.com/docs/en/amazon-bedrock",
+      "verified": "2026-10-16",
+      "unverified": [],
+      "halves": {
+        "claude": {
+          "env": {
+            "CLAUDE_CODE_USE_MANTLE": {
+              "value": "1",
+              "required": true,
+              "allowEmpty": false
+            },
+            "AWS_REGION": {
+              "value": "us-east-1",
+              "required": true,
+              "allowEmpty": false
+            }
+          },
+          "models": []
+        }
+      },
+      "harness": "claude",
+      "env": {
+        "CLAUDE_CODE_USE_MANTLE": {
+          "value": "1",
+          "required": true,
+          "allowEmpty": false
+        },
+        "AWS_REGION": {
+          "value": "us-east-1",
+          "required": true,
+          "allowEmpty": false
+        }
+      },
+      "models": [],
+      "cloudCredential": {
+        "kinds": ["aws-profile"],
+        "suggested": "aws-profile:default"
+      },
+      "test": {
+        "kind": "none",
+        "reason": "Mantle needs AWS request signing, which Ferretry does not do. Check the profile with `aws sts get-caller-identity --profile <name>`."
+      },
+      "quota": {
+        "source": "transcript-pricing",
+        "note": "Mantle documents no usage endpoint, so cost is counted from the transcript."
+      },
+      "catalog": "bedrock-mantle",
+      "pricing": "anthropic",
+      "detect": {
+        "hosts": [],
+        "variables": ["CLAUDE_CODE_USE_MANTLE"],
+        "keyPrefixes": []
+      }
+    },
+    {
+      "id": "google-vertex",
+      "origin": "built-in",
+      "label": "Google Vertex AI",
+      "summary": "Claude Code through Vertex AI in your Google Cloud project, using application-default credentials or a credentials file on this machine — named, never copied.",
+      "group": "cloud",
+      "docs": "https://code.claude.com/docs/en/google-vertex-ai",
+      "verified": "2026-10-16",
+      "unverified": [
+        "The count-tokens address and whether it is billed could not be confirmed, so no Test is offered."
+      ],
+      "halves": {
+        "claude": {
+          "env": {
+            "CLAUDE_CODE_USE_VERTEX": {
+              "value": "1",
+              "required": true,
+              "allowEmpty": false
+            },
+            "CLOUD_ML_REGION": {
+              "value": "us-east5",
+              "required": true,
+              "allowEmpty": false,
+              "description": "global, us, eu, or a region"
+            },
+            "ANTHROPIC_VERTEX_PROJECT_ID": {
+              "value": "",
+              "required": true,
+              "allowEmpty": false,
+              "description": "your Google Cloud project id"
+            }
+          },
+          "models": []
+        }
+      },
+      "harness": "claude",
+      "env": {
+        "CLAUDE_CODE_USE_VERTEX": {
+          "value": "1",
+          "required": true,
+          "allowEmpty": false
+        },
+        "CLOUD_ML_REGION": {
+          "value": "us-east5",
+          "required": true,
+          "allowEmpty": false,
+          "description": "global, us, eu, or a region"
+        },
+        "ANTHROPIC_VERTEX_PROJECT_ID": {
+          "value": "",
+          "required": true,
+          "allowEmpty": false,
+          "description": "your Google Cloud project id"
+        }
+      },
+      "models": [],
+      "cloudCredential": {
+        "kinds": ["gcloud-adc"],
+        "suggested": "gcloud-adc"
+      },
+      "test": {
+        "kind": "none",
+        "reason": "Vertex needs a Google access token from your credentials, which Ferretry does not mint. Check them with `gcloud auth application-default print-access-token`."
+      },
+      "quota": {
+        "source": "transcript-pricing",
+        "note": "Google reports limits in the Cloud Console only, so cost is counted from the transcript at Vertex prices."
+      },
+      "catalog": "google-vertex",
+      "pricing": "anthropic",
+      "detect": {
+        "hosts": [],
+        "variables": ["CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_VERTEX_PROJECT_ID", "CLOUD_ML_REGION"],
+        "keyPrefixes": []
+      }
+    },
+    {
+      "id": "microsoft-foundry-api-key",
+      "origin": "built-in",
+      "label": "Microsoft Foundry (API key)",
+      "summary": "Claude Code through your Microsoft Foundry resource with its API key. The model variables are your deployment names.",
+      "group": "cloud",
+      "docs": "https://code.claude.com/docs/en/microsoft-foundry",
+      "verified": "2026-10-16",
+      "unverified": ["Foundry documents no free read, so the Test is one message capped at one token."],
+      "halves": {
+        "claude": {
+          "env": {
+            "CLAUDE_CODE_USE_FOUNDRY": {
+              "value": "1",
+              "required": true,
+              "allowEmpty": false
+            },
+            "ANTHROPIC_FOUNDRY_RESOURCE": {
+              "value": "",
+              "required": true,
+              "allowEmpty": false,
+              "description": "the resource name only, not a URL"
+            },
+            "ANTHROPIC_FOUNDRY_API_KEY": {
+              "secretName": "ANTHROPIC_FOUNDRY_API_KEY",
+              "required": true,
+              "allowEmpty": false
+            },
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": {
+              "value": "claude-opus-5-5",
+              "required": true,
+              "allowEmpty": false,
+              "description": "your Opus deployment name"
+            },
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": {
+              "value": "claude-sonnet-5-5",
+              "required": true,
+              "allowEmpty": false,
+              "description": "your Sonnet deployment name"
+            },
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": {
+              "value": "claude-haiku-5-5",
+              "required": true,
+              "allowEmpty": false,
+              "description": "your Haiku deployment name"
+            }
+          },
+          "models": []
+        }
+      },
+      "harness": "claude",
+      "env": {
+        "CLAUDE_CODE_USE_FOUNDRY": {
+          "value": "1",
+          "required": true,
+          "allowEmpty": false
+        },
+        "ANTHROPIC_FOUNDRY_RESOURCE": {
+          "value": "",
+          "required": true,
+          "allowEmpty": false,
+          "description": "the resource name only, not a URL"
+        },
+        "ANTHROPIC_FOUNDRY_API_KEY": {
+          "secretName": "ANTHROPIC_FOUNDRY_API_KEY",
+          "required": true,
+          "allowEmpty": false
+        },
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": {
+          "value": "claude-opus-5-5",
+          "required": true,
+          "allowEmpty": false,
+          "description": "your Opus deployment name"
+        },
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": {
+          "value": "claude-sonnet-5-5",
+          "required": true,
+          "allowEmpty": false,
+          "description": "your Sonnet deployment name"
+        },
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": {
+          "value": "claude-haiku-5-5",
+          "required": true,
+          "allowEmpty": false,
+          "description": "your Haiku deployment name"
+        }
+      },
+      "models": [],
+      "test": {
+        "kind": "inference",
+        "url": "https://{ANTHROPIC_FOUNDRY_RESOURCE}.services.ai.azure.com/anthropic/v1/messages",
+        "keyVariable": "ANTHROPIC_FOUNDRY_API_KEY",
+        "header": "x-api-key",
+        "scheme": "",
+        "headers": {
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json"
+        },
+        "note": "Sends one message to your Haiku deployment, capped at one output token — a fraction of a cent.",
+        "body": "{\"model\":\"{ANTHROPIC_DEFAULT_HAIKU_MODEL}\",\"max_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+      },
+      "quota": {
+        "source": "transcript-pricing",
+        "note": "Foundry documents no usage endpoint, so cost is counted from the transcript."
+      },
+      "catalog": "microsoft-foundry",
+      "pricing": "anthropic",
+      "detect": {
+        "hosts": [],
+        "variables": ["CLAUDE_CODE_USE_FOUNDRY", "ANTHROPIC_FOUNDRY_API_KEY"],
+        "keyPrefixes": []
+      }
+    },
+    {
+      "id": "microsoft-foundry-azure-cli",
+      "origin": "built-in",
+      "label": "Microsoft Foundry (Azure CLI)",
+      "summary": "Claude Code through your Microsoft Foundry resource, signed in with the Azure CLI on this machine (Entra ID). Nothing is copied.",
+      "group": "cloud",
+      "docs": "https://code.claude.com/docs/en/microsoft-foundry",
+      "verified": "2026-10-16",
+      "unverified": [],
+      "halves": {
+        "claude": {
+          "env": {
+            "CLAUDE_CODE_USE_FOUNDRY": {
+              "value": "1",
+              "required": true,
+              "allowEmpty": false
+            },
+            "ANTHROPIC_FOUNDRY_RESOURCE": {
+              "value": "",
+              "required": true,
+              "allowEmpty": false,
+              "description": "the resource name only, not a URL"
+            },
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": {
+              "value": "claude-opus-5-5",
+              "required": true,
+              "allowEmpty": false,
+              "description": "your Opus deployment name"
+            },
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": {
+              "value": "claude-sonnet-5-5",
+              "required": true,
+              "allowEmpty": false,
+              "description": "your Sonnet deployment name"
+            },
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": {
+              "value": "claude-haiku-5-5",
+              "required": true,
+              "allowEmpty": false,
+              "description": "your Haiku deployment name"
+            }
+          },
+          "models": []
+        }
+      },
+      "harness": "claude",
+      "env": {
+        "CLAUDE_CODE_USE_FOUNDRY": {
+          "value": "1",
+          "required": true,
+          "allowEmpty": false
+        },
+        "ANTHROPIC_FOUNDRY_RESOURCE": {
+          "value": "",
+          "required": true,
+          "allowEmpty": false,
+          "description": "the resource name only, not a URL"
+        },
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": {
+          "value": "claude-opus-5-5",
+          "required": true,
+          "allowEmpty": false,
+          "description": "your Opus deployment name"
+        },
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": {
+          "value": "claude-sonnet-5-5",
+          "required": true,
+          "allowEmpty": false,
+          "description": "your Sonnet deployment name"
+        },
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": {
+          "value": "claude-haiku-5-5",
+          "required": true,
+          "allowEmpty": false,
+          "description": "your Haiku deployment name"
+        }
+      },
+      "models": [],
+      "cloudCredential": {
+        "kinds": ["azure-cli"],
+        "suggested": "azure-cli"
+      },
+      "test": {
+        "kind": "none",
+        "reason": "An Entra sign-in needs a token from the Azure CLI, which Ferretry does not mint. Check it with `az account get-access-token`."
+      },
+      "quota": {
+        "source": "transcript-pricing",
+        "note": "Foundry documents no usage endpoint, so cost is counted from the transcript."
+      },
+      "catalog": "microsoft-foundry",
+      "pricing": "anthropic",
+      "detect": {
+        "hosts": [],
+        "variables": ["CLAUDE_CODE_USE_FOUNDRY", "ANTHROPIC_FOUNDRY_RESOURCE"],
+        "keyPrefixes": []
+      }
+    },
+    {
+      "id": "zai-glm",
+      "origin": "built-in",
+      "label": "GLM / Z.ai",
+      "summary": "Claude Code on GLM models with a Z.ai Coding Plan key.",
+      "group": "popular",
+      "docs": "https://docs.z.ai/devpack/tool/claude",
+      "verified": "2026-10-16",
+      "unverified": [
+        "The quota endpoint the Test and usage read is described by community tools, not by Z.ai's own documentation."
+      ],
+      "halves": {
+        "claude": {
+          "env": {
+            "ANTHROPIC_BASE_URL": {
+              "value": "https://api.z.ai/api/anthropic",
+              "required": true,
+              "allowEmpty": false
+            },
+            "ANTHROPIC_AUTH_TOKEN": {
+              "secretName": "ZAI_API_KEY",
+              "required": true,
+              "allowEmpty": false
+            },
+            "API_TIMEOUT_MS": {
+              "value": "3000000",
+              "required": false,
+              "allowEmpty": false
+            }
+          },
+          "models": []
+        },
+        "codex": {
+          "docs": "https://docs.z.ai/devpack/tool/codex",
+          "env": {
+            "ZAI_API_KEY": {
+              "secretName": "ZAI_API_KEY",
+              "required": true,
+              "allowEmpty": false
+            }
+          },
+          "codexProvider": {
+            "id": "zai",
+            "name": "Z.ai",
+            "baseUrl": "https://api.z.ai/api/v1",
+            "keyVariable": "ZAI_API_KEY",
+            "model": "glm-5.3"
+          },
+          "models": [],
+          "unavailable": "Z.ai serves the Responses API, but Codex only runs GLM with a model catalogue file (model_catalog_json) and this preset has no verified Codex model list yet. Use this login with Claude Code instead."
+        }
+      },
+      "harness": "claude",
+      "env": {
+        "ANTHROPIC_BASE_URL": {
+          "value": "https://api.z.ai/api/anthropic",
+          "required": true,
+          "allowEmpty": false
+        },
+        "ANTHROPIC_AUTH_TOKEN": {
+          "secretName": "ZAI_API_KEY",
+          "required": true,
+          "allowEmpty": false
+        },
+        "API_TIMEOUT_MS": {
+          "value": "3000000",
+          "required": false,
+          "allowEmpty": false
+        }
+      },
+      "models": [],
+      "test": {
+        "kind": "request",
+        "url": "https://api.z.ai/api/monitor/usage/quota/limit",
+        "keyVariable": "ANTHROPIC_AUTH_TOKEN",
+        "header": "authorization",
+        "scheme": "Bearer",
+        "headers": {},
+        "note": "Reads your Coding Plan quota. Spends nothing."
+      },
+      "quota": {
+        "source": "zai-coding-plan",
+        "note": "Z.ai's Coding Plan quota — a 5-hour and a weekly window."
+      },
+      "catalog": "zai",
+      "pricing": "zai",
+      "detect": {
+        "hosts": ["api.z.ai", "open.bigmodel.cn"],
+        "variables": ["ZAI_*", "ZHIPUAI_*"],
+        "keyPrefixes": []
+      }
+    },
+    {
+      "id": "kimi",
+      "origin": "built-in",
+      "label": "Kimi / Moonshot",
+      "summary": "Claude Code and Codex on Kimi models with one Moonshot platform key (platform.kimi.ai; keys from platform.kimi.com are a separate system).",
+      "group": "popular",
+      "docs": "https://platform.kimi.ai/docs/guide/claude-code-kimi",
+      "verified": "2026-10-16",
+      "unverified": [],
+      "halves": {
+        "claude": {
+          "env": {
+            "ANTHROPIC_BASE_URL": {
+              "value": "https://api.moonshot.ai/anthropic",
+              "required": true,
+              "allowEmpty": false
+            },
+            "ANTHROPIC_AUTH_TOKEN": {
+              "secretName": "MOONSHOT_API_KEY",
+              "required": true,
+              "allowEmpty": false
+            },
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW": {
+              "value": "1000000",
+              "required": false,
+              "allowEmpty": false
+            }
+          },
+          "models": []
+        },
+        "codex": {
+          "docs": "https://platform.kimi.ai/docs/guide/codex-kimi",
+          "env": {
+            "KIMI_API_KEY": {
+              "secretName": "MOONSHOT_API_KEY",
+              "required": true,
+              "allowEmpty": false
+            }
+          },
+          "codexProvider": {
+            "id": "kimi",
+            "name": "Kimi",
+            "baseUrl": "https://api.moonshot.ai/v1",
+            "keyVariable": "KIMI_API_KEY",
+            "model": "kimi-k3"
+          },
+          "models": []
+        }
+      },
+      "harness": "claude",
+      "env": {
+        "ANTHROPIC_BASE_URL": {
+          "value": "https://api.moonshot.ai/anthropic",
+          "required": true,
+          "allowEmpty": false
+        },
+        "ANTHROPIC_AUTH_TOKEN": {
+          "secretName": "MOONSHOT_API_KEY",
+          "required": true,
+          "allowEmpty": false
+        },
+        "CLAUDE_CODE_AUTO_COMPACT_WINDOW": {
+          "value": "1000000",
+          "required": false,
+          "allowEmpty": false
+        },
+        "KIMI_API_KEY": {
+          "secretName": "MOONSHOT_API_KEY",
+          "required": true,
+          "allowEmpty": false
+        }
+      },
+      "codexProvider": {
+        "id": "kimi",
+        "name": "Kimi",
+        "baseUrl": "https://api.moonshot.ai/v1",
+        "keyVariable": "KIMI_API_KEY",
+        "model": "kimi-k3"
+      },
+      "models": [],
+      "test": {
+        "kind": "request",
+        "url": "https://api.moonshot.ai/v1/models",
+        "keyVariable": "ANTHROPIC_AUTH_TOKEN",
+        "header": "authorization",
+        "scheme": "Bearer",
+        "headers": {},
+        "note": "Lists the models the key can use. Spends nothing."
+      },
+      "quota": {
+        "source": "moonshot-balance",
+        "note": "Your Moonshot account balance, in US dollars."
+      },
+      "catalog": "kimi",
+      "pricing": "moonshot",
+      "detect": {
+        "hosts": ["api.moonshot.ai", "api.moonshot.cn"],
+        "variables": ["MOONSHOT_*", "KIMI_*"],
+        "keyPrefixes": []
+      }
+    },
+    {
+      "id": "minimax",
+      "origin": "built-in",
+      "label": "MiniMax (Token Plan)",
+      "summary": "Claude Code and Codex on MiniMax models with one Token Plan subscription key (a pay-as-you-go key is a different key). Codex 0.146.0 or newer is recommended.",
+      "group": "popular",
+      "docs": "https://platform.minimax.io/docs/api-reference/text-anthropic-api.md",
+      "verified": "2026-10-16",
+      "unverified": [],
+      "halves": {
+        "claude": {
+          "env": {
+            "ANTHROPIC_BASE_URL": {
+              "value": "https://api.minimax.io/anthropic",
+              "required": true,
+              "allowEmpty": false
+            },
+            "ANTHROPIC_API_KEY": {
+              "secretName": "MINIMAX_API_KEY",
+              "required": true,
+              "allowEmpty": false,
+              "description": "the Token Plan key, sent as x-api-key as MiniMax documents"
+            }
+          },
+          "models": []
+        },
+        "codex": {
+          "docs": "https://platform.minimax.io/docs/token-plan/codex.md",
+          "env": {
+            "MINIMAX_API_KEY": {
+              "secretName": "MINIMAX_API_KEY",
+              "required": true,
+              "allowEmpty": false
+            }
+          },
+          "codexProvider": {
+            "id": "minimax",
+            "name": "MiniMax",
+            "baseUrl": "https://api.minimax.io/v1",
+            "keyVariable": "MINIMAX_API_KEY",
+            "model": "MiniMax-M3.1-Flash-Preview"
+          },
+          "models": []
+        }
+      },
+      "harness": "claude",
+      "env": {
+        "ANTHROPIC_BASE_URL": {
+          "value": "https://api.minimax.io/anthropic",
+          "required": true,
+          "allowEmpty": false
+        },
+        "ANTHROPIC_API_KEY": {
+          "secretName": "MINIMAX_API_KEY",
+          "required": true,
+          "allowEmpty": false,
+          "description": "the Token Plan key, sent as x-api-key as MiniMax documents"
+        },
+        "MINIMAX_API_KEY": {
+          "secretName": "MINIMAX_API_KEY",
+          "required": true,
+          "allowEmpty": false
+        }
+      },
+      "codexProvider": {
+        "id": "minimax",
+        "name": "MiniMax",
+        "baseUrl": "https://api.minimax.io/v1",
+        "keyVariable": "MINIMAX_API_KEY",
+        "model": "MiniMax-M3.1-Flash-Preview"
+      },
+      "models": [],
+      "test": {
+        "kind": "request",
+        "url": "https://www.minimax.io/v1/token_plan/remains",
+        "keyVariable": "ANTHROPIC_API_KEY",
+        "header": "authorization",
+        "scheme": "Bearer",
+        "headers": {},
+        "note": "Reads what is left of your Token Plan. Spends nothing."
+      },
+      "quota": {
+        "source": "minimax-token-plan",
+        "note": "The Token Plan's 5-hour and weekly windows. MiniMax reports what REMAINS, and Ferretry turns it into what is used."
+      },
+      "catalog": "minimax",
+      "pricing": "minimax",
+      "detect": {
+        "hosts": ["api.minimax.io", "api.minimaxi.com"],
+        "variables": ["MINIMAX_*"],
+        "keyPrefixes": []
+      }
+    },
+    {
+      "id": "deepseek",
+      "origin": "built-in",
+      "label": "DeepSeek",
+      "summary": "Claude Code and Codex on DeepSeek models with one DeepSeek platform key.",
+      "group": "popular",
+      "docs": "https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code",
+      "verified": "2026-10-16",
+      "unverified": [],
+      "halves": {
+        "claude": {
+          "env": {
+            "ANTHROPIC_BASE_URL": {
+              "value": "https://api.deepseek.com/anthropic",
+              "required": true,
+              "allowEmpty": false
+            },
+            "ANTHROPIC_AUTH_TOKEN": {
+              "secretName": "DEEPSEEK_API_KEY",
+              "required": true,
+              "allowEmpty": false
+            }
+          },
+          "models": []
+        },
+        "codex": {
+          "docs": "https://api-docs.deepseek.com/quick_start/agent_integrations/codex",
+          "env": {
+            "DEEPSEEK_API_KEY": {
+              "secretName": "DEEPSEEK_API_KEY",
+              "required": true,
+              "allowEmpty": false
+            }
+          },
+          "codexProvider": {
+            "id": "deepseek",
+            "name": "DeepSeek",
+            "baseUrl": "https://api.deepseek.com/",
+            "keyVariable": "DEEPSEEK_API_KEY",
+            "model": "deepseek-flash"
+          },
+          "models": []
+        }
+      },
+      "harness": "claude",
+      "env": {
+        "ANTHROPIC_BASE_URL": {
+          "value": "https://api.deepseek.com/anthropic",
+          "required": true,
+          "allowEmpty": false
+        },
+        "ANTHROPIC_AUTH_TOKEN": {
+          "secretName": "DEEPSEEK_API_KEY",
+          "required": true,
+          "allowEmpty": false
+        },
+        "DEEPSEEK_API_KEY": {
+          "secretName": "DEEPSEEK_API_KEY",
+          "required": true,
+          "allowEmpty": false
+        }
+      },
+      "codexProvider": {
+        "id": "deepseek",
+        "name": "DeepSeek",
+        "baseUrl": "https://api.deepseek.com/",
+        "keyVariable": "DEEPSEEK_API_KEY",
+        "model": "deepseek-flash"
+      },
+      "models": [],
+      "test": {
+        "kind": "request",
+        "url": "https://api.deepseek.com/models",
+        "keyVariable": "ANTHROPIC_AUTH_TOKEN",
+        "header": "authorization",
+        "scheme": "Bearer",
+        "headers": {},
+        "note": "Lists the models the key can use. Spends nothing."
+      },
+      "quota": {
+        "source": "deepseek-balance",
+        "note": "Your DeepSeek balance, in the currency you topped up in."
+      },
+      "catalog": "deepseek",
+      "pricing": "deepseek",
+      "detect": {
+        "hosts": ["api.deepseek.com"],
+        "variables": ["DEEPSEEK_*"],
+        "keyPrefixes": []
+      }
+    },
+    {
+      "id": "qwen-coding-plan",
+      "origin": "built-in",
+      "label": "Qwen (Alibaba Coding Plan)",
+      "summary": "Claude Code on Qwen models with a Model Studio Coding Plan key. A Token Plan or pay-as-you-go key uses a different base URL — change it here.",
+      "docs": "https://www.alibabacloud.com/help/en/model-studio/claude-code",
+      "verified": "2026-10-16",
+      "unverified": [],
+      "halves": {
+        "claude": {
+          "env": {
+            "ANTHROPIC_BASE_URL": {
+              "value": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
+              "required": true,
+              "allowEmpty": false
+            },
+            "ANTHROPIC_AUTH_TOKEN": {
+              "secretName": "DASHSCOPE_API_KEY",
+              "required": true,
+              "allowEmpty": false
+            },
+            "ANTHROPIC_MODEL": {
+              "value": "qwen3.7-plus",
+              "required": true,
+              "allowEmpty": false
+            }
+          },
+          "models": []
+        }
+      },
+      "harness": "claude",
+      "env": {
+        "ANTHROPIC_BASE_URL": {
+          "value": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
+          "required": true,
+          "allowEmpty": false
+        },
+        "ANTHROPIC_AUTH_TOKEN": {
+          "secretName": "DASHSCOPE_API_KEY",
+          "required": true,
+          "allowEmpty": false
+        },
+        "ANTHROPIC_MODEL": {
+          "value": "qwen3.7-plus",
+          "required": true,
+          "allowEmpty": false
+        }
+      },
+      "models": [],
+      "test": {
+        "kind": "inference",
+        "url": "{ANTHROPIC_BASE_URL}/v1/messages",
+        "keyVariable": "ANTHROPIC_AUTH_TOKEN",
+        "header": "authorization",
+        "scheme": "Bearer",
+        "headers": {
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json"
+        },
+        "note": "The endpoint serves only messages, so the Test sends one capped at one output token — a fraction of a cent.",
+        "body": "{\"model\":\"{ANTHROPIC_MODEL}\",\"max_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+      },
+      "quota": {
+        "source": "transcript-pricing",
+        "note": "Model Studio documents no quota endpoint for this key, so cost is counted from the transcript."
+      },
+      "catalog": "qwen",
+      "pricing": "qwen",
+      "detect": {
+        "hosts": ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com"],
+        "variables": ["DASHSCOPE_*"],
+        "keyPrefixes": []
+      }
+    },
+    {
+      "id": "openrouter",
+      "origin": "built-in",
+      "label": "OpenRouter",
+      "summary": "Claude Code and Codex through OpenRouter with one key, on Anthropic and OpenAI models or any other it routes to.",
+      "group": "popular",
+      "docs": "https://openrouter.ai/docs/guides/guides/claude-code-integration",
+      "verified": "2026-10-16",
+      "unverified": [],
+      "halves": {
+        "claude": {
+          "env": {
+            "ANTHROPIC_BASE_URL": {
+              "value": "https://openrouter.ai/api",
+              "required": true,
+              "allowEmpty": false
+            },
+            "ANTHROPIC_AUTH_TOKEN": {
+              "secretName": "OPENROUTER_API_KEY",
+              "required": true,
+              "allowEmpty": false
+            },
+            "ANTHROPIC_API_KEY": {
+              "value": "",
+              "required": true,
+              "allowEmpty": true,
+              "description": "deliberately empty, so the OpenRouter key is the one sent"
+            }
+          },
+          "models": []
+        },
+        "codex": {
+          "docs": "https://openrouter.ai/docs/cookbook/coding-agents/codex-cli",
+          "env": {
+            "OPENROUTER_API_KEY": {
+              "secretName": "OPENROUTER_API_KEY",
+              "required": true,
+              "allowEmpty": false
+            }
+          },
+          "codexProvider": {
+            "id": "openrouter",
+            "name": "OpenRouter",
+            "baseUrl": "https://openrouter.ai/api/v1",
+            "keyVariable": "OPENROUTER_API_KEY",
+            "model": "~openai/gpt-sol-latest"
+          },
+          "models": []
+        }
+      },
+      "harness": "claude",
+      "env": {
+        "ANTHROPIC_BASE_URL": {
+          "value": "https://openrouter.ai/api",
+          "required": true,
+          "allowEmpty": false
+        },
+        "ANTHROPIC_AUTH_TOKEN": {
+          "secretName": "OPENROUTER_API_KEY",
+          "required": true,
+          "allowEmpty": false
+        },
+        "ANTHROPIC_API_KEY": {
+          "value": "",
+          "required": true,
+          "allowEmpty": true,
+          "description": "deliberately empty, so the OpenRouter key is the one sent"
+        },
+        "OPENROUTER_API_KEY": {
+          "secretName": "OPENROUTER_API_KEY",
+          "required": true,
+          "allowEmpty": false
+        }
+      },
+      "codexProvider": {
+        "id": "openrouter",
+        "name": "OpenRouter",
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "keyVariable": "OPENROUTER_API_KEY",
+        "model": "~openai/gpt-sol-latest"
+      },
+      "models": [],
+      "test": {
+        "kind": "request",
+        "url": "https://openrouter.ai/api/v1/key",
+        "keyVariable": "ANTHROPIC_AUTH_TOKEN",
+        "header": "authorization",
+        "scheme": "Bearer",
+        "headers": {},
+        "note": "Reads the key's limit and what it has used. Spends nothing."
+      },
+      "quota": {
+        "source": "openrouter-key",
+        "note": "The key's credit limit and what it has used."
+      },
+      "catalog": "openrouter",
+      "pricing": "openrouter",
+      "detect": {
+        "hosts": ["openrouter.ai"],
+        "variables": ["OPENROUTER_*"],
+        "keyPrefixes": ["sk-or-"]
+      }
+    },
+    {
+      "id": "vercel-ai-gateway",
+      "origin": "built-in",
+      "label": "Vercel AI Gateway",
+      "summary": "Claude Code through the Vercel AI Gateway, which lists the gateway's models in the model picker.",
+      "docs": "https://vercel.com/docs/ai-gateway/coding-agents/claude-code",
+      "verified": "2026-10-16",
+      "unverified": [
+        "The credits address the Test and usage read was found in search results, not read in Vercel's documentation."
+      ],
+      "halves": {
+        "claude": {
+          "env": {
+            "ANTHROPIC_BASE_URL": {
+              "value": "https://ai-gateway.vercel.sh/claude-code",
+              "required": true,
+              "allowEmpty": false
+            },
+            "ANTHROPIC_AUTH_TOKEN": {
+              "secretName": "AI_GATEWAY_API_KEY",
+              "required": true,
+              "allowEmpty": false
+            },
+            "ANTHROPIC_API_KEY": {
+              "value": "",
+              "required": true,
+              "allowEmpty": true,
+              "description": "deliberately empty, so the gateway key is the one sent"
+            },
+            "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": {
+              "value": "1",
+              "required": false,
+              "allowEmpty": false
+            }
+          },
+          "models": []
+        }
+      },
+      "harness": "claude",
+      "env": {
+        "ANTHROPIC_BASE_URL": {
+          "value": "https://ai-gateway.vercel.sh/claude-code",
+          "required": true,
+          "allowEmpty": false
+        },
+        "ANTHROPIC_AUTH_TOKEN": {
+          "secretName": "AI_GATEWAY_API_KEY",
+          "required": true,
+          "allowEmpty": false
+        },
+        "ANTHROPIC_API_KEY": {
+          "value": "",
+          "required": true,
+          "allowEmpty": true,
+          "description": "deliberately empty, so the gateway key is the one sent"
+        },
+        "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": {
+          "value": "1",
+          "required": false,
+          "allowEmpty": false
+        }
+      },
+      "models": [],
+      "test": {
+        "kind": "request",
+        "url": "https://ai-gateway.vercel.sh/v1/credits",
+        "keyVariable": "ANTHROPIC_AUTH_TOKEN",
+        "header": "authorization",
+        "scheme": "Bearer",
+        "headers": {},
+        "note": "Reads the gateway's credit balance. Spends nothing."
+      },
+      "quota": {
+        "source": "vercel-credits",
+        "note": "The gateway's credit balance."
+      },
+      "catalog": "vercel-ai-gateway",
+      "detect": {
+        "hosts": ["ai-gateway.vercel.sh"],
+        "variables": ["AI_GATEWAY_*"],
+        "keyPrefixes": []
+      }
+    },
+    {
+      "id": "litellm",
+      "origin": "built-in",
+      "label": "LiteLLM proxy",
+      "summary": "Claude Code through your own LiteLLM proxy, with a master or virtual key.",
+      "group": "self-hosted",
+      "docs": "https://docs.litellm.ai/docs/tutorials/claude_responses_api",
+      "verified": "2026-10-16",
+      "unverified": [
+        "The Test's model list is LiteLLM's OpenAI-style route, read in community sources rather than LiteLLM's Claude Code guide.",
+        "Whether a virtual key may read its own spend from /key/info is not documented."
+      ],
+      "halves": {
+        "claude": {
+          "env": {
+            "ANTHROPIC_BASE_URL": {
+              "value": "http://localhost:4000",
+              "required": true,
+              "allowEmpty": false,
+              "description": "your proxy's address"
+            },
+            "ANTHROPIC_AUTH_TOKEN": {
+              "secretName": "LITELLM_API_KEY",
+              "required": true,
+              "allowEmpty": false
+            },
+            "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": {
+              "value": "1",
+              "required": false,
+              "allowEmpty": false
+            }
+          },
+          "models": []
+        }
+      },
+      "harness": "claude",
+      "env": {
+        "ANTHROPIC_BASE_URL": {
+          "value": "http://localhost:4000",
+          "required": true,
+          "allowEmpty": false,
+          "description": "your proxy's address"
+        },
+        "ANTHROPIC_AUTH_TOKEN": {
+          "secretName": "LITELLM_API_KEY",
+          "required": true,
+          "allowEmpty": false
+        },
+        "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": {
+          "value": "1",
+          "required": false,
+          "allowEmpty": false
+        }
+      },
+      "models": [],
+      "test": {
+        "kind": "request",
+        "url": "{ANTHROPIC_BASE_URL}/v1/models",
+        "keyVariable": "ANTHROPIC_AUTH_TOKEN",
+        "header": "authorization",
+        "scheme": "Bearer",
+        "headers": {},
+        "note": "Lists the models the proxy offers this key. Spends nothing."
+      },
+      "quota": {
+        "source": "litellm-key-info",
+        "note": "The key's spend and budget, from the proxy's /key/info."
+      },
+      "catalog": "gateway",
+      "detect": {
+        "hosts": [],
+        "variables": ["LITELLM_*"],
+        "keyPrefixes": []
+      }
+    },
+    {
+      "id": "custom-gateway",
+      "origin": "built-in",
+      "label": "Custom gateway",
+      "summary": "Claude Code through any gateway that speaks the Anthropic Messages API. Fill in its address and the model it serves.",
+      "group": "self-hosted",
+      "docs": "https://code.claude.com/docs/en/llm-gateway",
+      "verified": "2026-10-16",
+      "unverified": [],
+      "halves": {
+        "claude": {
+          "env": {
+            "ANTHROPIC_BASE_URL": {
+              "value": "",
+              "required": true,
+              "allowEmpty": false,
+              "description": "the gateway's address, https://…"
+            },
+            "ANTHROPIC_AUTH_TOKEN": {
+              "secretName": "GATEWAY_API_KEY",
+              "required": true,
+              "allowEmpty": false
+            },
+            "ANTHROPIC_API_KEY": {
+              "value": "",
+              "required": true,
+              "allowEmpty": true,
+              "description": "deliberately empty, so the gateway key is the one sent"
+            },
+            "ANTHROPIC_MODEL": {
+              "value": "",
+              "required": false,
+              "allowEmpty": false
+            }
+          },
+          "models": []
+        }
+      },
+      "harness": "claude",
+      "env": {
+        "ANTHROPIC_BASE_URL": {
+          "value": "",
+          "required": true,
+          "allowEmpty": false,
+          "description": "the gateway's address, https://…"
+        },
+        "ANTHROPIC_AUTH_TOKEN": {
+          "secretName": "GATEWAY_API_KEY",
+          "required": true,
+          "allowEmpty": false
+        },
+        "ANTHROPIC_API_KEY": {
+          "value": "",
+          "required": true,
+          "allowEmpty": true,
+          "description": "deliberately empty, so the gateway key is the one sent"
+        },
+        "ANTHROPIC_MODEL": {
+          "value": "",
+          "required": false,
+          "allowEmpty": false
+        }
+      },
+      "models": [],
+      "test": {
+        "kind": "request",
+        "url": "{ANTHROPIC_BASE_URL}/v1/models",
+        "keyVariable": "ANTHROPIC_AUTH_TOKEN",
+        "header": "authorization",
+        "scheme": "Bearer",
+        "headers": {},
+        "note": "Asks the gateway for its model list. Spends nothing; a gateway that lists no models answers with an error."
+      },
+      "quota": {
+        "source": "transcript-pricing",
+        "note": "A gateway has no standard usage endpoint, so cost is counted from the transcript where the model's price is known."
+      },
+      "catalog": "gateway",
+      "detect": {
+        "hosts": [],
+        "variables": [],
+        "keyPrefixes": []
+      }
+    },
+    {
+      "id": "openai-api-key",
+      "origin": "built-in",
+      "label": "OpenAI API key",
+      "summary": "Codex with an OpenAI platform API key, billed per token, through the Responses API.",
+      "group": "popular",
+      "docs": "https://developers.openai.com/codex/config-advanced",
+      "verified": "2026-10-16",
+      "unverified": [],
+      "halves": {
+        "codex": {
+          "env": {
+            "OPENAI_API_KEY": {
+              "secretName": "OPENAI_API_KEY",
+              "required": true,
+              "allowEmpty": false
+            }
+          },
+          "codexProvider": {
+            "id": "openai-api",
+            "name": "OpenAI API",
+            "baseUrl": "https://api.openai.com/v1",
+            "keyVariable": "OPENAI_API_KEY"
+          },
+          "models": []
+        }
+      },
+      "harness": "codex",
+      "env": {
+        "OPENAI_API_KEY": {
+          "secretName": "OPENAI_API_KEY",
+          "required": true,
+          "allowEmpty": false
+        }
+      },
+      "codexProvider": {
+        "id": "openai-api",
+        "name": "OpenAI API",
+        "baseUrl": "https://api.openai.com/v1",
+        "keyVariable": "OPENAI_API_KEY"
+      },
+      "models": [],
+      "test": {
+        "kind": "request",
+        "url": "https://api.openai.com/v1/models",
+        "keyVariable": "OPENAI_API_KEY",
+        "header": "authorization",
+        "scheme": "Bearer",
+        "headers": {},
+        "note": "Lists the models the key can use. Spends nothing."
+      },
+      "quota": {
+        "source": "transcript-pricing",
+        "note": "OpenAI reports usage only to an admin key, so cost is counted from the transcript at OpenAI's prices."
+      },
+      "catalog": "openai",
+      "pricing": "openai",
+      "detect": {
+        "hosts": ["api.openai.com"],
+        "variables": ["OPENAI_API_KEY"],
+        "keyPrefixes": ["sk-proj-", "sk-svcacct-"]
+      }
+    },
+    {
+      "id": "azure-openai",
+      "origin": "built-in",
+      "label": "Azure OpenAI",
+      "summary": "Codex on your Azure OpenAI resource with its API key. The model is your deployment name. Entra ID sign-in is not supported by Codex.",
+      "group": "cloud",
+      "docs": "https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/codex",
+      "verified": "2026-10-16",
+      "unverified": [
+        "The Test lists models on the v1 endpoint with the api-key header; Microsoft's Codex guide does not describe a test."
+      ],
+      "halves": {
+        "codex": {
+          "env": {
+            "AZURE_OPENAI_RESOURCE": {
+              "value": "",
+              "required": true,
+              "allowEmpty": false,
+              "description": "the resource name, as in <name>.openai.azure.com"
+            },
+            "AZURE_OPENAI_API_KEY": {
+              "secretName": "AZURE_OPENAI_API_KEY",
+              "required": true,
+              "allowEmpty": false
+            }
+          },
+          "codexProvider": {
+            "id": "azure-openai",
+            "name": "Azure OpenAI",
+            "baseUrl": "https://{AZURE_OPENAI_RESOURCE}.openai.azure.com/openai/v1",
+            "keyVariable": "AZURE_OPENAI_API_KEY"
+          },
+          "models": []
+        }
+      },
+      "harness": "codex",
+      "env": {
+        "AZURE_OPENAI_RESOURCE": {
+          "value": "",
+          "required": true,
+          "allowEmpty": false,
+          "description": "the resource name, as in <name>.openai.azure.com"
+        },
+        "AZURE_OPENAI_API_KEY": {
+          "secretName": "AZURE_OPENAI_API_KEY",
+          "required": true,
+          "allowEmpty": false
+        }
+      },
+      "codexProvider": {
+        "id": "azure-openai",
+        "name": "Azure OpenAI",
+        "baseUrl": "https://{AZURE_OPENAI_RESOURCE}.openai.azure.com/openai/v1",
+        "keyVariable": "AZURE_OPENAI_API_KEY"
+      },
+      "models": [],
+      "test": {
+        "kind": "request",
+        "url": "https://{AZURE_OPENAI_RESOURCE}.openai.azure.com/openai/v1/models",
+        "keyVariable": "AZURE_OPENAI_API_KEY",
+        "header": "api-key",
+        "scheme": "",
+        "headers": {},
+        "note": "Lists the models on your resource. Spends nothing."
+      },
+      "quota": {
+        "source": "transcript-pricing",
+        "note": "Azure reports quota in the portal only, so cost is counted from the transcript."
+      },
+      "catalog": "azure-openai",
+      "pricing": "openai",
+      "detect": {
+        "hosts": ["openai.azure.com"],
+        "variables": ["AZURE_OPENAI_*"],
+        "keyPrefixes": []
+      }
+    },
+    {
+      "id": "ollama-codex",
+      "origin": "built-in",
+      "label": "Ollama (local)",
+      "summary": "Codex on a model Ollama serves on this machine, through Codex's own Ollama provider. Nothing leaves the machine.",
+      "group": "self-hosted",
+      "docs": "https://docs.ollama.com/integrations/codex",
+      "verified": "2026-10-16",
+      "unverified": [
+        "Ollama's Responses API is stateless, so Codex features that resume a response on the server do not work."
+      ],
+      "halves": {
+        "codex": {
+          "env": {},
+          "codexProvider": {
+            "id": "ollama",
+            "model": "gpt-oss:20b"
+          },
+          "models": []
+        }
+      },
+      "harness": "codex",
+      "env": {},
+      "codexProvider": {
+        "id": "ollama",
+        "model": "gpt-oss:20b"
+      },
+      "models": [],
+      "test": {
+        "kind": "local",
+        "url": "http://localhost:11434/api/tags",
+        "note": "Asks Ollama on this machine which models it has. Nothing leaves the machine."
+      },
+      "quota": {
+        "source": "none",
+        "note": "A local model has no quota and no bill."
+      },
+      "catalog": "ollama",
+      "detect": {
+        "hosts": [],
+        "variables": ["OLLAMA_*"],
+        "keyPrefixes": []
+      }
+    }
+  ]
+}

@@ -1,31 +1,55 @@
-import { describe, it } from 'bun:test';
+import { afterEach, describe, it } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import should from 'should';
-import { builtInModelCatalogs } from '../../../daemon/lib/catalog/catalog.ts';
 import { checkedBuiltInModelCatalogs, checkedBuiltInPresets } from '../../../daemon/lib/built-ins.ts';
-import {
-  checkedBuiltInModelCatalogs as inlinedModelCatalogs,
-  checkedBuiltInPresets as inlinedPresets,
-} from '../../../daemon/lib/built-ins.ts' with { type: 'macro' };
-import { builtInPresets } from '../../../daemon/lib/presets/catalog.ts';
+import { builtInsFresh, builtInsText, parsedBuiltIns } from '../../../scripts/built-ins.ts';
 
-describe('this build’s catalogs, parsed when it is built', () => {
-  it('should inline exactly what parsing the shipped files at run time gives', () => {
+const folders: string[] = [];
+afterEach(() => {
+  for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
+});
+
+function written(text: string): string {
+  const folder = mkdtempSync(join(tmpdir(), 'logins-built-ins-'));
+  folders.push(folder);
+  const file = join(folder, 'built-ins.json');
+  writeFileSync(file, text);
+  return file;
+}
+
+describe('this build’s catalogs, parsed when built-ins.json is written', () => {
+  it('should hold exactly what parsing the shipped files gives now (run scripts/built-ins.ts when this fails)', () => {
     // Act
-    const inlined = { models: inlinedModelCatalogs(), presets: inlinedPresets() };
+    const parsed = parsedBuiltIns();
 
-    // Assert — a value the macro cannot carry (a function, a class, a Date) would differ here.
-    should(inlined.models).eql(builtInModelCatalogs());
-    should(inlined.presets).eql(builtInPresets());
-    should(Object.keys(inlined.models).length).be.above(0);
-    should(inlined.presets.length).be.above(0);
+    // Assert — a catalog changed without regenerating, or a value JSON cannot carry, would differ here.
+    should(builtInsFresh()).be.true();
+    should(checkedBuiltInModelCatalogs()).eql(parsed.models);
+    should(checkedBuiltInPresets()).eql(parsed.presets);
+    should(Object.keys(parsed.models).length).be.above(0);
+    should(parsed.presets.length).be.above(0);
   });
 
-  it('should answer the same values when called plainly', () => {
-    // Act
-    const plain = { models: checkedBuiltInModelCatalogs(), presets: checkedBuiltInPresets() };
+  it('should call a file stale when one value differs, it does not parse or it is missing', () => {
+    // Arrange
+    const parsed = parsedBuiltIns();
+    const [first, ...rest] = parsed.presets;
+    const changed = { ...parsed, presets: [{ ...first, label: `${String(first?.label)} (edited)` }, ...rest] };
 
-    // Assert
-    should(plain.models).eql(builtInModelCatalogs());
-    should(plain.presets).eql(builtInPresets());
+    // Act / Assert
+    should(builtInsFresh(written(builtInsText(parsed)))).be.true();
+    should(builtInsFresh(written(builtInsText(changed as typeof parsed)))).be.false();
+    should(builtInsFresh(written('{ "models": '))).be.false();
+    should(builtInsFresh(join(tmpdir(), 'logins-built-ins-none', 'built-ins.json'))).be.false();
+  });
+
+  it('should compare values, not formatting', () => {
+    // Arrange — the same values on one line, as a formatter might never write them.
+    const file = written(`${JSON.stringify(parsedBuiltIns())}\n`);
+
+    // Act / Assert
+    should(builtInsFresh(file)).be.true();
   });
 });

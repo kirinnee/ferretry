@@ -424,3 +424,4 @@ tool	secure_list	removed	not built on 5.0 and so not offered to agents until it 
 tool	secure_discard	removed	not built on 5.0 and so not offered to agents until it is (lizzette 2026-11-11: M2 moves after merge); the parity row stays open
 tool	secure_paste	removed	not built on 5.0 and so not offered to agents until it is (lizzette 2026-11-11: M2 moves after merge); the parity row stays open
 tool	task_plan	removed	not built on 5.0 and so not offered to agents until it is (lizzette 2026-11-11: M2 moves after merge); the parity row stays open
+route	GET /v1/ferrets/:ferretId/hypermedia	added	new in 5.0: the app reads whether a ferret is told to use hypermedia (its own switch, else its mode default); v4 read it off the session view's config, which no 5.0 route serves, and Ferrets' summary carries neither. Same descriptor as the Ferrets read routes: operator, any caller, no-store, read audit skipped, answers a bare boolean so no body guard

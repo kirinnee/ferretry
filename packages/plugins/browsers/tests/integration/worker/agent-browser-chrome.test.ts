@@ -8,7 +8,7 @@ import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/pro
 import { NodeSessionBrowserLauncher } from '../../../daemon/worker/launcher.ts';
 import { BrowserSessionService } from '../../../daemon/pages/service.ts';
 import { nodeStagedFiles } from '../../../daemon/tools/adapters/staged-files.ts';
-import { SurfaceControl } from '../../../daemon/tools/control.ts';
+import { forgetsClosedPages, SurfaceControl } from '../../../daemon/tools/control.ts';
 import { rootFiles } from '../../../daemon/tools/files.ts';
 import { BrowserToolError as AgentToolError, BrowserTools as AgentToolService } from '../../../daemon/tools/service.ts';
 import type { ToolCaller as AgentToolCaller } from '../../../daemon/tools/types.ts';
@@ -64,6 +64,11 @@ let site: ReturnType<typeof Bun.serve>;
 let browser: BrowserSessionService;
 let tools: AgentToolService;
 let base = '';
+/** The surface events this run journaled, oldest first. */
+const journaled: { readonly type: string; readonly data: unknown }[] = [];
+let control: SurfaceControl;
+/** How many times the slow page was asked for: the act that asks is in Chrome, mid-flight. */
+let slowRequests = 0;
 
 const agent = (sessionId: string): AgentToolCaller => ({ kind: 'agent', sessionId });
 
@@ -139,12 +144,30 @@ beforeAll(async () => {
             "<script>setTimeout(()=>document.body.append('late-text'),1500)</script></body></html>",
           { headers: { 'content-type': 'text/html' } },
         );
+      if (url.pathname === '/slow') {
+        slowRequests += 1;
+        return Bun.sleep(1_500).then(
+          () =>
+            new Response('<html><body><p id="c">slow page</p></body></html>', {
+              headers: { 'content-type': 'text/html' },
+            }),
+        );
+      }
       if (url.pathname === '/ping')
         return new Response('pong', { headers: { 'x-api-key': 'k', 'content-type': 'text/plain' } });
       return page(url.pathname === '/set' ? 'set' : `cookie:${request.headers.get('cookie') ?? ''}`);
     },
   });
   base = `http://127.0.0.1:${String(site.port)}`;
+  control = new SurfaceControl(
+    {
+      publish: async (_sessionId, type, data) => {
+        journaled.push({ type, data });
+      },
+      history: async () => journaled,
+    },
+    { now: () => Date.now() },
+  );
   browser = new BrowserSessionService(
     { get: async id => (sessions.has(id) ? {} : undefined) },
     new NodeSessionBrowserLauncher(
@@ -160,10 +183,14 @@ beforeAll(async () => {
       { stageDirectory: join(root, 'stage'), listenerProver: unprovenListenerProver() },
     ),
     () => Date.now(),
+    undefined,
+    undefined,
+    // What the daemon half binds: a page that closes, however it closed, ends what a person held on it.
+    forgetsClosedPages(control),
   );
   tools = new AgentToolService({
     browser,
-    control: new SurfaceControl({ publish: async () => undefined, history: async () => [] }, { now: () => Date.now() }),
+    control,
     kernel: browserKernel().kernel,
     policy: { allows: async () => true },
     files: rootFiles(
@@ -338,6 +365,54 @@ describe('the machine agent browser, in a real Chrome', () => {
     // Assert
     should(held).be.instanceOf(AgentToolError).and.have.property('code', 'taken_over');
     should(elsewhere.summary).startWith('Done on %browser:work');
+  }, 60_000);
+
+  it('should finish an act already running when a person takes the page over, and refuse the next one', async () => {
+    // Arrange — a slow navigation is in the page when the person takes it over.
+    await tools.call(agent('s1'), { tool: 'browser.open', name: 'inflight', url: `${base}/read` });
+    const running = tools.call(agent('s1'), { tool: 'browser.navigate', name: 'inflight', url: `${base}/slow` });
+    await waitFor(() => slowRequests > 0, 'the slow page to be asked for', { within: 10_000, every: 20 });
+
+    // Act
+    await tools.control('s1', { action: 'takeover', key: 'inflight' }, { by: 'local' });
+    const finished = await running;
+    const next = await tools
+      .call(agent('s1'), { tool: 'browser.click', name: 'inflight', selector: '#q' })
+      .catch((error: unknown) => error);
+    const person = await tools.call(
+      { kind: 'person', sessionId: 's1', openedBy: { by: 'local' } },
+      { tool: 'browser.read', name: 'inflight', mode: 'text', selector: '#c' },
+    );
+
+    // Assert — the act that was already in the page was not undone; the one after it never reached Chrome.
+    should(finished.summary).containEql(`(now at ${base}/slow)`);
+    should(next).be.instanceOf(AgentToolError).and.have.property('code', 'taken_over');
+    should(person.output).equal('slow page');
+    await tools.control('s1', { action: 'handback', key: 'inflight' }, { by: 'local' });
+    await tools.call(agent('s1'), { tool: 'browser.close', name: 'inflight' });
+  }, 60_000);
+
+  it('should forget a takeover when the person closes the held page from the viewer', async () => {
+    // Arrange
+    await tools.call(agent('s1'), { tool: 'browser.open', name: 'viewed', url: `${base}/read` });
+    await tools.control('s1', { action: 'takeover', key: 'viewed' }, { by: 'local' });
+    const pageId = (await browser.status('s1')).pages.find(page => page.name === 'viewed')?.id as string;
+    const held = (await tools.controlView('s1')).takeovers.filter(takeover => takeover.id === pageId);
+
+    // Act — the person's toolbar closes the page; no tool did.
+    await browser.act('s1', { action: 'close-page', pageId });
+    await waitFor(
+      async () => (await tools.controlView('s1')).takeovers.every(takeover => takeover.id !== pageId),
+      'the closed page’s takeover to end',
+      { within: 5_000, every: 50 },
+    );
+
+    // Assert — it ended in memory and was journaled as a hand-back, so a replay reads the page released.
+    should(held).have.length(1);
+    should(
+      journaled.filter(event => event.type === 'surface.handback' && (event.data as { id?: string }).id === pageId),
+    ).have.length(1);
+    should(await control.takeoverOf('s1', { surface: 'browser', id: pageId })).be.undefined();
   }, 60_000);
 
   it('should keep incognito cookies apart from the shared profile and from each other, both ways, and discard them', async () => {
