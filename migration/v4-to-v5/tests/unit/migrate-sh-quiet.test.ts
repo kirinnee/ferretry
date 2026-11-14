@@ -85,6 +85,31 @@ describe('quiet: fail closed, never certify a failed read', () => {
     expect(calls).toContain('fy daemon start');
   });
 
+  test('queued agenda changes (agenda-changes.pending.json) are queued state, not pending: quiet passes and names the ferrets', async () => {
+    // v4 delivers these at a ferret's next turn end; a quiet window has no turns, so they can never drain.
+    await writeFile(join(sb.v4home, 'state', 'sessions', 'f1', 'agenda-changes.pending.json'), '[{"id":"e1"}]');
+    await writeFile(join(sb.v4home, 'state', 'sessions', 'f2', 'agenda-changes.pending.json'), '[{"id":"e2"}]');
+    const result = await sb.run('quiet', ['--owner-confirmed']);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain('queued agenda changes');
+    expect(result.out).toContain('f1');
+    expect(result.out).toContain('f2');
+    expect(await sb.notesText()).toContain('# quiet\n');
+    const calls = await sb.calls();
+    // No "start v4 for a minute": nothing was in flight.
+    expect(calls.filter(line => line === 'fy daemon stop')).toHaveLength(1);
+    expect(calls).not.toContain('fy daemon start');
+  });
+
+  test('a real in-flight agenda write beside a queued change still refuses', async () => {
+    await writeFile(join(sb.v4home, 'state', 'sessions', 'f1', 'agenda-changes.pending.json'), '[{"id":"e1"}]');
+    await writeFile(join(sb.v4home, 'state', 'sessions', 'f1', 'agenda-versions.pending.json'), '{}');
+    const result = await sb.run('quiet', ['--owner-confirmed']);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain('agenda-versions.pending.json');
+    expect(result.out).not.toContain('agenda-changes.pending.json\n');
+  });
+
   test('an unreadable session folder is exit 2, never "nothing pending"', async () => {
     const locked = join(sb.v4home, 'state', 'sessions', 'f2');
     await chmod(locked, 0o000);
