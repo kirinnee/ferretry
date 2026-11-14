@@ -2049,8 +2049,6 @@ export class InputRequestService {
                 throw error;
               }
             };
-      if (pasted !== undefined && sealed === undefined)
-        throw new InputRequestError('unavailable', 'Secure copy is not available, so nothing was pasted.');
       // The copy's end seen inside that same turn (secure-clip-1 fix2, R4): discarded, expired or captured again since it was opened.
       const lost = { copy: false };
       const outcome: TypeResult = await this.deps.target
