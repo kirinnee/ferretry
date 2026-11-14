@@ -118,12 +118,12 @@ const refusedIssues = (error: unknown): readonly string[] | undefined => {
   return [...(issues as NonNullable<FileView['issues']>[number][]).map(issueLine), sentence];
 };
 
-/** The environment variables an `--env NAME=value` list names; a malformed one is said, not skipped. */
+/** The environment variables an `--env NAME=value` list names; a malformed one is refused with a fixed sentence that never echoes it (it may be a credential pasted without its name). */
 export function parseEnvPairs(pairs: readonly string[]): Readonly<Record<string, string>> {
   const env: Record<string, string> = {};
   for (const pair of pairs) {
     const equals = pair.indexOf('=');
-    if (equals <= 0) throw new Error(`--env takes NAME=value, got "${pair}".`);
+    if (equals <= 0) throw new Error('--env takes NAME=value. Name the variable, then =, then its value.');
     env[pair.slice(0, equals)] = pair.slice(equals + 1);
   }
   return env;

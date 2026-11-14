@@ -193,6 +193,22 @@ describe('add', () => {
     should(err()).containEql('a --command or a --url, not both');
   });
 
+  it('should say a malformed --env with a fixed sentence that never echoes any part of the argument', async () => {
+    const fake = 'sk-FAKE-credential-0123456789abcdef';
+    for (const bad of [fake, `=${fake}`, `${fake}:also`]) {
+      for (const verb of ['add', 'edit'] as const) {
+        const { kernel, run, out, err } = harness();
+        kernel.files.set('mcp/docs.yaml', 'command: a\n');
+        const name = verb === 'add' ? 'fresh' : 'docs';
+        should(await run(verb, [name], { env: [bad] })).equal(2);
+        should(err()).containEql('--env takes NAME=value.');
+        should(out() + err()).not.containEql(fake);
+        should(out() + err()).not.containEql('0123456789');
+        should(writes(kernel)).eql([]);
+      }
+    }
+  });
+
   it('should change nothing on --dry-run', async () => {
     const { kernel, run, out } = harness();
     should(await run('add', ['docs'], { file: 'x', 'dry-run': true })).equal(0);
