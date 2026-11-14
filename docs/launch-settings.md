@@ -185,7 +185,7 @@ Each prints what restarted now, then what is queued and why. `--json` prints the
 
 ### In the app
 
-An **Outdated** mark sits on the sidebar row and in the session header of every outdated ferret, and a
+An **Outdated** mark sits on the ferret list's row and in **Info › Overview**, beside Restart, of every outdated ferret (a reader who may not restart it still sees it), and a
 **Restart outdated (N)** row in the ferret list's **⋯** menu (the ⋯ wears the count as a badge while any ferret is outdated, so it is found without hunting) offers the restart. It sends the same request as `fy restart
 --outdated` and shows the same result, restarted now and queued, until it is dismissed. Nothing restarts
 automatically: a restart interrupts a ferret, so the owner presses it.

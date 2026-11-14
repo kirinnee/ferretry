@@ -3,6 +3,8 @@
  * and chips; a row opens the file in Files. Over a scripted daemon listing.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { FerretWorkspaceActionsProvider } from '@ferretry/app';
+import { noteClientDaemon } from '@ferretry/app/testing';
 import type { PanelProps } from '@ferretry/kernel/manifest';
 import type { FunctionComponent } from 'react';
 import { createFilesPanel } from '../../../../app/views/files.tsx';
@@ -157,5 +159,41 @@ describe('S-0075 the Instructions panel', () => {
     await settle();
     // Files drew the file the row named, in its own tab.
     expect(mounted.container.textContent).toContain('# AGENTS.md');
+  });
+});
+
+describe('S-0075 an Instructions row also brings Files on screen (a phone shows one panel at a time)', () => {
+  const press = async (workspace: { daemon: string; ferret: string }, client = daemon(), asked: string[] = []) => {
+    const Instructions = createInstructionsPanel(client) as FunctionComponent<PanelProps>;
+    mounted = await mount(
+      <FerretWorkspaceActionsProvider
+        daemon={workspace.daemon}
+        ferret={workspace.ferret}
+        showPanel={id => asked.push(id)}
+      >
+        <Instructions subject="f1" />
+      </FerretWorkspaceActionsProvider>,
+    );
+    await settle();
+    await interact(() =>
+      must(
+        mounted?.container.querySelector<HTMLElement>('[data-context-doc="AGENTS.md"]'),
+        'the AGENTS.md row',
+      ).click(),
+    );
+    await settle();
+    return asked;
+  };
+
+  it('S-0075 asks the workspace of this ferret for the files panel', async () => {
+    expect(await press({ daemon: 'alpha', ferret: 'f1' })).toEqual(['files']);
+  });
+
+  it('S-0075 never moves the page of another ferret, or of another daemon', async () => {
+    expect(await press({ daemon: 'alpha', ferret: 'someone-else' })).toEqual([]);
+    await mounted?.unmount();
+    const other = daemon();
+    noteClientDaemon(other, 'beta');
+    expect(await press({ daemon: 'alpha', ferret: 'f1' }, other)).toEqual([]);
   });
 });

@@ -33,7 +33,7 @@ export function FerretList({ client }: { readonly client: LiveFerretsClient }): 
   const { read, retry } = useFerretList(client);
   const { device, set } = useDeviceControls();
   const [showStopped, setShowStopped] = useState(DEFAULT_LIST_FILTER.showStopped);
-  const restart = useRestartOutdated(read.kind === 'ready' ? read.ferrets : null, request =>
+  const restart = useRestartOutdated(client, read.kind === 'ready' ? read.ferrets : null, request =>
     restartFerrets(client, request),
   );
   const filter: FerretListFilter = { mode: device.sessionsMode ?? DEFAULT_LIST_FILTER.mode, showStopped };
@@ -59,7 +59,14 @@ export function FerretList({ client }: { readonly client: LiveFerretsClient }): 
 
   const view = ferretListView(read.ferrets, filter, ferret => ferret.id === openFerret);
   const row = (ferret: (typeof read.ferrets)[number]): ReactNode => (
-    <FerretRow active={ferret.id === openFerret} daemon={daemon} ferret={ferret} key={ferret.id} {...navigation} />
+    <FerretRow
+      active={ferret.id === openFerret}
+      daemon={daemon}
+      ferret={ferret}
+      key={ferret.id}
+      overlayKey={client}
+      {...navigation}
+    />
   );
   const empty = view.pinned.length === 0 && view.groups.length === 0;
   return (

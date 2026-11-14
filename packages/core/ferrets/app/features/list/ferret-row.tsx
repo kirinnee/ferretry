@@ -25,9 +25,11 @@ export interface FerretRowProps {
   readonly daemon: string;
   readonly active: boolean;
   readonly onNavigate?: (to: string) => void;
+  /** The daemon's client, which keys what "Restart outdated" last answered (`restart-outdated/restart-overlay.ts`). */
+  readonly overlayKey?: object;
 }
 
-export function FerretRow({ ferret, daemon, active, onNavigate }: FerretRowProps): ReactNode {
+export function FerretRow({ ferret, daemon, active, onNavigate, overlayKey }: FerretRowProps): ReactNode {
   const { title, ferret: callsign } = ferretTitles(ferret);
   const openMenu = useContext(RowMenuContext);
   const link = useRef<HTMLAnchorElement | null>(null);
@@ -71,7 +73,7 @@ export function FerretRow({ ferret, daemon, active, onNavigate }: FerretRowProps
         <StatusMark ferret={ferret} />
         <span className="fy-sbar__title">
           <span className="fy-sbar__name">{title}</span>
-          <OutdatedMark ferret={ferret} />
+          <OutdatedMark ferret={ferret} overlayKey={overlayKey} />
         </span>
         <span className="fy-sbar__detail" data-sbar-detail="">
           {callsign === null ? null : (

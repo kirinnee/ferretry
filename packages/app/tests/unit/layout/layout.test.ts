@@ -59,6 +59,7 @@ const surfaces = [
   plugin('mcp', { panels: [{ id: 'mcp-servers', slot: 'ferret.side', order: 40 }] }),
   plugin('packs', { panels: [{ id: 'helpers', slot: 'ferret.side', order: 40 }] }),
   plugin('skills', { panels: [{ id: 'skills', slot: 'ferret.side', order: 50 }] }),
+  plugin('ferrets-instructions', { panels: [{ id: 'instructions', slot: 'ferret.side', order: 41 }] }),
   // The ids and orders the real manifests declare for `composer.tools` (voice, conversation, runtimes, usage).
   plugin('voice', { panels: [{ id: 'dictation', slot: 'composer.tools', order: 20 }] }),
   plugin('conversation-files', { panels: [{ id: 'attachments', slot: 'composer.tools', order: 10 }] }),
@@ -226,6 +227,7 @@ describe('the frame plan', () => {
       'mcp-servers',
       'helpers',
       'skills',
+      'instructions',
       'usage',
       'insights',
     ]);
@@ -255,6 +257,7 @@ describe('the frame plan', () => {
       'files',
       'mcp-servers',
       'helpers',
+      'instructions',
       'skills',
       'usage',
       'insights',

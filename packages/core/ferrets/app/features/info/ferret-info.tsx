@@ -126,7 +126,7 @@ function FerretInfo({
         overview: () => (
           <>
             <InfoOverview
-              about={{ onRestart: restart }}
+              about={{ onRestart: restart, overlayKey: client }}
               ferret={record}
               name={name}
               now={now()}

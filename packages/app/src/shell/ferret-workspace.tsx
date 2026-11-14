@@ -12,7 +12,15 @@
 import type { PanelIntent } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useId, useRef, useState } from 'react';
 import { useLayoutMode } from '../ui/hooks/use-layout-mode.ts';
-import { CHAT_TAB, type NewTabChoice, newTabChoices, phoneTabs, tabOrChat } from './ferret-workspace-model.ts';
+import { FerretWorkspaceActionsProvider } from './ferret-workspace-actions.tsx';
+import {
+  CHAT_TAB,
+  type NewTabChoice,
+  newTabChoices,
+  panelKey,
+  phoneTabs,
+  tabOrChat,
+} from './ferret-workspace-model.ts';
 import { phoneChipId, PhoneTabRow } from './phone-tab-row.tsx';
 import { PanelSlot, useSlotPanels } from './views.tsx';
 
@@ -26,15 +34,20 @@ export interface FerretWorkspaceProps {
   readonly chat: ReactNode;
 }
 
+/** Beside the chat every panel is already on screen: asking for one changes nothing. */
+const ALREADY_SHOWN = (): void => undefined;
+
 export function FerretWorkspace({ daemon, subject, chat }: FerretWorkspaceProps) {
   const panels = useSlotPanels(SIDE);
   const phone = useLayoutMode() === 'drawer';
   if (!phone || panels.length === 0)
     return (
-      <div className="flex min-h-0 min-w-0 flex-1">
-        {chat}
-        <PanelSlot daemon={daemon} slot={SIDE} subject={subject} />
-      </div>
+      <FerretWorkspaceActionsProvider daemon={daemon} ferret={subject} showPanel={ALREADY_SHOWN}>
+        <div className="flex min-h-0 min-w-0 flex-1">
+          {chat}
+          <PanelSlot daemon={daemon} slot={SIDE} subject={subject} />
+        </div>
+      </FerretWorkspaceActionsProvider>
     );
   return <PhoneWorkspace chat={chat} daemon={daemon} subject={subject} />;
 }
@@ -55,8 +68,17 @@ function PhoneWorkspace({ daemon, subject, chat }: FerretWorkspaceProps) {
     setIntent({ id: requests.current, action: choice.action });
   }, []);
 
+  /** A panel of this ferret asks for another one (`files`): its chip becomes the one on show. */
+  const showPanel = useCallback(
+    (panelId: string): void => {
+      const panel = panels.find(candidate => candidate.id === panelId);
+      if (panel !== undefined) setChosen(panelKey(panel));
+    },
+    [panels],
+  );
+
   return (
-    <>
+    <FerretWorkspaceActionsProvider daemon={daemon} ferret={subject} showPanel={showPanel}>
       <PhoneTabRow
         active={active}
         choices={newTabChoices(panels)}
@@ -84,6 +106,6 @@ function PhoneWorkspace({ daemon, subject, chat }: FerretWorkspaceProps) {
           {...(intent === undefined ? {} : { props: { intent } })}
         />
       </div>
-    </>
+    </FerretWorkspaceActionsProvider>
   );
 }

@@ -22,6 +22,7 @@ const OWNER: Readonly<Record<string, string>> = {
   'mcp-servers': 'mcp',
   helpers: 'packs',
   skills: 'skills',
+  instructions: 'ferrets',
   usage: 'usage',
   insights: 'usage',
 };
@@ -47,6 +48,7 @@ describe('the phone ferret page’s chips', () => {
       'MCP',
       'Helpers',
       'Skills',
+      'Instructions',
       'Usage',
       'Insights',
     ]);

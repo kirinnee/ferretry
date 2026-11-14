@@ -110,12 +110,7 @@ export {
 export { fillPath, HEALTH_ROUTE, INVENTORY_ROUTE, type ShellPluginClient } from './client/daemon-client.ts';
 export type { BlockReason, InventoryEntry, Standing } from './client/inventory.ts';
 export { UPDATE_DAEMON_COMMAND } from './client/sentences.ts';
-export {
-  DaemonCallError,
-  isCarrierOutage,
-  type SocketListeners,
-  type TransportSocket,
-} from './client/transport.ts';
+export { DaemonCallError, isCarrierOutage, type SocketListeners, type TransportSocket } from './client/transport.ts';
 export type { View } from './surfaces/halves.ts';
 export type { GeneratedSurfaces, SurfaceEntry } from './surfaces/registry.ts';
 
@@ -152,6 +147,12 @@ export { type DeviceLayout, useDeviceLayout } from './shell/use-device-layout.ts
 export { PanelSlot, useSlotHasPanels, useSlotPanels } from './shell/views.tsx';
 /** @public The ferret page's body: the chat beside the `ferret.side` panels, or on a phone one at a time behind chips and "+" (§5.2). */
 export { FerretWorkspace } from './shell/ferret-workspace.tsx';
+/** @public A panel of a ferret's page asks its workspace to bring another panel of the same ferret on screen (a phone shows one at a time; §5.2). */
+export {
+  type FerretWorkspaceActions,
+  FerretWorkspaceActionsProvider,
+  useFerretWorkspace,
+} from './shell/ferret-workspace-actions.tsx';
 /** @public A panel acts on its host's one-shot request (`PanelIntent`), once per request id and only for the action it owns (§5.2). */
 export { usePanelIntent } from './shell/panel-intent.ts';
 export { forSubject } from './shell/for-subject.ts';

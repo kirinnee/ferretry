@@ -26,6 +26,7 @@ import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { App } from '../../../src/shell/app.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { FerretWorkspace } from '../../../src/shell/ferret-workspace.tsx';
+import { useFerretWorkspace } from '../../../src/shell/ferret-workspace-actions.tsx';
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
@@ -133,6 +134,7 @@ const OWNER: Readonly<Record<string, string>> = {
   processes: 'terminals',
   browser: 'browsers',
   files: 'ferrets',
+  instructions: 'ferrets',
   'ferret-warden': 'warden',
   'mcp-servers': 'mcp',
   helpers: 'packs',
@@ -142,7 +144,9 @@ const OWNER: Readonly<Record<string, string>> = {
 };
 const SIDE = DEFAULT_LAYOUT.panels['ferret.side'] ?? [];
 const panelStand = (id: string) =>
-  function SidePanel({ intent }: PanelProps): ReactNode {
+  function SidePanel({ intent, subject }: PanelProps): ReactNode {
+    // Ferrets' Instructions list opens a file in Files and brings Files on screen through the ferret's workspace.
+    const workspace = useFerretWorkspace();
     return (
       <section
         data-intent={intent === undefined ? undefined : `${intent.action}#${String(intent.id)}`}
@@ -151,6 +155,17 @@ const panelStand = (id: string) =>
       >
         <h3 style={{ margin: 0, fontSize: 13 }}>{id}</h3>
         <p style={{ margin: '4px 0 0', fontSize: 12, opacity: 0.7 }}>Fake {OWNER[id] ?? 'plugin'} panel.</p>
+        {id === 'instructions' ? (
+          <button
+            data-open-in-files=""
+            onClick={() => {
+              if (workspace !== null && workspace.ferret === subject) workspace.showPanel('files');
+            }}
+            type="button"
+          >
+            AGENTS.md
+          </button>
+        ) : null}
       </section>
     );
   };

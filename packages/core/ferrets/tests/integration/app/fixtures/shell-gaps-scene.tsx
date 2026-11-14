@@ -15,7 +15,6 @@ import type { PanelProps } from '@ferretry/kernel/manifest';
 import type { FunctionComponent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FerretList } from '../../../../app/features/list/ferret-list.tsx';
-import { RestartOverlayProvider } from '../../../../app/features/restart-outdated/restart-overlay.tsx';
 import type { LiveFerretsClient } from '../../../../app/lib/client.ts';
 import { createInstructionsPanel } from '../../../../app/views/instructions.tsx';
 import '../../../../app/features/list/ferret-list.css';
@@ -117,9 +116,7 @@ if (view === 'instructions') {
   Object.assign(root.style, { maxWidth: '360px', margin: '0 auto' });
   reactRoot.render(
     <RouterProvider screens={SCREENS}>
-      <RestartOverlayProvider>
-        <FerretList client={list.client} />
-      </RestartOverlayProvider>
+      <FerretList client={list.client} />
     </RouterProvider>,
   );
 }

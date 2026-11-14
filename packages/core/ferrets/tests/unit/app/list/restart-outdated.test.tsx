@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { RouterProvider } from '@ferretry/app/testing';
 import { deviceControls, type ScreenRef } from '@ferretry/app';
 import { FerretList } from '../../../../app/features/list/ferret-list.tsx';
-import { RestartOverlayProvider } from '../../../../app/features/restart-outdated/restart-overlay.tsx';
 import type { FerretSummary, RestartResult } from '../../../../contract/index.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { listDaemon, summary } from './support.ts';
@@ -82,9 +81,7 @@ const draw = async (
   };
   mounted = await mount(
     <RouterProvider screens={SCREENS}>
-      <RestartOverlayProvider>
-        <FerretList client={daemon.client} />
-      </RestartOverlayProvider>
+      <FerretList client={daemon.client} />
     </RouterProvider>,
   );
   await settle();

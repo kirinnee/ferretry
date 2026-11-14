@@ -13,7 +13,7 @@
 import { useState } from 'react';
 import type { FerretSummary, RestartRequest, RestartResult } from '../../../contract/index.ts';
 import { OUTDATED_REQUEST, outdatedFerrets, restartSummary } from './outdated-model.ts';
-import { useRestartOverlay } from './restart-overlay.tsx';
+import { useRestartOverlay } from './restart-overlay.ts';
 
 type Outcome =
   | { readonly kind: 'idle' }
@@ -35,11 +35,12 @@ const failureMessage = (error: unknown): string =>
 
 /** The restart's state, kept once by the list so the menu that presses it and the line that answers agree. */
 export function useRestartOutdated(
+  overlayKey: object | undefined,
   ferrets: readonly FerretSummary[] | null,
   onRestart: (request: RestartRequest) => Promise<RestartResult>,
 ): RestartOutdated {
   const [outcome, setOutcome] = useState<Outcome>({ kind: 'idle' });
-  const { overlay, record, clear } = useRestartOverlay();
+  const { overlay, record, clear } = useRestartOverlay(overlayKey);
   const count = outdatedFerrets(ferrets, overlay).length;
 
   const dismiss = (): void => {

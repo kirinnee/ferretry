@@ -3,6 +3,7 @@
  * with search and chips; a row opens the file in the ferret's Files panel. The listing is the Files panel's own
  * (`fsApi.list`), so what is offered is exactly what Files may serve — a file the daemon denies is not listed.
  */
+import { daemonOfClient, useFerretWorkspace } from '@ferretry/app';
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
 import {
   ContextFailure,
@@ -27,6 +28,9 @@ import {
   visibleDocs,
 } from '../features/instructions/instructions-model.ts';
 import type { LiveFerretsClient } from '../lib/client.ts';
+
+/** The panel that opens a file (this plugin's own `files` panel). */
+const FILES_PANEL = 'files';
 
 /** This machine's own words for a failure: the panel is drawn per daemon and the daemon's name is the shell's. */
 const MACHINE = 'This machine';
@@ -121,11 +125,20 @@ function FerretInstructions({ client, ferretId }: { readonly client: LiveFerrets
     [scope],
   );
   const read = useContextRead(loader, true);
+  const workspace = useFerretWorkspace();
+  // Open the file in Files, and bring Files on screen where the page shows one panel at a time (a phone). Only this ferret's
+  // own workspace on this ferret's own daemon may be asked: a page showing another ferret is never moved by this list.
+  const openFile = (path: string): void => {
+    requestFileOpen(scope, path);
+    const daemon = daemonOfClient(client);
+    if (workspace?.ferret === ferretId && (daemon === undefined || daemon === workspace.daemon))
+      workspace.showPanel(FILES_PANEL);
+  };
   return (
     <DocsList
       chip={chip}
       onChipChange={setChip}
-      onOpenFile={path => requestFileOpen(scope, path)}
+      onOpenFile={openFile}
       onQueryChange={setQuery}
       query={query}
       read={read}
