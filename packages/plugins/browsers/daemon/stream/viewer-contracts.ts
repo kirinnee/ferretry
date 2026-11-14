@@ -33,7 +33,20 @@ export interface BrowserViewerHost {
   dispatchHumanInput(sessionId: string, input: BrowserInputEvent): Promise<void>;
 }
 
+/**
+ * The delivery check an AGENT's viewer stream makes where a frame would leave (sealed output, docs/secure-copy.md): the stamp is
+ * taken when a frame arrives and the check is asked, synchronously, before EVERY send of it, a retry of a frame held for a
+ * congested socket included. A frame that fails it is dropped and the stream ends with `refusal`.
+ */
+export interface ViewerDeliveryGuard {
+  stamp(): unknown;
+  mayDeliver(stamp: unknown): boolean;
+  readonly refusal: string;
+}
+
 export interface ViewerStreamOptions {
+  /** Set for an agent's viewer only: a person's stream is never asked. */
+  readonly delivery?: ViewerDeliveryGuard | undefined;
   /** Largest single client message accepted before the stream is a protocol violation. */
   readonly maxInputMessageBytes?: number;
   /** Total in-flight client bytes tolerated before the client is judged to be flooding. */

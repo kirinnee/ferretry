@@ -56,6 +56,10 @@ const WITHHELD_TITLE = '[withheld: this page holds a sealed value]';
 const WITHHELD_ERROR =
   'The page could not do that. Because it holds a sealed value, Ferretry does not pass on what the browser said about it. Check your selector, or ask the owner to look.';
 
+/** The sentence when an answer was made while no value was sealed and one began before it left: nothing of it is passed on. */
+export const SEALED_ANSWER_WITHHELD =
+  'This answer is withheld: a value was sealed in this browser while it was being made, and it might show it. Nothing of it is passed on. Try again; a page that holds the value stays closed until it ends.';
+
 export const sealedWithheld = { dialog: WITHHELD_DIALOG, title: WITHHELD_TITLE, error: WITHHELD_ERROR } as const;
 
 /** An address cut to its scheme and host: a path, query or fragment can carry what the page wants to say. */
@@ -68,8 +72,43 @@ export function originOnly(address: string): string {
   }
 }
 
+/** What was true of the seals when an output began to be made: see {@link SealedGate.mayDeliver}. */
+export interface SealedStamp {
+  /** How many seals had begun. */
+  readonly generation: number;
+  /** Whether any value lived. */
+  readonly live: boolean;
+}
+
+/** Who an output is for: a ferret's credential (an AGENT) or a proved person. */
+export type SealedCaller = 'agent' | 'person';
+
 export class SealedGate {
   constructor(private readonly ports: SealedGatePorts) {}
+
+  /** Taken when an output BEGINS to be made (a frame arrives, a picture is asked for); handed to {@link mayDeliver} where it would leave. */
+  stamp(): SealedStamp {
+    return { generation: this.ports.sealed.generation, live: this.ports.sealed.anyLive() };
+  }
+
+  /**
+   * THE ONE SYNCHRONOUS DELIVERY CHECK (docs/secure-copy.md, "Where output is checked"): asked right where an output's bytes would
+   * LEAVE (the HTTP answer, a frame sent, a held frame's retry), after every await that made them. A person's output always
+   * leaves. An agent's does not if a value began to be sealed since `since` (even one that has ended again: the output may
+   * show it), and a PICTURE (a viewer's frame, which cannot be masked) does not while any value lives or lived at `since`.
+   * It takes the caller as a value so the viewer-scope check (which agent may watch which page) composes with it.
+   */
+  mayDeliver(caller: SealedCaller, since: SealedStamp, options: { readonly picture?: boolean } = {}): boolean {
+    if (caller === 'person') return true;
+    if (this.ports.sealed.generation !== since.generation) return false;
+    if (options.picture === true) return !since.live && !this.ports.sealed.anyLive();
+    return true;
+  }
+
+  /** Called synchronously whenever a seal begins (a stream already open ends at once). Returns what stops listening. */
+  onSeal(listener: () => void): () => void {
+    return this.ports.sealed.onSeal(listener);
+  }
 
   get registry(): SealedPages {
     return this.ports.sealed;
@@ -234,53 +273,124 @@ const STRUCTURAL_ROLE_OPTIONS = new Set([
 ]);
 
 /**
- * Whether a selector's result depends on WHAT THE PAGE SAYS: its text, a label, an attribute's value, an xpath comparison.
- * A page that holds a sealed value must not answer such a question (whether the selector found anything, or what it
- * clicked), because a binary search over it reads the value one character at a time. Anything it cannot parse is
- * treated as dependent (fail closed). Structural selectors (id, class, tag, position, role) pass.
+ * THE SAFE STRUCTURAL SUBSET of selectors, parsed, never guessed. A selector is allowed on a page that holds a sealed value ONLY
+ * when every part of it is proved to be one of the forms below; anything else (any syntax this file does not know, whether
+ * Playwright's, CSS's or XPath's) is refused. A page that holds a value must not answer a question about what it says (whether a
+ * selector found anything, or what it clicked), because a binary search over the answers reads the value one character at a time.
+ *
+ * ALLOWED, per part of a `>>` chain:
+ *   CSS    tags, `*`, `#id`, `.class`, `[attr]` and `[attr op value]` for the structural attributes above only, the structural
+ *          pseudo-classes (`:first-child`, `:nth-child(2n+1)`, `:nth-of-type(…)`, `:only-child`, `:enabled`, `:disabled`,
+ *          `:checked`, `:visible`) and the combinators (space, `>`, `+`, `~`, `,`); optionally behind `css=`.
+ *   id=…   data-testid=… data-test=… data-test-id=… data-cy=… data-qa=…   (a bare value)
+ *   nth=N  visible=true|false
+ *   role=<role> with options from a short structural list (never `name`)
+ *   xpath  element names, `*`, `.`, `..`, `/`, `//`, a position `[3]` or `[last()]`: no attribute test, no function, no string.
  */
+function structuralSelector(selector: string): boolean {
+  const parts = selector.split('>>');
+  return parts.length > 0 && parts.every(part => structuralPart(part.trim()));
+}
+
+/** Whether a selector's result may depend on WHAT THE PAGE SAYS, as far as Ferretry can prove: it is not a proven structural one. */
 export function contentDependentSelector(selector: string): boolean {
-  for (const part of selector.split('>>')) {
-    const text = part.trim();
-    if (text === '') continue;
-    if (/^internal:/iu.test(text) || /^(?:text|label|placeholder|alt|title|getbytext)\s*[=:]/iu.test(text)) return true;
-    if (/^(?:xpath\s*=|\/\/|\.\.?\/|\()/iu.test(text) || text.startsWith('/')) {
-      if (xpathDependsOnContent(text.replace(/^xpath\s*=/iu, ''))) return true;
-      continue;
-    }
-    if (/^role\s*=/iu.test(text)) {
-      for (const option of text.matchAll(/\[\s*([A-Za-z-]+)\s*(?:=[^\]]*)?\]/gu))
-        if (!STRUCTURAL_ROLE_OPTIONS.has((option[1] as string).toLowerCase())) return true;
-      continue;
-    }
-    if (/^(?:id|data-testid|css|nth|visible)\s*=/iu.test(text)) {
-      if (/^css\s*=/iu.test(text) && cssDependsOnContent(text.replace(/^css\s*=/iu, ''))) return true;
-      continue;
-    }
-    if (cssDependsOnContent(text)) return true;
-  }
-  return false;
+  return !structuralSelector(selector);
 }
 
-function cssDependsOnContent(css: string): boolean {
-  if (/:(?:has-text|text|text-is|text-matches|contains|-soup-contains)\b/iu.test(css)) return true;
-  if (/(?:^|[\s>+~,(])text\s*=/iu.test(css)) return true;
-  for (const group of css.matchAll(/\[([^\]]*)\]/gu)) {
-    const inside = (group[1] as string).trim();
-    const compared = /^([^\s~|^$*=!]+)\s*([~|^$*!]?=)/u.exec(inside);
-    if (compared === null) continue;
-    if (!STRUCTURAL_ATTRIBUTES.has((compared[1] as string).toLowerCase())) return true;
-  }
-  // A bracket that never closes is not a selector Ferretry can judge.
-  return (css.match(/\[/gu)?.length ?? 0) !== (css.match(/\]/gu)?.length ?? 0);
+const IDENT = String.raw`[A-Za-z_][A-Za-z0-9_-]*`;
+const BARE_VALUE = String.raw`[A-Za-z0-9_.:/-]+`;
+const ATTRIBUTE_VALUE = String.raw`(?:"[^"\\]*"|'[^'\\]*'|[A-Za-z0-9_.:/-]+)`;
+const NTH = String.raw`(?:even|odd|[+-]?\d*n(?:\s*[+-]\s*\d+)?|[+-]?\d+)`;
+const PSEUDO = new RegExp(
+  String.raw`^:(?:first-child|last-child|only-child|first-of-type|last-of-type|only-of-type|enabled|disabled|checked|visible|nth-child\(\s*${NTH}\s*\)|nth-last-child\(\s*${NTH}\s*\)|nth-of-type\(\s*${NTH}\s*\)|nth-last-of-type\(\s*${NTH}\s*\))(?![A-Za-z0-9_-])`,
+  'u',
+);
+const ATTRIBUTE = new RegExp(
+  String.raw`^\[\s*([A-Za-z_][A-Za-z0-9_-]*)\s*(?:([~|^$*]?=)\s*${ATTRIBUTE_VALUE}(?:\s+[is])?\s*)?\]`,
+  'u',
+);
+const STEP = new RegExp(String.raw`^(?:\*|${IDENT})`, 'u');
+
+function structuralPart(text: string): boolean {
+  if (text === '') return false;
+  if (/^id=/iu.test(text) || /^data-(?:testid|test|test-id|cy|qa)=/iu.test(text))
+    return new RegExp(String.raw`^[A-Za-z-]+=${BARE_VALUE}$`, 'u').test(text);
+  if (/^nth=/iu.test(text)) return /^nth=-?\d+$/iu.test(text);
+  if (/^visible=/iu.test(text)) return /^visible=(?:true|false)$/iu.test(text);
+  if (/^role=/iu.test(text)) return structuralRole(text);
+  if (/^xpath=/iu.test(text)) return structuralXpath(text.replace(/^xpath=/iu, '').trim());
+  if (text.startsWith('/') || text.startsWith('..') || text.startsWith('./')) return structuralXpath(text);
+  if (/^css=/iu.test(text)) return structuralCss(text.replace(/^css=/iu, '').trim());
+  return structuralCss(text);
 }
 
-function xpathDependsOnContent(xpath: string): boolean {
-  // Structure only: element names, positions, `*`, axes. Any function, comparison, quote or attribute test may read content.
-  return (
-    !/^[A-Za-z0-9_\-/.*\[\]():\s]*$/u.test(xpath) ||
-    /\b(?:text|contains|starts-with|ends-with|normalize-space|string|translate|substring|name|string-length|concat|matches)\s*\(/u.test(
-      xpath,
-    )
-  );
+function structuralRole(text: string): boolean {
+  const match = /^role=([A-Za-z]+)((?:\[[^\]]*\])*)$/u.exec(text);
+  if (match === null) return false;
+  const options = (match[2] as string).match(/\[[^\]]*\]/gu) ?? [];
+  return options.every(option => {
+    const inner = /^\[\s*([A-Za-z-]+)\s*(?:=\s*(true|false|\d+)\s*)?\]$/u.exec(option);
+    return inner !== null && STRUCTURAL_ROLE_OPTIONS.has((inner[1] as string).toLowerCase());
+  });
+}
+
+/** How many characters of `text` ONE compound selector (`tag#id.class[attr]:pseudo`) takes, 0 when it is none Ferretry can prove structural. */
+function compoundLength(text: string): number {
+  let rest = text;
+  let progressed = false;
+  const tag = STEP.exec(rest);
+  if (tag !== null) {
+    rest = rest.slice(tag[0].length);
+    progressed = true;
+  }
+  for (;;) {
+    const named = new RegExp(String.raw`^[#.]${IDENT}`, 'u').exec(rest);
+    if (named !== null) {
+      rest = rest.slice(named[0].length);
+      progressed = true;
+      continue;
+    }
+    const attribute = ATTRIBUTE.exec(rest);
+    if (attribute !== null) {
+      // Only an attribute whose value is structure: matching another one would ask the page what it says.
+      if (!STRUCTURAL_ATTRIBUTES.has((attribute[1] as string).toLowerCase())) return 0;
+      rest = rest.slice(attribute[0].length);
+      progressed = true;
+      continue;
+    }
+    const pseudo = PSEUDO.exec(rest);
+    if (pseudo !== null) {
+      rest = rest.slice(pseudo[0].length);
+      progressed = true;
+      continue;
+    }
+    break;
+  }
+  return progressed ? text.length - rest.length : 0;
+}
+
+/** CSS made only of tags, ids, classes, structural attributes, structural pseudo-classes and combinators. */
+function structuralCss(css: string): boolean {
+  let rest = css.trim();
+  let needCompound = true;
+  while (rest.length > 0) {
+    if (needCompound) {
+      const used = compoundLength(rest);
+      if (used === 0) return false;
+      rest = rest.slice(used);
+      needCompound = false;
+    } else {
+      const combinator = /^(?:\s*[>+~,]\s*|\s+)/u.exec(rest);
+      if (combinator === null) return false;
+      rest = rest.slice(combinator[0].length);
+      needCompound = true;
+    }
+  }
+  return css.trim() !== '' && !needCompound;
+}
+
+/** XPath made only of element names, `*`, `.`, `..`, `/`, `//` and positions. */
+function structuralXpath(xpath: string): boolean {
+  const step = String.raw`(?:\*|${IDENT}|\.\.|\.)(?:\[(?:\d+|last\(\))\])*`;
+  return new RegExp(String.raw`^(?:\.?\/\/?|\.\.\/)?${step}(?:\/\/?${step})*$`, 'u').test(xpath);
 }

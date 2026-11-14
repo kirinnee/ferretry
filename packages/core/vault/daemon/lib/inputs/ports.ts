@@ -379,7 +379,14 @@ export interface InputSealedPort {
    * Installs the protection a paste needs (a terminal's scrollback kept masked, a page's origins kept closed) from inside the
    * target's own write turn, before any byte can land. THROWS when it cannot, with a sentence: then nothing is typed.
    */
-  protect(sessionId: string, name: CopyName, target: InputTarget, where: { readonly origins: readonly string[] }): void;
+  protect(
+    sessionId: string,
+    name: CopyName,
+    target: InputTarget,
+    where: { readonly origins: readonly string[] },
+    /** The capture the card is for: the protection is for THAT capture, never for whatever holds the name now. */
+    capturedAt?: string,
+  ): void;
   /**
    * A sentence when this paste may not go to `target` now (a person has taken the page over), or nothing. Asked when the
    * paste is raised and again right before the write. Absent: no check, as for a daemon that knows no takeover.

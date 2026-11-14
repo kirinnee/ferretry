@@ -54,7 +54,13 @@ export async function readClipboardOf(
   if (failed && !unconfirmed) throw failure;
   const kept: { readonly kept?: true } = unconfirmed ? { kept: true } : {};
   if (failed || text.trim() === '') return { ok: false, reason: 'empty', ...kept };
-  if ((await document()).navigationId !== navigationId) return { ok: false, reason: 'changed', ...kept };
+  // The second look at the document can fail (the page is gone, which is exactly when it fails): a later failure must never
+  // lose `kept`, so it answers `changed` WITH it and the daemon still keeps the clipboard sealed.
+  const now = await document().then(
+    found => found.navigationId,
+    () => undefined,
+  );
+  if (now !== navigationId) return { ok: false, reason: 'changed', ...kept };
   return { ok: true, value: text, origin, frameOrigin: origin, navigationId, ...kept };
 }
 

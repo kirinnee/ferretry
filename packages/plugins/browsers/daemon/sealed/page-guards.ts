@@ -49,6 +49,8 @@ interface Held {
   readonly hosts: ReadonlySet<string>;
   /** When the copy ends, or nothing once it has: asked each time, so a discarded copy lifts its pages at once. */
   readonly until: () => number | undefined;
+  /** Covers every page, not only those on `hosts`: an unconfirmed clipboard whose source is not known. */
+  readonly everywhere?: true;
 }
 
 /** One live copy that covers a page, for a sentence: its name, where it was, when it ends, and whether the caller's own. */
@@ -74,12 +76,22 @@ export function hostOfOrigin(origin: string): string | undefined {
   }
 }
 
-/** A clipboard the worker could not empty after a capture: the retry that tries again, and the origins it keeps closed. */
+/**
+ * A clipboard the worker could not empty after a capture: BROWSER state of its own (the clipboard is the browser's, shared
+ * by every ferret). It is not a copy: no session ending, no capture or replacement of a copy of the same name and no copy's
+ * end touches it. It ends only when a retry CONFIRMS the clipboard empty (a browser that is gone has nothing left to clear).
+ */
 interface KeptClipboard {
   readonly ferret: string;
+  /** What a refusal calls it. */
   readonly copy: string;
+  readonly from: readonly string[];
+  readonly hosts: ReadonlySet<string>;
   readonly retry: () => Promise<boolean>;
 }
+
+/** Told when a value begins to be sealed, so an agent's open picture stream can end at once. */
+export type SealedListener = () => void;
 
 /** The daemon's own timer (the kernel clock): the daemon side arms no global timer of its own. Returns what cancels it. */
 export interface SealedTimers {
@@ -92,6 +104,9 @@ export class SealedPages {
   private scripts = 0;
   private drained: (() => void)[] = [];
   private kept: KeptClipboard | undefined;
+  /** Counts every seal that begins (a copy held, a paste protected, a clipboard kept): output made before one may not leave after it. */
+  private sealGeneration = 0;
+  private readonly listeners = new Set<SealedListener>();
 
   /** `timers`: how a capture waits for a running script. Without them it does not wait: a running script is a no. */
   constructor(private readonly timers?: SealedTimers) {}
@@ -111,6 +126,28 @@ export class SealedPages {
     const next: Held = { ferret, copy, from, hosts, until };
     if (index < 0) this.held.push(next);
     else this.held[index] = next;
+    this.began();
+  }
+
+  /** How many seals have begun: output stamped before a change is not delivered after it ({@link SealedGate.mayDeliver}). */
+  get generation(): number {
+    return this.sealGeneration;
+  }
+
+  /** Called synchronously whenever a seal begins. Returns what stops listening. */
+  onSeal(listener: SealedListener): () => void {
+    this.listeners.add(listener);
+    return () => void this.listeners.delete(listener);
+  }
+
+  private began(): void {
+    this.sealGeneration += 1;
+    for (const listener of [...this.listeners])
+      try {
+        listener();
+      } catch {
+        // A listener that fails must not stop the seal or the others being told.
+      }
   }
 
   /** Every copy of `ferret`'s is let go of (its session ended). */
@@ -182,8 +219,12 @@ export class SealedPages {
    * is empty, the capture's pages stay closed whatever becomes of the copy, and a keyboard paste is refused everywhere.
    */
   keepClipboard(ferret: string, copy: string, origins: readonly string[], retry: () => Promise<boolean>): void {
-    this.kept = { ferret, copy, retry };
-    this.hold(ferret, copy, origins, () => (this.kept === undefined ? undefined : Number.POSITIVE_INFINITY));
+    // Kept state of its own, never a copy's entry: a copy named like it, a session ending or a copy ending leave it alone. A
+    // second unconfirmed capture adds its origins to the first's (the same clipboard may still hold either value).
+    const from = [...new Set([...(this.kept?.from ?? []), ...origins])];
+    const hosts = new Set(from.map(hostOfOrigin).filter((host): host is string => host !== undefined));
+    this.kept = { ferret, copy, from, hosts, retry };
+    this.began();
   }
 
   /** Whether the browser's clipboard may still hold a captured value. */
@@ -220,7 +261,11 @@ export class SealedPages {
     const unreadable = shown.some(host => host === undefined);
     const known = new Set(shown.filter((host): host is string => host !== undefined).map(host => host.toLowerCase()));
     return this.live()
-      .filter(entry => entry.held.hosts.size > 0 && (unreadable || [...known].some(host => entry.held.hosts.has(host))))
+      .filter(
+        entry =>
+          entry.held.everywhere === true ||
+          (entry.held.hosts.size > 0 && (unreadable || [...known].some(host => entry.held.hosts.has(host)))),
+      )
       .map(({ held, until }) => ({ copy: held.copy, from: held.from, until, own: held.ferret === ferret }));
   }
 
@@ -233,6 +278,20 @@ export class SealedPages {
       if (until === undefined) this.held.splice(at, 1);
       else alive.push({ held, until });
     }
+    const kept = this.kept;
+    if (kept !== undefined)
+      alive.push({
+        held: {
+          ferret: kept.ferret,
+          copy: kept.copy,
+          from: kept.from,
+          hosts: kept.hosts,
+          until: () => Number.POSITIVE_INFINITY,
+          // A capture whose page is not known may have left the value for any page: all of them stay closed.
+          ...(kept.hosts.size === 0 ? { everywhere: true as const } : {}),
+        },
+        until: Number.POSITIVE_INFINITY,
+      });
     return alive;
   }
 }

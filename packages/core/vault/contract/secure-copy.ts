@@ -34,7 +34,14 @@ export interface SecureCopyProvider {
    * is uncertain: bytes may have landed. `where` is what the target itself reports at that moment (a page's document and
    * frame origins, as `https://host`; nothing for a terminal).
    */
-  protect(sessionId: string, name: string, target: InputTarget, where: { readonly origins: readonly string[] }): void;
+  protect(
+    sessionId: string,
+    name: string,
+    target: InputTarget,
+    where: { readonly origins: readonly string[] },
+    /** The capture the write was opened for: protecting any other capture under the name throws (the write is refused). */
+    capturedAt?: string,
+  ): void;
   /**
    * A sentence when this paste may not go to `target` now, or nothing: a person has taken the page over. Asked when the
    * paste is raised, and again right before the write, so a takeover that lands while the card waits ends the paste.

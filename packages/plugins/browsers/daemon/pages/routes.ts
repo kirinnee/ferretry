@@ -11,8 +11,11 @@ import {
 } from '@ferretry/kernel/contract';
 import { isFerretCall } from '@ferretry/core-gate/contract';
 import { BrowserLoginActionSchema } from '../../contract/index.ts';
+import { hostOfOrigin } from '../sealed/page-guards.ts';
+import { isWebUrl, WEB_URL_ONLY } from '../../contract/wire/limits.ts';
 import {
   originOnly,
+  SEALED_ANSWER_WITHHELD,
   type SealedGate,
   SealedRefusal,
   SEALED_STREAM_REFUSAL,
@@ -67,6 +70,15 @@ function toolOfAction(action: BrowserAction): string {
   }
 }
 
+/**
+ * Every URL an action names, whatever it is called (`open`, `navigate`, `new-page`): an agent's goes only to a web page, the
+ * rule the MCP tools hold, before anything is dispatched. A person's own navigation is as it was.
+ */
+function nonWebUrl(action: BrowserAction): string | undefined {
+  const url = (action as { readonly url?: unknown }).url;
+  return typeof url === 'string' && !isWebUrl(url) ? url : undefined;
+}
+
 /** The chords an action presses, as strings. */
 function keysOf(action: BrowserAction): readonly string[] {
   const keys = (action as { readonly keys?: unknown }).keys;
@@ -77,14 +89,35 @@ function keysOf(action: BrowserAction): readonly string[] {
  * A status as an AGENT may see it while a sealed value lives: a page a live copy covers shows its origin and a fixed
  * title, never its path, query or title (they are what the page says). A person's status is whole.
  */
-function withholdStatus(gate: SealedGate | undefined, ferret: string, status: BrowserStatus): BrowserStatus {
+async function withholdStatus(
+  gate: SealedGate | undefined,
+  browser: Pick<BrowserSubsystem, 'pageHosts'>,
+  ferret: string,
+  status: BrowserStatus,
+): Promise<BrowserStatus> {
   if (gate === undefined || !gate.anyLive() || status.state !== 'running' || !('url' in status)) return status;
-  const covered = (url: string): boolean => gate.coveringAddress(ferret, url).length > 0;
-  const shown = <T extends { readonly url: string; readonly title: string }>(page: T): T =>
-    covered(page.url) ? { ...page, url: originOnly(page.url), title: sealedWithheld.title } : page;
+  // By the address AND the host of every frame in the page, read from the live page: a page that only embeds the site shows it too.
+  const coveredIds = new Set<string>();
+  await Promise.all(
+    status.pages.map(async page => {
+      const hosts = await browser.pageHosts(ferret, page.id).catch(() => undefined);
+      const own = hostOfOrigin(page.url);
+      if (
+        await gate.covered(ferret, page.url, { hosts: async () => (hosts === undefined ? undefined : [own, ...hosts]) })
+      )
+        coveredIds.add(page.id);
+    }),
+  );
+  const active = (status as { readonly activePageId?: string }).activePageId;
+  const top = status.pages.find(page => page.id === active) ?? status.pages.find(page => page.url === status.url);
+  const shown = <T extends { readonly url: string; readonly title: string }>(page: T, covered: boolean): T =>
+    covered ? { ...page, url: originOnly(page.url), title: sealedWithheld.title } : page;
   return {
-    ...shown(status as typeof status & { readonly url: string; readonly title: string }),
-    pages: status.pages.map(shown),
+    ...shown(
+      status as typeof status & { readonly url: string; readonly title: string },
+      top !== undefined && coveredIds.has(top.id),
+    ),
+    pages: status.pages.map(page => shown(page, coveredIds.has(page.id))),
   } as BrowserStatus;
 }
 
@@ -147,9 +180,15 @@ async function browserStatus(
   call: CallContext,
 ): Promise<ApiResponse> {
   const sessionId = sessionIdOf(call);
+  const agent = gate !== undefined && isFerretCall(call);
+  const since = agent ? gate.stamp() : undefined;
   const raw = await browser.status(sessionId).catch(browserFailure);
-  const status = isFerretCall(call) ? withholdStatus(gate, sessionId, raw) : raw;
-  return jsonResponse(await kernel.redaction.read(scope => maskedStatus(scope, status)));
+  const status = isFerretCall(call) ? await withholdStatus(gate, browser, sessionId, raw) : raw;
+  const answer = jsonResponse(await kernel.redaction.read(scope => maskedStatus(scope, status)));
+  // The final check, right before the answer leaves: a value sealed while it was being made withholds it.
+  if (agent && since !== undefined && !gate.mayDeliver('agent', since))
+    throw sealedRefusal(new SealedRefusal(SEALED_ANSWER_WITHHELD));
+  return answer;
 }
 
 /** `POST /v1/sessions/:sessionId/browser`: one action on its page, through the act runner. */
@@ -161,12 +200,22 @@ async function browserAction(
 ): Promise<ApiResponse> {
   const sessionId = sessionIdOf(call);
   const action = await parseBody(call.request, BrowserActionSchema);
+  // An AGENT's address must be a web page, before the status is read, the gate asked or anything dispatched.
+  if (isFerretCall(call) && nonWebUrl(action) !== undefined) throw new ApiError(400, WEB_URL_ONLY, 'bad_request');
   const before = await browser.status(sessionId).catch(browserFailure);
   const target = targetOfAction(sessionId, action, before);
   const op = opOfAction(action);
   // A ferret's own credential on this route is an AGENT: it meets the same sealed gate the tools do, before the act and again
   // inside the page's queue, and what comes back is withheld for a page that holds a sealed value. A person passes.
   const agent = gate !== undefined && isFerretCall(call);
+  // Taken before any of the work: an answer an agent is given leaves only if no value began to be sealed since (see `leaves`).
+  const since = agent ? gate.stamp() : undefined;
+  /** The FINAL check, synchronous, immediately before the answer's bytes: what was made before a seal does not leave after it. */
+  const leaves = <T>(answer: T): T => {
+    if (agent && since !== undefined && !gate.mayDeliver('agent', since))
+      throw sealedRefusal(new SealedRefusal(SEALED_ANSWER_WITHHELD));
+    return answer;
+  };
   const viewed = before.state === 'running' && 'url' in before ? before.url : undefined;
   const guard: BrowserActGuard | undefined = agent
     ? async page => {
@@ -197,8 +246,8 @@ async function browserAction(
       return browserFailure(error);
     }
   };
-  const answerStatus = (status: BrowserStatus): BrowserStatus =>
-    agent ? withholdStatus(gate, sessionId, status) : status;
+  const answerStatus = async (status: BrowserStatus): Promise<BrowserStatus> =>
+    agent ? await withholdStatus(gate, browser, sessionId, status) : status;
   if (agent && gate.anyLive()) {
     // The pre-check, before the act waits its turn: by the address the viewed page had.
     try {
@@ -220,10 +269,11 @@ async function browserAction(
       await kernel.act(target, 'read', async () => {
         const result = await act();
         const text = 'result' in result && 'text' in result.result ? result.result.text : '';
+        const shownStatus = await answerStatus(result.status);
         return await kernel.redaction.read(scope => ({
           kind: 'content' as const,
           data: {
-            status: maskedStatus(scope, answerStatus(result.status)),
+            status: maskedStatus(scope, shownStatus),
             ...('result' in result
               ? { result: { ...maskedSnapshot(scope, result.result), text: scope.text(text) } }
               : {}),
@@ -231,17 +281,18 @@ async function browserAction(
         }));
       }),
     );
-    return jsonResponse(content.data as BrowserActionResult);
+    return leaves(jsonResponse(content.data as BrowserActionResult));
   }
   if (op === 'picture') {
     let answerBody: BrowserActionResult | undefined;
     acted(
       await kernel.act(target, 'picture', async () => {
         const result = await act();
+        const shownStatus = await answerStatus(result.status);
         answerBody = await kernel.redaction.read(
           scope =>
             ({
-              status: maskedStatus(scope, answerStatus(result.status)),
+              status: maskedStatus(scope, shownStatus),
               ...('result' in result ? { result: maskedSnapshot(scope, result.result) } : {}),
             }) as BrowserActionResult,
         );
@@ -249,11 +300,13 @@ async function browserAction(
         return { kind: 'picture' as const, mime: 'image/png' as const, bytes: Buffer.from(shot, 'base64') };
       }),
     );
-    return jsonResponse(answerBody);
+    return leaves(jsonResponse(answerBody));
   }
   await writeAct(kernel.act, target, op, async () => await act());
   const after = await browser.status(sessionId).catch(browserFailure);
-  return jsonResponse({ status: await kernel.redaction.read(scope => maskedStatus(scope, answerStatus(after))) });
+  const shownAfter = await answerStatus(after);
+  const status = await kernel.redaction.read(scope => maskedStatus(scope, shownAfter));
+  return leaves(jsonResponse({ status }));
 }
 
 /** The routes this file serves, keyed as the manifest declares them. */

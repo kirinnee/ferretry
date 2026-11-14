@@ -419,9 +419,15 @@ export class SecureCopyService implements InputSealedPort {
     name: CopyName,
     target: { readonly kind: string },
     where: { readonly origins: readonly string[] },
+    /** The capture the write was opened for: another capture under the name is not this paste's, and is not protected for it. */
+    capturedAt?: string,
   ): void {
     const entry = this.copies.get(sessionId)?.get(name);
-    if (entry?.value === undefined || entry.state !== 'live')
+    if (
+      entry?.value === undefined ||
+      entry.state !== 'live' ||
+      (capturedAt !== undefined && new Date(entry.capturedAt).toISOString() !== capturedAt)
+    )
       throw new SecureCopyError(
         'not_found',
         `${copyMask(name)} ended before it could be protected, so nothing was typed.`,

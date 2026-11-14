@@ -21,23 +21,58 @@ export function heldViewerHost(
   agent?: SealedGate,
 ): BrowserViewerHost {
   return {
-    attachViewer: async (sessionId, onFrame, onTerminal) =>
-      await host.attachViewer(
-        sessionId,
-        frame => {
-          if (agent?.anyLive() === true) {
-            onTerminal({ code: VIEWER_CLOSE_POLICY, reason: SEALED_STREAM_REFUSAL });
-            return;
-          }
-          void kernel
-            .act(pageTarget(frame.pageId), 'stream', async () => ({ kind: 'content' as const }))
-            .then(decision => {
-              if (decision.ok) onFrame(frame);
-            })
-            .catch(() => undefined);
+    attachViewer: async (sessionId, onFrame, onTerminal) => {
+      /** Ends the stream with the sealed sentence, once. */
+      let refused = false;
+      const refuse = (): void => {
+        if (refused) return;
+        refused = true;
+        onTerminal({ code: VIEWER_CLOSE_POLICY, reason: SEALED_STREAM_REFUSAL });
+      };
+      // A seal that begins while the stream is open ends it AT ONCE (and the stream drops what it held back), with no frame needed.
+      const unlisten = agent?.onSeal(refuse);
+      let attachment: Awaited<ReturnType<BrowserViewerHost['attachViewer']>>;
+      try {
+        attachment = await host.attachViewer(
+          sessionId,
+          frame => {
+            if (agent === undefined) {
+              void kernel
+                .act(pageTarget(frame.pageId), 'stream', async () => ({ kind: 'content' as const }))
+                .then(decision => {
+                  if (decision.ok) onFrame(frame);
+                })
+                .catch(() => undefined);
+              return;
+            }
+            const since = agent.stamp();
+            if (!agent.mayDeliver('agent', since, { picture: true })) {
+              refuse();
+              return;
+            }
+            void kernel
+              .act(pageTarget(frame.pageId), 'stream', async () => ({ kind: 'content' as const }))
+              .then(decision => {
+                if (!decision.ok) return;
+                // The act was awaited: a value may have begun to be sealed meanwhile. Asked again where the frame leaves.
+                if (agent.mayDeliver('agent', since, { picture: true })) onFrame(frame);
+                else refuse();
+              })
+              .catch(() => undefined);
+          },
+          onTerminal,
+        );
+      } catch (error) {
+        unlisten?.();
+        throw error;
+      }
+      return {
+        detach: () => {
+          unlisten?.();
+          attachment.detach();
         },
-        onTerminal,
-      ),
+      };
+    },
     dispatchHumanInput: async (sessionId, input) => {
       const status = await host.status(sessionId);
       if (status.state !== 'running' || !('activePageId' in status))

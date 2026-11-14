@@ -3,6 +3,7 @@ import { ApiError } from '@ferretry/kernel/contract';
 import { heldOrMasked, PageHeld } from '../holds/index.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { originOnly, type SealedGate, SealedRefusal, sealedWithheld, selectorsOf } from '../sealed/gate.ts';
+import { hostOfOrigin } from '../sealed/page-guards.ts';
 import { acted, browserTarget, pageTarget, writeAct } from '../pages/acts.ts';
 import {
   type BrowserActGuard,
@@ -95,6 +96,12 @@ interface CallScope {
   covered: boolean;
 }
 
+/** What the sealed gate needs to know of a page tool that does not come through `call`: its tool and every selector it names. */
+interface SealedFacts {
+  readonly tool: BrowserToolCall['tool'];
+  readonly selectors: readonly string[];
+}
+
 /** A browser tool's answer before it becomes MCP text (today's `AgentToolResult`, its browser fields). */
 export interface BrowserToolAnswer {
   readonly summary: string;
@@ -161,7 +168,9 @@ export interface BrowserToolPorts {
   readonly browser: Pick<
     BrowserSubsystem,
     'status' | 'openPage' | 'actOnPage' | 'filesOnPage' | 'scriptOnPage' | 'closePage' | 'lifecycleOnPage' | 'adoptPage'
-  >;
+  > &
+    /** Which sites a page and its frames are on now, for a listing's metadata: without it the address alone is asked. */
+    Partial<Pick<BrowserSubsystem, 'pageHosts'>>;
   readonly control: SurfaceControl;
   readonly kernel: Pick<KernelPorts, 'act' | 'redaction' | 'clock'>;
   readonly policy: AgentControlPolicy;
@@ -460,11 +469,14 @@ export class BrowserTools {
     if (this.scope.getStore()?.covered === true) return true;
     const key = call !== undefined && 'name' in call ? call.name : undefined;
     if (key === undefined) return false;
-    const address = await this.ports.browser
+    const page = await this.ports.browser
       .status(caller.sessionId)
-      .then(status => status.pages.find(page => page.name === key || page.id === key)?.url)
+      .then(status => status.pages.find(each => each.name === key || each.id === key))
       .catch(() => undefined);
-    return await gate.covered(caller.sessionId, address);
+    // By the address and by every frame's host, read from the live page.
+    return page === undefined
+      ? await gate.covered(caller.sessionId, undefined)
+      : await this.pageCovered(caller, page.id, page.url);
   }
 
   /** The page a failed call named, as its hold target and its reference; nothing when it cannot be found. */
@@ -556,23 +568,63 @@ export class BrowserTools {
     readonly identifierHost?: string;
     readonly identifierFields?: readonly { readonly index: number; readonly host: string }[];
   }> {
-    try {
-      const answer = await this.ports.browser.actOnPage(
-        caller.sessionId,
-        surface.id,
-        action,
-        this.browserGuard(caller, surface),
-      );
-      if (!('result' in answer)) return {};
-      const { passwordField, identifierHost, identifierFields } = answer.result;
-      return {
-        ...(passwordField === true ? { passwordField: true as const } : {}),
-        ...(identifierHost === undefined ? {} : { identifierHost }),
-        ...(identifierFields === undefined ? {} : { identifierFields }),
-      };
-    } catch (error) {
-      throw translate(error) ?? error;
-    }
+    // The real `browser_type` and `browser_fill_form` handlers come here, outside `call`: they get the same per-call scope and the
+    // same sealed gate (every selector the action names, asked inside the page's queue) and, on a failure, the same gated sentence.
+    const scope: CallScope = { agent: caller.kind === 'agent', ferret: caller.sessionId, covered: false };
+    return await this.scope.run(scope, async () => {
+      try {
+        const answer = await this.ports.browser.actOnPage(
+          caller.sessionId,
+          surface.id,
+          action,
+          this.browserGuard(caller, surface, undefined, {
+            tool: action.action === 'type' ? 'browser.type' : 'browser.fill_form',
+            selectors: selectorsOf(action),
+          }),
+        );
+        if (!('result' in answer)) return {};
+        const { passwordField, identifierHost, identifierFields } = answer.result;
+        return {
+          ...(passwordField === true ? { passwordField: true as const } : {}),
+          ...(identifierHost === undefined ? {} : { identifierHost }),
+          ...(identifierFields === undefined ? {} : { identifierFields }),
+        };
+      } catch (error) {
+        throw await this.inputFailure(caller, surface, translate(error) ?? error);
+      }
+    });
+  }
+
+  /**
+   * What a failed page input answers: on a page that holds a sealed value (or one a frame of which does) one fixed sentence,
+   * whatever failed, because what the browser says of a failure can echo the page; Ferretry's own refusals pass as they are.
+   */
+  private async inputFailure(caller: ToolCaller, surface: ResolvedSurface, error: unknown): Promise<unknown> {
+    if (caller.kind !== 'agent' || error instanceof SealedToolError) return error;
+    const gate = this.ports.sealed;
+    if (gate === undefined || !gate.anyLive()) return error;
+    const covered =
+      this.scope.getStore()?.covered === true || (await this.pageCovered(caller, surface.id, surface.url));
+    if (!covered) return error;
+    return error instanceof BrowserToolError
+      ? new SealedToolError(sealedWithheld.error)
+      : new BrowserToolError('upstream_failed', sealedWithheld.error);
+  }
+
+  /**
+   * Whether a page is one a live copy covers, by its address AND the host of every frame in it, read from the live page. A page
+   * whose frames cannot be told counts as covered (it fails closed), a browser that cannot be asked is judged by the address.
+   */
+  private async pageCovered(caller: ToolCaller, pageId: string, address: string | undefined): Promise<boolean> {
+    const gate = this.ports.sealed;
+    if (gate === undefined || caller.kind !== 'agent' || !gate.anyLive()) return false;
+    const ask = this.ports.browser.pageHosts;
+    if (ask === undefined) return await gate.covered(caller.sessionId, address);
+    const hosts = await ask.call(this.ports.browser, caller.sessionId, pageId).catch(() => undefined);
+    const own = address === undefined ? undefined : hostOfOrigin(address);
+    return await gate.covered(caller.sessionId, address, {
+      hosts: async () => (hosts === undefined ? undefined : [own, ...hosts]),
+    });
   }
 
   /** Hands a ferret's page to the owner ("Your turn here"); rejects when the owner could not be told. */
@@ -1172,11 +1224,14 @@ export class BrowserTools {
     caller: ToolCaller,
     surface: ResolvedSurface,
     call?: BrowserToolCall,
+    /** What a page tool outside `call` (type, fill) is, for the gate: its tool and every selector it names. */
+    facts?: SealedFacts,
   ): BrowserActGuard | undefined {
     if (caller.kind !== 'agent') return undefined;
     return async page => {
       await this.assertFree(caller.sessionId, surface);
       if (call !== undefined) await this.assertSealedOpen(caller, call.tool, surface, page, call);
+      else if (facts !== undefined) await this.assertSealedOpen(caller, facts.tool, surface, page, undefined, facts);
     };
   }
 
@@ -1193,6 +1248,7 @@ export class BrowserTools {
     surface: ResolvedSurface,
     page: BrowserGuardPage | undefined,
     call?: BrowserToolCall,
+    facts?: SealedFacts,
   ): Promise<void> {
     const gate = this.ports.sealed;
     if (gate === undefined || caller.kind !== 'agent') return;
@@ -1208,7 +1264,7 @@ export class BrowserTools {
         reference,
         address: surface.url,
         page,
-        selectors: call === undefined ? [] : selectorsOf(call),
+        selectors: call === undefined ? (facts?.selectors ?? []) : selectorsOf(call),
         keys: call?.tool === 'browser.press' ? call.keys.map(chord => String(chord)) : [],
         time: call?.tool === 'browser.wait_for' && waitConditionOf(call).kind === 'time',
       });
@@ -1241,11 +1297,18 @@ export class BrowserTools {
     );
     // A title and an address are what the page says: masked, for agent and person alike (S16).
     const visible = rows.filter((row): row is AgentSurface => row !== undefined);
-    const gate = caller.kind === 'agent' ? this.ports.sealed : undefined;
+    // Which rows a live copy covers, by address AND by every frame's host (a page that merely embeds the site shows it too).
+    const covered = new Set<string>();
+    if (caller.kind === 'agent')
+      await Promise.all(
+        visible.map(async row => {
+          if (await this.pageCovered(caller, row.id, row.url)) covered.add(row.id);
+        }),
+      );
     const masked = await this.ports.kernel.redaction.read(scope =>
       visible.map(row => {
         // A page that holds a sealed value is listed by its name and origin only: its title and path are what it says.
-        if (gate !== undefined && gate.coveringAddress(caller.sessionId, row.url).length > 0)
+        if (covered.has(row.id))
           return {
             ...row,
             title: sealedWithheld.title,

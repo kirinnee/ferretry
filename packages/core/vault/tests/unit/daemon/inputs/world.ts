@@ -121,6 +121,8 @@ export function world(options: WorldOptions = {}) {
     codeProgram: false,
     listingFails: false,
     fillFails: undefined as Error | undefined,
+    /** Runs inside the target's turn after its takeover/copy check and before it installs the protection (fix2, R3). */
+    onBeforeProtect: undefined as (() => void) | undefined,
     fillValue: undefined as ((role: LoginFieldRole) => string) | undefined,
     saveFails: undefined as Error | undefined,
     verify: { ok: true } as { ok: true } | { ok: false; reason?: string },
@@ -177,7 +179,7 @@ export function world(options: WorldOptions = {}) {
   const fills: { id: string; role: LoginFieldRole; factor?: string }[] = [];
   const timers: { ms: number; fire: () => void }[] = [];
   const used: { copy: string; target?: unknown }[] = [];
-  const protects: { copy: string; target: unknown; where: unknown }[] = [];
+  const protects: { copy: string; target: unknown; where: unknown; capturedAt?: string }[] = [];
   const ruleLog: { reserved: unknown[][]; released: string[]; spent: string[] } = {
     reserved: [],
     released: [],
@@ -244,6 +246,7 @@ export function world(options: WorldOptions = {}) {
       state.onQueue?.();
       // The target's own turn: a takeover that landed since the last look types nothing (secure-clip-1 fix1, P1-1).
       if ((await typeOptions?.refuse?.()) !== undefined) return 'guard_refused';
+      state.onBeforeProtect?.();
       // A sealed paste's protection is installed here, in the target's own turn, before the write (a throw types nothing).
       typeOptions?.protect?.({ origins: state.protectOrigins });
       writes.push({
@@ -329,9 +332,9 @@ export function world(options: WorldOptions = {}) {
                 : undefined;
             },
             used: (_session: string, name: string, target?: unknown) => void used.push({ copy: name, target }),
-            protect: (_session: string, name: string, target: unknown, where: unknown) => {
+            protect: (_session: string, name: string, target: unknown, where: unknown, pinned?: string) => {
               if (state.protectRefusal !== undefined) throw new Error(state.protectRefusal);
-              protects.push({ copy: name, target, where });
+              protects.push({ copy: name, target, where, ...(pinned === undefined ? {} : { capturedAt: pinned }) });
             },
             refusal: async () => (state.pasteRefusals.length > 0 ? state.pasteRefusals.shift() : state.pasteRefusal),
           },

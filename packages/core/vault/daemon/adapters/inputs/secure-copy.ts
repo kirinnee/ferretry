@@ -54,11 +54,12 @@ export class SecureCopiesThroughHook implements InputSealedPort, InputPasteRules
     name: CopyName,
     target: InputTarget,
     where: { readonly origins: readonly string[] },
+    capturedAt?: string,
   ): void {
     const provider = this.provider();
     if (provider === undefined)
       throw new Error('Secure copy is not available, so Ferretry cannot protect this paste: nothing was typed.');
-    provider.protect(sessionId, name, target, where);
+    provider.protect(sessionId, name, target, where, capturedAt);
   }
 
   async refusal(sessionId: string, name: CopyName, target: InputTarget): Promise<string | undefined> {

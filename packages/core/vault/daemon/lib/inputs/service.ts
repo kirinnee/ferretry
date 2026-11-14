@@ -2032,8 +2032,16 @@ export class InputRequestService {
           ? undefined
           : (where: { readonly origins: readonly string[] }): void => {
               try {
-                sealed.protect(request.sessionId, pasted, request.target, where);
+                // The copy check repeated HERE, synchronously, right before the protection and the write: the target's own check
+                // can be followed by an await, and a copy discarded, expired or captured again since is not protected or typed.
+                if (!this.copyPinned(request, pasted)) {
+                  lost.copy = true;
+                  throw new Error(COPY_ENDED);
+                }
+                // Bound to the capture this card is for, so the protection can never reopen another one under the name.
+                sealed.protect(request.sessionId, pasted, request.target, where, request.source?.capturedAt);
               } catch (error) {
+                if (lost.copy) throw error;
                 unprotected.sentence =
                   error instanceof Error && error.message !== ''
                     ? error.message
@@ -2085,7 +2093,8 @@ export class InputRequestService {
             ? { reprove: true }
             : {}),
         })
-        .catch((): TypeResult => (unprotected.sentence === undefined ? 'uncertain' : 'target_gone'));
+        // A copy that ended before the protection typed nothing either: the protection's own throw is not an uncertain write.
+        .catch((): TypeResult => (unprotected.sentence === undefined && !lost.copy ? 'uncertain' : 'target_gone'));
       wrote?.(outcome);
       if (lost.copy && outcome !== 'typed' && outcome !== 'uncertain') {
         // Refused inside the target's turn: the copy ended after it was opened. Nothing was typed; no value is returned.

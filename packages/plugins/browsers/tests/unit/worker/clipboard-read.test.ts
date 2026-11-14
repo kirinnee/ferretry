@@ -196,3 +196,42 @@ describe('the worker’s own helper page', () => {
     should(CLIPBOARD_HELPER_ORIGIN.endsWith('.invalid')).equal(true);
   });
 });
+
+describe('R4 (secure-clip-2 fix round 2): a later failure never loses that the clipboard could not be emptied', () => {
+  class Stuck implements ClipboardHelper {
+    async read(): Promise<string> {
+      return SENTINEL;
+    }
+    async clear(): Promise<void> {
+      throw new Error('the clipboard still holds text after it was emptied');
+    }
+  }
+
+  it('should still answer kept when the page vanishes during the second look at its document', async () => {
+    let looks = 0;
+    const vanishing = async () => {
+      looks += 1;
+      if (looks > 1) throw new Error('page closed');
+      return { navigationId: 'loader-1' };
+    };
+
+    const read = await readClipboardOf(page(), vanishing, new Stuck());
+
+    should(read.ok).equal(false);
+    should((read as { kept?: true }).kept).equal(true);
+    should(JSON.stringify(read)).not.containEql(SENTINEL);
+  });
+
+  it('should NOT answer kept when the clear was confirmed, whatever the second look does', async () => {
+    let looks = 0;
+    const vanishing = async () => {
+      looks += 1;
+      if (looks > 1) throw new Error('page closed');
+      return { navigationId: 'loader-1' };
+    };
+
+    const read = await readClipboardOf(page(), vanishing, new Helper(SENTINEL)).catch(() => ({ ok: false as const }));
+
+    should((read as { kept?: true }).kept).equal(undefined);
+  });
+});

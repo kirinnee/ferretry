@@ -140,6 +140,9 @@ const PAGES: Readonly<Record<string, string>> = {
   '/source': `<html><body><h1>Token created</h1><p id="token">${SENTINEL}</p><p id="empty"></p><p id="other">no secret here</p></body></html>`,
   '/dest': `<html><body><label>API token <input id="dest" type="password" oninput="fetch('/seen?v='+encodeURIComponent(this.value))"></label></body></html>`,
   '/other': '<html><body><p id="token">moved on</p></body></html>',
+  // A page whose Copy button puts the value on the clipboard: the agent presses it by selector and captures the CLIPBOARD
+  // (secure-clip-2 fix2, item 8). The value is on the page too, as such a page shows a key once.
+  '/clip': `<html><body><p id="k">${SENTINEL}</p><button id="copy" onclick="navigator.clipboard.writeText(document.getElementById('k').textContent)">Copy</button></body></html>`,
   '/slow': '<html><body><p>slow page</p></body></html>',
   // Pages that say the value on a channel other than their visible text (secure-clip-2 fix1, finding 5): a title, a dialog, and
   // two inputs whose value is it (so a click on "input" is a strict-mode error that quotes both).
@@ -725,10 +728,76 @@ describe('the secure-copy pipeline, on real processes and a real Chrome', () => 
     }, 120_000);
   });
 
+  it('should capture a page’s CLIPBOARD, paste it into a terminal and a page field, and show it to the agent nowhere (item 8)', async () => {
+    const opened = await tool('browser_open', { name: 'clipsrc', url: `${base}/clip` });
+    should(opened.isError).not.equal(true);
+    // Pressed by selector: reading the page first would put the value in the agent's context.
+    const pressed = await tool('browser_click', { name: 'clipsrc', selector: '#copy' });
+    should(pressed.isError).not.equal(true);
+
+    const sealed = await copy('cliptoken', { kind: 'clipboard', key: 'clipsrc' });
+    should(sealed.isError).not.equal(true);
+    should(sealed.text).containEql('sealed:cliptoken');
+    should(JSON.stringify(sealed)).not.containEql(SENTINEL);
+
+    // …into the (recording) terminal, once.
+    const typedBefore = typedIntoTerminal.length;
+    const toTerminal = await paste('cliptoken', { kind: 'terminal', name: 'dev' });
+    should(toTerminal.isError).not.equal(true);
+    should((await allow(requestOf(toTerminal))).status).equal(200);
+    should(typedIntoTerminal.slice(typedBefore)).eql([SENTINEL]);
+
+    // …and into a real page's field, which the page's own script reported once more.
+    await tool('browser_open', { name: 'clipdest', url: `${base}/dest` });
+    const seenBefore = typedIntoPage.filter(each => each === SENTINEL).length;
+    const toPage = await paste('cliptoken', { kind: 'browser', name: 'clipdest', selector: '#dest' });
+    should(toPage.isError).not.equal(true);
+    should((await allow(requestOf(toPage))).status).equal(200);
+    for (
+      let waited = 0;
+      typedIntoPage.filter(each => each === SENTINEL).length === seenBefore && waited < 5_000;
+      waited += 100
+    )
+      await Bun.sleep(100);
+    should(typedIntoPage.filter(each => each === SENTINEL).length).equal(seenBefore + 1);
+
+    // Every way the agent could look at either page is refused or masked, and the clipboard itself is empty and unreadable by it.
+    for (const name of ['clipsrc', 'clipdest']) {
+      for (const [toolName, input] of [
+        ['browser_read', { name, mode: 'text' }],
+        ['browser_read', { name, mode: 'snapshot' }],
+        ['browser_screenshot', { name }],
+        ['browser_eval', { name, function: '() => btoa(document.body.innerText)' }],
+        ['browser_eval', { name, function: '() => navigator.clipboard.readText()' }],
+        ['browser_console', { name }],
+        ['browser_network', { name, action: 'list' }],
+      ] as const) {
+        const answer = await tool(toolName, input);
+        mustBeRefused(answer);
+        should(JSON.stringify(answer)).not.containEql(SENTINEL);
+      }
+    }
+    for (const answer of [await tool('browser_list', {}), await tool('browser_tabs', { action: 'list' })])
+      for (const form of forms(SENTINEL)) should(JSON.stringify(answer)).not.containEql(form);
+    // The HTTP status and an agent's own picture of the viewed page, through the route an agent credential can reach.
+    const status = await host.request('GET', `/v1/sessions/${FERRET}/browser`, { as: ferret(FERRET) });
+    said.push(status.body);
+    const picture = await host.request('POST', `/v1/sessions/${FERRET}/browser`, {
+      body: { action: 'screenshot' },
+      as: ferret(FERRET),
+    });
+    said.push(picture.body);
+    should(picture.status).equal(403);
+    for (const form of forms(SENTINEL)) {
+      should(status.body).not.containEql(form);
+      should(picture.body).not.containEql(form);
+    }
+  }, 180_000);
+
   it('should have said the sentinel nowhere: no answer, failure, audit record, event, log line or state file holds it', async () => {
     const everywhere = await trace();
 
-    should(typedIntoTerminal).eql([SENTINEL]);
+    should(typedIntoTerminal).eql([SENTINEL, SENTINEL]);
     should(said.length).be.above(20);
     for (const form of forms(SENTINEL)) {
       should(said.filter(answer => answer.includes(form))).eql([]);

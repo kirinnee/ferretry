@@ -195,3 +195,61 @@ describe('what an agent is told when a page is closed', () => {
     should(withheld + capturePendingRefusal('browser.eval')).not.containEql(SENTINEL);
   });
 });
+
+describe('R4 (secure-clip-2 fix round 2): an unconfirmed clipboard is browser state of its own', () => {
+  const SOURCE = 'https://keys.example.test';
+
+  it('should keep covering the page after the ferret’s session ended, until a retry confirms the clear', async () => {
+    const pages = new SealedPages();
+    let clear = false;
+    pages.keepClipboard('f1', 'clipboard', [SOURCE], async () => clear);
+
+    pages.drop('f1');
+
+    should(pages.clipboardKept()).equal(true);
+    should(pages.covering('f2', 'keys.example.test')).have.length(1);
+    should(pages.anyLive()).equal(true);
+    clear = true;
+    should(await pages.retryClipboard()).equal(true);
+    should(pages.clipboardKept()).equal(false);
+    should(pages.covering('f2', 'keys.example.test')).eql([]);
+  });
+
+  it('should not lose its coverage when a real copy named like it is captured, replaced or ends', async () => {
+    const pages = new SealedPages();
+    pages.keepClipboard('f1', 'clipboard', [SOURCE], async () => false);
+    let end: number | undefined = Date.now() + 60_000;
+    pages.hold('f1', 'clipboard', ['https://other.example.test'], () => end);
+    end = undefined;
+
+    should(pages.covering('f1', 'keys.example.test')).have.length(1);
+    should(pages.clipboardKept()).equal(true);
+  });
+
+  it('should not be ended by a later copy ending, nor by a later successful capture of another ferret', async () => {
+    const pages = new SealedPages();
+    pages.keepClipboard('f1', 'clipboard', [SOURCE], async () => false);
+    let end: number | undefined = Date.now() + 1;
+    pages.hold('f2', 'token', [SOURCE], () => end);
+    end = undefined;
+
+    should(pages.anyLive()).equal(true);
+    should(pages.covering('f2', 'keys.example.test')).have.length(1);
+  });
+
+  it('should close EVERY page when it does not know where the value was copied from (fail closed)', () => {
+    const pages = new SealedPages();
+    pages.keepClipboard('f1', 'clipboard', [], async () => false);
+
+    should(pages.covering('f1', 'anything.example.test')).have.length(1);
+  });
+
+  it('should accumulate the origins of two captures that both left the clipboard unconfirmed', () => {
+    const pages = new SealedPages();
+    pages.keepClipboard('f1', 'clipboard', [SOURCE], async () => false);
+    pages.keepClipboard('f2', 'clipboard', ['https://second.example.test'], async () => false);
+
+    should(pages.covering('f1', 'keys.example.test')).have.length(1);
+    should(pages.covering('f1', 'second.example.test')).have.length(1);
+  });
+});

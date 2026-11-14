@@ -438,6 +438,41 @@ describe('PageInputTarget: a grant fill’s clear (R3a-4)', () => {
       should(world.calls.some(call => call.startsWith('type:'))).be.false();
   });
 
+  // R3 (secure-clip-2 fix round 2): the page is observed FIRST; the copy-live/takeover check is the last thing asked before the
+  // protection and the write, so a change during the observation is seen.
+  it('should ask the copy and takeover check AFTER observing the document and immediately before the protection and the write', async () => {
+    const world = host();
+
+    await world.target.type(S1, APP, VALUES, false, FACTS_PAGE, {
+      refuse: async () => {
+        world.calls.push('refuse');
+        return undefined;
+      },
+      protect: () => {
+        world.calls.push('protect');
+      },
+    });
+
+    should(world.calls).eql(['page:s1:app', 'document:page-1', 'refuse', 'protect', 'type:page-1:password:false']);
+  });
+
+  it('should type nothing, and install no protection, when the copy ended while the page was being observed', async () => {
+    const world = host();
+    let protectAsked = 0;
+
+    const outcome = await world.target.type(S1, APP, VALUES, false, FACTS_PAGE, {
+      // The copy ends during the document observation: a check made after it says so.
+      refuse: async () => (world.calls.includes('document:page-1') ? 'the copy ended' : undefined),
+      protect: () => {
+        protectAsked += 1;
+      },
+    });
+
+    should(outcome).equal('guard_refused');
+    should(protectAsked).equal(0);
+    should(world.calls.some(call => call.startsWith('type:'))).be.false();
+  });
+
   it('should not ask the protection for a write nothing sealed is behind, nor after an earlier check refused', async () => {
     let asked = 0;
     const plain = host();

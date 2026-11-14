@@ -10,6 +10,7 @@ import {
   VIEWER_CLOSE_POLICY,
   VIEWER_CLOSE_TOO_LARGE,
   type ViewerAttachment,
+  type ViewerDeliveryGuard,
   type ViewerDownstream,
   type ViewerStreamOptions,
   type ViewerTerminalSignal,
@@ -75,6 +76,9 @@ export class BrowserViewerStream {
   private serial: Promise<void> = Promise.resolve();
   private readonly pressedKeys = new Map<string, BrowserKeyInput>();
   private pendingFrame?: Uint8Array;
+  /** What the delivery guard stamped when the pending frame arrived. */
+  private pendingStamp?: unknown;
+  private readonly delivery: ViewerDeliveryGuard | undefined;
   /** The last envelope every chunk of which the transport took: what the viewer is showing. */
   private deliveredFrame?: Uint8Array;
   private serialNumber = 0;
@@ -98,6 +102,7 @@ export class BrowserViewerStream {
     this.maxBufferedBytes = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
     this.recoveryPollMs = Math.max(1, options.recoveryPollMs ?? FRAME_RECOVERY_POLL_MS);
     this.chunkBytes = options.chunkBytes ?? MAX_TUNNEL_DATA_BYTES;
+    this.delivery = options.delivery;
   }
 
   /**
@@ -215,11 +220,22 @@ export class BrowserViewerStream {
       return;
     }
     this.pendingFrame = envelope.value;
+    this.pendingStamp = this.delivery?.stamp();
     this.flushPendingFrame();
+  }
+
+  /** Asked right before bytes leave: false ends the stream with the guard's sentence, and nothing more is sent. */
+  private mayLeave(): boolean {
+    const guard = this.delivery;
+    if (guard === undefined || guard.mayDeliver(this.pendingStamp)) return true;
+    this.finish(VIEWER_CLOSE_POLICY, guard.refusal);
+    return false;
   }
 
   private flushPendingFrame(): void {
     if (this.closed || this.pendingFrame === undefined) return;
+    // A frame held back for a congested socket is checked again on every retry, not only when it arrived.
+    if (!this.mayLeave()) return;
     if ((this.downstream.bufferedBytes?.() ?? 0) > this.maxBufferedBytes) {
       this.scheduleRecovery();
       return;
@@ -229,6 +245,8 @@ export class BrowserViewerStream {
     const chunks = encodeBrowserStreamChunks(this.serialNumber, envelope, this.chunkBytes);
     this.serialNumber = nextBrowserStreamSerial(this.serialNumber);
     for (const chunk of chunks) {
+      // Every chunk is a send: asked again, so nothing a seal began under is sent after it.
+      if (!this.mayLeave()) return;
       let sent: number | void;
       try {
         sent = this.downstream.send(chunk);
@@ -266,6 +284,7 @@ export class BrowserViewerStream {
     if (this.closed) return;
     this.closed = true;
     this.pendingFrame = undefined;
+    this.pendingStamp = undefined;
     this.deliveredFrame = undefined;
     this.recoveryTimer?.cancel();
     this.recoveryTimer = undefined;

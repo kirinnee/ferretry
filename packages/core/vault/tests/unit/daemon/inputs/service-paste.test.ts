@@ -384,6 +384,52 @@ describe('a sealed paste is protected INSIDE the write turn, before any byte (se
   });
 });
 
+describe('the protection is bound to the pinned capture and repeats the copy check at the write (secure-clip-2 fix2, R3)', () => {
+  it('should hand the protection the capture the card is for, so it cannot reopen another one under the name', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+
+    await w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER);
+
+    should(w.protects).have.length(1);
+    should(w.protects[0]?.capturedAt).equal(w.copies.get('vercel')?.meta.capturedAt);
+  });
+
+  it('should type NOTHING and end copy_gone when the copy is captured again after the target’s own check and before the protection', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    // The target's extra look at the page is outstanding: the name is captured again meanwhile.
+    w.state.onBeforeProtect = () => w.copy({ capturedAt: '2026-11-01T11:30:00.000Z' }, 'FAKE-SC-RECAPTURED');
+
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(error.code).equal('gone');
+    should(w.writes).eql([]);
+    should(w.protects).eql([]);
+    should(w.used).eql([]);
+    should(w.events.at(-1)).match({ state: 'cancelled', reason: 'copy_gone' });
+    should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql('FAKE-SC-RECAPTURED');
+  });
+
+  it('should type NOTHING and end copy_gone when the copy is discarded after the target’s own check and before the protection', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    w.state.onBeforeProtect = () => void w.copies.delete('vercel');
+
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(error.code).equal('gone');
+    should(w.writes).eql([]);
+    should(w.events.at(-1)).match({ state: 'cancelled', reason: 'copy_gone' });
+  });
+});
+
 describe('a copy that ends after it was opened (secure-clip-1 fix2, R4)', () => {
   const ended = async (setup: (w: ReturnType<typeof world>) => void, facts: InputTargetFacts, raise: InputRaise) => {
     const w = world({ withSealed: true, facts });

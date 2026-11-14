@@ -81,15 +81,24 @@ export function secureCopyReach({
             await queue.guard?.(page);
           },
           work: async (copy, pageId) => {
-            const read = await copy.copyClipboard(pageId);
-            // A clipboard that could not be confirmed empty may still hold the value, however the read went: the page stays
-            // closed and a keyboard paste stays refused until a retry empties it (a restarted browser starts empty).
-            if (read.kept === true) {
+            // The clipboard is the BROWSER's, and a capture that did not end in a CONFIRMED clear leaves it unconfirmed: state of its
+            // own, kept until a retry confirms it empty (or the browser is gone), whatever becomes of the copy or the session.
+            const keep = async (): Promise<void> => {
               const address = await tools.addressOf(ferret, key);
               sealed.keepClipboard(ferret, 'clipboard', address === undefined ? [] : [address], () =>
                 pages.clearClipboard(),
               );
+            };
+            let read: Awaited<ReturnType<typeof copy.copyClipboard>>;
+            try {
+              read = await copy.copyClipboard(pageId);
+            } catch (error) {
+              // The worker failed somewhere in the read (a page that vanished, a lost transport): nothing says the clipboard
+              // was emptied, so it is kept until a retry does.
+              await keep();
+              throw error;
             }
+            if (read.kept === true) await keep();
             if (!read.ok) {
               if (read.reason !== 'shared') return { ok: false, reason: read.reason };
               return {

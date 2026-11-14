@@ -44,11 +44,17 @@ export class SecureCopyHook implements SecureCopyProvider {
     this.copies.used(sessionId, parsed.data);
   }
 
-  protect(sessionId: string, name: string, target: InputTarget, where: { readonly origins: readonly string[] }): void {
+  protect(
+    sessionId: string,
+    name: string,
+    target: InputTarget,
+    where: { readonly origins: readonly string[] },
+    capturedAt?: string,
+  ): void {
     const parsed = CopyNameSchema.safeParse(name);
     if (!parsed.success)
       throw new Error('Ferretry could not protect this paste (the copy has no usable name), so nothing was typed.');
-    this.copies.protectPaste(sessionId, parsed.data, { kind: target.kind }, where);
+    this.copies.protectPaste(sessionId, parsed.data, { kind: target.kind }, where, capturedAt);
   }
 
   async refusal(sessionId: string, name: string, target: InputTarget): Promise<string | undefined> {

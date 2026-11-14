@@ -284,6 +284,33 @@ describe('the pages a live copy keeps closed', () => {
     should(masking.scrub(SESSION, `$ ${SENTINEL}`)).equal('$ [sealed:key]');
   });
 
+  // R3 (secure-clip-2 fix round 2): the protection is for the capture the write was opened for, not for whatever holds the name.
+  it('should refuse to protect a paste for ANOTHER capture of the name, installing nothing', async () => {
+    const { service, scrollback, pasted } = world();
+    await service.capture(SESSION, fromClipboard());
+    const other = new Date(0).toISOString();
+
+    should(() => service.protectPaste(SESSION, 'key', { kind: 'page' }, { origins: ['https://x.test'] }, other)).throw(
+      /ended before/,
+    );
+    should(() => service.protectPaste(SESSION, 'key', { kind: 'terminal' }, { origins: [] }, other)).throw(
+      /ended before/,
+    );
+
+    should(scrollback).eql([]);
+    should(pasted).eql([]);
+  });
+
+  it('should protect a paste for the very capture it is pinned to', async () => {
+    const { service, pasted } = world();
+    await service.capture(SESSION, fromClipboard());
+    const pinned = service.describe(SESSION, 'key')?.capturedAt;
+
+    service.protectPaste(SESSION, 'key', { kind: 'page' }, { origins: ['https://form.example.test'] }, pinned);
+
+    should(pasted).have.length(1);
+  });
+
   it('should hold nothing for a paste into the secret store, and for a copy that is no longer live', async () => {
     const { service, scrollback, pasted } = world();
     await service.capture(SESSION, fromClipboard());

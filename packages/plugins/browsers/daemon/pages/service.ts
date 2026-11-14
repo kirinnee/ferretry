@@ -234,6 +234,12 @@ export interface BrowserSubsystem extends BrowserViewerHost {
     key: string,
     work: (fields: BrowserInputFieldsPort, pageId: string) => Promise<T>,
   ): Promise<T>;
+  /**
+   * The host of this session's page `key` and of every frame in it, read from the live page and not through its queue (nothing
+   * is acted on): for what a LISTING or a status may say of a page a sealed value covers. `undefined` when the browser is not
+   * running or any host cannot be told (the caller then fails closed).
+   */
+  pageHosts(sessionId: string, key: string): Promise<readonly (string | undefined)[] | undefined>;
   /** Closes this session's page with this name (or id). An incognito page's whole context goes with it. */
   closePage(sessionId: string, key: string, guard?: BrowserActGuard): Promise<void>;
   /** A session ended: every page it owns closes, and every incognito context it held is discarded. */
@@ -418,6 +424,13 @@ export class BrowserSessionService implements BrowserSubsystem {
       this.touch(run);
       return await work(run.driver, page.id);
     });
+  }
+
+  async pageHosts(sessionId: string, key: string): Promise<readonly (string | undefined)[] | undefined> {
+    const run = this.run;
+    if (run === undefined || run.closed) return undefined;
+    const page = this.requirePage(run, sessionId, key);
+    return await this.guardPage(run, page.id).hosts?.();
   }
 
   /** Secure copy's read of one page, in that page's own queue (copy-contracts.ts). */

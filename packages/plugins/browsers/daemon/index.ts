@@ -22,7 +22,7 @@ import { pageToolHost } from './tools/page-host.ts';
 import { agentControlPolicy } from './tools/agent-control.ts';
 import { BrowserTools } from './tools/service.ts';
 import { SealedPages } from './sealed/page-guards.ts';
-import { SealedGate } from './sealed/gate.ts';
+import { SEALED_STREAM_REFUSAL, SealedGate, type SealedStamp } from './sealed/gate.ts';
 import { secureCopyReach } from './sealed/reach.ts';
 import type { RecordedSurfaceEvent } from './tools/types.ts';
 import { processHost } from './adapters/host.ts';
@@ -185,6 +185,16 @@ export function buildBrowsers(
           sessionId,
           downstream,
           new KernelFrameClock(kernel.clock),
+          // An agent's stream asks the sealed gate where each frame (a retry of a held one too) would leave.
+          who.agent
+            ? {
+                delivery: {
+                  stamp: () => gate.stamp(),
+                  mayDeliver: since => gate.mayDeliver('agent', since as SealedStamp, { picture: true }),
+                  refusal: SEALED_STREAM_REFUSAL,
+                },
+              }
+            : {},
         );
       },
       fromClient: frame => viewer?.fromClient(frame),

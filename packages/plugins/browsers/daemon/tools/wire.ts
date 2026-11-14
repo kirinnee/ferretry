@@ -50,7 +50,7 @@ import {
   AGENT_TOOL_MAX_TEXT_CHARS,
   AGENT_TOOL_MAX_UPLOAD_FILES,
 } from './limits.ts';
-import { AGENT_TOOL_MAX_URL_CHARS, AskOwnerMessageSchema } from '../../contract/wire/limits.ts';
+import { AGENT_TOOL_MAX_URL_CHARS, AskOwnerMessageSchema, isWebUrl, WEB_URL_ONLY } from '../../contract/wire/limits.ts';
 
 /**
  * The browser tools' calls (§3.3 `tool(... input)`), copied field for field from today's `AgentToolCallSchema`
@@ -59,13 +59,7 @@ import { AGENT_TOOL_MAX_URL_CHARS, AskOwnerMessageSchema } from '../../contract/
  */
 
 /** Only web pages: an agent has no business opening `file:`, `javascript:` or `chrome:` URLs. */
-const AgentUrlSchema = z
-  .string()
-  .max(AGENT_TOOL_MAX_URL_CHARS)
-  .refine(
-    value => URL.canParse(value) && ['http:', 'https:'].includes(new URL(value).protocol),
-    'only http and https URLs can be opened',
-  );
+const AgentUrlSchema = z.string().max(AGENT_TOOL_MAX_URL_CHARS).refine(isWebUrl, WEB_URL_ONLY);
 
 /** `true` asks the owner to take the surface over; a string says exactly what to do there. */
 const AskOwnerSchema = z.union([z.literal(true), AskOwnerMessageSchema]);
