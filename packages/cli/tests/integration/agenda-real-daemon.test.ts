@@ -28,6 +28,9 @@ beforeAll(async () => {
     [
       ...['f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7'].map(id => ({ id, mode: 'auto' as const })),
       { id: 'i1', mode: 'interactive' },
+      // Boards named like sub-verbs: a target said before the sub-verb must never be read as one.
+      { id: 'done', mode: 'auto' },
+      { id: 'dismiss', mode: 'auto' },
     ],
     {
       // The owner has already said something to f1 (a daemon with no live agent will not take a send, so it is in the
@@ -91,7 +94,7 @@ const openIds = async (ferret: string): Promise<string[]> => (await boardOf(ferr
 afterAll(async () => await daemon?.dispose());
 
 describe('fy agenda: an unknown sub-verb after flags is refused, a known one is run', () => {
-  it('should exit 2 for `agenda --json frobnicate` and name the real sub-verbs, and change nothing', async () => {
+  it('V-0030: should exit 2 for `agenda --json frobnicate` and name the real sub-verbs, and change nothing', async () => {
     const before = await openIds('f1');
     const ran = await daemon.fy('owner', ['agenda', '--json', 'frobnicate']);
     should(ran.code).equal(2);
@@ -101,7 +104,7 @@ describe('fy agenda: an unknown sub-verb after flags is refused, a known one is 
     should(await openIds('f1')).deepEqual(before);
   });
 
-  it('should run `agenda --json add` as the add it names, not as the roll-up with the word thrown away', async () => {
+  it('V-0031: should run `agenda --json add` as the add it names, not as the roll-up with the word thrown away', async () => {
     const ran = await daemon.fy('f1', [
       'agenda',
       '--json',
@@ -123,7 +126,7 @@ describe('fy agenda: an unknown sub-verb after flags is refused, a known one is 
 });
 
 describe('fy agenda answer: a switch never takes the word after it', () => {
-  it('should write the answer "A2" on A1 for `answer A1 --json A2`, and leave A2 untouched', async () => {
+  it('V-0032: should write the answer "A2" on A1 for `answer A1 --json A2`, and leave A2 untouched', async () => {
     const first = await daemon.fy('f2', raise('Answer target'));
     expect(first.code, first.err).toBe(0);
     const second = await daemon.fy('f2', raise('Answer bystander'));
@@ -137,7 +140,7 @@ describe('fy agenda answer: a switch never takes the word after it', () => {
     should(shownB.questionAnswer).equal(undefined);
   });
 
-  it('should tick step 1 for `step <id> --undo 1 --json`, as v4 did', async () => {
+  it('V-0053: should tick step 1 for `step <id> --undo 1 --json`, as v4 did', async () => {
     const made = await daemon.fy('f2', [...raise('Steps'), '--todo', '--step', 'Run the check']);
     expect(made.code, made.err).toBe(0);
     const id = ((made.json as Board).items.at(-1) as Item).id;
@@ -149,7 +152,7 @@ describe('fy agenda answer: a switch never takes the word after it', () => {
 });
 
 describe('fy agenda: nothing a verb was given is ignored', () => {
-  it('should refuse an unknown flag on edit and write nothing', async () => {
+  it('V-0037: should refuse an unknown flag on edit and write nothing', async () => {
     const made = await daemon.fy('f3', raise('Typed flag'));
     const id = ((made.json as Board).items.at(-1) as Item).id;
     const ran = await daemon.fy('f3', ['agenda', 'edit', id, '--title', 'Changed title', '--no-such-flag', '--json']);
@@ -159,7 +162,7 @@ describe('fy agenda: nothing a verb was given is ignored', () => {
     should(shown.title).not.equal('Changed title');
   });
 
-  it('should refuse a second id on dismiss and dismiss neither', async () => {
+  it('V-0035: should refuse a second id on dismiss and dismiss neither', async () => {
     const one = await daemon.fy('f3', raise('Dismiss one'));
     const two = await daemon.fy('f3', raise('Dismiss two'));
     expect(one.code, one.err).toBe(0);
@@ -172,7 +175,7 @@ describe('fy agenda: nothing a verb was given is ignored', () => {
     should(await openIds('f3')).containEql(b.id);
   });
 
-  it('should refuse a misspelt switch on ls', async () => {
+  it('V-0041: should refuse a misspelt switch on ls', async () => {
     const ran = await daemon.fy('f3', ['agenda', 'ls', '--jsno']);
     should(ran.code).equal(1);
     should(ran.err).containEql('unknown option --jsno');
@@ -180,7 +183,7 @@ describe('fy agenda: nothing a verb was given is ignored', () => {
 });
 
 describe('fy agenda patch: one document, read back from the daemon', () => {
-  it('should change the ask the owner reads, carrying the revision `show --yaml` printed', async () => {
+  it('V-0045: should change the ask the owner reads, carrying the revision `show --yaml` printed', async () => {
     const made = await daemon.fy('f4', raise('Patch me'));
     expect(made.code, made.err).toBe(0);
     const id = ((made.json as Board).items.at(-1) as Item).id;
@@ -209,7 +212,7 @@ describe('fy agenda patch: one document, read back from the daemon', () => {
 });
 
 describe('fy agenda log: the owner’s own words are copied from the chat, not retyped', () => {
-  it('should refuse while the owner has said nothing to this ferret, naming that', async () => {
+  it('V-0040: should refuse while the owner has said nothing to this ferret, naming that', async () => {
     const made = await daemon.fy('f5', raise('Log nothing yet'));
     const id = ((made.json as Board).items.at(-1) as Item).id;
     const ran = await daemon.fy('f5', ['agenda', 'log', id, '--reply', 'Use eu-west', '--json']);
@@ -217,7 +220,7 @@ describe('fy agenda log: the owner’s own words are copied from the chat, not r
     should(ran.err).containEql('no message');
   });
 
-  it('should log the owner’s latest message onto the item once they have sent one', async () => {
+  it('V-0040: should log the owner’s latest message onto the item once they have sent one', async () => {
     const made = await daemon.fy('f1', raise('Log what they said'));
     const id = ((made.json as Board).items.at(-1) as Item).id;
     const said = OWNER_SAID;
@@ -238,7 +241,7 @@ describe('fy queue: a ferret that does not exist is not an empty queue', () => {
 });
 
 describe('fy agenda: the item verbs change the board the daemon serves', () => {
-  it('should edit, then dismiss, then done three items, each read back', async () => {
+  it('V-0036, V-0037, V-0035, V-0038, V-0050: should edit, then dismiss, then done three items, each read back', async () => {
     const one = await daemon.fy('f6', raise('Rename the relay'));
     expect(one.code, one.err + one.out).toBe(0);
     const two = await daemon.fy('f6', raise('Cache sizing'));
@@ -268,7 +271,7 @@ describe('fy agenda: the item verbs change the board the daemon serves', () => {
 });
 
 describe('fy agenda clear --agents: it clears what the dry run listed, or says it did not', () => {
-  it('should dismiss the open ask of an autonomous lead, count it, and leave the board empty', async () => {
+  it('V-0033: should dismiss the open ask of an autonomous lead, count it, and leave the board empty', async () => {
     const f2 = await daemon.fy('f7', raise('Backlog'));
     expect(f2.code, f2.err).toBe(0);
     const listed = await daemon.fy('owner', ['agenda', 'clear', '--agents', '--dry-run']);
@@ -283,11 +286,60 @@ describe('fy agenda clear --agents: it clears what the dry run listed, or says i
     should(await openIds('f7')).deepEqual([]);
   });
 
-  it('should never read an interactive ferret’s board', async () => {
+  it('V-0033: should never read an interactive ferret’s board', async () => {
     const own = await daemon.fy('i1', raise('Interactive ask'));
     expect(own.code, own.err).toBe(0);
     const ran = await daemon.fy('owner', ['agenda', 'clear', '--agents', '--yes', '--json']);
     should(ran.code).equal(0);
     should(await openIds('i1')).have.length(1);
+  });
+});
+
+describe('fy agenda: a target said before the sub-verb is the target, never the verb', () => {
+  const forms: readonly (readonly [string, readonly string[]])[] = [
+    ['--session f1', ['--session', 'f1']],
+    ['--session=f1', ['--session=f1']],
+    ['-s f1', ['-s', 'f1']],
+    ['--ferret f1', ['--ferret', 'f1']],
+  ];
+  for (const [label, target] of forms)
+    it(`V-0041: should list f1's agenda for \`agenda ${label} ls --json\`, as it does for \`agenda ls ${label}\``, async () => {
+      const expected = await openIds('f1');
+      const ran = await daemon.fy('owner', ['agenda', ...target, 'ls', '--json']);
+      expect(ran.code, ran.err).toBe(0);
+      should((ran.json as Board).items.map(item => item.id)).deepEqual(expected);
+    });
+
+  it('V-0035: should dismiss A1 on the board named "done", not resolve it on the board named "dismiss"', async () => {
+    const target = await daemon.fy('done', raise('Target board'));
+    expect(target.code, target.err).toBe(0);
+    const bystander = await daemon.fy('dismiss', raise('Bystander board'));
+    expect(bystander.code, bystander.err).toBe(0);
+    const [targetItem] = (await boardOf('done')).items as readonly [Item];
+    const [bystanderItem] = (await boardOf('dismiss')).items as readonly [Item];
+    should(targetItem.id).equal(bystanderItem.id);
+    const ran = await daemon.fy('owner', [
+      'agenda',
+      '--session',
+      'done',
+      'dismiss',
+      targetItem.id,
+      '--note',
+      'review closed',
+      '--json',
+    ]);
+    expect(ran.code, ran.err).toBe(0);
+    should(await openIds('done')).deepEqual([]);
+    should(await openIds('dismiss')).deepEqual([bystanderItem.id]);
+    const history = (await daemon.fy('owner', ['agenda', 'history', '--session', 'done', '--json'])).json as Board;
+    should((history.resolved ?? []).map(item => item.id)).containEql(targetItem.id);
+  });
+
+  it('V-0030: should still refuse an unknown sub-verb after a target, and write to no board', async () => {
+    const before = await openIds('f1');
+    const ran = await daemon.fy('owner', ['agenda', '--session', 'f1', 'frobnicate']);
+    should(ran.code).equal(2);
+    should(ran.err).containEql('"frobnicate" is not a sub-verb of agenda');
+    should(await openIds('f1')).deepEqual(before);
   });
 });

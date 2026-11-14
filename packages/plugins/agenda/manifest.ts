@@ -33,6 +33,16 @@ const PAGING: readonly VerbOptionDecl[] = [
   { flag: '--after <cursor>', help: 'continue after the cursor a page named' },
 ];
 
+/**
+ * The board an item verb acts on, declared on the PARENT too: the shell reads the word after a valued option as that
+ * option's value and never as a sub-verb, so `agenda --session done dismiss A1` is `dismiss A1` on the board named "done"
+ * (a callsign may equal a verb), and `agenda --session f1 ls` is `ls` on f1.
+ */
+const TARGET: readonly VerbOptionDecl[] = [
+  { flag: '-s, --session <id>', help: 'the ferret whose board to act on, said before the sub-verb' },
+  { flag: '--ferret <id>', help: 'the same as --session (`agenda mode` reads it as the ferret to switch)' },
+];
+
 const DONE_OPTIONS: readonly VerbOptionDecl[] = [
   { flag: '-n, --note <text>', help: 'a note recorded with the resolution' },
   {
@@ -201,7 +211,7 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('agenda', { summary: 'what is waiting on you, grouped', options: PAGING }),
+      verb('agenda', { summary: 'what is waiting on you, grouped', options: [...PAGING, ...TARGET] }),
       verb('agenda open', { summary: 'every ferret’s open and parked asks, paged', options: PAGING }),
       verb('agenda mode', {
         summary: 'switch agenda mode for a ferret or for new ferrets',

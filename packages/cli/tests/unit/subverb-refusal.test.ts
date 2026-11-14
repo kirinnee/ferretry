@@ -132,6 +132,75 @@ describe('every verb with sub-verbs, from the real registry', () => {
   });
 });
 
+/** The valued spellings a verb declares: `-s, --session <id>` is `-s` and `--session`; `--good | --clarify <text>` is `--clarify`. */
+const valuedSpellings = (entry: VerbEntry): readonly string[] =>
+  (entry.options ?? []).flatMap(option =>
+    option.flag
+      .split('|')
+      .filter(alternative => alternative.includes('<'))
+      .flatMap(alternative => alternative.split(',').map(part => part.trim().split(/\s+/u)[0] as string)),
+  );
+
+const entryOf = (words: readonly string[]): VerbEntry | undefined =>
+  table.entries.find(entry => entry.words.join(' ') === words.join(' '));
+
+describe('a valued option before a sub-verb: its value is never read as the verb', () => {
+  const withValued = parents.flatMap(words => {
+    const entry = entryOf(words);
+    return entry === undefined || valuedSpellings(entry).length === 0 ? [] : [{ words, entry }];
+  });
+
+  it('should find parents that declare valued options (a registry that lost them would pass this vacuously)', () => {
+    should(withValued.map(each => each.words.join(' '))).containEql('agenda');
+  });
+
+  for (const { words, entry } of withValued)
+    describe(words.join(' '), () => {
+      const children = subverbsBelow(words).filter(each => each.words.length === words.length + 1);
+      for (const spelling of valuedSpellings(entry))
+        it(`should read the word after ${spelling} as its value, even when that word is another sub-verb`, () => {
+          // A child that is itself a parent goes on to look for ITS sub-verb, so only a leaf can be the one that runs.
+          for (const child of children.filter(each => subverbsBelow(each.words).length === 0)) {
+            const childWord = child.words.at(-1) as string;
+            for (const decoy of children.map(each => each.words.at(-1) as string)) {
+              const spaced = resolveVerb(table, [...words, spelling, decoy, childWord, 'x']);
+              const chosen = spaced.kind === 'verb' ? spaced.entry.words.join(' ') : undefined;
+              should(`${spelling} ${decoy} ${childWord} -> ${String(chosen)}`).equal(
+                `${spelling} ${decoy} ${childWord} -> ${child.words.join(' ')}`,
+              );
+              if (spaced.kind === 'verb') should(spaced.rest).deepEqual([spelling, decoy, 'x']);
+            }
+            if (spelling.startsWith('--')) {
+              const joined = resolveVerb(table, [...words, `${spelling}=${childWord}`, childWord, 'x']);
+              should(joined.kind === 'verb' ? joined.entry.words.join(' ') : undefined).equal(child.words.join(' '));
+            }
+          }
+        });
+    });
+
+  it('should declare on the parent every valued option its children declare (a target said before the sub-verb)', () => {
+    const missing: string[] = [];
+    for (const { words, entry } of withValued) {
+      const declared = new Set(valuedSpellings(entry));
+      for (const child of subverbsBelow(words).filter(each => each.words.length === words.length + 1))
+        for (const spelling of valuedSpellings(child))
+          if (!declared.has(spelling) && /^(--session|-s|--ferret)$/u.test(spelling))
+            missing.push(`${words.join(' ')} lacks ${spelling} (declared by ${child.words.join(' ')})`);
+    }
+    should(missing).deepEqual([]);
+  });
+
+  it('should take `agenda --session done dismiss A1` as `dismiss A1` on the board "done", in every spelling', () => {
+    for (const target of [['--session', 'done'], ['--session=done'], ['-s', 'done'], ['--ferret', 'done']]) {
+      const resolved = resolveVerb(table, ['agenda', ...target, 'dismiss', 'A1']);
+      should(resolved.kind).equal('verb');
+      if (resolved.kind !== 'verb') return;
+      should(resolved.entry.words).deepEqual(['agenda', 'dismiss']);
+      should(resolved.rest).deepEqual([...target, 'A1']);
+    }
+  });
+});
+
 function world0() {
   return fakeWorld({
     registry,
