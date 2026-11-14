@@ -68,6 +68,7 @@ function documentsPort(docs: Map<string, Doc>, beforePersist: () => void | Promi
     records: async () => ({ records: [], unreadable: 0 }),
     tail: async () => ({ records: [], unreadable: 0 }),
     stat: async () => undefined,
+    entries: async () => [],
     removeEmptyDirectory: async () => {
       throw new Error('the fixture holds no folders');
     },

@@ -189,6 +189,15 @@ export interface StatePort {
     file: StateFileDef,
     name: string,
   ): Promise<{ readonly kind: 'file' | 'directory' | 'symlink'; readonly modifiedMs: number } | undefined>;
+  /**
+   * Own opaque named trees only. What is directly inside one directory of the tree (never followed into a link, and a
+   * link there is a `symlink` entry): `[]` when the directory is absent or is itself not a plain directory. A walk of
+   * the whole tree is the caller's loop, so it can bound it.
+   */
+  entries(
+    file: StateFileDef,
+    name: string,
+  ): Promise<readonly { readonly name: string; readonly kind: 'file' | 'directory' | 'symlink' }[]>;
   /** Own opaque named trees only. Plain rmdir: never recursive, refuses links and nonempty directories. */
   removeEmptyDirectory(file: StateFileDef, name: string): Promise<void>;
   /** Own opaque named trees only. Exclusive mkdir, mode 0700; any existing entry is refused. */

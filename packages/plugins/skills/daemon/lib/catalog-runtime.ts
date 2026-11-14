@@ -7,7 +7,7 @@ import {
 } from '@ferretry/plugin-catalogs/contract';
 import type { ProfileLayerOutcome, RuntimesApi } from '@ferretry/plugin-runtimes/contract';
 import type { SkillsItem } from '../../contract/index.ts';
-import { InstalledSkillRefused, type SkillStore } from './skill-store.ts';
+import { InstalledSkillConflict, InstalledSkillRefused, type SkillStore } from './skill-store.ts';
 
 /** What the installer reads and writes of Runtimes: the runtimes and profiles, and the one layer act. */
 type InstallRuntimes = Pick<RuntimesApi, 'list' | 'profiles' | 'changeProfileLayers'>;
@@ -123,6 +123,8 @@ export function skillsCatalogRuntime(deps: SkillsCatalogRuntimeDeps): CatalogRun
       try {
         await deps.store.install(name, files);
       } catch (error) {
+        if (error instanceof InstalledSkillConflict)
+          throw new CatalogItemRefusal('catalog_install_conflict', error.message);
         if (error instanceof InstalledSkillRefused)
           throw new CatalogItemRefusal('catalog_not_installable', error.message);
         throw error;

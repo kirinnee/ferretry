@@ -29,6 +29,27 @@ export class InstalledSkillRefused extends Error {
   }
 }
 
+/**
+ * An install or removal that would replace or delete something in the folder no install of ours wrote (a file the
+ * person added by hand, a link, a folder the store cannot read into). The folder is left exactly as it was, and the
+ * message names the path (never its content).
+ */
+export class InstalledSkillConflict extends InstalledSkillRefused {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InstalledSkillConflict';
+  }
+}
+
+/** The most entries one look at an installed folder lists before it says there are more than a skill holds. */
+const MAX_WALKED_ENTRIES = 1000;
+
+/** One thing found on disk inside an installed skill's folder (a folder only when the walk could not go into it). */
+export interface InstalledEntry {
+  readonly path: string;
+  readonly kind: 'file' | 'symlink' | 'directory';
+}
+
 /** One file of a skill to install: a path inside the folder, and its text. */
 export interface InstalledSkillFile {
   readonly path: string;
@@ -103,32 +124,78 @@ export function installRefusal(name: string, files: readonly InstalledSkillFile[
  */
 export class SkillStore {
   constructor(
-    private readonly state: Pick<StatePort, 'write' | 'remove' | 'stat' | 'read' | 'removeEmptyDirectory'>,
+    private readonly state: Pick<StatePort, 'write' | 'remove' | 'stat' | 'read' | 'removeEmptyDirectory' | 'entries'>,
     private readonly roots: Pick<RootsPort, 'share'>,
   ) {}
 
   /**
-   * Puts `files` at `installed/<name>/`, replacing what the folder held. Everything is checked before anything is
-   * touched, so a refused skill leaves the installed one as it was. DECLARED GAP: a folder is not swapped atomically, so
-   * a ferret that launches while its skill is being replaced finds the folder partly written.
+   * Puts `files` at `installed/<name>/`, replacing the files an earlier install of ours wrote there. Everything is
+   * checked before anything is touched, so a refused skill leaves the installed one as it was. Only paths this store
+   * remembers writing are ever replaced or removed: anything else on disk in the folder (a file added by hand, a link)
+   * refuses the install with {@link InstalledSkillConflict}, and nothing is removed recursively. DECLARED GAP: a folder
+   * is not swapped atomically, so a ferret that launches while its skill is being replaced finds the folder partly
+   * written.
    */
   async install(name: string, files: readonly InstalledSkillFile[]): Promise<void> {
     const refusal = installRefusal(name, files);
     if (refusal !== undefined) throw new InstalledSkillRefused(refusal);
-    await this.state.remove(SKILLS_INSTALLED_STATE, name);
-    await this.state.remove(SKILLS_INSTALLED_STATE, `${INDEX_FOLDER}/${name}`);
+    const owned = await this.#ownedFiles(name, 'replaced');
+    const incoming = new Set(files.map(file => file.path));
+    const stale = owned.filter(path => !incoming.has(path));
+    if (stale.length > 0) await this.removePaths(name, stale);
+    // The index names the new paths before they land, so a crash part-way leaves them ours, not someone else's.
+    await this.#remember(name, [...new Set([...owned.filter(path => incoming.has(path)), ...incoming])]);
     for (const file of files) await this.state.write(SKILLS_INSTALLED_STATE, file.content, `${name}/${file.path}`);
-    await this.#remember(
-      name,
-      files.map(file => file.path),
-    );
   }
 
-  /** Removes `installed/<name>/` (a name that is not a folder name removes nothing). */
+  /**
+   * Removes what this store wrote into `installed/<name>/` (a name that is not a folder name removes nothing). Anything
+   * else in the folder is left, so a folder that held a file added by hand stays, with that file.
+   */
   async uninstall(name: string): Promise<void> {
     if (!usableSkillName(name)) return;
-    await this.state.remove(SKILLS_INSTALLED_STATE, name);
-    await this.state.remove(SKILLS_INSTALLED_STATE, `${INDEX_FOLDER}/${name}`);
+    await this.removePaths(name, await this.paths(name));
+  }
+
+  /**
+   * Every file, link or unreadable folder in `installed/<name>/` as it is on disk now (not as remembered), by path,
+   * sorted; empty folders are not listed. Bounded: past {@link MAX_WALKED_ENTRIES} a last entry says there is more.
+   */
+  async walk(name: string): Promise<readonly InstalledEntry[]> {
+    if (!usableSkillName(name)) return [];
+    const found: InstalledEntry[] = [];
+    const pending: { readonly relative: string; readonly depth: number }[] = [{ relative: '', depth: 0 }];
+    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+      const at = next.relative === '' ? name : `${name}/${next.relative}`;
+      for (const entry of await this.state.entries(SKILLS_INSTALLED_STATE, at)) {
+        const path = next.relative === '' ? entry.name : `${next.relative}/${entry.name}`;
+        if (found.length >= MAX_WALKED_ENTRIES) {
+          found.push({ path: '(more entries than a skill holds)', kind: 'directory' });
+          return found.toSorted((left, right) => left.path.localeCompare(right.path));
+        }
+        if (entry.kind !== 'directory') found.push({ path, kind: entry.kind });
+        else if (next.depth + 1 >= MAX_PATH_DEPTH || !SEGMENT.test(entry.name)) found.push({ path, kind: 'directory' });
+        else pending.push({ relative: path, depth: next.depth + 1 });
+      }
+    }
+    return found.toSorted((left, right) => left.path.localeCompare(right.path));
+  }
+
+  /**
+   * The remembered paths that are plain files on disk now, after checking that nothing ELSE is in the folder: a file no
+   * install of ours wrote, a link, a folder that cannot be read into. That is what a person added, and it is never
+   * replaced or removed (`doing` is the word the refusal uses).
+   */
+  async #ownedFiles(name: string, doing: string): Promise<readonly string[]> {
+    const remembered = new Set(await this.paths(name));
+    const owned: string[] = [];
+    for (const entry of await this.walk(name))
+      if (entry.kind === 'file' && remembered.has(entry.path)) owned.push(entry.path);
+      else
+        throw new InstalledSkillConflict(
+          `${name}/${entry.path} is here but no install of ours wrote it, so the skill was not ${doing}. Move or remove it, then try again.`,
+        );
+    return owned;
   }
 
   /** Whether `installed/<name>/` is a plain folder here (a link or a file is not one). */
@@ -171,7 +238,12 @@ export class SkillStore {
   async removePaths(name: string, paths: readonly string[]): Promise<void> {
     if (!usableSkillName(name)) return;
     const plain = paths.filter(path => plainSkillPath(path));
-    for (const path of plain) await this.state.remove(SKILLS_INSTALLED_STATE, `${name}/${path}`);
+    // A path is removed only while it is a file or a link: a folder there is never removed with what is in it.
+    for (const path of plain) {
+      const found = await this.state.stat(SKILLS_INSTALLED_STATE, `${name}/${path}`).catch(() => undefined);
+      if (found !== undefined && found.kind !== 'directory')
+        await this.state.remove(SKILLS_INSTALLED_STATE, `${name}/${path}`);
+    }
     const folders = new Set<string>([name]);
     for (const path of plain) {
       const parts = path.split('/').slice(0, -1);

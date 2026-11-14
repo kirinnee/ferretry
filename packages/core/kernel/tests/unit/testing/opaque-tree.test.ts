@@ -35,3 +35,20 @@ test('P106 memory named trees mirror metadata, exclusive private directories, li
     await expect(port.removeEmptyDirectory(Tree, name)).rejects.toThrow();
   }
 });
+
+test('memory entries lists what is directly inside one directory, as the real port does', async () => {
+  const folder = new MemoryStateFolder(() => 1);
+  const port = folder.port([Tree]);
+  expect(await port.entries(Tree, 'one')).toEqual([]);
+  await port.createPrivateDirectory(Tree, 'one');
+  await port.write(Tree, 'a' as never, 'one/a.md');
+  await port.write(Tree, 'b' as never, 'one/sub/b.md');
+  folder.symlinks.set('pair-open/one/link', 'a.md');
+  const found = [...(await port.entries(Tree, 'one'))].toSorted((left, right) => left.name.localeCompare(right.name));
+  expect(found).toEqual([
+    { name: 'a.md', kind: 'file' },
+    { name: 'link', kind: 'symlink' },
+    { name: 'sub', kind: 'directory' },
+  ]);
+  expect(await port.entries(Tree, 'one/a.md')).toEqual([]);
+});

@@ -20,7 +20,7 @@ import { InstalledSkillAssets } from '../../daemon/adapters/installed-assets.ts'
 import { ProjectSkillFolders } from '../../daemon/adapters/project-skill-folders.ts';
 import { sha256Hex } from '../../daemon/adapters/sha256.ts';
 import { skillsCatalogRuntime } from '../../daemon/lib/catalog-runtime.ts';
-import { SkillStore } from '../../daemon/lib/skill-store.ts';
+import { InstalledSkillConflict, SkillStore } from '../../daemon/lib/skill-store.ts';
 import manifest from '../../manifest.ts';
 
 const parents: string[] = [];
@@ -238,11 +238,81 @@ describe('the skills a catalog installed into this machine, as the installer rea
     expect(await readFile(join(w.installed, 'pdf', 'SKILL.md'), 'utf8')).toBe(SKILL_DOC);
   });
 
-  test('a folder somebody put there by hand exists but lists nothing the store wrote, so it is never claimed', async () => {
+  test('a folder somebody put there by hand lists every file in it, so the installer sees it and never claims it', async () => {
     const w = await world();
     await mkdir(join(w.installed, 'by-hand'), { recursive: true });
     await writeFile(join(w.installed, 'by-hand', 'SKILL.md'), 'mine');
-    expect(await new InstalledSkillAssets(w.store).inspect('by-hand')).toEqual({ exists: true, files: new Map() });
+    const reading = await new InstalledSkillAssets(w.store).inspect('by-hand');
+    expect(reading.exists).toBe(true);
+    expect([...reading.files]).toEqual([['SKILL.md', await sha256Hex(text('mine'))]]);
+    await expect(w.store.install('by-hand', FILES)).rejects.toBeInstanceOf(InstalledSkillConflict);
+    expect(await readFile(join(w.installed, 'by-hand', 'SKILL.md'), 'utf8')).toBe('mine');
+  });
+
+  test('a file added locally after an install is listed by inspect, and an update refuses and keeps it', async () => {
+    const w = await world();
+    const assets = new InstalledSkillAssets(w.store);
+    await w.store.install('pdf', FILES);
+    await writeFile(join(w.installed, 'pdf', 'local-notes.md'), 'notes written locally\n');
+    await mkdir(join(w.installed, 'pdf', 'mine'), { recursive: true });
+    await writeFile(join(w.installed, 'pdf', 'mine', 'deep.md'), 'deep\n');
+
+    const reading = await assets.inspect('pdf');
+    expect([...reading.files.keys()].toSorted()).toEqual(
+      ['SKILL.md', 'local-notes.md', 'mine/deep.md', 'scripts/run.sh'].toSorted(),
+    );
+
+    const next = [{ path: 'SKILL.md', content: `${SKILL_DOC}\nversion two\n` }];
+    const refused = await w.store.install('pdf', next).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(InstalledSkillConflict);
+    expect((refused as Error).message).toContain('pdf/local-notes.md');
+    expect((refused as Error).message).not.toContain('notes written locally');
+    // Nothing moved: the owned files are as they were, and so are the person's.
+    expect(await readFile(join(w.installed, 'pdf', 'local-notes.md'), 'utf8')).toBe('notes written locally\n');
+    expect(await readFile(join(w.installed, 'pdf', 'mine', 'deep.md'), 'utf8')).toBe('deep\n');
+    expect(await readFile(join(w.installed, 'pdf', 'SKILL.md'), 'utf8')).toBe(SKILL_DOC);
+    expect(await readFile(join(w.installed, 'pdf', 'scripts', 'run.sh'), 'utf8')).toBe('run\n');
+  });
+
+  test('a link in the folder is listed and refuses an update, and what it points at is untouched', async () => {
+    const w = await world();
+    await w.store.install('pdf', FILES);
+    await writeFile(join(w.parent, 'outside.txt'), 'outside\n');
+    await symlink(join(w.parent, 'outside.txt'), join(w.installed, 'pdf', 'link.txt'));
+    expect([...(await new InstalledSkillAssets(w.store).inspect('pdf')).files.keys()]).toContain('link.txt');
+    await expect(w.store.install('pdf', FILES)).rejects.toBeInstanceOf(InstalledSkillConflict);
+    expect(await readFile(join(w.parent, 'outside.txt'), 'utf8')).toBe('outside\n');
+    expect((await lstat(join(w.installed, 'pdf', 'link.txt'))).isSymbolicLink()).toBe(true);
+  });
+
+  test('an update with nothing foreign in the folder replaces owned files and drops the ones the new version lacks', async () => {
+    const w = await world();
+    await w.store.install('pdf', FILES);
+    const next = [
+      { path: 'SKILL.md', content: `${SKILL_DOC}\nversion two\n` },
+      { path: 'docs/guide.md', content: 'guide\n' },
+    ];
+    await w.store.install('pdf', next);
+    expect(await readFile(join(w.installed, 'pdf', 'SKILL.md'), 'utf8')).toBe(next[0]?.content as string);
+    expect(await readFile(join(w.installed, 'pdf', 'docs', 'guide.md'), 'utf8')).toBe('guide\n');
+    await expect(lstat(join(w.installed, 'pdf', 'scripts'))).rejects.toThrow();
+    expect((await w.store.paths('pdf')).toSorted()).toEqual(['SKILL.md', 'docs/guide.md']);
+  });
+
+  test('removal and uninstall delete only owned files and leave a folder holding anything else', async () => {
+    const w = await world();
+    const assets = new InstalledSkillAssets(w.store);
+    await w.store.install('pdf', FILES);
+    await writeFile(join(w.installed, 'pdf', 'local-notes.md'), 'mine\n');
+    await w.store.uninstall('pdf');
+    expect(await readFile(join(w.installed, 'pdf', 'local-notes.md'), 'utf8')).toBe('mine\n');
+    await expect(lstat(join(w.installed, 'pdf', 'SKILL.md'))).rejects.toThrow();
+    expect([...(await assets.inspect('pdf')).files.keys()]).toEqual(['local-notes.md']);
+    // A directory is never removed with what is in it, even when a caller names it.
+    await mkdir(join(w.installed, 'pdf', 'mine'), { recursive: true });
+    await writeFile(join(w.installed, 'pdf', 'mine', 'deep.md'), 'deep\n');
+    await w.store.removePaths('pdf', ['mine']);
+    expect(await readFile(join(w.installed, 'pdf', 'mine', 'deep.md'), 'utf8')).toBe('deep\n');
   });
 });
 
@@ -322,6 +392,48 @@ describe('installing a catalog skill into a runtime', () => {
     expect(w.calls).toEqual(['write pdf absent', 'add skills/pdf']);
     expect(stored.component).toEqual({ items: ['pdf'], installedFrom: PROVENANCE });
     expect(await w.runtime.storedComponent('pdf')).toEqual(stored.component);
+  });
+
+  test('an update over a folder with a file added by hand is a conflict that names the path, and writes nothing else', async () => {
+    const w = await world();
+    const items = new Map<string, SkillsItem>([['pdf', { items: ['pdf'] }]]);
+    const calls: string[] = [];
+    const runtime = skillsCatalogRuntime({
+      runtimes: () =>
+        ({
+          list: async () => [],
+          profiles: async () => [{ name: 'default', layers: ['skills/pdf'], etag: 'p1' }],
+          changeProfileLayers: async () => {
+            calls.push('layers');
+            return { kind: 'written' as const, profiles: ['default'] };
+          },
+        }) as never,
+      items: () => items,
+      writeItem: async () => {
+        calls.push('write');
+        return written;
+      },
+      removeItem: async () => {
+        calls.push('remove');
+        return written;
+      },
+      store: w.store,
+    });
+    await runtime.installCatalogItem({ ...CHANGE, replace: true }, undefined);
+    await writeFile(join(w.installed, 'pdf', 'local-notes.md'), 'notes written locally\n');
+    calls.length = 0;
+    const refusal = await runtime
+      .installCatalogItem(
+        { ...CHANGE, replace: true, files: [{ path: 'SKILL.md', content: `${SKILL_DOC}\nversion two\n` }] },
+        undefined,
+      )
+      .catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(CatalogItemRefusal);
+    expect(refusal).toMatchObject({ code: 'catalog_install_conflict' });
+    expect((refusal as Error).message).toContain('pdf/local-notes.md');
+    expect(calls).toEqual([]);
+    expect(await readFile(join(w.installed, 'pdf', 'local-notes.md'), 'utf8')).toBe('notes written locally\n');
+    expect(await readFile(join(w.installed, 'pdf', 'SKILL.md'), 'utf8')).toBe(SKILL_DOC);
   });
 
   test('refuses a name that is already a skill here that no install of ours put there, writing nothing', async () => {

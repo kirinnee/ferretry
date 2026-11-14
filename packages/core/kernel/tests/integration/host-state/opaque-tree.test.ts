@@ -73,3 +73,27 @@ test('P106 named-tree metadata and directory operations refuse other defs, unsaf
   await expect(port.createPrivateDirectory(Tree, 'through/new')).rejects.toThrow();
   expect((await lstat(`${home}/outside/empty`)).isDirectory()).toBe(true);
 });
+
+test('entries lists what is directly inside one directory of the tree, never through a link', async () => {
+  const { home, port, path } = await fixture();
+  expect(await port.entries(Tree, 'missing')).toEqual([]);
+  await port.createPrivateDirectory(Tree, 'one');
+  await port.write(Tree, 'a' as never, 'one/a.md');
+  await port.createPrivateDirectory(Tree, 'one/sub');
+  await mkdir(`${home}/outside`, { recursive: true });
+  await writeFile(`${home}/outside/secret.txt`, 'x');
+  await symlink(`${home}/outside/secret.txt`, path('one/link.txt'));
+  const found = [...(await port.entries(Tree, 'one'))].toSorted((left, right) => left.name.localeCompare(right.name));
+  expect(found).toEqual([
+    { name: 'a.md', kind: 'file' },
+    { name: 'link.txt', kind: 'symlink' },
+    { name: 'sub', kind: 'directory' },
+  ]);
+  // A file, a link to a folder, and a folder under a link all list nothing (or are refused), and never reach outside.
+  expect(await port.entries(Tree, 'one/a.md')).toEqual([]);
+  await symlink(`${home}/outside`, path('alias'));
+  expect(await port.entries(Tree, 'alias')).toEqual([]);
+  await expect(port.entries(Tree, 'alias/x')).rejects.toThrow();
+  await expect(port.entries(Single, 'one')).rejects.toThrow();
+  await expect(port.entries(Tree, '../other')).rejects.toThrow();
+});
