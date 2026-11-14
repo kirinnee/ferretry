@@ -323,6 +323,48 @@ describe('the hosted tunnel carrier', () => {
     },
   );
 
+  it('should wait for a finder that answers later, then be off with the remedy when it finds nothing', async () => {
+    // Act: the kernel's lookup is asynchronous; start returns before it answers.
+    const subject = carrier({ cloudflared: { locate: async () => CLOUDFLARED_NOT_ON_PATH } });
+    subject.start();
+    await subject.idle();
+
+    // Assert
+    should(world.serviceReads).deepEqual([]);
+    should(world.listener.opened).equal(0);
+    should(subject.status.state).equal('unavailable');
+    should(world.notices.stated[0]).match(/^tunnel carrier off — cloudflared is not on this daemon’s PATH/u);
+  });
+
+  it('should bring the tunnel up from a finder that answers later', async () => {
+    // Act
+    const subject = await started({ cloudflared: { locate: async () => CLOUDFLARED } });
+
+    // Assert
+    should(world.serviceReads.length).be.above(0);
+    should(world.listener.opened).equal(1);
+    await subject.stop();
+  });
+
+  it('should bring nothing up when it is stopped before a later finder answers', async () => {
+    // Arrange
+    let answer: (location: CloudflaredLocation) => void = () => undefined;
+    const subject = carrier({
+      cloudflared: { locate: () => new Promise<CloudflaredLocation>(resolve => (answer = resolve)) },
+    });
+    subject.start();
+
+    // Act
+    const stopping = subject.stop();
+    answer(CLOUDFLARED);
+    await stopping;
+
+    // Assert
+    should(world.serviceReads).deepEqual([]);
+    should(world.listener.opened).equal(0);
+    should(() => world.processes.latest).throw(/no connector was spawned/u);
+  });
+
   it('should be off, saying why, when the hosted service does not provision tunnels', async () => {
     // Act
     await started({ service: { read: async () => NO_TUNNEL_SERVICE } });
