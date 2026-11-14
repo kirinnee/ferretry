@@ -65,6 +65,18 @@ PIN_URL="http://127.0.0.1:9"
 QUIET_TRIES="${MIGRATE_QUIET_TRIES:-10}"
 CONVERTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# What the owner chose NOT to carry (ruling !A516). The six items are left-behind.txt, the file the converter reads for its own
+# report, so the prompt and the report say the same words. $1 is the path the v4 home stays at.
+left_behind() {
+  local item
+  echo "Left behind (not carried to v5, by the owner's choice):"
+  while IFS= read -r item; do
+    [ -n "${item}" ] && echo "  - ${item}"
+  done <"${CONVERTER_DIR}/left-behind.txt"
+  echo "v4's home is kept untouched at $1, so you can look back at any of it."
+  echo "To look: open that folder, or copy it and run v4's fy against the copy (FY_HOME=<copy>). Do not start v4 on the original."
+}
+
 # ---------------------------------------------------------------- arguments
 [ "$#" -ge 1 ] || usage
 phase="$1"
@@ -388,6 +400,7 @@ preflight)
   note_set FY_PORT_STATE "${port_state}"
   if [ "${port_state}" = set ]; then note_set FY_PORT "${port_value}"; fi
   mark preflighted
+  left_behind "$(note_get B)"
   say "✅ preflight passed: v4 ${v4_version} -> ${tag:-rehearsal}, kind ${kind}, home ${H}"
   say "NOTES=${NOTES}"
   ;;
@@ -518,6 +531,7 @@ quiet)
 backup)
   H="$(note_get H)"
   B="$(note_get B)"
+  if [ "${owner_yes}" != 1 ]; then left_behind "${B}" >&2; fi
   [ "${owner_yes}" = 1 ] || fail "tell the owner: 'I will move ${H} to ${B}; that folder is the backup and stays untouched until you delete it', then pass --owner-yes"
   has_mark quiet || fail "run quiet first"
   rehearsal_phase_guard "${H}"
@@ -860,6 +874,7 @@ verify)
   grep -q $'\tREVIEW\t' "${rows}" && say "⚠️ REVIEW rows are not failures: show them to the owner, who decides."
   [ "${bad}" = 0 ] || fail "verify found a difference (FAIL rows above): stop, tell the owner, offer the rollback"
   mark verified
+  left_behind "$(note_get B)"
   say "✅ verify: no FAIL row. By eye, with the owner: message one running ferret, resume one stopped ferret, open one card with history, reload the app on a phone"
   ;;
 

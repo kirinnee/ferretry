@@ -151,6 +151,7 @@ export async function makeSandbox(options: SandboxOptions = {}): Promise<Sandbox
 
   // The checkout: the script itself in a git repository at a released tag.
   await cp(SCRIPT, join(repo, 'migration', 'v4-to-v5', 'migrate.sh'));
+  await cp(join(dirname(SCRIPT), 'left-behind.txt'), join(repo, 'migration', 'v4-to-v5', 'left-behind.txt'));
   await writeFile(join(repo, '.gitignore'), 'node_modules\n');
   await git(repo, 'init', '-q', '-b', 'main');
   await git(repo, 'add', '-A');

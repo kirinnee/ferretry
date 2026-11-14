@@ -1,0 +1,6 @@
+chat history (old conversations and transcripts)
+agents' browser sign-ins (the agent browser profile)
+named agent terminals
+the Warden machine agenda item
+multi-line routing prompts beyond their last line (models-guide routing)
+some security history (Gate kept-bucket and grant audit history)
