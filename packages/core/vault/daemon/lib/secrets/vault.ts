@@ -98,8 +98,18 @@ export class SecretDirectory {
    * that arrived after the card was drawn. Says what it found without writing: `changed`, `full`, or
    * `unreadable` when the store cannot be read. A failure while WRITING still raises, because then the value
    * may or may not be there.
+   *
+   * `proceed` is asked INSIDE the turn, after every check above and immediately before the write, so what it
+   * decides is true at the moment of committing and not merely when the write was queued (a secure paste asks
+   * whether its copy is still the live capture). A sentence refuses: nothing is written and it comes back as
+   * `refused`. It never sees the value.
    */
-  async putIf(name: SecretName, value: string, exists: boolean): Promise<'stored' | 'changed' | 'full' | 'unreadable'> {
+  async putIf(
+    name: SecretName,
+    value: string,
+    exists: boolean,
+    proceed?: () => Promise<string | undefined>,
+  ): Promise<'stored' | 'changed' | 'full' | 'unreadable' | 'refused'> {
     return await this.inTurn(async () => {
       let document: SecretVaultDocument;
       try {
@@ -109,6 +119,7 @@ export class SecretDirectory {
       }
       if ((document.entries[name] !== undefined) !== exists) return 'changed';
       if (!exists && Object.keys(document.entries).length >= MAX_SECRETS_PER_DAEMON) return 'full';
+      if (proceed !== undefined && (await proceed()) !== undefined) return 'refused';
       await this.write(document, name, value);
       return 'stored';
     });

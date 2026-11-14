@@ -103,6 +103,8 @@ export interface WorldOptions {
   readonly withRules?: boolean;
   readonly withLogins?: boolean;
   readonly clear?: boolean;
+  /** The production routing instead of the recording fake: every request goes to this target (a real router over a real store). */
+  readonly route?: InputRequestServiceDependencies['target'];
 }
 
 /** The service and everything it recorded. */
@@ -270,7 +272,7 @@ export function world(options: WorldOptions = {}) {
   };
 
   const service = new InputRequestService({
-    target,
+    target: options.route ?? target,
     agenda: {
       raise: async (_session, raised) => {
         if (state.agendaFails) return { ok: false, message: 'the agenda is full' };
