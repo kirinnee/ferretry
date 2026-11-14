@@ -25,7 +25,6 @@
  */
 
 import type { WardenAnomaly } from './detect.ts';
-import { provenancePath } from './provenance.ts';
 import type { WardenSessionConfig, WardenSessionState } from './types.ts';
 
 /** One session as a prompt describes it: what the detector knows, plus the
@@ -83,8 +82,17 @@ export function wardenTeammateToken(teammate: string): string {
 const teammateOf = (config: WardenPromptSession['config']): string =>
   config.teammate === undefined ? 'unknown' : wardenTeammateToken(config.teammate);
 
+/**
+ * How a report comes back: as the text of the investigator's final `signal done`, which Ferrets keeps as its summary
+ * and the Warden files as the report. The investigator works in a folder of its own outside the Ferretry home and has
+ * no way to write into the Warden's state, so no path is ever named to it.
+ */
+function reportDelivery(cli: string): string {
+  return `- Deliver the report as the whole message of your final \`${cli} signal done "<the report>"\`: that message IS the report, so put nothing else in it and write no file for it.`;
+}
+
 /** The report-writing rules both prompts share. */
-function reportWritingRules(reportPath: string): readonly string[] {
+function reportWritingRules(): readonly string[] {
   return [
     '',
     '## Report writing',
@@ -95,7 +103,6 @@ function reportWritingRules(reportPath: string): readonly string[] {
     '- LEAVE means "no action needed"; say why in one line. If two actions are genuinely safe, name both in the reason and put the safer one first.',
     '- Bold at most one key value per bullet.',
     '- Do not write CLI, model, harness, or failover facts: the daemon injects those from session metadata when rendering.',
-    `- The daemon-owned provenance sidecar is: ${provenancePath(reportPath)}`,
     '',
   ];
 }
@@ -240,7 +247,6 @@ function inboxStuckVerdicts(): readonly string[] {
 export function buildAssignedWardenPrompt(
   anomaly: WardenAnomaly,
   session: WardenPromptSession,
-  reportPath: string,
   settings: WardenPromptSettings,
 ): string {
   const cli = settings.clientName;
@@ -272,8 +278,8 @@ export function buildAssignedWardenPrompt(
     '',
     '## Rules',
     '- Do NOT touch any other session. No git writes, no repository edits, no new non-warden sessions.',
-    `- Write your report to EXACTLY: ${reportPath}`,
-    ...reportWritingRules(reportPath),
+    reportDelivery(cli),
+    ...reportWritingRules(),
     '- The report MUST follow this machine-stable template (the daemon parses the verdict and the recommendation):',
     '```',
     anomaly.kind === 'inbox_stuck'
@@ -293,7 +299,6 @@ export function buildAssignedWardenPrompt(
     '## Evidence',
     '- <up to three short bullets that support the verdict>',
     '```',
-    `- Then run: \`${cli} signal done\`.`,
   ].join('\n');
 }
 
@@ -328,7 +333,6 @@ function sweepSessionFacts(session: WardenPromptSession): Record<string, unknown
 export function buildWardenSweepPrompt(input: {
   readonly anomalies: readonly WardenAnomaly[];
   readonly sessions: readonly WardenPromptSession[];
-  readonly reportPath: string;
   readonly at: string;
   readonly moveCandidates?: readonly WardenMoveCandidates[];
   readonly settings: WardenPromptSettings;
@@ -359,7 +363,7 @@ export function buildWardenSweepPrompt(input: {
     '- Do NOT start any non-warden session.',
     '',
     '## Required output',
-    `- Write a report to EXACTLY this path: ${input.reportPath}`,
+    reportDelivery(cli),
     '- State the outcome and one recommended action per session; keep the report short.',
     '- Write one `## Anomaly: <session-id> — :<teammate> / <label>` section per anomaly record; repeat a session in separate sections when it has several anomaly kinds.',
     '- Put `- **Anomaly kind:** <kind>` inside EVERY anomaly section.',
@@ -368,8 +372,7 @@ export function buildWardenSweepPrompt(input: {
     '- Put `- **Outcome:** <short reason>` directly under the recommendation.',
     '- Never use one fleet-wide verdict as the verdict for several sessions.',
     '- Use NEEDS_HUMAN only for a genuine, explicit uncertainty about whether stopping would destroy needed work or cause irreversible harm. Otherwise act (or LEAVE) and log the outcome.',
-    ...reportWritingRules(input.reportPath),
-    `- When the sweep is done, run: \`${cli} signal done\`.`,
+    ...reportWritingRules(),
     '',
     '## Anomalies (deterministic detector output)',
     '```json',

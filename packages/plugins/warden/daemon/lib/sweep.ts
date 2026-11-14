@@ -1716,7 +1716,7 @@ export class WardenSweepService {
         state,
         {
           name: `Investigate ${target.config.teammate === undefined ? targetId.slice(0, 8) : displayAgentName(target.config.teammate)}`,
-          prompt: buildAssignedWardenPrompt(anomaly, target, reportPath, this.settings),
+          prompt: buildAssignedWardenPrompt(anomaly, target, this.settings),
           cwd: this.settings.wardenCwd,
           effort: input.config.investigation.effort,
           stopCapability: capability,
@@ -3269,7 +3269,6 @@ export class WardenSweepService {
         prompt: buildWardenSweepPrompt({
           anomalies,
           sessions: input.fleet,
-          reportPath,
           at: input.at,
           moveCandidates: await this.moveCandidates(anomalies, input.fleet, config),
           settings: this.settings,

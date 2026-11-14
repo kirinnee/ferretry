@@ -25,8 +25,11 @@ import { createWardenSubsystem } from './subsystem.ts';
  * - Auto-revive resumes a ferret Ferrets reports as having died (`FerretSummary.cause`) through `FerretsApi.resume`
  *   (automatic). A failover act is a move through `FerretsApi.move`, but nothing reaches it yet: the sweep routes every
  *   failover through the auto-move service, which is not built (it needs fleet facts, the owner hold and the ferret's
- *   background jobs, none of which Ferrets offers). Investigator wardens refuse: Ferrets takes a work folder, but the
- *   Warden has no folder of its own to give it, so nothing is spent.
+ *   background jobs, none of which Ferrets offers).
+ * - An investigator is a ferret the Warden starts through Ferrets (`daemon/spawner.ts`), as the Warden and under an agent
+ *   origin, in a folder of its own that the kernel's scratch port made outside the Ferretry home. It hands its report
+ *   back as the message of its last `signal done`; Ferrets keeps that as its summary and the first read after it
+ *   finished files it, masked, as the report (`FileWardenArtifacts.readReport`).
  * - The Jev guard is the real one, and the KERNEL places its key (`kernel.secrets.send`): the Warden never holds it.
  *   It is spent only once the owner wrote `jev.key: ${secret:JEV_API_KEY}` into warden.yaml (an agent's write that
  *   adds it is held) and the Vault holds the key; until then it answers `not_set` and no request leaves the machine.
