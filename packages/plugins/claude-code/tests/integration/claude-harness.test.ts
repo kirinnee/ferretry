@@ -66,6 +66,8 @@ function build(
     update?: unknown;
     permission?: unknown;
     dialog?: unknown;
+    /** The settings and hooks the launching runtime's profile selects; default: every configured item. */
+    selected?: (runtime: string | undefined) => Promise<{ settings: ReadonlySet<string>; hooks: ReadonlySet<string> }>;
   } = {},
 ) {
   const roots = rootsPortFor(
@@ -87,6 +89,7 @@ function build(
   const tmux: string[][] = [];
   const panes = new PaneDirectory();
   const harness = new ClaudeHarness({
+    selected: options.selected ?? (async () => ({ settings: EVERYTHING, hooks: EVERYTHING })),
     roots,
     config: (options.config ?? {
       file: () => ({ searchPaths: [], permissionMode: 'auto' }),
@@ -136,6 +139,9 @@ function build(
   };
   return { harness, roots, writeHome, tmux, panes };
 }
+
+/** Names every component: for the tests that are not about which components a runtime selects. */
+const EVERYTHING = { has: () => true } as unknown as ReadonlySet<string>;
 
 const spec = (more: Record<string, unknown> = {}): LaunchSpec =>
   ({
@@ -533,6 +539,63 @@ describe('ClaudeHarness', () => {
       env: Record<string, string>;
     };
     expect(settings.env).toEqual({ LOG: '1', GUARD: '${secret:GUARD_VALUE}' });
+  });
+
+  test('B02 only the settings and hooks the launching runtime’s profile selects reach its home; the rest stay out', async () => {
+    const config = {
+      file: () => ({ searchPaths: [], permissionMode: 'auto' }),
+      collection: (definition: unknown) =>
+        definition === CLAUDE_CODE_SETTINGS
+          ? new Map([
+              ['guard', { settings: { env: { LOG: '1' } } }],
+              ['other', { settings: { env: { OTHER: '1' } } }],
+            ])
+          : definition === CLAUDE_CODE_HOOKS
+            ? new Map([
+                ['audit', { hooks: { PostToolUse: [{ command: 'echo audit' }] } }],
+                ['unselected', { hooks: { PreToolUse: [{ command: 'echo nope' }] } }],
+              ])
+            : new Map(),
+    };
+    const asked: (string | undefined)[] = [];
+    const { harness } = build({
+      config,
+      selected: async runtime => {
+        asked.push(runtime);
+        return { settings: new Set(['guard']), hooks: new Set(['audit']) };
+      },
+    });
+
+    await harness.prepareHome(spec({ runtime: 'work' }));
+
+    const settings = JSON.parse(await readFile(join(HOME, 'settings.json'), 'utf8')) as {
+      env?: Record<string, string>;
+      hooks?: Record<string, unknown>;
+    };
+    expect(asked).toEqual(['work']);
+    expect(settings.env).toEqual({ LOG: '1' });
+    expect(Object.keys(settings.hooks ?? {})).toEqual(['PostToolUse']);
+  });
+
+  test('B02 a runtime whose profile selects none gets none of the machine’s settings or hooks', async () => {
+    const { harness } = build({
+      config: {
+        file: () => ({ searchPaths: [], permissionMode: 'auto' }),
+        collection: definition =>
+          definition === CLAUDE_CODE_SETTINGS
+            ? new Map([['guard', { settings: { env: { LOG: '1' } } }]])
+            : definition === CLAUDE_CODE_HOOKS
+              ? new Map([['audit', { hooks: { PostToolUse: [{ command: 'echo audit' }] } }]])
+              : new Map(),
+      },
+      selected: async () => ({ settings: new Set(), hooks: new Set() }),
+    });
+
+    await harness.prepareHome(spec({ runtime: 'bare' }));
+
+    const settings = JSON.parse(await readFile(join(HOME, 'settings.json'), 'utf8')) as Record<string, unknown>;
+    expect(settings.env).toBeUndefined();
+    expect(settings.hooks).toBeUndefined();
   });
 
   describe(".claude.json is merged at every launch, never replaced (today's wrapper seed)", () => {

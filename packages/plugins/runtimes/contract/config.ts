@@ -213,20 +213,22 @@ export function runtimeLoosening(
  * shell's build then runs with this runtime's login in its environment, which the owner approved for other runtimes
  * only. Dropping the shell, or keeping the same one, loosens nothing.
  *
- * A REMOVAL (`after` undefined: the kernel judges a removed file with that) is judged by `before` alone and loosens
- * nothing here: it never throws, so the owner's removal is admitted instead of held as "could not be judged". Today
- * held a removed runtime only when its login HAD a budget ({@link runtimeLoosening}, `before.login` only); this half
- * cannot see budgets and a held removal could not be confirmed through the apply, so that one refinement is the
- * daemon half's, as for a re-point.
+ * A REMOVAL (`after` undefined: the kernel judges a removed file with that) is judged by `before` alone and never
+ * throws. It is HELD like a re-point: today held a removed runtime off a budgeted login ({@link runtimeLoosening},
+ * `before.login` only), this half cannot see budgets, and a removal that was admitted let an agent (or a caller with no
+ * step-up) delete a runtime off a budgeted login and re-create the name on another, which a direct re-point would
+ * have held. The judge still lets the OWNER's removal into effect; only a caller who may not loosen is held.
  */
 export const runtimeFileLoosens = (
   before: RuntimeFile | undefined,
   after: RuntimeFile | undefined,
 ): readonly string[] => [
-  ...(before === undefined || after === undefined || before.login === after.login
+  ...(before === undefined || after?.login === before.login
     ? []
     : [
-        `a runtime moves off login "${before.login}" to "${after.login}", which may leave a budget that counts and stops it`,
+        after === undefined
+          ? `a runtime is removed from login "${before.login}", which may leave a budget that counts and stops it`
+          : `a runtime moves off login "${before.login}" to "${after.login}", which may leave a budget that counts and stops it`,
       ]),
   ...(after?.shell === undefined || after.shell === before?.shell
     ? []

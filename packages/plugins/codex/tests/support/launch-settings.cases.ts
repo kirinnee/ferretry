@@ -14,6 +14,7 @@ import { ok } from '@ferretry/std';
 import { CODEX_LAUNCH_SETTINGS, CODEX_ROLLOUTS, CODEX_SETTINGS, type HarnessConfig } from '../../contract/index.ts';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { realClock } from './ports.ts';
+import { selectEverything } from './selected.ts';
 
 /** ONE body, registered by two tiers: `lib/launch-settings.ts` (unit ledger) and the harness adapter (integration ledger). */
 export function launchSettingsCases(): void {
@@ -59,6 +60,7 @@ export function launchSettingsCases(): void {
     items: ReadonlyMap<string, unknown> = new Map(),
   ) {
     return codexHarness({
+      selected: selectEverything,
       kernel: {
         roots: roots(),
         state,

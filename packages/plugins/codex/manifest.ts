@@ -19,6 +19,7 @@ import {
   PROFILE_COMPONENTS_KEY,
   ProfileCodexHooksSource,
   ProfileCodexSettingsSource,
+  RuntimesPort,
 } from '@ferretry/plugin-runtimes/contract';
 
 /**
@@ -37,6 +38,9 @@ export default definePlugin({
   kinds: ['harness', 'command', 'view'],
 
   provides: { codex: CodexPort },
+  // Which settings components a runtime's profile selects (`RuntimesApi.layers`), read live and late (Runtimes takes this
+  // plugin's component sources, so it cannot be a build edge): only those items reach that runtime's home.
+  uses: { runtimes: RuntimesPort },
 
   actions: {
     routes: [

@@ -31,6 +31,36 @@ export interface RuntimeLayers {
   readonly profile: string;
   readonly mcp: readonly string[];
   readonly skills: readonly string[];
+  /** The `settings/<name>` and `hooks/<name>` components the stack names: a harness applies only these to its home. Absent: none. */
+  readonly settings?: readonly string[];
+  readonly hooks?: readonly string[];
+}
+
+/** The settings and hooks components a runtime's profile selects, by name. */
+export interface SelectedComponents {
+  readonly settings: ReadonlySet<string>;
+  readonly hooks: ReadonlySet<string>;
+}
+
+/**
+ * What a harness applies to a runtime's home (v4's `adaptProfile` got only the resolved profile's components): the
+ * settings and hooks items the runtime's profile stack names. A launch with no runtime, a runtime Runtimes does not know,
+ * a stack that cannot be resolved or Runtimes being off selects NOTHING: never a guess, so no item reaches the home.
+ */
+export async function selectedComponents(
+  runtimes: { layers(runtime: RuntimeId): Promise<RuntimeLayers | undefined> } | undefined,
+  runtime: string | undefined,
+): Promise<SelectedComponents> {
+  const none: SelectedComponents = { settings: new Set(), hooks: new Set() };
+  if (runtimes === undefined || runtime === undefined) return none;
+  try {
+    const layers = await runtimes.layers(runtime as RuntimeId);
+    return layers === undefined
+      ? none
+      : { settings: new Set(layers.settings ?? []), hooks: new Set(layers.hooks ?? []) };
+  } catch {
+    return none;
+  }
 }
 
 /** One profile: the layers it names as written (oldest first) and the etag of its file right now. */

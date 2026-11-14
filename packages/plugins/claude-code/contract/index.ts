@@ -123,6 +123,8 @@ export const LaunchSettingsRecordSchema = z.strictObject({
     settings: SectionDigestSchema,
     hooks: SectionDigestSchema,
   }),
+  /** The runtime this launch ran as (a name, not a secret): the selection of settings and hooks is read for it again. */
+  runtime: z.string().min(1).max(128).optional(),
 });
 export type LaunchSettingsRecord = z.infer<typeof LaunchSettingsRecordSchema>;
 export const CLAUDE_CODE_LAUNCH_SETTINGS = defineState({

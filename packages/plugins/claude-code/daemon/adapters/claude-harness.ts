@@ -41,6 +41,7 @@ import type {
   SpawnPort,
   StatePort,
 } from '@ferretry/kernel/contract';
+import type { SelectedComponents } from '@ferretry/plugin-runtimes/contract';
 import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import {
   CLAUDE_CODE_CONFIG,
@@ -80,6 +81,11 @@ export interface ClaudeHarnessDeps {
   readonly panes: PaneDirectory;
   readonly permission: PermissionAnswerService;
   readonly dialog: DialogAnswerService;
+  /**
+   * The settings and hooks components the launching runtime's profile selects (`selectedComponents`): only those items
+   * reach its home, as v4's profile resolution gave `adaptProfile` only the resolved profile's. No runtime selects none.
+   */
+  readonly selected: (runtime: string | undefined) => Promise<SelectedComponents>;
   /** A fresh conversation id: Claude takes `--session-id`, so the daemon assigns it. */
   readonly newConversationId: () => string;
   /** The user's documented Claude history home; only its projects subtree is read. */
@@ -152,7 +158,7 @@ export class ClaudeHarness implements Harness {
   }
 
   async prepareHome(spec: LaunchSpec): Promise<HomePlan> {
-    return await this.prepareHomeFrom(spec, this.launchInputs());
+    return await this.prepareHomeFrom(spec, await this.launchInputs(spec.runtime));
   }
 
   /** The home written from ONE read of this plugin's configuration, the same read the argv and the record are built from. */
@@ -341,7 +347,7 @@ export class ClaudeHarness implements Harness {
     if (!found.found) return err('unavailable');
     // ONE read of the configuration per launch: the home, the argv and the record all describe the same settings, so a
     // reload between them cannot leave a record that differs from what the process runs on.
-    const inputs = this.launchInputs();
+    const inputs = await this.launchInputs(spec.runtime);
     await this.prepareHomeFrom(spec, inputs);
     const command = launchCommand({
       binary: found.binary,
@@ -492,18 +498,25 @@ export class ClaudeHarness implements Harness {
       if (size === undefined || size > MAX_LAUNCH_RECORD_BYTES) return UNKNOWN_LAUNCH;
       const recorded = await this.deps.state.read(CLAUDE_CODE_LAUNCH_SETTINGS, ferret);
       if (!recorded.ok || recorded.value === undefined) return UNKNOWN_LAUNCH;
-      return compareLaunchSettings(recorded.value, launchSettingsRecord(this.launchInputs()));
+      return compareLaunchSettings(
+        recorded.value,
+        launchSettingsRecord(await this.launchInputs(recorded.value.runtime)),
+      );
     } catch {
       return UNKNOWN_LAUNCH;
     }
   }
 
   /** The settings a launch now runs under, from this plugin's own configuration (the effort is the launch's, not here). */
-  private launchInputs(): LaunchSettingsInputs {
+  private async launchInputs(runtime: string | undefined): Promise<LaunchSettingsInputs> {
+    const selected = await this.deps.selected(runtime);
+    const only = <T>(items: ReadonlyMap<string, T>, names: ReadonlySet<string>): ReadonlyMap<string, T> =>
+      new Map([...items].filter(([name]) => names.has(name)));
     return {
       permissionMode: this.deps.config.file(configFile)?.permissionMode ?? 'auto',
-      settings: this.deps.config.collection(settingsCollection) as never,
-      hooks: this.deps.config.collection(hooksCollection) as never,
+      settings: only(this.deps.config.collection(settingsCollection) as never, selected.settings),
+      hooks: only(this.deps.config.collection(hooksCollection) as never, selected.hooks),
+      ...(runtime === undefined ? {} : { runtime }),
     };
   }
 
