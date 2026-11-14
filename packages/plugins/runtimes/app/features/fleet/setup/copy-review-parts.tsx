@@ -97,7 +97,7 @@ export function ReviewItem({
         <p className="m-0 text-meta text-muted [overflow-wrap:anywhere]">{item.note}</p>
       )}
       {both ? (
-        <span className="flex flex-wrap gap-3 text-meta text-muted" data-copy-item-choice={item.ref}>
+        <span className="flex flex-wrap items-center gap-3 text-meta text-muted" data-copy-item-choice={item.ref}>
           {([true, false] as const).map(take => (
             <label key={String(take)} className="flex min-h-11 items-center gap-1">
               <input
@@ -198,7 +198,7 @@ export function SettingsPicker({
                   {key.loosens === true ? ' (loosens what this machine may spend or its agents may do)' : ''}
                 </span>
                 {pick.docs.has(doc.path) ? (
-                  <span className="flex flex-wrap gap-3">
+                  <span className="flex flex-wrap items-center gap-3">
                     {(['take', 'keep'] as const).map(choice => (
                       <label key={choice} className="flex min-h-11 items-center gap-1">
                         <input

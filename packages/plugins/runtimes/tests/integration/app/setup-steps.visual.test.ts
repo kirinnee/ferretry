@@ -92,8 +92,23 @@ const open = async (context: BrowserContext, view: string, mode: 'light' | 'dark
 
 /** A screenshot of the WHOLE page: the viewport is made as tall as the page first, so nothing is cut off at the bottom. */
 const shootWhole = async (tab: Page, path: string, width: number): Promise<void> => {
-  const height = await tab.evaluate(() => Math.ceil(document.documentElement.scrollHeight));
+  // The page may scroll inside `#root` or `body` rather than the document, so the height is the tallest of them.
+  const height = await tab.evaluate(() => {
+    const root = document.getElementById('root');
+    return Math.ceil(
+      Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, root?.scrollHeight ?? 0),
+    );
+  });
   await tab.setViewportSize({ width, height: Math.max(height, 200) });
+  // Back to the top (earlier clicks scrolled the page) and the pointer away, so no card is left in its hover state.
+  await tab.evaluate(() => {
+    for (const element of [document.documentElement, document.body, document.getElementById('root')])
+      if (element !== null) element.scrollTop = 0;
+    window.scrollTo(0, 0);
+  });
+  await tab.mouse.move(0, 0);
+  const shown = await tab.evaluate(() => document.getElementById('root')?.getBoundingClientRect().height ?? 0);
+  expect(shown, 'the whole page is drawn in the shot').toBeGreaterThan(0);
   await tab.screenshot({ path });
 };
 
@@ -191,6 +206,9 @@ describe('the machine-setup steps', () => {
         await tab.locator('[data-copy-settings-tick="voice.yaml"]').check();
         await tab.locator('[data-copy-undecided]').waitFor();
         expect(await tab.locator('[data-copy-stage]').isDisabled()).toBe(true);
+        // The both-changed item is what blocks it, and the screen says so beside the disabled button.
+        expect(await tab.locator('[data-copy-undecided]').innerText()).toContain('profile/dev');
+        expect(await tab.locator('[data-copy-undecided]').innerText()).toContain('voice.yaml: engine');
         await insideScreen(tab, '[data-copy-review] *', viewport.width);
         if (viewport.phone) await tapTargetsAreBigEnough(tab);
         if (shotsDir !== '')

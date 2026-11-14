@@ -376,8 +376,8 @@ export function CopySettings({
         {review.logins.length === 0 ? null : (
           <SetupNote tone="warn" name="copy-logins" title="Sign-ins stay behind">
             <span>
-              A sign-in never leaves {source.name}: {plural(review.logins.length, 'login')} arrive as an empty slot to
-              sign in to here.
+              A sign-in never leaves {source.name}: {plural(review.logins.length, 'login')}{' '}
+              {review.logins.length === 1 ? 'arrives' : 'arrive'} as an empty slot to sign in to here.
             </span>
           </SetupNote>
         )}
@@ -536,15 +536,15 @@ export function CopySettings({
           >
             {changes.busy ? 'Checking…' : 'Preview the copy'}
           </Button>
-          {undecided.length === 0 ? null : (
-            <p className="m-0 w-full text-meta leading-base text-warn" data-copy-undecided="">
-              Decide first: {undecided.join(', ')}
-            </p>
-          )}
           <Button type="button" data-copy-back="" onClick={() => setPhase({ kind: 'source' })}>
             Back
           </Button>
         </div>
+        {undecided.length === 0 ? null : (
+          <p className="m-0 text-meta leading-base text-warn [overflow-wrap:anywhere]" data-copy-undecided="">
+            Decide first: {undecided.join(', ')}
+          </p>
+        )}
       </div>
     );
   }

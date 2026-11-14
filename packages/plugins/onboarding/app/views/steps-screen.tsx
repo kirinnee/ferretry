@@ -110,9 +110,16 @@ export function SetupSummary({
   return (
     <section className="kt-panel flex flex-col gap-2 p-3" data-onboarding-summary="">
       <h2 className="m-0 text-cell font-semibold">Setup is finished</h2>
-      <p className="m-0 text-cell text-muted" data-onboarding-summary-set="">
-        {set.length === 0 ? 'No step was set up here.' : `Set up: ${set.map(step => step.title).join(', ')}.`}
-      </p>
+      <div className="flex flex-col gap-1" data-onboarding-summary-set="">
+        <p className="m-0 text-cell text-muted">{set.length === 0 ? 'No step was set up here.' : 'Set up:'}</p>
+        {set.length === 0 ? null : (
+          <ul className="m-0 flex list-none flex-col gap-0.5 p-0 text-cell">
+            {set.map(step => (
+              <li key={`${step.plugin}.${step.id}`}>{step.title}</li>
+            ))}
+          </ul>
+        )}
+      </div>
       {later.length === 0 ? null : (
         <div className="flex flex-col gap-1" data-onboarding-summary-later="">
           <p className="m-0 text-cell text-muted">Set up later, from Settings:</p>
