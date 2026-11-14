@@ -133,16 +133,45 @@ export function sealedEnvironment(source: Readonly<Record<string, string | undef
   return picked;
 }
 
-/** What `realAdapters` is given besides the plain base: the tool overlay and the sealed allowlist, both from one source. */
+/**
+ * The ONLY names a host-manager child (`systemctl`, `systemd-run`) is given from the daemon's own environment: the two
+ * by which a `--user` manager is found. Without them the child cannot reach the session bus, so Terminals' resource-limit
+ * probe falls to "no manager" and the limits silently stop protecting the host (v4 inherited the whole environment here).
+ * Deliberately not {@link TOOL_ENVIRONMENT_NAMES}: no proxy, no ssh agent, no config folder, and never a token.
+ */
+export const MANAGER_ENVIRONMENT_NAMES: readonly string[] = Object.freeze([
+  'XDG_RUNTIME_DIR',
+  'DBUS_SESSION_BUS_ADDRESS',
+]);
+
+/** The manager names that are set in `source`: nothing else of it is copied. */
+export function managerEnvironment(source: Readonly<Record<string, string | undefined>>): Record<string, string> {
+  const picked: Record<string, string> = {};
+  for (const name of MANAGER_ENVIRONMENT_NAMES) {
+    const value = source[name];
+    if (typeof value === 'string' && value !== '') picked[name] = value;
+  }
+  return picked;
+}
+
+/** What `realAdapters` is given besides the plain base: the tool overlay, the manager overlay and the sealed allowlist, all from one source. */
 export function childEnvironments(source: Readonly<Record<string, string | undefined>>): {
   readonly toolEnv: Record<string, string>;
+  readonly managerEnv: Record<string, string>;
   readonly sealedEnv: Record<string, string>;
 } {
-  return { toolEnv: toolEnvironment(source), sealedEnv: sealedEnvironment(source) };
+  return {
+    toolEnv: toolEnvironment(source),
+    managerEnv: managerEnvironment(source),
+    sealedEnv: sealedEnvironment(source),
+  };
 }
 
 /** The programs that are given {@link TOOL_ENVIRONMENT_NAMES}. */
 const TOOL_PROGRAMS: ReadonlySet<string> = new Set(['git', 'gh']);
+
+/** The programs that are given {@link MANAGER_ENVIRONMENT_NAMES}. */
+const MANAGER_PROGRAMS: ReadonlySet<string> = new Set(['systemctl', 'systemd-run']);
 
 /** The allow-listed names that are set in `source`: nothing else of it is copied. */
 export function toolEnvironment(source: Readonly<Record<string, string | undefined>>): Record<string, string> {
@@ -155,17 +184,24 @@ export function toolEnvironment(source: Readonly<Record<string, string | undefin
 }
 
 /**
- * What a child sees: the host's base, the allow-listed tool environment when the program is `git` or `gh`, then the
- * caller's own env (which wins). A token the caller hands over is the caller's act; the host adds none.
+ * What a child sees: the host's base, the allow-listed tool environment when the program is `git` or `gh`, the manager
+ * environment when it is `systemctl` or `systemd-run`, then the caller's own env (which wins). A token the caller hands
+ * over is the caller's act; the host adds none.
  */
 export function childEnvironment(
   program: string,
   baseEnv: Readonly<Record<string, string>>,
   tools: Readonly<Record<string, string>>,
   extra: Record<string, string>,
+  managers: Readonly<Record<string, string>> = {},
 ): Record<string, string> {
   const name = program.slice(program.lastIndexOf('/') + 1);
-  return { ...baseEnv, ...(TOOL_PROGRAMS.has(name) ? tools : {}), ...extra };
+  return {
+    ...baseEnv,
+    ...(TOOL_PROGRAMS.has(name) ? tools : {}),
+    ...(MANAGER_PROGRAMS.has(name) ? managers : {}),
+    ...extra,
+  };
 }
 
 export function bunSpawn(
@@ -174,12 +210,14 @@ export function bunSpawn(
   tools: Readonly<Record<string, string>> = {},
   /** What a SEALED child inherits ({@link sealedEnvironment}); absent, a sealed child sees only its caller's env. */
   sealedBase: Readonly<Record<string, string>> = {},
+  /** What `systemctl` / `systemd-run` children inherit ({@link managerEnvironment}). */
+  managers: Readonly<Record<string, string>> = {},
 ): SpawnPort {
   const env = (program: string, options?: SpawnOptions): Record<string, string> =>
     options?.sealed === true
       ? // Never the tool overlay, whatever the program is called.
         { ...sealedBase, ...resolveEnv(options.env, opener()) }
-      : childEnvironment(program, baseEnv, tools, resolveEnv(options?.env, opener()));
+      : childEnvironment(program, baseEnv, tools, resolveEnv(options?.env, opener()), managers);
   /**
    * One piped child. `signalCode` is read from the Bun subprocess after `exited` settles: a killed child (Bun's
    * `timeout`, an abort `signal`, `kill`) resolves `exited` with `128 + n` while `signalCode` names the signal, and
