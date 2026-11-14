@@ -79,6 +79,28 @@ describe('Lessons in a ferret’s toolbar', () => {
     expect(root.querySelector('[role="dialog"]')).toBeNull();
   });
 
+  it('says what a scan with nothing to read found, though it ended before any read saw it running', async () => {
+    const daemon = fakeLessonsDaemon();
+    daemon.state.onStart = {
+      runId: 'r-empty',
+      state: 'finished',
+      total: 0,
+      done: 0,
+      startedAt: AT,
+      finishedAt: AT,
+      added: 0,
+      merged: 0,
+      message: 'no ferrets in this scope have a transcript to read',
+    };
+    mounted = await mount(panel(daemon));
+    const root = mounted.container;
+    await click(byText(root, 'button', 'Scan this ferret for lessons'));
+    await waitForText(root, 'Nothing runs until you press Start.');
+    await click(byText(root, 'button', 'Start scan'));
+    await waitForText(root, 'No new lessons — no ferrets in this scope have a transcript to read.');
+    expect(root.querySelector('[data-lessons-scan-dialog="finished"]')).not.toBeNull();
+  });
+
   it('a View in Lessons with no screen to go to just closes', async () => {
     const daemon = fakeLessonsDaemon();
     daemon.state.scan = { runId: 'r', state: 'running', total: 2, done: 0, startedAt: AT, added: 0, merged: 0 };

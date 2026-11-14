@@ -246,7 +246,8 @@ export const scanResultSentence = (progress: LessonsScanProgress): string => {
     progress.added === 0
       ? 'No new lessons'
       : `Added ${progress.added} lesson${progress.added === 1 ? '' : 's'} to To review`;
-  return `${added}${progress.merged > 0 ? ` and merged ${progress.merged} into existing ones` : ''}.`;
+  const why = progress.added === 0 && progress.message ? ` — ${progress.message}` : '';
+  return `${added}${progress.merged > 0 ? ` and merged ${progress.merged} into existing ones` : ''}${why}.`;
 };
 
 const ABSOLUTE_FIELDS = ['year', 'month', 'day', 'hour', 'minute'] as const;
