@@ -1,5 +1,5 @@
 import type { SessionId } from '../../seams/ferret-id.ts';
-import type { SessionSendService } from './service.ts';
+import type { SendMessageRequest } from './service.ts';
 import type { SendFailureNotifier } from './tracker.ts';
 import { sendFailureNotice } from './tracking.ts';
 import type { SendRecord, SendRepository } from './types.ts';
@@ -15,7 +15,7 @@ import type { SendRecord, SendRepository } from './types.ts';
  */
 export class AgentSendFailureNotifier implements SendFailureNotifier {
   constructor(
-    private readonly sends: Pick<SessionSendService, 'send'>,
+    private readonly sends: { send(request: SendMessageRequest): Promise<unknown> },
     private readonly repository: Pick<SendRepository, 'read' | 'resolveSender'>,
     private readonly clientName: string,
   ) {}

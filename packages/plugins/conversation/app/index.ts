@@ -6,7 +6,7 @@ import type {
   ScreenProps,
   SettingsProps,
 } from '@ferretry/kernel/manifest';
-import { provideToShell, type ShellProvides } from '@ferretry/app';
+import { type BackgroundViewProps, provideToShell, type ShellProvides } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { CONVERSATION_ADD_TO_CHAT_HOOK } from '../contract/app-hooks.ts';
@@ -109,6 +109,13 @@ export default provideToShell(
       documentRestoreStore.clearDaemon(daemon);
       // ...and neither may it read the cached attachment images (object URLs) of that machine.
       clearAttachmentCaches(daemon);
+    },
+    // B12: each paired machine's saved messages are retried with no chat open (today's boot drain). The host's module
+    // loads on first mount, so this file still holds no view code.
+    background: {
+      outbox: lazyComponent<BackgroundViewProps>(
+        async () => (await import('./composer/outbox-host.ts')).OutboxHost,
+      ) as NonNullable<ShellProvides['background']>[string],
     },
     // Settings › Appearance (S4): this device's conversation width and the key to a message's marks. No machine, no client.
     deviceSettings: {

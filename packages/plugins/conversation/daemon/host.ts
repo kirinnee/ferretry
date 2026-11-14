@@ -51,6 +51,7 @@ import {
   queuedPayloadInstruction,
   routeSend,
   type SendPath,
+  AgentSendFailureNotifier,
   SendTracker,
   type SendTarget,
   type SendTerminal,
@@ -439,7 +440,11 @@ export function buildConversationA(deps: {
   /** What the send path's acts and the tracker read of a ferret, and the journal they write (one object, shared). */
   const sendRepository = {
     read: async (id: SessionId) => await readTarget(id).catch(() => undefined),
-    resolveSender: async () => undefined,
+    // A sender arrives as the session id the Gate proved (the tracker's `from`); a reference that names no ferret is none.
+    resolveSender: async (reference: string) => {
+      const id = tryParseSessionId(reference);
+      return id === undefined ? undefined : await readTarget(id).catch(() => undefined);
+    },
     // Names and ids only: an act's outcome, never a message's words, a refusal's sentence or a person's draft. Only
     // the keys of JOURNAL_LOG_KEYS are kept, so a field a later event adds is never logged by default.
     journal: async (id: SessionId, event: string, data: Readonly<Record<string, unknown>>) => {
@@ -496,6 +501,27 @@ export function buildConversationA(deps: {
       return await lookAtPane.heldAt(id, own?.matchText ?? text);
     },
   };
+  const failureNotifier = new AgentSendFailureNotifier(
+    {
+      send: async request =>
+        await typeMessage(request.id, {
+          sendId: request.sendId,
+          message: request.message,
+          origin: AGENT_ORIGIN,
+          notice: true,
+        }),
+    },
+    {
+      // The recipient is named by its ferret name in the notice, as a person reads it.
+      read: async id => {
+        const target = await readTarget(id).catch(() => undefined);
+        const name = (await ferrets.get(id).catch(() => undefined))?.name;
+        return target === undefined ? undefined : { ...target, ...(name === undefined ? {} : { teammate: name }) };
+      },
+      resolveSender: sendRepository.resolveSender,
+    },
+    defaultSessionSendSettings.clientName,
+  );
   const tracker = new SendTracker(
     {
       ledger: trackedLedger,
@@ -515,10 +541,14 @@ export function buildConversationA(deps: {
         reattempt: async (id, sendId) => await sendActs.reattempt(id, sendId, { by: 'daemon' }),
         resubmit: async (id, sendId) => await sendActs.resubmit(id, sendId),
       },
-      // A failed peer send is not told to its sender yet: the sender's id and the send's are logged, nothing else.
+      // A failed peer send is told ONCE to its sender (today's AgentSendFailureNotifier): the daemon types a notice into the
+      // sender's own session under `send-failed:<recipient>:<send id>` (the ledger keeps one row per id, so a re-derived
+      // failure cannot tell it twice), as the daemon with no sender session, so nothing retries it and it never notifies.
+      // The log keeps ids and the fate only.
       notifier: {
         notify: async (sender, recipient, record) => {
           kernel.log.info('send.failed', { ferret: recipient, sendId: record.sendId, sender, fate: record.fate });
+          await failureNotifier.notify(sender, recipient, record);
         },
       },
       scheduler,
@@ -729,6 +759,11 @@ export function buildConversationA(deps: {
     readonly senderSessionId?: string | undefined;
     /** The Warden is speaking (`ConversationCaller` `warden`): typed bare, recorded as the daemon's own. */
     readonly warden?: true;
+    /**
+     * The daemon itself is the sender (a failed-send notice): recorded as the daemon's own under the Delivery feature,
+     * with no sender session, so nothing retries it and a notice that cannot be delivered never notifies anybody.
+     */
+    readonly notice?: true;
   };
   /** One typed send on the ferret's one lane ({@link lane}): nothing else presses a key on this ferret meanwhile. */
   const typeMessage = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
@@ -827,9 +862,15 @@ export function buildConversationA(deps: {
       fate: 'accepted',
       attempt: 1,
       attemptAt: at,
-      senderKind: request.warden === true ? 'daemon' : request.senderSessionId === undefined ? 'human' : 'agent',
+      senderKind:
+        request.warden === true || request.notice === true
+          ? 'daemon'
+          : request.senderSessionId === undefined
+            ? 'human'
+            : 'agent',
       // The Warden's words are Ferretry's own, shown as such (the sender chip reads `by`), as today's remedies were.
       ...(request.warden === true ? { by: { kind: 'ferretry' as const, feature: 'Warden' } } : {}),
+      ...(request.notice === true ? { by: { kind: 'ferretry' as const, feature: 'Delivery' } } : {}),
       ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
       ...(fromName === undefined ? {} : { fromName }),
     });
@@ -901,9 +942,11 @@ export function buildConversationA(deps: {
       text,
       request.warden === true
         ? { kind: 'ferretry', feature: 'Warden' }
-        : request.senderSessionId === undefined
-          ? undefined
-          : { kind: 'ferret', ...(fromName === undefined ? {} : { name: fromName }) },
+        : request.notice === true
+          ? { kind: 'ferretry', feature: 'Delivery' }
+          : request.senderSessionId === undefined
+            ? undefined
+            : { kind: 'ferret', ...(fromName === undefined ? {} : { name: fromName }) },
     );
     // What the transcript will hold is the message, or the pointer typed for it.
     const accepted = await accepting(ferret, request, text, fromName, {

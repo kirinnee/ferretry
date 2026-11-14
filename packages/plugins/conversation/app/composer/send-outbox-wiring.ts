@@ -117,7 +117,8 @@ export interface DaemonOutboxOptions {
 
 /**
  * Builds one daemon's outbox: it loads what a previous page left, tries it, and keeps trying at the moments a message
- * could get through. Its machine is reachable only while a composer for it has offered a sender; until then its
+ * could get through. Its machine is reachable only while a sender has been offered for it (a composer's, or the shell's
+ * background {@link OutboxHost}); until then its
  * entries wait (`waiting for connection`), exactly as today's outbox waited for a machine it could not dial.
  */
 export const createDaemonOutbox = (options: DaemonOutboxOptions): DaemonOutbox => {
@@ -151,7 +152,7 @@ export const createDaemonOutbox = (options: DaemonOutboxOptions): DaemonOutbox =
 const documentOutboxes = new Map<string, DaemonOutbox>();
 
 /** The document-lifetime outbox of one daemon, made on first use over the browser's storage. */
-const documentOutbox = (daemonId: string): DaemonOutbox => {
+export const documentOutbox = (daemonId: string): DaemonOutbox => {
   let existing = documentOutboxes.get(daemonId);
   if (existing === undefined) {
     existing = createDaemonOutbox({ daemonId, backend: browserOutboxBackend() ?? new MemoryOutboxBackend() });

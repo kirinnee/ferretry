@@ -8,7 +8,7 @@ pwa/tests/integration/features/reference-actions.test.ts (second describe) | Ski
 GAPS (stand-ins in seam.ts, seam-drafts.ts, seam-attachments.ts)
 carrierDelivery | the 5.0 client marks a carrier outage (isCarrierOutage) but cannot prove a request never left, so a marked outage reads "checking whether it arrived" and never "not sent — send it again"
 shared-draft stream | GAP(app-shell): PluginClient.socket takes no query and reports no close code, so an Agenda item's own draft has no live stream, every reconnect reads the whole draft, and the 4413 resync close is read from the close reason
-outbox retry | GAP(app-shell): a half hears no "machine recovered" moment; the outbox retries on the browser's online event, its 20 s timer, or a composer offering a sender
+outbox retry | GAP(app-shell): a half hears no "machine recovered" moment; the outbox retries on the browser's online event, its 20 s timer, or a sender offered for it (a composer's, or the shell's background outbox host, which keeps one offered for every paired machine with no chat open)
 foreground pin scope | GAP(ferrets): nothing sets the pinned pane in front until Ferrets' app half does, so a quote goes to the visible chat's composer only
 FerretContext / ContextUsage | GAP(ferrets, Q0): a local shape until the Ferrets contract exports today's SessionContext
 LedgerSendRecord (ferretry-sender.ts) | GAP(C3): a minimal local type until C3's chat/send-ledger.ts exports it

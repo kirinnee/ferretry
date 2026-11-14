@@ -679,19 +679,46 @@ describe('BG-052 / BG-053 what a look cannot prove, it does not claim', () => {
     await host.stop();
   });
 
-  test('BG-052 a peer send that is never proved settles timed_out, and the sender’s notice is logged by id', async () => {
+  test('B13 a peer send that is never proved settles timed_out, and its sender is told once, in its own session', async () => {
     const { host, ferrets, api, stored, advance } = await conversation();
     ferrets.transcript = [otherEntry];
     await api().send(F1, { kind: 'ferret', ferret: F2 }, { message: 'FIXTURE peer lost', sendId: 's-peer-lost' });
+    ferrets.typed.length = 0;
 
     await advance(200_000, 5_000);
 
     expect(await stored('s-peer-lost')).toMatchObject({ fate: 'timed_out', senderKind: 'agent' });
-    // The sender's notice is logged by ids and the fate: never a word of the message.
-    const notices = host.logs.filter(entry => entry.message === 'send.failed');
-    expect(notices).toHaveLength(1);
-    expect(notices[0]?.fields).toEqual({ ferret: F1, sendId: 's-peer-lost', sender: F2, fate: 'timed_out' });
+    // ONE daemon-authored notice, typed into the SENDER's pane (f2), under an id derived from the failed send.
+    const noticeId = 'send-failed:f1:s-peer-lost';
+    const told = ferrets.typed.filter(text => text.startsWith('Ferretry could not deliver your message to f1'));
+    expect(told).toHaveLength(1);
+    expect(told[0]).toContain('send s-peer-lost');
+    expect(await stored(noticeId, 'f2')).toMatchObject({
+      senderKind: 'daemon',
+      by: { kind: 'ferretry', feature: 'Delivery' },
+    });
+    expect((await stored(noticeId, 'f2'))?.from).toBeUndefined();
+    // The log still carries ids and the fate only, never a word of the message.
     expect(JSON.stringify(host.logs)).not.toContain('FIXTURE peer lost');
+    await host.stop();
+  });
+
+  test('B13 a notice that cannot be delivered ends there: it is never itself notified, and never typed twice', async () => {
+    const { host, ferrets, api, advance } = await conversation();
+    ferrets.transcript = [otherEntry];
+    await api().send(F1, { kind: 'ferret', ferret: F2 }, { message: 'FIXTURE peer lost', sendId: 's-peer-lost' });
+    ferrets.typed.length = 0;
+    // The sender's pane takes nothing: its notice stays unproved forever.
+    ferrets.busy = true;
+    ferrets.queued.length = 0;
+
+    await advance(400_000, 5_000);
+
+    // No notice about a notice: nothing is ever addressed to f1 about the f2 notice, and f2 holds one notice id only.
+    expect(ferrets.typed).toEqual([]);
+    const notices = ferrets.queued.filter(entry => entry.text.includes('s-peer-lost'));
+    expect(notices.length).toBeLessThanOrEqual(1);
+    expect(ferrets.queued.some(entry => entry.text.includes('send-failed'))).toBe(false);
     await host.stop();
   });
 });
