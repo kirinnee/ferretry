@@ -311,11 +311,14 @@ describe('the runtime picker above the composer', () => {
     const root = await draw<PanelProps>(
       half?.panels['runtime-picker'],
       { subject: 's-1' } as PanelProps,
-      node => node.querySelector('[role="menu"]') !== null,
-      'the runtime picker menu',
+      node => node.querySelector('[data-runtime-chip]') !== null,
+      'the runtime picker chip',
     );
     expect(root.querySelector('[data-runtime-picker="s-1"]')).not.toBeNull();
-    const menu = must(root.querySelector('[role="menu"]'), 'the model menu');
+    // One chip at rest; the lists open on a tap, in a popover outside the composer's row.
+    expect(root.querySelector('[role="menu"]')).toBeNull();
+    await click(must(root.querySelector('[data-runtime-chip]'), 'the chip'));
+    const menu = must(document.querySelector('[data-runtime-popover] [role="menu"]'), 'the model menu');
     expect(menu.getAttribute('aria-label')).toBe('Switch claude-code model in place');
     const choices = [...menu.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
     expect(choices.map(choice => choice.getAttribute('aria-label'))).toEqual([
