@@ -225,6 +225,11 @@ export interface TestHostOptions {
     args: readonly string[],
     options?: SpawnOptions,
   ) => SpawnResult | Promise<SpawnResult>;
+  /**
+   * Answers a plain (not detached) `kernel.spawn.start` for declared programs, the way the real host starts a child; the
+   * declaration is judged here exactly as for `run`. Without it a long-lived start fails, as it always did.
+   */
+  readonly start?: (program: string, args: readonly string[], options?: SpawnOptions) => ChildHandle;
   /** Answers `kernel.fetch.request` for declared hosts. Without it a fetch fails. */
   readonly fetch?: (url: URL, init?: RequestInit) => Response | Promise<Response>;
   /** Answers `kernel.websocket.connect` for declared hosts (`ws:`/`wss:`). Without it a dial fails. */
@@ -2212,6 +2217,17 @@ async function start(world: World): Promise<TestHost> {
               throw new Error(`${manifest.id}: detached ${program} with no detachedStart fake`);
             return detachedHandle(options.detachedStart(program, args, spawnOptions));
           }
+          if (
+            options.start !== undefined &&
+            spawnPermitted(
+              effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
+              itemsOf,
+              program,
+              resolversOf(manifest.id),
+            )
+          )
+            return options.start(program, args, spawnOptions);
+          if (options.start !== undefined) throw new Error(`${manifest.id}: spawn ${program} is not declared`);
           throw new Error(
             `${manifest.id}: the test host does not start long-lived ${program}; fake the port that does`,
           );

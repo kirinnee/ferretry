@@ -70,7 +70,7 @@ async function probeStdio(ports: ProbePorts, spec: Extract<McpProbeSpec, { trans
   try {
     child = ports.spawn.start(spec.command, spec.args, {
       ...(spec.cwd === undefined ? {} : { cwd: spec.cwd as never }),
-      env: { ...spec.env },
+      env: spec.env,
     });
   } catch {
     throw new McpProbeFailure(

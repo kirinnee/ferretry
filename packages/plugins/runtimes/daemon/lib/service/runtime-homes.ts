@@ -43,7 +43,16 @@ const inFerretryHome = (path: string, fleetDirectory: string): boolean => {
 /** The homes of a manifest in manifest order; the runtimes of a home deduped in manifest order (an account's wrapper, then its runtimes'). */
 export function homesOf(manifest: FleetManifest | undefined, fleetDirectory: string): readonly RuntimeHome[] {
   if (manifest === undefined) return [];
-  const homes = new Map<string, { harness: RuntimeHome['harness']; home: string; wrapper: string; names: string[] }>();
+  const homes = new Map<
+    string,
+    {
+      harness: RuntimeHome['harness'];
+      home: string;
+      wrapper: string;
+      secretEnv: Readonly<Record<string, string>>;
+      names: string[];
+    }
+  >();
   for (const account of manifest.accounts) {
     const inside = fleetHomeIdOf(account.home, fleetDirectory);
     // An account's id is a UUID (the manifest schema), so it is always a plain name.
@@ -57,6 +66,7 @@ export function homesOf(manifest: FleetManifest | undefined, fleetDirectory: str
       harness: harnessKeyOfKind(account.kind),
       home: account.home,
       wrapper: account.wrapper,
+      secretEnv: account.secretEnv,
       names: [],
     };
     homes.set(id, entry);
@@ -74,5 +84,6 @@ export function homesOf(manifest: FleetManifest | undefined, fleetDirectory: str
     }),
     home: entry.home,
     wrapper: entry.wrapper,
+    ...(Object.keys(entry.secretEnv).length === 0 ? {} : { secretEnv: entry.secretEnv }),
   }));
 }

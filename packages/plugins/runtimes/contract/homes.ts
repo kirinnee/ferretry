@@ -20,6 +20,12 @@ export interface RuntimeHome {
   readonly home: string;
   /** The absolute wrapper path, display only. */
   readonly wrapper: string;
+  /**
+   * The environment variables its profile binds to secrets, as `${secret:NAME}` REFERENCES (the manifest account's
+   * `secretEnv`), never values: a consumer that starts a command for this runtime hands them to the Vault, which opens
+   * them for that one child. Absent when the runtime binds none.
+   */
+  readonly secretEnv?: Readonly<Record<string, string>>;
 }
 
 /** The only files of a home the reader can serve, by name. */
