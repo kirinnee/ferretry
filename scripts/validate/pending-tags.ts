@@ -69,6 +69,10 @@ export const ALLOWED_KNIP: ReadonlyMap<string, string> = new Map([
     'only the STT workers ported but unwired (voice GAP line in ports-pending.json naming app/worker/*-worker.ts) import it; the workers leave with the GAP (ruling #26).',
   ],
   [
+    'knip.production.json#workspaces["packages/plugins/logins"].entry:scripts/built-ins.ts',
+    'the developer-run generator of daemon/lib/built-ins.json (the built-in catalogs as data, not Bun macros: no-macros); nothing in the product imports it, its unit test runs it.',
+  ],
+  [
     'knip.production.json#workspaces["packages/plugins/mcp"].entry:app/views/surfaces.tsx',
     'loaded lazily by `import(`./views/${"surfaces"}.tsx`)` in app/index.ts, a template import knip cannot follow.',
   ],
