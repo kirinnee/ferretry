@@ -153,7 +153,13 @@ describe('the Browsers app half draws the surfaces today’s Browser feature had
 
   it('S-0299 the browser feature is one panel in a ferret’s side pane and a %browser reference chip', async () => {
     const built = half();
-    expect(manifest.ui?.panels?.map(entry => entry.id)).toEqual(['browser']);
+    // The ferret's side pane holds the one Browser panel; `open-links-in` is a This-device settings panel (S-0519).
+    expect(manifest.ui?.panels?.filter(entry => entry.slot === 'ferret.side').map(entry => entry.id)).toEqual([
+      'browser',
+    ]);
+    expect(manifest.ui?.panels?.filter(entry => entry.slot === 'device.settings').map(entry => entry.id)).toEqual([
+      'open-links-in',
+    ]);
     expect(built.panels?.browser?.({ subject: undefined } as never)).toBeNull();
     const Chip = must(built.renderers?.['reference:%browser'], 'the reference renderer');
     const view = await shown<RendererProps>(Chip, { value: 'agent-1' } as unknown as RendererProps);
