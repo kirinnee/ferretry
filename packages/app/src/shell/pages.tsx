@@ -9,7 +9,8 @@ import { DeviceAppearance } from './device-appearance.tsx';
 import { DevicePanels } from './device-panels.tsx';
 import { groupSettingsTabs, resolveSettingsTab } from './settings-tab.ts';
 import { PanelSlot, PluginView, ShellLine } from './views.tsx';
-import { useEffect, type MouseEvent } from 'react';
+import { keepSettingsPageRevealed } from './settings-reveal.ts';
+import { useEffect, useRef, type MouseEvent } from 'react';
 
 /** An in-app link: a plain click navigates in place; a modifier or middle click is the browser's (a new tab). */
 export function Link({
@@ -119,7 +120,8 @@ export function DaemonSettingsPage({
   readonly tab?: string;
   readonly tabId?: string;
 }) {
-  const { runtime } = useShell();
+  const { runtime, scroll } = useShell();
+  const { entryKey } = useRouter();
   useRuntimeVersion(runtime);
   const tabs = runtime.surfaces.flatMap(entry =>
     (entry.manifest.ui?.settings ?? []).map(setting => ({ plugin: entry.id, ...setting })),
@@ -129,6 +131,18 @@ export function DaemonSettingsPage({
   // names that tab, and a name nothing answers to is said so (never the first tab in its place).
   const choice = resolveSettingsTab(tabs, tab, tabId);
   const active = choice.kind === 'tab' ? choice.tab : undefined;
+  // A tab the address NAMES (a click on its link, or a deep link) is what the person asked to see: the page takes focus
+  // (a screen reader says its name) and is scrolled up out from under the list of every tab. A bare /settings opens
+  // at the top, and a Back/Forward/reload whose scroll was saved is the scroll memory's to put back.
+  const pageRef = useRef<HTMLDivElement>(null);
+  const named = tab === undefined ? undefined : active === undefined ? undefined : `${active.plugin}/${active.id}`;
+  useEffect(() => {
+    const page = pageRef.current;
+    if (named === undefined || page === null || scroll.page(entryKey) !== null) return;
+    const stop = keepSettingsPageRevealed(page);
+    page.focus({ preventScroll: true });
+    return stop;
+  }, [named, entryKey, scroll]);
   return (
     <section className="fy-page">
       <h1>Settings</h1>
@@ -167,7 +181,9 @@ export function DaemonSettingsPage({
       ) : choice.kind === 'missing' ? (
         <ShellLine>{`There is no settings tab called "${choice.name}" on this daemon. Pick one above.`}</ShellLine>
       ) : (
-        <PluginView daemon={daemon} plugin={choice.tab.plugin} section="settings" id={choice.tab.id} props={{}} />
+        <section ref={pageRef} className="fy-settings-page" aria-label={choice.tab.label} tabIndex={-1}>
+          <PluginView daemon={daemon} plugin={choice.tab.plugin} section="settings" id={choice.tab.id} props={{}} />
+        </section>
       )}
     </section>
   );
