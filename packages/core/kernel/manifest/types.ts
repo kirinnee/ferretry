@@ -128,6 +128,8 @@ export interface SettingsTabDecl<Id extends string = string> {
   readonly id: Id;
   readonly label: string;
   readonly order: number;
+  /** Words the command bar finds this tab by, beyond its label (the settings it holds). */
+  readonly keywords?: readonly string[];
 }
 
 /** Renderers are provide hooks of the app (§5.2): one per ask source, one per reference prefix. */

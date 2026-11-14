@@ -6,7 +6,7 @@ import { DEFAULT_LAYOUT } from '../layout/layout.ts';
 import { CommandBar } from '../ui/command-bar.tsx';
 import { useAppViewport } from '../ui/hooks/use-app-viewport.ts';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../ui/palette-shortcut.ts';
-import { buildPluginCommandSources, deviceLayoutSource, placeSource } from './command-sources.ts';
+import { buildPluginCommandSources, deviceLayoutSource, placeSource, settingsSource } from './command-sources.ts';
 import { useScreenHref } from '../router/screen-href.ts';
 import { daemonTitle } from '../daemons/daemon-list.ts';
 import type { NavEntry } from '../layout/engine.ts';
@@ -243,10 +243,11 @@ function ShellCommandBar(props: {
         routes,
         navigate: href => router.navigate(href),
       }),
+      settingsSource({ daemon, surfaces: runtime.surfaces, navigate: href => router.navigate(href) }),
       deviceLayoutSource(owner ?? DEFAULT_LAYOUT, layouts),
       ...pluginSources,
     ],
-    [daemons, daemon, views, routes, router, owner, layouts, pluginSources, answers],
+    [daemons, daemon, views, routes, router, owner, layouts, pluginSources, answers, runtime],
   );
   return <CommandBar open={props.open} focusSignal={props.focusSignal} onClose={props.onClose} sources={sources} />;
 }
