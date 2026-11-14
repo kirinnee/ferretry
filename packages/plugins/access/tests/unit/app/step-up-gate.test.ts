@@ -664,3 +664,83 @@ describe('a prompt comes from the machine on screen', () => {
     should(gate.snapshot()?.scope).be.undefined();
   });
 });
+
+describe('a cancelled prompt stays cancelled (triage row 50)', () => {
+  it('should not reopen when the page reads again in the background after Cancel', async () => {
+    // Arrange — the machine is on screen, a read of its is refused, the person cancels.
+    const gate = gateWith(async () => undefined);
+    gate.focus(first.daemonId);
+    const firstRead = gate.require(first, undefined, 'background');
+    await flush();
+    gate.dismiss();
+    should(await firstRead).be.false();
+
+    // Act — the page's next background read hits the same refusal.
+    const nextRead = gate.require(first, undefined, 'background');
+    await flush();
+
+    // Assert — it is told no at once, and nothing covers the page again.
+    should(await nextRead).be.false();
+    should(gate.snapshot()).be.null();
+    should(gate.waitingDaemons()).eql([]);
+  });
+
+  it('should still open for a press the person makes after cancelling', async () => {
+    // Arrange
+    const gate = gateWith(async () => undefined);
+    gate.focus(first.daemonId);
+    const read = gate.require(first, undefined, 'background');
+    await flush();
+    gate.dismiss();
+    await read;
+
+    // Act — a person pressing something asks explicitly.
+    const press = gate.require(first, 'open a terminal', 'explicit');
+    await flush();
+
+    // Assert
+    should(gate.snapshot()?.acts).eql(['open a terminal']);
+    gate.dismiss();
+    should(await press).be.false();
+  });
+
+  it('should let the background asks of a machine back in once the person leaves it and returns', async () => {
+    // Arrange
+    const gate = gateWith(async () => undefined);
+    gate.focus(first.daemonId);
+    const read = gate.require(first, undefined, 'background');
+    await flush();
+    gate.dismiss();
+    await read;
+
+    // Act — the machine goes off screen and comes back.
+    gate.focus(second.daemonId);
+    gate.focus(first.daemonId);
+    const later = gate.require(first, undefined, 'background');
+    await flush();
+
+    // Assert
+    should(gate.snapshot()?.daemon.daemonId).equal(first.daemonId);
+    gate.dismiss();
+    should(await later).be.false();
+  });
+
+  it('should open again after a confirmation, as before', async () => {
+    // Arrange
+    const gate = gateWith(async () => undefined);
+    gate.focus(first.daemonId);
+    const read = gate.require(first, undefined, 'background');
+    await flush();
+    await gate.confirm();
+    should(await read).be.true();
+
+    // Act
+    const later = gate.require(first, undefined, 'background');
+    await flush();
+
+    // Assert
+    should(gate.snapshot()).not.be.null();
+    gate.dismiss();
+    await later;
+  });
+});

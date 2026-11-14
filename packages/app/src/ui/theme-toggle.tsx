@@ -35,7 +35,7 @@ import { Button } from './primitives.tsx';
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]';
 
-const MODE_OPTIONS: readonly {
+export const MODE_OPTIONS: readonly {
   readonly id: ThemeMode;
   readonly label: string;
   readonly Icon: typeof Sun;
@@ -51,7 +51,7 @@ const THEME_FAMILY_CARD_CLASS =
   'flex w-full shrink-0 flex-col gap-1 rounded-panel border p-panel text-left transition-colors';
 
 /** Reveal one family card inside the picker's own scrollport — never `scrollIntoView()`, which walks the shell too. */
-function scrollThemeFamilyIntoView(scroller: HTMLElement, target: HTMLElement): void {
+export function scrollThemeFamilyIntoView(scroller: HTMLElement, target: HTMLElement): void {
   const viewport = scroller.getBoundingClientRect();
   const card = target.getBoundingClientRect();
   if (card.top < viewport.top) scroller.scrollTop += card.top - viewport.top;
@@ -59,7 +59,7 @@ function scrollThemeFamilyIntoView(scroller: HTMLElement, target: HTMLElement): 
 }
 
 /** A live, CSS-only preview of one family/mode pair. */
-function Swatch({ theme, current }: { readonly theme: string; readonly current: boolean }) {
+export function Swatch({ theme, current }: { readonly theme: string; readonly current: boolean }) {
   return (
     <span
       className={cn(

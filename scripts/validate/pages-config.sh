@@ -136,6 +136,8 @@ rg -q '^/pair /app/ 200$' "${redirects}"
 rg -q '^/pair/\* /app/ 200$' "${redirects}"
 rg -q '^/join /app/ 200$' "${redirects}"
 rg -q '^/shared /app/ 200$' "${redirects}"
+rg -q '^/onboarding /app/ 200$' "${redirects}"
+rg -q '^/onboarding/\* /app/ 200$' "${redirects}"
 require_in_block "/join" '^  Cache-Control: no-store$'
 last_redirect="$(tail -n 1 "${redirects}")"
 [[ ${last_redirect} == '/* /index.html 200' ]]

@@ -164,7 +164,7 @@ export function CommandBar({
   // the whole frame, scrim included, and took the clicks. Mounted here the bar and the menus share one root context, where
   // sheets z-40 < popovers z-45 < dialogs z-50 holds. Focus, Escape and restore-to-opener are the hook's and do not care.
   return createPortal(
-    <div className="kt-overlay fixed inset-x-0 z-50 flex justify-center px-3 pt-[12vh]">
+    <div className="kt-overlay fixed inset-x-0 z-50 flex items-start justify-center px-3 pt-[12vh]">
       {/* Scrim. A real button, so a click and a keyboard activation dismiss the same way. */}
       <button
         type="button"
@@ -259,6 +259,11 @@ export function CommandBar({
           {pending !== undefined && (
             <p className="m-0 px-cell-x py-row-y text-cell text-muted" data-command-bar-pending="">
               {pending}
+            </p>
+          )}
+          {trimmed === '' && found.results.length === 0 && (
+            <p className="m-0 px-cell-x py-row-y text-cell text-muted" data-command-bar-resting="">
+              Nothing to jump to yet. Type to search places and commands.
             </p>
           )}
           {trimmed !== '' && found.results.length === 0 && pending === undefined && (

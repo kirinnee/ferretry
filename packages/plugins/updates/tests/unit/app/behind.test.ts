@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { DAEMON_UPDATE_CODES, DaemonUpdateViewSchema, planUpdate } from '../../../contract/index.ts';
-import { behindSentence, refusalSentence, updateOffer, updateRequest } from '../../../app/lib/behind.ts';
+import {
+  behindSentence,
+  headlineSentence,
+  refusalSentence,
+  updateOffer,
+  updateRequest,
+} from '../../../app/lib/behind.ts';
 
 const LATEST = { version: '4.29.0', url: 'https://github.com/kirinnee/ferretry/releases/tag/v4.29.0' };
 const profile = { kind: 'nix-profile', element: 'ferretry' } as const;
@@ -80,5 +86,46 @@ describe('the update offer while an update is in flight, and the refusal sentenc
       'This daemon cannot update itself; follow the steps shown.',
     );
     expect(refusalSentence(undefined, 'fallback')).toBe('fallback');
+  });
+});
+
+describe('the line under "Running …" (never "up to date" for a latest nobody checked)', () => {
+  test('says up to date only when a newer release was looked for and none is newer', () => {
+    expect(headlineSentence(view({ available: false }))).toBe('This daemon is up to date.');
+  });
+  test('names the update when one is available', () => {
+    expect(headlineSentence(view())).toBe('This daemon is behind: 4.28.0 runs, 4.29.0 is out.');
+  });
+  test('a daemon that has never checked says so instead of "up to date"', () => {
+    const sentence = headlineSentence(view({ available: false, check: { state: 'never' } }));
+    expect(sentence).toBe('This daemon has not checked for a newer release yet.');
+    expect(sentence).not.toContain('up to date');
+  });
+  test('a failed check with no earlier answer says the check failed and why', () => {
+    const sentence = headlineSentence(
+      view({
+        available: false,
+        check: { state: 'failed', checkedAt: '2026-10-18T09:00:00.000Z', reason: 'network unreachable' },
+      }),
+    );
+    expect(sentence).toBe(
+      'The last check for a newer release failed (network unreachable), so this daemon may not be up to date.',
+    );
+  });
+  test('a failed check that still has an earlier answer keeps that answer and flags the failure', () => {
+    const sentence = headlineSentence(
+      view({
+        available: false,
+        check: {
+          state: 'failed',
+          checkedAt: '2026-10-18T09:30:00.000Z',
+          reason: 'network unreachable',
+          lastKnown: { checkedAt: '2026-10-18T09:00:00.000Z', latest: { ...LATEST, version: '4.28.0' } },
+        },
+      }),
+    );
+    expect(sentence).toBe(
+      'This daemon is up to date as of the last good check; the newest check failed (network unreachable).',
+    );
   });
 });

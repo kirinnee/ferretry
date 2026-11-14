@@ -45,7 +45,6 @@ function service(
   files: FakeFiles,
   projects: { id: string; name: string; path: string }[] = [],
   extra: {
-    ferretry?: () => Promise<readonly SkillDirectoryEntry[]>;
     selected?: (runtime: string) => Promise<readonly SkillDirectoryEntry[]>;
   } = {},
 ) {
@@ -158,53 +157,36 @@ describe('the skills inventory service', () => {
     should(files.listed).deepEqual(['/work/none/.agents/skills']);
   });
 
-  it('U11 lists the v4-installed skills straight from the asset tree, once, and a home link to one is not a second', async () => {
+  it('triage 59: an installed (asset) skill is listed only under the account whose home links to it, never under every account', async () => {
+    // HOME_A links review into the fleet's assets (the reader lists it managed); HOME_B links nothing. The asset tree
+    // holds review and extra: neither is attributed to an account that does not layer it.
     const files = new FakeFiles()
       .skill(`${HOME_A}/skills`, 'review', true)
       .skill(`${HOME_A}/skills`, 'mine')
       .skill(ASSETS, 'review')
       .skill(ASSETS, 'extra');
-    const asset = async () => [
-      { manifest: `${ASSETS}/review/SKILL.md`, managed: true },
-      { manifest: `${ASSETS}/extra/SKILL.md`, managed: true },
-    ];
 
-    const listing = await service(files, [], { ferretry: asset }).machine();
+    const listing = await service(files).machine();
 
-    const skills = listing.homes.find(home => home.home === HOME_A)!.skills;
-    should(skills.map(skill => [skill.name, skill.scope, skill.path])).deepEqual([
-      ['extra', 'ferretry', `${ASSETS}/extra/SKILL.md`],
+    const a = listing.homes.find(home => home.home === HOME_A)!.skills;
+    should(a.map(skill => [skill.name, skill.scope, skill.path])).deepEqual([
       ['mine', 'user', `${HOME_A}/skills/mine/SKILL.md`],
       ['review', 'ferretry', `${HOME_A}/skills/review/SKILL.md`],
     ]);
-    should(skills.find(skill => skill.name === 'extra')!.toggle?.supported).equal(false);
+    should(a.find(skill => skill.name === 'review')!.toggle?.supported).equal(false);
+    should(listing.homes.find(home => home.home === HOME_B)!.skills).deepEqual([]);
   });
 
-  it('U11 a plain folder of the home keeps its name: an asset or a selected item of the same name is not a second row', async () => {
-    const files = new FakeFiles().skill(`${HOME_A}/skills`, 'review').skill(ASSETS, 'review').skill('/store', 'review');
-    const asset = async () => [{ manifest: `${ASSETS}/review/SKILL.md`, managed: true }];
+  it('U11 a plain folder of the home keeps its name: a selected item of the same name is not a second row', async () => {
+    const files = new FakeFiles().skill(`${HOME_A}/skills`, 'review').skill('/store', 'review');
     const selected = async () => [{ manifest: '/store/review/SKILL.md', managed: true }];
 
-    const listing = await service(files, [], { ferretry: asset, selected }).machine();
+    const listing = await service(files, [], { selected }).machine();
 
     const skills = listing.homes.find(home => home.home === HOME_A)!.skills;
     should(skills.map(skill => [skill.name, skill.scope, skill.path])).deepEqual([
       ['review', 'user', `${HOME_A}/skills/review/SKILL.md`],
     ]);
-  });
-
-  it('U11 a ferret with no published home lists none of the asset tree', async () => {
-    const files = new FakeFiles().skill(ASSETS, 'tool');
-    const asset = async () => [{ manifest: `${ASSETS}/tool/SKILL.md`, managed: true }];
-
-    const inventory = await service(files, [], { ferretry: asset }).ferret({
-      id: 's1',
-      harness: 'claude-code',
-      runtime: 'not-a-wrapper',
-      folder: '/work/none',
-    });
-
-    should(inventory.skills).deepEqual([]);
   });
 
   it('a skill item the runtime’s profile selects is listed as Ferretry’s, and an unnamed runtime selects none', async () => {

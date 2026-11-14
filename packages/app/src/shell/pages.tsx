@@ -1,19 +1,13 @@
 import { daemonTitle } from '../daemons/daemon-list.ts';
 import { daemonHomeHref, daemonSettingsHref, DEVICE_SETTINGS_HREF, HOME_HREF } from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
-import {
-  TEXT_SCALES,
-  THEME_FAMILIES,
-  THEME_MODES,
-  type TextScale,
-  type ThemeFamilyId,
-  type ThemeMode,
-} from '../theme/preferences.ts';
 import { useRuntimeVersion, useShell } from './context.tsx';
 import { firstRunEntry, ONBOARDING_SCREEN } from './first-run.ts';
+import { DeviceAppearance } from './device-appearance.tsx';
 import { DevicePanels } from './device-panels.tsx';
+import { resolveSettingsTab } from './settings-tab.ts';
 import { PanelSlot, PluginView, ShellLine } from './views.tsx';
-import { useEffect, useSyncExternalStore, type MouseEvent } from 'react';
+import { useEffect, type MouseEvent } from 'react';
 
 /** An in-app link: a plain click navigates in place; a modifier or middle click is the browser's (a new tab). */
 export function Link({
@@ -129,9 +123,10 @@ export function DaemonSettingsPage({
     (entry.manifest.ui?.settings ?? []).map(setting => ({ plugin: entry.id, ...setting })),
   );
   tabs.sort((a, b) => a.order - b.order || a.plugin.localeCompare(b.plugin));
-  // A tab is found by its plugin AND its own id; a plugin's first tab is what `settings/<plugin>` names.
-  const active =
-    tabs.find(candidate => candidate.plugin === tab && (tabId === undefined || candidate.id === tabId)) ?? tabs[0];
+  // A tab is found by its plugin AND its own id; a plugin's first tab is what `settings/<plugin>` names, a bare tab id
+  // names that tab, and a name nothing answers to is said so (never the first tab in its place).
+  const choice = resolveSettingsTab(tabs, tab, tabId);
+  const active = choice.kind === 'tab' ? choice.tab : undefined;
   return (
     <section className="fy-page">
       <h1>Settings</h1>
@@ -146,52 +141,24 @@ export function DaemonSettingsPage({
           </Link>
         ))}
       </nav>
-      {active === undefined ? (
+      {choice.kind === 'none' ? (
         <ShellLine>No plugin on this daemon has settings.</ShellLine>
+      ) : choice.kind === 'missing' ? (
+        <ShellLine>{`There is no settings tab called "${choice.name}" on this daemon. Pick one above.`}</ShellLine>
       ) : (
-        <PluginView daemon={daemon} plugin={active.plugin} section="settings" id={active.id} props={{}} />
+        <PluginView daemon={daemon} plugin={choice.tab.plugin} section="settings" id={choice.tab.id} props={{}} />
       )}
     </section>
   );
 }
 
-/** This device's settings (§5.2): theme, text size; saved in this browser, never on a daemon. */
+/** This device's settings (§5.2): theme, mode, text size, motion; saved in this browser, never on a daemon. */
 export function DeviceSettingsPage() {
-  const { themes, layout } = useShell();
-  const preference = useSyncExternalStore(themes.subscribe, () => themes.snapshot());
+  const { layout } = useShell();
   return (
     <section className="fy-page">
       <h1>This device</h1>
-      <label>
-        Theme{' '}
-        <select value={preference.family} onChange={event => themes.setFamily(event.target.value as ThemeFamilyId)}>
-          {THEME_FAMILIES.map(family => (
-            <option key={family.id} value={family.id}>
-              {family.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Mode{' '}
-        <select value={preference.mode} onChange={event => themes.setMode(event.target.value as ThemeMode)}>
-          {THEME_MODES.map(mode => (
-            <option key={mode} value={mode}>
-              {mode}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Text size{' '}
-        <select value={preference.textScale} onChange={event => themes.setTextScale(event.target.value as TextScale)}>
-          {TEXT_SCALES.map(scale => (
-            <option key={scale} value={scale}>
-              {scale}
-            </option>
-          ))}
-        </select>
-      </label>
+      <DeviceAppearance />
       {/* Panels plugins declare in device.settings (S4, M3): no machine needed, by order. */}
       <DevicePanels slot="device.settings" />
       <p>

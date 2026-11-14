@@ -61,7 +61,7 @@ describe('the command bar', () => {
     );
     const view = await mount(bar(true, 1));
     const labels = () => [...document.body.querySelectorAll('[role="option"]')].map(option => option.textContent);
-    expect(labels()).toEqual(['Board', 'Agenda']);
+    expect(labels()).toEqual(['Board', 'Agenda', 'This device’s settings', 'This daemon’s settings']);
     const input = must(document.body.querySelector<HTMLInputElement>('input[role="combobox"]'), 'query box');
     await interact(() => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
@@ -75,7 +75,51 @@ describe('the command bar', () => {
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     await view.render(bar(true, 2));
     expect(document.body.querySelector<HTMLInputElement>('input')?.value).toBe('');
-    expect(labels()).toEqual(['Board', 'Agenda']);
+    expect(labels()).toEqual(['Board', 'Agenda', 'This device’s settings', 'This daemon’s settings']);
+    await view.unmount();
+  });
+
+  it('K5: opens on a default list, never a blank panel — even with no machine paired', async () => {
+    const sources = [
+      placeSource({ daemons: [], daemon: undefined, screens: [], routes: routeTable([]), navigate: () => {} }),
+    ];
+    const view = await mount(<CommandBar open focusSignal={1} onClose={() => {}} sources={sources} />);
+    expect([...document.body.querySelectorAll('[role="option"]')].map(option => option.textContent)).toEqual([
+      'This device’s settings',
+    ]);
+    expect(document.body.querySelector('[data-command-bar-resting]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('names a machine once: no subtitle that repeats the title, one only for an owner’s own label', () => {
+    const base = {
+      deviceId: 'dev',
+      address: 'http://127.0.0.1:40245',
+      carriers: [] as unknown[],
+      pairedAt: 1,
+      lastSelectedAt: 1,
+    };
+    const source = placeSource({
+      daemons: [
+        { ...base, daemon: 'a', machine: 'workshop-host' },
+        { ...base, daemon: 'b', machine: 'attic-host', label: 'Attic' },
+      ],
+      daemon: undefined,
+      screens: [],
+      routes: routeTable([]),
+      navigate: () => {},
+    });
+    const entries = commandBarResults([source], '').results.filter(entry => entry.id.startsWith('daemon-'));
+    expect(entries.map(entry => [entry.label, entry.description])).toEqual([
+      ['workshop-host', undefined],
+      ['Attic', 'attic-host'],
+    ]);
+  });
+
+  it('K5: when no source has anything at rest it says so, instead of a blank panel', async () => {
+    const view = await mount(<CommandBar open focusSignal={1} onClose={() => {}} sources={[]} />);
+    expect(document.body.querySelectorAll('[role="option"]')).toHaveLength(0);
+    expect(document.body.querySelector('[data-command-bar-resting]')?.textContent).toContain('Type to search');
     await view.unmount();
   });
 

@@ -33,8 +33,10 @@ export function placeSource(input: PlaceSourceInput): CommandBarSource {
       entries.push({ id, group: 'Go to', label, run: () => input.navigate(href), ...extra });
     };
     for (const paired of input.daemons) {
-      go(`daemon-${paired.daemon}`, daemonTitle(paired), daemonHomeHref(paired.daemon), {
-        description: paired.machine,
+      const title = daemonTitle(paired);
+      go(`daemon-${paired.daemon}`, title, daemonHomeHref(paired.daemon), {
+        // The host name is the title when the machine has no name of its own: say it once.
+        ...(paired.machine === title ? {} : { description: paired.machine }),
         keywords: ['daemon', paired.machine],
         resting: true,
       });
@@ -50,9 +52,16 @@ export function placeSource(input: PlaceSourceInput): CommandBarSource {
       const href = daemonLess ? input.routes.href(screen, {}) : input.routes.href(screen, {}, input.daemon as string);
       go(`screen-${key}`, screen.label, href, { keywords: [screen.id, screen.plugin], resting: true });
     }
-    go('device-settings', 'This device’s settings', DEVICE_SETTINGS_HREF, { keywords: ['theme', 'appearance'] });
+    // Settings are offered at rest too, as v4's palette did: the bar never opens empty, even with no machine paired.
+    go('device-settings', 'This device’s settings', DEVICE_SETTINGS_HREF, {
+      keywords: ['theme', 'appearance'],
+      resting: true,
+    });
     if (input.daemon !== undefined) {
-      go('daemon-settings', 'This daemon’s settings', daemonSettingsHref(input.daemon), { keywords: ['plugins'] });
+      go('daemon-settings', 'This daemon’s settings', daemonSettingsHref(input.daemon), {
+        keywords: ['plugins'],
+        resting: true,
+      });
     }
     return entries;
   };
