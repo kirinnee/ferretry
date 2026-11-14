@@ -55,6 +55,15 @@ const SOURCES: Readonly<Record<ProfileComponentKind, readonly SourceDefinition[]
   ],
 };
 
+/** Every hook an owner takes to give a component source: what Runtimes listens to for a change (`watchOwners`). */
+export const PROFILE_COMPONENT_SOURCE_HOOKS: readonly SourceHook[] = [
+  ...new Set(
+    Object.values(SOURCES).flatMap(sources =>
+      sources.flatMap(source => (source.hook === undefined ? [] : [source.hook])),
+    ),
+  ),
+];
+
 const unread = (reason: string): KindReading => ({ state: 'unread', reason });
 
 /** A component's `harness` in the model's own spelling. */

@@ -12,8 +12,12 @@ import type { HooksItem, SettingsItem } from '../../contract/index.ts';
 
 const byName = (left: string, right: string): number => left.localeCompare(right);
 
-export function claudeSettingsSource(items: () => ReadonlyMap<string, SettingsItem>): ProfileComponentSource {
+export function claudeSettingsSource(
+  items: () => ReadonlyMap<string, SettingsItem>,
+  watch?: ProfileComponentSource['watch'],
+): ProfileComponentSource {
   return {
+    ...(watch === undefined ? {} : { watch }),
     list: async () => [...items().keys()].toSorted(byName),
     read: async name => {
       const item = items().get(name);
@@ -22,8 +26,12 @@ export function claudeSettingsSource(items: () => ReadonlyMap<string, SettingsIt
   };
 }
 
-export function claudeHooksSource(items: () => ReadonlyMap<string, HooksItem>): ProfileComponentSource {
+export function claudeHooksSource(
+  items: () => ReadonlyMap<string, HooksItem>,
+  watch?: ProfileComponentSource['watch'],
+): ProfileComponentSource {
   return {
+    ...(watch === undefined ? {} : { watch }),
     list: async () => [...items().keys()].toSorted(byName),
     read: async name => {
       const item = items().get(name);
