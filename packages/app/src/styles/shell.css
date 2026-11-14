@@ -205,6 +205,40 @@
   min-width: 0;
 }
 
+/* On a phone even one wrapping row is too much (name, status, two chips, Info, Actions, two switches and a scan bar wrap
+   to five lines, about 30% of a 390x844 screen). The toolbar is ONE line that scrolls sideways, like the chip row under it,
+   so the conversation keeps the screen. The controls a person reaches for (the name, the status, Actions) are drawn
+   first whatever the plugins' order; the rest follows in that order. Nothing is hidden: it is a swipe away. */
+@media (max-width: 767.98px) {
+  .fy-slot[data-slot='ferret.toolbar'] {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    column-gap: 8px;
+  }
+  .fy-slot[data-slot='ferret.toolbar']::-webkit-scrollbar {
+    display: none;
+  }
+  .fy-slot[data-slot='ferret.toolbar'] > .fy-panel {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  .fy-slot[data-slot='ferret.toolbar'] > .fy-panel[data-panel$='.name'] {
+    order: -4;
+    max-width: 45vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .fy-slot[data-slot='ferret.toolbar'] > .fy-panel[data-panel$='.status'] {
+    order: -3;
+  }
+  .fy-slot[data-slot='ferret.toolbar'] > .fy-panel[data-panel$='.actions'] {
+    order: -2;
+  }
+}
+
 /* A ferret's side pane (`ferret.side`, drawn beside the chat by Conversation's page): the default layout lists every panel
    the plugins provide for it — fourteen — so the pane is its own COLUMN with its own scroll, never the chat's width and never
    taller than the page it sits in (the frame is the viewport, so the pane takes the row's height and scrolls inside, and a

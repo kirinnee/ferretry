@@ -173,9 +173,12 @@ const TOOLBAR: ReadonlyArray<readonly [string, () => ReactNode]> = [
   [
     'ferret-lessons',
     () => (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div
+        className="flex min-w-0 flex-col gap-2 max-md:flex-row max-md:items-center max-md:gap-3"
+        data-ferret-lessons=""
+      >
         {toggle('Passive lessons')()}
-        <button className="kt-btn w-full" type="button">
+        <button className="kt-btn" type="button">
           Scan this ferret for lessons…
         </button>
       </div>
