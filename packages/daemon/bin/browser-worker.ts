@@ -30,6 +30,7 @@ import {
   type BrowserMouseButton,
   BrowserPageLifecycleRequestSchema,
   type BrowserTarget,
+  carriesPairingFragment,
   InputTargetFactsSchema,
 } from '@ferretry/protocol';
 import {
@@ -67,7 +68,9 @@ import {
   type InputLocator,
   type InputSubject,
   observeInputFields,
+  pairingRelatedPages,
   playwrightNodeOf,
+  readPairingGroup,
   probeInputFields,
   readInputText,
   refindInputFields,
@@ -93,6 +96,7 @@ import {
   type WaitablePage,
 } from '../src/lib/browser/transport/page-lifecycle.ts';
 import { runPageScript } from '../src/lib/browser/transport/page-script.ts';
+import { originOfAddress, PairingNavigationLedger } from '../src/lib/browser/transport/pairing-history.ts';
 import { disablePasskeys } from '../src/lib/browser/transport/passkeys.ts';
 import { type PointerPosition, pointerAfter, pointerSequence } from '../src/lib/browser/transport/pointer.ts';
 import { type PointerPage, performPointerAct, pointerActParam } from '../src/lib/browser/transport/pointer-acts.ts';
@@ -148,6 +152,8 @@ const heldFrames = new Map<number, HeldFrame>();
 let global: Promise<unknown> = Promise.resolve();
 /** What each page is holding, logging and emulating — all of it forgotten with the page. */
 const dialogs = new PageDialogs();
+/** Every address any page committed that carried a pairing fragment, from DevTools — never from page script (docs/pairing.md). */
+const pairingLedger = new PairingNavigationLedger();
 const consoles = new Map<string, ConsoleLog>();
 const networks = new Map<string, NetworkLog>();
 const emulations = new Map<string, PageEmulation>();
@@ -322,6 +328,46 @@ function watch(page: Page, key: string): void {
   );
 }
 
+/**
+ * Keeps the page's navigation history in {@link pairingLedger}: every address any frame commits, and whether the main
+ * frame's document was replaced. Playwright's own frame events cover every frame (an out-of-process one too); the page's
+ * DevTools session says which commits replaced the document. A navigation that cannot be followed marks the page as
+ * entered by a pairing link: a miss would hand over a credential, a refusal costs one read.
+ */
+function followNavigation(page: Page, key: string): void {
+  pairingLedger.watch(key, safeUrl(page));
+  page.on('framenavigated', frame => {
+    try {
+      pairingLedger.committed(key, {
+        address: frame.url(),
+        mainFrame: frame === page.mainFrame(),
+        sameDocument: true,
+      });
+    } catch {
+      pairingLedger.lost(key);
+    }
+  });
+  void pageSession(page)
+    .then(async session => {
+      session.on('Page.frameNavigated', event => {
+        const found = (event as { frame?: { parentId?: unknown; url?: unknown; urlFragment?: unknown } }).frame;
+        if (found === undefined || typeof found.url !== 'string') return pairingLedger.lost(key);
+        pairingLedger.committed(key, {
+          address: found.url + (typeof found.urlFragment === 'string' ? found.urlFragment : ''),
+          mainFrame: found.parentId === undefined,
+          sameDocument: false,
+        });
+      });
+      session.on('Page.navigatedWithinDocument', event => {
+        const address = (event as { url?: unknown }).url;
+        if (typeof address !== 'string') return pairingLedger.lost(key);
+        pairingLedger.committed(key, { address, mainFrame: false, sameDocument: true });
+      });
+      await session.send('Page.enable');
+    })
+    .catch(() => pairingLedger.lost(key));
+}
+
 function registerPage(page: Page): void {
   if (pageIds.has(page)) return;
   const key = pageId(page);
@@ -334,6 +380,7 @@ function registerPage(page: Page): void {
     socket.on('close', () => sockets.delete(socket));
   });
   watch(page, key);
+  followNavigation(page, key);
   setPageState(page, 'ready');
   void page
     .opener()
@@ -367,6 +414,7 @@ function registerPage(page: Page): void {
   });
   page.on('close', () => {
     const id = pageId(page);
+    pairingLedger.closed(id);
     viewports.delete(id);
     pointers.delete(id);
     dialogs.drop(id);
@@ -1008,8 +1056,27 @@ async function act(request: Request): Promise<Record<string, unknown>> {
         ),
       };
     }
-    case 'inputDocument':
-      return { document: await describeInputDocument(inputSubject(targetPage(params.pageId))) };
+    case 'inputDocument': {
+      const page = targetPage(params.pageId);
+      const document = await describeInputDocument(inputSubject(page));
+      // Pairing screens (docs/pairing.md): the page asked about and every page that could reach it.
+      const group = [page, ...pairingRelatedPages(page, livePages())];
+      const pairing = await readPairingGroup(group.map(inputSubject));
+      const history = pairingLedger.look(group.map(pageId));
+      return {
+        document: {
+          ...document,
+          ...pairing,
+          // What the daemon needs to tell whether this group is the app's, and what the app was sent (never page script).
+          pairingOrigins: [...new Set(group.map(member => originOfAddress(safeUrl(member))))],
+          pairingCommits: history.commits,
+          // A ledger that lost a navigation cannot prove any page was not entered by a link: blind reads as linked.
+          pairingLinked:
+            history.linked || history.blind || group.some(member => carriesPairingFragment(safeUrl(member))),
+          pairingLost: history.lost,
+        },
+      };
+    }
     case 'inputText':
       return { text: await readInputText(inputSubject(targetPage(params.pageId))) };
     case 'inputObserve':

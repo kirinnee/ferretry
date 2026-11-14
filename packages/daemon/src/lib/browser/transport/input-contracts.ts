@@ -71,6 +71,35 @@ export interface BrowserInputDocument {
   readonly navigationId: string;
   /** The host the page is on now (`accounts.google.com`): a login's facts watch it leave the sign-in hosts. */
   readonly host?: string;
+  /**
+   * Whether the page, or any page that could reach it (same-origin: an opener, a popup), carries the pairing-screen
+   * marker (`PAIRING_SCREEN_META_NAME`): it shows a live pairing code or its QR, so no agent may read, picture or script
+   * it. Read by DOM queries, never a page script; absent means none does.
+   */
+  readonly pairingScreen?: boolean;
+  /**
+   * How many pairing codes each of those pages' documents has ever shown (`PAIRING_EPOCH_META_NAME`), by page id. It
+   * never goes down while a document lives, so a number that moved says a code was shown in between two looks.
+   */
+  readonly pairingEpochs?: Readonly<Record<string, number>>;
+  /**
+   * The origins of those pages (the page asked about and every page that could reach it), `''` for one that cannot be told
+   * (`about:blank`): the daemon decides from them whether the group is the app's. Read from the browser, never the page.
+   */
+  readonly pairingOrigins?: readonly string[];
+  /**
+   * How many addresses carrying a pairing fragment any page of the browser has committed, by origin, since the worker
+   * started (`PairingNavigationLedger`). It never goes down, whatever the page does or however it navigates or closes, so
+   * a number that moved between two looks says a pairing link was opened in between.
+   */
+  readonly pairingCommits?: Readonly<Record<string, number>>;
+  /**
+   * Whether the document one of those pages shows now was entered by an address carrying a pairing fragment, or the
+   * ledger is blind (it has lost track of a navigation and cannot prove its history complete: sticky until a fresh one).
+   */
+  readonly pairingLinked?: boolean;
+  /** How many times the ledger lost track of a navigation since the worker started. Never goes down; absent is none. */
+  readonly pairingLost?: number;
 }
 
 /**

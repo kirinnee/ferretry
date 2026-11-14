@@ -14,6 +14,7 @@ import type {
   TaskPlan,
   TaskPlanCall,
 } from '@ferretry/protocol';
+import type { CopyPageGuard } from '../secure-copy/ports.ts';
 
 /**
  * WHO IS CALLING A TOOL — derived by the route, never stated by the caller.
@@ -137,7 +138,7 @@ export interface AgentCopyPort {
       /** The page's documents the agent has read, asked after the copy's read. */
       readonly seen?: () => readonly string[];
       /** Run inside the page's queue before the read: a takeover or a hold that landed meanwhile refuses it. */
-      readonly guard?: (page: { document(): Promise<string | undefined> }) => Promise<void>;
+      readonly guard?: CopyPageGuard;
     },
   ): Promise<{ readonly copy: CopyMeta; readonly command?: CopyCommandReport }>;
   list(sessionId: string): readonly CopyMeta[];

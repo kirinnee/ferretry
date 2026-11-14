@@ -71,6 +71,7 @@ import {
   SELF_NARROW_NOTE,
 } from '../../lib/pairing-invite.ts';
 import { encodeQr, QrEncodeError, type QrMatrix } from '../../lib/qr-code.ts';
+import { usePairingScreenMarker } from '../../lib/pairing-screen-marker.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
 import { DeviceRuleNote } from '../secure-copy/device-rule-note.tsx';
 import {
@@ -501,6 +502,8 @@ export function AddDeviceCard({
   const headingId = useId();
   const devices = orderedPairedDevices(view);
   const countdown = invite === null ? null : pairingCountdown(invite.expiresAt, nowMs);
+  // The code, its link and its QR are on screen from the mint until it runs out or is cleared (docs/pairing.md).
+  usePairingScreenMarker(invite !== null && countdown !== null && !countdown.expired);
 
   return (
     <section

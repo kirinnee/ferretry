@@ -3,8 +3,9 @@ import {
   BrowserLoginActionSchema,
   hidePairingFragments,
   hidePairingFragmentsIn,
+  PAIRING_SCREEN_REFUSAL,
 } from '@ferretry/protocol';
-import { isAgentCaller } from '../../api/agent-caller.ts';
+import { isAgentCaller, OWNER_ONLY_CODE, ownerOnlyWords } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiResponse } from '../../api/http.ts';
@@ -16,7 +17,12 @@ import {
   type BrowserLoginLifecycle,
   type BrowserLoginStatus,
 } from '../../browser/control/index.ts';
-import { BrowserSessionError, type BrowserSubsystem } from '../../browser/runtime/index.ts';
+import {
+  type BrowserActGuard,
+  BrowserSessionError,
+  type BrowserSubsystem,
+  holdPairingScreen,
+} from '../../browser/runtime/index.ts';
 
 export interface BrowserMountedSubsystem extends BrowserSubsystem {
   stream(sessionId: string, downstream: SocketDownstream): Promise<SocketHandler>;
@@ -142,9 +148,18 @@ async function browserStatus(browser: BrowserSubsystem, context: RouteContext): 
   return jsonResponse(projectedFor(context).body(status));
 }
 
+/** The toolbar actions whose answer carries the page itself: its text, its markup, its picture. */
+const PAGE_CONTENT_ACTIONS: ReadonlySet<string> = new Set(['read', 'screenshot', 'highlight']);
+
+/** Refuses an agent's read of a page that carries the pairing-screen marker (docs/pairing.md), from inside its queue. */
+const pairingScreenGuard: BrowserActGuard = async page =>
+  await holdPairingScreen(page, () => new ApiError(403, PAIRING_SCREEN_REFUSAL, 'pairing_screen'));
+
 async function browserAction(browser: BrowserSubsystem, context: RouteContext): Promise<ApiResponse> {
   const action = await parseBody(context.request, BrowserActionSchema);
-  const result = await browser.act(sessionId(context), action).catch(error => browserFailure(error, context));
+  // What an agent is handed of a page (its words, its markup, a picture) is refused while the page shows a pairing code.
+  const guard = isAgentCaller(context) && PAGE_CONTENT_ACTIONS.has(action.action) ? pairingScreenGuard : undefined;
+  const result = await browser.act(sessionId(context), action, guard).catch(error => browserFailure(error, context));
   return jsonResponse(projectedFor(context).body(result));
 }
 
@@ -233,6 +248,9 @@ export function browserSocketRoutes(browser: BrowserMountedSubsystem): readonly 
       capability: { capability: 'browser', axis: 'use' },
       accept: async context => {
         const id = sessionId(context);
+        // A stream of pictures of the page is the owner's view, never an agent's: a frame could show a pairing code.
+        if (isAgentCaller(context))
+          throw new ApiError(403, ownerOnlyWords('watches the browser view'), OWNER_ONLY_CODE);
         await browser.status(id).catch(error => browserFailure(error, context));
         return async downstream => await browser.stream(id, downstream);
       },

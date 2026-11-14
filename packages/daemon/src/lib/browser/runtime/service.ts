@@ -30,6 +30,7 @@ import type { BrowserUploadMode } from '../transport/page-acts.ts';
 import type { PageScript } from '../transport/page-script.ts';
 import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '../transport/viewer-contracts.ts';
 import type { WorkerStagedFile } from '../transport/worker-protocol.ts';
+import { appOriginSet, pairingEvidenceOf, underGuard } from './pairing-guard.ts';
 import { type BrowserSignInWatch, pageActLeavesSignIn, toolbarActLeavesSignIn } from './sign-in-watch.ts';
 
 export const DEFAULT_BROWSER_VIEWPORT: BrowserViewport = { width: 1280, height: 800 };
@@ -70,15 +71,74 @@ export interface BrowserIdlePolicy {
  */
 export interface BrowserGuardPage {
   document(): Promise<string | undefined>;
+  /**
+   * What the page's pairing documents say, read from the live page inside its queue: the page itself and every page
+   * that could reach it (see {@link BrowserPairingState}). A browser that cannot say answers `marked`, so a guard that
+   * refuses on it fails closed.
+   */
+  pairing?(): Promise<BrowserPairingState>;
   /** The host the page is on now, read from the live page inside its queue; `undefined` when it can't be read. */
   host?(): Promise<string | undefined>;
 }
 
 /**
- * Refuses an act from inside its page's own queue, immediately before it runs — a takeover that landed while it
- * waited, or an owner's value pending on or just typed into the page (the input bridge's holds).
+ * What the pages a script on one page could reach say of pairing (docs/pairing.md, "Never show it to an agent"): whether
+ * any of them shows a live pairing code now, and how many codes each document has shown so far, by page id. The counter
+ * never goes down while a document lives, so one that moved says a code was shown between two looks.
  */
-export type BrowserActGuard = (page: BrowserGuardPage) => Promise<void>;
+export interface BrowserPairingState {
+  /** Whether a document the page's scripts could reach carries the app's marker. A HINT: the app's own DOM, so page script can write it. */
+  readonly marked: boolean;
+  /** How many codes each of those documents has shown (the app's own counter), by page id. A hint too. */
+  readonly epochs: Readonly<Record<string, number>>;
+  /**
+   * What the daemon and the browser worker know OUTSIDE every page (see {@link BrowserPairingEvidence}). Absent when the
+   * runtime was built with no pairing source, which is then only the hint above.
+   */
+  readonly evidence?: BrowserPairingEvidence;
+}
+
+/**
+ * THE EVIDENCE NO PAGE SCRIPT CAN TOUCH (docs/pairing.md, "Never show it to an agent"): kept in the daemon's memory and
+ * the browser worker's navigation history, so a page cannot write it, a navigation cannot reset it and closing a window
+ * cannot take it away.
+ */
+export interface BrowserPairingEvidence {
+  /** Whether the page, or a page its scripts could reach, is on a Ferretry app origin (or one that cannot be told). */
+  readonly app: boolean;
+  /** Whether one of those pages is on an origin KNOWN to be Ferretry's app (not merely one nobody could tell): where an agent's script never runs. */
+  readonly ownApp: boolean;
+  /** Whether the daemon has a pairing code live now: minted, and not yet redeemed, cancelled, replaced or expired. */
+  readonly live: boolean;
+  /** How many codes the daemon has minted since it started. Never goes down. */
+  readonly minted: number;
+  /** How many addresses carrying a pairing fragment an app origin has committed in the browser. Never goes down. */
+  readonly commits: number;
+  /** How many times the browser lost track of a page's navigation. Never goes down: an operation it overlapped is not to be believed. */
+  readonly lost: number;
+  /** Whether the document one of those pages shows now was entered by an address carrying a pairing fragment, or the history is blind. */
+  readonly linked: boolean;
+}
+
+/** What the browser runtime reads of the daemon: whether a pairing code is live, and which origins are Ferretry's app. */
+export interface BrowserPairingSource {
+  readonly live: { look(): { readonly live: boolean; readonly minted: number } };
+  /** The origins the app is served from: the hosted one, this daemon's own, and the others the build knows. */
+  appOrigins(): readonly string[];
+}
+
+/**
+ * Runs after an act whose guard handed it back, with the act's answer or error already in hand: it throws to refuse
+ * both. See {@link underGuard}.
+ */
+export type BrowserAfterCheck = () => Promise<void>;
+
+/**
+ * Refuses an act from inside its page's own queue, immediately before it runs — a takeover that landed while it
+ * waited, or an owner's value pending on or just typed into the page (the input bridge's holds). It may hand back a
+ * check to run once the act is over.
+ */
+export type BrowserActGuard = (page: BrowserGuardPage) => Promise<void | BrowserAfterCheck>;
 
 /** The sessions the browser serves: whether one exists, and the display name a page is grouped under. */
 export interface BrowserSessionDirectory {
@@ -163,7 +223,7 @@ export interface BrowserSubsystem extends BrowserViewerHost {
   /** This session's view of the machine's browser: its own pages, and the one its person is viewing. */
   status(sessionId: string): Promise<BrowserStatus>;
   /** A person's toolbar: everything acts on the page this session's person is viewing. */
-  act(sessionId: string, action: BrowserAction): Promise<BrowserActionResult>;
+  act(sessionId: string, action: BrowserAction, guard?: BrowserActGuard): Promise<BrowserActionResult>;
   /**
    * Opens a page with a human NAME in its own window, starting the browser when it is not running. A
    * name already in use in this session is refused, and so is a page past the session's or the
@@ -283,6 +343,8 @@ export class BrowserSessionService implements BrowserSubsystem {
     private readonly idle?: BrowserIdlePolicy,
     /** Told when an act may have changed who a page signs in, whoever made it (sign-in-watch.ts). */
     private readonly signIns?: BrowserSignInWatch,
+    /** What the daemon knows of pairing codes, beyond every page (see {@link BrowserPairingEvidence}). */
+    private readonly pairingSource?: BrowserPairingSource,
   ) {}
 
   async status(sessionId: string): Promise<BrowserStatus> {
@@ -294,7 +356,7 @@ export class BrowserSessionService implements BrowserSubsystem {
     return this.project(run, sessionId);
   }
 
-  async act(sessionId: string, action: BrowserAction): Promise<BrowserActionResult> {
+  async act(sessionId: string, action: BrowserAction, guard?: BrowserActGuard): Promise<BrowserActionResult> {
     await this.requireSession(sessionId);
     if (action.action === 'stop') {
       this.signIns?.forget(sessionId);
@@ -342,10 +404,11 @@ export class BrowserSessionService implements BrowserSubsystem {
     return await this.onPage(
       run,
       viewed,
-      async () => {
-        if (!toolbarActLeavesSignIn(action)) this.signIns?.cleared(sessionId, viewed);
-        return await this.perform(run, viewed, action);
-      },
+      async () =>
+        await underGuard(guard, this.guardPage(run, viewed), async () => {
+          if (!toolbarActLeavesSignIn(action)) this.signIns?.cleared(sessionId, viewed);
+          return await this.perform(run, viewed, action);
+        }),
       sessionId,
     );
   }
@@ -371,21 +434,21 @@ export class BrowserSessionService implements BrowserSubsystem {
     const run = this.requireRunning();
     const page = this.requirePage(run, sessionId, key);
     return await this.exclusive(page.id, async () => {
-      await guard?.(this.guardPage(run, page.id));
-      // Cleared BEFORE an act that may change who the page signs in, and after ANY act that failed partway (a fill that
-      // typed the email and then broke, an Enter that timed out after the page moved): the agent tools put a record
-      // back only from what they saw a finished act do.
-      if (!pageActLeavesSignIn(action)) this.signIns?.cleared(sessionId, page.id);
-      let result: BrowserPageActionSnapshot;
-      try {
-        result = await this.perform(run, page.id, action);
-      } catch (error) {
-        this.signIns?.cleared(sessionId, page.id);
-        throw error;
-      }
-      run.snapshot = pageOf(result);
+      const done = await underGuard(guard, this.guardPage(run, page.id), async () => {
+        // Cleared BEFORE an act that may change who the page signs in, and after ANY act that failed partway (a fill that
+        // typed the email and then broke, an Enter that timed out after the page moved): the agent tools put a record
+        // back only from what they saw a finished act do.
+        if (!pageActLeavesSignIn(action)) this.signIns?.cleared(sessionId, page.id);
+        try {
+          return await this.perform(run, page.id, action);
+        } catch (error) {
+          this.signIns?.cleared(sessionId, page.id);
+          throw error;
+        }
+      });
+      run.snapshot = pageOf(done);
       this.touch(run);
-      return { status: this.project(run, sessionId), result };
+      return { status: this.project(run, sessionId), result: done };
     });
   }
 
@@ -417,9 +480,10 @@ export class BrowserSessionService implements BrowserSubsystem {
     const page = this.requirePage(run, sessionId, key);
     return await this.exclusive(page.id, async () => {
       // The same in-queue check an agent's act gets: a takeover or a hold that landed while the copy waited wins.
-      await guard?.(this.guardPage(run, page.id));
-      this.touch(run);
-      return await work(run.driver, page.id);
+      return await underGuard(guard, this.guardPage(run, page.id), async () => {
+        this.touch(run);
+        return await work(run.driver, page.id);
+      });
     });
   }
 
@@ -445,14 +509,9 @@ export class BrowserSessionService implements BrowserSubsystem {
       this.touch(run);
       return { reply: answered.lifecycle, ...(answered.dialog === undefined ? {} : { dialog: answered.dialog }) };
     };
-    if (request.op === 'dialog' || request.op === 'console' || request.op === 'network') {
-      await guard?.(this.guardPage(run, page.id));
-      return await perform();
-    }
-    return await this.exclusive(page.id, async () => {
-      await guard?.(this.guardPage(run, page.id));
-      return await perform();
-    });
+    if (request.op === 'dialog' || request.op === 'console' || request.op === 'network')
+      return await underGuard(guard, this.guardPage(run, page.id), perform);
+    return await this.exclusive(page.id, async () => await underGuard(guard, this.guardPage(run, page.id), perform));
   }
 
   async adoptPage(sessionId: string, key: string, name: string, openedBy?: SurfaceOpener): Promise<BrowserPageSummary> {
@@ -480,20 +539,19 @@ export class BrowserSessionService implements BrowserSubsystem {
     const run = this.requireRunning();
     const page = this.requirePage(run, sessionId, key);
     return await this.exclusive(page.id, async () => {
-      await guard?.(this.guardPage(run, page.id));
-      let staged: WorkerStagedFile | undefined;
-      let result: BrowserPageActionSnapshot;
-      if (action.action === 'upload')
-        result = await run.driver.upload(page.id, action.target, action.paths, action.mode);
-      else {
+      const { staged, result } = await underGuard(guard, this.guardPage(run, page.id), async () => {
+        if (action.action === 'upload')
+          return {
+            staged: undefined,
+            result: await run.driver.upload(page.id, action.target, action.paths, action.mode),
+          };
         const done =
           action.action === 'download'
             ? await run.driver.download(page.id, action.downloadId)
             : await run.driver.pdf(page.id);
-        const { staged: file, ...snapshot } = done;
-        staged = file;
-        result = snapshot;
-      }
+        const { staged: file, ...snapshot }: { staged?: WorkerStagedFile } & BrowserPageActionSnapshot = done;
+        return { staged: file, result: snapshot };
+      });
       run.snapshot = pageOf(result);
       this.touch(run);
       return { status: this.project(run, sessionId), result, ...(staged === undefined ? {} : { staged }) };
@@ -510,10 +568,11 @@ export class BrowserSessionService implements BrowserSubsystem {
     const run = this.requireRunning();
     const page = this.requirePage(run, sessionId, key);
     return await this.exclusive(page.id, async () => {
-      await guard?.(this.guardPage(run, page.id));
-      // A script can type or choose an account on any page of the session: who they sign in is no longer known.
-      this.signIns?.forget(sessionId);
-      const { text, scriptOrigin, ...result } = await run.driver.evaluate(page.id, script);
+      const { text, scriptOrigin, ...result } = await underGuard(guard, this.guardPage(run, page.id), async () => {
+        // A script can type or choose an account on any page of the session: who they sign in is no longer known.
+        this.signIns?.forget(sessionId);
+        return await run.driver.evaluate(page.id, script);
+      });
       run.snapshot = pageOf(result);
       this.touch(run);
       return {
@@ -861,6 +920,23 @@ export class BrowserSessionService implements BrowserSubsystem {
           .inputDocument(pageId)
           .then(found => found.host)
           .catch(() => undefined),
+      pairing: async () => {
+        const source = this.pairingSource;
+        // The daemon's own memory is read first; whatever mints after it moves the count the check compares.
+        const live = source?.live.look();
+        return await run.driver
+          .inputDocument(pageId)
+          .then(
+            (found): BrowserPairingState => ({
+              marked: found.pairingScreen === true,
+              epochs: found.pairingEpochs ?? {},
+              ...(source === undefined || live === undefined
+                ? {}
+                : { evidence: pairingEvidenceOf(found, live, appOriginSet(source.appOrigins())) }),
+            }),
+          )
+          .catch((): BrowserPairingState => ({ marked: true, epochs: {} }));
+      },
     };
   }
 

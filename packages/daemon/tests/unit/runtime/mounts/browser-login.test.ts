@@ -14,7 +14,12 @@ import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { ApiSocketDispatcher, type SocketDownstream, type SocketHandler } from '../../../../src/lib/api/socket.ts';
 import { BrowserControlError } from '../../../../src/lib/browser/control/index.ts';
-import { BrowserSessionError } from '../../../../src/lib/browser/runtime/index.ts';
+import {
+  type BrowserActGuard,
+  type BrowserPairingState,
+  BrowserSessionError,
+  underGuard,
+} from '../../../../src/lib/browser/runtime/index.ts';
 import {
   type BrowserMountedSubsystem,
   browserLoginRoutes,
@@ -475,6 +480,130 @@ describe('the mounted per-session browser, for an agent', () => {
   });
 });
 
+/**
+ * A screen showing a live pairing code (docs/pairing.md): the page carries the pairing-screen marker, which the
+ * browser reports to a guard from inside the page's queue. A page's own reads run the guard the route hands in.
+ */
+class OnPairingScreen extends FakeBrowser {
+  /** What the page shows while the act is running, when that is not what it showed when the act began. */
+  duringAct: BrowserPairingState | undefined;
+  private marked: boolean;
+  constructor(marked: boolean) {
+    super();
+    this.marked = marked;
+  }
+  private state: BrowserPairingState = { marked: false, epochs: { p1: 0 } };
+  override async act(sessionId: string, action: BrowserAction, guard?: BrowserActGuard): Promise<BrowserActionResult> {
+    this.state = { marked: this.marked, epochs: { p1: this.marked ? 1 : 0 } };
+    return await underGuard(guard, { document: async () => 'loader-1', pairing: async () => this.state }, async () => {
+      if (this.duringAct !== undefined) this.state = this.duringAct;
+      this.calls.push(`act:${action.action}`);
+      const status = await this.status(sessionId);
+      return {
+        status: status as Extract<BrowserActionResult, { result: unknown }>['status'],
+        result: { ...SNAPSHOT, text: this.marked ? `Code ${FAKE_CODE}` : `an ordinary page ${FAKE_CODE}` },
+      };
+    });
+  }
+}
+
+describe('the mounted per-session browser, on a screen showing a pairing code', () => {
+  const post = (browser: FakeBrowser, headers: Record<string, string>, body: unknown) =>
+    served(browser).dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/sessions/s1/browser',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  it('should refuse an agent’s read, picture and highlight of the page, with no content', async () => {
+    for (const action of [{ action: 'read' }, { action: 'screenshot' }, { action: 'highlight', selector: 'body' }]) {
+      // Act
+      const response = await post(new OnPairingScreen(true), agentIn('s1'), action);
+
+      // Assert
+      should(response.status).equal(403);
+      should(response.body).containEql('hidden: this page shows a pairing code');
+      should(response.body).not.containEql(FAKE_CODE);
+    }
+  });
+
+  it('should refuse a read that began on an ordinary page and met a code while it ran, and return no content', async () => {
+    // Arrange — the page shows nothing when the read starts, and a code by the time it has an answer
+    const browser = new OnPairingScreen(false);
+    browser.duringAct = { marked: true, epochs: { p1: 1 } };
+
+    for (const action of [{ action: 'read' }, { action: 'screenshot' }]) {
+      // Act
+      const response = await post(browser, agentIn('s1'), action);
+
+      // Assert
+      should(response.status).equal(403);
+      should(response.body).containEql('hidden: this page shows a pairing code');
+      should(response.body).not.containEql(FAKE_CODE);
+    }
+  });
+
+  it('should refuse it too when the code came and went again while the read ran', async () => {
+    // Arrange — nothing is marked at either look, but the page's counter moved in between
+    const browser = new OnPairingScreen(false);
+    browser.duringAct = { marked: false, epochs: { p1: 1 } };
+
+    // Act
+    const response = await post(browser, agentIn('s1'), { action: 'read' });
+
+    // Assert
+    should(response.status).equal(403);
+    should(response.body).not.containEql(FAKE_CODE);
+  });
+
+  it('should answer an agent’s read of an ordinary page as before', async () => {
+    // Act
+    const response = await post(new OnPairingScreen(false), agentIn('s1'), { action: 'read' });
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.body).containEql('an ordinary page');
+  });
+
+  it('should still let an agent leave the page, which carries no page content', async () => {
+    // Act
+    const response = await post(new OnPairingScreen(true), agentIn('s1'), { action: 'back' });
+
+    // Assert
+    should(response.status).equal(200);
+  });
+
+  it('should still render the page for its owner', async () => {
+    // Act
+    const response = await post(new OnPairingScreen(true), human, { action: 'read' });
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.body).containEql(FAKE_CODE);
+  });
+
+  it('should refuse an agent the picture stream, which is the owner’s view, and serve the owner', async () => {
+    // Arrange
+    const sockets = (browser: FakeBrowser): ApiSocketDispatcher =>
+      new ApiSocketDispatcher(new ApiRouter(browserSocketRoutes(browser)), CREDENTIALS, GRANTED);
+
+    // Act
+    const agent = await sockets(new OnPairingScreen(true)).upgrade(
+      request({ path: '/v1/sessions/s1/browser/stream', headers: agentIn('s1') }),
+    );
+    const owner = await sockets(new OnPairingScreen(true)).upgrade(
+      request({ path: '/v1/sessions/s1/browser/stream', headers: human }),
+    );
+
+    // Assert
+    should(agent.outcome).equal('refused');
+    should(agent.outcome === 'refused' ? agent.response.status : 0).equal(403);
+    should(owner.outcome).equal('accepted');
+  });
+});
 /**
  * The session browser STREAM — a protocol switch rather than a response.
  *

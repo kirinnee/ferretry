@@ -9,16 +9,25 @@ import type {
 } from '@ferretry/protocol';
 import should from 'should';
 import {
+  type BrowserActGuard,
+  type BrowserGuardPage,
   type BrowserIdlePolicy,
+  type BrowserPairingSource,
+  type BrowserPairingState,
   type BrowserPageAction,
   BrowserSessionError,
   BrowserSessionService,
   pendingDialogOf,
 } from '../../../../src/lib/browser/runtime/service.ts';
+import { holdPairingScreen } from '../../../../src/lib/browser/runtime/pairing-guard.ts';
 import type { BrowserAutomation } from '../../../../src/lib/browser/transport/automation-contracts.ts';
 import { TypedIdentities } from '../../../../src/lib/input-requests/typed-identities.ts';
 
 type Page = BrowserPageSummary & { pageState?: 'ready' | 'error' };
+
+/** A guard the way an agent's is: it refuses while a pairing document shows a code, and again if one did meanwhile. */
+const refusing: BrowserActGuard = async page =>
+  await holdPairingScreen(page, () => new BrowserSessionError('conflict', 'hidden'));
 
 /**
  * The machine's agent browser, faked with REAL tabs and no active one: every act names its page,
@@ -31,6 +40,21 @@ class Tabs {
   readonly casts = new Map<string, Set<(frame: BrowserScreencastFrame) => void>>();
   pages: Page[] = [{ id: 'p0', url: 'about:blank', title: '' }];
   castFailure: Error | undefined;
+  /** What the browser says its pairing documents show, as a guard reads it from the live page. */
+  documentPairing = false;
+  documentEpochs: Record<string, number> | undefined;
+  /** What the worker says of the pages a script could reach: their origins, the pairing links committed, the link. */
+  documentOrigins: string[] | undefined;
+  documentCommits: Record<string, number> | undefined;
+  documentLinked = false;
+  documentLost: number | undefined;
+  /** Runs inside the next read, picture, PDF, script or wait: the page changing while the browser works on it. */
+  whileWorking: (() => void) | undefined;
+  private working(): void {
+    const run = this.whileWorking;
+    this.whileWorking = undefined;
+    run?.();
+  }
   /** A dialog the worker reports on the page of every result, as a worker with a dialog open does. */
   dialog: { type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'; message: string } | undefined;
   /** The browser cannot say which document a page shows. */
@@ -85,18 +109,27 @@ class Tabs {
     },
     type: async pageId => this.acted('type', pageId),
     pointer: async (pageId, act) => this.acted(`pointer-${act.action}`, pageId),
-    read: async (pageId, options) => ({ ...this.acted(`read-${options?.mode ?? 'text'}`, pageId), text: 'hello' }),
-    screenshot: async pageId => ({ ...this.acted('screenshot', pageId), screenshotBase64: 'iVBOR' }),
+    read: async (pageId, options) => {
+      this.working();
+      return { ...this.acted(`read-${options?.mode ?? 'text'}`, pageId), text: 'hello' };
+    },
+    screenshot: async pageId => {
+      this.working();
+      return { ...this.acted('screenshot', pageId), screenshotBase64: 'iVBOR' };
+    },
     upload: async pageId => this.acted('upload', pageId),
     download: async pageId => ({
       ...this.acted('download', pageId),
       staged: { path: '/stage/dl-1', name: 'report.csv', size: 3 },
     }),
-    pdf: async pageId => ({
-      ...this.acted('pdf', pageId),
-      staged: { path: '/stage/pdf-1', name: 'page.pdf', size: 5 },
-    }),
-    evaluate: async (pageId, script) => ({ ...this.acted('evaluate', pageId), text: `ran:${script.source}` }),
+    pdf: async pageId => {
+      this.working();
+      return { ...this.acted('pdf', pageId), staged: { path: '/stage/pdf-1', name: 'page.pdf', size: 5 } };
+    },
+    evaluate: async (pageId, script) => {
+      this.working();
+      return { ...this.acted('evaluate', pageId), text: `ran:${script.source}` };
+    },
     back: async pageId => this.acted('back', pageId),
     forward: async pageId => this.acted('forward', pageId),
     reload: async pageId => this.acted('reload', pageId),
@@ -108,7 +141,16 @@ class Tabs {
     inputDocument: async pageId => {
       this.calls.push(`inputDocument:${pageId}`);
       if (this.documentFails) throw new Error('the page is gone');
-      return { navigationId: 'loader-1', ...(this.documentHost === undefined ? {} : { host: this.documentHost }) };
+      return {
+        navigationId: 'loader-1',
+        ...(this.documentHost === undefined ? {} : { host: this.documentHost }),
+        ...(this.documentPairing ? { pairingScreen: true } : {}),
+        ...(this.documentEpochs === undefined ? {} : { pairingEpochs: this.documentEpochs }),
+        ...(this.documentOrigins === undefined ? {} : { pairingOrigins: this.documentOrigins }),
+        ...(this.documentCommits === undefined ? {} : { pairingCommits: this.documentCommits }),
+        ...(this.documentLinked ? { pairingLinked: true } : {}),
+        ...(this.documentLost === undefined ? {} : { pairingLost: this.documentLost }),
+      };
     },
     inputObserve: async pageId => {
       this.calls.push(`inputObserve:${pageId}`);
@@ -143,11 +185,14 @@ class Tabs {
       return { ...this.state(), actedPageId: pageId };
     },
     resize: async (pageId, viewport) => this.acted(`resize-${String(viewport.width)}`, pageId),
-    lifecycle: async (pageId, request) => ({
-      ...this.acted(`lifecycle-${request.op}`, pageId),
-      ...(this.dialog === undefined ? {} : { dialog: this.dialog }),
-      lifecycle: { text: `did ${request.op}`, ...(request.op === 'wait' ? { matched: true } : {}) },
-    }),
+    lifecycle: async (pageId, request) => {
+      this.working();
+      return {
+        ...this.acted(`lifecycle-${request.op}`, pageId),
+        ...(this.dialog === undefined ? {} : { dialog: this.dialog }),
+        lifecycle: { text: `did ${request.op}`, ...(request.op === 'wait' ? { matched: true } : {}) },
+      };
+    },
     startScreencast: async (pageId, _viewport, listener) => {
       if (this.castFailure !== undefined) throw this.castFailure;
       const set = this.casts.get(pageId) ?? new Set();
@@ -168,7 +213,12 @@ class Tabs {
 
 const known = new Set(['s1', 's2']);
 
-function harness(tabs = new Tabs(), idle?: BrowserIdlePolicy, signIns?: TypedIdentities) {
+function harness(
+  tabs = new Tabs(),
+  idle?: BrowserIdlePolicy,
+  signIns?: TypedIdentities,
+  pairing?: BrowserPairingSource,
+) {
   let launches = 0;
   const service = new BrowserSessionService(
     {
@@ -190,6 +240,7 @@ function harness(tabs = new Tabs(), idle?: BrowserIdlePolicy, signIns?: TypedIde
     () => Date.parse('2026-10-16T10:00:00.000Z'),
     idle,
     signIns,
+    pairing,
   );
   return { tabs, service, launches: () => launches };
 }
@@ -961,6 +1012,230 @@ describe('the machine agent browser — a page’s lifecycle', () => {
 
     // Assert
     should(seen).eql(['github.com', undefined]);
+  });
+
+  it('should let a guard ask what the page’s pairing documents show, and treat a page it cannot ask as showing a code', async () => {
+    // Arrange — read from the live page inside its queue; a browser that cannot say fails CLOSED.
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+    const seen: (BrowserPairingState | undefined)[] = [];
+    const guard = async (page: BrowserGuardPage) => void seen.push(await page.pairing?.());
+
+    // Act
+    tabs.documentEpochs = { p0: 2 };
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+    tabs.documentPairing = true;
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+    tabs.documentFails = true;
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+
+    // Assert
+    should(seen).eql([
+      { marked: false, epochs: { p0: 2 } },
+      { marked: true, epochs: { p0: 2 } },
+      { marked: true, epochs: {} },
+    ]);
+  });
+
+  it('should hand a guard the daemon’s own evidence beside the page’s hint, read from the daemon and the worker and never from the page', async () => {
+    // Arrange
+    const live = { live: true, minted: 3 };
+    const { tabs, service } = harness(new Tabs(), undefined, undefined, {
+      live: { look: () => live },
+      appOrigins: () => ['https://ferretry.pages.dev'],
+    });
+    await service.openPage('s1', 'app');
+    const seen: (BrowserPairingState | undefined)[] = [];
+    const guard = async (page: BrowserGuardPage) => void seen.push(await page.pairing?.());
+
+    // Act
+    tabs.documentOrigins = ['https://ferretry.pages.dev'];
+    tabs.documentCommits = { 'https://ferretry.pages.dev': 2, 'https://example.test': 5 };
+    tabs.documentLinked = true;
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+    tabs.documentOrigins = ['https://example.test'];
+    tabs.documentLinked = false;
+    live.live = false;
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+    tabs.documentFails = true;
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+
+    // Assert
+    should(seen).eql([
+      {
+        marked: false,
+        epochs: {},
+        evidence: { app: true, ownApp: true, live: true, minted: 3, commits: 2, lost: 0, linked: true },
+      },
+      {
+        marked: false,
+        epochs: {},
+        evidence: { app: false, ownApp: false, live: false, minted: 3, commits: 2, lost: 0, linked: false },
+      },
+      { marked: true, epochs: {} },
+    ]);
+  });
+
+  it('should read the daemon’s loopback app as the app on a wildcard bind with a public address, and every other origin as not', async () => {
+    // Arrange — the documented wildcard setup: bound on 0.0.0.0, advertised on a public address, a custom CORS list
+    const { tabs, service } = harness(new Tabs(), undefined, undefined, {
+      live: { look: () => ({ live: true, minted: 1 }) },
+      appOrigins: () => ['https://custom.example.test', 'https://daemon.example.test', 'http://0.0.0.0:4000'],
+    });
+    await service.openPage('s1', 'app');
+    const seen: (boolean | undefined)[] = [];
+    const guard = async (page: BrowserGuardPage) => void seen.push((await page.pairing?.())?.evidence?.ownApp);
+
+    // Act
+    for (const origin of [
+      'http://127.0.0.1:4000',
+      'http://localhost:4000',
+      'http://[::1]:4000',
+      'http://127.0.0.1:4001',
+    ]) {
+      tabs.documentOrigins = [origin];
+      await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+    }
+
+    // Assert
+    should(seen).eql([true, true, true, false]);
+  });
+
+  it('should hand a guard the count of navigations the browser lost track of, and read a blind history as linked', async () => {
+    // Arrange
+    const { tabs, service } = harness(new Tabs(), undefined, undefined, {
+      live: { look: () => ({ live: false, minted: 1 }) },
+      appOrigins: () => ['https://ferretry.pages.dev'],
+    });
+    await service.openPage('s1', 'app');
+    const seen: (number | undefined)[] = [];
+    const guard = async (page: BrowserGuardPage) => void seen.push((await page.pairing?.())?.evidence?.lost);
+
+    // Act
+    tabs.documentOrigins = ['https://example.test'];
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+    tabs.documentLost = 2;
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+
+    // Assert
+    should(seen).eql([0, 2]);
+  });
+
+  it('should run a guard inside the queue of the page a person’s toolbar acts on, and refuse before the browser is touched', async () => {
+    // Arrange — `fy browser read` and `screenshot` answer from the toolbar route, which hands a guard in for an agent.
+    const { tabs, service } = harness();
+    await service.act('s1', { action: 'open', url: 'https://one.test/' });
+    tabs.documentPairing = true;
+
+    // Act
+    const refused = await failure(service.act('s1', { action: 'read' }, refusing));
+    const allowed = await service.act('s1', { action: 'back' });
+
+    // Assert
+    should(refused.code).equal('conflict');
+    should(allowed).have.property('status');
+    should(tabs.calls.filter(call => call.startsWith('read'))).eql([]);
+  });
+
+  describe('a code that shows up while an act is running', () => {
+    const acts: readonly (readonly [
+      string,
+      (service: BrowserSessionService, guard: BrowserActGuard) => Promise<unknown>,
+    ])[] = [
+      [
+        'a read',
+        async (service, guard) => await service.actOnPage('s1', 'app', { action: 'read', mode: 'text' }, guard),
+      ],
+      ['a picture', async (service, guard) => await service.actOnPage('s1', 'app', { action: 'screenshot' }, guard)],
+      ['a PDF', async (service, guard) => await service.filesOnPage('s1', 'app', { action: 'pdf' }, guard)],
+      ['a script', async (service, guard) => await service.scriptOnPage('s1', 'app', { source: '() => 1' }, guard)],
+      [
+        'a wait',
+        async (service, guard) =>
+          await service.lifecycleOnPage(
+            's1',
+            'app',
+            { op: 'wait', condition: { kind: 'text', text: 'x' }, timeoutMs: 10 },
+            guard,
+          ),
+      ],
+    ];
+
+    for (const [name, act] of acts) {
+      it(`should refuse ${name} that began on an ordinary page, and give none of it back`, async () => {
+        // Arrange
+        const { tabs, service } = harness();
+        await service.openPage('s1', 'app');
+        tabs.documentEpochs = { p0: 0 };
+        tabs.whileWorking = () => {
+          tabs.documentPairing = true;
+          tabs.documentEpochs = { p0: 1 };
+        };
+
+        // Act
+        const refused = await failure(act(service, refusing));
+
+        // Assert
+        should(refused.code).equal('conflict');
+      });
+
+      it(`should refuse ${name} when the code came and went again before it finished`, async () => {
+        // Arrange — nothing is marked at either look; only the counter says a code was shown
+        const { tabs, service } = harness();
+        await service.openPage('s1', 'app');
+        tabs.documentEpochs = { p0: 0 };
+        tabs.whileWorking = () => {
+          tabs.documentEpochs = { p0: 1 };
+        };
+
+        // Act
+        const refused = await failure(act(service, refusing));
+
+        // Assert
+        should(refused.code).equal('conflict');
+      });
+
+      it(`should answer ${name} as before when nothing was shown`, async () => {
+        // Arrange
+        const { tabs, service } = harness();
+        await service.openPage('s1', 'app');
+        tabs.documentEpochs = { p0: 3 };
+
+        // Act, Assert
+        await act(service, refusing);
+      });
+    }
+
+    it('should refuse the error of a script that ran while a code showed, not report it', async () => {
+      // Arrange — a script's own error text is page content too
+      const { tabs, service } = harness();
+      await service.openPage('s1', 'app');
+      tabs.documentEpochs = { p0: 0 };
+      tabs.automation.evaluate = async () => {
+        tabs.documentPairing = true;
+        throw new Error('the page said HARNESS_INVITE');
+      };
+
+      // Act
+      const refused = await failure(service.scriptOnPage('s1', 'app', { source: '() => 1' }, refusing));
+
+      // Assert
+      should(refused.code).equal('conflict');
+      should(refused.message).not.containEql('HARNESS_INVITE');
+    });
+
+    it('should let a new page that never showed a code open while the act runs', async () => {
+      // Arrange
+      const { tabs, service } = harness();
+      await service.openPage('s1', 'app');
+      tabs.documentEpochs = { p0: 0 };
+      tabs.whileWorking = () => {
+        tabs.documentEpochs = { p0: 0, p1: 0 };
+      };
+
+      // Act, Assert
+      await service.actOnPage('s1', 'app', { action: 'read', mode: 'text' }, refusing);
+    });
   });
 
   it('should refuse a lifecycle request on a page of another session', async () => {

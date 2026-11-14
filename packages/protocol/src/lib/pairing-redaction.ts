@@ -66,3 +66,48 @@ function walk(value: unknown): unknown {
     Object.entries(value).map(([key, item]) => [key, key === 'screenshotBase64' ? item : walk(item)]),
   );
 }
+
+/**
+ * THE ONE MARKER A SCREEN SHOWING A LIVE PAIRING CODE CARRIES (docs/pairing.md, "Never show it to an agent").
+ *
+ * The app puts `<meta name="ferretry-pairing-screen" content="shown">` in the document's head for as long as the
+ * page shows a pairing code or its QR — the Add-a-device panel while a minted code is on it, the pair screen while
+ * it holds a pasted or arriving link — and removes it the moment that is gone. The browser the daemon drives reads
+ * the marker (a DOM query, no page script) before it answers an agent, so the code is never read from the PAGE: its
+ * words, its picture or its markup. One name, owned here, so the app that sets it and the daemon that looks for it
+ * cannot drift apart.
+ */
+export const PAIRING_SCREEN_META_NAME = 'ferretry-pairing-screen';
+
+/** The CSS selector that finds {@link PAIRING_SCREEN_META_NAME}'s element. */
+export const PAIRING_SCREEN_SELECTOR = `meta[name="${PAIRING_SCREEN_META_NAME}"]`;
+
+/** What an agent is told instead of a page that shows a pairing code: no content, and no hint of what it held. */
+export const PAIRING_SCREEN_REFUSAL =
+  'hidden: this page shows a pairing code, so it cannot be read or pictured. Ask the owner to finish or close it; navigating away or closing the page works.';
+
+/** What an agent is told when its own script is run on a Ferretry app page: always, whatever the page shows now. */
+export const PAIRING_EVAL_REFUSAL = 'eval is not available on Ferretry’s own app pages.';
+
+/**
+ * THE COUNTER THAT SAYS A CODE WAS SHOWN AT ANY POINT (docs/pairing.md, "Never show it to an agent").
+ *
+ * `<meta name="ferretry-pairing-epoch" content="N">` is added next to the marker the first time the document shows a
+ * code and counts up every time one is shown again. It is never removed, so a code that came and went while an agent's
+ * read, picture or script was in flight still leaves a different number behind: the daemon compares the number it saw
+ * before the operation with the one after, and refuses the result when they differ or the marker is there.
+ */
+export const PAIRING_EPOCH_META_NAME = 'ferretry-pairing-epoch';
+
+/** The CSS selector that finds {@link PAIRING_EPOCH_META_NAME}'s element. */
+export const PAIRING_EPOCH_SELECTOR = `meta[name="${PAIRING_EPOCH_META_NAME}"]`;
+
+/**
+ * Whether `text` (a page address, usually) carries a pairing-link fragment: the same grammar {@link hidePairingFragments}
+ * hides, so there is no second opinion about what one looks like. The browser worker asks it of every address a page
+ * commits (docs/pairing.md, "Never show it to an agent"): an address that carried one is the proof a pairing link was
+ * opened there.
+ */
+export function carriesPairingFragment(text: string): boolean {
+  return hidePairingFragments(text) !== text;
+}

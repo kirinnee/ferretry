@@ -55,7 +55,11 @@ describe('browser.eval taints the hosts it ran on, for the standing rules', () =
     const w = world();
     await w.service.call(agent, { tool: 'browser.open', name: 'app', url: 'https://github.com/login' });
     w.browser.scriptOnPage = async (_session, _key, _script, guard) => {
-      await guard?.({ document: async () => 'loader-1', host: async () => 'github.com' });
+      await guard?.({
+        document: async () => 'loader-1',
+        host: async () => 'github.com',
+        pairing: async () => ({ marked: false, epochs: {} }),
+      });
       throw new Error('the page crashed');
     };
     await w.service.call(agent, EVAL).catch(() => undefined);
@@ -136,7 +140,11 @@ describe('browser.eval: the origin the script ACTUALLY ran in (secrev-1282a M2)'
     should(events).deepEqual(['running', 'taint github.com', 'taint github.com', 'taint github.com', 'done']);
     events.length = 0;
     w.browser.scriptOnPage = async (_session, _key, _script, guard) => {
-      await guard?.({ document: async () => 'loader-1', host: async () => 'github.com' });
+      await guard?.({
+        document: async () => 'loader-1',
+        host: async () => 'github.com',
+        pairing: async () => ({ marked: false, epochs: {} }),
+      });
       throw new Error('the page crashed');
     };
     await w.service.call(agent, EVAL).catch(() => undefined);

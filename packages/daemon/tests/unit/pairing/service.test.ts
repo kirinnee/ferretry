@@ -26,6 +26,7 @@ import {
   type PairingGrantObserver,
   PAIRING_GRANTS_PER_HOUR,
   PAIRING_MAX_DEVICES,
+  PairingLiveWindow,
   PairingRateLimiter,
   PairingService,
 } from '../../../src/lib/pairing/index.ts';
@@ -246,6 +247,8 @@ function fixture(
     readonly idleDayMs?: number;
     /** The observer told once a grant is persisted, when a case is about what it is handed or what it may do. */
     readonly onGranted?: PairingGrantObserver;
+    /** What is told when a code is minted and when it ends, when a case is about the browser guard's window. */
+    readonly live?: PairingLiveWindow;
   } = {},
 ) {
   const clock = new FakeClock();
@@ -274,6 +277,7 @@ function fixture(
     ...(options.idleDayMs === undefined ? {} : { idleDayMs: options.idleDayMs }),
     ...(options.audit === undefined ? {} : { audit: options.audit }),
     ...(options.onGranted === undefined ? {} : { onGranted: options.onGranted }),
+    ...(options.live === undefined ? {} : { live: options.live }),
   });
   const mint = () => service.mint();
   return { clock, cryptography, devices, credentials, service, mint };
@@ -1879,5 +1883,108 @@ describe('PairingService full-access codes', () => {
     // Assert
     should(minted.grants).equal('limited');
     should(service.deviceGrants(FIRST_DEVICE_ID)).deepEqual(LIMITED_DEVICE_GRANTS);
+  });
+});
+
+describe('PairingService — the window the browser guard reads (docs/pairing.md, "Never show it to an agent")', () => {
+  it('should say no code is live until one is minted, and count the mint before the answer that carries the code', () => {
+    // Arrange
+    const live = new PairingLiveWindow();
+    const { service, clock } = fixture({ live });
+    live.useClock(clock);
+    should(live.look()).eql({ live: false, minted: 0 });
+
+    // Act
+    const answer = service.mint();
+    const seenWhenAnswered = live.look();
+
+    // Assert
+    should(answer.code).equal(CODE);
+    should(seenWhenAnswered).eql({ live: true, minted: 1 });
+  });
+
+  it('should stop saying a code is live the instant its two minutes pass, with nobody asking its status', () => {
+    // Arrange
+    const live = new PairingLiveWindow();
+    const { service, clock } = fixture({ live });
+    live.useClock(clock);
+    service.mint();
+
+    // Act
+    clock.nowMs += 119_000;
+    const inside = live.look();
+    clock.nowMs += 1_000;
+    const after = live.look();
+
+    // Assert
+    should(inside.live).be.true();
+    should(after).eql({ live: false, minted: 1 });
+  });
+
+  it('should stop saying it once the code is redeemed, and keep the count', async () => {
+    // Arrange
+    const live = new PairingLiveWindow();
+    const { service, clock } = fixture({ live });
+    live.useClock(clock);
+    service.mint();
+
+    // Act
+    const result = await redeemDirect(service, { code: CODE, deviceName: 'phone' }, '198.51.100.7');
+
+    // Assert
+    should(result.kind).equal('paired');
+    should(live.look()).eql({ live: false, minted: 1 });
+  });
+
+  it('should stop saying it once the code is cancelled, and when five wrong guesses spend it', async () => {
+    // Arrange
+    const live = new PairingLiveWindow();
+    const { service, clock } = fixture({ live });
+    live.useClock(clock);
+    service.mint();
+
+    // Act
+    service.revoke(PAIRING_ID);
+    const cancelled = live.look();
+    service.mint();
+    const reminted = live.look();
+    for (let guess = 0; guess < 5; guess += 1)
+      await redeemDirect(service, { code: '3333-3333', deviceName: 'thief' }, '198.51.100.8');
+    const spent = live.look();
+
+    // Assert
+    should(cancelled).eql({ live: false, minted: 1 });
+    should(reminted).eql({ live: true, minted: 2 });
+    should(spent).eql({ live: false, minted: 2 });
+  });
+
+  it('should keep saying a code is live when a new mint replaces it, with the count moved', () => {
+    // Arrange
+    const live = new PairingLiveWindow();
+    const { service, clock } = fixture({ live });
+    live.useClock(clock);
+    service.mint();
+
+    // Act
+    service.mint();
+
+    // Assert
+    should(live.look()).eql({ live: true, minted: 2 });
+  });
+
+  it('should stop saying it when a status read finds the code expired', () => {
+    // Arrange
+    const live = new PairingLiveWindow();
+    const { service, clock } = fixture({ live });
+    live.useClock(clock);
+    service.mint();
+    clock.nowMs += 121_000;
+
+    // Act
+    const status = service.status(PAIRING_ID);
+
+    // Assert
+    should(status?.status).equal('expired');
+    should(live.look().live).be.false();
   });
 });

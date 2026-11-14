@@ -18,7 +18,7 @@ import {
   type PageInputHost,
 } from '../../src/lib/index.ts';
 import type { BrowserProxyTestPorts } from '../../src/lib/browser/proxy/index.ts';
-import type { BrowserSessionDirectory } from '../../src/lib/browser/runtime/service.ts';
+import type { BrowserPairingSource, BrowserSessionDirectory } from '../../src/lib/browser/runtime/service.ts';
 import type { BrowserSignInWatch } from '../../src/lib/browser/runtime/sign-in-watch.ts';
 import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
 import { browserContribution } from '../../src/lib/runtime/mounts/browser.ts';
@@ -113,6 +113,11 @@ export interface BrowserNeeds {
   readonly login: BrowserLoginLifecycle;
   /** Who a page is signing in, as the ferret typed it, dropped on every act that may have changed it. */
   readonly signIns: BrowserSignInWatch;
+  /**
+   * What the browser guard reads of pairing, beyond every page: whether a code is live (the pairing service tells it) and
+   * which origins are Ferretry's app. The pairing screen's refusal stands on this, not on anything a page can write.
+   */
+  readonly pairing: BrowserPairingSource;
   /** The saved browser proxy and the secret store's values, which a proxy test reads. */
   readonly proxy: Pick<BrowserProxyTestPorts, 'saved' | 'secrets'>;
   /** Whether the loopback firewall fences this daemon's fixed browser ports; `undefined` while they are random. */
@@ -144,6 +149,7 @@ export const browserModule: DaemonModule<void, BrowserNeeds, BrowserProvides> = 
       // Who a page is signing in, as the ferret typed it, is dropped by the runtime itself on every act that may have
       // changed it, whoever made it: the toolbar route, the live view, the agent tools, an act that failed partway.
       needs.signIns,
+      needs.pairing,
     );
     const browserHost: BrowserMountedSubsystem = {
       ...browserService,

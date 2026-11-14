@@ -28,6 +28,8 @@ import {
   refindInputFields,
   PROBE_SECOND_LOOK_MS,
   probeInputFields,
+  readPairingGroup,
+  pairingRelatedPages,
   readInputText,
   shootInputFields,
   typeInputFields,
@@ -117,6 +119,15 @@ class FakeSession implements InputCdpSession {
     switch (method) {
       case 'DOM.getDocument':
         return { root: { nodeId: 1 } };
+      case 'DOM.querySelector':
+        if (params.selector === 'meta[name="ferretry-pairing-screen"]')
+          return { nodeId: this.world.pairingMarker ? 77 : 0 };
+        if (params.selector === 'meta[name="ferretry-pairing-epoch"]')
+          return { nodeId: this.world.pairingEpoch === undefined ? 0 : 78 };
+        throw new Error('not the marker');
+      case 'DOM.getAttributes':
+        if (params.nodeId !== 78) throw new Error('not the counter');
+        return { attributes: ['name', 'ferretry-pairing-epoch', 'content', this.world.pairingEpoch ?? ''] };
       case 'DOM.getOuterHTML':
         return { outerHTML: this.world.markup };
       case 'Page.getFrameTree': {
@@ -289,6 +300,10 @@ class FakeWorld {
   socketsEver = 0;
   /** Runs on every insert: a page that fires a request or navigates as you type. */
   onInput: (() => void) | undefined;
+  /** Whether the document carries the pairing-screen marker (a meta the app sets while a code is shown). */
+  pairingMarker = false;
+  /** What the document's pairing counter says (a meta the app never removes); `undefined`: it has none. */
+  pairingEpoch: string | undefined;
   readonly listeners = new Set<() => void>();
   listening = true;
   aria = '- textbox "Email": kirin@example.test';
@@ -1941,5 +1956,91 @@ describe('a grant fill arms its pagehide clear, and its fields are checked befor
     document.world.session('page-target').failOn = method =>
       method === 'Page.getFrameTree' ? new Error('Target closed') : undefined;
     should(await clearInputFields(document.world.subject, jobFor(document.frame))).equal('unknown');
+  });
+});
+
+describe('readPairingGroup', () => {
+  const subjectOf = (world: FakeWorld, pageId: string): InputSubject => ({ ...world.subject, pageId });
+
+  it('says nothing is marked, and what each document’s counter holds, for ordinary pages', async () => {
+    const ordinary = new FakeWorld();
+    const counted = new FakeWorld();
+    counted.pairingEpoch = '3';
+
+    const read = await readPairingGroup([subjectOf(ordinary, 'pg-1'), subjectOf(counted, 'pg-2')]);
+
+    should(read).eql({ pairingScreen: false, pairingEpochs: { 'pg-1': 0, 'pg-2': 3 } });
+  });
+
+  it('says a page shows a pairing code when it carries the marker, found by a DOM query and no page script', async () => {
+    const world = new FakeWorld();
+    world.pairingMarker = true;
+
+    const read = await readPairingGroup([subjectOf(world, 'pg-1')]);
+
+    should(read.pairingScreen).equal(true);
+    const session = world.session('page-target');
+    should(session.count('DOM.querySelector')).equal(2);
+    should(session.pageWorld).eql([]);
+  });
+
+  it('says so when ANY related document carries the marker, though the page asked about does not', async () => {
+    const asked = new FakeWorld();
+    const popup = new FakeWorld();
+    popup.pairingMarker = true;
+
+    const read = await readPairingGroup([subjectOf(asked, 'pg-1'), subjectOf(popup, 'pg-2')]);
+
+    should(read.pairingScreen).equal(true);
+  });
+
+  it('fails closed: a page whose marker cannot be looked for is treated as showing a pairing code', async () => {
+    const world = new FakeWorld();
+    world.session('page-target').failOn = method =>
+      method === 'DOM.querySelector' ? new Error('Cannot find context') : undefined;
+
+    should((await readPairingGroup([subjectOf(world, 'pg-1')])).pairingScreen).equal(true);
+  });
+
+  it('fails closed: a counter that is not a count is treated as showing a pairing code', async () => {
+    const world = new FakeWorld();
+    world.pairingEpoch = 'lots';
+
+    should((await readPairingGroup([subjectOf(world, 'pg-1')])).pairingScreen).equal(true);
+  });
+
+  it('fails closed: a closed related page is treated as showing a pairing code', async () => {
+    const asked = new FakeWorld();
+    const gone = new FakeWorld();
+    gone.closed = true;
+
+    should((await readPairingGroup([subjectOf(asked, 'pg-1'), subjectOf(gone, 'pg-2')])).pairingScreen).equal(true);
+  });
+});
+
+describe('pairingRelatedPages', () => {
+  const at = (address: string) => ({ url: () => address });
+
+  it('should name every other page of the same origin: a script on one reaches the documents of the rest', () => {
+    const asked = at('https://app.example.test/settings');
+    const popup = at('https://app.example.test/pair');
+    const elsewhere = at('https://docs.example.test/');
+
+    should(pairingRelatedPages(asked, [asked, popup, elsewhere])).eql([popup]);
+  });
+
+  it('should count a page whose origin cannot be told as related, in either direction: a miss hands out a credential', () => {
+    const asked = at('https://app.example.test/');
+    const blank = at('about:blank');
+    const garbled = at('not an address');
+
+    should(pairingRelatedPages(asked, [asked, blank, garbled])).eql([blank, garbled]);
+    should(pairingRelatedPages(blank, [blank, asked, at('https://docs.example.test/')]).length).equal(2);
+  });
+
+  it('should name no page for a page alone', () => {
+    const only = at('https://app.example.test/');
+
+    should(pairingRelatedPages(only, [only])).eql([]);
   });
 });
