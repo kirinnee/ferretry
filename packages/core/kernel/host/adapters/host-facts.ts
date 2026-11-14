@@ -9,15 +9,7 @@ import type { CgroupFile, HostFactsPort, HostLaunchGuard, ProcPidFile, ProcSyste
 import { UNDECIDED_LAUNCH_GUARD } from './launch-guard.ts';
 
 const SEGMENT = /^[A-Za-z0-9_.@:+-]+$/u;
-const PROC_PID_FILES: ReadonlySet<ProcPidFile> = new Set([
-  'stat',
-  'status',
-  'comm',
-  'cmdline',
-  'cgroup',
-  'statm',
-  'io',
-]);
+const PROC_PID_FILES: ReadonlySet<ProcPidFile> = new Set(['stat', 'status', 'comm', 'cmdline', 'cgroup', 'statm']);
 const PROC_SYSTEM_FILES: ReadonlySet<ProcSystemFile> = new Set([
   'stat',
   'meminfo',

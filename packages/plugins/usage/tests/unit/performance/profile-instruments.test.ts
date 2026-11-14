@@ -4,7 +4,7 @@
  * sampler that goes to the recording window and is otherwise drained unread.
  */
 import { describe, expect, it } from 'bun:test';
-import type { HostFactsPort } from '@ferretry/kernel/contract';
+import type { SelfCountersPort } from '@ferretry/kernel/contract';
 import { JscStackSampler, jscSamples } from '../../../daemon/adapters/performance/jsc-stack-sampler.ts';
 import {
   ProcessGauges,
@@ -19,14 +19,14 @@ const IO = 'rchar: 10\nwchar: 20\nsyscr: 1500\nsyscw: 700\nread_bytes: 0\nwrite_
 // pid (comm with a space and a paren) state ppid ... utime stime cutime cstime: cutime=300 cstime=200 -> 5000 ms
 const STAT = `4242 (fy d) S 1 4242 4242 0 -1 4194560 100 0 0 0 5 6 300 200 20 0 4 0 12345 1000 100 18446744073709551615`;
 
-const host = (platform: string, files: Record<string, string>): Pick<HostFactsPort, 'platform' | 'procFile'> => ({
-  platform,
-  procFile: async (_pid, file) => {
+const host = (platform: string, files: Record<string, string>): SelfCountersPort => {
+  const read = async (file: string): Promise<string> => {
     const text = files[file];
     if (text === undefined) throw new Error('ENOENT');
     return text;
-  },
-});
+  };
+  return { platform, io: async () => await read('io'), stat: async () => await read('stat') };
+};
 
 describe('ProcessGauges', () => {
   it('reads read and write system calls and the children’s CPU on Linux', async () => {

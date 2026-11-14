@@ -292,7 +292,7 @@ export default implementDaemon(manifest, {
     };
     const profiler = new PerformanceProfiler({
       recorder,
-      gauges: new ProcessGauges(kernel.hostFacts),
+      gauges: new ProcessGauges(kernel.selfCounters),
       workers: [],
       clock: { now: nowMs },
       timers: {

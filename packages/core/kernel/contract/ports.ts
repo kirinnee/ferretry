@@ -42,6 +42,8 @@ export interface KernelPorts {
   readonly paths: PathsPort;
   /** Read-only facts about this machine from `/proc` and `/sys`; only for a manifest with `permissions.hostFacts`. */
   readonly hostFacts: HostFactsPort;
+  /** THIS process's own `/proc/self/io` and `/proc/self/stat` counters and nothing else; only for a manifest with `permissions.selfCounters`. */
+  readonly selfCounters: SelfCountersPort;
   /**
    * This user's live processes, as pids and yes/no answers only, and SIGTERM to one that runs from this plugin's own
    * folder; only for a manifest with `permissions.processes` ({@link ProcessesPort}).
@@ -1414,7 +1416,22 @@ export interface BindPort {
  * resolves or reaches a path; reaching one goes through a declared root.
  */
 /** A per-process file under `/proc/<pid>/` (or `/proc/self/`) that `hostFacts.procFile` reads. */
-export type ProcPidFile = 'stat' | 'status' | 'comm' | 'cmdline' | 'cgroup' | 'statm' | 'io';
+export type ProcPidFile = 'stat' | 'status' | 'comm' | 'cmdline' | 'cgroup' | 'statm';
+
+/**
+ * The daemon's OWN process counters, for a plugin that reports on the daemon itself (Usage's `fy daemon profile`). A port of
+ * its own rather than a grant of `hostFacts`: `hostFacts` reaches any pid's command line, the process list, descriptors and
+ * machine facts, and none of that is needed (or allowed) here. The two methods name their one file; no pid, path or file name
+ * crosses, so there is nothing to widen. Each throws as the read it replaces does (a missing file, a platform without `/proc`).
+ */
+export interface SelfCountersPort {
+  /** `process.platform`. */
+  readonly platform: string;
+  /** `/proc/self/io`: read and write system-call counts (`syscr`, `syscw`). */
+  io(): Promise<string>;
+  /** `/proc/self/stat`: CPU times, including the reaped children's (`cutime`, `cstime`). */
+  stat(): Promise<string>;
+}
 
 /** A machine-wide file under `/proc/` that `hostFacts.procSystemFile` reads. */
 export type ProcSystemFile = 'stat' | 'meminfo' | 'sys/kernel/pid_max' | 'net/tcp' | 'net/tcp6';

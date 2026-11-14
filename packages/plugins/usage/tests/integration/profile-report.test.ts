@@ -1,34 +1,33 @@
 /**
  * `fy daemon profile` on the composed Usage daemon (ledger V-0235): the report carries the read/write system-call counters
- * (from `/proc/self/io` through the kernel's host facts) that v4 printed.
+ * (from `/proc/self/io` through the kernel's `selfCounters` port, which reads that file and `/proc/self/stat` only) that v4 printed.
  */
 import { expect, test } from 'bun:test';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
-import type { HostFactsPort } from '@ferretry/kernel/contract';
+import type { SelfCountersPort } from '@ferretry/kernel/contract';
 import { testHost } from '@ferretry/kernel/testing';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
 import { fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { renderPerformanceReport } from '../../contract/performance-render.ts';
 import type { PerformanceProfileView } from '../../contract/index.ts';
 import usage from '../../daemon/index.ts';
+import manifest from '../../manifest.ts';
 
 let syscr = 1_000;
-const hostFacts = {
+const selfCounters: SelfCountersPort = {
   platform: 'linux',
-  procFile: async (_pid: number | 'self', file: string) => {
-    if (file === 'io') {
-      syscr += 500;
-      return `syscr: ${String(syscr)}\nsyscw: ${String(syscr / 2)}\n`;
-    }
-    return '1 (fyd) S 1 1 1 0 -1 0 0 0 0 0 1 1 0 0 20 0 1 0 1 1 1 1';
+  io: async () => {
+    syscr += 500;
+    return `syscr: ${String(syscr)}\nsyscw: ${String(syscr / 2)}\n`;
   },
-} as unknown as HostFactsPort;
+  stat: async () => '1 (fyd) S 1 1 1 0 -1 0 0 0 0 0 1 1 0 0 20 0 1 0 1 1 1 1',
+};
 
 test('the profile report carries the system calls the window counted', async () => {
   const h = await testHost({
     plugins: [usage],
-    hostFacts,
+    selfCounters,
     fakes: {
       ferrets: new FakeFerrets(),
       conversation: fakeConversation(),
@@ -52,4 +51,9 @@ test('the profile report carries the system calls the window counted', async () 
   expect(view.report.resources.syscalls?.reads).toBeGreaterThan(0);
   expect(renderPerformanceReport(view.report)).toContain('Syscalls');
   await h.stop();
+});
+
+test('Usage holds the self-counter grant only: no host facts of any pid or file', () => {
+  expect(manifest.permissions?.selfCounters).toBe(true);
+  expect(Object.keys(manifest.permissions ?? {})).not.toContain('hostFacts');
 });
