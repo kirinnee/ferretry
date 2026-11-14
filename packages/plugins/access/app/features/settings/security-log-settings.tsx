@@ -98,11 +98,10 @@ export const SECURITY_REFUSED_REMEDY =
 export const SECURITY_REFUSED_INTRO =
   'This machine does not let other devices read its security log, because its owner has switched pairing off for them.';
 export const SECURITY_PASSKEY_INTRO =
-  "Reading this machine's security log from this device needs your passkey, and it was not confirmed. Nothing is switched off.";
+  "Reading this machine's security log from this device needs your passkey, and it was not confirmed. Pairing is still on.";
 export const SECURITY_PASSKEY_REMEDY =
-  'Reload this page and confirm with your passkey, or read the log on the machine itself: open Ferretry there, or run fy daemon audit in its terminal.';
-export const SECURITY_THIS_DEVICE_INTRO =
-  'This machine has not allowed this device to use device pairing, which is what reads its security log.';
+  'Reload this page to be asked for your passkey again, or read the log on the machine itself: open Ferretry there, or run fy daemon audit in its terminal.';
+export const SECURITY_THIS_DEVICE_INTRO = 'This machine has not given this device permission to read its security log.';
 const SECURITY_OTHER_INTRO = "This machine refused this device's read of its security log.";
 
 /** The heading, first sentence and closing line for each kind of refusal. */
