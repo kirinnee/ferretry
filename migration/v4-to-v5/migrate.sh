@@ -282,6 +282,9 @@ preflight)
   for tool in bash jq tmux bun git; do
     command -v "${tool}" >/dev/null || fail "${tool} is not on PATH; install it and run preflight again"
   done
+  H="${FY_HOME:-$HOME/.ferretry}"
+  # A rehearsal never touches the default home: refused here, before anything is read, stopped, moved or converted.
+  if [ "${MIGRATE_REHEARSAL:-}" = 1 ]; then rehearsal_refuse "${H}"; fi
   # The converter's bun.lock is written by the devshell's bun and an older bun cannot read it, so `convert` would die on
   # `bun install --frozen-lockfile` after the quiet window and the backup. Refused here, before anything is stopped or copied.
   need_bun="$(tr -d "[:space:]" 2>/dev/null <"${CONVERTER_DIR}/bun-version")" || need_bun=""
@@ -294,10 +297,6 @@ preflight)
     [ "${have_parts[i]}" -gt "${need_parts[i]}" ] || fail "bun ${have_bun} cannot read the converter's lockfile; install bun ${need_bun} or later (the Ferretry dev shell has it; bun.sh/docs/installation) and run preflight again"
     break
   done
-
-  H="${FY_HOME:-$HOME/.ferretry}"
-  # A rehearsal never touches the default home: refused here, before anything is read, stopped, moved or converted.
-  if [ "${MIGRATE_REHEARSAL:-}" = 1 ]; then rehearsal_refuse "${H}"; fi
   [ -d "${H}" ] || fail "no Ferretry home at ${H}"
   [ -f "${H}/layout-version" ] || fail "${H} has no layout-version: it is not a v4 home (a v5 home has none)"
   [ "$(cat "${H}/layout-version")" = 2 ] || fail "${H}/layout-version is not 2: the converter reads layout 2 of 4.291.x only"
