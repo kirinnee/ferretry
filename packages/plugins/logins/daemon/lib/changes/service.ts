@@ -18,6 +18,7 @@ import {
   type LoginChangeRefusalCode,
   type LoginChangeView,
   type LoginFile,
+  type LoginRuntimePreview,
   type LoginView,
 } from '../../../contract/index.ts';
 import type { LoginSignOutOutcome } from '../credentials/credentials-service.ts';
@@ -55,6 +56,10 @@ type Held = HeldChange<{
   readonly summary: string;
   readonly consequences: readonly string[];
   readonly orphanedSecrets: readonly string[];
+  /** The config-relative login files an apply writes (never a removal's), for the preview's "Saves:". */
+  readonly saves: readonly string[];
+  /** The runtimes on the login, by name, when the change edits a login a runtime may use (best effort). */
+  readonly runtimes: readonly LoginRuntimePreview[];
   readonly run: Payload;
   /**
    * Runtimes the caller said it moves off the login first (a removal through Runtimes); not counted as users AT STAGE.
@@ -81,6 +86,8 @@ export interface LoginChangeServiceDeps {
   readonly machineName: () => string;
   /** The runtimes on a login, by name (`logins.used-by`). Throws when that cannot be known: a removal then fails closed. */
   readonly usedBy: (id: string) => Promise<readonly string[]>;
+  /** The runtimes on the login as a change would leave them (`LoginUsers.after`); `undefined` when nothing can say. */
+  readonly runtimesAfter?: (change: LoginChange) => Promise<readonly LoginRuntimePreview[] | undefined>;
   /** One login as the list shows it, for a sign-out's sentence. */
   readonly view: (id: string) => Promise<LoginView | undefined>;
   readonly signOut: (id: string) => Promise<LoginSignOutOutcome>;
@@ -179,6 +186,8 @@ export class LoginChangeService {
         summary: `Sign out of login ${change.id}`,
         consequences: [login.signOut.sentence],
         orphanedSecrets: [],
+        saves: [],
+        runtimes: [],
         run: { kind: 'sign-out', id: change.id },
         movedFirst: [],
       };
@@ -195,11 +204,21 @@ export class LoginChangeService {
       presets: change.kind === 'login.add' || change.kind === 'login.env' ? await this.deps.presets() : [],
       usedBy: () => users,
     });
+    // A removal is refused while a runtime uses the login, so it has none to name; an add has none yet.
+    const named =
+      change.kind === 'login.label' ||
+      change.kind === 'login.disable' ||
+      change.kind === 'login.enable' ||
+      change.kind === 'login.env'
+        ? await this.#runtimesAfter(change, users)
+        : [];
     return {
       change,
       summary: edit.summary,
       consequences: edit.consequences,
       orphanedSecrets: edit.orphanedSecrets,
+      saves: edit.writes.flatMap(write => ('remove' in write ? [] : [`logins/${write.id}.yaml`])),
+      runtimes: named,
       run: { kind: 'edit', change, edit },
       movedFirst: change.kind === 'login.remove' ? movedFirst : [],
     };
@@ -219,6 +238,14 @@ export class LoginChangeService {
       throw new LoginChangeRefusal(USERS_UNKNOWN_SENTENCE);
     }
     return users.filter(name => !movedFirst.includes(name));
+  }
+
+  /** The runtimes on the login once `change` lands: with their launch status when Runtimes can say, else by name. */
+  async #runtimesAfter(change: LoginChange, users: readonly string[]): Promise<readonly LoginRuntimePreview[]> {
+    const after = await this.deps.runtimesAfter?.(change).catch(() => undefined);
+    if (after !== undefined) return after;
+    const names = change.kind === 'login.env' ? users : await this.#usersOf(change.id, []).catch(() => []);
+    return names.map(name => ({ name }));
   }
 
   async #run(run: Payload): Promise<LoginChangeOutcome> {
@@ -272,13 +299,15 @@ export class LoginChangeService {
   }
 
   #view(held: Held): LoginChangeView {
-    const { change, summary, consequences, orphanedSecrets } = held.payload;
+    const { change, summary, consequences, orphanedSecrets, saves, runtimes } = held.payload;
     return {
       id: held.id,
       change,
       summary,
       consequences,
       ...(orphanedSecrets.length === 0 ? {} : { orphanedSecrets }),
+      ...(saves.length === 0 ? {} : { saves }),
+      ...(runtimes.length === 0 ? {} : { runtimes }),
       expiresAt: instantFromEpochMs(held.expiresAt) as Instant,
       state: held.state,
     };

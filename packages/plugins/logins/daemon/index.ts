@@ -294,6 +294,10 @@ export function buildLoginsDaemon() {
           if (users === 'unavailable') throw new Error('nothing answers which runtimes use a login');
           return await users.of(id);
         },
+        runtimesAfter: async change => {
+          const users = hooks.provider(LoginsUsedBy, 'runtimes');
+          return users === 'unavailable' ? undefined : await users.after?.(change);
+        },
         view: id => api.get(id as LoginId),
         signOut: id => credentials.signOut(id),
         // The owner's reviewed change: made to both versions of a login with an edit held, so it never puts another

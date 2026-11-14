@@ -87,10 +87,12 @@ import type { ModelCatalogSources } from '../models/catalog.ts';
 import {
   LoginChangeError,
   type LoginChangesApi,
+  type LoginChange,
   type LoginChangeView,
+  type LoginRuntimePreview,
   type LoginsApi,
 } from '@ferretry/plugin-logins/contract';
-import { loginChangeOf, movedSentence, REFUSAL_CODES } from './login-changes.ts';
+import { loginChangeOf, modelAfterLoginChange, movedSentence, REFUSAL_CODES } from './login-changes.ts';
 import type { RuntimeConfigWriter } from './ports.ts';
 import {
   type AccountChangeFacts,
@@ -485,6 +487,29 @@ export class FleetCatalogService {
       now: () => deps.now(),
       mintId: () => deps.mintId(),
     });
+  }
+
+  /**
+   * The runtimes on a login as a change to it would leave them (Logins' `logins.used-by` hook, `after`): each with its
+   * resulting launch status, read from the model with the change applied. Nothing is written.
+   */
+  async runtimesAfterLoginChange(change: LoginChange): Promise<readonly LoginRuntimePreview[]> {
+    if (change.kind === 'login.add' || change.kind === 'login.signout' || change.kind === 'login.remove') return [];
+    const reading = await this.#read();
+    const onIt = new Set(runtimesUsingCredential(reading.model, change.id));
+    if (onIt.size === 0) return [];
+    const candidate = modelAfterLoginChange(reading.model, change);
+    const catalog = runtimeCatalog(candidate, await this.#facts({ ...reading, model: candidate }));
+    return catalog.runtimes
+      .filter(runtime => onIt.has(runtime.name))
+      .map(runtime => ({
+        name: runtime.name,
+        harness: runtime.harness,
+        agent: runtime.agent,
+        launch: runtime.launch.available
+          ? { available: true }
+          : { available: false, ...(runtime.launch.reason === undefined ? {} : { reason: runtime.launch.reason }) },
+      }));
   }
 
   /** `GET /v1/fleet/machine`, with what this caller may do to it. */
@@ -1091,6 +1116,15 @@ export class FleetCatalogService {
     return undefined;
   }
 
+  /** The catalogue rows of the runtimes on the login, read from the model as the change leaves it (a switch-off shows as blocked). */
+  async #runtimesAfter(reading: AccountDocumentReading, change: LoginAccountChange) {
+    const onIt = new Set(runtimesUsingCredential(reading.model, change.id));
+    const candidate = modelAfterLoginChange(reading.model, loginChangeOf(change));
+    return runtimeCatalog(candidate, await this.#facts({ ...reading, model: candidate })).runtimes.filter(runtime =>
+      onIt.has(runtime.name),
+    );
+  }
+
   /** The preview in this surface's own shapes: a sign-out's, or an apply's with the runtimes this lands on. */
   async #loginPreview(
     reading: AccountDocumentReading,
@@ -1113,7 +1147,7 @@ export class FleetCatalogService {
     const rows =
       onIt.size === 0 || change.kind === 'credential.add' || change.kind === 'credential.remove'
         ? []
-        : runtimeCatalog(reading.model, await this.#facts(reading)).runtimes.filter(runtime => onIt.has(runtime.name));
+        : await this.#runtimesAfter(reading, change);
     return {
       kind: 'apply',
       operations: [],

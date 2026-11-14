@@ -49,7 +49,7 @@ describe('the logins cli half', () => {
     const { ctx, out, calls } = context({ [ROUTES.logins]: loginList(login()) });
     const code = await cli.build?.(ctx).verbs['login ls']({ args: [], options: {} });
     should(code).equal(0);
-    should(calls.map(call => call.route)).eql(['GET /v1/logins']);
+    should(calls.map(call => call.route)).eql(['GET /v1/logins', 'GET /v1/usage/budgets']);
     should(out.join('')).match(/Logins on box:/);
   });
 
@@ -111,6 +111,40 @@ describe('the logins cli half', () => {
     should(calls[1]?.init).match({ body: { kind: 'login.enable', id: 'work' } });
     should(calls[2]?.init).match({ params: { changeId: 'chg1' } });
     should(out.join('')).match(/Done\./);
+  });
+
+  it('should print what a change saves and which runtimes it lands on, as v4 did', async () => {
+    const staged = {
+      id: 'chg1',
+      change: { kind: 'login.disable', id: 'work' },
+      summary: 'Disable login work',
+      consequences: ['Nothing running is stopped.'],
+      saves: ['logins/work.yaml'],
+      runtimes: [
+        { name: 'alpha', harness: 'claude-code', agent: true, launch: { available: true } },
+        {
+          name: 'beta',
+          harness: 'codex',
+          agent: false,
+          launch: { available: false, reason: 'its login "work" is disabled. Use "gamma" instead' },
+        },
+        { name: 'gamma' },
+      ],
+      expiresAt: LATER,
+      state: 'pending',
+    };
+    const { ctx, out } = context({
+      [GRANTS_ROUTE]: OPEN,
+      [ROUTES.stage]: staged,
+      [ROUTES.apply]: { outcome: 'applied' },
+    });
+
+    await cli.build?.(ctx).verbs['login disable']({ args: ['work'], options: {} });
+
+    should(out.join('')).match(/Saves:\n {2}logins\/work\.yaml\nRuntimes after this change:\n/);
+    should(out.join('')).match(/ {2}alpha \(Claude Code, agent\) — ready to launch\n/);
+    should(out.join('')).match(/ {2}beta \(Codex\) — its login "work" is disabled\. Use "gamma" instead\n/);
+    should(out.join('')).match(/ {2}gamma\n/);
   });
 
   it('should change nothing for a caller the grants refuse, and exit 1 with the sentence', async () => {

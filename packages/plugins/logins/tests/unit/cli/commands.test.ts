@@ -202,7 +202,7 @@ describe('fy login models', () => {
 
   it('should word every outcome, and a daemon that follows no published catalog', () => {
     should(renderModelRefresh({ outcome: 'updated', version: 5 })).equal(
-      'A newer model catalog was published; it is in effect now (version 5).',
+      'The published model catalog was updated; it is in effect now (version 5).',
     );
     should(renderModelRefresh({ outcome: 'disabled' })).containEql('FY_MODEL_CATALOG=off');
     should(renderModelCatalogs({ published: { origin: 'https://x', enabled: false }, catalogs: [] })).equal(

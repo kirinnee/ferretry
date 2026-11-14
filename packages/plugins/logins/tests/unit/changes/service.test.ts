@@ -81,6 +81,69 @@ describe('LoginChangeService', () => {
     should(events).deepEqual([{ id: 'work', change: 'edited' }]);
   });
 
+  it('should say which file a change saves and which runtimes are on the login', async () => {
+    const { service } = world({ usedBy: async () => ['alpha'] });
+
+    const label = await service.stage({ kind: 'login.label', id: 'work', label: 'Work' });
+    const disable = await service.stage({ kind: 'login.disable', id: 'work' });
+    const signOut = await service.stage({ kind: 'login.signout', id: 'work' });
+
+    should(label.saves).deepEqual(['logins/work.yaml']);
+    // Runtimes cannot say how they would launch here, so they are named without a status.
+    should(label.runtimes).deepEqual([{ name: 'alpha' }]);
+    should(disable.saves).deepEqual(['logins/work.yaml']);
+    should(signOut.saves).be.undefined();
+    should(signOut.runtimes).be.undefined();
+  });
+
+  it('should carry each runtime’s launch status as the change would leave it, when Runtimes can say', async () => {
+    const seen: unknown[] = [];
+    const { service } = world({
+      usedBy: async () => ['alpha'],
+      runtimesAfter: async change => {
+        seen.push(change);
+        return [
+          { name: 'alpha', harness: 'claude-code', agent: true, launch: { available: false, reason: 'login is off' } },
+        ];
+      },
+    });
+
+    const view = await service.stage({ kind: 'login.disable', id: 'work', reason: 'over budget' });
+    const signOut = await service.stage({ kind: 'login.signout', id: 'work' });
+
+    should(view.runtimes).deepEqual([
+      { name: 'alpha', harness: 'claude-code', agent: true, launch: { available: false, reason: 'login is off' } },
+    ]);
+    should(seen).deepEqual([{ kind: 'login.disable', id: 'work', reason: 'over budget' }]);
+    should(signOut.runtimes).be.undefined();
+  });
+
+  it('should fall back to the names when the preview cannot be made', async () => {
+    const { service } = world({
+      usedBy: async () => ['alpha'],
+      runtimesAfter: async () => {
+        throw new Error('Runtimes is not up');
+      },
+    });
+
+    const view = await service.stage({ kind: 'login.enable', id: 'work' });
+
+    should(view.runtimes).deepEqual([{ name: 'alpha' }]);
+  });
+
+  it('should name no runtimes, and still stage, when the runtimes cannot be read', async () => {
+    const { service } = world({
+      usedBy: async () => {
+        throw new Error('nothing answers');
+      },
+    });
+
+    const view = await service.stage({ kind: 'login.enable', id: 'work' });
+
+    should(view.runtimes).be.undefined();
+    should(view.saves).deepEqual(['logins/work.yaml']);
+  });
+
   it('should refuse to apply the same change twice', async () => {
     const { service } = world();
     const view = await service.stage({ kind: 'login.enable', id: 'work' });

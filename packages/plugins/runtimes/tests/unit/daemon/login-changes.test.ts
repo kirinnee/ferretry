@@ -516,3 +516,62 @@ describe('the runtimes on a login, as Logins asks for them', () => {
     ).equal('x and y were removed; the default runtime is now k');
   });
 });
+
+describe('the runtimes on a login, as a change to it would leave them (Logins asks, for its preview)', () => {
+  it('shows a runtime blocked once its login is switched off, with the sentence that says why', async () => {
+    const { catalog } = world();
+
+    const after = await catalog.runtimesAfterLoginChange({
+      kind: 'login.disable',
+      id: 'claude-you',
+      reason: 'Out of credit',
+    });
+
+    should(after).have.length(1);
+    should(after[0]).containDeep({ name: 'claude-default', harness: 'claude-code', agent: true });
+    should(after[0]?.launch?.available).be.false();
+    should(after[0]?.launch?.reason).match(/claude-you/);
+    should(after[0]?.launch?.reason).match(/Out of credit/);
+  });
+
+  it('does not blame the login when it is switched on or only labelled: a runtime still blocked says its own reason', async () => {
+    const { catalog } = world();
+
+    // The fixture's profile has no layers, so the runtime stays blocked by THAT, whatever is done to its login.
+    for (const change of [
+      { kind: 'login.enable', id: 'claude-you' },
+      { kind: 'login.label', id: 'claude-you', label: 'Home' },
+    ] as const) {
+      const after = await catalog.runtimesAfterLoginChange(change);
+      should(after).eql([
+        {
+          name: 'claude-default',
+          harness: 'claude-code',
+          agent: true,
+          launch: { available: false, reason: 'This profile has no layers yet.' },
+        },
+      ]);
+    }
+  });
+
+  it('names no runtime for a login none uses, or for a change that edits no runtime', async () => {
+    const { catalog } = world();
+
+    should(await catalog.runtimesAfterLoginChange({ kind: 'login.disable', id: 'spare' })).eql([]);
+    should(await catalog.runtimesAfterLoginChange({ kind: 'login.remove', id: 'claude-you' })).eql([]);
+    should(await catalog.runtimesAfterLoginChange({ kind: 'login.signout', id: 'claude-you' })).eql([]);
+  });
+
+  it('hands Logins the preview through its used-by hook, and leaves the change itself unwritten', async () => {
+    const { catalog, order } = world();
+    const users = loginUsers(
+      () => new Map(),
+      change => catalog.runtimesAfterLoginChange(change),
+    );
+
+    const after = await users.after?.({ kind: 'login.disable', id: 'claude-you' });
+
+    should(after?.[0]?.launch?.available).be.false();
+    should(order).eql([]);
+  });
+});

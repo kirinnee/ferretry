@@ -72,7 +72,7 @@ export interface RuntimesAssembly {
     FleetCatalogService,
     'machine' | 'components' | 'profiles' | 'previewProfile' | 'runtimes' | 'propose' | 'read' | 'apply' | 'serialise'
   > &
-    Partial<Pick<FleetCatalogService, 'republish'>>;
+    Partial<Pick<FleetCatalogService, 'republish' | 'runtimesAfterLoginChange'>>;
   readonly setup: Pick<
     FleetSetupService,
     'scan' | 'installTools' | 'exportBundle' | 'reviewClone' | 'forgetCloneSource' | 'recordCloneKeys' | 'executors'
@@ -488,7 +488,14 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         hooks: {
           // The login's compaction trigger, from the facts `start.decide` read (never its environment: docs/secrets.md).
           'launch.parts': () => [{ id: 'runtimes-compact-at', item: launchGate.parts }],
-          'logins.used-by:runtimes': loginUsers(() => config.collection(runtimeItems)),
+          'logins.used-by:runtimes': loginUsers(
+            () => config.collection(runtimeItems),
+            async change => {
+              // No preview to give: Logins then names the runtimes without a launch status.
+              if (assembly.catalog.runtimesAfterLoginChange === undefined) throw new Error('no preview here');
+              return await assembly.catalog.runtimesAfterLoginChange(change);
+            },
+          ),
           // Whether an automatic resume may spend (W2-a): the switch, then the ferret's runtime, each a no when in doubt.
           'auto-resume.decide': autoResumeAnswer({
             switchOn: () =>

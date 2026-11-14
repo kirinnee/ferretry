@@ -7,6 +7,7 @@
  * Pure.
  */
 import type { LoginChange, LoginChangeError } from '@ferretry/plugin-logins/contract';
+import type { AccountModel } from '../account/schema.ts';
 import type { CatalogRefusalCode } from '../../../contract/index.ts';
 import { listed } from './catalog.ts';
 import type { LoginAccountChange, LoginRemoval } from './mutations.ts';
@@ -63,6 +64,30 @@ export function loginChangeOf(change: LoginAccountChange): LoginChange {
     case 'credential.enable':
       return { kind: 'login.enable', id: change.id };
   }
+}
+
+/**
+ * The model as a login change would leave it, for a preview only: a switch-off, a switch-on or a label on one login. Any
+ * other change leaves the model as it is. Nothing is written.
+ */
+export function modelAfterLoginChange(model: AccountModel, change: LoginChange): AccountModel {
+  if (change.kind !== 'login.disable' && change.kind !== 'login.enable' && change.kind !== 'login.label') return model;
+  const credential = model.credentials[change.id];
+  if (credential === undefined) return model;
+  const { disabled: _off, ...rest } = credential;
+  const next =
+    change.kind === 'login.disable'
+      ? {
+          ...rest,
+          disabled: {
+            ...(change.reason === undefined ? {} : { reason: change.reason }),
+            ...(change.until === undefined ? {} : { until: change.until }),
+          },
+        }
+      : change.kind === 'login.enable'
+        ? rest
+        : { ...credential, ...(change.label === null ? {} : { label: change.label }) };
+  return { ...model, credentials: { ...model.credentials, [change.id]: next as typeof credential } };
 }
 
 /** Logins' refusal codes in this surface's own taxonomy; the sentence is carried over word for word. */

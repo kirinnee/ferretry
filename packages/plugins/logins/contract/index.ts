@@ -26,6 +26,7 @@ import {
   LoginFileSchema,
   LoginIdSchema,
   type LoginChange,
+  type LoginRuntimePreview,
   type LoginChangeOutcome,
   type LoginChangeRefusalCode,
   type LoginChangeView,
@@ -127,6 +128,11 @@ export const LoginChangesPort = definePort<LoginChangesApi>('logins.changes');
 export interface LoginUsers {
   /** The runtimes that launch on this login, by name. Throws when the answer is not known. */
   of(loginId: string): Promise<readonly string[]> | readonly string[];
+  /**
+   * The runtimes on the login as this change would leave them, each with whether it can launch then and why not. A
+   * preview only: nothing is written. Absent, or throwing, the change's preview names the runtimes without a status.
+   */
+  after?(change: LoginChange): Promise<readonly LoginRuntimePreview[]> | readonly LoginRuntimePreview[];
 }
 
 /**
