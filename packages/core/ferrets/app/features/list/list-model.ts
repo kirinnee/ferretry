@@ -10,7 +10,9 @@
  * draw, under the same stopped rule — never a total that stops matching the rows underneath it. "Show stopped (3)" is
  * likewise the stopped ferrets that tick would add under the kind chosen.
  *
- * A ferret with no `mode` matches no kind segment: it shows only under All.
+ * A ferret whose record names no `mode` (one carried over from a record that never stamped it) is an AGENT, the one
+ * reading every daemon reader gives it (`record.mode ?? 'auto'`: the session document, the auto-resume roster, a move's
+ * resume), so it is counted and filtered under Agents and never silently under none of the kinds.
  *
  * PINNED ferrets lift into "Pinned" above everything, oldest pin first, and are not repeated below. The rest group by
  * folder (Ferrets cannot read the Projects list, so the group key is the normalised folder and its name the folder's
@@ -41,8 +43,12 @@ export const byPinOrder = (left: FerretSummary, right: FerretSummary): number =>
 /** The ferret is over: the status mark's own finished class, so the list and the mark never disagree. */
 export const isStopped = (ferret: FerretSummary): boolean => statusMark(ferret).klass === 'finished';
 
+/** The kind a ferret is: its recorded mode, and an agent when the record names none (as the daemon reads it). */
+const modeOf = (ferret: FerretSummary): 'auto' | 'interactive' => ferret.mode ?? 'auto';
+
 /** Whether the ferret is the kind a segment asks for. */
-export const matchesMode = (ferret: FerretSummary, mode: ModeFilter): boolean => mode === 'all' || ferret.mode === mode;
+export const matchesMode = (ferret: FerretSummary, mode: ModeFilter): boolean =>
+  mode === 'all' || modeOf(ferret) === mode;
 
 /**
  * Which ferrets the list draws before the kind is chosen: everything live, the stopped ones only when ticked, a pinned
@@ -77,8 +83,8 @@ export const listTallies = (
   return {
     counts: {
       all: listed.length,
-      auto: listed.filter(ferret => ferret.mode === 'auto').length,
-      interactive: listed.filter(ferret => ferret.mode === 'interactive').length,
+      auto: listed.filter(ferret => modeOf(ferret) === 'auto').length,
+      interactive: listed.filter(ferret => modeOf(ferret) === 'interactive').length,
     },
     hiddenStopped: ferrets.filter(ferret => !listedBeforeMode(ferret, filter, keep) && matchesMode(ferret, filter.mode))
       .length,

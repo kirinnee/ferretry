@@ -47,6 +47,7 @@ interface Call {
     readonly params?: Record<string, string>;
     readonly body?: unknown;
     readonly headers?: Record<string, string>;
+    readonly quiet?: boolean;
   };
 }
 
@@ -73,7 +74,9 @@ describe('web terminal transport', () => {
   it('calls the daemon’s routes by manifest key, one path part per param, and carries no credential', async () => {
     const { calls, client } = recorder(list);
     expect(await listSessionTerminals(client, daemonA, scopeA)).toEqual(list);
-    expect(calls).toEqual([{ route: TERMINAL_ROUTES.list, init: { params: { ferretId: 'shared/session' } } }]);
+    expect(calls).toEqual([
+      { route: TERMINAL_ROUTES.list, init: { params: { ferretId: 'shared/session' }, quiet: true } },
+    ]);
     expect(calls[0]?.init.headers).toBeUndefined();
   });
 
@@ -212,7 +215,9 @@ describe('terminal quarantine transport', () => {
     const quarantines = [{ key: 'dev', until: '2026-10-30T10:02:00.000Z' as Instant }];
     const { calls, client } = recorder({ quarantines });
     expect(await listSessionQuarantines(client, daemonA, scopeA)).toEqual({ quarantines });
-    expect(calls).toEqual([{ route: TERMINAL_ROUTES.quarantines, init: { params: { ferretId: 'shared/session' } } }]);
+    expect(calls).toEqual([
+      { route: TERMINAL_ROUTES.quarantines, init: { params: { ferretId: 'shared/session' }, quiet: true } },
+    ]);
     await expect(
       listSessionQuarantines(recorder({ quarantines: [{ key: 'dev' }] }).client, daemonA, scopeA),
     ).rejects.toThrow();

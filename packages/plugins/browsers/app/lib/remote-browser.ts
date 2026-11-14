@@ -91,7 +91,7 @@ export const fetchRemoteBrowserStatus = async (
   assertScopeDaemon(daemon, scope);
   return parseBrowserStatus(
     scope,
-    await daemon.client.call(SESSION_BROWSER_ROUTES.status, { params: sessionParams(scope) }),
+    await daemon.client.call(SESSION_BROWSER_ROUTES.status, { params: sessionParams(scope), quiet: true }),
   );
 };
 

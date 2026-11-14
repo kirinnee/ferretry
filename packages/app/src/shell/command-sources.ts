@@ -6,7 +6,13 @@ import { daemonTitle, type PairedDaemon } from '../daemons/daemon-list.ts';
 import type { ScreenRef } from '../layout/engine.ts';
 import type { DeviceLayoutStore } from '../layout/device-layout.ts';
 import type { Layout } from '../layout/layout.ts';
-import { DEVICE_SETTINGS_HREF, daemonHomeHref, daemonSettingsHref, type RouteTable } from '../router/routes.ts';
+import {
+  DEVICE_SETTINGS_HREF,
+  daemonHomeHref,
+  daemonSettingsHref,
+  needsSubject,
+  type RouteTable,
+} from '../router/routes.ts';
 import type { CommandBarEntry, CommandBarSource } from '../ui/command-bar-model.ts';
 
 /**
@@ -45,7 +51,7 @@ export function placeSource(input: PlaceSourceInput): CommandBarSource {
     for (const screen of screens) {
       const key = `${screen.plugin}.${screen.id}`;
       // A screen that needs a subject is not a destination on its own; a bare id also listed qualified is one place.
-      if (seen.has(key) || screen.path.includes(':')) continue;
+      if (seen.has(key) || needsSubject(screen)) continue;
       seen.add(key);
       const daemonLess = screen.path.startsWith('/');
       if (!daemonLess && input.daemon === undefined) continue;

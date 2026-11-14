@@ -58,6 +58,14 @@ const isParam = (part: string): boolean => part.startsWith(':');
 const isOptional = (part: string): boolean => isParam(part) && part.endsWith('?');
 const paramName = (part: string): string => part.slice(1, isOptional(part) ? -1 : undefined);
 
+/**
+ * Whether a screen can only be reached with a subject the address does not hold: it has a REQUIRED parameter
+ * (`agenda/:ferret/:ask`). A screen whose parameters are all optional (`board/:project?`) has a bare address of its
+ * own, so it is a destination: a nav entry links it and the palette lists it.
+ */
+export const needsSubject = (screen: { readonly path: string }): boolean =>
+  segments(screen.path).some(part => isParam(part) && !isOptional(part));
+
 function matchParts(pattern: readonly string[], actual: readonly string[]): Record<string, string> | undefined {
   if (actual.length > pattern.length) return undefined;
   const params: Record<string, string> = {};

@@ -92,7 +92,13 @@ const inboxManifest = manifestOf('inbox', {
     routes: [{ key: 'POST /v1/inbox/marks', minimum: 'authenticated', caller: 'any', audit: 'skip' }],
   },
   ui: {
-    screens: [{ id: 'inbox', path: 'inbox', nav: { label: 'Inbox', order: 1 } }],
+    screens: [
+      { id: 'inbox', path: 'inbox', nav: { label: 'Inbox', order: 1 } },
+      // A screen whose only parameter is optional (the Board's `board/:project?`): it has a bare address of its own.
+      { id: 'lanes', path: 'lanes/:project?', nav: { label: 'Lanes', order: 2 } },
+      // A screen that cannot be reached without its subject.
+      { id: 'thread', path: 'thread/:id', nav: { label: 'Thread', order: 3 } },
+    ],
     panels: [
       { id: 'needs-you', slot: 'nav', order: 10 },
       { id: 'marks', slot: 'device.settings', order: 10 },
@@ -107,7 +113,7 @@ const inbox = entryOf(
   provideToShell(
     implementApp(inboxManifest, {
       build: () => ({
-        screens: { inbox: () => <p>inbox page</p> },
+        screens: { inbox: () => <p>inbox page</p>, lanes: () => <p>lanes page</p>, thread: () => <p>thread page</p> },
         panels: {
           'side-note': ({ subject }: PanelProps) => <p data-testid="side-note">side note {String(subject)}</p>,
           'top-note': () => <p>top note</p>,
@@ -623,6 +629,45 @@ describe('the side column', () => {
     const app = await bootApp({ surfaces: [inbox], machines: ['d1'], path: '/d/d1/inbox', viewport: 'phone' });
     view = app.view;
     expect(panels('inbox.side-note')).toBe(0);
+  });
+});
+
+describe('a screen the side column holds', () => {
+  /** The column holds the inbox screen itself (as the default layout holds the ferret list). */
+  const holdingInbox = () => {
+    const storage = memoryStore();
+    writeRecord(storage, APP_STORAGE.layout, {
+      nav: { side: 'left', style: 'list', items: ['inbox', 'lanes', 'thread'] },
+      side: { holds: 'inbox' },
+      phone: { nav: PHONE },
+      panels: { 'ferret.side': [] },
+      'composer.tools': [],
+    });
+    return storage;
+  };
+  const drawn = (word: string): number => text().split(word).length - 1;
+
+  test('ferrets list: on the page that IS the held screen it is drawn once, not in the page and again beside it', async () => {
+    const app = await bootApp({ surfaces: [inbox], machines: ['d1'], path: '/d/d1/inbox', storage: holdingInbox() });
+    view = app.view;
+    expect(drawn('inbox page')).toBe(1);
+  });
+
+  test('ferrets list: on any other page the column still holds it', async () => {
+    const app = await bootApp({ surfaces: [inbox], machines: ['d1'], path: '/d/d1/lanes', storage: holdingInbox() });
+    view = app.view;
+    expect(drawn('inbox page')).toBe(1);
+    expect(app.view.container.querySelector('.fy-side')).not.toBeNull();
+  });
+
+  test('ferrets list: a nav entry whose screen has only an optional parameter is a real link; one that needs a subject is not', async () => {
+    const app = await bootApp({ surfaces: [inbox], machines: ['d1'], path: '/d/d1/inbox', storage: holdingInbox() });
+    view = app.view;
+    const entry = (label: string) =>
+      [...app.view.container.querySelectorAll('.fy-nav__item')].find(node => node.textContent?.startsWith(label));
+    expect(entry('Lanes')?.tagName).toBe('A');
+    expect(entry('Lanes')?.getAttribute('href')).toBe('/d/d1/lanes');
+    expect(entry('Thread')?.tagName).toBe('SPAN');
   });
 });
 

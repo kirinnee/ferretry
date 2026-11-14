@@ -341,6 +341,14 @@ Both axes default to **enabled** for every capability. The dangerous act is stru
 unavailable to a remote caller, so starting open costs much less than it would otherwise, and starting
 closed would make a fresh remote session useless until somebody walked to the machine.
 
+**A page opening is not an act.** When the owner has turned `unlockOnOpen` off, every governed act asks its own
+step-up — but the Terminals and Browser panels read the machine on their own when a ferret page opens (the terminal
+list, the pane, the processes, the browser status), and a prompt for that would greet the person on every load. Those
+reads are sent **quiet** (`PluginClient.call`'s `quiet`, `GET`/`HEAD` only): a daemon that wants a step-up for one
+answers as it always did — nothing is read or done without it — and the app simply does not raise the prompt for it.
+The prompt comes when the person presses something (a press is never quiet), and the next poll then reads. An
+**unlock** still asks on opening, because that is the owner's own switch. Nothing the daemon gates is loosened.
+
 **The primary security layer is locality.** A remote caller can never turn a capability on. The passkey
 **unlock** is the **second layer**: a governed caller does nothing until its device unlocks the machine,
 and the unlock then stands in for the step-up over every `configure` and the `use` of `terminal`,

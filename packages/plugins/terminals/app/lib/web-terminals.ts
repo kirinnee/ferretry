@@ -73,7 +73,8 @@ export const listSessionTerminals = async (
 ): Promise<TerminalListView> => {
   assertScopeDaemon(daemon, scope);
   const list = TerminalListViewSchema.parse(
-    await client.call(TERMINAL_ROUTES.list, { params: { ferretId: scope.sessionId } }),
+    // Quiet: the deck lists on mount and on a poll, which is not the person acting (see `PluginClient.call`'s `quiet`).
+    await client.call(TERMINAL_ROUTES.list, { params: { ferretId: scope.sessionId }, quiet: true }),
   );
   if (list.sessionId !== scope.sessionId) throw mismatch('daemon listed another session');
   return list;
@@ -139,7 +140,7 @@ export const listSessionQuarantines = async (
 ): Promise<InputQuarantineList> => {
   assertScopeDaemon(daemon, scope);
   return InputQuarantineListSchema.parse(
-    await client.call(TERMINAL_ROUTES.quarantines, { params: { ferretId: scope.sessionId } }),
+    await client.call(TERMINAL_ROUTES.quarantines, { params: { ferretId: scope.sessionId }, quiet: true }),
   );
 };
 

@@ -10,7 +10,14 @@ import { buildPluginCommandSources, deviceLayoutSource, placeSource, settingsSou
 import { useScreenHref } from '../router/screen-href.ts';
 import { daemonTitle } from '../daemons/daemon-list.ts';
 import type { NavEntry } from '../layout/engine.ts';
-import { daemonHomeHref, DEVICE_SETTINGS_HREF, HOME_HREF, pairAgainHref, type Route } from '../router/routes.ts';
+import {
+  daemonHomeHref,
+  DEVICE_SETTINGS_HREF,
+  HOME_HREF,
+  needsSubject,
+  pairAgainHref,
+  type Route,
+} from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
 import {
@@ -53,7 +60,7 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
   const href = (entry: NavEntry): string | undefined => {
     if (entry.kind !== 'screen') return undefined;
     const { screen } = entry;
-    if (screen.path.includes(':')) return undefined; // a screen that needs a subject is not a nav destination
+    if (needsSubject(screen)) return undefined; // a screen that needs a subject is not a nav destination
     if (screen.path.startsWith('/')) return routes.href(screen, {});
     return daemon === undefined ? undefined : routes.href(screen, {}, daemon);
   };
@@ -172,12 +179,20 @@ function Main({ route }: { readonly route: Route }) {
   }
 }
 
-function Side({ daemon }: { readonly daemon: string | undefined }) {
+function Side({ daemon, route }: { readonly daemon: string | undefined; readonly route: Route }) {
   const { plan, viewport } = useShell();
   const { show, holds } = plan.side;
   if (show === 'never' || (show === 'wide-only' && viewport === 'phone') || holds.kind === 'none') return null;
   if (daemon === undefined) return null;
-  if (holds.kind === 'screen' && holds.screen.path.includes(':')) return null; // needs a subject the route lacks
+  if (holds.kind === 'screen' && needsSubject(holds.screen)) return null; // needs a subject the route lacks
+  // The page IS the screen the column holds (the ferret list on /ferrets): draw it once, in the page, not again beside it.
+  if (
+    holds.kind === 'screen' &&
+    route.kind === 'screen' &&
+    route.screen.plugin === holds.screen.plugin &&
+    route.screen.id === holds.screen.id
+  )
+    return null;
   return (
     <aside className="fy-side" data-slot="side">
       {holds.kind === 'screen' ? <ScreenView daemon={daemon} screen={holds.screen} params={{}} /> : null}
@@ -325,7 +340,7 @@ export function Frame() {
                 {whole === undefined ? <Main route={route} /> : <WholeLine daemon={daemon} line={whole} />}
               </PageScrollRegion>
             </main>
-            {whole === undefined ? <Side daemon={daemon} /> : null}
+            {whole === undefined ? <Side daemon={daemon} route={route} /> : null}
           </div>
         </div>
         <ShellCommandBar
