@@ -164,7 +164,7 @@ export function registeredCodex() {
     },
   } as unknown as KernelPorts;
   const buildHalf = () => {
-    const half = daemon.build?.({ manifest, kernel } as never);
+    const half = daemon.build?.({ manifest, kernel, uses: { runtimes: { current: () => undefined } } } as never);
     if (half === undefined) throw new Error('missing daemon half');
     return half;
   };
