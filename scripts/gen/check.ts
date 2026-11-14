@@ -31,6 +31,7 @@ import { check as guarantees, ownerCheck as guaranteeOwner } from '../validate/g
 import { check as hostFiles } from '../validate/host-files.ts';
 import { check as manifestMatch } from '../validate/manifest-match.ts';
 import { check as noCompat } from '../validate/no-compat.ts';
+import { check as noMacros } from '../validate/no-macros.ts';
 import { check as oneFormat } from '../validate/one-format.ts';
 import { check as parityTicks } from '../validate/parity-ticks.ts';
 import { check as pins } from '../validate/pins.ts';
@@ -71,6 +72,7 @@ export const CHECKS: readonly Check[] = [
   guaranteeOwner,
   oneFormat,
   noCompat,
+  noMacros,
   words,
   glossary,
   pins,
@@ -92,6 +94,7 @@ const SCOPED = new Set([
   'guarantee-owner',
   'one-format',
   'no-compat',
+  'no-macros',
   'glossary',
   'private-files',
 ]);
