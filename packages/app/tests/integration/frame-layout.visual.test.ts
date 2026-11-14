@@ -239,6 +239,39 @@ describe('the ferret page', () => {
           viewport.height / 3,
         );
         expect(boxes.chat, 'the conversation keeps a third of the window').toBeGreaterThanOrEqual(viewport.height / 3);
+        if (!viewport.phone) {
+          // The real page at a laptop's height: after the toolbar and the composer the transcript still has room to read.
+          const parts = await tab.evaluate(() => {
+            const box = (query: string) => document.querySelector(query)?.getBoundingClientRect().height ?? -1;
+            const pane = document.querySelector('[data-slot="ferret.side"]');
+            return {
+              transcript: box('[data-transcript]'),
+              paneOverflowsSideways: pane === null ? true : pane.scrollWidth > pane.clientWidth + 1,
+            };
+          });
+          expect(parts.transcript, 'the transcript is readable at a laptop height').toBeGreaterThanOrEqual(250);
+          expect(parts.paneOverflowsSideways, 'a wide panel does not give the side pane a sideways scroll').toBe(false);
+        }
+        if (viewport.phone) {
+          // A phone gets one line that scrolls sideways: at most ~15% of the screen, the conversation more than half of it,
+          // and the controls a person reaches for (name, status, Actions) are inside the scrolling line without a swipe.
+          expect(boxes.toolbar, 'a phone toolbar is one line').toBeLessThanOrEqual(viewport.height * 0.15);
+          expect(boxes.chat, 'a phone keeps over half the screen for the conversation').toBeGreaterThan(
+            viewport.height / 2,
+          );
+          const edges = await tab.evaluate(() => {
+            const toolbar = document.querySelector('[data-slot="ferret.toolbar"]');
+            const right = (suffix: string) =>
+              toolbar?.querySelector(`:scope > [data-panel$="${suffix}"]`)?.getBoundingClientRect().right ??
+              Number.POSITIVE_INFINITY;
+            return {
+              limit: toolbar?.getBoundingClientRect().right ?? 0,
+              rights: ['.name', '.status', '.actions'].map(right),
+            };
+          });
+          for (const edge of edges.rights)
+            expect(edge, 'a first-line control is inside the visible line').toBeLessThanOrEqual(edges.limit - 12);
+        }
       } finally {
         await close();
       }
