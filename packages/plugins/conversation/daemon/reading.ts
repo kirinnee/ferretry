@@ -18,6 +18,10 @@ import { RenderError } from './renders/lib/types.ts';
 import { buildSearch, WORK_SEARCH_WARM_DELAY_MS, type WorkSource } from './search/index.ts';
 import { tryParseSessionId } from './seams/ferret-id.ts';
 import { harnessFamily } from './seams/harness-family.ts';
+import type { TranscriptEvent } from './seams/transcript-types.ts';
+
+/** How many of a Codex transcript's newest events the question watch projects (its open call is among the newest). */
+const QUESTION_TAIL_EVENTS = 200;
 
 /**
  * The ONE sentence said by everything that needs the conversations a harness holds: the Conversations screen (its list
@@ -98,6 +102,11 @@ type ReadingApi = Pick<
 >;
 
 export interface ReadingHalf {
+  /**
+   * The parsed tail of a CODEX ferret's transcript, for the question watch (its `request_user_input` is in the transcript
+   * while the form is open): `'unreadable'` when it cannot be read, `undefined` for a ferret that is not a Codex one.
+   */
+  questionEvents(ferret: string): Promise<readonly TranscriptEvent[] | 'unreadable' | undefined>;
   readonly routes: Readonly<Record<string, RouteHandler>>;
   readonly tools: { readonly search_work: ToolHandler };
   readonly api: ReadingApi;
@@ -295,7 +304,16 @@ export function buildReading(deps: {
     keep: async request => await links.service.keep(request),
   };
 
+  const questionEvents: ReadingHalf['questionEvents'] = async ferret => {
+    const id = tryParseSessionId(ferret);
+    const summary = id === undefined ? undefined : await ferrets.get(id);
+    if (summary === undefined || harnessFamily(summary.harness) !== 'codex') return undefined;
+    const read = await reader.tail(ferret, QUESTION_TAIL_EVENTS).catch(() => undefined);
+    return read?.kind === 'read' ? read.events : 'unreadable';
+  };
+
   return {
+    questionEvents,
     routes: {
       ...reader.routes,
       ...links.routes,

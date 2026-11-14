@@ -71,7 +71,13 @@ import type { SessionStatus } from './seams/ferret-types.ts';
 import { sentDraftClearer, sharedDraftRoutes, sharedDraftSocketRoutes } from './drafts/lib/mounts/shared-drafts.ts';
 import { SessionSendError, sessionSendRoutes } from './delivery/lib/mounts/session-send.ts';
 import { StateDraftRepository } from './drafts/adapters/index.ts';
-import { buildQuestionAnswering, clearAskedQuestion, writeAskedQuestion } from './questions/adapters/index.ts';
+import {
+  buildQuestionAnswering,
+  clearAskedQuestion,
+  writeAskedQuestion,
+  writeProjectedQuestion,
+} from './questions/adapters/index.ts';
+import type { TranscriptEvent } from './seams/transcript-types.ts';
 import { ANSWER_FAILURES, SessionAnswerError } from './questions/lib/mounts/session-answer.ts';
 import { QUESTION_WATCH_MS, QuestionWatch } from './questions/lib/watch.ts';
 import { OwnerWordsReader, TurnBoundaries, type TurnPhase } from './turns/lib/index.ts';
@@ -305,6 +311,8 @@ export function buildConversationA(deps: {
   readonly gate: HarnessGate;
   /** The stored originals a send may name (part b's store). Absent: a send that names a file is refused. */
   readonly attachments?: AttachmentSource;
+  /** A Codex ferret's parsed transcript tail (part b's reader), for the question watch. Absent: Codex is not watched. */
+  readonly questionEvents?: (ferret: string) => Promise<readonly TranscriptEvent[] | 'unreadable' | undefined>;
 }): ConversationAHalf {
   const { kernel, ferrets, asks, hooks, gate } = deps;
   const clock: ClockPort = { now: () => kernel.clock.now() };
@@ -692,8 +700,8 @@ export function buildConversationA(deps: {
    * Where it does not press, the send goes on as any send does, and the delivery decides (type, queue, or refuse).
    * A ferret holding a pending structured question never reaches here: {@link refuseWhileAsking} refuses every send to it
    * first. That check reads `question.json`, which the question watch writes from the hook's file for a Claude Code ferret
-   * (one question or a tabbed form of several). A Codex `request_user_input` is not detected (no hook; see the
-   * claude-code line in `ports-pending.json`), so for Codex only this pane read stands between a send-now and a form.
+   * (one question or a tabbed form of several) and from the transcript's open `request_user_input` call for a Codex one.
+   * The pane read here remains the second guard for a form the watch has not yet stored (it looks every 2 s).
    */
   const stopForNow = async (ferret: SessionId, bound: Awaited<ReturnType<typeof terminal.bind>>): Promise<void> => {
     const pane = await lookAtPane.observe(ferret);
@@ -1178,6 +1186,15 @@ export function buildConversationA(deps: {
     write: async (ferret, payload, askedAt, transcript) =>
       await writeAskedQuestion(kernel.state, questionSerial, ferret, payload, askedAt, transcript),
     clear: async (ferret, toolUseId) => await clearAskedQuestion(kernel.state, questionSerial, ferret, toolUseId),
+    ...(deps.questionEvents === undefined
+      ? {}
+      : {
+          transcriptEvents: deps.questionEvents,
+          writeProjected: async (ferret, pending, askedAt) =>
+            await writeProjectedQuestion(kernel.state, questionSerial, ferret, pending, askedAt, () =>
+              kernel.clock.now(),
+            ),
+        }),
     asked: async (ferret, toolUseId) => {
       await kernel.events.publish(QuestionAsked, { ferret: parseSessionId(ferret), toolUseId });
     },
