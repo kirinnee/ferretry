@@ -11,6 +11,7 @@
  * There is no answer verb: a card never asks (#1552), so there is no route to answer one.
  */
 
+import { type AskListSnapshot, AskListSnapshotSchema } from '@ferretry/core-asks/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { type BoardServerQuery, boardQueryParams } from './board-model.ts';
 import type { DaemonConnection } from './machine.ts';
@@ -91,6 +92,8 @@ export interface BoardPort {
   board(daemon: DaemonConnection, query: BoardServerQuery, cursor?: string, limit?: number): Promise<BoardResponse>;
   /** One card in full, or `null` when the daemon has no such card. */
   card(daemon: DaemonConnection, id: CardId): Promise<CardResponse | null>;
+  /** One ferret's agenda (`GET /v1/ferrets/:ferretId/agenda`), or `null` when the daemon will not say: the card reads its asks from it. */
+  agenda(daemon: DaemonConnection, ferret: string): Promise<AskListSnapshot | null>;
   /** Every card id on the machine. */
   ids(daemon: DaemonConnection): Promise<readonly CardId[]>;
   /** The projects with their lane sets. */
@@ -188,6 +191,15 @@ export const clientBoardPort = (client: Pick<PluginClient, 'call'>): BoardPort =
   ids: async () => BoardIdsResponseSchema.parse(await read<unknown>(client, 'GET /v1/board/ids', {}, false)).ids,
   projects: async () =>
     BoardProjectsResponseSchema.parse(await read<unknown>(client, 'GET /v1/board/projects', {}, false)).projects,
+  agenda: async (_daemon, ferret) => {
+    try {
+      const answer = await client.call<unknown>('GET /v1/ferrets/:ferretId/agenda', { params: { ferretId: ferret } });
+      const parsed = AskListSnapshotSchema.safeParse(answer);
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
+  },
   version: async () => {
     try {
       const health = await client.call<{ readonly version?: unknown }>('GET /v1/health');
