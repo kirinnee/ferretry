@@ -5,7 +5,8 @@
  *
  * An accept keeps the prompt it replaces, so ONE undo puts it back exactly — including "there was no prompt of
  * the owner's", which undoing restores by writing the file without one. A routing prompt only says which
- * model suits which work, so it never loosens anything and is never held.
+ * model suits which work, so it never loosens anything; the writer still holds an edit that adds a secret
+ * reference (or sits beside one already held), and that is reported as held, never as applied.
  */
 import type { Instant } from '@ferretry/std';
 import type {
@@ -13,6 +14,7 @@ import type {
   PackRoutingAcceptRequest,
   PackRoutingWriteResult,
   ReplacedRouting,
+  RoutingFile,
   RoutingUndo,
 } from '../../../contract/index.ts';
 
@@ -22,10 +24,21 @@ interface PacksFileText {
   readonly etag: string;
 }
 
+/**
+ * What the configuration writer did with an edit: `written` (in effect), or `held` (saved, but it waits for the
+ * owner and the version in effect is unchanged; `sentences` say what waits). A stale etag or a refusal is thrown.
+ */
+export type GuideWrite =
+  | { readonly kind: 'written' }
+  | { readonly kind: 'held'; readonly sentences: readonly string[] };
+
 export interface GuideFilePorts {
   read(): Promise<PacksFileText>;
-  /** Writes through the configuration writer, against `etag`; throws when it does not check or moved. */
-  write(file: PacksFile, etag: string): Promise<void>;
+  /**
+   * Writes the `routing` section (`undefined` takes it out) through the configuration writer, against `etag`. Every
+   * other key of the file is left as it is. Throws when the edit does not check or the file moved.
+   */
+  write(routing: RoutingFile | undefined, etag: string): Promise<GuideWrite>;
   replaced: {
     read(): Promise<ReplacedRouting | undefined>;
     write(value: ReplacedRouting | undefined): Promise<void>;
@@ -33,13 +46,21 @@ export interface GuideFilePorts {
   now(): string;
 }
 
-/** The file without the keys of the `routing` section named. */
-const withoutRouting = (file: PacksFile, ...keys: readonly ('prompt' | 'suggested')[]): PacksFile => {
-  const { routing, ...rest } = file;
-  if (routing === undefined) return file;
+/** The section without the keys named; `undefined` when nothing is left, so the section is taken out. */
+const withoutKeys = (
+  routing: RoutingFile | undefined,
+  ...keys: readonly ('prompt' | 'suggested')[]
+): RoutingFile | undefined => {
+  if (routing === undefined) return undefined;
   const kept = Object.fromEntries(Object.entries(routing).filter(([name]) => !keys.includes(name as 'prompt')));
-  return Object.keys(kept).length === 0 ? rest : { ...rest, routing: kept };
+  return Object.keys(kept).length === 0 ? undefined : (kept as RoutingFile);
 };
+
+/** What a held write says: it is saved, not in effect, and the owner confirms it. */
+const heldMessage = (written: Extract<GuideWrite, { kind: 'held' }>, what: string): string =>
+  `${what} waits for you to confirm it, so the routing prompt in effect has not changed${
+    written.sentences.length === 0 ? '' : ` (${written.sentences.join('; ')})`
+  }.`;
 
 export class GuideFileService {
   constructor(private readonly ports: GuideFilePorts) {}
@@ -54,23 +75,33 @@ export class GuideFileService {
   async accept(request: PackRoutingAcceptRequest): Promise<PackRoutingWriteResult> {
     const { file, etag } = await this.ports.read();
     const now = this.ports.now();
+    const before = await this.ports.replaced.read();
+    // Kept BEFORE the write, so a crash between the two never leaves an accepted prompt with nothing to undo it to; put
+    // back as it was when the write is held or refused, because then nothing was replaced.
     await this.ports.replaced.write({
       format: 1,
       text: file.routing?.prompt ?? null,
       savedAt: now as Instant,
       source: file.routing?.prompt === undefined ? 'default' : 'file',
     });
-    await this.ports.write(
-      {
-        ...file,
-        routing: {
+    let written: GuideWrite;
+    try {
+      written = await this.ports.write(
+        {
           ...file.routing,
           prompt: request.prompt,
           suggested: { ...request.suggested, acceptedAt: now as Instant },
         },
-      },
-      etag,
-    );
+        etag,
+      );
+    } catch (error) {
+      await this.ports.replaced.write(before);
+      throw error;
+    }
+    if (written.kind === 'held') {
+      await this.ports.replaced.write(before);
+      return { outcome: 'held', message: heldMessage(written, 'The new routing prompt') };
+    }
     return {
       outcome: 'applied',
       message: `The routing prompt is the one ${request.suggested.by} ${request.suggested.mode === 'generate' ? 'wrote' : 'cleaned up'}. Undo puts the previous one back.`,
@@ -83,11 +114,13 @@ export class GuideFileService {
     if (kept === undefined) return { outcome: 'nothing', message: 'There is no accepted clean-up to undo.' };
     const { file, etag } = await this.ports.read();
     // No prompt before: everything an accept writes comes out again.
-    const restored: PacksFile =
+    const restored: RoutingFile | undefined =
       kept.text === null
-        ? withoutRouting(file, 'prompt', 'suggested')
-        : { ...file, routing: { ...withoutRouting(file, 'suggested').routing, prompt: kept.text } };
-    await this.ports.write(restored, etag);
+        ? withoutKeys(file.routing, 'prompt', 'suggested')
+        : { ...withoutKeys(file.routing, 'suggested'), prompt: kept.text };
+    const written = await this.ports.write(restored, etag);
+    // Held: the undo is not in effect and stays kept, so it can be tried again once the owner has answered.
+    if (written.kind === 'held') return { outcome: 'held', message: heldMessage(written, 'The undo') };
     await this.ports.replaced.write(undefined);
     return {
       outcome: 'applied',

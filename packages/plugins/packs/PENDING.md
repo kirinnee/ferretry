@@ -13,9 +13,13 @@ Each line names the seam it waits on and who owns it. Nothing here is stood in f
 - **Card reservation** (a helper started without `--card` gets a child card under the lead's focus card, as today):
   returns when Ferrets' helper start lands with `start.decide` carrying the brief and card, plus an additive Board
   `delegate`/`reserve` member. Packs → Board is an approved optional `uses` (D2 #15) with no call site until then.
-- **Clean up's folder**: today's builder ran in the Ferretry home. Its 5.0 folder is a kernel-chosen work folder given
-  through a Ferrets start with a work folder (D2 #19, the kernel WorkFolders seam). Until then Clean up refuses to
-  start and says so.
+- **Clean up's folder** (`guide clean-up`, `guide write`: V-0274, V-0278 stay unticked): today's builder ran in the Ferretry
+  home. Ferrets starts a ferret in a folder the start names (`StartRequest.workFolder`, a trusted plugin's own choice), but
+  no seam hands Pack mode a folder the KERNEL chose for a builder (D2 #19, the WorkFolders seam), and the only folders a
+  plugin can name are inside the state home (`state.pathOf`), where an unattended model run could reach the credentials and
+  sessions the state-home fence keeps agents out of. Using one would be a side door, so both verbs refuse to start, say what
+  is missing and how to edit `config/packs.yaml` by hand, and spend nothing. A ruling for britnee: which kernel seam hands
+  out a builder's folder. Clean up stays a person-only act.
 - **The start check** proves only that a runtime resolves, is switched on and is signed in (`RuntimesApi.resolve`).
   Today's "reply OK" run, which caught a login out of quota, is an additive `RuntimesApi.probe(runtime)` through the
   harness plugins. It spends, so it runs only on an owner's act (Clean up is person-only); nothing in Packs checks or
@@ -23,8 +27,10 @@ Each line names the seam it waits on and who owns it. Nothing here is stood in f
 - **Warden lineage** is read from labels: a ferret whose own label, or any ancestor's, is `fleet-warden` is never told
   about Pack mode. Today's start also stamped `provenance.wardenLineage`, which outlived a pruned warden; no 5.0 start
   writes that stamp yet (Ferrets'), so it is read only as a second guard.
-- **Routing prompt accept and undo** answer `503 config_write_unavailable` until the kernel's config write port
-  (D2 #16) lands.
+- **Routing prompt accept and undo** (V-0273, V-0277) are bound: they write the `routing` section of `packs.yaml` through
+  the kernel's config writer (`ConfigPort.write`, the service behind `PUT /v1/config/file`; `adapters/guide-config.ts`),
+  against the etag read with the file, so Gate's per-file rules apply unchanged. A stale etag is refused (409), a write
+  the owner must confirm is answered `held` and keeps no undo (nothing was replaced), and one undo restores exactly.
 - **A pack table's last line**: today's was the newer of the card's last note and the last message the member sent to
   the AUTHENTICATED CALLER. The sitrep lines carry no addressee, so the "message to the caller" half needs a
   Conversation read; until then the newest dated sitrep line is used, masked whole before it is cut.

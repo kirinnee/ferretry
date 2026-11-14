@@ -204,6 +204,11 @@ export function RoutingPromptCard({ view, state, pollMs = CLEAN_UP_POLL_MS, time
         setOutcome({ tone: 'err', message: result.message });
         return;
       }
+      // Held for the owner's yes: not in effect, so the box keeps what it had and the review stays open.
+      if (result.kind === 'held') {
+        setOutcome({ tone: 'warn', message: result.message });
+        return;
+      }
       // The accepted words are what the box shows next, whatever was typed before the clean-up.
       setDraft(suggestion.after);
       closeReview();
@@ -216,7 +221,10 @@ export function RoutingPromptCard({ view, state, pollMs = CLEAN_UP_POLL_MS, time
     setOutcome(null);
     void state.undo().then(result => {
       setBusy(false);
-      setOutcome({ tone: result.kind === 'refused' ? 'err' : 'ok', message: result.message });
+      setOutcome({
+        tone: result.kind === 'refused' ? 'err' : result.kind === 'held' ? 'warn' : 'ok',
+        message: result.message,
+      });
     });
   };
 

@@ -16,6 +16,7 @@ import {
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { FleetFacts } from './adapters/fleet-facts.ts';
+import { ConfigGuideWriter } from './adapters/guide-config.ts';
 import { PackFerrets } from './adapters/ferrets.ts';
 import { RuntimeLaunchProbe } from './adapters/launch-probe.ts';
 import { StateReplacedRouting } from './adapters/replaced.ts';
@@ -126,25 +127,23 @@ export default implementDaemon(manifest, {
       runs: new StateCleanUpRunStore(kernel.state),
       now: () => kernel.clock.now(),
       newId: () => kernel.ids.mint('run'),
-      // GAP: today's builder ran in the Ferretry home. Its 5.0 folder is a kernel-chosen work folder, given through a
-      // Ferrets start with a work folder (the kernel WorkFolders seam); that is not on this base, so Clean up refuses to
-      // start and says so (ports-pending). Clean up is a person's act (`POST /v1/pack/routing/clean-up` is person-only):
-      // nothing in Packs checks or starts a runtime unattended.
+      // GAP (the WorkFolders seam, D2 #19; a ruling for britnee): today's builder ran in the Ferretry home. Ferrets starts a
+      // ferret in a folder the START names (`StartRequest.workFolder` is a trusted plugin's own choice), but nothing hands
+      // Pack mode a folder the KERNEL chose for a builder, and the only folders Pack mode can name are inside the state home
+      // (`state.pathOf`), where an unattended model run could reach the credentials and sessions the fence keeps agents out
+      // of. So Clean up refuses to start and says so (the sentence names what is missing and how to edit by hand); no side
+      // door. It stays a person's act (`POST /v1/pack/routing/clean-up` is person-only): nothing in Packs checks or starts
+      // a runtime unattended.
       home: undefined,
       bin: BIN,
     });
 
+    // Accept and undo write `packs.yaml` through the kernel's config writer (the service behind `PUT /v1/config/file`),
+    // against the etag read with the file; an edit the writer holds for the owner is reported held.
+    const guideWriter = new ConfigGuideWriter(kernel.config);
     const guideFile = new GuideFileService({
-      read: async () => ({ file: file(), etag: JSON.stringify(file()) }),
-      // GAP: the kernel's config WRITE port (`kernel.config.write`) is not on this base; Gate's config route is the only
-      // writer, and it is not a port a plugin may call. Until it lands, accepting or undoing says so and writes nothing.
-      write: async () => {
-        throw new ApiError(
-          503,
-          'The configuration writer is not available to Pack mode yet; edit config/packs.yaml by hand.',
-          'config_write_unavailable',
-        );
-      },
+      read: async () => ({ file: file(), etag: await guideWriter.etag() }),
+      write: async (routing, etag) => await guideWriter.write(routing, etag),
       replaced: new StateReplacedRouting(kernel.state),
       now: () => kernel.clock.now(),
     });
