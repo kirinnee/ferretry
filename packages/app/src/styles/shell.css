@@ -282,3 +282,33 @@
   min-width: 0;
   overflow: hidden;
 }
+
+/* Settings, grouped (v4's machine-panels groups): a heading over each run of tabs, stacked so a phone reads down one
+   column instead of along one long wrapped row. */
+.fy-tabs--grouped {
+  flex-direction: column;
+  gap: 12px;
+}
+.fy-tab-group__title {
+  margin: 0 0 4px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--fg-soft);
+}
+.fy-tab-group__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fy-settings-device {
+  margin: 0 0 12px;
+}
+.fy-settings-device__hint {
+  color: var(--fg-soft);
+}
+.fy-settings-daemons {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}

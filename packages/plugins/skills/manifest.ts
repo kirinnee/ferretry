@@ -121,7 +121,7 @@ export default definePlugin({
   ui: {
     // The Skills tab of a ferret's "This folder" context, and the inventory under Settings.
     panels: [panel('ferret.side', { id: 'skills', order: 50 })],
-    settings: [settingsTab('skills', { label: 'Skills', order: 60 })],
+    settings: [settingsTab('skills', { group: 'tools', label: 'Skills', order: 60 })],
     // `/name` and `$name` are one skill reference: Claude invokes `/name`, Codex `$name` (docs/reference-standard.md).
     renderers: [renderer('reference', { prefix: '/' }), renderer('reference', { prefix: '$' })],
   },

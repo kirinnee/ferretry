@@ -6,6 +6,7 @@ import type { RootName } from '../contract/ports.ts';
 import type { MemberRouteDescriptor, RouteDescriptor, ScopedRoute } from '../contract/route.ts';
 import type { SocketDescriptor } from '../contract/socket.ts';
 import type { InstructionWhen, Word } from '../contract/snapshot.ts';
+import type { SettingsGroupId } from './settings-groups.ts';
 
 /** What a plugin can add (§4). Each kind brings its contract and conformance suite. */
 export type PluginKind =
@@ -149,6 +150,8 @@ export interface SettingsTabDecl<Id extends string = string> {
   readonly id: Id;
   readonly label: string;
   readonly order: number;
+  /** The heading the Settings page lists this tab under (`settings-groups.ts`); a tab that names none is listed last. */
+  readonly group?: SettingsGroupId;
   /** Words the command bar finds this tab by, beyond its label (the settings it holds). */
   readonly keywords?: readonly string[];
 }

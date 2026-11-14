@@ -276,6 +276,22 @@ describe('WardenConfigSurface', () => {
     for (const renderer of [hidden, message]) run(() => renderer.unmount());
   });
 
+  it('should say what it is waiting for in Settings instead of drawing nothing while the read is pending', async () => {
+    // Arrange — a read that has not answered yet (e.g. a passkey confirmation is still open)
+    const pending: WardenClientFactory = () => new Promise<WardenClient>(() => undefined);
+
+    // Act
+    const hidden = render(<Surface connection={connection('a')} createClient={pending} />);
+    const message = render(<Surface connection={connection('a')} createClient={pending} unavailable="message" />);
+    await settle();
+
+    // Assert — the default draws nothing (a panel that is absent); Settings and the setup step say they are waiting
+    expect(hidden.toJSON()).toBeNull();
+    expect(json(message)).toContain('Reading the Warden');
+    expect(json(message)).toContain('confirm');
+    for (const renderer of [hidden, message]) run(() => renderer.unmount());
+  });
+
   it("should drop a late answer instead of showing another daemon's settings", async () => {
     // Arrange
     let releaseA: ((value: WardenConfigView) => void) | undefined;

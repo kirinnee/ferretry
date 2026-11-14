@@ -427,8 +427,8 @@ export default definePlugin({
       panel('ferret.side', { id: 'processes', order: 22 }),
     ],
     settings: [
-      settingsTab('terminals', { label: 'Terminals', order: 50 }),
-      settingsTab('limits', { label: 'Ferret limits', order: 51 }),
+      settingsTab('terminals', { group: 'advanced', label: 'Terminals', order: 50 }),
+      settingsTab('limits', { group: 'health', label: 'Ferret limits', order: 51 }),
     ],
     renderers: [renderer('reference', { prefix: '%terminal' })],
   },

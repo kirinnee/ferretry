@@ -216,7 +216,7 @@ export default definePlugin({
       // The first-run step's body (Onboarding's steps screen offers this slot): the same view as the Settings tab.
       panel('onboarding.step', { id: 'onboarding-step', order: 20 }),
     ],
-    settings: [settingsTab('claude-code', { label: 'Claude Code', order: 20 })],
+    settings: [settingsTab('claude-code', { group: 'tools', label: 'Claude Code', order: 20 })],
   },
 
   data: {

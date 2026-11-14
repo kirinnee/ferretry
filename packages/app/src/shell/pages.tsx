@@ -7,7 +7,7 @@ import { SettingGroup } from '../compose/setting-row.tsx';
 import { CachedDataSetting } from './device-cached-data.tsx';
 import { DeviceAppearance } from './device-appearance.tsx';
 import { DevicePanels } from './device-panels.tsx';
-import { resolveSettingsTab } from './settings-tab.ts';
+import { groupSettingsTabs, resolveSettingsTab } from './settings-tab.ts';
 import { PanelSlot, PluginView, ShellLine } from './views.tsx';
 import { useEffect, type MouseEvent } from 'react';
 
@@ -132,15 +132,34 @@ export function DaemonSettingsPage({
   return (
     <section className="fy-page">
       <h1>Settings</h1>
-      <nav className="fy-tabs" aria-label="Plugin settings">
-        {tabs.map(candidate => (
-          <Link
-            key={`${candidate.plugin}.${candidate.id}`}
-            to={daemonSettingsHref(daemon, candidate.plugin, candidate.id)}
-            className={candidate === active ? 'fy-tab fy-tab--active' : 'fy-tab'}
-          >
-            {candidate.label}
-          </Link>
+      {/* This device's own settings (theme, text size, motion, notifications…) are saved in this browser, not on a daemon:
+      the shell's own entry, one click from here as v4's Settings had it. Its address is the one a reload still serves. */}
+      <p className="fy-settings-device">
+        <Link to={DEVICE_SETTINGS_HREF}>This device</Link>
+        <span className="fy-settings-device__hint">
+          {' '}
+          — theme, text size, motion and notifications, saved in this browser
+        </span>
+      </p>
+      {/* v4's titled groups (`machine-panels.ts`); each plugin names its tab's group in its manifest. */}
+      <nav className="fy-tabs fy-tabs--grouped" aria-label="Plugin settings">
+        {groupSettingsTabs(tabs).map(group => (
+          <section key={group.id} className="fy-tab-group" aria-labelledby={`fy-settings-group-${group.id}`}>
+            <h2 id={`fy-settings-group-${group.id}`} className="fy-tab-group__title">
+              {group.label}
+            </h2>
+            <div className="fy-tab-group__tabs">
+              {group.tabs.map(candidate => (
+                <Link
+                  key={`${candidate.plugin}.${candidate.id}`}
+                  to={daemonSettingsHref(daemon, candidate.plugin, candidate.id)}
+                  className={candidate === active ? 'fy-tab fy-tab--active' : 'fy-tab'}
+                >
+                  {candidate.label}
+                </Link>
+              ))}
+            </div>
+          </section>
         ))}
       </nav>
       {choice.kind === 'none' ? (
@@ -156,10 +175,22 @@ export function DaemonSettingsPage({
 
 /** This device's settings (§5.2): theme, mode, text size, motion; saved in this browser, never on a daemon. */
 export function DeviceSettingsPage() {
-  const { layout, scroll } = useShell();
+  const { layout, scroll, runtime } = useShell();
+  useRuntimeVersion(runtime);
+  const daemons = runtime.daemons.groups().flatMap(group => group.daemons);
   return (
     <section className="fy-page">
       <h1>This device</h1>
+      {/* The way back: each paired daemon keeps its own settings (what it runs, who may reach it), apart from these. */}
+      {daemons.length === 0 ? null : (
+        <ul className="fy-settings-daemons" aria-label="Daemon settings">
+          {daemons.map(daemon => (
+            <li key={daemon.daemon}>
+              <Link to={daemonSettingsHref(daemon.daemon)}>{`Settings for ${daemonTitle(daemon)}`}</Link>
+            </li>
+          ))}
+        </ul>
+      )}
       <DeviceAppearance />
       {/* Panels plugins declare in device.settings (S4, M3): no machine needed, by order. */}
       <DevicePanels slot="device.settings" />

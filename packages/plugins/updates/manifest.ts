@@ -71,7 +71,7 @@ export default definePlugin({
   },
 
   ui: {
-    settings: [settingsTab('updates', { label: 'Updates', order: 60 })],
+    settings: [settingsTab('updates', { group: 'about', label: 'Updates', order: 60 })],
     panels: [panel('daemon.status', { id: 'behind', order: 30 })],
   },
 

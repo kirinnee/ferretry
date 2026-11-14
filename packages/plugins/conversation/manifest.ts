@@ -498,7 +498,7 @@ export default definePlugin({
       panel(ACTIONS_ROW_SLOT, { id: 'interrupt-row', order: 10 }),
       panel(AGENDA_CONVERSATION_SLOT, { id: 'agenda-conversation', order: 10 }),
     ],
-    settings: [settingsTab('conversation', { label: 'Conversation', order: 20 })],
+    settings: [settingsTab('conversation', { group: 'behaviour', label: 'Conversation', order: 20 })],
     renderers: [renderer('ask', { source: 'question' })],
   },
 
