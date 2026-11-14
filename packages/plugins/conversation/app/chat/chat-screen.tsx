@@ -95,7 +95,7 @@ const CHAT_STATE_MESSAGE: Readonly<Record<ChatState, string>> = {
   failed: 'This ferret’s conversation could not be opened.',
 };
 
-export function ChatScreen({ params }: ScreenProps): ReactNode {
+export function ChatScreen({ params, embedded = false }: ScreenProps & { readonly embedded?: boolean }): ReactNode {
   const client = useConversationClient();
   const daemonId = useConversationDaemon();
   const ferretId = params['ferret'];
@@ -109,7 +109,13 @@ export function ChatScreen({ params }: ScreenProps): ReactNode {
     // Every composer below saves a send on this device first and hands it to the daemon second.
     <ConversationOutbox>
       {/* Keyed on the daemon and the ferret: another ferret is another chat, with nothing carried over. */}
-      <ChatRoute client={client} daemonId={daemonId} ferretId={ferretId} key={`${daemonId}\u0000${ferretId}`} />
+      <ChatRoute
+        client={client}
+        daemonId={daemonId}
+        embedded={embedded}
+        ferretId={ferretId}
+        key={`${daemonId}\u0000${ferretId}`}
+      />
     </ConversationOutbox>
   );
 }
@@ -118,9 +124,11 @@ interface ChatRouteProps {
   readonly client: PluginClient;
   readonly daemonId: string;
   readonly ferretId: string;
+  /** Drawn under an agenda item: the conversation alone (`SessionChatPageProps.embedded`). */
+  readonly embedded: boolean;
 }
 
-function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
+function ChatRoute({ client, daemonId, embedded, ferretId }: ChatRouteProps) {
   const router = useOptionalRouter();
   const navigate = router?.navigate;
   const { controls } = useDaemonControls(daemonId);
@@ -331,6 +339,7 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
             client={client}
             conversationSearch={conversationSearch}
             daemonId={daemonId}
+            embedded={embedded}
             entries={placedEntries}
             history={history}
             onCancel={cancelSend}

@@ -87,6 +87,12 @@ export interface SessionChatPageProps {
   readonly chatWidth?: ChatWidthPreference;
   /** A phone's drawer layout: the composer is compact. */
   readonly compact?: boolean;
+  /**
+   * Drawn UNDER something else (an agenda item's ask): only the conversation — issue line, transcript, question or
+   * composer. No `ferret.toolbar` and no `ferret.side` (terminals, browser, files, Warden…): viewing an item must not
+   * open a terminal, which would ask for a passkey, and the item is not the ferret's page.
+   */
+  readonly embedded?: boolean;
   readonly onRefresh?: () => void;
   /** Re-sends a send under its original id from its row in the transcript. */
   readonly onRetry?: SendRetry;
@@ -155,6 +161,7 @@ export function SessionChatPage({
   conversationSearch,
   chatWidth = 'readable',
   compact = false,
+  embedded = false,
   onRefresh,
   onRetry,
   onCancel,
@@ -249,7 +256,7 @@ export function SessionChatPage({
 
   const header = (
     <>
-      <PanelSlot daemon={daemonId} slot="ferret.toolbar" subject={ferretId} />
+      {embedded ? null : <PanelSlot daemon={daemonId} slot="ferret.toolbar" subject={ferretId} />}
       {liveSample?.compaction?.phase === 'running' || liveStream !== undefined ? (
         <div className="flex items-center gap-2 px-3" data-chat-status="">
           {liveSample?.compaction?.phase === 'running' ? <CompactionChip compaction={liveSample.compaction} /> : null}
@@ -361,11 +368,12 @@ export function SessionChatPage({
             <main
               className="flex h-full min-h-0 min-w-0 flex-col overflow-clip"
               data-daemon={daemonId}
+              {...(embedded ? { 'data-embedded': '' } : {})}
               data-session={ferretId}
             >
               {header}
               {/* The chat and the `ferret.side` panels: side by side wide; on a phone one at a time behind chips and "+". */}
-              <FerretWorkspace chat={chat} daemon={daemonId} subject={ferretId} />
+              {embedded ? chat : <FerretWorkspace chat={chat} daemon={daemonId} subject={ferretId} />}
             </main>
           </RowSlotProvider>
         </AttachmentGalleryProvider>

@@ -171,6 +171,44 @@ describe('fy ask', () => {
     should(io.stdout()).equal('answered f1/A3\n');
   });
 
+  it('should say how to answer a multiple-choice ask, and list its choices, when words were given instead', async () => {
+    const {
+      world: w,
+      io,
+      transport,
+    } = world({
+      'POST /v1/ferrets/f1/agenda': {
+        status: 400,
+        body: { error: 'A3 asks for a multiple-choice response', code: 'invalid' },
+      },
+      'GET /v1/ferrets/f1/agenda/A3': {
+        status: 200,
+        body: item('A3', {
+          ask: { kind: 'multiple-choice', options: [{ label: 'Patch the parser' }, { label: 'Rewrite the test' }] },
+        }),
+      },
+    });
+    should(await runFy(['ask', 'answer', 'f1/A3', 'maybe'], w)).equal(2);
+    const said = io.stderr();
+    should(said).containEql('A3 asks for a multiple-choice response');
+    should(said).containEql('ask answer f1/A3 --choice <label>');
+    should(said).containEql('Patch the parser');
+    should(said).containEql('Rewrite the test');
+    should(transport.sent.map(request => `${request.method} ${request.path}`)).deepEqual([
+      'POST /v1/ferrets/f1/agenda',
+      'GET /v1/ferrets/f1/agenda/A3',
+    ]);
+  });
+
+  it('should leave any other refusal of an answer as the daemon said it', async () => {
+    const { world: w, io } = world({
+      'POST /v1/ferrets/f1/agenda': { status: 403, body: { error: 'only the owner answers A3', code: 'forbidden' } },
+    });
+    should(await runFy(['ask', 'answer', 'f1/A3', 'maybe'], w)).equal(1);
+    should(io.stderr()).containEql('only the owner answers A3');
+    should(io.stderr()).not.containEql('--choice');
+  });
+
   it('should carry every v4 answer flag, and refuse two at once or none', async () => {
     const cases: [string[], unknown][] = [
       [['--approve'], { kind: 'permission', decision: 'approve' }],
