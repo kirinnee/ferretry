@@ -340,6 +340,7 @@ describe("AgentToolService — the daemon's and the worker's evidence, outside t
     live: false,
     minted: 1,
     commits: 0,
+    linkCommits: 0,
     lost: 0,
     linked: false,
     blind: false,

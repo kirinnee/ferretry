@@ -83,7 +83,7 @@ export function appOriginSet(origins: readonly string[]): ReadonlySet<string> {
 export function pairingEvidenceOf(
   document: Pick<
     BrowserInputDocument,
-    'pairingOrigins' | 'pairingCommits' | 'pairingLinked' | 'pairingBlind' | 'pairingLost'
+    'pairingOrigins' | 'pairingCommits' | 'pairingLinked' | 'pairingBlind' | 'pairingLost' | 'pairingLinkCommits'
   >,
   live: { readonly live: boolean; readonly minted: number },
   apps: ReadonlySet<string>,
@@ -101,6 +101,7 @@ export function pairingEvidenceOf(
       (total, [origin, count]) => (isApp(origin) ? total + count : total),
       0,
     ),
+    linkCommits: document.pairingLinkCommits ?? 0,
     lost: document.pairingLost ?? 0,
     linked: document.pairingLinked === true,
     blind: document.pairingBlind === true,
@@ -123,6 +124,8 @@ function evidenceMoved(before: BrowserPairingState, now: BrowserPairingState): b
   const first = before.evidence;
   const second = now.evidence;
   if (first === undefined || second === undefined) return false;
+  // A link-entered document that came and went in between, on ANY origin: the bytes it showed outlive it.
+  if (second.linkCommits !== first.linkCommits) return true;
   if (second.commits !== first.commits || second.lost !== first.lost) return true;
   return (first.app || second.app) && second.minted !== first.minted;
 }

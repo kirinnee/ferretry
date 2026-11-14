@@ -12,6 +12,7 @@ import {
   pairingEvidenceOf,
   underGuard,
 } from '../../../../src/lib/browser/runtime/pairing-guard.ts';
+import { PairingNavigationLedger } from '../../../../src/lib/browser/transport/pairing-history.ts';
 
 const refusal = () => new Error('hidden');
 
@@ -37,6 +38,7 @@ const quiet: BrowserPairingEvidence = {
   live: false,
   minted: 1,
   commits: 0,
+  linkCommits: 0,
   lost: 0,
   linked: false,
   blind: false,
@@ -331,6 +333,13 @@ describe('pairingEvidenceOf', () => {
     should([blind.app, blind.linked, blind.blind]).eql([false, false, true]);
   });
 
+  it('should carry the count of pairing links the group entered on any origin, apart from the app’s own count', () => {
+    const evidence = pairingEvidenceOf({ pairingOrigins: ['https://example.test'], pairingLinkCommits: 3 }, live, apps);
+
+    should([evidence.linkCommits, evidence.commits]).eql([3, 0]);
+    should(pairingEvidenceOf({ pairingOrigins: ['https://example.test'] }, live, apps).linkCommits).equal(0);
+  });
+
   it('should add up only the pairing links opened on an app origin, and carry the daemon’s own count of codes', () => {
     const evidence = pairingEvidenceOf(
       {
@@ -348,6 +357,7 @@ describe('pairingEvidenceOf', () => {
       live: true,
       minted: 4,
       commits: 7,
+      linkCommits: 0,
       lost: 0,
       linked: true,
       blind: false,
@@ -417,5 +427,78 @@ describe('underGuard', () => {
 
     should((answered as Error).message).equal('hidden');
     should((failed as Error).message).equal('hidden');
+  });
+});
+
+describe('holdPairingScreen — a pairing link on ANY origin, counted like the app’s', () => {
+  const outside = (linkCommits: number) => withEvidence({ app: false, ownApp: false, linkCommits });
+
+  it('should refuse an operation whose endpoints are both on an unknown origin when a link-entered document came and went', async () => {
+    const check = await holdPairingScreen(pageShowing([outside(0), outside(1)]), refusal);
+
+    should(await outcome(check())).be.instanceOf(Error);
+  });
+
+  it('should discard the answer and the error, and let an operation no link overlapped be', async () => {
+    const guard: BrowserActGuard = async guarded => await holdPairingScreen(guarded, refusal);
+
+    const answered = await outcome(underGuard(guard, pageShowing([outside(0), outside(2)]), async () => 'the code'));
+    const failed = await outcome(
+      underGuard(guard, pageShowing([outside(0), outside(2)]), async () => Promise.reject(new Error('the code'))),
+    );
+    const quietly = await outcome(underGuard(guard, pageShowing([outside(3), outside(3)]), async () => 'fine'));
+
+    should((answered as Error).message).equal('hidden');
+    should((failed as Error).message).equal('hidden');
+    should(quietly).equal('fine');
+  });
+
+  it('should count the links a group entered from the browser’s ledger, so a document that is replaced before the after-check is told (the reviewer’s probe)', async () => {
+    // Arrange — an operation on an ordinary document of an unknown deployment; the real ledger and evidence mapper
+    const apps = appOriginSet(['https://app.example.test']);
+    const ledger = new PairingNavigationLedger();
+    const ordinary = 'https://other.example.test/';
+    ledger.watch('p', ordinary);
+    const state = (): BrowserPairingState => {
+      const history = ledger.look(['p']);
+      return {
+        marked: false,
+        epochs: {},
+        evidence: pairingEvidenceOf(
+          {
+            pairingOrigins: ['https://other.example.test'],
+            pairingCommits: history.commits,
+            pairingLinked: history.linked,
+            pairingBlind: history.blind,
+            pairingLost: history.lost,
+            pairingLinkCommits: history.links,
+          },
+          { live: false, minted: 0 },
+          apps,
+        ),
+      };
+    };
+    const page: BrowserGuardPage = { document: async () => 'loader', pairing: async () => state() };
+
+    // Act
+    const result = await outcome(
+      underGuard(
+        async guarded => await holdPairingScreen(guarded, refusal),
+        page,
+        async () => {
+          ledger.committed('p', {
+            address: 'https://other.example.test/pair#v1;url=http%3A%2F%2F127.0.0.1%3A9;code=FAKE-FAKE;fp=fake',
+            mainFrame: true,
+            sameDocument: false,
+          });
+          const captured = 'FAKE-FAKE';
+          ledger.committed('p', { address: ordinary, mainFrame: true, sameDocument: false });
+          return captured;
+        },
+      ),
+    );
+
+    // Assert
+    should((result as Error).message).equal('hidden');
   });
 });

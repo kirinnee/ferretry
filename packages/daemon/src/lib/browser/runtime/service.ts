@@ -114,6 +114,8 @@ export interface BrowserPairingEvidence {
   readonly minted: number;
   /** How many addresses carrying a pairing fragment an app origin has committed in the browser. Never goes down. */
   readonly commits: number;
+  /** How many addresses carrying a pairing fragment the pages asked about entered, on ANY origin, even ones a later document replaced. */
+  readonly linkCommits: number;
   /** How many times the browser lost track of a page's navigation. Never goes down: an operation it overlapped is not to be believed. */
   readonly lost: number;
   /** Whether the document one of those pages shows now was entered by an address carrying a pairing fragment, on ANY origin. */

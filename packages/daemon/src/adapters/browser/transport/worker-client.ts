@@ -570,6 +570,7 @@ export class BrowserWorkerClient implements BrowserAutomation {
           pairingLinked?: unknown;
           pairingBlind?: unknown;
           pairingLost?: unknown;
+          pairingLinkCommits?: unknown;
         };
       } | null
     )?.document;
@@ -577,9 +578,11 @@ export class BrowserWorkerClient implements BrowserAutomation {
     const origins = parsePairingOrigins(pairing?.pairingOrigins);
     const commits = parsePairingCommits(pairing?.pairingCommits);
     const lost = pairing?.pairingLost === undefined ? 0 : parsePairingLost(pairing.pairingLost);
+    const linkCommits = pairing?.pairingLinkCommits === undefined ? 0 : parsePairingLost(pairing.pairingLinkCommits);
     // A marker, or anything about pairing that cannot be believed, is a pairing screen: FAIL CLOSED.
     const pairingScreen =
       lost === undefined ||
+      linkCommits === undefined ||
       pairing?.pairingScreen === true ||
       epochs === undefined ||
       origins === undefined ||
@@ -596,6 +599,7 @@ export class BrowserWorkerClient implements BrowserAutomation {
       ...(pairing?.pairingLinked === true ? { pairingLinked: true } : {}),
       ...(pairing?.pairingBlind === true ? { pairingBlind: true } : {}),
       ...(lost === undefined || lost === 0 ? {} : { pairingLost: lost }),
+      ...(linkCommits === undefined || linkCommits === 0 ? {} : { pairingLinkCommits: linkCommits }),
     };
   }
 

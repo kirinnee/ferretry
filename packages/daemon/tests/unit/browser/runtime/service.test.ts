@@ -1065,7 +1065,17 @@ describe('the machine agent browser — a page’s lifecycle', () => {
       {
         marked: false,
         epochs: {},
-        evidence: { app: true, ownApp: true, live: true, minted: 3, commits: 2, lost: 0, linked: true, blind: false },
+        evidence: {
+          app: true,
+          ownApp: true,
+          live: true,
+          minted: 3,
+          commits: 2,
+          linkCommits: 0,
+          lost: 0,
+          linked: true,
+          blind: false,
+        },
       },
       {
         marked: false,
@@ -1076,6 +1086,7 @@ describe('the machine agent browser — a page’s lifecycle', () => {
           live: false,
           minted: 3,
           commits: 2,
+          linkCommits: 0,
           lost: 0,
           linked: false,
           blind: false,
