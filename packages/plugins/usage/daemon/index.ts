@@ -29,7 +29,11 @@ import { openAnalyticsIndexStore } from './adapters/analytics/sqlite-analytics-s
 import { StatePricingConfiguration } from './adapters/pricing/pricing-state.ts';
 import { CachedUsageFeed } from './adapters/usage/cached-usage-feed.ts';
 import { AnalyticsTranscriptSpend } from './adapters/usage/provider-quota/analytics-spend.ts';
-import { effectiveAnalyticsPricing } from './lib/analytics/model-catalog-rates.ts';
+import { endedStatus, type WatchedOutcome } from './lib/analytics/ended-status.ts';
+import { JscStackSampler } from './adapters/performance/jsc-stack-sampler.ts';
+import { ProcessGauges } from './adapters/performance/process-gauges.ts';
+import { ProfileStackSampling } from './lib/performance/stack-sampling.ts';
+import { effectiveAnalyticsPricing, modelCatalogPricingRates } from './lib/analytics/model-catalog-rates.ts';
 import { AnalyticsIngestionService, type AnalyticsIngestCandidate } from './lib/analytics/ingestion.ts';
 import { type AnalyticsPricingRate, snapshotAnalyticsUsagePricing } from './lib/analytics/pricing.ts';
 import { AnalyticsPricingService } from './lib/analytics/pricing-service.ts';
@@ -39,7 +43,7 @@ import { SpendMeter } from './lib/budget/meter.ts';
 import { budgetAlternative, budgetedLogins } from './lib/budget/state.ts';
 import { budgetNoticeText } from './lib/budget/notice.ts';
 import { serialExecutor, type TurnUsageSource } from './lib/ports.ts';
-import { PerformanceProfiler, type ProcessReading } from './lib/performance/profiler.ts';
+import { PerformanceProfiler } from './lib/performance/profiler.ts';
 import { PerformanceRecorder } from './lib/performance/recorder.ts';
 import { IDLE_DAEMON_BUDGETS } from './lib/performance/budgets.ts';
 import {
@@ -65,9 +69,6 @@ const INGEST_BACKSTOP = milliseconds(15 * 60_000);
 const INGEST_SETTLE_MS = 30_000;
 
 const hostTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-/** The terminal status the insights index records for a stopped ferret, from how its last turn ended. */
-const STATUS_OF_OUTCOME = { completed: 'completed', interrupted: 'stopped', failed: 'failed' } as const;
 
 /** The tighter of the two windows' headroom, in percent. */
 function headroomOf(row: UsageAccountView | undefined): number | undefined {
@@ -98,7 +99,8 @@ export default implementDaemon(manifest, {
 
     // ── pricing: the owner's rate catalog, plus list prices once Logins publishes them whole ──────────────────────────────
     const pricingConfiguration = new StatePricingConfiguration(kernel.state);
-    const catalogRates = async (): Promise<readonly AnalyticsPricingRate[]> => [];
+    const catalogRates = async (): Promise<readonly AnalyticsPricingRate[]> =>
+      modelCatalogPricingRates(await needs.logins.modelPrices());
     const pricingFeed = new HttpAnalyticsPricingFeed({
       fetcher: async (url, init) => await kernel.fetch.request(url, init),
       scheduleTimeout: (onTimeout, timeoutMs) => kernel.clock.after(milliseconds(timeoutMs), onTimeout),
@@ -119,7 +121,7 @@ export default implementDaemon(manifest, {
 
     // ── insights: one row per stopped ferret, in a cache the kernel drops and the daemon rebuilds ─────────────────────────
     const opened = openAnalyticsIndexStore(kernel.state.sqlite(INSIGHTS_STATE));
-    const outcomes = new Map<string, 'completed' | 'interrupted' | 'failed'>();
+    const outcomes = new Map<string, WatchedOutcome>();
     const candidateOf = (ferret: FerretSummary): AnalyticsIngestCandidate => ({
       id: ferret.id,
       agent: ferret.login ?? null,
@@ -131,7 +133,7 @@ export default implementDaemon(manifest, {
       parent: ferret.parent ?? null,
       createdAt: ferret.createdAt,
       finishedAt: ferret.state === 'stopped' ? ferret.stateAt : null,
-      status: ferret.state === 'stopped' ? STATUS_OF_OUTCOME[outcomes.get(ferret.id) ?? 'interrupted'] : 'running',
+      status: ferret.state === 'stopped' ? endedStatus(ferret.cause, outcomes.get(ferret.id)) : 'running',
     });
     let ingestSoon: (() => void) | undefined;
     const ingestion = new AnalyticsIngestionService({
@@ -278,24 +280,19 @@ export default implementDaemon(manifest, {
 
     // ── performance: a window onto the daemon's own counters ───────────────────────────────────────────────────────────────
     const recorder = new PerformanceRecorder();
+    // "Hot functions": the runtime's own stack sampler, started by the first profile and drained for as long as the daemon runs.
+    const stackSampling = new ProfileStackSampling({
+      start: async () => await JscStackSampler.start(),
+      probe: recorder,
+      every: (intervalMs, tick) => kernel.clock.every(milliseconds(intervalMs), tick),
+    });
+    const startProfile = (seconds: number) => {
+      void stackSampling.ensure();
+      return profiler.start(seconds);
+    };
     const profiler = new PerformanceProfiler({
       recorder,
-      gauges: {
-        read: async (): Promise<ProcessReading> => {
-          const cpu = process.cpuUsage();
-          const memory = process.memoryUsage();
-          const resource = process.resourceUsage();
-          return {
-            cpuUserMicros: cpu.user,
-            cpuSystemMicros: cpu.system,
-            rssBytes: memory.rss,
-            heapUsedBytes: memory.heapUsed,
-            externalBytes: memory.external,
-            voluntaryContextSwitches: resource.voluntaryContextSwitches,
-            involuntaryContextSwitches: resource.involuntaryContextSwitches,
-          };
-        },
-      },
+      gauges: new ProcessGauges(kernel.hostFacts),
       workers: [],
       clock: { now: nowMs },
       timers: {
@@ -313,13 +310,19 @@ export default implementDaemon(manifest, {
         },
         limitations: () => [
           'The kernel does not yet hand Usage the routes, child processes, file operations or event-loop stalls it sees, so this report holds the process counters and the sampled work only.',
+          ...(platform() === 'linux'
+            ? []
+            : ['System-call counts and children’s CPU are read from /proc and exist on Linux only.']),
+          ...(stackSampling.available
+            ? []
+            : ['The runtime has no stack sampler, or it has not started, so the CPU profile is empty.']),
         ],
       },
       budgets: IDLE_DAEMON_BUDGETS,
       newId: () => kernel.ids.mint('profile'),
     });
     const performance = performanceHandlers({
-      start: seconds => profiler.start(seconds),
+      start: startProfile,
       view: id => profiler.view(id),
     });
     const pricingRoutes = pricingHandlers(pricing);
@@ -460,7 +463,7 @@ export default implementDaemon(manifest, {
           patchPricing: async patch => await pricing.patch(patch),
           previewPricing: async request => await pricing.preview(request),
           applyPricing: async request => await pricing.apply(request),
-          startProfile: seconds => profiler.start(seconds),
+          startProfile,
           profile: id => profiler.view(id),
         },
       },

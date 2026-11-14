@@ -1414,7 +1414,7 @@ export interface BindPort {
  * resolves or reaches a path; reaching one goes through a declared root.
  */
 /** A per-process file under `/proc/<pid>/` (or `/proc/self/`) that `hostFacts.procFile` reads. */
-export type ProcPidFile = 'stat' | 'status' | 'comm' | 'cmdline' | 'cgroup' | 'statm';
+export type ProcPidFile = 'stat' | 'status' | 'comm' | 'cmdline' | 'cgroup' | 'statm' | 'io';
 
 /** A machine-wide file under `/proc/` that `hostFacts.procSystemFile` reads. */
 export type ProcSystemFile = 'stat' | 'meminfo' | 'sys/kernel/pid_max' | 'net/tcp' | 'net/tcp6';

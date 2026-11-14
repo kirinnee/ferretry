@@ -37,6 +37,7 @@ import {
   ModelCatalogFileSchema,
   type ModelCatalogRefreshResult,
   type ModelCatalogsView,
+  type ModelPriceCatalog,
   ModelsStateSchema,
   type ProviderPresetCatalog,
   LOGIN_NAME,
@@ -80,6 +81,11 @@ export interface LoginsApi {
   presets(): Promise<ProviderPresetCatalog>;
   /** The model catalogs in effect and the state of the published catalog. */
   models(): Promise<ModelCatalogsView>;
+  /**
+   * The catalogs in effect with every stated list price WHOLE (cache and reasoning rates, source, day) and Claude Code's
+   * tier pins: what Usage prices a session from. Public catalog data only; no login, key or credential is in it.
+   */
+  modelPrices(): Promise<readonly ModelPriceCatalog[]>;
   /**
    * Puts ONE login's own key on ONE request to a host it names, and returns only what came back (Usage's quota read).
    * The caller names the LOGIN and the variable that carries its key, never a secret: Logins resolves the secret from
@@ -172,7 +178,15 @@ export class LoginChangeError extends Error {
 }
 
 /** Read models others and the app may call (`manifest.data.readModels`). */
-export const LOGINS_READ_MODELS = ['list', 'get', 'quota', 'presets', 'models', 'environmentTemplates'] as const;
+export const LOGINS_READ_MODELS = [
+  'list',
+  'get',
+  'quota',
+  'presets',
+  'models',
+  'modelPrices',
+  'environmentTemplates',
+] as const;
 
 // ─── events ──────────────────────────────────────────────────────────────────────────────────────────────────────
 

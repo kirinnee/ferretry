@@ -1,16 +1,20 @@
 import {
+  type FerretEndCause,
   FerretFiles,
   FerretNameSchema,
+  LoginNameSchema,
   FerretRecordSchema,
   FerretTokensFile,
   FerretTokensSchema,
 } from '@ferretry/core-ferrets/contract';
+import { isScalar } from 'yaml';
 import { join } from 'node:path';
 import type { NotCarried, StepReport } from '../report.ts';
 import { CODEX_HELD_SENTENCE, heldReason, heldRuntimes, holdsCodex } from './preview-hold.ts';
 import { previewFolder, rewriteTranscript } from '../v5/harness-paths.ts';
+import { listV4Config, readV4Yaml } from '../v4/config.ts';
 import { configs, json, paneFor, runtimeIds, runtimeName, State, type V4Config } from '../v4/ferrets.ts';
-import type { Step } from './index.ts';
+import type { Step, StepContext } from './index.ts';
 import { type DetailsSource, prepareDetails } from './ferret-details.ts';
 import { prepareLedgers } from './ferret-ledgers.ts';
 
@@ -33,6 +37,50 @@ function v4Birth(config: V4Config): 'person' | 'agent' {
   const origin = config.provenance?.origin;
   if (origin === undefined || origin === 'human') return 'person';
   return 'agent';
+}
+
+/**
+ * Why a converted ferret ended, from v4's `state.status`, for the record's `cause` (what Usage's insights read as how it
+ * ended). Only a status that says the ferret ended is mapped; a ferret v4 never finished (or one the preview only holds) has
+ * no cause. `failed` and `stalled` are an end that is a FAILURE to insights, written as `start_failed`: it is the one
+ * failed cause the Warden NEVER revives. The Warden DOES read `cause` (`reviveEventsOf`, packages/plugins/warden/daemon/
+ * fleet.ts): `terminal_gone`, `tmux_crashed`, `signal` and `agent_crashed` each rebuild a revivable death, so any of them
+ * on a converted record would restart an old ferret v4 had given up on. `start_failed`, `stopped` and `completed` are
+ * left alone for their own reasons (a test pins all three).
+ */
+export function v4EndCause(status: string | undefined): FerretEndCause | undefined {
+  switch (status) {
+    case 'completed':
+      return { kind: 'completed' };
+    case 'stopped':
+    case 'interrupted':
+      return { kind: 'stopped' };
+    case 'failed':
+    case 'stalled':
+      return { kind: 'start_failed' };
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * The login each v4 runtime names (`config/runtimes/<name>.yaml` `credential`, one login per runtime), keyed by runtime
+ * name; a runtime whose file is missing, unreadable or names no valid login is simply absent (its ferrets carry no login).
+ */
+async function runtimeLogins(ctx: StepContext): Promise<ReadonlyMap<string, string>> {
+  const logins = new Map<string, string>();
+  const listing = await listV4Config(ctx.v4.home, ctx.v4.configOverrides);
+  for (const file of listing.files) {
+    if (file.address.kind !== 'runtime') continue;
+    try {
+      const credential = (await readV4Yaml(file)).get('credential', true);
+      const parsed = isScalar(credential) ? LoginNameSchema.safeParse(credential.value) : undefined;
+      if (parsed?.success === true) logins.set(file.address.name, parsed.data);
+    } catch {
+      // A runtime file the settings step reports on; here it only means no login for its ferrets.
+    }
+  }
+  return logins;
 }
 
 export const ferretsStep: Step = {
@@ -117,6 +165,7 @@ export const ferretsStep: Step = {
       // The preview holds every ferret that is not a Claude Code one (or sits on a held runtime): no record, details
       // or token row. It would be a Codex ferret again the day a Codex login is added.
       const heldOnes = await heldRuntimes(ctx);
+      const loginOf = await runtimeLogins(ctx);
       const held: NotCarried[] = [];
       const heldIds = new Set<string>();
       const sourceRecords = (await configs(ctx.v4.sessions)).filter(config => {
@@ -160,6 +209,7 @@ export const ferretsStep: Step = {
           harness: config.harness === 'claude' ? 'claude-code' : 'codex',
           runner: 'tmux',
           runtime,
+          login: preview ? undefined : loginOf.get(runtime),
           folder: previewFolder(ctx, config.cwd, ledgers.worktreeFolders),
           state:
             stopped || preview
@@ -179,6 +229,7 @@ export const ferretsStep: Step = {
           projectId: config.projectId,
           handle: preview ? undefined : pane?.paneId,
           createdAt: config.createdAt,
+          cause: preview ? undefined : v4EndCause(status),
           stateAt: state?.finishedAt ?? state?.lastActivityAt ?? state?.startedAt ?? config.updatedAt,
         });
         records.push(record);
