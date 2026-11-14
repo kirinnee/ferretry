@@ -1,7 +1,8 @@
 import { chmod, mkdir, readdir, utimes } from 'node:fs/promises';
-import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { moveSealed } from '../sealed.ts';
+import { rebaseV4Path } from '../v4/rebase.ts';
 import { configs, info, json, runtimeIds, runtimeName } from '../v4/ferrets.ts';
 import { agentHomesRoot as targetRoot } from '../v5/harness-paths.ts';
 import type { Step } from './index.ts';
@@ -39,19 +40,6 @@ async function named<Result>(where: string, why: string, work: () => Promise<Res
   } catch (error) {
     throw error instanceof Refusal ? error : new Refusal(where, why);
   }
-}
-
-/**
- * Every home a v4 file records is the ABSOLUTE path it was written at. The v4 home is moved aside before it is converted
- * (and a copy lives somewhere else), so that path no longer exists; what survives is its shape `<old home>/fleet/homes/<name>`.
- * A recorded home of that shape is re-rooted at this home's `fleet/homes`; any other shape (an external home) is kept as
- * recorded, so it is still left out and never inspected. Nothing is widened: the copy only ever reads inside `fleet/homes`.
- */
-export function rerootHome(homes: string, recorded: string): string {
-  const old = resolve(recorded);
-  const parent = dirname(old);
-  const fleet = dirname(parent);
-  return basename(parent) === 'homes' && basename(fleet) === 'fleet' ? resolve(homes, basename(old)) : old;
 }
 
 export const harnessHomesStep: Step = {
@@ -105,15 +93,17 @@ export const harnessHomesStep: Step = {
         json(join(ctx.v4.fleet, 'manifest.json'), Manifest),
       );
       const known = new Map<string, { harness: 'claude' | 'codex'; home: string }>();
+      // A home that was moved or copied: the absolute paths v4 recorded inside its own home are re-based onto `--from`.
+      const rebase = (path: string): string => rebaseV4Path(ctx.v4.home, path);
       const inventory = [
-        ...(manifest?.accounts ?? []),
+        ...(manifest?.accounts ?? []).map(account => ({ ...account, home: rebase(account.home) })),
         ...(manifest?.runtimes ?? []).map(runtime => {
           const entry = ids?.runtimes[runtime.name];
           if (entry !== undefined && entry.id !== runtime.id)
             throw new Refusal(`${manifestFile} (and ${idsFile})`, `name runtime ${runtime.id} with two different ids`);
-          return { id: runtime.id, kind: runtime.harness, home: resolve(homes, entry?.home ?? runtime.id) };
+          return { id: runtime.id, kind: runtime.harness, home: resolve(homes, rebase(entry?.home ?? runtime.id)) };
         }),
-      ].map(runtime => ({ ...runtime, home: rerootHome(homes, runtime.home) }));
+      ];
       for (const runtime of inventory) {
         const previous = known.get(runtime.id);
         if (previous !== undefined && (previous.harness !== runtime.kind || previous.home !== runtime.home))
@@ -132,7 +122,10 @@ export const harnessHomesStep: Step = {
           ([current, value]) => current === name || value.formerNames.includes(name),
         )?.[1];
         if (entry === undefined) continue;
-        const home = rerootHome(homes, config.transcript?.home ?? resolve(homes, entry.home ?? entry.id));
+        const home =
+          config.transcript?.home === undefined
+            ? resolve(homes, rebase(entry.home ?? entry.id))
+            : rebase(config.transcript.home);
         const previous = known.get(entry.id);
         if (previous !== undefined && (previous.harness !== config.harness || resolve(previous.home) !== resolve(home)))
           throw new Refusal(
@@ -179,6 +172,7 @@ export const harnessHomesStep: Step = {
       const presentHomes = (await info(homes)) === undefined ? [] : await readdir(homes, { withFileTypes: true });
       let carriedHomes = 0;
       let omittedHomes = 0;
+      const carriedIds = new Set<string>();
       for (const source of presentHomes) {
         if (source.isSymbolicLink()) {
           links++;
@@ -202,12 +196,26 @@ export const harnessHomesStep: Step = {
           continue;
         }
         await copyTree(join(homes, name), join(targetRoot(item.harness), id), true);
+        carriedIds.add(id);
         carriedHomes++;
       }
+      // A runtime v4 recorded (its id is known) whose home sits under fleet/homes but was not carried: its conversations
+      // would be lost while the report said complete. Recorded runtimes and on-disk homes are matched on the SAME key (the
+      // runtime id): a recorded home with no folder on disk, or one only a differently-shaped folder stands in for, is named.
+      // A recorded home outside fleet/homes is never inspected and stays in the notCarried list.
+      const unmapped = [...known.entries()]
+        .filter(([id]) => !carriedIds.has(id))
+        .map(([, item]) => relative(resolve(homes), resolve(item.home)))
+        .filter(inside => inside !== '' && inside !== '..' && !inside.startsWith(`..${sep}`) && !isAbsolute(inside))
+        .sort();
       return {
         ...base,
-        status: 'converted' as const,
-        note: 'chat history is left behind: these folders are copied as opaque files only and no conversation resumes from them in v5',
+        ...(unmapped.length === 0
+          ? { status: 'converted' as const }
+          : {
+              status: 'failed' as const,
+              note: `${unmapped.length} runtime home(s) v4 recorded under fleet/homes could not be mapped to a folder carried, so they were not carried: ${unmapped.join(', ')}`,
+            }),
         sealed,
         kept: [
           {

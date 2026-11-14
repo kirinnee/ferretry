@@ -67,6 +67,7 @@ import { runtimeIds } from '../v4/ferrets.ts';
 import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
+import { isCodexHostLogin, moveToFerretryStore } from './host-logins.ts';
 import { LoginKeyHold, takeLoginKeys, v4VaultNames } from './login-keys.ts';
 
 /** Every v5 file this step writes, with its owning plugin, from the one registry of targets. */
@@ -502,6 +503,8 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
     // A plain key in a login's env is parked for the vault and written here as a reference; any other secret-shaped value
     // (and a key when no hold exists) still fails the step below, so nothing is ever left plain.
     if (ctx.loginKeys !== undefined) takeLoginKeys(document, address.name, ctx.loginKeys);
+    // A Codex login kept in the terminal's own folder is written as Ferretry's own (the Logins step makes its empty folder).
+    if (isCodexHostLogin(document)) moveToFerretryStore(document);
     // The login's spend cap moves to usage.yaml (the only place 5.0 enforces one); the login file then carries none.
     const budget = takeBudget(document);
     if (budget !== undefined) plan.budgets.set(address.name, budget);

@@ -87,6 +87,7 @@ import { configPath, v5ConfigProblem } from '../v5/write.ts';
 const LESSONS_CONFIG = CONFIG_TARGETS.LESSONS;
 import { keyPath, looksLikeKey } from '../key-path.ts';
 import { dropModeline } from '../v4/config.ts';
+import { v4Fenced } from '../v4/fence.ts';
 import { instructionsSource } from './component-files.ts';
 import type { Step, StepContext } from './index.ts';
 
@@ -509,6 +510,12 @@ async function globalSource(ctx: StepContext): Promise<string | undefined> {
 }
 
 async function convertGlobal(ctx: StepContext, tally: Tally): Promise<void> {
+  // The fence found `fleet` or `fleet/assets` to be a link before any step ran: nothing below it is looked at, not even
+  // for a missing document.
+  if (v4Fenced(ctx.v4, 'fleet/assets')) {
+    tally.notes.push('the Global lessons document (fleet/assets) is not carried: the folder is a link');
+    return;
+  }
   const source = await globalSource(ctx);
   if (source === undefined) return;
   const label = relative(ctx.v4.home, source);

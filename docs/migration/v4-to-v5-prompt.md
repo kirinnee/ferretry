@@ -149,6 +149,40 @@ daemon is up regardless.
    (a bare `fy config confirm` lists what waits), or Allow it in the app. Do not bypass this.
 5. You run `fy config check` and `fy secret use --with <NAME> -- true`; both must succeed. You never see the value.
 
+### Logins: what the owner is told before v5 starts
+
+1. **Which are listed.** The converter moves every v4 login folder (`fleet/credentials/<name>/`) to
+   `state/logins/credentials/<name>/` whole and unopened, **keeping its name**. The one exception is a Codex login kept
+   in the terminal's own folder (`store: host`): its v4 folder is not moved or followed (it may even be a link into the
+   terminal's folder) and the name gets a new, empty folder owned by Ferretry (item 4). A login folder that is a link
+   is never followed by any step. After v5 starts, `fy login ls` lists every login by that name, Claude Code and Codex
+   together, with whether each works. Every login Ferretry keeps itself that needs a sign-in is repeated under "Needs
+   sign-in:", each with its exact command. A login kept in the terminal's own folder (`store: host`) is never in that
+   section.
+2. **An old terminal sign-in keeps working.** The sign-in your own terminal holds (`~/.codex*`) is never read, moved or
+   changed by the converter or by v5, so `codex` in a terminal stays signed in as before.
+3. **When the owner must sign a Codex login in again.** For each Codex login `fy login ls` lists under "Needs sign-in:":
+   its sign-in file is empty or missing, cannot be read, has a second name (another link to it), or its sign-in has
+   expired. A Codex file that cannot be read or has a second name is shown as "Needs sign-in" and never as Ready. Do not
+   guess: the owner signs it in again with the app (Settings › Logins, open that login, "Sign in to <name>") or with
+   `fy login signin <name>` (Codex shows a code and a page to open, or a link; `--force` starts over).
+   `fy login check <name>` then re-checks it. You never see the sign-in.
+4. **Logins kept in the terminal's own folder (`store: host`).** Say both parts plainly.
+   - **A Codex login (`harness: codex`) is moved to Ferretry's own sign-in.** 5.0 cannot start a Codex ferret from the
+     terminal's folder, so the converter writes that login as `store: ferretry` under the **same name** (every other
+     field kept) and gives it an **empty, private** sign-in folder. It copies, links and reads nothing of the terminal's
+     sign-in. The converter's summary lists each one: "moved to Ferretry's own sign-in; needs one sign-in:
+     fy login signin <name>". List them for the owner by name. The owner runs `fy login signin <name>` **once for each**
+     (Codex shows a code and a page to open), then `fy login check <name>`. Until then `fy login ls` lists it under
+     "Needs sign-in:". You never see the sign-in.
+   - **A Claude login (`harness: claude`) stays `store: host`, with no step.** 5.0 starts a Claude ferret from the
+     terminal's own sign-in as v4 did, and `fy login ls` shows it as shared with the terminal. Its terminal sign-in and
+     configuration are untouched (v4's folder of that name, which held at most `usage.json`, moves as an empty one).
+     Signing it in or out happens with `claude` in the terminal.
+   - The terminal's own sign-in (`~/.claude*`, `~/.codex*`, the keychain) is never read or changed, and keeps working.
+5. **Links v4 made.** Links inside the v4 account and shared-history folders (`fleet/homes`, `fleet/shared`,
+   `fleet/bin`) are not carried: the summary lists each by path as a note, and 5.0 rebuilds them.
+
 ## What is kept, item by item
 
 Tell the owner this list before `start`, and say which items the converter summary showed as converted.
@@ -167,7 +201,7 @@ Tell the owner this list before `start`, and say which items the converter summa
 | Changes you had confirmed that loosen a setting (e.g. skipping agent permissions, a raised cap)                                    | **Kept**            | your v4 confirmations move with them, so v5 does not ask again. If v4 was still waiting for you to confirm a change when it stopped, none are carried and v5 asks again (the summary names the file)                                                                                         |
 | MCP server sign-ins (OAuth)                                                                                                        | **Kept**            | the sign-in records move, and the sealed refresh tokens move byte for byte with the vault key that opens them                                                                                                                                                                                |
 | Security log (pairings, grants, secrets used)                                                                                      | **Kept, in part**   | the v4 logs are merged into one v5 log, names and ids only, EXCEPT the Gate kept-bucket and grant audit history, which is left behind                                                                                                                                                        |
-| Harness sign-ins                                                                                                                   | **Kept**            | the sign-in folders move whole; never read                                                                                                                                                                                                                                                   |
+| Harness sign-ins                                                                                                                   | **Kept**            | the owned sign-in folders move whole, never read; a Codex `store: host` login gets a new empty owned folder (sign in once), and a Claude one stays in the terminal                                                                                                                           |
 | Secrets                                                                                                                            | **Kept**            | the sealed vault and its key move byte for byte; no existing value is ever opened. A key v4 had saved in plain text in a login file is sealed into the vault as `LOGIN_<ID>_<VAR>` and the login file names it with `${secret:…}` (listed by name in the summary)                            |
 | Paired phones and browsers, passkeys, unlock settings, push                                                                        | **Kept**            | the daemon identity, device public keys, grants, passkey ids and push keys move as they are. See **Devices and passkeys** below                                                                                                                                                              |
 | Admin and warden tokens                                                                                                            | **Kept**            | moved byte for byte, never opened; `fy` keeps working without signing in again                                                                                                                                                                                                               |
@@ -201,7 +235,7 @@ for a fake home, never a real one) and is never used on the owner's machine.
 2. Resume one stopped ferret with the owner; it continues its old conversation.
 3. Open one card with history and links. Show the owner every `REVIEW` row of `verify` (lane differences, fallback
    callsigns, dropped titles) and let them decide.
-4. `fy ask show <id>` for the answered ask the owner named: the answer is there. `fy login ls`: every login is signed in.
+4. `fy ask show <id>` for the answered ask the owner named: the answer is there. `fy login ls` lists every login by name, Codex ones included. Anything under "Needs sign-in:" is signed in again as in the Logins section above; name each `store: host` Codex login the converter moved until the owner has run `fy login signin <name>` for it. A `store: host` Claude login needs nothing and shows as shared with the terminal.
 5. Reload the app on one paired phone: it connects without pairing and unlocks with its passkey.
 6. `fy secret use --with <NAME> -- true` (owner's yes) for one secret by name. It must succeed; you never see the value.
 
