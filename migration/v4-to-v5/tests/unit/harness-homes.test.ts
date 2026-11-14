@@ -128,3 +128,78 @@ test('a linked runtime home is recorded as a gap without reading its target', as
   expect(report.sealed).toHaveLength(0);
   expect(report.kept.find(item => item.what.startsWith('links omitted'))?.count).toBe(1);
 });
+
+// The v4 files record ABSOLUTE paths of the place they were written. The home is moved aside before it is converted
+// (and may be copied), so those paths point at a folder that is no longer where the home is.
+const OLD_HOME = '/somewhere/else/entirely/home';
+
+test('a runtime home recorded at the home the v4 files were written in (now moved) still converts', async () => {
+  await f.put('fleet/manifest.json', {
+    version: 1,
+    accounts: [{ id: RUNTIME, kind: 'claude', home: `${OLD_HOME}/fleet/homes/${RUNTIME}` }],
+    runtimes: [{ id: RUNTIME, name: 'claude-work', harness: 'claude' }],
+  });
+  await f.put('fleet/ids.json', { version: 1, runtimes: { 'claude-work': { id: RUNTIME, formerNames: [] } } });
+  await f.session('f1', {
+    harness: 'claude',
+    agent: 'claude-work',
+    transcript: {
+      v: 1,
+      home: `${OLD_HOME}/fleet/homes/${RUNTIME}`,
+      harnessSessionId: '22222222-2222-4222-8222-222222222222',
+      identity: 'minted',
+      file: `${OLD_HOME}/fleet/homes/${RUNTIME}/projects/p/22222222-2222-4222-8222-222222222222.jsonl`,
+      resolvedAt: '2026-11-01T00:00:00.000Z',
+    },
+  });
+  await f.put(`fleet/homes/${RUNTIME}/.claude.json`, { user: 'FAKE-STATE' });
+  const report = await harnessHomesStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect(report.kept.find(item => item.what.startsWith('runtime homes'))?.count).toBe(1);
+  expect(await stat(join(f.to, 'state/claude-code/agent-homes', RUNTIME, '.claude.json'))).toBeDefined();
+});
+
+test('a home recorded outside any fleet/homes folder is still left out, not converted', async () => {
+  await f.put('fleet/manifest.json', {
+    version: 1,
+    accounts: [{ id: RUNTIME, kind: 'claude', home: `/external/user-home/${RUNTIME}` }],
+  });
+  await f.put(`fleet/homes/${RUNTIME}/.claude.json`, { user: 'FAKE-STATE' });
+  const report = await harnessHomesStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect(report.kept.find(item => item.what.startsWith('homes omitted'))?.count).toBe(1);
+});
+
+test('two records that disagree about a runtime fail naming both files and the runtime, never a value', async () => {
+  await f.put('fleet/manifest.json', {
+    version: 1,
+    accounts: [{ id: RUNTIME, kind: 'claude', home: join(f.from, 'fleet/homes', RUNTIME) }],
+    runtimes: [{ id: RUNTIME, name: 'codex-work', harness: 'codex' }],
+  });
+  const report = await harnessHomesStep.run(f.ctx());
+  expect(report.status).toBe('failed');
+  expect(report.note).toContain('fleet/manifest.json');
+  expect(report.note).toContain(RUNTIME);
+  expect(report.note).not.toContain(f.from);
+});
+
+test('a malformed document is named by its path inside the home', async () => {
+  await f.put('fleet/ids.json', { version: 'FAKE-SECRET' });
+  const report = await harnessHomesStep.run(f.ctx());
+  expect(report.status).toBe('failed');
+  expect(report.note).toContain('fleet/ids.json');
+  expect(report.note).not.toContain('FAKE-SECRET');
+});
+
+test('a device file in a pool is refused by name (relative to the home) and stays refused', async () => {
+  await f.put('fleet/shared/claude/history.jsonl', 'FAKE-HISTORY');
+  const fifo = join(f.from, 'fleet/shared/claude/projects/pipe');
+  await mkdir(join(fifo, '..'), { recursive: true });
+  expect(Bun.spawnSync(['mkfifo', fifo]).exitCode).toBe(0);
+  const report = await harnessHomesStep.run(f.ctx());
+  expect(report.status).toBe('failed');
+  expect(report.note).toContain('fleet/shared/claude/projects/pipe');
+  expect(report.note).toContain('not a regular file');
+  expect(report.note).not.toContain(f.from);
+  expect(report.sealed).toHaveLength(0);
+});
