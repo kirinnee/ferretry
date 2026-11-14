@@ -16,6 +16,7 @@ import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/te
 import { type DaemonImplementation, definePlugin, type HookInvoker, implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import { type ModelCatalogSourcesView, ModelCatalogSourcesSchema } from '@ferretry/plugin-logins/contract';
 import { LoginPaused, LoginResumed } from '@ferretry/plugin-usage/contract';
 import type { Instant } from '@ferretry/std';
 import type { KernelPorts } from '@ferretry/kernel/contract';
@@ -53,9 +54,12 @@ async function compose(
     readonly logins?: ReturnType<typeof sampleLogin>[];
     readonly executables?: readonly string[];
     readonly ferrets?: FakeFerrets;
+    readonly sources?: ModelCatalogSourcesView;
   } = {},
 ): Promise<Composed> {
   const world = await fleetWorld();
+  const composedLogins = fakeLogins(options.logins ?? [sampleLogin('claude-you', { store: 'ferretry' })]);
+  if (options.sources !== undefined) composedLogins.setModelSources(options.sources);
   const stubbed: string[] = [];
   const real: RuntimesAssembler = ctx =>
     (options.assemble ?? hostAssembly)({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never);
@@ -63,7 +67,7 @@ async function compose(
     plugins: [runtimesDaemon(real) as DaemonImplementation<any>],
     fakes: {
       ferrets: options.ferrets ?? new FakeFerrets(),
-      logins: fakeLogins(options.logins ?? [sampleLogin('claude-you', { store: 'ferretry' })]),
+      logins: composedLogins,
       loginChanges: fakeLoginChanges(),
     },
     gate: new StandInAdmission(() => ownerStanding()),
@@ -1081,5 +1085,53 @@ describe('M2b the auto-resume switch through the composed daemon', () => {
     expect((await askSwitch({ file: { autoResume: true } }))?.decision).toEqual({ allow: true });
     const off = await askSwitch({ file: { autoResume: false } });
     expect(off?.decision).toEqual({ allow: false, reason: 'Auto-resume after restart is off on this machine' });
+  });
+});
+
+const FIXTURE_SOURCES = ModelCatalogSourcesSchema.parse({
+  catalogs: {
+    anthropic: {
+      id: 'anthropic',
+      origin: 'built-in',
+      label: 'Anthropic',
+      docs: 'https://example.invalid/anthropic',
+      verified: '2027-01-01',
+      claude: {
+        models: [
+          { id: 'claude-opus-5-5', label: 'Opus 5.5', tier: 'best', default: true, efforts: ['high'] },
+          { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', tier: 'balanced', efforts: [] },
+          { id: 'claude-haiku-5-5', label: 'Haiku 5.5', tier: 'fast', efforts: [] },
+        ],
+      },
+    },
+  },
+  presets: [],
+});
+
+describe('a runtime’s models through the composed daemon', () => {
+  it('offers the models of the login’s catalog, read from Logins, not only the profile’s model set', async () => {
+    const { host } = await compose({ sources: FIXTURE_SOURCES });
+
+    const runtimes = await host.request('GET', '/v1/runtimes');
+
+    const body = runtimes.json<{
+      runtimes: { name: string; models?: { catalog: { id: string }; choices: { id: string }[] } }[];
+    }>();
+    const runtime = body.runtimes.find(entry => entry.name === 'claude-default');
+    expect(runtime?.models?.catalog.id).toBe('anthropic');
+    expect(runtime?.models?.choices.map(choice => choice.id)).toEqual([
+      'claude-opus-5-5',
+      'claude-sonnet-5-5',
+      'claude-haiku-5-5',
+    ]);
+  });
+
+  it('shows the model set only when Logins has no catalog for the login', async () => {
+    const { host } = await compose();
+
+    const runtimes = await host.request('GET', '/v1/runtimes');
+
+    const body = runtimes.json<{ runtimes: { name: string; models?: unknown }[] }>();
+    expect(body.runtimes.find(entry => entry.name === 'claude-default')?.models).toBeUndefined();
   });
 });

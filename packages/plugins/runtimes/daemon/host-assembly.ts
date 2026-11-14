@@ -35,6 +35,7 @@ import type { RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import type { AdapterHost } from './adapters/ports.ts';
 import { refuseBeforeWriting, runtimesConfigFiles } from './adapters/runtimes-config-files.ts';
 import { fleetMounts, harnessMounts, rootHostFiles } from './adapters/root-host-files.ts';
+import { loginsModelCatalogs } from './adapters/model-sources.ts';
 import { fileFleetSetupDeps } from './adapters/setup-files.ts';
 import { unavailableSharedHistory } from './adapters/shared-history-unavailable.ts';
 import { type FleetManifest, harnessKindOfKey } from './lib/manifest.ts';
@@ -333,7 +334,7 @@ export function fileAssembly(
     readonly needs: {
       readonly logins: FleetCatalogServiceDeps['credentials'] &
         Parameters<typeof fileFleetSetupDeps>[0]['logins'] &
-        Pick<LoginsApi, 'environmentTemplates'>;
+        Pick<LoginsApi, 'environmentTemplates' | 'modelSources'>;
       readonly loginChanges: FleetCatalogServiceDeps['loginChanges'];
       readonly ferrets: Pick<FerretsApi, 'lastAutoResume'> & {
         list(): Promise<readonly { readonly state: FerretState }[]>;
@@ -374,6 +375,10 @@ export function fileAssembly(
     sessionStatuses: async () => (await ctx.needs.ferrets.list()).map(ferret => SESSION_STATUS_OF[ferret.state]),
     credentials: ctx.needs.logins,
     loginChanges: ctx.needs.loginChanges,
+    // The catalogs Logins owns, read live: what each runtime offers, and what an apply pins its tier slots to.
+    modelCatalogs: loginsModelCatalogs(ctx.needs.logins, sentence => {
+      ctx.kernel.log.warn(sentence);
+    }),
     configWriter: writeAllConfigWriter(ctx.kernel.config, configDirectory),
     locate: harness => commands.which(harness),
     // The daemon's own display name (the host name, normalised by the kernel): what `fy machine` and a copy's source say.

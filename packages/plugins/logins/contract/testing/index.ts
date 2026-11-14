@@ -18,6 +18,8 @@ import {
   LoginUsageSchema,
   type LoginView,
   LoginViewSchema,
+  type ModelCatalogSourcesView,
+  ModelCatalogSourcesSchema,
   ModelCatalogsViewSchema,
   type ModelPriceCatalog,
   ProviderPresetCatalogSchema,
@@ -54,6 +56,8 @@ export interface FakeLogins extends LoginsApi {
   setTemplates(templates: readonly EnvironmentLoginTemplate[]): void;
   /** What `modelPrices` answers (default none): the catalogs' list prices, public data. */
   setModelPrices(catalogs: readonly ModelPriceCatalog[]): void;
+  /** What `modelSources` answers (default none): the catalogs and preset slice Runtimes derives models from. */
+  setModelSources(sources: ModelCatalogSourcesView): void;
   /** Every `authorizeFetch` asked, as asked (a login, a variable, hosts; never a secret). */
   readonly spends: { readonly loginId: string; readonly variable: string; readonly hosts: readonly string[] }[];
   /** What `authorizeFetch` answers next (default `refused`). */
@@ -129,6 +133,7 @@ export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
   let logins = [...initial];
   let templates: readonly EnvironmentLoginTemplate[] = [];
   let prices: readonly ModelPriceCatalog[] = [];
+  let sources: ModelCatalogSourcesView = ModelCatalogSourcesSchema.parse({ catalogs: {}, presets: [] });
   let spendAnswer: AuthorizedOutcome = { kind: 'refused' };
   const spends: FakeLogins['spends'] = [];
   const list = (): LoginList => LoginListSchema.parse({ format: 1, machine: 'fake', logins });
@@ -141,6 +146,7 @@ export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
     models: async () =>
       ModelCatalogsViewSchema.parse({ published: { origin: 'https://example.invalid', enabled: false }, catalogs: [] }),
     modelPrices: async () => prices,
+    modelSources: async () => sources,
     authorizeFetch: async (loginId, variable, hosts) => {
       spends.push({ loginId, variable, hosts });
       return spendAnswer;
@@ -151,6 +157,9 @@ export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
     },
     setLogins: next => {
       logins = [...next];
+    },
+    setModelSources: next => {
+      sources = next;
     },
     setModelPrices: next => {
       prices = [...next];
@@ -181,5 +190,7 @@ export async function loginsConformance(make: () => LoginsApi): Promise<Result<t
   if (!ProviderPresetCatalogSchema.safeParse(await api.presets()).success) failures.push('presets() returns a catalog');
   if (!ModelCatalogsViewSchema.safeParse(await api.models()).success)
     failures.push('models() returns the catalogs view');
+  if (!ModelCatalogSourcesSchema.safeParse(await api.modelSources()).success)
+    failures.push('modelSources() returns the catalog sources');
   return failures.length === 0 ? ok(true) : err(failures);
 }

@@ -147,6 +147,8 @@ export interface FileFleetCatalogOptions {
   readonly sessionRecords?: Required<Pick<FleetCatalogServiceDeps, 'sessionRecords' | 'renameSessions'>>;
   readonly credentials: FleetCatalogServiceDeps['credentials'];
   readonly loginChanges: FleetCatalogServiceDeps['loginChanges'];
+  /** The model catalogs and presets in effect (Logins'): what each runtime offers and what an apply pins. Absent: none. */
+  readonly modelCatalogs?: FleetCatalogServiceDeps['modelCatalogs'];
   /** Writes the configuration documents of a change. GAP(kernel): plugins have no config write port. */
   readonly configWriter: RuntimeConfigWriter;
   readonly locate: FleetCatalogServiceDeps['locate'];
@@ -294,6 +296,7 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
     machineName: options.machineName,
     credentials: options.credentials,
     loginChanges: options.loginChanges,
+    ...(options.modelCatalogs === undefined ? {} : { modelCatalogs: options.modelCatalogs }),
     configWriter: options.configWriter,
     provisioner: configThenFleet(
       new FileFleetProvisioner(
