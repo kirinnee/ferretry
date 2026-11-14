@@ -268,6 +268,9 @@ export const MintedExchangeRequestSchema = z.strictObject({
   url: z.string(),
   headers: z.record(z.string(), z.string()),
   body: z.string().optional(),
-  signal: z.instanceof(AbortSignal).optional(),
+  // Read at PARSE time, never at import: `z.instanceof(AbortSignal)` would hold whichever class the global was when this module
+  // first loaded, and a process whose DOM test registered its own AbortSignal first (one `bun test` process runs many files)
+  // would then refuse every caller's real signal, so no minted sign-in was ever presented.
+  signal: z.custom<AbortSignal>(value => value instanceof AbortSignal, 'not an AbortSignal').optional(),
   maxBodyBytes: z.number().int().positive().max(MINTED_MAX_BODY_BYTES).optional(),
 });
