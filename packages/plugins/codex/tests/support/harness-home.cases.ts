@@ -205,7 +205,6 @@ export function harnessHomeCases(): void {
       expect(await readFile(join(home, 'config.toml'), 'utf8')).toBe('model = "gpt-5"\n');
 
       // A profile that names no settings component gets none, so no config.toml settings at all.
-      await rm(join(home, 'config.toml'), { force: true });
       await build(items, { selected: selectSettings() }).harness.prepareHome({
         ...spec('f2', home),
         runtime: 'bare',
