@@ -336,7 +336,11 @@ export function buildConversationA(deps: {
   /** The one lane of each ferret's `question.json`: its writer, the exact-id clear and the withdrawal (r4 #2). */
   const questionSerial = new KeyedSerialExecutor();
   /** The Agenda's card for each stored question (Asks' source `question`), for either harness: one path. */
-  const questionAsks = new QuestionAsks(asks);
+  const questionAsks = new QuestionAsks(asks, (ferret, error) =>
+    kernel.log.warn(
+      `conversation could not raise the agenda card of the question of ${ferret} and will not try again: ${String(error)}`,
+    ),
+  );
   /** Asks failing is never the question's failure: it is logged, owed and tried again on the watch's next look. */
   const askFailure =
     (what: string) =>

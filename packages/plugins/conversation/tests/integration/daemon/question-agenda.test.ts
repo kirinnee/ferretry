@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import type { AskDraft, AskRef, AskSummary, AsksApi, CloseReason } from '@ferretry/core-asks/contract';
+import {
+  type AskDraft,
+  AskDraftSchema,
+  AskRefusedError,
+  type AskRef,
+  type AskSummary,
+  type AsksApi,
+  type CloseReason,
+} from '@ferretry/core-asks/contract';
 import type { Instant } from '@ferretry/std';
 import { QuestionSchema } from '../../../contract/index.ts';
 import type { HarnessGate } from '../../../daemon/harness-seam.ts';
@@ -42,10 +50,14 @@ interface Item {
 /** The Asks port's contract as far as this source uses it: idempotent raise, open by source/entry, close by ref. */
 function fakeAsks() {
   const items: Item[] = [];
-  const fail = { raise: 0, close: 0 };
+  const fail = { raise: 0, close: 0, attempts: 0, refuse: undefined as string | undefined };
   const api: Pick<AsksApi, 'get' | 'raise' | 'open' | 'close'> = {
     get: async () => undefined,
     raise: async draft => {
+      fail.attempts += 1;
+      // The real port reads the draft first, and the board may read it and say no.
+      AskDraftSchema.parse(draft);
+      if (fail.refuse !== undefined) throw new AskRefusedError(fail.refuse);
       if (fail.raise > 0) {
         fail.raise -= 1;
         throw new Error('asks is unavailable');
@@ -103,6 +115,7 @@ function daemon(options: {
   };
   const timers: (() => void)[] = [];
   const published: string[] = [];
+  const warned: string[] = [];
   const kernel = {
     state,
     clock: {
@@ -118,7 +131,7 @@ function daemon(options: {
     },
     events: { publish: async (event: { name?: string }) => void published.push(String(event.name)) },
     ids: { mint: () => 'id' },
-    log: { info: () => undefined, warn: () => undefined },
+    log: { info: () => undefined, warn: (line: string) => void warned.push(line) },
   } as never;
   const half = buildConversationA({
     kernel,
@@ -140,7 +153,7 @@ function daemon(options: {
     run?.();
     for (let i = 0; i < 10; i += 1) await new Promise(resolve => setTimeout(resolve, 0));
   };
-  return { half, tick, published, stored: () => files.get('cody/question.json') };
+  return { half, tick, published, warned, stored: () => files.get('cody/question.json') };
 }
 
 const world = () => {
@@ -171,6 +184,63 @@ describe('a stored question reaches the Agenda as one Asks obligation', () => {
     // The renderer's value: the stored question, the daemon's proof of its transcript left out.
     expect(QuestionSchema.parse(item?.draft.ref)).toMatchObject({ toolUseId: 'call_1', text: 'Which mode?' });
     expect(published(d)).toContain('conversation.question-asked');
+  });
+
+  test("the card is a form of the question's own fields, which the board takes", async () => {
+    const w = world();
+    const d = w.boot();
+    w.events.current = [callEvent('call_1')];
+    await d.tick();
+    const [item] = w.asks.open();
+    expect(item?.draft).toMatchObject({
+      kind: 'form',
+      fields: [
+        {
+          id: '1',
+          type: 'one',
+          name: 'Mode',
+          label: 'Which mode?',
+          options: [{ label: 'Fast' }, { label: 'Slow' }],
+        },
+      ],
+    });
+  });
+
+  test('a question the board refuses is said once and never tried again, not every two seconds', async () => {
+    const w = world();
+    const d = w.boot();
+    w.asks.fail.refuse = 'a form needs at least one field (--field)';
+    w.events.current = [callEvent('call_1')];
+    for (let i = 0; i < 6; i += 1) await d.tick();
+    const attempts = w.asks.fail.attempts;
+    for (let i = 0; i < 6; i += 1) await d.tick();
+    expect(w.asks.fail.attempts).toBe(attempts);
+    expect(attempts).toBeLessThanOrEqual(2);
+    expect(d.warned.filter(line => line.includes('will not try again'))).toHaveLength(1);
+    expect(d.warned.some(line => line.includes('could not reconcile'))).toBe(false);
+  });
+
+  test('a question with no option to pick is an open question, still a card (a form has one reply box)', async () => {
+    const w = world();
+    const d = w.boot();
+    w.events.current = [
+      {
+        kind: 'tool-call',
+        timestamp: ASKED,
+        call: {
+          id: 'call_9',
+          name: 'request_user_input',
+          input: {},
+          questions: [
+            { header: 'A', question: 'Why?', multiple: false, options: [] },
+            { header: 'B', question: 'And why not?', multiple: false, options: [] },
+          ],
+        },
+      } as unknown as TranscriptEvent,
+    ];
+    await d.tick();
+    expect(w.asks.open().map(item => item.draft.kind)).toEqual(['reply']);
+    expect(w.asks.open()[0]?.draft).not.toHaveProperty('fields');
   });
 
   test('its answer (the transcript carries the result) resolves that exact item as answered', async () => {

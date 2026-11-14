@@ -1,12 +1,17 @@
 import { createHash } from 'node:crypto';
 import {
+  type AgendaFormField,
+  AgendaFormFieldSchema,
+  AskRefusedError,
   type AskSummary,
   type AsksApi,
   type CloseReason,
   type EntryId,
   EntryIdSchema,
   type SourceKey,
+  agendaFormProblems,
 } from '@ferretry/core-asks/contract';
+import { ZodError } from 'zod';
 import type { Question } from '../../../contract/index.ts';
 
 /** The ask source Conversation registers (`ask.sources:question`): the agenda draws it with the `ask:question` renderer. */
@@ -35,6 +40,38 @@ const subjectOf = (text: string): string => {
   return words.length <= MAX_SUBJECT ? words : `${words.slice(0, MAX_SUBJECT - 1)}…`;
 };
 
+/**
+ * The form a question is on the card: one field per question it asks (the first, then each of `more`), a pick-one or
+ * pick-many when it has options to pick from and the reply box when it has none. `undefined` when the board cannot hold
+ * it as a form (a form has one reply box, and its fields and options have bounds): the card is then an open question,
+ * which the owner still answers through Conversation's own route.
+ */
+function questionFields(question: Question): readonly AgendaFormField[] | undefined {
+  const asked = [question, ...(question.more ?? [])];
+  const fields = asked.map((each, index) => ({
+    id: String(index + 1),
+    type: each.options.length < 2 ? 'text' : each.multiple ? 'many' : 'one',
+    label: each.text.trim() === '' ? 'Your answer' : each.text,
+    ...(each.header === undefined || each.header.trim() === '' ? {} : { name: each.header }),
+    ...(each.options.length < 2
+      ? {}
+      : {
+          options: each.options.map(option => ({
+            label: option.label,
+            ...(option.description === undefined || option.description === ''
+              ? {}
+              : { description: option.description }),
+          })),
+        }),
+  }));
+  const parsed = AgendaFormFieldSchema.array().min(1).safeParse(fields);
+  if (!parsed.success || agendaFormProblems({ kind: 'form', fields: parsed.data }).length > 0) return undefined;
+  return parsed.data;
+}
+
+/** The board READ a raise and said no (or the draft was never a valid one): asking again says no again. */
+const isVerdict = (error: unknown): boolean => error instanceof AskRefusedError || error instanceof ZodError;
+
 type Owed =
   | { readonly kind: 'raise'; readonly ferret: string; readonly question: Question }
   | { readonly kind: 'close'; readonly entry: EntryId; readonly reason: CloseReason };
@@ -49,20 +86,32 @@ type Owed =
 export class QuestionAsks {
   readonly #owed = new Map<string, Owed>();
 
-  constructor(private readonly asks: QuestionAsksPort) {}
+  /**
+   * `refused` hears a raise the board refused: said once, never owed and never tried again, because the same question
+   * would be refused again (an Asks that could not be reached is not that, and stays owed).
+   */
+  constructor(
+    private readonly asks: QuestionAsksPort,
+    private readonly refused: (ferret: string, error: unknown) => void = () => undefined,
+  ) {}
 
-  /** The question is open: its card is on the Agenda (once). Throws when Asks failed; the raise is then owed. */
+  /**
+   * The question is open: its card is on the Agenda (once). Throws when Asks could not be reached; the raise is then
+   * owed. A question the board refuses is said once through `refused` and settles there.
+   */
   async raise(ferret: string, question: Question): Promise<void> {
     const entry = questionEntry(ferret, question.toolUseId);
     const key = `raise:${entry}`;
     try {
       // The stored file's proof of its transcript is the daemon's own; the card carries the question only.
       const { transcript: _proof, ...shown } = question;
+      const fields = questionFields(question);
       await this.asks.raise({
         source: QUESTION_SOURCE,
         ref: shown,
         entry,
-        kind: 'form',
+        kind: fields === undefined ? 'reply' : 'form',
+        ...(fields === undefined ? {} : { fields: [...fields] }),
         subject: subjectOf(question.text),
         why: `${ferret} is waiting on your answer.`,
         howToResolve: 'Answer the question here or in the ferret’s chat; the answer is typed into its own form.',
@@ -72,6 +121,11 @@ export class QuestionAsks {
       });
       this.#owed.delete(key);
     } catch (error) {
+      if (isVerdict(error)) {
+        this.#owed.delete(key);
+        this.refused(ferret, error);
+        return;
+      }
       this.#owed.set(key, { kind: 'raise', ferret, question });
       throw error;
     }

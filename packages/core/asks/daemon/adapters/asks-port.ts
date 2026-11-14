@@ -10,6 +10,7 @@ import {
   type AskKind,
   AskOwnerActionSchema,
   AskOwnerActionError,
+  AskRefusedError,
   type AskRef,
   type AskSourceSpec,
   type AsksApi,
@@ -74,11 +75,6 @@ class UnknownAskSourceError extends Error {
   constructor(source: string) {
     super(`no plugin registers the ask source "${source}" (it may be turned off), so nothing was raised`);
   }
-}
-
-/** Thrown when the engine refused a raise or a close: its own sentence. */
-class AskRefusedError extends Error {
-  override readonly name = 'AskRefusedError';
 }
 
 /** The board a draft is raised on: the ferret it is about, else the ferret raising it. */
@@ -335,6 +331,7 @@ export function asksPort(
       kind,
       ...(parsed.context === undefined ? {} : { context: parsed.context }),
       ...(ask === undefined ? {} : { ask }),
+      ...(parsed.fields === undefined ? {} : { fields: parsed.fields }),
       ...(notice ? { notice: true as const } : {}),
       ...(notice && parsed.blocking === true ? { ping: true as const } : {}),
       ...(!notice && parsed.blocking === true ? { blockingNow: true as const } : {}),
