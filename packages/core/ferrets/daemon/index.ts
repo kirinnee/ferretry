@@ -21,6 +21,7 @@ import {
   FerretFiles,
   RestartsFile,
   FerretHistoryFiles,
+  type FerretIngestEvidence,
   type FerretRecord,
   type FerretState,
   FerretsChanged,
@@ -120,7 +121,7 @@ import { ferretsMoveResume, movedTarget } from './lib/ferrets/move-resume.ts';
 import { callerIsAgent, launchOriginOf } from './lib/ferrets/launch-origin.ts';
 import type { ResumeActor } from './lib/session/resume/types.ts';
 import { SessionConfigSchema, SessionStateSchema } from './lib/protocol/session.ts';
-import { displayModel } from './lib/protocol/session-subtree.ts';
+import { displayModel, ingestEvidence } from './lib/protocol/session-subtree.ts';
 import { livePaneLimits } from './lib/ferrets/pane-limits.ts';
 import { promptOf } from './lib/ferrets/prompt.ts';
 import { buildTurnWatch, turnWatchFailureFields } from './modules/turn-watch.ts';
@@ -679,6 +680,19 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     );
   };
 
+  /**
+   * What a ferret's own documents say that the insights index needs (today's analytics candidate source): the SELECTED
+   * model and the send counter, from the same two documents `displayModelOf` reads. A ferret whose pair does not parse
+   * says nothing, so an index row is never assembled from a document the schema rejected.
+   */
+  const ingestEvidenceOf = async (ferret: FerretId): Promise<FerretIngestEvidence | undefined> => {
+    if (registry.summary(ferret) === undefined) return undefined;
+    const id = ferret as unknown as SessionId;
+    const config = SessionConfigSchema.safeParse(await sessionStore.readConfig(id).catch(() => undefined));
+    const state = SessionStateSchema.safeParse(await sessionStore.readState(id).catch(() => undefined));
+    return config.success && state.success ? ingestEvidence(config.data, state.data) : undefined;
+  };
+
   // G24: the same bounded read as today's subtree API, masked whole before excerpts are cut.
   const subtree = new SubtreeService(registry, {
     nowMs: () => kernel.clock.nowMs(),
@@ -1228,6 +1242,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         ...ferretsPort(service, needer.id),
         lastAutoResume: async () => await autoResume.summary.read(),
         displayModel: displayModelOf,
+        ingestEvidence: ingestEvidenceOf,
         // What live panes prove about their logins, read from the session documents each time and kept nowhere.
         paneLimits: async () =>
           await livePaneLimits({

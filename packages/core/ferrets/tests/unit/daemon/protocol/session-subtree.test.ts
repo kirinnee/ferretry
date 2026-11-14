@@ -3,6 +3,7 @@ import should from 'should';
 import type { SessionView } from '../../../../daemon/lib/protocol/session.ts';
 import {
   displayModel,
+  ingestEvidence,
   lastLineLength,
   parentOf,
   SUBTREE_LAST_LINE_MAX,
@@ -74,5 +75,32 @@ describe('SubtreeRowSchema last line', () => {
   it('should refuse one character over the limit and an empty line', () => {
     should(SubtreeRowSchema.safeParse(row('a'.repeat(SUBTREE_LAST_LINE_MAX + 1))).success).be.false();
     should(SubtreeRowSchema.safeParse(row('')).success).be.false();
+  });
+});
+
+describe('ingestEvidence', () => {
+  it('should carry the SELECTED model and the send counter, as v4 passed them to analytics', () => {
+    should(
+      ingestEvidence(
+        { model: 'claude-opus-5-5' },
+        { turn: 6, startedAt: '2026-11-01T00:00:00.000Z', contextWindow: 200000, contextPercent: 41 },
+      ),
+    ).deepEqual({
+      selectedModel: 'claude-opus-5-5',
+      turns: 6,
+      startedAt: '2026-11-01T00:00:00.000Z',
+      contextWindow: 200000,
+      contextEndPercent: 41,
+    });
+  });
+
+  it('should say null for what the documents do not state, never a stand-in', () => {
+    should(ingestEvidence({}, { turn: 0 })).deepEqual({
+      selectedModel: null,
+      turns: 0,
+      startedAt: null,
+      contextWindow: null,
+      contextEndPercent: null,
+    });
   });
 });

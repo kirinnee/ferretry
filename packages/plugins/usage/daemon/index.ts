@@ -70,6 +70,9 @@ const INGEST_BACKSTOP = milliseconds(15 * 60_000);
 /** How long after a turn ended its ferret's last records are settled enough to read once. */
 const INGEST_SETTLE_MS = 30_000;
 
+/** How many ferrets' documents are read at once when the insights index lists its candidates. */
+const CANDIDATE_BATCH = 16;
+
 const hostTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /** The tighter of the two windows' headroom, in percent. */
@@ -124,10 +127,29 @@ export default implementDaemon(manifest, {
     // ── insights: one row per stopped ferret, in a cache the kernel drops and the daemon rebuilds ─────────────────────────
     const opened = openAnalyticsIndexStore(kernel.state.sqlite(INSIGHTS_STATE));
     const outcomes = new Map<string, WatchedOutcome>();
-    const candidateOf = (ferret: FerretSummary): AnalyticsIngestCandidate => ({
+    // The ferret's own documents say which model it was started on and how many turns it took, and a ferret converted
+    // from v4 has no transcript this daemon can fold, so they are the only source of either. A running ferret is gated
+    // out of the index whatever it says, so only a stopped one is asked. v4 passed both through (`config.model`,
+    // `state.turn`); the transcript's own figures still win where a fold reads them (`deriveAnalyticsSessionRecord`).
+    const candidateOf = async (ferret: FerretSummary): Promise<AnalyticsIngestCandidate> => {
+      const evidence =
+        ferret.state === 'stopped' ? await needs.ferrets.ingestEvidence?.(ferret.id).catch(() => undefined) : undefined;
+      return {
+        ...candidateFrom(ferret),
+        selectedModel: evidence?.selectedModel ?? ferret.model ?? null,
+        ...(evidence === undefined
+          ? {}
+          : {
+              turns: evidence.turns,
+              startedAt: evidence.startedAt,
+              contextWindow: evidence.contextWindow,
+              contextEndPercent: evidence.contextEndPercent,
+            }),
+      };
+    };
+    const candidateFrom = (ferret: FerretSummary): AnalyticsIngestCandidate => ({
       id: ferret.id,
       agent: ferret.login ?? null,
-      selectedModel: null,
       harness: ferret.harness,
       mode: ferret.role,
       label: ferret.name,
@@ -139,7 +161,16 @@ export default implementDaemon(manifest, {
     });
     let ingestSoon: (() => void) | undefined;
     const ingestion = new AnalyticsIngestionService({
-      candidates: { listCandidates: async () => (await needs.ferrets.list()).map(candidateOf) },
+      candidates: {
+        listCandidates: async () => {
+          // In bounded batches: each read is small, but a fleet of hundreds should not hold every one open at once.
+          const ferrets = await needs.ferrets.list();
+          const candidates: AnalyticsIngestCandidate[] = [];
+          for (let at = 0; at < ferrets.length; at += CANDIDATE_BATCH)
+            candidates.push(...(await Promise.all(ferrets.slice(at, at + CANDIDATE_BATCH).map(candidateOf))));
+          return candidates;
+        },
+      },
       folds: {
         foldFor: async (ferret, aliasGroups) =>
           foldAnalyticsTurns(await turnUsage.turns(ferret).catch(() => undefined), aliasGroups),
