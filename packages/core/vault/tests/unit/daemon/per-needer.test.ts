@@ -635,13 +635,17 @@ describe('the phone approval’s reach through the Vault is by name', () => {
     expect(await accounts.observeTerminal?.(FERRET, 'build')).toEqual({ ok: false, reason: 'unsupported' });
   });
 
-  test('only Browsers is handed the raise, and it is refused while no service provides approvals', async () => {
-    const { of, core } = await world({ accounts: NONE, browsers: NONE, tenant: NONE });
+  test('only Browsers and Terminals are handed the raise, and it is refused while no service provides approvals', async () => {
+    const { of, core } = await world({ accounts: NONE, browsers: NONE, terminals: NONE, tenant: NONE });
 
     expect(of('accounts').raisePhoneApproval).toBeUndefined();
     expect(of('tenant').raisePhoneApproval).toBeUndefined();
     const ask = { target: { kind: 'browser', key: 'login' } } as const;
     expect(await of('browsers').raisePhoneApproval?.(FERRET, ask)).toEqual({
+      ok: false,
+      error: PHONE_APPROVAL_UNAVAILABLE,
+    });
+    expect(await of('terminals').raisePhoneApproval?.(FERRET, { target: { kind: 'terminal', key: 'dev' } })).toEqual({
       ok: false,
       error: PHONE_APPROVAL_UNAVAILABLE,
     });
