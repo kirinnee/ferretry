@@ -55,6 +55,13 @@ export function hypermediaNote(enabled: boolean, changed: boolean, running: bool
 export class SessionHypermediaService {
   constructor(private readonly ports: SessionHypermediaPorts) {}
 
+  /** Whether this ferret is told to use hypermedia now: what the owner set, else its mode's default. */
+  async read(ferret: string): Promise<boolean> {
+    const facts = await this.ports.facts(ferret);
+    if (facts === undefined) throw new SessionHypermediaError('not-found', `no ferret ${ferret}`);
+    return facts.enabled;
+  }
+
   async set(ferret: string, enabled: boolean): Promise<HypermediaOutcome> {
     const facts = await this.ports.facts(ferret);
     if (facts === undefined) throw new SessionHypermediaError('not-found', `no ferret ${ferret}`);

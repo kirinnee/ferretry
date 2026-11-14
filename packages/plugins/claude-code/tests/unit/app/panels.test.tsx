@@ -9,6 +9,7 @@ import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createElement, Suspense } from 'react';
 import app from '../../../app/index.ts';
+import { ferretSummary } from '@ferretry/core-ferrets/contract/testing';
 import manifest from '../../../manifest.ts';
 
 const FERRET = 'mvuc7tsf-0c3d50df';
@@ -70,7 +71,7 @@ const daemon = (prompts: readonly unknown[], answers: Readonly<Record<string, un
         if (next instanceof Error) throw next;
         return next;
       }
-      if (route === 'GET /v1/ferrets/:ferretId') return { id: FERRET, name: 'denisha' };
+      if (route === 'GET /v1/ferrets/:ferretId') return ferretSummary({ id: FERRET, name: 'denisha' });
       if (!(route in answers)) throw new Error(`no route ${route}`);
       const answer = answers[route];
       if (answer instanceof Error) throw answer;
