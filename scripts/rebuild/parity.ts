@@ -14,6 +14,7 @@ import { existsSync, readFileSync, writeFileSync, statSync, mkdirSync } from 'no
 import { dirname, join, relative, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parseSync } from 'oxc-parser';
+import { CHECK_NONE_YET, CHECK_NOT_APPLICABLE } from '../validate/parity-ticks.ts';
 
 type Kind = 'R' | 'V' | 'T' | 'S' | 'J' | 'F';
 interface Row {
@@ -1843,13 +1844,22 @@ function applyReowned(all: ReadonlyMap<string, Row>) {
       throw new Error(`REOWNED names ${id}, which is not in the inventory`);
     }
     row.owner = owner;
-    // A ticked route row already names the test that proves it (kept from the registry above); moving the row to its
-    // real owner must not put the default check back, or the owner's tick loses its test path on the next regeneration.
-    const provenRoute = row.kind === 'R' && row.status.startsWith('[x]') && row.check !== 'descriptor-parity';
-    if (!provenRoute) row.check = checkOf(row.kind, row.what, stripLine(row.source), owner);
+    // A ticked row already names the test that proves it (kept from the registry above), whatever its kind; moving the
+    // row to its real owner must not put the default check back, or the tick loses its test path on the next regeneration.
+    const proven = row.status.startsWith('[x]') && row.check !== 'descriptor-parity';
+    if (!proven) row.check = checkOf(row.kind, row.what, stripLine(row.source), owner);
   }
 }
 applyReowned(unique);
+/**
+ * The check cell says only what is TRUE: a row keeps a path when that file exists, a removed-by-design row has no test
+ * to name (`n/a`), and a row whose proof file is not written yet says so (`none yet`). The owner's PLANNED parity file
+ * is never written as if it were there; `scripts/validate/parity-ticks.ts` fails any other value that is not a tracked test.
+ */
+for (const row of unique.values()) {
+  if (row.status.startsWith('removed by design')) row.check = CHECK_NOT_APPLICABLE;
+  else if (row.check !== 'descriptor-parity' && !existsSync(join(root, row.check))) row.check = CHECK_NONE_YET;
+}
 const inventory = [...unique.values()].sort(
   (a, b) =>
     owners.indexOf(a.owner) - owners.indexOf(b.owner) || a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id),

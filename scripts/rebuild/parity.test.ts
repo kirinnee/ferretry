@@ -231,7 +231,7 @@ test("regeneration keeps a ticked route row's test path, and gives a reverted ro
         })
         .join('\n'),
     );
-  const testPath = 'packages/daemon/tests/unit/routes/files.test.ts';
+  const testPath = 'packages/core/ferrets/tests/unit/routes/events.test.ts';
   rewrite(testPath, '[x]');
   expect(f.run().exitCode).toBe(0);
   expect(f.rows().find(row => row.what === what)).toMatchObject({ check: testPath, status: '[x]' });
@@ -310,4 +310,25 @@ test('BG-060 a ticked route row that REOWNED moves keeps its test path on regene
     check: 'descriptor-parity',
     status: '[ ]',
   });
+});
+
+test('a row whose proof file does not exist says `none yet`, a removed row says `n/a`, and a route keeps descriptor-parity', () => {
+  const f = fixture();
+  expect(f.run().exitCode).toBe(0);
+  const rows = f.rows();
+  // The planned parity file of the fixture's command, tool and UI rows is not there: never written as if it were.
+  const planned = rows.filter(row => row.check === 'none yet');
+  expect(planned.length).toBeGreaterThan(0);
+  for (const row of planned) expect(row.status).toBe('[ ]');
+  expect(rows.find(row => row.what === 'fy task list')!.check).toBe('n/a');
+  expect(rows.find(row => row.what === 'FY_HOME/operator-password.json')!.check).toBe('n/a');
+  expect(rows.find(row => row.what === 'GET /v1/sessions/:id/files')!.check).toBe('descriptor-parity');
+  // Only a literal or an existing test file is ever written (the repository's own tree decides which).
+  for (const row of rows)
+    expect(
+      row.check === 'descriptor-parity' ||
+        row.check === 'none yet' ||
+        row.check === 'n/a' ||
+        existsSync(join(import.meta.dir, '../..', row.check!)),
+    ).toBe(true);
 });

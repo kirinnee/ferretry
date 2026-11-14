@@ -18,6 +18,7 @@ import {
   FROZEN_IDS,
   type LedgerRow,
   type TickContext,
+  checkCellFindings,
   liveTitles,
   readKnown,
   routeWorld,
@@ -635,5 +636,72 @@ describe('the one guarantee helper names a row like a literal title (test-titles
     ];
     for (const source of strays) expect(titles(source)).toEqual([]);
     expect(titles(`${IMPORT}guarantee(['J-0052'], 'x', () => {});`, false)).toEqual([]);
+  });
+});
+
+describe('parity-ticks: every open row’s check cell is a tracked test or a literal that says why not', () => {
+  const row = (over: Partial<LedgerRow>): LedgerRow => ({
+    id: 'V-0001',
+    kind: 'V',
+    what: 'fy x',
+    name5: 'fy x',
+    check: 'packages/a/tests/unit/parity/commands.test.ts',
+    status: '[ ]',
+    ...over,
+  });
+  const tracked = new Set(['packages/a/tests/unit/parity/commands.test.ts']);
+  const messages = (rows: LedgerRow[]) => checkCellFindings(rows, tracked).map(finding => finding.message);
+
+  test('a tracked test file, `none yet`, `n/a` on a removed row, and descriptor-parity on a route all pass', () => {
+    expect(
+      messages([
+        row({}),
+        row({ id: 'V-0002', check: 'none yet' }),
+        row({ id: 'V-0003', check: 'n/a', status: 'removed by design (§1.4: no aliases)' }),
+        row({ id: 'R-0001', kind: 'R', check: 'descriptor-parity' }),
+      ]),
+    ).toEqual([]);
+  });
+
+  test('a path to a file that is not tracked is a dead pointer', () => {
+    const [message] = messages([row({ check: 'packages/a/tests/unit/parity/missing.test.ts' })]);
+    expect(message).toContain('not a tracked test file');
+    expect(message).toContain('none yet');
+  });
+
+  test('a removed row names n/a, and n/a names nothing else', () => {
+    expect(messages([row({ status: 'removed by design (§9.2)' })])[0]).toContain('write n/a');
+    expect(messages([row({ check: 'n/a' })])[0]).toContain('not');
+  });
+
+  test('descriptor-parity proves a route only', () => {
+    expect(messages([row({ check: 'descriptor-parity' })])[0]).toContain('route');
+  });
+
+  test('a ticked row is judged by its tick, not twice', () => {
+    expect(messages([row({ check: 'packages/a/tests/unit/missing.test.ts', status: '[x]' })])).toEqual([]);
+  });
+
+  test('the committed ledger has no dead pointer', () => {
+    const tsv = readFileSync(join(import.meta.dir, '../../docs/design/rebuild-parity.tsv'), 'utf8');
+    const rows = tsv
+      .trimEnd()
+      .split('\n')
+      .slice(1)
+      .map(line => {
+        const v = line.split('\t');
+        return {
+          id: v[0] ?? '',
+          kind: v[1] ?? '',
+          what: v[2] ?? '',
+          name5: v[6] ?? '',
+          check: v[8] ?? '',
+          status: v[9] ?? '',
+        };
+      });
+    const files = Bun.spawnSync(['git', '-C', join(import.meta.dir, '../..'), 'ls-files'], { stdout: 'pipe' })
+      .stdout.toString()
+      .split('\n');
+    expect(checkCellFindings(rows, new Set(files))).toEqual([]);
   });
 });
