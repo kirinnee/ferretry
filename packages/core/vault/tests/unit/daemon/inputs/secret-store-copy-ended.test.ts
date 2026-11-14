@@ -165,7 +165,7 @@ describe('a copy that ends after it was opened, pasted as a named secret (secure
     should('value' in result && result.value).match({ state: 'delivered' });
     should(await s.entries()).not.equal(before);
     should((await s.directory.list()).map(each => each.name)).eql(['OTHER', 'TOKEN']);
-    should(s.w.used).eql([{ copy: 'vercel' }]);
+    should(s.w.used).eql([{ copy: 'vercel', target: { kind: 'secret', key: 'TOKEN' } }]);
     should(s.w.stores).have.length(1);
   });
 
