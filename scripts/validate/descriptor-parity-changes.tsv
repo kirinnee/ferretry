@@ -433,3 +433,4 @@ route	POST /v1/sessions/:sessionId/surfaces/browser/tools	removed	session routes
 route	POST /v1/ferrets/:ferretId/surfaces/browser/tools	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 socket	GET /v1/sessions/:sessionId/browser/stream	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 socket	GET /v1/ferrets/:ferretId/browser/stream	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/catalog-installs/targets	added	new in 5.0 (B16): the runtimes an item can be installed into on this machine (ids, names, profile, harness), read from the item provider's runtime installer; v4 read the fleet runtime catalog (GET /v1/fleet/runtimes), which Catalogs has no plugin edge to. fleet.use, any caller, no store

@@ -84,7 +84,7 @@ describe('the providers the shell takes', () => {
 
   test('member carriers only from Connections, and none offered is none (a publisher is then unreachable)', () => {
     const carriers = {
-      rendezvousUrl: undefined,
+      rendezvous: () => Promise.resolve(undefined),
       dial: () => ({}) as never,
       drive: () => Promise.reject(new Error('not driven')),
     };

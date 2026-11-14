@@ -85,6 +85,14 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
+      route('GET /v1/catalog-installs/targets', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.fleet,
+        noStore: true,
+        audit: SKIP_READ,
+        guard: GUARD_NONE,
+      }),
       route('POST /v1/catalog-installs/project', {
         minimum: 'operator',
         caller: 'person',

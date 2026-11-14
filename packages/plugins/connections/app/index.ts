@@ -3,6 +3,7 @@ import { implementApp, type AppContext } from '@ferretry/kernel/manifest';
 import { createElement, useCallback, useEffect, useSyncExternalStore } from 'react';
 import type { PublishedCarriers } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { memberCarriers } from './carriers/member-carriers.ts';
 import { CarrierRouter } from './carriers/router.ts';
 import { bundledRelayDirectory, documentRelayDiscovery } from './discovery/hosted-relay.ts';
 import { ActiveCarrierCard } from './features/carrier/active-carrier-card.tsx';
@@ -299,4 +300,11 @@ export default provideToShell(implementApp(manifest, { build: ctx => buildConnec
   },
   carriers: ports => [connectFor(ports).router.dialer()],
   pairing: ports => connectFor(ports).pairing,
+  member: ports =>
+    memberCarriers({
+      openSocket: ports.openSocket,
+      after: ports.after,
+      now: ports.now,
+      hostedRelay: connectFor(ports).discovery.hostedRelay,
+    }),
 });

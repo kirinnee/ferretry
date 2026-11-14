@@ -19,7 +19,7 @@ import { listSecrets, type SecretList } from '../../lib/secrets.ts';
 import { fingerprintStart, shortDigest } from './catalog-review-model.ts';
 import { MarkedText, ReviewBody, WarningList } from './catalog-review-view.tsx';
 import { CatalogSheet, FailureLine } from './catalog-parts.tsx';
-import { applyCatalogInstall, previewCatalogInstall } from './catalog-installs-api.ts';
+import { applyCatalogInstall, listCatalogInstallTargets, previewCatalogInstall } from './catalog-installs-api.ts';
 import {
   type BindingPicks,
   bindableSecretNames,
@@ -66,7 +66,10 @@ export interface InstallHost {
   readonly readProjects?: (
     connection: DaemonConnection,
   ) => Promise<readonly { readonly name: string; readonly path: string }[]>;
-  /** GAP(runtimes): the runtime and profile choices are Runtimes' list, which Catalogs has no edge to; the host names them. */
+  /**
+   * The runtime and profile choices, instead of the ones the TARGET machine answers (`GET /v1/catalog-installs/targets`,
+   * read through that machine's own client). A harness or a test names them; the app leaves it unset.
+   */
   readonly runtimes?: TargetOptions['runtimes'];
 }
 
@@ -124,6 +127,50 @@ function useTargetProjects(host: InstallHost | undefined, connection: DaemonConn
   return fetched !== null && fetched.daemonId === daemonId ? fetched.projects : NO_PROJECTS;
 }
 
+/**
+ * The runtimes (each with the profile it launches with) of the machine being installed onto, read through THAT machine's
+ * own client once a file or item is open (v4's `readFleetRuntimes`, now Catalogs' own targets route). The host's own list
+ * wins when it names one. A machine that cannot answer offers none, so a project install stays possible. An answer read for
+ * another machine is never offered for this one.
+ */
+function useTargetRuntimes(
+  host: InstallHost | undefined,
+  connection: DaemonConnection,
+  createClient: CatalogClientFactory,
+  wanted: boolean,
+): TargetOptions['runtimes'] {
+  const named = host?.runtimes;
+  const [fetched, setFetched] = useState<{
+    readonly daemonId: string;
+    readonly runtimes: TargetOptions['runtimes'];
+  } | null>(null);
+  const daemonId = connection.daemonId;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the machine's id is the key; the connection object is rebuilt per render
+  useEffect(() => {
+    if (named !== undefined || !wanted) return;
+    let live = true;
+    createClient(connection)
+      .then(async client => await listCatalogInstallTargets(client))
+      .then(
+        targets => {
+          if (live)
+            setFetched({
+              daemonId,
+              runtimes: targets.runtimes.map(item => ({ runtime: item.id, profiles: [item.profile] })),
+            });
+        },
+        () => {
+          if (live) setFetched({ daemonId, runtimes: NO_RUNTIMES });
+        },
+      );
+    return () => {
+      live = false;
+    };
+  }, [named, wanted, daemonId, createClient]);
+  if (named !== undefined) return named;
+  return fetched !== null && fetched.daemonId === daemonId ? fetched.runtimes : NO_RUNTIMES;
+}
+
 /** The host names the projects: the target machine's registered ones, read from Projects' own list (views/catalogs-views.tsx). */
 export function InstallFromFileSheet(props: InstallFromFileSheetProps) {
   const projects = useTargetProjects(props.host, props.connection);
@@ -150,7 +197,7 @@ function InstallSheetBody({
   const [fileProblem, setFileProblem] = useState<string | null>(null);
   const [itemId, setItemId] = useState<string | null>(source?.itemId ?? null);
   const [draft, setDraft] = useState<TargetDraft>(preferredTarget ?? {});
-  const runtimes: TargetOptions['runtimes'] = host?.runtimes ?? NO_RUNTIMES;
+  const runtimes = useTargetRuntimes(host, connection, createClient, opened !== null);
   const [allowOlder, setAllowOlder] = useState(false);
   const [preview, setPreview] = useState<CatalogInstallPreview | null>(null);
   const [picks, setPicks] = useState<BindingPicks>({});

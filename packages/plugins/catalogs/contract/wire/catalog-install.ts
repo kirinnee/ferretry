@@ -270,3 +270,22 @@ export const CATALOG_INSTALL_REFUSALS = [
 ] as const;
 export const CatalogInstallRefusalSchema = z.enum(CATALOG_INSTALL_REFUSALS);
 export type CatalogInstallRefusal = z.infer<typeof CatalogInstallRefusalSchema>;
+
+/** `GET <CATALOG_INSTALLS_PATH>/targets`: where an item can be installed on THIS machine. */
+export const CATALOG_INSTALL_TARGETS_PATH = `${CATALOG_INSTALLS_PATH}/targets` as const;
+
+/**
+ * The runtimes an item can be installed into, with the profile each launches with (an install into a runtime lands in
+ * that profile, so a runtime is only a target together with it). Names and ids only: nothing a runtime holds.
+ */
+export const CatalogInstallTargetsSchema = z.strictObject({
+  runtimes: z.array(
+    z.strictObject({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      profile: z.string().min(1),
+      harness: z.enum(['claude', 'codex']),
+    }),
+  ),
+});
+export type CatalogInstallTargets = z.infer<typeof CatalogInstallTargetsSchema>;
