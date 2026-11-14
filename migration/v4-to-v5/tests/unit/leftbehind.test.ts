@@ -8,7 +8,7 @@ import { summarise } from '../../src/report.ts';
 import { advance, makeSandbox, type Sandbox } from './migrate-harness.ts';
 
 /**
- * Owner ruling !A516 ("Leave them"): five things are NOT carried to v5. The migration prompt (before the owner confirms)
+ * Owner ruling !A516 ("Leave them"): six things are NOT carried to v5. The migration prompt (before the owner confirms)
  * and the final report must say so in short plain lines, and say where v4's home stays. Text and report only: the
  * converter carries nothing new. Fake homes only.
  */
@@ -17,6 +17,7 @@ const SIX = [
   'browser sign-ins',
   'named agent terminals',
   'Warden machine agenda item',
+  'default routing prompt before your own routing words',
   'Gate kept-bucket and grant audit history',
 ] as const;
 const lacks = (text: string, needle: string): boolean => !text.toLowerCase().includes(needle.toLowerCase());
@@ -24,8 +25,8 @@ const lacks = (text: string, needle: string): boolean => !text.toLowerCase().inc
 const CLAIMS_CARRIED = /\b(carried over|converted|moved|kept(?!-bucket))\b/i;
 
 describe('the shared list', () => {
-  test('names exactly the five owner-ruled items, in plain words', () => {
-    expect(LEFT_BEHIND).toHaveLength(5);
+  test('names exactly the six owner-ruled items, in plain words', () => {
+    expect(LEFT_BEHIND).toHaveLength(6);
     for (const needle of SIX)
       expect(LEFT_BEHIND.some(line => line.toLowerCase().includes(needle.toLowerCase()))).toBe(true);
   });
@@ -63,7 +64,7 @@ describe('the converter report', () => {
     expect(result.report.leftBehind).toEqual([...LEFT_BEHIND]);
     // Every left-behind line is a "-" item; none of them says it was carried.
     const items = printed.split('\n').filter(line => line.startsWith('  - '));
-    expect(items).toHaveLength(5);
+    expect(items).toHaveLength(6);
     for (const line of items) expect(line).not.toMatch(CLAIMS_CARRIED);
   });
 
@@ -98,8 +99,6 @@ describe('the converter report', () => {
     expect(notCarried('harness-homes')).toContain('chat history');
     expect(notCarried('gate')).toContain('kept-bucket audit history');
     expect(notCarried('access')).toContain('grant audit history');
-    // No step report anywhere says the routing prompt is lost: it is carried whole (leftbehind-routing.test.ts).
-    expect(printed).not.toMatch(/routing prompts? beyond/i);
   });
 
   test('a dry run says it too (the owner reads the dry run first)', async () => {
