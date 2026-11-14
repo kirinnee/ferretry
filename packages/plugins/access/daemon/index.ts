@@ -4,6 +4,7 @@ import { HOSTED_APP_ORIGIN, StepUpStages } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { type AccessHost, AccessRuntime } from './runtime.ts';
 import { pairingRedirectBoot } from './adapters/pairing/boot-redirect-sweep.ts';
+import { notificationsDoctor } from './lib/push/health.ts';
 import { accessPortFor } from './lib/push/reach.ts';
 
 /**
@@ -64,6 +65,8 @@ export default implementDaemon(manifest, {
         'POST /v1/unlock': route('POST /v1/unlock'),
         'POST /v1/unlock/options': route('POST /v1/unlock/options'),
       },
+      // Whether this daemon can buzz a phone (today's `notifications` row): enrolled devices and the newest push.
+      doctor: { notifications: notificationsDoctor(() => access.pushHealth()) },
       provides: {
         // Each plugin is handed its own port: `clear` is narrowed to the lines of its own namespace (docs/notifications.md).
         access: perNeeder(needer =>

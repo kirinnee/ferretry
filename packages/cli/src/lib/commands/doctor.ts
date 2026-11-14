@@ -10,7 +10,8 @@ import type { ShellVerb } from '../shell-context.ts';
 import type { VerbConflict } from '../verbs.ts';
 
 export interface Finding {
-  readonly state: 'ok' | 'warn' | 'fail';
+  /** `n/a`: not used on this host (today's `n/a` row); `note`: said for the reader and never a verdict. */
+  readonly state: 'ok' | 'warn' | 'fail' | 'note' | 'n/a';
   readonly title: string;
   readonly detail: string;
   readonly fix?: string;
@@ -136,6 +137,10 @@ function hostFindings(report: NonNullable<DoctorInput['hostChecks']>): readonly 
   const notBuilt: string[] = [];
   const findings: Finding[] = [];
   for (const check of report.checks) {
+    if (check.status === 'not_applicable') {
+      findings.push({ state: 'n/a', title: `host ${check.name}`, detail: check.summary });
+      continue;
+    }
     const state = check.status !== 'missing' ? 'ok' : check.requirement === 'required' ? 'fail' : 'warn';
     const unbuilt = state === 'warn' ? notBuiltCheck(check.summary) : undefined;
     if (unbuilt !== undefined) {
@@ -162,10 +167,12 @@ function hostFindings(report: NonNullable<DoctorInput['hostChecks']>): readonly 
       detail: 'the daemon reports it is not ready',
       fix: report.limitation,
     });
+  // Today's closing line: what a presence report does and does not prove (it never says a harness is signed in).
+  findings.push({ state: 'note', title: 'host limitation', detail: report.limitation });
   return findings;
 }
 
-const MARK = { ok: 'ok  ', warn: 'warn', fail: 'FAIL' } as const;
+const MARK = { ok: 'ok  ', warn: 'warn', fail: 'FAIL', note: 'note', 'n/a': 'n/a ' } as const;
 
 export function renderFindings(findings: readonly Finding[]): string {
   return findings

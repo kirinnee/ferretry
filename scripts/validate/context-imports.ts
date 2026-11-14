@@ -59,8 +59,11 @@ export function refusal(edge: ImportEdge): string | undefined {
       if (to === 'contract' || to === 'contract-testing') return undefined;
       return `contract/testing imports only its contract and other contracts' testing, not ${to}`;
     }
-    // A half: its own area, its manifest and its contract.
+    // A half: its own area, its manifest and its contract. The Kernel's app half has the kernel's own: its manifest
+    // (`plugin.ts`), the manifest SDK and the contract, the three every other half reaches by package name.
     if (to === from || to === 'manifest' || to === 'contract') return undefined;
+    if (from === 'app' && (to === 'kernel-plugin' || to === 'kernel-manifest' || to === 'kernel-contract'))
+      return undefined;
     return `the ${from} half imports its own ${to} files; halves share only the manifest and the contract`;
   }
 

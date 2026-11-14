@@ -24,6 +24,7 @@ import { HostCodexProbe } from './adapters/probe.ts';
 import { CodexAppServerCatalog } from './adapters/app-server-catalog.ts';
 import { HeldFastCatalog } from './adapters/held-catalog.ts';
 import { codexUpdateRoutes, HarnessUpdateService, locateCodex } from './lib/index.ts';
+import { codexDoctor } from './lib/doctor.ts';
 import { fastStartDecision } from './lib/fast-mode.ts';
 import { codexHooksSource, codexSettingsSource } from './lib/profile-components.ts';
 import { codexProjectApprovals } from './lib/project-approvals.ts';
@@ -144,6 +145,8 @@ export default implementDaemon(manifest, {
 
     return {
       routes,
+      // Which `codex` this host runs and by which rule (today's `codex` row), by the same location every start uses.
+      doctor: { 'codex-paths': codexDoctor(locate) },
       // `approvedProjectServers` is always `not-taken` (Codex takes no `.mcp.json` server's sign-in, as today); MCP
       // answers `not-taken` for a Codex launch without asking, so this is the contract's answer, not MCP's gate.
       provides: { codex: { view, discovery, approvedProjectServers: codexProjectApprovals } },

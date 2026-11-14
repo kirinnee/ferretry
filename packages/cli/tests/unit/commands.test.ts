@@ -377,6 +377,40 @@ describe('fy doctor', () => {
       should(io.stdout()).containEql('warn  Not built yet in this build (nothing checked): chrome');
     });
 
+    it('V-0257 should print v4’s inventory: a not-applicable service manager as n/a, a missing alternative harness as a warning, and the limitation after the host rows', async () => {
+      const { world, io } = healthyWorld(
+        report([
+          check({
+            name: 'claude',
+            requirement: 'alternative',
+            summary: '/usr/bin/claude  (inherited environment — PATH)',
+          }),
+          check({
+            name: 'codex',
+            requirement: 'alternative',
+            status: 'missing',
+            summary: 'not found in the inherited environment, nor in PATH',
+            impact: 'no codex session can start on this host',
+          }),
+          check({
+            name: 'launchctl',
+            requirement: 'capability',
+            status: 'not_applicable',
+            summary: 'not used on this operating system',
+          }),
+        ]),
+      );
+      should(await runFy(['doctor'], world)).equal(0);
+      const lines = io.stdout().split('\n');
+      should(lines).containEql('ok    host claude: /usr/bin/claude  (inherited environment — PATH)');
+      should(lines).containEql('warn  host codex: not found in the inherited environment, nor in PATH');
+      should(lines).containEql('      fix: no codex session can start on this host');
+      should(lines).containEql('n/a   host launchctl: not used on this operating system');
+      should(lines.indexOf('note  host limitation: presence only')).above(
+        lines.indexOf('n/a   host launchctl: not used on this operating system'),
+      );
+    });
+
     it('should warn, not fail, when the report is refused or not readable', async () => {
       const refused = healthyWorld({ error: 'no' });
       refused.transport.replies[0] = { status: 403, body: { error: 'not allowed' } };

@@ -55,6 +55,8 @@ export function areaOf(pkg: WorkspacePackage, file: string): Area {
     if (rel.startsWith('host/') || rel.startsWith('src/')) return 'kernel-host';
     if (rel === 'plugin.ts') return 'kernel-plugin';
     if (rel === 'worker.ts') return 'kernel-worker';
+    // The Kernel's own app half (Settings › Files, Doctor, Host checks): browser code like any other app half.
+    if (rel.startsWith('app/')) return 'app';
     return 'other';
   }
   if (rel.startsWith('contract/testing/')) return 'contract-testing';
@@ -89,6 +91,7 @@ function areaOfSubpath(pkg: WorkspacePackage, subpath: string): Area {
       plugin: 'kernel-plugin',
       // A worker thread's opener for the sqlite files its half granted: daemon-side code only.
       worker: 'kernel-worker',
+      app: 'app',
     };
     return kernelAreas[subpath] ?? 'other';
   }

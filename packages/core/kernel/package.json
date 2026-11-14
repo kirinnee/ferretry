@@ -22,11 +22,25 @@
     "./plugin": "./plugin.ts",
     "./wire": "./wire.ts",
     "./session": "./session.ts",
-    "./worker": "./worker.ts"
+    "./worker": "./worker.ts",
+    "./app": "./app/index.ts"
   },
   "dependencies": {
     "@ferretry/std": "workspace:*",
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "react": "^19.0.0",
+    "lucide-react": "^0.468.0"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "devDependencies": {
+    "@ferretry/app": "workspace:*",
+    "@happy-dom/global-registrator": "^20.11.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-test-renderer": "^19.0.0",
+    "@types/react-test-renderer": "^19.0.0",
+    "happy-dom": "20.14.6",
+    "playwright-core": "1.62.1"
+  }
 }

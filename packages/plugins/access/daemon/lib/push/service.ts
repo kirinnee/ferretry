@@ -73,7 +73,14 @@ export interface PushServiceOptions {
  * changes remain deliberately silent so native harness notifications are not duplicated.
  */
 export class PushService {
+  #latest: { readonly at: string; readonly delivered: number; readonly failed: number } | undefined;
+
   constructor(private readonly options: PushServiceOptions) {}
+
+  /** The newest push that went to at least one enrolled device since this run began (memory only), for `fy doctor`. */
+  latestOutcome(): { readonly at: string; readonly delivered: number; readonly failed: number } | undefined {
+    return this.#latest;
+  }
 
   /** The application-server key a browser subscribes with. The private half is unreachable from here. */
   async publicKey(): Promise<string> {
@@ -212,6 +219,8 @@ export class PushService {
     const expired = addressed.filter((_, index) => outcomes[index] === 'expired').map(record => record.id);
     if (expired.length > 0) await this.options.store.forget(expired);
     const delivered = outcomes.filter(outcome => outcome === 'delivered').length;
+    if (outcomes.length > 0)
+      this.#latest = { at: this.options.clock.now(), delivered, failed: outcomes.length - delivered };
     return PushDeliveryResultSchema.parse({ delivered, failed: outcomes.length - delivered });
   }
 

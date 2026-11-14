@@ -22,6 +22,7 @@ import { DialogAnswerService } from './lib/dialog/service.ts';
 import { PermissionAnswerService } from './lib/permission/service.ts';
 import { isConversationId } from './lib/harness/claude-path.ts';
 import { fastStartDecision } from './lib/harness/fast-mode.ts';
+import { claudeCodeDoctor } from './lib/harness/doctor.ts';
 import { claudeHooksSource, claudeSettingsSource } from './lib/profile-components.ts';
 import { ClaudeProjectApprovals } from './lib/project-approvals.ts';
 import { dialogRoute, permissionRoute, promptRoute, updateStartRoute, updateViewRoute } from './lib/routes.ts';
@@ -125,6 +126,8 @@ export default implementDaemon(manifest, {
         'POST /v1/ferrets/:ferretId/permission': permissionRoute(permission),
         'POST /v1/ferrets/:ferretId/dialog': dialogRoute(dialog),
       },
+      // Which `claude` this host runs and by which rule (today's `claude` row), by the same location every start uses.
+      doctor: { 'claude-code-paths': claudeCodeDoctor(() => location.locate()) },
       provides: {
         claudeCode: {
           view: async () => {

@@ -10,7 +10,7 @@
       "project": ["**/*.ts"]
     },
     "packages/core/kernel": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts", "tests/**/fixtures/**/*.{ts,tsx}"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/core/*": {
