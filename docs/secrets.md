@@ -407,6 +407,8 @@ There is one narrow exception, for a ferret's launch environment only. A variabl
 lands while a ferret is starting does not stop that ferret. It names nothing a plain reference could not.
 Anywhere else, or inside a longer value, it is plain text.
 
+A second narrow reach, for `fy mcp check` only: a plugin whose manifest declares `permissions.profileSecrets` (MCP) may put into the ONE command it starts for a runtime, besides the secrets its own server entries name, exactly the names that runtime's profile references (Runtimes answers which, afresh each call; `VaultApi.childEnvironmentForRuntime`). The runtime's own launch already puts those secrets into the same server. It returns a sealed handle the kernel opens at exec time, never a value; any other name is refused by name, and nothing is kept after the call.
+
 ### A login's variables and a repository's own Claude settings
 
 **A project's own `.claude` settings win over a login's environment** (as in v4 before 4.291.9; owner decision, !A500). Claude Code

@@ -11,6 +11,7 @@ import {
   StartDecide,
 } from '@ferretry/core-ferrets/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
+import { ProfileSecrets } from '@ferretry/core-vault/contract';
 import {
   FerretsPort,
   INSTRUCTION_ITEMS,
@@ -277,6 +278,8 @@ export default definePlugin({
       // Ferrets asks which harness and login a runtime starts with (a start that names a runtime); only this plugin answers.
       { hook: RuntimeStart, key: 'runtimes' },
       { hook: LaunchParts },
+      // The Vault asks which secrets a runtime's profile references, for a check's command only (`ProfileSecrets`).
+      { hook: ProfileSecrets, key: 'profiles' },
     ],
     offers: [
       { hook: ProfileMcpSource },

@@ -569,6 +569,13 @@ export class FakeVault implements VaultApi {
     childValues.set(handle, Object.freeze(resolved.value));
     return ok(handle);
   }
+  /** The fake narrows nothing (the real Vault's reach is tested against the real Vault): a runtime's check is a plain environment. */
+  async childEnvironmentForRuntime(
+    _runtime: string,
+    env: Readonly<Record<string, string>>,
+  ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>> {
+    return await this.childEnvironment('runtime-check' as FerretId, env);
+  }
   async raiseInput(_ferret: FerretId, _raise: InputRaise): Promise<Result<InputRequestId, string>> {
     this.#nextInput += 1;
     const id = this.#nextInput.toString(16).padStart(32, '0') as InputRequestId;

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { LoginChangesPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
 import { AutoResumeDecide, LaunchParts, RuntimeStart, StartDecide } from '@ferretry/core-ferrets/contract';
+import { ProfileSecrets } from '@ferretry/core-vault/contract';
 import { ITEM_NAME_PATTERN as StdItemNamePattern } from '@ferretry/std';
 import {
   INSTRUCTION_ITEMS,
@@ -167,6 +168,7 @@ describe('runtimes contract', () => {
       { hook: StartDecide },
       { hook: RuntimeStart, key: 'runtimes' },
       { hook: LaunchParts },
+      { hook: ProfileSecrets, key: 'profiles' },
     ]);
     expect(manifest.needs.loginChanges).toBe(LoginChangesPort);
     expect(LoginsUsedBy.takers).toEqual(['runtimes']);

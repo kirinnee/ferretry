@@ -247,6 +247,12 @@ export interface Permissions {
    * other non-core plugin lists only the names it may use or mints.
    */
   readonly secretNamePicker?: true;
+  /**
+   * It starts a command for a RUNTIME (MCP's check) and may put into that one child exactly the secrets the runtime's
+   * profile references (`VaultApi.childEnvironmentForRuntime`; Runtimes answers which). Not a general grant: no other name,
+   * no value, only for the call, and only a non-core plugin that declares it is handed the method.
+   */
+  readonly profileSecrets?: true;
   /** It reads this machine's `/proc` and `/sys` facts through `kernel.hostFacts` (today's Terminals). */
   readonly hostFacts?: true;
   /**

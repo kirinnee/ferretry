@@ -17,6 +17,7 @@
 import type { ConfigCollectionDef, ConfigFileDef, DoctorFinding } from '@ferretry/kernel/contract';
 import { implementDaemon, type DaemonContext } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
+import { profileSecretNames } from './lib/service/profile-references.ts';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
 import {
   MODEL_SET_ITEMS,
@@ -504,6 +505,17 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           // A start's own compaction trigger is judged against its model's window, and the facts launch.parts uses are read
           // here; with no facts to read, a Claude start of a runtime is refused.
           'start.decide': launchGate.decide,
+          // The secret NAMES a runtime's profile binds (the manifest account's `secretEnv`), for the Vault to let a check
+          // put them into the one command it starts for that runtime. Names only; none when the fleet is unreadable.
+          'secrets.profile-references:profiles': {
+            references: async (runtime: string): Promise<readonly string[]> => {
+              try {
+                return profileSecretNames(await (assembly.homes ?? noHomes).homes(), runtime);
+              } catch {
+                return [];
+              }
+            },
+          },
         },
 
         subscribers: {
