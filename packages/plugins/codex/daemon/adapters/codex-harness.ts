@@ -293,9 +293,15 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
         ['AGENTS.md', agentsDocument(spec)],
         ['config.toml', configDocument(spec, items)],
       ] as const) {
-        if (text === '') continue;
         const target = root.resolve(name);
         if (!target.ok) throw new Error(`Codex's ${name} could not be placed in the ferret's home: ${target.error}`);
+        if (text === '') {
+          // Nothing to say now: a config.toml an earlier launch of this reused home left must not stay applied (the
+          // settings this profile no longer selects). Agent homes are Ferretry's only, so a FILE there is ours to clear.
+          if (name === 'config.toml' && (await root.lstat(target.value))?.kind === 'file')
+            await root.remove(target.value);
+          continue;
+        }
         await root.writeText(target.value, text);
         files.push(target.value);
       }
