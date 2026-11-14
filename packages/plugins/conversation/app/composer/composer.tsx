@@ -460,7 +460,11 @@ export function Composer({
 }: ComposerProps) {
   const client = useOptionalConversationClient() ?? UNCONNECTED;
   const clientDaemon = daemonOfClient(client);
-  const daemon = useMemo(() => daemonProp ?? daemonConnection(clientDaemon ?? ''), [daemonProp, clientDaemon]);
+  // A daemon is its id, not the object that names it: the chat page builds a fresh `daemonConnection(...)` every
+  // render, and a scope (and with it the draft stream, the send's mark and the saved draft) rebuilt from it each time
+  // forgot every send and reloaded the sent words.
+  const daemonId = daemonProp?.daemonId ?? clientDaemon ?? '';
+  const daemon = useMemo(() => daemonConnection(daemonId), [daemonId]);
   const ownApi = useMemo(() => composerApi(client), [client]);
   const api = apiProp ?? ownApi;
   const isDetached = detached !== undefined;

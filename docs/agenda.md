@@ -1115,6 +1115,11 @@ answer moves a card. So the grammars the daemon writes `sourceRef` in — `lanes
   question raised before the namespace that carries no other producer's mark): an input or secret card, a phone
   approval, a 2FA seed, a login recipe or a task plan — all `question` items too — is never closed by a console
   prompt coming and going.
+- **A carried `question:<tool id>` item is answered like the ferret's own item.** A v4 home brings the daemon's question
+  form item along; 5.0's questions are `ask:question:…` obligations, so nothing acts on a carried one's answer. The
+  owner's answer therefore rests it, waiting on its ferret, and is told to it; when it does not arrive the item reopens
+  with "Your answer didn't reach <ferret>" (`isCarriedQuestionItem`). It never closes as done with nobody told, and the
+  ferret gains no right to dismiss or close it.
 
 ## Confirming a configuration change
 

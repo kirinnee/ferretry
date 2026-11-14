@@ -35,7 +35,7 @@ import type { RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import type { AdapterHost } from './adapters/ports.ts';
 import { refuseBeforeWriting, runtimesConfigFiles } from './adapters/runtimes-config-files.ts';
 import { fleetMounts, harnessMounts, rootHostFiles } from './adapters/root-host-files.ts';
-import { loginsModelCatalogs } from './adapters/model-sources.ts';
+import { loginsLaunchStores, loginsModelCatalogs } from './adapters/model-sources.ts';
 import { fileFleetSetupDeps } from './adapters/setup-files.ts';
 import { unavailableSharedHistory } from './adapters/shared-history-unavailable.ts';
 import { type FleetManifest, harnessKindOfKey } from './lib/manifest.ts';
@@ -334,7 +334,7 @@ export function fileAssembly(
     readonly needs: {
       readonly logins: FleetCatalogServiceDeps['credentials'] &
         Parameters<typeof fileFleetSetupDeps>[0]['logins'] &
-        Pick<LoginsApi, 'environmentTemplates' | 'modelSources'>;
+        Pick<LoginsApi, 'environmentTemplates' | 'modelSources' | 'launchStores'>;
       readonly loginChanges: FleetCatalogServiceDeps['loginChanges'];
       readonly ferrets: Pick<FerretsApi, 'lastAutoResume'> & {
         list(): Promise<readonly { readonly state: FerretState }[]>;
@@ -379,6 +379,8 @@ export function fileAssembly(
     modelCatalogs: loginsModelCatalogs(ctx.needs.logins, sentence => {
       ctx.kernel.log.warn(sentence);
     }),
+    // Where Logins keeps each Ferretry-kept login, read live: how a person-run wrapper is signed in (the ferret launch hook's own projection).
+    loginStores: loginsLaunchStores(ctx.needs.logins),
     configWriter: writeAllConfigWriter(ctx.kernel.config, configDirectory),
     locate: harness => commands.which(harness),
     // The daemon's own display name (the host name, normalised by the kernel): what `fy machine` and a copy's source say.

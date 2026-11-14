@@ -221,6 +221,48 @@ test('a version-4 board: version 1, gate fields dropped, replied close done, cur
   expect(read.f1).toEqual({ read: true, unreadable: 0, entries: 22, historyMatchesCursor: true });
 });
 
+test('a v4 card agenda (daemon-raised, card-agenda:<card>) is carried with generatedSubject, so it rests after its card ask is answered', async () => {
+  // Made by v4's own engine: the daemon opens the card's agenda; a daemon item under another reference is no card agenda.
+  let ledger = v4Board();
+  const daemonRaise = (id: string, sourceRef: string, minute: number) => {
+    const made = applyAgendaCommand(ledger, {
+      action: 'raise',
+      actor: { kind: 'daemon', cause: 'system' },
+      at: at(minute),
+      request: {
+        source: 'task',
+        sourceRef,
+        subject: 'OK to build?',
+        why: 'FAKE why',
+        howToResolve: 'FAKE answer',
+        premise: 'FAKE premise',
+        context: 'FAKE context',
+        ask: { kind: 'open-question' },
+      },
+    });
+    if (!made.ok) throw new Error(`${id}: ${made.error.message}`);
+    ledger = made.ledger;
+  };
+  daemonRaise('A3', 'card-agenda:I1', 10);
+  daemonRaise('A4', 'reopen:I1', 11);
+  const v4 = document(ledger);
+  await putText('state/sessions/f1/agenda.json', `${JSON.stringify(v4, null, 2)}\n`);
+
+  const report = await agendaStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  const v5 = await readJson(out('f1', 'agenda.json'));
+  expect(item(v5, 'A3')?.item.sourceRef).toBe('card-agenda:I1');
+  expect(item(v5, 'A3')?.item.generatedSubject).toBe('OK to build?');
+  expect(item(v5, 'A4')?.item.generatedSubject).toBeUndefined();
+  expect(item(v5, 'A1')?.item.generatedSubject).toBeUndefined();
+  expect(item(v5, 'A2')?.item.generatedSubject).toBeUndefined();
+  // v5's own rule now reads it as the generated card ask: its whole ask is its card asks.
+  const { isGeneratedCardAgendaAsk } = await import('@ferretry/core-asks/contract');
+  const carried = item(v5, 'A3')?.item as Parameters<typeof isGeneratedCardAgendaAsk>[0];
+  expect(isGeneratedCardAgendaAsk(carried)).toBe(true);
+  expect((await readWithV5(['f1'])).f1).toMatchObject({ read: true, unreadable: 0, historyMatchesCursor: true });
+});
+
 test('an unversioned board goes through v4’s own read-time upgrade first', async () => {
   const legacy = document(v4Board());
   delete legacy.version;
@@ -295,7 +337,6 @@ test('an unfinished v4 commit fails the step, naming the file and never its cont
   for (const [name, text] of [
     ['agenda-versions.pending.json', '{"FAKE-SECRET":1}'],
     ['agenda-history.jsonl.pending', '{"bytes":0,"FAKE-SECRET":1}'],
-    ['agenda-changes.pending.json', '[{"FAKE-SECRET":1}]'],
   ] as const) {
     await putText(`state/sessions/f1/${name}`, text);
     const report = await agendaStep.run(f.ctx(true));

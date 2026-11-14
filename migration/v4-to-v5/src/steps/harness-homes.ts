@@ -1,5 +1,5 @@
 import { chmod, mkdir, readdir, utimes } from 'node:fs/promises';
-import { join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { moveSealed } from '../sealed.ts';
 import { configs, info, json, runtimeIds, runtimeName } from '../v4/ferrets.ts';
@@ -18,6 +18,41 @@ const Manifest = z.object({
   ),
   runtimes: z.array(z.object({ id: z.uuid(), name: z.string().min(1), harness: Harness })).optional(),
 });
+
+/**
+ * A refusal that says where and why, and nothing else: `where` is a path inside the v4 home (never absolute, never
+ * content) and `why` is a fixed sentence the owner can act on.
+ */
+class Refusal extends Error {
+  constructor(
+    readonly where: string,
+    readonly why: string,
+  ) {
+    super(`${where}: ${why}`);
+  }
+}
+
+/** Runs `work`; any failure that is not already a {@link Refusal} is reported against `where` with `why`. */
+async function named<Result>(where: string, why: string, work: () => Promise<Result>): Promise<Result> {
+  try {
+    return await work();
+  } catch (error) {
+    throw error instanceof Refusal ? error : new Refusal(where, why);
+  }
+}
+
+/**
+ * Every home a v4 file records is the ABSOLUTE path it was written at. The v4 home is moved aside before it is converted
+ * (and a copy lives somewhere else), so that path no longer exists; what survives is its shape `<old home>/fleet/homes/<name>`.
+ * A recorded home of that shape is re-rooted at this home's `fleet/homes`; any other shape (an external home) is kept as
+ * recorded, so it is still left out and never inspected. Nothing is widened: the copy only ever reads inside `fleet/homes`.
+ */
+export function rerootHome(homes: string, recorded: string): string {
+  const old = resolve(recorded);
+  const parent = dirname(old);
+  const fleet = dirname(parent);
+  return basename(parent) === 'homes' && basename(fleet) === 'fleet' ? resolve(homes, basename(old)) : old;
+}
 
 export const harnessHomesStep: Step = {
   id: 'harness-homes',
@@ -53,48 +88,64 @@ export const harnessHomesStep: Step = {
   ],
   async run(ctx) {
     const base = { id: this.id, title: this.title, notCarried: this.notCarried };
+    /** A path inside the v4 home, for a message. */
+    const inHome = (path: string) => relative(ctx.v4.home, path).split(sep).join('/');
     try {
       const homes = join(ctx.v4.fleet, 'homes');
       const shared = join(ctx.v4.fleet, 'shared');
       // Check each ancestor before descending. A fleet link could otherwise redirect into credentials.
       for (const folder of [ctx.v4.fleet, homes, shared]) {
-        const source = await info(folder);
-        if (source !== undefined && !source.isDirectory()) throw new Error('invalid folder');
+        const source = await named(inHome(folder), 'cannot be inspected', () => info(folder));
+        if (source !== undefined && !source.isDirectory()) throw new Refusal(inHome(folder), 'is not a folder');
       }
-      const ids = await runtimeIds(ctx.v4.fleet);
-      const manifest = await json(join(ctx.v4.fleet, 'manifest.json'), Manifest);
+      const idsFile = inHome(join(ctx.v4.fleet, 'ids.json'));
+      const manifestFile = inHome(join(ctx.v4.fleet, 'manifest.json'));
+      const ids = await named(idsFile, 'is not a readable runtime id list', () => runtimeIds(ctx.v4.fleet));
+      const manifest = await named(manifestFile, 'is not a readable manifest', () =>
+        json(join(ctx.v4.fleet, 'manifest.json'), Manifest),
+      );
       const known = new Map<string, { harness: 'claude' | 'codex'; home: string }>();
       const inventory = [
         ...(manifest?.accounts ?? []),
         ...(manifest?.runtimes ?? []).map(runtime => {
           const entry = ids?.runtimes[runtime.name];
-          if (entry !== undefined && entry.id !== runtime.id) throw new Error('runtime identity mismatch');
+          if (entry !== undefined && entry.id !== runtime.id)
+            throw new Refusal(`${manifestFile} (and ${idsFile})`, `name runtime ${runtime.id} with two different ids`);
           return { id: runtime.id, kind: runtime.harness, home: resolve(homes, entry?.home ?? runtime.id) };
         }),
-      ];
+      ].map(runtime => ({ ...runtime, home: rerootHome(homes, runtime.home) }));
       for (const runtime of inventory) {
         const previous = known.get(runtime.id);
         if (previous !== undefined && (previous.harness !== runtime.kind || previous.home !== runtime.home))
-          throw new Error('runtime identity mismatch');
+          throw new Refusal(
+            `${manifestFile} (and ${idsFile})`,
+            `record runtime ${runtime.id} as two different harnesses or homes`,
+          );
         known.set(runtime.id, { harness: runtime.kind, home: runtime.home });
       }
-      for (const config of await configs(ctx.v4.sessions)) {
+      const sessionConfigs = await named(inHome(ctx.v4.sessions), 'has a session record that cannot be read', () =>
+        configs(ctx.v4.sessions),
+      );
+      for (const config of sessionConfigs) {
         const name = runtimeName(config.agent);
         const entry = Object.entries(ids?.runtimes ?? {}).find(
           ([current, value]) => current === name || value.formerNames.includes(name),
         )?.[1];
         if (entry === undefined) continue;
-        const home = config.transcript?.home ?? resolve(homes, entry.home ?? entry.id);
+        const home = rerootHome(homes, config.transcript?.home ?? resolve(homes, entry.home ?? entry.id));
         const previous = known.get(entry.id);
         if (previous !== undefined && (previous.harness !== config.harness || resolve(previous.home) !== resolve(home)))
-          throw new Error('runtime identity mismatch');
+          throw new Refusal(
+            inHome(join(ctx.v4.sessions, config.id, 'config.json')),
+            `names runtime ${entry.id} with a different harness or home than ${manifestFile} does`,
+          );
         known.set(entry.id, { harness: config.harness, home });
       }
 
       const sealed: { file: string; bytes: number }[] = [];
       let links = 0;
       const copyTree = async (from: string, to: string, runtimeHome: boolean): Promise<void> => {
-        const source = await info(from);
+        const source = await named(inHome(from), 'cannot be inspected', () => info(from));
         if (source === undefined) return;
         if (source.isSymbolicLink()) {
           links++;
@@ -102,7 +153,7 @@ export const harnessHomesStep: Step = {
         }
         if (source.isDirectory()) {
           if (!ctx.dryRun) await mkdir(ctx.v5.resolve(to), { mode: 0o700, recursive: true });
-          for (const name of (await readdir(from)).sort()) {
+          for (const name of (await named(inHome(from), 'cannot be listed', () => readdir(from))).sort()) {
             if (name === '.fy' || name === '.leases' || name === '.migration-progress') continue;
             if (runtimeHome && (name === 'auth.json' || name === '.credentials.json')) continue;
             await copyTree(join(from, name), join(to, name), runtimeHome);
@@ -113,8 +164,12 @@ export const harnessHomesStep: Step = {
           }
           return;
         }
-        if (!source.isFile()) throw new Error('unsupported harness file');
-        if (!ctx.dryRun) await moveSealed(from, ctx.v5.resolve(to));
+        if (!source.isFile())
+          throw new Refusal(
+            inHome(from),
+            'is not a regular file (a device, pipe or socket is never copied); remove it from the v4 home, then run the migration again',
+          );
+        if (!ctx.dryRun) await named(inHome(from), 'cannot be copied', () => moveSealed(from, ctx.v5.resolve(to)));
         sealed.push({ file: to, bytes: source.size });
       };
 
@@ -129,7 +184,11 @@ export const harnessHomesStep: Step = {
           links++;
           continue;
         }
-        if (!source.isDirectory()) throw new Error('invalid runtime home');
+        if (!source.isDirectory())
+          throw new Refusal(
+            inHome(join(homes, source.name)),
+            'is not a folder (a runtime home is a folder); remove it from the v4 home, then run the migration again',
+          );
         const name = source.name;
         const runtime = [...known.entries()].find(([, item]) => resolve(item.home) === resolve(homes, name));
         if (runtime === undefined) {
@@ -163,11 +222,11 @@ export const harnessHomesStep: Step = {
           { what: 'homes omitted (no safe harness mapping)', count: omittedHomes },
         ],
       };
-    } catch {
+    } catch (error) {
       return {
         ...base,
         status: 'failed' as const,
-        note: 'cannot convert harness folders: invalid metadata or an unavailable file',
+        note: `cannot convert harness folders: ${error instanceof Refusal ? error.message : 'an unexpected failure (no file is named)'}`,
         kept: [],
         sealed: [],
       };

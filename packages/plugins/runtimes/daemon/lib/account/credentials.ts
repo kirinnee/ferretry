@@ -1,4 +1,4 @@
-// GAP(logins): where a login is kept is Logins' (today's `account/credentials.ts`); a runtime's plan needs it to launch, so a copy lives here until Logins' contract exports it.
+// Where a Ferretry-kept login lives is LOGINS' fact (`LoginsApi.launchStores`): this module consumes it and never spells a store path.
 /**
  * Where each credential of the account model is kept, and what a runtime needs to reach it
  * (docs/design/account-model.md §3.2 C1–C4, §8.1.1, §8.2.1).
@@ -8,9 +8,9 @@
  *
  * | harness | store      | what the runtime is given                                   | where the login lives                              |
  * | ------- | ---------- | ----------------------------------------------------------- | -------------------------------------------------- |
- * | claude  | `ferretry` | `CLAUDE_SECURESTORAGE_CONFIG_DIR=<fleet>/credentials/<id>`  | that dir's `.credentials.json`, or on macOS the keychain item named from it |
+ * | claude  | `ferretry` | `CLAUDE_SECURESTORAGE_CONFIG_DIR=<the store Logins names>`  | that dir's `.credentials.json`, or on macOS the keychain item named from it |
  * | claude  | `host`     | `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`                        | `<home>/.claude/.credentials.json`, or on macOS the bare keychain item |
- * | codex   | `ferretry` | `<runtime home>/auth.json` linked to `<fleet>/credentials/<id>/auth.json` | the canonical file                    |
+ * | codex   | `ferretry` | the wrapper links `<runtime home>/auth.json` to the file Logins names (`signInFile`)       | Logins' own `auth.json`          |
  * | codex   | `host`     | `<runtime home>/auth.json` linked to the person's own `auth.json`         | `$CODEX_HOME/auth.json`, else `<home>/.codex/auth.json` |
  * | either  | `environment` | the credential's own `env`                               | nowhere on disk                                    |
  *
@@ -37,7 +37,7 @@
  */
 import { isAbsolute, join } from 'node:path';
 import type { HarnessKind } from '../manifest.ts';
-import { ferretryCredentialDirectory } from './credential-directory.ts';
+import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
 import {
   cloudCredentialEnvironment,
   codexProviderArgs,
@@ -52,6 +52,9 @@ const CLAUDE_SECURE_STORAGE_VARIABLE = 'CLAUDE_SECURESTORAGE_CONFIG_DIR';
 
 /** The secure-storage value that selects the person's OWN Claude login: empty, never a path. */
 const HOST_CLAUDE_SECURE_STORAGE = '';
+
+/** No stores named: a `ferretry` credential then has none to reach. */
+const NO_STORES: ReadonlyMap<string, LoginLaunchStore> = new Map();
 
 /** The file Claude keeps a credential in, inside its storage directory. */
 const CLAUDE_CREDENTIAL_FILE = '.credentials.json';
@@ -74,8 +77,6 @@ export const CODEX_CREDENTIAL_STORE_FILE = 'file';
 
 /** The facts a store resolution needs from the machine. All absolute paths. */
 export interface CredentialStorePaths {
-  /** `<FY_HOME>/fleet`. */
-  readonly fleetRoot: string;
   /** The person's REAL home: Claude's default store and Codex's default home are both under it. */
   readonly userHome: string;
   /**
@@ -95,16 +96,20 @@ interface ClaudeStoreResolution {
   readonly storageDirectory: string;
   /** Where the credential file is, wherever the platform keeps it in a file. */
   readonly credentialFile: string;
-  /** A directory Ferretry must create (0700) before a sign-in can write into it; absent for `host`. */
-  readonly ownedDirectory?: string;
 }
 
-/** A Codex credential kept in ONE canonical `auth.json`; every runtime's own `auth.json` links to it. */
+/**
+ * A Codex credential. A `host` one is ONE canonical `auth.json` every runtime's own `auth.json` links to (the provisioner places
+ * the link). A `ferretry` one has no `canonicalFile`: its file is Logins' private one, which the provisioner may not link, so it
+ * names it as `signInFile` (what Logins said, never spelled here) and the runtime's WRAPPER links `auth.json` to it each time a
+ * person runs it. Nothing reads, copies or shows the file.
+ */
 interface CodexStoreResolution {
   readonly harness: 'codex';
   readonly store: 'host' | 'ferretry';
-  readonly canonicalFile: string;
-  readonly ownedDirectory?: string;
+  readonly canonicalFile?: string;
+  /** A `ferretry` one: the file Logins named, which the wrapper links the runtime home's `auth.json` to. */
+  readonly signInFile?: string;
 }
 
 /**
@@ -125,10 +130,13 @@ interface EnvironmentStoreResolution {
   readonly modelArgs?: readonly string[];
 }
 
-/** A `host` Codex credential on a machine whose Codex home cannot be named: nothing to share. */
+/**
+ * A credential with no store a runtime can reach: a `host` Codex credential on a machine whose Codex home cannot be named,
+ * or a `ferretry` one Logins names no store for. Nothing to share (fail closed).
+ */
 interface UnavailableStoreResolution {
-  readonly harness: 'codex';
-  readonly store: 'host';
+  readonly harness: HarnessKind;
+  readonly store: 'host' | 'ferretry';
   readonly unavailable: string;
 }
 
@@ -167,33 +175,45 @@ function claudeStorageDirectory(secureStorage: string, userHome: string): string
 /**
  * Where a credential is kept, and what every runtime on it is given to reach it. `harness` picks the
  * half of an environment login that drives both CLIs (`./halves.ts`); left out, it is the login's own.
+ *
+ * A `ferretry` credential is kept where LOGINS says (`stores`, from `LoginsApi.launchStores`): never a path this module
+ * spells, so a person-run wrapper and a ferret are signed in at the one store. Without Logins' answer it is unreachable.
  */
 export function resolveCredentialStore(
   id: string,
   credential: Credential,
   paths: CredentialStorePaths,
   harness: HarnessKind = credential.harness,
+  stores: ReadonlyMap<string, LoginLaunchStore> = NO_STORES,
 ): CredentialStoreResolution {
   if (credential.store === 'environment') return environmentResolution(credential, harness, paths.userHome);
-  const owned = credential.store === 'ferretry' ? ferretryCredentialDirectory(paths.fleetRoot, id) : undefined;
+  if (credential.store === 'ferretry') {
+    if (credential.harness === 'claude') {
+      const secureStorage = stores.get(id)?.variables[CLAUDE_SECURE_STORAGE_VARIABLE];
+      if (secureStorage === undefined || secureStorage.length === 0)
+        return { harness: 'claude', store: 'ferretry', unavailable: 'Logins names no store for it' };
+      const storageDirectory = claudeStorageDirectory(secureStorage, paths.userHome);
+      return {
+        harness: 'claude',
+        store: 'ferretry',
+        secureStorage,
+        storageDirectory,
+        credentialFile: join(storageDirectory, CLAUDE_CREDENTIAL_FILE),
+      };
+    }
+    const signInFile = stores.get(id)?.signInFile;
+    return signInFile === undefined || signInFile.length === 0
+      ? { harness: 'codex', store: 'ferretry', unavailable: 'Logins names no store for it' }
+      : { harness: 'codex', store: 'ferretry', signInFile };
+  }
   if (credential.harness === 'claude') {
-    const secureStorage = owned ?? HOST_CLAUDE_SECURE_STORAGE;
-    const storageDirectory = claudeStorageDirectory(secureStorage, paths.userHome);
+    const storageDirectory = claudeStorageDirectory(HOST_CLAUDE_SECURE_STORAGE, paths.userHome);
     return {
       harness: 'claude',
-      store: credential.store,
-      secureStorage,
+      store: 'host',
+      secureStorage: HOST_CLAUDE_SECURE_STORAGE,
       storageDirectory,
       credentialFile: join(storageDirectory, CLAUDE_CREDENTIAL_FILE),
-      ...(owned === undefined ? {} : { ownedDirectory: owned }),
-    };
-  }
-  if (owned !== undefined) {
-    return {
-      harness: 'codex',
-      store: 'ferretry',
-      canonicalFile: join(owned, CODEX_CREDENTIAL_FILE),
-      ownedDirectory: owned,
     };
   }
   return paths.hostCodexHome === undefined
@@ -214,6 +234,7 @@ export function resolveCredentialStore(
  */
 export function credentialLaunchEnvironment(resolution: CredentialStoreResolution): Readonly<Record<string, string>> {
   if (resolution.store === 'environment') return resolution.env;
+  if ('unavailable' in resolution) return {};
   if (resolution.harness === 'claude') return { [CLAUDE_SECURE_STORAGE_VARIABLE]: resolution.secureStorage };
   return {};
 }
@@ -229,8 +250,23 @@ export function codexCredentialLink(
   runtimeHome: string,
   resolution: CredentialStoreResolution,
 ): CodexCredentialLink | undefined {
-  if (resolution.harness !== 'codex' || !('canonicalFile' in resolution)) return undefined;
+  if (resolution.harness !== 'codex' || !('canonicalFile' in resolution) || resolution.canonicalFile === undefined)
+    return undefined;
   return { path: join(runtimeHome, CODEX_CREDENTIAL_FILE), target: resolution.canonicalFile };
+}
+
+/**
+ * The link a Codex runtime's WRAPPER makes when a person runs it: `auth.json` in the runtime home, pointing at the file Logins named
+ * for a Ferretry-kept login. The provisioner cannot place it (Logins' file is outside every folder it may link into), so the wrapper
+ * does, as the person who is about to run Codex. `undefined` when the credential has no such file.
+ */
+export function codexWrapperLink(
+  runtimeHome: string,
+  resolution: CredentialStoreResolution,
+): CodexCredentialLink | undefined {
+  if (resolution.harness !== 'codex' || !('signInFile' in resolution) || resolution.signInFile === undefined)
+    return undefined;
+  return { path: join(runtimeHome, CODEX_CREDENTIAL_FILE), target: resolution.signInFile };
 }
 
 /**

@@ -4503,6 +4503,28 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
       should(agendaState(prefixedDone.item!).state).equal('needs-you');
     });
 
+    it('rests a carried card agenda (its subject stamped as generated) once its card ask is answered', () => {
+      // Arrange — a carried v4 card agenda: v4's own subject, kept as `generatedSubject`
+      const carried = (ledger: AgendaLedger): AgendaLedger => ({
+        ...ledger,
+        entries: ledger.entries.map(entry => {
+          if (entry.lifecycle !== 'active') return entry;
+          const { generatedSubject: _generated, ...item } = entry.item;
+          const subject = 'OK to build? Badge counts unread items.';
+          return { ...entry, item: { ...item, subject, generatedSubject: subject } };
+        }),
+      });
+      const stamped = attach(carried(raised(DAEMON, CARD_AGENDA).ledger));
+
+      // Act — the owner answers the card ask
+      const done = succeeded(answer(stamped.ledger));
+
+      // Assert — nothing is left for the owner: it is off Needs you, as a 5.0-raised card agenda is
+      should(done.item?.generatedSubject).equal('OK to build? Badge counts unread items.');
+      should(openCardAsks(done.item!)).have.length(0);
+      should(agendaState(done.item!).state).equal('resting');
+    });
+
     it('keeps an unanswered own ask in Needs you when the owner says Not yet to the card ask', () => {
       const carried = attach(raised(AGENT, { ask: TASK }).ledger);
 
