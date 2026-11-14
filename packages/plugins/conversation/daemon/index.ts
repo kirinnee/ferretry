@@ -146,6 +146,7 @@ export const conversationDaemon = (gate: HarnessGate) =>
           // The one provider of this security-path hook (`takers: ['conversation']`), under its one key.
           'opening.attachments:opening': openingAttachmentsSource(),
           'ask.delivery:ferret': askDeliveryOf(api),
+          'ask.owner-chat:conversation': a.ownerChat,
           'sitrep.lines': () => [{ id: 'conversation', item: a.sitrep }],
           // A stop is being attempted: the unlocked attachments are zeroed before it can fail.
           'ferret.stopping': followFerretStopping({ release: ferret => b.release(ferret) }),

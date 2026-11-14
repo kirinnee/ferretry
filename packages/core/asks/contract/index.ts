@@ -332,6 +332,14 @@ export interface AsksApi {
   /** Apply a machine-board owner verb with the owner as actor. Ferret-board answers still use Asks' own route. */
   ownerAction(action: AskOwnerAction): Promise<AgendaSnapshot>;
   /**
+   * The OWNER dismisses one open ask on ANY ferret's board, as the owner and nothing else (the owner's clear of the agent
+   * ferrets' backlog): the engine's own dismissal by the human actor, so the item closes as dismissed by the owner and tells
+   * its ferret as an owner's dismiss does. It is not {@link close} (daemon provenance dismisses only what the daemon
+   * raised) and not {@link ownerAction} (the machine board's). A refusal throws {@link AskOwnerActionError} with the engine's
+   * words; an ask already closed is a no-op.
+   */
+  ownerDismiss(ask: AskRef, note?: string): Promise<void>;
+  /**
    * Tells a ferret something in its own terminal: the text joins the ferret's reply batch, the one an owner's answer
    * joins, so it goes in ONE message with them (blank-line apart), after the same settle window, once the ferret's turn
    * ends and its composer is empty, is given up on past the same composer wait, and is counted delivered on the same
@@ -414,6 +422,39 @@ export const AskDeliveries = defineHook('ask.delivery', {
   key: z.literal(ASK_DELIVERY_KEY),
   takers: ['conversation'],
   value: z.custom<AskDelivery>(),
+});
+
+/** One message the owner sent a ferret, its words as they typed them (a chat reply's `[re !A5 …]` heading is not theirs). */
+export interface AskOwnerChatMessage {
+  /** The id the message has in the ferret's queue and send ledger. */
+  readonly messageId: string;
+  readonly at: string;
+  readonly text: string;
+}
+
+export type AskOwnerChatLookup =
+  | { readonly ok: true; readonly message: AskOwnerChatMessage }
+  /** `none`: the owner sent nothing; `unknown`: no such message for this ferret; `not-owner`: it is not the owner's. */
+  | { readonly ok: false; readonly reason: 'none' | 'unknown' | 'not-owner' };
+
+/**
+ * THE OWNER'S CHAT, as `fy agenda log` reads it: the messages the owner sent THIS ferret, from the ferret's own message
+ * store (its queue and its send ledger). Conversation owns that store, so Conversation provides it under
+ * `ask.owner-chat:conversation`; unprovided (Conversation off), nothing can be logged and `agenda log` says so.
+ */
+export interface AskOwnerChat {
+  /** The owner's latest message to the ferret, or the one with `messageId`. Total: an unreadable store is `none`/`unknown`. */
+  find(ferret: string, messageId?: string): Promise<AskOwnerChatLookup>;
+}
+
+/** The one key `ask.owner-chat` is provided under. */
+export const ASK_OWNER_CHAT_KEY = 'conversation' as const;
+
+export const AskOwnerChats = defineHook('ask.owner-chat', {
+  mode: 'provide',
+  key: z.literal(ASK_OWNER_CHAT_KEY),
+  takers: ['conversation'],
+  value: z.custom<AskOwnerChat>(),
 });
 
 /** An answer landed. A wake-up: the source reads `answers` and applies each once. */

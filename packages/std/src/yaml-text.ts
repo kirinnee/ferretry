@@ -24,6 +24,7 @@ import {
   LineCounter,
   type Node,
   parseDocument,
+  stringify,
   type YAMLMap,
   type YAMLSeq,
 } from 'yaml';
@@ -613,4 +614,20 @@ export function setConfigKey(text: string, key: string, value: unknown): string 
   if (value === undefined) document.delete(key);
   else document.set(key, document.createNode(value));
   return document.toString({ lineWidth: 0 });
+}
+
+/**
+ * An editable document as YAML text (`fy agenda show --yaml`): multi-line Markdown as literal block text (`|`), never
+ * folded, so what a ferret reads is what it writes back. `header` lines go first as comments. Read it back with
+ * {@link readConfigText}.
+ */
+export function documentYaml(document: Record<string, unknown>, header: readonly string[]): string {
+  const comments = header.map(line => `# ${line}`).join('\n');
+  const body = stringify(document, {
+    version: '1.2',
+    lineWidth: 0,
+    blockQuote: 'literal',
+    aliasDuplicateObjects: false,
+  });
+  return `${comments}\n${body}`.trimEnd();
 }

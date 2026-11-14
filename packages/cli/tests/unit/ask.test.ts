@@ -57,7 +57,12 @@ const FERRETS = {
 const ARCHIVED = '/v1/archived-sessions?limit=500';
 /** Nothing archived, unless a test says otherwise. */
 const NONE_ARCHIVED = { status: 200, body: { count: 0, sessions: [] } };
-const archivedView = (id: string, name = id) => ({ config: { id, name }, state: 'stopped', directory: '/x' });
+/** An archived view: its `name` is the task title and its `teammate` the callsign, as the daemon writes them. */
+const archivedView = (id: string, name = id, teammate?: string) => ({
+  config: { id, name, ...(teammate === undefined ? {} : { teammate }) },
+  state: 'stopped',
+  directory: '/x',
+});
 
 const world = (answers: Record<string, DaemonReply | Error>, environment: Record<string, string> = {}) => {
   const transport = new RoutedTransport({ [`GET ${ARCHIVED}`]: NONE_ARCHIVED, ...answers });
@@ -247,11 +252,30 @@ describe('fy ask', () => {
   it('lists a waiting ask on an archived, stopped ferret the live list leaves out, as the app shows it', async () => {
     const { world: w, io } = world({
       'GET /v1/ferrets': { status: 200, body: [] },
-      [`GET ${ARCHIVED}`]: { status: 200, body: { count: 1, sessions: [archivedView('archived', 'old one')] } },
+      [`GET ${ARCHIVED}`]: {
+        status: 200,
+        body: { count: 1, sessions: [archivedView('archived', 'Fix the badge colour', 'old one')] },
+      },
       'GET /v1/ferrets/archived/agenda': board(item('A1', { title: 'Still waiting' })),
     });
     should(await runFy(['ask'], w)).equal(0);
     should(io.stdout()).match(/archived\/A1\s+old one/u);
+  });
+
+  it('shows the callsign of an archived ferret in the FERRET column, never its task title, as it does for a live one', async () => {
+    const { world: w, io } = world({
+      'GET /v1/ferrets': { status: 200, body: [{ id: 'live', name: 'alpha' }] },
+      [`GET ${ARCHIVED}`]: {
+        status: 200,
+        body: { count: 1, sessions: [archivedView('archived', 'Fix the badge colour', 'wren')] },
+      },
+      'GET /v1/ferrets/live/agenda': board(item('A2', { title: 'Live ask' })),
+      'GET /v1/ferrets/archived/agenda': board(item('A1', { title: 'Still waiting' })),
+    });
+    should(await runFy(['ask'], w)).equal(0);
+    should(io.stdout()).match(/archived\/A1\s+wren\s/u);
+    should(io.stdout()).not.containEql('Fix the badge colour');
+    should(io.stdout()).match(/live\/A2\s+alpha\s/u);
   });
 
   it('names the archived ferrets it could not read and still prints the live ones, exit 1', async () => {
@@ -323,6 +347,17 @@ describe('fy ask', () => {
     });
     await runFy(['ask'], timeout.world);
     should(timeout.io.stderr()).containEql('board read timed out');
+  });
+
+  it('should name an archived ferret by its callsign, and by its id when it has none, never by its task title', () => {
+    const named = archivedOf({
+      count: 2,
+      sessions: [
+        { config: { id: 'old-1', teammate: 'ada', name: 'Fix the badge colour' } },
+        { config: { id: 'old-2', name: 'Fix the badge colour' } },
+      ],
+    });
+    should(named.ferrets.map(each => each.name)).deepEqual(['ada', 'old-2']);
   });
 
   it('should read a shape it does not know as an error, not a crash', () => {

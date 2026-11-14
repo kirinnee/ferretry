@@ -6,7 +6,10 @@ import { renderOpen } from '../../cli/lib/render.ts';
 
 type Call = { route: string; init?: Parameters<PluginClient['call']>[1] };
 
-function world(answers: Record<string, unknown>) {
+function world(
+  answers: Record<string, unknown>,
+  terminal?: { readonly confirm: (question: string) => Promise<boolean> },
+) {
   const calls: Call[] = [];
   const out: string[] = [];
   const err: string[] = [];
@@ -18,8 +21,12 @@ function world(answers: Record<string, unknown>) {
     },
     subscribe: () => () => undefined,
   } as unknown as PluginClient;
-  const io: TerminalIo = { out: text => void out.push(text), err: text => void err.push(text), isTty: false };
-  const half = cli.build?.({ manifest: cli.manifest, client, io });
+  const io: TerminalIo = {
+    out: text => void out.push(text),
+    err: text => void err.push(text),
+    isTty: terminal !== undefined,
+  };
+  const half = cli.build?.({ manifest: cli.manifest, client, io, ...(terminal === undefined ? {} : terminal) });
   if (half === undefined) throw new Error('missing CLI half');
   const verb = (line: string, invocation: Partial<VerbInvocation> = {}) =>
     (half.verbs as Record<string, (i: VerbInvocation) => Promise<number>>)[line]?.({
@@ -134,6 +141,47 @@ describe('fy agenda mode and clear', () => {
     expect(done.calls.at(-1)?.init?.body).toEqual({});
     expect(done.out.join('')).toContain('cleared 3 open asks on 2 agent ferrets');
     expect(await world(answers).verb('agenda clear')).toBe(1);
+  });
+});
+
+describe('fy agenda clear: it says so when it cleared less than it listed', () => {
+  const route = 'POST /v1/agenda/clear-agents';
+  /** A daemon that lists `found` on the dry run and then clears `went`. */
+  const answering = (found: { cleared: number; ferrets: number }, went: { cleared: number; ferrets: number }) => ({
+    [route]: (init?: Call['init']) =>
+      (init?.body as { dryRun?: boolean } | undefined)?.dryRun === true ? found : went,
+  });
+
+  test('exits 1 and names both counts when fewer went than the dry run listed', async () => {
+    const w = world(answering({ cleared: 1, ferrets: 1 }, { cleared: 0, ferrets: 0 }));
+    expect(await w.verb('agenda clear', { options: { agents: true, yes: true } })).toBe(1);
+    expect(w.err.join('')).toContain(
+      'only 0 open asks on 0 agent ferrets were cleared, of the 1 open ask on 1 agent ferret',
+    );
+  });
+
+  test('exits 0 only when every listed ask went', async () => {
+    const w = world(answering({ cleared: 2, ferrets: 1 }, { cleared: 2, ferrets: 1 }));
+    expect(await w.verb('agenda clear', { options: { agents: true, yes: true } })).toBe(0);
+  });
+
+  test('asks at a terminal instead of refusing, goes on a yes and stops on a no', async () => {
+    const asked: string[] = [];
+    const yes = world(answering({ cleared: 2, ferrets: 1 }, { cleared: 2, ferrets: 1 }), {
+      confirm: async question => {
+        asked.push(question);
+        return true;
+      },
+    });
+    expect(await yes.verb('agenda clear', { options: { agents: true } })).toBe(0);
+    expect(asked).toEqual(['Dismiss 2 open asks on 1 agent ferret? [y/N]']);
+    expect(yes.out.join('')).toContain('cleared 2 open asks on 1 agent ferret');
+    const no = world(answering({ cleared: 2, ferrets: 1 }, { cleared: 2, ferrets: 1 }), { confirm: async () => false });
+    expect(await no.verb('agenda clear', { options: { agents: true } })).toBe(0);
+    expect(no.out.join('')).toContain('Nothing was cleared.');
+    expect(
+      no.calls.filter(call => (call.init?.body as { dryRun?: boolean } | undefined)?.dryRun !== true),
+    ).toHaveLength(0);
   });
 });
 

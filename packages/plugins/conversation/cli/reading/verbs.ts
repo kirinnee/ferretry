@@ -179,7 +179,7 @@ export function readingVerbs({ client, io }: Context) {
     render: guide,
     'render guide': guide,
 
-    link: guarded(async invocation => {
+    'link [query...]': guarded(async invocation => {
       const q = words(invocation);
       const limit = number(invocation, 'limit');
       const listing = await client.call<LinkListing>('GET /v1/links/conversations', {

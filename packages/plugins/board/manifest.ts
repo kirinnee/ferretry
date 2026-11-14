@@ -235,7 +235,18 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('board', { summary: 'the project board' }),
+      verb('board', {
+        summary: 'the project board',
+        options: [
+          { flag: '--project <name>', help: 'the project to read' },
+          { flag: '--ferret <id>', help: 'cards of this ferret' },
+          { flag: '--kind <kind>', help: 'only cards of this kind' },
+          { flag: '--pr <ref>', help: 'the card of this pull request' },
+          { flag: '--activity <state>', help: 'only cards in this activity' },
+          { flag: '--state <state>', help: 'only cards in this state' },
+          { flag: '--query <text>', help: 'only cards matching this text' },
+        ],
+      }),
       verb('board status', { summary: 'whether this project uses the board' }),
       verb('board on', { summary: 'switch this project’s board on; only the owner' }),
       verb('board off', { summary: 'switch this project’s board off; only the owner' }),

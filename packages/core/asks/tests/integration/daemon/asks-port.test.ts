@@ -457,6 +457,58 @@ describe('the owner’s actions on the machine agenda through the Asks port', ()
   });
 });
 
+describe('the owner dismisses what a ferret raised, through the Asks port', () => {
+  const add = (half: Awaited<ReturnType<typeof world>>) =>
+    half.call(
+      BOARD,
+      { ferretId: 'f1' },
+      {
+        action: 'add',
+        title: 'Which region',
+        subject: 'Which region ships first?',
+        why: 'The relay ships Friday.',
+        premise: 'A relay ships Friday.',
+        context: 'Two regions are near.',
+        howToResolve: 'Pick one.',
+        ask: { kind: 'open-question' },
+      },
+      ferretStanding('f1' as FerretId),
+    );
+
+  it('should close an ask the ferret raised as the owner’s dismissal, which the daemon’s own close cannot do', async () => {
+    // Arrange
+    const half = await world();
+    await add(half);
+    const [raised] = await half.asks.open({ ferret: 'f1' as FerretId });
+    expect(raised?.raisedBy).toMatchObject({ kind: 'ferret' });
+    const ref = { ferret: 'f1', id: raised?.id as AskId };
+
+    // Act
+    // Assert: the daemon closes only what the daemon raised, so its close leaves the ferret's ask open (and says nothing).
+    await expect(half.asks.close(ref, 'dismissed')).rejects.toThrow(/may dismiss only/u);
+    expect(await half.asks.open({ ferret: 'f1' as FerretId })).toHaveLength(1);
+    await half.asks.ownerDismiss(ref, 'cleared by the owner');
+    expect(await half.asks.open({ ferret: 'f1' as FerretId })).toHaveLength(0);
+    const [snapshot] = await half.asks.snapshots({ ferret: 'f1' });
+    expect(snapshot?.resolved.map(each => [each.id, each.resolutionNote])).toEqual([[ref.id, 'cleared by the owner']]);
+  });
+
+  it('should make a second dismissal of the same ask a no-op, and refuse nothing it does not know as a failure', async () => {
+    // Arrange
+    const half = await world();
+    await add(half);
+    const [raised] = await half.asks.open({ ferret: 'f1' as FerretId });
+    const ref = { ferret: 'f1', id: raised?.id as AskId };
+
+    // Act
+    await half.asks.ownerDismiss(ref);
+
+    // Assert
+    await half.asks.ownerDismiss(ref);
+    await half.asks.ownerDismiss({ ferret: 'f1', id: 'A99' as AskId });
+  });
+});
+
 describe('asks the owner raised themselves, and answers that carry form values', () => {
   it('should show an ask the owner added as the owner’s own', async () => {
     // Arrange

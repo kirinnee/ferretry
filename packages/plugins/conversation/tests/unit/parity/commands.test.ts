@@ -67,7 +67,7 @@ describe('the verbs Conversation owns', () => {
 
   test('V-0367 fy queue <ferret> lists its queued messages', async () => {
     const t = run({ 'GET /v1/ferrets/:ferretId/queue': { messages: [QUEUED] } });
-    expect(await t.verb('queue', ['lead'])).toBe(0);
+    expect(await t.verb('queue <ferret>', ['lead'])).toBe(0);
     expect(t.calls[0]).toMatchObject({
       route: 'GET /v1/ferrets/:ferretId/queue',
       init: { params: { ferretId: 'lead' } },
@@ -110,7 +110,7 @@ describe('the verbs Conversation owns', () => {
 
   test('V-0285 fy import conversations is fy link: it lists the conversations the harnesses hold', async () => {
     const t = run({ 'GET /v1/links/conversations': { conversations: [], total: 0 } });
-    await t.verb('link');
+    await t.verb('link [query...]');
     expect(t.calls[0]?.route).toBe('GET /v1/links/conversations');
   });
 });

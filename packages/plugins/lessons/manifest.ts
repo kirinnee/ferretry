@@ -199,8 +199,14 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('lesson', { summary: 'the lessons board: what was learned from your corrections (pending ones first)' }),
-      verb('lesson ls', { summary: 'the lessons board, pending ones first (the same as bare lesson)' }),
+      verb('lesson', {
+        summary: 'the lessons board: what was learned from your corrections (pending ones first)',
+        options: [{ flag: '--state <state>', help: 'only lessons in this state' }],
+      }),
+      verb('lesson ls', {
+        summary: 'the lessons board, pending ones first (the same as bare lesson)',
+        options: [{ flag: '--state <state>', help: 'only lessons in this state' }],
+      }),
       verb('lesson show', { summary: 'one lesson in full, with every quote behind it' }),
       verb('lesson accept', { summary: 'accept a lesson; it writes nothing until you apply it' }),
       verb('lesson reject', { summary: 'reject a lesson; it is not suggested again' }),
