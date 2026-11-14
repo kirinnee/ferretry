@@ -1,14 +1,12 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { implementApp, type PanelProps } from '@ferretry/kernel/manifest';
 import { BUILT_IN_LAYOUTS } from '@ferretry/plugin-layouts/contract';
 import { type ReactNode, useState } from 'react';
-import { deviceControls, useDeviceControls } from '../../../src/compose/device-controls.ts';
 import { provideToShell } from '../../../src/connect/provides.ts';
 import { useAppHook } from '../../../src/shell/app-hooks.ts';
 import { PanelSlot } from '../../../src/shell/views.tsx';
 import { useViewPlace } from '../../../src/shell/view-place.tsx';
 import { useEveryDaemon } from '../../../src/shell/every-daemon.ts';
-import { useDevicePaired } from '../../../src/shell/device-context.tsx';
 import { useNavForm } from '../../../src/shell/device-panels.tsx';
 import { APP_STORAGE } from '../../../src/storage/names.ts';
 import { memoryStore, writeRecord } from '../../../src/storage/records.ts';
@@ -37,12 +35,9 @@ const setCount = (daemon: string, n: number): void => {
 
 function NeedsYou(): ReactNode {
   const rows = useEveryDaemon();
-  const scope = useDeviceControls().device.sessionsList;
-  const selected = useDevicePaired().selected;
-  const shown = scope === 'current' ? rows.filter(row => row.daemon === selected) : rows;
   return (
     <ul data-testid="needs-you" data-form={useNavForm()}>
-      {shown.map(row => (
+      {rows.map(row => (
         <li key={row.daemon} data-testid={`needs-${row.daemon}`} data-online={String(row.online)}>
           {row.machine}
         </li>
@@ -186,9 +181,6 @@ const deviceLayout = (nav: Record<string, unknown>, phoneNav: Record<string, unk
 };
 
 let view: Mounted | null = null;
-beforeEach(() => {
-  deviceControls().setDeviceControls({ sessionsList: 'all' });
-});
 afterEach(async () => {
   await view?.unmount();
   view = null;
@@ -201,7 +193,6 @@ afterEach(async () => {
   placesSeen.length = 0;
   misbehave.countThrows = false;
   misbehave.subscribeThrows = false;
-  deviceControls().setDeviceControls({ sessionsList: 'all' });
 });
 
 const text = (): string => view?.container.textContent ?? '';
@@ -496,19 +487,6 @@ describe('the Needs-you nav panel (device-level)', () => {
     expect(text()).not.toContain('cannot reach');
     expect(text()).not.toContain('is off');
     expect(text()).not.toContain('paused');
-  });
-
-  test('shell S4: "Sessions list: current" shows the selected machine only; "all" shows both', async () => {
-    const app = await bootApp({ surfaces: [inbox], machines: ['d1', 'd2'], path: '/', storage: deviceLayout(LIST) });
-    view = app.view;
-    app.runtime.daemons.select('d2');
-    await interact(() => deviceControls().setDeviceControls({ sessionsList: 'current' }));
-    await settle();
-    expect(app.view.container.querySelector('[data-testid="needs-d1"]')).toBeNull();
-    expect(app.view.container.querySelector('[data-testid="needs-d2"]')).not.toBeNull();
-    await interact(() => deviceControls().setDeviceControls({ sessionsList: 'all' }));
-    expect(app.view.container.querySelector('[data-testid="needs-d1"]')).not.toBeNull();
-    expect(app.view.container.querySelector('[data-testid="needs-d2"]')).not.toBeNull();
   });
 
   test('shell S4: a machine whose feed drops keeps its row, offline (the panel greys it)', async () => {

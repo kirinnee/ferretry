@@ -41,7 +41,7 @@
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/core/ferrets": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}"],
       "ignore": [
         "daemon/lib/session/events/service.ts",
@@ -117,6 +117,10 @@
         "tests/**/fixtures/**/*.{ts,tsx}",
         "worker/src/adapters/link-store-worker.ts"
       ],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/browsers": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/conversation": {

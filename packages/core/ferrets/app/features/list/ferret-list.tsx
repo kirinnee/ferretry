@@ -6,11 +6,17 @@
  * `aria-current="page"`. A row is one link to the ferret's chat.
  *
  * The kind is kept for this device in the app's controls (`sessionsMode`); "Show stopped" lasts while the list does.
+ *
+ * NEEDS YOU. Under Pinned, a "Needs you" group gathers the ferrets with open items waiting on the owner (the Agenda says
+ * which, through `ferrets.needs-you`) while the device's "Group Needs you at the top" is on; with it off they stay in
+ * their folders, still bold and badged. Without a provider the list draws none of it.
  */
 
-import { useDeviceControls, useOptionalRouter } from '@ferretry/app';
+import { useAppHook, useDeviceControls, useOptionalRouter } from '@ferretry/app';
 import { type ReactNode, useState } from 'react';
+import { FERRETS_NEEDS_YOU_HOOK, type FerretNeedsYou, isFerretsNeedsYou } from '../../../contract/index.ts';
 import type { LiveFerretsClient } from '../../lib/client.ts';
+import { useNeedsYou } from './use-needs-you.ts';
 import { daemonOfRoute, ferretOfRoute } from '../header/header-paths.ts';
 import { newFerretHref } from '../new-ferret/hrefs.ts';
 import { FerretRow } from './ferret-row.tsx';
@@ -20,10 +26,26 @@ import {
   type FerretListFilter,
   ferretListView,
   MODE_SEGMENTS,
+  type NeedingYou,
 } from './list-model.ts';
 import { STALE_LIST, useFerretList } from './use-ferret-list.ts';
 
 export function FerretList({ client }: { readonly client: LiveFerretsClient }): ReactNode {
+  const router = useOptionalRouter();
+  const daemon = router === null ? undefined : daemonOfRoute(router.route);
+  const provided = useAppHook(daemon, FERRETS_NEEDS_YOU_HOOK);
+  const needing = useNeedsYou(isFerretsNeedsYou(provided) ? provided : undefined);
+  return <FerretListBody client={client} needing={needing} />;
+}
+
+/** The list over an answer to "who waits on the owner": what `FerretList` draws once the hook is read. */
+export function FerretListBody({
+  client,
+  needing,
+}: {
+  readonly client: LiveFerretsClient;
+  readonly needing: NeedingYou;
+}): ReactNode {
   const router = useOptionalRouter();
   const daemon = router === null ? undefined : daemonOfRoute(router.route);
   const openFerret = router === null ? undefined : ferretOfRoute(router.route);
@@ -51,11 +73,24 @@ export function FerretList({ client }: { readonly client: LiveFerretsClient }): 
       </div>
     );
 
-  const view = ferretListView(read.ferrets, filter, ferret => ferret.id === openFerret);
-  const row = (ferret: (typeof read.ferrets)[number]): ReactNode => (
-    <FerretRow active={ferret.id === openFerret} daemon={daemon} ferret={ferret} key={ferret.id} {...navigation} />
-  );
-  const empty = view.pinned.length === 0 && view.groups.length === 0;
+  const view = ferretListView(read.ferrets, filter, ferret => ferret.id === openFerret, {
+    needing,
+    group: device.groupNeedsYou,
+  });
+  const row = (ferret: (typeof read.ferrets)[number]): ReactNode => {
+    const waiting: FerretNeedsYou | undefined = needing.get(ferret.id);
+    return (
+      <FerretRow
+        active={ferret.id === openFerret}
+        daemon={daemon}
+        ferret={ferret}
+        key={ferret.id}
+        {...(waiting === undefined ? {} : { needsYou: waiting })}
+        {...navigation}
+      />
+    );
+  };
+  const empty = view.pinned.length === 0 && view.needsYou.length === 0 && view.groups.length === 0;
   return (
     <div className="fy-sbar__ferrets" data-ferret-list="">
       <div className="fy-sbar__filters">
@@ -104,6 +139,19 @@ export function FerretList({ client }: { readonly client: LiveFerretsClient }): 
                   <span className="fy-sbar__count">{view.pinned.length}</span>
                 </h2>
                 <ul>{view.pinned.map(row)}</ul>
+              </section>
+            )}
+            {view.needsYou.length === 0 ? null : (
+              <section
+                aria-label="Needs you"
+                className="fy-sbar__group fy-sbar__needs-you"
+                data-sbar-needs-you-group=""
+              >
+                <h2 className="fy-sbar__project">
+                  <span className="truncate">Needs you</span>
+                  <span className="fy-sbar__count">{view.needsYou.length}</span>
+                </h2>
+                <ul>{view.needsYou.map(row)}</ul>
               </section>
             )}
             {view.groups.map(group => (

@@ -3,6 +3,7 @@ import type { AppComponent, PanelProps, PluginClient, ScreenProps, SettingsProps
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { lazyComponent } from './lazy.ts';
+import { createNeedsYou } from './lib/needs-you-hook.ts';
 
 type Surfaces = {
   readonly screens: Record<string, AppComponent<ScreenProps>>;
@@ -76,4 +77,6 @@ const filterBootView = lazyComponent<DeviceViewProps>(
 export default provideToShell(half, {
   fragments: [{ form: 'keyed', key: 'agenda' }],
   device: { 'deep-link': deepLinkView, 'notification-filter': filterBootView },
+  // Ferrets' list gathers the ferrets that wait on the owner (`ferrets.needs-you`); which they are is this half's fact.
+  hooks: { 'ferrets.needs-you': ({ client }) => createNeedsYou(client) },
 });

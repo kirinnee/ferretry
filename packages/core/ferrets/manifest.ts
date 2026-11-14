@@ -842,6 +842,8 @@ export default definePlugin({
       panel('ferret.toolbar', { id: 'info', order: 30 }),
       panel('ferret.toolbar', { id: 'actions', order: 40 }),
       panel('ferret.side', { id: 'files', order: 40 }),
+      // Settings › This device (S4): "Group Needs you at the top", before the conversation width.
+      panel('device.settings', { id: 'needs-you', order: 15 }),
     ],
   },
 

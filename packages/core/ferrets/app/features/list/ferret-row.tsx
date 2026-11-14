@@ -10,7 +10,7 @@
  */
 
 import { type ReactNode, useContext, useRef, useState } from 'react';
-import type { FerretSummary } from '../../../contract/index.ts';
+import type { FerretNeedsYou, FerretSummary } from '../../../contract/index.ts';
 import { ferretTitles } from '../../lib/ferret-title.ts';
 import { StatusMark } from '../../lib/status-mark.tsx';
 import { RouteLink } from '../../ui.ts';
@@ -23,10 +23,15 @@ export interface FerretRowProps {
   readonly ferret: FerretSummary;
   readonly daemon: string;
   readonly active: boolean;
+  /** Open items waiting on the owner (`ferrets.needs-you`): a bold name, a count and the ask. Absent: none. */
+  readonly needsYou?: FerretNeedsYou;
   readonly onNavigate?: (to: string) => void;
 }
 
-export function FerretRow({ ferret, daemon, active, onNavigate }: FerretRowProps): ReactNode {
+/** What a count badge says aloud: "3 open Inbox items". */
+const waitingWords = (count: number): string => `${count} open Inbox ${count === 1 ? 'item' : 'items'}`;
+
+export function FerretRow({ ferret, daemon, active, needsYou, onNavigate }: FerretRowProps): ReactNode {
   const { title, ferret: callsign } = ferretTitles(ferret);
   const openMenu = useContext(RowMenuContext);
   const link = useRef<HTMLAnchorElement | null>(null);
@@ -57,6 +62,7 @@ export function FerretRow({ ferret, daemon, active, onNavigate }: FerretRowProps
         aria-current={active ? 'page' : undefined}
         aria-haspopup={openMenu === undefined ? undefined : 'menu'}
         className="fy-sbar__session"
+        data-sbar-needs-you={needsYou === undefined ? undefined : ''}
         data-sbar-pinned={isPinned(ferret) ? '' : undefined}
         data-sbar-pressing={pressing ? '' : undefined}
         data-sbar-session={ferret.id}
@@ -70,6 +76,11 @@ export function FerretRow({ ferret, daemon, active, onNavigate }: FerretRowProps
         <StatusMark ferret={ferret} />
         <span className="fy-sbar__title">
           <span className="fy-sbar__name">{title}</span>
+          {needsYou === undefined ? null : (
+            <span aria-label={waitingWords(needsYou.count)} className="fy-sbar__unread" data-sbar-unread="" role="img">
+              {needsYou.count}
+            </span>
+          )}
         </span>
         <span className="fy-sbar__detail" data-sbar-detail="">
           {callsign === null ? null : (
@@ -78,6 +89,11 @@ export function FerretRow({ ferret, daemon, active, onNavigate }: FerretRowProps
                 {callsign.charAt(0).toUpperCase()}
               </span>
               <span className="fy-sbar__ferret-name">{callsign}</span>
+            </span>
+          )}
+          {needsYou === undefined || needsYou.ask === '' ? null : (
+            <span className="fy-sbar__sub fy-sbar__ask" data-sbar-ask="">
+              {needsYou.ask}
             </span>
           )}
           {/* Truncated from the left (`direction: rtl`), so the folder's own name survives; `bdi` keeps the path's
