@@ -10,7 +10,7 @@
  * | ------- | ---------- | ----------------------------------------------------------- | -------------------------------------------------- |
  * | claude  | `ferretry` | `CLAUDE_SECURESTORAGE_CONFIG_DIR=<the store Logins names>`  | that dir's `.credentials.json`, or on macOS the keychain item named from it |
  * | claude  | `host`     | `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`                        | `<home>/.claude/.credentials.json`, or on macOS the bare keychain item |
- * | codex   | `ferretry` | nothing yet (GAP below): the kernel links the file, into a ferret's home only | Logins' own `auth.json`          |
+ * | codex   | `ferretry` | the wrapper links `<runtime home>/auth.json` to the file Logins names (`signInFile`)       | Logins' own `auth.json`          |
  * | codex   | `host`     | `<runtime home>/auth.json` linked to the person's own `auth.json`         | `$CODEX_HOME/auth.json`, else `<home>/.codex/auth.json` |
  * | either  | `environment` | the credential's own `env`                               | nowhere on disk                                    |
  *
@@ -99,16 +99,17 @@ interface ClaudeStoreResolution {
 }
 
 /**
- * A Codex credential. A `host` one is ONE canonical `auth.json` every runtime's own `auth.json` links to. A `ferretry` one has
- * no `canonicalFile`: it is Logins' private file, which only the kernel links (into a ferret's home, single use), so a
- * runtime home never links to it.
- * GAP(runtimes: codex-wrapper-link): a person-run Codex wrapper on a Ferretry-kept login starts signed out until the kernel
- * can place a standing link to a Logins sign-in file in a runtime's home.
+ * A Codex credential. A `host` one is ONE canonical `auth.json` every runtime's own `auth.json` links to (the provisioner places
+ * the link). A `ferretry` one has no `canonicalFile`: its file is Logins' private one, which the provisioner may not link, so it
+ * names it as `signInFile` (what Logins said, never spelled here) and the runtime's WRAPPER links `auth.json` to it each time a
+ * person runs it. Nothing reads, copies or shows the file.
  */
 interface CodexStoreResolution {
   readonly harness: 'codex';
   readonly store: 'host' | 'ferretry';
   readonly canonicalFile?: string;
+  /** A `ferretry` one: the file Logins named, which the wrapper links the runtime home's `auth.json` to. */
+  readonly signInFile?: string;
 }
 
 /**
@@ -200,7 +201,10 @@ export function resolveCredentialStore(
         credentialFile: join(storageDirectory, CLAUDE_CREDENTIAL_FILE),
       };
     }
-    return { harness: 'codex', store: 'ferretry' };
+    const signInFile = stores.get(id)?.signInFile;
+    return signInFile === undefined || signInFile.length === 0
+      ? { harness: 'codex', store: 'ferretry', unavailable: 'Logins names no store for it' }
+      : { harness: 'codex', store: 'ferretry', signInFile };
   }
   if (credential.harness === 'claude') {
     const storageDirectory = claudeStorageDirectory(HOST_CLAUDE_SECURE_STORAGE, paths.userHome);
@@ -249,6 +253,20 @@ export function codexCredentialLink(
   if (resolution.harness !== 'codex' || !('canonicalFile' in resolution) || resolution.canonicalFile === undefined)
     return undefined;
   return { path: join(runtimeHome, CODEX_CREDENTIAL_FILE), target: resolution.canonicalFile };
+}
+
+/**
+ * The link a Codex runtime's WRAPPER makes when a person runs it: `auth.json` in the runtime home, pointing at the file Logins named
+ * for a Ferretry-kept login. The provisioner cannot place it (Logins' file is outside every folder it may link into), so the wrapper
+ * does, as the person who is about to run Codex. `undefined` when the credential has no such file.
+ */
+export function codexWrapperLink(
+  runtimeHome: string,
+  resolution: CredentialStoreResolution,
+): CodexCredentialLink | undefined {
+  if (resolution.harness !== 'codex' || !('signInFile' in resolution) || resolution.signInFile === undefined)
+    return undefined;
+  return { path: join(runtimeHome, CODEX_CREDENTIAL_FILE), target: resolution.signInFile };
 }
 
 /**

@@ -46,6 +46,7 @@ const MODEL = parseAccountModel({
 
 const STORES: MaterialiseInput['loginStores'] = [
   { id: 'claude-work', variables: { CLAUDE_SECURESTORAGE_CONFIG_DIR: `${LOGINS_STORE}/claude-work` } },
+  { id: 'codex-work', variables: {}, signInFile: `${LOGINS_STORE}/codex-work/auth.json` },
 ];
 
 const plan = (overrides: Partial<MaterialiseInput> = {}): FleetModelApplyPlan => {
@@ -81,12 +82,26 @@ describe('materialiseFleet — a Ferretry-kept login is reached through the stor
     should(wrapper).not.containEql('/fy/fleet/credentials');
   });
 
-  it("should not link a Codex runtime's auth.json to the old fleet store (declared GAP: Logins' file is the kernel's to link)", () => {
+  it("should sign a Codex wrapper in by linking the home's auth.json to the file Logins names, and plan no link to the old fleet store", () => {
     // Act
     const result = plan({ loginStores: STORES });
 
     // Assert
+    const wrapper = wrapperOf(result, 'codex-default');
+    should(wrapper).containEql(`_fy_auth='/fy/fleet/homes/${ID_B}/auth.json'`);
+    should(wrapper).containEql(`_fy_auth_target='${LOGINS_STORE}/codex-work/auth.json'`);
+    should(wrapper).containEql('ln -sfn "$_fy_auth_target" "$_fy_auth"');
+    should(wrapperOf(result, 'claude-default')).not.containEql('_fy_auth');
     should(result.operations.filter(operation => operation.path === `/fy/fleet/homes/${ID_B}/auth.json`)).be.empty();
+  });
+
+  it('should publish a Codex runtime unlaunchable, naming the login, when Logins names no sign-in file for it', () => {
+    // Act
+    const result = plan({ loginStores: STORES?.filter(store => store.id === 'claude-work') });
+
+    // Assert
+    should(JSON.stringify(result.manifest)).containEql('its login \\"codex-work\\" cannot be reached');
+    should(wrapperOf(result, 'codex-default')).not.containEql('_fy_auth');
   });
 
   it('should not create, or name, any directory under fleet/credentials: Logins keeps its own stores', () => {

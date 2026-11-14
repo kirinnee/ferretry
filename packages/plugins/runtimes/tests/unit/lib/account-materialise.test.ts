@@ -33,9 +33,10 @@ const HOME_A = `/fy/fleet/homes/${ID_A}`;
 const HOME_B = `/fy/fleet/homes/${ID_B}`;
 
 /** Where Logins keeps the Ferretry-kept logins these models name (`LoginsApi.launchStores`): never under the fleet directory. */
-const LOGIN_STORES = [
+const LOGIN_STORES: NonNullable<MaterialiseInput['loginStores']> = [
   { id: 'claude-you', variables: { CLAUDE_SECURESTORAGE_CONFIG_DIR: '/fy/state/logins/credentials/claude-you' } },
-] satisfies MaterialiseInput['loginStores'];
+  { id: 'codex-work', variables: {}, signInFile: '/fy/state/logins/credentials/codex-work/auth.json' },
+];
 
 const COMPONENTS = {
   instructions: { main: { file: 'components/instructions/main.md' } },

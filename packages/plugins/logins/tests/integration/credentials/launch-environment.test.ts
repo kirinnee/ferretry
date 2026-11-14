@@ -265,8 +265,12 @@ test('launchStores names the same store a ferret launches with, for a runtime wr
       id: 'work',
       variables: { CLAUDE_SECURESTORAGE_CONFIG_DIR: store },
     });
-    // A Codex login's sign-in is a file the kernel links into one ferret's home, not a variable: nothing to name here.
-    expect(stores.find(entry => entry.id === 'team')).toBeUndefined();
+    // A Codex login's sign-in is a file: Logins names it (never its bytes), and a runtime wrapper links its own `auth.json` to it.
+    expect(stores.find(entry => entry.id === 'team')).toEqual({
+      id: 'team',
+      variables: {},
+      signInFile: join(f.base, 'team', 'auth.json'),
+    });
     // A host-kept login has no Ferretry store to name: this build reads owned stores only, so it is not listed.
     expect(stores.find(entry => entry.id === 'mine')).toBeUndefined();
     expect(JSON.stringify(stores)).not.toContain(TOKEN);

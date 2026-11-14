@@ -74,6 +74,7 @@ import {
 import {
   CODEX_CREDENTIAL_FILE,
   codexCredentialLink,
+  codexWrapperLink,
   credentialLaunchArguments,
   credentialLaunchEnvironment,
   resolveCredentialStore,
@@ -481,6 +482,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         fyCommand: input.fyCommand,
         secretsFile: model.advanced.secretsFile,
         harnessCommand: input.harnessCommands?.[harness],
+        signInLink: codexWrapperLink(home, store),
         refusal: blocked,
       }),
       mode: EXECUTABLE_MODE,

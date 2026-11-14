@@ -699,8 +699,9 @@ export class FleetCredentialsService {
 
   /**
    * What a runtime wrapper a PERSON runs needs to be signed in on each login (`LoginsApi.launchStores`): the same
-   * projection {@link launchStore} hands a ferret (a Ferretry-kept Claude login's one secure-storage variable). The store
-   * path is spelled here and nowhere else; no value is read, and a login with no variable to name is left out.
+   * projection {@link launchStore} hands a ferret (a Ferretry-kept Claude login's one secure-storage variable) and, for a Ferretry-kept
+   * Codex login, the sign-in file its runtime home links to. The store path is spelled here and nowhere else; no value is
+   * read, and a login with nothing to name is left out.
    */
   async launchStores(): Promise<readonly LoginLaunchStore[]> {
     const { entries } = await this.deps.catalog.entries();
@@ -709,6 +710,7 @@ export class FleetCredentialsService {
       const owned = stored(resolution);
       if (owned === undefined) continue;
       if (owned.harness === 'claude') out.push({ id, variables: credentialLaunchEnvironment(owned) });
+      else if (owned.store === 'ferretry') out.push({ id, variables: {}, signInFile: owned.canonicalFile });
     }
     return out;
   }
