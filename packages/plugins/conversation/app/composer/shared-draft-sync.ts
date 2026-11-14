@@ -80,6 +80,11 @@ export interface SharedDraftSyncState {
   readonly resyncing: boolean;
   /** Items a refused edit was adding, to be added again once the snapshot arrives. */
   readonly lost?: readonly DraftItem[];
+  /**
+   * The person typed on THIS device before the first snapshot arrived. Those words are theirs
+   * right now, not a stale copy from somewhere: an empty draft does not make them a conflict.
+   */
+  readonly typed?: true;
 }
 
 /** What one step produced. */
@@ -271,6 +276,9 @@ const local = (
   return launch(changed, change, ids);
 };
 
+/** No snapshot has been heard yet: the first one is still to come. */
+const awaitingContact = (state: SharedDraftSyncState): boolean => state.position === undefined && !state.resyncing;
+
 /**
  * The person changed the text (typed, pasted, dictated, or a send emptied it — `sent`). Answers the
  * edit to send now, or folds it into the one waiting behind the edit in flight.
@@ -283,7 +291,7 @@ export const applyLocalText = (
 ): SharedDraftStep => {
   if (next === state.text && !sent) return { state, send: [] };
   const change: PendingEdit = { op: diffToTextOp(state.text, next), add: [], remove: [], sent };
-  return local(state, change, { text: next }, ids);
+  return local(state, change, { text: next, ...(awaitingContact(state) ? { typed: true as const } : {}) }, ids);
 };
 
 /**
@@ -328,7 +336,10 @@ const fromSnapshot = (
   // been used is not that: it may be empty because its words were SENT, and this device's cached copy of
   // them must never seed the next message on its own.
   const untouched = snapshot.epoch === 0 && snapshot.rev === 0 && snapshot.text === '';
-  const firstPush = state.position === undefined && untouched && !state.resyncing && mine !== '';
+  // Words typed on this device before the first snapshot, onto a draft that is empty (its words were sent, say): the
+  // same answer — they ARE the draft. Nobody else holds words to disagree with, so there is no conflict to offer.
+  const typedOntoEmpty = state.typed === true && snapshot.text === '';
+  const firstPush = state.position === undefined && (untouched || typedOntoEmpty) && !state.resyncing && mine !== '';
   // A copy that was in step and had nothing unanswered simply missed what happened elsewhere — a send
   // from another device, most often: the draft as it now stands is taken, and nothing is offered back.
   const unanswered = state.inflight !== undefined || state.buffer !== undefined || state.resyncing;
