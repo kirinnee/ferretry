@@ -5,7 +5,8 @@ import { advance, DAEMON_UP_SH, makeSandbox, type Sandbox } from './migrate-harn
 
 /**
  * `start` refuses any entry in the new home that v5 did not make, EXCEPT `fleet/` when it holds nothing but
- * `assets/skills/**`: the converter's skill-folders step writes the installed skills there, where v5 Runtimes reads them.
+ * `assets/**` (installed skills and component assets such as a carried hook file, where v5 Runtimes reads them), and
+ * every entry there is a regular file or a folder.
  */
 
 setDefaultTimeout(60_000);
@@ -48,41 +49,64 @@ describe('start: the converter-written skill folders under fleet/ are allowed, n
     expect(await sb.notesText()).toContain('# started-v5');
   });
 
-  test('an empty fleet/ and a fleet/assets/skills with no skill pass too', async () => {
+  test('an empty fleet/ and a fleet/assets with no asset pass too', async () => {
     const sb = await box();
     await readyToStart(sb);
-    await mkdir(join(sb.v4home, 'fleet', 'assets', 'skills'), { recursive: true });
+    await mkdir(join(sb.v4home, 'fleet', 'assets'), { recursive: true });
     expect((await sb.run('start')).code).toBe(0);
+  });
+
+  test('a component asset (a carried hook file) under fleet/assets/components passes', async () => {
+    const sb = await box();
+    await readyToStart(sb);
+    await put(sb, 'fleet/assets/skills/review/SKILL.md');
+    await put(sb, 'fleet/assets/components/hooks/compact-before.txt');
+    await put(sb, 'fleet/assets/x.txt');
+    const result = await sb.run('start');
+    expect(result.code).toBe(0);
+    expect(await sb.notesText()).toContain('# started-v5');
   });
 
   test.each([
     ['a file next to assets', 'fleet/other.txt', 'fleet/other.txt'],
     ['another folder under fleet', 'fleet/shared/a/b.txt', 'fleet/shared'],
-    ['another folder under fleet/assets', 'fleet/assets/agents/a.md', 'fleet/assets/agents'],
-    ['a file directly in fleet/assets', 'fleet/assets/x.txt', 'fleet/assets/x.txt'],
-    [
-      'a file directly in fleet/assets/skills is a skill folder level: still skills/**',
-      'fleet/assets/skills/ok/SKILL.md',
-      '',
-    ],
-  ])('%s', async (_label, rel, named) => {
+  ])('%s stops and is named', async (_label, rel, named) => {
     const sb = await box();
     await readyToStart(sb);
     await put(sb, 'fleet/assets/skills/review/SKILL.md');
     await put(sb, rel);
     const result = await sb.run('start');
-    if (named === '') {
-      expect(result.code).toBe(0);
-      return;
-    }
     expect(result.code).toBe(1);
     expect(result.err).toContain(`unexpected entry '${named}' in the new home`);
     expect((await sb.calls()).filter(line => line === 'fy daemon start')).toEqual([]);
     expect(await sb.notesText()).not.toContain('# starting-v5');
   });
 
-  test('a link in place of fleet, assets or skills is a stop, and no link is followed', async () => {
-    for (const rel of ['fleet', 'fleet/assets', 'fleet/assets/skills']) {
+  test.each([
+    ['a symlink in a skill', 'fleet/assets/skills/a/link', 'link'],
+    ['a symlink in a component asset folder', 'fleet/assets/components/hooks/link', 'link'],
+    ['a FIFO in a skill', 'fleet/assets/skills/a/fifo', 'fifo'],
+    ['a FIFO under a component asset folder', 'fleet/assets/components/fifo', 'fifo'],
+  ])('%s stops and is named, never followed', async (_label, rel, kind) => {
+    const sb = await box();
+    await readyToStart(sb);
+    await put(sb, 'fleet/assets/skills/a/SKILL.md');
+    await mkdir(join(sb.v4home, dirname(rel)), { recursive: true });
+    if (kind === 'link') await symlink('/etc', join(sb.v4home, rel));
+    else {
+      const made = Bun.spawnSync(['mkfifo', join(sb.v4home, rel)]);
+      expect(made.exitCode).toBe(0);
+    }
+    const result = await sb.run('start');
+    expect(result.code).toBe(1);
+    expect(result.err).toContain(`unexpected entry '${rel}' in the new home`);
+    expect(result.err).toContain('not a regular file or folder');
+    expect((await sb.calls()).filter(line => line === 'fy daemon start')).toEqual([]);
+    expect(await sb.notesText()).not.toContain('# starting-v5');
+  });
+
+  test('a link in place of fleet or assets is a stop, and no link is followed', async () => {
+    for (const rel of ['fleet', 'fleet/assets']) {
       const sb = await box();
       await readyToStart(sb);
       const target = join(sb.root, 'elsewhere');

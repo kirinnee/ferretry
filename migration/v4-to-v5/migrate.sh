@@ -754,16 +754,20 @@ start)
     case "${entry}" in
     home.json | config | state | run | logs | "") ;;
     fleet)
-      # The converter's skill-folders step writes the installed skills to fleet/assets/skills/<name>/, where v5 Runtimes reads
-      # them. That is the ONLY thing allowed under fleet/: anything else is named and stops, as any other entry does. No link is
-      # followed (find -P), and fleet, assets and skills must themselves be real folders.
-      for d in fleet fleet/assets fleet/assets/skills; do
+      # The converter writes v5 Runtimes' asset root, fleet/assets/**, in the new home: the installed skills (assets/skills/<name>/)
+      # and the component assets a carried hook or setting names (assets/components/hooks/...). That is the ONLY thing allowed
+      # under fleet/: anything else is named and stops, as any other entry does. Nothing is followed (find -P); fleet and assets
+      # must be real folders, and every entry below must be a regular file or a folder (a link, FIFO, socket or device is never
+      # written by the converter and v5 would read it as part of an asset). Relative patterns: the home path is never a glob.
+      for d in fleet fleet/assets; do
         if [ -e "${H}/${d}" ] || [ -L "${H}/${d}" ]; then
           { [ -d "${H}/${d}" ] && [ ! -L "${H}/${d}" ]; } || fail "unexpected entry '${d}' in the new home ${H}: it is not a plain folder"
         fi
       done
-      stray="$(find -P "${H}/fleet" -mindepth 1 ! -path "${H}/fleet/assets" ! -path "${H}/fleet/assets/skills" ! -path "${H}/fleet/assets/skills/*" -print -quit)" || unreadable "cannot list ${H}/fleet"
-      [ -z "${stray}" ] || fail "unexpected entry '${stray#"${H}"/}' in the new home ${H}: only fleet/assets/skills may be there"
+      stray="$(cd "${H}" && find -P fleet -mindepth 1 ! -path fleet/assets ! -path 'fleet/assets/*' -print -quit)" || unreadable "cannot list ${H}/fleet"
+      [ -z "${stray}" ] || fail "unexpected entry '${stray}' in the new home ${H}: only fleet/assets may be there"
+      odd="$(cd "${H}" && find -P fleet -mindepth 1 ! -type f ! -type d -print -quit)" || unreadable "cannot list ${H}/fleet"
+      [ -z "${odd}" ] || fail "unexpected entry '${odd}' in the new home ${H}: not a regular file or folder (a link, pipe, socket or device)"
       ;;
     *) fail "unexpected entry '${entry}' in the new home ${H}" ;;
     esac
