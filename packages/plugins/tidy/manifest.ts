@@ -57,7 +57,7 @@ export default definePlugin({
       }),
       verb('tidy', {
         summary:
-          'drop your own cards nobody asked for and close your own asks that only track work (dry run unless --yes)',
+          'drop your own cards nobody asked for and close your own asks that only track work (dry run unless --yes; the owner names a ferret with --ferret <id>)',
       }),
     ],
   },

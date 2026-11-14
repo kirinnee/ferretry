@@ -265,6 +265,18 @@ describe('command parity', () => {
     expect(run.out()).toContain('[3m] halfway');
   });
 
+  test('V-0260 V-0261 fleet and fleet recommend are not verbs (removed by design: fy recommend replaces them)', () => {
+    const declared = (manifest.actions?.cli ?? []).map(each => each.verb as string);
+    const verbs = Object.keys(harness({}).verbs);
+
+    for (const gone of ['fleet', 'fleet recommend [task...]', 'fleet recommend <task...>']) {
+      expect(declared).not.toContain(gone);
+      expect(verbs).not.toContain(gone);
+    }
+    expect(declared).toContain('recommend [task...]');
+    expect(verbs).toContain('recommend [task...]');
+  });
+
   test('V-0334 V-0496 new and wait are not Packs’ verbs: fy new is Ferrets’, fy wait Conversation’s', () => {
     const verbs = Object.keys(harness({}).verbs);
 

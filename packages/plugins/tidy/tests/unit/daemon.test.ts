@@ -40,7 +40,7 @@ function routes() {
     config: () => SCRATCH_DEFAULTS,
     record: async () => {},
   });
-  const planner = { plan: async () => ({ ok: false as const, message: 'unused' }) };
+  const planner = { plan: async () => ({ ok: false as const, message: 'unused' }), known: async () => true };
   return tidyRoutes(collector, planner);
 }
 
@@ -135,14 +135,46 @@ describe('tidy on the test host', () => {
     await h.stop();
   });
 
-  test('the plan refuses the owner at the machine and a paired device, who have no work of their own to tidy', async () => {
+  test('the plan refuses the owner and a paired device that name no ferret, and says how to name one', async () => {
     let who: CallStanding = ownerStanding();
     const h = await host(() => who);
     for (const standing of [ownerStanding(), deviceStanding('phone')]) {
       who = standing;
       const response = await h.request('POST', '/v1/tidy/plan');
       expect([response.status, response.json<{ code: string }>().code]).toEqual([403, 'forbidden']);
+      expect(response.json<{ error: string }>().error).toContain('--ferret');
     }
+    await h.stop();
+  });
+
+  test('V-0494 the owner plans ANOTHER ferret’s tidy by naming it (v4 --session), and the plan is that ferret’s', async () => {
+    const h = await host(() => ownerStanding());
+    const response = await h.request('POST', '/v1/tidy/plan', { body: { ferret: 'lead' } });
+    expect(response.status).toBe(200);
+    const plan = response.json<{ ferret: string; drop: unknown[] }>();
+    expect(TidyPlanSchema.safeParse(plan).success).toBe(true);
+    expect(plan.ferret).toBe('lead');
+    expect(plan.drop).toHaveLength(1);
+    await h.stop();
+  });
+
+  test('the owner naming a ferret that does not exist is told so, and a malformed request is refused', async () => {
+    const h = await host(() => ownerStanding());
+    const missing = await h.request('POST', '/v1/tidy/plan', { body: { ferret: 'ghost' } });
+    expect([missing.status, missing.json<{ code: string }>().code]).toEqual([404, 'unknown_ferret']);
+    const odd = await h.request('POST', '/v1/tidy/plan', { body: { ferret: 'lead', extra: 1 } });
+    expect(odd.status).toBe(422);
+    await h.stop();
+  });
+
+  test('V-0494 a ferret credential naming ANY ferret but itself is refused with a sentence, and naming itself is fine', async () => {
+    const h = await host();
+    const other = await h.request('POST', '/v1/tidy/plan', { body: { ferret: 'someone-else' } });
+    expect([other.status, other.json<{ code: string }>().code]).toEqual([403, 'not_yours']);
+    expect(other.json<{ error: string }>().error).toContain('only its own');
+    const own = await h.request('POST', '/v1/tidy/plan', { body: { ferret: 'lead' } });
+    expect(own.status).toBe(200);
+    expect(own.json<{ ferret: string }>().ferret).toBe('lead');
     await h.stop();
   });
 

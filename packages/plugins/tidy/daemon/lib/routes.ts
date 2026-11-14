@@ -13,7 +13,9 @@ import {
   ScratchSweepRequestSchema,
   ScratchSweepViewSchema,
   TIDY_CODES,
+  TidyPlanRequestSchema,
   TidyPlanSchema,
+  type TidyPlanRequest,
 } from '../../contract/index.ts';
 import type { ScratchCollector } from './scratch-collector.ts';
 import type { TidyPlanResult } from './service.ts';
@@ -54,12 +56,41 @@ async function sweepRequest(request: ApiRequest): Promise<{ readonly force: bool
 /** What a plan route needs from the service. */
 export interface TidyPlanner {
   plan(ferret: NonNullable<ReturnType<typeof ferretOf>>): Promise<TidyPlanResult>;
+  /** Whether the ferret is one this machine knows. */
+  known(ferret: NonNullable<ReturnType<typeof ferretOf>>): Promise<boolean>;
+}
+
+/** The plan's optional body: empty is allowed (a ferret asking about itself); anything else must be the one field. */
+async function planRequest(request: ApiRequest): Promise<TidyPlanRequest> {
+  let text: string;
+  try {
+    text = await request.text(BODY_LIMIT);
+  } catch {
+    throw new ApiError(400, 'the request body could not be read', 'unreadable_body');
+  }
+  if (text.trim() === '') return {};
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new ApiError(400, 'the request body is not JSON', 'invalid_json');
+  }
+  const parsed = TidyPlanRequestSchema.safeParse(raw);
+  if (!parsed.success)
+    throw new ApiError(
+      422,
+      'the request is not one this route takes',
+      'invalid_request',
+      parsed.error.issues.map(issue => ({ path: issue.path, message: issue.message })),
+    );
+  return parsed.data;
 }
 
 /**
- * The plan is a read, and a read of ONE ferret's own work: the ferret is the caller's own credential's, never a field of
- * the request, so a ferret cannot ask for another's plan. The owner and the admin token with no ferret have no work of
- * their own to tidy and are refused with the way to do it by hand.
+ * The plan is a read of ONE ferret's work. A ferret's own credential decides whose: itself, and naming any other ferret is
+ * refused, so a ferret cannot ask for another's plan. A caller that is not a ferret (the owner at the machine, a paired
+ * device) has no work of its own, so it must name the ferret to tidy (v4's `--session`) and is refused with how to when it
+ * does not.
  */
 export function tidyRoutes(collector: ScratchCollector, planner: TidyPlanner) {
   return {
@@ -70,13 +101,23 @@ export function tidyRoutes(collector: ScratchCollector, planner: TidyPlanner) {
       return jsonResponse(ScratchSweepViewSchema.parse(await collector.sweep(force)));
     },
     'POST /v1/tidy/plan': async (call: CallContext) => {
-      const ferret = ferretOf(call);
+      const requested = await planRequest(call.request);
+      const own = ferretOf(call);
+      if (own !== undefined && requested.ferret !== undefined && requested.ferret !== own)
+        throw new ApiError(
+          403,
+          'fy tidy: a ferret tidies only its own work; the owner names another ferret with --ferret <id>',
+          TIDY_CODES.notYours,
+        );
+      const ferret = own ?? requested.ferret;
       if (ferret === undefined)
         throw new ApiError(
           403,
-          'fy tidy tidies the work of the ferret that runs it; run it inside a ferret’s own pane',
+          'fy tidy tidies the work of one ferret: run it inside that ferret’s own pane, or name it with --ferret <id>',
           TIDY_CODES.forbidden,
         );
+      if (own === undefined && !(await planner.known(ferret)))
+        throw new ApiError(404, `no ferret ${ferret} on this machine`, TIDY_CODES.unknownFerret);
       const result = await planner.plan(ferret);
       if (!result.ok)
         throw new ApiError(503, `the tidy plan could not be read: ${result.message}`, TIDY_CODES.unavailable);

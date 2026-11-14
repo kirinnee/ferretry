@@ -44,6 +44,10 @@ const askFactOf = (ask: AskSummary): TidyAskFact | undefined =>
 export class TidyService {
   constructor(private readonly ports: TidyPorts) {}
 
+  async known(ferret: FerretId): Promise<boolean> {
+    return (await this.ports.ferrets.get(ferret)) !== undefined;
+  }
+
   async plan(ferret: FerretId): Promise<TidyPlanResult> {
     const board = this.ports.board();
     if (board === undefined) return { ok: false, message: 'the board is not running, so there is no card to read' };

@@ -31,7 +31,9 @@ Each line names the seam it waits on and who owns it. Nothing here is stood in f
   the AUTHENTICATED CALLER. The sitrep lines carry no addressee, so the "message to the caller" half needs a
   Conversation read; until then the newest dated sitrep line is used, masked whole before it is cut.
 - **`POST /v1/recommend`** (R-0321, the account recommender) is still declared by Runtimes at that path; the placement
-  lists it with Packs. V-0260/V-0261 (`fy fleet`, `fy fleet recommend`) have no verb here. Both are the lead's to settle.
+  lists it with Packs. V-0260/V-0261 (`fy fleet`, `fy fleet recommend`) are removed by design: v4's verb read a
+  `routing.json` that 4.291.17 no longer ships and printed only "no routing catalog at …/routing.json", and
+  `fy recommend` is the one way to ask which models suit a piece of work.
 - **Usage**: Packs reads quota through its own stand-in port (`UsagePort`, D2 #15); it is dropped once Packs binds the
   merged Usage contract.
 

@@ -36,6 +36,18 @@ function run(answers: Record<string, unknown | ((call: Call) => unknown)>) {
   return { calls, out, err, verb };
 }
 
+/** The shell's refusal as `PluginClient.call` throws it: a `ShellError` named `DaemonRefusal` with a status and a code. */
+class DaemonRefusal extends Error {
+  override readonly name = 'DaemonRefusal';
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string,
+  ) {
+    super(message);
+  }
+}
+
 const plan: TidyPlan = {
   ferret: 'lead' as TidyPlan['ferret'],
   helper: false,
@@ -109,11 +121,43 @@ describe('fy tidy', () => {
     expect(t.out[0]).toContain('closed 1 ask(s); 1 failed.');
     expect(t.calls.at(-1)?.init?.body).toMatchObject({ note: 'tidy: the board is opt-in and this only tracked work' });
   });
-  test('--session is refused (the credential names the ferret) and an empty --reason needs words', async () => {
+  test('--session stays refused, pointing the owner at --ferret, and an empty --reason needs words', async () => {
     const t = run({});
     expect(await t.verb('tidy', { session: 'x' })).toBe(2);
+    expect(t.err.join('\n')).toContain('--ferret');
     expect(await t.verb('tidy', { reason: true })).toBe(2);
+    expect(await t.verb('tidy', { ferret: true })).toBe(2);
     expect(t.calls).toEqual([]);
+  });
+  test('V-0494 --ferret <id> asks for that ferret’s plan and, with --yes, applies it to that ferret', async () => {
+    const t = run({
+      'POST /v1/tidy/plan': { ...plan, ferret: 'worker' },
+      'POST /v1/board/cards/:cardId': {},
+      'POST /v1/ferrets/:ferretId/agenda': {},
+    });
+    expect(await t.verb('tidy', { ferret: 'worker' })).toBe(0);
+    expect(t.calls).toEqual([{ route: 'POST /v1/tidy/plan', init: { body: { ferret: 'worker' } } }]);
+    expect(t.out[0]).toContain('Dry run: nothing changed.');
+    expect(t.out[0]).toContain('Apply it with: fy tidy --ferret worker --yes');
+    expect(await t.verb('tidy', { ferret: 'worker', yes: true, reason: 'owner clean-up' })).toBe(0);
+    expect(t.calls.slice(2)).toEqual([
+      {
+        route: 'POST /v1/board/cards/:cardId',
+        init: { params: { cardId: 'F1' }, body: { action: 'drop', reason: 'owner clean-up' } },
+      },
+      {
+        route: 'POST /v1/ferrets/:ferretId/agenda',
+        init: { params: { ferretId: 'worker' }, body: { action: 'resolve', id: 'A2', note: 'owner clean-up' } },
+      },
+    ]);
+  });
+  test('V-0494 a ferret naming another ferret is refused with the daemon’s sentence and exit 2, nothing applied', async () => {
+    const t = run({
+      'POST /v1/tidy/plan': new DaemonRefusal('fy tidy: a ferret tidies only its own work', 403, 'not_yours'),
+    });
+    expect(await t.verb('tidy', { ferret: 'other', yes: true })).toBe(2);
+    expect(t.err.join('\n')).toContain('a ferret tidies only its own work');
+    expect(t.calls.map(call => call.route)).toEqual(['POST /v1/tidy/plan']);
   });
   test('--json prints the plan, and with --yes the result', async () => {
     const t = run({ 'POST /v1/tidy/plan': plan });

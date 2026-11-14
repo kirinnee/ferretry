@@ -280,6 +280,12 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
   if (kind === 'V' && /fy daemon adopt\b/.test(what)) return 'removed by design (§9.1, §9.2: old home adoption)';
   if (kind === 'V' && what === 'fyd --config')
     return 'removed by design (5.0 reads configuration from $FY_HOME/config/; fyd refuses --config by name, exit 64)';
+  // cli-work-small (s2 triage rulings 1 and 3): v4's `fy fleet` was dead on 4.291.17 and `fy recommend` replaces it; `fy board import`
+  // is the converter's job.
+  if (kind === 'V' && (what === 'fy fleet' || what === 'fy fleet recommend <task...>'))
+    return 'removed by design (v4 `fy fleet` read a routing.json 4.291.17 no longer ships and printed only "no routing catalog"; `fy recommend` replaces it, no alias; proved by test(s) V-0260 V-0261)';
+  if (kind === 'V' && what === 'fy board import')
+    return "removed by design (the v4-to-v5 converter turns old per-session task files into cards: 5.0 has no v4 readers, and `fy board import` exits 2 naming board's sub-verbs; proved by test(s) V-0086)";
   if (kind === 'V' && what === 'fy import')
     return 'removed by design (§1.4: imports are links; its one verb is `fy link`)';
   if (kind === 'R' && /legacy-tasks/.test(file)) return 'removed by design (§9.1, §9.2: per-ferret tasks/old readers)';
@@ -423,24 +429,27 @@ const SHELL_STORAGE_FILES: ReadonlySet<string> = new Set([
 function checkOf(kind: Kind, what: string, file: string, actualOwner: string): string {
   return kind === 'V' && what === 'fy daemon update'
     ? 'packages/cli/tests/unit/update/shell.test.ts'
-    : // The daemon process verbs are the fy shell's, which a kernel test may not import (context-imports).
-      kind === 'V' && SHELL_DAEMON_VERBS.has(what)
-      ? 'packages/cli/tests/unit/parity/daemon-verbs.test.ts'
-      : // The lifecycle claim and the daemon lock's place in the state home are the shell's own files.
-        kind === 'F' && actualOwner === 'kernel' && SHELL_STORAGE_FILES.has(file)
-        ? 'packages/cli/tests/unit/parity/storage.test.ts'
-        : // The sweep arm is proved by name in Vault's composition test (it drives `inputs-sweep`), not a jobs file.
-          kind === 'J' && /\.startInputHousekeeping\.sweepInputRequests$/.test(what)
-          ? 'packages/core/vault/tests/unit/daemon/composition.test.ts'
-          : // The watched document's cache is the kernel config service's snapshot (J-0096): its watcher test proves it.
-            kind === 'J' && file.endsWith('/fleet-reading/watched-document.ts')
-            ? 'packages/core/kernel/tests/unit/host-config/service.test.ts'
-            : // The tmux release reader's bound (J-0198) is proved where the reader is: kill at the bound, nothing left running.
-              kind === 'J' && file.endsWith('/adapters/tmux/tmux-release-reader.ts')
-              ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
-              : kind === 'R'
-                ? 'descriptor-parity'
-                : parityFileOf(actualOwner, kind);
+    : // The refusal of a verb `board` does not have is the shell's own sub-verb table, not Board's parity file.
+      kind === 'V' && what === 'fy board import'
+      ? 'packages/cli/tests/unit/agenda-verbs.test.ts'
+      : // The daemon process verbs are the fy shell's, which a kernel test may not import (context-imports).
+        kind === 'V' && SHELL_DAEMON_VERBS.has(what)
+        ? 'packages/cli/tests/unit/parity/daemon-verbs.test.ts'
+        : // The lifecycle claim and the daemon lock's place in the state home are the shell's own files.
+          kind === 'F' && actualOwner === 'kernel' && SHELL_STORAGE_FILES.has(file)
+          ? 'packages/cli/tests/unit/parity/storage.test.ts'
+          : // The sweep arm is proved by name in Vault's composition test (it drives `inputs-sweep`), not a jobs file.
+            kind === 'J' && /\.startInputHousekeeping\.sweepInputRequests$/.test(what)
+            ? 'packages/core/vault/tests/unit/daemon/composition.test.ts'
+            : // The watched document's cache is the kernel config service's snapshot (J-0096): its watcher test proves it.
+              kind === 'J' && file.endsWith('/fleet-reading/watched-document.ts')
+              ? 'packages/core/kernel/tests/unit/host-config/service.test.ts'
+              : // The tmux release reader's bound (J-0198) is proved where the reader is: kill at the bound, nothing left running.
+                kind === 'J' && file.endsWith('/adapters/tmux/tmux-release-reader.ts')
+                ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
+                : kind === 'R'
+                  ? 'descriptor-parity'
+                  : parityFileOf(actualOwner, kind);
 }
 /** The owner's parity file for a kind: the unit tier's, unless that file lives in the integration tier (real disk). */
 function parityFileOf(actualOwner: string, kind: Exclude<Kind, 'R'>): string {
