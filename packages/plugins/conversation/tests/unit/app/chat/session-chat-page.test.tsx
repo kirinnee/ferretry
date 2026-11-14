@@ -167,6 +167,45 @@ describe('SessionChatPage', () => {
     expect(refreshed).toBe(1);
   });
 
+  test('an ask’s reply is about that ask: its own draft, the !A3 prefix, and a receipt when it is sent (triage B17)', async () => {
+    const received: unknown[] = [];
+    const restored: string[] = [];
+    const sentBodies: string[] = [];
+    const client = fakeClient({
+      'POST /v1/ferrets/:ferretId/send': call => {
+        sentBodies.push(String((call.body as { message?: string } | undefined)?.message));
+        return { sendId: 's1', disposition: 'delivered' };
+      },
+    });
+    const page = draw(
+      {
+        ask: {
+          id: 'A3',
+          onReplied: sent => received.push(sent),
+          restore: 'take it back',
+          onRestored: () => restored.push('done'),
+        },
+      },
+      client,
+    );
+    const composer = page.root.findByType(Composer);
+    expect(composer.props.draftSlot).toBe('A3');
+    expect(composer.props.restore).toBe('take it back');
+    // The composer itself puts the words in the box once and says so.
+    expect(restored).toEqual(['done']);
+    run(() => composer.props.onSent({ words: 'hi', sendId: 's1', disposition: 'delivered' }));
+    expect(received).toEqual([{ words: 'hi', sendId: 's1', disposition: 'delivered' }]);
+    // The route's answer is not this test's subject: the request it was given is.
+    await composer.props.api.send('shared', { message: 'hi' }).catch(() => undefined);
+    expect(sentBodies.join('')).toContain('!A3');
+  });
+
+  test('without an ask the composer is the ferret’s own chat box: no item draft, no prefix', () => {
+    const page = draw();
+    expect(page.root.findByType(Composer).props.draftSlot).toBeUndefined();
+    expect(page.root.findByType(Composer).props.api).toBeUndefined();
+  });
+
   test('caps transcript and composer with one measure so neither can disagree with the other', () => {
     for (const chatWidth of ['full', 'readable'] as const) {
       const page = draw({ chatWidth });

@@ -23,8 +23,8 @@ export type NotifyKind = PushNotificationKind;
 /**
  * Every status a ferret's view may carry here: Ferrets' four (and the machine's own `running`), and the ones a
  * session list says about a ferret that is waiting, finished or dead. A ferret that DIED says one of the failed three;
- * Ferrets' own list (`starting | working | idle | stopped`) says none of them, so with that list alone no transition
- * here ever notifies — see GAP(ferret-failed-status) in NEEDS-APP-SHELL.txt.
+ * Ferrets' own list (`starting | working | idle | stopped`) never does: it says `stopped` with an end cause nobody
+ * chose (`failedStatusOf`), which the watch reads as `failed`.
  */
 export type NotifiedStatus =
   | SessionStatus
@@ -42,6 +42,8 @@ export interface NotifiedView {
     readonly status: NotifiedStatus;
     readonly reason?: string;
     readonly turn?: number;
+    /** Why a stopped ferret ended (Ferrets' end cause); the only place a Ferrets death is told. */
+    readonly cause?: { readonly kind: string };
     /** Whose turn the ferret's last turn left it on. */
     readonly turnState?: 'working' | 'your-turn' | 'needs-input';
     /** When that turn ended: each turn end is its own event. */
@@ -67,6 +69,28 @@ const ferretPagePath = (daemonId: DaemonId, sessionId: string): string =>
 export type SessionNotifyKind = Exclude<NotifyKind, 'device-paired' | 'question'>;
 
 const FAILED_STATUSES: ReadonlySet<NotifiedStatus> = new Set(['failed', 'stalled', 'kill_failed']);
+
+/**
+ * The end causes Ferrets reads as a death (its `FAILED_ENDS`): an end NOBODY CHOSE, or a launch that never ran. A stop
+ * somebody chose (`stopped`), completion (`completed`) and a clean exit are not deaths.
+ */
+const FAILED_END_CAUSES: ReadonlySet<string> = new Set([
+  'tmux_crashed',
+  'terminal_gone',
+  'signal',
+  'agent_crashed',
+  'start_failed',
+]);
+
+/**
+ * The view as the watch reads it: a Ferrets `stopped` that carries a failure cause is `failed`, so the one transition
+ * into it notifies once (the ledger holds the status, so a repeat tick is no transition) and a ferret that is resumed
+ * and dies again notifies again. Every other view is returned as it is.
+ */
+const failedStatusOf = (view: NotifiedView): NotifiedView =>
+  view.state.status === 'stopped' && view.state.cause !== undefined && FAILED_END_CAUSES.has(view.state.cause.kind)
+    ? { ...view, state: { ...view.state, status: 'failed' } }
+    : view;
 
 /**
  * NOTIFICATIONS ARE ATTENTION (docs/agenda.md): a ferret that wants the owner raises an Agenda
@@ -283,7 +307,8 @@ export const planNotifications = (
   const liveSessionIds = new Set<string>();
   const specs: NotificationSpec[] = [];
   const now = new Date(at);
-  for (const view of views) {
+  for (const listed of views) {
+    const view = failedStatusOf(listed);
     const scope = daemonSessionScope({ daemonId }, view.config.id);
     liveSessionIds.add(scope.sessionId);
     const kind = classifyTransition(ledger.status(scope), view.state.status);

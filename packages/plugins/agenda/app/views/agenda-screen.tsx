@@ -7,7 +7,7 @@
 import type { ScreenProps } from '@ferretry/kernel/manifest';
 import { MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
 import { AgendaBoardProviders, laneEditorOf, useAgendaBoardHooks } from '../features/agenda/agenda-board-hooks.tsx';
-import { AgendaConversationSlot } from '../features/agenda/agenda-conversation-slot.tsx';
+import { AgendaCardConversation } from '../features/agenda/agenda-conversation-slot.tsx';
 import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
 import { useAskFocus } from '../features/agenda/use-ask-focus.ts';
 import { AgendaInboxContext, useRuntimeInbox } from '../hooks/use-agenda-inbox.ts';
@@ -55,9 +55,7 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
               from={inboxSourceFromSearch(window.location.search)}
               onClearFrom={() => navigate(links.agenda(daemon), { replace: true })}
               onItemOpened={card => void runtime.itemOpened(card.view.config.id, card.item.id)}
-              renderComposer={card => (
-                <AgendaConversationSlot ask={card.item.id} daemon={daemon} ferret={card.view.config.id} />
-              )}
+              renderComposer={card => <AgendaCardConversation card={card} daemon={daemon} inbox={inbox} />}
             />
           </AgendaInboxContext.Provider>
         </AgendaClientContext.Provider>

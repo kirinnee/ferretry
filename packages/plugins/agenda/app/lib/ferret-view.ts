@@ -7,6 +7,7 @@
  */
 
 import { type SessionAgendaSummary } from '../../contract/wire.ts';
+import { type FerretEndCause, FerretEndCauseSchema } from '@ferretry/core-ferrets/contract';
 import type { AgendaItem, TaskRef } from '@ferretry/core-asks/contract';
 import { needsYouQueue } from './agenda-queue.ts';
 
@@ -36,6 +37,8 @@ export interface FerretState {
   readonly reason?: string;
   readonly lastActivityAt?: string;
   readonly turn?: number;
+  /** Why a stopped ferret ended (Ferrets' end cause); only ever present while `status` is `stopped`. */
+  readonly cause?: FerretEndCause;
   /** The open agenda items waiting on the owner; absent when none is open. */
   readonly agenda?: SessionAgendaSummary;
 }
@@ -109,6 +112,8 @@ export interface ListedFerret {
   readonly folder?: string;
   readonly state?: string;
   readonly stateAt?: string;
+  /** Why it ended, when it is stopped (Ferrets' `cause`); a value that is not an end cause is dropped. */
+  readonly cause?: FerretEndCause;
   readonly createdAt?: string;
 }
 
@@ -128,6 +133,7 @@ export const parseFerretList = (value: unknown): readonly ListedFerret[] => {
     const fields = row as Record<string, unknown>;
     const id = text(fields.id);
     if (id === undefined) return [];
+    const cause = FerretEndCauseSchema.safeParse(fields.cause);
     const mode = fields.mode === 'auto' || fields.mode === 'interactive' ? fields.mode : undefined;
     const optional = {
       name: text(fields.title),
@@ -146,6 +152,7 @@ export const parseFerretList = (value: unknown): readonly ListedFerret[] => {
         id,
         ...Object.fromEntries(Object.entries(optional).filter(([, entry]) => entry !== undefined)),
         ...(mode === undefined ? {} : { mode }),
+        ...(cause.success ? { cause: cause.data } : {}),
       } as ListedFerret,
     ];
   });
@@ -174,6 +181,7 @@ const ferretView = (ferret: ListedFerret, items: readonly AgendaItem[]): FerretV
       id: ferret.id,
       status,
       ...(ferret.stateAt === undefined ? {} : { lastActivityAt: ferret.stateAt }),
+      ...(status === 'stopped' && ferret.cause !== undefined ? { cause: ferret.cause } : {}),
       ...(agenda === undefined ? {} : { agenda }),
     },
   };

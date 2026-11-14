@@ -24,6 +24,18 @@ export interface AgendaConversationSlotProps {
   readonly ferret: string;
   /** The ask open above it (`A3`): what a message typed there is about. */
   readonly ask: string;
+  /**
+   * Told when a message about the ask was accepted (what the owner wrote, the id it was queued under, what the
+   * transport made of it): the page marks the Inbox item replied. Absent: nobody is told.
+   */
+  readonly onReplied?: (sent: {
+    readonly words: string;
+    readonly sendId?: string | undefined;
+    readonly disposition?: string | undefined;
+  }) => void;
+  /** The words of a reply the owner took back (Undo): they go into the ask's box once, then `onRestored` fires. */
+  readonly restore?: string;
+  readonly onRestored?: () => void;
 }
 
 /** A narrowing for a contributing panel: the props are untyped at the shell, so the panel checks what it reads. */

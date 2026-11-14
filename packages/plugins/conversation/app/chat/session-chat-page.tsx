@@ -29,9 +29,10 @@ import { CONVERSATION_ABOVE_COMPOSER_SLOT, type ComposerAccount } from '../../co
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AttachmentGalleryProvider } from '../composer/attachment-gallery.tsx';
-import { Composer } from '../composer/composer.tsx';
+import { composerApi } from '../composer/composer-api.ts';
+import { Composer, type ComposerSent } from '../composer/composer.tsx';
 import { useComposerPreferences } from '../composer/use-composer-preferences.ts';
-import { daemonConnection } from '../composer/seam.ts';
+import { daemonConnection, withReferencePrefix } from '../composer/seam.ts';
 import {
   type PendingQuestion,
   type QuestionAnswerApi,
@@ -55,6 +56,21 @@ import type { TranscriptHistoryControl } from './transcript-history-row.tsx';
 import { TranscriptUnboundNotice } from './transcript-unbound-notice.tsx';
 import { useChatScrollbarGutter } from './use-chat-scrollbar-gutter.ts';
 import { hideWaiting } from './waiting-fold.ts';
+
+/**
+ * The ask this conversation is drawn under (Agenda's `agenda.conversation` slot): what the owner types here is a reply
+ * to THAT item, so the composer keeps the item's own draft (never the ferret's chat box), the message carries its
+ * reference (`!A3 …`, delivered as `[re !A3 …]`), and the host hears once a message about it was accepted.
+ */
+export interface AskReply {
+  /** The item the reply is about (`A3`). */
+  readonly id: string;
+  /** A message about the item was accepted. */
+  readonly onReplied?: ((sent: ComposerSent) => void) | undefined;
+  /** The words of a reply that was taken back: they go in the box once. */
+  readonly restore?: string | undefined;
+  readonly onRestored?: (() => void) | undefined;
+}
 
 export interface SessionChatPageProps {
   readonly daemonId: string;
@@ -93,6 +109,8 @@ export interface SessionChatPageProps {
    * open a terminal, which would ask for a passkey, and the item is not the ferret's page.
    */
   readonly embedded?: boolean;
+  /** Drawn under an agenda item's ask: the composer is that item's reply box ({@link AskReply}). */
+  readonly ask?: AskReply | undefined;
   readonly onRefresh?: () => void;
   /** Re-sends a send under its original id from its row in the transcript. */
   readonly onRetry?: SendRetry;
@@ -162,6 +180,7 @@ export function SessionChatPage({
   chatWidth = 'readable',
   compact = false,
   embedded = false,
+  ask,
   onRefresh,
   onRetry,
   onCancel,
@@ -198,10 +217,21 @@ export function SessionChatPage({
   // Bumped when the reader sends: they want to watch the reply arrive, so the transcript returns to the tail and
   // follows again even if they had scrolled up to re-read while composing.
   const [pinSignal, setPinSignal] = useState(0);
-  const onSent = useCallback(() => {
-    setPinSignal(signal => signal + 1);
-    onRefresh?.();
-  }, [onRefresh]);
+  const askId = ask?.id;
+  const askReplied = ask?.onReplied;
+  const onSent = useCallback(
+    (sent?: ComposerSent) => {
+      setPinSignal(signal => signal + 1);
+      onRefresh?.();
+      if (sent !== undefined) askReplied?.(sent);
+    },
+    [onRefresh, askReplied],
+  );
+  // The ask's reply carries its reference; the ferret's own chat box has none, and keeps the composer's default calls.
+  const askApi = useMemo(
+    () => (askId === undefined ? undefined : withReferencePrefix(composerApi(client), () => [askId])),
+    [client, askId],
+  );
   // LIVE is not WORKING. `running` means the agent's terminal is up; whose turn it is comes from the daemon's turn
   // watcher (`state.turnState`, read through `session-activity.ts`). The pane is the Terminals plugin's to read, so the
   // chat reads none (`UNREAD_PANE`) and a ferret with no `turnState` falls back to its status mark.
@@ -348,6 +378,10 @@ export function SessionChatPage({
                 disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl || isUnread(session)}
                 ferretId={ferretId}
                 {...(account === undefined ? {} : { account })}
+                {...(askApi === undefined ? {} : { api: askApi })}
+                {...(askId === undefined ? {} : { draftSlot: askId })}
+                {...(ask?.restore === undefined ? {} : { restore: ask.restore })}
+                {...(ask?.onRestored === undefined ? {} : { onRestored: ask.onRestored })}
                 onSent={onSent}
               />
             </>

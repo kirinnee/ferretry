@@ -148,7 +148,11 @@ const isNoticeRaise = (request: RaiseAgendaRequest, actor: AgendaActor): boolean
   actor.kind === 'daemon' && (request.notice === true || actor.cause === 'warden-escalation');
 
 /** A notice's reference on the machine agenda: the ferret it is about is always part of it, so two ferrets never share a row. */
-const machineNoticeRef = (sessionId: string, sourceRef: string | null | undefined, actor: AgendaActor): string => {
+export const machineNoticeRef = (
+  sessionId: string,
+  sourceRef: string | null | undefined,
+  actor: AgendaActor,
+): string => {
   const base = sourceRef ?? `notice:${actor.kind === 'daemon' ? actor.cause : 'agent'}`;
   return base.endsWith(`:${sessionId}`) ? base : `${base}:${sessionId}`;
 };
@@ -308,11 +312,16 @@ export class AgendaService {
         const { source: _source, sourceRef, task: _task, ...rest } = named;
         return await machine.raiseOrUpdate(machineNoticeRef(sessionId, sourceRef, actor), rest, [sessionId]);
       });
+    // On the machine's own board a notice is a row of its own per ferret, never one shared by two ferrets' notices.
+    const placed =
+      home === MACHINE_AGENDA_ID && home !== sessionId && actor.kind === 'daemon'
+        ? { ...named, sourceRef: machineNoticeRef(sessionId, named.sourceRef, actor) }
+        : named;
     // The home's focus card is the lead's own work, not the sub-ferret's: a redirected row names no card.
-    const focused = named.task === undefined && home === sessionId ? await this.withFocusCard(home, named) : named;
+    const focused = placed.task === undefined && home === sessionId ? await this.withFocusCard(home, placed) : placed;
     const asking = await this.gateAsking(focused, actor);
-    if (asking !== undefined && asking !== UNREADABLE && named.task !== undefined)
-      return refusedForGate(named.task, asking, home);
+    if (asking !== undefined && asking !== UNREADABLE && placed.task !== undefined)
+      return refusedForGate(placed.task, asking, home);
     const carded = asking === undefined ? focused : { ...focused, task: undefined };
     const offered = await this.withOfferClose(carded);
     const mutation = await this.apply(home, { action: 'raise', actor, request: offered, at: this.clock.now() });
@@ -344,7 +353,16 @@ export class AgendaService {
     if (invalidSession(sessionId) !== null) return sessionId;
     if (!(await isSubFerret(this.subFerrets, sessionId))) return sessionId;
     const home = await this.homes.of(sessionId, notice).catch(() => sessionId);
-    return home === MACHINE_AGENDA_ID && this.machine === undefined ? sessionId : home;
+    return home === MACHINE_AGENDA_ID && !(await this.holdsMachineBoard()) ? sessionId : home;
+  }
+
+  /**
+   * Whether notices may land on the machine agenda here: a separate machine service answers for it (`machine`), or the
+   * session directory knows the machine's own board (the one ledger a daemon notice is then written on, as a row of
+   * its own per ferret: {@link machineNoticeRef}).
+   */
+  private async holdsMachineBoard(): Promise<boolean> {
+    return this.machine !== undefined || (await this.sessions.has(MACHINE_AGENDA_ID).catch(() => false));
   }
 
   /** A to-do or review on a card in the to-test lane offers to close it, unless the add already said so. */
@@ -843,7 +861,10 @@ export class AgendaService {
       action: 'resolve-source',
       actor,
       source,
-      sourceRef,
+      sourceRef:
+        home === MACHINE_AGENDA_ID && home !== sessionId && actor.kind === 'daemon'
+          ? machineNoticeRef(sessionId, sourceRef, actor)
+          : sourceRef,
       note,
       at: this.clock.now(),
     });
