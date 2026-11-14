@@ -414,6 +414,11 @@ export class BrowserSessionService implements BrowserSubsystem {
       }
       this.signIns?.forget(sessionId);
       await this.releaseSession(sessionId, guard);
+      // The machine has ONE Chrome that every ferret's pages share. Asking it to stop is asking for it to be gone when
+      // nothing else needs it: once no session holds a page and nobody is watching, it is closed at once (as v4's
+      // per-ferret browser was) instead of idling on to its timeout. Another ferret's pages keep it running.
+      const left = this.run;
+      if (left !== undefined && left.viewers.size === 0 && this.sessionPages(left) === 0) await this.stop();
       return { status: await this.status(sessionId) };
     }
     if (action.action === 'start' || action.action === 'open' || action.action === 'new-page') {
