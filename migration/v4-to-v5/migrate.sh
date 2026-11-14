@@ -16,7 +16,7 @@ set -euo pipefail
 #   backup    --owner-yes                                       mv H B
 #   convert                                                     converter dry run, then the real run
 #   install   [--rehearsal-build DIR]                           put v5 programs in place (never starts the daemon)
-#   start                                                       fyd --check, config check, one deliberate daemon start
+#   start                                                       fyd --check, one deliberate daemon start, then config check
 #   verify                                                      compare v5 with the baseline, print a table, fy doctor
 #   rollback  --owner-yes [--restart]                           back to v4 exactly as recorded
 #
@@ -749,18 +749,6 @@ start)
   esac
   [ -f "${H}/home.json" ] || fail "${H}/home.json is missing"
 
-  status=0
-  fy5_pinned config check >"${NOTES}.config-check.out" 2>&1 || status=$?
-  if [ "${status}" -ne 0 ]; then
-    # Expected only for a literal credential in a login file (it names the file and key, never a value). EVERY line of the
-    # report must be that diagnostic: one other problem next to it (schema, access, a held change) is a stop.
-    credential_lines="$(awk '/secret set/ {n++} END {print n + 0}' "${NOTES}.config-check.out")"
-    other_lines="$(awk 'NF && !/secret set/ {n++} END {print n + 0}' "${NOTES}.config-check.out")"
-    { [ "${credential_lines}" -gt 0 ] && [ "${other_lines}" -eq 0 ]; } || fail "fy config check failed for a reason other than only a literal credential (see ${NOTES}.config-check.out)"
-    say "⚠️ fy config check names a literal credential in a login file (expected, repaired by the OWNER after the start; names below)"
-    cat "${NOTES}.config-check.out"
-    mark credential-repair-pending
-  fi
   entries="$(ls -A "${H}")" || unreadable "cannot list ${H}"
   while read -r entry; do
     case "${entry}" in home.json | config | state | run | logs | "") ;; *) fail "unexpected entry '${entry}' in the new home ${H}" ;; esac
@@ -774,6 +762,23 @@ start)
     fy5 ps -a --json >"${NOTES}.ps-after-start.json" || ps_status=$?
     if [ "${ps_status}" -eq 0 ] && jq -e 'type == "array"' "${NOTES}.ps-after-start.json" >/dev/null; then
       rm -f "${NOTES}.ps-after-start.json"
+      # `fy config check` asks the daemon ("every file as the daemon holds it"), so it can only run now, unpinned, against the
+      # daemon just started. starting-v5 is already written, so rollback stops this daemon if the check stops the run here.
+      status=0
+      fy5 config check >"${NOTES}.config-check.out" 2>&1 || status=$?
+      if [ "${status}" -ne 0 ]; then
+        # Expected only for a literal credential in a login file (it names the file and key, never a value). EVERY line of the
+        # report must be that diagnostic: one other problem next to it (schema, access, a held change) is a stop.
+        credential_lines="$(awk '/secret set/ {n++} END {print n + 0}' "${NOTES}.config-check.out")"
+        other_lines="$(awk 'NF && !/secret set/ {n++} END {print n + 0}' "${NOTES}.config-check.out")"
+        if ! { [ "${credential_lines}" -gt 0 ] && [ "${other_lines}" -eq 0 ]; }; then
+          echo "❌ the v5 daemon IS running (rollback stops it)" >&2
+          fail "fy config check failed for a reason other than only a literal credential (see ${NOTES}.config-check.out)"
+        fi
+        say "⚠️ fy config check names a literal credential in a login file (expected, repaired by the OWNER; names below)"
+        cat "${NOTES}.config-check.out"
+        mark credential-repair-pending
+      fi
       mark started-v5
       say "✅ v5 daemon started and answering"
       exit 0

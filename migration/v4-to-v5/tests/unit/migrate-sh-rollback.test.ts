@@ -158,11 +158,22 @@ describe('start: a failed or interrupted start is not proof that no v5 daemon ra
     expect(await sb.notesText()).toContain('# credential-repair-pending');
   });
 
-  test('any other config check failure stops the start; fyd --check exit 78 and 69 are named stops', async () => {
+  test('any other config check failure stops the start after the daemon is up; fyd --check exit 78 and 69 are named stops', async () => {
     const sb = await box();
     await advance(sb, 'install');
-    await sb.fake('fy', [{ match: 'config check', err: 'schema error', code: 1 }]);
-    expect((await sb.run('start')).code).toBe(1);
+    await sb.fake('fy', [
+      { match: '--version', run: 'cat "$D/fy.version"' },
+      { match: 'config check', err: 'schema error', code: 1 },
+      { match: 'daemon start', run: DAEMON_UP_SH },
+      { match: 'ps -a --json', run: 'cat "$D/ps.v5.json"' },
+    ]);
+    const failed = await sb.run('start');
+    expect(failed.code).toBe(1);
+    expect(failed.err).toContain('IS running');
+    expect(failed.err).toContain('other than only a literal credential');
+    const notes = await sb.notesText();
+    expect(notes).toContain('# starting-v5');
+    expect(notes).not.toContain('# started-v5');
     await sb.fake('fyd', [
       { match: '--version', run: 'cat "$D/fyd.version"' },
       { match: '--check', code: 78 },
@@ -173,7 +184,21 @@ describe('start: a failed or interrupted start is not proof that no v5 daemon ra
       { match: '--check', code: 69 },
     ]);
     expect((await sb.run('start')).err).toContain('exit 69');
-    expect((await sb.calls()).filter(line => line === 'fy daemon start')).toEqual([]);
+  });
+
+  test('config check runs only after daemon start and ps answer; the offline pinned form is never called', async () => {
+    const sb = await box();
+    await advance(sb, 'install');
+    expect((await sb.run('start')).code).toBe(0);
+    const calls = await sb.calls();
+    const start = calls.indexOf('fy daemon start');
+    expect(start).toBeGreaterThan(-1);
+    const ps = calls.indexOf('fy ps -a --json', start);
+    expect(ps).toBeGreaterThan(start);
+    const checks = calls.map((line, i) => (line === 'fy config check' ? i : -1)).filter(i => i >= 0);
+    expect(checks).toHaveLength(1);
+    expect(checks[0]).toBeGreaterThan(ps);
+    expect(await sb.notesText()).toContain('# started-v5');
   });
 });
 
@@ -437,9 +462,10 @@ describe('rollback restores the ORIGINAL environment, not the shell it is run fr
     expect(env.filter(line => line.startsWith('fy|daemon start')).every(line => line.includes('FY_URL=<unset>'))).toBe(
       true,
     );
-    expect(
-      env.filter(line => line.startsWith('fy|config check')).every(line => line.includes('FY_URL=http://127.0.0.1:9')),
-    ).toBe(true);
+    expect(env.filter(line => line.startsWith('fy|config check')).every(line => line.includes('FY_URL=<unset>'))).toBe(
+      true,
+    );
+    expect(env.some(line => line.startsWith('fy|config check') && line.includes('127.0.0.1:9'))).toBe(false);
   });
 });
 
