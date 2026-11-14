@@ -751,7 +751,22 @@ start)
 
   entries="$(ls -A "${H}")" || unreadable "cannot list ${H}"
   while read -r entry; do
-    case "${entry}" in home.json | config | state | run | logs | "") ;; *) fail "unexpected entry '${entry}' in the new home ${H}" ;; esac
+    case "${entry}" in
+    home.json | config | state | run | logs | "") ;;
+    fleet)
+      # The converter's skill-folders step writes the installed skills to fleet/assets/skills/<name>/, where v5 Runtimes reads
+      # them. That is the ONLY thing allowed under fleet/: anything else is named and stops, as any other entry does. No link is
+      # followed (find -P), and fleet, assets and skills must themselves be real folders.
+      for d in fleet fleet/assets fleet/assets/skills; do
+        if [ -e "${H}/${d}" ] || [ -L "${H}/${d}" ]; then
+          { [ -d "${H}/${d}" ] && [ ! -L "${H}/${d}" ]; } || fail "unexpected entry '${d}' in the new home ${H}: it is not a plain folder"
+        fi
+      done
+      stray="$(find -P "${H}/fleet" -mindepth 1 ! -path "${H}/fleet/assets" ! -path "${H}/fleet/assets/skills" ! -path "${H}/fleet/assets/skills/*" -print -quit)" || unreadable "cannot list ${H}/fleet"
+      [ -z "${stray}" ] || fail "unexpected entry '${stray#"${H}"/}' in the new home ${H}: only fleet/assets/skills may be there"
+      ;;
+    *) fail "unexpected entry '${entry}' in the new home ${H}" ;;
+    esac
   done <<<"${entries}"
 
   mark starting-v5
