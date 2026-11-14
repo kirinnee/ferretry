@@ -777,3 +777,45 @@ describe('an item a member already opened', () => {
     await view.unmount();
   });
 });
+
+describe('B16 the runtime and profile an item installs into are the target machine’s own', () => {
+  const TARGETS = 'GET /v1/catalog-installs/targets';
+  const noHostRuntimes = { runtimes: undefined } as unknown as Partial<InstallHost>;
+
+  it('reads the runtimes of the machine installed onto and offers each with its profile', async () => {
+    const { fake, view } = await open(
+      { [TARGETS]: () => ({ runtimes: [{ id: 'studio', name: 'Studio', profile: 'lean', harness: 'claude' }] }) },
+      noHostRuntimes,
+    );
+    await giveText(fileText);
+    await settle();
+    await choose('[data-catalog-scope]', 'runtime');
+    expect(q('[data-catalog-runtime]')?.textContent).toContain('studio · lean');
+    expect(fake.calls.filter(call => call.path === '/v1/catalog-installs/targets')).toHaveLength(1);
+    await view.unmount();
+  });
+
+  it('offers no runtime, and says nothing broken, when the machine cannot answer', async () => {
+    const { view } = await open(
+      {
+        [TARGETS]: () => {
+          throw new DaemonCallError(503, 'catalog_kind_unavailable', 'No item provider can read runtime targets.');
+        },
+      },
+      noHostRuntimes,
+    );
+    await giveText(fileText);
+    await settle();
+    await choose('[data-catalog-scope]', 'runtime');
+    expect(q('[data-catalog-runtime]')?.querySelectorAll('option')).toHaveLength(1);
+    await view.unmount();
+  });
+
+  it('asks nothing when the host names the runtimes itself', async () => {
+    const { fake, view } = await open({}, {});
+    await giveText(fileText);
+    await settle();
+    expect(fake.calls.some(call => call.path === '/v1/catalog-installs/targets')).toBe(false);
+    await view.unmount();
+  });
+});

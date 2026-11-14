@@ -713,6 +713,7 @@ Installing is two steps and every route has exactly one capability. A project wr
 | `POST /v1/catalog-installs/runtime/preview`      | `fleet.use`            | the same, for a runtime and profile                                       |
 | `POST /v1/catalog-installs/runtime`              | `fleet.configure`      | applies it as one fleet change                                            |
 | `GET /v1/catalog-installs`                       | `fleet.use`            | what is installed, and where                                              |
+| `GET /v1/catalog-installs/targets`               | `fleet.use`            | the runtimes (with their profile) an item can be installed into here      |
 | `DELETE /v1/catalog-installs/project/:installId` | `filesystem.configure` | removes exactly what that install wrote                                   |
 | `DELETE /v1/catalog-installs/runtime/:installId` | `fleet.configure`      | the same, for a runtime install                                           |
 | `PATCH /v1/catalog-installs/project/:installId`  | `filesystem.use`       | stay on this version / skip one (no file is touched)                      |

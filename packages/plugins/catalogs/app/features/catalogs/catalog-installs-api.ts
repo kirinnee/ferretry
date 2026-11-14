@@ -7,7 +7,10 @@
  */
 
 import {
+  CATALOG_INSTALL_TARGETS_PATH,
   CATALOG_INSTALLS_PATH,
+  type CatalogInstallTargets,
+  CatalogInstallTargetsSchema,
   type CatalogInstall,
   type CatalogInstallList,
   CatalogInstallListSchema,
@@ -61,6 +64,11 @@ export async function applyCatalogInstall(
 
 export async function listCatalogInstalls(client: CatalogClient): Promise<CatalogInstallList> {
   return await client.request(CATALOG_INSTALLS_PATH, CatalogInstallListSchema);
+}
+
+/** The runtimes an item can be installed into on THIS machine, each with the profile it launches with. */
+export async function listCatalogInstallTargets(client: CatalogClient): Promise<CatalogInstallTargets> {
+  return await client.request(CATALOG_INSTALL_TARGETS_PATH, CatalogInstallTargetsSchema);
 }
 
 export async function removeCatalogInstall(

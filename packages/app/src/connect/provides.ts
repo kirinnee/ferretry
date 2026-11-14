@@ -306,7 +306,7 @@ export interface ShellProvides {
   readonly carriers?: (ports: ConnectPorts) => readonly CarrierDialer[];
   /** Connections only: the carriers a pairing walks. */
   readonly pairing?: (ports: ConnectPorts) => PairingCarriers;
-  /** Connections only; NOT IMPLEMENTED YET: the carriers a member session walks to a publisher this browser is not paired with. */
+  /** Connections only: the carriers a member session walks to a publisher this browser is not paired with. */
   readonly member?: (ports: ConnectPorts) => MemberCarriers;
   /**
    * Access only: the passkey handler every daemon call consults on a refusal, and the prompts the shell mounts
