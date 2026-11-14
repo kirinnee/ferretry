@@ -631,8 +631,10 @@ async function build(): Promise<void> {
     for (const each of asks) await add('yesno', each.title, each.ask);
     const closed = await idOf('Fixture closed ask');
     const answered = await idOf('Fixture answered ask');
-    // Closed by the owner with a reason and no answer: v4 resolves it at once.
-    await fyOk(['agenda', 'done', `!${closed}`, '--reason', 'fixture: no longer needed', '--session', target]);
+    // Closed by the FERRET that raised it, with a reason and no answer (`done --reason` is the ferret's verb: it withdraws a
+    // question the owner has not answered): v4 resolves it at once and types nothing to anyone. Closed by the owner it would
+    // leave a reply batch in flight that CI's v4 never proves, and v5 (like v4) reopens an item whose reply is unproven.
+    await fyOk(['agenda', 'done', `!${closed}`, '--reason', 'fixture: no longer needed'], { as: target });
     // Answered yes: v4 HOLDS the answer for the ferret, and the item stays on its list until it is delivered.
     await fyOk(['agenda', 'done', `!${answered}`, '--yes', '--note', 'fixture answer', '--session', target]);
     const after = await board();
