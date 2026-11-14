@@ -43,6 +43,7 @@ and `a-route-agreement` serially (Knip needs more than 4GB). `treefmt` runs in Q
 | `a-contract-registry`       | executable, documented and wired contract inventories agree                                                                                                       |
 | `a-fetch-binding`           | the PWA never stores a `fetch` builtin or calls the network past the carrier                                                                                      |
 | `a-git-hooks-worktree`      | commit linting works from a linked worktree, concurrently and repeatedly                                                                                          |
+| `a-lazy-component-copies`   | every app half's `app/lazy.ts` is the same copy, suspending through React `use()`                                                                                 |
 | `a-macos-policy`            | the darwin smoke is advisory on PRs, required and retried on main and a tag; free `macos-15` only                                                                 |
 | `a-migration-isolated`      | the v4 -> v5 converter stays outside the product (workspaces, imports, release paths)                                                                             |
 | `a-no-fy-render-in-docs`    | `fy-render` fence openers appear only in their three teaching files                                                                                               |
