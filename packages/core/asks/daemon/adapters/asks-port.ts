@@ -21,7 +21,7 @@ import {
 } from '../../contract/index.ts';
 import type { AgendaActor, AgendaService, RaiseAgendaRequest } from '../lib/agenda/index.ts';
 import { SerialQueue } from '../lib/agenda/serial-queue.ts';
-import { cardAskReference } from '../lib/protocol/agenda-card-asks.ts';
+import { askedCardAsks, cardAskReference } from '../lib/protocol/agenda-card-asks.ts';
 import { askForKind } from '../lib/protocol/agenda-card.ts';
 import {
   MACHINE_AGENDA_ID,
@@ -227,6 +227,25 @@ function summaryOf(
   };
 }
 
+/** The `card` source the Board registers: a gate's ask, `gate:<card>:<lane>:<entry>`. */
+const CARD_SOURCE = 'card' as SourceKey;
+
+/**
+ * The open asks a card's gates put on an item that is NOT itself the card's obligation: a ferret's own item or a card
+ * agenda carrying `cardAsks` (what a v4 agenda holds, and what this engine still reads, answers and rests). Each is
+ * an open ask of the `card` source named by its gate, on its carrier's own id, so the Board finds the ask a gate
+ * already has and raises no second one. Only the Board's own read (the `card` source) lists them; the carrier stays
+ * one ask of its own source everywhere else.
+ */
+const carriedCardAsks = (ferret: string, item: AgendaItem, sources: Parameters<typeof summaryOf>[3]): AskSummary[] =>
+  parseObligation(item.sourceRef)?.source === CARD_SOURCE
+    ? []
+    : askedCardAsks(item).map(ask => ({
+        ...summaryOf(ferret, item, 'open', sources),
+        source: CARD_SOURCE,
+        entry: cardAskReference(ask) as EntryId,
+      }));
+
 /** Which ferrets have a board; the engine's own list (`ferrets/*`). */
 export interface AskBoards {
   ferrets(): Promise<readonly string[]>;
@@ -239,7 +258,15 @@ export interface AskBoards {
 export function asksPort(
   agenda: Pick<
     AgendaService,
-    'list' | 'raise' | 'resolve' | 'dismiss' | 'snooze' | 'unsnooze' | 'raisedObligation' | 'raisedObligations'
+    | 'list'
+    | 'raise'
+    | 'resolve'
+    | 'dismiss'
+    | 'snooze'
+    | 'unsnooze'
+    | 'raisedObligation'
+    | 'raisedObligations'
+    | 'cardAsk'
   >,
   boards: AskBoards,
   sources: (key: SourceKey) => AskSourceSpec | 'unavailable',
@@ -401,8 +428,19 @@ export function asksPort(
           (filter.entry === undefined || answer.entry === filter.entry) &&
           (since === undefined || answer.at > since),
       ),
-    close: async (ref: AskRef, reason: CloseReason) => {
+    close: async (ref: AskRef, reason: CloseReason, entry?: EntryId) => {
       const daemon: AgendaActor = { kind: 'daemon', cause: 'system' };
+      if (reason !== 'answered') {
+        // A carrier's card ask is withdrawn from the carrier: the item is the ferret's own and stays open.
+        const carrier = (await snapshot(ref.ferret))?.items.find(item => item.id === ref.id);
+        if (carrier !== undefined && carriedCardAsks(ref.ferret, carrier, sources).length > 0) {
+          for (const ask of askedCardAsks(carrier).filter(
+            carried => entry === undefined || cardAskReference(carried) === entry,
+          ))
+            await agenda.cardAsk(ref.ferret, ref.id, { kind: 'withdraw', reference: cardAskReference(ask) });
+          return;
+        }
+      }
       const note = `closed: ${reason}`;
       const mutation =
         reason === 'answered'
@@ -415,7 +453,11 @@ export function asksPort(
       const listed = await everyBoard(
         (ferret, board) =>
           state === 'open'
-            ? board.items.map(item => summaryOf(ferret, item, 'open', sources))
+            ? board.items.flatMap(item =>
+                filter.source === CARD_SOURCE
+                  ? [summaryOf(ferret, item, 'open', sources), ...carriedCardAsks(ferret, item, sources)]
+                  : [summaryOf(ferret, item, 'open', sources)],
+              )
             : board.resolved.map(item =>
                 summaryOf(
                   ferret,

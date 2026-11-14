@@ -324,7 +324,11 @@ export interface AsksApi {
     filter: { readonly source: SourceKey; readonly entry?: EntryId },
     since?: string,
   ): Promise<readonly AskAnswer[]>;
-  close(ask: AskRef, reason: CloseReason): Promise<void>;
+  /**
+   * Closes an ask. For a card ask CARRIED on an agenda item, `entry` names the one gate entry to withdraw: only that
+   * carried ask goes, and the carrier and its other carried asks stay. Without it every carried ask is withdrawn.
+   */
+  close(ask: AskRef, reason: CloseReason, entry?: EntryId): Promise<void>;
   open(filter: AskFilter): Promise<readonly AskSummary[]>;
   get(ask: AskRef): Promise<AskSummary | undefined>;
   /** All boards, or one board (including an empty one); open and parked items are complete. */
