@@ -59,4 +59,31 @@ describe('no-macros', () => {
       'scripts/gen/inline.ts:1',
     ]);
   });
+
+  test('the whole check reads every module Bun loads (an .mjs re-export, a .js import), never node_modules or dist/', async () => {
+    file('package.json', JSON.stringify({ name: 'fixture', workspaces: ['packages/plugins/*'] }));
+    file('packages/plugins/beta/package.json', JSON.stringify({ name: '@fixture/beta' }));
+    file('packages/plugins/beta/re-export.mjs', "export * from './a.ts' with { type: 'macro' };\n");
+    file(
+      'packages/plugins/beta/daemon/common.cjs',
+      "const a = require('./a.ts');\nmodule.exports = { a, note: 'macro' };\n",
+    );
+    file(
+      'packages/plugins/beta/dist/bundle.js',
+      "import { a } from './a.ts' with { type: 'macro' };\nconsole.log(a);\n",
+    );
+    file(
+      'packages/plugins/beta/node_modules/dep/index.js',
+      "import { a } from './a.ts' with { type: 'macro' };\nconsole.log(a);\n",
+    );
+    file('scripts/entry.js', "import { a } from './a.ts' with { type: 'macro' };\nconsole.log(a);\n");
+
+    const found = (await check.run(contextFor(root))).map(f => f.where);
+
+    expect(found).toContain('packages/plugins/beta/re-export.mjs:1');
+    expect(found).toContain('scripts/entry.js:1');
+    expect(found.filter(where => where.startsWith('packages/plugins/beta/'))).toEqual([
+      'packages/plugins/beta/re-export.mjs:1',
+    ]);
+  });
 });
