@@ -2,6 +2,7 @@ import { type DaemonlessPorts, type DaemonlessScreenProps, type DaemonlessViews,
 import type { AppComponent, PanelProps, PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { catalogsCommands } from './command-bar.ts';
 import { lazyComponent } from './lazy.ts';
 
 /**
@@ -69,6 +70,7 @@ export default provideToShell(
     }),
   }),
   {
+    commands: catalogsCommands,
     // A share link's whole fragment on `/join` is the shell's to take (shell contract S3): it leaves the address bar
     // and the history entry before the first render and before the views chunk is asked for, and is held in memory
     // until the join screen takes it. Beneath `/join` it is stripped and dropped.

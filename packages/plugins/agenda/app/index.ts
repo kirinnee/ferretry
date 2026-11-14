@@ -2,6 +2,7 @@ import { type DeviceViewProps, provideToShell, type ShellProvides } from '@ferre
 import type { AppComponent, PanelProps, PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { agendaCommands } from './command-bar.ts';
 import { lazyComponent } from './lazy.ts';
 
 type Surfaces = {
@@ -74,6 +75,7 @@ const filterBootView = lazyComponent<DeviceViewProps>(
 ) as NonNullable<ShellProvides['device']>[string];
 
 export default provideToShell(half, {
+  commands: agendaCommands,
   fragments: [{ form: 'keyed', key: 'agenda' }],
   device: { 'deep-link': deepLinkView, 'notification-filter': filterBootView },
 });

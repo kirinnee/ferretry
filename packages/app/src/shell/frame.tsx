@@ -10,7 +10,14 @@ import { buildPluginCommandSources, deviceLayoutSource, placeSource } from './co
 import { useScreenHref } from '../router/screen-href.ts';
 import { daemonTitle } from '../daemons/daemon-list.ts';
 import type { NavEntry } from '../layout/engine.ts';
-import { daemonHomeHref, DEVICE_SETTINGS_HREF, HOME_HREF, pairAgainHref, type Route } from '../router/routes.ts';
+import {
+  daemonHomeHref,
+  DEVICE_SETTINGS_HREF,
+  HOME_HREF,
+  needsSubject,
+  pairAgainHref,
+  type Route,
+} from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
 import {
@@ -53,7 +60,7 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
   const href = (entry: NavEntry): string | undefined => {
     if (entry.kind !== 'screen') return undefined;
     const { screen } = entry;
-    if (screen.path.includes(':')) return undefined; // a screen that needs a subject is not a nav destination
+    if (needsSubject(screen.path)) return undefined; // a screen that needs a subject is not a nav destination
     if (screen.path.startsWith('/')) return routes.href(screen, {});
     return daemon === undefined ? undefined : routes.href(screen, {}, daemon);
   };
@@ -177,7 +184,7 @@ function Side({ daemon }: { readonly daemon: string | undefined }) {
   const { show, holds } = plan.side;
   if (show === 'never' || (show === 'wide-only' && viewport === 'phone') || holds.kind === 'none') return null;
   if (daemon === undefined) return null;
-  if (holds.kind === 'screen' && holds.screen.path.includes(':')) return null; // needs a subject the route lacks
+  if (holds.kind === 'screen' && needsSubject(holds.screen.path)) return null; // needs a subject the route lacks
   return (
     <aside className="fy-side" data-slot="side">
       {holds.kind === 'screen' ? <ScreenView daemon={daemon} screen={holds.screen} params={{}} /> : null}
@@ -209,6 +216,9 @@ function ShellCommandBar(props: {
 }) {
   const { runtime, views, routes, owner, layouts } = useShell();
   const router = useRouter();
+  const { route } = router;
+  // The ferret whose page this is, for the entries that are about "this ferret" (Board's, S-0449).
+  const ferret = route.kind === 'screen' ? route.params.ferret : undefined;
   // `useScreenHref` answers a fresh function every render with the same answers; the sources read the latest one.
   const screenHrefOf = useScreenHref();
   const screenHrefRef = useRef(screenHrefOf);
@@ -230,8 +240,9 @@ function ShellCommandBar(props: {
             navigate: href => router.navigate(href),
             screenHref: (...address) => screenHrefRef.current(...address),
             changed,
+            ferret,
           }),
-    [daemon, props.open, runtime, router, changed],
+    [daemon, props.open, runtime, router, changed, ferret],
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: `answers` re-lists when a plugin source's answer arrives.
   const sources = useMemo(

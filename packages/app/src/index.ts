@@ -156,7 +156,12 @@ export { FerretWorkspace } from './shell/ferret-workspace.tsx';
 export { usePanelIntent } from './shell/panel-intent.ts';
 export { forSubject } from './shell/for-subject.ts';
 /** @public A plugin's command bar entries (its app half's `shell.commands`), built per daemon by the bar (§5.1). */
-export type { PluginCommandContext, PluginCommandSource } from './shell/command-sources.ts';
+export {
+  type DestinationDecl,
+  destinationCommands,
+  type PluginCommandContext,
+  type PluginCommandSource,
+} from './shell/command-sources.ts';
 /** @public An app hook another half offers (`<offerer>.<name>`): the provider's `shell.hooks`, the offerer's `useAppHook` (§5.2). */
 export { type AppHookContext, type AppHookProvider, type AppHookProviders, useAppHook } from './shell/app-hooks.ts';
 /** @public This device's theme, read on any screen, daemon-less ones included (§5.2: a device setting; shell contract S9). */

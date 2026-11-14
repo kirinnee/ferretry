@@ -7,6 +7,11 @@ import { type CommandBarSource, commandBarResults } from '../../../src/ui/comman
 import { interact, mount, must, pressKey } from '../../support/dom.ts';
 
 const ran: string[] = [];
+/** The bold line of each row: its label, without the sentence under it. */
+const optionLabels = (): (string | null | undefined)[] =>
+  [...document.body.querySelectorAll('[role="option"]')].map(
+    option => option.querySelector('.font-semibold')?.textContent,
+  );
 const places: CommandBarSource = () => [
   { id: 'board', group: 'Go to', label: 'Board', resting: true, run: () => ran.push('board') },
   { id: 'agenda', group: 'Go to', label: 'Agenda', resting: true, run: () => ran.push('agenda') },
@@ -42,8 +47,8 @@ describe('the command bar model', () => {
 describe('the command bar', () => {
   it('retains screen destinations after an empty query, typing, and closing/reopening in StrictMode', async () => {
     const screens = new Map([
-      ['board.board', { plugin: 'board', id: 'board', path: 'board', label: 'Board' }],
-      ['agenda.agenda', { plugin: 'agenda', id: 'agenda', path: 'agenda', label: 'Agenda' }],
+      ['board.board', { plugin: 'board', id: 'board', path: 'board', label: 'Board', navOrder: 30 }],
+      ['agenda.agenda', { plugin: 'agenda', id: 'agenda', path: 'agenda', label: 'Agenda', navOrder: 10 }],
     ]);
     const sources = [
       placeSource({
@@ -60,8 +65,8 @@ describe('the command bar', () => {
       </StrictMode>
     );
     const view = await mount(bar(true, 1));
-    const labels = () => [...document.body.querySelectorAll('[role="option"]')].map(option => option.textContent);
-    expect(labels()).toEqual(['Board', 'Agenda', 'This device’s settings', 'This daemon’s settings']);
+    const labels = () => optionLabels();
+    expect(labels()).toEqual(['Agenda', 'Board', 'Open settings', 'This device’s settings']);
     const input = must(document.body.querySelector<HTMLInputElement>('input[role="combobox"]'), 'query box');
     await interact(() => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
@@ -69,13 +74,14 @@ describe('the command bar', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
     expect(input.value).toBe('board');
-    expect(labels()).toEqual(['Board']);
-    expect(commandBarResults(sources, 'board').results.map(entry => entry.id)).toEqual(['screen-board.board']);
+    // The Board first; v4's "Open settings" is found too, its sentence holding b-o-a-r-d in order.
+    expect(labels()).toEqual(['Board', 'Open settings']);
+    expect(commandBarResults(sources, 'board').results[0]?.id).toBe('screen-board.board');
     await view.render(bar(false, 1));
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     await view.render(bar(true, 2));
     expect(document.body.querySelector<HTMLInputElement>('input')?.value).toBe('');
-    expect(labels()).toEqual(['Board', 'Agenda', 'This device’s settings', 'This daemon’s settings']);
+    expect(labels()).toEqual(['Agenda', 'Board', 'Open settings', 'This device’s settings']);
     await view.unmount();
   });
 
@@ -84,9 +90,7 @@ describe('the command bar', () => {
       placeSource({ daemons: [], daemon: undefined, screens: [], routes: routeTable([]), navigate: () => {} }),
     ];
     const view = await mount(<CommandBar open focusSignal={1} onClose={() => {}} sources={sources} />);
-    expect([...document.body.querySelectorAll('[role="option"]')].map(option => option.textContent)).toEqual([
-      'This device’s settings',
-    ]);
+    expect(optionLabels()).toEqual(['Open settings']);
     expect(document.body.querySelector('[data-command-bar-resting]')).toBeNull();
     await view.unmount();
   });
