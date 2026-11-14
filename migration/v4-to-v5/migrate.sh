@@ -764,19 +764,31 @@ start)
       rm -f "${NOTES}.ps-after-start.json"
       # `fy config check` asks the daemon ("every file as the daemon holds it"), so it can only run now, unpinned, against the
       # daemon just started. starting-v5 is already written, so rollback stops this daemon if the check stops the run here.
+      # A daemon that dies between the ps above and this call is started again by the check itself (any fy command starts
+      # one); it cannot be pinned, and starting-v5 still covers rollback.
       status=0
-      fy5 config check >"${NOTES}.config-check.out" 2>&1 || status=$?
+      fy5 config check --json >"${NOTES}.config-check.out" 2>"${NOTES}.config-check.err" || status=$?
       if [ "${status}" -ne 0 ]; then
-        # Expected only for a literal credential in a login file (it names the file and key, never a value). EVERY line of the
-        # report must be that diagnostic: one other problem next to it (schema, access, a held change) is a stop.
-        credential_lines="$(awk '/secret set/ {n++} END {print n + 0}' "${NOTES}.config-check.out")"
-        other_lines="$(awk 'NF && !/secret set/ {n++} END {print n + 0}' "${NOTES}.config-check.out")"
-        if ! { [ "${credential_lines}" -gt 0 ] && [ "${other_lines}" -eq 0 ]; }; then
+        # Expected only for a literal credential in a login file. The report is the JSON the check prints; it passes ONLY when
+        # nothing waits for confirmation, there is at least one error, and EVERY error is in logins/ and carries one of the
+        # kernel's raw-secret messages (packages/core/kernel/host/config/secrets.ts: RAW_SECRET_MESSAGE, RAW_SECRET_KEY_MESSAGE,
+        # RAW_TEXT_SECRET_MESSAGE; a test pins these three strings). Anything else (schema, access, a held change, unreadable
+        # output) is a stop. The messages name a path, never a value.
+        credential_only=0
+        jq -e --arg m1 'this looks like a raw secret (an API key or token)' \
+          --arg m2 'a name in here looks like a raw secret (an API key or token)' \
+          --arg m3 'this line looks like it holds a raw secret (an API key or token) — a comment or a tag counts' '
+          (.pending | length) == 0
+          and ([.issues[] | select(.severity == "error")] as $e
+            | ($e | length) > 0
+              and all($e[]; (.path | startswith("logins/")) and (.message | (endswith($m1) or endswith($m2) or . == $m3))))' \
+          "${NOTES}.config-check.out" >/dev/null 2>&1 && credential_only=1
+        if [ "${credential_only}" -ne 1 ]; then
           echo "❌ the v5 daemon IS running (rollback stops it)" >&2
           fail "fy config check failed for a reason other than only a literal credential (see ${NOTES}.config-check.out)"
         fi
-        say "⚠️ fy config check names a literal credential in a login file (expected, repaired by the OWNER; names below)"
-        cat "${NOTES}.config-check.out"
+        say "⚠️ fy config check names a literal credential in a login file (expected, repaired by the OWNER; path, line and message below)"
+        jq -r '.issues[] | select(.severity == "error") | "\(.path):\(.line // 1) \(.message)"' "${NOTES}.config-check.out"
         mark credential-repair-pending
       fi
       mark started-v5

@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { advance, DAEMON_UP_SH, makeSandbox, SECRET_VALUE, type Sandbox } from './migrate-harness.ts';
+import {
+  advance,
+  configCheckJson,
+  DAEMON_UP_SH,
+  makeSandbox,
+  rawSecretIssue,
+  SECRET_VALUE,
+  type Sandbox,
+} from './migrate-harness.ts';
 
 /**
  * Round-1 review of migrate.sh, one named test per finding (P1 #1 to #8, then the P2s that were fixed). Every test here
@@ -150,8 +158,11 @@ describe('P1-3: any config-check error other than the one credential diagnostic 
     await sb.fake('fy', [
       { match: '--version', run: 'cat "$D/fy.version"' },
       {
-        match: 'config check',
-        err: 'logins/a.yaml KEY X holds a literal credential: use fy secret set NAME\nlimits.yaml: invalid schema',
+        match: 'config check --json',
+        out: configCheckJson([
+          rawSecretIssue(),
+          { path: 'limits.yaml', line: 2, severity: 'error', message: 'invalid schema' },
+        ]),
         code: 1,
       },
       { match: 'daemon start', run: DAEMON_UP_SH },
