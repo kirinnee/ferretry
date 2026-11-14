@@ -6,6 +6,7 @@ import {
   type ICellColour,
   PackCommandError,
   PackTableController,
+  prCell,
   renderPackTable,
   sinceLabel,
 } from '../../../cli/lib/pack-table.ts';
@@ -49,6 +50,7 @@ describe('renderPackTable', () => {
         id: 'a',
         name: 'ada',
         card: { ref: '&F7', lane: 'Implement' },
+        pr: { number: 42, url: 'https://github.com/o/r/pull/42', state: 'open', draft: true, checks: 'passing' },
         last: { at: at('2026-11-03T11:58:00.000Z'), source: 'note', text: 'wiring the route' },
       }),
       row({ id: 'b', name: 'bo', depth: 2, model: 'glm-5.3' }),
@@ -59,9 +61,18 @@ describe('renderPackTable', () => {
 
     // Assert
     should(lines[0]).equal('rhett (ses-lead): 2 helpers');
-    should(lines[1]).match(/^FERRET\s+MODEL\s+STATE\s+CARD\s+LAST$/);
-    should(lines[2]).match(/^ada\s+sonnet\s+running\s+&F7 Implement\s+\[2m\] wiring the route$/);
-    should(lines[3]).match(/^ {2}bo\s+glm-5\.3\s+running\s+-\s+-$/);
+    should(lines[1]).match(/^FERRET\s+MODEL\s+STATE\s+CARD\s+PR\s+LAST$/);
+    should(lines[2]).match(/^ada\s+sonnet\s+running\s+&F7 Implement\s+#42 draft CI passing\s+\[2m\] wiring the route$/);
+    should(lines[3]).match(/^ {2}bo\s+glm-5\.3\s+running\s+-\s+-\s+-$/);
+  });
+
+  it('should show CI for a live PR and the state once it no longer matters', () => {
+    const base = { url: 'https://github.com/o/r/pull/7', draft: false, checks: 'failing' as const };
+    should(prCell({ ...base, number: 7, state: 'open' })).equal('#7 CI failing');
+    should(prCell({ ...base, number: 7, state: 'unknown' })).equal('#7 CI failing');
+    should(prCell({ ...base, number: 7, state: 'merged' })).equal('#7 merged');
+    should(prCell({ ...base, number: 7, state: 'closed', draft: true })).equal('#7 closed');
+    should(prCell(undefined)).equal('-');
   });
 
   it('should mark an ended row with how long ago it ended', () => {

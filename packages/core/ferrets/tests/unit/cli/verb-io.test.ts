@@ -18,8 +18,10 @@ test('verb io answers on stdout and says notes and diagnostics on stderr', () =>
   verb.warn('warned');
   verb.error('refused');
   verb.diagnostic('diagnosed');
-  expect(out).toEqual(['ok', 'report', 'warned']);
-  expect(err).toEqual(['refused', 'diagnosed']);
+  // The shell's terminal writes exactly what it is given, so every message ends its own line: `fy ps -a` printed all
+  // its rows as one line before they did.
+  expect(out).toEqual(['ok\n', 'report\n', 'warned\n']);
+  expect(err).toEqual(['refused\n', 'diagnosed\n']);
 });
 
 test('verb io keeps the exit code a controller sets and starts at zero', () => {

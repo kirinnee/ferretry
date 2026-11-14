@@ -86,6 +86,7 @@ import {
   type GateCheckItem,
   type TranscriptEvent,
 } from './lib/board/index.ts';
+import { prOf } from './lib/board/card-pr.ts';
 import { githubWatchJob, type GithubWatch } from './lib/github/index.ts';
 import {
   BoardSwitchService,
@@ -647,12 +648,22 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
       await sweep.tick(signal);
       await gates.sweep(signal);
     },
-    lines: async ferret =>
-      (await heldBy(ferret)).map(card => ({
-        kind: 'card' as const,
-        text: `${card.title}${card.progress?.now ? `: ${card.progress.now}` : ''}`,
-        ref: `&${card.id}`,
-      })),
+    lines: async ferret => {
+      const held = await heldBy(ferret);
+      if (held.length === 0) return [];
+      const { laneSets } = await service.snapshot();
+      return held.map(card => {
+        const lane = laneSets.get(card.projectId)?.lanes.find(candidate => candidate.id === card.laneId)?.name;
+        const pr = prOf(card.links.prs);
+        return {
+          kind: 'card' as const,
+          text: `${card.title}${card.progress?.now ? `: ${card.progress.now}` : ''}`,
+          ref: `&${card.id}`,
+          ...(lane === undefined ? {} : { lane }),
+          ...(pr === undefined ? {} : { pr }),
+        };
+      });
+    },
     heldBy,
     laneSets: async () => [...(await service.snapshot()).laneSets.values()],
     orphanedCards: async () => {

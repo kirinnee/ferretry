@@ -17,11 +17,11 @@
  * while one does), the tool installer, the secret store's list and put, the shared-history pooling and the machine's
  * name; each is a declared GAP in `ports-pending.json`.
  */
-import type { FerretState } from '@ferretry/core-ferrets/contract';
+import type { FerretsApi, FerretState } from '@ferretry/core-ferrets/contract';
 import type { ConfigPort, KernelPorts, RootHandle, RootsPort } from '@ferretry/kernel/contract';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { UsageApi } from '@ferretry/plugin-usage/contract';
-import { milliseconds } from '@ferretry/std';
+import { InstantSchema, milliseconds } from '@ferretry/std';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
 import { PROFILE_COMPONENTS_KEY, PROFILE_ITEMS } from '../contract/index.ts';
 import { applyClaimFor } from './adapters/apply-claim.ts';
@@ -299,7 +299,7 @@ export function fleetHost(
  */
 export function fileAssembly(
   ctx: {
-    readonly kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log'> & {
+    readonly kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log' | 'identity'> & {
       readonly config: Pick<ConfigPort, 'writeAll' | 'collection' | 'file' | 'etag'>;
     };
     readonly needs: {
@@ -307,7 +307,9 @@ export function fileAssembly(
         Parameters<typeof fileFleetSetupDeps>[0]['logins'] &
         Pick<LoginsApi, 'environmentTemplates'>;
       readonly loginChanges: FleetCatalogServiceDeps['loginChanges'];
-      readonly ferrets: { list(): Promise<readonly { readonly state: FerretState }[]> };
+      readonly ferrets: Pick<FerretsApi, 'lastAutoResume'> & {
+        list(): Promise<readonly { readonly state: FerretState }[]>;
+      };
     };
     /** The hooks this plugin offers: the profile component sources the owning plugins take (read live, never kept). */
     readonly hooks: Pick<HookInvoker, 'provider'>;
@@ -346,8 +348,8 @@ export function fileAssembly(
     loginChanges: ctx.needs.loginChanges,
     configWriter: writeAllConfigWriter(ctx.kernel.config, configDirectory),
     locate: harness => commands.which(harness),
-    // GAP(kernel): the kernel offers no host name, so a copy's source is named "this machine".
-    machineName: () => 'this machine',
+    // The daemon's own display name (the host name, normalised by the kernel): what `fy machine` and a copy's source say.
+    machineName: () => ctx.kernel.identity.daemonName,
     clientName: CLIENT_NAME,
     config,
     sharedHistory: unavailableSharedHistory,
@@ -360,6 +362,11 @@ export function fileAssembly(
   });
   const catalog: FleetCatalogServiceDeps = {
     ...unguarded,
+    // What the last auto-resume pass after a restart did, for the Machine view; Ferrets keeps it (`null` before any pass).
+    lastAutoResume: async () => {
+      const report = await ctx.needs.ferrets.lastAutoResume?.();
+      return report === undefined || report === null ? null : { ...report, at: InstantSchema.parse(report.at) };
+    },
     // Usage's pauses in force now, synchronously (they are memory-only): a login its budget holds is published
     // unavailable, exactly as a disabled one is. Usage off (it is an optional need) holds nothing.
     budgetHolds: () =>

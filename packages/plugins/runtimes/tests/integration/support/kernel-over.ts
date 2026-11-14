@@ -11,6 +11,7 @@ export const kernelOver = (world: FleetWorld) => {
   const kernel = {
     roots: world.roots,
     paths: { home: () => world.person },
+    identity: { daemonId: 'fy_daemon_test', daemonName: 'test-host', binaries: { client: 'fy', daemon: 'fyd' } },
     clock: {
       nowMs: () => now,
       after: (_duration: unknown, run: () => void) => {
@@ -26,7 +27,7 @@ export const kernelOver = (world: FleetWorld) => {
       file: () => undefined,
       etag: async () => 'absent',
     },
-  } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log'> & {
+  } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log' | 'identity'> & {
     config: Pick<KernelPorts['config'], 'writeAll' | 'collection' | 'file' | 'etag'>;
   };
   return { kernel, warned };

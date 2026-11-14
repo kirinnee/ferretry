@@ -59,10 +59,11 @@ async function realWorld(world: FleetWorld) {
   const kernel = {
     roots: world.roots,
     paths: { home: () => world.person, which: async () => undefined },
+    identity: { daemonName: 'test-host' },
     clock: { nowMs: () => 1_000, after: () => () => undefined },
     log: { warn: () => undefined },
     config: port,
-  } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log'> & {
+  } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log' | 'identity'> & {
     config: Pick<KernelPorts['config'], 'writeAll' | 'collection' | 'file' | 'etag'>;
   };
   const assembly = fileAssembly({ kernel, needs, hooks: { provider: () => 'unavailable' } }, new FleetPublication());

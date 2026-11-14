@@ -37,13 +37,17 @@ const build = async (
   ferrets: readonly FerretSummary[],
   lines: Readonly<Record<string, readonly SitrepLine[]>> = {},
   blockers: Readonly<Record<string, number>> = {},
-  options: { readonly redact?: (texts: readonly string[]) => Promise<readonly string[]> } = {},
+  options: {
+    readonly redact?: (texts: readonly string[]) => Promise<readonly string[]>;
+    readonly model?: (ferret: string) => Promise<string | undefined>;
+  } = {},
 ) =>
   await readPackTable({
     root: ROOT,
     ferrets,
     sitrep: async id => ({ lines: lines[id] ?? [], blockers: blockers[id] ?? 0 }),
     redact: options.redact ?? (async texts => texts),
+    ...(options.model === undefined ? {} : { model: options.model }),
     nowMs: NOW,
   });
 
@@ -120,13 +124,23 @@ describe('readPackTable', () => {
   it('should build rows a reader can parse: state, card, newest line and when it ended', async () => {
     // Arrange
     const ferrets = [
-      ferret('w', { parent: 'lead' as FerretSummary['id'], runtime: 'claude-main' as FerretSummary['runtime'] }),
+      ferret('w', {
+        parent: 'lead' as FerretSummary['id'],
+        runtime: 'claude-main' as FerretSummary['runtime'],
+        model: 'opus-5.5',
+      }),
       ferret('i', { parent: 'lead' as FerretSummary['id'], state: 'idle' }),
       ferret('e', { parent: 'lead' as FerretSummary['id'], state: 'stopped', stateAt: at(5) }),
     ];
     const lines = {
       w: [
-        { kind: 'card', text: 'Fix the bug', ref: '&F7' },
+        {
+          kind: 'card',
+          text: 'Fix the bug',
+          ref: '&F7',
+          lane: 'Implement',
+          pr: { number: 42, url: 'https://github.com/o/r/pull/42', state: 'open', draft: false, checks: 'passing' },
+        },
         { kind: 'doing', text: 'running tests\nsecond line', at: at(3) },
         { kind: 'note', text: 'halfway', at: at(3) },
       ] satisfies SitrepLine[],
@@ -140,11 +154,41 @@ describe('readPackTable', () => {
     should(table.root).deepEqual({ id: 'lead', name: 'lead' });
     should(table.at).equal(new Date(NOW).toISOString());
     const [e, i, w] = table.rows;
-    should(w).containEql({ id: 'w', model: 'claude-main', state: 'running', depth: 1, card: { ref: '&F7' } });
+    // The MODEL column is the model it runs, never its runtime; the PR and the card's lane come from the card line.
+    should(w).containEql({
+      id: 'w',
+      model: 'opus-5.5',
+      state: 'running',
+      depth: 1,
+      card: { ref: '&F7', lane: 'Implement' },
+      pr: { number: 42, url: 'https://github.com/o/r/pull/42', state: 'open', draft: false, checks: 'passing' },
+    });
     should(w?.last).deepEqual({ at: at(3), source: 'note', text: 'halfway' });
     should(i?.state).equal('needs-you');
-    should(i?.model).equal('claude-code');
+    should(i?.model).equal('default');
+    should(i?.pr).be.undefined();
     should(e).containEql({ state: 'ended', endedAt: at(5), ferretState: 'stopped' });
+  });
+
+  it('should show the model each ferret is actually running: observed over requested, and an observed one for a default launch', async () => {
+    // Arrange: w was asked for opus but switched inside its session; d asked for nothing and the harness reports one.
+    const ferrets = [
+      ferret('w', { parent: 'lead' as FerretSummary['id'], model: 'opus-5.5' }),
+      ferret('d', { parent: 'lead' as FerretSummary['id'] }),
+      ferret('u', { parent: 'lead' as FerretSummary['id'] }),
+      ferret('k', { parent: 'lead' as FerretSummary['id'], model: 'glm-5.3' }),
+    ];
+    const observed: Record<string, string | undefined> = { w: 'sonnet-5.5', d: 'haiku-5.5' };
+
+    // Act
+    const table = await build(ferrets, {}, {}, { model: async id => observed[id] });
+
+    // Assert: a ferret the reader cannot speak for shows the model it was started with, else `default` — never its runtime.
+    const modelOf = (id: string) => table.rows.find(row => row.id === id)?.model;
+    should(modelOf('w')).equal('sonnet-5.5');
+    should(modelOf('d')).equal('haiku-5.5');
+    should(modelOf('u')).equal('default');
+    should(modelOf('k')).equal('glm-5.3');
   });
 
   it('should keep the newer of two lines, and a note over a message that is as new', async () => {

@@ -179,6 +179,7 @@ export default implementDaemon(manifest, {
           return found === undefined ? undefined : { lines: found.lines, blockers: found.blockers.length };
         },
         redact: async texts => await kernel.redaction.read(scope => texts.map(text => scope.text(text))),
+        model: async id => await api.displayModel?.(id as FerretId),
         nowMs: kernel.clock.nowMs(),
       });
     };

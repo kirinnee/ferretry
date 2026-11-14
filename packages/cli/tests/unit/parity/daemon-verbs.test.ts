@@ -5,7 +5,8 @@
 import { describe, expect, it } from 'bun:test';
 import type { DaemonController, DaemonControlReads } from '../../../src/lib/daemon/controller.ts';
 import { runFy } from '../../../src/lib/run.ts';
-import { fakeWorld } from '../fakes.ts';
+import { definePlugin, route } from '@ferretry/kernel/manifest';
+import { fakeWorld, inventoryOf, registryOf, skeletonEntry } from '../fakes.ts';
 
 type Call = readonly [method: string, options: unknown];
 
@@ -41,6 +42,26 @@ const run = async (argv: string[], probe: 'up' | 'down' = 'up', exitCode = 0) =>
   const code = await runFy(argv, built.world);
   return { ...built, code, out: built.io.stdout(), err: built.io.stderr() };
 };
+
+/** Terminals as a test daemon has it: the one read `fy daemon status` makes for its Limits block. */
+const terminalsManifest = definePlugin({
+  id: 'terminals',
+  title: 'Terminals',
+  version: '5.0.0',
+  api: 5,
+  core: false,
+  kinds: [],
+  actions: {
+    routes: [
+      route('GET /v1/cgroups/config', {
+        minimum: 'operator',
+        caller: 'any',
+        audit: { skip: 'test' },
+        guard: { none: 'test' },
+      }),
+    ],
+  },
+});
 
 describe('fy daemon', () => {
   it('V-0223 bare fy daemon names the daemon verbs it manages and exits as a usage error', async () => {
@@ -113,6 +134,40 @@ describe('fy daemon', () => {
     const down = await run(['daemon', 'status'], 'down');
     expect(down.code).toBe(1);
     expect(down.err).toContain('not running at http://127.0.0.1:7431');
+  });
+
+  it('K3 fy daemon status adds the daemon’s own Limits words, and nothing when they cannot be read', async () => {
+    const withTerminals = fakeWorld({
+      registry: registryOf(skeletonEntry(terminalsManifest, 'h-terminals')),
+      inventory: inventoryOf({ id: 'terminals', contract: 'h-terminals' }),
+    });
+    withTerminals.transport.replies.push({
+      status: 200,
+      body: {
+        lines: ['Ferrets are limited: 12 GiB for all of them, 4 GiB kept for the daemon.', 'Disk priority is lowered.'],
+        warnings: ['A cap above the daemon holds this user to 8 GiB.'],
+      },
+    });
+    expect(await runFy(['daemon', 'status'], withTerminals.world)).toBe(0);
+    expect(withTerminals.transport.sent.map(sent => `${sent.method} ${sent.path}`)).toEqual(['GET /v1/cgroups/config']);
+    expect(withTerminals.io.stdout()).toContain(
+      [
+        'limits   Ferrets are limited: 12 GiB for all of them, 4 GiB kept for the daemon.',
+        '         Disk priority is lowered.',
+        '         warning: A cap above the daemon holds this user to 8 GiB.',
+      ].join('\n'),
+    );
+    // A daemon that cannot answer the read (an older one, Terminals off) still reports itself: no line, the same exit.
+    const without = await run(['daemon', 'status']);
+    expect(without.code).toBe(0);
+    expect(without.out).not.toContain('limits');
+    const broken = fakeWorld({
+      registry: registryOf(skeletonEntry(terminalsManifest, 'h-terminals')),
+      inventory: inventoryOf({ id: 'terminals', contract: 'h-terminals' }),
+    });
+    broken.transport.replies.push({ status: 200, body: { nonsense: true } });
+    expect(await runFy(['daemon', 'status'], broken.world)).toBe(0);
+    expect(broken.io.stdout()).not.toContain('limits');
   });
 
   it('V-0243 fy daemon status --json prints one machine-readable object, with the same exit codes', async () => {

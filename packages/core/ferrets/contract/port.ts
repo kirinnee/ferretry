@@ -520,6 +520,14 @@ export interface MoveOptions {
   readonly movedBy?: string;
 }
 
+/** What one auto-resume pass did: how many ferrets came back, and which could not, each with the reason a person can act on. */
+export interface AutoResumeReport {
+  /** When the pass ran (an ISO instant). */
+  readonly at: string;
+  readonly resumed: number;
+  readonly skipped: readonly { readonly sessionId: string; readonly reason: string }[];
+}
+
 /** A ferret's whole status: its state, its turn, what plugins add, and its blockers from the Asks port. */
 export interface Sitrep {
   readonly ferret: FerretSummary;
@@ -612,6 +620,19 @@ export interface FerretsApi {
    * daemon does not know may control nothing.
    */
   agentControl(ferret: FerretId): Promise<AgentControl>;
+  /**
+   * What the last "Auto-resume after restart" pass did (today's `machine.lastAutoResume`), for the Machine view's
+   * "Last restart" lines: `null` when none has run or it could not be read. Optional, so it is additive: a Ferrets
+   * that keeps none reads as no pass.
+   */
+  lastAutoResume?(): Promise<AutoResumeReport | null>;
+  /**
+   * The model a ferret is actually running, for display (today's `displayModel`): what the harness last reported, else the
+   * model it was configured with, else the wrapper's declared hint, else `default`. A launch option (`FerretSummary.model`)
+   * is only what was ASKED for: it goes stale after a switch inside the session. `undefined` for a ferret this daemon does
+   * not know. Optional, so it is additive: absent reads as the launch option.
+   */
+  displayModel?(ferret: FerretId): Promise<string | undefined>;
   /**
    * What a ferret spent, turn by turn, read through ITS harness (`Harness.usage`; Ferrets owns which harness a ferret
    * runs, so Usage never reaches one). Token counts only, never transcript text. `undefined` means PARTIAL: the ferret is

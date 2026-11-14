@@ -59,6 +59,8 @@ export interface SubtreePorts {
    * then withholds its excerpts rather than show text it did not scrub.
    */
   redact(texts: readonly string[]): Promise<readonly string[]>;
+  /** The model a ferret is actually running (observed, then configured, then the wrapper's hint); see `FerretsApi.displayModel`. */
+  model(ferret: FerretId): Promise<string | undefined>;
   nowMs(): number;
 }
 
@@ -146,7 +148,17 @@ function excerptEligible(members: readonly SubtreeMember[], limits: SubtreeLimit
   return new Set([...liveChosen, ...endedChosen]);
 }
 
-function rowOf(member: SubtreeMember, last: SubtreeRow['last']): SubtreeRow {
+/** The card line a plugin added (the Board's), whose reference, lane and PR the table shows. */
+function cardLine(lines: readonly SitrepLine[]): SitrepLine | undefined {
+  return lines.find(line => line.kind === 'card' && line.ref !== undefined);
+}
+
+function rowOf(
+  member: SubtreeMember,
+  last: SubtreeRow['last'],
+  card: SitrepLine | undefined,
+  model: string | undefined,
+): SubtreeRow {
   const { ferret, depth } = member;
   const state = subtreeStateOf(ferret);
   return {
@@ -154,8 +166,13 @@ function rowOf(member: SubtreeMember, last: SubtreeRow['last']): SubtreeRow {
     name: ferret.name,
     ...(ferret.parent === undefined ? {} : { parent: ferret.parent }),
     depth,
+    model: model ?? ferret.model ?? 'default',
     state,
     ferretState: ferret.state,
+    ...(card?.ref === undefined
+      ? {}
+      : { card: { ref: card.ref, ...(card.lane === undefined ? {} : { lane: card.lane }) } }),
+    ...(card?.pr === undefined ? {} : { pr: card.pr }),
     ...(last === undefined ? {} : { last }),
     ...(state === 'ended' ? { endedAt: ferret.stateAt } : {}),
   };
@@ -174,25 +191,28 @@ export class SubtreeService {
     const rootFerret = this.registry.summary(root);
     if (rootFerret === undefined) return undefined;
     const members = subtreeMembers(this.registry, root, nowMs);
+    // The excerpt budget gates only the LAST text (and its redaction): every listed member keeps its model, card, lane
+    // and PR, as today's table built every row from the board's one read.
     const eligible = excerptEligible(members, this.limits);
-    const order = [...eligible];
-    const found = await mapBounded(order, this.limits.concurrency, async index => {
-      try {
-        return newestLine(await this.ports.lines((members[index] as SubtreeMember).ferret.id));
-      } catch {
-        return undefined;
-      }
-    });
-    const candidates: (SitrepLine | undefined)[] = members.map(() => undefined);
-    order.forEach((index, position) => {
-      candidates[index] = found[position];
-    });
+    const found = await mapBounded(
+      members.map((_, index) => index),
+      this.limits.concurrency,
+      async index => {
+        const id = (members[index] as SubtreeMember).ferret.id;
+        const lines = await this.ports.lines(id).catch((): readonly SitrepLine[] => []);
+        const model = await this.ports.model(id).catch(() => undefined);
+        return { newest: eligible.has(index) ? newestLine(lines) : undefined, card: cardLine(lines), model };
+      },
+    );
+    const candidates = found.map(each => each.newest);
+    const cards = found.map(each => each.card);
+    const models = found.map(each => each.model);
     const lasts = await this.excerpts(candidates);
     return {
       root: { id: rootFerret.id, name: rootFerret.name },
       at: instantFromEpochMs(nowMs),
       endedWindowMs: SUBTREE_ENDED_WINDOW_MS,
-      rows: members.map((member, index) => rowOf(member, lasts[index])),
+      rows: members.map((member, index) => rowOf(member, lasts[index], cards[index], models[index])),
     };
   }
 
