@@ -60,7 +60,7 @@ import {
   type InputSubject,
   playwrightNodeOf,
 } from '../target/lib/fields.ts';
-import { NavigationLedger, type NavigationSource } from '../target/lib/navigation-evidence.ts';
+import { NavigationLedger, type NavigationSource, NavigationTotalsLedger } from '../target/lib/navigation-evidence.ts';
 import type { PairingScreenState } from '../target/lib/pairing-screen.ts';
 import { type InputWorkerPages, isInputMethod, serveInputMethod } from '../target/lib/worker-serve.ts';
 import {
@@ -314,20 +314,20 @@ function watch(page: Page, key: string): void {
  * cannot be watched is a ledger that says it could not read where the page is (an origin nobody can match).
  */
 function watchNavigation(page: Page): void {
-  const ledger = new NavigationLedger(() => Date.now());
+  const ledger = new NavigationLedger(() => Date.now(), navigationTotals);
   navigationLedgers.set(page, ledger);
   page.on('framenavigated', frame => ledger.commit(`pw:${frameKey(frame)}`, frame.url(), frame === page.mainFrame()));
   page.on('frameattached', frame => ledger.attached(`pw:${frameKey(frame)}`));
   page.on('framedetached', frame => ledger.detached(`pw:${frameKey(frame)}`));
   void pageSession(page)
     .then(async session => await ledger.attach(session as unknown as NavigationSource))
-    .catch(() => ledger.commit('?', '?:unreadable'));
+    .catch(() => ledger.lose());
 }
 
 /** A ledger that has seen nothing and says so: a page registered through no path this worker knows. */
 function unwatched(): NavigationLedger {
-  const ledger = new NavigationLedger(() => Date.now());
-  ledger.commit('?', '?:unreadable');
+  const ledger = new NavigationLedger(() => Date.now(), navigationTotals);
+  ledger.lose();
   return ledger;
 }
 
@@ -543,6 +543,13 @@ function inputLocatorOf(locator: Locator): InputLocator {
  * its documents away. Nothing a page script runs can write it.
  */
 const navigationLedgers = new WeakMap<Page, NavigationLedger>();
+
+/**
+ * What this worker has counted across EVERY page it has watched, the closed and the departed too (`NavigationTotals`):
+ * pairing links committed by origin and navigations it lost track of. Held here, not on any page, so a page that closes or
+ * leaves the group takes none of it away; it only goes up, and only a fresh worker starts it again.
+ */
+const navigationTotals = new NavigationTotalsLedger();
 
 /** Each page's last DOM look for the pairing-screen hint, kept for a page with a dialog open (see `InputSubject.hint`). */
 const pairingHints = new Map<string, PairingScreenState>();

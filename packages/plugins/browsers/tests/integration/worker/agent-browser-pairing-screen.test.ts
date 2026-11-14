@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LiveWindowLedger } from '@ferretry/std/live-window';
-import { PAIRING_SCREEN_REFUSAL } from '@ferretry/std/pairing-screen';
+import { APP_EVAL_REFUSAL, PAIRING_SCREEN_REFUSAL } from '@ferretry/std/pairing-screen';
 import should from 'should';
 import { BrowserSessionService } from '../../../daemon/pages/service.ts';
 import { protectionWindows } from '../../../daemon/protection/windows.ts';
@@ -86,7 +86,12 @@ beforeAll(async () => {
       if (url.pathname === '/plain') return html('', '<p id="o">hello</p>');
       if (url.pathname === '/dyn') return html('', `<p id="o">idle</p>${SHOW_HIDE}`);
       if (url.pathname === '/framed') return html('', '<p id="o">outer</p><iframe id="f" src="/pair"></iframe>');
-      if (url.pathname === '/opener') return html('', '<p id="o">opener</p>');
+      // A page with a button that opens the pair screen as a popup, keeping its handle: a click is the user gesture.
+      if (url.pathname === '/opener')
+        return html(
+          '',
+          '<p id="o">opener</p><button id="open" onclick="window.open(\'/pair\', \'pairwin\')">open</button>',
+        );
       // A page whose own script DELETES the marker and the sighting count: all it can write.
       if (url.pathname === '/forged')
         return html(
@@ -233,18 +238,12 @@ describe('the agent browser, in a real Chrome, on a page showing a live pairing 
     should(waited.error).be.undefined();
   }, 60_000);
 
-  it('P1-2/3: should discard an async script that was running when the marker arrived, and show none of what it read', async () => {
-    // Arrange — the page is plain until 1.5 s after it loads; the script is admitted at once and runs 3 s
+  it('P1-2/3: should discard a content wait that was running when the marker arrived, and show none of what it read', async () => {
+    // Arrange — the page is plain until 1.5 s after it loads; the wait is admitted at once and runs 3 s
     await call({ tool: 'browser.open', name: 'late', url: `${base}/dyn?showAt=1500` });
 
     // Act
-    const answer = await call({
-      tool: 'browser.eval',
-      name: 'late',
-      function:
-        '() => new Promise(resolve => setTimeout(() => resolve(document.getElementById("o").textContent), 3000))',
-      timeoutMs: 20_000,
-    });
+    const answer = await call({ tool: 'browser.wait_for', name: 'late', text: 'never there', timeoutMs: 3_000 });
 
     // Assert
     should(answer.error).equal(PAIRING_SCREEN_REFUSAL);
@@ -253,23 +252,20 @@ describe('the agent browser, in a real Chrome, on a page showing a live pairing 
     await call({ tool: 'browser.close', name: 'late' });
   }, 60_000);
 
-  it('P1-3: should discard a script that ran while a code came and went (no marker left, but a code was shown)', async () => {
-    // Arrange — shown at 1 s, gone at 2 s; the script runs from the start to 3.5 s
+  it('P1-3: should discard a content wait that ran while a code came and went (no marker left, but a code was shown)', async () => {
+    // Arrange — shown at 1 s, gone at 2 s; the wait runs from the start to 3.5 s
     await call({ tool: 'browser.open', name: 'blink', url: `${base}/dyn?showAt=1000&hideAt=2000` });
 
     // Act
-    const answer = await call({
-      tool: 'browser.eval',
-      name: 'blink',
-      function:
-        '() => new Promise(resolve => setTimeout(() => resolve(document.getElementById("o").textContent), 3500))',
-      timeoutMs: 20_000,
-    });
+    const answer = await call({ tool: 'browser.wait_for', name: 'blink', text: 'never there', timeoutMs: 3_500 });
+    // the wait can end early (it is refused the moment the code shows); let the page finish its blink
+    await call({ tool: 'browser.wait_for', name: 'blink', time: 2_000 });
     const after = await call({ tool: 'browser.read', name: 'blink' });
 
     // Assert
     should(answer.error).equal(PAIRING_SCREEN_REFUSAL);
     // The code is gone from the page again, so a fresh read is the page as it is now.
+    should(after.error).be.undefined();
     should(after.text).containEql('idle');
     await call({ tool: 'browser.close', name: 'blink' });
   }, 60_000);
@@ -281,6 +277,7 @@ describe('the agent browser, in a real Chrome, on a page showing a live pairing 
     for (const request of [
       { tool: 'browser.read', name: 'framed' },
       { tool: 'browser.screenshot', name: 'framed' },
+      // a marked group: the marker is the first thing asked, so this is the pairing sentence (and the script never runs)
       {
         tool: 'browser.eval',
         name: 'framed',
@@ -296,18 +293,15 @@ describe('the agent browser, in a real Chrome, on a page showing a live pairing 
     await call({ tool: 'browser.close', name: 'framed' });
   }, 60_000);
 
-  it('P1-4: should refuse a script in a page that holds a window showing the code, and the window too', async () => {
-    // Arrange — the page opens a same-origin popup (the pair screen) and keeps the handle
+  it('P1-4: should refuse a page that holds a window showing the code, a script in it, and the window too', async () => {
+    // Arrange — the page's own button opens a same-origin popup (the pair screen) and keeps the handle
     await call({ tool: 'browser.open', name: 'opener', url: `${base}/opener` });
 
-    // Act — the popup opens while the script runs: the group was not the one that was checked
-    const opening = await call({
-      tool: 'browser.eval',
-      name: 'opener',
-      function: '() => { window.open("/pair", "pairwin"); return new Promise(resolve => setTimeout(resolve, 1500)); }',
-      timeoutMs: 20_000,
-    });
-    // Act — afterwards, a script that would read through the handle
+    // Act — the popup opens during the click (the click's own answer may or may not be caught by the window count: the
+    // group is what the later calls are held to)
+    await call({ tool: 'browser.click', name: 'opener', selector: '#open' });
+    await call({ tool: 'browser.wait_for', name: 'opener', time: 500 });
+    // Act — afterwards, a script that would read through the handle (a script never runs on the app), and a read
     const through = await call({
       tool: 'browser.eval',
       name: 'opener',
@@ -316,7 +310,6 @@ describe('the agent browser, in a real Chrome, on a page showing a live pairing 
     const text = await call({ tool: 'browser.read', name: 'opener' });
 
     // Assert
-    should(opening.error).equal(PAIRING_SCREEN_REFUSAL);
     should(through.error).equal(PAIRING_SCREEN_REFUSAL);
     should(text.error).equal(PAIRING_SCREEN_REFUSAL);
     await closeStrays();
@@ -350,7 +343,6 @@ describe('the agent browser, in a real Chrome, on a page showing a live pairing 
       { tool: 'browser.read', name: 'forged', selector: '#code' },
       { tool: 'browser.scroll', name: 'forged', text: FAKE_CODE },
       { tool: 'browser.click', name: 'forged', selector: '#code' },
-      { tool: 'browser.eval', name: 'forged', function: '() => document.body.innerText' },
     ] satisfies BrowserToolCall[]) {
       // Act
       const answer = await call(request);
@@ -359,6 +351,9 @@ describe('the agent browser, in a real Chrome, on a page showing a live pairing 
       should(answer.error).equal(PAIRING_SCREEN_REFUSAL);
       should(answer.picture).be.undefined();
     }
+    // A script is never run on the app, whatever the page says of itself
+    const script = await call({ tool: 'browser.eval', name: 'forged', function: '() => document.body.innerText' });
+    should(script.error).equal(APP_EVAL_REFUSAL);
     pairing.close('forged-1');
     await call({ tool: 'browser.close', name: 'forged' });
   }, 60_000);
@@ -379,7 +374,7 @@ describe('the agent browser, in a real Chrome, on a page showing a live pairing 
     await call({ tool: 'browser.close', name: 'leaves' });
   }, 60_000);
 
-  it('P1-2: should refuse a script on the app for the page’s life once a code was live, and still let a read answer', async () => {
+  it('P1-2: should refuse a script on the app once a code was live, and still let a read answer', async () => {
     // Arrange — a plain app page is open; a code is minted and spent while it stays open
     await call({ tool: 'browser.open', name: 'life', url: `${base}/plain` });
     pairing.open('life-1', Date.now() + 2 * MINUTE);
@@ -390,12 +385,12 @@ describe('the agent browser, in a real Chrome, on a page showing a live pairing 
     const read = await call({ tool: 'browser.read', name: 'life' });
 
     // Assert
-    should(script.error).equal(PAIRING_SCREEN_REFUSAL);
+    should(script.error).equal(APP_EVAL_REFUSAL);
     should(read.text).containEql('hello');
     await call({ tool: 'browser.close', name: 'life' });
   }, 60_000);
 
-  it('P1-2: should leave the script alone on an app page that no code has been live on since it loaded', async () => {
+  it('P1-2: should refuse a script on an app page even when no code has been live since it loaded (and run none)', async () => {
     // Arrange — the page loads after the last code was over
     await new Promise(resolve => setTimeout(resolve, 20));
     await call({ tool: 'browser.open', name: 'fresh', url: `${base}/plain` });
@@ -404,8 +399,8 @@ describe('the agent browser, in a real Chrome, on a page showing a live pairing 
     const script = await call({ tool: 'browser.eval', name: 'fresh', function: '() => document.body.innerText' });
 
     // Assert
-    should(script.error).be.undefined();
-    should(script.text).containEql('hello');
+    should(script.error).equal(APP_EVAL_REFUSAL);
+    should(script.text).be.undefined();
     await call({ tool: 'browser.close', name: 'fresh' });
   }, 60_000);
 

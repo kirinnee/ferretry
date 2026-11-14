@@ -147,6 +147,7 @@ describe('the daemon’s belief in the worker’s navigation evidence', () => {
     frames: ['https://app.example.test'],
     taintSeq: 0,
     watchedSince: 5,
+    totals: { links: {}, lost: 0 },
   };
 
   test('it believes the exact shape', () => {

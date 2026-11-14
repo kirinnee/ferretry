@@ -377,8 +377,10 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
   Browsers declares those ports (and Connections') as dependencies. While a credential is live, or was at any instant
   during an agent's call, the agent gets exactly the one sentence (`PAIRING_SCREEN_REFUSAL`, byte for byte v4 PR 1597's: it
   begins `hidden: this page shows a pairing code` and is pinned by equality) and no content, **for any page on a Ferretry app
-  origin** — the hosted app, the app and browser origins Connections advertises and the address of the daemon's own listener,
-  read live and never a single hard-coded address (every page, when Connections cannot say) — and for any window that can
+  origin** — the hosted app (always), the app and browser origins Connections advertises, the address of the daemon's own
+  listener, **and the daemon's own loopback app on every spelling** (`127.0.0.1`, `localhost`, `[::1]`) at the port it listens
+  on, whatever it is bound to (`0.0.0.0`, `[::]`, a public address) — read live and never a single hard-coded address (every
+  page, when Connections cannot say); an unrelated port or host is not in the set — and for any window that can
   reach one: the page's opener group **and every same-origin window**, opener or not (any window nobody can place counts too).
   The check runs inside the page's queue before anything reaches the page, and again when the call ends, **success or failure**:
   a call that overlapped a live interval at any point has its answer **and its error text** discarded.
@@ -395,12 +397,25 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
   daemon compares two answers (the strictly parsed `NavigationEvidence`): a navigation or a swapped frame during a call that
   touched an app origin is treated as the call having read it. A committed address carrying the pairing-fragment grammar
   **taints the target for life** (the app screen it arrived on is refused outright, and `eval` on it, wherever it goes after).
-  **`eval` is held to more, because a script outlives its own answer.** Discarding a result does not undo what a running
-  script did, what it sent elsewhere or the callback it leaves behind. So `browser_eval` is **refused on an app origin for the
-  page's whole life** once any credential was live at any instant since the page first showed the app — and likewise for
-  a window that can reach one — and for a page that ever committed a pairing link. **What still works** on such a page: reading
-  it (once nothing is live), screenshots, waits, navigating away (and a fresh page, or the same one reloaded after the last
-  code ended, can run scripts again), clicking by coordinates, and every page on another origin.
+  **The worker also keeps totals across every page it has ever watched** (`NavigationTotals`, in the worker, not on any page):
+  how many addresses carrying the pairing grammar were committed under each origin, and how many navigations it **lost** track
+  of. Every answer carries them, they only go up, and a page that closes or leaves the group takes none of it away. A call
+  during which **any** link was committed on an app origin (or one that cannot be told apart from it: an opaque or unreadable
+  origin, the overflow bucket) or any navigation was lost has its answer **and its error** discarded **whatever its endpoints
+  were** — it may begin away from the app, take the app's page in on the way and finish away from it. A lost navigation makes
+  the worker **blind for good**: while the count is above zero the app's own pages are not answered (a page elsewhere still is),
+  even with no code live and whichever pages the call touched, and only a fresh worker — a fresh, complete ledger — clears it.
+  **`eval` is never run on a Ferretry app origin.** A script shares the document's DOM with the app, where the codes and the
+  app's own hints sit, and discarding a result does not undo what a running script did, what it sent elsewhere or the callback
+  it leaves behind — so no state of the page makes it safe. `browser_eval` (the one tool that runs page script, for the MCP
+  tool and `fy browser eval` alike) on a page of any Ferretry app origin, or on one with a window that can reach one, is **always**
+  refused with the sentence `eval is not available on Ferretry's own app pages` (`APP_EVAL_REFUSAL`) — with no code live, no
+  history and no marker — and the script never reaches the browser; a script that ends on the app has its answer and error
+  discarded the same way. There is no hint-based path: nothing the page says is asked. On a page that is only possibly the app's
+  (blank, opaque) the older lifetime rule stays: refused once a credential was live since it first showed the app, and for a
+  page that ever committed a pairing link. **What still works** on an app page: reading it (once nothing is live), screenshots,
+  waits, navigating away, clicking by coordinates, and every page on another origin keeps its scripts. A person's own calls are
+  unchanged.
   The app's marker — `<meta name="ferretry-pairing-screen" content="shown">`, with the `-seen` counter beside it — is now
   **only a hint** the browser also looks for with a DevTools DOM search (no page script runs; every same-process frame is
   covered). It can ADD a refusal and can never remove one, so a page script that deletes or forges it changes nothing. A search

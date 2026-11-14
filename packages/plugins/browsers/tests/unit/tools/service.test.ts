@@ -113,7 +113,7 @@ class FakeBrowser {
   private guardPage = (extra: object = {}) =>
     ({
       document: async () => ({}),
-      pairingState: async () => ({ marked: false, seen: 0, pages: 1, targets: [] }),
+      pairingState: async () => ({ marked: false, seen: 0, pages: 1, targets: [], totals: { links: {}, lost: 0 } }),
       ...extra,
     }) as never;
 

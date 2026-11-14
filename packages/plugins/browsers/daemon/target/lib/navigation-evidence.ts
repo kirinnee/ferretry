@@ -18,6 +18,57 @@ interface CommittedOrigin {
   readonly lastSeq: number;
 }
 
+/**
+ * WHAT THE WORKER HAS COUNTED ACROSS EVERY PAGE IT HAS EVER WATCHED, the closed and the departed ones included. Held by the
+ * worker (not by any one page's ledger), so a page that leaves the group or closes takes none of it away, and only ever
+ * going up, so an operation that overlapped a change can always tell.
+ */
+export interface NavigationTotals {
+  /**
+   * Addresses that carried the pairing-fragment grammar, committed by any frame of any page, counted under their origin
+   * (`null` for an opaque one, `?` for one nobody could read). Past {@link MAX_COMMITTED_ORIGINS} origins the rest are
+   * counted under {@link TOTALS_OVERFLOW}, which a reader takes for every origin.
+   */
+  readonly links: Readonly<Record<string, number>>;
+  /**
+   * How many times the worker lost track of a page's navigation (a page it could not watch, a frame event it could not
+   * read, an origin it had to forget). Non-zero is BLIND for the rest of the worker's life: a missed address could have
+   * been a pairing link, so the history cannot be proved complete until a fresh worker starts a fresh ledger.
+   */
+  readonly lost: number;
+}
+
+/** The bucket for every origin past the bound: a reader takes it for every origin, so the bound can only refuse more. */
+export const TOTALS_OVERFLOW = '*';
+
+/** The worker's {@link NavigationTotals}, shared by every page's {@link NavigationLedger}. Pure state. */
+export class NavigationTotalsLedger {
+  readonly #links = new Map<string, number>();
+  #lost = 0;
+
+  /** A frame committed an address carrying the pairing grammar. */
+  linked(origin: string): void {
+    const key = this.#links.has(origin) || this.#links.size < MAX_COMMITTED_ORIGINS ? origin : TOTALS_OVERFLOW;
+    this.#links.set(key, (this.#links.get(key) ?? 0) + 1);
+  }
+
+  /** A navigation could not be followed. */
+  lost(): void {
+    this.#lost += 1;
+  }
+
+  snapshot(): NavigationTotals {
+    return { links: Object.fromEntries(this.#links), lost: this.#lost };
+  }
+}
+
+/** Two answers about the same worker, as one: the larger of every count (they only ever go up). */
+export function mergeTotals(first: NavigationTotals, second: NavigationTotals): NavigationTotals {
+  const links: Record<string, number> = { ...first.links };
+  for (const [origin, count] of Object.entries(second.links)) links[origin] = Math.max(links[origin] ?? 0, count);
+  return { links, lost: Math.max(first.lost, second.lost) };
+}
+
 export interface NavigationEvidence {
   /** Counts every frame event this target has seen, and only goes up. Equal across two looks: nothing moved. */
   readonly seq: number;
@@ -34,6 +85,8 @@ export interface NavigationEvidence {
   readonly taintSeq: number;
   /** Epoch milliseconds the ledger began watching: a commit before it is not in `origins`. */
   readonly watchedSince: number;
+  /** The worker's totals over every page (see {@link NavigationTotals}); the same whichever page is asked. */
+  readonly totals: NavigationTotals;
 }
 
 /** The most distinct origins one target is remembered to have committed. A page hand-built to exceed it is `overflow`. */
@@ -89,8 +142,17 @@ export class NavigationLedger {
   #taintSeq = 0;
   readonly #watchedSince: number;
 
-  constructor(private readonly now: () => number) {
+  constructor(
+    private readonly now: () => number,
+    private readonly totals: NavigationTotalsLedger = new NavigationTotalsLedger(),
+  ) {
     this.#watchedSince = now();
+  }
+
+  /** The ledger lost track of where the page is: counted for the whole worker, and a never-matching origin is noted. */
+  lose(): void {
+    this.totals.lost();
+    this.commit('?', '?:unreadable');
   }
 
   /** A frame committed an address (DevTools: `frameNavigated`, or `navigatedWithinDocument` for a hash or a pushState). */
@@ -104,7 +166,10 @@ export class NavigationLedger {
     else if (this.#origins.size >= MAX_COMMITTED_ORIGINS) this.#overflow = true;
     else this.#origins.set(origin, { firstAt: this.now(), lastSeq: this.#seq });
     const hash = address.indexOf('#');
-    if (hash >= 0 && carriesCredentialFragment(address.slice(hash))) this.#taintSeq = this.#seq;
+    if (hash >= 0 && carriesCredentialFragment(address.slice(hash))) {
+      this.#taintSeq = this.#seq;
+      this.totals.linked(origin);
+    }
   }
 
   /** A frame appeared. Its address is not known until it commits one. */
@@ -130,6 +195,7 @@ export class NavigationLedger {
       frames,
       taintSeq: this.#taintSeq,
       watchedSince: this.#watchedSince,
+      totals: this.totals.snapshot(),
     };
   }
 
@@ -156,14 +222,14 @@ export class NavigationLedger {
     try {
       this.#seed(objectOf(await session.send('Page.getFrameTree')).frameTree);
     } catch {
-      this.commit('?', '?:unreadable');
+      this.lose();
     }
   }
 
   #navigated(params: unknown): void {
     const frame = objectOf(objectOf(params).frame);
     if (typeof frame.id !== 'string' || typeof frame.url !== 'string') {
-      this.commit('?', '?:unreadable');
+      this.lose();
       return;
     }
     const fragment = typeof frame.urlFragment === 'string' ? frame.urlFragment : '';
@@ -174,7 +240,7 @@ export class NavigationLedger {
     const node = objectOf(tree);
     const frame = objectOf(node.frame);
     if (typeof frame.id !== 'string' || typeof frame.url !== 'string') {
-      this.commit('?', '?:unreadable');
+      this.lose();
       return;
     }
     const fragment = typeof frame.urlFragment === 'string' ? frame.urlFragment : '';
@@ -200,8 +266,10 @@ const hasOnly = (value: Record<string, unknown>, keys: readonly string[]): boole
  */
 export function parseNavigationEvidence(raw: unknown): NavigationEvidence | undefined {
   const value = objectOf(raw);
-  if (!hasOnly(value, ['seq', 'origins', 'overflow', 'frames', 'taintSeq', 'watchedSince'])) return undefined;
+  if (!hasOnly(value, ['seq', 'origins', 'overflow', 'frames', 'taintSeq', 'watchedSince', 'totals'])) return undefined;
   const { seq, origins, overflow, frames, taintSeq, watchedSince } = value;
+  const totals = parseTotals(value.totals);
+  if (totals === undefined) return undefined;
   if (!isCount(seq) || !isCount(watchedSince) || !isCount(taintSeq) || taintSeq > seq) return undefined;
   if (typeof overflow !== 'boolean') return undefined;
   if (!Array.isArray(origins) || origins.length > MAX_COMMITTED_ORIGINS) return undefined;
@@ -217,5 +285,20 @@ export function parseNavigationEvidence(raw: unknown): NavigationEvidence | unde
     seen.add(each.origin);
     parsed.push({ origin: each.origin, firstAt: each.firstAt, lastSeq: each.lastSeq });
   }
-  return { seq, origins: parsed, overflow, frames: [...(frames as string[])], taintSeq, watchedSince };
+  return { seq, origins: parsed, overflow, frames: [...(frames as string[])], taintSeq, watchedSince, totals };
+}
+
+/** The worker's {@link NavigationTotals}: only the exact shape, every count a safe whole number, the list bounded. */
+function parseTotals(raw: unknown): NavigationTotals | undefined {
+  const value = objectOf(raw);
+  if (!hasOnly(value, ['links', 'lost']) || !isCount(value.lost)) return undefined;
+  if (value.links === null || typeof value.links !== 'object' || Array.isArray(value.links)) return undefined;
+  const entries = Object.entries(value.links as Record<string, unknown>);
+  if (entries.length > MAX_COMMITTED_ORIGINS + 1) return undefined;
+  const links: Record<string, number> = {};
+  for (const [origin, count] of entries) {
+    if (!isOrigin(origin) || !isCount(count)) return undefined;
+    links[origin] = count;
+  }
+  return { links, lost: value.lost };
 }

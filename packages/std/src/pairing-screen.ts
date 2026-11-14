@@ -72,3 +72,10 @@ export function isShareMintAddress(address: string): boolean {
 export function isCredentialMintAddress(address: string): boolean {
   return isPairingMintAddress(address) || isShareMintAddress(address);
 }
+
+/**
+ * What an agent is told when it asks to run a script (`browser.eval`, or any tool that runs page script) on a page of a
+ * Ferretry app origin. The rule has no exception — no live code, no history, no marker changes it — because a script shares
+ * the document's DOM with the app, where its codes and its own evidence sit. The sentence names no content.
+ */
+export const APP_EVAL_REFUSAL = "eval is not available on Ferretry's own app pages";

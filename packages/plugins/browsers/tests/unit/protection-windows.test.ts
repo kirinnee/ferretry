@@ -7,12 +7,18 @@ import { protectionWindows } from '../../daemon/protection/windows.ts';
  * THE DAEMON'S OWN FACTS, as the guard reads them (docs/pairing.md, "Never show it to an agent"): which origins are the
  * app's, from what Connections advertises, and whether any credential was live, from every provider.
  */
-const advertised = (url: string | undefined, allowed: readonly string[] = [], app = 'https://app.example.test') => ({
+const advertised = (
+  url: string | undefined,
+  allowed: readonly string[] = [],
+  app = 'https://app.example.test',
+  port?: number,
+) => ({
   advertisement: () =>
     ({
       advertisement: url === undefined ? { kind: 'none', refusal: {} } : { kind: 'address', url, origin: 'operator' },
       appOrigin: app,
       allowedOrigins: allowed,
+      ...(port === undefined ? {} : { port }),
     }) as never,
 });
 
@@ -25,7 +31,14 @@ describe('the origins that are the app', () => {
     });
 
     expect([...(windows.appOrigins() ?? [])].sort()).toEqual(
-      [HOSTED_APP_ORIGIN, 'https://app.example.test', 'https://pwa.example.test', 'http://127.0.0.1:7077'].sort(),
+      [
+        HOSTED_APP_ORIGIN,
+        'https://app.example.test',
+        'https://pwa.example.test',
+        'http://127.0.0.1:7077',
+        'http://localhost:7077',
+        'http://[::1]:7077',
+      ].sort(),
     );
   });
 
@@ -118,5 +131,61 @@ describe('when a credential was live', () => {
     expect(absent.liveSince(0)).toBe(true);
     expect(throwing.liveSince(0)).toBe(true);
     expect(odd.liveSince(0)).toBe(true);
+  });
+});
+
+describe('the daemon’s own loopback app, whatever it is bound to', () => {
+  const LOOPBACKS = (port: number): string[] => [
+    `http://127.0.0.1:${String(port)}`,
+    `http://localhost:${String(port)}`,
+    `http://[::1]:${String(port)}`,
+  ];
+  const originsOf = (connections: ReturnType<typeof advertised>) =>
+    protectionWindows({ now: () => 1, connections: () => connections, windows: [] }).appOrigins();
+
+  test('a daemon bound to 0.0.0.0 with an operator public address is the app on every spelling of loopback at its port', () => {
+    const origins = originsOf(
+      advertised(
+        'https://fy.lan.example.test/',
+        ['http://0.0.0.0:7077', 'https://fy.lan.example.test'],
+        undefined,
+        7077,
+      ),
+    );
+
+    for (const origin of LOOPBACKS(7077)) expect(origins?.has(origin)).toBe(true);
+    expect(origins?.has('https://fy.lan.example.test')).toBe(true);
+  });
+
+  test('a wildcard bind with nothing to advertise is still the app on loopback (the listener port is the fact)', () => {
+    const origins = originsOf(advertised(undefined, [], undefined, 7077));
+
+    for (const origin of LOOPBACKS(7077)) expect(origins?.has(origin)).toBe(true);
+  });
+
+  test('an IPv6 wildcard, as an allowed origin, is the app on every spelling of loopback at that port', () => {
+    const origins = originsOf(advertised(undefined, ['http://[::]:8123'], undefined));
+
+    for (const origin of LOOPBACKS(8123)) expect(origins?.has(origin)).toBe(true);
+  });
+
+  test('a configured loopback origin is the app on every spelling of loopback at ITS port', () => {
+    const origins = originsOf(advertised('http://127.0.0.1:7077/', ['http://localhost:7077']));
+
+    for (const origin of LOOPBACKS(7077)) expect(origins?.has(origin)).toBe(true);
+  });
+
+  test('an unrelated port on loopback is NOT the app, and neither is an unrelated host', () => {
+    const origins = originsOf(advertised('https://fy.lan.example.test/', ['http://0.0.0.0:7077'], undefined, 7077));
+
+    for (const origin of LOOPBACKS(7078)) expect(origins?.has(origin)).toBe(false);
+    expect(origins?.has('http://127.0.0.1')).toBe(false);
+    expect(origins?.has('https://other.example.test')).toBe(false);
+  });
+
+  test('the hosted app is always there, whatever else is configured', () => {
+    const origins = originsOf(advertised(undefined, ['https://only.example.test'], 'https://only.example.test', 7077));
+
+    expect(origins?.has(HOSTED_APP_ORIGIN)).toBe(true);
   });
 });

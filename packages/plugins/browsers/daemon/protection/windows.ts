@@ -26,12 +26,43 @@ function originOf(address: string): string | undefined {
   }
 }
 
+/** The spellings a machine's own loopback is reached by: one daemon, three addresses it answers on. */
+const LOOPBACK_HOSTS: readonly string[] = ['127.0.0.1', 'localhost', '[::1]'];
+
+/** The addresses a daemon binds to listen on every interface: loopback is one of the ways in, so it is the app's too. */
+const WILDCARD_HOSTS: readonly string[] = ['0.0.0.0', '[::]'];
+
+/** Every spelling of loopback at `port` (the scheme the listener speaks is plain `http`). */
+const loopbackAt = (protocol: string, port: string): string[] =>
+  LOOPBACK_HOSTS.map(host => `${protocol}//${host}${port === '' ? '' : `:${port}`}`);
+
+/**
+ * The origins the daemon's own listener is the app on. A listener answers on every spelling of loopback whatever it is
+ * bound to and whatever public address or CORS list is configured beside it, so: the listener's own port (the fact
+ * Connections reports), and any configured or advertised origin whose host is loopback or a wildcard bind (`0.0.0.0`,
+ * `[::]`) at ITS port. An unrelated port, or host, is not in it.
+ */
+function loopbackApps(listenerPort: number | undefined, spelled: readonly string[]): string[] {
+  const found = listenerPort === undefined ? [] : loopbackAt('http:', String(listenerPort));
+  for (const address of spelled) {
+    try {
+      const parsed = new URL(address);
+      if (LOOPBACK_HOSTS.includes(parsed.hostname) || WILDCARD_HOSTS.includes(parsed.hostname))
+        found.push(...loopbackAt(parsed.protocol, parsed.port));
+    } catch {
+      // not an address: nothing to match, and the caller already refuses text no one can read
+    }
+  }
+  return found;
+}
+
 /**
  * THE DAEMON'S OWN FACTS, put in the shape the agent guard reads them (`../pages/pairing-screen-guard.ts`).
  *
- * WHICH ORIGINS ARE THE APP: the hosted app this build carries, the app origin and the browser origins Connections
- * advertises, and the origin of the address it advertises for the daemon's own listener — read live, never one hard-coded
- * address. If Connections cannot say, or says something unreadable, the answer is `undefined`: every page is then taken
+ * WHICH ORIGINS ARE THE APP: the hosted app this build carries (always), the app origin and the browser origins
+ * Connections advertises, the origin of the address it advertises for the daemon's own listener, and the daemon's own
+ * loopback app on every spelling at the port it listens on, wildcard bind or not (`loopbackApps`) — read live, never one
+ * hard-coded address. If Connections cannot say, or says something unreadable, the answer is `undefined`: every page is then taken
  * for an app page.
  *
  * WHEN A CREDENTIAL WAS LIVE: asked of every provider; one that is absent, throws or answers anything but a plain "no"
@@ -52,7 +83,7 @@ export function protectionWindows(sources: ProtectionSources): ProtectionWindows
           ...advertised.allowedOrigins,
           ...(advertised.advertisement.kind === 'none' ? [] : [advertised.advertisement.url]),
         ];
-        const origins = spelled.map(originOf);
+        const origins = [...spelled, ...loopbackApps(advertised.port, spelled)].map(originOf);
         if (origins.some(origin => origin === undefined)) return undefined;
         return new Set(origins as string[]);
       } catch {

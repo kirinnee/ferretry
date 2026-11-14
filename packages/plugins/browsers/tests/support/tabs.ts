@@ -1,5 +1,5 @@
 import type { BrowserAutomation } from '../../daemon/pages/automation.ts';
-import type { NavigationEvidence } from '../../daemon/target/lib/navigation-evidence.ts';
+import type { NavigationEvidence, NavigationTotals } from '../../daemon/target/lib/navigation-evidence.ts';
 import type {
   BrowserInputEvent,
   BrowserPageActionSnapshot,
@@ -28,6 +28,7 @@ export function cleanNavigation(address: string, at = 0): NavigationEvidence {
     frames: [origin],
     taintSeq: 0,
     watchedSince: at,
+    totals: { links: {}, lost: 0 },
   };
 }
 
@@ -68,6 +69,11 @@ export class Tabs {
    * listed has been on its own address since the start and nowhere else. A case moves a page by setting its entry.
    */
   readonly navigation = new Map<string, NavigationEvidence>();
+  /**
+   * What the WORKER has counted across every page it has ever watched, the closed and the departed too: pairing links
+   * committed by origin and navigations it lost track of. Every page answers with it, as the real worker does.
+   */
+  totals: NavigationTotals = { links: {}, lost: 0 };
   /** Called inside every act (after it began, before it answers): a page can start showing a code while it runs. */
   whileActing: ((call: string) => void) | undefined;
   /** While set, a click does not return: the page's queue is stuck behind it, as it is behind a dialog. */
@@ -157,7 +163,12 @@ export class Tabs {
         pairingSeen: pairing.seen,
         ...(this.navigationBroken.has(pageId)
           ? {}
-          : { navigation: this.navigation.get(pageId) ?? cleanNavigation(this.pageUrl(pageId)) }),
+          : {
+              navigation: {
+                ...(this.navigation.get(pageId) ?? cleanNavigation(this.pageUrl(pageId))),
+                totals: this.totals,
+              },
+            }),
       };
     },
     inputObserve: async pageId => {

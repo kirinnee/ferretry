@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { PAIRING_SCREEN_REFUSAL } from '@ferretry/std/pairing-screen';
+import { APP_EVAL_REFUSAL, PAIRING_SCREEN_REFUSAL } from '@ferretry/std/pairing-screen';
 import should from 'should';
 import type { BrowserTools } from '../../../daemon/tools/service.ts';
 import type { ToolCaller } from '../../../daemon/tools/types.ts';
@@ -332,7 +332,7 @@ describe('P1-1: a pairing link committed in any frame', () => {
   });
 });
 
-describe('P1-2: a script outlives its own answer, so it is refused for the pageâ€™s life', () => {
+describe('P1-2: a script outlives its own answer, so it never runs on the app (the blanket rule is in pairing-screen-fix2.test.ts)', () => {
   const EVAL: BrowserToolCall = { tool: 'browser.eval', name: 'app', function: '() => document.body.innerText' };
 
   it('should refuse a script on an app page while a code is live, running nothing', async () => {
@@ -342,7 +342,7 @@ describe('P1-2: a script outlives its own answer, so it is refused for the pageâ
     const { answer, error } = await attempt(tools, EVAL);
 
     should(answer).be.undefined();
-    should(error?.message).equal(PAIRING_SCREEN_REFUSAL);
+    should(error?.message).equal(APP_EVAL_REFUSAL);
     should(tabs.calls.filter(call => call.startsWith('evaluate'))).eql([]);
   });
 
@@ -356,7 +356,7 @@ describe('P1-2: a script outlives its own answer, so it is refused for the pageâ
     const { answer, error } = await attempt(tools, EVAL);
 
     should(answer).be.undefined();
-    should(error?.message).equal(PAIRING_SCREEN_REFUSAL);
+    should(error?.message).equal(APP_EVAL_REFUSAL);
     should(tabs.calls.filter(call => call.startsWith('evaluate'))).eql([]);
   });
 
@@ -372,7 +372,7 @@ describe('P1-2: a script outlives its own answer, so it is refused for the pageâ
     should(read.output).equal('hello');
   });
 
-  it('should allow a script on an app page no code has been live since it showed the app', async () => {
+  it('should refuse a script on an app page even when no code has been live since it showed the app (the app is never scripted)', async () => {
     const { tabs, tools, app, pairing, clock } = await pairingWorld();
     pairing.open('pairing-1', clock.at);
     clock.at += SECOND;
@@ -384,9 +384,10 @@ describe('P1-2: a script outlives its own answer, so it is refused for the pageâ
       watchedSince: clock.at - 6 * SECOND,
     });
 
-    const answer = await tools.call(agent, EVAL);
+    const { answer, error } = await attempt(tools, EVAL);
 
-    should(answer.summary).be.a.String();
+    should(answer).be.undefined();
+    should(error?.message).equal(APP_EVAL_REFUSAL);
   });
 
   it('should allow a script on a page that has never been on an app origin, whatever is live', async () => {
@@ -431,7 +432,7 @@ describe('P1-2: a script outlives its own answer, so it is refused for the pageâ
     const { answer, error } = await attempt(tools, { tool: 'browser.eval', name: 'popup', function: '() => 1' });
 
     should(answer).be.undefined();
-    should(error?.message).equal(PAIRING_SCREEN_REFUSAL);
+    should(error?.message).equal(APP_EVAL_REFUSAL);
   });
 });
 

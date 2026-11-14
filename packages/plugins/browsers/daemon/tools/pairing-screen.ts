@@ -1,4 +1,4 @@
-import { PAIRING_SCREEN_REFUSAL } from '@ferretry/std/pairing-screen';
+import { APP_EVAL_REFUSAL, PAIRING_SCREEN_REFUSAL } from '@ferretry/std/pairing-screen';
 import { type ProtectionWindows, pairingScreenGuard as guardWith } from '../pages/pairing-screen-guard.ts';
 import type { BrowserActGuard } from '../pages/service.ts';
 import { BrowserToolError } from './service.ts';
@@ -53,5 +53,6 @@ export function pairingScreenGuard(
     () => new BrowserToolError('forbidden', PAIRING_SCREEN_REFUSAL),
     windows,
     call.tool === 'browser.eval' ? 'script' : 'content',
+    () => new BrowserToolError('forbidden', APP_EVAL_REFUSAL),
   );
 }

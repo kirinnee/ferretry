@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { PAIRING_SCREEN_REFUSAL } from '@ferretry/std/pairing-screen';
+import { APP_EVAL_REFUSAL, PAIRING_SCREEN_REFUSAL } from '@ferretry/std/pairing-screen';
 import should from 'should';
 import type { BrowserTools } from '../../../daemon/tools/service.ts';
 import type { ToolCaller } from '../../../daemon/tools/types.ts';
@@ -71,12 +71,12 @@ describe('a page showing a live pairing code, read by an agent', () => {
     // Act
     const read = await tools.call(agent, { tool: 'browser.read', name: 'app' });
     const shot = await tools.call(agent, { tool: 'browser.screenshot', name: 'app' });
-    const script = await tools.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' });
+    const script = await attempt(tools, agent, { tool: 'browser.eval', name: 'app', function: '() => 1' });
 
-    // Assert
+    // Assert — a script is the exception: it is never run on the app (the sentence is not about a code)
     should(read.output).equal('hello');
     should(shot.picture?.bytes.byteLength).be.above(0);
-    should(script.summary).be.a.String();
+    should(script.error?.message).equal(APP_EVAL_REFUSAL);
   });
 
   it('should FAIL CLOSED when the browser cannot say whether the page is marked', async () => {
@@ -196,7 +196,7 @@ describe('P1-3: a read that was in flight while a code came on screen shows noth
       during: /^pointer-highlight$/u,
     },
     { name: 'a PDF', call: { tool: 'browser.pdf', name: 'app' }, during: /^pdf$/u },
-    { name: 'a page script', call: { tool: 'browser.eval', name: 'app', function: '() => 1' }, during: /^evaluate$/u },
+    // (a page script is not here: it is never run on the app at all, see pairing-screen-fix2.test.ts)
     { name: 'the console', call: { tool: 'browser.console', name: 'app' }, during: /^lifecycle-console$/u },
     {
       name: 'the network log',

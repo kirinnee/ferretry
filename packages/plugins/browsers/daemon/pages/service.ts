@@ -1,5 +1,5 @@
 import { openerGroup, sameOriginOrUnplaced } from './opener-group.ts';
-import type { NavigationEvidence } from '../target/lib/navigation-evidence.ts';
+import { mergeTotals, type NavigationEvidence, type NavigationTotals } from '../target/lib/navigation-evidence.ts';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
 import { BROWSER_MAX_MACHINE_PAGES, BROWSER_MAX_PAGES, type BrowserStateView } from '../../contract/index.ts';
 import {
@@ -86,7 +86,13 @@ export interface BrowserGuardPage {
 }
 
 /** The answer when the pages cannot be read, or one of them shows a code: marked, and counts no real group has. */
-const UNREADABLE_PAIRING_STATE: BrowserPairingState = { marked: true, seen: -1, pages: -1, targets: [] };
+const UNREADABLE_PAIRING_STATE: BrowserPairingState = {
+  marked: true,
+  seen: -1,
+  pages: -1,
+  targets: [],
+  totals: { links: {}, lost: 0 },
+};
 
 /** What the live pages say about a pairing code (see {@link BrowserGuardPage.pairingState}). */
 export interface BrowserPairingState {
@@ -101,6 +107,12 @@ export interface BrowserPairingState {
    * group, never an entry without one.
    */
   readonly targets: readonly { readonly id: string; readonly nav: NavigationEvidence }[];
+  /**
+   * What the WORKER has counted across every page it has watched, the closed and the departed too (pairing links by
+   * origin, navigations lost): the group's own pages say it, and so would any other. It only goes up, so a page that left
+   * the group or closed meanwhile cannot take a change out of it.
+   */
+  readonly totals: NavigationTotals;
 }
 
 /**
@@ -965,6 +977,7 @@ export class BrowserSessionService implements BrowserSubsystem {
         .map(each => each.id);
       const group = [...new Set([...openerGroup(run.snapshot.pages, pageId), ...related])];
       let seen = 0;
+      let totals: NavigationTotals | undefined;
       const targets: { id: string; nav: NavigationEvidence }[] = [];
       for (const id of group) {
         const found = await run.driver.inputDocument(id);
@@ -972,9 +985,12 @@ export class BrowserSessionService implements BrowserSubsystem {
         if (typeof found.pairingSeen !== 'number' || found.pairingSeen < 0) return UNREADABLE_PAIRING_STATE;
         if (found.navigation === undefined) return UNREADABLE_PAIRING_STATE;
         seen += found.pairingSeen;
+        totals = totals === undefined ? found.navigation.totals : mergeTotals(totals, found.navigation.totals);
         targets.push({ id, nav: found.navigation });
       }
-      return { marked: false, seen, pages: group.length, targets };
+      // No page to ask is no totals to read: a look that cannot say what the worker has counted is a look that refuses.
+      if (totals === undefined) return UNREADABLE_PAIRING_STATE;
+      return { marked: false, seen, pages: group.length, targets, totals };
     } catch {
       return UNREADABLE_PAIRING_STATE;
     }
