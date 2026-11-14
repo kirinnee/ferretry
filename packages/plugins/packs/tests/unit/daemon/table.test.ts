@@ -37,13 +37,17 @@ const build = async (
   ferrets: readonly FerretSummary[],
   lines: Readonly<Record<string, readonly SitrepLine[]>> = {},
   blockers: Readonly<Record<string, number>> = {},
-  options: { readonly redact?: (texts: readonly string[]) => Promise<readonly string[]> } = {},
+  options: {
+    readonly redact?: (texts: readonly string[]) => Promise<readonly string[]>;
+    readonly model?: (ferret: string) => Promise<string | undefined>;
+  } = {},
 ) =>
   await readPackTable({
     root: ROOT,
     ferrets,
     sitrep: async id => ({ lines: lines[id] ?? [], blockers: blockers[id] ?? 0 }),
     redact: options.redact ?? (async texts => texts),
+    ...(options.model === undefined ? {} : { model: options.model }),
     nowMs: NOW,
   });
 
@@ -164,6 +168,27 @@ describe('readPackTable', () => {
     should(i?.model).equal('default');
     should(i?.pr).be.undefined();
     should(e).containEql({ state: 'ended', endedAt: at(5), ferretState: 'stopped' });
+  });
+
+  it('should show the model each ferret is actually running: observed over requested, and an observed one for a default launch', async () => {
+    // Arrange: w was asked for opus but switched inside its session; d asked for nothing and the harness reports one.
+    const ferrets = [
+      ferret('w', { parent: 'lead' as FerretSummary['id'], model: 'opus-5.5' }),
+      ferret('d', { parent: 'lead' as FerretSummary['id'] }),
+      ferret('u', { parent: 'lead' as FerretSummary['id'] }),
+      ferret('k', { parent: 'lead' as FerretSummary['id'], model: 'glm-5.3' }),
+    ];
+    const observed: Record<string, string | undefined> = { w: 'sonnet-5.5', d: 'haiku-5.5' };
+
+    // Act
+    const table = await build(ferrets, {}, {}, { model: async id => observed[id] });
+
+    // Assert: a ferret the reader cannot speak for shows the model it was started with, else `default` — never its runtime.
+    const modelOf = (id: string) => table.rows.find(row => row.id === id)?.model;
+    should(modelOf('w')).equal('sonnet-5.5');
+    should(modelOf('d')).equal('haiku-5.5');
+    should(modelOf('u')).equal('default');
+    should(modelOf('k')).equal('glm-5.3');
   });
 
   it('should keep the newer of two lines, and a note over a message that is as new', async () => {

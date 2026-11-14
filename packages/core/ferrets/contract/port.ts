@@ -627,6 +627,13 @@ export interface FerretsApi {
    */
   lastAutoResume?(): Promise<AutoResumeReport | null>;
   /**
+   * The model a ferret is actually running, for display (today's `displayModel`): what the harness last reported, else the
+   * model it was configured with, else the wrapper's declared hint, else `default`. A launch option (`FerretSummary.model`)
+   * is only what was ASKED for: it goes stale after a switch inside the session. `undefined` for a ferret this daemon does
+   * not know. Optional, so it is additive: absent reads as the launch option.
+   */
+  displayModel?(ferret: FerretId): Promise<string | undefined>;
+  /**
    * What a ferret spent, turn by turn, read through ITS harness (`Harness.usage`; Ferrets owns which harness a ferret
    * runs, so Usage never reaches one). Token counts only, never transcript text. `undefined` means PARTIAL: the ferret is
    * unknown, its harness is off, or the reader threw. It is never counted as zero; an empty list is a ferret that spent

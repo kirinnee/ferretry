@@ -61,6 +61,7 @@ function ports(
       redactCalls.push(texts);
       return texts.map(text => text.replaceAll('hunter2', '*******'));
     },
+    model: async () => undefined,
     nowMs: () => NOW,
     ...overrides,
   };
@@ -152,6 +153,60 @@ describe('the subtree table', () => {
     expect(a?.last).toBeUndefined();
     expect(b?.card).toBeUndefined();
     expect(b?.pr).toBeUndefined();
+  });
+
+  it('should show the model each ferret is actually running: observed over requested, and an observed one for a default launch', async () => {
+    const registry = new FerretRegistry([
+      ferret('root'),
+      ferret('a', { parent: 'root' }),
+      ferret('b', { parent: 'root' }),
+      ferret('c', { parent: 'root' }),
+    ]);
+    const observed: Record<string, string> = { a: 'sonnet-5.5', b: 'haiku-5.5' };
+    const view = await new SubtreeService(registry, ports({}, { model: async id => observed[id] })).view(
+      'root' as FerretId,
+    );
+    // c has no report: the model it was started with (none here) reads `default`, never its runtime or harness.
+    expect(view?.rows.map(row => [row.id, row.model])).toEqual([
+      ['a', 'sonnet-5.5'],
+      ['b', 'haiku-5.5'],
+      ['c', 'default'],
+    ]);
+  });
+
+  it('P2-1 the excerpt budget gates only the LAST text: a row past it, or a recently ended one, keeps its card, lane and PR', async () => {
+    const helpers = Array.from({ length: 4 }, (_, index) => ferret(`h${String(index)}`, { parent: 'root' }));
+    const ended = ferret('done', { parent: 'root', state: 'stopped', stateAt: at(5) });
+    const registry = new FerretRegistry([ferret('root'), ...helpers, ended]);
+    const pr = {
+      number: 9,
+      url: 'https://github.com/o/r/pull/9',
+      state: 'merged',
+      draft: false,
+      checks: 'passing',
+    } as const;
+    const card = (id: string): SitrepLine => ({ kind: 'card', text: id, ref: `&F${id.length}`, lane: 'Review', pr });
+    const view = await new SubtreeService(
+      registry,
+      ports({
+        h0: [card('h0'), line('hi', 1)],
+        h1: [card('h1'), line('hi', 1)],
+        h2: [card('h2'), line('hi', 1)],
+        h3: [card('h3'), line('hi', 1)],
+        done: [card('done'), line('bye', 4)],
+      }),
+      { concurrency: 2, excerptRows: 2, endedRows: 0 },
+    ).view('root' as FerretId);
+    const rows = view?.rows ?? [];
+    // Only two rows have a last line (the budget) ...
+    expect(rows.filter(row => row.last !== undefined)).toHaveLength(2);
+    // ... yet EVERY row keeps its card, its lane and its PR, the ended one and the live ones past the budget included.
+    expect(rows).toHaveLength(5);
+    for (const row of rows) {
+      expect(row.card).toMatchObject({ lane: 'Review' });
+      expect(row.pr).toEqual(pr);
+    }
+    expect(rows.find(row => row.id === 'done')?.last).toBeUndefined();
   });
 
   it('should answer undefined for a ferret the registry does not hold', async () => {

@@ -235,6 +235,11 @@ export interface PackTableReads {
    * table then withholds its excerpts rather than show text it did not scrub.
    */
   redact(texts: readonly string[]): Promise<readonly string[]>;
+  /**
+   * The model a member is actually running (the harness's report, then its configured model; `FerretsApi.displayModel`),
+   * or `undefined` when it cannot say, and the row then shows the model it was started with.
+   */
+  model?(ferret: string): Promise<string | undefined>;
   readonly nowMs: number;
   readonly endedWindowMs?: number;
 }
@@ -253,6 +258,13 @@ export async function readPackTable(
   const sitreps = await mapBounded(members, limits.concurrency, async ({ ferret }) => {
     try {
       return await reads.sitrep(ferret.id);
+    } catch {
+      return undefined;
+    }
+  });
+  const models = await mapBounded(members, limits.concurrency, async ({ ferret }) => {
+    try {
+      return await reads.model?.(ferret.id);
     } catch {
       return undefined;
     }
@@ -281,7 +293,7 @@ export async function readPackTable(
       name: ferret.name,
       ...(parent === undefined ? {} : { parent }),
       depth,
-      model: ferret.model ?? 'default',
+      model: models[index] ?? ferret.model ?? 'default',
       state,
       ferretState: ferret.state,
       ...(card === undefined ? {} : { card }),

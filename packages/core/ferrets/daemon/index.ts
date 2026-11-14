@@ -119,7 +119,8 @@ import { ferretsPort } from './lib/ferrets/port.ts';
 import { ferretsMoveResume, movedTarget } from './lib/ferrets/move-resume.ts';
 import { callerIsAgent, launchOriginOf } from './lib/ferrets/launch-origin.ts';
 import type { ResumeActor } from './lib/session/resume/types.ts';
-import { SessionStateSchema } from './lib/protocol/session.ts';
+import { SessionConfigSchema, SessionStateSchema } from './lib/protocol/session.ts';
+import { displayModel } from './lib/protocol/session-subtree.ts';
 import { promptOf } from './lib/ferrets/prompt.ts';
 import { buildTurnWatch, turnWatchFailureFields } from './modules/turn-watch.ts';
 import { buildLiveEvents } from './modules/live-events.ts';
@@ -661,9 +662,26 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
   });
 
+  /**
+   * The model a ferret is really running (today's `displayModel`): what the harness last reported, then its configured
+   * model, then the wrapper's hint. A ferret whose config cannot be read falls back to the model it was started with.
+   */
+  const displayModelOf = async (ferret: FerretId): Promise<string | undefined> => {
+    const summary = registry.summary(ferret);
+    if (summary === undefined) return undefined;
+    const id = ferret as unknown as SessionId;
+    const config = SessionConfigSchema.safeParse(await sessionStore.readConfig(id).catch(() => undefined));
+    const state = SessionStateSchema.safeParse(await sessionStore.readState(id).catch(() => undefined));
+    return displayModel(
+      config.success ? config.data : { model: summary.model, modelHint: '' },
+      state.success ? state.data : {},
+    );
+  };
+
   // G24: the same bounded read as today's subtree API, masked whole before excerpts are cut.
   const subtree = new SubtreeService(registry, {
     nowMs: () => kernel.clock.nowMs(),
+    model: displayModelOf,
     lines: async ferret => (await service.sitrep(ferret))?.lines ?? [],
     redact: texts => kernel.redaction.read(scope => texts.map(text => scope.text(text))),
   });
@@ -1208,6 +1226,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       ferrets: perNeeder(needer => ({
         ...ferretsPort(service, needer.id),
         lastAutoResume: async () => await autoResume.summary.read(),
+        displayModel: displayModelOf,
       })),
       workFolders,
       agentControl: agentControlReader(ferret => service.agentControl(ferret)),
