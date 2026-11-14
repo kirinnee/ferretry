@@ -13,6 +13,7 @@ export {
   type WorkFolders,
   WorkFoldersPort,
 } from '@ferretry/kernel/contract';
+export * from './app-hooks.ts';
 export * from './instructions-report.ts';
 export * from './hooks.ts';
 export * from './ids.ts';

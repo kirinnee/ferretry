@@ -204,6 +204,34 @@
 .fy-sbar__pinned .fy-sbar__project {
   color: var(--accent);
 }
+/* A ferret with open items waiting on the owner: a bold name, an accent count, the ask under it. */
+.fy-sbar__needs-you .fy-sbar__project {
+  color: var(--accent);
+}
+.fy-sbar__session[data-sbar-needs-you] .fy-sbar__name {
+  font-weight: var(--weight-strong);
+}
+.fy-sbar__unread {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--accent-fg, var(--bg));
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+}
+.fy-sbar__ask {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .fy-sbar__session[data-sbar-pinned][data-sbar-stopped] {
   opacity: 0.6;
 }

@@ -3,6 +3,8 @@ import { daemonHomeHref, daemonSettingsHref, DEVICE_SETTINGS_HREF, HOME_HREF } f
 import { useRouter } from '../router/router.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
 import { firstRunEntry, ONBOARDING_SCREEN } from './first-run.ts';
+import { SettingGroup } from '../compose/setting-row.tsx';
+import { CachedDataSetting } from './device-cached-data.tsx';
 import { DeviceAppearance } from './device-appearance.tsx';
 import { DevicePanels } from './device-panels.tsx';
 import { resolveSettingsTab } from './settings-tab.ts';
@@ -154,13 +156,16 @@ export function DaemonSettingsPage({
 
 /** This device's settings (§5.2): theme, mode, text size, motion; saved in this browser, never on a daemon. */
 export function DeviceSettingsPage() {
-  const { layout } = useShell();
+  const { layout, scroll } = useShell();
   return (
     <section className="fy-page">
       <h1>This device</h1>
       <DeviceAppearance />
       {/* Panels plugins declare in device.settings (S4, M3): no machine needed, by order. */}
       <DevicePanels slot="device.settings" />
+      <SettingGroup label="Storage">
+        <CachedDataSetting onClear={async () => scroll.clear()} />
+      </SettingGroup>
       <p>
         Layout: <code>{layout.layout.id}</code>
         {layout.kind === 'refused'

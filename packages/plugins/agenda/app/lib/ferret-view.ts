@@ -71,7 +71,10 @@ const inDiscussion = (item: Pick<AgendaItem, 'waitingOn' | 'waitingFor'>): boole
  * and `decoratedSummary`): a parked item or a notice waits on nobody; an idle ferret with an item on the owner's turn
  * is stopped on the owner.
  */
-const agendaSummaryOf = (items: readonly AgendaItem[], status?: FerretStatus): SessionAgendaSummary | undefined => {
+export const agendaSummaryOf = (
+  items: readonly AgendaItem[],
+  status?: FerretStatus,
+): SessionAgendaSummary | undefined => {
   const open = items.filter(item => item.notice !== true && item.parked === undefined);
   const [oldest] = open;
   if (oldest === undefined) return undefined;

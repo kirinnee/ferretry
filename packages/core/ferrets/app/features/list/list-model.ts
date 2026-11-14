@@ -12,13 +12,18 @@
  *
  * A ferret with no `mode` matches no kind segment: it shows only under All.
  *
+ * NEEDS YOU. A ferret with open items waiting on the owner (the Agenda says which: `ferrets.needs-you`) is listed though
+ * it is stopped (an unread row that vanished would be an unanswered ferret). While the device's "Group Needs you at the
+ * top" is on, those ferrets gather into "Needs you" under Pinned, newest first, and are not repeated below; with it off
+ * they stay in their folders, still marked. Nothing else puts a ferret there: a ferret parked on the owner is a status.
+ *
  * PINNED ferrets lift into "Pinned" above everything, oldest pin first, and are not repeated below. The rest group by
  * folder (Ferrets cannot read the Projects list, so the group key is the normalised folder and its name the folder's
  * base name), newest activity first inside a group, the busiest group first.
  */
 
 import type { ModeFilter } from '@ferretry/app';
-import type { FerretSummary } from '../../../contract/index.ts';
+import type { FerretNeedsYou, FerretSummary } from '../../../contract/index.ts';
 import { statusMark } from '../../lib/status-mark.tsx';
 import { folderBaseName, normalizeFolder } from '../new-ferret/recent-folders.ts';
 
@@ -52,7 +57,28 @@ export const listedBeforeMode = (
   ferret: FerretSummary,
   { showStopped }: FerretListFilter,
   keep?: (ferret: FerretSummary) => boolean,
-): boolean => keep?.(ferret) === true || showStopped || !isStopped(ferret) || isPinned(ferret);
+  needing?: NeedingYou,
+): boolean =>
+  keep?.(ferret) === true || showStopped || !isStopped(ferret) || isPinned(ferret) || needsYou(ferret, needing);
+
+/** Which ferrets wait on the owner, by ferret id (`ferrets.needs-you`); absent when nobody says. */
+export type NeedingYou = ReadonlyMap<string, FerretNeedsYou>;
+
+/** The ferret has open items waiting on the owner. */
+const needsYou = (ferret: FerretSummary, needing: NeedingYou | undefined): boolean => needing?.has(ferret.id) === true;
+
+/** What the list reads of Needs you: who waits, and whether the device gathers them at the top. */
+export interface NeedsYouRead {
+  readonly needing: NeedingYou;
+  readonly group: boolean;
+}
+
+/** Newest `latestAt` first; the id keeps the order from shuffling between reads. */
+const byNeedsYouOrder =
+  (needing: NeedingYou) =>
+  (left: FerretSummary, right: FerretSummary): number =>
+    Date.parse(needing.get(right.id)?.latestAt ?? '') - Date.parse(needing.get(left.id)?.latestAt ?? '') ||
+    left.id.localeCompare(right.id);
 
 /** How many ferrets each kind segment would draw. */
 interface ModeCounts {
@@ -72,16 +98,18 @@ export const listTallies = (
   ferrets: readonly FerretSummary[],
   filter: FerretListFilter,
   keep?: (ferret: FerretSummary) => boolean,
+  needing?: NeedingYou,
 ): ListTallies => {
-  const listed = ferrets.filter(ferret => listedBeforeMode(ferret, filter, keep));
+  const listed = ferrets.filter(ferret => listedBeforeMode(ferret, filter, keep, needing));
   return {
     counts: {
       all: listed.length,
       auto: listed.filter(ferret => ferret.mode === 'auto').length,
       interactive: listed.filter(ferret => ferret.mode === 'interactive').length,
     },
-    hiddenStopped: ferrets.filter(ferret => !listedBeforeMode(ferret, filter, keep) && matchesMode(ferret, filter.mode))
-      .length,
+    hiddenStopped: ferrets.filter(
+      ferret => !listedBeforeMode(ferret, filter, keep, needing) && matchesMode(ferret, filter.mode),
+    ).length,
   };
 };
 
@@ -124,6 +152,8 @@ export const groupByFolder = (ferrets: readonly FerretSummary[]): readonly Ferre
 export interface FerretListView extends ListTallies {
   /** The owner's pinned ferrets, oldest pin first: the "Pinned" group above all. Not repeated in `groups`. */
   readonly pinned: readonly FerretSummary[];
+  /** Ferrets with open items, newest first: the "Needs you" group under Pinned. Empty when the device turned it off. */
+  readonly needsYou: readonly FerretSummary[];
   readonly groups: readonly FerretGroup[];
 }
 
@@ -132,12 +162,20 @@ export const ferretListView = (
   ferrets: readonly FerretSummary[],
   filter: FerretListFilter,
   keep?: (ferret: FerretSummary) => boolean,
+  waiting?: NeedsYouRead,
 ): FerretListView => {
-  const drawn = ferrets.filter(ferret => listedBeforeMode(ferret, filter, keep) && matchesMode(ferret, filter.mode));
+  const needing = waiting?.needing;
+  const drawn = ferrets.filter(
+    ferret => listedBeforeMode(ferret, filter, keep, needing) && matchesMode(ferret, filter.mode),
+  );
+  const unpinned = drawn.filter(ferret => !isPinned(ferret));
+  const gathered =
+    waiting === undefined || !waiting.group ? [] : unpinned.filter(ferret => needsYou(ferret, waiting.needing));
   return {
     pinned: drawn.filter(isPinned).sort(byPinOrder),
-    groups: groupByFolder(drawn.filter(ferret => !isPinned(ferret))),
-    ...listTallies(ferrets, filter, keep),
+    needsYou: waiting === undefined ? [] : [...gathered].sort(byNeedsYouOrder(waiting.needing)),
+    groups: groupByFolder(unpinned.filter(ferret => !gathered.includes(ferret))),
+    ...listTallies(ferrets, filter, keep, needing),
   };
 };
 

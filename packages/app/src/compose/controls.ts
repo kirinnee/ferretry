@@ -122,14 +122,22 @@ export interface DeviceControls {
   /** Instant client-side filter over the session list. */
   readonly query: string;
   readonly mode: ModeFilter;
-  /** Remote-control sessions only — a real filter, not a search term. */
+  /**
+   * Remote-control sessions only — a real filter, not a search term.
+   * GAP(device-controls): stored and read by nothing. Today's `rcOnly`, `includeFinished` and `dashboardView` drove
+   * the sessions dashboard (cards or table, finished sessions, remote-control only); 5.0 has no such page by design.
+   */
   readonly rcOnly: boolean;
+  /** GAP(device-controls): see `rcOnly`. The ferret list's "Show stopped" is the list's own tick and lasts while the list does. */
   readonly includeFinished: boolean;
-  /** null = follow the viewport (cards when narrow). */
+  /** null = follow the viewport (cards when narrow). GAP(device-controls): see `rcOnly`. */
   readonly dashboardView: DashboardView | null;
   /** null = use the first-load device default without persisting it. */
   readonly density: Density | null;
-  /** Gather the sessions with open Attention into a "Needs you" group at the top. Default on. */
+  /**
+   * Gather the ferrets with open Attention into a "Needs you" group at the top of the ferret list. Default on. Read by
+   * Ferrets' list (`features/list/ferret-list.tsx`), set in Settings › This device › "Group Needs you at the top".
+   */
   readonly groupNeedsYou: boolean;
   /** Chat pane horizontal measure; inert on a phone, which is already narrower. */
   readonly chatWidth: ChatWidthPreference;
@@ -139,8 +147,16 @@ export interface DeviceControls {
   readonly composerPhoneEnterKey: ComposerEnterKeyPreference | null;
   /** Reduced motion: follow the operating system, or always reduce it on this device. */
   readonly motion: MotionPreference;
+  /**
+   * GAP(device-controls): read by nothing. Today's collapse button turned the sessions bar into a rail; in 5.0 the
+   * navigation's form is the layout's `nav.style` (list or rail), chosen in Settings › Layout — no button toggles it.
+   */
   readonly sidebarCollapsed: boolean;
-  /** Every paired machine's sessions in the list, or only the machine on screen's. */
+  /**
+   * Every paired machine's sessions in the list, or only the machine on screen's.
+   * GAP(device-controls): the ferret list is the machine on screen's; the all-machines list and its one Needs you
+   * group across machines (S-0550) are not built, so this is read by no list.
+   */
   readonly sessionsList: SessionsListScope;
   /** The Sessions bar's kind filter. null = never chosen on this device, so the bar opens on Interactive. */
   readonly sessionsMode: ModeFilter | null;
@@ -174,11 +190,17 @@ export interface DeviceControls {
    * mean what, never which element holds the draft, the selection or dictation.
    */
   readonly composerVimMode: boolean;
-  /** Where an ordinary tap on an external link opens (`OpenLinksIn`). */
+  /**
+   * Where an ordinary tap on an external link opens (`OpenLinksIn`). Read at the moment of the tap by Browsers' link
+   * provider (`shell.links`, S7), set in Settings › This device › "Open links in".
+   */
   readonly openLinksIn: OpenLinksIn;
   /**
    * Keep the interactive chats and the most recently opened ones fresh in the background, so switching
-   * to one is instant (`lib/background-fresh.ts`). On by default; per device.
+   * to one is instant (today's `lib/background-fresh.ts`). On by default; per device.
+   * GAP(device-controls): read by nothing. The shell keeps no device copy of a transcript or of a session list (the
+   * chat's GAP(app-shell): it opens on "Opening…" until the first read), so there is nothing to keep fresh. When that
+   * cache exists this is its switch, and Settings › This device gets the "Keep recent chats fresh" row with it.
    */
   readonly keepChatsFresh: boolean;
   /** …but not while the browser says the link is cellular. Where it cannot say, this changes nothing. */
