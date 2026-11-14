@@ -1,38 +1,39 @@
-/** A card's Agenda asks: the agendas of the ferrets that can hold them, read when the card changes. */
+/**
+ * A card's Agenda asks, LIVE (v4's `useBoardAsks`): the agendas of the ferrets that can hold them are watched in the
+ * board store for as long as the card is open, and re-read when the machine says that ferret's asks changed
+ * (`asks.changed`, noted by the runtime). The rows follow every later snapshot with no board refresh and no remount;
+ * the watch is released on unmount.
+ */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { CardView } from '../../contract/index.ts';
-import { type CardAsks, askSessions, collectAsks, type SessionAgenda } from '../lib/board-asks.ts';
+import { askSessions, type CardAsks, collectAsks } from '../lib/board-asks.ts';
 import type { DaemonBoardStore } from '../lib/board-store.ts';
 import type { DaemonConnection } from '../lib/machine.ts';
 
 export const useCardAsks = (store: DaemonBoardStore, machine: DaemonConnection, card: CardView): CardAsks => {
-  const key = askSessions(card).join('|');
-  // The card's own value changes when the board moves it or an ask opens or closes: read the agendas again then.
-  const [read, setRead] = useState<{ readonly for: string; readonly agendas: readonly SessionAgenda[] } | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `key` is the list of sessions; `card` says when to re-read
+  const sessions = askSessions(card);
+  const key = sessions.join('|');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `key` is the list of sessions
+  const held = useMemo(() => sessions, [key]);
   useEffect(() => {
-    let live = true;
-    void Promise.all(
-      askSessions(card).map(async sessionId => ({
-        sessionId,
-        snapshot: await store.agendaOf(machine, sessionId).catch(() => null),
-      })),
-    ).then(agendas => {
-      if (live) setRead({ for: key, agendas });
-    });
+    const releases = held.map(ferret => store.watchAgenda(machine, ferret));
     return () => {
-      live = false;
+      for (const release of releases) release();
     };
-  }, [store, machine, key, card]);
+  }, [store, machine, held]);
+  const stamp = useSyncExternalStore(
+    store.subscribe,
+    () => store.agendaStamp(machine.daemonId, held),
+    () => store.agendaStamp(machine.daemonId, held),
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `stamp` is what moves when an agenda does
   return useMemo(
     () =>
       collectAsks(
         card,
-        read !== null && read.for === key
-          ? read.agendas
-          : askSessions(card).map(sessionId => ({ sessionId, snapshot: null })),
+        held.map(sessionId => ({ sessionId, snapshot: store.agendaSnapshot(machine.daemonId, sessionId) })),
       ),
-    [card, read, key],
+    [card, held, stamp, store, machine.daemonId],
   );
 };
