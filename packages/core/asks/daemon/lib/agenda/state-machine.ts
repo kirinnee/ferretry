@@ -580,6 +580,18 @@ export function isOnBehalfItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 's
   return isGateFollowupItem(item) || isCardAgendaItem(item);
 }
 
+/**
+ * A ferret's own question form as a v4 home carried it into 5.0 (`question:<tool id>`, raised by the daemon's harness-prompt
+ * observer, docs/agenda.md § Reserved sourceRefs): the ferret is waiting on it, and v4's observer is what typed the answer into
+ * the form. 5.0's questions are obligations (`ask:question:…`, answered through Conversation's own route), so a carried one
+ * has no daemon that acts on its answer. Its answer therefore goes to the ferret like an answer to the ferret's own item —
+ * rests waiting on it, is told to it, and reopens saying so when it did not arrive — instead of closing as done with
+ * nobody told. It is NOT "on behalf": the ferret gains no right to dismiss or close it.
+ */
+export function isCarriedQuestionItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
+  return item.raisedBy === 'daemon' && item.source === 'question' && (item.sourceRef ?? '').startsWith('question:');
+}
+
 /** {@link isOnBehalfItem}, of an entry the daemon raised. */
 function isOnBehalfAgenda(entry: Pick<AgendaEntry, 'origin' | 'item'>): boolean {
   return entry.origin.kind === 'daemon' && isOnBehalfItem(entry.item);
@@ -1413,7 +1425,7 @@ function addressById(
  * asks move into agendas), a held configuration change, an input card, and every item the daemon raised for itself.
  */
 function restsOnAnswer(entry: Pick<AgendaEntry, 'origin' | 'item'>): boolean {
-  const speaksForFerret = entry.origin.kind === 'agent' || isOnBehalfAgenda(entry);
+  const speaksForFerret = entry.origin.kind === 'agent' || isOnBehalfAgenda(entry) || isCarriedQuestionItem(entry.item);
   return (
     speaksForFerret && entry.item.confirms === undefined && entry.item.kind !== 'input' && entry.item.notice !== true
   );
