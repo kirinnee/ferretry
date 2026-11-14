@@ -135,7 +135,7 @@ import type { HostStatePort, PrivatePin } from './state/state-port.ts';
 import { type PinReport, pinCreated, touchesPrivate } from './fence-guard.ts';
 import { openHome, probeHome } from './home.ts';
 import { composePrivateFiles, privacyRefusals } from '../manifest/privacy.ts';
-import { ensureInternalRootBases, ownFolderSpellings, rootsPortFor } from './roots.ts';
+import { ensureInternalRootBases, ensureWorktreesBase, ownFolderSpellings, rootsPortFor } from './roots.ts';
 import { NO_PROCESS_TABLE, type ProcessTable, processesPortFor } from './processes.ts';
 import { PinRegistry } from './pins.ts';
 import { FsError, type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
@@ -1075,7 +1075,12 @@ async function bootLocked(
       { home, plugin: manifest.id },
       manifest.permissions?.roots ?? [],
     );
-    for (const refused of roots)
+    const worktreesBase = await ensureWorktreesBase(
+      adapters.fs,
+      { plugin: manifest.id, worktrees: options.worktrees ?? `${home}-worktrees` },
+      manifest.permissions?.roots ?? [],
+    );
+    for (const refused of worktreesBase === undefined ? roots : [...roots, worktreesBase])
       log.warn('a root base was refused and left as it is', {
         plugin: manifest.id,
         root: refused.name,

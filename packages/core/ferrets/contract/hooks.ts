@@ -282,6 +282,12 @@ export interface RuntimeStartSource {
   login(login: string): Promise<LoginStartResolution>;
   /** The runtime NAMED `runtime`, resolved; or the plain sentence saying why it cannot serve a launch now. */
   resolve(runtime: string): Promise<RuntimeStartResolution>;
+  /**
+   * The machine's default runtime for new agents (the setting, else the machine's own fallback), or `undefined` when this
+   * machine has none. A start that names no runtime, login or harness is a start on it (v4 parity), so it is recorded with
+   * it and passes the SAME login gate. Optional: a source that does not say leaves such a start as it was.
+   */
+  defaultRuntime?(): Promise<string | undefined>;
 }
 
 /** The one key `runtime.start` is provided under: a runtime has exactly one owner. */

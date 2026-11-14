@@ -28,6 +28,7 @@ import {
   machineSetVerb,
   machineShowVerb,
 } from './commands/machine.ts';
+import { statuslineVerb } from './commands/statusline.ts';
 import { wordsVerb } from './commands/words.ts';
 import { updateVerb } from './commands/update.ts';
 import { EXIT, reportFailure, ShellError } from './errors.ts';
@@ -66,6 +67,7 @@ const SHELL_HANDLERS: Readonly<Record<string, ShellVerb>> = {
   'machine export': machineExportVerb,
   'machine clone': machineCloneVerb,
   update: updateVerb,
+  statusline: statuslineVerb,
 };
 
 /** Flags before the verb. `--help` and `--version` anywhere in the leading flags answer at once. */

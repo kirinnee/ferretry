@@ -51,6 +51,16 @@ describe('fy notify', () => {
     expect(loud.out.join('')).toMatch(/phone buzzes/u);
   });
 
+  test("--ping, v4's spelling of --buzz, buzzes the phone too", async () => {
+    const loud = world({ 'POST /v1/ferrets/:ferretId/agenda': {} });
+    await loud.verb('notify', { args: ['Deploy needs you'], options: { ferret: 'f1', ping: true } });
+    expect(loud.calls[0]?.init?.body).toMatchObject({ ping: true });
+    const early = world({ 'POST /v1/ferrets/:ferretId/agenda': {} });
+    await early.verb('notify', { args: ['for', 'you'], options: { ferret: 'f1', ping: 'Deploy' } });
+    expect(early.calls[0]?.init?.body).toMatchObject({ ping: true, subject: 'Deploy for you' });
+    expect(loud.out.join('')).toMatch(/phone buzzes/u);
+  });
+
   test('refuses an empty or two-line summary, and a missing ferret, without calling the daemon', async () => {
     const w = world({});
     expect(await w.verb('notify', { args: [], options: { ferret: 'f1' } })).toBe(1);

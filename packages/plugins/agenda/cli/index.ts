@@ -212,19 +212,22 @@ export default implementCli(manifest, {
         notify: async invocation => {
           const ferret = text(invocation.options.ferret);
           if (ferret === undefined) return fail('no ferret id — pass --ferret <id>');
+          // `--ping` is v4's spelling of `--buzz`. Help names only `--buzz` (help.test.ts), but agents' old instructions still say `--ping`.
+          // It is no declared switch, so `--ping "summary"` reads the summary as its value: that word is given back.
+          const ping = invocation.options.ping;
+          const buzzes = flag(invocation, 'buzz') || (ping !== undefined && ping !== false);
+          const words = typeof ping === 'string' ? [ping, ...invocation.args] : invocation.args;
           let request: ReturnType<typeof composeNoticeRequest>;
           try {
-            request = composeNoticeRequest(invocation.args, {
+            request = composeNoticeRequest(words, {
               body: text(invocation.options.body),
-              buzz: flag(invocation, 'buzz'),
+              buzz: buzzes,
             });
           } catch (error) {
             return fail(error instanceof Error ? error.message : String(error));
           }
           await client.call('POST /v1/ferrets/:ferretId/agenda', { params: { ferretId: ferret }, body: request });
-          say(
-            `Sent. The owner sees it in this ferret's agenda${flag(invocation, 'buzz') ? ' and their phone buzzes' : ''}.`,
-          );
+          say(`Sent. The owner sees it in this ferret's agenda${buzzes ? ' and their phone buzzes' : ''}.`);
           return 0;
         },
       },

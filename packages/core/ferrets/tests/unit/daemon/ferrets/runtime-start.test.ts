@@ -62,7 +62,11 @@ function drivenClock() {
   };
 }
 
-function fixture(runtimeStart: Resolve | undefined = rt, after?: (delayMs: number, fire: () => void) => () => void) {
+function fixture(
+  runtimeStart: Resolve | undefined = rt,
+  after?: (delayMs: number, fire: () => void) => () => void,
+  defaultRuntime?: () => Promise<string | undefined>,
+) {
   const registry = new FerretRegistry([]);
   const harness = new FakeHarness('claude-code');
   const loginsAsked: string[] = [];
@@ -109,6 +113,7 @@ function fixture(runtimeStart: Resolve | undefined = rt, after?: (delayMs: numbe
       return ok({});
     },
     ...(runtimeStart === undefined ? {} : { runtimeStart }),
+    ...(defaultRuntime === undefined ? {} : { defaultRuntime }),
     ...(after === undefined ? {} : { after }),
     vault: { childEnvironment: async () => ok(emptyChildEnvironment()) },
     asks: { open: async () => [] },
@@ -124,6 +129,44 @@ function fixture(runtimeStart: Resolve | undefined = rt, after?: (delayMs: numbe
 }
 
 describe('a start by runtime launches with the runtime’s login', () => {
+  test('a start that chooses nothing is a start on the machine default runtime: recorded with it, through the same login gate', async () => {
+    const f = fixture(rt, undefined, async () => 'rt');
+
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
+
+    expect(started.ok).toBe(true);
+    const record = f.registry.get(startedId(started));
+    expect(record?.runtime).toBe('rt');
+    expect(record?.login).toBe('oauth');
+    expect(f.loginsAsked).toEqual(['oauth']);
+  });
+
+  test('a default runtime whose login needs signing in refuses the start: nothing is recorded or launched', async () => {
+    const f = fixture(
+      async runtime => ({ ok: false, sentence: `runtime ${runtime} was not started: its login needs sign in` }),
+      undefined,
+      async () => 'claude-default',
+    );
+
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
+
+    expect(started.ok).toBe(false);
+    expect(started.ok ? '' : started.error.reason).toContain('needs sign in');
+    expect(f.registry.list()).toEqual([]);
+    expect(f.harness.launched).toEqual([]);
+  });
+
+  test('a start that names its own login or harness, or a machine with no default runtime, is left as it was', async () => {
+    const named = fixture(rt, undefined, async () => 'rt');
+    const none = fixture(rt, undefined, async () => undefined);
+
+    const direct = await named.service.start({ folder: '/work', login: 'oauth', by: 'owner' }, PERSON_ORIGIN);
+    const bare = await none.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
+
+    expect(named.registry.get(startedId(direct))?.runtime).toBeUndefined();
+    expect(none.registry.get(startedId(bare))?.runtime).toBeUndefined();
+  });
+
   test('the record carries the runtime’s harness and login, the decision and the launch see them', async () => {
     const f = fixture();
 

@@ -8,6 +8,7 @@ import type { Duration } from '@ferretry/std';
 import type { DaemonTransport, InventoryCache } from './client.ts';
 import type { Environment } from './credential.ts';
 import type { CommandRegistry } from './registry.ts';
+import type { StatuslinePorts } from './commands/statusline.ts';
 import type { DaemonController, DaemonControlReads } from './daemon/controller.ts';
 import type { IDaemonPrompt } from './update/machine.ts';
 import type { DaemonUpdateOptions } from './update/updater.ts';
@@ -77,6 +78,8 @@ export interface CliWorld {
   readonly prompt?: IDaemonPrompt;
   /** A local file's text; throws when it cannot be read. */
   readText?(path: string): Promise<string>;
+  /** `fy statusline`'s two effects: the passive usage file and the person's own command. Absent: nothing is recorded. */
+  readonly statusline?: StatuslinePorts;
   /** The shell's local update transaction. Never depends on an enabled plugin. */
   update?(options: DaemonUpdateOptions, view: IDaemonUpdateViewPort): Promise<number>;
 }

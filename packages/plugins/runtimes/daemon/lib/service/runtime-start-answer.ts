@@ -19,6 +19,8 @@ import { RuntimeIdSchema, type RuntimesApi } from '../../../contract/index.ts';
 
 export interface RuntimeStartAnswerDeps {
   readonly resolve: RuntimesApi['resolve'];
+  /** The machine's default runtime; absent: the answer names none. */
+  readonly default?: RuntimesApi['default'];
   readonly logins: Pick<LoginsApi, 'list'>;
 }
 
@@ -62,5 +64,6 @@ export function runtimeStartAnswer(deps: RuntimeStartAnswerDeps): RuntimeStartSo
       return { ok: false, sentence: `runtime ${id.data} was not started: ${spendable.sentence}; ${REMEDY}` };
     return { ok: true, harness: resolved.runtime.harness, login: resolved.runtime.login };
   };
-  return { login, resolve };
+  const defaultRuntime = async (): Promise<string | undefined> => await deps.default?.().catch(() => undefined);
+  return { login, resolve, defaultRuntime };
 }

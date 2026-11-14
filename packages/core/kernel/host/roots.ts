@@ -3201,3 +3201,34 @@ function stateTreeAccess(
     linkTarget: async () => refuse('not_declared'),
   };
 }
+
+/**
+ * Makes the `worktrees` folder (`<home>-worktrees`, outside the home) `0700` for a plugin that DECLARED the root, before
+ * the plugin is built: the root has no leaf of its own to make it with, so a root whose folder is missing refuses every
+ * call (`outside`) and a managed checkout could never be made on a fresh machine. The folder's parent must be a real
+ * folder; what is already at the name must be a folder, never a link or a file, and is left exactly as it is when not.
+ * Returns the refusal, or nothing when the root is made (or not declared).
+ */
+export async function ensureWorktreesBase(
+  fs: HostFs,
+  layout: Pick<RootLayout, 'plugin' | 'worktrees'>,
+  declared: readonly RootName[],
+): Promise<RootBaseRefusal | undefined> {
+  if (!declared.includes('worktrees') || !mayHoldRoot(layout.plugin, 'worktrees')) return undefined;
+  try {
+    const folder = absolute(layout.worktrees, 'the worktrees folder');
+    const found = await fs.identity(folder);
+    if (found === undefined) {
+      const parent = await fs.identity(dirname(folder));
+      if (parent?.kind !== 'directory') return { name: 'worktrees', refusal: 'outside' };
+      await fs.mkdir(folder, 0o700);
+      return undefined;
+    }
+    if (found.kind === 'link') return { name: 'worktrees', refusal: 'link_escape' };
+    if (found.kind !== 'directory') return { name: 'worktrees', refusal: 'not_a_file' };
+    return undefined;
+  } catch (error) {
+    if (error instanceof RootError) return { name: 'worktrees', refusal: error.refusal };
+    return { name: 'worktrees', refusal: 'changed', code: errnoCode(error) };
+  }
+}
