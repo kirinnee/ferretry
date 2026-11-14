@@ -262,6 +262,7 @@ export default implementDaemon(manifest, {
       scriptedOn: host => inputs.scripts.scriptedOn(host),
       // The input card a 2FA seed is set up from (Accounts, I173): where the daemon saw its target, and "use it now".
       cardTarget: requestId => inputs.service.cardTarget(requestId),
+      inputOpen: ferret => inputs.service.hasOpen(ferret),
       useNow: async (requestId, use) =>
         await inputs.service.useNow(requestId, {
           ...use,
@@ -409,6 +410,7 @@ export default implementDaemon(manifest, {
         captureCommand,
         maskCopy,
         pageTakenOver,
+        inputOpen,
         ...rest
       } = full;
       return {
@@ -416,7 +418,7 @@ export default implementDaemon(manifest, {
         ...(needer.id === SECURE_COPY_OWNER ? { captureCommand, maskCopy } : {}),
         // Browsers alone reports a takeover: the report ends waiting pastes, so no other plugin may make one.
         ...(needer.id === 'browsers' ? { pageTakenOver } : {}),
-        ...(needer.id === PHONE_APPROVAL_LOOKER ? { pushNumber, observeTerminal, tainted } : {}),
+        ...(needer.id === PHONE_APPROVAL_LOOKER ? { pushNumber, observeTerminal, tainted, inputOpen } : {}),
         ...(PHONE_APPROVAL_RAISERS.includes(needer.id) ? { raisePhoneApproval } : {}),
         // LIST reach: the secrets this needer may use or mints itself. WRITE reach is narrower: only the names it MINTS, so a
         // plugin cannot overwrite or delete a secret it merely uses (an owner's GITHUB_TOKEN named in its records), nor see

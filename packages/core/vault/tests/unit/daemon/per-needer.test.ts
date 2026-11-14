@@ -625,11 +625,14 @@ describe('the phone approval’s reach through the Vault is by name', () => {
       expect(api.pushNumber).toBeUndefined();
       expect(api.observeTerminal).toBeUndefined();
       expect(api.tainted).toBeUndefined();
+      expect(api.inputOpen).toBeUndefined();
     }
     const accounts = of('accounts');
     expect(typeof accounts.pushNumber).toBe('function');
     expect(typeof accounts.observeTerminal).toBe('function');
     expect(typeof accounts.tainted).toBe('function');
+    // The Warden's hold answer: Accounts alone asks whether a ferret has an input card open, and a yes or no is all it gets.
+    expect(accounts.inputOpen?.(FERRET)).toBe(false);
     // With no Browsers or Terminals bound, a look finds nothing, and nothing is said to be unsteered.
     expect(await accounts.pushNumber?.(FERRET, 'login')).toBeUndefined();
     expect(await accounts.observeTerminal?.(FERRET, 'build')).toEqual({ ok: false, reason: 'unsupported' });

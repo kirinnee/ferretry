@@ -142,6 +142,13 @@ export interface VaultApi {
    */
   cardTarget?(requestId: string): { readonly matchKey?: string; readonly observedDigest?: string } | undefined;
   /**
+   * Whether this ferret has an input card the owner has not answered yet: a yes or no, never a card, a field or a
+   * value. It is one of the reads behind the ferret-level owner hold Accounts answers for the Warden (a move would
+   * kill the pane the owner is about to type into). Additive, and handed to Accounts alone: any other needer is
+   * handed none, so no one else learns which ferret has a card open.
+   */
+  inputOpen?(ferret: FerretId): boolean;
+  /**
    * "USE IT NOW" (today's `InputRequestService.useNow`): the owner just saved a 2FA seed with a passkey from this OPEN
    * code card, so the Vault types the new key's first code into that card through every check a "Use code from Ferretry"
    * tap gets, against `observedDigest` (the card as the owner saw it). Whether it was typed; never the code. Additive.

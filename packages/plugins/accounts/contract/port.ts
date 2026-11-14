@@ -9,6 +9,13 @@ import { type PlaceKey, SignInIdSchema, type SignInSummary } from './wire.ts';
 export interface AccountsApi {
   /** The sign-ins saved for one place key (a login domain, a site's match host or a `tool@host`). */
   signInsFor(place: PlaceKey): Promise<readonly SignInSummary[]>;
+  /**
+   * Whether anything of the owner's is open on this ferret — an input card they have not answered, a sign-in waiting
+   * for their phone, a plan card, a secret the ferret copied — so the Warden does not move it and throw that away. ONE yes
+   * or no: no card, account, id or value crosses it. FAILS CLOSED: a read that cannot be made answers `true`. Additive: a
+   * provider without it leaves the Warden unable to say, and the Warden then moves nothing.
+   */
+  ownerHold?(ferret: string): boolean;
 }
 
 export const AccountsPort = definePort<AccountsApi>('accounts');

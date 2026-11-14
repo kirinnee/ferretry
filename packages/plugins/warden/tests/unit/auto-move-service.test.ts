@@ -59,6 +59,8 @@ interface Recorded {
 function subject(
   options: {
     readonly hold?: string;
+    /** A hold read afresh each time, for a card that opens while the mover awaits. */
+    readonly holdNow?: () => string | undefined;
     readonly jobs?: () => readonly AgentJob[];
     readonly stop?: () => StoppedAgentJobs;
     readonly move?: () => Promise<void> | void;
@@ -78,7 +80,7 @@ function subject(
   };
   const service = new WardenAutoMoveService({
     facts: options.facts ?? (async () => fleetFacts),
-    ownerHold: async () => options.hold,
+    ownerHold: async () => options.holdNow?.() ?? options.hold,
     blockingJobs: async () => options.jobs?.() ?? [],
     askToStopJobs: async sessionId => {
       recorded.asked.push(sessionId);
@@ -160,6 +162,42 @@ describe('WardenAutoMoveService.run', () => {
     should([...result.moved]).deepEqual(['s1']);
     should(ledger().sessions.s1?.moves).deepEqual(['2026-11-01T12:00:00.000Z']);
     should(recorded.events.map(event => event.type)).deepEqual(['warden.auto_moved']);
+  });
+
+  it('should not move a ferret an owner card was opened on while the logins were being read', async () => {
+    // Arrange: nothing open when the hold is first read; a card by the time the facts are back.
+    let open = false;
+    const { recorded, sweep } = subject({
+      holdNow: () => (open ? 'it has an input card open' : undefined),
+      facts: async () => {
+        open = true;
+        return fleetFacts;
+      },
+    });
+
+    // Act
+    const result = await sweep();
+
+    // Assert
+    should(recorded.moves).deepEqual([]);
+    should(result.actions.map(action => action.outcome)).deepEqual(['held']);
+    should(result.actions[0]?.detail).containEql('it has an input card open');
+  });
+
+  it('should treat a hold read that throws as a hold, and move nothing', async () => {
+    // Arrange
+    const { recorded, sweep } = subject({
+      holdNow: () => {
+        throw new Error('accounts exploded');
+      },
+    });
+
+    // Act
+    const result = await sweep();
+
+    // Assert
+    should(recorded.moves).deepEqual([]);
+    should(result.actions[0]?.detail).containEql('accounts exploded');
   });
 
   it('should not move a ferret holding an input card, a secret or an owner prompt, and record that once', async () => {

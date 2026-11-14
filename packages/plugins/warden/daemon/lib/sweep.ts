@@ -2608,8 +2608,11 @@ export class WardenSweepService {
     let routed: { readonly agent: string; readonly note?: string } | undefined;
     try {
       if (act.action === 'failover') {
-        routed = await this.routeFailover(target, act.agent);
-        await this.ports.remedies.failover(targetId, routed.agent);
+        routed = await this.routeFailover(target, act.agent, async chosen => {
+          // Named before the move so a refused move is recorded against the login it was routed TO.
+          routed = chosen;
+          await this.ports.remedies.failover(targetId, chosen.agent);
+        });
       } else if (act.action === 'nudge') await this.ports.remedies.nudge(targetId, words.nudge);
       else if (act.action === 'resume' || act.action === 'restart') {
         // The ferret started again carries on with its card (`focus-card.ts`). Only an auto one is handed
@@ -2672,18 +2675,25 @@ export class WardenSweepService {
   /**
    * The login an investigation's `MOVE (agent)` really goes to: the one it named when it is ready, else the best
    * ready one, else an error naming every login tried (`auto-move.ts`). Without the mover there is no one to say
-   * a login is ready, and the move is refused rather than made blind.
+   * a login is ready, and the move is refused rather than made blind. The move itself (`move`) runs INSIDE the
+   * mover's guard — its lock, the fail-closed owner-hold read, the hourly cap and its ledger — never beside it.
    */
   private async routeFailover(
     target: WardenFleetSession,
     named: string,
+    move: (chosen: { readonly agent: string; readonly note?: string }) => Promise<void>,
   ): Promise<{ readonly agent: string; readonly note?: string }> {
     const service = this.ports.autoMove;
     if (service === undefined) throw new Error(`nothing can check that ${named} is ready, so it was not moved`);
     const { agent, harness } = target.config;
     if (agent === undefined || harness === undefined) throw new Error('it records no login to move from');
     const config = parseStoredWardenConfig(await this.ports.config.read()).config;
-    return await service.failoverTarget({ agent, harness }, named, config);
+    return await service.failover(
+      { sessionId: target.config.id, source: { agent, harness }, named },
+      config,
+      this.ports.nowMs(),
+      move,
+    );
   }
 
   /** The logins each flagged ferret could be moved to, for the investigation's prompt; none without the mover. */

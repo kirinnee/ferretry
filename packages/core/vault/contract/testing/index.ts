@@ -485,6 +485,11 @@ export class FakeVault implements VaultApi {
   async observeTerminal(_ferret: FerretId, _key: string): Promise<ObserveResult> {
     return this.terminalObserved;
   }
+  /** The ferrets this fake holds an unanswered input card for (`inputOpen`'s yes or no). */
+  readonly openInputFerrets = new Set<string>();
+  inputOpen(ferret: FerretId): boolean {
+    return this.openInputFerrets.has(ferret);
+  }
   tainted(ferret: FerretId, kind: 'browser' | 'terminal', since: number): boolean {
     this.taintedAsked.push({ ferret, kind, since });
     return this.steered;
