@@ -231,6 +231,14 @@ export type ComposerResult = z.infer<typeof ComposerResultSchema>;
 export const HypermediaRequestSchema = z.strictObject({ enabled: z.boolean() });
 export type HypermediaRequest = z.infer<typeof HypermediaRequestSchema>;
 
+/**
+ * `GET /v1/ferrets/:ferretId/hypermedia`: whether the ferret is told to use hypermedia now — the switch the owner set,
+ * else the default for its mode (on for an interactive ferret, off for an automatic one). The daemon says it; a reader
+ * never works the default out from a summary of the ferret.
+ */
+export const HypermediaStateSchema = z.strictObject({ enabled: z.boolean() });
+export type HypermediaState = z.infer<typeof HypermediaStateSchema>;
+
 /** What switching it did: nothing is sent to the ferret, so a RUNNING one takes the change at its next launch. */
 export const HypermediaResultSchema = z.strictObject({
   restartRequired: z.boolean(),

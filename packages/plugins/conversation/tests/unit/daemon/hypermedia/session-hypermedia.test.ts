@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
-import { HypermediaResultSchema } from '../../../../contract/index.ts';
+import { HypermediaResultSchema, HypermediaStateSchema } from '../../../../contract/index.ts';
 import daemon from '../../../../daemon/index.ts';
 import { SessionHypermediaError } from '../../../../daemon/hypermedia/lib/service.ts';
 import { sessionHypermediaRoutes } from '../../../../daemon/hypermedia/lib/mounts/session-hypermedia.ts';
@@ -35,6 +35,7 @@ async function world() {
   const patch = (ferret: string, body: unknown) =>
     host.request('PATCH', `/v1/ferrets/${ferret}/hypermedia`, { as: owner(), body });
   /** What a launch of this ferret would say about hypermedia, through the hook Conversation takes. */
+  const read = (ferret: string) => host.request('GET', `/v1/ferrets/${ferret}/hypermedia`, { as: owner() });
   const launched = async (ferret: string) => {
     const hooks = built.half?.hooks as unknown as Record<
       string,
@@ -43,8 +44,32 @@ async function world() {
     const [source] = hooks['launch.parts']?.() ?? [];
     return await source?.item.parts({ ferret });
   };
-  return { host, patch, launched };
+  return { host, patch, read, launched };
 }
+
+describe('GET /v1/ferrets/:ferretId/hypermedia', () => {
+  test("says the mode default for a ferret nobody set, and the owner's own value once set", async () => {
+    const { patch, read } = await world();
+
+    const interactive = await read(RUNNING);
+    expect(interactive.status).toBe(200);
+    expect(HypermediaStateSchema.parse(interactive.json())).toEqual({ enabled: true });
+    expect(HypermediaStateSchema.parse((await read(AUTO)).json())).toEqual({ enabled: false });
+
+    await patch(RUNNING, { enabled: false });
+    await patch(AUTO, { enabled: true });
+    expect(HypermediaStateSchema.parse((await read(RUNNING)).json())).toEqual({ enabled: false });
+    expect(HypermediaStateSchema.parse((await read(AUTO)).json())).toEqual({ enabled: true });
+  });
+
+  test('answers 404 with a sentence for a ferret that does not exist', async () => {
+    const { read } = await world();
+
+    const gone = await read('ghost-ferret');
+    expect(gone.status).toBe(404);
+    expect((gone.json() as { code: string }).code).toBe('not-found');
+  });
+});
 
 describe('PATCH /v1/ferrets/:ferretId/hypermedia', () => {
   test('switches one ferret and answers whether it needs a restart, and why', async () => {
@@ -102,14 +127,23 @@ describe('the hypermedia mount', () => {
   const PATH = '/v1/ferrets/:ferretId/hypermedia';
 
   test('passes an unusable ferret id back as a 400 before it reads the body', async () => {
-    const routes = sessionHypermediaRoutes({ set: async () => ({ restartRequired: false, note: 'n' }) });
+    const routes = sessionHypermediaRoutes({
+      read: async () => true,
+      set: async () => ({ restartRequired: false, note: 'n' }),
+    });
     const refusal = await refusalOf(routes, 'PATCH', PATH, { params: { ferretId: '' }, body: { enabled: true } });
     expect(refusal.status).toBe(400);
     expect(refusal.code).toBe('invalid_session_id');
+    const read = await refusalOf(routes, 'GET', PATH, { params: { ferretId: '' } });
+    expect(read.status).toBe(400);
+    expect(read.code).toBe('invalid_session_id');
   });
 
   test('answers 404 for a ferret the service does not know, and lets any other failure through', async () => {
     const unknown = sessionHypermediaRoutes({
+      read: async () => {
+        throw new SessionHypermediaError('not-found', 'no such ferret');
+      },
       set: async () => {
         throw new SessionHypermediaError('not-found', 'no such ferret');
       },
@@ -119,6 +153,7 @@ describe('the hypermedia mount', () => {
     expect(missing.code).toBe('not-found');
 
     const broken = sessionHypermediaRoutes({
+      read: async () => true,
       set: async () => {
         throw new TypeError('boom');
       },

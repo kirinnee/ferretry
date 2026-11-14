@@ -79,8 +79,8 @@ const stricter = (a: Answer, b: Answer): Answer => (RANK(b) > RANK(a) ? b : a);
  * each as input-requests.md keeps it. When several rows match, the most restrictive answer wins (refused over
  * `allow-masked` over allowed).
  *
- * - A pending card with any non-`code` field refuses every ferret op that writes; a card of only codes lets the
- *   ferret's `keys` and `type` through (I32).
+ * - A pending card with any non-`code` field refuses every op that writes, whoever asks but the owner's own input
+ *   (the ferret, the warden and the owner's tools alike, I119); a card of only codes lets `keys` and `type` through (I32).
  * - A terminal in quarantine refuses every op that reads, for the ferret AND the owner's tools; the ferret can still
  *   send keys; the owner's viewer sees it only with an unexpired reveal for that target (I72, I77).
  * - A page hold refuses every op that reads while the page shows a document a value went into, and every op that
@@ -120,11 +120,12 @@ export class InputHoldsOverService implements BoundInputHolds {
     this.#fresh.delete(keyOf(target));
     // The owner's own delivery is what the holds protect; nothing holds it.
     if (actor === 'owner-input') return 'allow';
+    // An op the table does not name is refused here, as the kernel refuses it before asking.
+    if (!Object.hasOwn(OP_EFFECTS, op)) return { refused: 'unknown_op' };
     const effects: readonly string[] = OP_EFFECTS[op];
     const reads = effects.includes('reads');
     const writes = effects.includes('writes');
     const pictures = effects.includes('pictures');
-    const ferret = actor === 'ferret' || actor === 'warden';
     // Replay must close readers even when the session list is still empty (I82).
     if ((reads || pictures) && this.quarantine.replayUntil() !== undefined) {
       if (target.kind === 'terminal' && !this.revealed(actor, target, reveal)) return { refused: 'quarantined' };
@@ -132,7 +133,9 @@ export class InputHoldsOverService implements BoundInputHolds {
     }
     let answer: Answer = 'allow';
     for (const session of this.sessions()) {
-      if (ferret && writes) {
+      // Every caller but the owner's own input: the card is the owner's to answer, so no tool writes under it, the
+      // owner's tools (v4's tool guard asked every caller) and the warden included (I119).
+      if (writes) {
         const typing = op === 'keys' || op === 'type';
         if (this.service.pendingOn(session, target, { typing }) !== undefined) return { refused: 'input_pending' };
       }
