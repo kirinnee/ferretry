@@ -187,6 +187,24 @@
   gap: 8px;
 }
 
+/* A ferret's toolbar (`ferret.toolbar`, drawn above the chat by Conversation's page): name, status, the switches and chips,
+   Info, Actions and Lessons are small controls, so they sit in ONE wrapping row, like v4's header. As the default column above
+   they stacked one per line (about 330px) and, being the page's only non-shrinking block, took the whole window of a phone or
+   a laptop and left the conversation about 40px. A panel that is a full-width bar (Lessons' scan) still takes its own line. */
+.fy-slot[data-slot='ferret.toolbar'] {
+  flex: 0 0 auto;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 4px;
+  min-width: 0;
+  padding: 4px var(--flow-3, 12px);
+}
+.fy-slot[data-slot='ferret.toolbar'] > .fy-panel {
+  min-width: 0;
+}
+
 /* A ferret's side pane (`ferret.side`, drawn beside the chat by Conversation's page): the default layout lists every panel
    the plugins provide for it — fourteen — so the pane is its own COLUMN with its own scroll, never the chat's width and never
    taller than the page it sits in (the frame is the viewport, so the pane takes the row's height and scrolls inside, and a
