@@ -95,3 +95,19 @@ it('withdrawing a carried card ask takes the ask off its carrier and leaves the 
   expect(board.items[0]?.cardAsks).toBeUndefined();
   expect(await api.open({ source: 'card' as never, state: 'open' })).toHaveLength(0);
 });
+
+it('withdrawing one carried gate entry keeps the carrier and every other carried ask on it', async () => {
+  const { agenda, api } = await carried();
+  const second = { ...GATE, cardId: 'I2' };
+  await agenda.cardAsk('s1', 'A1', { kind: 'attach', ask: { gate: second } });
+  const ref = { ferret: 's1' as never, id: 'A1' as never };
+  await api.close(ref, 'withdrawn', REFERENCE as never);
+  const board = await itemsOf(agenda);
+  expect(board.items.map(item => item.id)).toEqual(['A1']);
+  expect((await api.open({ source: 'card' as never, state: 'open' })).map(ask => ask.entry)).toEqual([
+    cardAskReference({ gate: second }) as never,
+  ]);
+  // Without an entry the carrier's whole set goes, as before.
+  await api.close(ref, 'withdrawn');
+  expect(await api.open({ source: 'card' as never, state: 'open' })).toHaveLength(0);
+});

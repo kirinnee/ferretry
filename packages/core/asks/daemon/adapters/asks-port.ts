@@ -428,13 +428,15 @@ export function asksPort(
           (filter.entry === undefined || answer.entry === filter.entry) &&
           (since === undefined || answer.at > since),
       ),
-    close: async (ref: AskRef, reason: CloseReason) => {
+    close: async (ref: AskRef, reason: CloseReason, entry?: EntryId) => {
       const daemon: AgendaActor = { kind: 'daemon', cause: 'system' };
       if (reason !== 'answered') {
         // A carrier's card ask is withdrawn from the carrier: the item is the ferret's own and stays open.
         const carrier = (await snapshot(ref.ferret))?.items.find(item => item.id === ref.id);
         if (carrier !== undefined && carriedCardAsks(ref.ferret, carrier, sources).length > 0) {
-          for (const ask of askedCardAsks(carrier))
+          for (const ask of askedCardAsks(carrier).filter(
+            carried => entry === undefined || cardAskReference(carried) === entry,
+          ))
             await agenda.cardAsk(ref.ferret, ref.id, { kind: 'withdraw', reference: cardAskReference(ask) });
           return;
         }

@@ -30,6 +30,30 @@ const gateDraft = (cardId: string, entry = 1, ferret = 'f1'): AskDraft => ({
 });
 
 describe('a card gate as an obligation in Asks', () => {
+  test('withdrawing a gate names its entry to Asks, so a carrier holding other gates keeps them', async () => {
+    const asks = new FakeAsks();
+    const obligations = new AsksCardObligations(asks);
+    await obligations.raise(gateDraft('F1'));
+    const closes: { entry: unknown; reason: unknown }[] = [];
+    const recording = {
+      raise: asks.raise.bind(asks),
+      answers: asks.answers.bind(asks),
+      open: asks.open.bind(asks),
+      close: async (
+        ref: Parameters<typeof asks.close>[0],
+        reason: Parameters<typeof asks.close>[1],
+        entry?: unknown,
+      ) => {
+        closes.push({ entry, reason });
+        await asks.close(ref, reason);
+      },
+    };
+
+    await new AsksCardObligations(recording as never).withdraw(gate('F1'), 'withdrawn');
+
+    expect(closes).toEqual([{ entry: gate('F1'), reason: 'withdrawn' }]);
+  });
+
   test('raising the same gate entry twice is one ask, and an entry already answered is never asked again', async () => {
     const asks = new FakeAsks();
     const obligations = new AsksCardObligations(asks);
