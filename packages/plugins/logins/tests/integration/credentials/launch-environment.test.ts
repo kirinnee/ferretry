@@ -8,6 +8,7 @@ import { nodeFs, rootsPortFor } from '@ferretry/kernel/host';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { fixedClock, owner, standInAdmission, testHost } from '@ferretry/kernel/testing';
 import { instantFromEpochMs } from '@ferretry/std';
+import { LoginsPort } from '../../../contract/index.ts';
 import { buildLoginsDaemon } from '../../../daemon/index.ts';
 import { emptyVault } from '../../support/fake-vault.ts';
 
@@ -239,6 +240,37 @@ test('B3: a refresh-token-only file in the expected shape is still admitted (ref
     await f.put('work/.credentials.json', { claudeAiOauth: { refreshToken: REFRESH } });
 
     expect((await f.anthropic().launchEnvironment?.('work', 'claude-code'))?.ok).toBe(true);
+  } finally {
+    await f.host.stop();
+  }
+});
+
+test('launchStores names the same store a ferret launches with, for a runtime wrapper a person runs, and no value', async () => {
+  const f = await boot({
+    work: { harness: 'claude-code', store: 'ferretry' },
+    team: { harness: 'codex', store: 'ferretry' },
+    mine: { harness: 'claude-code', store: 'host' },
+  });
+  try {
+    await f.put('work/.credentials.json', claudeCredential());
+
+    const stores = await f.host.provided(LoginsPort).launchStores();
+
+    // The Claude login: the very variable the ferret's launch hook hands out, rooted in state/logins/credentials.
+    const ferret = await f.anthropic().launchEnvironment?.('work', 'claude-code');
+    const store = join(f.base, 'work');
+    expect(store).toBe(join(f.fyHome, 'state', 'logins', 'credentials', 'work'));
+    expect(ferret).toEqual({ ok: true, value: { CLAUDE_SECURESTORAGE_CONFIG_DIR: store } });
+    expect(stores.find(entry => entry.id === 'work')).toEqual({
+      id: 'work',
+      variables: { CLAUDE_SECURESTORAGE_CONFIG_DIR: store },
+    });
+    // A Codex login's sign-in is a file the kernel links into one ferret's home, not a variable: nothing to name here.
+    expect(stores.find(entry => entry.id === 'team')).toBeUndefined();
+    // A host-kept login has no Ferretry store to name: this build reads owned stores only, so it is not listed.
+    expect(stores.find(entry => entry.id === 'mine')).toBeUndefined();
+    expect(JSON.stringify(stores)).not.toContain(TOKEN);
+    expect(JSON.stringify(stores)).not.toContain(REFRESH);
   } finally {
     await f.host.stop();
   }

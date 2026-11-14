@@ -77,6 +77,7 @@ import {
   LoginViewSchema,
   type LoginBudget,
   type LoginDisabled,
+  type LoginLaunchStore,
   type ProviderPresetCatalog,
   type ProviderQuotaReading,
 } from '../../../contract/index.ts';
@@ -694,6 +695,22 @@ export class FleetCredentialsService {
     const target = this.deps.catalog.signInTarget(entry);
     const usable = target.kind === 'store' && (await target.check()).signedIn;
     return { kind: 'owned', variables: credentialLaunchEnvironment(owned), usable };
+  }
+
+  /**
+   * What a runtime wrapper a PERSON runs needs to be signed in on each login (`LoginsApi.launchStores`): the same
+   * projection {@link launchStore} hands a ferret (a Ferretry-kept Claude login's one secure-storage variable). The store
+   * path is spelled here and nowhere else; no value is read, and a login with no variable to name is left out.
+   */
+  async launchStores(): Promise<readonly LoginLaunchStore[]> {
+    const { entries } = await this.deps.catalog.entries();
+    const out: LoginLaunchStore[] = [];
+    for (const { id, resolution } of entries) {
+      const owned = stored(resolution);
+      if (owned === undefined) continue;
+      if (owned.harness === 'claude') out.push({ id, variables: credentialLaunchEnvironment(owned) });
+    }
+    return out;
   }
 
   /** Inside Logins only: the trusted Ferrets launch hook shares Check now's work, never its caller standing. */

@@ -172,11 +172,10 @@ describe('materialising the account model onto disk', () => {
     );
     // History pooling is not built on this host: the apply stood and a person is not told about a missing engine.
     for (const skip of host.skippedByLastApply()) should(skip.reason).not.match(/pooling conversation history/);
-    // The slot has no login yet; the link waits for the sign-in that writes through it.
-    should(await readlink(path.join(host.codexHome, 'auth.json'))).equal(
-      path.join(host.layout.fleetDirectory, 'credentials', 'codex-slot', 'auth.json'),
-    );
-    should(await exists(path.join(host.layout.fleetDirectory, 'credentials', 'codex-slot', 'auth.json'))).be.false();
+    // A Ferretry-kept Codex login is Logins' (state/logins/credentials): no link to the old fleet store is made, and the
+    // apply is not refused for a link out of the folders it may write (declared GAP: the kernel links that file, into a ferret's home only).
+    should(await exists(path.join(host.codexHome, 'auth.json'))).be.false();
+    should(await exists(path.join(host.layout.fleetDirectory, 'credentials'))).be.false();
     should(JSON.parse(await readFile(path.join(host.claudeHome, '.claude.json'), 'utf8'))).eql({
       mcpServers: { notes: { type: 'stdio', command: 'notes-server', args: [] } },
     });

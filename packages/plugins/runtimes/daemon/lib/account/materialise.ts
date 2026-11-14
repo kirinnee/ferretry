@@ -32,6 +32,7 @@
  * Pure: bodies are read by the caller, an id is minted by an injected function, the clock is a string.
  */
 import { secretReferencesIn } from '@ferretry/core-vault/contract';
+import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
 import { looksSecret, namesCredential } from '@ferretry/std/credential-words';
 import type { z } from 'zod';
 import type { CompactAtSchema } from '../../../contract/index.ts';
@@ -160,6 +161,11 @@ export interface MaterialiseInput {
    * catalog offers its models and gets its tier pins; absent, every runtime offers its profile's model set.
    */
   readonly modelCatalogs?: ModelCatalogSources;
+  /**
+   * Where Logins keeps each Ferretry-kept login (`LoginsApi.launchStores`): the one place a runtime's wrapper and home
+   * learn the store, so a person-run wrapper is signed in where a ferret is. Absent: no `ferretry` login is reachable.
+   */
+  readonly loginStores?: readonly LoginLaunchStore[];
 }
 
 /** One reason a runtime, or the fleet, cannot be planned. */
@@ -268,8 +274,8 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
   const ids = assignRuntimeIds(runtimeNames, input.ids, input.mint);
   const fleet = layout.fleetDirectory;
   const codexSqliteHome = joinPath(sharedHistoryPoolDirectory(fleet, 'codex'), 'sqlite');
+  const loginStores = new Map((input.loginStores ?? []).map(store => [store.id, store] as const));
   const credentialStorePaths = {
-    fleetRoot: fleet,
     userHome: layout.userHome,
     ...(input.hostCodexHome === undefined ? {} : { hostCodexHome: input.hostCodexHome }),
   };
@@ -286,15 +292,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     { kind: 'file', path: runtimeIdsPath(fleet), content: serializeRuntimeIds(ids), mode: PRIVATE_FILE_MODE },
   ];
 
-  // Every Ferretry-kept login gets its directory, used or not: an empty slot (C8) has no login yet,
-  // and a sign-in needs somewhere to write one.
-  for (const [id, credential] of Object.entries(model.credentials).toSorted(([left], [right]) =>
-    left < right ? -1 : 1,
-  )) {
-    const resolution = resolveCredentialStore(id, credential, credentialStorePaths);
-    if (!('ownedDirectory' in resolution) || resolution.ownedDirectory === undefined) continue;
-    operations.push({ kind: 'directory', path: resolution.ownedDirectory, mode: DIRECTORY_MODE });
-  }
+  // A Ferretry-kept login's store is Logins' (it makes the directory a sign-in writes into): nothing is created for one here.
   if (runtimeNames.some(name => model.credentials[model.runtimes[name]?.credential ?? '']?.harness === 'codex')) {
     operations.push({ kind: 'directory', path: codexSqliteHome, mode: DIRECTORY_MODE });
   }
@@ -324,7 +322,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     const reasons: string[] = [];
     reasons.push(...(runtimeDisable(model, name, now, binary, input.budgetHolds)?.clauses ?? []));
 
-    const store = resolveCredentialStore(runtime.credential, credential, credentialStorePaths, harness);
+    const store = resolveCredentialStore(runtime.credential, credential, credentialStorePaths, harness, loginStores);
     if ('unavailable' in store)
       reasons.push(`its login "${runtime.credential}" cannot be reached: ${store.unavailable}`);
     if (store.store === 'environment' && store.problem !== undefined) {

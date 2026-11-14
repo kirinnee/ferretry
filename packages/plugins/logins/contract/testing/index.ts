@@ -12,6 +12,7 @@ import {
   type LoginChangeOutcome,
   type LoginChangeView,
   type LoginId,
+  type LoginLaunchStore,
   type LoginList,
   LoginListSchema,
   type LoginsApi,
@@ -54,6 +55,8 @@ export interface FakeLogins extends LoginsApi {
   setLogins(logins: readonly LoginView[]): void;
   /** What `environmentTemplates` answers (default none): variable templates, never a secret's value. */
   setTemplates(templates: readonly EnvironmentLoginTemplate[]): void;
+  /** What `launchStores` answers (default none): a login's store variable, never a value. */
+  setLaunchStores(stores: readonly LoginLaunchStore[]): void;
   /** What `modelPrices` answers (default none): the catalogs' list prices, public data. */
   setModelPrices(catalogs: readonly ModelPriceCatalog[]): void;
   /** What `modelSources` answers (default none): the catalogs and preset slice Runtimes derives models from. */
@@ -132,6 +135,7 @@ export function fakeLoginChanges(): FakeLoginChanges {
 export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
   let logins = [...initial];
   let templates: readonly EnvironmentLoginTemplate[] = [];
+  let launchStores: readonly LoginLaunchStore[] = [];
   let prices: readonly ModelPriceCatalog[] = [];
   let sources: ModelCatalogSourcesView = ModelCatalogSourcesSchema.parse({ catalogs: {}, presets: [] });
   let spendAnswer: AuthorizedOutcome = { kind: 'refused' };
@@ -142,6 +146,7 @@ export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
     get: async id => logins.find(login => login.id === id),
     quota: async id => logins.find(login => login.id === id)?.usage,
     environmentTemplates: async () => templates,
+    launchStores: async () => launchStores,
     presets: async () => ProviderPresetCatalogSchema.parse({ presets: [] }),
     models: async () =>
       ModelCatalogsViewSchema.parse({ published: { origin: 'https://example.invalid', enabled: false }, catalogs: [] }),
@@ -166,6 +171,9 @@ export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
     },
     setTemplates: next => {
       templates = [...next];
+    },
+    setLaunchStores: next => {
+      launchStores = [...next];
     },
   };
 }

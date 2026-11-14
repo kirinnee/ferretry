@@ -245,6 +245,8 @@ export function buildLoginsDaemon() {
         // Read live from each login's own file, kept nowhere: Runtimes asks on every read of its model.
         environmentTemplates: async () =>
           environmentTemplates(files(), id => config.fileState(LOGINS_CONFIG, id).state),
+        // The stores a person-run wrapper signs in through: the one projection a ferret's launch also uses.
+        launchStores: () => credentials.launchStores(),
         get: async id => (await credentials.list()).logins.find(login => login.id === id),
         quota: async id => (await credentials.list()).logins.find(login => login.id === id)?.usage,
         presets: () => credentials.presets(),
