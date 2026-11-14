@@ -405,7 +405,7 @@ function ContinueConversationBody({
       </div>
       {computerHidden && source !== 'ferretry' ? (
         <p className="m-0 text-meta text-muted" data-continue-computer-hidden="">
-          Conversations on this computer are hidden. Turn on Keep in sync in Settings › Machine › Conversations.
+          Conversations on this computer are hidden. Turn on Keep in sync in Settings › Agents › Conversations.
         </p>
       ) : null}
       {listed}
