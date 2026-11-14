@@ -282,6 +282,18 @@ preflight)
   for tool in bash jq tmux bun git; do
     command -v "${tool}" >/dev/null || fail "${tool} is not on PATH; install it and run preflight again"
   done
+  # The converter's bun.lock is written by the devshell's bun and an older bun cannot read it, so `convert` would die on
+  # `bun install --frozen-lockfile` after the quiet window and the backup. Refused here, before anything is stopped or copied.
+  need_bun="$(tr -d "[:space:]" 2>/dev/null <"${CONVERTER_DIR}/bun-version")" || need_bun=""
+  [[ ${need_bun} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "${CONVERTER_DIR}/bun-version does not hold a bun version: this is not an intact checkout"
+  have_bun="$(version_of bun)" || fail "'bun --version' printed no version; install bun ${need_bun} or later and run preflight again"
+  IFS=. read -r -a need_parts <<<"${need_bun}"
+  IFS=. read -r -a have_parts <<<"${have_bun}"
+  for i in 0 1 2; do
+    [ "${have_parts[i]}" -eq "${need_parts[i]}" ] && continue
+    [ "${have_parts[i]}" -gt "${need_parts[i]}" ] || fail "bun ${have_bun} cannot read the converter's lockfile; install bun ${need_bun} or later (the Ferretry dev shell has it; bun.sh/docs/installation) and run preflight again"
+    break
+  done
 
   H="${FY_HOME:-$HOME/.ferretry}"
   # A rehearsal never touches the default home: refused here, before anything is read, stopped, moved or converted.
