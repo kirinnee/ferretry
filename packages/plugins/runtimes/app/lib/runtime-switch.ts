@@ -24,12 +24,17 @@ export const RUNTIME_SWITCH_ROUTE = 'POST /v1/ferrets/:id/runtime' as const;
 export const FERRET_ROUTE = 'GET /v1/ferrets/:ferretId' as const;
 
 /**
- * GAP(kernel): `PluginClient.call` carries no headers, so the per-click request id (the daemon's idempotency key
- * for this act) cannot ride along yet; the route refuses controls without that key until the client supports headers.
+ * The per-click request id is the daemon's idempotency key for this act and rides as `x-fy-request-id` (the one header
+ * a half may set): the route refuses a control without it (`missing_request_id`), so a retried click cannot drive the
+ * harness twice.
  */
 export const runtimeControlApi = (client: RuntimesClient): RuntimeControlApi => ({
-  runtime: async (sessionId, command) => {
-    await client.call(RUNTIME_SWITCH_ROUTE, { params: { id: sessionId }, body: command });
+  runtime: async (sessionId, command, requestId) => {
+    await client.call(RUNTIME_SWITCH_ROUTE, {
+      params: { id: sessionId },
+      body: command,
+      headers: { 'x-fy-request-id': requestId },
+    });
   },
 });
 
