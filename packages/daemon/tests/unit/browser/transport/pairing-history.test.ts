@@ -58,7 +58,7 @@ describe('PairingNavigationLedger', () => {
 
     ledger.watch('p1', FAKE_LINK);
 
-    should(ledger.look(['p1'])).eql({ commits: { [APP]: 1 }, linked: true });
+    should(ledger.look(['p1'])).eql({ commits: { [APP]: 1 }, linked: true, lost: 0, blind: false });
   });
 
   it('should keep the document linked when the fragment is only dropped, and free it when a new document replaces it', () => {
@@ -78,7 +78,7 @@ describe('PairingNavigationLedger', () => {
     // Assert — the count never goes down
     should(dropped).be.true();
     should(frame).be.true();
-    should(replaced).eql({ commits: { [APP]: 1 }, linked: false });
+    should(replaced).eql({ commits: { [APP]: 1 }, linked: false, lost: 0, blind: false });
   });
 
   it('should answer for the pages it is asked about, and keep a closed page’s commits', () => {
@@ -97,22 +97,44 @@ describe('PairingNavigationLedger', () => {
     // Assert
     should(mine.linked).be.false();
     should(theirs.linked).be.true();
-    should(gone).eql({ commits: { [APP]: 1 }, linked: false });
+    should(gone).eql({ commits: { [APP]: 1 }, linked: false, lost: 0, blind: false });
   });
 
-  it('should read a page whose navigation could not be followed as linked, until it closes', () => {
+  it('should count every loss on a counter that never goes down, whatever the page does or however it ends', () => {
+    // Arrange — a related window loses its tracking, then leaves, then closes
     const ledger = new PairingNavigationLedger();
     ledger.watch('p1', 'about:blank');
+    ledger.watch('p2', 'about:blank');
+    const before = ledger.look(['p1']).lost;
 
+    // Act
+    ledger.lost('p2');
+    const during = ledger.look(['p1']).lost;
+    ledger.committed('p2', { address: 'https://example.test/', ...document });
+    ledger.closed('p2');
     ledger.lost('p1');
-    const blind = ledger.look(['p1']).linked;
-    ledger.committed('p1', { address: 'https://example.test/', ...document });
-    const stillBlind = ledger.look(['p1']).linked;
-    ledger.closed('p1');
 
-    should(blind).be.true();
-    should(stillBlind).be.true();
-    should(ledger.look(['p1']).linked).be.false();
+    // Assert — the page that lost it is no longer in the group, and the counter still moved
+    should(before).equal(0);
+    should(during).equal(1);
+    should(ledger.look(['p1']).lost).equal(2);
+    should(ledger.look([]).lost).equal(2);
+  });
+
+  it('should stay blind after the page that lost its history leaves the group or closes, until a fresh ledger', () => {
+    // Arrange
+    const ledger = new PairingNavigationLedger();
+    ledger.watch('p1', 'about:blank');
+    ledger.watch('p2', 'about:blank');
+
+    // Act
+    ledger.lost('p2');
+    ledger.closed('p2');
+
+    // Assert — an unrelated page's look is blind too: the missed navigation's origin cannot be proved safe
+    should(ledger.look(['p1']).blind).be.true();
+    should(ledger.look([]).blind).be.true();
+    should(new PairingNavigationLedger().look(['p1']).blind).be.false();
   });
 
   it('should fold origins past its bound into one bucket a guard reads as every origin', () => {

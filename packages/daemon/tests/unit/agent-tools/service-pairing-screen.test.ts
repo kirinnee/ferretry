@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type AgentToolCall, PAIRING_SCREEN_REFUSAL } from '@ferretry/protocol';
+import { type AgentToolCall, PAIRING_EVAL_REFUSAL, PAIRING_SCREEN_REFUSAL } from '@ferretry/protocol';
 import type { BrowserPairingEvidence } from '../../../src/lib/browser/runtime/index.ts';
 import { agent, agentToolWorld, person } from './support.ts';
 
@@ -334,7 +334,18 @@ describe('AgentToolService — a code that shows up while an operation is runnin
  */
 describe("AgentToolService — the daemon's and the worker's evidence, outside the page", () => {
   /** What a Ferretry app page nothing has happened to says: no code live, one ever minted, no link opened. */
-  const QUIET: BrowserPairingEvidence = { app: true, live: false, minted: 1, commits: 0, linked: false };
+  const QUIET: BrowserPairingEvidence = {
+    app: true,
+    ownApp: true,
+    live: false,
+    minted: 1,
+    commits: 0,
+    lost: 0,
+    linked: false,
+  };
+  /** What an agent is told for a call: an eval on an app page is refused for what it is, everything else for the screen. */
+  const refusalFor = (call: AgentToolCall): string =>
+    call.tool === 'browser.eval' ? PAIRING_EVAL_REFUSAL : PAIRING_SCREEN_REFUSAL;
 
   const appPage = async (evidence: Partial<BrowserPairingEvidence> = {}) => {
     const world = agentToolWorld();
@@ -361,19 +372,23 @@ describe("AgentToolService — the daemon's and the worker's evidence, outside t
       const refusal = await refusalOf(world.service.call(agent, call));
 
       // Assert
-      should(refusal?.message).equal(PAIRING_SCREEN_REFUSAL);
+      should(refusal?.message).equal(refusalFor(call));
     }
   });
 
   it('should keep refusing after an agent’s own script cleared the marker and rewrote the counter', async () => {
-    // Arrange — an eval ran on an unmarked page, then the page showed a code and the script wiped what showed it
+    // Arrange — the eval that would wipe the marker never runs on an app page; the page then shows a code anyway
     const world = await appPage();
     world.browser.pairingEpochs = { 'page-1': 3 };
-    await world.service.call(agent, {
-      tool: 'browser.eval',
-      name: 'app',
-      function: "() => { document.querySelector('meta[name=ferretry-pairing-screen]')?.remove(); }",
-    });
+    const wipe = await refusalOf(
+      world.service.call(agent, {
+        tool: 'browser.eval',
+        name: 'app',
+        function: "() => { document.querySelector('meta[name=ferretry-pairing-screen]')?.remove(); }",
+      }),
+    );
+    should(wipe?.message).equal(PAIRING_EVAL_REFUSAL);
+    should(world.browser.scripts).eql([]);
     world.browser.pairingEvidence = { ...QUIET, live: true };
     world.browser.pairingScreen = false;
     world.browser.pairingEpochs = {};
@@ -402,7 +417,7 @@ describe("AgentToolService — the daemon's and the worker's evidence, outside t
       const refusal = await refusalOf(world.service.call(agent, call));
 
       // Assert
-      should(refusal?.message).equal(PAIRING_SCREEN_REFUSAL);
+      should(refusal?.message).equal(refusalFor(call));
     }
   });
 
@@ -419,7 +434,7 @@ describe("AgentToolService — the daemon's and the worker's evidence, outside t
     );
 
     // Assert
-    should(refusal?.message).equal(PAIRING_SCREEN_REFUSAL);
+    should(refusal?.message).equal(PAIRING_EVAL_REFUSAL);
   });
 
   it('should refuse an operation that a mint overlapped, though no code was live when it started or ended', async () => {
@@ -434,7 +449,7 @@ describe("AgentToolService — the daemon's and the worker's evidence, outside t
       const refusal = await refusalOf(world.service.call(agent, call));
 
       // Assert
-      should(refusal?.message).equal(PAIRING_SCREEN_REFUSAL);
+      should(refusal?.message).equal(refusalFor(call));
       should(refusal?.message).not.containEql(FAKE_CODE);
     }
   });
@@ -453,7 +468,8 @@ describe("AgentToolService — the daemon's and the worker's evidence, outside t
     );
 
     // Assert
-    should(refusal?.message).equal(PAIRING_SCREEN_REFUSAL);
+    should(refusal?.message).equal(PAIRING_EVAL_REFUSAL);
+    should(refusal?.message).not.containEql(FAKE_CODE);
   });
 
   it('should refuse a read of a document a pairing link opened, with no code live and nothing marked', async () => {
@@ -475,16 +491,24 @@ describe("AgentToolService — the daemon's and the worker's evidence, outside t
     const read = await world.service.call(agent, { tool: 'browser.read', name: 'app' });
 
     // Assert
-    should(script?.message).equal(PAIRING_SCREEN_REFUSAL);
+    should(script?.message).equal(PAIRING_EVAL_REFUSAL);
     should(read.output).equal(PAGE_TEXT);
     should(world.browser.scripts).eql([]);
   });
 
   it('should leave pages on other origins alone: a live code, a mint, a link and a navigation change nothing for them', async () => {
     // Arrange
-    const world = await appPage({ app: false, live: true, commits: 5, linked: true });
+    const world = await appPage({ app: false, ownApp: false, live: true, commits: 5, linked: true });
     world.browser.whileWorking.push(() => {
-      world.browser.pairingEvidence = { ...QUIET, app: false, live: true, minted: 9, commits: 6, linked: true };
+      world.browser.pairingEvidence = {
+        ...QUIET,
+        app: false,
+        ownApp: false,
+        live: true,
+        minted: 9,
+        commits: 5,
+        linked: true,
+      };
     });
 
     // Act
@@ -498,14 +522,12 @@ describe("AgentToolService — the daemon's and the worker's evidence, outside t
     should(shot.screenshotBase64).be.a.String();
   });
 
-  it('should answer an app page as before when no code is live, none was minted meanwhile and no link was opened', async () => {
+  it('should answer an app page read as before when no code is live, none was minted meanwhile and no link was opened', async () => {
     const world = await appPage();
 
     const read = await world.service.call(agent, { tool: 'browser.read', name: 'app' });
-    const script = await world.service.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' });
 
     should(read.output).equal(PAGE_TEXT);
-    should(script.summary).be.a.String();
   });
 
   it('should leave an owner’s own reads alone while a code is live', async () => {
@@ -523,5 +545,59 @@ describe("AgentToolService — the daemon's and the worker's evidence, outside t
     should((await refusalOf(world.service.call(agent, CONTENT_WAITS[0] as AgentToolCall)))?.message).equal(
       PAIRING_SCREEN_REFUSAL,
     );
+  });
+
+  it('should refuse an eval on an app page always: nothing live, nothing linked, nothing counted', async () => {
+    // Arrange
+    const world = await appPage();
+
+    // Act
+    const script = await refusalOf(
+      world.service.call(agent, { tool: 'browser.eval', name: 'app', function: '() => document.title' }),
+    );
+    const read = await world.service.call(agent, { tool: 'browser.read', name: 'app' });
+
+    // Assert — reads keep the older rules; the script never reaches the page
+    should(script?.message).equal(PAIRING_EVAL_REFUSAL);
+    should(world.browser.scripts).eql([]);
+    should(read.output).equal(PAGE_TEXT);
+  });
+
+  it('should refuse a read that began and ended outside the app when an app pairing link committed in between', async () => {
+    for (const call of everyContentCall.filter(candidate => candidate.tool !== 'browser.eval')) {
+      // Arrange — outside -> app -> outside: the bytes captured on the app page survive the departure
+      const world = await appPage({ app: false, ownApp: false });
+      world.browser.whileWorking.push(() => {
+        world.browser.pairingEvidence = { ...QUIET, app: false, ownApp: false, commits: 1 };
+      });
+
+      // Act
+      const refusal = await refusalOf(world.service.call(agent, call));
+
+      // Assert
+      should(refusal?.message).equal(PAIRING_SCREEN_REFUSAL);
+    }
+  });
+
+  it('should refuse an operation the navigation ledger lost track during, wherever it began and ended', async () => {
+    // Arrange
+    const world = await appPage({ app: false, ownApp: false });
+    world.browser.whileWorking.push(() => {
+      world.browser.pairingEvidence = { ...QUIET, app: false, ownApp: false, lost: 1 };
+    });
+
+    // Act
+    const refusal = await refusalOf(world.service.call(agent, { tool: 'browser.read', name: 'app' }));
+
+    // Assert
+    should(refusal?.message).equal(PAIRING_SCREEN_REFUSAL);
+  });
+
+  it('should still let an agent script a page that is not a Ferretry app origin', async () => {
+    const world = await appPage({ app: false, ownApp: false });
+
+    const script = await world.service.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' });
+
+    should(script.summary).be.a.String();
   });
 });

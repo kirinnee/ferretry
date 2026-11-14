@@ -106,13 +106,17 @@ export interface BrowserPairingState {
 export interface BrowserPairingEvidence {
   /** Whether the page, or a page its scripts could reach, is on a Ferretry app origin (or one that cannot be told). */
   readonly app: boolean;
+  /** Whether one of those pages is on an origin KNOWN to be Ferretry's app (not merely one nobody could tell): where an agent's script never runs. */
+  readonly ownApp: boolean;
   /** Whether the daemon has a pairing code live now: minted, and not yet redeemed, cancelled, replaced or expired. */
   readonly live: boolean;
   /** How many codes the daemon has minted since it started. Never goes down. */
   readonly minted: number;
   /** How many addresses carrying a pairing fragment an app origin has committed in the browser. Never goes down. */
   readonly commits: number;
-  /** Whether the document one of those pages shows now was entered by an address carrying a pairing fragment. */
+  /** How many times the browser lost track of a page's navigation. Never goes down: an operation it overlapped is not to be believed. */
+  readonly lost: number;
+  /** Whether the document one of those pages shows now was entered by an address carrying a pairing fragment, or the history is blind. */
   readonly linked: boolean;
 }
 

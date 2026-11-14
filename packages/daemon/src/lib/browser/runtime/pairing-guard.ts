@@ -1,3 +1,4 @@
+import { HOSTED_APP_ORIGIN } from '@ferretry/protocol';
 import type { BrowserInputDocument } from '../transport/input-contracts.ts';
 import { PAIRING_HISTORY_OVERFLOW } from '../transport/pairing-history.ts';
 import type {
@@ -48,18 +49,23 @@ async function look(page: BrowserGuardPage, limitMs: number): Promise<BrowserPai
 /** The addresses a machine's own loopback is reached by: one daemon, three spellings of where it is. */
 const LOOPBACK_HOSTS: readonly string[] = ['127.0.0.1', 'localhost', '[::1]'];
 
+/** The addresses a daemon binds to listen on every interface: loopback is one of the ways in, so it is the app's too. */
+const WILDCARD_HOSTS: readonly string[] = ['0.0.0.0', '[::]'];
+
 /**
- * The origins that are Ferretry's app: the ones given, in their canonical form, and for a loopback one every spelling of
- * loopback on the same port (`127.0.0.1`, `localhost`, `[::1]`), because the same daemon answers on all of them. An
- * origin that does not parse is dropped; it could never match a page.
+ * The origins that are Ferretry's app: the hosted app always, the ones given in their canonical form, and for a loopback
+ * or a wildcard-bound one (`0.0.0.0`, `[::]`) every spelling of loopback on the same port (`127.0.0.1`, `localhost`,
+ * `[::1]`), because the same daemon answers on all of them whatever public address or CORS list is configured beside it.
+ * An origin that does not parse is dropped; it could never match a page.
  */
 export function appOriginSet(origins: readonly string[]): ReadonlySet<string> {
-  const found = new Set<string>();
+  const found = new Set<string>([HOSTED_APP_ORIGIN]);
   for (const origin of origins) {
     try {
       const parsed = new URL(origin);
       found.add(parsed.origin);
-      if (LOOPBACK_HOSTS.includes(parsed.host.replace(/:\d+$/u, '')))
+      const host = parsed.host.replace(/:\d+$/u, '');
+      if (LOOPBACK_HOSTS.includes(host) || WILDCARD_HOSTS.includes(host))
         for (const host of LOOPBACK_HOSTS)
           found.add(`${parsed.protocol}//${host}${parsed.port === '' ? '' : `:${parsed.port}`}`);
     } catch {
@@ -75,7 +81,7 @@ export function appOriginSet(origins: readonly string[]): ReadonlySet<string> {
  * blank page) or that overflowed its bound counts as the app's: a page that cannot be told apart may be anyone's.
  */
 export function pairingEvidenceOf(
-  document: Pick<BrowserInputDocument, 'pairingOrigins' | 'pairingCommits' | 'pairingLinked'>,
+  document: Pick<BrowserInputDocument, 'pairingOrigins' | 'pairingCommits' | 'pairingLinked' | 'pairingLost'>,
   live: { readonly live: boolean; readonly minted: number },
   apps: ReadonlySet<string>,
 ): BrowserPairingEvidence {
@@ -84,12 +90,15 @@ export function pairingEvidenceOf(
   return {
     // An answer that names no origins cannot say the page is not the app's.
     app: origins === undefined || origins.length === 0 || origins.some(isApp),
+    // Only an origin KNOWN to be the app's: a blank page may be anyone's and an agent may still script it.
+    ownApp: origins?.some(origin => apps.has(origin)) === true,
     live: live.live,
     minted: live.minted,
     commits: Object.entries(document.pairingCommits ?? {}).reduce(
       (total, [origin, count]) => (isApp(origin) ? total + count : total),
       0,
     ),
+    lost: document.pairingLost ?? 0,
     linked: document.pairingLinked === true,
   };
 }
@@ -100,22 +109,27 @@ function showedACodeSince(before: BrowserPairingState, now: BrowserPairingState)
 }
 
 /**
- * Whether the evidence moved between two looks on a page that is, or became, the app's: a code was minted (live or not
- * by the time of the second look) or a pairing link was opened. Neither can go down, so no navigation, close or script
- * can hide it.
+ * Whether the evidence moved between two looks. A pairing link committed on an app origin, or a navigation the browser
+ * lost track of, discards the operation WHEREVER IT STARTED AND ENDED: an operation can begin outside the app, capture
+ * the app's page on the way and finish outside it, and its endpoints say nothing of where it has been. Neither count can
+ * go down, so no navigation, close or script can hide it. A code minted (live or not by the second look) discards one
+ * that is, or became, on the app.
  */
 function evidenceMoved(before: BrowserPairingState, now: BrowserPairingState): boolean {
   const first = before.evidence;
   const second = now.evidence;
   if (first === undefined || second === undefined) return false;
-  return (first.app || second.app) && (second.minted !== first.minted || second.commits !== first.commits);
+  if (second.commits !== first.commits || second.lost !== first.lost) return true;
+  return (first.app || second.app) && second.minted !== first.minted;
 }
 
 /**
  * Whether a page must not be answered now. A marker anywhere a script could reach is a refusal. So is the app's page
- * while a code is live, or while its document was entered by a pairing link. A SCRIPT is refused on the app's page for
- * the rest of the browser's life once any pairing link was opened on an app origin: it runs in the document's world
- * and a link may have left its code in the document's state, wherever the page has been since.
+ * while a code is live, or while its document was entered by a pairing link (or the browser's history is blind). A SCRIPT
+ * is refused on a page of a Ferretry app origin ALWAYS (see {@link scriptOnApp}): it shares the document's DOM with the
+ * app, which the app's own evidence and its codes sit in, so no state of the page makes it safe. On a page that is only
+ * possibly the app's (blank, opaque) it is refused for the rest of the browser's life once any pairing link was opened
+ * on an app origin: a link may have left its code in the document's state, wherever the page has been since.
  */
 function refused(state: BrowserPairingState, script: boolean): boolean {
   if (state.marked) return true;
@@ -124,12 +138,19 @@ function refused(state: BrowserPairingState, script: boolean): boolean {
   return evidence.live || evidence.linked || (script && evidence.commits > 0);
 }
 
+/** Whether an agent's script was asked to run where Ferretry's own app is, or ended there: the rule has no exception. */
+function scriptOnApp(state: BrowserPairingState): boolean {
+  return state.evidence?.ownApp === true;
+}
+
 /** How an operation is told apart from the others the guard covers. */
 export interface PairingHold {
   /** The operation runs a script of the agent's own (`browser.eval`): refused for longer, see {@link refused}. */
   readonly script?: boolean;
   /** How long one look at the page may take before it reads as marked; {@link PAIRING_LOOK_MS} when absent. */
   readonly lookMs?: number;
+  /** The refusal for a script on an app page, which says why (it is not about a code); `refusal` when absent. */
+  readonly scriptRefusal?: () => Error;
 }
 
 /**
@@ -145,10 +166,13 @@ export async function holdPairingScreen(
 ): Promise<BrowserAfterCheck> {
   const script = hold.script === true;
   const limit = hold.lookMs ?? PAIRING_LOOK_MS;
+  const refuseScript = hold.scriptRefusal ?? refusal;
   const before = await look(page, limit);
+  if (!before.marked && script && scriptOnApp(before)) throw refuseScript();
   if (refused(before, script)) throw refusal();
   return async () => {
     const now = await look(page, limit);
+    if (!now.marked && script && (scriptOnApp(before) || scriptOnApp(now))) throw refuseScript();
     if (refused(now, script) || showedACodeSince(before, now) || evidenceMoved(before, now)) throw refusal();
   };
 }

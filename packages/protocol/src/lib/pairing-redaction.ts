@@ -86,6 +86,9 @@ export const PAIRING_SCREEN_SELECTOR = `meta[name="${PAIRING_SCREEN_META_NAME}"]
 export const PAIRING_SCREEN_REFUSAL =
   'hidden: this page shows a pairing code, so it cannot be read or pictured. Ask the owner to finish or close it; navigating away or closing the page works.';
 
+/** What an agent is told when its own script is run on a Ferretry app page: always, whatever the page shows now. */
+export const PAIRING_EVAL_REFUSAL = 'eval is not available on Ferretry’s own app pages.';
+
 /**
  * THE COUNTER THAT SAYS A CODE WAS SHOWN AT ANY POINT (docs/pairing.md, "Never show it to an agent").
  *

@@ -47,6 +47,7 @@ class Tabs {
   documentOrigins: string[] | undefined;
   documentCommits: Record<string, number> | undefined;
   documentLinked = false;
+  documentLost: number | undefined;
   /** Runs inside the next read, picture, PDF, script or wait: the page changing while the browser works on it. */
   whileWorking: (() => void) | undefined;
   private working(): void {
@@ -148,6 +149,7 @@ class Tabs {
         ...(this.documentOrigins === undefined ? {} : { pairingOrigins: this.documentOrigins }),
         ...(this.documentCommits === undefined ? {} : { pairingCommits: this.documentCommits }),
         ...(this.documentLinked ? { pairingLinked: true } : {}),
+        ...(this.documentLost === undefined ? {} : { pairingLost: this.documentLost }),
       };
     },
     inputObserve: async pageId => {
@@ -1060,10 +1062,63 @@ describe('the machine agent browser — a page’s lifecycle', () => {
 
     // Assert
     should(seen).eql([
-      { marked: false, epochs: {}, evidence: { app: true, live: true, minted: 3, commits: 2, linked: true } },
-      { marked: false, epochs: {}, evidence: { app: false, live: false, minted: 3, commits: 2, linked: false } },
+      {
+        marked: false,
+        epochs: {},
+        evidence: { app: true, ownApp: true, live: true, minted: 3, commits: 2, lost: 0, linked: true },
+      },
+      {
+        marked: false,
+        epochs: {},
+        evidence: { app: false, ownApp: false, live: false, minted: 3, commits: 2, lost: 0, linked: false },
+      },
       { marked: true, epochs: {} },
     ]);
+  });
+
+  it('should read the daemon’s loopback app as the app on a wildcard bind with a public address, and every other origin as not', async () => {
+    // Arrange — the documented wildcard setup: bound on 0.0.0.0, advertised on a public address, a custom CORS list
+    const { tabs, service } = harness(new Tabs(), undefined, undefined, {
+      live: { look: () => ({ live: true, minted: 1 }) },
+      appOrigins: () => ['https://custom.example.test', 'https://daemon.example.test', 'http://0.0.0.0:4000'],
+    });
+    await service.openPage('s1', 'app');
+    const seen: (boolean | undefined)[] = [];
+    const guard = async (page: BrowserGuardPage) => void seen.push((await page.pairing?.())?.evidence?.ownApp);
+
+    // Act
+    for (const origin of [
+      'http://127.0.0.1:4000',
+      'http://localhost:4000',
+      'http://[::1]:4000',
+      'http://127.0.0.1:4001',
+    ]) {
+      tabs.documentOrigins = [origin];
+      await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+    }
+
+    // Assert
+    should(seen).eql([true, true, true, false]);
+  });
+
+  it('should hand a guard the count of navigations the browser lost track of, and read a blind history as linked', async () => {
+    // Arrange
+    const { tabs, service } = harness(new Tabs(), undefined, undefined, {
+      live: { look: () => ({ live: false, minted: 1 }) },
+      appOrigins: () => ['https://ferretry.pages.dev'],
+    });
+    await service.openPage('s1', 'app');
+    const seen: (number | undefined)[] = [];
+    const guard = async (page: BrowserGuardPage) => void seen.push((await page.pairing?.())?.evidence?.lost);
+
+    // Act
+    tabs.documentOrigins = ['https://example.test'];
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+    tabs.documentLost = 2;
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+
+    // Assert
+    should(seen).eql([0, 2]);
   });
 
   it('should run a guard inside the queue of the page a person’s toolbar acts on, and refuse before the browser is touched', async () => {

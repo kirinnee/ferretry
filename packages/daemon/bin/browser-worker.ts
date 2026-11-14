@@ -1070,7 +1070,10 @@ async function act(request: Request): Promise<Record<string, unknown>> {
           // What the daemon needs to tell whether this group is the app's, and what the app was sent (never page script).
           pairingOrigins: [...new Set(group.map(member => originOfAddress(safeUrl(member))))],
           pairingCommits: history.commits,
-          pairingLinked: history.linked || group.some(member => carriesPairingFragment(safeUrl(member))),
+          // A ledger that lost a navigation cannot prove any page was not entered by a link: blind reads as linked.
+          pairingLinked:
+            history.linked || history.blind || group.some(member => carriesPairingFragment(safeUrl(member))),
+          pairingLost: history.lost,
         },
       };
     }

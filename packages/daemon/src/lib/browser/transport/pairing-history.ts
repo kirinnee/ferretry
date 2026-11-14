@@ -42,25 +42,36 @@ export interface PairingCommit {
 export interface PairingHistoryLook {
   /** Commits that carried a pairing fragment, by origin, since the worker started. Never goes down. */
   readonly commits: Readonly<Record<string, number>>;
-  /** Whether the document one of those pages shows now was entered by such a commit (or its history is unknown). */
+  /** Whether the document one of those pages shows now was entered by such a commit. */
   readonly linked: boolean;
+  /** How many times the ledger lost track of a page's navigation, since the worker started. Never goes down. */
+  readonly lost: number;
+  /**
+   * Whether the ledger has EVER lost track of a navigation and so cannot prove the history complete. Sticky: it does not
+   * go when the page that lost it leaves the group, navigates or closes, only with a fresh ledger (a restarted worker).
+   */
+  readonly blind: boolean;
 }
 
 export class PairingNavigationLedger {
   private readonly commits = new Map<string, number>();
   /** Pages whose current document was entered, or later moved, by an address carrying a pairing fragment. */
   private readonly linked = new Set<string>();
-  /** Pages whose navigation could not be followed: treated as linked, because a miss would hand over a credential. */
-  private readonly blind = new Set<string>();
+  /** How many times a page's navigation could not be followed: a count that only goes up, so an operation it overlapped is told. */
+  private lostCount = 0;
 
   /** Starts keeping a page's history from the address it has now. */
   watch(pageKey: string, address: string): void {
     this.committed(pageKey, { address, mainFrame: true, sameDocument: false });
   }
 
-  /** The page's navigation cannot be followed (DevTools would not say): from here on it counts as entered by a link. */
-  lost(pageKey: string): void {
-    this.blind.add(pageKey);
+  /**
+   * A page's navigation cannot be followed (DevTools would not say). The address that was missed could have carried a
+   * pairing link, so this is evidence of its own and not a page's state: it is counted, and it makes the ledger blind for
+   * good, whatever the page does next and wherever it is when the question is asked.
+   */
+  lost(_pageKey: string): void {
+    this.lostCount += 1;
   }
 
   committed(pageKey: string, commit: PairingCommit): void {
@@ -74,16 +85,17 @@ export class PairingNavigationLedger {
     if (commit.mainFrame && !commit.sameDocument) this.linked.delete(pageKey);
   }
 
-  /** The page is gone. Its commits stay counted: a window that closed has still shown what it showed. */
+  /** The page is gone. Its commits stay counted, and so does any loss: a window that closed has still shown what it showed. */
   closed(pageKey: string): void {
     this.linked.delete(pageKey);
-    this.blind.delete(pageKey);
   }
 
   look(pageKeys: readonly string[]): PairingHistoryLook {
     return {
       commits: Object.fromEntries(this.commits),
-      linked: pageKeys.some(key => this.linked.has(key) || this.blind.has(key)),
+      linked: pageKeys.some(key => this.linked.has(key)),
+      lost: this.lostCount,
+      blind: this.lostCount > 0,
     };
   }
 

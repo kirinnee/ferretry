@@ -35,6 +35,7 @@ import {
   type InputAgentView,
   type LoginRecipeProposed,
   loginHintSite,
+  PAIRING_EVAL_REFUSAL,
   PAIRING_SCREEN_REFUSAL,
   type PhoneApprovalAgentView,
   PhoneApprovalRaiseSchema,
@@ -1311,6 +1312,7 @@ export class AgentToolService {
         caller.kind === 'agent' && reads && pairing
           ? await holdPairingScreen(page, () => new AgentToolError('forbidden', PAIRING_SCREEN_REFUSAL), {
               script: tool === 'browser.eval',
+              scriptRefusal: () => new AgentToolError('forbidden', PAIRING_EVAL_REFUSAL),
             })
           : undefined;
       if (gated) await this.guardPage(caller, tool, surface, async () => await page.document());

@@ -93,8 +93,13 @@ export interface BrowserInputDocument {
    * a number that moved between two looks says a pairing link was opened in between.
    */
   readonly pairingCommits?: Readonly<Record<string, number>>;
-  /** Whether the document one of those pages shows now was entered by an address carrying a pairing fragment. */
+  /**
+   * Whether the document one of those pages shows now was entered by an address carrying a pairing fragment, or the
+   * ledger is blind (it has lost track of a navigation and cannot prove its history complete: sticky until a fresh one).
+   */
   readonly pairingLinked?: boolean;
+  /** How many times the ledger lost track of a navigation since the worker started. Never goes down; absent is none. */
+  readonly pairingLost?: number;
 }
 
 /**

@@ -99,6 +99,10 @@ function parsePairingCommits(raw: unknown): Record<string, number> | undefined {
   return commits;
 }
 
+function parsePairingLost(raw: unknown): number | undefined {
+  return typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0 ? raw : undefined;
+}
+
 function parseObservation(raw: unknown): BrowserInputObservation {
   const observation = (raw as { observation?: unknown } | null)?.observation as Record<string, unknown> | undefined;
   if (observation?.ok === false && typeof observation.missing === 'string')
@@ -564,14 +568,17 @@ export class BrowserWorkerClient implements BrowserAutomation {
           pairingOrigins?: unknown;
           pairingCommits?: unknown;
           pairingLinked?: unknown;
+          pairingLost?: unknown;
         };
       } | null
     )?.document;
     const epochs = parsePairingEpochs(pairing?.pairingEpochs);
     const origins = parsePairingOrigins(pairing?.pairingOrigins);
     const commits = parsePairingCommits(pairing?.pairingCommits);
+    const lost = pairing?.pairingLost === undefined ? 0 : parsePairingLost(pairing.pairingLost);
     // A marker, or anything about pairing that cannot be believed, is a pairing screen: FAIL CLOSED.
     const pairingScreen =
+      lost === undefined ||
       pairing?.pairingScreen === true ||
       epochs === undefined ||
       origins === undefined ||
@@ -585,6 +592,7 @@ export class BrowserWorkerClient implements BrowserAutomation {
       ...(origins === undefined || origins.length === 0 ? {} : { pairingOrigins: origins }),
       ...(commits === undefined || Object.keys(commits).length === 0 ? {} : { pairingCommits: commits }),
       ...(pairing?.pairingLinked === true ? { pairingLinked: true } : {}),
+      ...(lost === undefined || lost === 0 ? {} : { pairingLost: lost }),
     };
   }
 

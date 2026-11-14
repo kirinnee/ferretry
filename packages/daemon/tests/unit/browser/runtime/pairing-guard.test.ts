@@ -31,7 +31,15 @@ const ordinary: BrowserPairingState = { marked: false, epochs: { p1: 2 } };
 const marked: BrowserPairingState = { marked: true, epochs: { p1: 3 } };
 
 /** What the daemon and the worker say of an app page nothing has happened to. */
-const quiet: BrowserPairingEvidence = { app: true, live: false, minted: 1, commits: 0, linked: false };
+const quiet: BrowserPairingEvidence = {
+  app: true,
+  ownApp: true,
+  live: false,
+  minted: 1,
+  commits: 0,
+  lost: 0,
+  linked: false,
+};
 const withEvidence = (evidence: Partial<BrowserPairingEvidence>, base = ordinary): BrowserPairingState => ({
   ...base,
   evidence: { ...quiet, ...evidence },
@@ -116,9 +124,10 @@ describe('holdPairingScreen — the evidence outside the page', () => {
 
   it('should leave a page that is not the app’s alone, whatever the daemon and the browser say of codes', async () => {
     // Arrange — a live code, a code minted in between and a link opened elsewhere
-    const elsewhere = (evidence: Partial<BrowserPairingEvidence>) => withEvidence({ app: false, ...evidence });
+    const elsewhere = (evidence: Partial<BrowserPairingEvidence>) =>
+      withEvidence({ app: false, ownApp: false, ...evidence });
     const check = await holdPairingScreen(
-      pageShowing([elsewhere({ live: true }), elsewhere({ live: true, minted: 5, commits: 3, linked: true })]),
+      pageShowing([elsewhere({ live: true }), elsewhere({ live: true, minted: 5, linked: true })]),
       refusal,
       { script: true },
     );
@@ -191,6 +200,83 @@ describe('holdPairingScreen — the evidence outside the page', () => {
   });
 });
 
+describe('holdPairingScreen — r3: what moved, wherever the operation started and ended', () => {
+  it('should refuse an operation whose endpoints are both outside the app when an app pairing link committed in between', async () => {
+    // Arrange — outside -> app -> outside: the captured bytes survive the departure
+    const outside = (commits: number) => withEvidence({ app: false, ownApp: false, commits });
+    const check = await holdPairingScreen(pageShowing([outside(0), outside(1)]), refusal);
+
+    // Act / Assert
+    should(await outcome(check())).be.instanceOf(Error);
+  });
+
+  it('should discard the answer and the error of such an operation, and let one with no commit be', async () => {
+    const guard: BrowserActGuard = async guarded => await holdPairingScreen(guarded, refusal);
+    const outside = (commits: number) => withEvidence({ app: false, ownApp: false, commits });
+
+    const answered = await outcome(underGuard(guard, pageShowing([outside(0), outside(2)]), async () => 'the code'));
+    const failed = await outcome(
+      underGuard(guard, pageShowing([outside(0), outside(2)]), async () => Promise.reject(new Error('the code'))),
+    );
+    const quietly = await outcome(underGuard(guard, pageShowing([outside(3), outside(3)]), async () => 'fine'));
+
+    should((answered as Error).message).equal('hidden');
+    should((failed as Error).message).equal('hidden');
+    should(quietly).equal('fine');
+  });
+
+  it('should refuse an operation the ledger lost track during, wherever it started and ended, and ignore a loss before it', async () => {
+    const outside = (lost: number) => withEvidence({ app: false, ownApp: false, lost });
+
+    const during = await holdPairingScreen(pageShowing([outside(0), outside(1)]), refusal);
+    const before = await holdPairingScreen(pageShowing([outside(1), outside(1)]), refusal);
+
+    should(await outcome(during())).be.instanceOf(Error);
+    should(await outcome(before())).be.undefined();
+  });
+});
+
+describe('holdPairingScreen — r3: agent script on a Ferretry app origin', () => {
+  const scriptRefusal = () => new Error('eval is not available on Ferretry’s own app pages');
+
+  it('should always refuse a script on an app origin, with nothing live, nothing linked and nothing counted', async () => {
+    // Arrange — the quietest app page there is
+    const check = holdPairingScreen(pageShowing([withEvidence({})]), refusal, { script: true, scriptRefusal });
+
+    // Act
+    const error = (await outcome(check)) as Error;
+
+    // Assert
+    should(error.message).equal('eval is not available on Ferretry’s own app pages');
+  });
+
+  it('should refuse a script that ended up on an app origin though it began outside, and the answer with it', async () => {
+    const outside = withEvidence({ app: false, ownApp: false });
+    const check = await holdPairingScreen(pageShowing([outside, withEvidence({})]), refusal, {
+      script: true,
+      scriptRefusal,
+    });
+
+    should(((await outcome(check())) as Error).message).equal('eval is not available on Ferretry’s own app pages');
+  });
+
+  it('should leave a script on a page that is not an app origin alone, blank pages included', async () => {
+    const elsewhere = withEvidence({ app: false, ownApp: false });
+    const blank = withEvidence({ app: true, ownApp: false });
+
+    for (const page of [elsewhere, blank]) {
+      const check = await holdPairingScreen(pageShowing([page, page]), refusal, { script: true, scriptRefusal });
+      should(await outcome(check())).be.undefined();
+    }
+  });
+
+  it('should keep reading an app page that is quiet: the refusal is for scripts only', async () => {
+    const check = await holdPairingScreen(pageShowing([withEvidence({}), withEvidence({})]), refusal);
+
+    should(await outcome(check())).be.undefined();
+  });
+});
+
 describe('pairingEvidenceOf', () => {
   const apps = appOriginSet(['https://ferretry.pages.dev', 'http://127.0.0.1:4000']);
   const live = { live: true, minted: 4 };
@@ -216,7 +302,15 @@ describe('pairingEvidenceOf', () => {
       apps,
     );
 
-    should(evidence).eql({ app: true, live: true, minted: 4, commits: 7, linked: true });
+    should(evidence).eql({
+      app: true,
+      ownApp: true,
+      live: true,
+      minted: 4,
+      commits: 7,
+      lost: 0,
+      linked: true,
+    });
   });
 });
 
@@ -230,6 +324,23 @@ describe('appOriginSet', () => {
       'http://localhost:4000',
       'https://ferretry.pages.dev',
     ]);
+  });
+
+  it('should serve the loopback spellings of a wildcard bind, whatever else is configured', () => {
+    // Arrange — the documented wildcard bind with a public address and a custom CORS list
+    const apps = appOriginSet(['http://0.0.0.0:4000', 'https://daemon.example.test', 'https://custom.example.test']);
+
+    // Assert
+    for (const origin of ['http://127.0.0.1:4000', 'http://localhost:4000', 'http://[::1]:4000'])
+      should(apps.has(origin)).be.true();
+    should(appOriginSet(['http://[::]:4000']).has('http://127.0.0.1:4000')).be.true();
+    should(apps.has('https://daemon.example.test')).be.true();
+    should(apps.has('http://127.0.0.1:5000')).be.false();
+  });
+
+  it('should always hold the hosted app, even when the configured origins name another', () => {
+    should(appOriginSet(['https://daemon.example.test']).has('https://ferretry.pages.dev')).be.true();
+    should(appOriginSet([]).has('https://ferretry.pages.dev')).be.true();
   });
 
   it('should not widen a public host to loopback', () => {
