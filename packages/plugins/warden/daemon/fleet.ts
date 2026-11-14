@@ -10,6 +10,7 @@ import {
   type WardenFleetSession,
   type WardenLivenessMonitor,
   type WardenSessionStatus,
+  isTerminalStatus,
   withBatchMembers,
   withLivenessLedger,
 } from './lib/index.ts';
@@ -62,7 +63,7 @@ const FAILED_ENDS: ReadonlySet<FerretEndCause['kind']> = new Set([
   'start_failed',
 ]);
 
-const statusOf = (ferret: FerretSummary): WardenSessionStatus => {
+export const statusOf = (ferret: FerretSummary): WardenSessionStatus => {
   if (ferret.state === 'stopped' && ferret.cause !== undefined) {
     if (FAILED_ENDS.has(ferret.cause.kind)) return 'failed';
     if (ferret.cause.kind === 'completed') return 'completed';
@@ -322,4 +323,31 @@ export async function transcriptDigest(conversation: ConversationApi, ferret: Fe
   if (conversation.transcriptLog === undefined) return undefined;
   const tail = await conversation.transcriptLog(ferret, { limit: LIVENESS_TAIL_EVENTS }).catch(() => undefined);
   return tail?.ok === true ? textFingerprint(tail.value.log) : undefined;
+}
+
+/**
+ * The fleet with every ferret that sits on a usage limit read as `rate_limited` (today's session status). Ferrets' own
+ * summary has four states and none of them is a limit; the one place a limit is found is the pane limits it publishes
+ * (`FerretsApi.paneLimits`, one row per live ferret whose session says it is parked on one). A ferret that has
+ * stopped is never read as limited: there is nothing on that login to move. Pure.
+ */
+export function withRateLimited(
+  fleet: readonly WardenFleetSession[],
+  limited: ReadonlySet<string>,
+): readonly WardenFleetSession[] {
+  if (limited.size === 0) return fleet;
+  return fleet.map(session =>
+    limited.has(session.config.id) && !isTerminalStatus(session.state.status)
+      ? { ...session, state: { ...session.state, status: 'rate_limited' as const } }
+      : session,
+  );
+}
+
+/** The ferrets Ferrets says are parked on a limit now; none when it cannot say (the move then sees no limit). */
+export async function limitedFerrets(ferrets: Pick<FerretsApi, 'paneLimits'>): Promise<ReadonlySet<string>> {
+  try {
+    return new Set((await ferrets.paneLimits?.())?.map(limit => limit.ferret) ?? []);
+  } catch {
+    return new Set();
+  }
 }

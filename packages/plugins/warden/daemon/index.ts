@@ -23,9 +23,13 @@ import { createWardenSubsystem } from './subsystem.ts';
  *   sweep) and recorded as failed. The revive notice is the same send: it is journalled apart, and the resume it
  *   follows stands (`daemon/remedies.ts`), so the revive limits count it.
  * - Auto-revive resumes a ferret Ferrets reports as having died (`FerretSummary.cause`) through `FerretsApi.resume`
- *   (automatic). A failover act is a move through `FerretsApi.move`, but nothing reaches it yet: the sweep routes every
- *   failover through the auto-move service, which is not built (it needs fleet facts, the owner hold and the ferret's
- *   background jobs, none of which Ferrets offers).
+ *   (automatic). A failover act is a move through `FerretsApi.move`, and so is every automatic one: the sweep routes both
+ *   through the auto-move service (`subsystem.ts`), which reads the fleet facts from Runtimes, Logins and Usage and asks
+ *   Accounts ONE yes or no for the owner hold (an input card, a sign-in waiting on their phone, a plan card, a copied
+ *   secret: a ferret with any is never moved, and a hold that cannot be checked is a hold). GAP: Ferrets publishes no
+ *   read of a ferret's background jobs, so the mover sees none and a move is never forced: the move's own safety check
+ *   refuses a ferret with jobs, the owner is told once, and the ask-to-stop and force-stop paths wait for that read;
+ *   and a terminal or browser the ferret handed to the owner is not on any port, so it is not part of the hold.
  * - An investigator is a ferret the Warden starts through Ferrets (`daemon/spawner.ts`), as the Warden and under an agent
  *   origin, in a folder of its own that the kernel's scratch port made outside the Ferretry home. It hands its report
  *   back as the message of its last `signal done`; Ferrets keeps that as its summary and the first read after it
@@ -52,6 +56,9 @@ export default implementDaemon(manifest, {
       conversation,
       asks,
       usage: () => ctx.uses.usage.current(),
+      logins: () => ctx.uses.logins.current(),
+      accounts: () => ctx.uses.accounts.current(),
+      runtimes: () => ctx.uses.runtimes.current(),
       board: () => ctx.uses.board.current(),
       terminals: () => ctx.uses.terminals.current(),
       browsers: () => ctx.uses.browsers.current(),

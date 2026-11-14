@@ -53,7 +53,7 @@ export default implementDaemon(manifest, {
       tools: Object.fromEntries(
         manifest.actions.agentTools.map(tool => [tool.name, tools[tool.name] ?? notBuiltTool]),
       ) as Tools,
-      provides: a.provides,
+      provides: { accounts: { ...a.provides.accounts, ownerHold: b.ownerHold } },
       subscribers: b.subscribers,
       // One source for every Accounts card: a plan, a rule suggestion or suspension, a phone approval, a recipe
       // proposal, a staged 2FA seed. Its refs name an id only; Asks' generic answer creates nothing.

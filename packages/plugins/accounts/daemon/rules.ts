@@ -31,6 +31,7 @@ import { FilePasteRuleStore, FileSignInRuleStore, kernelStateDocument } from './
 import type { AccountsCore } from './accounts.ts';
 import { type HalfB, halfB } from './half-b.ts';
 import { LoginEntryError } from './lib/accounts.ts';
+import { holdsOwner } from './lib/owner-hold.ts';
 import type { AuditSink } from './lib/local-ports.ts';
 import { PhoneApprovalService } from './lib/phone-approval/service.ts';
 import { LoginRecipeService } from './lib/secrets/login-recipes.ts';
@@ -68,6 +69,8 @@ type AccountsContext = DaemonContext<typeof manifest>;
 const SWEEP_EVERY = seconds(15);
 
 export interface RulesHalf extends HalfB {
+  /** Whether anything of the owner's is open on a ferret (`AccountsApi.ownerHold`): the Warden's one yes or no. */
+  readonly ownerHold: (ferret: string) => boolean;
   /** The recipe masking half a's routes and `account_hint` serve through (I133). */
   readonly recipes: RecipeMasking;
 }
@@ -244,5 +247,18 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
         why: error instanceof Error ? error.message : String(error),
       }),
   });
-  return { ...half, recipes };
+  return {
+    ...half,
+    recipes,
+    ownerHold: ferret =>
+      holdsOwner(
+        {
+          inputCardOpen: id => ctx.needs.vault.inputOpen?.(id as FerretId),
+          phoneApprovalOpen: id => phone.hasOpen(id),
+          planAwaitingOwner: id => plans.awaitingOwner(id),
+          heldSecrets: id => copies.heldCount(id),
+        },
+        ferret,
+      ),
+  };
 }
