@@ -36,7 +36,14 @@ import {
 import { Badge, Button, ChangeApplyPanel, cn } from '../ui.ts';
 import { useSignInsLogin } from '../lib/sign-ins-route.ts';
 import { AddLoginPanel } from './add-login-panel.tsx';
-import { CardSwitch, DisableControl, LabelEditor, RemoveZone, SignOutZone } from './login-changes-panels.tsx';
+import {
+  authorityRefusal,
+  CardSwitch,
+  DisableControl,
+  LabelEditor,
+  RemoveZone,
+  SignOutZone,
+} from './login-changes-panels.tsx';
 import { type LoginChanges, useLoginChanges } from '../lib/login-changes.ts';
 import { LocalModelsPanel } from './local-models-panel.tsx';
 import { environmentChip, LoginEnvironmentSection } from './login-environment.tsx';
@@ -263,6 +270,9 @@ function LoginPage({ login, machineName, client, reload, onBack, now, clock, pol
   );
 }
 
+/** The one act a card can have open: its switch-off form, or its removal's confirmation. */
+type CardAct = 'disable' | 'remove';
+
 /**
  * One login's card: the row that opens its page, with the two things v4 kept on the card itself — the on/off switch
  * beside the name and a Remove button under it. Each opens its own confirmation under the card; the page keeps the
@@ -275,8 +285,16 @@ function LoginRow({
   machineName,
   changes,
   reload,
+  open,
+  elsewhere,
+  onAct,
   onOpen,
 }: {
+  /** The act open on THIS card, if any: the switch-off form or the removal's confirmation. */
+  readonly open: CardAct | null;
+  /** Another card has an act open: this card's controls wait for it (one at a time, so a refusal is never shared). */
+  readonly elsewhere: boolean;
+  readonly onAct: (act: CardAct | null) => void;
   readonly login: LoginView;
   readonly now: number;
   readonly clock: () => number;
@@ -285,9 +303,8 @@ function LoginRow({
   readonly reload: () => Promise<void>;
   readonly onOpen: () => void;
 }) {
-  const [switching, setSwitching] = useState(false);
-  const [removing, setRemoving] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
+  const refusal = authorityRefusal(changes);
   return (
     <div className="kt-panel flex min-w-0 flex-col gap-3 p-panel" data-login-card-wrap={login.id}>
       <div className="flex min-w-0 items-start gap-3">
@@ -314,8 +331,9 @@ function LoginRow({
           login={login}
           changes={changes}
           reload={reload}
-          asking={switching}
-          onAsk={setSwitching}
+          blocked={elsewhere || open === 'remove'}
+          asking={open === 'disable'}
+          onAsk={asking => onAct(asking ? 'disable' : null)}
           onRefused={setRefused}
         />
         <button
@@ -332,33 +350,47 @@ function LoginRow({
           {refused}
         </p>
       )}
-      {switching && login.disabled === undefined ? (
-        <DisableControl login={login} machineName={machineName} changes={changes} reload={reload} now={clock} />
+      {open === 'disable' && login.disabled === undefined ? (
+        <DisableControl
+          login={login}
+          machineName={machineName}
+          changes={changes}
+          reload={reload}
+          now={clock}
+          onDone={() => onAct(null)}
+        />
       ) : null}
-      {removing ? (
+      {open === 'remove' ? (
         <RemoveZone
           login={login}
           machineName={machineName}
           changes={changes}
           askAtOnce
-          onKeep={() => setRemoving(false)}
+          onKeep={() => onAct(null)}
           onRemoved={() => {
-            setRemoving(false);
+            onAct(null);
             void reload();
           }}
         />
       ) : (
-        <div className="flex justify-end border-t border-border pt-3">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
+          {refusal === null ? null : (
+            <span className="min-w-0 flex-1 text-meta leading-base text-muted" data-login-card-locked="">
+              Remove is off here: {refusal}
+            </span>
+          )}
           <Button
             type="button"
             variant="danger"
             size="sm"
             data-login-card-remove={login.id}
             aria-label={`Remove ${login.id}`}
-            disabled={changes.busy}
+            title={refusal ?? undefined}
+            disabled={changes.busy || elsewhere || open === 'disable' || refusal !== null}
             onClick={() => {
               changes.clear();
-              setRemoving(true);
+              setRefused(null);
+              onAct('remove');
             }}
           >
             Remove
@@ -391,6 +423,8 @@ export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs, 
   const [detail, openDetail] = useSignInsLogin(state.kind === 'ready' ? state.list.machine : null, browser);
   // One change state for every card on the list: only one act is under way at a time.
   const cardChanges = useLoginChanges(client);
+  // The ONE card act open on the list, by login: opening another card's act waits for this one to finish or be cancelled.
+  const [cardAct, setCardAct] = useState<{ readonly id: string; readonly act: CardAct } | null>(null);
 
   const reload = useCallback(async (): Promise<void> => {
     try {
@@ -498,7 +532,16 @@ export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs, 
                       machineName={list.machine}
                       changes={cardChanges}
                       reload={reload}
-                      onOpen={() => openDetail(item.id)}
+                      open={cardAct?.id === item.id ? cardAct.act : null}
+                      elsewhere={cardAct !== null && cardAct.id !== item.id}
+                      onAct={act => {
+                        cardChanges.clear();
+                        setCardAct(act === null ? null : { id: item.id, act });
+                      }}
+                      onOpen={() => {
+                        setCardAct(null);
+                        openDetail(item.id);
+                      }}
                     />
                   </li>
                 ))}

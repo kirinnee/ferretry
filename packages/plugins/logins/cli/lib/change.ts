@@ -1,4 +1,4 @@
-import type { LoginChange, LoginChangeOutcome, LoginChangeView } from '../../contract/index.ts';
+import type { LoginChange, LoginChangeOutcome, LoginChangeView, LoginRuntimePreview } from '../../contract/index.ts';
 import { requireMayApply } from './authority.ts';
 import { type LoginsCommandDeps, LoginsCommandError } from './ports.ts';
 
@@ -47,13 +47,29 @@ export function parseReason(text: string | undefined): string | undefined {
   return reason;
 }
 
+const HARNESS_LABEL = { 'claude-code': 'Claude Code', codex: 'Codex' } as const;
+
+/** One runtime as v4 worded it: `alpha (Claude Code, agent) — ready to launch`, or the reason it cannot. */
+function runtimeWords(runtime: LoginRuntimePreview): string {
+  if (runtime.launch === undefined) return runtime.name;
+  const kind =
+    runtime.harness === undefined
+      ? undefined
+      : runtime.agent === true
+        ? `${HARNESS_LABEL[runtime.harness]}, agent`
+        : HARNESS_LABEL[runtime.harness];
+  const status = runtime.launch.available ? 'ready to launch' : (runtime.launch.reason ?? 'cannot launch');
+  return `${runtime.name}${kind === undefined ? '' : ` (${kind})`} — ${status}`;
+}
+
 /** What one staged change would do, for the person deciding whether to apply it. */
 function renderChangeView(view: LoginChangeView): string {
   const lines = [view.summary, ...view.consequences.map(sentence => `  • ${sentence}`)];
   const saves = view.saves ?? [];
   if (saves.length > 0) lines.push('Saves:', ...saves.map(path => `  ${path}`));
   const runtimes = view.runtimes ?? [];
-  if (runtimes.length > 0) lines.push('Runtimes on it:', ...runtimes.map(name => `  ${name}`));
+  if (runtimes.length > 0)
+    lines.push('Runtimes after this change:', ...runtimes.map(runtime => `  ${runtimeWords(runtime)}`));
   return lines.join('\n');
 }
 

@@ -643,6 +643,20 @@ export const LoginChangeSchema = z.discriminatedUnion('kind', [
 ]);
 export type LoginChange = z.infer<typeof LoginChangeSchema>;
 
+/**
+ * One runtime on a login as it would be once a change landed: whether it can launch and, when it cannot, the sentence
+ * that says why (a switched-off login, a login that needs sign-in). Names the runtime and nothing of its configuration.
+ * Everything but the name is absent when the plugin that owns runtimes could not say.
+ */
+export const LoginRuntimePreviewSchema = z.strictObject({
+  name: NonEmptyStringSchema,
+  harness: HarnessKindSchema.optional(),
+  /** An agent runtime, as against an interactive one. */
+  agent: z.boolean().optional(),
+  launch: z.strictObject({ available: z.boolean(), reason: NonEmptyStringSchema.optional() }).optional(),
+});
+export type LoginRuntimePreview = z.infer<typeof LoginRuntimePreviewSchema>;
+
 /** A change held for review: what it does, in sentences, and when the hold ends. */
 export const LoginChangeViewSchema = z.strictObject({
   id: NonEmptyStringSchema,
@@ -654,8 +668,8 @@ export const LoginChangeViewSchema = z.strictObject({
   orphanedSecrets: z.array(NonEmptyStringSchema).readonly().optional(),
   /** The login files applying it writes, as paths under the config folder (`logins/<id>.yaml`). Absent when it writes none. */
   saves: z.array(NonEmptyStringSchema).readonly().optional(),
-  /** The runtimes that launch on the login, by name, when the change touches a login a runtime may be using. */
-  runtimes: z.array(NonEmptyStringSchema).readonly().optional(),
+  /** The runtimes on the login as the change leaves them, when it touches a login a runtime may be using. */
+  runtimes: z.array(LoginRuntimePreviewSchema).readonly().optional(),
   expiresAt: InstantSchema,
   state: z.enum(['pending', 'consumed']),
 });

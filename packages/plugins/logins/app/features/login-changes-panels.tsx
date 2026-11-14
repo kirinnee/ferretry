@@ -12,6 +12,13 @@ import { HARNESS_NAMES } from '../lib/logins-view.ts';
 
 const SIGN_OUT_VERSUS_REMOVE = 'Sign out keeps the login but it needs sign-in again. Remove deletes it.';
 
+/**
+ * Why this caller can never change a login from here, or `null`. Only a refusal a passkey would not fix counts: a step-up
+ * is asked for by the carrier when the change applies, so the controls stay on for it.
+ */
+export const authorityRefusal = (changes: LoginChanges): string | null =>
+  changes.authority?.kind === 'refused' ? changeRefusalExplanation(changes.authority.refusal) : null;
+
 interface PanelProps {
   readonly login: LoginView;
   readonly machineName: string;
@@ -77,7 +84,12 @@ export function DisableControl({
   changes,
   reload,
   now,
-}: PanelProps & { readonly now: () => number }) {
+  onDone,
+}: PanelProps & {
+  readonly now: () => number;
+  /** Called once a switch-off or switch-on has applied (held for the owner included), so a card can close its form. */
+  readonly onDone?: () => void;
+}) {
   const [reason, setReason] = useState('');
   const [wait, setWait] = useState('until-on');
   const off = login.disabled !== undefined;
@@ -94,7 +106,12 @@ export function DisableControl({
             ...(ms === null ? {} : { until: new Date(now() + ms).toISOString() as never }),
           },
     );
-    if (result.kind === 'applied') await reload();
+    if (result.kind === 'applied') {
+      setReason('');
+      setWait('until-on');
+      await reload();
+      onDone?.();
+    }
   };
   return (
     <div className="flex flex-col gap-2" data-login-disable={off ? 'off' : 'on'}>
@@ -205,6 +222,8 @@ export function RemoveZone({
   /** Called when the person keeps the login, so a card can fold the confirmation away. */
   readonly onKeep?: () => void;
 }) {
+  // A card's confirmation has a way out in every state: reading what removing it does, refused, and asking to confirm.
+  const onCard = askAtOnce && onKeep !== undefined;
   const [staged, setStaged] = useState<LoginChangeView | null>(null);
   const ask = async (): Promise<void> => {
     const result = await changes.stage({ kind: 'login.remove', id: login.id });
@@ -232,15 +251,31 @@ export function RemoveZone({
       </p>
       {staged === null ? (
         <>
-          <Button
-            type="button"
-            variant="danger"
-            data-login-remove-ask=""
-            disabled={changes.busy}
-            onClick={() => void ask()}
-          >
-            Remove this login…
-          </Button>
+          {onCard ? (
+            <div className="flex flex-wrap items-center gap-2" data-login-remove-pending="">
+              {changes.busy ? <span className="text-cell text-muted">Checking what removing it does…</span> : null}
+              <Button
+                type="button"
+                data-login-remove-keep=""
+                onClick={() => {
+                  changes.clear();
+                  onKeep?.();
+                }}
+              >
+                {changes.busy ? 'Cancel' : 'Keep it'}
+              </Button>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              variant="danger"
+              data-login-remove-ask=""
+              disabled={changes.busy}
+              onClick={() => void ask()}
+            >
+              Remove this login…
+            </Button>
+          )}
           {changes.refusal === null ? null : (
             <p role="alert" className="m-0 text-cell leading-base text-err" data-change-refusal="">
               {changes.refusal}
@@ -295,7 +330,10 @@ export function CardSwitch({
   asking,
   onAsk,
   onRefused,
+  blocked = false,
 }: Omit<PanelProps, 'machineName'> & {
+  /** Another card's act is open: this switch waits for it to finish or be cancelled. */
+  readonly blocked?: boolean;
   readonly asking: boolean;
   readonly onAsk: (asking: boolean) => void;
   /** Said where the card shows it, when switching back on is refused. */
@@ -303,7 +341,7 @@ export function CardSwitch({
 }) {
   const off = login.disabled !== undefined;
   // Only a refusal a passkey would not fix locks the switch; a step-up is asked for by the carrier when it applies.
-  const refusal = changes.authority?.kind === 'refused' ? changeRefusalExplanation(changes.authority.refusal) : null;
+  const refusal = authorityRefusal(changes);
   const toggle = async (): Promise<void> => {
     changes.clear();
     onRefused(null);
@@ -323,7 +361,7 @@ export function CardSwitch({
         role="switch"
         aria-checked={!off}
         aria-label={`${login.id}: ${off ? 'off' : 'on'} for new starts`}
-        disabled={changes.busy || refusal !== null}
+        disabled={changes.busy || blocked || refusal !== null}
         title={refusal ?? undefined}
         onClick={() => void toggle()}
         className="-my-3 inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control disabled:cursor-not-allowed disabled:opacity-60"
