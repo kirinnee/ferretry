@@ -14,7 +14,8 @@
  *   `gateAttachedChangedAt` are dropped (v5 deleted the standalone gate item and the older-app mirror; a card's gate
  *   rides `cardAsks`); a closed item whose disposition is `replied` (v5 has no such disposition) is closed as `done`.
  *   Every other byte of the item is kept in its order. v5's new optional fields (`raisedObligations`,
- *   `generatedSubject`, `ownAskRepliedTo`) are absent, as on any board v5 never touched.
+ *   `ownAskRepliedTo`) are absent, as on any board v5 never touched; `generatedSubject` is set ONLY on a daemon-raised
+ *   `card-agenda:<card>` item (its subject, as the daemon wrote it), so answering its card ask rests it like a 5.0 one.
  * - The history (`agenda-history.jsonl`): the same JSONL records; a `version` record of a `replied` close becomes
  *   `done`, and the ledger's byte cursor is recomputed over the rewritten bytes. Bytes past v4's committed cursor
  *   (never committed; v4 cuts them at its next append) are not carried.
@@ -37,6 +38,7 @@ import {
   AgendaSnapshotSchema,
   AskItemSchema,
   AskVersionsFiles,
+  parseCardAgendaReference,
   ResolvedAgendaItemSchema,
 } from '@ferretry/core-asks/contract';
 import { Database } from 'bun:sqlite';
@@ -129,6 +131,19 @@ function v5Item(item: Json, closed: boolean, tally: Pick<Tally, 'gateFields' | '
     out[key] = key === 'disposition' && closed && value === 'replied' ? 'done' : value;
   }
   if (closed && item.disposition === 'replied') tally.repliedClosed++;
+  // A card agenda v4's daemon opened (`card-agenda:<card>`) is born in v5 with the subject it wrote kept as its own
+  // (`generatedSubject`), exactly as a 5.0-raised one: without it the item reads as asking the owner a question of its
+  // own, and answering its card ask leaves it in Needs you. v4's subject IS what the daemon wrote (v4 had no way for
+  // anyone else to reword it into a different generated one), so it is carried as it stands.
+  if (
+    out.generatedSubject === undefined &&
+    out.raisedBy === 'daemon' &&
+    out.source === 'task' &&
+    typeof out.subject === 'string' &&
+    parseCardAgendaReference(typeof out.sourceRef === 'string' ? out.sourceRef : undefined) !== undefined
+  ) {
+    out.generatedSubject = out.subject;
+  }
   return out;
 }
 
