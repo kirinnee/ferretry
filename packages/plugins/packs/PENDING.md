@@ -50,8 +50,9 @@ Each line names the seam it waits on and who owns it. Nothing here is stood in f
   card), and "retried" is marked only within a row. Conversation's tool group still draws the raw call in the row; the
   card is beside it. Its PeerName, MessageFooter and command list are the card's own (`components/card-parts.tsx`):
   the chat's are Conversation's files, which another half may not import.
-- **Settings › Pack mode** reads and saves `packs.yaml` through a configuration-file port the shell does not hand a
-  plugin half yet (and the kernel write port, D2 #16); until then the tab says to edit the file by hand.
+- **Settings › Pack mode** reads and saves `packs.yaml` through the kernel's `GET`/`PUT /v1/config/file`
+  (`app/lib/config-files-client.ts`), as Runtimes does for a profile file; a loosening edit comes back held and the tab says
+  it waits for the owner's confirmation. It never confirms: that is the owner's act elsewhere.
 - **One ferret's own switch**: no read of a single ferret's Pack switch exists, so the panel's switch shows ON until the
   daemon has answered on that page.
 - **CSS**: `app/components/pack-call.css` (theme roles only) is loaded by the shell with the Packs views.
