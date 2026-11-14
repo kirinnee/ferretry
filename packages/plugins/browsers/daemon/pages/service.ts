@@ -369,6 +369,8 @@ interface Running {
 export class BrowserSessionService implements BrowserSubsystem {
   private run: Running | undefined;
   private starting: Promise<Running> | undefined;
+  /** Page opens (and starts) that have been asked for and have not answered yet, whoever asked. */
+  private opening = 0;
   private readonly serial = new Map<string, Promise<void>>();
   /** Session id → the agent's spoken name (its first name, else its task title), as last read. */
   private readonly sessionNames = new Map<string, string>();
@@ -417,35 +419,43 @@ export class BrowserSessionService implements BrowserSubsystem {
       // The machine has ONE Chrome that every ferret's pages share. Asking it to stop is asking for it to be gone when
       // nothing else needs it: once no session holds a page and nobody is watching, it is closed at once (as v4's
       // per-ferret browser was) instead of idling on to its timeout. Another ferret's pages keep it running.
+      // A page still being opened has no owner until Chrome answers, so it is counted from the moment its session asked
+      // (`opening`), not from when it lands: stopping here would close Chrome under it.
       const left = this.run;
-      if (left !== undefined && left.viewers.size === 0 && this.sessionPages(left) === 0) await this.stop();
+      if (left !== undefined && this.opening === 0 && left.viewers.size === 0 && this.sessionPages(left) === 0)
+        await this.stop();
       return { status: await this.status(sessionId) };
     }
     if (action.action === 'start' || action.action === 'open' || action.action === 'new-page') {
-      const run = await this.ensure();
-      const viewed = this.viewedPage(run, sessionId);
-      if (action.action !== 'new-page' && viewed !== undefined) this.assertPinned(pinned, viewed);
-      if (action.action === 'new-page' || viewed === undefined) {
-        const opened = await this.openIn(run, sessionId, {
-          ...(action.action !== 'start' && action.url !== undefined ? { url: action.url } : {}),
-          ...(action.action === 'new-page' && action.incognito === true ? { incognito: true } : {}),
-        });
-        if (openedBy !== undefined) run.openers.set(opened.actedPageId, openedBy);
-        await this.view(run, sessionId, opened.actedPageId);
-        return { status: this.project(run, sessionId), result: opened };
+      this.opening += 1;
+      try {
+        const run = await this.ensure();
+        const viewed = this.viewedPage(run, sessionId);
+        if (action.action !== 'new-page' && viewed !== undefined) this.assertPinned(pinned, viewed);
+        if (action.action === 'new-page' || viewed === undefined) {
+          const opened = await this.openIn(run, sessionId, {
+            ...(action.action !== 'start' && action.url !== undefined ? { url: action.url } : {}),
+            ...(action.action === 'new-page' && action.incognito === true ? { incognito: true } : {}),
+          });
+          if (openedBy !== undefined) run.openers.set(opened.actedPageId, openedBy);
+          await this.view(run, sessionId, opened.actedPageId);
+          return { status: this.project(run, sessionId), result: opened };
+        }
+        if (action.action === 'start' || action.url === undefined) return { status: this.project(run, sessionId) };
+        const url = action.url;
+        return await this.onPage(
+          run,
+          viewed,
+          async () => {
+            this.signIns?.cleared(sessionId, viewed);
+            return await run.driver.navigate(viewed, url);
+          },
+          sessionId,
+          guard,
+        );
+      } finally {
+        this.opening -= 1;
       }
-      if (action.action === 'start' || action.url === undefined) return { status: this.project(run, sessionId) };
-      const url = action.url;
-      return await this.onPage(
-        run,
-        viewed,
-        async () => {
-          this.signIns?.cleared(sessionId, viewed);
-          return await run.driver.navigate(viewed, url);
-        },
-        sessionId,
-        guard,
-      );
     }
     const run = this.requireRunning();
     if (action.action === 'activate-page' || action.action === 'close-page') {
@@ -487,13 +497,18 @@ export class BrowserSessionService implements BrowserSubsystem {
 
   async openPage(sessionId: string, name: string, options: BrowserOpenOptions = {}): Promise<BrowserPageSummary> {
     await this.requireSession(sessionId);
-    const run = await this.ensure();
-    if (this.page(run, sessionId, name) !== undefined)
-      throw new BrowserSessionError('conflict', `this session already has a browser page named ${name}`);
-    const opened = await this.openIn(run, sessionId, options);
-    run.names.set(opened.actedPageId, name);
-    if (options.openedBy !== undefined) run.openers.set(opened.actedPageId, options.openedBy);
-    return this.named(run, opened.actedPageId);
+    this.opening += 1;
+    try {
+      const run = await this.ensure();
+      if (this.page(run, sessionId, name) !== undefined)
+        throw new BrowserSessionError('conflict', `this session already has a browser page named ${name}`);
+      const opened = await this.openIn(run, sessionId, options);
+      run.names.set(opened.actedPageId, name);
+      if (options.openedBy !== undefined) run.openers.set(opened.actedPageId, options.openedBy);
+      return this.named(run, opened.actedPageId);
+    } finally {
+      this.opening -= 1;
+    }
   }
 
   async actOnPage(
