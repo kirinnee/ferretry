@@ -471,6 +471,12 @@ export interface VerbInvocation {
    * verb whose option is a switch reads these to give the word back its place among the arguments. Absent when none.
    */
   readonly swallowed?: readonly SwallowedWord[];
+  /**
+   * Every option name as it was written, in order, one entry per occurrence (`--session`, `-s`, `--no-color`, `--x=1`).
+   * Present only when some name was written more than once: the options map then cannot say which of two spellings of
+   * one flag came last, and a verb that reads a flag under several names needs the order. Absent otherwise.
+   */
+  readonly written?: readonly string[];
 }
 
 /**

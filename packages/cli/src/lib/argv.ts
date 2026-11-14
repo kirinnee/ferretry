@@ -25,7 +25,9 @@ export function parseArgs(tokens: readonly string[]): VerbInvocation {
   const args: string[] = [];
   const options: Record<string, OptionValue> = {};
   const swallowed: SwallowedWord[] = [];
+  const written: string[] = [];
   const put = (name: string, value: string | boolean): void => {
+    written.push(name);
     const known = options[name];
     if (known === undefined) options[name] = value;
     else if (typeof value === 'boolean' || typeof known === 'boolean') options[name] = value;
@@ -58,7 +60,13 @@ export function parseArgs(tokens: readonly string[]): VerbInvocation {
       index += 1;
     } else put(body, true);
   }
-  return swallowed.length === 0 ? { args, options } : { args, options, swallowed };
+  const repeated = new Set(written).size < written.length;
+  return {
+    args,
+    options,
+    ...(swallowed.length === 0 ? {} : { swallowed }),
+    ...(repeated ? { written } : {}),
+  };
 }
 
 /** The first string value of an option, if it has one. */

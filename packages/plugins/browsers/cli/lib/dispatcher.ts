@@ -75,8 +75,10 @@ export class BrowserDispatcher {
       }
       const ferret = this.ferretOf(line, spec, words.text('ferret'));
       const outcome = await this.perform(plan, ferret);
+      const asJson = words.on('json');
       const text = hidden.sealed(
-        words.on('json') ? JSON.stringify(hidden.cleanData(outcome.data)) : hidden.clean(outcome.text),
+        asJson ? JSON.stringify(hidden.cleanData(outcome.data)) : hidden.clean(outcome.text),
+        asJson,
       );
       if (outcome.ok) this.io.out(`${text}\n`);
       else this.io.err(`${text}\n`);

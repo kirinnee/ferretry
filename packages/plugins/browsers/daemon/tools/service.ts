@@ -382,12 +382,49 @@ export class BrowserTools {
     }
   }
 
+  /**
+   * Which of a ferret's pages (rows of its own status) are the ferret's — opened by it, handed to it, or popups of those,
+   * taken over or not: what it may be SHOWN of its browser. Nothing for a browser that is not its own. Everything else
+   * in the session is a person's, and not so much as its id, title or address leaves with an agent's answer.
+   */
+  async ferretOwnedPages(ferret: string, target: string, rows: PageRows): Promise<ReadonlySet<string>> {
+    if (ferret !== target) return new Set();
+    const owned = new Set<string>();
+    for (const row of rows) if (await this.agentOwns(ferret, surfaceOf(row), rows)) owned.add(row.id);
+    return owned;
+  }
+
   /** Every live driving marker, standing takeover and hand-over of a ferret's pages. */
   async controlView(sessionId: string): Promise<SurfaceControlView> {
     try {
       return await this.alive(sessionId, await this.ports.control.view(sessionId, 'browser'));
     } catch (error) {
       throw await this.withheld({ kind: 'person', sessionId }, undefined, translate(error) ?? error);
+    }
+  }
+
+  /**
+   * The control record a FERRET may read: its own ferret's, and in it only the pages that are its own (a person's page,
+   * its takeover, its hand-over and its asks, stay out). Another ferret's record is refused, not shown empty.
+   */
+  async ferretControlView(ferret: string, target: string): Promise<SurfaceControlView> {
+    try {
+      if (ferret !== target)
+        throw new BrowserToolError('forbidden', 'A ferret reads only its own browser’s control, not another ferret’s.');
+      const view = await this.controlView(target);
+      const owned = await this.ferretOwnedPages(ferret, target, (await this.ports.browser.status(target)).pages);
+      const mine = <T extends { readonly surface: string; readonly id: string }>(rows: readonly T[]): T[] =>
+        rows.filter(row => row.surface !== 'browser' || owned.has(row.id));
+      return {
+        ...view,
+        driving: mine(view.driving),
+        takeovers: mine(view.takeovers),
+        handed: mine(view.handed),
+        opened: mine(view.opened),
+        asked: mine(view.asked),
+      };
+    } catch (error) {
+      throw translate(error) ?? error;
     }
   }
 
@@ -1125,23 +1162,25 @@ export class BrowserTools {
         'not_found',
         `There is no ${surfaceReference(key)} in this session. List them with browser.list, or open one with browser.open.`,
       );
-    return {
-      surface: 'browser',
-      id: found.id,
-      ...(found.name === undefined ? {} : { name: found.name }),
-      ...(found.openedBy === undefined ? {} : { openedBy: found.openedBy }),
-      ...(found.incognito === true ? { incognito: true } : {}),
-      ...(found.openerId === undefined ? {} : { openerId: found.openerId }),
-      url: found.url,
-    };
+    return surfaceOf(found);
   }
 
-  /** Whether an agent may act on this surface now: it is the agent's, and nobody is holding it. */
-  private async assertAgentMay(sessionId: string, surface: ResolvedSurface, pages?: PageRows): Promise<void> {
-    const mine =
+  /** Whether this surface is the agent's: opened by it, handed to it, or a popup of those. Held or not. */
+  private async agentOwns(sessionId: string, surface: ResolvedSurface, pages?: PageRows): Promise<boolean> {
+    return (
       openedByAgent(surface.openedBy, sessionId) ||
       (await this.ports.control.isHanded(sessionId, surface)) ||
-      (await this.popupOfMine(sessionId, surface, pages));
+      (await this.popupOfMine(sessionId, surface, pages))
+    );
+  }
+
+  /**
+   * THE rule for an agent and a page: it is the agent's, and nobody is holding it. Every route and tool that lets an
+   * agent reach a page — the page tools, the whole-browser routes, the viewer socket — asks it through here, so a
+   * further condition (a sealed value on the page, say) is added in this one place and reaches them all.
+   */
+  private async assertAgentMay(sessionId: string, surface: ResolvedSurface, pages?: PageRows): Promise<void> {
+    const mine = await this.agentOwns(sessionId, surface, pages);
     if (!mine)
       throw new BrowserToolError(
         'forbidden',
@@ -1446,6 +1485,19 @@ const handedNote = (askOwner: true | string | undefined): string =>
   askOwner === undefined ? '' : ' and asked the owner to take over (wait for them)';
 
 /** A listing's result: the rows the caller may see, and a sentence naming them. */
+/** One page row of a status as the surface the checks read. */
+function surfaceOf(found: PageRows[number]): ResolvedSurface {
+  return {
+    surface: 'browser',
+    id: found.id,
+    ...(found.name === undefined ? {} : { name: found.name }),
+    ...(found.openedBy === undefined ? {} : { openedBy: found.openedBy }),
+    ...(found.incognito === true ? { incognito: true } : {}),
+    ...(found.openerId === undefined ? {} : { openerId: found.openerId }),
+    url: found.url,
+  };
+}
+
 function shown(surfaces: readonly AgentSurface[]): BrowserToolAnswer {
   if (surfaces.length === 0) return { summary: 'No browser pages are open for you in this session.', surfaces };
   const names = surfaces.map(entry => surfaceReference(entry.name ?? entry.id)).join(', ');

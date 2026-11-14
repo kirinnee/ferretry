@@ -4,7 +4,7 @@ import { type DaemonContext, type DaemonHalf, implementDaemon } from '@ferretry/
 import { type BrowsersConfig, PageChanged } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { type BrowserSessionLauncher, BrowserSessionService } from './pages/service.ts';
-import { type BrowserStreamOpener, pageRoutes, streamSocket } from './pages/routes.ts';
+import { type BrowserStreamOpener, type FerretBrowserGuard, pageRoutes, streamSocket } from './pages/routes.ts';
 import { BrowsersReferenceMenu } from './pages/reference-menu.ts';
 import { BrowserProxyTester, resolveBrowserProxy } from './proxy/index.ts';
 import { TunnelProxyProbe } from './proxy/adapters/probe.ts';
@@ -15,7 +15,7 @@ import { BrowserViewerStream } from './stream/viewer-stream.ts';
 import { pageTarget, TypedIdentities } from './target/index.ts';
 import { VaultPageApprovals } from './target/tools/phone-approvals.ts';
 import { nodeStagedFiles } from './tools/adapters/staged-files.ts';
-import { SurfaceControl } from './tools/control.ts';
+import { forgetsClosedPages, SurfaceControl } from './tools/control.ts';
 import { rootFiles } from './tools/files.ts';
 import { controlRoutes, refusing, toolHandlers } from './tools/index.ts';
 import { pageToolHost } from './tools/page-host.ts';
@@ -144,6 +144,22 @@ export function buildBrowsers(
   // Who each page signs in, in memory only (I154): ONE ledger, cleared by the runtime whenever an act may have changed
   // it, whoever made it (I155), and read and written by every browser tool.
   const identities = seams.identities ?? new TypedIdentities(() => kernel.clock.nowMs());
+
+  // Who holds each page, journaled; built first because a page closing (below) ends what is held on it.
+  const history = new Map<string, RecordedSurfaceEvent[]>();
+  const control = new SurfaceControl(
+    {
+      publish: async (sessionId, type, data) => {
+        history.set(sessionId, [...(history.get(sessionId) ?? []), { type, data }]);
+        const change = PAGE_CHANGES[type];
+        const page = (data as { readonly id?: unknown }).id;
+        if (change !== undefined && typeof page === 'string')
+          kernel.events.publish(PageChanged, { ferret: sessionId, page, change });
+      },
+      history: async sessionId => history.get(sessionId) ?? [],
+    },
+    { now: () => kernel.clock.nowMs() },
+  );
   const pages = new BrowserSessionService(
     {
       get: async sessionId => {
@@ -158,14 +174,14 @@ export function buildBrowsers(
       after: (delay, action) => ({ cancel: kernel.clock.after(milliseconds(delay), action) }),
     },
     identities,
-    // A page closed, however it closed (a tool, the toolbar, the session's end, the browser stopping): a wake-up.
-    {
-      closed: (sessionId, pageId) =>
-        kernel.events.publish(PageChanged, { ferret: sessionId, page: pageId, change: 'closed' }),
-    },
+    // A page closed, however it closed (a tool, the viewer, the toolbar, the session's end, the browser stopping): what a
+    // person held on it ends, and the workspace is woken.
+    forgetsClosedPages(control, (sessionId, pageId) =>
+      kernel.events.publish(PageChanged, { ferret: sessionId, page: pageId, change: 'closed' }),
+    ),
   );
-  const viewerHost = heldViewerHost(kernel, pages);
-  const stream: BrowserStreamOpener = async (sessionId, downstream) => {
+  const stream: BrowserStreamOpener = async (sessionId, downstream, mayType, admit) => {
+    const viewerHost = heldViewerHost(kernel, pages, mayType, admit);
     let viewer: BrowserViewerStream | undefined;
     return {
       open: async () => {
@@ -207,21 +223,6 @@ export function buildBrowsers(
     now: () => kernel.clock.nowMs(),
   });
 
-  // ── surface control and the tools ────────────────────────────────────────────────────────────────────────────
-  const history = new Map<string, RecordedSurfaceEvent[]>();
-  const control = new SurfaceControl(
-    {
-      publish: async (sessionId, type, data) => {
-        history.set(sessionId, [...(history.get(sessionId) ?? []), { type, data }]);
-        const change = PAGE_CHANGES[type];
-        const page = (data as { readonly id?: unknown }).id;
-        if (change !== undefined && typeof page === 'string')
-          kernel.events.publish(PageChanged, { ferret: sessionId, page, change });
-      },
-      history: async sessionId => history.get(sessionId) ?? [],
-    },
-    { now: () => kernel.clock.nowMs() },
-  );
   // "What agents may control" is read from core's AgentControlPort on every call; unbound, or an answer that is not a
   // plain yes, refuses (fail closed). ONE policy for the browser tools and the page target.
   const policy = agentControlPolicy(() => ctx.uses.agentControl.current());
@@ -241,6 +242,14 @@ export function buildBrowsers(
     },
     pageActs: { acted: (sessionId, script) => vault.pageActed?.(sessionId as FerretId, script) },
   });
+  // A ferret on its whole-browser routes and the viewer socket passes the one rule its page tools pass (a refusal keeps its
+  // code), and is shown only its own pages.
+  const ferretGuard: FerretBrowserGuard = {
+    check: async (ferret, target, pageId) =>
+      await refusing(async () => await tools.guardFerretBrowser(ferret, target, pageId)),
+    owned: async (ferret, target, rows) =>
+      await tools.ferretOwnedPages(ferret, target, rows as Parameters<typeof tools.ferretOwnedPages>[2]),
+  };
   // The `page` input target and the four tools that type into a page or hand it over, on the same checks as the rest.
   const target = pageTarget({
     kernel,
@@ -271,16 +280,12 @@ export function buildBrowsers(
 
   return {
     routes: {
-      ...pageRoutes(kernel, login, pages, {
-        // A ferret on its own whole-browser routes passes the checks its page tools pass (docs: a refusal keeps its code).
-        check: async (ferret, target, pageId) =>
-          await refusing(async () => await tools.guardFerretBrowser(ferret, target, pageId)),
-      }),
+      ...pageRoutes(kernel, login, pages, ferretGuard),
       ...proxyRoutes({ tester, state: () => pages.overview() }),
       ...controlRoutes(tools),
       ...systemOpenRoutes(openUrl),
     },
-    sockets: { 'GET /v1/ferrets/:ferretId/browser/stream': streamSocket(pages, stream) },
+    sockets: { 'GET /v1/ferrets/:ferretId/browser/stream': streamSocket(pages, stream, ferretGuard) },
     tools: { ...toolHandlers(tools), ...target.tools },
     provides: {
       browsers: {

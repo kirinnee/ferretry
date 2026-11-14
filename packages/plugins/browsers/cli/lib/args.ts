@@ -169,11 +169,25 @@ export function parseVerb(verb: string, shape: VerbShape, invocation: VerbInvoca
   const values = new Map<string, FlagValue>();
   /** The names under which a switch was written: the words they swallowed go back among the arguments. */
   const switches = new Set<string>();
+  // A flag written under two of its names takes the value of the one written LAST. The shell says the order of every
+  // occurrence when a name repeats (`written`); with no repeat, the options map is already in the order written.
+  const order = invocation.written ?? Object.keys(invocation.options);
+  const lastAt = new Map<string, number>();
+  for (const [at, name] of order.entries()) lastAt.set(name, at);
+  const winner = new Map<string, string>();
+  for (const name of Object.keys(invocation.options)) {
+    const known = byName.get(name);
+    if (known === undefined) continue;
+    const held = winner.get(known.key);
+    if (held === undefined || (lastAt.get(name) ?? -1) > (lastAt.get(held) ?? -1)) winner.set(known.key, name);
+  }
   for (const [name, given] of Object.entries(invocation.options)) {
     const known = byName.get(name);
     if (known === undefined) throw new UsageError(unknownOption(verb, name, shape));
     const { key, spec } = known;
     const label = dashed(spec.names[0] as string);
+    // Only the name written last speaks for a flag that takes a value; a switch's names all say the same thing.
+    if (spec.kind !== 'switch' && winner.get(key) !== name) continue;
     if (given === false) continue;
     switch (spec.kind) {
       case 'switch': {

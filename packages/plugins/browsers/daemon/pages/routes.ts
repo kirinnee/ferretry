@@ -9,12 +9,13 @@ import {
   type SocketDownstream,
   type SocketHandler,
 } from '@ferretry/kernel/contract';
-import { ferretOf } from '@ferretry/core-gate/contract';
+import { ferretOf, isFerretCall, isHumanAdminActor } from '@ferretry/core-gate/contract';
 import { BrowserLoginActionSchema } from '../../contract/index.ts';
 import { BrowserControlError, type BrowserLoginLifecycle, type BrowserLoginStatus } from '../worker/control/index.ts';
 import { acted, maskedSnapshot, maskedStatus, opOfAction, targetOfAction, writeAct } from './acts.ts';
 import { parseBody } from './body.ts';
-import { BrowserSessionError, type BrowserSubsystem } from './service.ts';
+import { ferretAnswer, ferretStatus } from './agent-view.ts';
+import { BrowserSessionError, type BrowserPageGuard, type BrowserSubsystem } from './service.ts';
 import {
   type BrowserAction,
   type BrowserActionResult,
@@ -34,7 +35,24 @@ import {
  * answers the status read afterwards, masked (S16); a read answers its masked text; a screenshot its picture.
  */
 /** Opens one viewer stream on a socket. */
-export type BrowserStreamOpener = (sessionId: string, downstream: SocketDownstream) => Promise<SocketHandler>;
+export type BrowserStreamOpener = (
+  sessionId: string,
+  downstream: SocketDownstream,
+  mayType: boolean,
+  /** For a FERRET's viewer: asked before every frame whether the ferret may still see that page. Absent for a person. */
+  admit?: (pageId: string) => Promise<boolean>,
+) => Promise<SocketHandler>;
+
+/**
+ * Whether the caller of the viewer socket may TYPE into the page: a person (the owner's own app or `fy` with the admin
+ * token, or a paired device), as Gate stamped it on the call. The socket is `caller: 'any'`, so a ferret's credential
+ * is admitted to watch; its input never is. Anything Gate did not prove a person is refused.
+ */
+function viewerMayType(call: Pick<CallContext, 'actor' | 'credential'>): boolean {
+  if (isFerretCall(call)) return false;
+  if (call.credential?.tokenClass === 'device') return true;
+  return call.credential?.tokenClass === 'admin' && isHumanAdminActor(call.actor);
+}
 
 /** Every refusal the login domain raises, in the transport's own taxonomy. */
 function refusal(error: BrowserControlError): ApiError {
@@ -93,8 +111,18 @@ export function sessionIdOf(call: CallContext): string {
  * the toolbar is theirs. Throws the refusal (an `ApiError`).
  */
 export interface FerretBrowserGuard {
+  /** THE rule: refuses (with the sentence) unless the ferret may use this page of its own browser now. */
   check(ferret: string, target: string, pageId: string | undefined): Promise<void>;
+  /** Which of these pages are the ferret's own: all a ferret is ever shown of the session's browser. */
+  owned(ferret: string, target: string, pages: readonly { readonly id: string }[]): Promise<ReadonlySet<string>>;
 }
+
+/** The guard as the page service runs it, inside the page's queue, for the page it is about to touch. */
+const pageGuardOf =
+  (guard: FerretBrowserGuard, ferret: string, sessionId: string): BrowserPageGuard =>
+  async pageId => {
+    await guard.check(ferret, sessionId, pageId);
+  };
 
 /** `GET /v1/ferrets/:ferretId/browser`: the status, every page's address and title masked (S16). */
 async function browserStatus(
@@ -104,9 +132,12 @@ async function browserStatus(
   call: CallContext,
 ): Promise<ApiResponse> {
   const caller = ferretOf(call);
-  if (caller !== undefined) await guard.check(caller, sessionIdOf(call), undefined);
-  const status = await browser.status(sessionIdOf(call)).catch(browserFailure);
-  return jsonResponse(await kernel.redaction.read(scope => maskedStatus(scope, status)));
+  const sessionId = sessionIdOf(call);
+  if (caller !== undefined) await guard.check(caller, sessionId, undefined);
+  const status = await browser.status(sessionId).catch(browserFailure);
+  const shown =
+    caller === undefined ? status : ferretStatus(status, await guard.owned(caller, sessionId, status.pages));
+  return jsonResponse(await kernel.redaction.read(scope => maskedStatus(scope, shown)));
 }
 
 /** `POST /v1/ferrets/:ferretId/browser`: one action on its page, through the act runner. */
@@ -118,17 +149,30 @@ async function browserAction(
 ): Promise<ApiResponse> {
   const sessionId = sessionIdOf(call);
   const caller = ferretOf(call);
-  // A ferret's own browser and the switch first, before anything about it is read; then the page the act would touch.
+  // A ferret's own browser and the switch first, before anything about it is read.
   if (caller !== undefined) await guard.check(caller, sessionId, undefined);
   const action = await parseBody(call.request, BrowserActionSchema);
   const before = await browser.status(sessionId).catch(browserFailure);
-  if (caller !== undefined) await guard.check(caller, sessionId, pageTouchedBy(action, before));
   const target = targetOfAction(sessionId, action, before);
   const op = opOfAction(action);
+  // The page this act is about, resolved ONCE: the hold target above and the page the service acts on are the same page
+  // (the service refuses if the view moved), and a ferret's check is run by the service inside that page's queue, for
+  // each page the act touches — a stop asks every page it will close — never here, ahead of the queue.
+  const options = {
+    ...(pageTouchedBy(action, before) === undefined ? {} : { pinned: pageTouchedBy(action, before) as string }),
+    ...(caller === undefined
+      ? {}
+      : { guard: pageGuardOf(guard, caller, sessionId), openedBy: { by: 'agent' as const, sessionId: caller } }),
+  };
+  /** What the caller may be shown of an answer: a person all of it, a ferret its own pages. */
+  const view = async (answer: BrowserActionResult): Promise<BrowserActionResult> =>
+    caller === undefined ? answer : ferretAnswer(answer, await guard.owned(caller, sessionId, answer.status.pages));
+  const perform = async (): Promise<BrowserActionResult> =>
+    await view(await browser.act(sessionId, action, options).catch(browserFailure));
   if (op === 'read') {
     const content = acted<'read'>(
       await kernel.act(target, 'read', async () => {
-        const result = await browser.act(sessionId, action).catch(browserFailure);
+        const result = await perform();
         const text = 'result' in result && 'text' in result.result ? result.result.text : '';
         return await kernel.redaction.read(scope => ({
           kind: 'content' as const,
@@ -147,7 +191,7 @@ async function browserAction(
     let answerBody: BrowserActionResult | undefined;
     acted(
       await kernel.act(target, 'picture', async () => {
-        const result = await browser.act(sessionId, action).catch(browserFailure);
+        const result = await perform();
         answerBody = await kernel.redaction.read(
           scope =>
             ({
@@ -161,14 +205,20 @@ async function browserAction(
     );
     return jsonResponse(answerBody);
   }
-  await writeAct(kernel.act, target, op, async () => await browser.act(sessionId, action).catch(browserFailure));
-  const after = await browser.status(sessionId).catch(browserFailure);
+  await writeAct(kernel.act, target, op, perform);
+  const afterAll = await browser.status(sessionId).catch(browserFailure);
+  const after =
+    caller === undefined ? afterAll : ferretStatus(afterAll, await guard.owned(caller, sessionId, afterAll.pages));
   return jsonResponse({ status: await kernel.redaction.read(scope => maskedStatus(scope, after)) });
 }
 
 /** The page an act would touch, when it touches one: the page it names, else the one the session is viewing. */
 function pageTouchedBy(action: BrowserAction, status: BrowserStatus): string | undefined {
-  if (action.action === 'start' || action.action === 'stop' || action.action === 'new-page') return undefined;
+  if (action.action === 'stop' || action.action === 'new-page') return undefined;
+  if (action.action === 'start' || action.action === 'open') {
+    // Start/open only touch the viewed page when there is one and a url to go to.
+    if (action.action === 'start' || action.url === undefined) return undefined;
+  }
   const named = (action as { readonly pageId?: unknown }).pageId;
   if (typeof named === 'string' && named !== '') return named;
   return status.state === 'running' && 'activePageId' in status ? status.activePageId : undefined;
@@ -192,10 +242,28 @@ export function pageRoutes(
 }
 
 /** `GET /v1/ferrets/:ferretId/browser/stream`: proves the session, then hands the socket to the viewer stream. */
-export function streamSocket(browser: Pick<BrowserSubsystem, 'status'>, stream: BrowserStreamOpener): SocketAccept {
+export function streamSocket(
+  browser: Pick<BrowserSubsystem, 'status'>,
+  stream: BrowserStreamOpener,
+  guard: FerretBrowserGuard,
+): SocketAccept {
   return async call => {
     const id = sessionIdOf(call);
-    await browser.status(id).catch(browserFailure);
-    return async downstream => await stream(id, downstream);
+    const status = await browser.status(id).catch(browserFailure);
+    const mayType = viewerMayType(call);
+    const ferret = ferretOf(call);
+    // A person's viewer — the owner's own, a paired device's — always opens. A ferret's opens only on a page that is its
+    // own, nobody holds and the rule (one function, the page tools') allows; anything else is refused BEFORE the socket
+    // opens. It is asked again before every frame, so a takeover while it is open ends it.
+    if (ferret === undefined) return async downstream => await stream(id, downstream, mayType);
+    const viewed = status.state === 'running' && 'activePageId' in status ? status.activePageId : undefined;
+    await guard.check(ferret, id, viewed);
+    if (viewed === undefined) throw new ApiError(409, 'this browser has no page open to watch', 'not_running');
+    const admit = async (pageId: string): Promise<boolean> =>
+      await guard.check(ferret, id, pageId).then(
+        () => true,
+        () => false,
+      );
+    return async downstream => await stream(id, downstream, mayType, admit);
   };
 }

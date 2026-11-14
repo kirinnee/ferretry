@@ -99,3 +99,26 @@ describe('reading a verb’s words', () => {
     should(() => read('app', '#go', '--double=yes')).throw('--double is a switch and takes no value');
   });
 });
+
+describe('a targeting flag written under several names: the one nearest the end wins', () => {
+  const FERRET: VerbShape = { args: [], flags: { ferret: flag.text('ferret', 'session', 's') } };
+  const chosen = (...tokens: string[]): string | undefined =>
+    parseVerb('browser status', FERRET, parseArgs(tokens)).text('ferret');
+
+  it('should pick the last one written when a long name is repeated after a short one', () => {
+    should(chosen('--session', 'outer', '-s', 'middle', '--session', 'inner')).equal('inner');
+  });
+
+  it('should pick the last one written whichever names it uses', () => {
+    should(chosen('-s', 'a', '--session', 'b')).equal('b');
+    should(chosen('--session', 'a', '-s', 'b')).equal('b');
+    should(chosen('--ferret', 'a', '-s', 'b', '--ferret', 'c')).equal('c');
+    should(chosen('-s', 'only')).equal('only');
+  });
+
+  it('should honour the equals spelling in the same order', () => {
+    should(chosen('--session=a', '-s', 'b', '--session=c')).equal('c');
+    should(chosen('--session', 'a', '--ferret=b', '-s', 'c')).equal('c');
+    should(chosen('-s', 'a', '--ferret=b')).equal('b');
+  });
+});

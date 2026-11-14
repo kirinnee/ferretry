@@ -146,5 +146,10 @@ export const SurfaceHandbackSchema = z.strictObject({
   id: z.string().min(1).max(128),
   name: SurfaceNameSchema.optional(),
   at: InstantSchema,
+  /**
+   * The surface itself ended (a page closed): a replay reads EVERY mark on it cleared, the hand-over and open marks
+   * included. A hand-back without it ends only the takeover and the ask, as a person's hand-back always did.
+   */
+  closed: z.literal(true).optional(),
 });
 export type SurfaceHandback = z.infer<typeof SurfaceHandbackSchema>;

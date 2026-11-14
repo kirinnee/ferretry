@@ -66,3 +66,15 @@ describe('parseArgs swallowed words', () => {
     should(parseArgs(['c1', '--force', '--to=done'])).deepEqual({ args: ['c1'], options: { force: true, to: 'done' } });
   });
 });
+
+describe('parseArgs: the order every option was written in', () => {
+  it('should record each written occurrence, whatever its spelling, in order', () => {
+    const parsed = parseArgs(['--session', 'outer', 'x', '-s', 'middle', '--session=inner', '--no-color', '--force']);
+    should(parsed.written).deepEqual(['session', 's', 'session', 'color', 'force']);
+  });
+
+  it('should say nothing when no option name was repeated (the order is then the order of the options)', () => {
+    should(parseArgs(['a', '--', '--b']).written).be.undefined();
+    should(parseArgs(['-s', 'a', '--session', 'b']).written).be.undefined();
+  });
+});

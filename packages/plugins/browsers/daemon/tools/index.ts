@@ -132,8 +132,17 @@ export async function refusing<T>(work: () => Promise<T>): Promise<T> {
 /** The surface control routes and the person's tool route (today's `agent-tools.ts` browser surface routes). */
 export function controlRoutes(tools: BrowserTools) {
   return {
-    'GET /v1/ferrets/:ferretId/surfaces/browser/control': (async call =>
-      jsonResponse(await refusing(async () => await tools.controlView(sessionIdOf(call))))) satisfies RouteHandler,
+    // A person sees every record; a ferret only its own ferret's, and in it only its own pages (others' are left out).
+    'GET /v1/ferrets/:ferretId/surfaces/browser/control': (async call => {
+      const ferret = ferretOf(call);
+      const target = sessionIdOf(call);
+      return jsonResponse(
+        await refusing(
+          async () =>
+            await (ferret === undefined ? tools.controlView(target) : tools.ferretControlView(ferret, target)),
+        ),
+      );
+    }) satisfies RouteHandler,
     'POST /v1/ferrets/:ferretId/surfaces/browser/control': (async call => {
       const request = await parseBody(call.request, SurfaceControlRequestSchema);
       return jsonResponse(
