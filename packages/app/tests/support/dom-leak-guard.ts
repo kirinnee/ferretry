@@ -20,6 +20,9 @@ import { afterEach } from 'bun:test';
  *    Response object"; the MCP launch-renewal files, which build native requests, silently lose their second
  *    token request; and once the native `AbortController` is back, its abort reason is a native
  *    `DOMException`, which is no `instanceof` happy-dom's (passkey-retry's G95 aborted read).
+ *    It also replaces `TransformStream` and `WritableStream`: a native `ReadableStream` piped through the DOM's
+ *    transform throws "The transform's 'readable' property must be a ReadableStream", which failed the Vault's
+ *    reply masking (echo-mask, minted-exchange) for no reason of its own.
  *    The native ones are captured here, before any DOM registers, and put back after every test. No unit
  *    DOM file reaches a network (each hands its component a fake).
  *
@@ -35,6 +38,9 @@ const network = [
   'AbortController',
   'AbortSignal',
   'DOMException',
+  'ReadableStream',
+  'TransformStream',
+  'WritableStream',
 ] as const;
 const natives = network.map(name => [name, Reflect.get(globalThis, name)] as const);
 
