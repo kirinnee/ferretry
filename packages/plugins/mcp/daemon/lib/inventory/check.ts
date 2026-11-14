@@ -25,6 +25,8 @@ import {
 interface TextRedactor {
   redact(text: string): Promise<string>;
 }
+import type { ChildEnvironment } from '@ferretry/kernel/contract';
+import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { expandVariables } from './json-rpc.ts';
 import {
   FERRETRY_TOOLS_SERVER,
@@ -39,7 +41,8 @@ export type McpProbeSpec =
       readonly transport: 'stdio';
       readonly command: string;
       readonly args: readonly string[];
-      readonly env: Readonly<Record<string, string>>;
+      /** Plain values, or a Vault handle when a `${secret:NAME}` is in it: the kernel opens that at exec time, so no value is here. */
+      readonly env: Readonly<Record<string, string>> | ChildEnvironment;
       readonly cwd?: string;
     }
   | {
@@ -83,6 +86,16 @@ export interface McpCheckDeps {
   baseEnvironment(): Readonly<Record<string, string>>;
   /** A held access token for a sign-in subject at an address, renewed first when it is about to expire. */
   bearer(subject: string, url: string): Promise<string | undefined>;
+  /**
+   * The environment of a command whose values name secrets, as one handle for one child (the Vault resolves each
+   * `${secret:NAME}`, the kernel opens it at exec time; use, never read). Absent: a secret reference cannot be
+   * resolved here and the check says so rather than start the command with the literal text.
+   */
+  sealEnvironment?(
+    env: Readonly<Record<string, string>>,
+  ): Promise<
+    { readonly ok: true; readonly env: ChildEnvironment } | { readonly ok: false; readonly unknown: readonly string[] }
+  >;
   readonly redactor: Pick<TextRedactor, 'redact'>;
   now(): number;
 }
@@ -101,6 +114,9 @@ const FAILURE_LEAD: Readonly<Record<McpProbeFailureKind, string>> = {
   unreachable: 'Could not reach it.',
   protocol: 'It answered, but not as an MCP server.',
 };
+
+/** A secret a check's command names that cannot be opened: the sentence names it, never a value. */
+class SecretsNotAvailable extends Error {}
 
 export class McpCheckService {
   constructor(private readonly deps: McpCheckDeps) {}
@@ -128,7 +144,13 @@ export class McpCheckService {
       return finish({ outcome: 'not-approved', message: NOT_RUN[blocked] });
 
     const missing = new Set<string>();
-    const spec = await this.#spec(server, missing);
+    let spec: McpProbeSpec;
+    try {
+      spec = await this.#spec(server, missing);
+    } catch (error) {
+      if (!(error instanceof SecretsNotAvailable)) throw error;
+      return finish({ outcome: 'error', message: clip(error.message) });
+    }
     const deadline = AbortSignal.timeout(MCP_CHECK_TIMEOUT_MS);
     try {
       const answer = await this.deps.probe.probe(spec, deadline);
@@ -155,6 +177,25 @@ export class McpCheckService {
     }
   }
 
+  /**
+   * The command's environment, with every `${secret:NAME}` resolved for that one child by the Vault and never seen here
+   * (use, never read). Plain values go as they are. A secret the Vault does not hold refuses the check, by NAME.
+   */
+  async #sealed(env: Readonly<Record<string, string>>): Promise<Readonly<Record<string, string>> | ChildEnvironment> {
+    const named = Object.values(env).flatMap(value => secretReferencesIn(value));
+    if (named.length === 0) return env;
+    if (this.deps.sealEnvironment === undefined)
+      throw new SecretsNotAvailable(
+        `This server's environment names a secret (${[...new Set(named)].sort().join(', ')}), and a check cannot open secrets on this machine.`,
+      );
+    const sealed = await this.deps.sealEnvironment(env);
+    if (!sealed.ok)
+      throw new SecretsNotAvailable(
+        `Not stored on this machine (or not one this server may use), so the command was not started: ${[...sealed.unknown].sort().join(', ')}. Store each with fy secret set NAME.`,
+      );
+    return sealed.env;
+  }
+
   async #spec(server: ResolvedMcpServer, missing: Set<string>): Promise<McpProbeSpec> {
     const declaration = server.declaration;
     if (declaration === null) throw new Error('unreachable: the tools server is refused before this');
@@ -166,11 +207,12 @@ export class McpCheckService {
       const env = Object.fromEntries(
         Object.entries(declaration.env).map(([name, value]) => [name, expandVariables(value, environment, missing)]),
       );
+      const full = { ...base, ...launch, ...env };
       return {
         transport: 'stdio',
         command: expandVariables(declaration.command, environment, missing),
         args: declaration.args.map(argument => expandVariables(argument, environment, missing)),
-        env: { ...base, ...launch, ...env },
+        env: await this.#sealed(full),
         ...(server.cwd === undefined ? {} : { cwd: server.cwd }),
       };
     }

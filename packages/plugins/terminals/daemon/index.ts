@@ -84,6 +84,8 @@ import {
 } from './adapters/tmux/tmux-release-checks.ts';
 import { SurfaceControl } from './lib/agent-tools/control.ts';
 import {
+  AGENT_TOOL_STATUS,
+  AgentToolError,
   type AgentToolResult,
   INPUT_SINGLE_FIELD_ID,
   type TerminalToolCall,
@@ -487,7 +489,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
         const result = await tools.call(caller, parsed);
         return { text: renderToolResult(result), data: JSON.parse(JSON.stringify(result)) };
       } catch (error) {
-        if (error instanceof Error && error.name === 'AgentToolError') return { text: error.message, isError: true };
+        if (error instanceof AgentToolError) return { text: error.message, isError: true };
         throw error;
       }
     };
@@ -648,8 +650,15 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
           ...(decision.outcome === 'attributed' ? { openedBy: decision.openedBy } : {}),
         };
         // The same answer a ferret's MCP call gets: the rendered text, and the report as `data` (`matched` included).
-        const result = await tools.call(caller, parsed);
-        return jsonResponse({ text: renderToolResult(result), data: JSON.parse(JSON.stringify(result)) });
+        try {
+          const result = await tools.call(caller, parsed);
+          return jsonResponse({ text: renderToolResult(result), data: JSON.parse(JSON.stringify(result)) });
+        } catch (error) {
+          // A refusal, in the error's own sentence and at v4's status for its code — never a 500.
+          if (error instanceof AgentToolError)
+            throw new ApiError(AGENT_TOOL_STATUS[error.code], error.message, error.code);
+          throw error;
+        }
       },
     },
     sockets: { 'GET /v1/ferrets/:ferretId/terminals/:terminalId/stream': terminalStreamAccept(subsystem) },

@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import { type McpInventoryServer, mcpProjectSubject } from '../../../contract/index.ts';
 import should from 'should';
 import {
+  type McpCheckDeps,
   McpCheckService,
   type McpProbe,
   type McpProbeAnswer,
@@ -27,7 +28,11 @@ class FakeProbe implements McpProbe {
   }
 }
 
-function checker(probe: FakeProbe, launch: Record<string, string> = {}) {
+function checker(
+  probe: FakeProbe,
+  launch: Record<string, string> = {},
+  sealEnvironment?: McpCheckDeps['sealEnvironment'],
+) {
   const inventory = new McpInventoryService(inventoryWorld().deps);
   const bearers: string[] = [];
   let at = 1_000;
@@ -36,6 +41,7 @@ function checker(probe: FakeProbe, launch: Record<string, string> = {}) {
     probe,
     launchEnvironment: async runtime => (runtime === 'claude-work' ? launch : {}),
     baseEnvironment: () => ({ PATH: '/usr/bin', HOME: '/home/me' }),
+    ...(sealEnvironment === undefined ? {} : { sealEnvironment }),
     bearer: async subject => {
       bearers.push(subject);
       return subject === mcpProjectSubject('docs', PROJECT_KEY) ? TOKEN : undefined;
@@ -115,6 +121,57 @@ describe('McpCheckService', () => {
       env: { PATH: '/usr/bin', HOME: '/fy/home', EXTRA: 'from-launch' },
     });
     should(JSON.stringify(result)).not.containEql('sk-live');
+  });
+
+  it('should hand a command its secrets as one sealed environment and never see a value, as the launch does', async () => {
+    // Arrange — the launch names a secret; the Vault (faked) seals the whole environment for the one child.
+    const sealedHandle = { names: ['PATH', 'HOME', 'API_KEY'] } as never;
+    const sealed: Record<string, string>[] = [];
+    const probe = new FakeProbe({ tools: [] });
+    const { inventory, service } = checker(probe, { API_KEY: '\${secret:WORK_KEY}' }, async env => {
+      sealed.push({ ...env });
+      return { ok: true, env: sealedHandle };
+    });
+
+    // Act
+    const result = await service.check(await idOf(inventory, 'scratch', 'user'), 's1');
+
+    // Assert — the reference went to the Vault as text, and the probe got the handle, not a map.
+    should(result.outcome).equal('connected');
+    should(sealed[0]?.API_KEY).equal('\${secret:WORK_KEY}');
+    const spec = probe.specs[0];
+    should(spec?.transport === 'stdio' && spec.env === sealedHandle).be.true();
+  });
+
+  it('should not start a command whose secret is not stored, and name the secret', async () => {
+    // Arrange
+    const probe = new FakeProbe({ tools: [] });
+    const { inventory, service } = checker(probe, { API_KEY: '\${secret:WORK_KEY}' }, async () => ({
+      ok: false,
+      unknown: ['WORK_KEY'],
+    }));
+
+    // Act
+    const result = await service.check(await idOf(inventory, 'scratch', 'user'), 's1');
+
+    // Assert
+    should(result.outcome).equal('error');
+    should(result.message).containEql('WORK_KEY');
+    should(probe.specs).deepEqual([]);
+  });
+
+  it('should say so, and start nothing, when a secret is named and this machine cannot open secrets', async () => {
+    // Arrange
+    const probe = new FakeProbe({ tools: [] });
+    const { inventory, service } = checker(probe, { API_KEY: '\${secret:WORK_KEY}' });
+
+    // Act
+    const result = await service.check(await idOf(inventory, 'scratch', 'user'), 's1');
+
+    // Assert
+    should(result.outcome).equal('error');
+    should(result.message).containEql('WORK_KEY');
+    should(probe.specs).deepEqual([]);
   });
 
   it('should read a 401 as needing a sign-in', async () => {

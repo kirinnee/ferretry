@@ -36,7 +36,7 @@ const WAIT_TAIL_LINES = 40;
 /** The one field a single-value terminal card has (today's `INPUT_SINGLE_FIELD_ID`). */
 const INPUT_SINGLE_FIELD_ID = 'value';
 
-class AgentToolError extends Error {
+export class AgentToolError extends Error {
   constructor(
     readonly code:
       | 'bad_request'
@@ -484,3 +484,15 @@ function translate(error: unknown): AgentToolError | undefined {
 }
 
 export { INPUT_SINGLE_FIELD_ID };
+
+/** The HTTP status of each refusal on a person's route (v4 `mounts/agent-tools.ts` `STATUS`): a takeover is a 409, the call was fine and the surface busy. */
+export const AGENT_TOOL_STATUS: Readonly<Record<AgentToolError['code'], number>> = {
+  bad_request: 400,
+  not_found: 404,
+  conflict: 409,
+  forbidden: 403,
+  taken_over: 409,
+  capacity: 409,
+  unavailable: 503,
+  upstream_failed: 502,
+};

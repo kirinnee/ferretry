@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from 'bun:test';
 import { type AgentControlKind, type AgentControlReader, agentControlRefusal } from '@ferretry/kernel/contract';
 import should from 'should';
-import { FERRET, type Half, terminalsHalf } from '../../support/daemon/half.ts';
+import { ALL_ON, FERRET, type Half, terminalsHalf } from '../../support/daemon/half.ts';
 
 /**
  * "What agents may control › Terminals" at the Terminals agent-tool boundary, read from core's `AgentControlPort`.
@@ -136,5 +136,34 @@ describe('the Terminals switch ("What agents may control › Terminals", AgentCo
     // Assert
     should(listed.status).equal(200);
     should(owner.asked).eql([]);
+  });
+});
+
+/**
+ * Triage row 19 (v4 parity): a person's terminal-tools route answers an `AgentToolError` as a refusal — the error's
+ * sentence at the status v4's table gave its code — never as a 500 (v4 mounts/agent-tools.ts `STATUS`).
+ */
+describe('a person’s terminal tools route, refused', () => {
+  let half: Half | undefined;
+  afterEach(async () => {
+    await half?.host.stop();
+    half = undefined;
+  });
+
+  it('should answer a terminal that is not there with 404, its sentence and its code, as v4 did', async () => {
+    // Arrange
+    half = await terminalsHalf({}, undefined, { agentControl: ALL_ON });
+    half.as('owner');
+
+    // Act
+    const refused = await half.host.request('POST', `/v1/ferrets/${FERRET}/surfaces/terminals/tools`, {
+      body: { tool: 'terminal.read', name: 'nope' },
+    });
+
+    // Assert
+    should(refused.status).equal(404);
+    const body = JSON.parse(refused.body) as { error?: string; message?: string; code?: string };
+    should(JSON.stringify(body)).containEql('nope');
+    should(body.code ?? (body as { error?: { code?: string } }).error?.code).equal('not_found');
   });
 });

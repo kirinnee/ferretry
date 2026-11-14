@@ -13,7 +13,7 @@ import { StateMcpOAuthStateStore } from './adapters/oauth-state-store.ts';
 import { TransportMcpProbe } from './adapters/probe.ts';
 import { type FerretRoot, RootMcpProjectFiles } from './adapters/project-files.ts';
 import { PROJECT_MCP_FILE, projectRootMcpFile } from './adapters/project-root-files.ts';
-import { McpCheckService } from './lib/inventory/check.ts';
+import { McpCheckService, mcpCheckBaseEnvironment } from './lib/inventory/check.ts';
 import {
   KnownAndFerretFolders,
   type McpInventoryFolder,
@@ -72,6 +72,12 @@ const NOT_YET = (what: string): never => {
  *   ferret), and its launches merge `.claude.json` rather than replace it, so a server the person disabled stays
  *   disabled. A Codex launch is handed no project server and renews none (`not-taken`, as today), answered by MCP
  *   whatever Codex's daemon half says.
+ * - A CHECK (`fy mcp check`): the command is started with the kernel's own small base (`PATH`, `HOME`) and every `${secret:NAME}`
+ *   in its environment resolved for that one child through `vault.childEnvironment` (use, never read; a secret not held
+ *   refuses by NAME). GAPS (declared): (1) a HELD sign-in token is not presented to a remote server, because the Vault
+ *   has no value getter and `authorizeFetch` cannot carry a session or an event stream, so a signed-in remote server
+ *   still reads as needing a sign-in; it needs a Vault operation that places a named secret on a streamed request.
+ *   (2) a runtime profile's own environment is published by no Runtimes read model, so it is not filled into a check.
  * - GAP (declared): the narrowing of the `imports` grant to `<known root>/.mcp.json` is enforced by MCP's adapter
  *   (`adapters/project-root-files.ts`), not by the kernel, which would hand MCP's `imports` root any folder outside
  *   the fence. Closing it needs a kernel root scoped to one file.
@@ -214,8 +220,22 @@ export default implementDaemon(manifest, {
     const check = new McpCheckService({
       inventory,
       probe: new TransportMcpProbe(kernel),
+      // GAP (declared above): a runtime's profile environment is published by no read model, so its variables are not
+      // filled into a check; a `${secret:NAME}` in the SERVER's own env is (`sealEnvironment`).
       launchEnvironment: async () => ({}),
-      baseEnvironment: () => ({}),
+      // The same small base the kernel hands every child (`PATH`, `HOME`), so a command is found and `${PATH}` fills.
+      baseEnvironment: () => {
+        const searchPath = kernel.hostFacts.launchGuard().searchPath;
+        return mcpCheckBaseEnvironment({
+          ...(searchPath === undefined ? {} : { PATH: searchPath }),
+          HOME: kernel.paths.home(),
+        });
+      },
+      sealEnvironment: async env => {
+        // The Vault ignores the ferret for a handle; a check has none, so it is minted under the plugin's own name.
+        const sealed = await vault.childEnvironment('mcp-check' as FerretId, env);
+        return sealed.ok ? { ok: true, env: sealed.value } : { ok: false, unknown: sealed.error.unknown };
+      },
       bearer: async () => undefined,
       redactor: { redact: async text => await kernel.redaction.read(scope => scope.text(text)) },
       now: () => kernel.clock.nowMs(),
