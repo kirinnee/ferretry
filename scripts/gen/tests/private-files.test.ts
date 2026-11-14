@@ -172,6 +172,7 @@ const SWEEP: readonly Entry[] = [
   ['kernel', 'identity.json', false],
   ['vault', 'vault.key', false],
   ['vault', 'vault.json', false],
+  ['vault', 'mints.json', false],
   ['gate', 'admin-token', false],
   ['gate', 'warden-token', false],
   ['ferrets', 'tokens.json', false],
