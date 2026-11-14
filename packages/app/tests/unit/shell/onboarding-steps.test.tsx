@@ -37,7 +37,7 @@ async function until(done: () => boolean, turns = 300): Promise<void> {
   }
 }
 
-/** The steps the daemon lists: exactly the ones the five plugins declare in their manifests. */
+/** The steps the daemon lists: exactly the ones the booted plugins declare in their manifests. */
 const declaredSteps = real.flatMap(entry =>
   (entry.manifest.onboarding ?? []).map(step => ({
     plugin: entry.id,
@@ -155,7 +155,7 @@ describe('S14 the steps come from the plugins', () => {
     // Every declared step has its box, and each box mounts the slot once.
     const boxes = [...view.container.querySelectorAll('[data-step]')].map(node => node.getAttribute('data-step'));
     expect(boxes.toSorted()).toEqual(declaredSteps.map(step => `${step.plugin}.${step.id}`).toSorted());
-    expect(declaredSteps.map(step => step.plugin).toSorted()).toEqual(
+    expect([...new Set(declaredSteps.map(step => step.plugin))].toSorted()).toEqual(
       ['claude-code', 'codex', 'logins', 'runtimes', 'shells'].toSorted(),
     );
     await view.unmount();

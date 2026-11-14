@@ -45,7 +45,9 @@ describe('pluginTerminalDeckDependencies', () => {
     const deps = pluginTerminalDeckDependencies(client, HOST);
 
     expect(await deps.list(DAEMON, scope)).toEqual(WREN_LISTING);
-    expect(calls).toEqual([{ route: 'GET /v1/ferrets/:ferretId/terminals', init: { params: { ferretId: 'wren' } } }]);
+    expect(calls).toEqual([
+      { route: 'GET /v1/ferrets/:ferretId/terminals', init: { params: { ferretId: 'wren' }, quiet: true } },
+    ]);
   });
 
   it('renames and closes one terminal by its parsed id', async () => {

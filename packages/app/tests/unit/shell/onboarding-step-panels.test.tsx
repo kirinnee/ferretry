@@ -22,36 +22,44 @@ describe('S14 forSubject', () => {
   });
 });
 
-/** The plugins that declare a first-run step: each must contribute exactly one panel to the slot, for its own steps. */
+/** The plugins that declare a first-run step: each must contribute a panel to the slot for every step it declares. */
 const contributors = generated.surfaces.filter(entry => (entry.manifest.onboarding ?? []).length > 0);
 
-describe('S14 every plugin that declares a first-run step contributes its panel', () => {
-  test('S14 the contributors are the five that declare a per-machine step', () => {
+describe('S14 every plugin that declares a first-run step contributes its panels', () => {
+  test('S14 the contributors are the eight that declare a per-machine step', () => {
     expect(contributors.map(entry => entry.id).toSorted()).toEqual(
-      ['claude-code', 'codex', 'logins', 'runtimes', 'shells'].toSorted(),
+      ['claude-code', 'codex', 'lessons', 'logins', 'runtimes', 'shells', 'voice', 'warden'].toSorted(),
     );
   });
 
   for (const entry of contributors) {
-    test(`S14 ${entry.id} offers one panel in onboarding.step and it is silent for other steps`, () => {
+    test(`S14 ${entry.id} offers one panel per declared step in onboarding.step and each is silent for other steps`, () => {
       const placed = (entry.manifest.ui?.panels ?? []).filter(panel => panel.slot === 'onboarding.step');
-      expect(placed).toHaveLength(1);
+      // One panel for each step the plugin declares: a plugin with two steps places two panels, one apiece.
+      expect(placed).toHaveLength((entry.manifest.onboarding ?? []).length);
       const built = entry.app?.build?.({ manifest: entry.manifest, client: { call: async () => ({}) } as never });
-      const panel = (built?.panels as Record<string, AppComponent<PanelProps>> | undefined)?.[placed[0]?.id ?? ''];
-      expect(panel).toBeDefined();
-      // Another plugin's step, or none: nothing is drawn, and nothing is loaded or thrown (a lazy view would throw).
-      expect(panel?.({ subject: 'nobody.nothing' })).toBeNull();
-      expect(panel?.({})).toBeNull();
-      // Its own step: it draws (or, for a lazily loaded view, suspends by throwing the loading promise).
+      const panels = placed.map(
+        item => (built?.panels as Record<string, AppComponent<PanelProps>> | undefined)?.[item.id],
+      );
+      for (const panel of panels) {
+        expect(panel).toBeDefined();
+        // Another plugin's step, or none: nothing is drawn, and nothing is loaded or thrown (a lazy view would throw).
+        expect(panel?.({ subject: 'nobody.nothing' })).toBeNull();
+        expect(panel?.({})).toBeNull();
+      }
+      // Each declared step draws in exactly one of the plugin's panels (or, for a lazily loaded view, suspends by
+      // throwing the loading promise): never in none, never in two.
       for (const step of entry.manifest.onboarding ?? []) {
-        let result: unknown;
-        try {
-          result = panel?.({ subject: `${entry.id}.${step.id}` });
-        } catch (thrown) {
-          result = thrown;
-        }
-        expect(result).not.toBeNull();
-        expect(result).not.toBeUndefined();
+        const drew = panels.filter(panel => {
+          let result: unknown;
+          try {
+            result = panel?.({ subject: `${entry.id}.${step.id}` });
+          } catch (thrown) {
+            result = thrown;
+          }
+          return result !== null && result !== undefined;
+        });
+        expect(drew).toHaveLength(1);
       }
     });
   }

@@ -89,7 +89,7 @@ describe('useSessionBrowser', () => {
     });
 
     // Assert
-    expect(calls[0]).toEqual({ route: STATUS, init: { params: { ferretId: 'sess-1' } } });
+    expect(calls[0]).toEqual({ route: STATUS, init: { params: { ferretId: 'sess-1' }, quiet: true } });
     expect(calls.length).toBeGreaterThan(1);
     expect(first?.pages[0]?.name).toBe('app');
     expect(seen.current.status).toBe(first);
