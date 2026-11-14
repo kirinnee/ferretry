@@ -1,5 +1,6 @@
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
+import { selectedComponents } from '@ferretry/plugin-runtimes/contract';
 import manifest from '../manifest.ts';
 import {
   CODEX_CONFIG,
@@ -173,6 +174,7 @@ export default implementDaemon(manifest, {
         },
         'harnesses:codex': codexHarness({
           kernel,
+          selected: async runtime => await selectedComponents(ctx.uses.runtimes.current(), runtime),
           locate,
           probe,
           permissionMode: () => paths().permissionMode,

@@ -6,6 +6,7 @@ import should from 'should';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { realClock } from '../support/ports.ts';
 import { tomlString, tomlTables } from '../../daemon/lib/index.ts';
+import { selectEverything } from '../support/selected.ts';
 
 const FERRET = 'f1' as FerretId;
 const HOME = '/state/codex/agent-homes/f1' as FencedPath;
@@ -61,6 +62,7 @@ function fakeRunner() {
 const harnessOver = (location: Awaited<ReturnType<NonNullable<Parameters<typeof codexHarness>[0]['locate']>>>) => {
   const { written, privateDirectories, roots } = fakeRoots();
   const harness = codexHarness({
+    selected: selectEverything,
     kernel: {
       roots,
       state: { write: async () => undefined } as never,

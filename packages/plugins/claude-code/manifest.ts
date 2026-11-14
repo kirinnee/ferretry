@@ -19,6 +19,7 @@ import {
   PROFILE_COMPONENTS_KEY,
   ProfileClaudeHooksSource,
   ProfileClaudeSettingsSource,
+  RuntimesPort,
 } from '@ferretry/plugin-runtimes/contract';
 
 /**
@@ -39,6 +40,9 @@ export default definePlugin({
 
   // The prompt read below is Ferrets' own (`FerretsApi.prompt`): the pane's recorded permission request and dialog, masked.
   needs: { ferrets: FerretsPort },
+  // Which settings and hooks components a runtime's profile selects (`RuntimesApi.layers`), read live and late (Runtimes
+  // takes this plugin's component sources, so it cannot be a build edge): only those items reach that runtime's home.
+  uses: { runtimes: RuntimesPort },
   provides: { claudeCode: ClaudeCodePort },
 
   actions: {

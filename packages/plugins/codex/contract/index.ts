@@ -138,6 +138,8 @@ export const CodexLaunchSettingsRecordSchema = z.strictObject({
     'fixed-layer': SectionDigestSchema,
     settings: SectionDigestSchema,
   }),
+  /** The runtime this launch ran as (a name, not a secret): the selection of settings is read for it again. */
+  runtime: z.string().min(1).max(128).optional(),
 });
 export type CodexLaunchSettingsRecord = z.infer<typeof CodexLaunchSettingsRecordSchema>;
 export const CODEX_LAUNCH_SETTINGS = defineState({

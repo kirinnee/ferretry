@@ -11,6 +11,7 @@ import { CODEX_SETTINGS } from '../../contract/index.ts';
 import { realClock } from './ports.ts';
 import { ensureInternalRootBases, rootsPortFor } from '../../../../core/kernel/host/roots.ts';
 import { nodeFs } from '../../../../core/kernel/host/adapters/node-fs.ts';
+import { selectEverything, selectSettings } from './selected.ts';
 
 /** ONE body, registered by two tiers: `lib/settings.ts` (unit ledger) and the harness adapter (integration ledger). */
 export function harnessHomeCases(): void {
@@ -32,7 +33,11 @@ export function harnessHomeCases(): void {
 
   function build(
     items: ReadonlyMap<string, unknown> = new Map(),
-    options: { readonly withoutConfig?: boolean; readonly warned?: string[] } = {},
+    options: {
+      readonly withoutConfig?: boolean;
+      readonly warned?: string[];
+      readonly selected?: Parameters<typeof codexHarness>[0]['selected'];
+    } = {},
   ) {
     const roots = rootsPortFor(
       nodeFs(() => crypto.randomUUID()),
@@ -42,6 +47,7 @@ export function harnessHomeCases(): void {
     );
     const state = new Map<string, unknown>();
     const harness = codexHarness({
+      selected: options.selected ?? selectEverything,
       kernel: {
         roots,
         state: {
@@ -182,6 +188,29 @@ export function harnessHomeCases(): void {
           '',
         ].join('\n'),
       );
+    });
+
+    test('B02 only the settings items the launching runtime’s profile selects reach its home; the rest stay out', async () => {
+      const items = new Map<string, unknown>([
+        ['guard', { settings: { model: 'gpt-5' } }],
+        ['other', { settings: { shell_environment_policy: { set: { OTHER: '1' } } } }],
+      ]);
+      const home = await build(items).harness.homeFor('f2' as FerretId);
+
+      // The runtime's profile names `settings/guard` only: `other` (another profile's) is not in its home.
+      await build(items, { selected: selectSettings('guard') }).harness.prepareHome({
+        ...spec('f2', home),
+        runtime: 'work',
+      } as LaunchSpec);
+      expect(await readFile(join(home, 'config.toml'), 'utf8')).toBe('model = "gpt-5"\n');
+
+      // A profile that names no settings component gets none, so no config.toml settings at all.
+      await rm(join(home, 'config.toml'), { force: true });
+      await build(items, { selected: selectSettings() }).harness.prepareHome({
+        ...spec('f2', home),
+        runtime: 'bare',
+      } as LaunchSpec);
+      await expect(readFile(join(home, 'config.toml'), 'utf8')).rejects.toThrow();
     });
 
     test('settings items merge in name order (the later wins), beside the MCP servers a launch adds, and a launch server replaces a settings one', async () => {

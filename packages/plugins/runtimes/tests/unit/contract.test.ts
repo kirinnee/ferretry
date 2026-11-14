@@ -240,12 +240,15 @@ describe('runtimes contract', () => {
     expect(runtimeFileLoosens(undefined, file('a'))).toEqual([]);
   });
 
-  test('a removed runtime file is judged by what it was and never thrown on: it loosens nothing, shell or not', () => {
+  test('B01 a removed runtime file is judged by what it was and never thrown on: it is held (the budget is unseen), shell or not', () => {
     const file = (login: string, shell?: string) =>
       RuntimeFileSchema.parse({ login, profile: 'p', ...(shell ? { shell } : {}) });
     expect(() => runtimeFileLoosens(file('work'), undefined)).not.toThrow();
-    expect(runtimeFileLoosens(file('work'), undefined)).toEqual([]);
-    expect(runtimeFileLoosens(file('work', 'dev'), undefined)).toEqual([]);
+    // fails closed like a re-point: the file cannot see Logins' budgets, so every removal is held, as v4 held one off a budgeted login
+    expect(runtimeFileLoosens(file('work'), undefined)).toEqual([
+      'a runtime is removed from login "work", which may leave a budget that counts and stops it',
+    ]);
+    expect(runtimeFileLoosens(file('work', 'dev'), undefined)).toHaveLength(1);
     expect(runtimeFileLoosens(undefined, undefined)).toEqual([]);
     // the same function still holds what it held: a re-point and a shell newly entered
     expect(runtimeFileLoosens(file('work'), file('play'))).toHaveLength(1);

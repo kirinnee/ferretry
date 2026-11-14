@@ -409,19 +409,24 @@ describe('R2 layers and profiles', () => {
       profiles: {
         top: { contents: ['mcp/own', 'profile/mid', 'skills/last'] },
         mid: { contents: ['mcp/shared', 'profile/base', 'skills/mid'] },
-        base: { contents: ['mcp/base', 'mcp/shared', 'skills/base', 'instructions/ignored'] },
+        base: {
+          contents: ['mcp/base', 'mcp/shared', 'skills/base', 'instructions/ignored', 'settings/strict', 'hooks/audit'],
+        },
       },
     });
 
     // Act
     const layers = await runtimes.layers(runtime('work'));
 
-    // Assert — oldest first; `mcp/shared` appears once (its newest position, from `mid`).
+    // Assert — oldest first; `mcp/shared` appears once (its newest position, from `mid`). B02: the settings and hooks the
+    // stack names are answered too, so a harness applies only those to this runtime's home.
     should(layers).deepEqual({
       runtime: 'work',
       profile: 'top',
       mcp: ['own', 'base', 'shared'],
       skills: ['base', 'mid', 'last'],
+      settings: ['strict'],
+      hooks: ['audit'],
     });
   });
 

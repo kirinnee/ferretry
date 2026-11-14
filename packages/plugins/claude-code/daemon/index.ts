@@ -1,5 +1,6 @@
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
+import { selectedComponents } from '@ferretry/plugin-runtimes/contract';
 import { milliseconds } from '@ferretry/std';
 import {
   CLAUDE_CODE_CONFIG,
@@ -52,7 +53,7 @@ const discoveryOf = (view: HarnessCliView, checkedAt: Discovery['checkedAt']): D
  * (`agent-homes`, scoped to that ferret), so MCP holds no root over a harness home.
  */
 export default implementDaemon(manifest, {
-  build: ({ kernel, needs }) => {
+  build: ({ kernel, needs, uses }) => {
     const host = hostFacts(kernel.spawn);
     const location = locationSource(kernel.spawn, () => kernel.config.file(configFile), host);
     const inner = new HarnessUpdateService({
@@ -99,6 +100,7 @@ export default implementDaemon(manifest, {
     const dialog = new DialogAnswerService(pane, sleep);
 
     const harness = new ClaudeHarness({
+      selected: async runtime => await selectedComponents(uses.runtimes.current(), runtime),
       roots: kernel.roots,
       config: kernel.config,
       state: kernel.state,

@@ -39,9 +39,11 @@ function fingerprint(value: unknown): string {
 export function codexLaunchSettingsRecord(
   permissionMode: HarnessConfig['permissionMode'],
   items: ReadonlyMap<string, SettingsItem>,
+  runtime?: string,
 ): CodexLaunchSettingsRecord {
   return {
     format: 1,
+    ...(runtime === undefined ? {} : { runtime }),
     sections: {
       'permission-mode': fingerprint(permissionMode),
       'fixed-layer': fingerprint(codexFixedArguments(permissionMode, FOLDER_STAND_IN)),
