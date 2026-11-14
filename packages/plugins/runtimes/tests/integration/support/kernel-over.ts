@@ -11,7 +11,6 @@ export const kernelOver = (world: FleetWorld) => {
   const kernel = {
     roots: world.roots,
     paths: { home: () => world.person },
-    identity: { daemonId: 'fy_daemon_test', daemonName: 'test-host', binaries: { client: 'fy', daemon: 'fyd' } },
     clock: {
       nowMs: () => now,
       after: (_duration: unknown, run: () => void) => {
@@ -21,6 +20,11 @@ export const kernelOver = (world: FleetWorld) => {
       },
     },
     log: { warn: (message: string) => warned.push(message) },
+    identity: {
+      daemonId: 'fy_daemon_testid',
+      daemonName: 'work-mac',
+      binaries: { client: 'fy', daemon: 'fyd' },
+    },
     config: {
       writeAll: async () => ({ kind: 'written' as const }),
       collection: () => new Map(),

@@ -147,6 +147,36 @@ describe('S14 the steps screen', () => {
     await drawn.unmount();
   });
 
+  it('closes the setup with what was set up and a Settings link for each step left for later or skipped', async () => {
+    const { client } = clientOf(() => ({
+      steps: [
+        { plugin: 'logins', id: 'login', title: 'Sign in', order: 30, state: 'done' },
+        { plugin: 'voice', id: 'voice', title: 'Voice', order: 40, state: 'later' },
+        { plugin: 'warden', id: 'warden', title: 'Warden', order: 50, state: 'skipped' },
+      ],
+      complete: true,
+      setUp: true,
+    }));
+    noteClientDaemon(client, 'd1');
+    const Steps = createStepsScreen(client);
+    const view = await mount(<Steps params={{}} />);
+    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
+    expect(view.container.querySelector('[data-onboarding-summary-set]')?.textContent).toContain('Sign in');
+    expect(view.container.querySelector('[data-onboarding-later-link="voice.voice"]')?.getAttribute('href')).toBe(
+      '/d/d1/settings/voice',
+    );
+    expect(view.container.querySelector('[data-onboarding-later-link="warden.warden"]')).not.toBeNull();
+  });
+
+  it('shows no closing summary while a step still waits', async () => {
+    const { client } = clientOf(() => VIEW);
+    noteClientDaemon(client, 'd1');
+    const Steps = createStepsScreen(client);
+    const view = await mount(<Steps params={{}} />);
+    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
+    expect(view.container.querySelector('[data-onboarding-summary]')).toBeNull();
+  });
+
   it('says so when a machine has nothing to set up, and still links to the machine', async () => {
     const { client } = clientOf(() => ({ steps: [], complete: true, setUp: false }));
     noteClientDaemon(client, 'd1');

@@ -796,3 +796,76 @@ export function secretNamed(name: string): boolean {
   if (words.some(word => SECRET_NAME_WORDS.has(word))) return true;
   return words.some((word, index) => SECRET_NAME_PAIRS.has(`${word}_${words[index + 1] ?? ''}`));
 }
+
+/** The shortest word the word cutter can cut anything in (`a://:p@h` holds a password). */
+const MIN_CUT_WORD = 7;
+
+/** What splits a text that does not parse into the words a mask would judge: blanks, a flow list's marks and quotes. */
+const RAW_WORD_BREAK = /[\s,[\]"']+/u;
+
+/**
+ * Whether a text that does not parse holds a word the word cutter would cut, or a value after a secret-named key
+ * (`DB_PASSWORD: v`) that looks like a credential: none of its values can be cut and rebuilt, so such a text is
+ * withheld (`unparsed`) rather than shown raw. A pointer (`apiKey: ${secret:NAME}`) is no credential. Linear.
+ */
+export function rawTextMayHold(text: string): boolean {
+  const words = text.split(RAW_WORD_BREAK).filter(word => word !== '' && word !== '-');
+  return words.some((word, index) => {
+    // No shorter word can be cut: a credential is at least 8 characters, a URL with a password at least 7.
+    if (word.length < MIN_CUT_WORD) return false;
+    const before = words[index - 1];
+    return (
+      shownWord(word, before).hidden ||
+      (before !== undefined && before.endsWith(':') && looksSecretShown(before.slice(0, -1), word))
+    );
+  });
+}
+
+/** A run of white space, kept by a split. */
+const VALUE_BLANK_RUN = /(\s+)/u;
+
+/** The one field that is DECLARED to hold a secret's name, never its value (a `${secret:NAME}` pointer in long form). */
+const SECRET_NAME_FIELD = 'secretName';
+
+/**
+ * One scalar as the read mask judges it: cut under a credential name (its own key, or any key above it — a literal
+ * nested under `ANTHROPIC_AUTH_TOKEN:` is that variable's value), or a word (or command line) the cutter would cut.
+ * The declared name field is the exception to the keys above it only: it names a secret and holds none.
+ */
+function scalarMayHold(text: string, keys: readonly string[], before: string | undefined): boolean {
+  const own = keys.at(-1);
+  const judged = own === SECRET_NAME_FIELD ? [] : keys;
+  if (judged.some(key => looksSecretShown(key, text))) return true;
+  if (shownWord(text, before).hidden) return true;
+  if (!/\s/u.test(text)) return false;
+  return shownWords(text.split(VALUE_BLANK_RUN).filter((_, index) => index % 2 === 0)).some(word => word.hidden);
+}
+
+/**
+ * Whether a PARSED document holds a scalar the read mask would cut: each string or number is judged with the keys above
+ * it (`env.API_KEY: v`), a list's words with the word before them. It reads the structure, not the words around it, so
+ * a key with a mapping under it (`ANTHROPIC_AUTH_TOKEN:` then `secretName: GATEWAY_KEY`) is read as the pointer it is;
+ * and a literal under a credential-named key is a value whatever its spelling or depth — no value is spared for
+ * looking like a secret's name. Linear.
+ */
+export function valueMayHoldCredential(value: unknown): boolean {
+  const isScalar = (node: unknown): node is string | number | bigint =>
+    typeof node === 'string' || typeof node === 'number' || typeof node === 'bigint';
+  const walk = (node: unknown, keys: readonly string[]): boolean => {
+    if (isScalar(node)) return scalarMayHold(String(node), keys, undefined);
+    if (Array.isArray(node))
+      return node.some((item: unknown, index) =>
+        isScalar(item)
+          ? scalarMayHold(
+              String(item),
+              keys,
+              typeof node[index - 1] === 'string' ? (node[index - 1] as string) : undefined,
+            )
+          : walk(item, keys),
+      );
+    if (node !== null && typeof node === 'object')
+      return Object.entries(node).some(([name, item]) => walk(item, [...keys, name]));
+    return false;
+  };
+  return walk(value, []);
+}

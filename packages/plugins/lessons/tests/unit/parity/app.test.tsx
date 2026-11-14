@@ -29,7 +29,7 @@ describe('the Lessons app half', () => {
   it('S-0311 feature learning is the lessons half: a screen, a ferret toolbar panel and a Settings tab', () => {
     const half = halfOver(fakeLessonsDaemon());
     expect(Object.keys(half.screens)).toEqual(['lessons']);
-    expect(Object.keys(half.panels)).toEqual(['ferret-lessons']);
+    expect(Object.keys(half.panels)).toEqual(['ferret-lessons', 'onboarding-step']);
     expect(Object.keys(half.settings)).toEqual(['lessons']);
   });
 

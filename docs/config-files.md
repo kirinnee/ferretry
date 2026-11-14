@@ -793,8 +793,8 @@ with a degraded banner when a board, the reports or the sweep could not be read.
 Because the files are the settings, moving settings between machines is moving files — minus secrets, which
 no file holds and no route returns.
 
-- **Copy settings from another machine** (Settings › a machine › Machine › Setup, and New machine setup's
-  _Start from_ step) runs in the browser, which holds both pairings. It reads `warden.yaml`, `learning.yaml`
+- **Copy settings from another machine** (Settings › a machine › Runtimes › Export & copy, and New machine setup's
+  _Start from…_ step) runs in the browser, which holds both pairings. It reads `warden.yaml`, `learning.yaml`
   and `voice.yaml` from the source with `GET /v1/config/file`. **A first copy writes each here with
   `PUT /v1/config/file`** against this machine's current etag; **a repeat copy merges them key by key**
   (below). Either way the loosening rule applies exactly as to any other editor: a copied file that loosens (a
@@ -837,7 +837,9 @@ no file holds and no route returns.
     `${secret:NAME}` reference (design §14.4).
 - **Export settings** zips every file `GET /v1/config/status` lists, read one by one, under `config/`. A file
   the daemon refused is **left out and named**: a pasted key is exactly what makes a file invalid, and an
-  invalid file is still on disk as typed.
+  invalid file is still on disk as typed. So is a file the daemon does not show whole (a value in it is hidden
+  or its text is withheld): the zip never carries masked text with a gap in it. (Settings › a machine › Runtimes ›
+  Export & copy.)
 
 ## Agents
 

@@ -134,6 +134,7 @@ describe('the Warden half, bound to the shell', () => {
     expect(Object.keys(half.panels).sort()).toEqual([
       'ask-warden-row',
       'ferret-warden',
+      'onboarding-step',
       'warden-strip',
       'warden-verdicts',
     ]);

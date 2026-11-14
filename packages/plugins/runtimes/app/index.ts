@@ -7,15 +7,23 @@ import { lazyComponent } from './lazy.ts';
 import { MACHINES_SECTION } from './features/fleet/shell/machine-route.ts';
 
 type SettingsView = 'runtimes-settings' | 'profiles-settings' | 'model-sets-settings' | 'agents-settings';
+type StepView = 'setup-transfer' | 'agent-controls-step';
 
 /**
  * A view module (React), loaded on first use. The specifier is a Vite dynamic-import variable (`./views/*.tsx`).
  */
-const loadView = (name: SettingsView | 'runtime-picker' | 'account-picker-panels'): Promise<Record<string, unknown>> =>
-  import(`./views/${name}.tsx`);
+const loadView = (
+  name: SettingsView | StepView | 'runtime-picker' | 'account-picker-panels',
+): Promise<Record<string, unknown>> => import(`./views/${name}.tsx`);
 
 /** A Settings tab: its module exports `create…(client)`, called once the tab is first drawn. */
 const settingsView = (name: SettingsView, factory: string, client: LiveRuntimesClient): AppComponent<SettingsProps> =>
+  lazyComponent<SettingsProps>(async () =>
+    ((await loadView(name))[factory] as (client: LiveRuntimesClient) => AppComponent<SettingsProps>)(client),
+  );
+
+/** A setup view: its module exports `create…(client)`, called once it is first drawn. */
+const stepView = (name: StepView, factory: string, client: LiveRuntimesClient): AppComponent<SettingsProps> =>
   lazyComponent<SettingsProps>(async () =>
     ((await loadView(name))[factory] as (client: LiveRuntimesClient) => AppComponent<SettingsProps>)(client),
   );
@@ -55,6 +63,7 @@ export default provideToShell(
         profiles: settingsView('profiles-settings', 'createProfilesSettings', client),
         'model-sets': settingsView('model-sets-settings', 'createModelSetsSettings', client),
         agents: settingsView('agents-settings', 'createAgentsSettings', client),
+        transfer: stepView('setup-transfer', 'createTransferSettings', client),
       },
       panels: {
         'runtime-picker': pickerView(client),
@@ -64,6 +73,15 @@ export default provideToShell(
         'onboarding-step': forSubject(
           'runtimes.runtimes',
           settingsView('runtimes-settings', 'createRuntimesSettings', client) as AppComponent<PanelProps>,
+        ),
+        // v4's "Start from…" and "Agent controls" steps.
+        'onboarding-start': forSubject(
+          'runtimes.start',
+          stepView('setup-transfer', 'createStartStep', client) as AppComponent<PanelProps>,
+        ),
+        'onboarding-controls': forSubject(
+          'runtimes.controls',
+          stepView('agent-controls-step', 'createAgentControlsStep', client) as AppComponent<PanelProps>,
         ),
       },
     }),

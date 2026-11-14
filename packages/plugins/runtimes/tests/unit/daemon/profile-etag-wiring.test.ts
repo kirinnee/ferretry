@@ -59,9 +59,9 @@ async function realWorld(world: FleetWorld) {
   const kernel = {
     roots: world.roots,
     paths: { home: () => world.person, which: async () => undefined },
-    identity: { daemonName: 'test-host' },
     clock: { nowMs: () => 1_000, after: () => () => undefined },
     log: { warn: () => undefined },
+    identity: { daemonId: 'fy_daemon_testid', daemonName: 'work-mac' },
     config: port,
   } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log' | 'identity'> & {
     config: Pick<KernelPorts['config'], 'writeAll' | 'collection' | 'file' | 'etag'>;

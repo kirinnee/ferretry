@@ -13,6 +13,8 @@ import {
   HIDDEN_VALUE_TEXT,
   looksSecret,
   looksSecretShown,
+  rawTextMayHold,
+  valueMayHoldCredential,
   shownWord,
   shownWords,
 } from '../../src/credential-words/index.ts';
@@ -153,5 +155,30 @@ describe('the name and value tests', () => {
   test('looksSecretShown is never narrower than looksSecret on a secret name', () => {
     expect(looksSecretShown('API_KEY', VALUE)).toBe(true);
     expect(looksSecretShown('API_KEY', '${secret:X}')).toBe(false);
+  });
+});
+
+describe('rawTextMayHold (a text that does not parse, and an export: nothing that may hold a credential is shown)', () => {
+  test('an ALL-UPPERCASE literal under a credential-named key may be a credential', () => {
+    expect(rawTextMayHold('env:\n  API_KEY: FIXTUREKEY\n')).toBe(true);
+  });
+
+  test('a pointer and plain settings may not', () => {
+    expect(rawTextMayHold('env:\n  API_KEY: ${secret:FIXTURE_KEY}\n  LOG_LEVEL: debug\n')).toBe(false);
+  });
+});
+
+describe('valueMayHoldCredential (a parsed document, judged by its values)', () => {
+  test('a nested secretName under a credential-named variable is a name, not a value', () => {
+    expect(valueMayHoldCredential({ env: { ANTHROPIC_AUTH_TOKEN: { secretName: 'GATEWAY_KEY' } } })).toBe(false);
+  });
+
+  test('a literal under a credential-named key is a value, whatever its spelling or nesting', () => {
+    expect(valueMayHoldCredential({ env: { API_KEY: 'FIXTUREKEY' } })).toBe(true);
+    expect(valueMayHoldCredential({ env: { ANTHROPIC_AUTH_TOKEN: { value: 'FIXTUREKEY' } } })).toBe(true);
+  });
+
+  test('a pointer and plain settings are not', () => {
+    expect(valueMayHoldCredential({ env: { API_KEY: '${secret:FIXTURE_KEY}', LOG_LEVEL: 'debug' } })).toBe(false);
   });
 });
