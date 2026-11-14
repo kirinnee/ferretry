@@ -72,6 +72,7 @@ import {
 } from '../lib/terminal-links.ts';
 import {
   type TerminalAttachOptions,
+  type TerminalListOptions,
   type TerminalStream,
   type TerminalStreamHandlers,
   TerminalStreamRefused,
@@ -92,7 +93,7 @@ type XtermModules = {
  * harness renders a deck with a scripted pane instead of opening a real shell.
  */
 export interface TerminalDeckDependencies {
-  list(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<TerminalListView>;
+  list(daemon: DaemonConnection, scope: DaemonSessionScope, options?: TerminalListOptions): Promise<TerminalListView>;
   create(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<TerminalView>;
   rename(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, title: string): Promise<TerminalView>;
   close(daemon: DaemonConnection, scope: DaemonSessionScope, id: string): Promise<unknown>;
@@ -673,26 +674,30 @@ export function SessionTerminalDeck({
   const [revealed, setRevealed] = useState<ReadonlySet<string>>(new Set());
   const [reconnectVersion, setReconnectVersion] = useState(0);
 
-  const refresh = useCallback(async () => {
-    try {
-      const next = await dependencies.list(connection, scope);
-      // A listing about another session is damaged evidence, not an empty one.
-      // Showing it would put another session's shells under this one's tabs.
-      if (next.sessionId !== scope.sessionId) {
-        setError('the daemon answered about a different session');
-        return;
+  // `explicit` is the person pressing Retry: that read is not quiet, so a refused step-up can be answered.
+  const refresh = useCallback(
+    async (explicit = false) => {
+      try {
+        const next = await dependencies.list(connection, scope, explicit ? { explicit: true } : undefined);
+        // A listing about another session is damaged evidence, not an empty one.
+        // Showing it would put another session's shells under this one's tabs.
+        if (next.sessionId !== scope.sessionId) {
+          setError('the daemon answered about a different session');
+          return;
+        }
+        setList(next);
+        setActiveId(current =>
+          current !== null && next.terminals.some(terminal => terminal.id === current)
+            ? current
+            : (next.terminals[0]?.id ?? null),
+        );
+        setError(null);
+      } catch (caught) {
+        setError(failure(caught));
       }
-      setList(next);
-      setActiveId(current =>
-        current !== null && next.terminals.some(terminal => terminal.id === current)
-          ? current
-          : (next.terminals[0]?.id ?? null),
-      );
-      setError(null);
-    } catch (caught) {
-      setError(failure(caught));
-    }
-  }, [connection, dependencies, scope]);
+    },
+    [connection, dependencies, scope],
+  );
 
   useEffect(() => {
     void refresh();
@@ -926,7 +931,7 @@ export function SessionTerminalDeck({
       {error === null ? null : (
         <div className="kt-webterm__error" role="alert">
           <span>{error}</span>
-          <button aria-label="Retry loading terminals" onClick={() => void refresh()} type="button">
+          <button aria-label="Retry loading terminals" onClick={() => void refresh(true)} type="button">
             <RefreshCw aria-hidden="true" size={14} />
           </button>
         </div>

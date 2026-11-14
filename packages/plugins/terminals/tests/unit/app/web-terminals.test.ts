@@ -80,6 +80,17 @@ describe('web terminal transport', () => {
     expect(calls[0]?.init.headers).toBeUndefined();
   });
 
+  it('lists quietly by default, but an explicit read by the person is NOT quiet so the step-up can run', async () => {
+    const quietly = recorder(list);
+    await listSessionTerminals(quietly.client, daemonA, scopeA, { explicit: false });
+    expect(quietly.calls[0]?.init.quiet).toBe(true);
+
+    const pressed = recorder(list);
+    await listSessionTerminals(pressed.client, daemonA, scopeA, { explicit: true });
+    expect(pressed.calls).toEqual([{ route: TERMINAL_ROUTES.list, init: { params: { ferretId: 'shared/session' } } }]);
+    expect(pressed.calls[0]?.init.quiet).toBeUndefined();
+  });
+
   it('calls only routes the manifests declare: its own, bar the stream (a socket) and Vault’s quarantine pair', () => {
     const declared: ReadonlySet<string> = new Set((manifest.actions?.routes ?? []).map(each => each.key));
     const elsewhere: readonly string[] = [

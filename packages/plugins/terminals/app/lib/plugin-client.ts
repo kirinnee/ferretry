@@ -48,7 +48,7 @@ export const pluginTerminalDeckDependencies = (
   client: PluginClient,
   host: TerminalDeckHost,
 ): TerminalDeckDependencies => ({
-  list: (daemon, scope) => listSessionTerminals(client, daemon, scope),
+  list: (daemon, scope, options) => listSessionTerminals(client, daemon, scope, options),
   create: (daemon, scope) => createSessionTerminal(client, daemon, scope),
   rename: (daemon, scope, id, title) => renameSessionTerminal(client, daemon, scope, id, title),
   close: (daemon, scope, id) => closeSessionTerminal(client, daemon, scope, id),

@@ -65,16 +65,29 @@ const parseTerminal = (scope: DaemonSessionScope, body: unknown): TerminalView =
  * resolve to whichever daemon happens to be current.
  */
 
-/** Lists the terminals the paired daemon owns for one of its sessions. */
+/** Why the terminal list is being read: the person asked for it (`explicit`), or the deck did on its own. */
+export interface TerminalListOptions {
+  readonly explicit?: boolean;
+}
+
+/**
+ * Lists the terminals the paired daemon owns for one of its sessions.
+ *
+ * A mount or a poll is not the person acting, so it is quiet (see `PluginClient.call`'s `quiet`): no passkey on every
+ * load. A press on Retry (or any other deliberate read) is `explicit`, so the existing protected step-up runs.
+ */
 export const listSessionTerminals = async (
   client: TerminalCalls,
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
+  options: TerminalListOptions = {},
 ): Promise<TerminalListView> => {
   assertScopeDaemon(daemon, scope);
   const list = TerminalListViewSchema.parse(
-    // Quiet: the deck lists on mount and on a poll, which is not the person acting (see `PluginClient.call`'s `quiet`).
-    await client.call(TERMINAL_ROUTES.list, { params: { ferretId: scope.sessionId }, quiet: true }),
+    await client.call(TERMINAL_ROUTES.list, {
+      params: { ferretId: scope.sessionId },
+      ...(options.explicit === true ? {} : { quiet: true }),
+    }),
   );
   if (list.sessionId !== scope.sessionId) throw mismatch('daemon listed another session');
   return list;

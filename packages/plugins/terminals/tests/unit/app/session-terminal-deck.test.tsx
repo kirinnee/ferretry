@@ -453,6 +453,43 @@ describe('SessionTerminalDeck', () => {
     run(() => page.unmount());
   });
 
+  test('mount and poll reads stay quiet, but a press on Retry after a step-up refusal asks for the step-up and loads the tabs', async () => {
+    const refusal = new DaemonCallError(403, 'grant_step_up_required', 'confirm with your passkey');
+    const asked: boolean[] = [];
+    let stepped = false;
+    const client = {
+      call: (async (route: string, init: { readonly quiet?: boolean } = {}) => {
+        if (route !== 'GET /v1/ferrets/:ferretId/terminals') throw new Error(`unexpected route ${route}`);
+        asked.push(init.quiet === true);
+        // The daemon client refuses a quiet protected read without prompting; a non-quiet one prompts once, then reads.
+        if (!stepped && init.quiet === true) throw refusal;
+        stepped = true;
+        return terminalListing([terminalView(FIRST)]);
+      }) as PluginClient['call'],
+      subscribe: () => () => undefined,
+    } as PluginClient;
+    const deck = pluginTerminalDeckDependencies(client, {
+      ...browserTerminalDeckHost(),
+    });
+    const fake = fakeDeck(async () => terminalListing([]), deck);
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={fake.dependencies} scope={scopeAlpha} />);
+    await settle();
+
+    // Mounting never prompts: the one read was quiet and its refusal is what the person sees.
+    expect(asked).toEqual([true]);
+    expect(json(page)).toContain('Retry loading terminals');
+    expect(json(page)).not.toContain('Terminal F');
+
+    clickNamed(page, 'Retry loading terminals');
+    await settle();
+
+    // The explicit press is not quiet, so the existing step-up ran and the tabs loaded.
+    expect(asked).toEqual([true, false]);
+    expect(json(page)).toContain('1/6 in this session');
+    expect(json(page)).not.toContain('Retry loading terminals');
+    run(() => page.unmount());
+  });
+
   test('words a refused listing as the grant refusal it is, not as a bare HTTP status', async () => {
     const refusal = new DaemonCallError(403, 'grant_not_granted', '');
     const explanation = grantRefusalNotice(refusal)?.guidance.explanation ?? '';
