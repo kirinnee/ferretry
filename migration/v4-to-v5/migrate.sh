@@ -181,22 +181,59 @@ quiet_check() { # $1 socket. 0 quiet for 60 s, 1 still writing after QUIET_TRIES
   return 1
 }
 
-# 0 when a daemon process may be running (proof by process list, never by a marker); 1 when none; exits 2 when ps fails.
-# Only each process's command NAME is read (`comm`), never its arguments, which can carry tokens of unrelated programs.
-# A daemon is recognised by what it IS, not by the exact name `fyd`: Nix's wrapProgram runs the real daemon as
-# `.fyd-wrapped` (and the kernel reports that name, whatever argv0 says), so ANY executable whose name holds `fyd` is a
-# daemon until proven otherwise. The browser worker (`fyd-browser-worker`, also wrapped) is a helper, not a daemon. An
-# unknown name errs on the side of "a daemon is running": that stops a move, it never allows one.
+# 0 when a daemon may be running at ${H}; 1 only when EVERY signal says it is not. Sets DAEMON_WHY to the reason either way.
+# No process name, executable or command line is ever read or matched (a wrapped or source-hosted daemon is not called
+# `fyd`, and a name proves nothing about which home a process owns). The daemon is RUNNING if any of:
+#   (a) ${H}/run/daemon.json exists and names a PID that `kill -0` reaches (also "not permitted": it exists, it is another
+#       user's). A file that cannot be parsed, or names no usable PID, is UNKNOWN, and unknown counts as running;
+#   (b) the socket recorded in that file (or the documented ${H}/run/fyd.sock) accepts a connection, or the loopback
+#       port recorded in it does;
+#   (c) the state cannot be determined for any reason (a tool is missing, an answer is unreadable).
+DAEMON_WHY=""
 daemon_live() {
-  local listing name
-  listing="$(ps -eo comm=)" || unreadable "cannot read the process list (ps failed)"
-  while IFS= read -r name; do
-    name="${name##*/}"
-    case "${name}" in
-    *fyd-browser-worker*) ;;
-    *fyd*) return 0 ;;
-    esac
-  done <<<"${listing}"
+  local run="${H}/run/daemon.json" pid="" sock="" host="" port="" err="" rc=0 fields
+  if [ -e "${run}" ] || [ -L "${run}" ]; then
+    if ! fields="$(jq -r '[(.pid | if type == "number" and . == floor and . > 0 then tostring else "" end),
+        (.socket | if type == "string" then . else "" end),
+        (.host | if type == "string" then . else "" end),
+        (.port | if type == "number" and . == floor and . > 0 and . < 65536 then tostring else "" end)] | join("\t")' "${run}" 2>/dev/null)"; then
+      DAEMON_WHY="${run} exists but cannot be read as a daemon record, so whether a daemon runs is UNKNOWN"
+      return 0
+    fi
+    IFS=$'\t' read -r pid sock host port <<<"${fields}"
+    if ! [[ ${pid} =~ ^[1-9][0-9]*$ ]]; then
+      DAEMON_WHY="${run} names no usable process id, so whether a daemon runs is UNKNOWN"
+      return 0
+    fi
+    err="$(kill -0 "${pid}" 2>&1)" || rc=$?
+    if [ "${rc}" -eq 0 ] || [[ ${err} == *ermitted* ]]; then
+      DAEMON_WHY="the daemon recorded in ${run} is alive (process ${pid})"
+      return 0
+    fi
+  fi
+  local candidate
+  for candidate in "${sock}" "${H}/run/fyd.sock"; do
+    [ -n "${candidate}" ] || continue
+    [ -S "${candidate}" ] || continue
+    rc=0
+    command -v curl >/dev/null 2>&1 || {
+      DAEMON_WHY="a socket exists at ${candidate} and curl is missing to test it, so whether a daemon runs is UNKNOWN"
+      return 0
+    }
+    curl -s -o /dev/null --max-time 3 --unix-socket "${candidate}" http://localhost/ >/dev/null 2>&1 || rc=$?
+    if [ "${rc}" -ne 7 ]; then
+      DAEMON_WHY="the socket ${candidate} answers"
+      return 0
+    fi
+  done
+  if [ -n "${port}" ] && [[ ${host} =~ ^[0-9A-Za-z.:-]*$ ]]; then
+    case "${host}" in "" | 0.0.0.0 | ::) host=127.0.0.1 ;; esac
+    if (exec 3<>"/dev/tcp/${host}/${port}") 2>/dev/null; then
+      DAEMON_WHY="the port ${host}:${port} recorded in ${run} answers"
+      return 0
+    fi
+  fi
+  DAEMON_WHY="no live daemon record, no answering socket, no answering port at ${H}"
   return 1
 }
 
@@ -705,9 +742,9 @@ start)
     echo "❌ 'fy daemon start' exited ${status}" >&2
   fi
   if daemon_live; then
-    echo "❌ a fyd process is still running (it may be a half-started v5 daemon holding ${H}): rollback stops it" >&2
+    echo "❌ a daemon may still be running (${DAEMON_WHY}; it may be a half-started v5 daemon holding ${H}): rollback stops it" >&2
   else
-    say "📝 proven: no fyd process is running, so no v5 daemon owns ${H}"
+    say "📝 proven: no daemon is running (${DAEMON_WHY}), so no v5 daemon owns ${H}"
   fi
   exit 1
   ;;
@@ -865,21 +902,21 @@ rollback)
       # The recorded state says the last daemon this script launched is v5. Only a v5 fy can stop it; without one, nothing is moved.
       ver=""
       if fy_try="$(v5_fy)" && out="$(v5_version "${fy_try}")"; then ver="${out}"; fi # fy absent or silent: not v5, refused below
-      [[ ${ver} =~ ^5\. ]] || fail "a fyd process is running and the notes say it is the v5 daemon, but fy (${ver:-not found}) is not v5, so it cannot be stopped safely here. Nothing was moved: stop that daemon yourself, or bring the v5 programs back, then run rollback again"
-      say "⚙️ a fyd process is running; the notes say it is the v5 daemon: reaching a quiet point, then stopping it (panes keep running)"
+      [[ ${ver} =~ ^5\. ]] || fail "a daemon is running (${DAEMON_WHY}) and the notes say it is the v5 daemon, but fy (${ver:-not found}) is not v5, so it cannot be stopped safely here. Nothing was moved: stop that daemon yourself, or bring the v5 programs back, then run rollback again"
+      say "⚙️ a daemon is running (${DAEMON_WHY}); the notes say it is the v5 daemon: reaching a quiet point, then stopping it (panes keep running)"
       rb_quiet before
-      fy5 daemon stop || fail "'fy daemon stop' failed for the v5 daemon"
+      fy5 daemon stop || fail "'fy daemon stop' failed for the v5 daemon (${DAEMON_WHY}): nothing was moved; stop it yourself, then run rollback again"
       rb_quiet after
-      if daemon_live; then fail "a fyd process is still running after 'fy daemon stop': it cannot be proven that no v5 daemon owns ${H}; tell the owner"; fi
-      say "📝 proven: no fyd process is running"
+      if daemon_live; then fail "a daemon is still running after 'fy daemon stop' (${DAEMON_WHY}): it cannot be proven that no v5 daemon owns ${H}. Nothing was moved: stop it yourself, tell the owner, then run rollback again"; fi
+      say "📝 proven: no daemon is running (${DAEMON_WHY})"
       ;;
     *)
-      say "📝 a fyd process is running, and the notes record no v5 daemon launch after the last v4 start: it is the v4 daemon, left alone"
+      say "📝 a daemon is running (${DAEMON_WHY}), and the notes record no v5 daemon launch after the last v4 start: it is the v4 daemon, left alone"
       rb_quiet before
       ;;
     esac
   else
-    say "📝 proven: no fyd process is running"
+    say "📝 proven: no daemon is running (${DAEMON_WHY})"
     rb_quiet before
   fi
 

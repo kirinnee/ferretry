@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { advance, makeSandbox, SECRET_VALUE, type Sandbox } from './migrate-harness.ts';
+import { advance, DAEMON_UP_SH, makeSandbox, SECRET_VALUE, type Sandbox } from './migrate-harness.ts';
 
 /**
  * Round-1 review of migrate.sh, one named test per finding (P1 #1 to #8, then the P2s that were fixed). Every test here
@@ -38,10 +38,10 @@ const tmuxReads = async (sb: Sandbox): Promise<string[]> =>
   (await sb.calls()).filter(line => line.startsWith('tmux ') && line.includes('list-panes'));
 
 describe('P1-1: rollback proves the panes quiet whatever the daemon state, and never guesses a live daemon is v4', () => {
-  test('P1-1a: NO fyd process but a pane that cannot be proven quiet (tmux fails): exit 2 and the v5 home is NOT moved', async () => {
+  test('P1-1a: NO live daemon but a pane that cannot be proven quiet (tmux fails): exit 2 and the v5 home is NOT moved', async () => {
     const sb = await box();
     await advance(sb, 'start');
-    await sb.state('ps.out', ''); // the daemon crashed; the harness panes still run in tmux
+    await sb.daemonDown(); // the daemon crashed; the harness panes still run in tmux
     await sb.fake('tmux', [{ match: '*', code: 42 }]);
     const result = await sb.run('rollback', ['--owner-yes']);
     expect(result.code).toBe(2);
@@ -51,10 +51,10 @@ describe('P1-1: rollback proves the panes quiet whatever the daemon state, and n
     expect((await tmuxReads(sb)).length).toBeGreaterThan(0);
   });
 
-  test('P1-1a: NO fyd process and quiet panes: the quiet window is still established BEFORE the home moves', async () => {
+  test('P1-1a: NO live daemon and quiet panes: the quiet window is still established BEFORE the home moves', async () => {
     const sb = await box();
     await advance(sb, 'start');
-    await sb.state('ps.out', '');
+    await sb.daemonDown();
     const before = (await tmuxReads(sb)).length;
     const result = await sb.run('rollback', ['--owner-yes']);
     expect(result.code).toBe(0);
@@ -66,7 +66,7 @@ describe('P1-1: rollback proves the panes quiet whatever the daemon state, and n
   test('P1-1b: a live fyd the notes say is v5, while the installed fy is already v4: refused, nothing moved, no stop attempted', async () => {
     const sb = await box();
     await advance(sb, 'start');
-    expect(await sb.readState('ps.out')).toContain('fyd');
+    expect(await exists(join(sb.v4home, 'run', 'daemon.json'))).toBe(true);
     await sb.state('fy.version', '4.291.12\n'); // a partly restored machine: v4 fy on PATH, the v5 process still running
     await sb.state('fyd.version', '4.291.12\n');
     const stopsBefore = (await sb.calls()).filter(line => line === 'fy daemon stop').length;
@@ -87,12 +87,11 @@ describe('P1-1: rollback proves the panes quiet whatever the daemon state, and n
     expect(await exists(failedHome(sb))).toBe(false);
   });
 
-  test('P1-1: the process list is read by command NAME only, never by arguments', async () => {
+  test('P1-1: the process list is never read at all (no name, no executable, no arguments): the daemon is found by its record', async () => {
     const sb = await box();
     await advance(sb, 'start');
     await sb.run('rollback', ['--owner-yes']);
-    expect((await sb.calls()).filter(line => line.startsWith('ps '))).toEqual(expect.arrayContaining(['ps -eo comm=']));
-    expect((await sb.calls()).filter(line => line === 'ps -eo args=')).toEqual([]);
+    expect((await sb.calls()).filter(line => line.startsWith('ps '))).toEqual([]);
   });
 });
 
@@ -155,7 +154,7 @@ describe('P1-3: any config-check error other than the one credential diagnostic 
         err: 'logins/a.yaml KEY X holds a literal credential: use fy secret set NAME\nlimits.yaml: invalid schema',
         code: 1,
       },
-      { match: 'daemon start', run: 'echo /opt/ferretry/fyd > "$D/ps.out"' },
+      { match: 'daemon start', run: DAEMON_UP_SH },
     ]);
     const result = await sb.run('start');
     expect(result.code).toBe(1);

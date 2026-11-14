@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { advance, makeSandbox, type Sandbox } from './migrate-harness.ts';
+import { advance, DAEMON_UP_SH, makeSandbox, type Sandbox } from './migrate-harness.ts';
 
 /**
  * Round-4 review of migrate.sh (the fix1 re-check, findings F1, F2 and F4). Each test here failed on the script as it
@@ -36,26 +36,23 @@ const filesHolding = async (sb: Sandbox, value: string): Promise<string[]> => {
 const stopCalls = async (sb: Sandbox): Promise<number> =>
   (await sb.calls()).filter(line => line === 'fy daemon stop').length;
 
-describe('F1: the daemon is recognised by what it is, not by the exact name "fyd" (Nix runs it as .fyd-wrapped)', () => {
-  test('F1: a live .fyd-wrapped daemon after the v5 start is stopped BEFORE the home moves', async () => {
+describe('F1 (round 4, still holds): a live daemon after the v5 start is stopped BEFORE the home moves', () => {
+  test('F1: a live recorded daemon after the v5 start is stopped BEFORE the home moves', async () => {
     const sb = await box();
     await advance(sb, 'start');
-    await sb.state('ps.out', '/nix/store/abc123-ferretry-5.0.0/bin/.fyd-wrapped\n');
     const before = await stopCalls(sb);
     const result = await sb.run('rollback', ['--owner-yes']);
     expect(result.code).toBe(0);
     expect(await stopCalls(sb)).toBe(before + 1);
-    expect(result.all).not.toContain('proven: no fyd process is running\n📝 quiet before');
     expect(await exists(failedHome(sb))).toBe(true);
   });
 
-  test('F1: a .fyd-wrapped daemon that survives "fy daemon stop" stops the rollback: exit 1, nothing moved', async () => {
+  test('F1: a daemon that survives "fy daemon stop" stops the rollback: exit 1, nothing moved', async () => {
     const sb = await box();
     await advance(sb, 'start');
-    await sb.state('ps.out', '.fyd-wrapped\n');
     await sb.fake('fy', [
       { match: '--version', run: 'cat "$D/fy.version"' },
-      { match: 'daemon stop' }, // reports success but the wrapped daemon keeps running
+      { match: 'daemon stop' }, // reports success but the daemon keeps running
     ]);
     const result = await sb.run('rollback', ['--owner-yes']);
     expect(result.code).toBe(1);
@@ -64,24 +61,25 @@ describe('F1: the daemon is recognised by what it is, not by the exact name "fyd
     expect(await exists(join(sb.v4home, 'home.json'))).toBe(true);
   });
 
-  test('F1: a live .fyd-wrapped daemon is also seen by the failed-start proof (it does not claim "no fyd process")', async () => {
+  test('F1: a daemon live after a failed start is seen by the failed-start proof (it does not claim "no daemon")', async () => {
     const sb = await box();
     await advance(sb, 'install');
     await sb.fake('fy', [
       { match: '--version', run: 'cat "$D/fy.version"' },
       { match: 'config check', out: 'config ok' },
-      { match: 'daemon start', run: 'echo /nix/store/x/bin/.fyd-wrapped > "$D/ps.out"', code: 1 },
+      { match: 'daemon start', run: DAEMON_UP_SH, code: 1 },
     ]);
     const result = await sb.run('start');
     expect(result.code).toBe(1);
-    expect(result.all).not.toContain('proven: no fyd process is running');
-    expect(result.err).toContain('a fyd process is still running');
+    expect(result.all).not.toContain('proven: no daemon is running');
+    expect(result.err).toContain('a daemon may still be running');
   });
 
-  test('F1 control: only the browser worker running (wrapped) is a helper, not a daemon: nothing to stop', async () => {
+  test('F1 control: a process list full of fyd-named processes is NOT a signal (no record, no socket: not running)', async () => {
     const sb = await box();
     await advance(sb, 'start');
-    await sb.state('ps.out', '/nix/store/x/bin/.fyd-browser-worker-wrapped\nfyd-browser-worker\n');
+    await sb.daemonDown();
+    await sb.state('ps.out', '/nix/store/x/bin/.fyd-wrapped\nfyd\n');
     const before = await stopCalls(sb);
     const result = await sb.run('rollback', ['--owner-yes']);
     expect(result.code).toBe(0);
@@ -94,7 +92,7 @@ describe('F2: a missing tmux socket while live panes are expected is UNKNOWN, ne
     const sb = await box();
     await advance(sb, 'start');
     await rm(`${sb.v4home}-before-2026-11-13-1200/tmux.sock`);
-    await sb.state('ps.out', '');
+    await sb.daemonDown();
     const result = await sb.run('rollback', ['--owner-yes']);
     expect(result.code).toBe(2);
     expect(result.err).toContain('UNKNOWN');
@@ -115,7 +113,7 @@ describe('F2: a missing tmux socket while live panes are expected is UNKNOWN, ne
   test('F2 control: no live panes were recorded and no socket exists: the empty-fleet rollback still succeeds', async () => {
     const sb = await box({ panes: false });
     await advance(sb, 'start');
-    await sb.state('ps.out', '');
+    await sb.daemonDown();
     const result = await sb.run('rollback', ['--owner-yes']);
     expect(result.code).toBe(0);
     expect(await exists(failedHome(sb))).toBe(true);

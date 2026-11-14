@@ -1,4 +1,4 @@
-import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -54,6 +54,16 @@ exit 99
 `;
 }
 
+/**
+ * A "running daemon" in a fake home is what the script reads: `run/daemon.json` naming a LIVE process id. These shell
+ * snippets (for a fake `fy daemon start|stop`) start / kill a short-lived `sleep` fixture by PID only.
+ */
+export const DAEMON_UP_SH =
+  'mkdir -p "$FAKE_H/run"; command -p sleep 300 >/dev/null 2>&1 </dev/null & p=$!; echo "$p" >> "$D/fixture.pids"; ' +
+  'printf \'{"format":1,"socket":"%s/run/fyd.sock","host":"127.0.0.1","port":9,"pid":%s,"version":"5.0.0"}\\n\' "$FAKE_H" "$p" > "$FAKE_H/run/daemon.json"';
+export const DAEMON_DOWN_SH =
+  'if [ -f "$D/fixture.pids" ]; then while read -r p; do kill "$p" 2>/dev/null; done < "$D/fixture.pids"; : > "$D/fixture.pids"; fi; rm -f "$FAKE_H/run/daemon.json"';
+
 const BOARD_EMPTY = '{"cards":[],"nextCursor":null}';
 
 export const V4_PS = JSON.stringify([
@@ -93,6 +103,15 @@ export interface Sandbox {
   unscripted(): Promise<string[]>;
   notesText(): Promise<string>;
   cleanup(): Promise<void>;
+  /**
+   * Start a live fixture "daemon" (a short-lived child, killed by PID only) and record it in the home's
+   * `run/daemon.json`. `comm` is the kernel name of the process: `sleep` (default) or `bun`.
+   */
+  daemonUp(options?: { readonly comm?: 'sleep' | 'bun'; readonly home?: string }): Promise<number>;
+  /** Kill every fixture daemon this sandbox started and remove the record. */
+  daemonDown(): Promise<void>;
+  /** Every regular file's mtime and path under a directory, as one string: "nothing changed" is a string comparison. */
+  treeSignature(dir: string): Promise<string>;
   /** Everything under HOME, v4home siblings and the notes folder, as one string (for "no secret anywhere"). */
   everything(): Promise<string>;
 }
@@ -157,6 +176,26 @@ export async function makeSandbox(options: SandboxOptions = {}): Promise<Sandbox
   const listener =
     options.panes === false ? undefined : Bun.listen({ unix: join(v4home, 'tmux.sock'), socket: { data() {} } });
 
+  const fixtures = new Set<number>();
+  const killFixtures = async (): Promise<void> => {
+    for (const pid of fixtures) {
+      try {
+        process.kill(pid);
+      } catch {
+        // already gone
+      }
+    }
+    fixtures.clear();
+    // The fake `fy daemon start` fixtures are listed by the shell; kill those by PID too.
+    for (const line of (await read(join(fakeDir, 'fixture.pids'))).split('\n').filter(Boolean)) {
+      try {
+        process.kill(Number(line));
+      } catch {
+        // already gone
+      }
+    }
+  };
+
   const sandbox: Sandbox = {
     root,
     repo,
@@ -211,7 +250,44 @@ export async function makeSandbox(options: SandboxOptions = {}): Promise<Sandbox
     envLog: async () => (await read(join(fakeDir, 'env.log'))).split('\n').filter(Boolean),
     unscripted: async () => (await read(join(fakeDir, 'unscripted.log'))).split('\n').filter(Boolean),
     notesText: () => read(sandbox.notes),
+    async daemonUp(opts = {}) {
+      const target = opts.home ?? v4home;
+      await mkdir(join(target, 'run'), { recursive: true });
+      const spawnCmd = opts.comm === 'bun' ? "bun -e 'setTimeout(() => {}, 300000)'" : 'command -p sleep 300';
+      const proc = Bun.spawn(['bash', '-c', `${spawnCmd} >/dev/null 2>&1 </dev/null & echo $!`], {
+        stdout: 'pipe',
+        stderr: 'ignore',
+      });
+      const pid = Number((await new Response(proc.stdout).text()).trim());
+      await proc.exited;
+      if (!Number.isInteger(pid) || pid <= 0) throw new Error('fixture daemon did not start');
+      fixtures.add(pid);
+      await appendFile(join(fakeDir, 'fixture.pids'), `${pid}\n`);
+      await writeFile(
+        join(target, 'run', 'daemon.json'),
+        JSON.stringify({
+          format: 1,
+          socket: join(target, 'run', 'fyd.sock'),
+          host: '127.0.0.1',
+          port: 9,
+          pid,
+          version: '5.0.0',
+        }),
+      );
+      return pid;
+    },
+    async daemonDown() {
+      await killFixtures();
+      await rm(join(v4home, 'run', 'daemon.json'), { force: true });
+    },
+    async treeSignature(dir) {
+      const proc = Bun.spawn(['find', dir, '-printf', '%p %T@ %y\\n'], { stdout: 'pipe', stderr: 'ignore' });
+      const text = await new Response(proc.stdout).text();
+      await proc.exited;
+      return text.split('\n').sort().join('\n');
+    },
     async cleanup() {
+      await killFixtures();
       listener?.stop(true);
       await rm(root, { recursive: true, force: true });
     },
@@ -252,8 +328,8 @@ async function installDefaults(sb: Sandbox): Promise<void> {
     { match: 'board --project all --state closed --all --json', run: `cat ${D}/board-closed.json` },
     { match: 'board --project all --state dropped --all --json', run: `cat ${D}/board-dropped.json` },
     { match: 'secret ls --json', out: SECRET_LS },
-    { match: 'daemon stop', run: `: > ${D}/ps.out` },
-    { match: 'daemon start', run: `echo "/opt/ferretry/fyd" > ${D}/ps.out` },
+    { match: 'daemon stop', run: DAEMON_DOWN_SH },
+    { match: 'daemon start', run: DAEMON_UP_SH },
     { match: 'daemon update --major --yes --to *', run: `echo 5.0.0 > ${D}/fy.version; echo 5.0.0 > ${D}/fyd.version` },
     { match: 'config check', out: 'config ok' },
     { match: 'doctor', out: 'doctor clean' },
@@ -326,7 +402,7 @@ export async function writeV5Build(sb: Sandbox): Promise<void> {
     const path = join(sb.v5bin, name);
     await writeFile(
       path,
-      `#!/usr/bin/env bash\nD="\${FAKE_DIR:?}"\nprintf '%s|%s|PATH=%s|FY_URL=%s|FY_HOME=%s|FY_PORT=%s\\n' ${quote(`v5build-${name}`)} "$*" "$PATH" "\${FY_URL-<unset>}" "\${FY_HOME-<unset>}" "\${FY_PORT-<unset>}" >> "$D/env.log"\ncase "$*" in\n  --version) echo 5.0.0-rc.1 ;;\n  --check) echo "a Ferretry home — this daemon would use it" ;;\n  "ps -a --json") cat "$D/ps.v5.json" ;;\n  "daemon start") echo /v5/fyd > "$D/ps.out" ;;\n  "daemon stop") : > "$D/ps.out" ;;\n  *) printf '%s\\n' "$*" >> "$D/v5build.log" ;;\nesac\n`,
+      `#!/usr/bin/env bash\nD="\${FAKE_DIR:?}"\nprintf '%s|%s|PATH=%s|FY_URL=%s|FY_HOME=%s|FY_PORT=%s\\n' ${quote(`v5build-${name}`)} "$*" "$PATH" "\${FY_URL-<unset>}" "\${FY_HOME-<unset>}" "\${FY_PORT-<unset>}" >> "$D/env.log"\ncase "$*" in\n  --version) echo 5.0.0-rc.1 ;;\n  --check) echo "a Ferretry home — this daemon would use it" ;;\n  "ps -a --json") cat "$D/ps.v5.json" ;;\n  "daemon start") ${DAEMON_UP_SH} ;;\n  "daemon stop") ${DAEMON_DOWN_SH} ;;\n  *) printf '%s\\n' "$*" >> "$D/v5build.log" ;;\nesac\n`,
     );
     await chmod(path, 0o755);
   }

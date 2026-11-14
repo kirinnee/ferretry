@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { advance, makeSandbox, type Sandbox, writeV5Build } from './migrate-harness.ts';
+import { advance, DAEMON_DOWN_SH, DAEMON_UP_SH, makeSandbox, type Sandbox, writeV5Build } from './migrate-harness.ts';
 
 setDefaultTimeout(60_000);
 
@@ -81,8 +81,8 @@ describe('start: a failed or interrupted start is not proof that no v5 daemon ra
     await sb.fake('fy', [
       { match: '--version', run: 'cat "$D/fy.version"' },
       { match: 'config check', out: 'ok' },
-      { match: 'daemon start', run: 'echo /opt/ferretry/fyd > "$D/ps.out"', code: 1 },
-      { match: 'daemon stop', run: ': > "$D/ps.out"' },
+      { match: 'daemon start', run: DAEMON_UP_SH, code: 1 },
+      { match: 'daemon stop', run: DAEMON_DOWN_SH },
       { match: 'restart *' },
     ]);
   };
@@ -94,7 +94,7 @@ describe('start: a failed or interrupted start is not proof that no v5 daemon ra
     expect(result.code).toBe(1);
     expect(await sb.notesText()).toContain('# starting-v5');
     expect(await sb.notesText()).not.toContain('# started-v5');
-    expect(result.err).toContain('fyd process is still running');
+    expect(result.err).toContain('daemon may still be running');
   });
 
   test('a failed start with NO fyd process proves "no v5 daemon owns H" from the process list', async () => {
@@ -107,18 +107,18 @@ describe('start: a failed or interrupted start is not proof that no v5 daemon ra
     ]);
     const result = await sb.run('start');
     expect(result.code).toBe(1);
-    expect(result.out).toContain('proven: no fyd process is running');
+    expect(result.out).toContain('proven: no daemon is running');
   });
 
   test('R2.4: rollback after a failed start + a live fake fyd STOPS it before moving the home', async () => {
     const sb = await box();
     await failingStart(sb);
     expect((await sb.run('start')).code).toBe(1);
-    expect(await sb.readState('ps.out')).toContain('fyd');
+    expect(await exists(join(sb.v4home, 'run', 'daemon.json'))).toBe(true);
     await sb.fake('fy', [
       { match: '--version', run: 'cat "$D/fy.version"' },
-      { match: 'daemon stop', run: ': > "$D/ps.out"' },
-      { match: 'daemon start', run: 'echo /opt/ferretry/fyd > "$D/ps.out"' },
+      { match: 'daemon stop', run: DAEMON_DOWN_SH },
+      { match: 'daemon start', run: DAEMON_UP_SH },
     ]);
     const result = await sb.run('rollback', ['--owner-yes']);
     expect(result.code).toBe(0);
@@ -149,7 +149,7 @@ describe('start: a failed or interrupted start is not proof that no v5 daemon ra
     await sb.fake('fy', [
       { match: '--version', run: 'cat "$D/fy.version"' },
       { match: 'config check', err: 'logins/a.yaml KEY X holds a literal credential: use fy secret set NAME', code: 1 },
-      { match: 'daemon start', run: 'echo /opt/ferretry/fyd > "$D/ps.out"' },
+      { match: 'daemon start', run: DAEMON_UP_SH },
       { match: 'ps -a --json', run: 'cat "$D/ps.v5.json"' },
     ]);
     const result = await sb.run('start');
@@ -347,7 +347,7 @@ describe('rollback: by recorded state', () => {
   test('a live fyd when the notes record NO v5 launch is the v4 daemon: left alone, after the quiet check', async () => {
     const sb = await box();
     await advance(sb, 'backup');
-    await sb.state('ps.out', '/opt/ferretry/fyd\n');
+    await sb.daemonUp();
     const result = await sb.run('rollback', ['--owner-yes']);
     expect(result.code).toBe(0);
     expect(result.out).toContain('it is the v4 daemon, left alone');
