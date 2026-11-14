@@ -56,6 +56,19 @@ describe('structured values: the shared secret rules apply to a parsed document'
     expect(rawSecretPaths({ env: { [FAKE_SK]: true } })).toEqual(['env.<key>']);
   });
 
+  // Known provider shapes `pathSegment` does not recognise as keys (no digit, or a prefix its list omits): the scanner
+  // detects them, so the path must say `<key>` and never descend below them.
+  test.each([
+    ['a GitLab', 'glpat-FAKEFAKEFAKEFAKEFAKE'],
+    ['a Groq', 'gsk_FAKEFAKEFAKEFAKEFAKEFAKE'],
+    ['a Cerebras', 'csk-FAKEFAKEFAKEFAKEFAKEFAKE'],
+  ])('%s credential used as a mapping key is said as <key>, with nothing below it', (_, key) => {
+    expect(rawSecretPaths({ env: { [key]: true } })).toEqual(['env.<key>']);
+    const below = rawSecretPaths({ env: { [key]: { API_TOKEN: `\${API_TOKEN:-${FAKE}}`, [key]: 'x' } } });
+    expect(below).toEqual(['env.<key>']);
+    expect(JSON.stringify(below)).not.toContain(key);
+  });
+
   test('the component rule (documentCredentialPaths) inherits all of it', () => {
     expect(documentCredentialPaths({ env: { API_TOKEN: `\${API_TOKEN:-${FAKE}}` } })).toContain('env.API_TOKEN');
   });
@@ -158,5 +171,16 @@ describe('the conversion report names each refused file and never its value', ()
     expect(report.note).toContain('config/logins/leaky.yaml');
     expect(report.note).not.toContain(FAKE);
     expect(report.note).not.toContain('5Vb7Nc4KabcdEfGh');
+  });
+
+  test('a known provider credential written as a key (digitless body) is never printed in the report', async () => {
+    const key = 'glpat-FAKEFAKEFAKEFAKEFAKE';
+    await put('logins/leaky.yaml', `harness: claude\nstore: environment\nenv:\n  ${key}:\n    NOTE: hello\n`);
+    const report = await settingsStep.run(f.ctx());
+    expect(report.status).toBe('failed');
+    expect(report.note).toContain('config/logins/leaky.yaml');
+    expect(report.note).toContain('env.<key>');
+    expect(report.note).not.toContain(key);
+    expect(report.note).not.toContain('FAKEFAKEFAKE');
   });
 });

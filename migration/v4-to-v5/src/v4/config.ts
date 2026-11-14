@@ -385,8 +385,13 @@ function walkStrings(value: unknown, judge: (path: Path, text: string, isKey: bo
     if (Array.isArray(node)) node.forEach((item, index) => visit(item, [...path, index]));
     else if (node !== null && typeof node === 'object')
       for (const [key, item] of Object.entries(node)) {
-        // A KEY spelled as a token is a credential too; it is said as the path to it (`<key>`), never as itself.
-        if (judge([...path, key], key, true)) found.add(say([...path, key]));
+        // A KEY spelled as a token is a credential too; it is said as an opaque `<key>` segment, never as itself (the
+        // report's own key formatter is narrower than this judge), and nothing below it is walked: a path under it
+        // would carry the key again.
+        if (judge([...path, key], key, true)) {
+          found.add([...path.map(pathSegment), '<key>'].join('.'));
+          continue;
+        }
         visit(item, [...path, key]);
       }
   };
