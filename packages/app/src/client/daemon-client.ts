@@ -426,14 +426,17 @@ export class DaemonClient {
       ...(init.signal === undefined ? {} : { signal: init.signal }),
     };
     // A resend is the same request, its request id included: the daemon sees one act asked twice, never two acts.
+    const origin: PromptOrigin = background ? 'background' : requestOrigin(method);
     const answer = await this.#confirmed(
-      background ? 'background' : requestOrigin(method),
+      origin,
       await this.#sent(request),
       async () => {
         await this.#admit(caller, owner);
         return await this.#sent(request);
       },
       init.signal,
+      // Only a read can be quiet: a press asks for its step-up at once, whatever the caller said.
+      init.quiet === true && requestOrigin(method) === 'background',
     );
     if (answer.status >= 400) throw refusal(answer);
     return answer.body as Answer;
@@ -450,6 +453,7 @@ export class DaemonClient {
     first: TransportAnswer,
     resend: () => Promise<TransportAnswer>,
     signal?: AbortSignal,
+    quiet = false,
   ): Promise<TransportAnswer> {
     const passkey = this.#passkey;
     // G95: a read is the page's own work, so its prompt waits for its machine to be on screen; a press asks at once.
@@ -463,6 +467,9 @@ export class DaemonClient {
       need = this.#need(answer);
     }
     if (need?.kind !== 'step-up') return answer;
+    // A quiet read (a panel mounting, a poll) is not the person acting: the refusal is the answer, and the prompt waits
+    // for a press. The daemon's refusal still stands, so nothing is read or done without the step-up.
+    if (quiet) return answer;
     // Today's step-up wait is NOT abortable (only the unlock is), so the step-up prompt takes no signal.
     if (!(await this.#confirm(need, origin))) return answer;
     return await resend();

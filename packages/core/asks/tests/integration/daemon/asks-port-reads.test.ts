@@ -30,6 +30,7 @@ function counted() {
     dismiss: inner.dismiss.bind(inner),
     snooze: inner.snooze.bind(inner),
     unsnooze: inner.unsnooze.bind(inner),
+    cardAsk: inner.cardAsk.bind(inner),
   };
   return { agenda, reads };
 }
@@ -94,6 +95,7 @@ it('a board ledger that cannot be read does not poison the index: that raise fai
     dismiss: inner.dismiss.bind(inner),
     snooze: inner.snooze.bind(inner),
     unsnooze: inner.unsnooze.bind(inner),
+    cardAsk: inner.cardAsk.bind(inner),
   };
   const api = asksPort(agenda, { ferrets: async () => ['b1'] }, () => 'unavailable');
 

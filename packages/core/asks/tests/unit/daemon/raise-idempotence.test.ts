@@ -48,6 +48,7 @@ it('names the home a redirected raise landed on, now and on every repeat', async
     dismiss: inner.dismiss.bind(inner),
     snooze: inner.snooze.bind(inner),
     unsnooze: inner.unsnooze.bind(inner),
+    cardAsk: inner.cardAsk.bind(inner),
     raisedObligation: inner.raisedObligation.bind(inner),
     raisedObligations: inner.raisedObligations.bind(inner),
   };
