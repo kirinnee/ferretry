@@ -152,80 +152,107 @@ export class FakeInputHolds implements InputHolds, HoldsSubject {
 
 const refused = (decision: HoldDecision): boolean => typeof decision === 'object';
 
+/**
+ * The question the act runner asks of the holds: `prepare` when they have one (a fresh read of what a page shows), then
+ * `decide` with nothing between them. A conformance case asks it the same way for every implementation.
+ */
+async function ask(
+  holds: InputHolds & { prepare?(target: TargetRef, op: Op, actor: Actor): Promise<void> },
+  target: TargetRef,
+  op: Op,
+  actor: Actor,
+  reveal?: RevealGrant,
+): Promise<HoldDecision> {
+  await holds.prepare?.(target, op, actor);
+  return holds.decide(target, op, actor, reveal);
+}
+
 /** §4.7's rule table and worked cases, run against an `InputHolds` (the tool conformance suite adds the tool side). */
 export function inputHoldsConformance(name: string, make: () => HoldsSubject): void {
   const pane = targetRef('terminal', '%1');
   const page = targetRef('page', 'p1');
   describe(`input holds conformance: ${name}`, () => {
-    test('a target with no hold allows every op for the ferret', () => {
+    test('a target with no hold allows every op for the ferret', async () => {
       const subject = make();
-      for (const op of Object.keys(OP_EFFECTS) as Op[]) expect(subject.holds.decide(page, op, 'ferret')).toBe('allow');
+      for (const op of Object.keys(OP_EFFECTS) as Op[])
+        expect(await ask(subject.holds, page, op, 'ferret')).toBe('allow');
     });
-    test('an op not in OP_EFFECTS is refused', () => {
-      expect(make().holds.decide(page, 'teleport' as Op, 'ferret')).toEqual({ refused: 'unknown_op' });
+    test('an op not in OP_EFFECTS is refused', async () => {
+      expect(await ask(make().holds, page, 'teleport' as Op, 'ferret')).toEqual({ refused: 'unknown_op' });
     });
-    test('a pending card with a non-code field refuses every ferret write, allows reads (I52)', () => {
+    test('a pending card with a non-code field refuses every ferret write, allows reads (I52)', async () => {
       const subject = make();
       subject.pendingCard(page, { codeOnly: false });
       for (const op of ['keys', 'type', 'press', 'fill', 'script', 'navigate', 'open', 'close'] as const)
-        expect(refused(subject.holds.decide(page, op, 'ferret'))).toBe(true);
-      expect(subject.holds.decide(page, 'read', 'ferret')).toBe('allow');
-      expect(subject.holds.decide(page, 'type', 'owner-input')).toBe('allow');
+        expect(refused(await ask(subject.holds, page, op, 'ferret'))).toBe(true);
+      expect(await ask(subject.holds, page, 'read', 'ferret')).toBe('allow');
+      expect(await ask(subject.holds, page, 'type', 'owner-input')).toBe('allow');
     });
-    test('a code-only card lets terminal_send and browser_type through, and only those (I32)', () => {
+    test('a pending card with a non-code field refuses the owner’s tools, the warden and the viewer too — only the owner’s own input passes (I119)', async () => {
+      const subject = make();
+      subject.pendingCard(page, { codeOnly: false });
+      for (const actor of ['owner-tools', 'warden', 'owner-viewer'] as const)
+        for (const op of ['keys', 'type', 'press', 'fill', 'script', 'navigate', 'open', 'close'] as const)
+          expect(await ask(subject.holds, page, op, actor)).toEqual({ refused: 'input_pending' });
+      for (const actor of ['owner-tools', 'warden'] as const)
+        expect(await ask(subject.holds, page, 'read', actor)).toBe('allow');
+      for (const op of ['keys', 'type', 'press', 'fill', 'script', 'navigate', 'open', 'close'] as const)
+        expect(await ask(subject.holds, page, op, 'owner-input')).toBe('allow');
+    });
+    test('a code-only card lets terminal_send and browser_type through, and only those (I32)', async () => {
       const subject = make();
       subject.pendingCard(page, { codeOnly: true });
-      expect(subject.holds.decide(page, 'type', 'ferret')).toBe('allow');
-      expect(subject.holds.decide(page, 'keys', 'ferret')).toBe('allow');
+      expect(await ask(subject.holds, page, 'type', 'ferret')).toBe('allow');
+      expect(await ask(subject.holds, page, 'keys', 'ferret')).toBe('allow');
       for (const op of ['press', 'fill', 'script', 'navigate', 'open', 'close'] as const)
-        expect(refused(subject.holds.decide(page, op, 'ferret'))).toBe(true);
+        expect(refused(await ask(subject.holds, page, op, 'ferret'))).toBe(true);
     });
-    test('a quarantined terminal refuses reads for the ferret and owner-tools, still takes keys (I72)', () => {
+    test('a quarantined terminal refuses reads for the ferret and owner-tools, still takes keys (I72)', async () => {
       const subject = make();
       subject.quarantine(pane);
-      expect(subject.holds.decide(pane, 'read', 'ferret')).toEqual({ refused: 'quarantined' });
-      expect(subject.holds.decide(pane, 'wait', 'owner-tools')).toEqual({ refused: 'quarantined' });
-      expect(subject.holds.decide(pane, 'keys', 'ferret')).toBe('allow');
+      expect(await ask(subject.holds, pane, 'read', 'ferret')).toEqual({ refused: 'quarantined' });
+      expect(await ask(subject.holds, pane, 'wait', 'owner-tools')).toEqual({ refused: 'quarantined' });
+      expect(await ask(subject.holds, pane, 'keys', 'ferret')).toBe('allow');
     });
-    test('the viewer stream of a quarantined terminal needs an audited reveal (I77)', () => {
+    test('the viewer stream of a quarantined terminal needs an audited reveal (I77)', async () => {
       const subject = make();
       subject.quarantine(pane);
-      expect(refused(subject.holds.decide(pane, 'stream', 'owner-viewer'))).toBe(true);
-      expect(subject.holds.decide(pane, 'stream', 'owner-viewer', subject.reveal(pane))).toBe('allow');
+      expect(refused(await ask(subject.holds, pane, 'stream', 'owner-viewer'))).toBe(true);
+      expect(await ask(subject.holds, pane, 'stream', 'owner-viewer', subject.reveal(pane))).toBe('allow');
     });
-    test('a page hold on the held document refuses reads, script and pictures; writes are allowed (I117)', () => {
+    test('a page hold on the held document refuses reads, script and pictures; writes are allowed (I117)', async () => {
       const subject = make();
       subject.pageHold(page, { onHeldDocument: true });
       for (const op of ['read', 'wait', 'script', 'picture', 'stream'] as const)
-        expect(refused(subject.holds.decide(page, op, 'ferret'))).toBe(true);
-      expect(refused(subject.holds.decide(page, 'read', 'owner-tools'))).toBe(true);
+        expect(refused(await ask(subject.holds, page, op, 'ferret'))).toBe(true);
+      expect(refused(await ask(subject.holds, page, 'read', 'owner-tools'))).toBe(true);
       for (const op of ['type', 'press', 'fill', 'navigate', 'open', 'close'] as const)
-        expect(subject.holds.decide(page, op, 'ferret')).toBe('allow');
+        expect(await ask(subject.holds, page, op, 'ferret')).toBe('allow');
     });
-    test('after a new document reads are masked, pictures still refused (except until-moved-on) (I116)', () => {
+    test('after a new document reads are masked, pictures still refused (except until-moved-on) (I116)', async () => {
       const subject = make();
       subject.pageHold(page, { onHeldDocument: false });
-      expect(subject.holds.decide(page, 'read', 'ferret')).toBe('allow-masked');
-      expect(subject.holds.decide(page, 'script', 'ferret')).toBe('allow-masked');
-      expect(refused(subject.holds.decide(page, 'picture', 'ferret'))).toBe(true);
+      expect(await ask(subject.holds, page, 'read', 'ferret')).toBe('allow-masked');
+      expect(await ask(subject.holds, page, 'script', 'ferret')).toBe('allow-masked');
+      expect(refused(await ask(subject.holds, page, 'picture', 'ferret'))).toBe(true);
       const moved = make();
       moved.pageHold(page, { onHeldDocument: false, untilMovedOn: true });
-      expect(moved.holds.decide(page, 'picture', 'ferret')).toBe('allow');
+      expect(await ask(moved.holds, page, 'picture', 'ferret')).toBe('allow');
     });
-    test('worked cases: rows that match together answer the most restrictive', () => {
+    test('worked cases: rows that match together answer the most restrictive', async () => {
       const a = make();
       a.pendingCard(page, { codeOnly: true });
       a.pageHold(page, { onHeldDocument: true });
-      expect(a.holds.decide(page, 'type', 'ferret')).toBe('allow'); // rows 2 and 4: type has no reads
-      expect(refused(a.holds.decide(page, 'read', 'ferret'))).toBe(true); // rows 2 and 4
+      expect(await ask(a.holds, page, 'type', 'ferret')).toBe('allow'); // rows 2 and 4: type has no reads
+      expect(refused(await ask(a.holds, page, 'read', 'ferret'))).toBe(true); // rows 2 and 4
       const b = make();
       b.pendingCard(pane, { codeOnly: true });
       b.quarantine(pane);
-      expect(b.holds.decide(pane, 'keys', 'ferret')).toBe('allow'); // rows 2 and 3
-      expect(refused(b.holds.decide(pane, 'read', 'ferret'))).toBe(true);
+      expect(await ask(b.holds, pane, 'keys', 'ferret')).toBe('allow'); // rows 2 and 3
+      expect(refused(await ask(b.holds, pane, 'read', 'ferret'))).toBe(true);
       const c = make();
       c.pendingCard(page, { codeOnly: false });
-      expect(refused(c.holds.decide(page, 'type', 'ferret'))).toBe(true); // rows 1 and 5
+      expect(refused(await ask(c.holds, page, 'type', 'ferret'))).toBe(true); // rows 1 and 5
     });
   });
 }
@@ -259,20 +286,20 @@ export function outputGuardConformance(name: string, make: () => OutputGuardSubj
   const page = targetRef('page', 'p1');
   const other = targetRef('page', 'p2');
   describe(`output guard conformance: ${name}`, () => {
-    test('a stamp is showable until a hold begins on its target', () => {
+    test('a stamp is showable until a hold begins on its target', async () => {
       const subject = make();
       const stamp = subject.guard.stamp([page]);
       expect(subject.guard.stillShowable(stamp)).toBe(true);
       subject.beginHold(page);
       expect(subject.guard.stillShowable(stamp)).toBe(false);
     });
-    test('a hold on another target leaves a targeted stamp showable', () => {
+    test('a hold on another target leaves a targeted stamp showable', async () => {
       const subject = make();
       const stamp = subject.guard.stamp([page]);
       subject.beginHold(other);
       expect(subject.guard.stillShowable(stamp)).toBe(true);
     });
-    test('stillShowable is synchronous', () => {
+    test('stillShowable is synchronous', async () => {
       const subject = make();
       expect(typeof subject.guard.stillShowable(subject.guard.stamp())).toBe('boolean');
     });
