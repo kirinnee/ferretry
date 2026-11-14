@@ -766,13 +766,13 @@ const TERMINAL_AND_BROWSER_TOOLS: readonly McpToolDefinition[] = [
   },
   {
     name: 'task_plan',
-    description: 'Before a task, ask the owner once to pre-approve its sign-ins and pastes.',
+    description: 'Before a task, ask the owner once to pre-approve its sign-ins.',
     inputSchema: object(
       {
         lines: {
           type: 'array',
           description:
-            '{kind,uses,why} and: sign-in signIn|site,fields:[username,password,totp]; terminal-sign-in signIn|place; paste from,to',
+            '{kind,uses,why} and: sign-in signIn|site,fields:[username,password,totp]; terminal-sign-in signIn|place',
         },
         expiresInSeconds: { type: 'integer' },
       },
@@ -901,18 +901,13 @@ const CARD_TOOLS: readonly McpToolDefinition[] = [
 ];
 
 /**
- * Agent tools whose owner (Accounts) has not built them. An agent is not told to use a tool that cannot work (M2 ruling), so
- * the owner's manifest no longer declares them and this list keeps their definitions out of what the server lists, whatever
- * a manifest declares later; the parity test pins both.
+ * Agent tools whose owner (Accounts) cannot serve them yet: the four secure-copy tools. The copy library and its owner
+ * routes are built, but a capture has no seam on 5.0 to be masked through (the Vault's ephemeral registry is not on its
+ * port), to run a command through, or to read a page through, and a copy that is not masked is worse than none. An agent
+ * is not told to use a tool that cannot work (M2 ruling), so the owner's manifest does not declare them and this list keeps
+ * their rows out of what the server lists, whatever a manifest declares later; the parity test pins both.
  */
-const UNBUILT_TOOLS: ReadonlySet<string> = new Set([
-  'account_propose',
-  'secure_copy',
-  'secure_list',
-  'secure_discard',
-  'secure_paste',
-  'task_plan',
-]);
+const UNBUILT_TOOLS: ReadonlySet<string> = new Set(['secure_copy', 'secure_list', 'secure_discard', 'secure_paste']);
 
 /** Every tool this server lists, in the order a model reads them: the built ones only. */
 export const MCP_TOOLS: readonly McpToolDefinition[] = [

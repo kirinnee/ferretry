@@ -41,8 +41,12 @@ describe('accounts manifest', () => {
       }
     }
   });
-  test('M2 lists only the one agent tool that is built (account_hint), none showing a value; the six unbuilt are not offered to agents', () => {
-    expect(manifest.actions.agentTools.map(entry => entry.name)).toEqual(['account_hint']);
+  test('lists the agent tools that are built (account_hint, account_propose, task_plan), none showing a value; the four secure-copy tools are not offered to agents', () => {
+    expect(manifest.actions.agentTools.map(entry => entry.name)).toEqual([
+      'account_hint',
+      'account_propose',
+      'task_plan',
+    ]);
     for (const entry of manifest.actions.agentTools) expect(entry.guard).not.toBe('secrets');
   });
   test('needs the Vault, its sealed documents and Asks, and takes the phone-approval, sign-in-approval and four step-up stage hooks', () => {

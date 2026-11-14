@@ -12,6 +12,7 @@ import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/cont
 import { definePlugin, renderer, route, settingsTab, tool, verb } from '@ferretry/kernel/manifest';
 import {
   ACCOUNTS_WORDS,
+  AccountProposeInputSchema,
   AccountsConfigSchema,
   AccountsPort,
   AUDIT,
@@ -24,6 +25,7 @@ import {
   SKIP_BY_SERVICE,
   SKIP_READ,
   SKIP_UNRECORDED,
+  TaskPlanToolInputSchema,
   USE,
 } from './contract/index.ts';
 
@@ -565,11 +567,25 @@ export default definePlugin({
         guard: NO_VALUE,
         summary: 'list the saved sign-ins for a place',
       }),
-      // AFTER MERGE (lizzette 2026-11-11: M2 moves after merge): account_propose, secure_copy, secure_list, secure_discard,
-      // secure_paste and task_plan are declared here again once each is built. Until then they are NOT listed, because the
-      // CLI builds the agents' MCP tool list from this array and a listed tool that answers "not built" is a lie. Their
-      // shapes (capability USE.terminal, or USE.secrets for account_propose; guard NO_VALUE) are the v4 descriptors in
-      // docs/design/rebuild-parity.tsv T-0002 and T-0039…T-0043 (still open).
+      tool('account_propose', {
+        ...TOOL,
+        capability: USE.secrets,
+        guard: NO_VALUE,
+        summary: 'propose a sign-in recipe and/or suggest a standing rule; the owner decides',
+        input: AccountProposeInputSchema,
+      }),
+      tool('task_plan', {
+        ...TOOL,
+        capability: USE.terminal,
+        guard: NO_VALUE,
+        summary: 'ask the owner once to pre-approve the sign-ins and pastes the work will need',
+        input: TaskPlanToolInputSchema,
+      }),
+      // NOT SERVED: secure_copy, secure_list, secure_discard and secure_paste (T-0039…T-0042). The secure-copy
+      // library, its owner routes and its paste rules are built, but the copy service has no seam to stand on here:
+      // masking a captured value everywhere (the Vault's ephemeral registry is not on its port), running the command
+      // a copy reads, the transcript file and the page read. A copy that is not masked is worse than none, so the
+      // tools stay out of the manifest and the CLI's list until those seams exist (docs/secure-copy.md, "GAP").
     ],
     cli: [
       verb('copy ls', { summary: 'list the secure copies a session holds' }),

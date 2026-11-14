@@ -171,7 +171,14 @@ export default definePlugin({
       }),
     ],
     /** `fy secret set <name>` takes the value from stdin only, never from an argument (S1, S33). */
-    cli: [verb('secret set', { summary: 'save or replace a secret, reading its VALUE from stdin' })],
+    cli: [
+      verb('secret set', { summary: 'save or replace a secret, reading its VALUE from stdin' }),
+      verb('input ls', { summary: 'list the input requests still waiting' }),
+      verb('input answer', {
+        summary: 'type the value a ferret asked for, read from this terminal with nothing echoed',
+      }),
+      verb('input cancel', { summary: 'decline what a ferret asked for' }),
+    ],
   },
   ui: {
     settings: [settingsTab('secrets', { label: 'Secrets', order: 42 })],

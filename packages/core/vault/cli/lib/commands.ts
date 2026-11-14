@@ -16,8 +16,8 @@ export function secretVerbs(
   exit: ExitStatus,
 ): { readonly 'secret set': VerbHandler } {
   return {
-    'secret set': verbHandler(io, exit, { command: 'set', args: ['name'] }, async args => {
-      await controller.set(args[0] ?? '');
+    'secret set': verbHandler(io, exit, { command: 'set', args: ['name'] }, async read => {
+      await controller.set(read.args[0] ?? '');
     }),
   };
 }

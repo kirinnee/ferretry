@@ -214,7 +214,7 @@ describe('the launch prompt names only tools the server lists', () => {
 
   it('should be able to tell: a prompt naming an unlisted tool is caught by the same check', () => {
     const listed = new Set(MCP_TOOLS.map(tool => tool.name));
-    should(listed.has('account_propose')).be.false();
+    should(listed.has('secure_copy')).be.false();
     should(listed.has('account_hint')).be.true();
   });
 });

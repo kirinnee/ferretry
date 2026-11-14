@@ -14,3 +14,7 @@ export { type AccountIndexDocument, AccountIndexDocumentSchema, sealedNamesOf } 
 export { DEFAULT_PASTE_RULE_SETTINGS, PasteRuleSchema, PasteRuleSettingsSchema } from './routes/secure-copy.ts';
 export { LOGIN_SECRETS } from './routes/sealed.ts';
 export { type SignInRulesDocument, SignInRulesDocumentSchema } from './routes/sign-in-rules.ts';
+
+/** The inputs of the agent tools the manifest declares with a zod `input`, each from its own file. */
+export { type AccountProposeInput, AccountProposeInputSchema } from './routes/accounts.ts';
+export { TaskPlanToolInputSchema } from './routes/task-plan.ts';

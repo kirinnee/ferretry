@@ -390,31 +390,32 @@ const askKey = (ask: TaskPlanLineAsk): string | undefined => {
   return ask.kind === 'sign-in' ? `site:${ask.site ?? ''}` : `place:${ask.place ?? ''}`;
 };
 
+const taskPlanCallFields = {
+  lines: z.array(TaskPlanLineAskSchema).min(1).max(TASK_PLAN_MAX_LINES),
+  expiresInSeconds: z.number().int().min(TASK_PLAN_MIN_LIFETIME_SECONDS).max(TASK_PLAN_MAX_LIFETIME_SECONDS).optional(),
+};
+
+const oneLinePerSignIn = (call: { readonly lines: readonly TaskPlanLineAsk[] }, context: z.RefinementCtx): void => {
+  const seen = new Set<string>();
+  call.lines.forEach((ask, index) => {
+    const key = askKey(ask);
+    if (key === undefined) return;
+    if (seen.has(key))
+      context.addIssue({ code: 'custom', path: ['lines', index], message: 'name each sign-in on one line only' });
+    seen.add(key);
+  });
+};
+
 /**
- * `task.plan`: the agent-tool call, as the agent-tool union will carry it. Two lines naming the same sign-in (or the
+ * `task.plan`: the agent-tool call, as the agent-tool door carries it. Two lines naming the same sign-in (or the
  * same site or terminal key) are refused: one sign-in, one line.
  */
 export const TaskPlanCallSchema = z
-  .strictObject({
-    tool: z.literal('task.plan'),
-    lines: z.array(TaskPlanLineAskSchema).min(1).max(TASK_PLAN_MAX_LINES),
-    expiresInSeconds: z
-      .number()
-      .int()
-      .min(TASK_PLAN_MIN_LIFETIME_SECONDS)
-      .max(TASK_PLAN_MAX_LIFETIME_SECONDS)
-      .optional(),
-  })
-  .superRefine((call, context) => {
-    const seen = new Set<string>();
-    call.lines.forEach((ask, index) => {
-      const key = askKey(ask);
-      if (key === undefined) return;
-      if (seen.has(key))
-        context.addIssue({ code: 'custom', path: ['lines', index], message: 'name each sign-in on one line only' });
-      seen.add(key);
-    });
-  });
+  .strictObject({ tool: z.literal('task.plan'), ...taskPlanCallFields })
+  .superRefine(oneLinePerSignIn);
+
+/** `task_plan`'s input as the agent-tool door hands it over: the same call without the `tool` word. */
+export const TaskPlanToolInputSchema = z.strictObject(taskPlanCallFields).superRefine(oneLinePerSignIn);
 
 /**
  * A paste plan's items (`secure.preapprove`) read as task-plan paste lines: one use each, as a paste plan allowed.

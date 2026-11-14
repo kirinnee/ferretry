@@ -33,12 +33,15 @@ the page and end with it. The reference grammar is unchanged — see
 `browser.eval(name, function, target?, timeoutMs?)` (owner-gated: [Page scripts](#page-scripts-owner-gated)) ·
 `browser.close(name)` · `browser.ask_owner(name, message?)`.
 
-> **Not available on 5.0 yet — these come AFTER MERGE (M2, tracked in
-> [`rebuild/after-merge.json`](rebuild/after-merge.json)).** The Accounts plugin declares only `account_hint`. These
-> six are NOT declared, so the CLI builds no MCP tool for them and an agent cannot call them until each is built and
-> declared again: `account_propose`, `task_plan` (`task.plan`), `secure_copy`, `secure_list`, `secure_discard` and
-> `secure_paste`. Every section below that describes one of them is the design it will be built to, not a thing a
-> ferret can use today.
+> **Served: `account_hint`, `account_propose` and `task_plan` (`task.plan`).** Accounts declares those three.
+>
+> **GAP: the four secure-copy tools — `secure_copy`, `secure_list`, `secure_discard` and `secure_paste` — are NOT
+> served on 5.0.** The copy library, its owner routes (`fy copy ls`, paste rules, `fy plan`) and its paste rules are built,
+> but a capture has no seam to stand on: the Vault's ephemeral masking registry is not on its port (so a captured value
+> could not be masked everywhere it must be), the Vault's input service is not handed the copies a paste types from
+> (`input.saved`, proposed), and a command or page read has no runner. A copy that cannot be masked is worse than none,
+> so the four are not declared, the CLI builds no MCP tool for them, and an agent cannot call them. Every section below
+> that describes one of them is the design it will be built to, not a thing a ferret can use today.
 
 A **target** is exactly one of a `ref`, a `selector`, or — for a click only — a point `x`, `y`; see
 [Refs and targets](#refs-and-targets). `history` is `back`, `forward` or `reload`.
@@ -310,9 +313,9 @@ a staged path the daemon alone saves.
 
 ## Task plan: ask once before a task
 
-> **Not available on 5.0 yet: after merge (M2, [`rebuild/after-merge.json`](rebuild/after-merge.json)).** `task_plan`
-> is not declared by the Accounts plugin, so no ferret has this tool today; this section is the design it will be built
-> to. Until then a sign-in or paste simply asks the owner each time.
+> **Served on 5.0 for sign-in and terminal-sign-in lines.** `paste` lines are accepted and asked, but no copy can exist
+> while the secure-copy tools are not served (see the GAP above), so a paste line is never covered; the MCP row describes
+> sign-in lines only.
 
 `task.plan(lines, expiresInSeconds?)` (MCP `task_plan`) is how a ferret asks the owner, once, to pre-approve the
 sign-ins and pastes a task will need. One call raises ONE card on the owner's agenda, up to 10 lines, for
@@ -362,9 +365,8 @@ reads Ferretry's own files." Every ferret can read Ferretry's own state-home fil
 
 ## Suggesting a standing rule
 
-> **Not available on 5.0 yet: after merge (M2, [`rebuild/after-merge.json`](rebuild/after-merge.json)).**
-> `account_propose` is not declared by the Accounts plugin, so a ferret cannot call it today; the owner makes standing
-> rules from the app or `fy`. This section is the design it will be built to.
+> **Served on 5.0.** A sign-in is named by its `si_…` id only: v4's older `login` spelling (an account handle) is not
+> accepted.
 
 `account_propose` takes `preapprove: true` (and `recipe` is then optional) to ask the owner to consider a
 [standing sign-in rule](secrets.md#standing-sign-in-rules) for one sign-in. It is a **suggestion and nothing more**:
@@ -609,8 +611,8 @@ its own).
   — never the owner, on the board and the agenda too — whatever any header says. That covers everything a
   ferret's `fy` and MCP tools need: `fy send` and `fy notify`, its board card and notes, its own agenda
   items, signals, starting a sub-ferret, config reads and (held) writes, input requests through the agent
-  tools, `account_hint`, and session and fleet reads. (Secure copy and `account_propose` join this list after merge,
-  M2: they are not declared on 5.0 yet.)
+  tools, `account_hint`, `account_propose`, `task_plan`, and session and fleet reads. (Secure copy joins this list
+  when its tools are served: see the GAP at the top of the Accounts tools.)
 - **A handler keeps a second line**, keyed on the same predicate, for the PARTS of an `any` route that are
   the owner's: another session's agenda item, an unheld config loosening, confirming a lane set, widening
   what ferrets may drive through a fleet proposal, revealing a quarantined terminal.

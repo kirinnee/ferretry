@@ -1387,13 +1387,14 @@ export function accountHintLine(hint: AccountHint, site: string): string {
 
 /**
  * How a ferret uses a 2FA key a hint listed. NOT YET SERVED: a hint says it only once the request tools take `factor`
- * and `push` (the code-card and approve-on-phone changes), as the unbuilt `account_propose` tool (M2, after merge) would be named in {@link ACCOUNT_HINT_NEXT}.
+ * and `push` (the code-card and approve-on-phone changes), as `account_propose` is named in {@link ACCOUNT_HINT_NEXT}.
  */
 export const ACCOUNT_HINT_FACTOR_NEXT =
   "For a code, request input with the key's id (factor); for a push, request approval (push: true) and wait.";
 
 /** The sentence a hint that listed a sign-in ends with: how a ferret names one and suggests a better recipe. */
-const ACCOUNT_HINT_NEXT = 'Name the account when you request input (secretHint) if your brief says which.';
+const ACCOUNT_HINT_NEXT =
+  'Name the account when you request input (secretHint) if your brief says which; propose recipe fixes with account_propose and the sign-in id.';
 
 /**
  * The phone-approval sentence every hint ends with, whether or not the account holds a push 2FA key: a sign-in page that
@@ -1412,27 +1413,36 @@ export function accountHintSummary(site: string, hints: readonly AccountHint[]):
 
 // ── `account.propose` ───────────────────────────────────────────────────────────────────────────
 
+const ACCOUNT_PROPOSE_ONE_OF = {
+  message: 'suggest a recipe, a standing rule (preapprove: true), or both',
+  path: ['recipe'],
+};
+
+const accountProposeFields = {
+  signIn: SignInIdSchema,
+  /** The recipe to suggest. Optional only when the call suggests a standing rule instead (`preapprove`). */
+  recipe: LoginRecipeSchema.optional(),
+  /**
+   * Also suggest a STANDING RULE for this sign-in (sign-in-rules.ts): the daemon raises a card whose only action
+   * opens the owner's create sheet with nothing ticked. It creates, stages and widens nothing by itself.
+   */
+  preapprove: z.boolean().optional(),
+  why: LoginRecipeProposeRequestSchema.shape.why,
+};
+
+/** `account_propose`'s input as the agent-tool door hands it over: the same call without the `tool` word. */
+export const AccountProposeInputSchema = z
+  .strictObject(accountProposeFields)
+  .refine(call => call.recipe !== undefined || call.preapprove === true, ACCOUNT_PROPOSE_ONE_OF);
+export type AccountProposeInput = z.infer<typeof AccountProposeInputSchema>;
+
 /**
  * A ferret's recipe proposal, keyed by the SIGN-IN it is for. It changes nothing until the owner approves it, unless
  * the owner turned auto-apply on for that one sign-in. THE ONE SCHEMA of the tool.
  */
 export const AccountProposeCallSchema = z
-  .strictObject({
-    tool: z.literal('account.propose'),
-    signIn: SignInIdSchema,
-    /** The recipe to suggest. Optional only when the call suggests a standing rule instead (`preapprove`). */
-    recipe: LoginRecipeSchema.optional(),
-    /**
-     * Also suggest a STANDING RULE for this sign-in (sign-in-rules.ts): the daemon raises a card whose only action
-     * opens the owner's create sheet with nothing ticked. It creates, stages and widens nothing by itself.
-     */
-    preapprove: z.boolean().optional(),
-    why: LoginRecipeProposeRequestSchema.shape.why,
-  })
-  .refine(call => call.recipe !== undefined || call.preapprove === true, {
-    message: 'suggest a recipe, a standing rule (preapprove: true), or both',
-    path: ['recipe'],
-  });
+  .strictObject({ tool: z.literal('account.propose'), ...accountProposeFields })
+  .refine(call => call.recipe !== undefined || call.preapprove === true, ACCOUNT_PROPOSE_ONE_OF);
 
 // ── Places from match keys ("Save as" on a card) ───────────────────────────────────────────────
 

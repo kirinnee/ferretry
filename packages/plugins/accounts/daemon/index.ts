@@ -45,7 +45,7 @@ export default implementDaemon(manifest, {
     rules = buildRules(ctx, a.core);
     const b = rules;
     const answered: Record<string, unknown> = { ...b.routes, ...a.routes };
-    const tools: Record<string, ToolHandler> = { ...a.tools };
+    const tools: Record<string, ToolHandler> = { ...a.tools, ...b.tools };
     return {
       routes: Object.fromEntries(
         manifest.actions.routes.map(route => [route.key, answered[route.key] ?? notBuiltRoute]),

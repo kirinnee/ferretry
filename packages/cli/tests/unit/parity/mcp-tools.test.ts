@@ -16,11 +16,11 @@ const everyManifest = [registry.kernel, ...registry.plugins];
 const declared = everyManifest.flatMap(entry => entry.manifest.actions?.agentTools ?? []);
 
 /**
- * Tools whose owner has not built them (M2 ruling, lizzette 2026-11-11: they move after merge). Their owner no longer declares
- * them in its manifest (they are declared again once built), and the CLI lists none of them: an agent is not told to call a
- * tool that answers `is not built yet`.
+ * Tools whose owner cannot serve them yet: the four secure-copy tools (a capture has no masking, command or page seam on
+ * 5.0). Their owner does not declare them in its manifest (they are declared once served), and the CLI lists none of them: an
+ * agent is not told to call a tool that answers `is not built yet`.
  */
-const UNBUILT = ['account_propose', 'secure_copy', 'secure_list', 'secure_discard', 'secure_paste', 'task_plan'];
+const UNBUILT = ['secure_copy', 'secure_list', 'secure_discard', 'secure_paste'];
 
 /**
  * Tools whose manifest declaration carries no zod `input` (their owner parses the call itself), so their row's property

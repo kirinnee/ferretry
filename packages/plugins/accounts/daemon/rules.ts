@@ -28,6 +28,7 @@ import { AccountKeySchema } from '../contract/routes/index.ts';
 import type manifest from '../manifest.ts';
 import { FilePasteRuleStore, FileSignInRuleStore, kernelStateDocument } from './adapters/index.ts';
 import type { AccountsCore } from './accounts.ts';
+import { accountAgentTools } from './lib/agent-tools.ts';
 import { type HalfB, halfB } from './half-b.ts';
 import { LoginEntryError } from './lib/accounts.ts';
 import type { AuditSink } from './lib/local-ports.ts';
@@ -54,6 +55,8 @@ const SWEEP_EVERY = seconds(15);
 export interface RulesHalf extends HalfB {
   /** The recipe masking half a's routes and `account_hint` serve through (I133). */
   readonly recipes: RecipeMasking;
+  /** The agent tools half b answers: `account_propose` and `task_plan`. */
+  readonly tools: ReturnType<typeof accountAgentTools>;
 }
 
 const stateFile = (ctx: AccountsContext, name: string): StateFileDef => {
@@ -188,5 +191,5 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
         why: error instanceof Error ? error.message : String(error),
       }),
   });
-  return { ...half, recipes };
+  return { ...half, recipes, tools: accountAgentTools({ plans, recipes, suggestions }) };
 }

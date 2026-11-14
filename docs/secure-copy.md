@@ -271,7 +271,7 @@ profile on`) is listed for every paired device under Settings › Secure copy �
 > approves and revokes plans (`packages/daemon/src/lib/task-plans/`); the app shows the card
 > (`packages/pwa/src/features/secure-copy/task-plan-card.tsx`) and the shared matcher fills under an approved line
 > ([input requests › Task plan fills](input-requests.md#task-plan-fills-a-sign-in-the-owner-approved-in-advance)).
-> The agent tool `task_plan` is NOT listed in MCP on 5.0 yet (it returns after merge, M2); once it is, the owner answers with `fy plan` (R3a-3) or on the card.
+> The agent tool `task_plan` is listed in MCP; the owner answers with `fy plan` (R3a-3) or on the card. The four secure-copy agent tools are a declared GAP on 5.0 (no masking, command or page seam for a capture, and the Vault is not handed copies to paste from): see [agent tools](agent-tools.md#tools).
 > `secure.preapprove` still raises paste-only task plans. An app that doesn't know `task-plan.1` draws a plan with
 > paste lines as the old copy-plan card; on a daemon of this build its Allow is refused (`409 needs_passkey`), and its
 > Decline still works.
