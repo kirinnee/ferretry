@@ -1,5 +1,12 @@
 import { relative } from 'node:path';
-import type { BinaryNames, BoundAddress, ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
+import type {
+  BinaryNames,
+  BoundAddress,
+  ContractSurface,
+  HostFactsPort,
+  SelfCountersPort,
+  UpdateHostPort,
+} from '../contract/ports.ts';
 import type { Instant } from '@ferretry/std';
 import { notBuiltSummary } from '../contract/doctor.ts';
 import { decideHome } from '../contract/home.ts';
@@ -113,6 +120,7 @@ import { outboundSecretTransport } from './adapters/outbound-secret.ts';
 import { exactNetworkHosts, ownSecretsPort } from './secrets.ts';
 import { NO_HOST_FACTS } from './no-host-facts.ts';
 import { undeclaredHostFacts } from './adapters/host-facts.ts';
+import { NO_SELF_COUNTERS, undeclaredSelfCounters } from './adapters/self-counters.ts';
 import { type UpdateHostFiles, undeclaredUpdateHost } from './adapters/update-host.ts';
 import { PRODUCT_BINARIES } from './binaries.ts';
 import { hostProgramLines } from './doctor-programs.ts';
@@ -250,6 +258,8 @@ export interface HostAdapters {
   readonly operatorVariable?: (name: string) => string | undefined;
   /** `kernel.hostFacts` (`/proc`, `/sys`). Absent: every read refuses. */
   readonly hostFacts?: HostFactsPort;
+  /** `kernel.selfCounters` (this process's `/proc/self/{io,stat}`). Absent: every read refuses. */
+  readonly selfCounters?: SelfCountersPort;
   /** This user's process table, for `kernel.processes` (kernel-only). Absent: nothing is listed or signalled. */
   readonly processTable?: ProcessTable;
   /** Gzips an opted-in route's answer. Absent: every answer is plain. */
@@ -968,6 +978,10 @@ async function bootLocked(
         manifest.permissions?.hostFacts === true
           ? (adapters.hostFacts ?? NO_HOST_FACTS)
           : undeclaredHostFacts(manifest.id, adapters.hostFacts ?? NO_HOST_FACTS),
+      selfCounters:
+        manifest.permissions?.selfCounters === true
+          ? (adapters.selfCounters ?? NO_SELF_COUNTERS)
+          : undeclaredSelfCounters(manifest.id, (adapters.selfCounters ?? NO_SELF_COUNTERS).platform),
       // The same rule as the testing host (`./processes.ts`), over this machine's table and this host's own handles.
       processes: processesPortFor(
         manifest.id,

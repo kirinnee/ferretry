@@ -231,5 +231,7 @@ export default definePlugin({
     ],
     spawn: [],
     secrets: [],
+    // The daemon's own system-call count and reaped children's CPU, for `fy daemon profile`: `/proc/self/{io,stat}` only.
+    selfCounters: true,
   },
 });

@@ -278,6 +278,8 @@ export interface Permissions {
   readonly profileSecrets?: true;
   /** It reads this machine's `/proc` and `/sys` facts through `kernel.hostFacts` (today's Terminals). */
   readonly hostFacts?: true;
+  /** It reads THIS process's own `/proc/self/io` and `/proc/self/stat` through `kernel.selfCounters` (Usage's profile), and no other file or pid. */
+  readonly selfCounters?: true;
   /**
    * It asks `kernel.paths.checkDirectory` whether an owner-named absolute path is a directory (Ferrets' session
    * working directory, today's resolver). The check answers for ANY absolute path with no root and no fence, so a

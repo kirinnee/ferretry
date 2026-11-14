@@ -1424,6 +1424,28 @@ export const CatalogPriceSchema = z.strictObject({
   verified: z.string().regex(YYYY_MM_DD),
 });
 
+/**
+ * What Usage reads to price a session at list price (`LoginsApi.modelPrices`): each catalog in effect, each half's models
+ * THAT STATE A PRICE with the whole of it, and Claude Code's tier slots as bare model ids (`opus` -> the model it is
+ * pinned to). No label, no login, no credential: a catalog is public data.
+ */
+export const ModelPriceHalfSchema = z.strictObject({
+  models: z.array(z.strictObject({ id: ModelIdSchema, price: CatalogPriceSchema })).readonly(),
+  tiers: z
+    .strictObject({
+      opus: ModelIdSchema.optional(),
+      sonnet: ModelIdSchema.optional(),
+      haiku: ModelIdSchema.optional(),
+    })
+    .optional(),
+});
+export const ModelPriceCatalogSchema = z.strictObject({
+  id: z.string().min(1),
+  claude: ModelPriceHalfSchema.optional(),
+  codex: ModelPriceHalfSchema.optional(),
+});
+export type ModelPriceCatalog = z.infer<typeof ModelPriceCatalogSchema>;
+
 export const CatalogModelSchema = z.strictObject({
   id: ModelIdSchema,
   label: z.string().min(1).max(80),

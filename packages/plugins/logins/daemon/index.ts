@@ -43,6 +43,7 @@ import { environmentTemplates } from './lib/profile-templates.ts';
 import { ModelCatalogService } from './lib/models/service.ts';
 import { PublishedModelCatalogService } from './lib/models/published.ts';
 import { modelCatalogsView, type PublishedCatalogState } from './lib/models/view.ts';
+import { modelPriceCatalogs } from './lib/models/prices.ts';
 import { presetFromFile, type ProviderPreset, type ProviderPresetFile } from './lib/presets/schema.ts';
 import { ProviderPresetService } from './lib/provider-probe/presets.ts';
 import { ProviderProbeService } from './lib/provider-probe/service.ts';
@@ -247,6 +248,7 @@ export function buildLoginsDaemon() {
         quota: async id => (await credentials.list()).logins.find(login => login.id === id)?.usage,
         presets: () => credentials.presets(),
         models: modelsView,
+        modelPrices: async () => modelPriceCatalogs(await catalogs.catalogs()),
       };
 
       /**

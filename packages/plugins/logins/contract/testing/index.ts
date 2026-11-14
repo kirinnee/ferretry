@@ -19,6 +19,7 @@ import {
   type LoginView,
   LoginViewSchema,
   ModelCatalogsViewSchema,
+  type ModelPriceCatalog,
   ProviderPresetCatalogSchema,
 } from '../index.ts';
 
@@ -51,6 +52,8 @@ export interface FakeLogins extends LoginsApi {
   setLogins(logins: readonly LoginView[]): void;
   /** What `environmentTemplates` answers (default none): variable templates, never a secret's value. */
   setTemplates(templates: readonly EnvironmentLoginTemplate[]): void;
+  /** What `modelPrices` answers (default none): the catalogs' list prices, public data. */
+  setModelPrices(catalogs: readonly ModelPriceCatalog[]): void;
   /** Every `authorizeFetch` asked, as asked (a login, a variable, hosts; never a secret). */
   readonly spends: { readonly loginId: string; readonly variable: string; readonly hosts: readonly string[] }[];
   /** What `authorizeFetch` answers next (default `refused`). */
@@ -125,6 +128,7 @@ export function fakeLoginChanges(): FakeLoginChanges {
 export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
   let logins = [...initial];
   let templates: readonly EnvironmentLoginTemplate[] = [];
+  let prices: readonly ModelPriceCatalog[] = [];
   let spendAnswer: AuthorizedOutcome = { kind: 'refused' };
   const spends: FakeLogins['spends'] = [];
   const list = (): LoginList => LoginListSchema.parse({ format: 1, machine: 'fake', logins });
@@ -136,6 +140,7 @@ export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
     presets: async () => ProviderPresetCatalogSchema.parse({ presets: [] }),
     models: async () =>
       ModelCatalogsViewSchema.parse({ published: { origin: 'https://example.invalid', enabled: false }, catalogs: [] }),
+    modelPrices: async () => prices,
     authorizeFetch: async (loginId, variable, hosts) => {
       spends.push({ loginId, variable, hosts });
       return spendAnswer;
@@ -146,6 +151,9 @@ export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
     },
     setLogins: next => {
       logins = [...next];
+    },
+    setModelPrices: next => {
+      prices = [...next];
     },
     setTemplates: next => {
       templates = [...next];
