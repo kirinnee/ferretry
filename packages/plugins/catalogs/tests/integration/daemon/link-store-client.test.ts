@@ -169,9 +169,12 @@ describe('what a store says about itself', () => {
         new ReadableStream({
           start(controller) {
             controller.enqueue(new TextEncoder().encode('{"version":'));
-            controller.error(new Error('the store went away'));
+            controller.close();
           },
         }),
+        // The body ends well short of what the header promised: the store went away half way. `controller.error()` tells
+        // the client the same but bun reports the server-side error as an unhandled one and fails the group.
+        { headers: { 'content-length': '64' } },
       );
     expect(await (await clientWith()).available(origin)).toBe(false);
   });

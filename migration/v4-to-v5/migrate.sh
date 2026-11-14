@@ -751,7 +751,26 @@ start)
 
   entries="$(ls -A "${H}")" || unreadable "cannot list ${H}"
   while read -r entry; do
-    case "${entry}" in home.json | config | state | run | logs | "") ;; *) fail "unexpected entry '${entry}' in the new home ${H}" ;; esac
+    case "${entry}" in
+    home.json | config | state | run | logs | "") ;;
+    fleet)
+      # The converter writes v5 Runtimes' asset root, fleet/assets/**, in the new home: the installed skills (assets/skills/<name>/)
+      # and the component assets a carried hook or setting names (assets/components/hooks/...). That is the ONLY thing allowed
+      # under fleet/: anything else is named and stops, as any other entry does. Nothing is followed (find -P); fleet and assets
+      # must be real folders, and every entry below must be a regular file or a folder (a link, FIFO, socket or device is never
+      # written by the converter and v5 would read it as part of an asset). Relative patterns: the home path is never a glob.
+      for d in fleet fleet/assets; do
+        if [ -e "${H}/${d}" ] || [ -L "${H}/${d}" ]; then
+          { [ -d "${H}/${d}" ] && [ ! -L "${H}/${d}" ]; } || fail "unexpected entry '${d}' in the new home ${H}: it is not a plain folder"
+        fi
+      done
+      stray="$(cd "${H}" && find -P fleet -mindepth 1 ! -path fleet/assets ! -path 'fleet/assets/*' -print -quit)" || unreadable "cannot list ${H}/fleet"
+      [ -z "${stray}" ] || fail "unexpected entry '${stray}' in the new home ${H}: only fleet/assets may be there"
+      odd="$(cd "${H}" && find -P fleet -mindepth 1 ! -type f ! -type d -print -quit)" || unreadable "cannot list ${H}/fleet"
+      [ -z "${odd}" ] || fail "unexpected entry '${odd}' in the new home ${H}: not a regular file or folder (a link, pipe, socket or device)"
+      ;;
+    *) fail "unexpected entry '${entry}' in the new home ${H}" ;;
+    esac
   done <<<"${entries}"
 
   mark starting-v5

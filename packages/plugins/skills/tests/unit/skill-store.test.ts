@@ -4,7 +4,7 @@
  * linked into a ferret home by the harness side. Real state, real roots, a real disk.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { materializeSkills } from '@ferretry/core-ferrets/contract';
@@ -16,6 +16,7 @@ import { SKILLS_INSTALLED_STATE } from '../../contract/index.ts';
 import { skillParts } from '../../daemon/lib/launch-parts.ts';
 import {
   installRefusal,
+  InstalledSkillConflict,
   InstalledSkillRefused,
   MAX_INSTALLED_FILE_BYTES,
   SkillStore,
@@ -223,5 +224,103 @@ describe('F-0184 the daemon half hands a launch the installed skills it selects'
     expect(await taker[0]?.item.parts({ harness: 'claude-code', runtime: 'b' })).toEqual([]);
     expect(await taker[0]?.item.parts({ harness: 'claude-code' })).toEqual([]);
     expect(await taker[0]?.item.parts({ harness: 'claude-code', runtime: 'broken' })).toEqual([]);
+  });
+});
+
+describe('what a person put in an installed folder is never replaced or removed', () => {
+  test('a file added by hand refuses the next install, names its path, and is left where it was', async () => {
+    const f = await fixture();
+    await f.store.install('review', SKILL);
+    await writeFile(join(f.installed, 'review', 'mine.txt'), 'hand');
+    const refused = await f.store.install('review', [{ path: 'SKILL.md', content: 'v2\n' }]).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(refused).toBeInstanceOf(InstalledSkillConflict);
+    expect(refused).toBeInstanceOf(InstalledSkillRefused);
+    expect((refused as Error).name).toBe('InstalledSkillConflict');
+    expect((refused as Error).message).toBe(
+      'review/mine.txt is here but no install of ours wrote it, so the skill was not replaced. Move or remove it, then try again.',
+    );
+    expect(await readFile(join(f.installed, 'review', 'mine.txt'), 'utf8')).toBe('hand');
+    expect(await readFile(join(f.installed, 'review', 'SKILL.md'), 'utf8')).toBe(SKILL[0]?.content ?? '');
+  });
+
+  test('a folder no install of ours wrote is a conflict too, and a link in the folder is listed as a link', async () => {
+    const f = await fixture();
+    await mkdir(join(f.installed, 'hand'), { recursive: true });
+    await writeFile(join(f.installed, 'hand', 'SKILL.md'), 'hand');
+    await expect(f.store.install('hand', SKILL)).rejects.toBeInstanceOf(InstalledSkillConflict);
+    await symlink('SKILL.md', join(f.installed, 'hand', 'link'));
+    expect(await f.store.walk('hand')).toEqual([
+      { path: 'link', kind: 'symlink' },
+      { path: 'SKILL.md', kind: 'file' },
+    ]);
+  });
+
+  test('uninstall removes what the store wrote and leaves the hand-made file, with its folder', async () => {
+    const f = await fixture();
+    await f.store.install('review', SKILL);
+    await writeFile(join(f.installed, 'review', 'mine.txt'), 'hand');
+    await f.store.uninstall('review');
+    expect(await readFile(join(f.installed, 'review', 'mine.txt'), 'utf8')).toBe('hand');
+    expect(await f.store.walk('review')).toEqual([{ path: 'mine.txt', kind: 'file' }]);
+    expect(await f.store.paths('review')).toEqual([]);
+  });
+});
+
+describe('a look at an installed folder is bounded', () => {
+  test('walk lists a thousand entries and then says there are more than a skill holds', async () => {
+    const f = await fixture();
+    await mkdir(join(f.installed, 'big'), { recursive: true });
+    await Promise.all(
+      Array.from({ length: 1001 }, (_, index) =>
+        writeFile(join(f.installed, 'big', `f${String(index).padStart(4, '0')}`), ''),
+      ),
+    );
+    const found = await f.store.walk('big');
+    expect(found).toHaveLength(1001);
+    expect(found.at(0)).toEqual({ path: '(more entries than a skill holds)', kind: 'directory' });
+    expect(found.filter(entry => entry.kind === 'file')).toHaveLength(1000);
+  });
+
+  test('walk of a name that is no folder name finds nothing', async () => {
+    const f = await fixture();
+    expect(await f.store.walk('../x')).toEqual([]);
+  });
+});
+
+describe('the list of what was installed is read as a claim, never trusted', () => {
+  const remember = async (f: Awaited<ReturnType<typeof fixture>>, name: string, text: string) => {
+    await mkdir(join(f.installed, '_files'), { recursive: true });
+    await writeFile(join(f.installed, '_files', name), text);
+  };
+
+  test('text that is not JSON, JSON that is not a list, and a missing list all name no paths', async () => {
+    const f = await fixture();
+    await remember(f, 'broken', '{not json');
+    await remember(f, 'object', '{"a":1}');
+    expect(await f.store.paths('broken')).toEqual([]);
+    expect(await f.store.paths('object')).toEqual([]);
+    expect(await f.store.paths('missing')).toEqual([]);
+    expect(await f.store.paths('../x')).toEqual([]);
+  });
+
+  test('a list keeps the plain skill paths and drops everything that could leave the folder', async () => {
+    const f = await fixture();
+    await remember(f, 'tampered', JSON.stringify(['SKILL.md', 'a/b.txt', '../escape', '/etc/passwd', 'a//b', 7, null]));
+    expect(await f.store.paths('tampered')).toEqual(['SKILL.md', 'a/b.txt']);
+  });
+});
+
+describe('one installed file is read back as bytes', () => {
+  test('a plain file is its bytes, a folder or a missing file or a path that climbs is nothing', async () => {
+    const f = await fixture();
+    await f.store.install('review', SKILL);
+    expect(new TextDecoder().decode(await f.store.read('review', 'scripts/run.sh'))).toBe('run\n');
+    expect(await f.store.read('review', 'scripts')).toBeUndefined();
+    expect(await f.store.read('review', 'missing.md')).toBeUndefined();
+    expect(await f.store.read('review', '../review/SKILL.md')).toBeUndefined();
+    expect(await f.store.read('../x', 'SKILL.md')).toBeUndefined();
   });
 });
