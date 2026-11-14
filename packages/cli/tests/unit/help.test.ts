@@ -242,7 +242,14 @@ describe('help names the flags the handlers read', () => {
 
   it('should list every option `start` reads, and keep --compact-at', () => {
     const flags = flagsOf('start [prompt...]');
-    for (const flag of [...SHARED, '-a, --agent <agent>', '--parent <id>', '-f, --file <file>', '--request-id <id>'])
+    for (const flag of [
+      ...SHARED,
+      '-a, --agent <agent>',
+      '--parent <id>',
+      '-f, --file <file>',
+      '--request-id <id>',
+      '--detach',
+    ])
       should(flags).containEql(flag);
   });
 

@@ -126,6 +126,8 @@ export interface FakeLessonsDaemon {
   readonly state: {
     lessons: ProposalView[];
     scan: LessonsScanProgress | undefined;
+    /** What a scan that is started answers with, when it is not the usual running one (a scan with nothing to read ends at once). */
+    onStart?: LessonsScanProgress;
     ferrets: FerretLessons[];
     config: LessonsConfig;
     estimate: LessonsScanEstimate;
@@ -173,7 +175,7 @@ export const fakeLessonsDaemon = (lessons: readonly ProposalView[] = [lesson()])
       case 'POST /v1/lessons/scan/estimate':
         return { body: state.estimate };
       case 'POST /v1/lessons/scan':
-        state.scan = progress();
+        state.scan = state.onStart ?? progress();
         return { body: state.scan };
       case 'GET /v1/lessons/scan':
         return { body: state.scan === undefined ? {} : { scan: state.scan } };

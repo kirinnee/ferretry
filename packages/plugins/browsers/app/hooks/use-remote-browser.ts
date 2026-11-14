@@ -14,6 +14,7 @@
  * and invalidates every request already in flight.
  */
 
+import { STEP_UP_REQUIRED_CODE, UNLOCK_REQUIRED_CODE } from '@ferretry/core-gate/contract';
 import type { BrowserAction, BrowserActionResult, BrowserStatus } from '../../contract/wire/browser.ts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -63,6 +64,8 @@ export interface RemoteBrowserModel {
   readonly status: BrowserStatus | null;
   readonly error: string | null;
   readonly busy: boolean;
+  /** The last answer was the daemon asking for this device's passkey: the browser's state is unknown, not stopped. */
+  readonly needsPasskey: boolean;
   readonly runAction: (action: BrowserAction) => void;
   readonly refresh: () => void;
   readonly reportError: (message: string) => void;
@@ -70,6 +73,16 @@ export interface RemoteBrowserModel {
 }
 
 const failureMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/**
+ * Whether a failure is the daemon waiting for this device's passkey (a step-up or an unlock), which is a thing the
+ * person can DO something about — not a browser that is stopped or broken. A quiet read never raises that prompt, so
+ * the pane has to say it and offer the press that does.
+ */
+const wantsPasskey = (error: unknown): boolean => {
+  const code = typeof error === 'object' && error !== null ? (error as { readonly code?: unknown }).code : undefined;
+  return code === STEP_UP_REQUIRED_CODE || code === UNLOCK_REQUIRED_CODE;
+};
 
 export function useRemoteBrowser({
   daemon,
@@ -83,6 +96,7 @@ export function useRemoteBrowser({
   const [status, setStatus] = useState<BrowserStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [needsPasskey, setNeedsPasskey] = useState(false);
   const generationRef = useRef(0);
   const mutationsRef = useRef(0);
   const pairingRef = useRef<{ readonly connection: BrowserDaemon; readonly scope: BrowserSessionScope } | null>(null);
@@ -110,16 +124,20 @@ export function useRemoteBrowser({
     if (status !== null) setStatus(null);
     if (error !== null) setError(null);
     if (busy) setBusy(false);
+    if (needsPasskey) setNeedsPasskey(false);
   }
 
   const commit = useCallback((generation: number, next: BrowserStatus): void => {
     if (generation !== generationRef.current) return;
     setStatus(next);
+    setNeedsPasskey(false);
     if (next.state === 'error') setError(next.error);
   }, []);
 
   const fail = useCallback((generation: number, caught: unknown): void => {
-    if (generation === generationRef.current) setError(failureMessage(caught));
+    if (generation !== generationRef.current) return;
+    setError(failureMessage(caught));
+    setNeedsPasskey(wantsPasskey(caught));
   }, []);
 
   const refresh = useCallback(() => {
@@ -174,5 +192,5 @@ export function useRemoteBrowser({
   const reportError = useCallback((message: string) => setError(message), []);
   const clearError = useCallback(() => setError(null), []);
 
-  return { status, error, busy, runAction, refresh, reportError, clearError };
+  return { status, error, busy, needsPasskey, runAction, refresh, reportError, clearError };
 }

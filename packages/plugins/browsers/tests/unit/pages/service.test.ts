@@ -319,6 +319,75 @@ describe('the machine agent browser — one Chrome, pages by session', () => {
     should(tabs.pages.some(page => page.incognito === true)).be.false();
   });
 
+  it('should close Chrome itself when a stop leaves no session holding a page (fy browser stop, cli-check #37)', async () => {
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+
+    const answer = await service.act('s1', { action: 'stop' });
+
+    should(answer.status).match({ state: 'stopped', pages: [] });
+    should(tabs.calls).containEql('close');
+    should(await service.status('s1')).match({ state: 'stopped' });
+  });
+
+  it('should keep Chrome running when a stop lands while another session’s new page is still being opened', async () => {
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+    const originalNewPage = tabs.automation.newPage;
+    let reply!: () => void;
+    const gate = new Promise<void>(resolve => {
+      reply = resolve;
+    });
+    let created!: () => void;
+    const entered = new Promise<void>(resolve => {
+      created = resolve;
+    });
+    Object.assign(tabs.automation, {
+      newPage: async (options: Parameters<typeof originalNewPage>[0]) => {
+        const page = await originalNewPage(options);
+        created();
+        await gate;
+        return page;
+      },
+    });
+
+    const opening = service.openPage('s2', 'docs');
+    await entered;
+    await service.act('s1', { action: 'stop' });
+    reply();
+    await opening;
+
+    should(await service.status('s2')).match({ state: 'running' });
+    should((await service.status('s2')).pages.map(page => page.name)).deepEqual(['docs']);
+    should(tabs.calls).not.containEql('close');
+  });
+
+  it('should not open a page on a browser a stop closed while the open waited its turn', async () => {
+    const { service } = harness();
+    await service.openPage('s1', 'app');
+
+    const stopping = service.act('s1', { action: 'stop' });
+    const opening = failure(service.openPage('s2', 'docs'));
+    await stopping;
+
+    // Either the open ran first (and Chrome stayed for it) or it was refused as stopped: never a page on a dead run.
+    const refused = await opening;
+    if (refused === undefined) should((await service.status('s2')).pages.map(page => page.name)).deepEqual(['docs']);
+    else should(refused).match({ code: 'not_running' });
+  });
+
+  it('should keep Chrome running for another session when one session stops', async () => {
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+    await service.openPage('s2', 'docs');
+
+    const answer = await service.act('s1', { action: 'stop' });
+
+    should(answer.status).match({ state: 'running', pages: [] });
+    should(tabs.calls).not.containEql('close');
+    should((await service.status('s2')).pages.map(page => page.name)).deepEqual(['docs']);
+  });
+
   it('should release nothing, and report stopped, when the browser is not running', async () => {
     const { service } = harness();
     await service.releaseSession('s1');
