@@ -35,6 +35,8 @@ const StartIdentitySchema = z.strictObject({
   /** Optional on the wire so a start without one is refused with today's sentence, not a schema issue list. */
   folder: z.string().min(1).max(4_096).optional(),
   prompt: z.string().max(200_000).optional(),
+  /** `fy start --detach`: answer once the ferret is recorded, launch in the background (a request fact, never stored). */
+  detach: z.boolean().optional(),
 });
 
 const StartBodySchema = z

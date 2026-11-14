@@ -23,6 +23,7 @@ import {
   StateAutoMoveLedger,
   StateWardenStateStore,
   WardenReportReader,
+  runtimesWardenAgents,
 } from './adapters/index.ts';
 import { WardenFleetFacts } from './adapters/fleet-facts.ts';
 import {
@@ -232,15 +233,11 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   const workFolders = new ScratchWardenWorkFolders(kernel.scratch);
   const spawner: WardenSpawner = ferretsWardenSpawner({ ferrets, folders: workFolders });
 
-  const agents: WardenAgentInventory = {
-    // Empty is "the inventory is unreadable" (`WardenAgentInventory`): it condemns no account. The harness keys Ferrets
-    // lists are not runtime names, so answering with them made EVERY account unknown and no investigator could start.
-    // Ferrets resolves the runtime at the start itself and refuses an unknown or signed-out one: the sweep then strikes
-    // that account and tries the next, which is the check that matters.
-    installed: async () => [],
-    currentName: async reference => reference,
-    defaultRuntime: async () => undefined,
-  };
+  // The logins an investigation may run on: this machine's agent runtimes by NAME, and its default runtime for an owner who
+  // never chose one (`runtime-agents.ts`). Runtimes not answering is "unreadable": it condemns no account and leaves the login
+  // not set. Ferrets resolves the runtime at the start itself and refuses a signed-out one: the sweep then strikes that
+  // account and tries the next, which is the check that matters. (The harness keys Ferrets lists are not runtime names.)
+  const agents: WardenAgentInventory = runtimesWardenAgents(() => host.runtimes?.());
 
   // ── auto-move: a ferret on a login that hit its limit goes to one with room (`auto-move-service.ts`) ────────────────
   // No Jev, no investigation, no spend: a rule over recorded facts and the owner's `autoMove` setting. The act is

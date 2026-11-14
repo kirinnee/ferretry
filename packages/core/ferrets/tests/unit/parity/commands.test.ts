@@ -373,11 +373,13 @@ describe('commands parity', () => {
       expect(negated.calls[0]?.init).toMatchObject({ body: { mode: 'interactive', fast: false, remoteControl: true } });
     });
 
-    test('V-0443 fy start refuses, by name and unsent, a flag whose job another plugin took (--detach) and a bad number or mode', async () => {
+    test('V-0443 fy start sends --detach (v4: answer once the ferret is recorded) and refuses, unsent, a bad number or mode', async () => {
       const detached = run({ answers: startAnswers });
-      expect(await detached.verb('start [prompt...]', ['x'], { detach: true })).toBe(2);
-      expect(detached.err.join('\n')).toContain('--detach');
-      expect(detached.calls).toEqual([]);
+      expect(await detached.verb('start [prompt...]', ['x'], { cwd: '/abs', detach: true })).toBe(0);
+      expect(detached.calls[0]?.init).toMatchObject({ body: { prompt: 'x', detach: true } });
+      const plain = run({ answers: startAnswers });
+      expect(await plain.verb('start [prompt...]', ['x'], { cwd: '/abs' })).toBe(0);
+      expect(JSON.stringify(plain.calls[0]?.init)).not.toContain('detach');
       const bad = run({ answers: startAnswers });
       expect(await bad.verb('start [prompt...]', ['x'], { cwd: '/abs', interval: 'banana' })).toBe(2);
       expect(await bad.verb('start [prompt...]', ['x'], { cwd: '/abs', mode: 'sideways' })).toBe(2);

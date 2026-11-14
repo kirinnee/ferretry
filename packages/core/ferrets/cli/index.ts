@@ -219,6 +219,7 @@ export default implementCli(manifest, {
           ...(harness === undefined ? {} : { harness }),
           ...(login === undefined ? {} : { login }),
           ...(pack === undefined ? {} : { pack }),
+          ...(role === 'start' && on(invocation, 'detach') ? { detach: true } : {}),
           ...(cwd === undefined ? {} : { cwd }),
           ...(prompt === undefined ? {} : { prompt }),
           ...(initialAttachments.length === 0 ? {} : { initialAttachments }),

@@ -106,7 +106,7 @@ describe('the ferrets cli half', () => {
     expect(sentBody(relative.calls[0])?.folder).toBe('/home/me/work/beta');
   });
 
-  test('V-0443 start posts the body Ferrets start takes and refuses, by name, a flag another plugin decides now', async () => {
+  test('V-0443 start posts the body Ferrets start takes; --detach is sent (v4: answer once recorded), a bad mode is refused', async () => {
     const { verb, calls, err } = run({ [FERRET_ROUTES.start]: { id: 'lead' }, [FERRET_ROUTES.get]: ferret });
     expect(await verb('start [prompt...]', ['fix', 'it'], { a: 'claude-alpha', cwd: '/abs', teammate: 'wren' })).toBe(
       0,
@@ -118,10 +118,11 @@ describe('the ferrets cli half', () => {
         headers: { 'x-fy-request-id': expect.any(String) },
       },
     });
-    expect(await verb('start [prompt...]', ['x'], { detach: true })).toBe(2);
-    expect(err.at(-1)).toContain('--detach');
+    expect(await verb('start [prompt...]', ['x'], { cwd: '/abs', detach: true })).toBe(0);
+    expect(calls[2]?.init).toMatchObject({ body: { folder: '/abs', prompt: 'x', mode: 'auto', detach: true } });
     expect(await verb('start [prompt...]', ['x'], { mode: 'sideways' })).toBe(2);
-    expect(calls).toHaveLength(2);
+    expect(err.at(-1)).toContain('--mode');
+    expect(calls).toHaveLength(4);
   });
 
   test('V-0443 start sends today’s flags under today’s wire names; --no-fast and a repeated --harness-flag carry', async () => {
