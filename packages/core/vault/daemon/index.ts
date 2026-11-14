@@ -81,8 +81,8 @@ const IDENTITY_NOT_OFFERED: SecretCloneIdentitySource = { load: async () => unde
 const PHONE_APPROVAL_LOOKER = 'accounts';
 /** The one plugin that captures a secure copy: it runs the command and holds the value in the masking registry. */
 const SECURE_COPY_OWNER = 'accounts';
-/** The plugins whose request tools carry a ferret's `push: true` raise (Terminals' does not serve one yet). */
-const PHONE_APPROVAL_RAISERS: readonly string[] = ['browsers'];
+/** The plugins whose request tools carry a ferret's `push: true` raise. */
+const PHONE_APPROVAL_RAISERS: readonly string[] = ['browsers', 'terminals'];
 
 /**
  * The Vault's daemon half (§2.2): the sealed store and key (byte for byte, spine D16), `${secret:NAME}` use, the
@@ -398,7 +398,7 @@ export default implementDaemon(manifest, {
       const ownChildEnvironment: VaultApi['childEnvironment'] = async (_ferret, env) =>
         await mintChildEnvironment(env, needer.id);
       if (isCoreNeeder(needer)) return { ...full, childEnvironment: ownChildEnvironment };
-      // The phone approval's reach is by name: the service that looks (Accounts) and the tool that raises (Browsers).
+      // The phone approval's reach is by name: the service that looks (Accounts) and the tools that raise (Browsers, Terminals).
       // Every other needer is handed none of it, so a plugin cannot read a page's number or the prompt of
       // a terminal, or raise an approval, by holding the Vault port.
       const {

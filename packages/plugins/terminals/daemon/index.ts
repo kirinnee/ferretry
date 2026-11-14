@@ -20,6 +20,8 @@ import {
   type InputTargetAdapter,
   type InputTargetFacts,
   type InputTargetField,
+  PHONE_APPROVAL_UNAVAILABLE,
+  PhoneApprovalAskSchema,
   type TypeOptions,
   targetRef,
 } from '@ferretry/core-vault/contract';
@@ -33,7 +35,7 @@ import {
   jsonResponse,
 } from '@ferretry/kernel/contract';
 import { type DaemonContext, implementDaemon, type ToolResult } from '@ferretry/kernel/manifest';
-import { instantFromEpochMs, milliseconds } from '@ferretry/std';
+import { err, instantFromEpochMs, milliseconds } from '@ferretry/std';
 import { z } from 'zod';
 import {
   SurfaceControlRequestSchema,
@@ -209,8 +211,14 @@ export function renderToolResult(result: AgentToolResult): string {
   return lines.join('\n');
 }
 
-/** `terminal_request_input`'s input: today's single-value terminal card (`push` approvals are not served yet). */
-const TerminalRequestInputSchema = z.strictObject({
+/** `terminal_request_input push:true` ("Approve on your phone"): the terminal and hints only; Accounts owns the approval. */
+const TerminalPushApprovalInputSchema = PhoneApprovalAskSchema.omit({ target: true }).extend({
+  push: z.literal(true),
+  name: z.string().min(1).max(80),
+});
+
+/** `terminal_request_input`'s card of one value: today's single-value terminal card. */
+const TerminalValueInputSchema = z.strictObject({
   name: z.string().min(1).max(80),
   prompt: z.string().trim().min(1).max(280),
   sensitivity: z.enum(['secret', 'private', 'code', 'plain']),
@@ -222,6 +230,9 @@ const TerminalRequestInputSchema = z.strictObject({
   secretHint: z.string().optional(),
   push: z.literal(false).optional(),
 });
+
+/** `terminal_request_input`: a push approval, or a card of one value. */
+const TerminalRequestInputSchema = z.union([TerminalPushApprovalInputSchema, TerminalValueInputSchema]);
 
 /** Each tool's call, parsed by the schema the manifest declares for it. */
 function parseToolCall(tool: string, input: unknown): TerminalToolCall | string {
@@ -270,6 +281,10 @@ function parseToolCall(tool: string, input: unknown): TerminalToolCall | string 
       );
     case 'terminal_request_input':
       return parsed(TerminalRequestInputSchema, (value: z.infer<typeof TerminalRequestInputSchema>) => {
+        if (value.push === true) {
+          const { name, push: _approval, ...ask } = value;
+          return { tool: 'terminal.request_push', name, ask } as unknown as TerminalToolCall;
+        }
         const { name, label, push: _push, ...rest } = value;
         const raise = {
           ...rest,
@@ -452,6 +467,11 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     raiseInput: async (ferret, raise) => {
       const vault = ctx.needs.vault;
       return await vault.raiseInput(ferret as FerretId, raise);
+    },
+    // Absent when the Vault offers none (it hands the raise to the plugins it names): the tool then says so.
+    raisePhoneApproval: async (ferret, ask) => {
+      const raise = ctx.needs.vault.raisePhoneApproval;
+      return raise === undefined ? err(PHONE_APPROVAL_UNAVAILABLE) : await raise(ferret as FerretId, ask);
     },
   });
 

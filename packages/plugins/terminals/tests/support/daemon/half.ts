@@ -11,6 +11,7 @@ import type {
   InputRaise,
   InputRequestId,
   InputTargetAdapter,
+  PhoneApprovalAsk,
   SecretName,
   VaultApi,
 } from '@ferretry/core-vault/contract';
@@ -142,7 +143,10 @@ export function fakeFerrets(known: readonly FerretSummary[] = [ferretSummary()])
 }
 
 /** The Vault, as far as Terminals asks it: input cards a ferret raises. */
-export function fakeVault(raised: { ferret: string; raise: InputRaise }[]): VaultApi {
+export function fakeVault(
+  raised: { ferret: string; raise: InputRaise }[],
+  approvals: { ferret: string; ask: PhoneApprovalAsk }[] = [],
+): VaultApi {
   const refuse = async (): Promise<never> => {
     throw new Error('not in this test');
   };
@@ -160,6 +164,10 @@ export function fakeVault(raised: { ferret: string; raise: InputRaise }[]): Vaul
     },
     cancelInput: async () => undefined,
     inputState: async () => undefined,
+    raisePhoneApproval: async (ferret, ask) => {
+      approvals.push({ ferret, ask });
+      return ok({ id: `pa_${'0'.repeat(24)}`, state: 'waiting' as const });
+    },
   };
 }
 
@@ -169,6 +177,8 @@ export interface Half {
   readonly holds: FakeInputHolds;
   readonly redaction: FakeRedaction;
   readonly raised: { ferret: string; raise: InputRaise }[];
+  /** The phone approvals the half asked the Vault to raise. */
+  readonly approvals: { ferret: string; ask: PhoneApprovalAsk }[];
   /** Who the next call is: the ferret (its own token) or the owner. */
   as(caller: 'ferret' | 'owner'): void;
   /** The `input.targets:terminal` adapter the half provides. */
@@ -199,6 +209,7 @@ export async function terminalsHalf(
   const holds = new FakeInputHolds();
   const redaction = new FakeRedaction(new Map([['GITHUB_TOKEN' as SecretName, SECRET]]));
   const raised: { ferret: string; raise: InputRaise }[] = [];
+  const approvals: { ferret: string; ask: PhoneApprovalAsk }[] = [];
   let caller: 'ferret' | 'owner' = 'ferret';
   let built: ReturnType<typeof buildTerminals> | undefined;
   const plugin = implementDaemon(manifest, {
@@ -216,7 +227,7 @@ export async function terminalsHalf(
     ...(kernelHost.executables === undefined ? {} : { executables: kernelHost.executables }),
     ...(kernelHost.searchPath === undefined ? {} : { searchPath: kernelHost.searchPath }),
     plugins: [plugin],
-    fakes: { ferrets: fakeFerrets(known), vault: fakeVault(raised) },
+    fakes: { ferrets: fakeFerrets(known), vault: fakeVault(raised, approvals) },
     uses: kernelHost.agentControl === null ? {} : { agentControl: kernelHost.agentControl ?? ALL_ON },
     gate: new StandInAdmission(() => (caller === 'ferret' ? ferretStanding(FERRET) : ownerStanding())),
     holds: holds.holds,
@@ -228,6 +239,7 @@ export async function terminalsHalf(
     holds,
     redaction,
     raised,
+    approvals,
     as: next => (caller = next),
     inputTarget: () => built?.hooks['input.targets:terminal'] as InputTargetAdapter,
     referenceMenu: () => built?.hooks['reference.catalog:%terminal'] as ReferenceCatalogProvider,

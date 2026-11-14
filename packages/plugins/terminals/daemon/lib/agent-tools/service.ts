@@ -1,4 +1,10 @@
-import type { InputRaise, InputRequestId } from '@ferretry/core-vault/contract';
+import type {
+  InputRaise,
+  InputRequestId,
+  PhoneApprovalAgentView,
+  PhoneApprovalAsk,
+} from '@ferretry/core-vault/contract';
+import { PHONE_APPROVAL_UNAVAILABLE } from '@ferretry/core-vault/contract';
 import type { Ack, Content, HoldRefusal, Op, RedactionScope, ResultOf } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
 import {
@@ -95,6 +101,12 @@ export type TerminalToolCall =
       readonly tool: 'terminal.request_input';
       readonly name: string;
       readonly raise: Omit<InputRaise, 'target'>;
+    }
+  | {
+      /** `terminal_request_input push:true`: the owner approves a sign-in on their phone; nothing is typed. */
+      readonly tool: 'terminal.request_push';
+      readonly name: string;
+      readonly ask: Omit<PhoneApprovalAsk, 'target'>;
     };
 
 /** One terminal as an agent lists it. */
@@ -131,6 +143,11 @@ export interface TerminalToolPorts {
   readonly sleep: (milliseconds: number) => Promise<void>;
   /** Raises an input card through the Vault (I68: the only way a ferret gets a password typed). Not an act. */
   readonly raiseInput?: (ferret: string, raise: InputRaise) => Promise<Result<InputRequestId, string>>;
+  /** Raises a phone approval through the Vault to Accounts, which owns the approval, its gates and its card. Not an act. */
+  readonly raisePhoneApproval?: (
+    ferret: string,
+    ask: PhoneApprovalAsk,
+  ) => Promise<Result<PhoneApprovalAgentView, string>>;
 }
 
 const DONE: Ack = { status: 'done' };
@@ -256,6 +273,24 @@ export class TerminalToolService {
         return {
           summary: `Asked the owner for the value (!${raised.value}) for ${reference}. Wait with input.wait; do not type there yourself.`,
           input: { id: raised.value },
+        };
+      }
+      case 'terminal.request_push': {
+        if (caller.kind !== 'agent')
+          throw new AgentToolError(
+            'bad_request',
+            'Only an agent asks for a phone approval; you already have the terminal.',
+          );
+        if (this.ports.raisePhoneApproval === undefined)
+          throw new AgentToolError('unavailable', PHONE_APPROVAL_UNAVAILABLE);
+        // The terminal is the one this session owns (resolved above); Accounts re-checks it and owns the approval.
+        const raised = await this.ports.raisePhoneApproval(sessionId, {
+          ...call.ask,
+          target: { kind: 'terminal', key: surface.name ?? surface.id },
+        });
+        if (!raised.ok) throw new AgentToolError('conflict', raised.error);
+        return {
+          summary: `Asked the owner to approve the sign-in on their phone (${raised.value.id}) for ${reference}. Wait with input_wait on ${raised.value.id}; never tell the owner a number.`,
         };
       }
       case 'terminal.ask_owner':
