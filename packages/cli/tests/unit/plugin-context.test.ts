@@ -354,7 +354,8 @@ describe('verbs that failed in the real binary for want of a context field', () 
     const { world, io, transport } = ferretsWorld({ ferret: sessionView({ id: 'lead', name: 'wren' }) });
     transport.replies.push(...Array.from({ length: 20 }, () => ({ status: 200, body: sessionView({ name: 'wren' }) })));
     const code = await runFy(['wait', 'wren', '--timeout', '2'], world);
-    should(io.stderr()).equal('fy wait: gave up while the ferret was still working');
+    // a88838f724: every stderr line ends with a newline.
+    should(io.stderr()).equal('fy wait: gave up while the ferret was still working\n');
     should(code).equal(124);
     should(transport.sent[0]?.path).containEql('/v1/ferrets/');
   });
