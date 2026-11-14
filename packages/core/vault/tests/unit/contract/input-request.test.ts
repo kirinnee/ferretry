@@ -752,14 +752,8 @@ describe('the schemas that must never hold a value', () => {
   for (const [name, schema] of WITHOUT_VALUE) {
     it(`should give ${name} no field named or shaped like a value`, () => {
       const offenders = propertyNames(schema).filter(property => VALUE_LIKE.test(property));
-      // A pasted field's source states how many characters the copy holds (`source.length`, a count for the owner's card, never a
-      // sample: secure-copy 0adc82a67b), so InputRequest alone may carry a `length`.
       const allowedElsewhere =
-        name === 'Ask'
-          ? new Set(['body', 'data', 'response', 'answer', 'input', 'text'])
-          : name === 'InputRequest'
-            ? new Set(['length'])
-            : new Set<string>();
+        name === 'Ask' ? new Set(['body', 'data', 'response', 'answer', 'input', 'text']) : new Set<string>();
 
       should(offenders.filter(property => !allowedElsewhere.has(property))).deepEqual([]);
     });

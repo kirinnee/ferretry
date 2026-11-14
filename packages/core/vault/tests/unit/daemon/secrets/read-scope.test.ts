@@ -231,22 +231,10 @@ describe('child environments (lead decision 9)', () => {
 
 describe('what the types refuse', () => {
   it('S6 S157 the management surface has no method that hands back a value', () => {
-    // Assert — the directory a route holds can list, write and remove; nothing on it opens ciphertext. putIdentified and
-    // writeIdentity answer a write's seal nonce (its identity, never a value): what a mint ledger records.
+    // Assert — the directory a route holds can list, write and remove; nothing on it opens ciphertext.
     const methods = Object.getOwnPropertyNames(SecretDirectory.prototype).filter(name => name !== 'constructor');
     should(methods.filter(name => !name.startsWith('#')).sort()).deepEqual(
-      [
-        'document',
-        'inTurn',
-        'list',
-        'put',
-        'putIdentified',
-        'putIf',
-        'putMissing',
-        'remove',
-        'write',
-        'writeIdentity',
-      ].sort(),
+      ['document', 'inTurn', 'list', 'put', 'putIf', 'putMissing', 'remove', 'write'].sort(),
     );
   });
 
@@ -279,9 +267,6 @@ describe('what the types refuse', () => {
       'ferret launch environment': /childEnvironment\s*=\s*async[\s\S]*?\bvault\.values\(\)/u,
       // The kernel's own `${secret:NAME}` lookup (`kernel.secrets`): bound to the kernel alone, never a route or a half.
       'kernel secret resolver': /secretResolver:\s*SecretResolver\s*=\s*\{[\s\S]*?\bvault\.values\(\)/u,
-      // The minted exchange (`fetchMinted`): ONE reading of the entry places the value a plugin MINTED on a request to a host
-      // it was checked for and answers only a sanitized reply; the value never reaches the plugin.
-      'minted exchange': /opened\s*=\s*await\s+vault\.openEntry\(/u,
     };
 
     // Assert — one vault, built in one place, handed only to the allowlist. A new holder adds a use and fails here.

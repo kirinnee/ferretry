@@ -136,8 +136,6 @@ describe('fy secret set', () => {
   it('S33 declares one word, the name, and nothing that could carry a value', () => {
     const declared = manifest.actions.cli.filter(each => each.verb === 'secret set');
     expect(declared).toHaveLength(1);
-    // `args` is the help text of the one positional (the name); there is no `options` key, so no flag could carry a value.
-    expect(Object.keys(declared[0] ?? {}).sort()).toEqual(['args', 'summary', 'verb']);
-    expect(declared[0]?.args?.map(arg => arg.name)).toEqual(['name']);
+    expect(Object.keys(declared[0] ?? {}).sort()).toEqual(['summary', 'verb']);
   });
 });
