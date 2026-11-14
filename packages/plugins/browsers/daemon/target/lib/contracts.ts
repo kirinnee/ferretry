@@ -1,5 +1,6 @@
 import type { PageFacts } from '@ferretry/core-vault/contract';
 import type { ElementTarget } from './element.ts';
+import type { NavigationEvidence } from './navigation-evidence.ts';
 
 /**
  * THE INPUT BRIDGE'S SEAM INTO THE AGENT BROWSER (docs/input-requests.md, "Pages").
@@ -83,6 +84,13 @@ export interface BrowserInputDocument {
    * read that began on an unmarked page knows when one was shown meanwhile. `-1`: the browser could not say.
    */
   readonly pairingSeen?: number;
+  /**
+   * Where the TARGET has been, from the browser's own frame events (`./navigation-evidence.ts`): the origins its frames
+   * committed and when, how many frame events it has seen, and whether any address it committed carried the pairing
+   * fragment. Page script cannot write it, and a navigation or a swapped frame leaves a mark in it that the DOM does not.
+   * Absent: the browser kept none, and a guard that needs it refuses.
+   */
+  readonly navigation?: NavigationEvidence;
 }
 
 /**

@@ -5,6 +5,7 @@ import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
 import {
   ACCESS_WORDS,
   AccessPort,
+  PairingWindowPort,
   AUDIT,
   DevicesChanged,
   DevicesFile,
@@ -41,7 +42,7 @@ export default definePlugin({
 
   needs: { gate: GatePort },
   uses: { connections: ConnectionsPort },
-  provides: { access: AccessPort },
+  provides: { access: AccessPort, pairingWindow: PairingWindowPort },
 
   actions: {
     routes: [

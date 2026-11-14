@@ -4,7 +4,7 @@ import { PAIRING_SCREEN_SEEN_META_NAME, PAIRING_SCREEN_SELECTOR } from '@ferretr
 import type { PairingCodeMintResponse, PairingId } from '../../../../contract/index.ts';
 import { PairingScreen } from '../../../../app/features/pairing/pairing-screen.tsx';
 import { AddDeviceCard } from '../../../../app/features/settings/add-device-settings.tsx';
-import { holdPairingScreenMarker } from '../../../../app/lib/pairing-screen-marker.ts';
+import { holdPairingScreenMarker, usePairingScreenMarker } from '../../../../app/lib/pairing-screen-marker.ts';
 import { daemonConnection } from '../../../../app/shell-pairing.ts';
 import { interact, mount, must } from '../../../support/app/dom.ts';
 // React DOM reads the DOM globals when it loads, and dom.ts is what installs them: load it after, as dom.ts does.
@@ -236,7 +236,8 @@ describe('the pairing-screen marker', () => {
       const withCode = looks.filter(look => look.codeVisible);
       expect(withCode.length).toBeGreaterThan(0);
       expect(withCode.every(look => look.markers === 1)).toBe(true);
-      expect(looks.some(look => !look.codeVisible && look.markers > 0)).toBe(false);
+      // The marker is released only AFTER the code's nodes are gone, so a look just after the commit may still see it (the
+      // reverse of the first look): what must never happen is the code visible with no marker. By the end it is gone.
       expect(markers()).toBe(0);
     } finally {
       observer.disconnect();
@@ -244,5 +245,71 @@ describe('the pairing-screen marker', () => {
       container.remove();
       flags.IS_REACT_ACT_ENVIRONMENT = wasActEnvironment;
     }
+  });
+});
+
+/** A screen that holds the marker and shows the (fixed fake) code, deleted whole by its parent. */
+function CodeScreen() {
+  usePairingScreenMarker(true);
+  return <p data-fake-code="">{FAKE_CODE}</p>;
+}
+
+describe('P2: the marker is released only after the code’s nodes are gone', () => {
+  const orderOfRemovals = async (tree: (shown: boolean) => React.ReactElement) => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const flags = globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const wasActEnvironment = flags.IS_REACT_ACT_ENVIRONMENT;
+    flags.IS_REACT_ACT_ENVIRONMENT = false;
+    const root = createRoot(container);
+    const removals: string[] = [];
+    const observer = new MutationObserver(records => {
+      for (const record of records)
+        for (const node of Array.from(record.removedNodes))
+          if (node instanceof Element) {
+            if (node.matches(PAIRING_SCREEN_SELECTOR)) removals.push('marker');
+            else if (node.matches('[data-fake-code]') || node.querySelector('[data-fake-code]') !== null)
+              removals.push('code');
+          }
+    });
+    observer.observe(document, { childList: true, subtree: true });
+    const settle = async (): Promise<void> => await new Promise(resolve => setTimeout(resolve, 50));
+    try {
+      root.render(tree(true));
+      await settle();
+      expect(markers()).toBe(1);
+      root.render(tree(false));
+      await settle();
+      return { removals, left: markers() };
+    } finally {
+      observer.disconnect();
+      root.unmount();
+      container.remove();
+      flags.IS_REACT_ACT_ENVIRONMENT = wasActEnvironment;
+    }
+  };
+
+  it('should remove the code’s nodes BEFORE the marker when the screen is deleted whole', async () => {
+    const { removals, left } = await orderOfRemovals(shown => <div>{shown ? <CodeScreen /> : null}</div>);
+
+    expect(removals).toEqual(['code', 'marker']);
+    expect(left).toBe(0);
+  });
+
+  it('should remove the code’s nodes BEFORE the marker when a PARENT of the screen is deleted', async () => {
+    const { removals, left } = await orderOfRemovals(shown => (
+      <div>
+        {shown ? (
+          <section>
+            <div>
+              <CodeScreen />
+            </div>
+          </section>
+        ) : null}
+      </div>
+    ));
+
+    expect(removals).toEqual(['code', 'marker']);
+    expect(left).toBe(0);
   });
 });

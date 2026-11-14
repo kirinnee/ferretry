@@ -113,7 +113,7 @@ class FakeBrowser {
   private guardPage = (extra: object = {}) =>
     ({
       document: async () => ({}),
-      pairingState: async () => ({ marked: false, seen: 0, pages: 1 }),
+      pairingState: async () => ({ marked: false, seen: 0, pages: 1, targets: [] }),
       ...extra,
     }) as never;
 
@@ -204,6 +204,8 @@ async function harness(
         : agentControlPolicy(options.control),
     files: rootFiles(workRoots(work, join(work, '.fy')), nodeStagedFiles(join(root, 'upload'), clock)),
     binaryName: 'fy',
+    // No credential is live in these worlds and no page is the app's (`pairing-screen*.test.ts` is where they are).
+    protection: { now: () => clock.nowMs(), appOrigins: () => new Set(), liveSince: () => false },
     // Bound as the daemon half binds them: the Vault's sign-in lock hears scripts and page acts (I98–I100).
     ...(options.vault === undefined
       ? {}

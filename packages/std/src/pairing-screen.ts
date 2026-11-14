@@ -50,3 +50,25 @@ export function isPairingMintAddress(address: string): boolean {
     return address.includes(PAIRING_MINT_PATH);
   }
 }
+
+/**
+ * The route a catalog share is minted at (`POST /v1/catalog-shares`): its response carries the share's CODE, its link and
+ * its QR's text — a credential that lets a browser join without an existing member passkey. Catalogs owns the route;
+ * the browser worker must recognise its address, so the path is spelled once here, and Catalogs' own tests pin it to this.
+ */
+export const CATALOG_SHARE_MINT_PATH = '/v1/catalog-shares';
+
+/** Whether a request address is the catalog share route, or under it: its response body is never shown. Fails closed. */
+export function isShareMintAddress(address: string): boolean {
+  try {
+    const { pathname } = new URL(address, 'http://placeholder.invalid');
+    return pathname === CATALOG_SHARE_MINT_PATH || pathname.startsWith(`${CATALOG_SHARE_MINT_PATH}/`);
+  } catch {
+    return address.includes(CATALOG_SHARE_MINT_PATH);
+  }
+}
+
+/** Whether a response from this address IS a live credential (a pairing code or a share invite): no tool shows its body. */
+export function isCredentialMintAddress(address: string): boolean {
+  return isPairingMintAddress(address) || isShareMintAddress(address);
+}

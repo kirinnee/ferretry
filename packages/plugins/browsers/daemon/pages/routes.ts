@@ -17,7 +17,7 @@ import { mapStrings } from '../address-rule.ts';
 import { BrowserControlError, type BrowserLoginLifecycle, type BrowserLoginStatus } from '../worker/control/index.ts';
 import { acted, maskedSnapshot, maskedStatus, opOfAction, targetOfAction, writeAct } from './acts.ts';
 import { parseBody } from './body.ts';
-import { pairingScreenGuard } from './pairing-screen-guard.ts';
+import { type ProtectionWindows, pairingScreenGuard } from './pairing-screen-guard.ts';
 import { BrowserSessionError, type BrowserSubsystem } from './service.ts';
 import { type BrowserActionResult, BrowserActionSchema } from '../../contract/wire/browser.ts';
 
@@ -147,20 +147,39 @@ async function browserStatus(kernel: KernelPorts, browser: BrowserSubsystem, cal
 }
 
 /** The toolbar actions whose answer carries the page itself: its text, its markup, its picture. */
-const PAGE_CONTENT_ACTIONS: ReadonlySet<string> = new Set(['read', 'screenshot', 'highlight']);
+const PAGE_CONTENT_ACTIONS: ReadonlySet<string> = new Set(['read', 'screenshot', 'highlight', 'fill-form']);
+
+/** The members of an action that find an element by what it is or says (the same rule as the agent tools': `../tools/pairing-screen.ts`). */
+const ELEMENT_MEMBERS = ['selector', 'ref', 'fromSelector', 'fromRef', 'toSelector', 'toRef'] as const;
+
+/**
+ * Whether an action answers a question about the page's CONTENT: it hands the page back, or it finds its element by a
+ * selector, a ref or the text it shows (so that "found" and "not found", or the error that says why, depend on what the
+ * page holds). An act at a coordinate, a scroll by distance, navigation and the page list read nothing.
+ */
+function readsPageAction(action: Readonly<Record<string, unknown>>): boolean {
+  if (typeof action.action === 'string' && PAGE_CONTENT_ACTIONS.has(action.action)) return true;
+  if (ELEMENT_MEMBERS.some(member => action[member] !== undefined)) return true;
+  return action.action === 'scroll' && action.text !== undefined;
+}
 
 /** What a ferret is told of a page showing a pairing code (docs/pairing.md): the sentence, and nothing of the page. */
 const pairingScreenRefusal = (): ApiError => new ApiError(403, PAIRING_SCREEN_REFUSAL, 'pairing_screen');
 
 /** `POST /v1/sessions/:sessionId/browser`: one action on its page, through the act runner. */
-async function browserAction(kernel: KernelPorts, browser: BrowserSubsystem, call: CallContext): Promise<ApiResponse> {
+async function browserAction(
+  kernel: KernelPorts,
+  browser: BrowserSubsystem,
+  protection: ProtectionWindows,
+  call: CallContext,
+): Promise<ApiResponse> {
   const sessionId = sessionIdOf(call);
   const action = await parseBody(call.request, BrowserActionSchema);
   // What a FERRET is handed of a page (its words, its markup, a picture) is refused while the page shows a pairing code,
   // from inside the page's queue; a person's own toolbar is untouched.
   const guard =
-    ferretOf(call) !== undefined && PAGE_CONTENT_ACTIONS.has(action.action)
-      ? pairingScreenGuard(pairingScreenRefusal)
+    ferretOf(call) !== undefined && readsPageAction(action as Readonly<Record<string, unknown>>)
+      ? pairingScreenGuard(pairingScreenRefusal, protection)
       : undefined;
   const before = await browser.status(sessionId).catch(browserFailure);
   const target = targetOfAction(sessionId, action, before);
@@ -201,19 +220,24 @@ async function browserAction(kernel: KernelPorts, browser: BrowserSubsystem, cal
     );
     return jsonResponse(answerBody);
   }
-  await writeAct(kernel.act, target, op, async () => await browser.act(sessionId, action).catch(browserFailure));
+  await writeAct(kernel.act, target, op, async () => await browser.act(sessionId, action, guard).catch(browserFailure));
   const after = await browser.status(sessionId).catch(browserFailure);
   return jsonResponse({ status: await kernel.redaction.read(scope => maskedStatus(scope, after)) });
 }
 
 /** The routes this file serves, keyed as the manifest declares them. */
-export function pageRoutes(kernel: KernelPorts, window: BrowserLoginLifecycle, browser: BrowserSubsystem) {
+export function pageRoutes(
+  kernel: KernelPorts,
+  window: BrowserLoginLifecycle,
+  browser: BrowserSubsystem,
+  protection: ProtectionWindows,
+) {
   const guard = (handler: RouteHandler): RouteHandler => guarded(kernel.redaction, handler);
   return {
     'GET /v1/browser/login': guard(async () => await answer(async () => await window.status())),
     'POST /v1/browser/login': guard(async call => await loginAct(window, call)),
     'GET /v1/sessions/:sessionId/browser': guard(async call => await browserStatus(kernel, browser, call)),
-    'POST /v1/sessions/:sessionId/browser': guard(async call => await browserAction(kernel, browser, call)),
+    'POST /v1/sessions/:sessionId/browser': guard(async call => await browserAction(kernel, browser, protection, call)),
   } as const;
 }
 

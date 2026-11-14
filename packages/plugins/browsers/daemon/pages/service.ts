@@ -1,4 +1,5 @@
-import { openerGroup } from './opener-group.ts';
+import { openerGroup, sameOriginOrUnplaced } from './opener-group.ts';
+import type { NavigationEvidence } from '../target/lib/navigation-evidence.ts';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
 import { BROWSER_MAX_MACHINE_PAGES, BROWSER_MAX_PAGES, type BrowserStateView } from '../../contract/index.ts';
 import {
@@ -85,7 +86,7 @@ export interface BrowserGuardPage {
 }
 
 /** The answer when the pages cannot be read, or one of them shows a code: marked, and counts no real group has. */
-const UNREADABLE_PAIRING_STATE: BrowserPairingState = { marked: true, seen: -1, pages: -1 };
+const UNREADABLE_PAIRING_STATE: BrowserPairingState = { marked: true, seen: -1, pages: -1, targets: [] };
 
 /** What the live pages say about a pairing code (see {@link BrowserGuardPage.pairingState}). */
 export interface BrowserPairingState {
@@ -94,6 +95,12 @@ export interface BrowserPairingState {
   readonly seen: number;
   /** How many pages the group had: a window that closed or opened meanwhile changes it. */
   readonly pages: number;
+  /**
+   * Each page of the group with where the BROWSER says it has been (`../target/lib/navigation-evidence.ts`): not a DOM
+   * fact, so a navigation or a swapped frame cannot take it away. A page whose evidence cannot be had is an unreadable
+   * group, never an entry without one.
+   */
+  readonly targets: readonly { readonly id: string; readonly nav: NavigationEvidence }[];
 }
 
 /**
@@ -949,15 +956,25 @@ export class BrowserSessionService implements BrowserSubsystem {
   private async pairingStateOf(run: Running, pageId: string): Promise<BrowserPairingState> {
     try {
       run.snapshot = pageOf(await run.driver.location());
-      const group = openerGroup(run.snapshot.pages, pageId);
+      // The opener group, and EVERY page of the browser on the named page's origin (or on one nobody can place): a window
+      // with no opener can still be same-origin with a document that shows a code, and the lack of a link is no proof it
+      // cannot reach it. Pages on other origins cannot script this one's documents and are left out.
+      const named = run.snapshot.pages.find(candidate => candidate.id === pageId)?.url;
+      const related = run.snapshot.pages
+        .filter(candidate => sameOriginOrUnplaced(candidate.url, named))
+        .map(each => each.id);
+      const group = [...new Set([...openerGroup(run.snapshot.pages, pageId), ...related])];
       let seen = 0;
+      const targets: { id: string; nav: NavigationEvidence }[] = [];
       for (const id of group) {
         const found = await run.driver.inputDocument(id);
         if (found.pairingScreen === true) return UNREADABLE_PAIRING_STATE;
         if (typeof found.pairingSeen !== 'number' || found.pairingSeen < 0) return UNREADABLE_PAIRING_STATE;
+        if (found.navigation === undefined) return UNREADABLE_PAIRING_STATE;
         seen += found.pairingSeen;
+        targets.push({ id, nav: found.navigation });
       }
-      return { marked: false, seen, pages: group.length };
+      return { marked: false, seen, pages: group.length, targets };
     } catch {
       return UNREADABLE_PAIRING_STATE;
     }

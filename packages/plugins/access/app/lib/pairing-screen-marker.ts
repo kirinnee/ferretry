@@ -18,9 +18,17 @@ import { useLayoutEffect } from 'react';
  * screen and no marker. A layout effect's setup runs in the commit that inserted the code's DOM, and its cleanup in the
  * commit that removes it, so no task can observe the code without the marker.
  *
+ * THE MARKER IS RELEASED ONLY AFTER THE CODE'S NODES ARE GONE. React runs a deleted component's layout cleanup BEFORE it
+ * removes that component's host nodes, in the same synchronous commit, so releasing there would take the marker down
+ * while the code is still in the document. The hook's cleanup therefore defers the removal past the commit (a microtask:
+ * after the whole commit, before any other task), and a screen that is deleted whole leaves the marker for exactly as
+ * long as the code. A holder that is replaced in the same commit has its own element, so nothing is shared.
+ *
+ * IT IS A HINT, NOT THE AUTHORITY: a page script can delete or forge this element, so the daemon's browser trusts it only to
+ * ADD a refusal. The authority is the daemon's own record of when a code was live (`PairingWindowPort`).
+ *
  * A second element, `ferretry-pairing-screen-seen`, counts how many times a code has come on screen in this document
- * and is never removed: a read that straddles a code appearing and going away still knows (see
- * `@ferretry/std/pairing-screen`).
+ * and is never removed: another hint, which can only add a refusal (see `@ferretry/std/pairing-screen`).
  */
 
 /** Starts showing the marker; returns the one function that stops it (idempotent). */
@@ -49,5 +57,10 @@ function countSighting(): void {
 
 /** Marks the document for as long as `shown` is true, and for exactly that long. */
 export function usePairingScreenMarker(shown: boolean): void {
-  useLayoutEffect(() => (shown ? holdPairingScreenMarker() : undefined), [shown]);
+  useLayoutEffect(() => {
+    if (!shown) return undefined;
+    const release = holdPairingScreenMarker();
+    // After the synchronous commit that is removing the code's host nodes, never inside it.
+    return () => queueMicrotask(release);
+  }, [shown]);
 }

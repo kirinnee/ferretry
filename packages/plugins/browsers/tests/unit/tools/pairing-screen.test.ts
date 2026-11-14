@@ -1,13 +1,11 @@
 import { describe, it } from 'bun:test';
 import { PAIRING_SCREEN_REFUSAL } from '@ferretry/std/pairing-screen';
 import should from 'should';
-import { BrowserSessionService } from '../../../daemon/pages/service.ts';
-import { SurfaceControl } from '../../../daemon/tools/control.ts';
-import { BrowserTools } from '../../../daemon/tools/service.ts';
+import type { BrowserTools } from '../../../daemon/tools/service.ts';
 import type { ToolCaller } from '../../../daemon/tools/types.ts';
 import type { BrowserToolCall } from '../../../daemon/tools/wire.ts';
-import { browserKernel } from '../../support/kernel.ts';
-import { Tabs } from '../../support/tabs.ts';
+import { FAKE_CODE, pairingWorld } from '../../support/pairing-world.ts';
+import type { Tabs } from '../../support/tabs.ts';
 
 /**
  * AN AGENT NEVER READS A PAGE THAT SHOWS A LIVE PAIRING CODE (docs/pairing.md, "Never show it to an agent").
@@ -16,39 +14,13 @@ import { Tabs } from '../../support/tabs.ts';
  * whether the app's marker is in them and how many codes they have shown. The code is the repo's fixed fake and never a
  * minted one.
  */
-const FAKE_CODE = 'FAKE-PAIR-0000';
 const agent: ToolCaller = { kind: 'agent', sessionId: 's1' };
 const person: ToolCaller = { kind: 'person', sessionId: 's1', openedBy: { by: 'local' } };
 
 /** The browser calls that would put a page's content in front of the caller. */
 const CONTENT_CALLS = /^(read|screenshot|pointer-highlight|pdf|evaluate|lifecycle-(console|network|wait))/u;
 
-async function world() {
-  const tabs = new Tabs();
-  const browser = new BrowserSessionService(
-    { get: async id => (id === 's1' ? {} : undefined) },
-    { launch: async () => tabs.automation },
-    () => Date.parse('2026-11-13T10:00:00.000Z'),
-  );
-  const tools = new BrowserTools({
-    browser,
-    control: new SurfaceControl({ publish: async () => undefined, history: async () => [] }, { now: () => Date.now() }),
-    kernel: browserKernel().kernel,
-    policy: { allows: async () => true },
-    files: {
-      save: async (_session: string, staged: { name: string; size: number }) => ({
-        saved: staged.name,
-        size: staged.size,
-      }),
-    } as never,
-    binaryName: 'fy',
-  });
-  const app = await browser.openPage('s1', 'app', {
-    url: 'https://app.example.test/',
-    openedBy: { by: 'agent', sessionId: 's1' },
-  });
-  return { tabs, browser, tools, app };
-}
+const world = pairingWorld;
 
 /** A call's refusal, or the answer when it was not refused. */
 const attempt = async (tools: BrowserTools, caller: ToolCaller, call: BrowserToolCall) =>
@@ -382,10 +354,10 @@ describe('P1-4: a window that can reach a marked document is refused with it', (
     should(error?.message).equal(PAIRING_SCREEN_REFUSAL);
   });
 
-  it('should NOT refuse a page for a marked window that cannot reach it (no opener relation)', async () => {
+  it('should NOT refuse a page for a marked window on ANOTHER origin that cannot reach it', async () => {
     // Arrange
     const { tabs, tools, browser } = await world();
-    const other = await browser.openPage('s1', 'other', { url: 'https://app.example.test/' });
+    const other = await browser.openPage('s1', 'other', { url: 'https://docs.example.test/' });
     tabs.pairing.set(other.id, { marked: true, seen: 1 });
 
     // Act

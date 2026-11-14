@@ -36,6 +36,7 @@ import { DeviceKeySchema } from '../proof/device-proof.ts';
 import { secretsMatch } from '../wire.ts';
 import type { GrantAuditPort } from '../grants/types.ts';
 import type { DeviceConnectionRevoker } from './live-connections.ts';
+import { LiveWindowLedger } from '@ferretry/std/live-window';
 
 const FERRETRY_PAIRING_APP_URL = `${HOSTED_APP_ORIGIN}/pair`;
 const PAIRING_RATE_LIMIT_ATTEMPTS = 10;
@@ -407,6 +408,11 @@ interface PairingServiceOptions {
   readonly audit?: Pick<GrantAuditPort, 'record'>;
   readonly rateLimiter?: PairingRateLimiter;
   /**
+   * Where each code's live interval is written down (see {@link PairingService.liveWindow}). Absent: the service keeps its
+   * own, so a daemon built without one still answers truthfully.
+   */
+  readonly liveWindow?: LiveWindowLedger;
+  /**
    * The machine's idle period in days, read at every check so a shortened one applies at the next
    * (`idleExpiryDays`, `docs/design/zero-trust.md` B6). Absent means {@link DEVICE_IDLE_EXPIRY_DAYS}.
    */
@@ -446,6 +452,12 @@ export class PairingService {
   readonly #grantedAt: Record<PairingCarrierKind, number[]> = { direct: [], relay: [] };
   private readonly compare: (left: string, right: string) => boolean;
   private active: ActivePairing | undefined;
+  /**
+   * WHEN A PAIRING CODE WAS LIVE, as the daemon alone knows it: opened by `mint` before its answer can leave, closed by every
+   * way a code ends (replacement, expiry, revocation, a spent direct budget, redemption), and ended by its own deadline with
+   * no one asking. The agent browser reads only yes or no from it (`PairingWindowPort`): no code, no id.
+   */
+  readonly liveWindow: LiveWindowLedger;
   private readonly observations = new Map<PairingId, PairingCodeStatusResponse>();
   /** The latest instant a person used each device, ahead of the hourly copy on disk. */
   readonly #seen = new Map<string, number>();
@@ -473,6 +485,7 @@ export class PairingService {
     this.pairingAppUrl = new URL(options.pairingAppUrl ?? FERRETRY_PAIRING_APP_URL).toString();
     this.capabilities = [...(options.capabilities ?? ['daemon-api'])];
     this.rateLimiter = options.rateLimiter ?? new PairingRateLimiter(options.clock);
+    this.liveWindow = options.liveWindow ?? new LiveWindowLedger(() => options.clock.now());
     this.compare = options.compare ?? secretsMatch;
   }
 
@@ -496,6 +509,8 @@ export class PairingService {
     const code = PairingCodeSchema.parse(this.options.cryptography.pairingCode());
     const expiresAtMs = this.options.clock.now() + PAIRING_CODE_TTL_SECONDS * 1_000;
     const expiresAt = instant(expiresAtMs);
+    // Written down BEFORE the answer below can leave this method: from here a page may show the code.
+    this.liveWindow.open(pairingId, expiresAtMs);
     this.active = { pairingId, code, expiresAtMs, attempts: 0, relayAttempts: 0, relayClosed: false, grants };
     this.observations.set(pairingId, { pairingId, status: 'pending', expiresAt });
 
@@ -561,6 +576,7 @@ export class PairingService {
     if (active?.pairingId === pairingId && this.options.clock.now() < active.expiresAtMs) return observation;
     const expired = { pairingId, status: 'expired', expiresAt: observation.expiresAt } as const;
     this.observations.set(pairingId, expired);
+    this.liveWindow.close(pairingId);
     if (active?.pairingId === pairingId) this.active = undefined;
     return expired;
   }
@@ -886,6 +902,7 @@ export class PairingService {
     // The consume is the synchronous state change immediately before any persistence await. A
     // concurrent call therefore sees no active code and cannot enter the successful branch.
     this.active = undefined;
+    this.liveWindow.close(active.pairingId);
     const createdAt = instant(now);
     const record: PairingDeviceRecord = {
       id: this.options.cryptography.deviceId(),
@@ -940,6 +957,7 @@ export class PairingService {
   }
 
   private expire(active: ActivePairing): void {
+    this.liveWindow.close(active.pairingId);
     if (this.active?.pairingId === active.pairingId) this.active = undefined;
     const current = this.observations.get(active.pairingId);
     this.observations.set(active.pairingId, {

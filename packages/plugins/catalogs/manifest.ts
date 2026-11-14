@@ -13,6 +13,7 @@ import {
   CATALOGS_WORDS,
   CatalogsChanged,
   CatalogsPort,
+  ShareWindowPort,
   CatalogItems,
   CONFIGURE,
   GUARD_NONE,
@@ -68,7 +69,7 @@ export default definePlugin({
   /** Projects is optional: off, an install can only target the project folders the item providers name. */
   // Skills: the app half reads the skills.add slot's props shape (add-skills page) and Skills' machine inventory (`GET /v1/skills`).
   uses: { connections: ConnectionsPort, projects: ProjectsPort, skills: SkillsPort },
-  provides: { catalogs: CatalogsPort },
+  provides: { catalogs: CatalogsPort, shareWindow: ShareWindowPort },
 
   // The install mapping offers the person the NAMES of their secrets for a `${secret:NAME}` placeholder (never a value),
   // behind the secrets-use grant. Catalogs mints no Vault secret and writes none: its link keys are its own sealed documents.

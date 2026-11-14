@@ -39,7 +39,13 @@ export async function readPairingScreen(session: InputCdpSession): Promise<Pairi
     const marked = await hitsOf(session, PAIRING_SCREEN_SELECTOR, PAIRING_SCREEN_META_NAME);
     const counts = await hitsOf(session, PAIRING_SCREEN_SEEN_SELECTOR, PAIRING_SCREEN_SEEN_META_NAME);
     if (marked === undefined || counts === undefined) return PAIRING_SCREEN_UNKNOWN;
-    const seen = counts.reduce((sum, hit) => sum + (Number.parseInt(hit.content ?? '', 10) || 0), 0);
+    let seen = 0;
+    for (const hit of counts) {
+      const count = countOf(hit.content);
+      if (count === undefined) return PAIRING_SCREEN_UNKNOWN;
+      seen += count;
+    }
+    if (!Number.isSafeInteger(seen)) return PAIRING_SCREEN_UNKNOWN;
     return { marked: marked.length > 0, seen };
   } catch {
     return PAIRING_SCREEN_UNKNOWN;
@@ -47,7 +53,8 @@ export async function readPairingScreen(session: InputCdpSession): Promise<Pairi
 }
 
 interface Hit {
-  readonly content?: string;
+  /** The element's `content` attribute; absent when it has none. */
+  readonly content: string | undefined;
 }
 
 /** The elements a search finds whose own `name` attribute is `name`; `undefined` when the answer cannot be believed. */
@@ -64,9 +71,18 @@ async function hitsOf(session: InputCdpSession, query: string, name: string): Pr
     const hits: Hit[] = [];
     for (const nodeId of listed.nodeIds) {
       if (typeof nodeId !== 'number') return undefined;
-      const attributes = attributesOf(await session.send('DOM.getAttributes', { nodeId }).catch(() => undefined));
-      // A text node or an element of some other name: DevTools' plain-text search matched words, not the marker.
-      if (attributes.get('name') === name) hits.push({ content: attributes.get('content') ?? '' });
+      // WHAT KIND OF NODE IT IS is asked, not guessed from a failure: a text node (DevTools' plain-text search matched words)
+      // is a verified non-hit, while a node that cannot be described or whose attributes are not the shape DevTools gives
+      // is one that cannot be inspected — and a possible marker nobody could inspect is a marker (fail closed).
+      const node = objectOf(objectOf(await session.send('DOM.describeNode', { nodeId })).node);
+      if (node.nodeType !== ELEMENT_NODE) {
+        if (typeof node.nodeType !== 'number' || !Number.isInteger(node.nodeType)) return undefined;
+        continue;
+      }
+      const attributes = attributesOf(node.attributes);
+      if (attributes === undefined) return undefined;
+      // An element of some other name: the search matched its words, not the marker.
+      if (attributes.get('name') === name) hits.push({ content: attributes.get('content') });
     }
     return hits;
   } finally {
@@ -74,14 +90,33 @@ async function hitsOf(session: InputCdpSession, query: string, name: string): Pr
   }
 }
 
-/** DevTools lists attributes as one flat `[name, value, name, value…]` array. */
-function attributesOf(answer: unknown): ReadonlyMap<string, string> {
-  const flat = objectOf(answer).attributes;
+/** `Node.ELEMENT_NODE`. */
+const ELEMENT_NODE = 1;
+
+/** The longest a sighting count's text may be: far past any real count, short of anything that is not one. */
+const MAX_COUNT_DIGITS = 9;
+
+/** A sighting count as plain digits only — no sign, no space, no suffix, no leading zero; anything else is `undefined`. */
+function countOf(text: string | undefined): number | undefined {
+  if (text === undefined || text.length > MAX_COUNT_DIGITS || !/^(?:0|[1-9][0-9]*)$/u.test(text)) return undefined;
+  return Number(text);
+}
+
+/**
+ * DevTools lists attributes as one flat `[name, value, name, value…]` array. An element with NONE has no `attributes`
+ * member (a plain `<meta>` always has some); anything else — not an array, an odd length, a non-string — is not what
+ * DevTools gives, and is `undefined`.
+ */
+function attributesOf(flat: unknown): ReadonlyMap<string, string> | undefined {
   const map = new Map<string, string>();
-  if (!Array.isArray(flat)) return map;
-  for (let index = 0; index + 1 < flat.length; index += 2)
-    if (typeof flat[index] === 'string' && typeof flat[index + 1] === 'string')
-      map.set(flat[index] as string, flat[index + 1] as string);
+  if (flat === undefined) return map;
+  if (!Array.isArray(flat) || flat.length % 2 !== 0) return undefined;
+  for (let index = 0; index < flat.length; index += 2) {
+    const key = flat[index];
+    const value = flat[index + 1];
+    if (typeof key !== 'string' || typeof value !== 'string') return undefined;
+    if (!map.has(key)) map.set(key, value);
+  }
   return map;
 }
 

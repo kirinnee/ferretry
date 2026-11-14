@@ -11,7 +11,8 @@
     "./compaction-line": "./src/compaction-line.ts",
     "./credential-words": "./src/credential-words/index.ts",
     "./testing/linear-time": "./testing/linear-time.ts",
-    "./pairing-screen": "./src/pairing-screen.ts"
+    "./pairing-screen": "./src/pairing-screen.ts",
+    "./live-window": "./src/live-window.ts"
   },
   "types": "./src/index.ts",
   "dependencies": {

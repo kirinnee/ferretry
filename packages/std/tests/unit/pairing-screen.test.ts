@@ -1,7 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  CATALOG_SHARE_MINT_PATH,
+  isCredentialMintAddress,
   isPairingMintAddress,
+  isShareMintAddress,
   PAIRING_MINT_BODY_HIDDEN,
   PAIRING_MINT_PATH,
   PAIRING_SCREEN_META_NAME,
@@ -18,12 +21,40 @@ describe('the shared pairing-screen marker', () => {
     should(PAIRING_SCREEN_SELECTOR).equal('meta[name="ferretry-pairing-screen"]');
   });
 
-  it('refuses with the agreed sentence and no content', () => {
-    should(PAIRING_SCREEN_REFUSAL.startsWith('hidden: this page shows a pairing code')).be.true();
+  it('refuses with EXACTLY the sentence v4 PR 1597 sends, byte for byte, and no content', () => {
+    should(PAIRING_SCREEN_REFUSAL).equal(
+      'hidden: this page shows a pairing code, so it cannot be read or pictured. Ask the owner to finish or close it; navigating away or closing the page works.',
+    );
   });
 
   it('prints the agreed text in place of a mint response body', () => {
     should(PAIRING_MINT_BODY_HIDDEN).equal('(body not shown: a pairing code)');
+  });
+});
+
+describe('the catalog share mint address', () => {
+  it('names the route that mints a join invite, and anything under it, and nothing that merely looks alike', () => {
+    should(CATALOG_SHARE_MINT_PATH).equal('/v1/catalog-shares');
+    for (const address of [
+      'https://daemon.example.test/v1/catalog-shares',
+      'https://daemon.example.test/v1/catalog-shares/shr_abc',
+      '/v1/catalog-shares?x=1#y',
+    ]) {
+      should(isShareMintAddress(address)).be.true();
+      should(isCredentialMintAddress(address)).be.true();
+    }
+    for (const address of [
+      'https://daemon.example.test/v1/catalog-sharesx',
+      'https://daemon.example.test/v1/catalogs',
+      'https://daemon.example.test/x/v1/catalog-shares',
+    ]) {
+      should(isShareMintAddress(address)).be.false();
+      should(isCredentialMintAddress(address)).be.false();
+    }
+  });
+
+  it('counts the pairing mint as a credential too', () => {
+    should(isCredentialMintAddress('https://daemon.example.test/v1/pair/code')).be.true();
   });
 });
 

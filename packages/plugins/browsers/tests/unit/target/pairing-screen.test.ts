@@ -11,6 +11,8 @@ interface Node {
   readonly id: number;
   /** `null`: a text node, which DevTools' plain-text search may match and which has no attributes. */
   readonly attributes: readonly string[] | null;
+  /** How DevTools' answer about this node is malformed, when a case is about that. */
+  readonly shape?: 'broken' | 'odd' | 'unreadable';
 }
 
 /** A DevTools session over a document of `nodes`: a search finds the nodes the test lists for that query. */
@@ -34,10 +36,14 @@ function sessionOf(
           return { searchId: String(params?.query), resultCount: (hits[String(params?.query)] ?? []).length };
         case 'DOM.getSearchResults':
           return { nodeIds: (hits[String(params?.searchId)] ?? []).map(node => node.id) };
-        case 'DOM.getAttributes': {
+        case 'DOM.describeNode': {
           const node = nodes.get(Number(params?.nodeId));
-          if (node?.attributes === null || node === undefined) throw new Error('Node is not an Element');
-          return { attributes: node.attributes };
+          if (node === undefined) throw new Error('No node with given id found');
+          if (node.attributes === null) return { node: { nodeType: 3, nodeName: '#text' } };
+          if (node.shape === 'broken') return { node: { nodeType: 1, nodeName: 'META', attributes: 'name' } };
+          if (node.shape === 'odd') return { node: { nodeType: 1, nodeName: 'META', attributes: ['name'] } };
+          if (node.shape === 'unreadable') return { node: {} };
+          return { node: { nodeType: 1, nodeName: 'META', attributes: node.attributes } };
         }
         case 'DOM.discardSearchResults':
           discarded.push(String(params?.searchId));
@@ -87,15 +93,42 @@ describe('the worker’s look for the pairing-screen marker', () => {
     expect(await readPairingScreen(session)).toEqual({ marked: false, seen: 0 });
   });
 
-  test('it reads the count as a plain number, whatever else a forged element says', async () => {
-    const forged: Node = { id: 6, attributes: ['name', PAIRING_SCREEN_SEEN_META_NAME, 'content', '12abc'] };
-    const { session } = sessionOf({ [MARKER]: [], [SEEN]: [forged] });
-    expect(await readPairingScreen(session)).toEqual({ marked: false, seen: 12 });
-    const noise: Node = { id: 6, attributes: ['name', PAIRING_SCREEN_SEEN_META_NAME, 'content', 'lots'] };
-    expect(await readPairingScreen(sessionOf({ [MARKER]: [], [SEEN]: [noise] }).session)).toEqual({
+  test('it FAILS CLOSED on a count that is not plain digits: no NaN becomes zero, no prefix is believed', async () => {
+    for (const content of ['12abc', 'lots', '', '-1', '+3', '1e3', ' 4', '0x10', '01', '1.5', '1234567890', '９']) {
+      const forged: Node = { id: 6, attributes: ['name', PAIRING_SCREEN_SEEN_META_NAME, 'content', content] };
+      expect(await readPairingScreen(sessionOf({ [MARKER]: [], [SEEN]: [forged] }).session)).toEqual(
+        PAIRING_SCREEN_UNKNOWN,
+      );
+    }
+    const none: Node = { id: 6, attributes: ['name', PAIRING_SCREEN_SEEN_META_NAME] };
+    expect(await readPairingScreen(sessionOf({ [MARKER]: [], [SEEN]: [none] }).session)).toEqual(
+      PAIRING_SCREEN_UNKNOWN,
+    );
+  });
+
+  test('it reads a count of plain digits', async () => {
+    const plain: Node = { id: 6, attributes: ['name', PAIRING_SCREEN_SEEN_META_NAME, 'content', '12'] };
+    expect(await readPairingScreen(sessionOf({ [MARKER]: [], [SEEN]: [plain] }).session)).toEqual({
       marked: false,
-      seen: 0,
+      seen: 12,
     });
+  });
+
+  test('it FAILS CLOSED when a possible marker cannot be inspected: a failed describe is not an empty attribute map', async () => {
+    const hit = marker(5);
+    for (const method of ['DOM.describeNode'])
+      expect(await readPairingScreen(sessionOf({ [MARKER]: [hit], [SEEN]: [] }, { failOn: method }).session)).toEqual(
+        PAIRING_SCREEN_UNKNOWN,
+      );
+  });
+
+  test('it FAILS CLOSED on a node whose attributes are not the shape DevTools gives', async () => {
+    for (const shape of ['broken', 'odd', 'unreadable'] as const) {
+      const hit: Node = { id: 5, attributes: ['name', PAIRING_SCREEN_META_NAME, 'content', 'shown'], shape };
+      expect(await readPairingScreen(sessionOf({ [MARKER]: [hit], [SEEN]: [] }).session)).toEqual(
+        PAIRING_SCREEN_UNKNOWN,
+      );
+    }
   });
 
   test('it FAILS CLOSED when any DevTools call cannot be answered', async () => {

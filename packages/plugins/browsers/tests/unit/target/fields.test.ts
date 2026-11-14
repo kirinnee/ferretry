@@ -394,6 +394,38 @@ describe('describeInputDocument', () => {
     should(await describeInputDocument(world.subject)).match({ pairingScreen: true, pairingSeen: -1 });
   });
 
+  it('does not ask the DOM of a page with a dialog open (it is frozen): the last look stands in, and none yet is marked', async () => {
+    const { world } = loginWorld();
+    let last: { marked: boolean; seen: number } | undefined;
+    let frozen = false;
+    const subject = {
+      ...world.subject,
+      hint: {
+        frozen: () => frozen,
+        last: () => last,
+        keep: (state: { marked: boolean; seen: number }) => {
+          last = state;
+        },
+      },
+    };
+    world.pairing.seen = 4;
+    should(await describeInputDocument(subject)).match({ pairingSeen: 4 });
+    const asked = world.session('page-target').calls.length;
+    frozen = true;
+    world.session('page-target').failOn = method => (method.startsWith('DOM.') ? new Error('frozen') : undefined);
+
+    should(await describeInputDocument(subject)).match({ pairingSeen: 4 });
+    should(world.session('page-target').calls.filter(call => call.method.startsWith('DOM.')).length).equal(
+      world
+        .session('page-target')
+        .calls.slice(0, asked)
+        .filter(call => call.method.startsWith('DOM.')).length,
+    );
+
+    last = undefined;
+    should(await describeInputDocument(subject)).match({ pairingScreen: true, pairingSeen: -1 });
+  });
+
   it('says the host the page is on, so a login’s facts can watch it leave the sign-in hosts', async () => {
     const { world } = loginWorld();
     world.pageUrl = 'https://Vercel.com/dashboard';

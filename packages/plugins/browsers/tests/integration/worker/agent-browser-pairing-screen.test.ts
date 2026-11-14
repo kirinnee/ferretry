@@ -2,9 +2,11 @@ import { afterAll, beforeAll, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { LiveWindowLedger } from '@ferretry/std/live-window';
 import { PAIRING_SCREEN_REFUSAL } from '@ferretry/std/pairing-screen';
 import should from 'should';
 import { BrowserSessionService } from '../../../daemon/pages/service.ts';
+import { protectionWindows } from '../../../daemon/protection/windows.ts';
 import { nodeStagedFiles } from '../../../daemon/tools/adapters/staged-files.ts';
 import { SurfaceControl } from '../../../daemon/tools/control.ts';
 import { rootFiles } from '../../../daemon/tools/files.ts';
@@ -61,6 +63,9 @@ let site: ReturnType<typeof Bun.serve>;
 let browser: BrowserSessionService;
 let tools: BrowserTools;
 let base = '';
+/** The daemon's own record of when a pairing code was live: what a page script cannot write. */
+const pairing = new LiveWindowLedger(() => Date.now());
+const MINUTE = 60_000;
 /** Everything an agent was handed, answer or refusal. */
 const handedOver: string[] = [];
 
@@ -82,6 +87,15 @@ beforeAll(async () => {
       if (url.pathname === '/dyn') return html('', `<p id="o">idle</p>${SHOW_HIDE}`);
       if (url.pathname === '/framed') return html('', '<p id="o">outer</p><iframe id="f" src="/pair"></iframe>');
       if (url.pathname === '/opener') return html('', '<p id="o">opener</p>');
+      // A page whose own script DELETES the marker and the sighting count: all it can write.
+      if (url.pathname === '/forged')
+        return html(
+          MARKED_HEAD,
+          `<h1>Add a device</h1><p id="code">${FAKE_CODE}</p><script>document.head.querySelectorAll('meta').forEach(meta => meta.remove())</script>`,
+        );
+      // A page that navigates itself away after a moment: the document that held the code is then gone.
+      if (url.pathname === '/leaves')
+        return html('', `<p id="o">${FAKE_CODE}</p><script>setTimeout(() => location.assign('/plain'), 600)</script>`);
       if (url.pathname === '/minted')
         return html(
           '',
@@ -120,6 +134,19 @@ beforeAll(async () => {
       nodeStagedFiles(join(root, 'upload'), wallClock()),
     ),
     binaryName: 'fy',
+    protection: protectionWindows({
+      now: () => Date.now(),
+      connections: () => ({
+        advertisement: () =>
+          ({
+            advertisement: { kind: 'none', refusal: { reason: 'none' } },
+            // The app is wherever THIS fake site is: never a hard-coded address.
+            appOrigin: base,
+            allowedOrigins: [base],
+          }) as never,
+      }),
+      windows: [() => pairing],
+    }),
   });
 }, 60_000);
 
@@ -128,6 +155,16 @@ afterAll(async () => {
   site?.stop(true);
   if (root !== '') await rm(root, { recursive: true, force: true });
 });
+
+/**
+ * Closes every page of the session that is on the pair screen but was never named by the agent (a popup a script opened):
+ * every window of the app's origin can reach every other, so a stray one that still shows the marker refuses its siblings.
+ */
+async function closeStrays(): Promise<void> {
+  const status = await browser.status('s1');
+  for (const page of status.pages.filter(candidate => candidate.url.endsWith('/pair')))
+    await browser.act('s1', { action: 'close-page', pageId: page.id }).catch(() => undefined);
+}
 
 /** One tool call as an agent makes it: what it was handed (or refused with) is kept for the final look. */
 async function call(request: BrowserToolCall): Promise<{ text?: string; picture?: unknown; error?: string }> {
@@ -282,6 +319,8 @@ describe('the agent browser, in a real Chrome, on a page showing a live pairing 
     should(opening.error).equal(PAIRING_SCREEN_REFUSAL);
     should(through.error).equal(PAIRING_SCREEN_REFUSAL);
     should(text.error).equal(PAIRING_SCREEN_REFUSAL);
+    await closeStrays();
+    await call({ tool: 'browser.close', name: 'opener' });
   }, 60_000);
 
   it('should never show the body of the pairing mint in a network log, marked page or not', async () => {
@@ -298,6 +337,76 @@ describe('the agent browser, in a real Chrome, on a page showing a live pairing 
     should(id).be.a.String();
     should(got.text).containEql('(body not shown: a pairing code)');
     await call({ tool: 'browser.close', name: 'minted' });
+  }, 60_000);
+  it('P1-1: should still refuse every read while the DAEMON says a code is live, when the page deleted its own marker', async () => {
+    // Arrange — the page shows the code and its script removes the marker and the count; the daemon minted a code
+    await call({ tool: 'browser.open', name: 'forged', url: `${base}/forged` });
+    pairing.open('forged-1', Date.now() + 2 * MINUTE);
+
+    for (const request of [
+      { tool: 'browser.read', name: 'forged' },
+      { tool: 'browser.screenshot', name: 'forged' },
+      { tool: 'browser.pdf', name: 'forged' },
+      { tool: 'browser.read', name: 'forged', selector: '#code' },
+      { tool: 'browser.scroll', name: 'forged', text: FAKE_CODE },
+      { tool: 'browser.click', name: 'forged', selector: '#code' },
+      { tool: 'browser.eval', name: 'forged', function: '() => document.body.innerText' },
+    ] satisfies BrowserToolCall[]) {
+      // Act
+      const answer = await call(request);
+
+      // Assert — the page says it is unmarked; the daemon's fact says otherwise
+      should(answer.error).equal(PAIRING_SCREEN_REFUSAL);
+      should(answer.picture).be.undefined();
+    }
+    pairing.close('forged-1');
+    await call({ tool: 'browser.close', name: 'forged' });
+  }, 60_000);
+
+  it('P1-1: should discard a read when the page that held the code navigated away during it', async () => {
+    // Arrange — nothing is live when the wait starts; the daemon mints a code 200 ms into it, and the page leaves at 600 ms
+    await call({ tool: 'browser.open', name: 'leaves', url: `${base}/leaves` });
+    setTimeout(() => pairing.open('leaves-1', Date.now() + 2 * MINUTE), 200);
+
+    // Act — a wait on text is a read of the page; the document the code was minted over is gone by the time it ends
+    const waited = await call({ tool: 'browser.wait_for', name: 'leaves', text: 'hello', timeoutMs: 5_000 });
+    const afterwards = await call({ tool: 'browser.read', name: 'leaves' });
+
+    // Assert — a navigation is no reason to forget the interval: the call overlapped it
+    should(waited.error).equal(PAIRING_SCREEN_REFUSAL);
+    should(afterwards.error).equal(PAIRING_SCREEN_REFUSAL);
+    pairing.close('leaves-1');
+    await call({ tool: 'browser.close', name: 'leaves' });
+  }, 60_000);
+
+  it('P1-2: should refuse a script on the app for the page’s life once a code was live, and still let a read answer', async () => {
+    // Arrange — a plain app page is open; a code is minted and spent while it stays open
+    await call({ tool: 'browser.open', name: 'life', url: `${base}/plain` });
+    pairing.open('life-1', Date.now() + 2 * MINUTE);
+    pairing.close('life-1');
+
+    // Act
+    const script = await call({ tool: 'browser.eval', name: 'life', function: '() => document.body.innerText' });
+    const read = await call({ tool: 'browser.read', name: 'life' });
+
+    // Assert
+    should(script.error).equal(PAIRING_SCREEN_REFUSAL);
+    should(read.text).containEql('hello');
+    await call({ tool: 'browser.close', name: 'life' });
+  }, 60_000);
+
+  it('P1-2: should leave the script alone on an app page that no code has been live on since it loaded', async () => {
+    // Arrange — the page loads after the last code was over
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await call({ tool: 'browser.open', name: 'fresh', url: `${base}/plain` });
+
+    // Act
+    const script = await call({ tool: 'browser.eval', name: 'fresh', function: '() => document.body.innerText' });
+
+    // Assert
+    should(script.error).be.undefined();
+    should(script.text).containEql('hello');
+    await call({ tool: 'browser.close', name: 'fresh' });
   }, 60_000);
 
   it('should have handed an agent the fake code in no answer, no refusal and no network body', () => {

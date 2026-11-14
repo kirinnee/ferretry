@@ -24,3 +24,17 @@ export function openerGroup(
   }
   return [...group];
 }
+
+/**
+ * Whether a page at `address` can script documents of the page at `named`: it is on the same origin, or on one nobody can
+ * read (either address unparsable). An opaque origin (`about:blank`, `data:`) is taken for the same as any other opaque
+ * one, because it may have inherited its creator's. Fails closed: it errs toward "yes".
+ */
+export function sameOriginOrUnplaced(address: string, named: string | undefined): boolean {
+  if (named === undefined) return true;
+  try {
+    return new URL(address).origin === new URL(named).origin;
+  } catch {
+    return true;
+  }
+}

@@ -34,6 +34,7 @@ import type { AgentSurface, SurfaceControlView, SurfaceController } from '../../
 import type { BrowserFiles } from './files.ts';
 import { sizeWords } from './files-policy.ts';
 import { AGENT_TOOL_MAX_OUTPUT_CHARS } from './limits.ts';
+import type { ProtectionWindows } from '../pages/pairing-screen-guard.ts';
 import { pairingScreenGuard } from './pairing-screen.ts';
 import type { ResolvedSurface, ToolCaller } from './types.ts';
 import type { BrowserToolCall } from './wire.ts';
@@ -151,6 +152,8 @@ export interface BrowserToolPorts {
   readonly files: BrowserFiles;
   /** The command-line client's name, for a refusal that tells the owner the command to type. */
   readonly binaryName: string;
+  /** When a credential was live and which origins are the app's: the evidence an agent's content act is held to. */
+  readonly protection: ProtectionWindows;
   readonly typedIdentities?: TypedIdentityLedger;
   readonly scriptedOrigins?: ScriptedOrigins;
   /** Told of every page act a ferret makes, before it runs (the Vault's sign-in lock, I99 and I100). */
@@ -1036,7 +1039,7 @@ export class BrowserTools {
   ): BrowserActGuard | undefined {
     if (caller.kind !== 'agent') return undefined;
     // An agent's READ of a page is also refused while the page shows a live pairing code (`./pairing-screen.ts`).
-    const pairing = pairingScreenGuard(call);
+    const pairing = pairingScreenGuard(call, this.ports.protection);
     return async page => {
       await this.assertFree(caller.sessionId, surface);
       return await pairing?.(page);

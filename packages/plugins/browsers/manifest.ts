@@ -3,6 +3,9 @@ import { GatePort } from '@ferretry/core-gate/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
 import { AgentControlPort, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { InputTargets, VaultPort } from '@ferretry/core-vault/contract';
+import { PairingWindowPort } from '@ferretry/plugin-access/contract';
+import { ShareWindowPort } from '@ferretry/plugin-catalogs/contract';
+import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
 import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
 import { TerminalsPort } from '@ferretry/plugin-terminals/contract';
 import {
@@ -61,6 +64,13 @@ export default definePlugin({
     agentControl: AgentControlPort,
     terminals: TerminalsPort,
     conversation: ConversationPort,
+    /**
+     * Whether a credential was live, and which origins are the app's (docs/pairing.md, "Never show it to an agent"): Access's
+     * pairing code, Catalogs' share invite and Connections' advertisement. Off or unbound, each is unknown, and unknown is live.
+     */
+    connections: ConnectionsPort,
+    pairingWindow: PairingWindowPort,
+    shareWindow: ShareWindowPort,
   },
   /**
    * The Vault: input requests raised from a page (`browser_request_input`), and what a ferret did to a page and where

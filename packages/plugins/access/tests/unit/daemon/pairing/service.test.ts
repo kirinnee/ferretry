@@ -2139,3 +2139,120 @@ describe('PushNewDeviceAlert (every other enrolled browser hears of a new device
     should(reported[0]).not.containEql('Secret Phone');
   });
 });
+
+/**
+ * WHEN A PAIRING CODE WAS LIVE is the daemon's own fact (docs/pairing.md, "Never show it to an agent"): the agent browser
+ * refuses what a page showed while one could be on it, and a page script cannot write this.
+ */
+describe('PairingService live window', () => {
+  const MINUTE = 60_000;
+
+  it('should be live from the mint, before the answer is read, and not before', async () => {
+    const { clock, service } = fixture();
+    const before = clock.nowMs;
+    should(service.liveWindow.live()).be.false();
+    should(service.liveWindow.liveSince(before)).be.false();
+
+    service.mint();
+
+    should(service.liveWindow.live()).be.true();
+    should(service.liveWindow.liveSince(before)).be.true();
+  });
+
+  it('should keep an interval after a REDEMPTION consumes the code, and end it', async () => {
+    const { clock, service } = fixture();
+    const mintedAt = clock.nowMs;
+    service.mint();
+    clock.nowMs += 10_000;
+
+    const result = await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer');
+
+    should(result.kind).equal('paired');
+    clock.nowMs += 10_000;
+    should(service.liveWindow.live()).be.false();
+    should(service.liveWindow.liveSince(mintedAt)).be.true();
+    should(service.liveWindow.liveSince(mintedAt + 10_000)).be.true();
+    should(service.liveWindow.liveSince(mintedAt + 10_001)).be.false();
+  });
+
+  it('should end by DEADLINE with no request asking, and keep the interval', async () => {
+    const { clock, service } = fixture();
+    const mintedAt = clock.nowMs;
+    service.mint();
+
+    clock.nowMs = mintedAt + 3 * MINUTE;
+
+    should(service.liveWindow.live()).be.false();
+    should(service.liveWindow.liveSince(mintedAt + MINUTE)).be.true();
+    should(service.liveWindow.liveSince(mintedAt + 2 * MINUTE + 1)).be.false();
+  });
+
+  it('should end on REVOKE', async () => {
+    const { clock, service } = fixture();
+    const mintedAt = clock.nowMs;
+    service.mint();
+    clock.nowMs += 5_000;
+
+    service.revoke(PAIRING_ID);
+    clock.nowMs += 5_000;
+
+    should(service.liveWindow.live()).be.false();
+    should(service.liveWindow.liveSince(mintedAt)).be.true();
+    should(service.liveWindow.liveSince(mintedAt + 5_001)).be.false();
+  });
+
+  it("should keep the replaced code's interval when a second mint replaces it, and stay live", async () => {
+    const { clock, service } = fixture();
+    const first = clock.nowMs;
+    service.mint();
+    clock.nowMs += 5_000;
+    service.mint();
+    clock.nowMs += 5_000;
+
+    should(service.liveWindow.live()).be.true();
+    should(service.liveWindow.liveSince(first)).be.true();
+    service.revoke(SECOND_PAIRING_ID);
+    clock.nowMs += 1;
+    should(service.liveWindow.live()).be.false();
+  });
+
+  it('should end when the DIRECT guess budget is spent, but NOT when only the relay budget is', async () => {
+    const { clock, service } = fixture();
+    service.mint();
+    for (let attempt = 0; attempt < 5; attempt++)
+      await redeemRelayed(service, { code: 'ZZZZ-ZZZZ', deviceName: 'phone' });
+    should(service.liveWindow.live()).be.true();
+
+    for (let attempt = 0; attempt < 5; attempt++)
+      await redeemDirect(service, { code: 'ZZZZ-ZZZZ', deviceName: 'phone' }, `peer-${String(attempt)}`);
+    clock.nowMs += 1;
+
+    should(service.liveWindow.live()).be.false();
+  });
+
+  it('should end through a status poll that finds the deadline passed', async () => {
+    const { clock, service } = fixture();
+    const mintedAt = clock.nowMs;
+    service.mint();
+    clock.nowMs = mintedAt + 5 * MINUTE;
+
+    should(service.status(PAIRING_ID)?.status).equal('expired');
+
+    should(service.liveWindow.live()).be.false();
+    should(service.liveWindow.liveSince(mintedAt + 2 * MINUTE + 1)).be.false();
+  });
+
+  it('should answer only yes or no: the view has no way to say a code or an id', async () => {
+    const { service } = fixture();
+    service.mint();
+
+    should(
+      Object.keys(service.liveWindow)
+        .filter(key => !key.startsWith('#'))
+        .sort(),
+    ).eql([]);
+    should(service.liveWindow.live()).be.true();
+    should(JSON.stringify(service.liveWindow)).not.containEql(CODE);
+    should(JSON.stringify(service.liveWindow)).not.containEql(PAIRING_ID);
+  });
+});

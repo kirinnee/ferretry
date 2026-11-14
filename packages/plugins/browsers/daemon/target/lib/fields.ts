@@ -14,7 +14,8 @@ import {
   type BrowserInputValue,
   BROWSER_INPUT_TEXT_MAX_CHARS,
 } from './contracts.ts';
-import { readPairingScreen } from './pairing-screen.ts';
+import type { NavigationEvidence } from './navigation-evidence.ts';
+import { PAIRING_SCREEN_UNKNOWN, type PairingScreenState, readPairingScreen } from './pairing-screen.ts';
 import {
   BROWSER_PROBE_TIMEOUT_MS,
   browserElementOf,
@@ -154,6 +155,19 @@ export interface InputSubject {
   readonly page: InputablePage;
   readonly cdp: InputCdp;
   readonly sessions: InputFrameSessions;
+  /** The target's navigation history (`./navigation-evidence.ts`), when the worker keeps one. */
+  readonly navigation?: () => NavigationEvidence;
+  /**
+   * The page's last DOM look for the pairing-screen HINT, and whether a JavaScript dialog is open on it. A page with a
+   * dialog open is FROZEN: every DOM query waits for the dialog to be answered, so asking would hang the act that opened
+   * it. While one is open the last look stands in (and no look yet is "marked": fail closed). The hint can only add a
+   * refusal; the authority (the daemon's ledgers and the navigation history above) never touches the page's DOM.
+   */
+  readonly hint?: {
+    readonly frozen: () => boolean;
+    readonly last: () => PairingScreenState | undefined;
+    readonly keep: (state: PairingScreenState) => void;
+  };
   /** The worker's own timer (the clock is a port, never a global): a bounded wait for a title, the probe's second look. */
   readonly wait: (ms: number) => Promise<void>;
 }
@@ -280,6 +294,34 @@ async function navigationIdOf(session: InputCdpSession): Promise<string> {
   return loaderId.slice(0, NAVIGATION_ID_LIMIT);
 }
 
+/** How often a look that has not answered re-checks whether a dialog has frozen the page under it. */
+const FROZEN_POLL_MS = 250;
+
+/**
+ * The pairing-screen HINT look. A page with a JavaScript dialog open is frozen: the DOM query hangs until the dialog is
+ * answered, and the dialog's own event can arrive just after the act that opened it returned. So a look that has not
+ * answered re-checks, every beat, whether a dialog is now open, and if so stands in the last look (none yet: marked).
+ */
+async function lookAtPairingScreen(subject: InputSubject): Promise<PairingScreenState> {
+  const hint = subject.hint;
+  if (hint === undefined) return await readPairingScreen(await subject.cdp.page());
+  if (hint.frozen()) return hint.last() ?? PAIRING_SCREEN_UNKNOWN;
+  let answer: PairingScreenState | undefined;
+  const look = readPairingScreen(await subject.cdp.page()).then(
+    state => {
+      answer = state;
+    },
+    () => {
+      answer = PAIRING_SCREEN_UNKNOWN;
+    },
+  );
+  while (answer === undefined) {
+    await Promise.race([look, subject.wait(FROZEN_POLL_MS)]);
+    if (answer === undefined && hint.frozen()) return hint.last() ?? PAIRING_SCREEN_UNKNOWN;
+  }
+  return answer;
+}
+
 /** The page's current document, cheaply: no field is looked at. */
 export async function describeInputDocument(subject: InputSubject): Promise<BrowserInputDocument> {
   if (subject.page.isClosed()) throw new Error(REFUSALS.noDocument);
@@ -290,12 +332,14 @@ export async function describeInputDocument(subject: InputSubject): Promise<Brow
   } catch {
     host = undefined;
   }
-  const pairing = await readPairingScreen(await subject.cdp.page());
+  const pairing = await lookAtPairingScreen(subject);
+  if (pairing.seen >= 0) subject.hint?.keep(pairing);
   return {
     navigationId,
     ...(host === undefined ? {} : { host }),
     ...(pairing.marked ? { pairingScreen: true } : {}),
     pairingSeen: pairing.seen,
+    ...(subject.navigation === undefined ? {} : { navigation: subject.navigation() }),
   };
 }
 

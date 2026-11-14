@@ -1,4 +1,5 @@
 import type { BrowserAutomation } from '../../daemon/pages/automation.ts';
+import type { NavigationEvidence } from '../../daemon/target/lib/navigation-evidence.ts';
 import type {
   BrowserInputEvent,
   BrowserPageActionSnapshot,
@@ -8,6 +9,27 @@ import type {
 } from '../../contract/wire/browser.ts';
 
 export type Page = BrowserPageSummary & { pageState?: 'ready' | 'error' };
+
+/**
+ * A page that has been on `address` since it was first watched, at `at`, and nowhere else: one commit, one frame, no link
+ * of the pairing grammar. Spread it and change a member to say the page has moved.
+ */
+export function cleanNavigation(address: string, at = 0): NavigationEvidence {
+  let origin = '?';
+  try {
+    origin = new URL(address).origin;
+  } catch {
+    origin = '?';
+  }
+  return {
+    seq: 1,
+    origins: [{ origin, firstAt: at, lastSeq: 1 }],
+    overflow: false,
+    frames: [origin],
+    taintSeq: 0,
+    watchedSince: at,
+  };
+}
 
 /**
  * The machine's agent browser, faked with REAL tabs and no active one: every act names its page,
@@ -26,6 +48,12 @@ export class Tabs {
   castFailure: Error | undefined;
   /** A dialog the worker reports on the page of every result, as a worker with a dialog open does. */
   dialog: { type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'; message: string } | undefined;
+  /** Pages whose navigation evidence the browser does not give (an older or broken worker). */
+  readonly navigationBroken = new Set<string>();
+  /** The address a page is on, for its default navigation evidence. */
+  private pageUrl(pageId: string): string {
+    return this.pages.find(candidate => candidate.id === pageId)?.url ?? 'about:blank';
+  }
   /** The browser cannot say which document a page shows. */
   documentFails = false;
   /** The host the live page reports, when a case sets one. */
@@ -35,6 +63,11 @@ export class Tabs {
    * screen (the marker is in the document), `seen` how many times one has been. A page not listed shows none.
    */
   readonly pairing = new Map<string, { marked: boolean; seen: number }>();
+  /**
+   * What the browser's own frame events say each page has been (`daemon/target/lib/navigation-evidence.ts`): a page not
+   * listed has been on its own address since the start and nowhere else. A case moves a page by setting its entry.
+   */
+  readonly navigation = new Map<string, NavigationEvidence>();
   /** Called inside every act (after it began, before it answers): a page can start showing a code while it runs. */
   whileActing: ((call: string) => void) | undefined;
   /** While set, a click does not return: the page's queue is stuck behind it, as it is behind a dialog. */
@@ -122,6 +155,9 @@ export class Tabs {
         ...(this.documentHost === undefined ? {} : { host: this.documentHost }),
         ...(pairing.marked ? { pairingScreen: true } : {}),
         pairingSeen: pairing.seen,
+        ...(this.navigationBroken.has(pageId)
+          ? {}
+          : { navigation: this.navigation.get(pageId) ?? cleanNavigation(this.pageUrl(pageId)) }),
       };
     },
     inputObserve: async pageId => {

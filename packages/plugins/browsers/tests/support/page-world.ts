@@ -94,6 +94,18 @@ export class FakeSession implements InputCdpSession {
     const failure = this.failOn?.(method, params);
     if (failure !== undefined) throw failure;
     const own = this.world.elements.filter(element => element.frame.sessionName === this.name);
+    // The pairing-screen look describes the two meta nodes it searched for (ids 9001 and 9002), strictly by node.
+    if (method === 'DOM.describeNode' && (params.nodeId === 9001 || params.nodeId === 9002))
+      return {
+        node: {
+          nodeType: 1,
+          nodeName: 'META',
+          attributes:
+            params.nodeId === 9001
+              ? ['name', 'ferretry-pairing-screen', 'content', 'shown']
+              : ['name', 'ferretry-pairing-screen-seen', 'content', String(this.world.pairing.seen)],
+        },
+      };
     switch (method) {
       case 'DOM.getDocument':
         return { root: { nodeId: 1 } };
@@ -106,10 +118,6 @@ export class FakeSession implements InputCdpSession {
       }
       case 'DOM.getSearchResults':
         return { nodeIds: [Number(params.searchId)] };
-      case 'DOM.getAttributes':
-        return Number(params.nodeId) === 9001
-          ? { attributes: ['name', 'ferretry-pairing-screen', 'content', 'shown'] }
-          : { attributes: ['name', 'ferretry-pairing-screen-seen', 'content', String(this.world.pairing.seen)] };
       case 'DOM.discardSearchResults':
         return {};
       case 'DOM.getOuterHTML':

@@ -338,6 +338,7 @@ export default implementDaemon(manifest, {
         'session.modes:member': member.mode,
       },
       provides: {
+        shareWindow: members.window,
         catalogs: {
           installs: async () =>
             (await installs.list()).installs.map(install =>
