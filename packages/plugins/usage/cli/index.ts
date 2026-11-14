@@ -67,7 +67,7 @@ const optionText = (invocation: VerbInvocation, name: string): string | undefine
 export default implementCli(manifest, {
   build: ({ client, io }) => {
     const usage = (line: string): number => {
-      io.err(`usage: ${line}`);
+      io.err(`usage: ${line}\n`);
       return USAGE;
     };
 
@@ -131,6 +131,7 @@ export default implementCli(manifest, {
                   ? JSON.stringify({ login: id, budget: current ?? null, standing: standing ?? null }, null, 2)
                   : `${id}: ${budgetWords(current)}.${standing?.pause === undefined ? '' : ` Paused: ${standing.pause.phrase}.`}`,
               );
+              io.out('\n');
               return OK;
             }
 
@@ -170,11 +171,11 @@ export default implementCli(manifest, {
                 result.timeZoneOutcome = written.outcome;
               }
             }
-            io.out(wantsJson(invocation) ? JSON.stringify(result, null, 2) : lines.join('\n'));
+            io.out(`${wantsJson(invocation) ? JSON.stringify(result, null, 2) : lines.join('\n')}\n`);
             return OK;
           } catch (error) {
             if (!(error instanceof BudgetEditError)) throw error;
-            io.err(error.message);
+            io.err(`${error.message}\n`);
             return FAILED;
           }
         },

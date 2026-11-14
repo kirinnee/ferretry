@@ -81,6 +81,33 @@ describe('LoginChangeService', () => {
     should(events).deepEqual([{ id: 'work', change: 'edited' }]);
   });
 
+  it('should say which file a change saves and which runtimes are on the login', async () => {
+    const { service } = world({ usedBy: async () => ['alpha'] });
+
+    const label = await service.stage({ kind: 'login.label', id: 'work', label: 'Work' });
+    const disable = await service.stage({ kind: 'login.disable', id: 'work' });
+    const signOut = await service.stage({ kind: 'login.signout', id: 'work' });
+
+    should(label.saves).deepEqual(['logins/work.yaml']);
+    should(label.runtimes).deepEqual(['alpha']);
+    should(disable.saves).deepEqual(['logins/work.yaml']);
+    should(signOut.saves).be.undefined();
+    should(signOut.runtimes).be.undefined();
+  });
+
+  it('should name no runtimes, and still stage, when the runtimes cannot be read', async () => {
+    const { service } = world({
+      usedBy: async () => {
+        throw new Error('nothing answers');
+      },
+    });
+
+    const view = await service.stage({ kind: 'login.enable', id: 'work' });
+
+    should(view.runtimes).be.undefined();
+    should(view.saves).deepEqual(['logins/work.yaml']);
+  });
+
   it('should refuse to apply the same change twice', async () => {
     const { service } = world();
     const view = await service.stage({ kind: 'login.enable', id: 'work' });

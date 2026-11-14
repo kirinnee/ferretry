@@ -3,7 +3,8 @@
  * change to make, stages it at Logins' own route and shows the daemon's own consequences before anything that removes
  * or signs out. `ChangeApplyPanel` is the last thing each shows: the button, the passkey sentence, the grant guidance.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { changeRefusalExplanation, cn } from '../ui.ts';
 import type { LoginChangeView, LoginView } from '../../contract/index.ts';
 import type { LoginChanges } from '../lib/login-changes.ts';
 import { Button, ChangeApplyPanel } from '../ui.ts';
@@ -195,12 +196,27 @@ export function RemoveZone({
   machineName,
   changes,
   onRemoved,
-}: Omit<PanelProps, 'reload'> & { readonly onRemoved: () => void }) {
+  askAtOnce = false,
+  onKeep,
+}: Omit<PanelProps, 'reload'> & {
+  readonly onRemoved: () => void;
+  /** A card's own Remove button already asked: stage at once instead of waiting for a second click. */
+  readonly askAtOnce?: boolean;
+  /** Called when the person keeps the login, so a card can fold the confirmation away. */
+  readonly onKeep?: () => void;
+}) {
   const [staged, setStaged] = useState<LoginChangeView | null>(null);
   const ask = async (): Promise<void> => {
     const result = await changes.stage({ kind: 'login.remove', id: login.id });
     if (result.kind === 'staged') setStaged(result.staged);
   };
+  // Once, when the card asks: a later render must not stage the same removal again.
+  const asked = useRef(false);
+  useEffect(() => {
+    if (!askAtOnce || asked.current) return;
+    asked.current = true;
+    void ask();
+  });
   const remove = async (): Promise<void> => {
     if (staged === null) return;
     const result = await changes.applyStaged(staged);
@@ -255,6 +271,7 @@ export function RemoveZone({
               onClick={() => {
                 changes.clear();
                 setStaged(null);
+                onKeep?.();
               }}
             >
               Keep it
@@ -263,5 +280,69 @@ export function RemoveZone({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The switch on a login's card (docs/disabling.md): on, a tap asks for a reason and how long (the form is the
+ * page's `DisableControl`, shown by the card); off, a tap switches it back on at once. Switching on only ever loosens
+ * back to what was there and switching off tightens, so neither asks "are you sure". Nothing running is stopped.
+ */
+export function CardSwitch({
+  login,
+  changes,
+  reload,
+  asking,
+  onAsk,
+  onRefused,
+}: Omit<PanelProps, 'machineName'> & {
+  readonly asking: boolean;
+  readonly onAsk: (asking: boolean) => void;
+  /** Said where the card shows it, when switching back on is refused. */
+  readonly onRefused: (sentence: string | null) => void;
+}) {
+  const off = login.disabled !== undefined;
+  // Only a refusal a passkey would not fix locks the switch; a step-up is asked for by the carrier when it applies.
+  const refusal = changes.authority?.kind === 'refused' ? changeRefusalExplanation(changes.authority.refusal) : null;
+  const toggle = async (): Promise<void> => {
+    changes.clear();
+    onRefused(null);
+    if (!off) return onAsk(!asking);
+    const result = await changes.apply({ kind: 'login.enable', id: login.id });
+    if (result.kind === 'applied') await reload();
+    else onRefused(result.sentence);
+  };
+  return (
+    <span
+      className="relative z-10 inline-flex shrink-0"
+      data-login-switch={login.id}
+      data-login-switch-state={off ? 'off' : 'on'}
+    >
+      <button
+        type="button"
+        role="switch"
+        aria-checked={!off}
+        aria-label={`${login.id}: ${off ? 'off' : 'on'} for new starts`}
+        disabled={changes.busy || refusal !== null}
+        title={refusal ?? undefined}
+        onClick={() => void toggle()}
+        className="-my-3 inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <span
+          aria-hidden="true"
+          className={cn(
+            'relative h-5 w-9 shrink-0 rounded-full border transition-colors',
+            off ? 'border-border-strong bg-surface-2' : 'border-accent bg-accent',
+          )}
+        >
+          <span
+            className={cn(
+              'absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full transition-transform',
+              off ? 'translate-x-[2px] bg-muted' : 'translate-x-[18px] bg-accent-fg',
+            )}
+          />
+        </span>
+      </button>
+    </span>
   );
 }

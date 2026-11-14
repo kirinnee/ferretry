@@ -1,4 +1,5 @@
 import type { PluginClient } from '@ferretry/kernel/manifest';
+import { z } from 'zod';
 import {
   type HarnessLoginCodexMethod,
   type HarnessLoginFlow,
@@ -13,6 +14,8 @@ import {
   LoginChangeSchema,
   type LoginChangeView,
   LoginChangeViewSchema,
+  type LoginBudget,
+  LoginBudgetSchema,
   LoginCheckRequestSchema,
   type LoginList,
   LoginListSchema,
@@ -48,6 +51,14 @@ export const ROUTES = {
 } as const;
 
 /**
+ * Usage's budgets read. Logins cannot import Usage (Usage imports Logins), so the standing a login's row shows is
+ * read here from Usage's own route and parsed against Logins' own budget shape. A caller or machine without it
+ * (Usage off, a refusal) shows no budget line, as a login with no budget does.
+ */
+export const BUDGETS_ROUTE = 'GET /v1/usage/budgets' as const;
+const BudgetsReadSchema = z.object({ budgets: z.array(z.object({ login: z.string(), budget: LoginBudgetSchema })) });
+
+/**
  * Speaks the login routes through the plugin client, parsing every answer through the shared schema, which has no
  * field a token could occupy. THIS CLASS HOLDS NO AUTHORITY: the daemon governs a caller by how it arrived.
  *
@@ -57,12 +68,25 @@ export class ClientLoginsGateway implements ILoginsGateway {
   constructor(private readonly client: PluginClient) {}
 
   async logins(): Promise<LoginList> {
-    return LoginListSchema.parse(await this.client.call(ROUTES.logins));
+    const list = LoginListSchema.parse(await this.client.call(ROUTES.logins));
+    const budgets = await this.budgets();
+    return { ...list, logins: list.logins.map(login => withBudget(login, budgets)) };
   }
 
   async check(loginId: string): Promise<LoginView> {
     const body = LoginCheckRequestSchema.parse({});
-    return LoginViewSchema.parse(await this.client.call(ROUTES.check, { params: { loginId }, body }));
+    const view = LoginViewSchema.parse(await this.client.call(ROUTES.check, { params: { loginId }, body }));
+    return withBudget(view, await this.budgets());
+  }
+
+  /** Every budgeted login's standing, by id; empty when Usage cannot say (a missing budget line is not an error). */
+  private async budgets(): Promise<ReadonlyMap<string, LoginBudget>> {
+    try {
+      const read = BudgetsReadSchema.safeParse(await this.client.call(BUDGETS_ROUTE));
+      return new Map(read.success ? read.data.budgets.map(entry => [entry.login, entry.budget]) : []);
+    } catch {
+      return new Map();
+    }
   }
 
   async test(loginId: string, allowInference: boolean): Promise<LoginTestResult> {
@@ -126,4 +150,10 @@ export class ClientLoginsGateway implements ILoginsGateway {
   async apply(changeId: string): Promise<LoginChangeOutcome> {
     return LoginChangeOutcomeSchema.parse(await this.client.call(ROUTES.apply, { params: { changeId } }));
   }
+}
+
+/** A login's view with its budget standing, when it has one. A login the daemon already put a budget on keeps it. */
+function withBudget(login: LoginView, budgets: ReadonlyMap<string, LoginBudget>): LoginView {
+  const budget = login.budget ?? budgets.get(login.id);
+  return budget === undefined ? login : { ...login, budget };
 }

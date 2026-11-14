@@ -55,6 +55,10 @@ type Held = HeldChange<{
   readonly summary: string;
   readonly consequences: readonly string[];
   readonly orphanedSecrets: readonly string[];
+  /** The config-relative login files an apply writes (never a removal's), for the preview's "Saves:". */
+  readonly saves: readonly string[];
+  /** The runtimes on the login, by name, when the change edits a login a runtime may use (best effort). */
+  readonly runtimes: readonly string[];
   readonly run: Payload;
   /**
    * Runtimes the caller said it moves off the login first (a removal through Runtimes); not counted as users AT STAGE.
@@ -179,6 +183,8 @@ export class LoginChangeService {
         summary: `Sign out of login ${change.id}`,
         consequences: [login.signOut.sentence],
         orphanedSecrets: [],
+        saves: [],
+        runtimes: [],
         run: { kind: 'sign-out', id: change.id },
         movedFirst: [],
       };
@@ -195,11 +201,20 @@ export class LoginChangeService {
       presets: change.kind === 'login.add' || change.kind === 'login.env' ? await this.deps.presets() : [],
       usedBy: () => users,
     });
+    // A removal is refused while a runtime uses the login, so it has none to name; an add has none yet.
+    const named =
+      change.kind === 'login.label' || change.kind === 'login.disable' || change.kind === 'login.enable'
+        ? await this.#usersOf(change.id, []).catch(() => [])
+        : change.kind === 'login.env'
+          ? users
+          : [];
     return {
       change,
       summary: edit.summary,
       consequences: edit.consequences,
       orphanedSecrets: edit.orphanedSecrets,
+      saves: edit.writes.flatMap(write => ('remove' in write ? [] : [`logins/${write.id}.yaml`])),
+      runtimes: named,
       run: { kind: 'edit', change, edit },
       movedFirst: change.kind === 'login.remove' ? movedFirst : [],
     };
@@ -272,13 +287,15 @@ export class LoginChangeService {
   }
 
   #view(held: Held): LoginChangeView {
-    const { change, summary, consequences, orphanedSecrets } = held.payload;
+    const { change, summary, consequences, orphanedSecrets, saves, runtimes } = held.payload;
     return {
       id: held.id,
       change,
       summary,
       consequences,
       ...(orphanedSecrets.length === 0 ? {} : { orphanedSecrets }),
+      ...(saves.length === 0 ? {} : { saves }),
+      ...(runtimes.length === 0 ? {} : { runtimes }),
       expiresAt: instantFromEpochMs(held.expiresAt) as Instant,
       state: held.state,
     };

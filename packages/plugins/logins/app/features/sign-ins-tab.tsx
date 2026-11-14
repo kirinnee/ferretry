@@ -36,8 +36,8 @@ import {
 import { Badge, Button, ChangeApplyPanel, cn } from '../ui.ts';
 import { useSignInsLogin } from '../lib/sign-ins-route.ts';
 import { AddLoginPanel } from './add-login-panel.tsx';
-import { DisableControl, LabelEditor, RemoveZone, SignOutZone } from './login-changes-panels.tsx';
-import { useLoginChanges } from '../lib/login-changes.ts';
+import { CardSwitch, DisableControl, LabelEditor, RemoveZone, SignOutZone } from './login-changes-panels.tsx';
+import { type LoginChanges, useLoginChanges } from '../lib/login-changes.ts';
 import { LocalModelsPanel } from './local-models-panel.tsx';
 import { environmentChip, LoginEnvironmentSection } from './login-environment.tsx';
 import { LoginSignIn } from './login-sign-in.tsx';
@@ -263,36 +263,109 @@ function LoginPage({ login, machineName, client, reload, onBack, now, clock, pol
   );
 }
 
+/**
+ * One login's card: the row that opens its page, with the two things v4 kept on the card itself — the on/off switch
+ * beside the name and a Remove button under it. Each opens its own confirmation under the card; the page keeps the
+ * same acts for a login you are already looking at.
+ */
 function LoginRow({
   login,
   now,
+  clock,
+  machineName,
+  changes,
+  reload,
   onOpen,
 }: {
   readonly login: LoginView;
   readonly now: number;
+  readonly clock: () => number;
+  readonly machineName: string;
+  readonly changes: LoginChanges;
+  readonly reload: () => Promise<void>;
   readonly onOpen: () => void;
 }) {
+  const [switching, setSwitching] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
   return (
-    <button
-      type="button"
-      className="kt-panel flex w-full min-w-0 items-start gap-3 p-panel text-left hover:border-accent"
-      data-login-card={login.id}
-      data-login-row={login.id}
-      onClick={onOpen}
-    >
-      <AccountStatus word={login.status.word} className="mt-1" />
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="truncate font-mono text-row text-fg">
-          {login.store === 'environment' ? login.id : loginEmail(login)}
-        </span>
-        <LoginBadges login={login} />
-        <span className="text-cell text-muted">
-          {login.status.label} · {loginUse(login)}
-        </span>
-        <Quota login={login} now={now} />
-      </span>
-      <ChevronRight size={16} aria-hidden="true" className="mt-1 shrink-0 text-muted" />
-    </button>
+    <div className="kt-panel flex min-w-0 flex-col gap-3 p-panel" data-login-card-wrap={login.id}>
+      <div className="flex min-w-0 items-start gap-3">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-start gap-3 bg-transparent p-0 text-left"
+          data-login-card={login.id}
+          data-login-row={login.id}
+          onClick={onOpen}
+        >
+          <AccountStatus word={login.status.word} className="mt-1" />
+          <span className="flex min-w-0 flex-1 flex-col gap-1">
+            <span className="truncate font-mono text-row text-fg">
+              {login.store === 'environment' ? login.id : loginEmail(login)}
+            </span>
+            <LoginBadges login={login} />
+            <span className="text-cell text-muted">
+              {login.status.label} · {loginUse(login)}
+            </span>
+            <Quota login={login} now={now} />
+          </span>
+        </button>
+        <CardSwitch
+          login={login}
+          changes={changes}
+          reload={reload}
+          asking={switching}
+          onAsk={setSwitching}
+          onRefused={setRefused}
+        />
+        <button
+          type="button"
+          className="mt-1 shrink-0 border-0 bg-transparent p-0 text-muted"
+          aria-label={`Open ${login.id}`}
+          onClick={onOpen}
+        >
+          <ChevronRight size={16} aria-hidden="true" />
+        </button>
+      </div>
+      {refused === null ? null : (
+        <p role="alert" className="m-0 text-cell leading-base text-err" data-login-switch-refused="">
+          {refused}
+        </p>
+      )}
+      {switching && login.disabled === undefined ? (
+        <DisableControl login={login} machineName={machineName} changes={changes} reload={reload} now={clock} />
+      ) : null}
+      {removing ? (
+        <RemoveZone
+          login={login}
+          machineName={machineName}
+          changes={changes}
+          askAtOnce
+          onKeep={() => setRemoving(false)}
+          onRemoved={() => {
+            setRemoving(false);
+            void reload();
+          }}
+        />
+      ) : (
+        <div className="flex justify-end border-t border-border pt-3">
+          <Button
+            type="button"
+            variant="danger"
+            size="sm"
+            data-login-card-remove={login.id}
+            aria-label={`Remove ${login.id}`}
+            disabled={changes.busy}
+            onClick={() => {
+              changes.clear();
+              setRemoving(true);
+            }}
+          >
+            Remove
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -316,6 +389,8 @@ export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs, 
   // The page the address names, and the way the tab opens one: a link from another tab (Runtimes'
   // "Add a new login in Sign-ins", a runtime's login that needs sign-in) lands on the login's page.
   const [detail, openDetail] = useSignInsLogin(state.kind === 'ready' ? state.list.machine : null, browser);
+  // One change state for every card on the list: only one act is under way at a time.
+  const cardChanges = useLoginChanges(client);
 
   const reload = useCallback(async (): Promise<void> => {
     try {
@@ -416,7 +491,15 @@ export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs, 
               <ul className="m-0 mt-2 flex list-none flex-col gap-2 p-0">
                 {group.logins.map(item => (
                   <li key={item.id}>
-                    <LoginRow login={item} now={now()} onOpen={() => openDetail(item.id)} />
+                    <LoginRow
+                      login={item}
+                      now={now()}
+                      clock={now}
+                      machineName={list.machine}
+                      changes={cardChanges}
+                      reload={reload}
+                      onOpen={() => openDetail(item.id)}
+                    />
                   </li>
                 ))}
               </ul>

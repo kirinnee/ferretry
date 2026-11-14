@@ -652,6 +652,10 @@ export const LoginChangeViewSchema = z.strictObject({
   consequences: z.array(NonEmptyStringSchema).readonly(),
   /** Secret NAMES (never values) that only a removed login referred to: left in the store, said aloud. */
   orphanedSecrets: z.array(NonEmptyStringSchema).readonly().optional(),
+  /** The login files applying it writes, as paths under the config folder (`logins/<id>.yaml`). Absent when it writes none. */
+  saves: z.array(NonEmptyStringSchema).readonly().optional(),
+  /** The runtimes that launch on the login, by name, when the change touches a login a runtime may be using. */
+  runtimes: z.array(NonEmptyStringSchema).readonly().optional(),
   expiresAt: InstantSchema,
   state: z.enum(['pending', 'consumed']),
 });

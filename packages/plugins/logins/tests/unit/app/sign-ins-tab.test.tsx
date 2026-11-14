@@ -70,7 +70,8 @@ describe('the Sign-ins tab', () => {
     expect(c.querySelector('[data-login-page="claude-you"]')).not.toBeNull();
     await click(c.querySelector('[data-page-back]'), 'back');
     expect(c.querySelector('[data-logins-tab]')).not.toBeNull();
-    expect(calls.map(call => call.route)).toEqual([LIST, 'GET /v1/grants']);
+    // The list reads what this caller may change once for its cards; a login's own page reads it again for itself.
+    expect(calls.map(call => call.route).toSorted()).toEqual(['GET /v1/grants', 'GET /v1/grants', LIST]);
     await view.unmount();
   });
 

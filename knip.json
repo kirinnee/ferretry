@@ -127,6 +127,10 @@
       "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}"],
       "project": ["**/*.{ts,tsx}"]
     },
+    "packages/plugins/logins": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}"],
+      "project": ["**/*.{ts,tsx}"]
+    },
     "packages/plugins/voice": {
       "entry": ["tests/**/*.test.{ts,tsx}", "tests/realworld/dev/**/*.ts"],
       "project": ["**/*.{ts,tsx}"],

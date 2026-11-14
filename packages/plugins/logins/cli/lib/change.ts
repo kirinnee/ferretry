@@ -49,7 +49,12 @@ export function parseReason(text: string | undefined): string | undefined {
 
 /** What one staged change would do, for the person deciding whether to apply it. */
 function renderChangeView(view: LoginChangeView): string {
-  return [view.summary, ...view.consequences.map(sentence => `  • ${sentence}`)].join('\n');
+  const lines = [view.summary, ...view.consequences.map(sentence => `  • ${sentence}`)];
+  const saves = view.saves ?? [];
+  if (saves.length > 0) lines.push('Saves:', ...saves.map(path => `  ${path}`));
+  const runtimes = view.runtimes ?? [];
+  if (runtimes.length > 0) lines.push('Runtimes on it:', ...runtimes.map(name => `  ${name}`));
+  return lines.join('\n');
 }
 
 /** How an applied change ended, and whether a script should trust it as done. */
