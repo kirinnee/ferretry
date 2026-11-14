@@ -75,11 +75,46 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('skill ls', { summary: 'the skills a ferret or this machine has' }),
-      verb('skill show', { summary: 'one skill item and where it is used' }),
-      verb('skill add', { summary: 'add a skills item' }),
-      verb('skill edit', { summary: 'change a skills item; every profile and runtime that uses it changes too' }),
-      verb('skill rm', { summary: 'remove a skills item' }),
+      verb('skill ls', {
+        summary: 'the skills a ferret or this machine has',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('skill show', {
+        summary: 'one skill item and where it is used',
+        args: [{ name: 'name', help: 'the skills item’s name' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('skill add', {
+        summary: 'add a skills item',
+        args: [{ name: 'name', help: 'the skills item’s name' }],
+        options: [
+          { flag: '--item <skill>', help: 'skills: one skill; repeat it' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('skill edit', {
+        summary: 'change a skills item; every profile and runtime that uses it changes too',
+        args: [{ name: 'name', help: 'the skills item’s name' }],
+        options: [
+          { flag: '--item <skill>', help: 'skills: one skill; repeat it' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('skill rm', {
+        summary: 'remove a skills item',
+        args: [{ name: 'name', help: 'the skills item’s name' }],
+        options: [
+          { flag: '--remove-from-profiles', help: 'take it out of every profile that has it first' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
     ],
   },
 

@@ -108,14 +108,49 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('layout show', { summary: 'the layout in use, with your changes applied' }),
-      verb('layout list', { summary: 'the installed layouts and themes' }),
-      verb('layout set', { summary: 'change one key of the layout: fy layout set nav.side right' }),
-      verb('layout use', { summary: 'switch to another installed layout' }),
-      verb('layout reset', { summary: 'drop your changes and use the built-in default' }),
-      verb('layout save', { summary: 'save the layout in use as a new, shareable layout item' }),
-      verb('theme list', { summary: 'the installed themes' }),
-      verb('theme use', { summary: 'switch theme' }),
+      verb('layout show', {
+        summary: 'the layout in use, with your changes applied',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('layout list', {
+        summary: 'the installed layouts and themes',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('layout set', {
+        summary: 'change one key of the layout: fy layout set nav.side right',
+        args: [
+          { name: 'path', help: 'the key to change, e.g. nav.side' },
+          { name: 'value', help: 'the new value', variadic: true },
+        ],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('layout use', {
+        summary: 'switch to another installed layout',
+        args: [{ name: 'name', help: 'the layout’s name' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('layout reset', {
+        summary: 'drop your changes and use the built-in default',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('layout save', {
+        summary: 'save the layout in use as a new, shareable layout item',
+        args: [{ name: 'name', help: 'the name for the new layout' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('theme list', {
+        summary: 'the installed themes',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('theme use', {
+        summary: 'switch theme',
+        args: [{ name: 'name', help: 'the theme’s name' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
     ],
   },
 

@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
 import { definePlugin, verb } from '@ferretry/kernel/manifest';
 import should from 'should';
-import { buildVerbTable, expandAlias, renderHelp, resolveVerb, verbWords } from '../../src/lib/verbs.ts';
+import { renderRootHelp } from '../../src/lib/help.ts';
+import { buildVerbTable, expandAlias, resolveVerb, verbWords } from '../../src/lib/verbs.ts';
 import { boardEntry, entry, registryOf, skeletonEntry } from './fakes.ts';
 
 describe('verb table', () => {
@@ -64,7 +65,7 @@ describe('verb table', () => {
 
   it('should list every owner’s verbs in help, under its title', () => {
     const table = buildVerbTable(registryOf(boardEntry()));
-    const help = renderHelp('fy', table, { board: 'Board' });
+    const help = renderRootHelp('fy', table, { board: 'Board' });
     should(help).containEql('Usage: fy <verb>');
     should(help).containEql('Board\n  card show');
     should(help).containEql('The shell\n  plugin list');

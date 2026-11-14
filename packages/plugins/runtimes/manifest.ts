@@ -188,36 +188,199 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('runtimes', { summary: 'the runtimes on this machine: a sign-in plus a profile' }),
-      verb('runtime ls', { summary: 'the runtimes on this machine: a sign-in plus a profile' }),
+      verb('runtimes', {
+        summary: 'the runtimes on this machine: a sign-in plus a profile',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('runtime ls', {
+        summary: 'the runtimes on this machine: a sign-in plus a profile',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
       verb('runtime add', {
         summary: 'add a runtime: which sign-in, which profile, and whether Ferretry launches it as an agent',
+        args: [{ name: 'name', help: 'the runtime name' }],
+        options: [
+          { flag: '--credential <id>', help: 'the login it uses' },
+          { flag: '--profile <name>', help: 'the profile it uses' },
+          {
+            flag: '--agent',
+            help: 'Ferretry launches it as an agent: no trust or onboarding prompts, and the agent permissions',
+          },
+          { flag: '--add-another', help: 'add it even when another runtime already uses this login and profile' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
+          { flag: '--json', help: 'print the change and its outcome as JSON' },
+        ],
       }),
-      verb('runtime show', { summary: 'one runtime: its stack, models and fixed layer' }),
-      verb('runtime set', { summary: 'change which sign-in or profile a runtime uses, or whether it is an agent' }),
+      verb('runtime show', {
+        summary: 'one runtime: its stack, models and fixed layer',
+        args: [{ name: 'name', help: 'the runtime' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('runtime set', {
+        summary: 'change which sign-in or profile a runtime uses, or whether it is an agent',
+        args: [{ name: 'name', help: 'the runtime' }],
+        options: [
+          { flag: '--credential <id>', help: 'the login it uses' },
+          { flag: '--profile <name>', help: 'the profile it uses' },
+          { flag: '--agent', help: 'Ferretry launches it as an agent' },
+          { flag: '--no-agent', help: 'it is not launched as an agent' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
+          { flag: '--json', help: 'print the change and its outcome as JSON' },
+        ],
+      }),
       verb('runtime disable', {
         summary: 'switch a runtime off without deleting it: nothing new starts on it; running ferrets keep going',
+        args: [{ name: 'name', help: 'the runtime' }],
+        options: [
+          { flag: '--until <when>', help: 'switch back on by itself: a date (2026-11-01), a time or a wait (3d, 12h)' },
+          { flag: '--reason <text>', help: 'why, shown beside the switch and in every refusal' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
+          { flag: '--json', help: 'print the change and its outcome as JSON' },
+        ],
       }),
-      verb('runtime enable', { summary: 'switch a disabled runtime back on' }),
-      verb('runtime rename', { summary: 'give a runtime a new name; nothing restarts' }),
-      verb('runtime rm', { summary: 'remove a runtime' }),
+      verb('runtime enable', {
+        summary: 'switch a disabled runtime back on',
+        args: [{ name: 'name', help: 'the runtime' }],
+        options: [
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
+          { flag: '--json', help: 'print the change and its outcome as JSON' },
+        ],
+      }),
+      verb('runtime rename', {
+        summary: 'give a runtime a new name; nothing restarts',
+        args: [
+          { name: 'name', help: 'the runtime' },
+          { name: 'new-name', help: 'its new name' },
+        ],
+        options: [
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
+          { flag: '--json', help: 'print the change and its outcome as JSON' },
+        ],
+      }),
+      verb('runtime rm', {
+        summary: 'remove a runtime',
+        args: [{ name: 'name', help: 'the runtime' }],
+        options: [
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
+          { flag: '--json', help: 'print the change and its outcome as JSON' },
+        ],
+      }),
       verb('runtime link', {
         summary: "link one harness's own sign-in and setup as a runtime, with no questions (for scripts)",
+        args: [{ name: 'tool', help: 'the tool to link: claude or codex' }],
+        options: [
+          { flag: '--name <name>', help: 'the runtime’s name; default is the suggested one (claude-default)' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
       }),
       verb('runtime scan', {
         summary: 'what the first run would find: each harness, its sign-in, instructions, settings, servers and skills',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
       }),
-      verb('profiles', { summary: 'the profiles on this machine: scope, layers, overrides and where each is used' }),
-      verb('profile ls', { summary: 'the profiles on this machine, each with its scope' }),
-      verb('profile show', { summary: 'one profile: its layers, overrides and where it is used' }),
-      verb('profile build', { summary: 'build a new profile from layers' }),
-      verb('profile edit', { summary: "replace a profile's layers; every runtime on it changes" }),
-      verb('profile rm', { summary: 'delete a profile' }),
-      verb('model-set ls', { summary: 'the model sets on this machine' }),
-      verb('model-set show', { summary: 'one model set and where it is used' }),
-      verb('model-set add', { summary: 'add a model set' }),
-      verb('model-set edit', { summary: 'change a model set; every profile and runtime that uses it changes too' }),
-      verb('model-set rm', { summary: 'remove a model set (refused while a profile uses it)' }),
+      verb('profiles', {
+        summary: 'the profiles on this machine: scope, layers, overrides and where each is used',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('profile ls', {
+        summary: 'the profiles on this machine, each with its scope',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('profile show', {
+        summary: 'one profile: its layers, overrides and where it is used',
+        args: [{ name: 'name', help: 'the profile' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('profile build', {
+        summary: 'build a new profile from layers',
+        args: [{ name: 'name', help: 'the profile name' }],
+        options: [
+          {
+            flag: '--layer <kind/name>',
+            help: 'a component (instructions/main) or another profile (profile/default); repeat it, oldest first (default: [])',
+          },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
+          { flag: '--json', help: 'print the change and its outcome as JSON' },
+        ],
+      }),
+      verb('profile edit', {
+        summary: "replace a profile's layers; every runtime on it changes",
+        args: [{ name: 'name', help: 'the profile' }],
+        options: [
+          {
+            flag: '--layer <kind/name>',
+            help: 'a component (instructions/main) or another profile (profile/default); repeat it, oldest first (default: [])',
+          },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
+          { flag: '--json', help: 'print the change and its outcome as JSON' },
+        ],
+      }),
+      verb('profile rm', {
+        summary: 'delete a profile',
+        args: [{ name: 'name', help: 'the profile' }],
+        options: [
+          { flag: '--switch-runtimes-to <profile>', help: 'move every runtime on it to this profile first' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
+          { flag: '--json', help: 'print the change and its outcome as JSON' },
+        ],
+      }),
+      verb('model-set ls', {
+        summary: 'the model sets on this machine',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('model-set show', {
+        summary: 'one model set and where it is used',
+        args: [{ name: 'name', help: 'the model set’s name' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('model-set add', {
+        summary: 'add a model set',
+        args: [{ name: 'name', help: 'the model set’s name' }],
+        options: [
+          { flag: '--model <id>', help: 'model set: one model; repeat it' },
+          { flag: '--default <id>', help: 'model set: the model it starts with' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('model-set edit', {
+        summary: 'change a model set; every profile and runtime that uses it changes too',
+        args: [{ name: 'name', help: 'the model set’s name' }],
+        options: [
+          { flag: '--model <id>', help: 'model set: one model; repeat it' },
+          { flag: '--default <id>', help: 'model set: the model it starts with' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('model-set rm', {
+        summary: 'remove a model set (refused while a profile uses it)',
+        args: [{ name: 'name', help: 'the model set’s name' }],
+        options: [
+          { flag: '--remove-from-profiles', help: 'take it out of every profile that has it first' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
     ],
     app: [
       appAction('runtimes.apply', {

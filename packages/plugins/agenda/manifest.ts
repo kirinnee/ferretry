@@ -108,11 +108,60 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('agenda', { summary: 'what is waiting on you, grouped' }),
-      verb('agenda open', { summary: 'every ferret’s open and parked asks, paged' }),
-      verb('agenda mode', { summary: 'switch agenda mode for a ferret or for new ferrets' }),
-      verb('agenda clear', { summary: 'dismiss the agent ferrets’ backlog (--dry-run counts it)' }),
-      verb('notify', { summary: 'tell the owner one thing: a quiet notice; --buzz also buzzes the phone' }),
+      verb('agenda', {
+        summary: 'what is waiting on you, grouped',
+        args: [{ name: 'verb', help: 'what to do: one of the commands below', optional: true, variadic: true }],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'target another session; an agent may mutate only its own session; a lead may also edit, surface, done or dismiss in a sub-ferret it started (defaults to the current session)',
+          },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('agenda open', {
+        summary: 'every ferret’s open and parked asks, paged',
+        args: [],
+        options: [
+          { flag: '--all', help: 'include parked asks' },
+          { flag: '--cursor <cursor>', help: 'continue from where the last page ended' },
+          { flag: '--limit <n>', help: 'how many to show' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('agenda mode', {
+        summary: 'switch agenda mode for a ferret or for new ferrets',
+        args: [{ name: 'mode', help: 'on or off', optional: true }],
+        options: [
+          { flag: '-s, --session <id>', help: 'switch it for this ferret; without it, for new ferrets' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('agenda clear', {
+        summary: 'dismiss the agent ferrets’ backlog (--dry-run counts it)',
+        args: [],
+        options: [
+          { flag: '--agents', help: 'clear the boards of the agent ferrets (the only thing there is to clear yet)' },
+          { flag: '--yes', help: 'do not ask first' },
+          {
+            flag: '-s, --session <id>',
+            help: 'target another session; an agent may mutate only its own session; a lead may also edit, surface, done or dismiss in a sub-ferret it started (defaults to the current session)',
+          },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('notify', {
+        summary: 'tell the owner one thing: a quiet notice; --buzz also buzzes the phone',
+        args: [{ name: 'summary', help: 'one line saying what the owner should know', optional: true, variadic: true }],
+        options: [
+          { flag: '--body <markdown>', help: 'the longer reading behind the summary, as Markdown' },
+          { flag: '--ping', help: "also buzz the owner's phone" },
+          {
+            flag: '-s, --session <id>',
+            help: 'target another session; an agent may notify only for its own (defaults to the current session)',
+          },
+        ],
+      }),
     ],
     app: [
       appAction('agenda.clear-agents', {

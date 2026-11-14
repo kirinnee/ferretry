@@ -137,18 +137,54 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('daemon config', { summary: 'read and change what a caller NOT on this host may do' }),
-      verb('daemon config ls', { summary: 'show every capability, both axes, and where each value came from' }),
-      verb('daemon config history', { summary: 'who changed a grant on this machine, and when' }),
-      verb('daemon config set <capability>', { summary: 'grant or revoke one capability, by axis' }),
+      verb('daemon config', { summary: 'read and change what a caller NOT on this host may do', args: [] }),
+      verb('daemon config ls', {
+        summary: 'show every capability, both axes, and where each value came from',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol document instead of the human report' }],
+      }),
+      verb('daemon config history', {
+        summary: 'who changed a grant on this machine, and when',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol document instead of the human listing' }],
+      }),
+      verb('daemon config set <capability>', {
+        summary: 'grant or revoke one capability, by axis',
+        args: [
+          {
+            name: 'capability',
+            help: 'the capability: fleet, terminal, browser, filesystem, warden, pairing, secrets or sharing',
+          },
+        ],
+        options: [
+          { flag: '--use', help: 'let a remote caller exercise this capability' },
+          { flag: '--no-use', help: 'stop a remote caller exercising this capability' },
+          { flag: '--configure', help: "let a remote caller change this capability's host settings" },
+          { flag: '--no-configure', help: "stop a remote caller changing this capability's host settings" },
+        ],
+      }),
       verb('daemon audit', {
         summary: 'show the audit: who was paired, removed or refused, and what was done, newest first',
+        args: [],
+        options: [
+          { flag: '--limit <n>', help: 'how many records of each section to show (at most 200)' },
+          { flag: '--kept-skip <n>', help: 'skip the newest n security changes, to page back through older ones' },
+          { flag: '--json', help: 'print the protocol document instead of the human listing' },
+        ],
       }),
-      verb('daemon security', { summary: 'read and change this machine’s security settings' }),
+      verb('daemon security', { summary: 'read and change this machine’s security settings', args: [] }),
       verb('daemon security show', {
         summary: 'show every setting, its bounds and where the values came from',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol document instead of the human report' }],
       }),
-      verb('daemon security set <field> <value>', { summary: 'change one setting' }),
+      verb('daemon security set <field> <value>', {
+        summary: 'change one setting',
+        args: [
+          { name: 'field', help: 'the security setting to change' },
+          { name: 'value', help: 'the new value' },
+        ],
+      }),
     ],
   },
   /** Never reached by a ferret, through any root: the admin and warden bearers (`PrivacyDecl`). */

@@ -277,7 +277,7 @@ describe('runFy', () => {
 
       // Assert
       should(code).equal(0);
-      should(io.stdout()).equal('fy card move: move a card\n');
+      should(io.stdout()).startWith('Usage: fy card move [options]\n\nmove a card\n');
       should(calls.args).be.undefined();
       should(connects).deepEqual([]);
     });
@@ -289,13 +289,13 @@ describe('runFy', () => {
     should(calls.args).deepEqual(['-h']);
   });
 
-  it('should print a verb’s summary for --help after it', async () => {
+  it('should print a verb’s usage and summary for --help after it', async () => {
     const { world, io } = fakeWorld({ registry: registryOf(boardEntry()) });
     should(await runFy(['card', 'move', '--help'], world)).equal(0);
-    should(io.stdout()).equal('fy card move: move a card\n');
+    should(io.stdout()).startWith('Usage: fy card move [options]\n\nmove a card\n');
   });
 
-  it('should list a verb’s declared options under its summary for --help, and print nothing for a verb that declares none', async () => {
+  it('should list a verb’s declared options under its summary for --help, and only -h for a verb that declares none', async () => {
     const withOptions = definePlugin({
       id: 'sized',
       title: 'Sized',
@@ -321,10 +321,12 @@ describe('runFy', () => {
     const { world, io } = fakeWorld({ registry: registryOf(skeletonEntry(withOptions)) });
     should(await runFy(['size', '--help'], world)).equal(0);
     should(io.stdout()).equal(
-      "fy size: size a thing\n\noptions:\n  --at <tokens|auto>\n      squeeze it at this many tokens (e.g. 250k); auto leaves the thing's own trigger\n",
+      "Usage: fy size [options]\n\nsize a thing\n\nOptions:\n  --at <tokens|auto>  squeeze it at this many tokens (e.g. 250k); auto leaves\n                      the thing's own trigger\n  -h, --help          show this help\n",
     );
     should(await runFy(['plain', '-h'], world)).equal(0);
-    should(io.stdout().endsWith('fy plain: a verb with no options\n')).be.true();
+    should(io.stdout()).containEql(
+      'Usage: fy plain [options]\n\na verb with no options\n\nOptions:\n  -h, --help  show this help\n',
+    );
   });
 
   it('should run an alias as the verb it names, with the arguments carried over', async () => {

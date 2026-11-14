@@ -199,24 +199,133 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('lesson', { summary: 'the lessons board: what was learned from your corrections (pending ones first)' }),
-      verb('lesson ls', { summary: 'the lessons board, pending ones first (the same as bare lesson)' }),
-      verb('lesson show', { summary: 'one lesson in full, with every quote behind it' }),
-      verb('lesson accept', { summary: 'accept a lesson; it writes nothing until you apply it' }),
-      verb('lesson reject', { summary: 'reject a lesson; it is not suggested again' }),
-      verb('lesson edit', { summary: 'reword a lesson before accepting it' }),
-      verb('lesson categorize', { summary: 'change where a lesson goes: global or project' }),
-      verb('lesson reopen', { summary: 'put a lesson back in To review' }),
-      verb('lesson apply', { summary: 'show the diff of an accepted lesson, and with --yes write it' }),
-      verb('lesson scan', { summary: 'an estimated read of older ferrets for lessons; never starts by itself' }),
-      verb('lesson patch', { summary: 'print the file an accepted lesson edits, for you to apply' }),
-      verb('lesson run', { summary: 'mine now instead of waiting for the schedule' }),
-      verb('lesson status', { summary: 'whether mining is on, what is pending, how the last run went' }),
-      verb('lesson config', { summary: 'the mining schedule and the agent that performs it' }),
-      verb('lesson suggest', { summary: 'file one lesson for the owner to review' }),
-      verb('lesson global', { summary: 'the Global lessons every ferret reads, numbered' }),
-      verb('lesson global edit', { summary: 'reword one Global lesson by its number' }),
-      verb('lesson global remove', { summary: 'remove one Global lesson by its number' }),
+      verb('lesson', {
+        summary: 'the lessons board: what was learned from your corrections (pending ones first)',
+        args: [],
+      }),
+      verb('lesson ls', {
+        summary: 'the lessons board, pending ones first (the same as bare lesson)',
+        args: [],
+        options: [
+          { flag: '--state <state>', help: 'narrow to pending, accepted or rejected' },
+          { flag: '--all', help: 'every state, not just the pending ones' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('lesson show', {
+        summary: 'one lesson in full, with every quote behind it',
+        args: [{ name: 'id', help: 'the proposal id' }],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('lesson accept', {
+        summary: 'accept a lesson; it writes nothing until you apply it',
+        args: [{ name: 'id', help: 'the proposal id' }],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('lesson reject', {
+        summary: 'reject a lesson; it is not suggested again',
+        args: [{ name: 'id', help: 'the proposal id' }],
+        options: [
+          { flag: '-n, --note <text>', help: 'why it was rejected, recorded in the audit' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('lesson edit', {
+        summary: 'reword a lesson before accepting it',
+        args: [
+          { name: 'id', help: 'the proposal id' },
+          { name: 'rule', help: 'the replacement rule text', variadic: true },
+        ],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('lesson categorize', {
+        summary: 'change where a lesson goes: global or project',
+        args: [
+          { name: 'id', help: 'the proposal id' },
+          { name: 'category', help: 'global (every ferret) or repo (this project)' },
+        ],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('lesson reopen', {
+        summary: 'put a lesson back in To review',
+        args: [{ name: 'id', help: 'the proposal id' }],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('lesson apply', {
+        summary: 'show the diff of an accepted lesson, and with --yes write it',
+        args: [{ name: 'id', help: 'the proposal id' }],
+        options: [
+          { flag: '--yes', help: 'write it; without this, only the diff is shown and nothing is written' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('lesson scan', {
+        summary: 'an estimated read of older ferrets for lessons; never starts by itself',
+        args: [],
+        options: [
+          { flag: '--estimate', help: 'what a scan would cost, without reading anything (the default)' },
+          { flag: '--start', help: 'actually run the scan' },
+          {
+            flag: '--sessions <ids>',
+            help: 'comma-separated session ids; without it, every ferret not instructed to learn',
+          },
+          { flag: '--agent <agent>', help: 'the login (fleet agent) the miner runs on' },
+          { flag: '--model <model>', help: 'the model the miner uses' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('lesson patch', {
+        summary: 'print the file an accepted lesson edits, for you to apply',
+        args: [{ name: 'id', help: 'the proposal id' }],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('lesson run', {
+        summary: 'mine now instead of waiting for the schedule',
+        args: [],
+        options: [
+          { flag: '--spawn', help: 'also launch the miner sessions this run needs' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('lesson status', {
+        summary: 'whether mining is on, what is pending, how the last run went',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('lesson config', {
+        summary: 'the mining schedule and the agent that performs it',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('lesson suggest', {
+        summary: 'file one lesson for the owner to review',
+        args: [{ name: 'rule', help: 'one short imperative rule, at most 500 characters' }],
+        options: [
+          {
+            flag: '--scope <scope>',
+            help: 'global (every ferret should follow it) or repo (a fact about this project)',
+          },
+          { flag: '--json', help: "print the protocol payload instead of the daemon's sentence" },
+        ],
+      }),
+      verb('lesson global', {
+        summary: 'the Global lessons every ferret reads, numbered',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('lesson global edit', {
+        summary: 'reword one Global lesson by its number',
+        args: [
+          { name: 'number', help: 'the lesson’s number in the Global list' },
+          { name: 'rule', help: 'the new wording', variadic: true },
+        ],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('lesson global remove', {
+        summary: 'remove one Global lesson by its number',
+        args: [{ name: 'number', help: 'the lesson’s number in the Global list' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
     ],
   },
 
