@@ -1493,6 +1493,38 @@ export const ModelCatalogFileSchema = z.strictObject({
 });
 export type ModelCatalogFile = z.infer<typeof ModelCatalogFileSchema>;
 
+/**
+ * What `LoginsApi.modelSources` answers: every catalog in effect WHOLE (the models a runtime on a login offers, with the
+ * words a picker shows), the slice of each preset that says which catalog a login reads and which variables are the
+ * person's own, and what the last read of a local server found. Public catalog data only: no login, key, variable value
+ * or credential is in it (a preset's variables are named, never valued).
+ */
+export const ModelCatalogSourcesSchema = z.strictObject({
+  catalogs: z.record(
+    z.string().min(1),
+    ModelCatalogFileSchema.extend({
+      id: z.string().min(1),
+      origin: z.enum(['built-in', 'published', 'file']),
+    }),
+  ),
+  presets: z
+    .array(
+      z.strictObject({
+        id: z.string().min(1),
+        /** The catalog a login made from the preset reads, by id. */
+        catalog: z.string().min(1).optional(),
+        /** The variable NAMES each half takes: the ones a catalog pin never replaces. */
+        variables: z.strictObject({
+          claude: z.array(z.string().min(1)).readonly().optional(),
+          codex: z.array(z.string().min(1)).readonly().optional(),
+        }),
+      }),
+    )
+    .readonly(),
+  local: z.strictObject({ ollama: LocalModelsSchema.optional() }).optional(),
+});
+export type ModelCatalogSourcesView = z.infer<typeof ModelCatalogSourcesSchema>;
+
 // ── State (state/logins/models.json) ─────────────────────────────────────────────────────────────────────────────
 
 /** What the last published-catalog check and local-model read left behind. Never a credential. */

@@ -11,7 +11,6 @@
 import type { LocalModels } from '@ferretry/plugin-logins/contract';
 import type { Credential } from '../account/schema.ts';
 import type { HarnessKind } from '../manifest.ts';
-import type { ProviderPreset } from '../presets/schema.ts';
 import type { ModelCatalog } from './schema.ts';
 
 /** The catalog a SIGN-IN login reads: its CLI's maker. */
@@ -25,17 +24,27 @@ const SIGN_IN_MODEL_CATALOGS: Readonly<Record<HarnessKind, string>> = { claude: 
 function loginModelCatalogId(
   credential: Pick<Credential, 'store' | 'preset'>,
   harness: HarnessKind,
-  presets: readonly Pick<ProviderPreset, 'id' | 'catalog'>[],
+  presets: readonly Pick<ModelSourcePreset, 'id' | 'catalog'>[],
 ): string | undefined {
   if (credential.store !== 'environment') return SIGN_IN_MODEL_CATALOGS[harness];
   if (credential.preset === undefined) return undefined;
   return presets.find(preset => preset.id === credential.preset)?.catalog;
 }
 
+/**
+ * The slice of a preset a runtime reads to decide its models: the catalog a login made from it reads, and the variables
+ * each half takes (the person's own, which a catalog pin never replaces). A full `ProviderPreset` is one.
+ */
+export interface ModelSourcePreset {
+  readonly id: string;
+  readonly catalog?: string;
+  readonly halves: Readonly<Partial<Record<HarnessKind, { readonly env: Readonly<Record<string, unknown>> }>>>;
+}
+
 /** What a machine knows about catalogs when it decides a runtime's models. */
 export interface ModelCatalogSources {
   readonly catalogs: Readonly<Record<string, ModelCatalog>>;
-  readonly presets: readonly ProviderPreset[];
+  readonly presets: readonly ModelSourcePreset[];
   /** What the last read of each local server found, by the `detect` kind a catalog names. */
   readonly local?: { readonly ollama?: LocalModels };
 }

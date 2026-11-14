@@ -37,6 +37,7 @@ import {
   type ModelCatalogFile,
   ModelCatalogFileSchema,
   type ModelCatalogRefreshResult,
+  type ModelCatalogSourcesView,
   type ModelCatalogsView,
   type ModelPriceCatalog,
   ModelsStateSchema,
@@ -87,6 +88,11 @@ export interface LoginsApi {
    * tier pins: what Usage prices a session from. Public catalog data only; no login, key or credential is in it.
    */
   modelPrices(): Promise<readonly ModelPriceCatalog[]>;
+  /**
+   * The catalogs in effect WHOLE, the preset slice that names each login's catalog, and what the last read of a local
+   * server found: what Runtimes derives each runtime's models from. Public catalog data only; no login, key or value.
+   */
+  modelSources(): Promise<ModelCatalogSourcesView>;
   /**
    * Puts ONE login's own key on ONE request to a host it names, and returns only what came back (Usage's quota read).
    * The caller names the LOGIN and the variable that carries its key, never a secret: Logins resolves the secret from
@@ -191,6 +197,7 @@ export const LOGINS_READ_MODELS = [
   'presets',
   'models',
   'modelPrices',
+  'modelSources',
   'environmentTemplates',
 ] as const;
 
