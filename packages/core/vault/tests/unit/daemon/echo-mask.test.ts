@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { echoMask, maskEvent, maskJson, maskText, sanitizeBody } from '../../../daemon/lib/secrets/echo-mask.ts';
+import {
+  echoMask,
+  maskEvent,
+  maskJson,
+  maskReplyHeaders,
+  maskText,
+  sanitizeBody,
+} from '../../../daemon/lib/secrets/echo-mask.ts';
 
 const FAKE = 'FAKE-MCP-TOKEN-0123456789';
 const around = echoMask([FAKE, `Bearer ${FAKE}`], '[x]');
@@ -135,5 +142,123 @@ describe('checking a stranger’s reply for the credential: parse, decode every 
     expect((await sanitizeBody(reply(streamOf('{}'), 'application/json; charset=utf-16'), around)).kind).toBe(
       'dropped',
     );
+  });
+});
+
+describe('the edges of the check: what it keeps, what it refuses, and what it never swallows', () => {
+  /** A mask whose `sent` list cannot be read: the only way to make the check fail with an error that is not its own bound. */
+  const broken = {
+    mask: '[x]',
+    get sent(): never {
+      throw new Error('boom');
+    },
+  };
+
+  test('an HTML entity that is not a code point reads as nothing, so a value split by one is still found', () => {
+    expect(maskText('FAKE-MCP&#x110000;-TOKEN-0123456789', around)).toBe('[x]');
+    expect(maskText('a harmless &#1114112; string', around)).toBe('a harmless &#1114112; string');
+  });
+
+  test('a percent run that is not valid UTF-8 still decodes what it can, so the value beside it is found', () => {
+    expect(maskText(`${FAKE}%ff%2d`, around)).toBe('[x]');
+    expect(maskText('only %ff%2d noise here', around)).toBe('only %ff%2d noise here');
+  });
+
+  test('null and booleans in JSON are kept as they are', () => {
+    expect(maskJson('{"a":null,"b":true,"c":false}', around)).toBe('{"a":null,"b":true,"c":false}');
+  });
+
+  test('a retry is kept only as digits that do not hold the credential', () => {
+    expect(maskEvent('retry: 3000\ndata: x', around)).toBe('retry: 3000\ndata: x');
+    expect(maskEvent('retry: soon\ndata: x', around)).toBe('data: x');
+    const digits = echoMask(['3000'], '[x]');
+    expect(maskEvent('retry: 3000\ndata: x', digits)).toBe('data: x');
+  });
+
+  test('an unexpected failure inside the check is thrown, never turned into a mask', () => {
+    expect(() => maskText('anything', broken)).toThrow('boom');
+    expect(() => maskJson('{"a":"b"}', broken)).toThrow('boom');
+  });
+
+  test('an unexpected failure while checking a JSON body is thrown from the reader, not reported as a dropped body', async () => {
+    await expect(sanitizeBody(reply(streamOf('{"a":"b"}')), broken)).rejects.toThrow('boom');
+  });
+
+  test('a reply with no content, or a compressed one, is not read for the credential', async () => {
+    const empty = await sanitizeBody(
+      new Response(streamOf('ignored'), { headers: { 'content-type': 'application/json', 'content-length': '0' } }),
+      around,
+    );
+    expect(empty).toEqual({ kind: 'text', text: '' });
+    const gzip = await sanitizeBody(
+      new Response(streamOf('x'), { headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' } }),
+      around,
+    );
+    expect(gzip.kind).toBe('dropped');
+    if (gzip.kind === 'dropped') expect(gzip.why).toContain('compressed');
+  });
+
+  test('a JSON body past the byte bound is dropped, never clipped', async () => {
+    const body = await sanitizeBody(reply(streamOf('{"a":"', 'x'.repeat(50), '"}')), around, 20);
+    expect(body.kind).toBe('dropped');
+    if (body.kind === 'dropped') expect(body.why).toContain('larger');
+  });
+
+  test('a JSON body that is not valid text, or not valid JSON, is dropped with its own sentence', async () => {
+    const notText = await sanitizeBody(
+      new Response(new Uint8Array([0x7b, 0xff, 0xfe, 0x7d]), { headers: { 'content-type': 'application/json' } }),
+      around,
+    );
+    expect(notText.kind).toBe('dropped');
+    if (notText.kind === 'dropped') expect(notText.why).toContain('not valid text');
+    const notJson = await sanitizeBody(reply(streamOf('{"a":')), around);
+    expect(notJson.kind).toBe('dropped');
+    if (notJson.kind === 'dropped') expect(notJson.why).toContain('not valid JSON');
+  });
+
+  test('a body stream that breaks while being read is an error, not a dropped body', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(new Error('connection lost'));
+      },
+    });
+    await expect(sanitizeBody(reply(stream), around)).rejects.toThrow('connection lost');
+  });
+
+  test('an event stream that ends inside a character, or holds an event with no blank line after it, is handled at the end', async () => {
+    const cut = await sanitizeBody(reply(streamOf('data: ok\n\n'), 'text/event-stream'), around);
+    if (cut.kind !== 'events') throw new Error('not events');
+    expect(await read(cut.events)).toBe('data: ok\n\n');
+    const half = await sanitizeBody(
+      new Response(new Uint8Array([0x64, 0x61, 0x74, 0x61, 0x3a, 0x20, 0xe2, 0x82]), {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+      around,
+    );
+    if (half.kind !== 'events') throw new Error('not events');
+    await expect(read(half.events)).rejects.toThrow('not valid text');
+    const tail = await sanitizeBody(reply(streamOf(`data: {"a":"${FAKE}"}`), 'text/event-stream'), around);
+    if (tail.kind !== 'events') throw new Error('not events');
+    expect(await read(tail.events)).toBe('data: {"a":"[x]"}');
+  });
+
+  test('an unexpected failure while checking an event ends the stream with that failure', async () => {
+    const stream = await sanitizeBody(reply(streamOf('data: x\n\n'), 'text/event-stream'), broken);
+    if (stream.kind !== 'events') throw new Error('not events');
+    await expect(read(stream.events)).rejects.toThrow('boom');
+  });
+
+  test('only the allowlisted reply headers are kept, each checked as a string', () => {
+    const headers = new Headers({
+      'content-type': 'application/json',
+      'mcp-session-id': FAKE,
+      'set-cookie': `session=${FAKE}`,
+      'retry-after': '30',
+    });
+    expect(maskReplyHeaders(headers, around)).toEqual({
+      'content-type': 'application/json',
+      'mcp-session-id': '[x]',
+      'retry-after': '30',
+    });
   });
 });
