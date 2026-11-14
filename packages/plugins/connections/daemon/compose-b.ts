@@ -16,6 +16,7 @@ import type {
   RouteHandler,
 } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
+import { KernelCloudflaredLocator } from './adapters/tunnel/cloudflared-locator.ts';
 import { FileTunnelHolding } from './adapters/tunnel/file-tunnel-holding.ts';
 import { BunConnectorProcesses } from './adapters/tunnel/bun-connector-process.ts';
 import { HostedTunnelProvisioner } from './adapters/tunnel/hosted-tunnel-provisioner.ts';
@@ -43,14 +44,13 @@ export interface TunnelHostPort {
   readonly cloudflared: CloudflaredLocatorPort;
 }
 
-const NO_CLOUDFLARED_SENTENCE = 'this daemon cannot run a tunnel yet: the kernel offers no way to find cloudflared';
-
 /**
- * The host the kernel's ports can build today: it says out loud that the tunnel cannot run, instead of looking around
- * the kernel for a binary. The tunnel carrier then reports itself `unavailable` with this sentence.
+ * The host the kernel's ports build: `cloudflared` is found through `kernel.paths.locate` (`FY_CLOUDFLARED`, else the
+ * bounded `PATH`), never by looking at the daemon's own environment. Absent, the carrier reports itself `unavailable`
+ * with the remedy.
  */
-export function kernelTunnelHost(): TunnelHostPort {
-  return { cloudflared: { locate: () => ({ kind: 'absent', reason: NO_CLOUDFLARED_SENTENCE }) } };
+export function kernelTunnelHost(kernel: Pick<KernelPorts, 'paths'>): TunnelHostPort {
+  return { cloudflared: new KernelCloudflaredLocator(kernel.paths) };
 }
 
 /**

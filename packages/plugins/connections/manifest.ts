@@ -138,5 +138,8 @@ export default definePlugin({
   permissions: {
     network: [new URL(HOSTED_RELAY_DIRECTORY_ORIGIN).host, { resolver: 'relay' }, 'stun.cloudflare.com'],
     spawn: ['cloudflared'],
+    // Where `cloudflared` is (`kernel.paths.locate`: bounded, never executing): the operator's `FY_CLOUDFLARED`, else the PATH.
+    which: true,
+    whichOverrides: ['FY_CLOUDFLARED'],
   },
 });

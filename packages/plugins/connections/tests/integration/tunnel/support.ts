@@ -10,7 +10,7 @@ import { join } from 'node:path';
 
 const directories: string[] = [];
 
-export async function tempDirectory(prefix: string): Promise<string> {
+async function tempDirectory(prefix: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), `${prefix}-`));
   directories.push(directory);
   return directory;

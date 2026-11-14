@@ -166,8 +166,7 @@
     },
     "packages/plugins/connections": {
       "entry": ["worker/src/adapters/worker.ts"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["daemon/adapters/tunnel/cloudflared-locator.ts"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/catalogs": {
       "entry": ["worker/src/adapters/link-store-worker.ts"],

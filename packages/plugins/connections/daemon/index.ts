@@ -315,7 +315,7 @@ export function buildConnections(
           kernel: ctx.kernel,
           config,
           ...(bindings.directoryOrigin === undefined ? {} : { directoryOrigin: bindings.directoryOrigin }),
-          host: tunnelHost ?? kernelTunnelHost(),
+          host: tunnelHost ?? kernelTunnelHost(ctx.kernel),
           origins: allowedOrigins,
           publishTunnel,
         }));

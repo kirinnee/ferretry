@@ -37,9 +37,12 @@ export type CloudflaredLocation =
   | { readonly kind: 'found'; readonly path: string; readonly via: 'override' | 'path' }
   | { readonly kind: 'absent'; readonly reason: string };
 
-/** Finds the binary. A port because asking the filesystem is not something a domain module does. */
+/**
+ * Finds the binary. A port because asking the filesystem is not something a domain module does. It may answer later:
+ * the kernel's lookup (`kernel.paths.locate`) is asynchronous, today's environment-and-PATH finder was not.
+ */
 export interface CloudflaredLocatorPort {
-  locate(): CloudflaredLocation;
+  locate(): CloudflaredLocation | Promise<CloudflaredLocation>;
 }
 
 /** The sentence for a named override that names nothing runnable. It does NOT fall back to `PATH`. */

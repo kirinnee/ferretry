@@ -1,7 +1,5 @@
-import { accessSync, constants, statSync } from 'node:fs';
 import type { Clock, SpawnPort } from '@ferretry/kernel/contract';
 import { InstantSchema } from '@ferretry/std';
-import { CloudflaredLocator } from '../../daemon/adapters/tunnel/cloudflared-locator.ts';
 
 /** Native adapters used only by integration/realworld tests, never by a product half. */
 export const clock: Clock = {
@@ -56,13 +54,3 @@ export const processes: SpawnPort = {
     };
   },
 };
-export function executableFile(path: string): boolean {
-  try {
-    accessSync(path, constants.X_OK);
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
-}
-export const locator = (environment: Readonly<Record<string, string | undefined>>) =>
-  new CloudflaredLocator(environment, (name, path) => Bun.which(name, { PATH: path }) ?? undefined, executableFile);
