@@ -205,3 +205,83 @@ describe('a remote check that carries a held sign-in', () => {
     expect((failure as McpProbeFailure).message).toContain('the Vault kept it');
   });
 });
+
+describe('a remote check that carries a held sign-in, when the exchange goes wrong', () => {
+  const remote = {
+    transport: 'http',
+    url: 'https://mcp.example.com/mcp',
+    headers: {},
+    credential: { secret: 'MCP_X_0123456789ABCDEF_ACCESS', header: 'Authorization', scheme: 'Bearer' },
+  } as Parameters<TransportMcpProbe['probe']>[0];
+  const stub = { spawn: {}, clock: {}, fetch: { request: async () => new Response('') } } as unknown as ProbePorts;
+  const probing = (fetchMinted: NonNullable<ConstructorParameters<typeof TransportMcpProbe>[1]>['fetchMinted']) =>
+    new TransportMcpProbe(stub, { childEnvironment: async () => ok(HANDLE), fetchMinted });
+  const failureOf = async (probe: TransportMcpProbe): Promise<McpProbeFailure> => {
+    const failure = await probe.probe(remote, AbortSignal.timeout(2000)).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(McpProbeFailure);
+    return failure as McpProbeFailure;
+  };
+  const text = (status: number, body: MintedBody, headers: Record<string, string> = {}): MintedExchangeOutcome => ({
+    kind: 'response',
+    status,
+    statusText: '',
+    headers,
+    body,
+  });
+
+  test.each([
+    [{ kind: 'aborted' }, 'timeout', ''],
+    [{ kind: 'secret_missing' }, 'unauthorized', 'The held sign-in is gone.'],
+    [{ kind: 'vault_damaged' }, 'unreachable', 'The secret store could not be opened, so the sign-in was not sent.'],
+    [{ kind: 'unreachable', certificate: false }, 'unreachable', 'Nothing answered at mcp.example.com.'],
+    [
+      { kind: 'unreachable', certificate: true },
+      'unreachable',
+      'Nothing answered at mcp.example.com (its certificate was refused).',
+    ],
+    [
+      { kind: 'refused' },
+      'unreachable',
+      'The held sign-in could not be presented to mcp.example.com; signing in again may fix it.',
+    ],
+  ] as const)('tells a Vault outcome of %j apart: %s', async (outcome, kind, message) => {
+    const failure = await failureOf(probing(async () => outcome as unknown as MintedExchangeOutcome));
+    expect([failure.kind, failure.message]).toEqual([kind, message]);
+  });
+
+  test('says in words that an event stream it was reading broke', async () => {
+    const broken = new ReadableStream<string>({ start: controller => controller.error(new Error('reset')) });
+    const failure = await failureOf(
+      probing(async () => text(200, { kind: 'events', events: broken }, { 'content-type': 'text/event-stream' })),
+    );
+    expect([failure.kind, failure.message]).toEqual(['protocol', 'Its answer could not be read as text.']);
+  });
+
+  test('names the status of a failed answer even when the Vault kept its body back', async () => {
+    const failure = await failureOf(probing(async () => text(503, { kind: 'dropped', why: 'It was not plain text.' })));
+    expect([failure.kind, failure.message]).toEqual(['unreachable', 'It answered HTTP 503.']);
+  });
+
+  test('still answers when closing the session it opened fails', async () => {
+    const calls: string[] = [];
+    const probe = probing(async (_secret, request) => {
+      if (request.method === 'DELETE') {
+        calls.push('delete');
+        return { kind: 'refused' };
+      }
+      const body = JSON.parse(request.body ?? '{}') as { id?: number; method?: string };
+      const answer = (result: unknown) =>
+        text(
+          200,
+          { kind: 'text', text: JSON.stringify({ jsonrpc: '2.0', id: body.id, result }) },
+          { 'content-type': 'application/json', 'mcp-session-id': 'session-1' },
+        );
+      if (body.method === 'initialize') return answer({ serverInfo: { name: 'Remote' } });
+      if (body.method === 'tools/list') return answer({ tools: [{ name: 'a' }] });
+      return text(202, { kind: 'text', text: '' }, { 'mcp-session-id': 'session-1' });
+    });
+
+    expect(await probe.probe(remote, AbortSignal.timeout(2000))).toEqual({ serverName: 'Remote', tools: ['a'] });
+    expect(calls).toEqual(['delete']);
+  });
+});
