@@ -914,6 +914,20 @@ describe('the homes the composed daemon provides', () => {
     expect(port.home('00000000-0000-4000-8000-0000000000ff')).toBeUndefined();
   });
 
+  it('the provided port answers catalog() and tools() as the fleet runtimes and machine reads do (Packs recommends from them)', async () => {
+    const { host } = await compose();
+    const port = host.provided(RuntimesPort);
+
+    const runtimes = await host.request('GET', '/v1/runtimes');
+    const machine = await host.request('GET', '/v1/runtimes/machine');
+
+    expect(runtimes.status).toBe(200);
+    expect(machine.status).toBe(200);
+    expect(await port.catalog()).toEqual(runtimes.json<{ runtimes: unknown[] }>().runtimes as never);
+    expect(await port.tools()).toEqual(machine.json<{ tools: unknown[] }>().tools as never);
+    expect((await port.tools()).length).toBeGreaterThan(0);
+  });
+
   it('S1 the provided port lists and reads the fleet’s installed skills through assetSkills()', async () => {
     const { host, world } = await compose();
     await mkdir(join(world.fleet, 'assets', 'skills', 'review'), { recursive: true });

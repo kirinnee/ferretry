@@ -30,6 +30,7 @@ import {
   type ProfileFile,
   type RuntimeFile,
   RuntimeHomeUnreadable,
+  type RuntimeFactsApi,
   type RuntimeHomesApi,
   type RuntimesFile,
 } from '../contract/index.ts';
@@ -452,6 +453,12 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         },
       };
 
+      // What is published, read as `GET /v1/runtimes` and `GET /v1/runtimes/machine` read it (no caller: the machine's own view).
+      const facts: RuntimeFactsApi = {
+        catalog: async () => (await assembly.catalog.runtimes()).runtimes,
+        tools: async () => (await assembly.catalog.machine(undefined)).tools,
+      };
+
       // ONE gate: its `start.decide` keeps the facts it read and its `launch.parts` contributes from exactly those.
       const launchGate = new LaunchGate({ source: launchFacts });
 
@@ -461,7 +468,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           ...fleetSetupRoutes(assembly.setup),
           ...ferretRuntimeRoutes(assembly.runtime),
         },
-        provides: { runtimes: { ...api, ...layers, ...(assembly.homes ?? noHomes) } },
+        provides: { runtimes: { ...api, ...layers, ...(assembly.homes ?? noHomes), ...facts } },
         doctor: {
           // The half builds without opening the fleet folder, so a broken fleet root shows here, not as a failed boot.
           'runtimes-config': async (): Promise<DoctorFinding> => {

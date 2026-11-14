@@ -13,7 +13,6 @@ import {
   packConfigFromFile,
   type PackTable,
   type PackView,
-  type RuntimeFactsApi,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { FleetFacts } from './adapters/fleet-facts.ts';
@@ -56,13 +55,20 @@ export default implementDaemon(manifest, {
     const ferrets = (): FerretsApi => needs.ferrets;
     const packFerrets = new PackFerrets(ferrets);
     const runtimes = (): RuntimesApi | undefined => uses.runtimes.current();
-    // GAP: Runtimes offers no `catalog()`/`tools()`/`modelCatalogs()` on this base (its app porter adds them, additive).
-    // Until then Pack mode is handed none and says no model is usable now, rather than reading members it cannot see.
-    const runtimeFacts = (): RuntimeFactsApi | undefined => undefined;
-    const catalogs = async (): Promise<readonly ModelCatalogView[]> => [];
+    // The model catalogs in effect, from Logins (which owns them). A Logins that is off or fails offers none: the routing
+    // prompt is then rendered from no catalog, and each runtime's own model list still names what it offers.
+    const catalogs = async (): Promise<readonly ModelCatalogView[]> => {
+      const logins = uses.logins.current();
+      if (logins === undefined) return [];
+      try {
+        return (await logins.models()).catalogs;
+      } catch {
+        return [];
+      }
+    };
     const fleet = new FleetFacts(
       runtimes,
-      runtimeFacts,
+      () => uses.logins.current(),
       () => uses.usage.current(),
       () => kernel.clock.now(),
     );
