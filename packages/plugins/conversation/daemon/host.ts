@@ -1,3 +1,4 @@
+import { basename, dirname } from 'node:path';
 import { ApiError, type KernelPorts, type RouteHandler, type SocketAccept } from '@ferretry/kernel/contract';
 import { type AskId, AskIdSchema, type AskOwnerChat, type AsksApi } from '@ferretry/core-asks/contract';
 import {
@@ -18,6 +19,7 @@ import {
   type ConversationCaller,
   type ConversationRefusal,
   MessageBeforeSend,
+  parseMessageAttachments,
   PEER_MESSAGE_LABELS,
   type PeerMessageLabel,
   QueueChanged,
@@ -41,6 +43,7 @@ import {
   defaultSendTrackerSettings,
   defaultSessionSendSettings,
   dispositionOf,
+  handoffView,
   isDirectSend,
   isFileBackedQueue,
   isUnconfirmedTyping,
@@ -110,11 +113,18 @@ import { KeyedSerialExecutor } from './seams/keyed-serial-executor.ts';
 import { type MountRoute, routeTable, socketTable } from './seams/api.ts';
 import { parseSessionId, type SessionId, tryParseSessionId } from './seams/ferret-id.ts';
 import type { ClockPort } from './seams/ports.ts';
-import type { SessionView } from './seams/protocol.ts';
+import type { SessionHandoff, SessionView } from './seams/protocol.ts';
 
 /** Said by every route that needs the ferret's terminal and is not connected to it: an explicit send retry, the compact-at setting. */
 const TERMINAL_PENDING =
   "This needs the ferret's terminal, and Conversation is not connected to it yet. Drive the ferret from its terminal for now.";
+
+/**
+ * The note Ferrets ends every revive's turn document with (its `turnProtocolReminder` default). Taken off the words a hand-off
+ * shows, because it is the daemon's, not the owner's. GAP: Ferrets owns this fact and offers no read of it, so it is
+ * mirrored here; a changed Ferrets setting would show the note until that read exists (end-list).
+ */
+const TURN_PROTOCOL_REMINDER = 'Continue using the same completion and interaction protocol.';
 
 const pending = (sentence: string = TERMINAL_PENDING): never => {
   throw new ApiError(503, sentence, 'conversation_terminal_unavailable');
@@ -464,6 +474,37 @@ export function buildConversationA(deps: {
   const unwiredTyping = (): never => pending(SEND_PATH_UNWIRED);
   /** The ferret's turn documents and the files Ferrets writes for it; none when Ferrets offers none (or refuses the look). */
   const turnsOf = async (ferret: SessionId) => await ferrets.turns?.(ferret).catch(() => undefined);
+  /**
+   * WHAT THE OWNER SENT behind a pointer the transcript records (v4's `handoff` route). The words are read from the very
+   * turn document Ferrets wrote (its `turns().list()`, a best-effort read of the ferret's own folder) and shown by
+   * the document's written shapes (`handoffView`); a document that is not there is a 404, so the chat says the file
+   * is gone only when it is. A queued message (`queued-<send id>`) lives in the ferret's `channel/` folder, which
+   * Ferrets offers no read of yet, so it stays unread (GAP, end-list).
+   */
+  const handoffOf = async (id: string, name: string): Promise<SessionHandoff> => {
+    const gone = (): never => {
+      throw new SessionSendError('not_found', 'that hand-off document is not there');
+    };
+    const ferret = tryParseSessionId(id);
+    const turn = /^turn-(\d{1,9})$/u.exec(name)?.[1];
+    if (ferret === undefined || turn === undefined) return gone();
+    const found = (await (await turnsOf(ferret))?.list())?.find(document => document.turn === Number(turn));
+    if (found === undefined) return gone();
+    // A delivered copy sits at `<session folder>/attachments/<attachment id>/<file name>`: only such a listed file is
+    // this ferret's stored attachment (and so a thumbnail); any other keeps its name as a plain chip.
+    const delivered = parseMessageAttachments(found.text.replace(/\n$/u, '')).files.find(
+      file => basename(dirname(dirname(file.path))) === 'attachments',
+    );
+    return handoffView(
+      name,
+      found.text,
+      {
+        reminder: TURN_PROTOCOL_REMINDER,
+        attachmentRoot: delivered === undefined ? '' : dirname(dirname(delivered.path)),
+      },
+      found.by,
+    );
+  };
   /**
    * The send path's turn store, over Ferrets' writer: the act that presses Enter (a person's, the Warden's, the tracker's
    * re-submit) starts the turn a typed pointer named, and that clears the markers the turn that ended left. The numbered
@@ -1356,7 +1397,7 @@ export function buildConversationA(deps: {
           action: request.action,
           outcome: await sendActs.resolveDraft(parseSessionId(id), request.action, request.draft).catch(sendActRefusal),
         }),
-        handoff: async () => pending(),
+        handoff: handoffOf,
       },
       sentDraftClearer(drafts),
     ),
