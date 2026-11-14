@@ -52,6 +52,7 @@ import { autoResumeAnswer, autoResumeSwitch, readAutoResume } from './lib/servic
 import { runtimeStartAnswer } from './lib/service/runtime-start-answer.ts';
 import { DisableExpiryWatch, earliestExpiry, keepUnpublished, runtimesBackOn } from './lib/service/disable-expiry.ts';
 import { loginUsers } from './lib/service/login-users.ts';
+import { fleetFromFiles } from './lib/service/fleet-from-files.ts';
 import { createProfileLayers } from './lib/service/profile-layers.ts';
 import { createRuntimesApi } from './lib/service/runtimes-api.ts';
 import { RuntimeEndSupervision, type RuntimeEndSeams } from './lib/service/runtime-end-supervision.ts';
@@ -72,7 +73,7 @@ export interface RuntimesAssembly {
     FleetCatalogService,
     'machine' | 'components' | 'profiles' | 'previewProfile' | 'runtimes' | 'propose' | 'read' | 'apply' | 'serialise'
   > &
-    Partial<Pick<FleetCatalogService, 'republish'>>;
+    Partial<Pick<FleetCatalogService, 'republish' | 'publishFromFiles'>>;
   readonly setup: Pick<
     FleetSetupService,
     'scan' | 'installTools' | 'exportBundle' | 'reviewClone' | 'forgetCloneSource' | 'recordCloneKeys' | 'executors'
@@ -390,6 +391,18 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         setTimer: (run, ms) => clock.after(milliseconds(ms), run),
       });
       void expiry.rearm();
+      // The fleet is published from the files as they stand (docs/config-files.md): once after start (below) and after
+      // every change to them, as v4 did after each configuration load. A hand edit, a conversion or a copied home
+      // therefore has its homes, wrappers and manifest (the runtime accounts MCP's inventory and Settings read) with no
+      // write through a route first. An unchanged fleet is left exactly as it is; a refusal is said and never thrown.
+      const fromFiles = fleetFromFiles({
+        republish: async () => await assembly.catalog.publishFromFiles?.(),
+        warn: message => {
+          ctx.kernel.log.warn(message);
+        },
+      });
+      for (const def of [RUNTIME_ITEMS, PROFILE_ITEMS, MODEL_SET_ITEMS, RUNTIMES_CONFIG])
+        config.watch(def, fromFiles.soon);
       // A manifest the previous version wrote in a shape this one does not read is derived data: rebuilt (the apply keeps
       // the old file aside and says so), never left to refuse every start. It runs once after start AND whenever a launch
       // reader meets the damage later (it asks through the runner's single-flight kick; a healthy manifest never publishes).
@@ -403,6 +416,9 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           assembly.repair?.begin();
           if (!(await assembly.manifestUnreadable?.())) {
             assembly.repair?.release();
+            // A manifest that reads is still published from the files an owner wrote by hand (v4 published after the
+            // first load): a machine whose files were edited, or converted, has homes the moment it starts.
+            await fromFiles.now();
             return;
           }
           const failure = await assembly.catalog.republish?.({ rebuild: true }).then(
@@ -509,7 +525,10 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         subscribers: {
           'ferrets.changed': async change => await ending.onChanged(change),
           // A login switched off or on, or its `until` moved: the expiry timer reads the logins again.
-          'logins.changed': async () => await expiry.rearm(),
+          'logins.changed': async () => {
+            fromFiles.soon();
+            await expiry.rearm();
+          },
           // A login its budget starts or stops holding: the fleet is published again so its wrappers follow (docs/budgets.md).
           'usage.login-paused': async () => await republishForBudget(),
           'usage.login-resumed': async () => await republishForBudget(),

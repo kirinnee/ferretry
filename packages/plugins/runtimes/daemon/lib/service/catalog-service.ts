@@ -545,9 +545,20 @@ export class FleetCatalogService {
     return await this.#exclusively(async () => await this.#republish(options.rebuild === true));
   }
 
+  /**
+   * Publish the fleet from the configuration files as they stand: what the daemon does once after start and after every
+   * change to a file Runtimes reads (v4 published after each configuration load). It is {@link republish} with
+   * `rebuild`, because no model catalog is what moved: a machine whose files an owner wrote, edited or converted gets
+   * its homes, wrappers and manifest with no write through a route first. A machine with no fleet files has nothing to
+   * publish, and a fleet whose manifest would be identical is left exactly as it is.
+   */
+  async publishFromFiles(): Promise<'applied' | 'unchanged' | 'skipped'> {
+    return await this.#exclusively(async () => await this.#republish(true));
+  }
+
   /** {@link republish} for a caller that already holds the section (a login change republishes from inside its apply). */
   async #republish(rebuild = false): Promise<'applied' | 'unchanged' | 'skipped'> {
-    const reading = await this.#read();
+    const reading = await this.#read(true);
     const sources = await this.#modelCatalogs();
     if (reading.format === 'none' || (sources.modelCatalogs === undefined && !rebuild)) return 'skipped';
     // A reading that holds a stand-in is never published: it would replace what the homes hold with what stands in. This is

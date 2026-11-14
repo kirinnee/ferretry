@@ -638,7 +638,10 @@ const CONFIG = {
   'model-sets': { heavy: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' } },
 };
 
-async function compose(logins = [sampleLogin('claude-you', { store: 'ferretry' })]) {
+async function compose(
+  logins = [sampleLogin('claude-you', { store: 'ferretry' })],
+  config: Readonly<Record<string, unknown>> = CONFIG,
+) {
   const world = await fleetWorld();
   const host = await testHost({
     plugins: [
@@ -648,7 +651,7 @@ async function compose(logins = [sampleLogin('claude-you', { store: 'ferretry' }
     ],
     fakes: { ferrets: new FakeFerrets(), logins: fakeLogins(logins), loginChanges: fakeLoginChanges() },
     gate: new StandInAdmission(() => ownerStanding()),
-    config: CONFIG,
+    config,
     ownerHome: world.person,
     executables: ['/fixture/bin/claude', '/fixture/bin/codex'],
     searchPath: '/fixture/bin',
@@ -677,6 +680,15 @@ const publishOnce = async (host: TestHost): Promise<void> => {
 };
 
 const REPAIR = 'runtimes.manifest-repair';
+
+/** Polls `done` for at most 5 s (a publish fired by a watch has no promise to await). */
+async function until(done: () => Promise<boolean>, what: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (!(await done().catch(() => false))) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+}
 
 describe('the composed daemon rebuilds an unreadable manifest after start', () => {
   it('registers the repair as a once-after-start job', async () => {
@@ -735,12 +747,44 @@ describe('the composed daemon rebuilds an unreadable manifest after start', () =
     expect(await kept(world)).toEqual([]);
   });
 
-  it('a machine with no manifest yet is left alone too', async () => {
-    const { host, world } = await compose();
+  it('a machine with no configuration and no manifest yet is left alone too', async () => {
+    const { host, world } = await compose([], {});
 
     await host.runJob(REPAIR);
 
     expect(await readdir(world.fleet)).not.toContain('manifest.json');
+  });
+
+  it('a machine whose files an owner wrote and that has no manifest yet is published from them at start, with no config write', async () => {
+    const { host, world } = await compose();
+    expect(await readdir(world.fleet)).not.toContain('manifest.json');
+
+    await host.runJob(REPAIR);
+
+    const published = JSON.parse(await readFile(manifestPathOf(world), 'utf8')) as FleetManifest;
+    expect(published.runtimes.map(runtime => runtime.name)).toEqual(['claude-default']);
+    expect((await fleetHomes(world.roots, new FleetPublication()).homes()).length).toBeGreaterThan(0);
+    // A ferret started right after boot finds its runtime's launch facts (the start gate refuses one with none).
+    const facts = launchFactsSource({ roots: world.roots }, new FleetPublication());
+    expect(await facts.facts('claude-default')).toMatchObject({ kind: 'claude' });
+  });
+
+  it('a change to a runtime or profile file is published when it lands: the new runtime has its home with no config write', async () => {
+    const { host, world } = await compose();
+    await host.runJob(REPAIR);
+
+    host.setConfig('runtimes', {
+      'claude-default': { login: 'claude-you', profile: 'default', agent: true },
+      'claude-extra': { login: 'claude-you', profile: 'default', agent: true },
+    });
+    await host.settle();
+    await until(
+      async () => (await readFile(manifestPathOf(world), 'utf8')).includes('claude-extra'),
+      'the extra runtime to be published',
+    );
+
+    const published = JSON.parse(await readFile(manifestPathOf(world), 'utf8')) as FleetManifest;
+    expect(published.runtimes.map(runtime => runtime.name).toSorted()).toEqual(['claude-default', 'claude-extra']);
   });
 
   it('says so, and FAILS the job (so the runner retries it), when the manifest is unreadable and the configuration cannot be published yet', async () => {
