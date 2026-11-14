@@ -1,8 +1,7 @@
 /**
  * Merge-bar line 2: `LOG_TOKENS` / `LOG_STREAM` make the `yaml` library print every token it parses, and a configuration
- * text may carry a credential. `fyd --check` parses the shipped catalogs (Bun macros, run when the plugin's module is
- * transpiled, in an environment of their own that `fyd`'s own deletion does not reach) and probes the plugin workers, so
- * it is the cheapest run that would dump them.
+ * text may carry a credential. `fyd --check` loads every plugin, reads the home and probes the plugin workers, so it is
+ * the cheapest run that would dump them.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
