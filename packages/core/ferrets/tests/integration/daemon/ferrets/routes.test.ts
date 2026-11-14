@@ -294,11 +294,16 @@ describe('starting, tokens and attach', () => {
 });
 
 describe('managed worktrees and the file browser before the kernel host IO is bound', () => {
-  test('the worktree list answers with no managed root, and a create or removal says why it cannot', async () => {
+  // a2444e8de2 binds the worktrees root to the kernel host IO, so the test kernel (whose `worktrees` root names a
+  // folder) now hosts managed checkouts and the list names where they live.
+  test('the worktree list names the managed root and holds none, and a create from a folder with no repository says why it cannot', async () => {
     const h = await host();
     const list = await h.request('GET', '/v1/worktrees');
     expect(list.status).toBe(200);
-    expect(list.json<{ worktrees: unknown[]; managedRoot?: string }>()).toEqual({ worktrees: [] });
+    expect(list.json<{ worktrees: unknown[]; managedRoot?: string }>()).toEqual({
+      worktrees: [],
+      managedRoot: '/worktrees/.',
+    });
     const created = await h.request('POST', '/v1/worktrees', {
       body: { cwd: '/work/project', branch: 'feat/one' },
     });

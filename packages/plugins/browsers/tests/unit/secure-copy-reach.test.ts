@@ -7,6 +7,7 @@ import { ferret, type TestCaller, type TestHost, testHost } from '@ferretry/kern
 import should from 'should';
 import { type BrowserCopyAnswer, type BrowsersCopyApi, BrowsersPort } from '../../contract/port.ts';
 import daemon, { buildBrowsers } from '../../daemon/index.ts';
+import { quietPairingUses } from '../support/no-pairing-screen.ts';
 import { Tabs } from '../support/tabs.ts';
 
 /** A value no real credential looks like: it crosses the seam once, in the read's answer, and appears nowhere else. */
@@ -42,7 +43,8 @@ async function built(
   );
   const host = await testHost({
     plugins: [half],
-    uses: { ferrets: FERRETS, agentControl: control },
+    // The pairing guard reads the daemon's own facts: with none bound it fails closed (every page an app page), so say "no pairing screen".
+    uses: { ferrets: FERRETS, agentControl: control, ...quietPairingUses() },
     fakes: { vault, gate: new FakeGate() },
     gate,
   });

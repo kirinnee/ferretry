@@ -55,6 +55,7 @@ export function parseArgs(tokens: readonly string[]): VerbInvocation {
   return {
     args,
     options,
+    raw: tokens,
     ...(swallowed.length === 0 ? {} : { swallowed }),
     ...(repeated ? { written } : {}),
   };
