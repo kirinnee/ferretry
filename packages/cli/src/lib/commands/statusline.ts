@@ -3,7 +3,7 @@
  * spelling Runtimes materialises).
  *
  * Claude hands that command the turn's JSON on stdin, `rate_limits` included. This records that block as the login's
- * PASSIVE usage reading (`<fleet>/credentials/<FY_CREDENTIAL>/usage.json`, the file Logins' daemon reads), then runs the
+ * PASSIVE usage reading (`<home>/state/logins/credentials/<FY_CREDENTIAL>/usage.json`, the file Logins' daemon reads), then runs the
  * person's OWN status line command with the same stdin, so what they see is what they saw before. A status line must
  * never break a session: input that is not JSON, no `FY_CREDENTIAL` or a failed write skip the recording and still
  * exit 0; with `--then` the exit code is theirs.

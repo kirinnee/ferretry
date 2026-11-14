@@ -158,4 +158,30 @@ describe('the status ports', () => {
     });
     expect(launched).toBe(false);
   });
+
+  test('the passive reading `fy statusline` writes is read from state/logins/credentials/<id>/usage.json', async () => {
+    // `fy statusline` writes JSON.stringify(record) + "\n" at internalRootFolder('logins', 'credentials')/<id>/usage.json
+    // (packages/cli/src/adapters/statusline); this is the reader of exactly that file, on the real credentials root.
+    const f = await fixture();
+    await mkdir(join(f.base, 'claude'));
+    const record = {
+      version: 1,
+      source: 'claude-statusline',
+      at: NOW - 1_000,
+      fiveHour: { usedPercent: 12, resetAt: NOW + 3_600_000 },
+      weekly: { usedPercent: 3 },
+    } as const;
+    await writeFile(join(f.base, 'claude', 'usage.json'), `${JSON.stringify(record)}\n`, { mode: 0o600 });
+    const store = new OwnedLoginStore(f.root, () => NOW);
+    const ports = store.statusPorts({
+      anthropic: {} as never,
+      codex: {} as never,
+      refresh: { refresh: async () => ({ outcome: 'ran' }) },
+      usageIntervalMs: 60_000,
+    });
+
+    const read = await ports.passiveUsage({ resolution: resolution(f.base) } as never);
+
+    expect(read).toEqual(record);
+  });
 });

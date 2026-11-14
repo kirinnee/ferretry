@@ -2,11 +2,16 @@
 import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { internalRootFolder } from '@ferretry/kernel/contract';
 import type { StatuslinePorts } from '../../lib/commands/statusline.ts';
 
-/** `<home>/fleet/credentials/<id>/usage.json`: where Logins' daemon reads a `store: ferretry` login's passive reading. */
+/**
+ * `<home>/state/logins/credentials/<id>/usage.json`: where Logins' daemon reads a `store: ferretry` login's passive reading.
+ * The folder is the kernel's one layout fact for Logins' `credentials` root (`internalRootFolder`), the same one the
+ * kernel makes that root's base by, so this never spells a second copy of it.
+ */
 export const passiveUsagePath = (home: string, credentialId: string): string =>
-  join(home, 'fleet', 'credentials', credentialId, 'usage.json').normalize('NFC');
+  join(home, internalRootFolder('logins', 'credentials'), credentialId, 'usage.json').normalize('NFC');
 
 /**
  * Runs the person's own statusLine command through `sh -c`, as Claude itself would, with the same stdin. Its stdout and

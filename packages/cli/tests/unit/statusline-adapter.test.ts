@@ -20,10 +20,13 @@ describe('the statusline ports over the real disk', () => {
     await ports.writeUsage('claude-main', record);
 
     const path = passiveUsagePath(home, 'claude-main');
-    should(path).equal(join(home, 'fleet', 'credentials', 'claude-main', 'usage.json'));
+    should(path).equal(join(home, 'state', 'logins', 'credentials', 'claude-main', 'usage.json'));
     should(JSON.parse(await readFile(path, 'utf8'))).eql(record);
     should((await stat(path)).mode & 0o777).equal(0o600);
-    should(await readdir(join(home, 'fleet', 'credentials', 'claude-main'))).eql(['usage.json']);
+    const directory = join(home, 'state', 'logins', 'credentials', 'claude-main');
+    should((await stat(directory)).mode & 0o777).equal(0o700);
+    should(await readdir(directory)).eql(['usage.json']);
+    should(await readdir(home)).eql(['state']);
   });
 
   it('should never turn an id that is not one plain name into a path', async () => {
