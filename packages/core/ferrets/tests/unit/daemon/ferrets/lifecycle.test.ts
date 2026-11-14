@@ -416,3 +416,70 @@ test('a plain start still waits for the launch: the harness has launched when th
   expect(answer.ok).toBe(true);
   expect(f.harness.launched).toHaveLength(1);
 });
+
+test('fy start --detach: a late failure whose first stopped-record write throws is settled `stopped` afterwards and said, without the port text', async () => {
+  const f = fixture();
+  const child = ferretId('sprout');
+  f.ports.newId = () => child;
+  f.ports.newName = () => 'sprout';
+  let stopWrites = 0;
+  f.ports.save = async record => {
+    if (record.state === 'stopped' && ++stopWrites === 1) throw new Error('transient stopped-record write failure');
+  };
+  const said: { type: string; data: Readonly<Record<string, unknown>> }[] = [];
+  f.ports.history = async (_ferret, type, data) => {
+    said.push({ type, data });
+  };
+  f.harness.prepareHome = async () => {
+    throw new Error('home unavailable');
+  };
+
+  const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'go', detach: true }, PERSON_ORIGIN);
+
+  expect(answer).toEqual(ok(child));
+  await eventually(() => said.some(entry => entry.type === 'start.failed'));
+  expect(f.registry.get(child)?.state).toBe('stopped');
+  expect(f.registry.get(child)?.cause).toEqual({ kind: 'start_failed' });
+  expect(f.tokens.holds(child)).toBe(false);
+  const failed = said.find(entry => entry.type === 'start.failed');
+  expect(failed?.data).toEqual({
+    code: 'failed',
+    reason: 'the launch failed after the start was answered',
+    settled: true,
+  });
+  expect(JSON.stringify(said)).not.toContain('transient');
+  expect(JSON.stringify(said)).not.toContain('home unavailable');
+});
+
+test('fy start --detach: a created pane that cannot be stopped keeps its handle, is never marked stopped, and the failure is said without the port text', async () => {
+  const f = fixture();
+  const child = ferretId('sprout');
+  f.ports.newId = () => child;
+  f.ports.newName = () => 'sprout';
+  const said: { type: string; data: Readonly<Record<string, unknown>> }[] = [];
+  f.ports.history = async (_ferret, type, data) => {
+    said.push({ type, data });
+  };
+  const start = f.harness.start.bind(f.harness);
+  f.harness.start = async (...args) => {
+    await start(...args);
+    throw new Error('harness failed after spawn');
+  };
+  f.runner.stop = async () => {
+    throw new Error('pane could not be stopped');
+  };
+
+  const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'go', detach: true }, PERSON_ORIGIN);
+
+  expect(answer).toEqual(ok(child));
+  await eventually(() => said.some(entry => entry.type === 'start.failed'));
+  const record = f.registry.get(child);
+  expect(record?.state).toBe('starting');
+  expect(record?.handle).toBeDefined();
+  expect(await f.runner.alive(record?.handle as never)).toBe(true);
+  expect(f.tokens.holds(child)).toBe(false);
+  const failed = said.find(entry => entry.type === 'start.failed');
+  expect(failed?.data).toMatchObject({ code: 'runner_unavailable', settled: false });
+  expect(JSON.stringify(said)).not.toContain('pane could not be stopped');
+  expect(JSON.stringify(said)).not.toContain('harness failed after spawn');
+});

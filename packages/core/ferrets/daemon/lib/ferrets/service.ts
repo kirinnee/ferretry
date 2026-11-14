@@ -480,6 +480,9 @@ const FIRST_TURN_MAYBE_RAN = '; its first turn may not have run, so start a new 
 /** The fixed sentence when the harness has no explanation of its own: the pane's own words are never quoted. */
 const STARTUP_EXITED = "the ferret's pane exited while its harness was still starting";
 
+/** What `start.failed` says when a detached launch threw: fixed words, never the port's own error text. */
+const DETACHED_LAUNCH_FAILED = 'the launch failed after the start was answered';
+
 /** Tells a resume's caller what it decided; a caller's own failure there never changes the resume. */
 function tellDecided(options: ServiceResumeOptions | undefined, disposition: 'running' | 'relaunching'): void {
   try {
@@ -992,11 +995,54 @@ export class FerretsService implements FerretsApi {
       });
     });
     if (request.detach !== true) return await launched;
-    // A launch that fails settles the recorded ferret itself (`abandon`); a launch that throws leaves it `starting`, which
-    // the boot recovery settles. Neither has a caller left to tell, so the rejection is only kept from being unhandled.
-    launched.catch(() => undefined);
+    // The ferret is recorded and acknowledged; the launch is no caller's to await any more, so its END is handled here:
+    // a failed Result and a rejection alike are settled and said (a plain start hands both to its caller).
     await recorded;
+    void this.finishDetached(id, launched);
     return ok(id);
+  }
+
+  /**
+   * The end of a launch whose start was acknowledged before it ran (`fy start --detach`). A launch that succeeded needs
+   * nothing. A failure, whether it came back as a failed Result or as a thrown error, is never swallowed:
+   *  - a ferret the launch already settled `stopped` (`start_failed`) needs only the diagnostic;
+   *  - one left `starting` WITHOUT a handle (the stopped-record write itself failed) is settled `stopped` now, on its own
+   *    lane, once more;
+   *  - one left `starting` WITH a handle keeps it: a pane that could not be stopped is still alive and stays reachable by
+   *    `stop`, and it is never marked stopped falsely.
+   * Whatever happened, `start.failed` is written to the ferret's history with a closed code and a fixed sentence. A port's
+   * own error text is never quoted (it can sit beside a credential).
+   */
+  private async finishDetached(id: FerretId, launched: Promise<Result<FerretId, StartFailure>>): Promise<void> {
+    let failure: { readonly code: StartFailure['code']; readonly reason: string } | undefined;
+    try {
+      const result = await launched;
+      if (!result.ok) failure = result.error;
+    } catch {
+      failure = { code: 'failed', reason: DETACHED_LAUNCH_FAILED };
+    }
+    if (failure === undefined) return;
+    let settled: boolean;
+    try {
+      settled = await this.serial.run(id, async () => {
+        const current = this.registry.get(id);
+        if (current === undefined || current.state !== 'starting') return current?.state === 'stopped';
+        if (current.handle !== undefined) return false;
+        await this.settle(current, 'stopped', 'stopped', { kind: 'start_failed' });
+        return true;
+      });
+    } catch {
+      settled = false;
+    }
+    try {
+      await this.ports.history?.(id, 'start.failed', {
+        code: failure.code,
+        reason: failure.reason,
+        settled,
+      });
+    } catch {
+      // The diagnostic is best effort: a journal that cannot be written must not become an unhandled rejection.
+    }
   }
 
   /** `cause` is why it ended when that is not simply "stopped" (`signal done` says `completed`). */
