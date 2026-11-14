@@ -74,6 +74,9 @@ export default definePlugin({
       panel('composer.tools', { id: 'dictation', order: 20 }),
       // "Read aloud" in an assistant message's footer (Conversation's `conversation.row-actions` slot).
       panel(CONVERSATION_ROW_ACTIONS_SLOT, { id: 'read-aloud', order: 10 }),
+      // First-run steps (Onboarding's steps screen offers this slot): the same views as the two Settings tabs.
+      panel('onboarding.step', { id: 'onboarding-speedups', order: 50 }),
+      panel('onboarding.step', { id: 'onboarding-voice', order: 51 }),
     ],
     settings: [
       settingsTab('voice', { label: 'Voice', order: 60 }),
@@ -86,6 +89,12 @@ export default definePlugin({
     config: [VOICE_CONFIG],
     readModels: [...VOICE_READ_MODELS],
   },
+
+  // v4's New machine setup: Speed-ups (the provider keys), then Voice (this device's dictation).
+  onboarding: [
+    { id: 'speedups', title: 'Speed-ups', order: 50 },
+    { id: 'voice', title: 'Voice', order: 51 },
+  ],
 
   permissions: {
     // Keys ride only on requests the Vault's outbound holder builds; the hosts are the provider table's.

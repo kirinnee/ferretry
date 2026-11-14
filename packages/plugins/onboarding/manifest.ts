@@ -70,6 +70,8 @@ export default definePlugin({
       screen('onboarding', { path: '/onboarding', daemonless: true }),
       // The steps every plugin declared, on one machine: it OFFERS the `onboarding.step` slot (contract/slots.ts).
       screen('steps', { path: 'onboarding/steps' }),
+      // v4's address for the same first run (`/d/<machine>/setup`): a bookmark or an old link still lands on the steps.
+      screen('setup', { path: 'setup' }),
     ],
     // The way back to the steps screen for a machine that was paired but not set up: nothing else links to it.
     settings: [settingsTab('setup', { label: 'Setup', order: 60 })],

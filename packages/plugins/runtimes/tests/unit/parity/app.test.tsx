@@ -637,3 +637,103 @@ describe('the Model sets tab', () => {
     expect(text(root, 'h3')).toBe('Claude models');
   });
 });
+
+describe('the machine-setup views the half builds (the first run’s steps and Export settings)', () => {
+  it('S-0024 Agent controls draws the five switches and the default runtime, and Save appears once one is flipped', async () => {
+    await at('/d/d1/onboarding/steps');
+    const half = app.build?.({ manifest, client: daemon(LISTED) });
+    const root = await draw<PanelProps>(
+      half?.panels['onboarding-controls'],
+      { subject: 'runtimes.controls' } as PanelProps,
+      r => r.querySelector('[data-default-runtime]') !== null,
+      'the Agent controls step drew its switches and the default runtime',
+    );
+    expect(root.querySelectorAll('[data-switch-row]').length).toBe(5);
+    expect(text(root, '[data-setup-section="agent-control"] h4')).toBe('What agents may control');
+    expect(root.querySelector('[data-change-submit]')).toBeNull();
+    const ferretry = must(
+      root.querySelector('[data-switch-row="Ferretry settings"] [role="switch"]'),
+      'the Ferretry settings switch',
+    );
+    expect(ferretry.getAttribute('aria-checked')).toBe('false');
+    await click(ferretry);
+    expect(ferretry.getAttribute('aria-checked')).toBe('true');
+    expect(text(root, '[data-change-submit]')).toBe('Save what agents may control');
+    // The step draws only for its own subject.
+    await view?.unmount();
+    view = null;
+    const other = await draw<PanelProps>(
+      half?.panels['onboarding-controls'],
+      { subject: 'runtimes.start' } as PanelProps,
+      () => true,
+      'a step that is not its own draws nothing',
+    );
+    expect(other.querySelector('[data-onboarding-step-body]')).toBeNull();
+  });
+
+  it('S-0101 Export settings reads the files one by one, carries the valid ones and names the one it left out', async () => {
+    const saved: string[] = [];
+    const real = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+    URL.createObjectURL = (blob: Blob | MediaSource) => {
+      saved.push(String((blob as Blob).size));
+      return 'blob:setup-export';
+    };
+    URL.revokeObjectURL = () => undefined;
+    try {
+      await at('/d/d1/settings/runtimes/transfer');
+      const half = app.build?.({
+        manifest,
+        client: daemon(LISTED, {
+          'GET /v1/config/status': {
+            files: [
+              { path: 'warden.yaml', state: 'ok' },
+              { path: 'logins/work.yaml', state: 'invalid' },
+            ],
+          },
+          'GET /v1/config/file': (call: Call) => ({
+            path: call.query?.['path'],
+            exists: true,
+            text: `# ${call.query?.['path']}\n`,
+            etag: 'e',
+            issues: [],
+          }),
+        }),
+      });
+      const root = await draw<SettingsProps>(
+        half?.settings['transfer'],
+        {},
+        r => r.querySelector('[data-export-run]') !== null,
+        'the Export & copy tab drew Export settings',
+      );
+      expect(text(root, '#export-settings-heading')).toBe('Export settings');
+      await click(must(root.querySelector('[data-export-run]'), 'the Export settings button'));
+      await settleUntil(
+        () => root.querySelector('[data-setup-section="export-manifest"]') !== null,
+        () => `the export ran; drew: ${root.textContent ?? ''}`,
+        interact,
+      );
+      const listing = text(root, '[data-setup-section="export-manifest"]');
+      expect(listing).toContain('config/warden.yaml');
+      expect(listing).toContain('secrets: none');
+      expect(listing).not.toContain('logins/work.yaml');
+      expect(text(root, '[data-setup-note="export-left-out"]')).toContain('logins/work.yaml');
+      expect(saved.length).toBe(1);
+    } finally {
+      URL.createObjectURL = real.create;
+      URL.revokeObjectURL = real.revoke;
+    }
+  });
+
+  it('Copy settings from another machine asks to pair one first when this browser has no other machine', async () => {
+    await at('/d/d1/settings/runtimes/transfer');
+    const half = app.build?.({ manifest, client: daemon(LISTED) });
+    const root = await draw<SettingsProps>(
+      half?.settings['transfer'],
+      {},
+      r => r.querySelector('[data-copy-source]') !== null,
+      'the Export & copy tab drew the Copy source step',
+    );
+    expect(text(root, '[data-copy-no-sources]')).toContain('Pair another machine first');
+    expect(must(root.querySelector('[data-copy-read]'), 'the Review button').hasAttribute('disabled')).toBe(true);
+  });
+});

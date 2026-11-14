@@ -14,8 +14,8 @@
  *  - a command's location, looked up ahead through `kernel.paths.which` (`adapters/command-cache.ts`).
  *
  * What is NOT here is what another plugin owns: its components and a login's templates stand in (and an apply is refused
- * while one does), the tool installer, the secret store's list and put, the shared-history pooling and the machine's
- * name; each is a declared GAP in `ports-pending.json`.
+ * while one does), the tool installer, the secret store's list and put and the shared-history pooling; each is a declared
+ * GAP in `ports-pending.json`. The machine's name and id are the kernel's `identity`.
  */
 import type { FerretState } from '@ferretry/core-ferrets/contract';
 import type { ConfigPort, KernelPorts, RootHandle, RootsPort } from '@ferretry/kernel/contract';
@@ -299,7 +299,7 @@ export function fleetHost(
  */
 export function fileAssembly(
   ctx: {
-    readonly kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log'> & {
+    readonly kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log' | 'identity'> & {
       readonly config: Pick<ConfigPort, 'writeAll' | 'collection' | 'file' | 'etag'>;
     };
     readonly needs: {
@@ -346,8 +346,7 @@ export function fileAssembly(
     loginChanges: ctx.needs.loginChanges,
     configWriter: writeAllConfigWriter(ctx.kernel.config, configDirectory),
     locate: harness => commands.which(harness),
-    // GAP(kernel): the kernel offers no host name, so a copy's source is named "this machine".
-    machineName: () => 'this machine',
+    machineName: () => ctx.kernel.identity.daemonName,
     clientName: CLIENT_NAME,
     config,
     sharedHistory: unavailableSharedHistory,
@@ -394,7 +393,7 @@ export function fileAssembly(
       catalog: base,
       logins: ctx.needs.logins,
       tools,
-      daemonId: () => undefined,
+      daemonId: () => ctx.kernel.identity.daemonId,
       secrets: { list: refusing.secrets.held, put: refusing.secrets.put },
     }),
   );

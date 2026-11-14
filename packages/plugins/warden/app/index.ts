@@ -1,3 +1,4 @@
+import { forSubject } from '@ferretry/app';
 import type { AppComponent, PanelProps, PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
@@ -32,6 +33,11 @@ export default implementApp(manifest, {
       'warden-verdicts': viewOf<PanelProps>('warden-dashboard', 'createWardenVerdictsPanel', client),
       'ferret-warden': viewOf<PanelProps>('warden-ferret', 'createWardenFerretPanel', client),
       'ask-warden-row': viewOf<PanelProps>('warden-ferret', 'createAskWardenPanel', client),
+      // The first-run step's body: the Settings tab's view, only for its own step.
+      'onboarding-step': forSubject(
+        'warden.warden',
+        viewOf<SettingsProps>('warden-settings', 'createWardenSettings', client) as AppComponent<PanelProps>,
+      ),
     },
     settings: { warden: viewOf<SettingsProps>('warden-settings', 'createWardenSettings', client) },
   }),
