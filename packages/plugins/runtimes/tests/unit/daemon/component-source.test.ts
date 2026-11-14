@@ -147,6 +147,8 @@ async function compose(
     readonly owners?: Owners;
     readonly absent?: readonly string[];
     readonly logins?: ReturnType<typeof sampleLogin>[];
+    /** An owner whose confirmation of a loosening the file judge holds (a runtime removal, B01) is given. */
+    readonly ownerConfirms?: boolean;
   } = {},
 ): Promise<Composed> {
   const world = await fleetWorld();
@@ -161,7 +163,10 @@ async function compose(
       ...ownerPlugins(owners, options.absent),
     ],
     fakes: { ferrets: new FakeFerrets(), logins, loginChanges: fakeLoginChanges() },
-    gate: new StandInAdmission(() => standing.current),
+    gate:
+      options.ownerConfirms === true
+        ? Object.assign(new StandInAdmission(() => standing.current), { judgeConfigWrite: () => 'apply' as const })
+        : new StandInAdmission(() => standing.current),
     config: options.config ?? BASE,
     ownerHome: world.person,
     executables: ['/fixture/bin/claude', '/fixture/bin/codex', '/fixture/bin/github-mcp'],
@@ -675,7 +680,7 @@ describe('m2-R2 the 5 s deadline on an owner is wired at the composition root', 
 /** An environment login Logins withholds (its file is not a clean, checked version), with the view variables it can state. */
 async function composeWithWithheldLogin(
   variables: readonly unknown[],
-  options: { readonly used?: boolean } = {},
+  options: { readonly used?: boolean; readonly ownerConfirms?: boolean } = {},
 ): Promise<Composed> {
   const glm = sampleLogin('glm', {
     store: 'environment',
@@ -687,6 +692,7 @@ async function composeWithWithheldLogin(
     } as never,
   });
   const composed = await compose({
+    ...(options.ownerConfirms === true ? { ownerConfirms: true } : {}),
     logins: [sampleLogin('claude-you', { store: 'ferretry' }), glm],
     config:
       options.used === true
@@ -741,7 +747,8 @@ describe('M1-R2 a change that would write a login that stands in is refused, and
   });
 
   it('M1-R2 a runtime that already uses a withheld login can still be removed, and the machine is not wedged after it', async () => {
-    const composed = await composeWithWithheldLogin([], { used: true });
+    // B01 holds a removal for the owner (the file cannot see a login's budget); the owner confirms it here.
+    const composed = await composeWithWithheldLogin([], { used: true, ownerConfirms: true });
 
     const removed = await stageAndApply(composed.host, { change: { kind: 'runtime.remove', name: 'glm-work' } });
     const after = await stageAndApply(composed.host, put('claude-work'));
