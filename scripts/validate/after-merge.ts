@@ -51,6 +51,7 @@ export const OWNER_MOVED_ITEMS: readonly { readonly id: string; readonly decisio
     id: 'coverage-lag',
     decision: '!A484: the coverage lag (12 unit batches + 40 int files, #32 CI-only proof) moves after merge',
   },
+  { id: 'host-store-codex-login', decision: 'lizzette 2026-11-11: host-store Codex after merge (&F3468)' },
   {
     id: 'v4-doctor-checks',
     decision: 'lizzette 2026-11-13: the v4 doctor checks and readiness move after merge (card &F3715); tmux is in 5.0',

@@ -9,12 +9,12 @@
  * folder). 2: refused before writing anything. 64: usage. A dry run writes nothing (its report says `complete: false`)
  * and exits 0 when every step WOULD convert, 3 when one would not.
  */
-import { writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { convert } from './convert.ts';
 import { hostLockProbe } from './preflight.ts';
+import { resolveReport, writeReportFile } from './report-file.ts';
 import { summarise } from './report.ts';
 import { clearYamlLogSwitches } from '@ferretry/std/yaml';
 
@@ -46,6 +46,15 @@ async function main(argv: readonly string[]): Promise<number> {
   const from = resolve(values.from);
   const to = resolve(values.to);
   const dryRun = values['dry-run'] ?? false;
+  // The report sits BESIDE the new home, never inside it: a v5 home holds only declared files. Its parent is resolved
+  // ONCE here and the report is written against that place; a link on its path is refused before anything is written,
+  // and again when it is written (the report is never written through a link).
+  const wanted = await resolveReport(resolve(values.report ?? `${to}.conversion-report.json`));
+  if (wanted.place === undefined || wanted.problem !== undefined) {
+    console.error(`refused; nothing was written:\n  - ${wanted.problem ?? 'the report path could not be resolved'}`);
+    return 2;
+  }
+  const reportPath = wanted.place.path;
   const result = await convert({
     from,
     to,
@@ -63,10 +72,12 @@ async function main(argv: readonly string[]): Promise<number> {
     console.error(`refused; nothing was written:\n${result.problems.map(p => `  - ${p}`).join('\n')}`);
     return 2;
   }
-  // The report sits BESIDE the new home, never inside it: a v5 home holds only declared files.
-  const reportPath = resolve(values.report ?? `${to}.conversion-report.json`);
-  await writeFile(reportPath, `${JSON.stringify(result.report, null, 2)}\n`, { mode: 0o600 });
+  const written = await writeReportFile(wanted.place, `${JSON.stringify(result.report, null, 2)}\n`);
   console.log(summarise(result.report));
+  if (written.problem !== undefined) {
+    console.error(`the conversion ran, but its report was not written:\n  - ${written.problem}`);
+    return 2;
+  }
   console.log(`report: ${reportPath}`);
   const wouldComplete = result.report.steps.every(step => step.status === 'converted');
   return (dryRun ? wouldComplete : result.report.complete) ? 0 : 3;

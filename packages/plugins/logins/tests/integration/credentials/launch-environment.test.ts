@@ -279,3 +279,23 @@ test('launchStores names the same store a ferret launches with, for a runtime wr
     await f.host.stop();
   }
 });
+
+test('a host-kept Claude login reads Ready and launches when the terminal sign-in exists, without Ferretry ever reading that file', async () => {
+  const f = await boot({ mine: { harness: 'claude-code', store: 'host' } });
+  // A fake terminal sign-in in its own temp folder, never the person's real one. Its bytes are a canary: nothing may carry them.
+  const terminalHome = await mkdtemp(join(tmpdir(), 'fake-terminal-'));
+  tempHomes.push(terminalHome);
+  await mkdir(join(terminalHome, '.claude'), { recursive: true });
+  await writeFile(join(terminalHome, '.claude', '.credentials.json'), 'FAKE-TERMINAL-CANARY', { mode: 0o600 });
+  try {
+    const list = await f.host.provided(LoginsPort).list();
+    const mine = list.logins.find(login => login.id === 'mine');
+    expect(mine?.status).toMatchObject({ word: 'ready', reason: 'host_terminal' });
+
+    const launch = await f.anthropic().launchEnvironment?.('mine', 'claude-code');
+    expect(launch).toEqual({ ok: true, value: { CLAUDE_SECURESTORAGE_CONFIG_DIR: '' } });
+    expect(JSON.stringify({ list, launch })).not.toContain('FAKE-TERMINAL-CANARY');
+  } finally {
+    await f.host.stop();
+  }
+});

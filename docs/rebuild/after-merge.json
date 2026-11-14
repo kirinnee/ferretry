@@ -73,6 +73,11 @@
       "owner": "britnee"
     },
     {
+      "id": "host-store-codex-login",
+      "what": "host-store Codex login (store: host): a Codex login kept in the terminal's own folder cannot start a ferret in the product. The migration converts each one to Ferretry's own sign-in under the same name (the owner signs in once); an old terminal sign-in keeps working (card &F3468) (due 2026-11-27)",
+      "owner": "britnee"
+    },
+    {
       "id": "v4-doctor-checks",
       "what": "what is left of the v4 doctor after rebuild/config-doctor (which built the host program rows, the claude and codex path rows, the notifications row, the loopback-firewall row and the Doctor, Host checks and Files tabs): doctor readiness (ready only when some runtime can launch, v4 doctor.ts:317) and a required row for an unreadable fleet/manifest.json (v4 :224); the loopback-firewall row appears only once Runtimes serves browserPorts (today every launch is on random ports, which v4 also left out); the notifications row has no ledger rows (5.0 keeps no notifications.jsonl) and its newest push is this run only; the `directory syscalls` row (kernel FFI); the declared checks with no v4 row still say not built yet (chrome, shells-nix, update, board-store, agenda-buzz, mcp-inventory, warden-sweep, logins-store, usage-meter, lessons-board, conversation-store, conversation-search-index); the Host checks tab cannot rename a machine or remove this browser's pairing, nor show its address (the shell owns that record and an app half is not handed it). Due 2026-11-27, card &F3715",
       "owner": "britnee"

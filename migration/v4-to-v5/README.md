@@ -159,11 +159,15 @@ Projects keep every id exactly; v4's bare array gains the `{format: 1, projects}
 memory under `format: 1` (v5's schema is still the condensed `looseObject`, so the sections keep v4's names), moves
 blessings to `remembered.json`, rewrites each `reportPath` into the new home, copies reports unopened and turns each
 `jev-checks/<day>.jsonl` into `{format: 1, day, checks}`; the per-assignment stop capability is a secret and is
-dropped. Logins moves each `fleet/credentials/<login>/` whole with `moveSealedTree` (lstat and folder listings only;
+dropped. Logins moves each `fleet/credentials/<login>/` whole (except a Codex `store: host` login, below) with `moveSealedTree` (lstat and folder listings only;
 a file this user may not read fails the step by path, never hard-linked, so the backup stays its own file; a link is
 made again, never followed) and turns
 `state/model-catalog.json` into `models.json` `published`. A v4 login id with capitals fails the step: v5 login ids
-are lowercase. `config/warden.yaml` and `config/logins/*.yaml` belong to the Settings step.
+are lowercase. A Codex login with `store: host` (the terminal's own folder, which 5.0 cannot start Codex from) is written
+`store: ferretry` under the same name by the Settings step and gets an EMPTY 0700 folder here: nothing of the terminal's sign-in
+(`~/.claude*`, `~/.codex*`, the keychain) is read, listed or linked, and the report says "moved to Ferretry's own sign-in; needs
+one sign-in: fy login signin <name>". A Claude `store: host` login keeps its terminal sign-in and configuration as they are (5.0 starts it from the terminal); a login folder that is a link refuses the whole conversion before any step runs (see the fence).
+`config/warden.yaml` and `config/logins/*.yaml` belong to the Settings step.
 
 Settings (`src/steps/settings.ts`) turns each v4 `config/*.yaml` into the v5 plugin config file that owns it: runtimes
 (`credential` → `login`), profiles, model sets, MCP and skills items, logins, endpoints (v4 presets), model catalogs,
@@ -224,9 +228,26 @@ the Linux unit's `fyd.service.d/*.conf` drop-ins then `fyd.service`, else the ma
 converter's own environment (a managed daemon sees only its service definition, so that beats an incidental shell `export`; a
 unit for another `FY_HOME` is skipped). The value passes v4's own parse rule (whole hours, 1 or more, or `off`). Absent, `off`,
 invalid or over 8760 hours writes nothing and the summary says why, so the default stays off. `launchctl setenv`, `set-environment` and
-`EnvironmentFile=` are never read or run. The `archive.yaml` schema is Ferrets' U6 (`rebuild/mount-ferrets-archive-restarts`, not on
+`EnvironmentFile=` are never read or run. A service file may be a link (home-manager links `fyd.service` into the Nix store) and is
+then read; only one whose chain of links (followed with `readlink` alone, at most 16 hops, the file and every folder above it) lands in
+`~/.claude`, `~/.claude.json` or `~/.codex` is refused, with `the service file points into a terminal sign-in folder, so it was not read`. The `archive.yaml` schema is Ferrets' U6 (`rebuild/mount-ferrets-archive-restarts`, not on
 `rebuild/5.0` yet), restated in the step until it lands. `src/main.ts` passes the real home directory and environment; tests inject
 temp ones.
+
+The fence (`src/v4/fence.ts`, run first in `preflight`): before anything else in the v4 home is read, the converter `lstat`s the
+home's own folders the steps descend into (`config`, `state`, `fleet` and its `credentials`, `assets`, `homes`, `shared`, `bin`) and the
+entries preflight reads (`home.json`, `layout-version`, `daemon.lock`). A folder that is a link or not a folder, an entry that is a link, or ANY link met anywhere inside `config`, `state` or `fleet` outside `fleet/homes`, `fleet/shared` and `fleet/bin` (a login folder, a file in `fleet/assets`, …),
+**REFUSES the conversion before any step runs**, writing nothing (not even the new home), with a plain sentence naming it and the remedy
+(replace the link with the real folder, then run again). The target is never named, and no resolving call (`stat`, `readFile`, `readdir`,
+`exists`, `open`, `realpath`) is made on anything that resolves into `~/.claude`, `~/.claude.json` or `~/.codex`; only `lstat` and
+`readlink` of a link entry itself. Service-definition links are walked component by component, `..` applied against the real folder after the links before it are
+expanded.
+
+The links v4 writes itself (its provisioner's per-account links in `fleet/homes`, its shared-history links in `fleet/shared`, wrappers in `fleet/bin`) are the one exception: they are LEFT ALONE. They are `lstat`ed and never followed or carried, the conversion continues, and the report (`notes`, and the printed summary) lists each link by PATH, never its target. Nothing is written through a link either: every path written in the new home has each component `lstat`ed first (`src/v5/no-link.ts`), and a link anywhere on it, the new home or the report path included, refuses.
+
+The folders ABOVE the new home are pinned too: preflight resolves its parent once (a system link such as macOS `/tmp` that existed before the run is resolved away) and records the identity (device and inode, by `lstat`) of every folder from `/` down to the resolved anchor (`src/v5/resolved-place.ts`). Every write, and the report's write, looks at all of them again (`verifyPinned`, `src/v5/no-link.ts`): one that is now a link, or no longer the same folder, refuses with a plain sentence and nothing is written through it. The report is checked the same way. A link, a non-folder or an unreadable folder DETECTED while that chain is first pinned refuses the same way (`LinkOnWritePathError`, naming the folder, never a target): the chain is whole or the run, and the report, write nothing.
+
+A MOVED or COPIED v4 home converts (the prompt does `mv H B`, then `--from B --to H`). v4 wrote ABSOLUTE paths of its own home into that home, so the ones a step consumes are re-based onto `--from` by their v4-home-relative tail, identity by id (`src/v4/rebase.ts`, string work only: the old path is never looked at): `fleet/manifest.json` `accounts[].home`, `fleet/ids.json` `runtimes[].home`, a session's `transcript.home` and `transcript.file`, a session's `command[0]` wrapper under `fleet/bin`, a conversion's `fromFile` in `fleet/shared`, and a warden record's `reportPath` under `state/warden/reports`. The LAST such tail in the spelling wins, so a home that used to live beneath a `fleet/homes` folder of its own still maps to its own `fleet/homes/<id>`. A path outside the v4 home (a project folder, a worktree, `~/.claude`) is kept as written. A runtime home that v4 recorded under `fleet/homes` (its id is known) and that could not be mapped to a folder carried (missing on disk, or only a folder of another shape is there) makes the harness-folders step FAIL, naming the recorded home, so the conversion is incomplete (non-zero) rather than complete with that conversation history left behind. Not re-based, and said so: the display-only fields kept verbatim (`conversion.fromFile` outside the pool, a catalog install's `destination`, frozen fork plans), and a component file's own text naming the old home (it is judged against the home as given in `--from`).
 
 The `rebuild/migration-ferrets-b` development branch contains a local merge of the unreviewed
 `rebuild/port-ferrets-a2` schemas. **Do not integrate it before Ferrets lands on `rebuild/5.0`.** Once Ferrets lands,
