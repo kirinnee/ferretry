@@ -59,6 +59,9 @@ export function summaryOf(
   const fast = details.options?.fast;
   const card = details.options?.card;
   const label = details.options?.label;
+  // A converted ferret's record carries no `mode` (v4 kept it in `config.json`; the conversion files it under the start
+  // options), yet the Agents filter and "Clear all from agent ferrets" read the summary's. The record's own wins.
+  const mode = record.mode === undefined ? details.options?.mode : undefined;
   const nudgeAfterSeconds = details.options?.nudgeAfterSeconds;
   const killAfterSeconds = details.options?.killAfterSeconds;
   return {
@@ -68,6 +71,7 @@ export function summaryOf(
     ...(fast === undefined ? {} : { fast }),
     ...(card === undefined ? {} : { card }),
     ...(label === undefined ? {} : { label }),
+    ...(mode === undefined ? {} : { mode }),
     ...(nudgeAfterSeconds === undefined ? {} : { nudgeAfterSeconds }),
     ...(killAfterSeconds === undefined ? {} : { killAfterSeconds }),
     ...(details.title === undefined ? {} : { title: details.title }),

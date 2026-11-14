@@ -1,7 +1,8 @@
 /**
  * THE OPEN ASK'S CONVERSATION (`panels['agenda-conversation']`, slot `agenda.conversation`, Agenda's contract/slots.ts,
  * lead decision Q9). Agenda's ask page hands `{ ferret, ask }`; this draws that ferret's conversation and composer under
- * the ask, as today's ask page did. Conversation imports nothing of Agenda's (Agenda already uses Conversation), so the
+ * the ask, as today's ask page did — the conversation ALONE (`embedded`): not the ferret's toolbar or side panels
+ * (terminals, browser, files, Warden…), so viewing an item opens no terminal and asks for no passkey. Conversation imports nothing of Agenda's (Agenda already uses Conversation), so the
  * two props are narrowed here.
  */
 
@@ -23,5 +24,5 @@ export function isAgendaConversationProps(props: unknown): props is AgendaConver
 
 export function AgendaConversationPanel(props: PanelProps): ReactNode {
   if (!isAgendaConversationProps(props) || props.ferret.trim() === '') return null;
-  return <ChatScreen params={{ ferret: props.ferret }} />;
+  return <ChatScreen embedded params={{ ferret: props.ferret }} />;
 }

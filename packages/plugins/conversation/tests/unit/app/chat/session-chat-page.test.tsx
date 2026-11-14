@@ -84,6 +84,17 @@ describe('SessionChatPage', () => {
     ]);
   });
 
+  test('embedded under an agenda item: only the conversation and composer — no toolbar, no side panels (no terminal, no passkey ask)', () => {
+    const page = draw({ embedded: true, session: ferretView('shared') });
+
+    expect(page.root.findByType(Transcript).props.daemonId).toBe('alpha');
+    expect(page.root.findAllByType(Composer)).toHaveLength(1);
+    const slots = page.root.findAllByType(PanelSlot).map(slot => slot.props.slot);
+    expect(slots).not.toContain('ferret.toolbar');
+    expect(slots).not.toContain('ferret.side');
+    expect(slots).toContain('conversation.above-composer');
+  });
+
   test('offers the above-composer slot for this ferret, in the input column directly before the composer', () => {
     const page = draw();
 

@@ -16,7 +16,7 @@
  */
 import { skeletonSentence } from '@ferretry/kernel/contract';
 import { optionOn, optionText } from '../argv.ts';
-import { EXIT, ShellError } from '../errors.ts';
+import { DaemonRefusal, EXIT, ShellError } from '../errors.ts';
 import { renderTable } from '../render.ts';
 import type { ShellContext, ShellVerb } from '../shell-context.ts';
 
@@ -250,6 +250,42 @@ function answerOf(ctx: ShellContext, words: readonly string[]): { readonly respo
   return { response: { kind: 'open-question', answer: required(typed ?? '', '--answer', 'the answer text') } };
 }
 
+/** The daemon's refusal of words given to an ask that wants one of its listed options. */
+const WANTS_A_CHOICE = /asks for a multiple-choice response/u;
+
+/** The labels of the options a multiple-choice ask lists; none when the item is not one or is in a shape this fy does not read. */
+function choicesOf(item: unknown): readonly string[] {
+  const ask = (item as { ask?: { kind?: unknown; options?: unknown } } | null)?.ask;
+  if (ask?.kind !== 'multiple-choice' || !Array.isArray(ask.options)) return [];
+  return ask.options.flatMap(option => {
+    const label = (option as { label?: unknown } | null)?.label;
+    return typeof label === 'string' && label.trim() !== '' ? [label.trim()] : [];
+  });
+}
+
+/**
+ * v4's hint for a multiple-choice ask answered in words: how to pass the choice, and which choices there are. The words
+ * are not a choice, so the refusal is the owner's to correct, not the daemon's sentence alone.
+ */
+async function choiceHint(
+  ctx: ShellContext,
+  target: { readonly ferretId: string; readonly id: string },
+  refused: DaemonRefusal,
+): Promise<ShellError> {
+  let labels: readonly string[] = [];
+  try {
+    labels = choicesOf(await ctx.client(ASKS).call(ASK_ROUTES.item, { params: target }));
+  } catch {
+    // The choices could not be read: the usage is still said.
+  }
+  const ref = `${target.ferretId}/${target.id}`;
+  const usage = `usage: ${ctx.world.identity.binary} ask answer ${ref} --choice <label>`;
+  return new ShellError(
+    `${refused.message}\n${usage}${labels.length === 0 ? '' : `\nchoices: ${labels.map(label => `"${label}"`).join(', ')}`}`,
+    EXIT.usage,
+  );
+}
+
 export const askVerb: ShellVerb = async ctx => {
   const { io, identity } = ctx.world;
   const declared = Object.values(ASK_ROUTES).every(route => ctx.surfaces.routes.has(route));
@@ -284,7 +320,16 @@ export const askVerb: ShellVerb = async ctx => {
       throw new ShellError(`usage: ${identity.binary} ask answer <ask> <text>  (or --text "...")`, EXIT.usage);
     const body = answerOf(ctx, rest.slice(1));
     const { ferretId, id } = await resolveRef(ctx, word);
-    await ctx.client(ASKS).call(ASK_ROUTES.answer, { params: { ferretId }, body: { action: 'resolve', id, ...body } });
+    try {
+      await ctx
+        .client(ASKS)
+        .call(ASK_ROUTES.answer, { params: { ferretId }, body: { action: 'resolve', id, ...body } });
+    } catch (error) {
+      const words = (body.response as { kind?: unknown } | undefined)?.kind === 'open-question';
+      if (words && error instanceof DaemonRefusal && WANTS_A_CHOICE.test(error.message))
+        throw await choiceHint(ctx, { ferretId, id }, error);
+      throw error;
+    }
     io.out(`answered ${ferretId}/${id}\n`);
     return EXIT.ok;
   }

@@ -55,6 +55,14 @@ describe('the open ask’s conversation (slot agenda.conversation)', () => {
     await mounted.unmount();
   });
 
+  test('draws the conversation embedded: not the whole ferret page', async () => {
+    const { mounted, client } = await open({ ferret: 'f1', ask: 'A3' });
+    expect(client.callsTo('GET /v1/ferrets/:ferretId').length).toBeGreaterThan(0);
+    expect(mounted.container.querySelector('[data-session="f1"]')).not.toBeNull();
+    expect(mounted.container.querySelector('main[data-embedded]')).not.toBeNull();
+    await mounted.unmount();
+  });
+
   test('draws nothing when the slot hands something else, or a blank ferret', async () => {
     for (const props of [{}, { ferret: '  ', ask: 'A3' }]) {
       const { mounted, client } = await open(props);
