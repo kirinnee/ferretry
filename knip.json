@@ -95,7 +95,7 @@
       ]
     },
     "packages/plugins/runtimes": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx", "tests/**/fixtures/**/*.{ts,tsx}"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/updates": {

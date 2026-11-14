@@ -3,6 +3,7 @@ import type { FerretId } from '@ferretry/core-ferrets/contract';
 import type { ApiRequest } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import { err, ok } from '@ferretry/std';
+import { keepInSyncFrom } from '../../../daemon/links/index.ts';
 import { FileConversationDescriber } from '../../../daemon/links/lib/conversation-describer.ts';
 import type { ConversationFiles } from '../../../daemon/links/lib/conversation-describer.ts';
 import { type LinkHarness, LinkService } from '../../../daemon/links/lib/service.ts';
@@ -49,6 +50,7 @@ const build = (
   copies: Array<{ id: string; source: string }> = [],
   copyFails = false,
   kept2: Array<{ copy: boolean }> = [],
+  keepInSync?: () => boolean,
 ) => {
   const fs = files({ [`.claude/projects/-work-app/${ID}.jsonl`]: TRANSCRIPT, ...held });
   const stored = {
@@ -94,6 +96,7 @@ const build = (
     },
     now: () => '2026-02-02T00:00:00.000Z' as Instant,
     keptPublished: (ferret, link) => void kept.push([ferret, link]),
+    ...(keepInSync === undefined ? {} : { keepInSync }),
   });
   return { service, stored, cache: () => cache, kept };
 };
@@ -112,6 +115,38 @@ describe('links', () => {
       keptIn: 'computer',
     });
     expect(cache()['claude-code']?.[ID]).toBe(`projects/-work-app/${ID}.jsonl`);
+  });
+
+  test('Keep in sync off hides the computer’s conversations and says so; on lists them; read fresh on every listing', async () => {
+    let on = false;
+    const { service } = build([], {}, [], false, [], () => on);
+    const hidden = await service.list({});
+    expect(hidden.conversations).toEqual([]);
+    expect(hidden.matched).toBe(0);
+    expect(hidden.computerListed).toBe(false);
+    on = true;
+    const shown = await service.list({});
+    expect(shown.matched).toBe(1);
+    expect(shown.computerListed).toBeUndefined();
+  });
+
+  test('the daemon reads keepInSync from the conversation.yaml in effect on every listing: off hides, an edit shows again', async () => {
+    let inEffect: { keepInSync: boolean } | undefined = { keepInSync: false };
+    const config = { file: () => inEffect } as unknown as Parameters<typeof keepInSyncFrom>[0];
+    const { service } = build([], {}, [], false, [], keepInSyncFrom(config));
+    expect((await service.list({})).computerListed).toBe(false);
+    inEffect = { keepInSync: true };
+    expect((await service.list({})).matched).toBe(1);
+    inEffect = { keepInSync: false };
+    expect((await service.list({})).matched).toBe(0);
+    // A file that is absent says nothing: on.
+    inEffect = undefined;
+    expect((await service.list({})).matched).toBe(1);
+  });
+
+  test('with no Keep in sync reader the computer’s conversations are listed, as on a machine whose file says nothing', async () => {
+    const { service } = build();
+    expect((await service.list({})).matched).toBe(1);
   });
 
   test('a query narrows by every word, and a source of ferretry lists nothing (those are ferrets)', async () => {

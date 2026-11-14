@@ -575,7 +575,7 @@ describe('ContinueConversation over this computer', () => {
 
     // Assert
     expect(text('[data-continue-computer-hidden]')).toBe(
-      'Conversations on this computer are hidden. Turn on Keep in sync in Settings › Machine › Conversations.',
+      'Conversations on this computer are hidden. Turn on Keep in sync in Settings › Agents › Conversations.',
     );
     expect(text('[data-continue-empty]')).toBe('Nothing to show: Keep in sync is off.');
   });

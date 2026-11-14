@@ -6,7 +6,7 @@ import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import type { ConversationApi, ConversationRefusal, RenderBody, RenderMeta } from '../contract/index.ts';
 import { buildAttachments } from './attachments/index.ts';
 import { AttachmentError } from './attachments/lib/index.ts';
-import { buildLinks } from './links/index.ts';
+import { buildLinks, keepInSyncFrom } from './links/index.ts';
 import type { LinkHarness, LinkKeeper } from './links/lib/service.ts';
 import type { TranscriptOpener } from './reader/adapters/file-reads.ts';
 import type { HarnessTranscripts } from './reader/adapters/entries-source.ts';
@@ -194,6 +194,8 @@ export function buildReading(deps: {
     now: () => kernel.clock.now(),
     clockMs: () => kernel.clock.nowMs(),
     kept: deps.onKept,
+    // The version of conversation.yaml in effect, asked on every listing: an edit is live for the next one.
+    keepInSync: keepInSyncFrom(kernel.config),
   });
 
   const attachments = buildAttachments({

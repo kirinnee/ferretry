@@ -6,7 +6,7 @@ import type { LiveRuntimesClient, RuntimesClient } from './lib/client.ts';
 import { lazyComponent } from './lazy.ts';
 import { MACHINES_SECTION } from './features/fleet/shell/machine-route.ts';
 
-type SettingsView = 'runtimes-settings' | 'profiles-settings' | 'model-sets-settings';
+type SettingsView = 'runtimes-settings' | 'profiles-settings' | 'model-sets-settings' | 'agents-settings';
 
 /**
  * A view module (React), loaded on first use. The specifier is a Vite dynamic-import variable (`./views/*.tsx`).
@@ -38,7 +38,7 @@ const accountPanel = (
   );
 
 /**
- * Runtimes' app half: the three Settings tabs (`runtimes`, `profiles`, `model-sets`), the runtime picker above the
+ * Runtimes' app half: the four Settings tabs (`runtimes`, `profiles`, `model-sets`, `agents`), the runtime picker above the
  * composer, and the account picker it contributes to the two slots Ferrets' new-ferret and move pages offer. The views
  * are React and load on first use (`./lazy.ts`), so this module imports no React and stays loadable by the registry
  * generator before the app shell, which owns React, is in place.
@@ -54,6 +54,7 @@ export default provideToShell(
         runtimes: settingsView('runtimes-settings', 'createRuntimesSettings', client),
         profiles: settingsView('profiles-settings', 'createProfilesSettings', client),
         'model-sets': settingsView('model-sets-settings', 'createModelSetsSettings', client),
+        agents: settingsView('agents-settings', 'createAgentsSettings', client),
       },
       panels: {
         'runtime-picker': pickerView(client),

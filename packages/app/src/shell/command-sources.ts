@@ -58,6 +58,35 @@ export function placeSource(input: PlaceSourceInput): CommandBarSource {
   };
 }
 
+export interface SettingsSourceInput {
+  /** The daemon the reader is on; settings are saved on a daemon, so none means no entries. */
+  readonly daemon: string | undefined;
+  readonly surfaces: readonly SurfaceEntry[];
+  readonly navigate: (href: string) => void;
+}
+
+/**
+ * EVERY SETTINGS TAB AS A DESTINATION: the tabs the Settings page lists (one per `ui.settings` declaration of every
+ * plugin), each found by its label, its plugin and the words it declares, and opening that tab on this daemon.
+ */
+export function settingsSource(input: SettingsSourceInput): (query: string) => readonly CommandBarEntry[] {
+  return () => {
+    if (input.daemon === undefined) return [];
+    const daemon = input.daemon;
+    return input.surfaces
+      .flatMap(entry => (entry.manifest.ui?.settings ?? []).map(tab => ({ plugin: entry.id, tab })))
+      .sort((a, b) => a.tab.order - b.tab.order || a.plugin.localeCompare(b.plugin))
+      .map(({ plugin, tab }) => ({
+        id: `settings-${plugin}.${tab.id}`,
+        group: 'Settings',
+        label: tab.label,
+        description: 'Settings',
+        keywords: ['settings', plugin, tab.id, ...(tab.keywords ?? [])],
+        run: () => input.navigate(daemonSettingsHref(daemon, plugin, tab.id)),
+      }));
+  };
+}
+
 /** `layout set --device …` and `layout reset --device`, applied over the layout in force on this device. */
 export function deviceLayoutSource(base: Layout, layouts: DeviceLayoutStore): CommandBarSource {
   return () => {

@@ -240,6 +240,27 @@ export default definePlugin({
       settingsTab('runtimes', { label: 'Runtimes', order: 10 }),
       settingsTab('profiles', { label: 'Profiles', order: 11 }),
       settingsTab('model-sets', { label: 'Model sets', order: 12 }),
+      // v4's Agents tab: permissions, what agents may control, auto-resume, agenda mode, conversations.
+      settingsTab('agents', {
+        label: 'Agents',
+        order: 13,
+        keywords: [
+          'permissions',
+          'agent permissions',
+          'auto mode',
+          'skip all checks',
+          'what agents may control',
+          'terminals',
+          'browsers',
+          'files',
+          'page scripts',
+          'auto-resume',
+          'resume after restart',
+          'agenda mode',
+          'conversations',
+          'keep in sync',
+        ],
+      }),
     ],
     // The model and effort switches above the composer, and the account picker (with its health and quota) that
     // Ferrets' new-ferret and move pages OFFER as slots: Runtimes contributes, Ferrets imports nothing of it.

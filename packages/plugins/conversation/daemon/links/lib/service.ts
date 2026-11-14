@@ -84,6 +84,12 @@ export interface LinkServiceNeeds {
   readonly copier: LinkCopier;
   readonly now: () => Instant;
   readonly keptPublished?: (ferret: FerretId, link: string) => void;
+  /**
+   * "Keep in sync" (`conversation.yaml` `keepInSync`), asked afresh on EVERY listing so an edit of the file is in
+   * effect for the next one. Off: the computer's own conversations are not listed. Absent: on, as a file that says
+   * nothing.
+   */
+  readonly keepInSync?: () => boolean;
 }
 
 /** The most messages a foreign history entry shows. */
@@ -142,9 +148,11 @@ export class LinkService {
   constructor(private readonly needs: LinkServiceNeeds) {}
 
   async list(query: LinkQuery = {}): Promise<LinkListing> {
-    // Ferretry's own conversations are ferrets, not links: only the computer's history is listed.
-    const computerListed = true;
+    // Ferretry's own conversations are ferrets, not links: only the computer's history is listed, and only while
+    // "Keep in sync" is on; off says so, so the screen can name the switch instead of "no conversation matches".
+    const computerListed = this.needs.keepInSync?.() ?? true;
     if (query.source === 'ferretry') return { conversations: [], matched: 0, skipped: 0 };
+    if (!computerListed) return { conversations: [], matched: 0, skipped: 0, computerListed: false as const };
     const { located, skipped } = await this.#discover(query.harness);
     const kept = new Map(
       (await this.needs.ledger.read()).links.map(link => [`${link.harness}:${link.id}`, link.ferret]),
