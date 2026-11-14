@@ -126,7 +126,7 @@ export function ReviewItem({
       {item.runnable === undefined ? null : (
         <div className="flex min-w-0 flex-col gap-2" data-copy-runnable={item.ref}>
           {both ? null : (
-            <label className="flex min-w-0 items-center gap-2 text-cell font-semibold text-fg">
+            <label className="flex min-h-11 min-w-0 items-center gap-2 text-cell font-semibold text-fg">
               <input type="checkbox" checked={ticked} onChange={event => onTick(event.target.checked)} />
               <span>{tickLabel}: it starts or runs what is shown</span>
             </label>

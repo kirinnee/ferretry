@@ -82,7 +82,7 @@ function RouterLink({
     router.navigate(href);
   };
   return (
-    <a href={href} onClick={go} className="text-cell" {...marks}>
+    <a href={href} onClick={go} className="inline-flex min-h-11 items-center text-cell" {...marks}>
       {children}
     </a>
   );
@@ -92,7 +92,7 @@ function RouterLink({
  * The close of the setup, once no step waits for an answer: what was set up, and each step left for later or skipped,
  * with the way to its settings, so nothing left undone is lost.
  */
-function SetupSummary({
+export function SetupSummary({
   daemon,
   steps,
 }: {

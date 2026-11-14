@@ -90,10 +90,38 @@ const open = async (context: BrowserContext, view: string, mode: 'light' | 'dark
   return tab;
 };
 
+/** A screenshot of the WHOLE page: the viewport is made as tall as the page first, so nothing is cut off at the bottom. */
+const shootWhole = async (tab: Page, path: string, width: number): Promise<void> => {
+  const height = await tab.evaluate(() => Math.ceil(document.documentElement.scrollHeight));
+  await tab.setViewportSize({ width, height: Math.max(height, 200) });
+  await tab.screenshot({ path });
+};
+
+/** Picks the one paired machine and reads its review, as a person does. */
+const toCopyReview = async (tab: Page): Promise<void> => {
+  await tab.locator('input[name="copy-source"]').click();
+  await tab.locator('[data-copy-read]').click();
+  await tab.waitForSelector('[data-copy-review]');
+};
+
+/** On a phone, every control a person presses in the copy flow is a 44px target (the label around a tick or a radio counts). */
+const tapTargetsAreBigEnough = async (tab: Page): Promise<void> => {
+  const targets = tab.locator(
+    '[data-copy-review] label:has(input), [data-copy-review] button, [data-copy-review] select',
+  );
+  for (let at = 0; at < (await targets.count()); at += 1) {
+    const height = (await targets.nth(at).boundingBox())?.height ?? 0;
+    const which = (await targets.nth(at).evaluate(element => element.outerHTML)).slice(0, 160);
+    expect(height, `a tap target is under 44px tall: ${which}`).toBeGreaterThanOrEqual(43);
+  }
+};
+
 const insideScreen = async (tab: Page, selector: string, width: number): Promise<void> => {
   const boxes = tab.locator(selector);
   for (let at = 0; at < (await boxes.count()); at += 1) {
     const box = await boxes.nth(at).boundingBox();
+    // An element that draws nothing (an <option> inside a closed menu) has no box to be outside the screen.
+    if (box === null) continue;
     expect(box?.x).toBeGreaterThanOrEqual(0);
     expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width + 1);
   }
@@ -125,7 +153,7 @@ describe('the machine-setup steps', () => {
         await tab.waitForSelector('[data-onboarding-step-body="start"]');
         if (shotsDir !== '')
           await tab.screenshot({ path: join(shotsDir, `start-from-fresh-${viewport.name}-${mode}.png`) });
-        await tab.getByText('Clone settings from another machine').click();
+        await tab.getByText('Copy settings from another machine').click();
         await tab.waitForSelector('[data-copy-no-sources]');
         // With no machine to copy from there is no Review button to look pressable.
         expect(await tab.locator('[data-copy-read]').count()).toBe(0);
@@ -135,15 +163,84 @@ describe('the machine-setup steps', () => {
         await context.close();
       }, 60_000);
 
+      it(`Copy review: every command and script in full, with its tick (${viewport.name}, ${mode})`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await open(context, 'copy-first', mode);
+        await toCopyReview(tab);
+        const text = await tab.locator('[data-copy-review]').innerText();
+        expect(text).toContain('bash ./guard.sh');
+        expect(text).toContain('echo "guard ran for $1"');
+        expect(text).toContain('node ./notes-server.js --port 4100');
+        expect(text).toContain('AWS_PROFILE');
+        expect(await tab.locator('[data-copy-runnable] input[type="checkbox"]').count()).toBe(2);
+        expect(await tab.locator('[data-copy-item-tick="profile/dev"]').count()).toBe(1);
+        await insideScreen(tab, '[data-copy-review] *', viewport.width);
+        if (viewport.phone) await tapTargetsAreBigEnough(tab);
+        if (shotsDir !== '')
+          await shootWhole(tab, join(shotsDir, `copy-review-${viewport.name}-${mode}.png`), viewport.width);
+        await context.close();
+      }, 60_000);
+
+      it(`Copy, repeat: a both-changed key blocks Preview; Update, Add alongside, Start over and the default runtime (${viewport.name}, ${mode})`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await open(context, 'copy-update', mode);
+        await toCopyReview(tab);
+        // Nothing is ticked for the person: the settings start unticked, and the changed command shows in full.
+        expect(await tab.locator('[data-copy-settings-tick="voice.yaml"]').isChecked()).toBe(false);
+        expect(await tab.locator('[data-copy-review]').innerText()).toContain('--port 4200 --verbose');
+        await tab.locator('[data-copy-settings-tick="voice.yaml"]').check();
+        await tab.locator('[data-copy-undecided]').waitFor();
+        expect(await tab.locator('[data-copy-stage]').isDisabled()).toBe(true);
+        await insideScreen(tab, '[data-copy-review] *', viewport.width);
+        if (viewport.phone) await tapTargetsAreBigEnough(tab);
+        if (shotsDir !== '')
+          await shootWhole(tab, join(shotsDir, `copy-blocked-${viewport.name}-${mode}.png`), viewport.width);
+        await tab.locator('[data-setup-choice="replace"]').click();
+        await tab.locator('[data-setup-section="copy-default-runtime"]').waitFor();
+        expect(await tab.locator('[data-setup-section="copy-default-runtime"]').innerText()).not.toContain(
+          'plain-shell',
+        );
+        await insideScreen(tab, '[data-copy-review] *', viewport.width);
+        if (shotsDir !== '')
+          await shootWhole(tab, join(shotsDir, `copy-modes-${viewport.name}-${mode}.png`), viewport.width);
+        await context.close();
+      }, 60_000);
+
+      it(`Copy, done: what was NOT brought, the sign-in and the key to add (${viewport.name}, ${mode})`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await open(context, 'copy-done', mode);
+        await toCopyReview(tab);
+        // Leave both settings documents out: Done must say they were not copied.
+        await tab.locator('[data-copy-settings-tick="warden.yaml"]').uncheck();
+        await tab.locator('[data-copy-settings-tick="voice.yaml"]').uncheck();
+        await tab.locator('[data-copy-stage]').click();
+        await tab.waitForSelector('[data-copy-confirm]');
+        expect(await tab.locator('[data-copy-description]').innerText()).toContain('bash ./guard.sh');
+        await tab.locator('[data-change-submit]').click();
+        await tab.waitForSelector('[data-copy-done]');
+        const done = await tab.locator('[data-copy-done]').innerText();
+        expect(done).toContain('Copied 4 items from work-mac.');
+        expect(await tab.locator('[data-setup-note="copy-not-written"]').innerText()).toContain('Warden');
+        expect(await tab.locator('[data-setup-note="copy-sign-ins"]').innerText()).toContain('bedrock');
+        expect(await tab.locator('[data-setup-note="copy-missing-keys"]').innerText()).toContain('NOTES_KEY');
+        await insideScreen(tab, '[data-copy-done] *', viewport.width);
+        if (shotsDir !== '')
+          await shootWhole(tab, join(shotsDir, `copy-done-${viewport.name}-${mode}.png`), viewport.width);
+        await context.close();
+      }, 60_000);
+
       it(`Export settings: the listing, one file left out, no secret (${viewport.name}, ${mode})`, async () => {
         const context = await newContext(viewport, mode);
         const tab = await open(context, 'export', mode);
         await tab.locator('[data-export-run]').click();
         await tab.waitForSelector('[data-setup-section="export-manifest"]');
-        // The listing wraps inside its block: no line is cut at the right edge, and nothing scrolls sideways.
+        // The listing keeps each name whole and scrolls INSIDE its own block: a file name is never broken across lines,
+        // and the page itself does not scroll sideways.
         const listing = tab.locator('[data-setup-section="export-manifest"] pre');
-        expect(await listing.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
-        expect(await listing.evaluate(element => getComputedStyle(element).whiteSpace)).toBe('pre-wrap');
+        expect(await listing.evaluate(element => getComputedStyle(element).whiteSpace)).toBe('pre');
+        expect(await listing.evaluate(element => getComputedStyle(element).overflowX)).toBe('auto');
+        expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        expect(await listing.innerText()).toContain('ferretry-settings-studio-mac-2026-11-14.zip');
         expect(await tab.locator('[data-setup-section="export-manifest"]').innerText()).toContain('config/warden.yaml');
         expect(await tab.locator('[data-setup-section="export-manifest"]').innerText()).not.toContain(
           'logins/work.yaml',

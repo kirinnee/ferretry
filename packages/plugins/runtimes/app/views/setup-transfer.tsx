@@ -60,7 +60,7 @@ function StartStep({ client, machineName, machine }: MachineTabProps) {
           { id: 'fresh', title: 'A fresh setup', detail: 'Walk through each step.' },
           {
             id: 'clone',
-            title: 'Clone settings from another machine',
+            title: 'Copy settings from another machine',
             detail:
               'Copy the Warden, learning, voice, agent controls, profiles and runtimes. Secrets and login tokens are never copied.',
           },
