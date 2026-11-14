@@ -61,7 +61,13 @@ export default definePlugin({
         guard: GUARD_NONE,
       }),
     ],
-    cli: [verb('update check', { summary: 'read the daemon’s cached update state' })],
+    cli: [
+      verb('update check', {
+        summary: 'read the daemon’s cached update state',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+    ],
   },
 
   ui: {

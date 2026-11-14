@@ -542,31 +542,208 @@ export default definePlugin({
     cli: [
       verb('catalog install', {
         summary: 'install one skill or MCP setup from a signed catalog file, after you review all of it',
+        args: [{ name: 'file', help: 'a catalog file' }],
+        options: [
+          { flag: '--item <name>', help: 'which item to install (needed when the file carries several)' },
+          { flag: '--project <root>', help: 'install into this project folder' },
+          { flag: '--harness <harness>', help: 'claude or codex: which agent CLI the project is for' },
+          { flag: '--runtime <name>', help: 'install into this runtime' },
+          { flag: '--profile <name>', help: 'the runtime profile that gets it' },
+          {
+            flag: '--bind <placeholder=secret>',
+            help: 'fill a placeholder with one of YOUR secrets (repeatable) (default: [])',
+          },
+          { flag: '--unbound <placeholder>', help: 'leave a placeholder unfilled (repeatable) (default: [])' },
+          { flag: '--older', help: 'allow installing an older version than the one installed' },
+          { flag: '--yes', help: 'do not ask before installing' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
       }),
-      verb('catalog installs', { summary: 'list what is installed from catalogs, and where' }),
-      verb('catalog uninstall', { summary: 'remove one install, and only the files it wrote' }),
-      verb('catalog ls', { summary: 'every catalog on this machine, with its items' }),
-      verb('catalog create', { summary: 'make an empty catalog' }),
-      verb('catalog rename', { summary: "change a catalog's name" }),
-      verb('catalog describe', { summary: "change a catalog's description" }),
-      verb('catalog default', { summary: 'make this the default catalog, where one tap adds' }),
-      verb('catalog rm', { summary: 'delete a catalog and every version in it' }),
+      verb('catalog installs', {
+        summary: 'list what is installed from catalogs, and where',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('catalog uninstall', {
+        summary: 'remove one install, and only the files it wrote',
+        args: [{ name: 'installId', help: 'an install id from "catalog installs"' }],
+        options: [
+          { flag: '--yes', help: 'do not ask before removing' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('catalog ls', {
+        summary: 'every catalog on this machine, with its items',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('catalog create', {
+        summary: 'make an empty catalog',
+        args: [{ name: 'name', help: 'what people will see it called' }],
+        options: [
+          { flag: '--description <text>', help: 'a line about what it is for' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('catalog rename', {
+        summary: "change a catalog's name",
+        args: [
+          { name: 'catalog', help: 'the catalog id or name' },
+          { name: 'name', help: 'the new name' },
+        ],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('catalog describe', {
+        summary: "change a catalog's description",
+        args: [
+          { name: 'catalog', help: 'the catalog id or name' },
+          { name: 'description', help: 'the new description' },
+        ],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('catalog default', {
+        summary: 'make this the default catalog, where one tap adds',
+        args: [{ name: 'catalog', help: 'the catalog id or name' }],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('catalog rm', {
+        summary: 'delete a catalog and every version in it',
+        args: [{ name: 'catalog', help: 'the catalog id or name' }],
+        options: [
+          { flag: '-y, --yes', help: 'skip the y/N question; required when not on a terminal' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
       verb('catalog add', {
         summary:
           'freeze a skill or an MCP setup into a catalog, or list an item you already keep, after showing you all of it',
+        args: [{ name: 'catalog', help: 'the catalog id or name' }],
+        options: [
+          {
+            flag: '--item <item>',
+            help: 'an item this machine already keeps (id or name), listed here too at its current version',
+          },
+          { flag: '--skill <source>', help: 'a SKILL.md path from the skills inventory, or a skill name' },
+          { flag: '--mcp <source>', help: 'an MCP inventory server id, or a server name' },
+          { flag: '--summary <text>', help: "your own words for what it does, instead of the skill's description" },
+          { flag: '-y, --yes', help: 'skip the y/N question; required when not on a terminal' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
       }),
-      verb('catalog publish', { summary: "freeze the item's source as its next version, after showing you all of it" }),
-      verb('catalog versions', { summary: 'list every version of an item in a catalog; the current one is marked' }),
-      verb('catalog withdraw', { summary: 'take an item out of the catalog; installers are told it is gone' }),
-      verb('catalog export', { summary: 'write the catalog as a signed file' }),
-      verb('catalog share', { summary: 'make a link that lets a person read one or more catalogs; shown once' }),
-      verb('catalog shares', { summary: 'every share and how it stands; a code is never shown' }),
-      verb('catalog unshare', { summary: 'end a share so its code stops working' }),
-      verb('member ls', { summary: 'everyone who has joined, with their catalogs and browsers' }),
-      verb('member rename', { summary: "change a person's name" }),
-      verb('member revoke', { summary: 'remove a person: their browsers are signed out and their shares end' }),
-      verb('member forget-key', { summary: "remove one of a person's browsers; their others keep working" }),
-      verb('member take', { summary: 'stop a person reading one catalog' }),
+      verb('catalog publish', {
+        summary: "freeze the item's source as its next version, after showing you all of it",
+        args: [
+          { name: 'catalog', help: 'the catalog id or name' },
+          { name: 'item', help: 'the item id or name' },
+        ],
+        options: [
+          { flag: '-y, --yes', help: 'skip the y/N question; required when not on a terminal' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('catalog versions', {
+        summary: 'list every version of an item in a catalog; the current one is marked',
+        args: [
+          { name: 'catalog', help: 'the catalog id or name' },
+          { name: 'item', help: 'the item id or name' },
+        ],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('catalog withdraw', {
+        summary: 'take an item out of the catalog; installers are told it is gone',
+        args: [
+          { name: 'catalog', help: 'the catalog id or name' },
+          { name: 'item', help: 'the item id or name' },
+        ],
+        options: [
+          { flag: '-y, --yes', help: 'skip the y/N question; required when not on a terminal' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('catalog export', {
+        summary: 'write the catalog as a signed file',
+        args: [{ name: 'catalog', help: 'the catalog id or name' }],
+        options: [
+          {
+            flag: '--item <item>',
+            help: 'carry only this item in the file (repeat for more). The signed list still names every live item, and the ask above shows them',
+          },
+          { flag: '--out <file>', help: 'where to write it; <catalog-name>.catalog.json in this directory otherwise' },
+          { flag: '--force', help: 'replace the file if it is already there' },
+          {
+            flag: '-y, --yes',
+            help: 'sign without asking; the list of what is signed is still printed. Required when not on a terminal',
+          },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('catalog share', {
+        summary: 'make a link that lets a person read one or more catalogs; shown once',
+        args: [{ name: 'catalog', help: 'the catalog ids or names to share', variadic: true }],
+        options: [
+          { flag: '--member <name>', help: 'a new person, named by you' },
+          { flag: '--to <person>', help: 'a person who has already joined: id or name' },
+          { flag: '--expires <time>', help: 'how long the link lives: 15m, 1h, 3h, 8h or 1d' },
+          { flag: '--multi', help: 'let several browsers use the link (it makes its own person; needs --member)' },
+          { flag: '--cap <count>', help: 'with --multi, the most browsers that may join (2 to 200)' },
+          { flag: '-y, --yes', help: 'with --to, skip the y/N warning; required when not on a terminal' },
+          { flag: '--large', help: 'draw the QR at full size, for a camera that will not focus on the compact one' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('catalog shares', {
+        summary: 'every share and how it stands; a code is never shown',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('catalog unshare', {
+        summary: 'end a share so its code stops working',
+        args: [{ name: 'share', help: 'the share id' }],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('member ls', {
+        summary: 'everyone who has joined, with their catalogs and browsers',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('member rename', {
+        summary: "change a person's name",
+        args: [
+          { name: 'member', help: 'the person id or name' },
+          { name: 'name', help: 'the new name' },
+        ],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('member revoke', {
+        summary: 'remove a person: their browsers are signed out and their shares end',
+        args: [{ name: 'member', help: 'the person id or name' }],
+        options: [
+          { flag: '-y, --yes', help: 'skip the y/N question; required when not on a terminal' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('member forget-key', {
+        summary: "remove one of a person's browsers; their others keep working",
+        args: [
+          { name: 'member', help: 'the person id or name' },
+          { name: 'key', help: 'the browser id (mk_…) or the name it gave itself' },
+        ],
+        options: [
+          { flag: '-y, --yes', help: 'skip the y/N question; required when not on a terminal' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('member take', {
+        summary: 'stop a person reading one catalog',
+        args: [
+          { name: 'member', help: 'the person id or name' },
+          { name: 'catalog', help: 'the catalog id or name' },
+        ],
+        options: [
+          { flag: '-y, --yes', help: 'skip the y/N question; required when not on a terminal' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
     ],
   },
 

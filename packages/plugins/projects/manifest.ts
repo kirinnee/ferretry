@@ -70,9 +70,22 @@ export default definePlugin({
     cli: [
       verb('project add', {
         summary: 'register a folder as a project; a folder already registered prints the one it is',
+        args: [{ name: 'path', help: 'the folder, such as `.`' }],
+        options: [
+          { flag: '--name <name>', help: "the project's name; default: the folder's name" },
+          { flag: '--json', help: 'print the project as JSON, with whether it was created' },
+        ],
       }),
-      verb('project list', { summary: 'every registered project: name, id and folder' }),
-      verb('project remove', { summary: 'forget a registered project; the folder itself is left alone' }),
+      verb('project list', {
+        summary: 'every registered project: name, id and folder',
+        args: [],
+        options: [{ flag: '--json', help: 'print the registry as JSON' }],
+      }),
+      verb('project remove', {
+        summary: 'forget a registered project; the folder itself is left alone',
+        args: [{ name: 'project', help: 'the project’s name, id or folder' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
     ],
     app: [appAction('project.remove', { on: 'project', label: 'Remove', calls: 'DELETE /v1/projects/:id' })],
   },

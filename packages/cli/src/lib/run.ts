@@ -35,7 +35,8 @@ import { lazyClient } from './lazy-client.ts';
 import { pluginEnvironment } from './plugin-env.ts';
 import { buildPluginGraph } from './plugin-graph.ts';
 import type { ShellContext, ShellVerb } from './shell-context.ts';
-import { buildVerbTable, expandAlias, renderHelp, resolveVerb, type VerbEntry } from './verbs.ts';
+import { renderGroupHelp, renderRootHelp, renderVerbHelp, verbsUnder } from './help.ts';
+import { buildVerbTable, expandAlias, resolveVerb, type VerbEntry, type VerbTable } from './verbs.ts';
 import type { CliWorld } from './world.ts';
 
 /** The shell's own verb lines and their handlers. The line is the key, exactly as `SHELL_VERB_LINES` spells it. */
@@ -103,6 +104,70 @@ function asksForHelp(tokens: readonly string[]): boolean {
   return false;
 }
 
+type Unknown = Extract<ReturnType<typeof resolveVerb>, { kind: 'unknown' }>;
+type Subverb = Extract<ReturnType<typeof resolveVerb>, { kind: 'subverb' }>;
+/** Words that name no verb: nothing at all, or a known verb with a sub-verb that is none of its own. */
+type NoVerb = Unknown | Subverb;
+
+/** What a help request resolved to: text to print, or the words that name nothing. */
+type HelpRequest =
+  | { readonly kind: 'text'; readonly text: (binary: string) => string }
+  | { readonly kind: 'root' }
+  | { readonly kind: 'unknown'; readonly resolution: NoVerb };
+
+/**
+ * `fy help [verb ...]` and `fy <group> --help`: help for words that are a verb or the first words of several (a group).
+ * Anything else falls through to the ordinary dispatch, which owns the unknown-verb sentence.
+ */
+function helpRequest(table: VerbTable, tokens: readonly string[]): HelpRequest | undefined {
+  const viaHelp = tokens[0] === 'help' && !table.entries.some(entry => entry.words[0] === 'help');
+  const words = viaHelp ? tokens.slice(1) : tokens;
+  if (!viaHelp && !asksForHelp(tokens)) return undefined;
+  const leading: string[] = [];
+  for (const word of words) {
+    if (word.startsWith('-')) break;
+    leading.push(word);
+  }
+  if (leading.length === 0) return viaHelp ? { kind: 'root' } : undefined;
+  const resolution = resolveVerb(table, leading);
+  if (resolution.kind === 'verb') {
+    // A verb's own `--help` is answered after alias expansion, below; `fy help <verb>` answers it here.
+    if (!viaHelp) return undefined;
+    const { entry } = resolution;
+    return { kind: 'text', text: binary => renderVerbHelp(binary, entry, table) };
+  }
+  if (verbsUnder(table, leading).length > 0)
+    return { kind: 'text', text: binary => renderGroupHelp(binary, leading, table) };
+  return viaHelp ? { kind: 'unknown', resolution } : undefined;
+}
+
+/** A known verb with sub-verbs and a word where its sub-verb belongs that is none of them (or no word at all). */
+function subverbRefusal(world: CliWorld, resolved: Subverb): number {
+  const { io, identity } = world;
+  const parent = resolved.parent.words.join(' ');
+  const subs = resolved.subverbs.map(each => `  ${identity.binary} ${each.words.join(' ')}`);
+  const said =
+    resolved.word === undefined
+      ? `${identity.binary}: ${parent} needs a sub-verb:`
+      : `${identity.binary}: "${resolved.word}" is not a sub-verb of ${parent}${
+          resolved.didYouMean === undefined
+            ? ''
+            : ` (did you mean "${resolved.didYouMean.words.join(' ')}"? to use "${resolved.word}" as words, put it after --)`
+        }; its sub-verbs are:`;
+  io.err(`${said}\n${subs.join('\n')}\n`);
+  return EXIT.usage;
+}
+
+function unknownVerb(world: CliWorld, resolved: Unknown): number {
+  const { io, identity } = world;
+  const typed = resolved.typed.join(' ');
+  const near = resolved.nearby.map(entry => `  ${identity.binary} ${entry.words.join(' ')}`);
+  io.err(
+    `${identity.binary}: unknown verb "${typed}"${near.length > 0 ? `; did you mean:\n${near.join('\n')}` : `; see \`${identity.binary} --help\``}\n`,
+  );
+  return EXIT.usage;
+}
+
 /** `argv` excludes the runtime and script. Returns the exit code; never throws. */
 export async function runFy(argv: readonly string[], world: CliWorld): Promise<number> {
   const { io, identity } = world;
@@ -127,7 +192,18 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
     return EXIT.ok;
   }
   if (leading.help || leading.rest.length === 0) {
-    io.out(`${renderHelp(identity.binary, table, { ...surfaces.titles })}\n`);
+    io.out(`${renderRootHelp(identity.binary, table, { ...surfaces.titles })}\n`);
+    return EXIT.ok;
+  }
+  const asked = helpRequest(table, leading.rest);
+  if (asked !== undefined) {
+    if (asked.kind === 'unknown')
+      return asked.resolution.kind === 'unknown'
+        ? unknownVerb(world, asked.resolution)
+        : subverbRefusal(world, asked.resolution);
+    io.out(
+      `${asked.kind === 'root' ? renderRootHelp(identity.binary, table, { ...surfaces.titles }) : asked.text(identity.binary)}\n`,
+    );
     return EXIT.ok;
   }
 
@@ -138,37 +214,13 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
     tokens = expandAlias(resolved.entry, resolved.rest) ?? tokens;
     resolved = resolveVerb(table, tokens);
   }
-  if (resolved.kind === 'unknown') {
-    const typed = resolved.typed.join(' ');
-    const near = resolved.nearby.map(entry => `  ${identity.binary} ${entry.words.join(' ')}`);
-    io.err(
-      `${identity.binary}: unknown verb "${typed}"${near.length > 0 ? `; did you mean:\n${near.join('\n')}` : `; see \`${identity.binary} --help\``}\n`,
-    );
-    return EXIT.usage;
-  }
+  if (resolved.kind === 'unknown') return unknownVerb(world, resolved);
 
-  if (resolved.kind === 'subverb') {
-    const parent = resolved.parent.words.join(' ');
-    const subs = resolved.subverbs.map(each => `  ${identity.binary} ${each.words.join(' ')}`);
-    const said =
-      resolved.word === undefined
-        ? `${identity.binary}: ${parent} needs a sub-verb:`
-        : `${identity.binary}: "${resolved.word}" is not a sub-verb of ${parent}${
-            resolved.didYouMean === undefined
-              ? ''
-              : ` (did you mean "${resolved.didYouMean.words.join(' ')}"? to use "${resolved.word}" as words, put it after --)`
-          }; its sub-verbs are:`;
-    io.err(`${said}\n${subs.join('\n')}\n`);
-    return EXIT.usage;
-  }
+  if (resolved.kind === 'subverb') return subverbRefusal(world, resolved);
 
   const { entry } = resolved;
   if (asksForHelp(resolved.rest)) {
-    io.out(`${identity.binary} ${entry.words.join(' ')}${entry.summary === undefined ? '' : `: ${entry.summary}`}\n`);
-    if (entry.options !== undefined && entry.options.length > 0) {
-      io.out('\noptions:\n');
-      for (const option of entry.options) io.out(`  ${option.flag}\n      ${option.help}\n`);
-    }
+    io.out(`${renderVerbHelp(identity.binary, entry, table)}\n`);
     return EXIT.ok;
   }
   const invocation = parseArgs(resolved.rest);

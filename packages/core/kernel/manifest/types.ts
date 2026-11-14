@@ -69,10 +69,24 @@ export interface VerbOptionDecl {
   readonly help: string;
 }
 
+/** One positional argument a verb takes, as `fy <verb> --help` lists it under Arguments. */
+export interface VerbArgDecl {
+  /** The placeholder name (`id`, `name`): shown as `<id>`, `[id]` when optional, `[id...]` when variadic. */
+  readonly name: string;
+  readonly help: string;
+  readonly optional?: boolean;
+  readonly variadic?: boolean;
+}
+
 /** A `fy` verb (code) or an alias to an existing verb (data). */
 export interface VerbDecl<Verb extends string = string> {
   readonly verb: Verb;
   readonly summary?: string;
+  /**
+   * The arguments `fy <verb> --help` lists. An empty array says the verb takes none; leaving it out means the verb
+   * line's own placeholders (`<id>`, `[name...]`) are shown without a sentence, which a test refuses for a verb in the table.
+   */
+  readonly args?: readonly VerbArgDecl[];
   /** The options `fy <verb> --help` lists under the summary (only the ones worth naming; the verb's parser owns the rest). */
   readonly options?: readonly VerbOptionDecl[];
   /** Data plugins only: the verb line this alias runs (`card move --to done`). */

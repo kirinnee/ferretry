@@ -17,7 +17,10 @@ import { ArchiveKeeps, FerretChanged, FerretsPort, LaunchParts } from '@ferretry
 import { AccessPort } from './contract/others.ts';
 import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
 
-import type { VerbOptionDecl } from '@ferretry/kernel/manifest';
+import type { VerbArgDecl, VerbOptionDecl } from '@ferretry/kernel/manifest';
+
+/** The agenda item an item verb acts on. */
+const ITEM_ID: VerbArgDecl = { name: 'id', help: 'the agenda item, like A3' };
 
 /** What every item verb takes: which board to act on (default: the ferret this runs inside), and --json. */
 const SESSION: readonly VerbOptionDecl[] = [
@@ -39,7 +42,10 @@ const PAGING: readonly VerbOptionDecl[] = [
  * (a callsign may equal a verb), and `agenda --session f1 ls` is `ls` on f1.
  */
 const TARGET: readonly VerbOptionDecl[] = [
-  { flag: '-s, --session <id>', help: 'the ferret whose board to act on, said before the sub-verb' },
+  {
+    flag: '-s, --session <id>',
+    help: 'target another session; an agent may mutate only its own session; a lead may also edit, surface, done or dismiss in a sub-ferret it started (defaults to the current session)',
+  },
   { flag: '--ferret <id>', help: 'the same as --session (`agenda mode` reads it as the ferret to switch)' },
 ];
 
@@ -211,40 +217,67 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('agenda', { summary: 'what is waiting on you, grouped', options: [...PAGING, ...TARGET] }),
-      verb('agenda open', { summary: 'every ferret’s open and parked asks, paged', options: PAGING }),
+      verb('agenda', {
+        summary: 'what is waiting on you, grouped',
+        args: [{ name: 'verb', help: 'what to do: one of the commands below', optional: true, variadic: true }],
+        options: [
+          ...TARGET,
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+          ...PAGING,
+        ],
+      }),
+      verb('agenda open', {
+        summary: 'every ferret’s open and parked asks, paged',
+        args: [],
+        options: [
+          { flag: '--limit <n>', help: 'how many to show' },
+          { flag: '--after <cursor>', help: 'continue after the cursor a page named' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
       verb('agenda mode', {
         summary: 'switch agenda mode for a ferret or for new ferrets',
-        options: [{ flag: '--ferret <id>', help: 'the ferret to read or switch' }],
+        args: [{ name: 'mode', help: 'on or off', optional: true }],
+        options: [
+          { flag: '--ferret <id>', help: 'the ferret to read or switch' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
       }),
       verb('agenda clear', {
         summary: 'dismiss the agent ferrets’ backlog (--dry-run counts it)',
+        args: [],
         options: [
           { flag: '--agents', help: 'clear the boards of the agent ferrets (the only thing there is to clear yet)' },
           { flag: '--dry-run', help: 'say what would be cleared and clear nothing' },
           { flag: '--yes', help: 'do not ask first' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
         ],
       }),
       verb('agenda add [ask...]', {
         summary: 'open an agenda for what the owner must decide or do: only when no open one fits',
+        args: [{ name: 'ask', help: 'the ask, in words (or give it with --ask)', optional: true, variadic: true }],
         options: [...SESSION, ...ADD_OPTIONS],
       }),
       verb('agenda edit <id>', {
         summary: 'rewrite an open item you raised: its writing, its stage, or (--kind) a new ask',
+        args: [ITEM_ID],
         options: [...SESSION, ...EDIT_OPTIONS],
       }),
       verb('agenda answer <id> <text...>', {
         summary: 'answer the owner on an item you raised: shown above its ask',
+        args: [ITEM_ID, { name: 'text', help: 'your answer to the owner, in words', variadic: true }],
         options: SESSION,
       }),
       verb('agenda rest <id>', {
         summary:
           'take an item on without asking anything yet: it rests as working, quiet, until you answer or mark it done',
+        args: [ITEM_ID],
         options: [...SESSION, { flag: '-w, --why <line>', help: 'REQUIRED: what you are doing about it, in a line' }],
       }),
       verb('agenda log <id>', {
         summary:
           'keep what the owner said in chat on the item, word for word; you give your words, the daemon copies theirs',
+        args: [ITEM_ID],
         options: [
           ...SESSION,
           { flag: '--reply <text>', help: 'your answer to what they said; the item goes back to their list' },
@@ -255,10 +288,15 @@ export default definePlugin({
       verb('agenda merge <into> <from>', {
         summary:
           'merge a duplicate into an item: both conversations, every card and link are kept; the duplicate closes as merged',
+        args: [
+          { name: 'into', help: 'the agenda item to keep, like A3' },
+          { name: 'from', help: 'the duplicate, which closes as merged' },
+        ],
         options: SESSION,
       }),
       verb('agenda split <id> <ask...>', {
         summary: 'split a new item off one that grew two asks, linked both ways',
+        args: [ITEM_ID, { name: 'ask', help: 'the ask of the new item, in words', variadic: true }],
         options: [
           ...SESSION,
           { flag: '-t, --title <text>', help: 'REQUIRED: what the new item is about' },
@@ -272,10 +310,12 @@ export default definePlugin({
       }),
       verb('agenda step <id> <n>', {
         summary: 'tick a step of an open item, counted from 1 as ls prints them',
+        args: [ITEM_ID, { name: 'n', help: 'the step, counted from 1 as ls prints them' }],
         options: [...SESSION, { flag: '--undo', help: 'untick the step instead' }],
       }),
       verb('agenda show <id>', {
         summary: 'print one item in full: read-only',
+        args: [ITEM_ID],
         options: [
           ...SESSION,
           { flag: '--tab <name>', help: 'print only this tab, exactly as written: main, body, or a tab of your own' },
@@ -285,6 +325,7 @@ export default definePlugin({
       verb('agenda patch <id>', {
         summary:
           'change an open item you raised as ONE YAML or JSON document, in one atomic edit (read it with agenda show <id> --yaml)',
+        args: [ITEM_ID],
         options: [
           ...SESSION,
           { flag: '-f, --file <path>', help: 'the YAML or JSON document; - (the default) reads standard input' },
@@ -295,15 +336,18 @@ export default definePlugin({
       verb('agenda history', { summary: 'show the resolution audit, newest first', options: SESSION }),
       verb('agenda needs-info <id>', {
         summary: 'ask the ferret that raised an item for more information; the item stays open',
+        args: [ITEM_ID],
         options: [...SESSION, { flag: '-n, --note <text>', help: 'what is missing, told to the ferret' }],
       }),
       verb('agenda discuss <id>', {
         summary: 'ask the ferret that raised an item to talk it through before you answer; the item stays open',
+        args: [ITEM_ID],
         options: [...SESSION, { flag: '-n, --note <text>', help: 'what is unclear or wrong, told to the ferret' }],
       }),
       verb('agenda surface <id>', {
         summary:
           'hand an item back to the owner, or bring back one their reply parked: it is their turn again (never pings)',
+        args: [ITEM_ID],
         options: [
           ...SESSION,
           { flag: '-w, --why <line>', help: 'one line on why the owner must look now' },
@@ -315,6 +359,7 @@ export default definePlugin({
       }),
       verb('agenda snooze <id>', {
         summary: 'put an item away until later (owner): it leaves the list and comes back as new',
+        args: [ITEM_ID],
         options: [
           ...SESSION,
           { flag: '--for <time>', help: 'how long: like 4h, 90m or 1d' },
@@ -323,6 +368,7 @@ export default definePlugin({
       }),
       verb('agenda unsnooze <id>', {
         summary: 'bring a snoozed or replied-to item back to the list now (owner)',
+        args: [ITEM_ID],
         options: SESSION,
       }),
       verb('agenda send-now', {
@@ -331,13 +377,26 @@ export default definePlugin({
       }),
       verb('agenda done <id>', {
         summary: 'resolve an item, optionally answering its ask',
+        args: [ITEM_ID],
         options: [...SESSION, ...DONE_OPTIONS],
       }),
       verb('agenda dismiss <id>', {
         summary: 'dismiss an item without answering it: recorded with who dismissed it',
+        args: [ITEM_ID],
         options: [...SESSION, { flag: '-n, --note <text>', help: 'a note recorded with the dismissal' }],
       }),
-      verb('notify', { summary: 'tell the owner one thing: a quiet notice; --buzz also buzzes the phone' }),
+      verb('notify', {
+        summary: 'tell the owner one thing: a quiet notice; --buzz also buzzes the phone',
+        args: [{ name: 'summary', help: 'one line saying what the owner should know', optional: true, variadic: true }],
+        options: [
+          { flag: '--body <markdown>', help: 'the longer reading behind the summary, as Markdown' },
+          { flag: '--buzz', help: "also buzz the owner's phone" },
+          {
+            flag: '-s, --session <id>',
+            help: 'target another session; an agent may notify only for its own (defaults to the current session)',
+          },
+        ],
+      }),
     ],
     app: [
       appAction('agenda.clear-agents', {

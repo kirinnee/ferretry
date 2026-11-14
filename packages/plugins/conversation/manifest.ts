@@ -276,22 +276,179 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('send', { summary: 'say a message to a ferret' }),
-      verb('reply', { summary: 'answer the ferret that last wrote to you' }),
-      verb('answer', { summary: "answer a ferret's question" }),
-      verb('interrupt', { summary: "stop a ferret's turn" }),
-      verb('queue <ferret>', { summary: "a ferret's queued messages" }),
-      verb('queue edit', { summary: 'change a queued message before it is typed' }),
-      verb('queue cancel', { summary: 'withdraw a queued message' }),
-      verb('logs', { summary: "read a ferret's conversation log" }),
-      verb('compact-at', { summary: 'when a ferret squeezes its memory' }),
-      verb('search', { summary: 'find cards and asks by what they say' }),
-      verb('render', { summary: 'save a picture a ferret can show in a message' }),
-      verb('render guide', { summary: 'how to write a render' }),
-      verb('link [query...]', { summary: 'list conversations the harnesses hold, to keep as ferrets' }),
-      verb('link preview', { summary: 'the first words of a conversation' }),
-      verb('link keep', { summary: 'keep conversations as ferrets, read from the harness file' }),
-      verb('transcript', { summary: 'the conversation transcript every runtime of a harness shares' }),
+      verb('send', {
+        summary: 'say a message to a ferret',
+        args: [
+          { name: 'id', help: 'session id or callsign' },
+          { name: 'message', help: 'the message text', optional: true, variadic: true },
+        ],
+        options: [
+          { flag: '-f, --file <file>', help: 'attach a supported image or document; repeatable (default: [])' },
+          { flag: '--message-file <file>', help: 'read the message from a file (use for long messages)' },
+          { flag: '--now', help: 'interrupt the active turn and deliver immediately instead of riding the queue' },
+          { flag: '--ask', help: 'label this as needing a reply and park this session until the peer answers' },
+          { flag: '--expect-reply', help: 'label this as needing a reply, without parking this session' },
+          {
+            flag: '--until <when>',
+            help: 'with --ask: give up waiting after this long (45m, 2h, or an ISO timestamp)',
+          },
+          { flag: '--wait', help: 'wait until the message is proven delivered, timed out, or unconfirmed' },
+          {
+            flag: '--kind <kind>',
+            help: "blocker | action | fyi (default action): how soon it is delivered — a blocker at once, actions combined for a minute, an fyi held until the receiver's turn ends",
+          },
+          { flag: '--json', help: 'print the session as JSON' },
+        ],
+      }),
+      verb('reply', {
+        summary: 'answer the ferret that last wrote to you',
+        args: [
+          { name: 'id', help: 'session id or callsign' },
+          { name: 'message', help: 'the reply text', variadic: true },
+        ],
+        options: [
+          {
+            flag: '--kind <kind>',
+            help: "blocker | action | fyi (default action): how soon it is delivered — a blocker at once, actions combined for a minute, an fyi held until the receiver's turn ends",
+          },
+          { flag: '--json', help: 'print the session as JSON' },
+        ],
+      }),
+      verb('answer', {
+        summary: "answer a ferret's question",
+        args: [
+          { name: 'id', help: 'session id or callsign' },
+          { name: 'labels', help: 'the option labels to choose', optional: true, variadic: true },
+        ],
+        options: [
+          { flag: '--other <text>', help: 'choose the free-form Other response for one question' },
+          { flag: '--response <answer>', help: 'answer each question in order; repeatable (default: [])' },
+          { flag: '--json', help: 'print the session as JSON' },
+        ],
+      }),
+      verb('interrupt', {
+        summary: "stop a ferret's turn",
+        args: [{ name: 'id', help: 'session id or callsign' }],
+        options: [{ flag: '--json', help: 'print the session as JSON' }],
+      }),
+      verb('queue <ferret>', {
+        summary: "a ferret's queued messages",
+        args: [{ name: 'ferret', help: 'the ferret, by name or session id' }],
+        options: [{ flag: '--json', help: 'print the queue as JSON' }],
+      }),
+      verb('queue edit', {
+        summary: 'change a queued message before it is typed',
+        args: [
+          { name: 'ferret', help: 'the ferret, by name or session id' },
+          { name: 'id', help: 'the message id, as `fy queue <ferret>` lists it' },
+          { name: 'text', help: 'the new words', variadic: true },
+        ],
+      }),
+      verb('queue cancel', {
+        summary: 'withdraw a queued message',
+        args: [
+          { name: 'ferret', help: 'the ferret, by name or session id' },
+          { name: 'id', help: 'the message id, as `fy queue <ferret>` lists it' },
+        ],
+      }),
+      verb('logs', {
+        summary: "read a ferret's conversation log",
+        args: [{ name: 'id', help: 'session id' }],
+        options: [{ flag: '--turn <number>', help: 'read one explicitly bounded transcript turn' }],
+      }),
+      verb('compact-at', {
+        summary: 'when a ferret squeezes its memory',
+        args: [
+          { name: 'ferret', help: 'the ferret to read or change' },
+          {
+            name: 'value',
+            help: 'a size like 250k, auto (the harness’s own trigger) or inherit; leave out to read',
+            optional: true,
+          },
+        ],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('search', {
+        summary: 'find cards and asks by what they say',
+        args: [{ name: 'text', help: 'words to look for, or an id like F303 / A3', variadic: true }],
+        options: [
+          { flag: '--kind <kind>', help: 'only task | agenda' },
+          { flag: '--open', help: 'only work still to do' },
+          { flag: '--project <name>', help: "only this project's cards (agenda items are kept)" },
+          { flag: '--all', help: 'also find closed, dropped and addressed work older than 30 days' },
+          { flag: '--limit <n>', help: 'at most this many hits (default 20)' },
+          { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
+          { flag: '--json', help: 'print the daemon response as JSON' },
+        ],
+      }),
+      verb('render', { summary: 'save a picture a ferret can show in a message', args: [] }),
+      verb('render guide', {
+        summary: 'how to write a render',
+        args: [
+          {
+            name: 'type',
+            help: 'mermaid, svg, html, chart, map, image, video, audio, pdf, lottie, card, board',
+            optional: true,
+          },
+        ],
+      }),
+      verb('link [query...]', {
+        summary: 'list conversations the harnesses hold, to keep as ferrets',
+        args: [
+          {
+            name: 'query',
+            help: 'search words; each must appear in the name, first or latest message or project folder',
+            optional: true,
+            variadic: true,
+          },
+        ],
+        options: [
+          { flag: '--harness <harness>', help: 'only this harness (choices: "claude", "codex")' },
+          {
+            flag: '--since <duration>',
+            help: 'only conversations active within this long: <n>d, <n>h or <n>w (e.g. 7d)',
+          },
+          { flag: '--select <id...>', help: 'adopt these conversation ids instead of listing' },
+          { flag: '--runtime <name>', help: 'the runtime every adopted ferret runs on (required with --select)' },
+          {
+            flag: '--all',
+            help: 'import every conversation as a stopped ferret (needs --runtime; hard-linked, never copied)',
+          },
+          { flag: '--start', help: 'launch every selected conversation now (at most 10 at once)' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('link preview', {
+        summary: 'the first words of a conversation',
+        args: [
+          { name: 'harness', help: 'claude or codex' },
+          { name: 'conversation-id', help: 'the conversation’s id' },
+        ],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('link keep', {
+        summary: 'keep conversations as ferrets, read from the harness file',
+        args: [
+          { name: 'harness', help: 'claude or codex' },
+          { name: 'runtime', help: 'the runtime to keep them on' },
+          { name: 'conversation-id', help: 'a conversation to keep', variadic: true },
+        ],
+        options: [
+          { flag: '--start', help: 'also start each one as a ferret' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('transcript', {
+        summary: 'the conversation transcript every runtime of a harness shares',
+        args: [{ name: 'ferret', help: 'the ferret whose conversation to read' }],
+        options: [
+          { flag: '--cursor <cursor>', help: 'continue from where the last page ended' },
+          { flag: '--through <row>', help: 'end at this row' },
+          { flag: '--tail', help: 'read the newest rows' },
+          { flag: '--limit <n>', help: 'how many rows' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
     ],
     agentTools: [
       tool('search_work', {

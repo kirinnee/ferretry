@@ -264,21 +264,159 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('terminal list', { summary: 'list the terminals in the session' }),
-      verb('terminal open', { summary: 'open a named terminal, optionally running a command in it' }),
-      verb('terminal send', { summary: 'type text and press keys in a terminal' }),
-      verb('terminal read', { summary: 'print the last lines of a terminal' }),
-      verb('terminal wait', { summary: 'wait until text appears or the running command ends; exits 1 on timeout' }),
+      verb('terminal list', {
+        summary: 'list the terminals in the session',
+        args: [],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+        ],
+      }),
+      verb('terminal open', {
+        summary: 'open a named terminal, optionally running a command in it',
+        args: [
+          { name: 'name', help: 'its name: a lowercase letter, then letters, digits or dashes' },
+          {
+            name: 'command',
+            help: 'a command to run in it; use -- before one that starts with a dash',
+            optional: true,
+            variadic: true,
+          },
+        ],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+          { flag: '-f, --folder <dir>', help: 'where it starts: absolute, or relative to the session folder' },
+          {
+            flag: '--ask [message]',
+            help: 'hand it to the owner at once: their tab comes forward with "Your turn here"; optionally say what to do',
+          },
+        ],
+      }),
+      verb('terminal send', {
+        summary: 'type text and press keys in a terminal',
+        args: [
+          { name: 'name', help: "the terminal's name or id" },
+          {
+            name: 'text',
+            help: 'text to type; use -- before text that starts with a dash',
+            optional: true,
+            variadic: true,
+          },
+        ],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+          { flag: '-k, --key <key...>', help: 'keys to press after the text: enter, tab, escape, up, ctrl-c, …' },
+        ],
+      }),
+      verb('terminal read', {
+        summary: 'print the last lines of a terminal',
+        args: [{ name: 'name', help: "the terminal's name or id" }],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+          { flag: '-n, --lines <n>', help: 'how many lines' },
+        ],
+      }),
+      verb('terminal wait', {
+        summary: 'wait until text appears or the running command ends; exits 1 on timeout',
+        args: [{ name: 'name', help: "the terminal's name or id" }],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+          { flag: '--text <text>', help: 'wait until this text appears' },
+          { flag: '--exit', help: 'wait until the running command ends' },
+          { flag: '-t, --timeout <ms>', help: 'how long to wait in all (default: "10000")' },
+        ],
+      }),
       verb('terminal close', {
         summary: 'close a terminal, or with --all-finished every terminal a finished ferret left open',
+        args: [{ name: 'name', help: "the terminal's name or id", optional: true }],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+          {
+            flag: '--all-finished',
+            help: "the owner's cleanup: close the terminals of ferrets that completed, stopped or were removed",
+          },
+          { flag: '--json', help: 'print the --all-finished result as JSON' },
+        ],
       }),
-      verb('terminal slots', { summary: 'show who holds the open terminals, across every ferret, against the limit' }),
-      verb('terminal ask', { summary: 'hand a terminal to the owner' }),
-      verb('terminal takeover', { summary: 'take a terminal over from the ferret until you hand it back' }),
-      verb('terminal handback', { summary: 'hand a terminal you took over back to the ferret' }),
-      verb('terminal handover', { summary: 'let the ferret use a terminal you opened' }),
-      verb('terminal control', { summary: 'show which terminals a ferret is driving, taken over, or handed to it' }),
-      verb('attach', { summary: 'attach to the terminal a ferret runs in (Ctrl-b d detaches)' }),
+      verb('terminal slots', {
+        summary: 'show who holds the open terminals, across every ferret, against the limit',
+        args: [],
+        options: [{ flag: '--json', help: 'print the result as JSON' }],
+      }),
+      verb('terminal ask', {
+        summary: 'hand a terminal to the owner',
+        args: [
+          { name: 'name', help: "the terminal's name or id" },
+          { name: 'message', help: 'what the owner should do there; never a secret', optional: true, variadic: true },
+        ],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+        ],
+      }),
+      verb('terminal takeover', {
+        summary: 'take a terminal over from the ferret until you hand it back',
+        args: [{ name: 'name', help: "the terminal's name or id" }],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+        ],
+      }),
+      verb('terminal handback', {
+        summary: 'hand a terminal you took over back to the ferret',
+        args: [{ name: 'name', help: "the terminal's name or id" }],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+        ],
+      }),
+      verb('terminal handover', {
+        summary: 'let the ferret use a terminal you opened',
+        args: [{ name: 'name', help: "the terminal's name or id" }],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+        ],
+      }),
+      verb('terminal control', {
+        summary: 'show which terminals a ferret is driving, taken over, or handed to it',
+        args: [],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+        ],
+      }),
+      verb('attach', {
+        summary: 'attach to the terminal a ferret runs in (Ctrl-b d detaches)',
+        args: [{ name: 'id', help: 'session id' }],
+      }),
     ],
   },
 

@@ -132,29 +132,71 @@ export default definePlugin({
     cli: [
       verb('recommend [task...]', {
         summary: 'the routing prompt and the models that can run a piece of work here now (Pack mode)',
+        args: [
+          {
+            name: 'task',
+            help: 'the part to hand to a sub-ferret (echoed back; nothing is matched against it)',
+            optional: true,
+            variadic: true,
+          },
+        ],
+        options: [{ flag: '--json', help: 'print the payload' }],
       }),
       verb('pack [id]', {
         summary:
           'a table of every live ferret in a pack: model, state, card and its last line (defaults to the calling ferret)',
+        args: [{ name: 'id', help: 'a ferret in the pack; defaults to the calling ferret', optional: true }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
       }),
-      verb('guide', { summary: 'the routing prompt Pack mode picks helper models with' }),
+      verb('guide', { summary: 'the routing prompt Pack mode picks helper models with', args: [] }),
       verb('guide show', {
         summary: 'the routing prompt in effect, where it came from, and whether a clean-up can be undone',
+        args: [],
+        options: [{ flag: '--json', help: 'print the routing prompt' }],
       }),
       verb('guide inventory', {
         summary: 'what Clean up is shown: every runtime, its models, readiness and quota, and every model',
+        args: [],
+        options: [{ flag: '--json', help: 'print the inventory' }],
       }),
       verb('guide clean-up', {
         summary:
           'have a short-lived ferret rewrite the routing prompt to fit (one model run), then review it as a diff',
+        args: [],
+        options: [
+          { flag: '--prompt <text>', help: 'the rough prompt to clean up (default: the one in effect)' },
+          { flag: '--prompt-file <file>', help: 'read the rough prompt from a file' },
+          {
+            flag: '--runtime <runtime>',
+            help: 'run it on this runtime (default: the ready one with the most quota left)',
+          },
+          { flag: '--model <model>', help: "run it on this model (default: the runtime's own)" },
+          { flag: '-y, --apply', help: 'accept the rewrite as soon as it is checked' },
+          { flag: '--json', help: 'print the run and its checked rewrite' },
+        ],
       }),
       verb('guide write', {
         summary: 'have a short-lived ferret write the routing prompt from a short idea (one model run), then review it',
+        args: [],
+        options: [
+          {
+            flag: '--idea <text>',
+            help: 'what you want, in your words, up to 4,000 characters ("cheap models for chores, Opus for planning"); optional',
+          },
+          {
+            flag: '--runtime <runtime>',
+            help: 'run it on this runtime (default: the ready one with the most quota left)',
+          },
+          { flag: '--model <model>', help: "run it on this model (default: the runtime's own)" },
+          { flag: '-y, --apply', help: 'accept the prompt as soon as it is checked' },
+          { flag: '--json', help: 'print the run and its checked prompt' },
+        ],
       }),
       verb('guide accept <run>', {
         summary: 'write a run’s checked rewrite as the routing prompt (undo puts the old one back)',
+        args: [{ name: 'run', help: 'the run id guide clean-up or guide write printed' }],
       }),
-      verb('guide undo', { summary: 'put back the routing prompt the last accepted clean-up replaced' }),
+      verb('guide undo', { summary: 'put back the routing prompt the last accepted clean-up replaced', args: [] }),
     ],
   },
 

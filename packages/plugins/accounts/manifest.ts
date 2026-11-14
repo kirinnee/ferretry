@@ -606,66 +606,415 @@ export default definePlugin({
       // a listed tool that answers "not built" is a lie (docs/design/rebuild-parity.tsv T-0002, T-0043: still open).
     ],
     cli: [
-      verb('copy ls', { summary: 'list the secure copies a session holds' }),
-      verb('copy rules ls', { summary: 'list the rules' }),
-      verb('copy rules add', { summary: 'make a paste rule: approve a route in advance' }),
+      verb('copy ls', {
+        summary: 'list the secure copies a session holds',
+        args: [],
+        options: [
+          { flag: '-s, --session <id>', help: 'the session' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('copy rules ls', {
+        summary: 'list the rules',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('copy rules add', {
+        summary: 'make a paste rule: approve a route in advance',
+        args: [],
+        options: [
+          { flag: '--from <source>', help: 'command:<program>, browser:<origin> or clipboard:<origin>' },
+          { flag: '--to <destination>', help: 'terminal:<program>, browser:<origin> or secret:<NAME>' },
+          { flag: '-s, --session <id>', help: 'only this session (default: any)' },
+          { flag: '--count <n>', help: 'how many pastes it allows (default: no count)' },
+          { flag: '--expires <time>', help: 'how long it lasts, like 30m, 2h or 7d (default: no expiry)' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
       verb('copy rules profile', {
         summary: 'let paste rules match programs in your own profile (on), or only ones the system installed (off)',
+        args: [
+          {
+            name: 'state',
+            help: 'on: a program from ~/.nix-profile, which any ferret can change, may match; off (the default)',
+          },
+        ],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
       }),
-      verb('copy rules rm', { summary: 'end a paste rule' }),
-      verb('copy plan ls', { summary: 'list the plans, line by line' }),
-      verb('copy plan approve', { summary: 'allow the numbered lines of a plan; no numbers declines it' }),
-      verb('copy plan revoke', { summary: 'end the numbered lines of a plan (all when none is named)' }),
-      verb('plan ls', { summary: 'list the plans, line by line' }),
-      verb('plan approve', { summary: 'allow the numbered lines of a plan; no numbers declines it' }),
-      verb('plan revoke', { summary: 'end the numbered lines of a plan (all when none is named)' }),
-      verb('rules ls', { summary: 'list the rules and the ones waiting for a passkey' }),
-      verb('rules add', { summary: 'stage a rule for a sign-in; you approve it with your passkey in the app' }),
-      verb('rules resume', { summary: 'approve a suspended rule again, with a new passkey' }),
-      verb('rules renew', { summary: 'approve a rule again for a new period, with a new passkey' }),
+      verb('copy rules rm', {
+        summary: 'end a paste rule',
+        args: [{ name: 'id', help: 'the rule, by the start of its id' }],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('copy plan ls', {
+        summary: 'list the plans, line by line',
+        args: [],
+        options: [
+          { flag: '-s, --session <id>', help: 'only this session' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('copy plan approve', {
+        summary: 'allow the numbered lines of a plan; no numbers declines it',
+        args: [
+          { name: 'id', help: 'the plan, by the start of its id' },
+          { name: 'lines', help: 'the line numbers to allow, as listed', optional: true, variadic: true },
+        ],
+        options: [
+          {
+            flag: '--pick <line=account>',
+            help: 'which account signs in on a line with several (a handle or si_…) (default: [])',
+          },
+          {
+            flag: '--totp <line>',
+            help: 'also let Ferretry type the 2FA code on this line (needs --i-understand-one-factor) (default: [])',
+          },
+          {
+            flag: '--i-understand-one-factor',
+            help: 'I understand this makes the sign-in one factor, with no one to approve a code.',
+          },
+          { flag: '--open', help: "open the plan's card in this machine's browser to confirm with your passkey" },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('copy plan revoke', {
+        summary: 'end the numbered lines of a plan (all when none is named)',
+        args: [
+          { name: 'id', help: 'the plan, by the start of its id' },
+          { name: 'lines', help: 'the line numbers to end', optional: true, variadic: true },
+        ],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('plan ls', {
+        summary: 'list the plans, line by line',
+        args: [],
+        options: [
+          { flag: '-s, --session <id>', help: 'only this session' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('plan approve', {
+        summary: 'allow the numbered lines of a plan; no numbers declines it',
+        args: [
+          { name: 'id', help: 'the plan, by the start of its id' },
+          { name: 'lines', help: 'the line numbers to allow, as listed', optional: true, variadic: true },
+        ],
+        options: [
+          {
+            flag: '--pick <line=account>',
+            help: 'which account signs in on a line with several (a handle or si_…) (default: [])',
+          },
+          {
+            flag: '--totp <line>',
+            help: 'also let Ferretry type the 2FA code on this line (needs --i-understand-one-factor) (default: [])',
+          },
+          {
+            flag: '--i-understand-one-factor',
+            help: 'I understand this makes the sign-in one factor, with no one to approve a code.',
+          },
+          { flag: '--open', help: "open the plan's card in this machine's browser to confirm with your passkey" },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('plan revoke', {
+        summary: 'end the numbered lines of a plan (all when none is named)',
+        args: [
+          { name: 'id', help: 'the plan, by the start of its id' },
+          { name: 'lines', help: 'the line numbers to end', optional: true, variadic: true },
+        ],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('rules ls', {
+        summary: 'list the rules and the ones waiting for a passkey',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('rules add', {
+        summary: 'stage a rule for a sign-in; you approve it with your passkey in the app',
+        args: [{ name: 'sign-in', help: 'the sign-in, as si_… (see `fy account site ls`)' }],
+        options: [
+          { flag: '--username', help: 'also type the username (default: the password only)' },
+          { flag: '--totp', help: 'also let Ferretry type the 2FA code (needs --i-understand-one-factor)' },
+          {
+            flag: '--i-understand-one-factor',
+            help: 'say "I understand this makes the sign-in one factor, with no one to approve a code."',
+          },
+          { flag: '--scope <scope>', help: 'any ferret (default), project:<uuid> or session:<id>' },
+          {
+            flag: '--expires <time>',
+            help: 'how long it lasts, like 12h or 7d (default: 30 days for a page, 1 day for a terminal)',
+          },
+          { flag: '--uses <n>', help: 'at most this many fills (at least 1)' },
+          { flag: '--open', help: "open the rule's page in this machine's browser to confirm with your passkey" },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('rules resume', {
+        summary: 'approve a suspended rule again, with a new passkey',
+        args: [{ name: 'rule', help: 'the rule, by the start of its id' }],
+        options: [
+          { flag: '--totp', help: 'also let Ferretry type the 2FA code (needs --i-understand-one-factor)' },
+          {
+            flag: '--i-understand-one-factor',
+            help: 'say "I understand this makes the sign-in one factor, with no one to approve a code."',
+          },
+          { flag: '--open', help: "open the rule's page in this machine's browser to confirm with your passkey" },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('rules renew', {
+        summary: 'approve a rule again for a new period, with a new passkey',
+        args: [{ name: 'rule', help: 'the rule, by the start of its id' }],
+        options: [
+          { flag: '--totp', help: 'also let Ferretry type the 2FA code (needs --i-understand-one-factor)' },
+          {
+            flag: '--i-understand-one-factor',
+            help: 'say "I understand this makes the sign-in one factor, with no one to approve a code."',
+          },
+          {
+            flag: '--expires <time>',
+            help: 'how long it lasts, like 12h or 7d (default: 30 days for a page, 1 day for a terminal)',
+          },
+          { flag: '--uses <n>', help: 'at most this many fills (at least 1)' },
+          { flag: '--open', help: "open the rule's page in this machine's browser to confirm with your passkey" },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
       verb('rules widen', {
         summary: 'give a rule more (the username, the 2FA code, who, time or uses), with a new passkey',
+        args: [{ name: 'rule', help: 'the rule, by the start of its id' }],
+        options: [
+          { flag: '--username', help: 'also type the username' },
+          { flag: '--totp', help: 'also let Ferretry type the 2FA code (needs --i-understand-one-factor)' },
+          {
+            flag: '--i-understand-one-factor',
+            help: 'say "I understand this makes the sign-in one factor, with no one to approve a code."',
+          },
+          { flag: '--scope <scope>', help: 'who may use it: any, project:<uuid> or session:<id>' },
+          { flag: '--expires <time>', help: 'how long it lasts from now, like 7d (default: it ends when it did)' },
+          { flag: '--uses <n>', help: 'at most this many fills (at least 1) (default: the uses it has left)' },
+          { flag: '--open', help: "open the rule's page in this machine's browser to confirm with your passkey" },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
       }),
-      verb('rules narrow', { summary: 'take something away from a rule: the 2FA code, time or uses; no passkey' }),
-      verb('rules rm', { summary: 'revoke a rule now, or every rule of an account; no passkey' }),
-      verb('account ls', { summary: 'list the accounts, with their 2FA keys and sign-ins' }),
-      verb('account add', { summary: 'save a new account; type the password with echo off' }),
-      verb('account edit', { summary: 'change the fields named; the rest are kept' }),
-      verb('account rename', { summary: 'change a handle; the values follow it' }),
-      verb('account rm', { summary: 'delete an account with its sign-ins and 2FA keys' }),
+      verb('rules narrow', {
+        summary: 'take something away from a rule: the 2FA code, time or uses; no passkey',
+        args: [{ name: 'rule', help: 'the rule, by the start of its id' }],
+        options: [
+          { flag: '--drop-totp', help: 'stop typing the 2FA code' },
+          { flag: '--expires <time>', help: 'end it this long from now, like 2h' },
+          { flag: '--uses <n>', help: 'lower the cap on fills' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('rules rm', {
+        summary: 'revoke a rule now, or every rule of an account; no passkey',
+        args: [{ name: 'rule', help: 'the rule, by the start of its id', optional: true }],
+        options: [
+          { flag: '--account <account>', help: 'revoke every standing rule of this account instead' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('account ls', {
+        summary: 'list the accounts, with their 2FA keys and sign-ins',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol document instead of the human listing' }],
+      }),
+      verb('account add', {
+        summary: 'save a new account; type the password with echo off',
+        args: [{ name: 'id', help: 'the account’s id: a short name you choose' }],
+        options: [
+          { flag: '--label <text>', help: 'the name you read it by, e.g. "sudo on kirin-box"' },
+          { flag: '--username <text>', help: 'the username (plain text, shown on cards)' },
+          { flag: '--no-password', help: 'save it without a password for now' },
+          { flag: '--domain <host>', help: 'where the sign-in happens, e.g. accounts.google.com (repeatable)' },
+          { flag: '--for <host>', help: 'what it is for, e.g. app.vercel.com (repeatable)' },
+          { flag: '--tool <program>', help: 'terminal: the program asking, e.g. sudo, ssh' },
+          { flag: '--host <machine>', help: 'terminal: the machine it runs on' },
+          { flag: '--dest <machine>', help: 'terminal: where ssh, scp or sftp go' },
+          { flag: '--method <kind>', help: 'how it signs in: password, google, github, microsoft, apple, sso' },
+          { flag: '--sso-name <text>', help: 'with --method sso: the provider as its button says it, e.g. Okta' },
+          { flag: '--via <id>', help: "with a provider method: the provider's account, e.g. GOOGLE_KIRIN" },
+        ],
+      }),
+      verb('account edit', {
+        summary: 'change the fields named; the rest are kept',
+        args: [{ name: 'id', help: 'the account to change' }],
+        options: [
+          { flag: '--label <text>', help: 'a new label' },
+          { flag: '--username <text>', help: 'a new username' },
+          { flag: '--no-username', help: 'remove the username' },
+          { flag: '--password', help: 'replace the password (typed at a hidden prompt)' },
+          { flag: '--totp', help: '(moved) a 2FA seed is saved with `account factor add <id> --totp`' },
+        ],
+      }),
+      verb('account rename', {
+        summary: 'change a handle; the values follow it',
+        args: [
+          { name: 'id', help: 'the account to rename' },
+          { name: 'new-id', help: 'its new id' },
+        ],
+      }),
+      verb('account rm', {
+        summary: 'delete an account with its sign-ins and 2FA keys',
+        args: [{ name: 'id', help: 'the account to remove' }],
+        options: [{ flag: '-y, --yes', help: 'do not ask first' }],
+      }),
       verb('account merge', {
         summary: 'fold the account FROM into KEEP: its sign-ins and 2FA keys move, then it is gone',
+        args: [
+          { name: 'keep', help: 'the account to keep' },
+          { name: 'from', help: 'the account folded into it' },
+        ],
+        options: [{ flag: '-y, --yes', help: 'do not ask first' }],
       }),
       verb('account apart', {
         summary: 'say two accounts are different, so look-alike and merge hints stop pairing them',
+        args: [
+          { name: 'id', help: 'the account that holds the two looks-alike accounts' },
+          { name: 'other', help: 'the account it is deliberately not the same as' },
+        ],
       }),
       verb('account look-alike', {
         summary: 'groups of accounts with the same username and password (handles only), which may be one account',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol document instead' }],
       }),
       verb('account hint', {
         summary: 'what a ferret is told about signing in to a site: label, method, domains, username; never a value',
+        args: [{ name: 'site', help: 'the website the sign-in is for' }],
+        options: [{ flag: '--json', help: 'print the protocol document instead' }],
       }),
-      verb('account default set', { summary: 'use ACCOUNT for KEY: a site host, or --project / --folder' }),
-      verb('account default rm', { summary: 'stop using a default for KEY' }),
-      verb('account site ls', { summary: 'list the sign-ins (one account, or all), each with its si_ id' }),
-      verb('account site add', { summary: 'add a place this account signs in' }),
-      verb('account site edit', { summary: 'change the parts named; the rest are kept' }),
-      verb('account site rm', { summary: 'remove a sign-in; the account stays' }),
+      verb('account default set', {
+        summary: 'use ACCOUNT for KEY: a site host, or --project / --folder',
+        args: [
+          { name: 'key', help: 'which default to set (a site or a kind of sign-in)' },
+          { name: 'account', help: 'the account that becomes the default' },
+        ],
+        options: [
+          { flag: '--project <name>', help: 'KEY is a board project' },
+          { flag: '--folder <path>', help: 'KEY is a folder' },
+        ],
+      }),
+      verb('account default rm', {
+        summary: 'stop using a default for KEY',
+        args: [{ name: 'key', help: 'which default to clear' }],
+        options: [
+          { flag: '--project <name>', help: 'KEY is a board project' },
+          { flag: '--folder <path>', help: 'KEY is a folder' },
+        ],
+      }),
+      verb('account site ls', {
+        summary: 'list the sign-ins (one account, or all), each with its si_ id',
+        args: [{ name: 'account', help: 'the account whose sign-in sites to list', optional: true }],
+        options: [{ flag: '--json', help: 'print the sign-ins as JSON instead' }],
+      }),
+      verb('account site add', {
+        summary: 'add a place this account signs in',
+        args: [{ name: 'account', help: 'the account the sign-in site belongs to' }],
+        options: [
+          { flag: '--domain <host>', help: 'where the sign-in happens, e.g. accounts.google.com (repeatable)' },
+          { flag: '--for <host>', help: 'what it is for, e.g. app.vercel.com (repeatable)' },
+          { flag: '--tool <program>', help: 'terminal: the program asking, e.g. sudo, ssh' },
+          { flag: '--host <machine>', help: 'terminal: the machine it runs on' },
+          { flag: '--dest <machine>', help: 'terminal: where ssh, scp or sftp go' },
+          { flag: '--method <kind>', help: 'how it signs in: password, google, github, microsoft, apple, sso' },
+          { flag: '--sso-name <text>', help: 'with --method sso: the provider as its button says it, e.g. Okta' },
+          { flag: '--via <id>', help: "with a provider method: the provider's account, e.g. GOOGLE_KIRIN" },
+          {
+            flag: '--auto-apply-recipe <on|off>',
+            help: "let a ferret's recipe proposal for this sign-in apply without asking",
+          },
+        ],
+      }),
+      verb('account site edit', {
+        summary: 'change the parts named; the rest are kept',
+        args: [{ name: 'sign-in', help: 'the sign-in to change' }],
+        options: [
+          { flag: '--domain <host>', help: 'REPLACE where the sign-in happens, e.g. accounts.google.com (repeatable)' },
+          { flag: '--for <host>', help: 'REPLACE what it is for, e.g. app.vercel.com (repeatable)' },
+          { flag: '--tool <program>', help: 'terminal: REPLACE the program asking, e.g. sudo, ssh' },
+          { flag: '--host <machine>', help: 'terminal: REPLACE the machine it runs on' },
+          { flag: '--dest <machine>', help: 'terminal: REPLACE where ssh, scp or sftp go' },
+          { flag: '--method <kind>', help: 'how it signs in: password, google, github, microsoft, apple, sso' },
+          { flag: '--sso-name <text>', help: 'with --method sso: the provider as its button says it, e.g. Okta' },
+          { flag: '--via <id>', help: "with a provider method: the provider's account, e.g. GOOGLE_KIRIN" },
+          { flag: '--no-via', help: 'sign in via no account' },
+          {
+            flag: '--auto-apply-recipe <on|off>',
+            help: "let a ferret's recipe proposal for this sign-in apply without asking",
+          },
+        ],
+      }),
+      verb('account site rm', {
+        summary: 'remove a sign-in; the account stays',
+        args: [{ name: 'sign-in', help: 'the sign-in to remove' }],
+        options: [{ flag: '-y, --yes', help: 'do not ask first' }],
+      }),
       verb('account site recipe show', {
         summary: 'the recipe, what was seen when it was typed, and each waiting proposal as a change',
+        args: [{ name: 'sign-in', help: 'the sign-in whose recipe to show' }],
+        options: [{ flag: '--json', help: 'print the sign-in as JSON instead' }],
       }),
       verb('account site recipe set', {
         summary: 'replace the recipe with Markdown from a file, or from standard input with --file -',
+        args: [{ name: 'sign-in', help: 'the sign-in to give a recipe' }],
+        options: [{ flag: '--file <path>', help: 'the Markdown file, or - for standard input' }],
       }),
-      verb('account site recipe clear', { summary: 'remove the recipe' }),
-      verb('account site recipe approve', { summary: "make a ferret's proposal the recipe" }),
-      verb('account site recipe decline', { summary: "turn a ferret's proposal down; the recipe stays as it is" }),
-      verb('account factor ls', { summary: 'list the 2FA keys (one account, or all), each with its tf_ id' }),
+      verb('account site recipe clear', {
+        summary: 'remove the recipe',
+        args: [{ name: 'sign-in', help: 'the sign-in whose recipe to clear' }],
+      }),
+      verb('account site recipe approve', {
+        summary: "make a ferret's proposal the recipe",
+        args: [
+          { name: 'sign-in', help: 'the sign-in whose recipe to approve' },
+          { name: 'proposal-id', help: 'the proposal to approve' },
+        ],
+      }),
+      verb('account site recipe decline', {
+        summary: "turn a ferret's proposal down; the recipe stays as it is",
+        args: [
+          { name: 'sign-in', help: 'the sign-in whose recipe to decline' },
+          { name: 'proposal-id', help: 'the proposal to decline' },
+        ],
+      }),
+      verb('account factor ls', {
+        summary: 'list the 2FA keys (one account, or all), each with its tf_ id',
+        args: [{ name: 'account', help: 'the account whose 2FA keys to list', optional: true }],
+        options: [{ flag: '--json', help: 'print the keys as JSON instead' }],
+      }),
       verb('account factor add', {
         summary: 'add a 2FA key: --totp saves a seed (confirmed with your passkey), the others hold no value',
+        args: [{ name: 'account', help: 'the account the 2FA key belongs to' }],
+        options: [
+          {
+            flag: '--totp',
+            help: 'a TOTP key Ferretry makes codes from (typed at a hidden prompt, then confirmed in the app)',
+          },
+          { flag: '--authenticator', help: 'a TOTP app only you hold: Ferretry stores no seed, you type its codes' },
+          { flag: '--sms', help: 'a code by text message' },
+          { flag: '--ends-with <digits>', help: 'with --sms: the last 2 to 4 digits of the number' },
+          { flag: '--email', help: 'a code by email' },
+          { flag: '--to <address>', help: 'with --email: where it arrives, as it is shown' },
+          { flag: '--push', help: 'an approval on your phone' },
+          { flag: '--app <name>', help: 'with --push: okta-verify, microsoft-authenticator, google, duo, other' },
+          { flag: '--security-key', help: 'a hardware key you tap' },
+          { flag: '--label <text>', help: 'what you call it, e.g. "Authy backup" (required, except with --totp)' },
+          {
+            flag: '-s, --session <id>',
+            help: "with --totp: the session whose card in the app's Inbox confirms it (defaults to the current session; at your own terminal, your most recently active one)",
+          },
+          { flag: '--i-understand-totp', help: 'with --totp: skip the typed "yes" after the 2FA warning' },
+        ],
       }),
       verb('account factor rm', {
         summary: 'remove a 2FA key; for one whose seed Ferretry holds, the seed goes with it',
+        args: [
+          { name: 'account', help: 'the account the 2FA key belongs to' },
+          { name: 'factor', help: 'the 2FA key to remove' },
+        ],
+        options: [{ flag: '-y, --yes', help: 'do not ask first' }],
       }),
     ],
   },

@@ -66,8 +66,24 @@ export default definePlugin({
     cli: [
       verb('voice [text...]', {
         summary: 'clean up dictated text through the enhancement provider (same as voice enhance)',
+        args: [{ name: 'text', help: 'the text to clean up', variadic: true }],
+        options: [
+          { flag: '-m, --model <model>', help: 'the enhancement model to use instead of the provider default' },
+          { flag: '-t, --term <term>', help: 'a proper noun the model keeps mangling; repeat for each (default: [])' },
+          { flag: '-c, --context <text>', help: 'what the dictation is about, to disambiguate homophones' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
       }),
-      verb('voice enhance', { summary: 'clean up dictated text — punctuation, casing and proper nouns' }),
+      verb('voice enhance', {
+        summary: 'clean up dictated text — punctuation, casing and proper nouns',
+        args: [{ name: 'text', help: 'the text to clean up', variadic: true }],
+        options: [
+          { flag: '-m, --model <model>', help: 'the enhancement model to use instead of the provider default' },
+          { flag: '-t, --term <term>', help: 'a proper noun the model keeps mangling; repeat for each (default: [])' },
+          { flag: '-c, --context <text>', help: 'what the dictation is about, to disambiguate homophones' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
     ],
   },
 

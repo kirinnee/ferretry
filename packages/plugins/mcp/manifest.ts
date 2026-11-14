@@ -174,13 +174,70 @@ export default definePlugin({
     cli: [
       verb('mcp serve', {
         summary: 'serve the terminal and browser tools over MCP on stdin/stdout, as this agent session',
+        args: [],
       }),
-      verb('mcp ls', { summary: 'list the MCP servers a ferret sees, by scope, with approval and sign-in' }),
-      verb('mcp check', { summary: 'connect to one MCP server and list its tools, by name or id' }),
-      verb('mcp add', { summary: 'add an MCP server item' }),
-      verb('mcp show', { summary: 'one MCP server item and where it is used' }),
-      verb('mcp edit', { summary: 'change an MCP server item; every profile and runtime that uses it changes too' }),
-      verb('mcp rm', { summary: 'remove an MCP server item' }),
+      verb('mcp ls', {
+        summary: 'list the MCP servers a ferret sees, by scope, with approval and sign-in',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('mcp check', {
+        summary: 'connect to one MCP server and list its tools, by name or id',
+        args: [{ name: 'server', help: 'the MCP server to check; every one it can see when left out' }],
+        options: [
+          {
+            flag: '--session <id>',
+            help: 'check it as this ferret reaches it (default: this one, when run inside one)',
+          },
+          { flag: '--machine', help: 'pick the server from the whole machine instead of one ferret' },
+          {
+            flag: '--scope <scope>',
+            help: 'when the name is declared twice: ferretry, component, user, project or local',
+          },
+          { flag: '--json', help: 'print the protocol result' },
+        ],
+      }),
+      verb('mcp add', {
+        summary: 'add an MCP server item',
+        args: [{ name: 'name', help: 'the MCP server item’s name' }],
+        options: [
+          { flag: '--command <command>', help: 'MCP: the command to run' },
+          { flag: '--arg <arg>', help: 'MCP: one argument; repeat it' },
+          { flag: '--url <url>', help: 'MCP: the server address, instead of a command' },
+          { flag: '--env <NAME=value>', help: 'MCP or settings: one environment variable; repeat it' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('mcp show', {
+        summary: 'one MCP server item and where it is used',
+        args: [{ name: 'name', help: 'the MCP server item’s name' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('mcp edit', {
+        summary: 'change an MCP server item; every profile and runtime that uses it changes too',
+        args: [{ name: 'name', help: 'the MCP server item’s name' }],
+        options: [
+          { flag: '--command <command>', help: 'MCP: the command to run' },
+          { flag: '--arg <arg>', help: 'MCP: one argument; repeat it' },
+          { flag: '--url <url>', help: 'MCP: the server address, instead of a command' },
+          { flag: '--env <NAME=value>', help: 'MCP or settings: one environment variable; repeat it' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('mcp rm', {
+        summary: 'remove an MCP server item',
+        args: [{ name: 'name', help: 'the MCP server item’s name' }],
+        options: [
+          { flag: '--remove-from-profiles', help: 'take it out of every profile that has it first' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
     ],
   },
 
