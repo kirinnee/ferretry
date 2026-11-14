@@ -55,11 +55,15 @@ async function moveToken(
 
 export const gateStep: Step = {
   id: 'gate',
-  title: 'Gate (admin and warden tokens moved unopened; the audit log)',
+  title: 'Gate (admin and warden tokens moved unopened; the general audit log; the kept-bucket history is left behind)',
   owner: ['core-gate'],
   reads: [...V4_AUDIT_FILES],
   sealed: [V4_ADMIN_TOKEN, V4_WARDEN_TOKEN],
   notCarried: [
+    {
+      what: 'the Gate kept-bucket audit history (audit-kept.jsonl, audit-kept.1.jsonl)',
+      why: 'owner ruling !A516: left behind, so it is not promised in v5; the originals stay in the v4 home. Until the converter stops reading those two files, their lines may still be merged into audit.jsonl',
+    },
     {
       what: 'an audit line v4 could not read (torn, hand-edited or of an unknown event)',
       why: 'v4 counted it as unreadable and never showed it; skipped and counted, never quoted',
@@ -123,7 +127,10 @@ export const gateStep: Step = {
       }
 
       const kept: KeptItem[] = [
-        { what: 'audit records', count: records.length },
+        {
+          what: 'audit records (the Gate kept-bucket history is left behind by owner ruling, see not carried)',
+          count: records.length,
+        },
         { what: 'tokens (moved unopened)', count: sealed.length },
       ];
       return { ...base, status: 'converted', ...(notes.length > 0 ? { note: notes.join('; ') } : {}), kept, sealed };

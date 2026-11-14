@@ -21,11 +21,15 @@ const Manifest = z.object({
 
 export const harnessHomesStep: Step = {
   id: 'harness-homes',
-  title: 'Harness folders (Claude Code / Codex conversations, for resume)',
+  title: 'Harness folders (copied as opaque files; chat history is left behind and NOT usable in v5)',
   owner: ['plugin-claude-code', 'plugin-codex'],
   reads: ['fleet/ids.json', 'fleet/manifest.json', 'fleet/homes/', 'fleet/shared/<claude|codex>/'],
   sealed: [],
   notCarried: [
+    {
+      what: 'chat history (old conversations and transcripts) as usable conversations',
+      why: 'owner ruling !A516: left behind. The folders are copied as opaque files and never opened or linked into v5, so no conversation resumes from them; the originals stay in the v4 home',
+    },
     {
       what: 'all harness-home symlinks (including pooled history and sign-in links)',
       why: 'agent-homes declarations specify no v5 link policy; no link is read, followed or re-made; Logins owns sign-ins',
@@ -144,10 +148,17 @@ export const harnessHomesStep: Step = {
       return {
         ...base,
         status: 'converted' as const,
+        note: 'chat history is left behind: these folders are copied as opaque files only and no conversation resumes from them in v5',
         sealed,
         kept: [
-          { what: 'opaque harness files copied without opening', count: sealed.length },
-          { what: 'runtime homes copied', count: carriedHomes },
+          {
+            what: 'opaque harness files copied unopened (kept as files only, not usable conversations)',
+            count: sealed.length,
+          },
+          {
+            what: 'runtime homes copied as opaque folders (no conversation resumes from them in v5)',
+            count: carriedHomes,
+          },
           { what: 'links omitted (no v5 policy)', count: links },
           { what: 'homes omitted (no safe harness mapping)', count: omittedHomes },
         ],

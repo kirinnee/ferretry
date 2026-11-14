@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import type { LoginHarness } from './steps/preview-hold.ts';
 import { type LockProbe, preflight } from './preflight.ts';
 import type { ConversionReport, StepReport } from './report.ts';
+import { LEFT_BEHIND } from './left-behind.ts';
 import { type EnforcedConversion, type HostFacts, STEPS, type Step, type StepContext } from './steps/index.ts';
 import { LoginKeyHold } from './steps/login-keys.ts';
 import { type V4ConfigOverrides, v4Paths } from './v4/layout.ts';
@@ -208,6 +209,7 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
       dryRun: options.dryRun,
       steps: reports,
       complete: finished && !options.dryRun,
+      leftBehind: LEFT_BEHIND,
     },
   };
 }

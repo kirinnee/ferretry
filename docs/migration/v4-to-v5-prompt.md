@@ -38,6 +38,23 @@ a stop: tell the owner what it printed, and never improvise around it.** The exi
   carries credentials or names another machine makes `preflight` refuse (unset it for the switch); a query or fragment on a
   loopback address is dropped, never copied.
 
+## What is left behind (tell the owner before they confirm anything)
+
+The owner chose **not** to carry these over (decision !A516, "Leave them"). Read this list to the owner before the first
+decision below, and again in your final report. `preflight`, `backup` (until the owner says yes), `verify` and the
+converter's summary print the same list from one file, `migration/v4-to-v5/left-behind.txt`.
+
+- chat history (old conversations and transcripts)
+- agents' browser sign-ins (the agent browser profile)
+- named agent terminals
+- the Warden machine agenda item
+- the default routing prompt before your own routing words (v4 rendered it from its model catalogs; models-guide routing)
+- some security history (Gate kept-bucket and grant audit history)
+
+**Nothing is deleted.** v4's home is kept untouched at `<home>-before-<stamp>` (the backup; `preflight` prints the exact
+path), so the owner can look back at any of it. To look: open that folder, or copy it and run v4's `fy` against the copy
+(`FY_HOME=<copy>`). Do not start v4 on the original; it must stay as it is for a rollback.
+
 ## Decisions the owner makes
 
 Ask these first, one at a time, and wait.
@@ -112,7 +129,7 @@ Tell the owner this list before `start`, and say which items the converter summa
 | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Every ferret, live and archived: id, callsign, title, lineage (parent/child, pack), project, runtime, start options, pins, history | **Kept**            | converted into Ferrets                                                                                                                                                                                                                                                                       |
 | Running ferrets                                                                                                                    | **Kept, same pane** | v5 attaches to each live tmux pane by its handle (no new window, no lost turn). A ferret whose pane is gone is resumed from its harness conversation id. At its next idle turn, an attached harness is restarted in that same pane with resume, so its hooks and tools are v5 (no lost turn) |
-| Harness conversations (Claude Code / Codex transcripts, for resume)                                                                | **Kept**            | moved whole, never parsed                                                                                                                                                                                                                                                                    |
+| Harness conversations (Claude Code / Codex transcripts, chat history)                                                              | **Left behind**     | not carried (see the left-behind list above)                                                                                                                                                                                                                                                 |
 | Message queue, shared drafts (chat and ask replies), turns, attachments, renders                                                   | **Kept**            | converted into Conversation                                                                                                                                                                                                                                                                  |
 | Board: cards, lanes, links, dependencies, history; projects                                                                        | **Kept**            | converted                                                                                                                                                                                                                                                                                    |
 | Agenda: asks, answers, notices                                                                                                     | **Kept**            | converted into Asks and Agenda                                                                                                                                                                                                                                                               |
@@ -121,7 +138,7 @@ Tell the owner this list before `start`, and say which items the converter summa
 | Settings, layouts, runtimes, profiles, logins                                                                                      | **Kept**            | YAML split per v5 owner; comments kept                                                                                                                                                                                                                                                       |
 | Changes you had confirmed that loosen a setting (e.g. skipping agent permissions, a raised cap)                                    | **Kept**            | your v4 confirmations move with them, so v5 does not ask again. If v4 was still waiting for you to confirm a change when it stopped, none are carried and v5 asks again (the summary names the file)                                                                                         |
 | MCP server sign-ins (OAuth)                                                                                                        | **Kept**            | the sign-in records move, and the sealed refresh tokens move byte for byte with the vault key that opens them                                                                                                                                                                                |
-| Security log (pairings, grants, secrets used)                                                                                      | **Kept**            | the v4 logs are merged into one v5 log, names and ids only                                                                                                                                                                                                                                   |
+| Security log (pairings, grants, secrets used)                                                                                      | **Kept, in part**   | the v4 logs are merged into one v5 log, names and ids only, EXCEPT the Gate kept-bucket and grant audit history, which is left behind                                                                                                                                                        |
 | Harness sign-ins                                                                                                                   | **Kept**            | the sign-in folders move whole; never read                                                                                                                                                                                                                                                   |
 | Secrets                                                                                                                            | **Kept**            | the sealed vault and its key move byte for byte; no existing value is ever opened. A key v4 had saved in plain text in a login file is sealed into the vault as `LOGIN_<ID>_<VAR>` and the login file names it with `${secret:…}` (listed by name in the summary)                            |
 | Paired phones and browsers, passkeys, unlock settings, push                                                                        | **Kept**            | the daemon identity, device public keys, grants, passkey ids and push keys move as they are. See **Devices and passkeys** below                                                                                                                                                              |
@@ -193,7 +210,7 @@ that** and it checks that `fy` and `fyd` print 4.291.x and finishes (starts v4, 
 
 - **Keep the backup.** `<home>-before-<stamp>` stays until **the owner** deletes it. Never delete it yourself. v5 fences
   every `<home>-before-*` folder and never reads it. It holds the old vault, key and sign-ins, so it stays `0700`.
-- Report to the owner: the converter's summary, the `verify` table, the commit in `$NOTES` (`COMMIT`), and where the
+- Report to the owner: the converter's summary (it ends with the left-behind list and the path of the v4 home), repeat that list in plain words, the `verify` table, the commit in `$NOTES` (`COMMIT`), and where the
   backup, the report, the baseline folder and the notes are.
 - Do not delete `$SRC` until the owner says this machine is done.
 - **When all three machines are on v5**, the converter and its script are deleted from the repository

@@ -362,3 +362,11 @@ not read).
 ## Tests
 
 `bun test tests` (unit; temp folders only, never a real home).
+
+## What is left behind
+
+By owner ruling (!A516) six things are **not** carried: chat history, agents' browser sign-ins, named agent terminals, the
+Warden machine agenda item, the default routing prompt before your own routing words, and some security history (Gate
+kept-bucket and grant audit history). The list is one file, `left-behind.txt`: `migrate.sh` prints it (`preflight`,
+`backup` until the owner says yes, `verify`) and the converter prints and writes it (`leftBehind` in the report), each
+with the path where v4's home stays untouched.
