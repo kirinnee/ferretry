@@ -185,6 +185,7 @@ export default definePlugin({
         audit: { record: COMPACT_AT_CHANGED_AUDIT },
         ...ACK,
       }),
+      route('GET /v1/ferrets/:ferretId/hypermedia', { ...FERRET, ...READ, ...ACK }),
       route('PATCH /v1/ferrets/:ferretId/hypermedia', {
         ...FERRET,
         audit: { record: HYPERMEDIA_CHANGED_AUDIT },
