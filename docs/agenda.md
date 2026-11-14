@@ -714,7 +714,7 @@ a recent tail of complete entries, at most 8,192 JSON characters; an entry large
 the conversation route. These fields do not count toward the bounded own-content budget. Items and version snapshots
 stay schema-valid under the item transport bound regardless of how much conversation accumulates.
 
-`GET /v1/sessions/:sessionId/agenda/:id/conversation?index=0&offset=0` reads the full thread in bounded fragments.
+`GET /v1/ferrets/:ferretId/agenda/:id/conversation?index=0&offset=0` reads the full thread in bounded fragments.
 The response has `total`, `index`, `offset`, an optional `entry`, and an optional `next: { index, offset }`. Each fragment
 holds at most 16,384 UTF-16 code units of one entry's text; concatenate fragments of the same index verbatim. Follow
 `next` until absent. An empty thread has no entry. Cursors describe the current chronological thread: restart at zero
@@ -839,7 +839,7 @@ A busy disk delays that session's next change while other routes and streams kee
 the request without falling back to disk IO on the main thread. The worker closes connections after each operation
 and ends after a minute idle. Both ends cache at most one immutable read version for fragment paging.
 
-`GET /v1/sessions/:id/agenda/:itemId/versions` lists them (and this device's last seen version),
+`GET /v1/ferrets/:ferretId/agenda/:id/versions` lists them (and this device's last seen version),
 `GET …/versions/:version` fetches any one in full, and `PUT …/seen` records that this device opened the item at a
 version. The mark is per device (`agenda-seen.json`, `{ deviceId: { itemId: version } }`), monotonic (a device that
 has seen a later version keeps it), and refused for a version the item does not have.
@@ -1658,7 +1658,7 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
     toast does.
   - **Undo** brings the card back at once (the owner `unsnooze`, "Back to my list"), opens it, and puts the words back
     in **that card's** composer — once, and only when the ferret has not read the message: the message is taken out of
-    the session queue by the route the chat uses to cancel a waiting message (`DELETE /v1/sessions/:id/queue/:messageId`;
+    the session queue by the route the chat uses to cancel a waiting message (`DELETE /v1/ferrets/:ferretId/queue/:messageId`;
     a message still on this device is cancelled in the outbox). If the ferret already took it (the transport delivered
     it at once, or the queue answers 409/404) Undo only brings the card back and says so: "Back on your list — Zoe
     already read your reply." (words are never duplicated). If the queue cannot be reached the card still comes back
@@ -1822,8 +1822,8 @@ A bare **Got it** (or Done with no words) on an `info` item is never delivered: 
    file). It is due **10 seconds after the last card action**: every further action on that ferret's cards
    restarts the countdown, and the first one never waits more than **2 minutes**. The agenda says so:
    `replies: {pending, dueAt, heldForTurn?}` on every `GET` and `POST` of the agenda route
-   (`/v1/sessions/:id/agenda`). "Send now"
-   (`POST /v1/sessions/:id/agenda/replies`, `fy agenda send-now`) skips the countdown, never the empty-composer rule (step 3): with text in the composer nothing is typed and the answers stay held.
+   (`/v1/ferrets/:ferretId/agenda`). "Send now"
+   (`POST /v1/ferrets/:ferretId/agenda/replies`, `fy agenda send-now`) skips the countdown, never the empty-composer rule (step 3): with text in the composer nothing is typed and the answers stay held.
 2. **Waiting for the turn.** A due batch waits while the ferret's `turnState` is `working`, and later
    answers join it. It is looked at again every 5 seconds and goes once the turn ends. Past 15 minutes it
    goes through the ordinary send path anyway, which queues natively. A state that cannot be read
@@ -1977,14 +1977,14 @@ reads every item; the CLI checks the feature first and says the daemon needs an 
 
 ### Lists and complete items
 
-`GET /v1/sessions/:sessionId/agenda` and `GET /v1/machine/agenda` return
+`GET /v1/ferrets/:ferretId/agenda` and `GET /v1/machine/agenda` return
 `AgendaListSnapshot`: active items (including resting and snoozed ones) in full, and every addressed item as a
 `projection: header` record. A header keeps its id, title, kind, author, resolution time and disposition,
 conversation count, card and reference links, the short reason searched by Find, and the outcome metadata the Resolved rows display. The document's
 tabs, revisions, history, conversation text and full picture travel only on an item read. Stored ledgers and mutation
 responses retain the full `AgendaSnapshot` shape. List readers also accept full records from older daemons.
 
-`GET /v1/sessions/:sessionId/agenda/:id` returns one complete active or addressed item, with the same operator
+`GET /v1/ferrets/:ferretId/agenda/:id` returns one complete active or addressed item, with the same operator
 minimum and caller policy as the session list. `GET /v1/machine/agenda/:id` does the same for a machine item and is
 owner-only, exactly as its list is. Both are no-store reads; an unknown item is a 404. The existing conversation
 cursor still reads words outside the item's bounded tail.

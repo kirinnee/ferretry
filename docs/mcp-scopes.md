@@ -56,11 +56,11 @@ transport's own text behind **Details**.
 
 ## Listing
 
-| Route                                     | Capability / axis  | Answers                                |
-| ----------------------------------------- | ------------------ | -------------------------------------- |
-| `GET /v1/mcp`                             | `fleet` / use      | every declaration on the machine, once |
-| `GET /v1/sessions/:sessionId/mcp/servers` | `filesystem` / use | exactly what that ferret sees          |
-| `POST /v1/mcp/check`                      | `terminal` / use   | one server checked (below)             |
+| Route                                   | Capability / axis  | Answers                                |
+| --------------------------------------- | ------------------ | -------------------------------------- |
+| `GET /v1/mcp`                           | `fleet` / use      | every declaration on the machine, once |
+| `GET /v1/ferrets/:ferretId/mcp/servers` | `filesystem` / use | exactly what that ferret sees          |
+| `POST /v1/mcp/check`                    | `terminal` / use   | one server checked (below)             |
 
 A row carries the server's name, scope, harness, transport (`stdio`, `http`, `sse`), the file that
 declares it, the runtimes that see it (each with its approval, for a project server), what it is

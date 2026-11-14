@@ -197,15 +197,15 @@ redactor like every other page text. `fy browser page eval <name> <function> [--
 
 ## Routes
 
-| Route                                                     | Who                       | Session from                                                              |
-| --------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------- |
-| `POST /v1/agent/tools`                                    | an agent, on this machine | its session credential ONLY                                               |
-| `POST /v1/sessions/:sessionId/surfaces/terminals/tools`   | a person (CLI, app)       | the path; `terminal` grant                                                |
-| `POST /v1/sessions/:sessionId/surfaces/browser/tools`     | a person                  | the path; `browser` grant, plus `filesystem` for the [file tools](#files) |
-| `POST /v1/sessions/:sessionId/surfaces/terminals/control` | a person: control         | the path; `terminal` grant                                                |
-| `POST /v1/sessions/:sessionId/surfaces/browser/control`   | a person: control         | the path; `browser` grant                                                 |
-| `GET /v1/sessions/:sessionId/surfaces/terminals/control`  | a person: who drives what | the path; `terminal` grant                                                |
-| `GET /v1/sessions/:sessionId/surfaces/browser/control`    | a person: who drives what | the path; `browser` grant                                                 |
+| Route                                                   | Who                       | Session from                                                              |
+| ------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------- |
+| `POST /v1/agent/tools`                                  | an agent, on this machine | its session credential ONLY                                               |
+| `POST /v1/ferrets/:ferretId/surfaces/terminals/tools`   | a person (CLI, app)       | the path; `terminal` grant                                                |
+| `POST /v1/ferrets/:ferretId/surfaces/browser/tools`     | a person                  | the path; `browser` grant, plus `filesystem` for the [file tools](#files) |
+| `POST /v1/ferrets/:ferretId/surfaces/terminals/control` | a person: control         | the path; `terminal` grant                                                |
+| `POST /v1/ferrets/:ferretId/surfaces/browser/control`   | a person: control         | the path; `browser` grant                                                 |
+| `GET /v1/ferrets/:ferretId/surfaces/terminals/control`  | a person: who drives what | the path; `terminal` grant                                                |
+| `GET /v1/ferrets/:ferretId/surfaces/browser/control`    | a person: who drives what | the path; `browser` grant                                                 |
 
 A control request is `{ action: 'takeover' | 'handback' | 'handover', key }` and answers
 `SurfaceControlView { sessionId, driving[], takeovers[], handed[], opened[], asked[] }` for that kind.
@@ -499,7 +499,7 @@ call.
    store, read per call). The same switches also wrap every ordinary terminal, browser and filesystem
    route — HTTP and sockets — for an agent caller, so `files` is enforced on the session filesystem
    routes. A person is never asked. **The three [file tools](#files) need the `files` switch AS WELL AS
-   `browser`**; on a person's route `POST /v1/sessions/:id/surfaces/browser/tools` they additionally need the
+   `browser`**; on a person's route `POST /v1/ferrets/:ferretId/surfaces/browser/tools` they additionally need the
    `filesystem` grant on `use` ([grants.md](grants.md)), so a paired phone granted the browser cannot reach the host's
    disk through it. A caller whose grants cannot be read is refused; the owner at the machine is not governed.
 6. **Take over / hand back, per tab and per terminal.** While a person holds a surface, every agent tool
@@ -590,10 +590,10 @@ its own).
   warden's settings and "leave it alone", resource limits, the lessons settings, a session's Pack switch and a
   board's switch; answering a harness's own prompts (`permission`, `dialog`, `answer`, console keys, `attach`) and typing the owner's own composer draft into a pane;
   the agent browser's sign-in window, whose status is a credential; and the security log and grant history.
-  A person's own agent-tool routes (`/v1/sessions/:id/surfaces/*`) are person routes too: an agent uses
+  A person's own agent-tool routes (`/v1/ferrets/:ferretId/surfaces/*`) are person routes too: an agent uses
   `POST /v1/agent/tools`.
-- **Every session a ferret starts is its own child.** On its own credential or the admin token naming its session, `POST /v1/sessions` (`fy start`,
-  interactive included) and `POST /v1/pack/new` (`fy new`) take the parent from the credential: a body `parent`
+- **Every session a ferret starts is its own child.** On its own credential or the admin token naming its session, `POST /v1/ferrets` (`fy start`,
+  interactive included, and `fy new`) takes the parent from the credential: a body `parent`
   naming another session is `403 parent_mismatch`, and an absent one is filled in. So a ferret can never start a
   top-level session, and its sub-ferret limits and depth (and, for `fy new`, the Pack switch) always apply to
   what it starts ([pack-mode.md](pack-mode.md#limits)). A ferret may not give its start the Warden's own label
@@ -627,7 +627,7 @@ its own).
 
 ### Cutting a ferret off
 
-`fy session revoke-credential <session>` (`POST /v1/sessions/:sessionId/revoke-credential`, a **person** route)
+`fy session revoke-credential <session>` (`POST /v1/ferrets/:ferretId/revoke-credential`, a **person** route)
 revokes one session's credential at once. Its stored hash is erased on the session's own queue, so the value
 its pane holds names nobody from that moment: where its `fy`, its MCP server and its agent tools present their
 own credential (`fys_…`), they are refused as an unknown one (`401`; `fy` reports it and does not fall back to
@@ -671,7 +671,7 @@ names the home and never the file's contents; the rule is the same everywhere (`
 
 ### Reading a session's files
 
-`/v1/sessions/:id/fs`, `/fs/file`, `/fs/index`, `/fs/changes` and `/fs/diff` serve any caller, and an **agent** (its
+`/v1/ferrets/:ferretId/fs`, `/fs/file`, `/fs/index`, `/fs/changes` and `/fs/diff` serve any caller, and an **agent** (its
 own session credential, the admin token naming its session, a warden) is held to two rules a person is not:
 
 - **Its own tree.** A ferret reads its own session and the sub-ferrets it started, however deep (the lead reviews
@@ -696,7 +696,7 @@ session's files, a Warden session's included. A daemon that cannot resolve its s
 
 ### Starting a session
 
-A ferret's `POST /v1/sessions` and `fy new --cwd` (`POST /v1/pack/new`) are refused `403 state_home` when the
+A ferret's `POST /v1/ferrets` and `fy new --cwd` (the same route) are refused `403 state_home` when the
 working folder is inside the home, named there or reached through a link — a session's folder is what its agent
 reads freely, so a child started in `~/.ferretry` would hold the tokens. This is asked before the terminal gate,
 which a caller on loopback skips, and asked AGAIN of the canonical folder the start records and spawns in — by

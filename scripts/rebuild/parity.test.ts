@@ -158,7 +158,7 @@ test('extracts security descriptors, nested Commander flags, tools, UI, jobs and
   expect(result.exitCode, result.stderr.toString()).toBe(0);
   const rows = f.rows();
   const route = rows.find(row => row.what === 'GET /v1/sessions/:id/files')!;
-  expect(route.name5).toBe('GET /v1/ferrets/:id/files');
+  expect(route.name5).toBe('GET /v1/ferrets/:ferretId/files');
   expect(route.descriptor).toContain('minimum=operator; caller=person');
   expect(route.descriptor).toContain('capability={"capability":"filesystem","axis":"use"}');
   expect(route.descriptor).toContain('privilegedOnly=true; unlockExempt=true');

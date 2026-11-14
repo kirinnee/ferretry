@@ -130,7 +130,7 @@ This is contributor documentation, not user documentation. Features don't need t
 | Surface Type | One File Per                                  |
 | ------------ | --------------------------------------------- |
 | CLI          | Command or global flag (e.g., `fy --version`) |
-| API          | HTTP endpoint (e.g., `GET /v1/sessions/:id`)  |
+| API          | HTTP endpoint (e.g., `GET /v1/ferrets/:id`)   |
 | SDK          | Public method or function                     |
 | Event        | Event type (e.g., `session.started`)          |
 

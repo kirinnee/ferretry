@@ -236,17 +236,24 @@ function ownerOf(file: string, what = ''): string {
 }
 
 function renamed(what: string): string {
-  return what
-    .replace(/\/v1\/sessions(?=\/|\b)/g, '/v1/ferrets')
-    .replace(/^fy task\b/, 'fy card')
-    .replace(/^fy card status\b/, 'fy card progress')
-    .replace(/^fy (?:credentials?|login)\b/, 'fy login')
-    .replace(/^fy learning\b/, 'fy lesson')
-    .replace(/^fy harness update(?: \[harness\])?$/, 'fy harness {claude-code|codex} update')
-    .replace(/^fy migrate\b/, 'fy ferret move')
-    .replace(/^fy import conversations\b/, 'fy link')
-    .replace(/--ping\b/g, '--buzz')
-    .replace(/\btask_plan\b/g, 'card_plan');
+  return (
+    what
+      .replace(/\/v1\/sessions(?=\/|\b)/g, '/v1/ferrets')
+      // The ferret segment is `:ferretId` in every manifest route but Runtimes' two (`:id`), so the 5.0 column names what the
+      // manifest declares, not the v4 spelling (`:sessionId`, `:sid`).
+      .replace(/\/v1\/ferrets\/:(?:sessionId|sid|id)(?=\/|$)(\/runtime(?:-models)?$)?/, (_match, runtime?: string) =>
+        runtime === undefined ? '/v1/ferrets/:ferretId' : `/v1/ferrets/:id${runtime}`,
+      )
+      .replace(/^fy task\b/, 'fy card')
+      .replace(/^fy card status\b/, 'fy card progress')
+      .replace(/^fy (?:credentials?|login)\b/, 'fy login')
+      .replace(/^fy learning\b/, 'fy lesson')
+      .replace(/^fy harness update(?: \[harness\])?$/, 'fy harness {claude-code|codex} update')
+      .replace(/^fy migrate\b/, 'fy ferret move')
+      .replace(/^fy import conversations\b/, 'fy link')
+      .replace(/--ping\b/g, '--buzz')
+      .replace(/\btask_plan\b/g, 'card_plan')
+  );
 }
 /**
  * Owner decision !A466 (2026-11-08): the local skill copy is gone from 5.0, with the "from this machine" group of the Add

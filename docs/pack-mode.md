@@ -25,7 +25,7 @@ machine's switch and its depth) rather than nothing; a stored value still wins.
   sub-ferret of its own. A ferret at the deepest level is never told about a door it cannot open. A
   learning miner or a warden is never told; an adopted conversation (`fy new --continue`, Import) is a
   top-level ferret and is.
-- `PATCH /v1/sessions/:sessionId/pack {enabled}` (`operator`) switches one ferret. Like Hypermedia, a running
+- `PATCH /v1/ferrets/:ferretId/pack {enabled}` (`operator`) switches one ferret. Like Hypermedia, a running
   ferret is not re-instructed — the change is in its system prompt from its next launch, and the answer's
   `note` says so — but switching it **off** makes `fy new` refuse it `pack_off` at once.
 - Switching the machine off makes every `fy new` refuse `pack_off` at once; ferrets already running keep
@@ -249,7 +249,7 @@ call and no extra request:
 
 ## `fy new`
 
-`POST /v1/pack/new` — `operator`. `fy new` without `--continue` (with it, it still continues an existing
+`POST /v1/ferrets` — `operator` (`fy new` is Ferrets' verb, and the old `POST /v1/pack/new` route is gone: it answers `404`). `fy new` without `--continue` (with it, it still continues an existing
 conversation). Inside a ferret's pane the asking ferret becomes the parent. On its own credential (what its
 `fy` presents) the **daemon** reads the parent from the credential — a `--parent` naming another session is
 `403 parent_mismatch` — so nothing the agent's shell does can change it. With an older `fy` on the admin token,
@@ -362,7 +362,7 @@ failed, stalled or stopped. A plain `fy start` refused here answers `409 limit_r
 
 - A sub-ferret records `parent` (the session document's existing field) and inherits its parent's folder.
 - `fy wait <id>` blocks until it settles and **prints its result** — the `signal done` message, from
-  `GET /v1/sessions/:sessionId/result` (`--json` adds it as `result`).
+  `GET /v1/ferrets/:ferretId/result` (`--json` adds it as `result`).
 - A sub-ferret that signals done is stopped by that signal. One a wait settles on that is still running
   (a `--until-marker` wait) is stopped once its result is collected, unless the caller passes `--keep`.
 
@@ -382,7 +382,7 @@ ada      sonnet-5-5   running    &F767 Implement  #321 CI pending  [2m] route an
 cy       gpt-6.1-sol  ended 25m  &F768 Done       #320 merged      [25m] merged; nothing left
 ```
 
-- **One call.** `fy status --subtree [<id>]` asks `GET /v1/sessions/:sessionId/subtree` once (default: the calling
+- **One call.** `fy status --subtree [<id>]` asks `GET /v1/ferrets/:ferretId/subtree` once (default: the calling
   session; the owner outside a pane names an id). The daemon builds every row from what it already holds — the
   sessions registry, one read of the board's cards, the PR cache the board keeps, and the end of each
   descendant's outbox. It never calls GitHub per row, so fifty descendants cost one request.

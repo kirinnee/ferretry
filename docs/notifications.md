@@ -501,7 +501,7 @@ Bug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options
   Info › Runtime tab shows it as a row, and the sidebar / header marks (a to-do list icon) show it only
   while it is on.
 - **Flipping it from a ferret:** `fy notify agenda` reads the mode, `fy notify agenda on|off` switches it,
-  over `GET`/`PATCH /v1/sessions/:id/agenda-mode` (operator scope; no capability, like the Pack switch).
+  over `GET`/`PATCH /v1/ferrets/:ferretId/agenda-mode` (operator scope; no capability, like the Pack switch).
   `PATCH` answers `{ view, restartRequired, note }` like the Hypermedia and Pack switches: a running ferret
   reads its instructions once, at launch, so the change takes effect when the ferret next starts.
 - **The nudge follows the mode.** The turn-end check (the safety net for a reply that asks the owner to act
