@@ -48,6 +48,10 @@ async function boot(withTmux: boolean) {
   );
   const bin = join(home, 'bin');
   await mkdir(bin);
+  // The host's own inventory requires `bash` on the daemon's PATH (a lookup only, nothing launches it), so the
+  // temporary PATH carries one; tmux is then the only thing whose presence the two reports differ by.
+  await writeFile(join(bin, 'bash'), '#!/bin/sh\nexit 0\n');
+  await chmod(join(bin, 'bash'), 0o755);
   if (withTmux) {
     await writeFile(join(bin, 'tmux'), '#!/bin/sh\nexit 0\n');
     await chmod(join(bin, 'tmux'), 0o755);
