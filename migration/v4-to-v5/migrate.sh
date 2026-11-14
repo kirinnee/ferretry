@@ -520,19 +520,33 @@ quiet)
     { [ -r "${d}" ] && [ -x "${d}" ]; } || unreadable "cannot read ${d}"
   done
   found=0
+  queued=""
   for f in "${H}"/state/sessions/*/agenda-*.pending.json "${H}/fleet/.fy-fleet-apply.lock" "${H}"/fleet/shared/*/.migration-journal; do
     if [ -e "${f}" ]; then
+      # agenda-changes.pending.json is v4's QUEUE of agenda-change notices for a ferret's next turn end. It is queued
+      # state, not an in-flight write: a quiet window has no turns, so it can never drain, and starting v4 does not
+      # drain it. It is not "pending" here; convert carries it into v5's own queue (steps/agenda.ts).
+      case "${f}" in
+      */agenda-changes.pending.json)
+        queued="${queued} $(basename "$(dirname "${f}")")"
+        continue
+        ;;
+      esac
       printf '%s\n' "${f}"
       found=1
     fi
   done
+  if [ -n "${queued}" ]; then
+    say "📝 queued agenda changes (not in flight; convert carries them into v5) for:${queued}"
+    note_set QUEUED_AGENDA_CHANGES "${queued# }"
+  fi
   if [ "${found}" = 1 ]; then
     say "⚠️ FOUND: something is pending (names above). Starting v4 for a minute so it can finish, then stopping it again"
     mark quiet-retry
     orig_env "${v4_fy}" daemon start || fail "'fy daemon start' failed"
     sleep 60
     orig_env "${v4_fy}" daemon stop || fail "'fy daemon stop' failed"
-    fail "pending files were found. The quiet window is NOT established: ask the owner again and run quiet from the start"
+    fail "pending files were found. The quiet window is NOT established: ask the owner again and rerun quiet (the whole phase). If the same files are listed again, stop and tell the owner"
   fi
   mark quiet
   say "✅ quiet: no pane wrote, the v4 daemon is stopped, nothing is pending"

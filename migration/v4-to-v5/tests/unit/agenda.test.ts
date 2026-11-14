@@ -295,7 +295,6 @@ test('an unfinished v4 commit fails the step, naming the file and never its cont
   for (const [name, text] of [
     ['agenda-versions.pending.json', '{"FAKE-SECRET":1}'],
     ['agenda-history.jsonl.pending', '{"bytes":0,"FAKE-SECRET":1}'],
-    ['agenda-changes.pending.json', '[{"FAKE-SECRET":1}]'],
   ] as const) {
     await putText(`state/sessions/f1/${name}`, text);
     const report = await agendaStep.run(f.ctx(true));
