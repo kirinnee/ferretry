@@ -177,6 +177,30 @@ describe('runFy', () => {
     should(transport.sent.map(sent => sent.path)).deepEqual(['/v1/cards/a']);
   });
 
+  it('V-0429 hands a plugin verb the words as typed, `--` included, beside the parsed args and options', async () => {
+    const manifest = definePlugin({
+      ...boardManifest,
+      actions: { ...boardManifest.actions, cli: [verb('card show')] },
+    });
+    const heard: (readonly string[] | undefined)[] = [];
+    const half = implementCli(manifest, {
+      build: () => ({
+        verbs: {
+          'card show': async invocation => {
+            heard.push(invocation.words);
+            return 0;
+          },
+        },
+      }),
+    });
+    const { world } = fakeWorld({
+      registry: registryOf(entry(manifest, 'h-board', half)),
+      inventory: inventoryOf({ id: 'board', contract: 'h-board' }),
+    });
+    await runFy(['card', 'show', '--with', 'A', 'B', '--', 'sh', '-c', 'exit 0'], world);
+    should(heard).deepEqual([['--with', 'A', 'B', '--', 'sh', '-c', 'exit 0']]);
+  });
+
   it('S58 --as-owner inside a pane prints its stderr line before acting', async () => {
     const manifest = definePlugin({ ...boardManifest, actions: { ...boardManifest.actions, cli: [verb('board')] } });
     const half = implementCli(manifest, {
