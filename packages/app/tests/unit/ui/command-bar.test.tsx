@@ -91,6 +91,31 @@ describe('the command bar', () => {
     await view.unmount();
   });
 
+  it('names a machine once: no subtitle that repeats the title, one only for an owner’s own label', () => {
+    const base = {
+      deviceId: 'dev',
+      address: 'http://127.0.0.1:40245',
+      carriers: [] as unknown[],
+      pairedAt: 1,
+      lastSelectedAt: 1,
+    };
+    const source = placeSource({
+      daemons: [
+        { ...base, daemon: 'a', machine: 'workshop-host' },
+        { ...base, daemon: 'b', machine: 'attic-host', label: 'Attic' },
+      ],
+      daemon: undefined,
+      screens: [],
+      routes: routeTable([]),
+      navigate: () => {},
+    });
+    const entries = commandBarResults([source], '').results.filter(entry => entry.id.startsWith('daemon-'));
+    expect(entries.map(entry => [entry.label, entry.description])).toEqual([
+      ['workshop-host', undefined],
+      ['Attic', 'attic-host'],
+    ]);
+  });
+
   it('K5: when no source has anything at rest it says so, instead of a blank panel', async () => {
     const view = await mount(<CommandBar open focusSignal={1} onClose={() => {}} sources={[]} />);
     expect(document.body.querySelectorAll('[role="option"]')).toHaveLength(0);
