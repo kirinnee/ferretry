@@ -223,11 +223,13 @@ export const MINTED_REPLY_HEADERS: readonly string[] = [
 ];
 
 /**
- * A reply's body as the Vault sanitized it, never the stranger's own bytes. `text` is the whole (bounded) body;
- * `events` is an event stream as COMPLETE masked events, one string each (an event ends with its blank line), which the
- * caller reads until it has what it needs and then cancels. `dropped` is the fail-closed answer: the Vault could not be
- * sure it had masked the credential (binary, compressed or undecodable bytes, a type that is not text, a body past the
- * bound), so it keeps the body and says why in a sentence of its own.
+ * A reply's body as the Vault sanitized it, never the stranger's own bytes. Only a body the Vault can PARSE is
+ * returned: `text` is one JSON document, parsed in the Vault with every string checked (a string any decoded form of which
+ * holds the value is replaced whole) and written back; `events` is an event stream as COMPLETE rebuilt events, one string
+ * each (an event ends with its blank line), whose `data` is parsed and checked the same way, which the caller reads until it
+ * has what it needs and then cancels. `dropped` is the fail-closed answer: the body is not JSON (HTML, XML, plain text,
+ * binary, compressed or undecodable bytes) or passed a size or depth bound, so the Vault keeps it and says why in a
+ * sentence of its own.
  */
 export type MintedBody =
   | { readonly kind: 'text'; readonly text: string }
@@ -237,9 +239,10 @@ export type MintedBody =
 /**
  * What a minted exchange answered. A `response` is REQUEST-SCOPED DATA built inside the Vault, the holder of the
  * credential that was sent: the status, a masked `statusText`, the allowlisted headers ({@link MINTED_REPLY_HEADERS}) with
- * names and values masked, and a {@link MintedBody} masked against the value AS SENT in the forms it can be echoed in
- * (literal, JSON-escaped, URL-encoded, base64, base64url, hex), across chunk boundaries and after a JSON parse. It is
- * still a stranger's text, so a caller scrubs it as it scrubs any server's words. No branch carries the request it
+ * values checked, and a {@link MintedBody} parsed and checked against the value AS SENT: each string is read in every
+ * form the Vault can decode (URI, HTML entity, backslash, hex, base64 and base64url) and replaced whole if any holds the
+ * value. A value a server split across two strings is out of scope. It is still a stranger's text, so a caller scrubs it
+ * as it scrubs any server's words. No branch carries the request it
  * built. `unreachable.certificate` says the failure was a certificate or TLS refusal.
  */
 export type MintedExchangeOutcome =

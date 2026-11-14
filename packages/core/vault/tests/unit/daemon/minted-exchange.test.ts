@@ -57,7 +57,7 @@ async function world(echo: boolean | Reply = false) {
       if (typeof echo === 'function') return echo(header, url);
       return echo
         ? new Response(`{"echo":"${header}"}`, { headers: { 'x-echo': header, 'content-type': 'application/json' } })
-        : new Response('{"ok":true}');
+        : new Response('{"ok":true}', { headers: { 'content-type': 'application/json' } });
     },
   });
   hosts.push(host);
@@ -244,7 +244,7 @@ describe('the reply is built inside the Vault and carries the value in no spelli
   const b64 = (token: string, lead: number) => Buffer.from(`${'x'.repeat(lead)}${token}tail`).toString('base64');
 
   const forms: Record<string, (token: string) => string> = {
-    literal: token => token,
+    'literal (quotes escaped, as JSON requires)': token => token.replaceAll('"', '\\"'),
     'JSON-escaped (quotes and \\/)': token => JSON.stringify(token).slice(1, -1).replaceAll('/', '\\/'),
     'all \\uXXXX': token => [...token].map(char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`).join(''),
     'mixed escapes': mix,
@@ -341,8 +341,8 @@ describe('the reply is built inside the Vault and carries the value in no spelli
     await of('mcp').put(ACCESS, DEMO);
     const outcome = await of('mcp').fetchMinted?.(ACCESS, exchange());
     if (outcome?.kind !== 'response') throw new Error('no response');
-    expect(outcome.statusText).toBe('Nope [redacted]');
-    expect(outcome.headers['www-authenticate']).toBe('Bearer realm="[redacted]"');
+    expect(outcome.statusText).toBe('[redacted]');
+    expect(outcome.headers['www-authenticate']).toBe('[redacted]');
     expect(Object.keys(outcome.headers).sort()).toEqual(['content-type', 'www-authenticate']);
     expect(await everything(outcome)).not.toContain(DEMO);
   });
@@ -371,7 +371,7 @@ describe('the reply is built inside the Vault and carries the value in no spelli
         'bad utf-8',
         new Response(new Uint8Array([0xff, 0xfe, 0xfd]), { headers: { 'content-type': 'application/json' } }),
       ],
-      ['other charset', new Response('x', { headers: { 'content-type': 'text/plain; charset=utf-16' } })],
+      ['other charset', new Response('x', { headers: { 'content-type': 'application/json; charset=utf-16' } })],
       ['no type', new Response(new Uint8Array([65]), { headers: {} })],
     ];
     for (const [label, reply] of cases) {
@@ -387,5 +387,224 @@ describe('the reply is built inside the Vault and carries the value in no spelli
     await of('mcp').put(ACCESS, DEMO);
     const big = await of('mcp').fetchMinted?.(ACCESS, { ...exchange(), maxBodyBytes: 100 });
     expect(big?.kind === 'response' && big.body.kind).toBe('dropped');
+  });
+});
+
+describe('decode, check, drop: what the reply says is parsed in the Vault and a string that reads as the value goes whole', () => {
+  const TOKEN = 'FAKE/MCP+TOKEN"0123456789';
+  const MARK = '[redacted]';
+  const sent = (bearer: string) => bearer.replace(/^Bearer /u, '');
+  const jsonReply = (body: string, type = 'application/json'): Response =>
+    new Response(body, { headers: { 'content-type': type } });
+  const hexOf = (text: string) => Buffer.from(text).toString('hex');
+  /** Alternating upper and lower case. */
+  const mixedHex = (text: string) =>
+    [...hexOf(text)].map((char, index) => (index % 2 === 0 ? char.toUpperCase() : char)).join('');
+  /** Folded the way a mail client folds base64: a line break (or a space) every eight characters. */
+  const folded = (text: string, glue: string) => (text.match(/.{1,8}/gu) ?? []).join(glue);
+  const b64 = (token: string) => Buffer.from(`id=${token};`).toString('base64');
+  const entity = (token: string, kind: 'hex' | 'dec' | 'named' | 'mixed') =>
+    [...token]
+      .map((char, index) => {
+        const code = char.charCodeAt(0);
+        const named: Record<string, string> = { '/': '&sol;', '+': '&plus;', '"': '&quot;', '-': '&hyphen;' };
+        if (kind === 'hex') return `&#x${code.toString(16)};`;
+        if (kind === 'dec') return `&#${code};`;
+        if (kind === 'named') return named[char] ?? char;
+        return index % 3 === 0 ? `&#X${code.toString(16).toUpperCase()};` : (named[char] ?? char);
+      })
+      .join('');
+
+  /** `token` with only some bytes percent-escaped, in a mix of hex-digit cases. */
+  const partialPercent = (token: string) =>
+    token
+      .replaceAll('/', '%2f')
+      .replaceAll('+', '%2B')
+      .replaceAll('"', '%22')
+      .replaceAll('-', '%2d')
+      .replace('0123', '%30%31%32%33');
+  /** `%xX`: one digit of each escape upper, the other lower. */
+  const crossCase = (token: string) =>
+    [...token]
+      .map((char, index) =>
+        index % 2 === 0
+          ? `%${char
+              .charCodeAt(0)
+              .toString(16)
+              .padStart(2, '0')
+              .replace(/.$/u, d => d.toUpperCase())}`
+          : char,
+      )
+      .join('');
+
+  const spellings: Record<string, (token: string) => string> = {
+    'partial percent-encoding': partialPercent,
+    'mixed-case %xX': crossCase,
+    'mixed-case hex': mixedHex,
+    'whitespace-folded base64 (newlines)': token => folded(b64(token), '\n'),
+    'whitespace-folded base64 (spaces)': token => folded(b64(token), ' '),
+    'whitespace-folded base64url': token => folded(b64(token).replaceAll('+', '-').replaceAll('/', '_'), '\n'),
+    'HTML entities (hex)': token => entity(token, 'hex'),
+    'HTML entities (decimal)': token => entity(token, 'dec'),
+    'HTML entities (named)': token => entity(token, 'named'),
+    'HTML entities (mixed, upper X)': token => entity(token, 'mixed'),
+    'double-encoded': token => encodeURIComponent(encodeURIComponent(token)),
+    'base64 of a percent-encoding': token => Buffer.from(encodeURIComponent(token)).toString('base64'),
+  };
+
+  for (const [name, spell] of Object.entries(spellings))
+    test(`a string that holds the value ${name} is replaced whole, in a value, a key and a nested array`, async () => {
+      const { of } = await world(bearer =>
+        jsonReply(
+          JSON.stringify({
+            [`k ${spell(sent(bearer))}`]: { deep: [`before ${spell(sent(bearer))} after`] },
+            keep: 'an ordinary string',
+            count: 3,
+          }),
+        ),
+      );
+      await of('mcp').put(ACCESS, TOKEN);
+
+      const outcome = await of('mcp').fetchMinted?.(ACCESS, exchange());
+      if (outcome === undefined) throw new Error('no exchange');
+      const body = await text(outcome);
+
+      expect(body).toBe(JSON.stringify({ [MARK]: { deep: [MARK] }, keep: 'an ordinary string', count: 3 }));
+    });
+
+  test('statusText and every kept header are checked the same way, and only the allowlist is kept', async () => {
+    const { of } = await world(
+      bearer =>
+        new Response('{}', {
+          statusText: `Nope ${partialPercent(sent(bearer))}`,
+          headers: {
+            'content-type': 'application/json',
+            'www-authenticate': `Bearer realm="${entity(sent(bearer), 'dec')}"`,
+            'mcp-session-id': folded(b64(sent(bearer)), ' '),
+            'retry-after': '7',
+            'x-token-echo': sent(bearer),
+          },
+        }),
+    );
+    await of('mcp').put(ACCESS, TOKEN);
+    const outcome = await of('mcp').fetchMinted?.(ACCESS, exchange());
+    if (outcome?.kind !== 'response') throw new Error('no response');
+    expect(outcome.statusText).toBe(MARK);
+    expect(outcome.headers).toEqual({
+      'content-type': 'application/json',
+      'www-authenticate': MARK,
+      'mcp-session-id': MARK,
+      'retry-after': '7',
+    });
+  });
+
+  test('an event stream: data is parsed as JSON and checked; event and id are checked; a comment and an unknown field are dropped', async () => {
+    const { of } = await world(bearer => {
+      const echo = crossCase(sent(bearer));
+      return jsonReply(
+        `: ${sent(bearer)}\nevent: ${echo}\nid: 7\nx-extra: ${sent(bearer)}\nretry: 1500\ndata: {"t":"${echo}","n":1}\n\nevent: message\ndata: not json ${entity(sent(bearer), 'hex')}\n\n`,
+        'text/event-stream',
+      );
+    });
+    await of('mcp').put(ACCESS, TOKEN);
+    const outcome = await of('mcp').fetchMinted?.(ACCESS, exchange());
+    expect(await text(outcome as MintedExchangeOutcome)).toBe(
+      `event: ${MARK}\nid: 7\nretry: 1500\ndata: {"t":"${MARK}","n":1}\n\nevent: message\ndata: ${MARK}\n\n`,
+    );
+  });
+
+  test('a string that only looks a little like the value, and ordinary text, pass untouched', async () => {
+    const { of } = await world(() =>
+      jsonReply(
+        JSON.stringify({
+          a: 'FAKE/MCP+TOKEN',
+          b: 'Zm9vYmFy',
+          c: '20260101',
+          d: 'a%20b &amp; c',
+          e: 'application/json',
+        }),
+      ),
+    );
+    await of('mcp').put(ACCESS, TOKEN);
+    const body = await text((await of('mcp').fetchMinted?.(ACCESS, exchange())) as MintedExchangeOutcome);
+    expect(JSON.parse(body)).toEqual({
+      a: 'FAKE/MCP+TOKEN',
+      b: 'Zm9vYmFy',
+      c: '20260101',
+      d: 'a%20b &amp; c',
+      e: 'application/json',
+    });
+  });
+
+  test('GAP (declared): a value split across TWO JSON strings is not found, because no one string holds it', async () => {
+    const { of } = await world(bearer => {
+      const value = sent(bearer);
+      return jsonReply(JSON.stringify({ first: value.slice(0, 12), second: value.slice(12) }));
+    });
+    await of('mcp').put(ACCESS, TOKEN);
+    const body = await text((await of('mcp').fetchMinted?.(ACCESS, exchange())) as MintedExchangeOutcome);
+    expect(JSON.parse(body)).toEqual({ first: TOKEN.slice(0, 12), second: TOKEN.slice(12) });
+  });
+
+  const nonJson: [string, string, string][] = [
+    ['HTML', 'text/html; charset=utf-8', '<p>token: FAKE&#x2F;MCP</p>'],
+    ['XML', 'application/xml', '<t>FAKE/MCP+TOKEN"0123456789</t>'],
+    ['plain text', 'text/plain', 'FAKE/MCP+TOKEN"0123456789'],
+    ['NDJSON', 'application/x-ndjson', '{"a":"FAKE/MCP+TOKEN\\"0123456789"}\n'],
+    ['binary', 'application/octet-stream', 'FAKE/MCP+TOKEN"0123456789'],
+  ];
+  for (const [label, type, body] of nonJson)
+    test(`${label} is dropped with a sentence, never returned`, async () => {
+      const { of } = await world(() => jsonReply(body, type));
+      await of('mcp').put(ACCESS, TOKEN);
+      const outcome = await of('mcp').fetchMinted?.(ACCESS, exchange());
+      if (outcome?.kind !== 'response') throw new Error('no response');
+      expect(outcome.body).toEqual({
+        kind: 'dropped',
+        why: 'The server’s answer is not JSON, so the Vault could not check it for the sign-in and kept it.',
+      });
+    });
+
+  test('a body with a JSON type that is not JSON is dropped with its own sentence', async () => {
+    const { of } = await world(() => jsonReply('{"a": FAKE/MCP+TOKEN"0123456789'));
+    await of('mcp').put(ACCESS, TOKEN);
+    const outcome = await of('mcp').fetchMinted?.(ACCESS, exchange());
+    expect(await text(outcome as MintedExchangeOutcome)).toContain('not valid JSON');
+  });
+
+  test('FAILS CLOSED past a bound: a body nested too deep, or with too many values, is dropped', async () => {
+    const deep = `${'['.repeat(200)}"x"${']'.repeat(200)}`;
+    const wide = JSON.stringify({ items: Array.from({ length: 210_000 }, () => 1) });
+    for (const body of [deep, wide]) {
+      const { of } = await world(() => jsonReply(body));
+      await of('mcp').put(ACCESS, TOKEN);
+      const outcome = await of('mcp').fetchMinted?.(ACCESS, { ...exchange(), maxBodyBytes: 4 * 1024 * 1024 });
+      if (outcome?.kind !== 'response') throw new Error('no response');
+      expect(outcome.body).toEqual({
+        kind: 'dropped',
+        why: 'The server’s answer was too deep or too long to check for the sign-in, so the Vault kept it.',
+      });
+      await hosts.splice(0)[0]?.stop();
+    }
+  });
+
+  test('FAILS CLOSED past a bound: a body larger than the read limit is dropped, not clipped', async () => {
+    const { of } = await world(() => jsonReply(JSON.stringify({ big: 'x'.repeat(5000) })));
+    await of('mcp').put(ACCESS, TOKEN);
+    const outcome = await of('mcp').fetchMinted?.(ACCESS, { ...exchange(), maxBodyBytes: 100 });
+    if (outcome?.kind !== 'response') throw new Error('no response');
+    expect(outcome.body.kind).toBe('dropped');
+  });
+
+  test('the check is made against the value AS SENT: an owner replacing the secret in flight changes nothing', async () => {
+    let replace: () => Promise<void> = async () => undefined;
+    const { core, of } = await world(bearer => {
+      void replace();
+      return jsonReply(JSON.stringify({ echo: partialPercent(sent(bearer)) }));
+    });
+    await of('mcp').put(ACCESS, TOKEN);
+    replace = async () => await core.put(ACCESS, 'FAKE-OWNER-NEW-VALUE-123');
+    const body = await text((await of('mcp').fetchMinted?.(ACCESS, exchange())) as MintedExchangeOutcome);
+    expect(body).toBe(JSON.stringify({ echo: MARK }));
   });
 });

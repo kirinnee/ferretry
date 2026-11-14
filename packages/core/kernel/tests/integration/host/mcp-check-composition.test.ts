@@ -66,7 +66,10 @@ interface FakeServer {
    * Reflect the bearer token it was given into its own name (after `prefix`) and as a tool, spelled with JSON \u escapes:
    * the Vault's plain-text mask of a reply cannot see through those, but the parsed strings carry the token.
    */
-  readonly reflect?: { readonly prefix: string };
+  readonly reflect?: {
+    readonly prefix: string;
+    /** How the token is spelled (JSON \u escapes when absent). */ readonly spell?: (token: string) => string;
+  };
 }
 
 const escapedJson = (text: string): string =>
@@ -113,7 +116,7 @@ async function world(options: {
   let opener: { open(env: ChildEnvironment): Readonly<Record<string, string>> | undefined } | undefined;
   const answerTo = (body: { id?: number; method?: string }, bearer = ''): Response => {
     if (answer.reflect !== undefined && bearer !== '') {
-      const echo = escapedJson(bearer);
+      const echo = (answer.reflect.spell ?? escapedJson)(bearer);
       const raw =
         body.method === 'initialize'
           ? `{"jsonrpc":"2.0","id":${body.id},"result":{"protocolVersion":"2025-03-26","serverInfo":{"name":"${answer.reflect.prefix}${echo}"}}}`
@@ -328,6 +331,49 @@ describe('what a server says is scrubbed before it is shown, clipped or not', ()
       await w.host.stop();
     }
   });
+});
+
+describe('the reflected server name is checked in its encoded forms too', () => {
+  const spellings: Record<string, (token: string) => string> = {
+    'partial, mixed-case percent-encoding': token =>
+      token.replaceAll('-', '%2d').replace('MCP', '%4dCP').replace('0123', '%30%31%32%33'),
+    'HTML entities': token => [...token].map(char => `&#x${char.charCodeAt(0).toString(16)};`).join(''),
+    'whitespace-folded base64': token =>
+      (
+        Buffer.from(token)
+          .toString('base64')
+          .match(/.{1,8}/gu) ?? []
+      ).join('\\n'),
+    'mixed-case hex': token =>
+      [...Buffer.from(token).toString('hex')]
+        .map((char, index) => (index % 2 === 0 ? char.toUpperCase() : char))
+        .join(''),
+  };
+  for (const [label, spell] of Object.entries(spellings))
+    test(`a server name and tool names that carry the held token as ${label} are replaced whole`, async () => {
+      const names = mcpOAuthSecretNames('linear', URL_OF_SERVER);
+      const w = await world({
+        ...linear(names),
+        answer: { name: '', tools: [], reflect: { prefix: 'a server called ', spell } },
+      });
+      try {
+        await w.mint();
+
+        const checked = await w.check('linear');
+
+        expect(checked.json<{ outcome: string; toolCount?: number }>()).toMatchObject({
+          outcome: 'connected',
+          toolCount: 3,
+        });
+        expect(checked.body).not.toContain(FAKE_TOKEN);
+        expect(checked.body).not.toContain('FAKE-M');
+        // the ENCODED spelling is what these cases are about: a literal search for the token cannot see it
+        expect(checked.body).not.toContain(spell(FAKE_TOKEN).slice(0, 12));
+        expect(checked.json<{ tools?: string[] }>().tools).toContain('plain');
+      } finally {
+        await w.host.stop();
+      }
+    });
 });
 
 describe('the answer is masked against the token as it was SENT', () => {
