@@ -7,6 +7,7 @@
  * Every failure is a {@link V4InputError} naming the file (relative to the v4 home) and, for a value, its key path —
  * never the text: a YAML parser's own message quotes the line it choked on, so it is never passed through.
  */
+import { findRawSecrets, urlPasswordCuts } from '@ferretry/std/credential-words';
 import { constants } from 'node:fs';
 import { lstat, open, readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
@@ -309,35 +310,125 @@ function entropy(value: string): number {
   return bits;
 }
 
+/** `${NAME:-default}`, `${NAME:=default}`, `${NAME:+word}` and `${NAME:?word}`: the part after the operator is a VALUE, not a reference. */
+const REFERENCE_WITH_DEFAULT = /^\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=+?]([^}]*)\}$/u;
+
+/** A value of a few folded lines (a YAML `>` or `|` block): the pieces of one token, spaces where the lines were. */
+const TOKEN_ALPHABET_PIECES = /^[A-Za-z0-9._~+/=-]+$/u;
+
+/** Whether `value` under a credential-named key is a folded token: every piece is token-alphabet and the join looks random. */
+function foldedLooksRaw(value: string): boolean {
+  const pieces = value.split(/\s+/u).filter(piece => piece !== '');
+  if (pieces.length < 2 || !pieces.every(piece => TOKEN_ALPHABET_PIECES.test(piece))) return false;
+  const joined = pieces.join('');
+  if (joined.length < 16 || isPathShaped(joined)) return false;
+  // Prose joined up has neither a digit nor mixed case; a key has one of them.
+  if (!/\d/u.test(joined) && !(/[A-Z]/u.test(joined) && /[a-z]/u.test(joined))) return false;
+  return entropy(joined) >= 3.5;
+}
+
 function looksLikeRawSecret(key: string | number | undefined, value: string): boolean {
   if (KNOWN_SHAPES.some(shape => shape.test(value))) return true;
   if (typeof key !== 'string' || !CREDENTIAL_KEY.test(key)) return false;
   const trimmed = value.trim();
-  if (REFERENCE.test(trimmed) || trimmed.length < 16 || /\s/u.test(trimmed)) return false;
+  const withDefault = REFERENCE_WITH_DEFAULT.exec(trimmed);
+  if (withDefault !== null) return looksLikeRawSecret(key, withDefault[1] as string);
+  if (REFERENCE.test(trimmed) || trimmed.length < 16) return false;
+  if (/\s/u.test(trimmed)) return foldedLooksRaw(trimmed);
   if (/^[a-z][a-z0-9+.-]*:\/\//iu.test(trimmed) || isPathShaped(trimmed)) return false;
   return entropy(trimmed) >= 3.5;
 }
 
-/** The key paths of every value that looks like a raw secret (paths only: a value is never returned). */
-export function rawSecretPaths(value: unknown): readonly string[] {
-  const found: string[] = [];
-  const visit = (node: unknown, path: readonly (string | number)[]): void => {
+/** `%XX` read as the ASCII character it spells, wherever it stands; a stray `%` stays. The text itself is never rejected. */
+const percentDecoded = (text: string): string =>
+  text.replace(/%([0-7][0-9A-Fa-f])/gu, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+
+/** JSON's `\uXXXX`, `\xXX` and `\/` escapes read as the characters they spell (`"API_KEY"` is `"API_KEY"`). */
+const jsonUnescaped = (text: string): string =>
+  text
+    .replace(/\\u([0-9A-Fa-f]{4})/gu, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)))
+    .replace(/\\x([0-9A-Fa-f]{2})/gu, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)))
+    .replaceAll('\\/', '/');
+
+/** A text as written and with its percent and JSON escapes read (separately and together): the spellings one value can take. */
+const spellingsOf = (text: string): readonly string[] => {
+  const forms = new Set<string>([text, percentDecoded(text), jsonUnescaped(text), percentDecoded(jsonUnescaped(text))]);
+  return [...forms];
+};
+
+/** A query parameter or fragment field: `?api_key=v`, `&access_token=v`. */
+const QUERY_FIELD = /[?&;#]([^=&;#\s"']+)=([^&;#\s"']*)/gu;
+
+/** One string, judged alone: a known shape or a credential-named key's value, in every spelling, and a credential in a URL's query. */
+function leafLooksSecret(key: string | number | undefined, value: string): boolean {
+  for (const form of spellingsOf(value)) {
+    if (looksLikeRawSecret(key, form)) return true;
+    for (const field of form.matchAll(QUERY_FIELD)) if (looksLikeRawSecret(field[1], field[2] as string)) return true;
+  }
+  return false;
+}
+
+type Path = readonly (string | number)[];
+
+const nameOf = (path: Path): string | undefined =>
+  path.findLast(part => typeof part === 'string') as string | undefined;
+
+/** Every key path, deduplicated, where `judge` says the string (or the key spelled as one) is a credential. Paths only. */
+function walkStrings(value: unknown, judge: (path: Path, text: string, isKey: boolean) => boolean): readonly string[] {
+  const found = new Set<string>();
+  const say = (path: Path): string => path.map(pathSegment).join('.');
+  const visit = (node: unknown, path: Path): void => {
     if (typeof node === 'string') {
-      if (
-        looksLikeRawSecret(
-          path.findLast(part => typeof part === 'string'),
-          node,
-        )
-      )
-        found.push(path.map(pathSegment).join('.'));
+      if (judge(path, node, false)) found.add(say(path));
       return;
     }
     if (Array.isArray(node)) node.forEach((item, index) => visit(item, [...path, index]));
     else if (node !== null && typeof node === 'object')
-      for (const [key, item] of Object.entries(node)) visit(item, [...path, key]);
+      for (const [key, item] of Object.entries(node)) {
+        // A KEY spelled as a token is a credential too; it is said as the path to it (`<key>`), never as itself.
+        if (judge([...path, key], key, true)) found.add(say([...path, key]));
+        visit(item, [...path, key]);
+      }
   };
   visit(value, []);
-  return found;
+  return [...found];
+}
+
+/** The document `leaf` stands in, built from its path, so a shared rule that reads a whole document reads it with its keys. */
+const nestedAt = (path: Path, leaf: unknown): unknown =>
+  path.reduceRight<unknown>((inside, part) => (typeof part === 'number' ? [inside] : { [part]: inside }), leaf);
+
+/** A string that is JSON (an object or a list) as the data it holds, or `undefined`: a settings value can be a JSON document. */
+function embeddedJson(text: string): unknown {
+  const trimmed = text.trim();
+  if (!/^[{[]/u.test(trimmed)) return undefined;
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The one judgement of a string anywhere in a carried document: this module's rules, the shared ones, a JSON document in it, and its text. */
+function stringHoldsCredential(path: Path, text: string, isKey: boolean): boolean {
+  if (leafLooksSecret(isKey ? undefined : nameOf(path), text)) return true;
+  if (isKey) return false;
+  if (textLooksLikeCredential(text)) return true;
+  const nested = nestedAt(path, text);
+  if (findRawSecrets(nested).length > 0 || urlPasswordCuts(text).length > 0) return true;
+  const json = embeddedJson(text);
+  return json !== undefined && rawSecretPaths(json).length > 0;
+}
+
+/**
+ * The key paths of every value that looks like a raw secret (paths only: a value is never returned). Every string is
+ * judged by this module's rules AND the shared ones (`@ferretry/std/credential-words`: the kernel's raw-secret rule and
+ * the word cutter), in each spelling a value can take (percent-encoded, JSON-escaped), with a JSON document inside a
+ * string read as the document it is. Ambiguity is refused: this is a one-time converter, and a held file is named in its
+ * report.
+ */
+export function rawSecretPaths(value: unknown): readonly string[] {
+  return walkStrings(value, stringHoldsCredential);
 }
 
 const AUTH_SHAPE = String.raw`(?:Bearer|Basic|token)\s+\S{16,}`;
@@ -485,13 +576,23 @@ export const documentCredentialPaths = (value: unknown): readonly string[] => [
  * value itself looks like a credential. Prose that merely uses the words ("Basic troubleshooting", "token budget") carries.
  */
 export function textLooksLikeCredential(text: string): boolean {
+  // Each spelling a text can take (percent-encoded, JSON-escaped) is read as itself: `api%5Fkey=…` is `api_key=…`.
+  return spellingsOf(text).some(form => spelledTextLooksLikeCredential(form));
+}
+
+/** A `${secret:NAME}` pointer: the one thing a carried text may hold in place of a credential; read as nothing. */
+const SECRET_POINTER = /\$\{secret:[A-Z][A-Z0-9_]{0,63}\}/gu;
+
+function spelledTextLooksLikeCredential(source: string): boolean {
+  const text = source.replaceAll(SECRET_POINTER, '');
   if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/u.test(text) || hasAuthorizationValue(text)) return true;
   for (const match of text.matchAll(SCHEME_VALUE)) if (looksLikeTokenValue(match[1] as string)) return true;
   const words = text.split(/\s+/u).filter(word => word !== '');
   const assigned = [...text.matchAll(/([A-Za-z0-9_.-]+)["']?\s*[=:]\s*["']?([^\s"']+)/gu)].map(match => ({
     [match[1] as string]: match[2] as string,
   }));
-  return rawSecretPaths({ words, assigned }).length > 0;
+  // Leaf rules only here: the document rule above reads a whole text, so reading its words again would never end.
+  return walkStrings({ words, assigned }, (path, word) => leafLooksSecret(nameOf(path), word)).length > 0;
 }
 
 // ── the modeline ─────────────────────────────────────────────────────────────────────────────────────────────────

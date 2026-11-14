@@ -93,12 +93,49 @@ export const decoded = (text: string): string => {
   }
 };
 
-/** Whether a gated value names v4 (whole) or a harness home (prefix), as written or URL-decoded. */
+/** A shell's own quoting and escaping, which a shell removes before it opens the path: `"$HOME"/.cl""aude`. */
+const SHELL_QUOTING = /["'\\]/gu;
+
+/**
+ * What stands in front of `/.claude`, `/.codex` or `/.ferretry` (a name that begins so) and is NOT a literal path: a variable,
+ * a `~user`, a command substitution (`$(…)`, a backtick), a brace or glob. Only a literal path can be compared with a
+ * finite list of spellings; anything else is a reference the gate cannot resolve, so it is refused.
+ */
+const UNRESOLVED_PREFIX = /[$~`(){}*?[\]]/u;
+/** The variables that name the PROJECT being worked in, never the user's home: `$CLAUDE_PROJECT_DIR/.claude/hooks/x.sh`. */
+const PROJECT_PREFIX = /^"?\$(?:\{(?:CLAUDE_PROJECT_DIR|PWD)\}|CLAUDE_PROJECT_DIR(?![\w])|PWD(?![\w]))/u;
+/** A folder name that is, or may expand to, a harness home or (in `both`) v4's home. */
+const HOME_NAME = String.raw`\.(?:claude|codex|c[\w]*[*?[{]|[{*?[])`;
+const V4_NAME = String.raw`\.ferretry(?![\w.-]*[A-Za-z0-9])|\.ferretry-worktrees(?![\w.-]*[A-Za-z0-9])`;
+const AFTER_PREFIX = (harness: boolean, v4: boolean): RegExp =>
+  new RegExp(
+    String.raw`([^\s;|&<>=]*)/(?:${[harness ? HOME_NAME : '', v4 ? V4_NAME : ''].filter(Boolean).join('|')})`,
+    'gu',
+  );
+
+/** Whether a (quote-stripped) form reaches one of those folders through a prefix that is not a literal path. */
+function reachesThroughReference(form: string, harness: boolean, v4: boolean): boolean {
+  if (!harness && !v4) return false;
+  for (const match of form.matchAll(AFTER_PREFIX(harness, v4))) {
+    const prefix = match[1] ?? '';
+    if (UNRESOLVED_PREFIX.test(prefix) && !PROJECT_PREFIX.test(prefix)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a gated value names v4 (whole) or a harness home (prefix), as written, URL-decoded, and with a shell's quoting
+ * and escapes taken out. A home reached through a reference the gate cannot resolve (`$(echo ~)/.claude`, `~user/.claude`,
+ * `H=$HOME; $H/.claude`, `$HOME/.{claude,codex}`) is a hit too: it is refused rather than guessed at.
+ */
 export function valueHits(value: string, needles: Needles, only: 'both' | 'harness' = 'both'): boolean {
-  const forms = value === decoded(value) ? [value] : [value, decoded(value)];
+  const decodedValue = decoded(value);
+  const forms = new Set<string>([value, decodedValue]);
+  for (const form of [...forms]) forms.add(form.replace(SHELL_QUOTING, ''));
   for (const form of forms) {
     if (needles.harness.some(needle => form.includes(needle))) return true;
     if (only === 'both' && needles.v4.some(needle => namesWhole(form, needle))) return true;
+    if (reachesThroughReference(form, needles.harness.length > 0, only === 'both')) return true;
   }
   return false;
 }
