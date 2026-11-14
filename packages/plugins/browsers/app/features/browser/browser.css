@@ -256,3 +256,39 @@
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: var(--focus-offset);
 }
+
+/* The browser bar answers to the width of its own frame, not the screen: the ferret page docks it in a 328px column
+   on any display, and a viewport breakpoint cannot see that. In a narrow frame the address takes a row of its own,
+   so it is never squeezed to nothing between the page button, the chip and the four step buttons. */
+.fy-browser-bar-frame {
+  container-type: inline-size;
+  container-name: fy-browser-bar;
+}
+@container fy-browser-bar (max-width: 440px) {
+  .fy-browser-bar {
+    flex-wrap: wrap;
+  }
+  .fy-browser-bar [data-browser-bar-part='address'] {
+    order: 10;
+    flex: 1 1 100%;
+    padding-bottom: 2px;
+  }
+  .fy-browser-bar [data-browser-bar-part='page'] {
+    max-width: 5rem;
+  }
+  .fy-browser-bar [data-browser-bar-part='chip'] {
+    max-width: 6.5rem;
+    margin-inline-end: auto;
+  }
+  .fy-browser-bar [data-browser-bar-part='chip'] button {
+    max-width: 100%;
+  }
+  .fy-browser-bar [data-browser-bar-part='forward'] {
+    display: none;
+  }
+  .fy-browser-bar [data-browser-bar-part='back'],
+  .fy-browser-bar [data-browser-bar-part='reload'],
+  .fy-browser-bar [data-browser-bar-part='menu'] button {
+    min-width: 32px;
+  }
+}
