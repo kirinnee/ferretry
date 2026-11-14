@@ -189,7 +189,7 @@ separate daemon-scoped path and retain their existing validation and composer be
 
 **#20 is done, and what it still does not cover is named rather than implied.** The flow is now real end to end:
 a transcript `AskUserQuestion` becomes a `pendingQuestion` on the session document, the browser
-renders it, `POST /v1/sessions/:id/answer` drives the exact rendered form, and the durable state is
+renders it, `POST /v1/ferrets/:ferretId/answer` drives the exact rendered form, and the durable state is
 cleared only after the pane visibly advanced. What this pass added is that the answer is now
 performed **at most once per logical request**: one dedicated per-session queue is held across the
 pending re-read, the drive and the clear; an identical retry joins the operation already running

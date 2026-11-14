@@ -146,7 +146,7 @@ fy new / fy start / app Start
 - **The probe runs at admission, not at enqueue.** Quota and logins change while a request waits, so
   the "reply OK" probe and the `--auto` choice of runtime happen when its turn comes.
 - **The credential is minted at launch.** A queued record holds no credential and no pane.
-- **The request id still deduplicates.** A retried `POST /v1/sessions` with the same request id finds
+- **The request id still deduplicates.** A retried `POST /v1/ferrets` with the same request id finds
   the queued record, so a lost answer never queues a ferret twice.
 
 ### 2.2 What the caller sees (D1 a)

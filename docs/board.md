@@ -1612,5 +1612,4 @@ wherever it appears ([reference-standard.md](reference-standard.md)). It is **re
   session links to that card, shown as the old text; a card on the slice with the same id wins. It does not call
   `GET /v1/board/tasks?legacyRef=` per reference. The limit is the slice: an imported card this ferret no longer
   owns or is assigned stays plain text ([reference-standard.md](reference-standard.md)).
-- **Per-session task routes.** `/v1/sessions/:sid/tasks` and `/v1/tasks` survive as empty compatibility answers for
-  one release and then go. Nothing in the PWA requests them any more; a unit test scans its source for the spelling.
+- **Per-session task routes.** `/v1/sessions/:id/tasks` and `/v1/tasks` are deleted, not kept as compatibility answers: the board plugin declares no route for either (`packages/plugins/board/manifest.ts`). Nothing in the PWA requests them any more; a unit test scans its source for the spelling.

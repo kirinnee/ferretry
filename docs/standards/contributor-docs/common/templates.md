@@ -181,7 +181,7 @@ For CLI:
 For API:
 
 - **Method**: `GET`
-- **Path**: `/v1/sessions/:id`
+- **Path**: `/v1/ferrets/:id`
 - **Auth**: Bearer token
 
 ## Request

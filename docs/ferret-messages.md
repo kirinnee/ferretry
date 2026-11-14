@@ -140,14 +140,14 @@ message and each picture once after them.
 ## Declared gaps
 
 - **A held send does not follow itself to Delivered** (&B157). "Held — delivered when Tanna's turn ends" (or "Held —
-  delivered at 10:38, batched with its other messages") is what the CLI said when it sent; the delivery is in the RECEIVER's send ledger (`/v1/sessions/:id/sends`), and the
+  delivered at 10:38, batched with its other messages") is what the CLI said when it sent; the delivery is in the RECEIVER's send ledger (`/v1/ferrets/:ferretId/sends`), and the
   sender's Chat does not read another session's ledger. Following it means reading the receiver's ledger from
   the sender's Chat and matching the send to its row.
 
 - **One machine.** A send is always between two sessions on the same daemon, so no machine is shown.
 - **Live sender state.** The Sent card reads the CLI's answer at send time, then `replied` from the
   Chat; it does not follow the receiver's ledger afterwards.
-- **The hand-off wire is unchanged.** `GET /v1/sessions/:id/handoffs/:name` still returns the document's
+- **The hand-off wire is unchanged.** `GET /v1/ferrets/:ferretId/handoffs/:name` still returns the document's
   text, banner included, because its schema is strict and a new field would break an older app reading
   a newer daemon; the app lifts the sender off the banner itself.
 

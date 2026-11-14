@@ -45,7 +45,7 @@ on. Its `id` is a digest of everything a person decides on, so a prompt that cha
 
 ## Answering
 
-`POST /v1/sessions/:sessionId/permission` with `{ kind: 'choice', requestId, number }` or
+`POST /v1/ferrets/:ferretId/permission` with `{ kind: 'choice', requestId, number }` or
 `{ kind: 'deny', requestId }`:
 
 1. The pane is captured and parsed again. If it no longer shows `requestId`, nothing is typed and the

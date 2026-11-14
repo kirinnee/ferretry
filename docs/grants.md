@@ -216,7 +216,7 @@ plugin), held equal to it by a committed test.
 changing automatic install are `configure`, and a governed device also gives a passkey step-up for that
 act alone (turning automatic install off never needs one). See [updating.md](updating.md).
 
-**A lead's table of its sub-ferrets is `fleet.use`.** `GET /v1/sessions/:sessionId/subtree` (`fy status --subtree`,
+**A lead's table of its sub-ferrets is `fleet.use`.** `GET /v1/ferrets/:ferretId/subtree` (`fy status --subtree`,
 [pack-mode.md](pack-mode.md#checking-on-your-sub-ferrets)) reads the sessions registry, the board's cards and PR
 cache and each descendant's outbox, so a remote caller whose `fleet.use` is narrowed is refused with
 `grant_not_granted` before anything is read. Plain session reads are ungoverned; this one is not, because it
@@ -232,7 +232,7 @@ WebRTC caller gets `403` before the handler runs, whatever it holds. The address
 shell string; credentials and every non-http(s) scheme are refused; ten openings per ten seconds. The security
 log records `link.opened` with the host only, never the path or query.
 
-**The Console is a terminal.** `POST /v1/sessions/:sessionId/console/input` types into the agent's own
+**The Console is a terminal.** `POST /v1/ferrets/:ferretId/console/input` types into the agent's own
 Claude / Codex pane and is declared `terminal` / `use` like every terminal route, so it is governed
 identically: ungoverned from loopback; for a paired device, a browser across the network or a relayed session,
 the `terminal` grant plus a current step-up, which the unlock holds by default; an undetermined grant
@@ -242,19 +242,19 @@ names — the session's single registration, matched on pane id, pid and process
 name. The security log records each write as `terminal.input` on the session (`detail.mode: 'console'`),
 folded per window, and never what was typed.
 
-**So is answering a permission prompt.** `POST /v1/sessions/:sessionId/permission` answers the harness's
+**So is answering a permission prompt.** `POST /v1/ferrets/:ferretId/permission` answers the harness's
 tool-permission prompt with one key into the same proved pane, so it is declared `terminal` / `use` and
 governed exactly as the Console is — a relayed answer is a remote one. It is audited as `terminal.input`
 with `detail.mode: 'permission'`, never with the choice. How the prompt is read and why the answer is a
 single key is [docs/permission-prompts.md](permission-prompts.md).
 
-**So is answering a harness dialog.** `POST /v1/sessions/:sessionId/dialog` answers the harness's own
+**So is answering a harness dialog.** `POST /v1/ferrets/:ferretId/dialog` answers the harness's own
 dialog — Codex's hook review, Claude's MCP-server approval — with arrows, then Enter or Esc, into the same
 proved pane, so it is declared `terminal` / `use` and governed exactly as the Console is. It is audited as
 `terminal.input` with `detail.mode: 'dialog'`, never with the choice. See
 [docs/harness-dialogs.md](harness-dialogs.md).
 
-**So is acting on the person's own draft.** `POST /v1/sessions/:sessionId/composer` presses Enter on, or
+**So is acting on the person's own draft.** `POST /v1/ferrets/:ferretId/composer` presses Enter on, or
 erases, text a person left typed in the agent's composer — the "Send it" / "Clear it" a refused send
 offers. It is not a send (no ledger row, and the text is not Ferretry's), so it is declared `terminal` /
 `use` and governed exactly as the Console is, unlike the send-ledger routes, which stay `operator` with no
@@ -262,7 +262,7 @@ capability. It acts only while the composer holds exactly the quoted draft, and 
 `terminal.input` with `detail.mode: 'composer'`, never with the text. See
 [docs/message-delivery.md](message-delivery.md).
 
-**So is a ferret's Processes tab.** `GET /v1/sessions/:sessionId/processes`, a process's
+**So is a ferret's Processes tab.** `GET /v1/ferrets/:ferretId/processes`, a process's
 `/output` and its `/stop` are all declared `terminal` / `use`. The list is every command line under that
 ferret's pane — what `ps` shows somebody with a shell there — an output read is what those commands print,
 exactly what a terminal shows, and Stop is SIGTERM to a command the agent started, which is less than typing
@@ -280,7 +280,7 @@ The list is closed. Everything the daemon does _inside its own state home_ — s
 the agenda, pins — is deliberately absent: a grant list that grew to cover every route would be a
 second copy of the route table, and a second copy is how the two stop agreeing.
 
-**Shared drafts follow sends.** `GET`/`POST /v1/sessions/:sessionId/shared-draft` and its live
+**Shared drafts follow sends.** `GET`/`POST /v1/ferrets/:ferretId/shared-draft` and its live
 `…/shared-draft/stream` are `operator` with **no capability**, exactly like the send-ledger routes: a draft
 is the owner's own unsent message, strictly less than a send, and a device that may send a message may
 draft one. What guards them is **who acts** — `caller: 'person'` refuses every ferret, and the route admits
@@ -288,11 +288,11 @@ only the owner's shell and paired devices — not a grant. An Inbox card's own d
 `?item=A5` (a malformed id is 422, an unknown or closed item 404) and the same gates. A test pins this choice
 (`tests/unit/runtime/mounts/shared-drafts.test.ts`), so making drafts governed is a reviewed decision.
 
-**Pinned agents are the owner's preference.** `POST /v1/sessions/:sessionId/pin` and `…/unpin` are `operator`
+**Pinned agents are the owner's preference.** `POST /v1/ferrets/:ferretId/pin` and `…/unpin` are `operator`
 with **no capability** and `caller: 'person'`: a pin only decides where a ferret is listed in the owner's own
 sidebar, so it is strictly less than any change to the ferret, and a device that may use the app may pin. What
 guards it is **who acts** — every ferret is refused at the boundary — not a grant. The list is kept per
-machine in `state/agent-pins.json` (session ids and instants only), and rides `GET /v1/sessions` as `pinnedAt`
+machine in `state/agent-pins.json` (session ids and instants only), and rides `GET /v1/ferrets` as `pinnedAt`
 on the view. A test pins this choice (`tests/unit/runtime/mounts/session-pin.test.ts`), so making pinning
 governed is a reviewed decision.
 
@@ -320,11 +320,11 @@ One consequence: agenda actions are gated by **who acts** (the human or a ferret
 `GET /v1/agenda/open` (every conversation's open and parked items, [agenda.md](agenda.md#the-roll-up-every-conversation-and-a-count-that-is-the-list)) is the same: `operator`, `caller: 'person'`, no capability.
 The machine agenda's routes (`GET` and `POST /v1/machine/agenda`, [agenda.md](agenda.md#the-machine-agenda)) sit on
 the same axis: owner-only, `caller: 'person'`, no grant, and a non-human actor is refused with 403.
-The full conversation read (`GET /v1/sessions/:sessionId/agenda/:id/conversation`) requires `operator`,
+The full conversation read (`GET /v1/ferrets/:ferretId/agenda/:id/conversation`) requires `operator`,
 `caller: 'any'`, no capability; its session authorization is the item's. Responses are bounded fragments, and
 relayed loopback callers remain remote.
 
-The item's versions follow the same axis ([agenda.md](agenda.md#versions)): `GET /v1/sessions/:sessionId/agenda/:id/versions`
+The item's versions follow the same axis ([agenda.md](agenda.md#versions)): `GET /v1/ferrets/:ferretId/agenda/:id/versions`
 and `GET …/versions/:version` are `operator`, `caller: 'any'`, no capability; `PUT …/seen` (a device marks the version it
 opened) is `operator`, `caller: 'person'`, no capability, and keys the mark by the credential's device (`host` for the
 local one). `log`, `merge` and `split` are actions of the existing agenda `POST`, gated by who acts: a ferret may touch
@@ -963,9 +963,9 @@ command says so at the moment somebody might be tempted to do that instead.
   would make revoking `fleet` break the session list. If a future event kind carries fleet
   configuration, it needs its own decision.
   Its `live` frames (`?live=1`, a working turn's verb, clock start and token counts) are read off
-  the same pane and transcript `GET /v1/sessions/:id/snapshot` and `/logs` already return at the same
+  the same pane and transcript `GET /v1/ferrets/:ferretId/snapshot` and `/logs` already return at the same
   `operator` minimum, so they widen nothing.
-- **The transcript image route (`GET /v1/sessions/:id/transcript-images/:handle`) reads the same
+- **The transcript image route (`GET /v1/ferrets/:ferretId/transcript-images/:handle`) reads the same
   transcript as `/logs`, at the same `operator` minimum, and widens nothing.** It carries no
   capability of its own and is not `noStore`, exactly like `/logs` — an image is bytes of that
   transcript the log already summarises as a marker, so whoever may read the log may fetch the image.
@@ -973,12 +973,12 @@ command says so at the moment somebody might be tempted to do that instead.
   never address arbitrary bytes of the file, and a handle outside that transcript is a 4xx with a
   code. The image is served as `private, max-age=31536000, immutable` with a strong etag, so a
   browser keeps it per device.
-- **The log page route (`GET /v1/sessions/:id/log-page`) reads the same transcript as `/logs`, at the
+- **The log page route (`GET /v1/ferrets/:ferretId/log-page`) reads the same transcript as `/logs`, at the
   same `operator` minimum, and widens nothing.** It is the chat's tail and every page of history older
   than it, rendered and scrubbed exactly as `/logs` is, so whoever may read the tail may scroll back
   through the rest. Its `start` is a byte offset into the transcript and its `file` an opaque digest of
   the file's path and identity — positions, never content, and never the path itself.
-- **The log search route (`GET /v1/sessions/:id/log-search`) reads the same transcript as `/logs`, at
+- **The log search route (`GET /v1/ferrets/:ferretId/log-search`) reads the same transcript as `/logs`, at
   the same `operator` minimum, and widens nothing.** It searches every record, not just a tail, so it
   answers no more than scrolling all the way back already shows. A match is decided on the SCRUBBED
   text and its snippet is cut from it, so the search cannot be used to ask whether a secret value
@@ -1026,13 +1026,13 @@ Actions › Add MCP server… writes in one of two places, and each is governed 
 already owns that place. A route declares exactly one capability, so each scope has its own route
 (`packages/daemon/src/lib/runtime/mounts/session-mcp.ts`):
 
-| Route                                       | Capability             | What it does                                                           |
-| ------------------------------------------- | ---------------------- | ---------------------------------------------------------------------- |
-| `GET /v1/sessions/:id/mcp`                  | `filesystem.use`       | lists the project `.mcp.json`'s servers, or why there is none          |
-| `POST /v1/sessions/:id/mcp/project/preview` | `filesystem.use`       | the diff a project add would make, and the file's etag; writes nothing |
-| `POST /v1/sessions/:id/mcp/project`         | `filesystem.configure` | writes the previewed change into the repository's `.mcp.json`          |
-| `POST /v1/sessions/:id/mcp/login/preview`   | `fleet.use`            | the runtime, profile and ferret count a login add would reach          |
-| `POST /v1/sessions/:id/mcp/login`           | `fleet.configure`      | adds an MCP component and appends it to the runtime's profile          |
+| Route                                            | Capability             | What it does                                                           |
+| ------------------------------------------------ | ---------------------- | ---------------------------------------------------------------------- |
+| `GET /v1/ferrets/:ferretId/mcp`                  | `filesystem.use`       | lists the project `.mcp.json`'s servers, or why there is none          |
+| `POST /v1/ferrets/:ferretId/mcp/project/preview` | `filesystem.use`       | the diff a project add would make, and the file's etag; writes nothing |
+| `POST /v1/ferrets/:ferretId/mcp/project`         | `filesystem.configure` | writes the previewed change into the repository's `.mcp.json`          |
+| `POST /v1/ferrets/:ferretId/mcp/login/preview`   | `fleet.use`            | the runtime, profile and ferret count a login add would reach          |
+| `POST /v1/ferrets/:ferretId/mcp/login`           | `fleet.configure`      | adds an MCP component and appends it to the runtime's profile          |
 
 - **`filesystem.configure` now also gates a project `.mcp.json` write.** It is a write into the
   person's repository, so it lands only at the root of a folder the daemon already knows — a

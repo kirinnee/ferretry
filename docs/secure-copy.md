@@ -128,7 +128,7 @@ can touch. So, for as long as a copy **lives** (not just a short window after a 
   (`BrowsersApi.copy.sealed`, told by Accounts: the copy's name, the origins it was read from or pasted into, and a function that
   answers when it ends; **never a value**). An agent's `browser.read`, `eval`, `console`, `network`, `screenshot`, `pdf`, `highlight`,
   `download` and `wait_for` on a text are refused on a page of one of those origins. **One gate is asked by every agent path**: the
-  tools, the HTTP action route (`POST /v1/sessions/<id>/browser`) and the viewer stream. The route checks before the act and again
+  tools, the HTTP action route (`POST /v1/ferrets/<id>/browser`) and the viewer stream. The route checks before the act and again
   inside the page's queue; its status answers an agent a covered page by origin only. The viewer stream is **closed to an agent's
   credential while any copy lives** (a picture of a page cannot be masked; a stream that is already open is **ended the moment a
   value is sealed**, with a policy close and a sentence, and what it still held back is dropped). A person's own calls and viewer pass. The sentence says why, until when, what still
@@ -146,7 +146,7 @@ can touch. So, for as long as a copy **lives** (not just a short window after a 
   on; an agent's viewer picture is never delivered while any value lives. A person's output always leaves. **What this does not
   do**: it does not decide which agent may watch which page (that is the viewer-scope check, which composes with `mayDeliver`
   because it takes the caller as a value), and the viewer socket's INPUT is the handover's.
-- **An agent's URL actions over HTTP take only http(s).** `open`, `navigate` and `new-page` on `POST /v1/sessions/<id>/browser`
+- **An agent's URL actions over HTTP take only http(s).** `open`, `navigate` and `new-page` on `POST /v1/ferrets/<id>/browser`
   refuse a `javascript:`, `data:`, `file:`, `chrome:`, `about:` or `blob:` address before anything is dispatched, the rule the MCP
   tools already hold, so a script address cannot be admitted as navigation on a page that holds a value. A person's own navigation
   is unchanged. (The browser worker itself still takes any address: it cannot tell who asked, so the rule sits at the transport.)
@@ -515,7 +515,7 @@ a ferret's words: a plain item with the same text is a plain item.
   and the agenda refuses a plain answer to the card (`use_input_form`): only the plan routes answer it. Every card
   says: "This stops misuse through a ferret's tools and page text; it can't stop a ferret
   that reads Ferretry's own files."
-- **Stage, passkey, commit.** `POST /v1/sessions/:sid/task-plans/:pid/approval` with the ticks and picks. Nothing
+- **Stage, passkey, commit.** `POST /v1/ferrets/:ferretId/task-plans/:planId/approval` with the ticks and picks. Nothing
   ticked declines the plan, at once and with no passkey. Any ticked line, a paste line included (owner ruling on
   !A244), is STAGED (`201`, `{ stage: "tps_…", summary, expiresAt }`): the daemon snapshots its pins from Accounts now (a
   sign-in removed, moved to another account or with other login domains than the card showed is refused) and holds
