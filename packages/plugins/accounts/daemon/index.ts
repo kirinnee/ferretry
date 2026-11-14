@@ -45,7 +45,7 @@ export default implementDaemon(manifest, {
     rules = buildRules(ctx, a.core);
     const b = rules;
     const answered: Record<string, unknown> = { ...b.routes, ...a.routes };
-    const tools: Record<string, ToolHandler> = { ...a.tools };
+    const tools: Record<string, ToolHandler> = { ...a.tools, ...b.tools };
     return {
       routes: Object.fromEntries(
         manifest.actions.routes.map(route => [route.key, answered[route.key] ?? notBuiltRoute]),
@@ -60,6 +60,7 @@ export default implementDaemon(manifest, {
       hooks: {
         [SIGN_IN_APPROVAL_HOOK]: b.hooks['ask.sources:sign-in-approval'],
         'input.phone-approval:phone': b.hooks['input.phone-approval:phone'],
+        'input.secure-copy:copy': b.hooks['input.secure-copy:copy'],
         'redaction.sources:source': a.masks,
         'step-up.stages:add-2fa-key': addTwoFactorKeyStage(a.seeds),
         'step-up.stages:approve-task-plan': b.stepUpStages['approve-task-plan'],

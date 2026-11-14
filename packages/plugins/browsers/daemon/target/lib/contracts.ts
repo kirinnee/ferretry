@@ -72,6 +72,10 @@ export interface BrowserInputDocument {
   readonly navigationId: string;
   /** The host the page is on now (`accounts.google.com`): a login's facts watch it leave the sign-in hosts. */
   readonly host?: string;
+  /** The hosts of the frames inside the page (each frame's effective one: `about:blank` frames take their parent's). */
+  readonly frameHosts?: readonly string[];
+  /** A frame whose host cannot be told (a `data:` frame, an address with none) or more frames than are looked at. */
+  readonly framesUnreadable?: true;
 }
 
 /**

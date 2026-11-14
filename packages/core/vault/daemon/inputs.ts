@@ -6,15 +6,19 @@ import { milliseconds } from '@ferretry/std';
 import {
   InputAskRefSchema,
   InputPhoneApprovals,
+  InputSecureCopies,
   type InputTargetAdapter,
   InputRequestFiles,
   InputTargets,
   PHONE_APPROVAL_KEY,
   type PhoneApprovalProvider,
+  SECURE_COPY_KEY,
+  type SecureCopyProvider,
 } from '../contract/index.ts';
 import { INPUT_ASK_SOURCE, InputAgentNotifierAdapter, InputAsksAdapter } from './adapters/inputs/asks.ts';
 import { InputGateAudit } from './adapters/inputs/audit.ts';
 import { PhoneApprovalReach } from './adapters/inputs/phone-reach.ts';
+import { SecureCopiesThroughHook } from './adapters/inputs/secure-copy.ts';
 import { type BoundInputHolds, HeardActs, InputHoldsOverService } from './adapters/inputs/holds.ts';
 import { InputStateJournal } from './adapters/inputs/journal.ts';
 import { LoginProbeThroughHook, PageTargetThroughHook, TerminalTargetThroughHook } from './adapters/inputs/targets.ts';
@@ -126,7 +130,14 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
   const journal = new InputStateJournal(state, cardOf, () => clock.now());
   // Who a page is signing in, as the ferret typed it: plain text it held already, for the owner's card only.
   const identities = new TypedIdentities(() => clock.nowMs());
-  const accounts = deps.accounts ?? {};
+  // Secure copies and the owner's paste rules are Accounts', provided as `input.secure-copy`: looked up on every call, so an
+  // Accounts that is off leaves no copy to paste and no rule to match (fail closed). A seam a test passes wins.
+  const secureCopy = (): SecureCopyProvider | undefined => {
+    const found = ctx.hooks.provider(InputSecureCopies, SECURE_COPY_KEY);
+    return found === 'unavailable' ? undefined : found;
+  };
+  const copies = new SecureCopiesThroughHook(secureCopy);
+  const accounts = { sealed: copies, rules: copies, ...(deps.accounts ?? {}) };
   // The sign-in lock's ears: the acts the kernel tells `InputHolds.observed` after each completed act (HeardActs).
   // Its own looks after a submit go through the targets' own reads (`where`, `text`, `promptLine`); a target that
   // offers none answers "cannot tell", so no sign-in fact is kept for it.

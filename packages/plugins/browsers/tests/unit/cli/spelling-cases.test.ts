@@ -120,3 +120,80 @@ describe('typed text in a spelling nobody listed — decode, then compare', () =
     should(hidden.sealed(hidden.clean('bytes %ff%fe and %'))).equal('bytes %ff%fe and %');
   });
 });
+
+/** A typed value too short for a piece of base64 to mean anything inside a longer blob: its COMPLETE encodings are compared. */
+describe('a short typed value in hex and base64 — no length exemption', () => {
+  const SHORT: readonly (readonly [string, string])[] = [
+    ['two characters', 'QZ'],
+    ['one character', 'x'],
+  ];
+  const ENCODINGS: readonly (readonly [string, (value: string) => string])[] = [
+    ['hex', value => [...new TextEncoder().encode(value)].map(byte => hex2(byte, false)).join('')],
+    ['upper-case hex', value => [...new TextEncoder().encode(value)].map(byte => hex2(byte, true)).join('')],
+    ['base64', value => Buffer.from(value).toString('base64')],
+    ['unpadded base64', value => Buffer.from(value).toString('base64').replace(/=+$/u, '')],
+    ['url-safe base64', value => Buffer.from(value).toString('base64url')],
+  ];
+
+  for (const [size, fixture] of SHORT) {
+    for (const [label, encode] of ENCODINGS) {
+      const spelled = encode(fixture);
+
+      it(`should not print a ${size} value as ${label} (${spelled}) in human output`, async () => {
+        // Arrange
+        const daemon = new FakeDaemon().answer('browser_type', toolText(`seen ${spelled} done`));
+        const world = cliWorld(daemon, { stdin: fixture });
+
+        // Act
+        const code = await world.run(['browser', 'page', 'type', 'app', '#field', '--stdin']);
+
+        // Assert
+        should(code).equal(0);
+        should(world.stdout() + world.stderr()).not.containEql(spelled);
+      });
+
+      it(`should not print a ${size} value as ${label} (${spelled}) with --json, and keep it JSON`, async () => {
+        // Arrange
+        const daemon = new FakeDaemon().answer('browser_type', toolText(`seen ${spelled} done`));
+        const world = cliWorld(daemon, { stdin: fixture });
+
+        // Act
+        const code = await world.run(['browser', 'page', 'type', 'app', '#field', '--stdin', '--json']);
+
+        // Assert
+        should(code).equal(0);
+        should(world.stdout()).not.containEql(spelled);
+        should(() => JSON.parse(world.stdout())).not.throw();
+      });
+
+      it(`should not print a ${size} value as ${label} (${spelled}) in an error`, async () => {
+        // Arrange
+        const daemon = new FakeDaemon();
+        daemon.answer('POST /v1/ferrets/:ferretId/surfaces/browser/tools', () => {
+          throw new Error(`no field takes ${spelled}`);
+        });
+        const world = cliWorld(daemon, { stdin: fixture });
+
+        // Act
+        const code = await world.run(['browser', 'page', 'type', 'app', '#field', '--stdin', '--ferret', 'f1']);
+
+        // Assert
+        should(code).equal(1);
+        should(world.stdout() + world.stderr()).not.containEql(spelled);
+      });
+    }
+  }
+
+  it('should still print an ordinary answer for a short value', async () => {
+    // Arrange
+    const daemon = new FakeDaemon().answer('browser_type', toolText('Done on %browser:app.'));
+    const world = cliWorld(daemon, { stdin: 'QZ' });
+
+    // Act
+    const code = await world.run(['browser', 'page', 'type', 'app', '#field', '--stdin']);
+
+    // Assert
+    should(code).equal(0);
+    should(world.stdout()).equal('Done on %browser:app.\n');
+  });
+});

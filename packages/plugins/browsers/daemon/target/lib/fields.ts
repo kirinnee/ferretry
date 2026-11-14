@@ -51,11 +51,22 @@ export interface InputCdpSession {
   detach?(): Promise<void>;
 }
 
+/** The body of a frame, as far as the text a read could show is looked at. */
+interface InputFrameBody {
+  first(): InputFrameBody;
+  innerText?(options: { readonly timeout: number }): Promise<string>;
+  ariaSnapshot?(options: { readonly timeout: number }): Promise<string>;
+}
+
 /** A frame of the page, as far as the input calls look at it. */
 export interface InputFrame {
   url(): string;
   /** The frame this one is inside, or `null` for the page's main frame. */
   parentFrame(): InputFrame | null;
+  /** The frame's own locator (Playwright's), for the text a read of the page could show inside it. */
+  locator?(selector: string): InputFrameBody;
+  /** The frame's markup. */
+  content?(): Promise<string>;
 }
 
 /**
@@ -279,7 +290,30 @@ async function navigationIdOf(session: InputCdpSession): Promise<string> {
   return loaderId.slice(0, NAVIGATION_ID_LIMIT);
 }
 
-/** The page's current document, cheaply: no field is looked at. */
+/** How many frames below the main one a page may have before it is judged uninspectable. */
+const MAX_FRAMES = 32;
+
+/**
+ * The host a frame's document really belongs to: its own address, or the nearest ancestor's for a frame with none of its
+ * own (`about:blank`, `about:srcdoc`: they inherit their parent's origin), or the origin inside a `blob:`. A `data:` frame, or
+ * one whose address says nothing, belongs to no host: `undefined`, so a caller fails closed.
+ */
+function frameHostOf(frame: InputFrame): string | undefined {
+  for (let at: InputFrame | null = frame; at !== null; at = at.parentFrame()) {
+    const url = at.url();
+    if (url === '' || url === 'about:blank' || url === 'about:srcdoc') continue;
+    try {
+      const parsed = new URL(url.startsWith('blob:') ? url.slice('blob:'.length) : url);
+      if (parsed.protocol === 'data:') return undefined;
+      return parsed.host === '' ? undefined : parsed.host.toLowerCase();
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+/** The page's current document, cheaply: no field is looked at. The hosts of the frames inside it are named too. */
 export async function describeInputDocument(subject: InputSubject): Promise<BrowserInputDocument> {
   if (subject.page.isClosed()) throw new Error(REFUSALS.noDocument);
   const navigationId = await navigationIdOf(await subject.cdp.page());
@@ -289,7 +323,17 @@ export async function describeInputDocument(subject: InputSubject): Promise<Brow
   } catch {
     host = undefined;
   }
-  return { navigationId, ...(host === undefined ? {} : { host }) };
+  const main = subject.page.mainFrame();
+  const frames = subject.page.frames().filter(frame => frame !== main);
+  const hosts = frames.map(frameHostOf);
+  const unreadable = frames.length > MAX_FRAMES || hosts.some(each => each === undefined);
+  const frameHosts = [...new Set(hosts.filter((each): each is string => each !== undefined))];
+  return {
+    navigationId,
+    ...(host === undefined ? {} : { host }),
+    ...(frameHosts.length === 0 ? {} : { frameHosts }),
+    ...(unreadable ? { framesUnreadable: true as const } : {}),
+  };
 }
 
 /** How long the daemon waits for a page's text after a sign-in. */
@@ -317,8 +361,31 @@ export async function readInputText(subject: InputSubject): Promise<string> {
   ];
   if (typeof markup !== 'string' || parts.some(part => part.length > BROWSER_INPUT_TEXT_MAX_CHARS))
     throw new Error(REFUSALS.noDocument);
+  // EVERY frame's text too: a frame of another origin shows what its own document says, and a picture of the page shows it.
+  // A frame that cannot be read (no locator, a timeout, too many, too long) refuses the whole read: a value past a frame
+  // the check could not see would read as "not there".
+  const main = subject.page.mainFrame();
+  const frames = subject.page.frames().filter(frame => frame !== main);
+  if (frames.length > MAX_FRAMES) throw new Error(REFUSALS.noDocument);
+  const inner: string[] = [];
+  for (const frame of frames) {
+    if (frame.locator === undefined || frame.content === undefined) throw new Error(REFUSALS.noDocument);
+    const frameBody = frame.locator('body').first();
+    if (frameBody.innerText === undefined || frameBody.ariaSnapshot === undefined) throw new Error(REFUSALS.noDocument);
+    inner.push(
+      await frameBody.innerText({ timeout: TEXT_WAIT_MS }),
+      await frameBody.ariaSnapshot({ timeout: TEXT_WAIT_MS }),
+      await frame.content(),
+      frame.url(),
+    );
+  }
+  if (
+    inner.some(part => part.length > BROWSER_INPUT_TEXT_MAX_CHARS) ||
+    inner.join('').length > BROWSER_INPUT_TEXT_MAX_CHARS * 3
+  )
+    throw new Error(REFUSALS.noDocument);
   // The title and the address too: a page can echo a value into either (`document.title`, `history.replaceState`).
-  return [...parts, await titleOf(subject), subject.page.url()].join('\n');
+  return [...parts, ...inner, await titleOf(subject), subject.page.url()].join('\n');
 }
 
 async function titleOf(subject: InputSubject): Promise<string> {

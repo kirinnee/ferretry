@@ -17,6 +17,8 @@ import type { MaskValue, Scrub } from '../secrets/redaction.ts';
 
 const MIN_MASKED_LENGTH = 1;
 const MAX_FRAGMENT_FLOOR = 3;
+/** How many DIFFERENT copies pasted into terminals one session keeps masked for the life of its scrollback (each in all its spellings). */
+const MAX_SCROLLBACK_HOLDS = 256;
 
 /** The shortest piece of a value that counts as the value: three characters, fewer for a value too short to have three. */
 /** The longest a secure copy is masked for: its longest life, then the time it may still sit on a screen. */
@@ -28,6 +30,8 @@ interface Held {
   readonly value: string;
   readonly label: string;
   readonly until: number;
+  /** A value pasted into a terminal: it lasts as long as that terminal's scrollback (the session's life), and `retime` never shortens it. */
+  readonly scrollback?: true;
   /** The whole replacement text, when it is not `[redacted:input <label>]` (a secure copy's `[sealed:<name>]`). */
   readonly marker?: string;
 }
@@ -62,13 +66,47 @@ export class EphemeralValues {
     ]);
   }
 
+  /**
+   * Masks `value` in `sessionId`'s reads for as long as the session lives (and the after-mask window past it): a value
+   * PASTED INTO A TERMINAL stays in that terminal's scrollback, which no clock empties, so the mask must not end with the
+   * copy. `retime` (a discarded copy) does not shorten it. Bounded WITHOUT EVER LETTING GO: a mask whose value can still be
+   * read is never dropped to make room. A session that already keeps {@link MAX_SCROLLBACK_HOLDS} different copies refuses a
+   * new one (`false`, nothing held; ask {@link scrollbackFull} first so nothing is typed), and a copy it already keeps takes
+   * every further spelling and paste.
+   */
+  holdScrollback(sessionId: string, value: string, marker: string): boolean {
+    if (value.length < MIN_MASKED_LENGTH) return true;
+    this.purge();
+    if (this.scrollbackFull(sessionId, marker)) return false;
+    const entries = (this.held.get(sessionId) ?? []).filter(
+      entry => !(entry.scrollback === true && entry.value === value && entry.marker === marker),
+    );
+    this.held.set(sessionId, [
+      ...entries,
+      { value, label: marker, marker, until: Number.POSITIVE_INFINITY, scrollback: true },
+    ]);
+    return true;
+  }
+
+  /** Whether `sessionId` keeps as many different copies masked in scrollback as it may, and `marker` is not one of them. */
+  scrollbackFull(sessionId: string, marker: string): boolean {
+    this.purge();
+    const kept = (this.held.get(sessionId) ?? []).filter(entry => entry.scrollback === true);
+    if (kept.some(entry => entry.marker === marker)) return false;
+    return new Set(kept.map(entry => entry.marker)).size >= MAX_SCROLLBACK_HOLDS;
+  }
+
   /** Brings forward the end of every hold of `sessionId` masked as `marker` to `until`, never later than it was. */
   retime(sessionId: string, marker: string, until: number): void {
     const entries = this.held.get(sessionId);
     if (entries === undefined) return;
     this.held.set(
       sessionId,
-      entries.map(entry => (entry.marker === marker ? { ...entry, until: Math.min(entry.until, until) } : entry)),
+      entries.map(entry =>
+        entry.marker === marker && entry.scrollback !== true
+          ? { ...entry, until: Math.min(entry.until, until) }
+          : entry,
+      ),
     );
     this.purge();
   }

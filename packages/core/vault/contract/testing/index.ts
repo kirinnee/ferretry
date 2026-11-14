@@ -417,6 +417,8 @@ export class FakeVault implements VaultApi {
   readonly #values = new Map<SecretName, { value: string; createdAt: string; updatedAt: string }>();
   /** Every page act Browsers told (`pageActed`), and the page it was placed on once the call ended (`null`: none). */
   readonly pageActs: { ferret: FerretId; script: boolean; placed?: ActedPage | null }[] = [];
+  /** Every takeover Browsers told (`pageTakenOver`): the ferret and the keys (name and id) of the page. */
+  readonly pageTakeovers: { ferret: FerretId; keys: readonly string[] }[] = [];
   /** Every host a page script was told to have run on (`undefined`: one that could not be read). */
   readonly scriptedHosts: (string | undefined)[] = [];
   /** Page scripts running now (`scriptRunning` not yet ended). */
@@ -429,6 +431,9 @@ export class FakeVault implements VaultApi {
     private readonly transport: FakeTransport = () => ({ kind: 'completion', payload: {} }),
   ) {}
 
+  async pageTakenOver(ferret: FerretId, keys: readonly string[]): Promise<void> {
+    this.pageTakeovers.push({ ferret, keys });
+  }
   pageActed(ferret: FerretId, script: boolean): PageActNote {
     const act: { ferret: FerretId; script: boolean; placed?: ActedPage | null } = { ferret, script };
     this.pageActs.push(act);

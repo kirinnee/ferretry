@@ -74,6 +74,10 @@ export interface BrowserGuardPage {
   document(): Promise<string | undefined>;
   /** The host the page is on now, read from the live page inside its queue; `undefined` when it can't be read. */
   host?(): Promise<string | undefined>;
+  /** The host of the page AND of every frame in it (`undefined` when any cannot be told), read inside its queue. */
+  hosts?(): Promise<readonly (string | undefined)[] | undefined>;
+  /** What a read of the page and its frames could show now (visible text, accessibility tree, markup), read inside its queue; `undefined` when it can't be read. */
+  text?(): Promise<string | undefined>;
 }
 
 /**
@@ -188,6 +192,10 @@ export interface BrowserSubsystem extends BrowserViewerHost {
   /** A person's toolbar: everything acts on the page this session's person is viewing. */
   act(sessionId: string, action: BrowserAction, options?: BrowserActOptions): Promise<BrowserActionResult>;
   /**
+   * Empties the browser's clipboard: `true` only when it was CONFIRMED empty. A browser that is not running holds none.
+   */
+  clearClipboard(): Promise<boolean>;
+  /**
    * Opens a page with a human NAME in its own window, starting the browser when it is not running. A
    * name already in use in this session is refused, and so is a page past the session's or the
    * machine's cap — refused, never hidden.
@@ -244,6 +252,12 @@ export interface BrowserSubsystem extends BrowserViewerHost {
     key: string,
     work: (fields: BrowserInputFieldsPort, pageId: string) => Promise<T>,
   ): Promise<T>;
+  /**
+   * The host of this session's page `key` and of every frame in it, read from the live page and not through its queue (nothing
+   * is acted on): for what a LISTING or a status may say of a page a sealed value covers. `undefined` when the browser is not
+   * running or any host cannot be told (the caller then fails closed).
+   */
+  pageHosts(sessionId: string, key: string): Promise<readonly (string | undefined)[] | undefined>;
   /** Closes this session's page with this name (or id). An incognito page's whole context goes with it. */
   closePage(sessionId: string, key: string, guard?: BrowserActGuard): Promise<void>;
   /** A session ended: every page it owns closes, and every incognito context it held is discarded. */
@@ -458,6 +472,13 @@ export class BrowserSessionService implements BrowserSubsystem {
     });
   }
 
+  async pageHosts(sessionId: string, key: string): Promise<readonly (string | undefined)[] | undefined> {
+    const run = this.run;
+    if (run === undefined || run.closed) return undefined;
+    const page = this.requirePage(run, sessionId, key);
+    return await this.guardPage(run, page.id).hosts?.();
+  }
+
   /** Secure copy's read of one page, in that page's own queue (copy-contracts.ts). */
   async copyOnPage<T>(
     sessionId: string,
@@ -655,6 +676,13 @@ export class BrowserSessionService implements BrowserSubsystem {
 
   async closeAll(): Promise<void> {
     await this.stop();
+  }
+
+  async clearClipboard(): Promise<boolean> {
+    const run = this.run;
+    // No browser, no clipboard of its: a restarted private browser starts empty.
+    if (run === undefined) return true;
+    return await run.driver.clearClipboard().catch(() => false);
   }
 
   /** The machine's browser, started on first need; concurrent first needs share one launch. */
@@ -987,6 +1015,16 @@ export class BrowserSessionService implements BrowserSubsystem {
           .inputDocument(pageId)
           .then(found => found.host)
           .catch(() => undefined),
+      hosts: async () =>
+        await run.driver
+          .inputDocument(pageId)
+          .then(found =>
+            found.host === undefined || found.framesUnreadable === true
+              ? undefined
+              : [found.host, ...(found.frameHosts ?? [])],
+          )
+          .catch(() => undefined),
+      text: async () => await run.driver.inputText?.(pageId).catch(() => undefined),
     };
   }
 

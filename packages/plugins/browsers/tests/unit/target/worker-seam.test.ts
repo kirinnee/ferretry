@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { PushNumberPage } from '../../../daemon/challenges/push-number-read.ts';
-import type { BrowserInputFacts } from '../../../daemon/target/lib/contracts.ts';
+import { BROWSER_INPUT_TEXT_MAX_CHARS, type BrowserInputFacts } from '../../../daemon/target/lib/contracts.ts';
 import { elementParam } from '../../../daemon/target/lib/element.ts';
 import { workerInputFields } from '../../../daemon/target/lib/worker-port.ts';
 import { type InputWorkerPages, isInputMethod, serveInputMethod } from '../../../daemon/target/lib/worker-serve.ts';
@@ -243,13 +243,33 @@ describe('the daemon side of the page input seam', () => {
       await expect(port(bad).fields.inputDocument('p')).rejects.toMatchObject({ status: 502 });
   });
 
+  test('FINDING 6: the frames’ hosts are believed only when every one fits, and a doubt reaches the daemon as "cannot be told"', async () => {
+    const said = (document: object) =>
+      port({ document: { navigationId: 'n1', host: 'a.test', ...document } }).fields.inputDocument('p');
+    expect(await said({ frameHosts: ['k.test', 'b.test:8443'] })).toEqual({
+      navigationId: 'n1',
+      host: 'a.test',
+      frameHosts: ['k.test', 'b.test:8443'],
+    });
+    expect(await said({ frameHosts: [] })).toEqual({ navigationId: 'n1', host: 'a.test' });
+    for (const doubt of [
+      { framesUnreadable: true },
+      { frameHosts: ['k.test', 7] },
+      { frameHosts: ['k.test', ''] },
+      { frameHosts: Array.from({ length: 65 }, (_, index) => `f${String(index)}.test`) },
+    ])
+      expect(await said(doubt)).toEqual({ navigationId: 'n1', host: 'a.test', framesUnreadable: true });
+  });
+
   test('the text answer is believed only when it is a string of a sane size', async () => {
     expect(await port({ text: 'hello' }).fields.inputText('p')).toBe('hello');
     await expect(port({ text: 5 }).fields.inputText('p')).rejects.toThrow(
       'the browser did not answer with the page text',
     );
     await expect(port(null).fields.inputText('p')).rejects.toMatchObject({ code: 'upstream_failed' });
-    await expect(port({ text: 'x'.repeat(1_300_000) }).fields.inputText('p')).rejects.toMatchObject({ status: 502 });
+    await expect(
+      port({ text: 'x'.repeat(BROWSER_INPUT_TEXT_MAX_CHARS * 7 + 3) }).fields.inputText('p'),
+    ).rejects.toMatchObject({ status: 502 });
   });
 
   test('an observation says what is missing or ambiguous, and anything else is refused without quoting it', async () => {

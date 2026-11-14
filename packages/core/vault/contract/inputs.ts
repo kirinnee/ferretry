@@ -63,6 +63,7 @@ export const INPUT_REASONS = [
   'check_failures',
   'expired',
   'copy_gone',
+  'taken_over',
 ] as const;
 export const InputReasonSchema = z.enum(INPUT_REASONS);
 

@@ -6,9 +6,15 @@ import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
 import { FerretsChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { BoardPort } from '@ferretry/plugin-board/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
-import { InputPhoneApprovals, RedactionSources, SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
+import {
+  InputPhoneApprovals,
+  InputSecureCopies,
+  RedactionSources,
+  SealedDocumentsPort,
+  VaultPort,
+} from '@ferretry/core-vault/contract';
 import { LOGIN_SECRETS } from './contract/routes/sealed.ts';
-import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
+import { AgentControlPort, type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
 import { definePlugin, renderer, route, settingsTab, tool, verb } from '@ferretry/kernel/manifest';
 import {
   ACCOUNTS_WORDS,
@@ -56,7 +62,15 @@ export default definePlugin({
    * orders its sign-in cards (I184); its project is the Board's (`projectOf`), named by Projects. All optional: without them,
    * today's behaviour without the read.
    */
-  uses: { access: AccessPort, browsers: BrowsersPort, ferrets: FerretsPort, board: BoardPort, projects: ProjectsPort },
+  uses: {
+    access: AccessPort,
+    browsers: BrowsersPort,
+    ferrets: FerretsPort,
+    board: BoardPort,
+    projects: ProjectsPort,
+    /** "What agents may control": a command copy needs the Terminals switch, as any terminal act does. */
+    agentControl: AgentControlPort,
+  },
   provides: { accounts: AccountsPort },
 
   actions: {
@@ -565,11 +579,31 @@ export default definePlugin({
         guard: NO_VALUE,
         summary: 'list the saved sign-ins for a place',
       }),
-      // AFTER MERGE (lizzette 2026-11-11: M2 moves after merge): account_propose, secure_copy, secure_list, secure_discard,
-      // secure_paste and task_plan are declared here again once each is built. Until then they are NOT listed, because the
-      // CLI builds the agents' MCP tool list from this array and a listed tool that answers "not built" is a lie. Their
-      // shapes (capability USE.terminal, or USE.secrets for account_propose; guard NO_VALUE) are the v4 descriptors in
-      // docs/design/rebuild-parity.tsv T-0002 and T-0039…T-0043 (still open).
+      // SECURE COPY (docs/secure-copy.md): a value moves page/command → secure clipboard → terminal / page field / named
+      // secret without entering the agent's context. Each tool parses its own call (the strict schemas are the contract's
+      // `CopyCaptureSchema`, `SecurePasteInputSchema`, …) and answers a handle, a name, an origin, a length and a state.
+      tool('secure_copy', {
+        ...TOOL,
+        capability: USE.terminal,
+        guard: NO_VALUE,
+        summary: "seal a command's stdout or a page element as sealed:<name>; you see its length, never the value",
+      }),
+      tool('secure_list', {
+        ...TOOL,
+        capability: USE.terminal,
+        guard: NO_VALUE,
+        summary: 'list the copies this session holds',
+      }),
+      tool('secure_discard', { ...TOOL, capability: USE.terminal, guard: NO_VALUE, summary: 'let go of a copy now' }),
+      tool('secure_paste', {
+        ...TOOL,
+        capability: USE.terminal,
+        guard: NO_VALUE,
+        summary: 'ask the owner to paste sealed:<name> into a terminal, a page field or a saved secret',
+      }),
+      // AFTER MERGE (lizzette 2026-11-11: M2 moves after merge): account_propose and task_plan are declared here again once
+      // each is built. Until then they are NOT listed, because the CLI builds the agents' MCP tool list from this array and
+      // a listed tool that answers "not built" is a lie (docs/design/rebuild-parity.tsv T-0002, T-0043: still open).
     ],
     cli: [
       verb('copy ls', { summary: 'list the secure copies a session holds' }),
@@ -677,6 +711,8 @@ export default definePlugin({
       { hook: RedactionSources, key: 'source' },
       /** The Vault's `push: true` raise and `input_wait` on a `pa_` id are answered here: an approval is a sign-in's. */
       { hook: InputPhoneApprovals, key: 'phone' },
+      /** The Vault's paste draws on the copies, the owner's paste rules and the takeover check, all Accounts'. */
+      { hook: InputSecureCopies, key: 'copy' },
       { hook: AskSources, key: 'sign-in-approval' satisfies string as SourceKey, schema: SignInApprovalRefSchema },
       /** Access issues a passkey challenge for a staged act only through the plugin that staged it (G83): each act is Accounts'. */
       { hook: StepUpStages, key: 'add-2fa-key' },

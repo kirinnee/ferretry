@@ -70,6 +70,8 @@ const IDENTITY_NOT_OFFERED: SecretCloneIdentitySource = { load: async () => unde
 
 /** The one plugin that looks at a page's number and a terminal's prompt for a phone approval, and may ask whether a ferret steered. */
 const PHONE_APPROVAL_LOOKER = 'accounts';
+/** The one plugin that captures a secure copy: it runs the command and holds the value in the masking registry. */
+const SECURE_COPY_OWNER = 'accounts';
 /** The plugins whose request tools carry a ferret's `push: true` raise (Terminals' does not serve one yet). */
 const PHONE_APPROVAL_RAISERS: readonly string[] = ['browsers'];
 
@@ -199,6 +201,8 @@ export default implementDaemon(manifest, {
       resolve: async name => (await vault.values()).get(name as SecretName),
     };
 
+    // Its OWN sealed child path (secure-clip-1 fix1, P1-2): the sealed allowlist only, never the git/gh tool overlay.
+    const copyRunner = new KernelSecretChildRunner(kernel.spawn, kernel.clock, undefined, true);
     const full: VaultApi = {
       names: async () => await directory.list(),
       has: async name => (await directory.list()).some(secret => secret.name === name),
@@ -233,6 +237,8 @@ export default implementDaemon(manifest, {
       // the login observer's act notes and the machine-wide script taint a page card's lock reads.
       pageActed: (ferret, script) => inputs.observer?.acted(ferret, 'browser', script) ?? { placed: () => undefined },
       scriptRunning: () => inputs.scripts.running(),
+      // A person took a page over (Browsers): a paste still waiting for the owner into it is refused now (secure-clip-1 fix1, P2-5).
+      pageTakenOver: async (ferret, keys) => await inputs.service.pageTakenOver(ferret, keys),
       scriptedOn: host => inputs.scripts.scriptedOn(host),
       // The input card a 2FA seed is set up from (Accounts, I173): where the daemon saw its target, and "use it now".
       cardTarget: requestId => inputs.service.cardTarget(requestId),
@@ -248,6 +254,23 @@ export default implementDaemon(manifest, {
       observeTerminal: async (ferret, key) => await inputs.phoneReach.observeTerminal(ferret, key),
       tainted: (ferret, kind, since) => inputs.phoneReach.tainted(ferret, kind, since),
       raisePhoneApproval: async (ferret, ask) => await inputs.phoneReach.raisePhoneApproval(ferret, ask),
+      // A secure copy (docs/secure-copy.md): the command it captures runs with NO shell and an environment that holds
+      // nothing but what the kernel host allows every child (no admin token, none of the daemon's secrets); what it
+      // printed goes once to the service that seals it. The masking registry is the one the input bridge uses.
+      captureCommand: async spec =>
+        await copyRunner.run({
+          command: spec.command,
+          cwd: spec.cwd,
+          env: environments.mint({}, { requester: SECURE_COPY_OWNER }),
+          timeoutMs: spec.timeoutMs,
+          maxOutputBytes: spec.maxOutputBytes,
+        }),
+      maskCopy: {
+        hold: (ferret, value, marker, until) => values.holdUntil(ferret, value, marker, until),
+        retime: (ferret, marker, until) => values.retime(ferret, marker, until),
+        holdScrollback: (ferret, value, marker) => values.holdScrollback(ferret, value, marker),
+        scrollbackFull: (ferret, marker) => values.scrollbackFull(ferret, marker),
+      },
     };
 
     /**
@@ -265,9 +288,21 @@ export default implementDaemon(manifest, {
       // The phone approval's reach is by name: the service that looks (Accounts) and the tool that raises (Browsers).
       // Every other needer is handed none of it, so a plugin cannot read a page's number or the prompt of
       // a terminal, or raise an approval, by holding the Vault port.
-      const { pushNumber, observeTerminal, tainted, raisePhoneApproval, ...rest } = full;
+      const {
+        pushNumber,
+        observeTerminal,
+        tainted,
+        raisePhoneApproval,
+        captureCommand,
+        maskCopy,
+        pageTakenOver,
+        ...rest
+      } = full;
       return {
         ...rest,
+        ...(needer.id === SECURE_COPY_OWNER ? { captureCommand, maskCopy } : {}),
+        // Browsers alone reports a takeover: the report ends waiting pastes, so no other plugin may make one.
+        ...(needer.id === 'browsers' ? { pageTakenOver } : {}),
         ...(needer.id === PHONE_APPROVAL_LOOKER ? { pushNumber, observeTerminal, tainted } : {}),
         ...(PHONE_APPROVAL_RAISERS.includes(needer.id) ? { raisePhoneApproval } : {}),
         // LIST reach: the secrets this needer may use or mints itself. WRITE reach is narrower: only the names it MINTS, so a

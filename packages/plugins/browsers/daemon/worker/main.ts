@@ -48,6 +48,7 @@ import {
 } from 'playwright-core';
 import { CDP_PIPE_ENDPOINT, CDP_PIPE_FROM_CHROME_FD, CDP_PIPE_TO_CHROME_FD, CdpPipeTransport } from './cdp-pipe.ts';
 import { recogniseBrowserChallenge } from '../challenges/recognise.ts';
+import { ContextClipboardHelper, readClipboardOf } from './clipboard-read.ts';
 import { type CopyablePage, readCopyElement } from './copy-read.ts';
 import { DownloadStage } from './download-stage.ts';
 import {
@@ -306,9 +307,31 @@ function watch(page: Page, key: string): void {
   );
 }
 
+/** The agent browser's clipboard, read only here: a context of the worker's own that no tool can name (clipboard-read.ts). */
+const clipboard = new ContextClipboardHelper(async () => {
+  if (!browser) throw new Error('the browser is not connected');
+  return (await browser.newContext({ viewport: null })) as never;
+});
+
+/** Lets a page write the clipboard for its own origin, as Chrome does; never read, never another origin. */
+async function allowClipboardWrite(page: Page): Promise<void> {
+  try {
+    const { protocol, origin } = new URL(page.url());
+    if (protocol !== 'https:' && protocol !== 'http:') return;
+    await (incognito.get(page) ?? requireContext()).grantPermissions(['clipboard-write'], { origin });
+  } catch {
+    // A page that cannot be granted it keeps Chrome's own rule (a click may still write).
+  }
+}
+
 function registerPage(page: Page): void {
   if (pageIds.has(page)) return;
   const key = pageId(page);
+  // A normal page's Copy button works as in any Chrome: it may WRITE the clipboard, for its own origin only. READ is never granted
+  // to an agent page (the worker reads in a context of its own, clipboard-read.ts).
+  page.on('framenavigated', frame => {
+    if (frame === page.mainFrame()) void allowClipboardWrite(page);
+  });
   // The WebSockets the page holds open: the dummy probe will not type where a socket may carry each keystroke.
   const sockets = new Set<WebSocket>();
   openSockets.set(page, sockets);
@@ -489,6 +512,9 @@ function inputLocatorOf(locator: Locator): InputLocator {
     first: () => inputLocatorOf(locator.first()),
     nth: index => inputLocatorOf(locator.nth(index)),
     count: async () => await locator.count(),
+    // What a read of the page could show: its text and its accessibility tree, read by Playwright in its own world (readInputText).
+    innerText: async options => await locator.innerText(options),
+    ariaSnapshot: async options => await locator.ariaSnapshot(options),
     elementHandle: async options => {
       const handle = await locator.elementHandle(options);
       return handle === null ? null : inputHandleOf(handle);
@@ -874,6 +900,20 @@ async function act(request: Request): Promise<Record<string, unknown>> {
           part,
           attribute,
         ),
+      };
+    }
+    case 'clipboardClear': {
+      return {
+        cleared: await clipboard.clear().then(
+          () => true,
+          () => false,
+        ),
+      };
+    }
+    case 'clipboardRead': {
+      const page = targetPage(params.pageId);
+      return {
+        read: await readClipboardOf(page, async () => await describeInputDocument(inputSubject(page)), clipboard),
       };
     }
     case 'pointer': {

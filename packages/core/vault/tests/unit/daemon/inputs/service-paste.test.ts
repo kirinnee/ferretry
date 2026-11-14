@@ -82,8 +82,43 @@ describe('raising a paste', () => {
       kind: 'sealed',
       name: 'vercel',
       from: { kind: 'command', program: 'vercel', path: '/usr/bin/vercel' },
+      length: COPY_VALUE.length,
+      capturedAt: '2026-11-01T11:00:00.000Z',
     });
     should(w.events.map(event => event.sealed)).eql(['vercel']);
+  });
+
+  it('should not leave a copy green when its exposure is unknown or its page was read first, and say so without claiming a leak', async () => {
+    const calm = { ...VERCEL, recognisedConsumer: true };
+    const unknown = world({ withSealed: true, facts: calm });
+    unknown.copy({ exposure: { transcript: 'unknown' } });
+    const paged = world({ withSealed: true, facts: calm });
+    paged.copy({ exposure: { transcript: 'clean', pageReadBeforeCapture: true } });
+    const clean = world({ withSealed: true, facts: calm });
+    clean.copy({ exposure: { transcript: 'clean', pageReadBeforeCapture: false } });
+
+    await unknown.service.raise(SESSION_ID, PASTE_RAISE);
+    await paged.service.raise(SESSION_ID, PASTE_RAISE);
+    await clean.service.raise(SESSION_ID, PASTE_RAISE);
+
+    const said = [(await unknown.pending()).risk, (await paged.pending()).risk, (await clean.pending()).risk];
+    should(said[0]?.level).equal('amber');
+    should(said[0]?.reason).containEql('could not check').and.containEql('may not be protected');
+    should(said[1]?.level).equal('amber');
+    should(said[1]?.reason).containEql('may have read').and.containEql('may not be protected');
+    for (const each of [said[0], said[1]]) should(each?.reason).not.match(/\b(leak|leaked|stolen|compromised)\b/iu);
+    should(said[2]?.reason ?? '').not.containEql('protected');
+  });
+
+  it('should keep the replacement warning when the copy is also uncertain: both are said, neither hides the other', async () => {
+    const w = world({ withSealed: true, facts: SECRET_STORE(true) });
+    w.copy({ exposure: { transcript: 'unknown' } });
+
+    await w.service.raise(SESSION_ID, STORE_RAISE);
+
+    const risk = (await w.pending()).risk;
+    should(risk?.level).equal('amber');
+    should(risk?.reason).containEql('the old value is gone for good').and.containEql('could not check');
   });
 
   it('should make every field of a paste a secret, whatever the agent called it', async () => {
@@ -130,6 +165,369 @@ describe('raising a paste', () => {
   });
 });
 
+const FIELD_RAISE = {
+  target: { kind: 'page', key: 'app' },
+  prompt: 'paste the token',
+  fields: [{ id: 'pass', sensitivity: 'secret', element: { kind: 'selector', selector: '#password' } }],
+  submit: 'owner-default',
+  source: { kind: 'sealed', name: 'vercel' },
+} satisfies InputRaise;
+
+const TAKEN_OVER = 'A person has taken over that page, so nothing is pasted into it.';
+
+describe('a paste into a page a person has taken over', () => {
+  it('should refuse the raise while a person holds the page, raising no card and opening no copy', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    w.state.pasteRefusal = TAKEN_OVER;
+
+    const error = await refusal(w.service.raise(SESSION_ID, FIELD_RAISE));
+
+    should(error.code).equal('conflict');
+    should(error.message).equal(TAKEN_OVER);
+    should(w.cards).eql([]);
+    should(w.writes).eql([]);
+  });
+
+  it('should refuse a pending card when a takeover lands before the owner allows it, typing nothing', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    w.state.pasteRefusal = TAKEN_OVER;
+
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(error.code).equal('conflict');
+    should(error.message).equal(TAKEN_OVER);
+    should(w.writes).eql([]);
+    should(w.used).eql([]);
+    should(w.events.at(-1)).match({ state: 'refused', reason: 'taken_over' });
+    should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql(COPY_VALUE);
+  });
+
+  it('should refuse a rule’s unasked paste the same way: the card stays refused, the rule is given back', async () => {
+    const w = world({ withSealed: true, withRules: true, facts: githubPageFacts() });
+    w.copy();
+    w.state.ruleId = 'rule-1';
+    w.state.pasteRefusal = TAKEN_OVER;
+
+    const error = await refusal(w.service.raise(SESSION_ID, FIELD_RAISE));
+
+    should(error.code).equal('conflict');
+    should(w.ruleLog.reserved).eql([]);
+    should(w.writes).eql([]);
+  });
+});
+
+describe('a takeover refuses a waiting paste at once (secure-clip-1 fix1, P2-5)', () => {
+  it('should end a waiting paste card as refused the moment a person takes its page over, typing and opening nothing', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+
+    await w.service.pageTakenOver(SESSION_ID, ['app', 'page-1']);
+
+    should(w.events.at(-1)).match({ state: 'refused', reason: 'taken_over' });
+    should(w.closed.length).equal(1);
+    should(w.told.length).be.above(0);
+    should(w.writes).eql([]);
+    should(w.used).eql([]);
+    // The card is over: allowing it now is refused, not pasted.
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+    should(w.writes).eql([]);
+    should(error.message).not.containEql(COPY_VALUE);
+    should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql(COPY_VALUE);
+  });
+
+  it('should leave a paste into another page, a terminal paste and another ferret’s paste waiting', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, { ...FIELD_RAISE, target: { kind: 'page', key: 'other' } });
+
+    await w.service.pageTakenOver(SESSION_ID, ['app']);
+    await w.service.pageTakenOver('some-other-session', ['other']);
+
+    should((await w.pending()).state).equal('pending');
+    should(w.closed).eql([]);
+  });
+});
+
+describe('a takeover that lands after the last check (secure-clip-1 fix1, P1-1)', () => {
+  it('should refuse and type nothing when a takeover lands between opening the copy and the write', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    // Free at the open of the copy, held at the write (it landed during the journal and hold awaits between them).
+    w.state.pasteRefusals = [undefined, TAKEN_OVER];
+
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(error.code).equal('conflict');
+    should(error.message).equal(TAKEN_OVER);
+    should(w.writes).eql([]);
+    should(w.used).eql([]);
+    should(w.events.at(-1)).match({ state: 'refused', reason: 'taken_over' });
+    should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql(COPY_VALUE);
+  });
+
+  it('should refuse and type nothing when a takeover lands while the write waits in the page queue', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    w.state.onQueue = () => {
+      w.state.pasteRefusal = TAKEN_OVER;
+    };
+    // The queue's own check is the only one that sees it: the open of the copy found the page free.
+    w.state.pasteRefusals = [undefined];
+
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(error.code).equal('conflict');
+    should(error.message).equal(TAKEN_OVER);
+    should(w.writes).eql([]);
+    should(w.used).eql([]);
+    should(w.events.at(-1)).match({ state: 'refused', reason: 'taken_over' });
+  });
+});
+
+describe('a copy replaced under the same name (secure-clip-1 fix1, P2-3)', () => {
+  it('should end a waiting card as copy_gone when its copy was discarded and captured again under the same name', async () => {
+    const w = world({ withSealed: true, facts: VERCEL });
+    w.copy();
+    await w.service.raise(SESSION_ID, PASTE_RAISE);
+    const request = await w.pending();
+    // The owner is still looking at the card for the first copy when another value takes its name.
+    w.copy({ capturedAt: '2026-11-01T11:30:00.000Z' }, 'FAKE-SC-REPLACED');
+
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(error.code).equal('gone');
+    should(w.writes).eql([]);
+    should(w.used).eql([]);
+    should(w.events.at(-1)).match({ state: 'cancelled', reason: 'copy_gone' });
+    should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql('FAKE-SC-REPLACED');
+  });
+});
+
+describe('a sealed paste is protected INSIDE the write turn, before any byte (secure-clip-2 fix1, finding 3)', () => {
+  it('should install the protection from the target’s own turn, with the origins it reports, before the first byte is typed', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    w.state.protectOrigins = ['https://form.example.test', 'https://frame.example.test'];
+
+    await w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER);
+
+    should(w.protects).have.length(1);
+    should(w.protects[0]).match({
+      copy: 'vercel',
+      target: { kind: 'page' },
+      where: { origins: ['https://form.example.test', 'https://frame.example.test'] },
+    });
+    // ONE protection, installed before the one write.
+    should(w.writes.map(write => write.protectedBefore)).eql([1]);
+  });
+
+  it('should type NOTHING, end the card refused and say why when the protection cannot be installed', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    w.state.protectRefusal = 'Ferretry could not guard the page this value goes to, so nothing was typed.';
+
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(error.code).equal('unavailable');
+    should(error.message).equal('Ferretry could not guard the page this value goes to, so nothing was typed.');
+    should(w.writes).eql([]);
+    should(w.used).eql([]);
+    should(w.events.at(-1)).match({ state: 'refused' });
+    should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql(COPY_VALUE);
+  });
+
+  it('should leave the protection ON when the write may have landed (uncertain), never undoing it', async () => {
+    const w = world({ withSealed: true, facts: SECRET_STORE(true) });
+    w.copy();
+    await w.service.raise(SESSION_ID, STORE_RAISE);
+    const request = await w.pending();
+    w.state.typed = 'uncertain';
+
+    await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(w.protects).have.length(1);
+    should(w.used).eql([]);
+  });
+
+  it('should install none for a value the owner typed, which no copy is behind', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    await w.service.raise(SESSION_ID, PAGE_LOGIN);
+    const request = await w.pending();
+
+    await w.service.deliver(
+      SESSION_ID,
+      request.id,
+      w.send(request, {
+        fields: [
+          { field: 'user', padded: padInputValue('kirin') },
+          { field: 'pass', padded: padInputValue('a-long-enough-password') },
+        ],
+      }),
+      OWNER,
+    );
+
+    should(w.protects).eql([]);
+  });
+});
+
+describe('the protection is bound to the pinned capture and repeats the copy check at the write (secure-clip-2 fix2, R3)', () => {
+  it('should hand the protection the capture the card is for, so it cannot reopen another one under the name', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+
+    await w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER);
+
+    should(w.protects).have.length(1);
+    should(w.protects[0]?.capturedAt).equal(w.copies.get('vercel')?.meta.capturedAt);
+  });
+
+  it('should type NOTHING and end copy_gone when the copy is captured again after the target’s own check and before the protection', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    // The target's extra look at the page is outstanding: the name is captured again meanwhile.
+    w.state.onBeforeProtect = () => w.copy({ capturedAt: '2026-11-01T11:30:00.000Z' }, 'FAKE-SC-RECAPTURED');
+
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(error.code).equal('gone');
+    should(w.writes).eql([]);
+    should(w.protects).eql([]);
+    should(w.used).eql([]);
+    should(w.events.at(-1)).match({ state: 'cancelled', reason: 'copy_gone' });
+    should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql('FAKE-SC-RECAPTURED');
+  });
+
+  it('should type NOTHING and end copy_gone when the copy is discarded after the target’s own check and before the protection', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    w.state.onBeforeProtect = () => void w.copies.delete('vercel');
+
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(error.code).equal('gone');
+    should(w.writes).eql([]);
+    should(w.events.at(-1)).match({ state: 'cancelled', reason: 'copy_gone' });
+  });
+});
+
+describe('a copy that ends after it was opened (secure-clip-1 fix2, R4)', () => {
+  const ended = async (setup: (w: ReturnType<typeof world>) => void, facts: InputTargetFacts, raise: InputRaise) => {
+    const w = world({ withSealed: true, facts });
+    w.copy();
+    await w.service.raise(SESSION_ID, raise);
+    const request = await w.pending();
+    setup(w);
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+    should(error.code).equal('gone');
+    should(w.writes).eql([]);
+    should(w.used).eql([]);
+    should(w.events.at(-1)).match({ state: 'cancelled', reason: 'copy_gone' });
+    should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql(COPY_VALUE);
+    should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql('FAKE-SC-RECAPTURED');
+  };
+
+  it('should type nothing when the copy is discarded while the attempt is journalled', async () => {
+    await ended(
+      w => {
+        w.state.onDelivering = () => void w.copies.delete('vercel');
+      },
+      githubPageFacts(),
+      FIELD_RAISE,
+    );
+  });
+
+  it('should type nothing when the copy expires while the attempt is journalled', async () => {
+    await ended(
+      w => {
+        w.state.onDelivering = () => void w.copy({ state: 'expired' });
+      },
+      githubPageFacts(),
+      FIELD_RAISE,
+    );
+  });
+
+  it('should type nothing when the name is captured again while the attempt is journalled', async () => {
+    await ended(
+      w => {
+        w.state.onDelivering = () => void w.copy({ capturedAt: '2026-11-01T11:30:00.000Z' }, 'FAKE-SC-RECAPTURED');
+      },
+      githubPageFacts(),
+      FIELD_RAISE,
+    );
+  });
+
+  it('should type nothing when the copy is discarded while the write waits in the page queue', async () => {
+    await ended(
+      w => {
+        w.state.onQueue = () => void w.copies.delete('vercel');
+      },
+      githubPageFacts(),
+      FIELD_RAISE,
+    );
+  });
+
+  it('should type nothing when the copy expires while the write waits in the page queue', async () => {
+    await ended(
+      w => {
+        w.state.onQueue = () => void w.copy({ state: 'expired' });
+      },
+      githubPageFacts(),
+      FIELD_RAISE,
+    );
+  });
+
+  it('should type nothing when the name is captured again while the write waits in the page queue', async () => {
+    await ended(
+      w => {
+        w.state.onQueue = () => void w.copy({ capturedAt: '2026-11-01T11:30:00.000Z' }, 'FAKE-SC-RECAPTURED');
+      },
+      githubPageFacts(),
+      FIELD_RAISE,
+    );
+  });
+
+  it('should type nothing into a terminal when the copy is discarded while the attempt is journalled', async () => {
+    await ended(
+      w => {
+        w.state.onDelivering = () => void w.copies.delete('vercel');
+      },
+      VERCEL,
+      PASTE_RAISE,
+    );
+  });
+
+  it('should still type a copy that is live and the pinned capture at the write', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    w.state.onQueue = () => void w.copy();
+    const result = await w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER);
+    should(result).match({ state: 'delivered' });
+    should(w.writes.map(write => write.values)).eql([[COPY_VALUE]]);
+  });
+});
+
 describe('allowing a paste', () => {
   it('should type the copy once when the owner allows it, count the use, and tell the agent it was pasted', async () => {
     const w = world({ withSealed: true, facts: VERCEL });
@@ -142,7 +540,8 @@ describe('allowing a paste', () => {
 
     should(result).match({ state: 'delivered', submitted: true });
     should(w.writes.map(write => write.values)).eql([[COPY_VALUE]]);
-    should(w.used).eql([{ copy: 'vercel' }]);
+    // The Vault says WHERE it was typed, so Accounts can keep that terminal's scrollback masked and that page's origin closed.
+    should(w.used).eql([{ copy: 'vercel', target: { kind: 'terminal', key: 'dev' } }]);
     should(after).match({ state: 'delivered', source: 'sealed' });
     should(w.told.at(-1)).containEql('sealed:vercel was pasted into %terminal:dev');
     should(w.events.at(-1)).match({ state: 'delivered', sealed: 'vercel' });
@@ -333,6 +732,24 @@ describe('a paste a rule approved in advance', () => {
     should(echoing.ruleLog.reserved).eql([]);
     should(replacing.ruleLog.reserved).eql([]);
     should(fresh.ruleLog.reserved).have.length(1);
+  });
+
+  it('should never reserve a rule for a copy whose exposure is not known clean: the owner is asked', async () => {
+    const unknown = world({ withSealed: true, withRules: true, facts: { ...VERCEL, echo: 'off' } });
+    unknown.copy({ exposure: { transcript: 'unknown' } });
+    const pageRead = world({ withSealed: true, withRules: true, facts: { ...VERCEL, echo: 'off' } });
+    pageRead.copy({ exposure: { transcript: 'clean', pageReadBeforeCapture: true } });
+    const clean = world({ withSealed: true, withRules: true, facts: { ...VERCEL, echo: 'off' } });
+    clean.copy({ exposure: { transcript: 'clean', pageReadBeforeCapture: false } });
+    for (const each of [unknown, pageRead, clean]) each.state.ruleId = 'rule-1';
+
+    await unknown.service.raise(SESSION_ID, PASTE_RAISE);
+    await pageRead.service.raise(SESSION_ID, PASTE_RAISE);
+    await clean.service.raise(SESSION_ID, PASTE_RAISE);
+
+    should(unknown.ruleLog.reserved).eql([]);
+    should(pageRead.ruleLog.reserved).eql([]);
+    should(clean.ruleLog.reserved).have.length(1);
   });
 
   it('should leave a paste into a page to the owner unless the card would be green for every field', async () => {

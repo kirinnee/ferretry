@@ -169,14 +169,20 @@ function base64Cores(bytes: Uint8Array): readonly string[] {
 }
 
 /** One typed value in every form a decoded text could still carry it in; never an empty string. */
-function needles(value: string): { readonly exact: readonly string[]; readonly hex: string | undefined } {
+function needles(value: string): { readonly exact: readonly string[]; readonly hex: string } {
   const bytes = new TextEncoder().encode(value);
   const canonical = decodings(value).stages.at(-1) as string;
   const exact = new Set<string>([value, value.replaceAll(' ', '+'), canonical, canonical.replaceAll(' ', '+')]);
-  // Hex and base64 of something shorter than this would match ordinary ids and words.
+  // No length exemption: a short value is compared by its COMPLETE encodings (hex, and base64 standard and URL-safe,
+  // padded or not), which are exact however short it is. Only the base64 pieces that sit inside a longer blob need a few
+  // whole groups to mean anything, so those are kept for longer values.
+  for (const whole of [Buffer.from(bytes).toString('base64'), Buffer.from(bytes).toString('base64url')]) {
+    exact.add(whole);
+    exact.add(whole.replace(/=+$/u, ''));
+  }
   if (value.length >= MASK_MIN_LENGTH) for (const core of base64Cores(bytes)) exact.add(core);
   exact.delete('');
-  return { exact: [...exact], hex: value.length >= MASK_MIN_LENGTH ? hexOf(bytes) : undefined };
+  return { exact: [...exact], hex: hexOf(bytes) };
 }
 
 /**
@@ -187,9 +193,7 @@ function carries(text: string, value: string): { readonly found: boolean; readon
   const bare = text.split(MASK).join(NEUTRAL).split(WITHHELD).join(NEUTRAL);
   const { stages, settled } = decodings(bare);
   const { exact, hex } = needles(value);
-  const found = stages.some(
-    stage => exact.some(form => stage.includes(form)) || (hex !== undefined && stage.toLowerCase().includes(hex)),
-  );
+  const found = stages.some(stage => exact.some(form => stage.includes(form)) || stage.toLowerCase().includes(hex));
   return { found, unsure: !settled };
 }
 
