@@ -1,3 +1,4 @@
+import type { PushOutcome } from './health.ts';
 import {
   PairedDeviceIdSchema,
   PUSH_URGENT_TTL_SECONDS,
@@ -73,7 +74,14 @@ export interface PushServiceOptions {
  * changes remain deliberately silent so native harness notifications are not duplicated.
  */
 export class PushService {
+  #latest: PushOutcome | undefined;
+
   constructor(private readonly options: PushServiceOptions) {}
+
+  /** The newest push that went to at least one enrolled device since this run began (memory only), for `fy doctor`. */
+  latestOutcome(): PushOutcome | undefined {
+    return this.#latest;
+  }
 
   /** The application-server key a browser subscribes with. The private half is unreachable from here. */
   async publicKey(): Promise<string> {
@@ -190,6 +198,29 @@ export class PushService {
    * `delivered` means a push endpoint accepted the request; it does not claim a person observed it.
    */
   async notify(dispatch: PushDispatch<PushPayload>, to?: readonly string[]): Promise<PushDeliveryResult> {
+    try {
+      const result = await this.#send(dispatch, to);
+      this.#latest = { at: this.#stamp(), delivered: result.delivered, failed: result.failed };
+      return result;
+    } catch (error) {
+      // Every push that could not be made is remembered, whatever stopped it (the store, the keys, the transport) and
+      // whether or not it got as far as a device: only a later push that completes supersedes it. Nothing of the error
+      // is kept — no text, no endpoint — and the caller still sees it.
+      this.#latest = { at: this.#stamp(), delivered: 0, failed: 0, thrown: true };
+      throw error;
+    }
+  }
+
+  /** The instant now, or a fixed one if the clock itself fails: a failure must still be recorded. */
+  #stamp(): string {
+    try {
+      return this.options.clock.now();
+    } catch {
+      return new Date(0).toISOString();
+    }
+  }
+
+  async #send(dispatch: PushDispatch<PushPayload>, to?: readonly string[]): Promise<PushDeliveryResult> {
     const enrolled = await this.enrolments();
     const addressed = (to === undefined ? enrolled : enrolled.filter(record => to.includes(record.id))).filter(
       record => record.deviceId !== dispatch.exceptDevice,

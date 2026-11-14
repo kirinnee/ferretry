@@ -74,6 +74,7 @@ import {
   verifyDeviceProof,
 } from './lib/proof/device-proof.ts';
 import { buzzPayload, clearPayload, HighPushCap, PairedPushDevices, PushService } from './lib/push/index.ts';
+import type { PushHealth } from './lib/push/health.ts';
 import { pairingRoutes } from './lib/routes/pairing.ts';
 import { pushRoutes } from './lib/routes/push.ts';
 import { stepUpRoutes } from './lib/routes/step-up.ts';
@@ -388,6 +389,13 @@ export class AccessRuntime {
     this.#moved();
     const parsed = PairedDeviceIdSchema.safeParse(device);
     if (parsed.success) this.#deps.kernel.events.publish(DevicesChanged, { device: parsed.data, change });
+  }
+
+  /** What `fy doctor` says about pushes: the devices enrolled now and the newest push this run made. */
+  async pushHealth(): Promise<PushHealth> {
+    const { push } = await this.ready();
+    const latest = push.latestOutcome();
+    return { enrolled: (await push.list()).length, ...(latest === undefined ? {} : { latest }) };
   }
 
   /** One handler per manifest route key; each waits for the services to open. */

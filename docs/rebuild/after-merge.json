@@ -74,7 +74,7 @@
     },
     {
       "id": "v4-doctor-checks",
-      "what": "the v4 doctor checks and readiness 5.0 does not have yet (doctor lists the unbuilt checks on one line as not built yet): user-slice, loopback-firewall (warn-only), notifications health, claude-code/codex paths; and doctor readiness: ready only when some runtime can launch (v4 doctor.ts:317) and a required row for an unreadable fleet/manifest.json (v4 :224). Starts already refuse by name. Due 2026-11-27, card &F3715",
+      "what": "what is left of the v4 doctor after rebuild/config-doctor (which built the host program rows, the claude and codex path rows, the notifications row, the loopback-firewall row and the Doctor, Host checks and Files tabs): doctor readiness (ready only when some runtime can launch, v4 doctor.ts:317) and a required row for an unreadable fleet/manifest.json (v4 :224); the loopback-firewall row appears only once Runtimes serves browserPorts (today every launch is on random ports, which v4 also left out); the notifications row has no ledger rows (5.0 keeps no notifications.jsonl) and its newest push is this run only; the `directory syscalls` row (kernel FFI); the declared checks with no v4 row still say not built yet (chrome, shells-nix, update, board-store, agenda-buzz, mcp-inventory, warden-sweep, logins-store, usage-meter, lessons-board, conversation-store, conversation-search-index); the Host checks tab cannot rename a machine or remove this browser's pairing, nor show its address (the shell owns that record and an app half is not handed it). Due 2026-11-27, card &F3715",
       "owner": "britnee"
     },
     {

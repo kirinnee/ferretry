@@ -8,7 +8,7 @@ import {
   policyRef,
   SessionModes,
 } from './contract/index.ts';
-import { definePlugin, route, socket, tool } from './manifest/index.ts';
+import { definePlugin, route, settingsTab, socket, tool } from './manifest/index.ts';
 import { AgentConfigCallSchemas, AGENT_CONFIG_TOOLS } from './contract/agent-config.ts';
 
 /** `config/plugins.yaml` (§3.6): on or off per plugin. Core is always on whatever it says. */
@@ -219,6 +219,15 @@ export default definePlugin({
   /** Never reached by a ferret, through any root: the daemon's signing key (`PrivacyDecl`). */
   privacy: {
     private: ['identity.json'],
+  },
+  // The settings every daemon has (today's Health and Advanced groups): the host checks, their reachability tab, and the
+  // configuration files. After Access (20-23) and the plugins' own tabs, before the daemon-wide ones at 90 and above.
+  ui: {
+    settings: [
+      settingsTab('doctor', { label: 'Doctor', order: 80 }),
+      settingsTab('host-checks', { label: 'Host checks', order: 81 }),
+      settingsTab('files', { label: 'Files', order: 90 }),
+    ],
   },
   data: { publishes: [PluginsChanged, ConfigChanged], config: [PluginsConfig] },
   hooks: {

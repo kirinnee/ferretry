@@ -22,9 +22,9 @@ const impactOf = (line: DoctorLine): string =>
 export function doctorReport(lines: readonly DoctorLine[]): DoctorReport {
   return DoctorReportSchema.parse({
     checks: lines.map(line => ({
-      name: line.check === undefined ? line.plugin : `${line.plugin}: ${line.check}`,
-      requirement: line.state === 'fail' ? 'required' : 'optional',
-      status: line.state === 'ok' ? 'present' : 'missing',
+      name: line.name ?? (line.check === undefined ? line.plugin : `${line.plugin}: ${line.check}`),
+      requirement: line.requirement ?? (line.state === 'fail' ? 'required' : 'optional'),
+      status: line.notApplicable === true ? 'not_applicable' : line.state === 'ok' ? 'present' : 'missing',
       summary: line.detail === '' ? 'No detail.' : line.detail,
       impact: impactOf(line),
     })),

@@ -37,6 +37,7 @@ import { closeLeftoverBrowsers, spawnTerminate } from './leftovers.ts';
 import { BrowserLoginWindowService } from './worker/control/adapters/login-window.ts';
 import { ProcListenerProver } from './worker/control/adapters/listener-prover.ts';
 import { NodeBrowserLoginRuntime, XvfbDisplay } from './worker/control/adapters/login-runtime.ts';
+import { loopbackFirewallDoctor } from './proxy/firewall/doctor.ts';
 import { BrowserProfileStore } from './worker/control/adapters/profile-store.ts';
 import type { StartWorker } from './worker/client.ts';
 import { NodeSessionBrowserLauncher } from './worker/launcher.ts';
@@ -338,6 +339,12 @@ export function buildBrowsers(
     },
     sockets: {
       'GET /v1/ferrets/:ferretId/browser/stream': streamSocket(kernel.redaction, pages, stream, ferretGuard, gate),
+    },
+    doctor: {
+      // GAP (card F1931 finding 10, above): every launch takes random ports, so there is nothing fixed to fence and no
+      // row — exactly as today's report left the row out for random ports. When Runtimes serves `browserPorts`, this
+      // reads `readLoopbackFirewall` there and the row appears.
+      'loopback-firewall': loopbackFirewallDoctor(async () => undefined),
     },
     tools: withAddressRuleTools({ ...toolHandlers(tools), ...target.tools }),
     provides: {

@@ -39,6 +39,7 @@ import {
   Carriers,
   ConfigChanged,
   type DoctorCheck,
+  type DoctorFinding,
   DoctorChecks,
   PluginsChanged,
   SessionModes,
@@ -114,6 +115,7 @@ import { NO_HOST_FACTS } from './no-host-facts.ts';
 import { undeclaredHostFacts } from './adapters/host-facts.ts';
 import { type UpdateHostFiles, undeclaredUpdateHost } from './adapters/update-host.ts';
 import { PRODUCT_BINARIES } from './binaries.ts';
+import { hostProgramLines } from './doctor-programs.ts';
 import { descriptorReachNote } from './descriptor-reach.ts';
 import { doctorReport } from './doctor-report.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
@@ -324,6 +326,10 @@ export interface DoctorLine {
   readonly check?: string;
   /** What to do about it, when the check said. */
   readonly fix?: string;
+  /** The report's row name, when it is not "<plugin>: <check>" (see `DoctorFinding.name`). */
+  readonly name?: string;
+  readonly requirement?: DoctorFinding['requirement'];
+  readonly notApplicable?: true;
 }
 
 export interface RunningHost {
@@ -832,6 +838,16 @@ async function bootLocked(
               adapters.executable,
             ),
     });
+  /** The host's own program rows (`doctor-programs.ts`): a lookup on this daemon's `PATH`, nothing launched. */
+  const programLines = async (): Promise<readonly DoctorLine[]> =>
+    // No probe wired (a test host that gave none): nothing could be looked up, so no row says anything.
+    adapters.executable === undefined
+      ? []
+      : await hostProgramLines({
+          which: async name => await ownerPaths.which(name),
+          platform: process.platform,
+          binary: options.binaries?.client ?? PRODUCT_BINARIES.client,
+        });
   /** A plugin's own `resolvers` section, read at each call (unset during build: nothing resolves yet). */
   const resolversOf =
     (id: string): ResolverOf =>
@@ -1278,6 +1294,7 @@ async function bootLocked(
         ...bootNotes,
         ...pastBudgetLines(home, pastBudget.current),
         ...(await doctorLines(records, hooks, jobs, data.refused)),
+        ...(await programLines()),
       ]),
     liveness: () => ({
       status: phase === 'started' ? 'ok' : 'starting',
@@ -1494,6 +1511,7 @@ async function bootLocked(
       ...bootNotes,
       ...pastBudgetLines(home, pastBudget.current),
       ...(await doctorLines(records, hooks, jobs, data.refused)),
+      ...(await programLines()),
     ],
     stop: () => stopHost(),
   };
@@ -1654,7 +1672,15 @@ async function doctorLines(
   for (const check of checks) {
     try {
       const finding = await check.item.run();
-      lines.push({ plugin: check.id, state: finding.state, detail: finding.detail });
+      lines.push({
+        plugin: check.id,
+        state: finding.state,
+        detail: finding.detail,
+        ...(finding.fix === undefined ? {} : { fix: finding.fix }),
+        ...(finding.name === undefined ? {} : { name: finding.name }),
+        ...(finding.requirement === undefined ? {} : { requirement: finding.requirement }),
+        ...(finding.notApplicable === undefined ? {} : { notApplicable: true as const }),
+      });
     } catch {
       lines.push({ plugin: check.id, state: 'fail', detail: `The check ${check.item.title} failed to run.` });
     }
@@ -1685,6 +1711,9 @@ async function doctorLines(
           state: finding.state,
           detail: finding.detail,
           ...(finding.fix === undefined ? {} : { fix: finding.fix }),
+          ...(finding.name === undefined ? {} : { name: finding.name }),
+          ...(finding.requirement === undefined ? {} : { requirement: finding.requirement }),
+          ...(finding.notApplicable === undefined ? {} : { notApplicable: true as const }),
         });
       } catch {
         lines.push({ plugin: id, check, state: 'fail', detail: `The check ${check} failed to run.` });
