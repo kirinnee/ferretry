@@ -168,6 +168,11 @@ export interface FerretsPorts {
    */
   runtimeStart?(runtime: string): Promise<RuntimeStartResolution>;
   /**
+   * The machine's default runtime, or `undefined` when it has none (Runtimes' `runtime.start`, `defaultRuntime`). A start
+   * that names no runtime, login or harness starts on it. Unbound in a unit fixture: such a start is then as it was.
+   */
+  defaultRuntime?(): Promise<string | undefined>;
+  /**
    * Whether a login named WITHOUT a runtime (`--login`, or the one a stored record holds) may be spent now (Runtimes'
    * `runtime.start`, `login`): switched off or over its budget is refused. Unbound only in a unit fixture.
    */
@@ -889,7 +894,10 @@ export class FerretsService implements FerretsApi {
     }
     // A start that names a runtime launches with THAT runtime's harness and login (Runtimes answers); resolved before
     // anything is written, so a runtime that cannot serve refuses here and is never launched signed out.
-    const resolved = await this.resolveRuntime(request.runtime, { harness: request.harness, login: request.login });
+    // A start that names no runtime, login or harness is a start on the machine's DEFAULT runtime (v4 parity): it is
+    // recorded with it, and the same login gate refuses it when that login needs signing in.
+    const runtimeName = request.runtime ?? (await this.defaultRuntimeFor(request));
+    const resolved = await this.resolveRuntime(runtimeName, { harness: request.harness, login: request.login });
     if (!resolved.ok) return resolved;
     const login = resolved.value?.login ?? request.login;
     const harnessKey = resolved.value?.harness ?? request.harness ?? this.ports.harnessKeys()[0];
@@ -907,7 +915,7 @@ export class FerretsService implements FerretsApi {
       ...(request.parent === undefined ? {} : { parent: request.parent }),
       ...(request.pack === undefined ? {} : { pack: request.pack }),
       harness: harnessKey,
-      ...(request.runtime === undefined ? {} : { runtime: request.runtime }),
+      ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
       ...(login === undefined ? {} : { login }),
       folder: folder.value,
       by: request.by,
@@ -941,7 +949,7 @@ export class FerretsService implements FerretsApi {
       mode: request.options?.mode ?? 'auto',
       birth: birthOf(origin),
       runner: 'tmux',
-      ...(request.runtime === undefined ? {} : { runtime: request.runtime }),
+      ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
       ...(login === undefined ? {} : { login }),
       folder: folder.value,
       state: 'starting',
@@ -2264,6 +2272,16 @@ export class FerretsService implements FerretsApi {
     } finally {
       cancel();
     }
+  }
+
+  /** The machine's default runtime when this start chose nothing of its own (no runtime, login or harness), else none. */
+  private async defaultRuntimeFor(request: StartRequest): Promise<string | undefined> {
+    if (request.login !== undefined || request.harness !== undefined || this.ports.defaultRuntime === undefined)
+      return undefined;
+    return await this.withinDeadline(
+      this.ports.defaultRuntime().catch(() => undefined),
+      undefined,
+    );
   }
 
   /**

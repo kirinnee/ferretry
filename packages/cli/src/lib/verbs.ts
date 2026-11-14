@@ -175,6 +175,12 @@ const SHELL_VERB_LINES: readonly ShellVerbLine[] = [
       { flag: '--done', help: 'close the ask without a response' },
     ],
   },
+  {
+    verb: 'statusline',
+    summary: "record a Claude runtime's usage from its status line, then run your own status line command",
+    args: [],
+    options: [{ flag: '--then <command>', help: 'your own statusLine command, run with the same input' }],
+  },
 ];
 
 /**

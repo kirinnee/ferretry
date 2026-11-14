@@ -12,7 +12,7 @@ export * from './lib/index.ts';
 export const WORK_SEARCH_WARM_DELAY_MS = 5_000;
 
 export interface SearchNeeds {
-  readonly asks: Pick<AsksApi, 'open'>;
+  readonly asks: Pick<AsksApi, 'open'> & Partial<Pick<AsksApi, 'snapshots'>>;
   readonly redaction: Redaction;
   /**
    * Names the set of secret values the redaction knows (see {@link RedactionGeneration}): a change rebuilds the index,

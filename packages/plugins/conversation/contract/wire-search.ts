@@ -14,6 +14,15 @@ export const MAX_WORK_RELATED_HITS = 5;
 /** `card` is today's `task`; `ask` is today's `agenda` item (words of §1). Ids stay plain strings: Board and Asks own them. */
 export const WorkKindSchema = z.enum(['card', 'ask']);
 export type WorkKind = z.infer<typeof WorkKindSchema>;
+
+/**
+ * What a search is asked for by KIND: today's own spellings (`task`, `agenda`) are accepted beside `card` and `ask` and
+ * mean the same, so a v4 script or an agent's old instructions (`--kind agenda`, `search_work kind: task`) still work.
+ * The answer always says `card` or `ask`.
+ */
+export const WorkKindInputSchema = z
+  .enum(['card', 'ask', 'task', 'agenda'])
+  .transform((kind): WorkKind => (kind === 'task' ? 'card' : kind === 'agenda' ? 'ask' : kind));
 export const WorkStateSchema = z.enum(['open', 'closed', 'dropped']);
 export const WorkFieldSchema = z.enum([
   'id',
@@ -33,7 +42,7 @@ export const WorkFieldSchema = z.enum([
 
 export const WorkSearchQuerySchema = z.strictObject({
   q: z.string().trim().min(1).max(MAX_WORK_SEARCH_QUERY_LENGTH),
-  kind: WorkKindSchema.optional(),
+  kind: WorkKindInputSchema.optional(),
   open: z.boolean().default(false),
   all: z.boolean().optional(),
   project: z.string().min(1).optional(),
@@ -86,7 +95,7 @@ export type WorkRelatedResponse = z.infer<typeof WorkRelatedResponseSchema>;
 /** The `search_work` agent tool's input (today's MCP schema). */
 export const SearchWorkToolInputSchema = z.strictObject({
   query: z.string().min(1).max(MAX_WORK_SEARCH_QUERY_LENGTH),
-  kind: WorkKindSchema.optional(),
+  kind: WorkKindInputSchema.optional(),
   open: z.boolean().optional(),
   all: z.boolean().optional(),
 });

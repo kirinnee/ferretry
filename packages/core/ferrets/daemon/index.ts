@@ -87,6 +87,7 @@ import { WARDEN_LABEL } from './lib/session/peers/warden-lifecycle.ts';
 import { sessionFilesystemRoutes } from './lib/runtime/mounts/session-filesystem.ts';
 import { AGENT_READ_FENCE, SessionFilesystem } from './lib/session/filesystem/index.ts';
 import { KernelGitRunner } from './adapters/git/runner.ts';
+import { createKernelWorktreeHostIo } from './adapters/worktrees/kernel-host-io.ts';
 import { KernelDiffScratch, KernelSessionRootPinner, RunnerSessionGit } from './adapters/session/filesystem/index.ts';
 import { StateAgentPinRepository } from './adapters/agent-pins/index.ts';
 import { RegistryPinSessionDirectory, StatePinRepository } from './adapters/pins/index.ts';
@@ -479,6 +480,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
           }
         : await found.resolve(runtime);
     },
+    // The machine's default runtime, for a start that chose nothing: Runtimes alone answers; with no provider there is none.
+    defaultRuntime: async () => {
+      const found = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
+      return found === 'unavailable' ? undefined : await found.defaultRuntime?.();
+    },
     // Whether a login named with no runtime may be spent: Runtimes alone answers, the same check a runtime's login passes.
     loginStart: async login => {
       const found = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
@@ -701,9 +707,17 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     redact: texts => kernel.redaction.read(scope => texts.map(text => scope.text(text))),
   });
 
-  // Managed worktrees (today's worktrees module). The Git/disk IO is the kernel's spawn and root additions on
-  // rebuild/port-kernel; until the host has them there is no managed root and every route says so.
+  // Managed worktrees (today's worktrees module). Its Git and disk IO is the kernel's roots and spawn: the `worktrees` root
+  // (`<home>-worktrees`) is the managed folder, and a repository a checkout is made from is reached through the `work`
+  // root of the ferret standing in it. A host whose `worktrees` root names no folder hosts none, and every route says so.
+  const worktreeIo = createKernelWorktreeHostIo({
+    worktrees: kernel.roots.root('worktrees'),
+    work: ferret => kernel.roots.root('work', { ferret }),
+    ferrets: () => registry.list().map(ferret => ({ id: ferret.id, folder: ferret.folder })),
+    spawn: kernel.spawn,
+  });
   const worktrees = buildWorktrees({
+    ...(worktreeIo === undefined ? {} : { io: worktreeIo }),
     state: kernel.state,
     clock: kernel.clock,
     sessions: async () => {

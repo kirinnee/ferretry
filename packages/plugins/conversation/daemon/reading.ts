@@ -127,7 +127,7 @@ export interface ReadingHalf {
 export function buildReading(deps: {
   readonly kernel: KernelPorts;
   readonly ferrets: FerretsApi;
-  readonly asks: Pick<AsksApi, 'open'>;
+  readonly asks: Pick<AsksApi, 'open'> & Partial<Pick<AsksApi, 'snapshots'>>;
   readonly onKept: (ferret: FerretId, link: string) => void;
   /** The work other plugins hand the work search through `search.sources` (Board's cards), asked on every use. */
   readonly workSources?: () => readonly WorkSource[];
