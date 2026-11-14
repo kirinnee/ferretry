@@ -324,6 +324,18 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # Every app half's `app/lazy.ts` is one helper copied byte for byte: a half cannot import another
+    # package's app files, and a drifted copy can bring back the thrown-promise suspension that hung
+    # `act` on a cold machine. See scripts/validate/lazy-component-copies.sh.
+    a-lazy-component-copies = {
+      enable = true;
+      name = "app/lazy.ts copies are identical";
+      entry = validator "scripts/validate/lazy-component-copies.sh";
+      files = "^(packages/[^/]+/[^/]+/app/lazy\\.ts|scripts/validate/lazy-component-copies\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-enforce-exec = {
       enable = true;
       name = "Executable shell scripts";
