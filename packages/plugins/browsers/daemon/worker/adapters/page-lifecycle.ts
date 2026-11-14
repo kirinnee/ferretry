@@ -1,3 +1,4 @@
+import { isCredentialMintAddress, PAIRING_MINT_BODY_HIDDEN } from '@ferretry/std/pairing-screen';
 import {
   BROWSER_CONSOLE_BUFFER,
   BROWSER_CONSOLE_DEFAULT_LIMIT,
@@ -18,7 +19,7 @@ import {
   type BrowserResourceType,
   type BrowserWaitCondition,
 } from '../../../contract/wire/page-lifecycle.ts';
-import { type BrowserElementTarget } from '../../../contract/wire/target.ts';
+import type { BrowserElementTarget } from '../../../contract/wire/target.ts';
 import { browserSelectorOf } from '../../pages/page-acts.ts';
 
 /**
@@ -325,6 +326,12 @@ export class NetworkLog {
     }
     const headers = Object.entries(response.headers()).filter(([name]) => !isCredentialHeader(name));
     if (headers.length > 0) lines.push('response headers:', ...headers.map(([name, value]) => `  ${name}: ${value}`));
+    // A pairing mint's response IS a live code, its link and its QR's text, and a catalog share mint's is a join invite's
+    // code, link and QR: no tool shows either (docs/pairing.md).
+    if (isCredentialMintAddress(entry.url)) {
+      lines.push(PAIRING_MINT_BODY_HIDDEN);
+      return lines.join('\n');
+    }
     const contentType = Object.entries(response.headers()).find(([name]) => name.toLowerCase() === 'content-type');
     if (contentType !== undefined && !TEXT_BODY.test(contentType[1])) {
       lines.push(`(body not shown: ${contentType[1].split(';')[0] ?? 'binary'})`);
@@ -400,9 +407,7 @@ export interface WaitablePage {
   ): Promise<void>;
 }
 
-export interface Pause {
-  (ms: number): Promise<void>;
-}
+export type Pause = (ms: number) => Promise<void>;
 
 const POLL_MS = 100;
 const pause: Pause = ms => new Promise(resolve => setTimeout(resolve, ms));

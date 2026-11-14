@@ -400,6 +400,79 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
   `fy pair` that may be showing it to a browser right now.
 - **Never screenshot a real one.** Committed captures use a fixed fake code (`HARNESS_INVITE`). A QR is a
   machine-readable label, not obfuscation, so a PNG of a real code in a repository is a leaked credential.
+- **Never show it to an agent.** What decides is the daemon's own record, in its own memory, **outside any page**:
+  a pairing code is **live** from the instant `mint` runs — before its answer can leave — until it is redeemed, revoked,
+  replaced, past its two minutes (with no one asking) or out of direct guesses (a spent relay budget alone does not end
+  it), and Catalogs keeps the same record for a **share invite** (its link and QR let a browser join without an existing
+  member passkey, so it is a credential too: live from the mint until it is ended, used up or expired, and read back from
+  disk at start; an ending closes the interval only once its write has **committed**, because a write that is pending or fails
+  puts the share back to joinable, so the interval stays open through it and until the share's own deadline). Each is a `LiveWindowLedger` (`@ferretry/std/live-window`) that remembers every interval, offered through
+  a Browsers-facing contract port (`PairingWindowPort` from Access, `ShareWindowPort` from Catalogs) that answers only
+  **yes or no** to "was a credential live at any instant since T" — never a code, an id or a boundary. A ledger that
+  overflows its history, or a catalogs list not yet read, answers yes for what it can no longer prove; a provider that is
+  missing, throws or cannot say counts as live.
+  Browsers declares those ports (and Connections') as dependencies. While a credential is live, or was at any instant
+  during an agent's call, the agent gets exactly the one sentence (`PAIRING_SCREEN_REFUSAL`, byte for byte v4 PR 1597's: it
+  begins `hidden: this page shows a pairing code` and is pinned by equality) and no content, **for any page on a Ferretry app
+  origin** — the hosted app (always), the app and browser origins Connections advertises, the address of the daemon's own
+  listener, **and the daemon's own loopback app on every spelling** (`127.0.0.1`, `localhost`, `[::1]`) at the port it listens
+  on, whatever it is bound to (`0.0.0.0`, `[::]`, a public address) — read live and never a single hard-coded address (every
+  page, when Connections cannot say); an unrelated port or host is not in the set — and for any window that can
+  reach one: the page's opener group **and every same-origin window**, opener or not (any window nobody can place counts too).
+  The check runs inside the page's queue before anything reaches the page, and again when the call ends, **success or failure**:
+  a call that overlapped a live interval at any point has its answer **and its error text** discarded.
+  What an agent asks for is classified by what the answer depends on, not by tool name: a read, screenshot, highlight, pdf,
+  console, network, `eval`, a wait on text, text gone or an element, `fill_form`, and **any act that finds its element by
+  a selector, a ref or the text it shows** (click, hover, drag, select, check, type, press, upload, scroll-to-text) are reads — "found"
+  against "not found", and the error that says why, is a boolean about hidden content. Coordinate acts, scrolling by distance,
+  waits on a time, an address or a load, navigating, opening and closing read nothing and still work. The same classification
+  holds for `POST /v1/sessions/:id/browser`. A person's own calls, and the owner's view, are unchanged; the picture stream
+  refuses a ferret.
+  **The browser keeps its own history of where each page has been.** The worker records every committed address per target
+  from DevTools' frame events (`Page.frameNavigated`, `navigatedWithinDocument`, `frameAttached`, `frameDetached`, and
+  Playwright's mirror of them for frames in other processes), including frames that are gone by the time anyone asks, and the
+  daemon compares two answers (the strictly parsed `NavigationEvidence`): a navigation or a swapped frame during a call that
+  touched an app origin is treated as the call having read it. A committed address carrying the pairing-fragment grammar
+  **taints the target for life** (the app screen it arrived on is refused outright, and `eval` on it, wherever it goes after).
+  **The worker also keeps totals across every page it has ever watched** (`NavigationTotals`, in the worker, not on any page):
+  how many addresses carrying the pairing grammar were committed under each origin, and how many navigations it **lost** track
+  of. Every answer carries them, they only go up, and a page that closes or leaves the group takes none of it away. A call
+  during which **any** link was committed on an app origin (or one that cannot be told apart from it: an opaque or unreadable
+  origin, the overflow bucket) or any navigation was lost has its answer **and its error** discarded **whatever its endpoints
+  were** — it may begin away from the app, take the app's page in on the way and finish away from it. A lost navigation makes
+  the worker **blind for good**: while the count is above zero the app's own pages are not answered (a page elsewhere still is),
+  even with no code live and whichever pages the call touched, and only a fresh worker — a fresh, complete ledger — clears it.
+  **`eval` is never run on a Ferretry app origin.** A script shares the document's DOM with the app, where the codes and the
+  app's own hints sit, and discarding a result does not undo what a running script did, what it sent elsewhere or the callback
+  it leaves behind — so no state of the page makes it safe. `browser_eval` (the one tool that runs page script) through the agent
+  tools and `POST /v1/sessions/:id/browser` — the browsers CLI half is still a skeleton, so `fy browser eval` is not built yet and the rule is
+  not claimed for it — on a page of any Ferretry app origin, or on one with a window that can reach one, is **always**
+  refused with the sentence `eval is not available on Ferretry's own app pages` (`APP_EVAL_REFUSAL`) — with no code live, no
+  history and no marker — and the script never reaches the browser; a script that ends on the app has its answer and error
+  discarded the same way. There is no hint-based path: nothing the page says is asked. On a page that is only possibly the app's
+  (blank, opaque) the older lifetime rule stays: refused once a credential was live since it first showed the app, and for a
+  page that ever committed a pairing link. **What still works** on an app page: reading it (once nothing is live), screenshots,
+  waits, navigating away, clicking by coordinates, and every page on another origin keeps its scripts. A person's own calls are
+  unchanged.
+  The app's marker — `<meta name="ferretry-pairing-screen" content="shown">`, with the `-seen` counter beside it — is now
+  **only a hint** the browser also looks for with a DevTools DOM search (no page script runs; every same-process frame is
+  covered). It can ADD a refusal and can never remove one, so a page script that deletes or forges it changes nothing. A search
+  that cannot be answered, a node that cannot be inspected, a malformed attribute reply or a count that is not plain digits
+  counts as marked (**fail closed**). The marker lands in the same synchronous commit as the code (a layout effect) and is
+  released **after** the code's nodes are gone (the hook defers its removal past the commit; React runs a deleted component's
+  cleanup before removing its host nodes).
+  A mint's response is never shown either: `POST /v1/pair/code` is a person's route, Access has no agent tool, and
+  `browser_network` prints `(body not shown: a pairing code)` for that address, and for `/v1/catalog-shares` and what is under
+  it (a share mint's answer carries the invite's code, link and QR text), on any page, live or not.
+  Declared GAPs: the window cannot know a code that was minted by ANOTHER machine and pasted or scanned here (the pair screen
+  holding a pasted link): for that the arriving fragment's taint and the app's own marker are all there is, and a page script
+  can forge the marker only to lose its own reads, but it can also delete it; a window opened before the worker began watching
+  it has only what its frame tree said then; Catalogs' join screen holding a pasted invite link is covered the same way
+  (the fragment taint and `/join`'s own screen) and has no marker of its own; the share sheet itself sets no marker, so for it
+  the ledger is the whole protection; the history of an overflowed target (more than 64 distinct origins) counts as having
+  touched the app; a switched-off Catalogs plugin makes every app-origin read refuse while it is off (an absent provider is
+  unknown, and unknown is live); the text of a JavaScript dialog an app page has open (`browser_dialog`: the page is frozen
+  while it is open, so nothing can be asked of it first); and a marker inside a shadow root or a cross-site frame is not searched for.
 
 ## Revoking
 

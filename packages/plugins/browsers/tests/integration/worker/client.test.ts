@@ -655,8 +655,8 @@ describe('browser worker client — the input bridge', () => {
     // Assert
     should(seen.facts.fields[0]?.backendNodeId).equal(7);
     should(missing).deepEqual({ ok: false, missing: 'password' });
-    should(document).deepEqual({ navigationId: 'loader-1', host: 'accounts.example.test' });
-    should(hostless).deepEqual({ navigationId: 'loader-1' });
+    should(document).deepEqual({ navigationId: 'loader-1', host: 'accounts.example.test', pairingSeen: 0 });
+    should(hostless).deepEqual({ navigationId: 'loader-1', pairingSeen: 0 });
     should(text).equal('Welcome back');
     should(refound.ok && refound.facts.fields[0]?.backendNodeId).equal(9);
     should(refoundMissing).deepEqual({ ok: false, missing: 'password' });

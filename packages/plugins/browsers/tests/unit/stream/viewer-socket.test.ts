@@ -64,7 +64,7 @@ describe('the browser viewer socket — whose input reaches a page', () => {
     should(await delivered(host, tabs)).deepEqual(['insertText']);
   });
 
-  it('R549 delivers a ferret on the viewer socket no input at all on a held page, and ends its stream', async () => {
+  it('R549 delivers a ferret on the viewer socket no input at all on a held page: the socket is refused to it outright (a frame could show a pairing code)', async () => {
     // Arrange
     const { host, tabs, as } = await held();
     const socket = await host.socket(STREAM, as('f1'));
@@ -75,7 +75,9 @@ describe('the browser viewer socket — whose input reaches a page', () => {
 
     // Assert
     should(inputs).deepEqual([]);
-    should(socket.closed?.code).equal(1008);
+    should(socket.response?.status).equal(403);
+    should(socket.response?.body).containEql('Only a person watches the browser view');
+    should(socket.handler).be.undefined();
   });
 
   it('R549 delivers a ferret on the viewer socket no input on a page nothing holds either', async () => {

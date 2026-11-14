@@ -20,6 +20,7 @@ import {
   type ViewerTerminalSignal,
 } from '../../../daemon/stream/viewer-contracts.ts';
 import { BrowserViewerStream } from '../../../daemon/stream/viewer-stream.ts';
+import { quietPairingUses } from '../../support/no-pairing-screen.ts';
 import { Tabs } from '../../support/tabs.ts';
 
 /**
@@ -240,7 +241,7 @@ describe('R1: the HTTP picture and read leave only if no value began to live mea
     );
     const host = await testHost({
       plugins: [half],
-      uses: { ferrets: FERRETS, agentControl: ALL_ON },
+      uses: { ferrets: FERRETS, agentControl: ALL_ON, ...quietPairingUses() },
       fakes: { vault: new FakeVault(), gate: new FakeGate() },
       gate,
     });

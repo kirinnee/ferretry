@@ -15,6 +15,7 @@ import { verbTable } from '../../../cli/lib/verbs/index.ts';
 import daemon, { buildBrowsers } from '../../../daemon/index.ts';
 import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/profile-store.ts';
 import { NodeSessionBrowserLauncher } from '../../../daemon/worker/launcher.ts';
+import { quietPairingUses } from '../../support/no-pairing-screen.ts';
 import { launcherPorts, REAL_WORKER } from '../../support/process-workers.ts';
 import { unprovenListenerProver } from '../../support/listener-prover.ts';
 
@@ -117,7 +118,7 @@ beforeAll(async () => {
   );
   host = await testHost({
     plugins: [half],
-    uses: { ferrets: FERRETS, agentControl: SWITCHES },
+    uses: { ferrets: FERRETS, agentControl: SWITCHES, ...quietPairingUses() },
     fakes: { vault: new FakeVault(), gate: new FakeGate() },
     gate,
     secrets: [],

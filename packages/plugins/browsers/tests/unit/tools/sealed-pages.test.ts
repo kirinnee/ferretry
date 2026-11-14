@@ -13,6 +13,7 @@ import { rootFiles } from '../../../daemon/tools/files.ts';
 import { BrowserToolError, BrowserTools, type BrowserToolPorts } from '../../../daemon/tools/service.ts';
 import type { ToolCaller } from '../../../daemon/tools/types.ts';
 import { browserKernel } from '../../support/kernel.ts';
+import { quietProtection } from '../../support/no-pairing-screen.ts';
 import { workRoots } from '../../support/work-root.ts';
 
 /** Never a real credential. The sealed copy's value: it must be in no result, error or picture an agent is handed. */
@@ -65,10 +66,19 @@ class Browser {
     return page;
   }
 
-  private async guarded(key: string, guard?: BrowserActGuard): Promise<Page> {
+  /**
+   * The runtime's own order: the guard, the act, then the after-check the guard handed back (even when the act threw).
+   * The page shows no pairing code (`pairing-screen.test.ts` covers one), so the pairing guard has nothing to refuse.
+   */
+  private async guarded<T>(
+    key: string,
+    guard: BrowserActGuard | undefined,
+    work: (page: Page) => Promise<T>,
+  ): Promise<T> {
     const page = this.find(key);
-    await guard?.({
+    const view = {
       document: async () => 'loader-1',
+      pairingState: async () => ({ marked: false, seen: 0, pages: 1, targets: [], totals: { links: {}, lost: 0 } }),
       host: async () => page.host ?? new URL(page.url).host,
       hosts: async () =>
         page.frames === 'unreadable' ? undefined : [page.host ?? new URL(page.url).host, ...(page.frames ?? [])],
@@ -76,8 +86,13 @@ class Browser {
         if (this.textFails) throw new Error('too long');
         return page.text;
       },
-    });
-    return page;
+    };
+    const after = await guard?.(view);
+    try {
+      return await work(page);
+    } finally {
+      await after?.(view);
+    }
   }
 
   private result(page: Page, extra: Record<string, unknown> = {}) {
@@ -106,32 +121,32 @@ class Browser {
     return { id: page.id, url: page.url, title: '' } as never;
   };
 
-  actOnPage = async (_session: string, key: string, action: { action: string }, guard?: BrowserActGuard) => {
-    const page = await this.guarded(key, guard);
-    if (this.failWith !== undefined) throw this.failWith;
-    this.acts.push(action.action);
-    if (action.action === 'read') return this.result(page, { text: page.text });
-    if (action.action === 'screenshot') return this.result(page, { screenshotBase64: 'iVBOR' });
-    return this.result(page);
-  };
+  actOnPage = async (_session: string, key: string, action: { action: string }, guard?: BrowserActGuard) =>
+    await this.guarded(key, guard, async page => {
+      if (this.failWith !== undefined) throw this.failWith;
+      this.acts.push(action.action);
+      if (action.action === 'read') return this.result(page, { text: page.text });
+      if (action.action === 'screenshot') return this.result(page, { screenshotBase64: 'iVBOR' });
+      return this.result(page);
+    });
 
-  scriptOnPage = async (_session: string, key: string, script: { source: string }, guard?: BrowserActGuard) => {
-    const page = await this.guarded(key, guard);
-    this.acts.push('script');
-    return { ...(this.result(page) as object), text: `ran:${script.source}` } as never;
-  };
+  scriptOnPage = async (_session: string, key: string, script: { source: string }, guard?: BrowserActGuard) =>
+    await this.guarded(key, guard, async page => {
+      this.acts.push('script');
+      return { ...(this.result(page) as object), text: `ran:${script.source}` } as never;
+    });
 
-  filesOnPage = async (_session: string, key: string, action: { action: string }, guard?: BrowserActGuard) => {
-    const page = await this.guarded(key, guard);
-    this.acts.push(action.action);
-    return { ...(this.result(page) as object), staged: { path: '/stage/x', name: 'x.pdf', size: 3 } } as never;
-  };
+  filesOnPage = async (_session: string, key: string, action: { action: string }, guard?: BrowserActGuard) =>
+    await this.guarded(key, guard, async page => {
+      this.acts.push(action.action);
+      return { ...(this.result(page) as object), staged: { path: '/stage/x', name: 'x.pdf', size: 3 } } as never;
+    });
 
-  lifecycleOnPage = async (_session: string, key: string, request: { op: string }, guard?: BrowserActGuard) => {
-    const page = await this.guarded(key, guard);
-    this.acts.push(`lifecycle-${request.op}`);
-    return { reply: { text: `log of ${page.name}`, matched: true } } as never;
-  };
+  lifecycleOnPage = async (_session: string, key: string, request: { op: string }, guard?: BrowserActGuard) =>
+    await this.guarded(key, guard, async page => {
+      this.acts.push(`lifecycle-${request.op}`);
+      return { reply: { text: `log of ${page.name}`, matched: true } } as never;
+    });
 
   closePage = async () => undefined as never;
   adoptPage = async () => undefined as never;
@@ -175,6 +190,7 @@ async function harness() {
     files: rootFiles(workRoots(work, join(work, '.fy')), nodeStagedFiles(join(root, 'upload'), clock)),
     binaryName: 'fy',
     sealed: gate,
+    protection: quietProtection(),
   });
   await tools.call(agent, { tool: 'browser.open', name: 'keys', url: `${SOURCE}/new` });
   await tools.call(agent, { tool: 'browser.open', name: 'docs', url: 'https://docs.example.test/' });

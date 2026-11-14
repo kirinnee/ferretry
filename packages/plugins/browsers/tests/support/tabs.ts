@@ -1,5 +1,6 @@
 import type { BrowserAutomation } from '../../daemon/pages/automation.ts';
 import type { BrowserClipboardRead } from '../../daemon/pages/copy-contracts.ts';
+import type { NavigationEvidence, NavigationTotals } from '../../daemon/target/lib/navigation-evidence.ts';
 import type {
   BrowserInputEvent,
   BrowserPageActionSnapshot,
@@ -9,6 +10,28 @@ import type {
 } from '../../contract/wire/browser.ts';
 
 export type Page = BrowserPageSummary & { pageState?: 'ready' | 'error' };
+
+/**
+ * A page that has been on `address` since it was first watched, at `at`, and nowhere else: one commit, one frame, no link
+ * of the pairing grammar. Spread it and change a member to say the page has moved.
+ */
+export function cleanNavigation(address: string, at = 0): NavigationEvidence {
+  let origin = '?';
+  try {
+    origin = new URL(address).origin;
+  } catch {
+    origin = '?';
+  }
+  return {
+    seq: 1,
+    origins: [{ origin, firstAt: at, lastSeq: 1 }],
+    overflow: false,
+    frames: [origin],
+    taintSeq: 0,
+    watchedSince: at,
+    totals: { links: {}, lost: 0 },
+  };
+}
 
 /**
  * The machine's agent browser, faked with REAL tabs and no active one: every act names its page,
@@ -27,6 +50,12 @@ export class Tabs {
   castFailure: Error | undefined;
   /** A dialog the worker reports on the page of every result, as a worker with a dialog open does. */
   dialog: { type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'; message: string } | undefined;
+  /** Pages whose navigation evidence the browser does not give (an older or broken worker). */
+  readonly navigationBroken = new Set<string>();
+  /** The address a page is on, for its default navigation evidence. */
+  private pageUrl(pageId: string): string {
+    return this.pages.find(candidate => candidate.id === pageId)?.url ?? 'about:blank';
+  }
   /** The browser cannot say which document a page shows. */
   documentFails = false;
   /** What a secure copy's read of one element found (an empty element by default). */
@@ -53,6 +82,23 @@ export class Tabs {
   pageText: string | undefined;
   /** Whether the browser's clipboard is confirmed empty by a clear. */
   clearAnswer = true;
+  /**
+   * What each page says about a pairing code, as the worker's DOM search would answer it: `marked` when a live code is on
+   * screen (the marker is in the document), `seen` how many times one has been. A page not listed shows none.
+   */
+  readonly pairing = new Map<string, { marked: boolean; seen: number }>();
+  /**
+   * What the browser's own frame events say each page has been (`daemon/target/lib/navigation-evidence.ts`): a page not
+   * listed has been on its own address since the start and nowhere else. A case moves a page by setting its entry.
+   */
+  readonly navigation = new Map<string, NavigationEvidence>();
+  /**
+   * What the WORKER has counted across every page it has ever watched, the closed and the departed too: pairing links
+   * committed by origin and navigations it lost track of. Every page answers with it, as the real worker does.
+   */
+  totals: NavigationTotals = { links: {}, lost: 0 };
+  /** Called inside every act (after it began, before it answers): a page can start showing a code while it runs. */
+  whileActing: ((call: string) => void) | undefined;
   /** While set, a click does not return: the page's queue is stuck behind it, as it is behind a dialog. */
   clickGate: Promise<void> | undefined;
   /** What a page in the error state says went wrong (the worker's first line of a failed navigation). */
@@ -100,6 +146,7 @@ export class Tabs {
 
   private acted(method: string, pageId: string): BrowserPageActionSnapshot {
     this.calls.push(`${method}:${pageId}`);
+    this.whileActing?.(method);
     return { ...this.state(pageId), actedPageId: pageId };
   }
 
@@ -154,11 +201,22 @@ export class Tabs {
     inputDocument: async pageId => {
       this.calls.push(`inputDocument:${pageId}`);
       if (this.documentFails) throw new Error('the page is gone');
+      const pairing = this.pairing.get(pageId) ?? { marked: false, seen: 0 };
       return {
         navigationId: 'loader-1',
         ...(this.documentHost === undefined ? {} : { host: this.documentHost }),
         ...(this.frameHosts === undefined ? {} : { frameHosts: this.frameHosts }),
         ...(this.framesUnreadable ? { framesUnreadable: true as const } : {}),
+        ...(pairing.marked ? { pairingScreen: true } : {}),
+        pairingSeen: pairing.seen,
+        ...(this.navigationBroken.has(pageId)
+          ? {}
+          : {
+              navigation: {
+                ...(this.navigation.get(pageId) ?? cleanNavigation(this.pageUrl(pageId))),
+                totals: this.totals,
+              },
+            }),
       };
     },
     inputObserve: async pageId => {

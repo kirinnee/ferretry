@@ -117,7 +117,7 @@ filter in an abstraction that is harder to read than the native operation.
 A shared utility must be product-neutral, small, and independently testable. A task-specific
 transform belongs with the task domain, even if it is only a few lines. A generic helper belongs
 under src/lib only when it has a clear contract and more than one consumer.
-`@ferretry/std` holds no Ferretry noun, except the `${secret:NAME}` pointer grammar and the credential-word rules built on it (`./secret-reference`, `./credential-words`), which two contracts and two consumers must agree on byte for byte (fact-ownership). The other exception is Claude's compaction status line (`./compaction-line`): the terminals plugin, Ferrets and Warden each read it off a pane in separate packages, and a shape one takes and another misses lets a send be typed into a compacting composer.
+`@ferretry/std` holds no Ferretry noun, except the `${secret:NAME}` pointer grammar and the credential-word rules built on it (`./secret-reference`, `./credential-words`), which two contracts and two consumers must agree on byte for byte (fact-ownership). The other exception is Claude's compaction status line (`./compaction-line`): the terminals plugin, Ferrets and Warden each read it off a pane in separate packages, and a shape one takes and another misses lets a send be typed into a compacting composer. The third is the pairing-screen marker (`./pairing-screen`): the app that puts it in the page and the agent browser that looks for it are different plugins, which never import each other.
 
 For example, a future Result module should define one canonical Result<T, E> shape and its
 combinators. It should not be introduced as a hidden dependency inside one controller. See

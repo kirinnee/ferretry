@@ -8,6 +8,7 @@ import type { ReferenceCatalogProvider } from '@ferretry/plugin-conversation/con
 import daemon, { buildBrowsers } from '../../daemon/index.ts';
 import { HIDDEN_FRAGMENT } from '../../daemon/address-rule.ts';
 import type manifest from '../../manifest.ts';
+import { quietPairingUses } from '../support/no-pairing-screen.ts';
 import { Tabs } from '../support/tabs.ts';
 
 /**
@@ -43,6 +44,7 @@ async function boot(launchFailure?: string): Promise<{ readonly host: TestHost; 
     uses: {
       ferrets: { get: async (id: string) => (id === 'f1' ? { name: id } : undefined) },
       agentControl: { allows: async () => true },
+      ...quietPairingUses(),
     },
     fakes: { vault: new FakeVault(), gate: new FakeGate() },
     gate: new StandInAdmission(request =>

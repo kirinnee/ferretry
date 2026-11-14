@@ -38,6 +38,8 @@ import type { AgentSurface, SurfaceControlView, SurfaceController } from '../../
 import type { BrowserFiles } from './files.ts';
 import { sizeWords } from './files-policy.ts';
 import { AGENT_TOOL_MAX_OUTPUT_CHARS } from './limits.ts';
+import type { ProtectionWindows } from '../pages/pairing-screen-guard.ts';
+import { pairingScreenGuard } from './pairing-screen.ts';
 import type { ResolvedSurface, ToolCaller } from './types.ts';
 import type { BrowserToolCall } from './wire.ts';
 
@@ -177,6 +179,8 @@ export interface BrowserToolPorts {
   readonly files: BrowserFiles;
   /** The command-line client's name, for a refusal that tells the owner the command to type. */
   readonly binaryName: string;
+  /** When a credential was live and which origins are the app's: the evidence an agent's content act is held to. */
+  readonly protection: ProtectionWindows;
   readonly typedIdentities?: TypedIdentityLedger;
   readonly scriptedOrigins?: ScriptedOrigins;
   /** Told of every page act a ferret makes, before it runs (the Vault's sign-in lock, I99 and I100). */
@@ -1073,12 +1077,14 @@ export class BrowserTools {
             // Counted BEFORE the checks: a clipboard capture that begins now waits for this script, and one that began
             // already is seen by the check (sealed/page-guards.ts), so no script can run while a capture reads.
             const ended = this.ports.sealed?.registry.scriptRunning();
-            try {
-              await guard?.(page);
-            } catch (error) {
-              ended?.();
-              throw error;
-            }
+            const after = await (async () => {
+              try {
+                return await guard?.(page);
+              } catch (error) {
+                ended?.();
+                throw error;
+              }
+            })();
             // The LAST thing before the script runs, inside the page's queue. While it runs, no standing rule fills
             // anywhere, and the host it is about to run on is tainted for the rules at once.
             const before = scripts?.running?.();
@@ -1090,6 +1096,7 @@ export class BrowserTools {
             // A script can type or choose an account on any page of the session: who they sign in is no longer known.
             this.ports.typedIdentities?.forget(caller.sessionId);
             ran = true;
+            return after;
           },
         );
         // The origin of the world the script ACTUALLY ran in, and where it left the page: each is tainted too.
@@ -1284,10 +1291,14 @@ export class BrowserTools {
     facts?: SealedFacts,
   ): BrowserActGuard | undefined {
     if (caller.kind !== 'agent') return undefined;
+    // An agent's READ of a page is also refused while the page shows a live pairing code (`./pairing-screen.ts`): asked
+    // right after the takeover and sealed checks, and its after-check runs once the act is over.
+    const pairing = pairingScreenGuard(call, this.ports.protection);
     return async page => {
       await this.assertFree(caller.sessionId, surface);
       if (call !== undefined) await this.assertSealedOpen(caller, call.tool, surface, page, call);
       else if (facts !== undefined) await this.assertSealedOpen(caller, facts.tool, surface, page, undefined, facts);
+      return await pairing?.(page);
     };
   }
 

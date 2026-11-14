@@ -3,6 +3,7 @@
  * Access's WebAuthn verifier); Agenda `uses` it to buzz a phone. Never a device key, a token or a digest.
  */
 import { defineEvent, defineHook, definePort } from '@ferretry/kernel/contract';
+import type { LiveWindowView } from '@ferretry/std/live-window';
 import { z } from 'zod';
 import { type PairedDevice, PairedDeviceIdSchema } from './pairing.ts';
 import type { PasskeyAlgorithmId, StoredStepUpProofSchema } from './step-up.ts';
@@ -69,6 +70,14 @@ export interface AccessApi {
 }
 
 export const AccessPort = definePort<AccessApi>('access');
+
+/**
+ * WHEN A PAIRING CODE WAS LIVE, as a yes or no (docs/pairing.md, "Never show it to an agent"): offered to the agent browser,
+ * which refuses what a page showed while a code could be on it. The daemon's own ledger answers — opened by the mint
+ * before its answer leaves, closed by every way a code ends, ended by its own deadline — so a page script cannot write it.
+ * NO CODE, NO PAIRING ID and no interval boundary other than the question asked ever crosses it.
+ */
+export const PairingWindowPort = definePort<LiveWindowView>('access.pairing-window');
 
 /** A device was paired, revoked, expired or had its grants changed. A wake-up: read the truth through the port. */
 export const DevicesChanged = defineEvent(

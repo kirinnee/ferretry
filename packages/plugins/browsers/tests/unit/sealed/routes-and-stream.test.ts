@@ -11,6 +11,7 @@ import { SealedGate } from '../../../daemon/sealed/gate.ts';
 import { SealedPages } from '../../../daemon/sealed/page-guards.ts';
 import { sealedDelivery } from '../../../daemon/stream/delivery.ts';
 import { heldViewerHost } from '../../../daemon/stream/held-host.ts';
+import { quietPairingUses } from '../../support/no-pairing-screen.ts';
 import { Tabs } from '../../support/tabs.ts';
 
 /**
@@ -47,7 +48,7 @@ async function built(): Promise<{ host: TestHost; tabs: Tabs; copy: BrowsersCopy
   );
   const host = await testHost({
     plugins: [half],
-    uses: { ferrets: FERRETS, agentControl: ALL_ON },
+    uses: { ferrets: FERRETS, agentControl: ALL_ON, ...quietPairingUses() },
     fakes: { vault: new FakeVault(), gate: new FakeGate() },
     gate,
   });
@@ -217,15 +218,19 @@ describe('FINDING 1: the viewer socket’s pictures are an agent path, and meet 
     await person.handler?.close();
   });
 
-  it('should open an agent’s stream when no copy lives', async () => {
+  it('should refuse an agent’s stream even when no copy lives (a frame could show a pairing code), and let a person watch', async () => {
     const { host } = await built();
     await host.tool('browser_open', { name: 'keys', url: `${SOURCE}/` }, asAgent);
     await host.request('POST', ACT, { body: { action: 'activate-page', pageId: 'p1' }, ...asAgent });
 
     const agent = await host.socket(SOCKET, asAgent);
+    const person = await host.socket(SOCKET);
 
-    should(agent.response).equal(undefined);
-    await agent.handler?.close();
+    should(agent.response?.status).equal(403);
+    should(agent.response?.body).containEql('Only a person watches the browser view');
+    should(agent.handler).equal(undefined);
+    should(person.response).equal(undefined);
+    await person.handler?.close();
   });
 });
 

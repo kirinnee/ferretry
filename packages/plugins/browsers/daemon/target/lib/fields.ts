@@ -14,6 +14,8 @@ import {
   type BrowserInputValue,
   BROWSER_INPUT_TEXT_MAX_CHARS,
 } from './contracts.ts';
+import type { NavigationEvidence } from './navigation-evidence.ts';
+import { PAIRING_SCREEN_UNKNOWN, type PairingScreenState, readPairingScreen } from './pairing-screen.ts';
 import {
   BROWSER_PROBE_TIMEOUT_MS,
   browserElementOf,
@@ -164,6 +166,19 @@ export interface InputSubject {
   readonly page: InputablePage;
   readonly cdp: InputCdp;
   readonly sessions: InputFrameSessions;
+  /** The target's navigation history (`./navigation-evidence.ts`), when the worker keeps one. */
+  readonly navigation?: () => NavigationEvidence;
+  /**
+   * The page's last DOM look for the pairing-screen HINT, and whether a JavaScript dialog is open on it. A page with a
+   * dialog open is FROZEN: every DOM query waits for the dialog to be answered, so asking would hang the act that opened
+   * it. While one is open the last look stands in (and no look yet is "marked": fail closed). The hint can only add a
+   * refusal; the authority (the daemon's ledgers and the navigation history above) never touches the page's DOM.
+   */
+  readonly hint?: {
+    readonly frozen: () => boolean;
+    readonly last: () => PairingScreenState | undefined;
+    readonly keep: (state: PairingScreenState) => void;
+  };
   /** The worker's own timer (the clock is a port, never a global): a bounded wait for a title, the probe's second look. */
   readonly wait: (ms: number) => Promise<void>;
 }
@@ -313,10 +328,56 @@ function frameHostOf(frame: InputFrame): string | undefined {
   return undefined;
 }
 
+/** How often a look that has not answered re-checks whether a dialog has frozen the page under it. */
+const FROZEN_POLL_MS = 250;
+
+/**
+ * A look at a page that may have a JavaScript dialog open. Such a page is FROZEN: every query that reaches its renderer
+ * (the DOM, the frame tree) waits until the dialog is answered, and the dialog's own event can arrive just after the act
+ * that opened it returned. So a look that has not answered re-checks, every beat, whether a dialog is now open, and if
+ * so gives up (`undefined`) rather than hold the act that would answer it. No hint wired means no such check.
+ */
+async function unlessFrozen<T>(subject: InputSubject, look: () => Promise<T>): Promise<T | undefined> {
+  const hint = subject.hint;
+  if (hint === undefined) return await look();
+  if (hint.frozen()) return undefined;
+  let answered: { readonly value: T } | { readonly failed: unknown } | undefined;
+  const pending = look().then(
+    value => {
+      answered = { value };
+    },
+    (failed: unknown) => {
+      answered = { failed };
+    },
+  );
+  while (answered === undefined) {
+    await Promise.race([pending, subject.wait(FROZEN_POLL_MS)]);
+    if (answered === undefined && hint.frozen()) return undefined;
+  }
+  if ('failed' in answered) throw answered.failed;
+  return answered.value;
+}
+
+/** What the document says of itself while a dialog holds the page: nothing new, and never the same id as a real one. */
+const FROZEN_NAVIGATION_ID = 'dialog-open';
+
+/** The pairing-screen HINT look: the last look stands in while the page is frozen (none yet: marked, fail closed). */
+async function lookAtPairingScreen(subject: InputSubject): Promise<PairingScreenState> {
+  const looked = await unlessFrozen(subject, async () => {
+    try {
+      return await readPairingScreen(await subject.cdp.page());
+    } catch {
+      return PAIRING_SCREEN_UNKNOWN;
+    }
+  });
+  return looked ?? subject.hint?.last() ?? PAIRING_SCREEN_UNKNOWN;
+}
+
 /** The page's current document, cheaply: no field is looked at. The hosts of the frames inside it are named too. */
 export async function describeInputDocument(subject: InputSubject): Promise<BrowserInputDocument> {
   if (subject.page.isClosed()) throw new Error(REFUSALS.noDocument);
-  const navigationId = await navigationIdOf(await subject.cdp.page());
+  const navigationId =
+    (await unlessFrozen(subject, async () => await navigationIdOf(await subject.cdp.page()))) ?? FROZEN_NAVIGATION_ID;
   let host: string | undefined;
   try {
     host = new URL(subject.page.url()).host.toLowerCase() || undefined;
@@ -328,11 +389,16 @@ export async function describeInputDocument(subject: InputSubject): Promise<Brow
   const hosts = frames.map(frameHostOf);
   const unreadable = frames.length > MAX_FRAMES || hosts.some(each => each === undefined);
   const frameHosts = [...new Set(hosts.filter((each): each is string => each !== undefined))];
+  const pairing = await lookAtPairingScreen(subject);
+  if (pairing.seen >= 0) subject.hint?.keep(pairing);
   return {
     navigationId,
     ...(host === undefined ? {} : { host }),
     ...(frameHosts.length === 0 ? {} : { frameHosts }),
     ...(unreadable ? { framesUnreadable: true as const } : {}),
+    ...(pairing.marked ? { pairingScreen: true } : {}),
+    pairingSeen: pairing.seen,
+    ...(subject.navigation === undefined ? {} : { navigation: subject.navigation() }),
   };
 }
 

@@ -14,6 +14,7 @@ import {
   type BrowserInputValue,
   type BrowserPushNumberRead,
 } from './contracts.ts';
+import { parseNavigationEvidence } from './navigation-evidence.ts';
 
 /**
  * THE DAEMON'S SIDE OF THE PAGE INPUT SEAM: {@link BrowserInputFieldsPort} over the browser worker's JSON lines, copied
@@ -127,7 +128,16 @@ export function workerInputFields(request: WorkerRequest): Required<BrowserInput
       if (typeof navigationId !== 'string' || navigationId === '' || navigationId.length > 128)
         throw new InputAnswerRefused('the browser did not say which document the page shows');
       const document = (
-        raw as { document?: { host?: unknown; frameHosts?: unknown; framesUnreadable?: unknown } } | null
+        raw as {
+          document?: {
+            host?: unknown;
+            frameHosts?: unknown;
+            framesUnreadable?: unknown;
+            pairingScreen?: unknown;
+            pairingSeen?: unknown;
+            navigation?: unknown;
+          };
+        } | null
       )?.document;
       const host = document?.host;
       const frameHosts = Array.isArray(document?.frameHosts)
@@ -140,11 +150,19 @@ export function workerInputFields(request: WorkerRequest): Required<BrowserInput
         document?.framesUnreadable === true ||
         (Array.isArray(document?.frameHosts) && frameHosts.length !== (document.frameHosts as unknown[]).length) ||
         frameHosts.length > 64;
+      const pairingSeen = document?.pairingSeen;
+      const navigation = parseNavigationEvidence(document?.navigation);
       return {
         navigationId,
+        ...(navigation === undefined ? {} : { navigation }),
         ...(typeof host === 'string' && host !== '' && host.length <= 260 ? { host } : {}),
         ...(frameHosts.length === 0 || unreadable ? {} : { frameHosts }),
         ...(unreadable ? { framesUnreadable: true as const } : {}),
+        // Anything but a plain yes is NOT a no: a reply that cannot be believed is a marked page (fail closed).
+        ...(document?.pairingScreen === true || typeof pairingSeen !== 'number' || !Number.isInteger(pairingSeen)
+          ? { pairingScreen: true }
+          : {}),
+        pairingSeen: typeof pairingSeen === 'number' && Number.isInteger(pairingSeen) ? pairingSeen : -1,
       };
     },
 

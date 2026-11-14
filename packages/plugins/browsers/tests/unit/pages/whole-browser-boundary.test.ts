@@ -261,27 +261,30 @@ describe('a ferret on the whole-browser routes and the viewer socket', () => {
       should(socket.response?.status).equal(409);
     });
 
-    it('should let a ferret watch its own free page, and send it frames of that page only', async () => {
+    it('should refuse a ferret a viewer even on its own free page (a frame could show a pairing code), and still send a person that page’s frames', async () => {
       // Arrange
       const { host, tabs, as, ids } = await world(['person', 'mine']);
 
       // Act
-      const socket = await host.socket(STREAM, as('f1'));
+      const agent = await host.socket(STREAM, as('f1'));
+      const person = await host.socket(STREAM);
       tabs.emit(ids.mine);
       await drain(host);
 
       // Assert
-      should(socket.response).be.undefined();
-      should(socket.closed).be.undefined();
-      should(socket.frames.length).be.above(0);
+      should(agent.response?.status).equal(403);
+      should(agent.response?.body).containEql('Only a person watches the browser view');
+      should(agent.handler).be.undefined();
+      should(agent.frames.length).equal(0);
+      should(person.response).be.undefined();
+      should(person.closed).be.undefined();
+      should(person.frames.length).be.above(0);
     });
 
-    it('should end a ferret’s stream when a person takes its page over while it is open, and send no later frame', async () => {
+    it('should send a ferret no frame at all, before or after a person takes its page over', async () => {
       // Arrange
       const { host, tabs, as, ids } = await world(['mine']);
-      const socket = await host.socket(STREAM, as('f1'));
-      await host.settle();
-      const framesBefore = socket.frames.length;
+      const before = await host.socket(STREAM, as('f1'));
 
       // Act
       await host.request('POST', CONTROL, { body: { action: 'takeover', key: 'mine' } });
@@ -289,8 +292,9 @@ describe('a ferret on the whole-browser routes and the viewer socket', () => {
       await drain(host);
 
       // Assert
-      should(socket.closed?.code).equal(1008);
-      should(socket.frames.length).equal(framesBefore);
+      should(before.response?.status).equal(403);
+      should(before.handler).be.undefined();
+      should(before.frames.length).equal(0);
     });
 
     it('should always let the person watch, and type, on any page', async () => {

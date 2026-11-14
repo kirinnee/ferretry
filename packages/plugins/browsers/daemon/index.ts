@@ -4,6 +4,7 @@ import { type DaemonContext, type DaemonHalf, implementDaemon, perNeeder } from 
 import { type BrowsersApi, type BrowsersConfig, PageChanged } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { withAddressRuleKernel, withAddressRuleTools } from './address-rule.ts';
+import { protectionWindows } from './protection/windows.ts';
 import { type BrowserSessionLauncher, BrowserSessionService } from './pages/service.ts';
 import { type BrowserStreamOpener, type FerretBrowserGuard, pageRoutes, streamSocket } from './pages/routes.ts';
 import { BrowsersReferenceMenu } from './pages/reference-menu.ts';
@@ -102,6 +103,13 @@ export function buildBrowsers(
     executable: which('Xvfb'),
     authorityDirectory: profile.displayDirectory,
     processes,
+  });
+  // The daemon's own facts about when a credential was live and which origins are the app's (docs/pairing.md, "Never show
+  // it to an agent"): every agent content act is held to them, by the guard at the tool and route boundaries.
+  const protection = protectionWindows({
+    now: () => kernel.clock.nowMs(),
+    connections: () => ctx.uses.connections.current(),
+    windows: [() => ctx.uses.pairingWindow.current(), () => ctx.uses.shareWindow.current()],
   });
   // The worker is a process of its own, as today (lead decision, port-browsers r1): the compiled worker beside the
   // daemon, or Node over the source entry, started through kernel.spawn under a name permissions.spawn declares.
@@ -269,6 +277,7 @@ export function buildBrowsers(
     policy,
     files: rootFiles(kernel.roots, nodeStagedFiles(host.uploadDirectory, kernel.clock)),
     binaryName: 'fy',
+    protection,
     typedIdentities: identities,
     // Where page scripts ran and what a ferret did to a page, told to the Vault's sign-in lock (lead DECISIONS-2 #5,
     // I98–I100; today's `scriptedOrigins` and `loginActs`).
@@ -322,7 +331,7 @@ export function buildBrowsers(
 
   return {
     routes: {
-      ...pageRoutes(kernel, login, pages, ferretGuard, gate),
+      ...pageRoutes(kernel, login, pages, ferretGuard, protection, gate),
       ...proxyRoutes({ tester, state: () => pages.overview() }),
       ...controlRoutes(tools),
       ...systemOpenRoutes(openUrl),

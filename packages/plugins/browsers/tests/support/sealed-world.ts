@@ -5,6 +5,7 @@ import { implementDaemon, type Needer } from '@ferretry/kernel/manifest';
 import { ferret, type TestHost, testHost } from '@ferretry/kernel/testing';
 import { BrowsersPort, type BrowsersCopyApi } from '../../contract/port.ts';
 import daemon, { buildBrowsers } from '../../daemon/index.ts';
+import { quietPairingUses } from './no-pairing-screen.ts';
 import { Tabs } from './tabs.ts';
 
 /**
@@ -41,7 +42,7 @@ export async function built(): Promise<SealedWorld> {
   );
   const host = await testHost({
     plugins: [half],
-    uses: { ferrets: FERRETS, agentControl: ALL_ON },
+    uses: { ferrets: FERRETS, agentControl: ALL_ON, ...quietPairingUses() },
     fakes: { vault: new FakeVault(), gate: new FakeGate() },
     gate,
   });

@@ -24,6 +24,7 @@ import { afterAll, beforeAll, describe, it } from 'bun:test';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { LiveWindowLedger } from '@ferretry/std/live-window';
 import should from 'should';
 import type { BrowsersApi } from '../../../../../plugins/browsers/contract/index.ts';
 import { FakeAsks } from '../../../../asks/contract/testing/index.ts';
@@ -341,6 +342,22 @@ beforeAll(async () => {
     build: () => ({ hooks: { 'input.targets:terminal': fakeTerminal } }) as never,
   });
   gate = new FakeGate();
+  // The Browsers half's pairing guard reads Connections' app origin and two credential ledgers (docs/pairing.md, "Never show
+  // it to an agent"). This daemon composes no Connections, so it binds the facts of a daemon with NO live pairing screen: one
+  // app origin no test page is on, and a pairing code and a share invite that were never live. The guard still runs.
+  const appOrigin = 'https://app.ferretry.test';
+  const quietPairing = {
+    connections: {
+      advertisement: () =>
+        ({
+          advertisement: { kind: 'none', refusal: { reason: 'none' } },
+          appOrigin,
+          allowedOrigins: [appOrigin],
+        }) as never,
+    },
+    pairingWindow: new LiveWindowLedger(() => Date.now()),
+    shareWindow: new LiveWindowLedger(() => Date.now()),
+  };
   const ferrets = {
     get: async (id: string) => (id === FERRET || id === OTHER ? { name: id } : undefined),
     workFolder: async () => ({ folder: join(root, 'work') }),
@@ -350,7 +367,7 @@ beforeAll(async () => {
     gate: new StandInAdmission(request =>
       request.arrival.kind === 'local' && request.arrival.privileged ? ferretStanding(calling) : ownerStanding(),
     ),
-    uses: { ferrets, agentControl: { allows: async () => true } },
+    uses: { ferrets, agentControl: { allows: async () => true }, ...quietPairing },
     fakes: { gate, asks: new FakeAsks(), ferrets },
     redaction: { read: async fn => await (redact as Redaction).read(fn) },
   });

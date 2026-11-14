@@ -11,6 +11,7 @@ import {
   type SocketHandler,
 } from '@ferretry/kernel/contract';
 import { ferretOf, isFerretCall, isHumanAdminActor } from '@ferretry/core-gate/contract';
+import { PAIRING_SCREEN_REFUSAL } from '@ferretry/std/pairing-screen';
 import { BrowserLoginActionSchema } from '../../contract/index.ts';
 import { mapStrings } from '../address-rule.ts';
 import { hostOfOrigin } from '../sealed/page-guards.ts';
@@ -28,6 +29,7 @@ import { BrowserControlError, type BrowserLoginLifecycle, type BrowserLoginStatu
 import { acted, maskedSnapshot, maskedStatus, opOfAction, targetOfAction, writeAct } from './acts.ts';
 import { parseBody } from './body.ts';
 import { ferretAnswer, ferretStatus } from './agent-view.ts';
+import { type ProtectionWindows, pairingScreenGuard } from './pairing-screen-guard.ts';
 import { type BrowserActGuard, type BrowserPageGuard, BrowserSessionError, type BrowserSubsystem } from './service.ts';
 import {
   type BrowserAction,
@@ -306,11 +308,32 @@ function pageTouchedBy(action: BrowserAction, status: BrowserStatus): string | u
   return status.state === 'running' && 'activePageId' in status ? status.activePageId : undefined;
 }
 
+/** The toolbar actions whose answer carries the page itself: its text, its markup, its picture. */
+const PAGE_CONTENT_ACTIONS: ReadonlySet<string> = new Set(['read', 'screenshot', 'highlight', 'fill-form']);
+
+/** The members of an action that find an element by what it is or says (the same rule as the agent tools': `../tools/pairing-screen.ts`). */
+const ELEMENT_MEMBERS = ['selector', 'ref', 'fromSelector', 'fromRef', 'toSelector', 'toRef'] as const;
+
+/**
+ * Whether an action answers a question about the page's CONTENT: it hands the page back, or it finds its element by a
+ * selector, a ref or the text it shows (so that "found" and "not found", or the error that says why, depend on what the
+ * page holds). An act at a coordinate, a scroll by distance, navigation and the page list read nothing.
+ */
+function readsPageAction(action: Readonly<Record<string, unknown>>): boolean {
+  if (typeof action.action === 'string' && PAGE_CONTENT_ACTIONS.has(action.action)) return true;
+  if (ELEMENT_MEMBERS.some(member => action[member] !== undefined)) return true;
+  return action.action === 'scroll' && action.text !== undefined;
+}
+
+/** What a ferret is told of a page showing a pairing code (docs/pairing.md): the sentence, and nothing of the page. */
+const pairingScreenRefusal = (): ApiError => new ApiError(403, PAIRING_SCREEN_REFUSAL, 'pairing_screen');
+
 /** `POST /v1/ferrets/:ferretId/browser`: one action on its page, through the act runner. */
 async function browserAction(
   kernel: KernelPorts,
   browser: BrowserSubsystem,
   guard: FerretBrowserGuard,
+  protection: ProtectionWindows,
   gate: SealedGate | undefined,
   call: CallContext,
 ): Promise<ApiResponse> {
@@ -321,6 +344,13 @@ async function browserAction(
   const action = await parseBody(call.request, BrowserActionSchema);
   // An AGENT's address must be a web page, before the status is read, the gate asked or anything dispatched.
   if (isFerretCall(call) && nonWebUrl(action) !== undefined) throw new ApiError(400, WEB_URL_ONLY, 'bad_request');
+  // What a FERRET is handed of a page (its words, its markup, a picture) is refused while the page shows a pairing code,
+  // from inside the page's queue — right after the ownership and sealed checks the service runs there; a person's own
+  // toolbar is untouched.
+  const contentGuard =
+    caller !== undefined && readsPageAction(action as Readonly<Record<string, unknown>>)
+      ? pairingScreenGuard(pairingScreenRefusal, protection)
+      : undefined;
   const before = await browser.status(sessionId).catch(browserFailure);
   const target = targetOfAction(sessionId, action, before);
   const op = opOfAction(action);
@@ -376,7 +406,7 @@ async function browserAction(
     caller === undefined ? answer : ferretAnswer(answer, await guard.owned(caller, sessionId, answer.status.pages));
   const act = async (): Promise<BrowserActionResult> => {
     try {
-      return await view(await browser.act(sessionId, action, options));
+      return await view(await browser.act(sessionId, action, options, contentGuard));
     } catch (error) {
       if (error instanceof ApiError) throw error;
       // A failure on a page that holds a sealed value is one fixed sentence: what the browser said can echo the page.
@@ -456,6 +486,7 @@ export function pageRoutes(
   window: BrowserLoginLifecycle,
   browser: BrowserSubsystem,
   ferretGuard: FerretBrowserGuard,
+  protection: ProtectionWindows,
   gate?: SealedGate,
 ) {
   const guard = (handler: RouteHandler): RouteHandler => guarded(kernel.redaction, handler);
@@ -466,7 +497,7 @@ export function pageRoutes(
       async call => await browserStatus(kernel, browser, ferretGuard, gate, call),
     ),
     'POST /v1/ferrets/:ferretId/browser': guard(
-      async call => await browserAction(kernel, browser, ferretGuard, gate, call),
+      async call => await browserAction(kernel, browser, ferretGuard, protection, gate, call),
     ),
   } as const;
 }
@@ -486,14 +517,19 @@ export function streamSocket(
     const ferret = ferretOf(call);
     // A person's viewer — the owner's own, a paired device's — always opens, whole.
     if (ferret === undefined) return async downstream => await stream(id, downstream, { agent: false, mayType });
-    // A ferret's credential here is an AGENT. Its stream is closed while a sealed value lives (the frames are pictures,
-    // which cannot be masked); and it opens only on a page that is its own, nobody holds and the one rule (the page tools')
-    // allows — anything else is refused BEFORE the socket opens. After that every frame is asked again (stamped when it
-    // arrives, checked again where it leaves, retries and chunks included): see `stream/delivery.ts`.
+    // A ferret's credential here is an AGENT. Its stream is refused while a sealed value lives (the frames are pictures,
+    // which cannot be masked), and on a page that is not its own, that somebody holds or that the one rule (the page
+    // tools') does not allow — each BEFORE the socket opens.
     if (gate?.anyLive() === true) throw new ApiError(403, SEALED_STREAM_REFUSAL, 'forbidden');
     const viewed = status.state === 'running' && 'activePageId' in status ? status.activePageId : undefined;
     await guard.check(ferret, id, viewed);
     if (viewed === undefined) throw new ApiError(409, 'this browser has no page open to watch', 'not_running');
-    return async downstream => await stream(id, downstream, { agent: true, mayType: false, ferret });
+    // And past all of those, a stream of pictures of the page is the owner's view, never a ferret's: a frame could show a
+    // pairing code (docs/pairing.md), which no per-frame check can see.
+    throw new ApiError(
+      403,
+      'Only a person watches the browser view; a ferret reads pages with its browser tools.',
+      'owner_only',
+    );
   });
 }

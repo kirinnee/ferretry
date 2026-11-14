@@ -65,6 +65,7 @@ export default implementDaemon(manifest, {
         'POST /v1/unlock/options': route('POST /v1/unlock/options'),
       },
       provides: {
+        pairingWindow: access.pairingWindow,
         // Each plugin is handed its own port: `clear` is narrowed to the lines of its own namespace (docs/notifications.md).
         access: perNeeder(needer =>
           accessPortFor(access.port, needer.id, (CORE_IDS as readonly string[]).includes(needer.id)),

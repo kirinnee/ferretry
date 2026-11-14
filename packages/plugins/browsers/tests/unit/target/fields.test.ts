@@ -373,8 +373,57 @@ describe('describeInputDocument', () => {
     should(await describeInputDocument(world.subject)).eql({
       navigationId: 'loader-5',
       host: new URL(PAGE_URL).host,
+      pairingSeen: 0,
     });
-    should(world.session('page-target').calls.map(call => call.method)).eql(['Page.getFrameTree']);
+    // The loader, then the pairing-screen look: DevTools' DOM domain only, so no page script runs and no field is looked at.
+    const calls = world.session('page-target').calls.map(call => call.method);
+    should(calls[0]).equal('Page.getFrameTree');
+    should(calls.slice(1).every(method => method.startsWith('DOM.'))).be.true();
+  });
+
+  it('says the page carries the pairing-screen marker, and how many codes it has shown', async () => {
+    const { world } = loginWorld();
+    world.pairing.marked = true;
+    world.pairing.seen = 2;
+    should(await describeInputDocument(world.subject)).match({ pairingScreen: true, pairingSeen: 2 });
+  });
+
+  it('says marked when the browser cannot be asked (FAILS CLOSED)', async () => {
+    const { world } = loginWorld();
+    world.session('page-target').failOn = method => (method === 'DOM.performSearch' ? new Error('gone') : undefined);
+    should(await describeInputDocument(world.subject)).match({ pairingScreen: true, pairingSeen: -1 });
+  });
+
+  it('does not ask the DOM of a page with a dialog open (it is frozen): the last look stands in, and none yet is marked', async () => {
+    const { world } = loginWorld();
+    let last: { marked: boolean; seen: number } | undefined;
+    let frozen = false;
+    const subject = {
+      ...world.subject,
+      hint: {
+        frozen: () => frozen,
+        last: () => last,
+        keep: (state: { marked: boolean; seen: number }) => {
+          last = state;
+        },
+      },
+    };
+    world.pairing.seen = 4;
+    should(await describeInputDocument(subject)).match({ pairingSeen: 4 });
+    const asked = world.session('page-target').calls.length;
+    frozen = true;
+    world.session('page-target').failOn = method => (method.startsWith('DOM.') ? new Error('frozen') : undefined);
+
+    should(await describeInputDocument(subject)).match({ pairingSeen: 4 });
+    should(world.session('page-target').calls.filter(call => call.method.startsWith('DOM.')).length).equal(
+      world
+        .session('page-target')
+        .calls.slice(0, asked)
+        .filter(call => call.method.startsWith('DOM.')).length,
+    );
+
+    last = undefined;
+    should(await describeInputDocument(subject)).match({ pairingScreen: true, pairingSeen: -1 });
   });
 
   it('says the host the page is on, so a login’s facts can watch it leave the sign-in hosts', async () => {
@@ -386,7 +435,7 @@ describe('describeInputDocument', () => {
   it('says no host for a page whose address will not parse', async () => {
     const { world } = loginWorld();
     world.pageUrl = '';
-    should(await describeInputDocument(world.subject)).eql({ navigationId: world.loaderId });
+    should(await describeInputDocument(world.subject)).eql({ navigationId: world.loaderId, pairingSeen: 0 });
   });
 
   it('refuses a closed page', async () => {

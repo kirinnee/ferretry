@@ -198,6 +198,8 @@ beforeAll(async () => {
       nodeStagedFiles(join(root, 'upload'), wallClock()),
     ),
     binaryName: 'fy',
+    // No credential is live and no page here is the app's: this file is about the browser, not the pairing screen.
+    protection: { now: () => Date.now(), appOrigins: () => new Set(), liveSince: () => false },
   });
 }, 60_000);
 

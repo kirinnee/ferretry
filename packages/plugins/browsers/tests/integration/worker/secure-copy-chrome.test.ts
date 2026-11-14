@@ -16,6 +16,7 @@ import type { ToolCaller } from '../../../daemon/tools/types.ts';
 import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/profile-store.ts';
 import { NodeSessionBrowserLauncher } from '../../../daemon/worker/launcher.ts';
 import { browserKernel } from '../../support/kernel.ts';
+import { quietProtection } from '../../support/no-pairing-screen.ts';
 import { launcherPorts, REAL_WORKER } from '../../support/process-workers.ts';
 import { unprovenListenerProver } from '../../support/listener-prover.ts';
 import { workRoots } from '../../support/work-root.ts';
@@ -366,6 +367,7 @@ beforeAll(async () => {
     ),
     binaryName: 'fy',
     sealed: gate,
+    protection: quietProtection(),
   });
   reach = secureCopyReach({ tools, pages: browser, gate });
   copies = new Copies(masker, clock, reach as NonNullable<BrowsersApi['copy']>);

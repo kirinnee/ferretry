@@ -34,7 +34,7 @@ import {
   type BrowserMouseButton,
   type BrowserTarget,
 } from '../../contract/wire/target.ts';
-import { type BrowserInputEvent } from '../../contract/wire/browser.ts';
+import type { BrowserInputEvent } from '../../contract/wire/browser.ts';
 import { BrowserPageLifecycleRequestSchema } from '../../contract/wire/page-lifecycle.ts';
 import {
   type Browser,
@@ -61,6 +61,8 @@ import {
   type InputSubject,
   playwrightNodeOf,
 } from '../target/lib/fields.ts';
+import { NavigationLedger, type NavigationSource, NavigationTotalsLedger } from '../target/lib/navigation-evidence.ts';
+import type { PairingScreenState } from '../target/lib/pairing-screen.ts';
 import { type InputWorkerPages, isInputMethod, serveInputMethod } from '../target/lib/worker-serve.ts';
 import {
   browserElementParam,
@@ -324,6 +326,42 @@ async function allowClipboardWrite(page: Page): Promise<void> {
   }
 }
 
+/**
+ * Starts the page's navigation ledger. DevTools' own frame events feed it, and so do Playwright's for the frames that run in
+ * another process (which the page's own session does not report); both only ever move its count forward. A page that
+ * cannot be watched is a ledger that says it could not read where the page is (an origin nobody can match).
+ */
+function watchNavigation(page: Page): void {
+  const ledger = new NavigationLedger(() => Date.now(), navigationTotals);
+  navigationLedgers.set(page, ledger);
+  page.on('framenavigated', frame => ledger.commit(`pw:${frameKey(frame)}`, frame.url(), frame === page.mainFrame()));
+  page.on('frameattached', frame => ledger.attached(`pw:${frameKey(frame)}`));
+  page.on('framedetached', frame => ledger.detached(`pw:${frameKey(frame)}`));
+  void pageSession(page)
+    .then(async session => await ledger.attach(session as unknown as NavigationSource))
+    .catch(() => ledger.lose());
+}
+
+/** A ledger that has seen nothing and says so: a page registered through no path this worker knows. */
+function unwatched(): NavigationLedger {
+  const ledger = new NavigationLedger(() => Date.now(), navigationTotals);
+  ledger.lose();
+  return ledger;
+}
+
+const frameKeys = new WeakMap<object, string>();
+let frameSerial2 = 0;
+/** A stable name for one Playwright frame object, so its attach, navigations and detach are one frame in the ledger. */
+function frameKey(frame: object): string {
+  let key = frameKeys.get(frame);
+  if (key === undefined) {
+    frameSerial2 += 1;
+    key = String(frameSerial2);
+    frameKeys.set(frame, key);
+  }
+  return key;
+}
+
 function registerPage(page: Page): void {
   if (pageIds.has(page)) return;
   const key = pageId(page);
@@ -340,6 +378,7 @@ function registerPage(page: Page): void {
     socketsOpened.set(page, (socketsOpened.get(page) ?? 0) + 1);
     socket.on('close', () => sockets.delete(socket));
   });
+  watchNavigation(page);
   watch(page, key);
   setPageState(page, 'ready');
   void page
@@ -380,6 +419,7 @@ function registerPage(page: Page): void {
     consoles.delete(id);
     networks.delete(id);
     emulations.delete(id);
+    pairingHints.delete(id);
     inputSessions.get(id)?.release();
     inputSessions.delete(id);
     const cast = screencasts.get(id);
@@ -523,6 +563,23 @@ function inputLocatorOf(locator: Locator): InputLocator {
 }
 
 /** The page as the input bridge sees it: Playwright for the element, DevTools for the node. */
+/**
+ * Each page's navigation history (`registerPage`): fed by DevTools' frame events and Playwright's mirror of them, kept for
+ * the page's whole life and answered with every document check, so the daemon sees a navigation or a frame swap that took
+ * its documents away. Nothing a page script runs can write it.
+ */
+const navigationLedgers = new WeakMap<Page, NavigationLedger>();
+
+/**
+ * What this worker has counted across EVERY page it has watched, the closed and the departed too (`NavigationTotals`):
+ * pairing links committed by origin and navigations it lost track of. Held here, not on any page, so a page that closes or
+ * leaves the group takes none of it away; it only goes up, and only a fresh worker starts it again.
+ */
+const navigationTotals = new NavigationTotalsLedger();
+
+/** Each page's last DOM look for the pairing-screen hint, kept for a page with a dialog open (see `InputSubject.hint`). */
+const pairingHints = new Map<string, PairingScreenState>();
+
 /** Each page's open WebSockets (`registerPage`). */
 const openSockets = new WeakMap<Page, Set<WebSocket>>();
 /** How many WebSockets each page has ever opened. */
@@ -554,6 +611,12 @@ function inputSubject(page: Page): InputSubject {
       frame: async frame => (await page.context().newCDPSession(frame as never)) as unknown as InputCdpSession,
     },
     sessions,
+    navigation: () => (navigationLedgers.get(page) ?? unwatched()).evidence(),
+    hint: {
+      frozen: () => dialogs.pending(key) !== undefined,
+      last: () => pairingHints.get(key),
+      keep: state => void pairingHints.set(key, state),
+    },
     // The bounded wait for a title and the probe's second look (the thread's own timer).
     // read-scoped: none — a timer: it waits a number of milliseconds and reads nothing
     wait: async ms => await new Promise(resolve => setTimeout(resolve, ms)),

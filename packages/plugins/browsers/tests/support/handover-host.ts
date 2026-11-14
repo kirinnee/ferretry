@@ -10,6 +10,7 @@ import type { FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { ferret, type TestHost, testHost } from '@ferretry/kernel/testing';
 import daemon, { buildBrowsers } from '../../daemon/index.ts';
+import { quietPairingUses } from './no-pairing-screen.ts';
 import { Tabs } from './tabs.ts';
 
 /** The ferrets this machine knows of: `f1` and `f2`. */
@@ -40,7 +41,7 @@ export async function handoverHost(): Promise<{
   );
   const host = await testHost({
     plugins: [half],
-    uses: { ferrets: FERRETS, agentControl: { allows: async () => true } },
+    uses: { ferrets: FERRETS, agentControl: { allows: async () => true }, ...quietPairingUses() },
     fakes: { vault: new FakeVault(), gate: new FakeGate() },
     gate,
   });

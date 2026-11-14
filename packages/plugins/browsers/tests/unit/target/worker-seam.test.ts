@@ -58,7 +58,7 @@ describe('the worker side of the page input seam', () => {
   test('reads answer the document, the text and the fields of the page they name', async () => {
     const { serve, pageId } = loginWorld();
     expect(await serve('inputDocument', { pageId })).toEqual({
-      document: { navigationId: 'loader-1', host: 'localhost:3000' },
+      document: { navigationId: 'loader-1', host: 'localhost:3000', pairingSeen: 0 },
     });
     expect(((await serve('inputText', { pageId })) as { text: string }).text).toContain('Welcome back');
     const facts = await pageFacts(serve, pageId);
@@ -226,12 +226,18 @@ describe('the daemon side of the page input seam', () => {
   const facts = { kind: 'page' } as unknown as BrowserInputFacts;
 
   test('the document answer is believed only with a document id, and a host only when it fits', async () => {
-    expect(await port({ document: { navigationId: 'n1', host: 'a.test' } }).fields.inputDocument('p')).toEqual({
+    expect(
+      await port({ document: { navigationId: 'n1', host: 'a.test', pairingSeen: 0 } }).fields.inputDocument('p'),
+    ).toEqual({
       navigationId: 'n1',
       host: 'a.test',
+      pairingSeen: 0,
     });
-    expect(await port({ document: { navigationId: 'n1', host: '' } }).fields.inputDocument('p')).toEqual({
+    expect(
+      await port({ document: { navigationId: 'n1', host: '', pairingSeen: 0 } }).fields.inputDocument('p'),
+    ).toEqual({
       navigationId: 'n1',
+      pairingSeen: 0,
     });
     for (const bad of [
       null,
@@ -245,20 +251,26 @@ describe('the daemon side of the page input seam', () => {
 
   test('FINDING 6: the frames’ hosts are believed only when every one fits, and a doubt reaches the daemon as "cannot be told"', async () => {
     const said = (document: object) =>
-      port({ document: { navigationId: 'n1', host: 'a.test', ...document } }).fields.inputDocument('p');
+      port({ document: { navigationId: 'n1', host: 'a.test', pairingSeen: 0, ...document } }).fields.inputDocument('p');
     expect(await said({ frameHosts: ['k.test', 'b.test:8443'] })).toEqual({
       navigationId: 'n1',
       host: 'a.test',
+      pairingSeen: 0,
       frameHosts: ['k.test', 'b.test:8443'],
     });
-    expect(await said({ frameHosts: [] })).toEqual({ navigationId: 'n1', host: 'a.test' });
+    expect(await said({ frameHosts: [] })).toEqual({ navigationId: 'n1', host: 'a.test', pairingSeen: 0 });
     for (const doubt of [
       { framesUnreadable: true },
       { frameHosts: ['k.test', 7] },
       { frameHosts: ['k.test', ''] },
       { frameHosts: Array.from({ length: 65 }, (_, index) => `f${String(index)}.test`) },
     ])
-      expect(await said(doubt)).toEqual({ navigationId: 'n1', host: 'a.test', framesUnreadable: true });
+      expect(await said(doubt)).toEqual({
+        navigationId: 'n1',
+        host: 'a.test',
+        pairingSeen: 0,
+        framesUnreadable: true,
+      });
   });
 
   test('the text answer is believed only when it is a string of a sane size', async () => {

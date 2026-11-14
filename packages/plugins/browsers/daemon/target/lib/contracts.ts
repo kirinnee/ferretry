@@ -1,5 +1,6 @@
 import type { PageFacts } from '@ferretry/core-vault/contract';
 import type { ElementTarget } from './element.ts';
+import type { NavigationEvidence } from './navigation-evidence.ts';
 
 /**
  * THE INPUT BRIDGE'S SEAM INTO THE AGENT BROWSER (docs/input-requests.md, "Pages").
@@ -76,6 +77,24 @@ export interface BrowserInputDocument {
   readonly frameHosts?: readonly string[];
   /** A frame whose host cannot be told (a `data:` frame, an address with none) or more frames than are looked at. */
   readonly framesUnreadable?: true;
+  /**
+   * Whether the page, or a frame of it, carries the pairing-screen marker (`PAIRING_SCREEN_META_NAME`): it shows a live
+   * pairing code or its QR, so no agent may read or picture it. Read by a DOM search, never a page script; absent means
+   * it does not. `true` also when the browser could not say (fail closed).
+   */
+  readonly pairingScreen?: boolean;
+  /**
+   * How many times a code has come on screen in the page's documents (the sighting count that outlives the marker), so a
+   * read that began on an unmarked page knows when one was shown meanwhile. `-1`: the browser could not say.
+   */
+  readonly pairingSeen?: number;
+  /**
+   * Where the TARGET has been, from the browser's own frame events (`./navigation-evidence.ts`): the origins its frames
+   * committed and when, how many frame events it has seen, and whether any address it committed carried the pairing
+   * fragment. Page script cannot write it, and a navigation or a swapped frame leaves a mark in it that the DOM does not.
+   * Absent: the browser kept none, and a guard that needs it refuses.
+   */
+  readonly navigation?: NavigationEvidence;
 }
 
 /**
