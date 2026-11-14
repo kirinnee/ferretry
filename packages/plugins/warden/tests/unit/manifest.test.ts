@@ -24,11 +24,13 @@ describe('warden manifest', () => {
       '/v1/warden/verdicts',
     ]);
   });
-  test('it takes ferret.changed and turn.ended, needs ferrets, conversation and asks, may use Usage, Board, Terminals, Browsers, Runtimes, Voice and Gate (the app half reads its grants)', () => {
+  test('it takes ferret.changed and turn.ended, needs ferrets, conversation and asks, may use Usage, Logins, Accounts, Board, Terminals, Browsers, Runtimes, Voice and Gate (the app half reads its grants)', () => {
     expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual(['ferret.changed', 'turn.ended']);
     expect(Object.keys(manifest.needs).sort()).toEqual(['asks', 'conversation', 'ferrets']);
     expect(Object.keys(manifest.uses)).toEqual([
       'usage',
+      'logins',
+      'accounts',
       'board',
       'terminals',
       'browsers',
