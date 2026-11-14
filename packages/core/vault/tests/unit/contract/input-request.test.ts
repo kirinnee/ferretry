@@ -752,8 +752,14 @@ describe('the schemas that must never hold a value', () => {
   for (const [name, schema] of WITHOUT_VALUE) {
     it(`should give ${name} no field named or shaped like a value`, () => {
       const offenders = propertyNames(schema).filter(property => VALUE_LIKE.test(property));
+      // `Ask` carries the owner's free text. `InputRequest` carries one count a pasted capture's card may show: how many
+      // characters the sealed copy holds (`source.length`), never a sample of it.
       const allowedElsewhere =
-        name === 'Ask' ? new Set(['body', 'data', 'response', 'answer', 'input', 'text']) : new Set<string>();
+        name === 'Ask'
+          ? new Set(['body', 'data', 'response', 'answer', 'input', 'text'])
+          : name === 'InputRequest'
+            ? new Set(['length'])
+            : new Set<string>();
 
       should(offenders.filter(property => !allowedElsewhere.has(property))).deepEqual([]);
     });

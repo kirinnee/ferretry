@@ -127,7 +127,10 @@ describe('S42 every declared internal root base exists on a fresh FY_HOME before
   test('S42 boot makes only declared internal bases: no owner root, no worktrees, no credentials for another plugin', async () => {
     const f = await bootFresh({ intruder: ['credentials', 'worktrees', 'work', 'imports'] });
     expect(await readdir(`${f.home}/state`).then(names => names.includes('intruder'))).toBe(false);
-    expect(await readdir(f.parent)).toEqual(['home']);
+    // The one outside folder is the managed worktrees base (`<home>-worktrees`), made for the plugin that DECLARED the
+    // `worktrees` root (Ferrets); the intruder's declaration makes nothing, and no other sibling of the home appears.
+    expect((await readdir(f.parent)).sort()).toEqual(['home', 'home-worktrees']);
+    expect(await readdir(`${f.home}-worktrees`)).toEqual([]);
   });
 });
 
