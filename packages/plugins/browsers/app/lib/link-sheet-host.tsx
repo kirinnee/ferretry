@@ -80,6 +80,7 @@ export function LinkSheetHost({ store, Sheet }: LinkSheetHostProps): ReactNode {
             <button
               className="kt-btn kt-btn--sm"
               data-link-notice-dismiss=""
+              style={{ flexShrink: 0 }}
               onClick={() => store.say('')}
               type="button"
             >
