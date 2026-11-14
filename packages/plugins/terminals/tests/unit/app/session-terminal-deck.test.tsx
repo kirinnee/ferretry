@@ -479,6 +479,11 @@ describe('SessionTerminalDeck', () => {
     expect(asked).toEqual([true]);
     expect(json(page)).toContain('Retry loading terminals');
     expect(json(page)).not.toContain('Terminal F');
+    // A listing that failed is not an empty listing: nothing says "none open" (starting one stays possible).
+    expect(json(page)).not.toContain('No shell terminals open');
+    expect(json(page)).toContain('Terminals not read');
+    expect(json(page)).toContain('terminals unavailable');
+    expect(json(page)).not.toContain('loading terminals…');
 
     clickNamed(page, 'Retry loading terminals');
     await settle();
@@ -501,6 +506,7 @@ describe('SessionTerminalDeck', () => {
     await settle();
 
     expect(json(page)).toContain(explanation);
+    expect(json(page)).not.toContain('No shell terminals open');
     run(() => page.unmount());
   });
 
