@@ -23,6 +23,7 @@
  * - carries a `c=`, `code=` or `share=` part (`;`, `&` or `#` separated), however the version is spelled.
  * The classification never weakens the access codec: it only decides what to hide.
  *
+ * A run that already reads as a credential does not stop at a quote-like character (`'`, `"`, `<`, `>`, ```, `\`) either: an ignored field ahead of the code may hold one, so it goes through the next whitespace, minus the closing punctuation of the sentence around it (v4 4.291.16, #1596).
  * A run's END is conservative too. It continues across whitespace while the next word continues the fragment (the
  * previous word ends in, or the next word starts with, a `;`, `=`, `&` or `,`, or the next word contains one and is no
  * address or new `#`), so `code= FAKE;fp=00` leaves no credential suffix behind. The cost is deliberate: ordinary text
@@ -84,7 +85,21 @@ const START = /#|%(?:25)*23/giu;
 /** Characters that end a run outright: quotes, angle brackets, a backtick, a backslash. */
 const STOP = /["'<>`\\]/u;
 
-const SEPARATOR_END = /(?:[;=&,]|%(?:25)*(?:3b|3d|26|2c))$/iu;
+const SEPARATOR_CODES = new Set(['3b', '3d', '26', '2c']);
+
+/**
+ * Whether `text[start, end)` ends in a separator, raw or percent-encoded (`%`, any number of `25`, then `3b`, `3d`, `26`
+ * or `2c`). Read backwards from the end, so a long span costs what its last characters cost: a `$`-anchored pattern run
+ * over the whole growing span is quadratic across a run of words.
+ */
+function endsInSeparator(text: string, start: number, end: number): boolean {
+  if (end <= start) return false;
+  if (';=&,'.includes(text.charAt(end - 1))) return true;
+  if (end - start < 3 || !SEPARATOR_CODES.has(text.slice(end - 2, end).toLowerCase())) return false;
+  let at = end - 2;
+  while (at - 2 > start && text.slice(at - 2, at) === '25') at -= 2;
+  return text.charAt(at - 1) === '%';
+}
 const SEPARATOR_START = /^(?:[;=&,]|%(?:25)*(?:3b|3d|26|2c))/iu;
 const SEPARATOR_INSIDE = /[;=&]|%(?:25)*(?:3b|3d|26)/iu;
 const ADDRESS_START = /^[a-z][a-z0-9+.-]*:\/\//iu;
@@ -238,6 +253,25 @@ function credentialValueEnd(text: string, cursor: { at: number }, end: number): 
   return end;
 }
 
+/** What closes a sentence or a quotation around an address: given back, never part of a fragment's end. */
+const CLOSING_PUNCTUATION = new Set([...')]}>"\'`.,:;!?']);
+
+/**
+ * A fragment that already reads as a credential and whose run stopped at a quote-like character (v4 4.291.16, #1596): a
+ * reader ignores a field it does not know and keeps no field order, so an ignored field may hold `'`, `"`, `<`, `>`,
+ * `` ` `` or `\` ahead of the code, and no field is parsed to find where the code is. The whole of it goes — through the
+ * next whitespace (or `&`, inside a query) — minus the closing punctuation of the sentence around it, which is given back.
+ * Returns `end` itself when this fragment has no such stop to cross. Linear: the closing characters are given back by a
+ * backward walk (no backtracking pattern), and whether the fragment is a credential is {@link spanEnd}'s to remember.
+ */
+function stretchPastStop(text: string, end: number, stopAtAmpersand: boolean): number {
+  let far = end;
+  while (far < text.length && !/\s/u.test(text.charAt(far)) && !(stopAtAmpersand && text.charAt(far) === '&')) far++;
+  let back = far;
+  while (back > end && CLOSING_PUNCTUATION.has(text.charAt(back - 1))) back--;
+  return back;
+}
+
 /**
  * Where the fragment that starts at `start` ends: the end of its run, then on across whitespace while the next word
  * continues it (see the file header), and across a credential value the codec reads through whitespace
@@ -247,23 +281,32 @@ function credentialValueEnd(text: string, cursor: { at: number }, end: number): 
 function spanEnd(text: string, start: number, stopAtAmpersand: boolean): number {
   let end = runEnd(text, start, stopAtAmpersand);
   const cursor = { at: start };
+  // Once the span reads as a credential it always will (it only grows): asked until it does, never re-decoded after.
+  let credential = false;
   for (;;) {
     const accepted = credentialValueEnd(text, cursor, end);
     if (accepted > end) {
       end = runEnd(text, accepted, stopAtAmpersand);
       continue;
     }
+    if (end < text.length && STOP.test(text.charAt(end))) {
+      credential ||= isCredentialFragment(text.slice(start, end));
+      const stretched = credential ? stretchPastStop(text, end, stopAtAmpersand) : end;
+      if (stretched > end) {
+        end = stretched;
+        continue;
+      }
+    }
     let next = end;
     while (next < text.length && /\s/u.test(text.charAt(next))) next++;
     if (next === end || next >= text.length) return end;
     const wordEnd = runEnd(text, next, stopAtAmpersand);
     const word = text.slice(next, wordEnd);
-    const previous = text.slice(start, end);
     const continues =
       word !== '' &&
       !word.startsWith('#') &&
       !ADDRESS_START.test(word) &&
-      (SEPARATOR_END.test(previous) || SEPARATOR_START.test(word) || SEPARATOR_INSIDE.test(word));
+      (endsInSeparator(text, start, end) || SEPARATOR_START.test(word) || SEPARATOR_INSIDE.test(word));
     if (!continues) return end;
     end = wordEnd;
   }
