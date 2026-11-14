@@ -1,6 +1,6 @@
 import { isFerretCall, ferretOf } from '@ferretry/core-gate/contract';
 import { ApiError, decodeParameter, jsonResponse, parseBody, type RouteHandler } from '@ferretry/kernel/contract';
-import type { Redaction } from '@ferretry/kernel/contract';
+import type { Log, Redaction } from '@ferretry/kernel/contract';
 import {
   FerretPackPatchSchema,
   FerretResultSchema,
@@ -78,9 +78,30 @@ function ferretParameter(call: Call): string {
   return decoded;
 }
 
+/**
+ * What a person or a ferret is told when a read FAILED for a reason no handler named (a provider that threw, a document
+ * that did not parse). The cause goes to the daemon log, whole; the answer says what could not be read and where the
+ * cause is, and quotes none of it (a cause can carry anything a provider said).
+ */
+const UNREADABLE =
+  'Pack mode could not read what it needs from this machine just now. The cause is in the daemon log; try again in a moment.';
+
+/** A refusal a handler named keeps its own status; anything else is logged and answered as {@link UNREADABLE}, never a bare 500. */
+function explained(log: Log, route: string, handler: RouteHandler): RouteHandler {
+  return async call => {
+    try {
+      return await handler(call);
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      log.error(`${route} failed: ${error instanceof Error ? error.message : String(error)}`, { route });
+      throw new ApiError(503, UNREADABLE, 'pack_unavailable');
+    }
+  };
+}
+
 /** `noStore` throughout: every answer is decided on live facts or a live ferret. */
-export function packRoutes(subsystem: PackSubsystem, redaction: Redaction) {
-  return {
+export function packRoutes(subsystem: PackSubsystem, redaction: Redaction, log: Log) {
+  const routes = {
     'GET /v1/pack': (async () => {
       const [base, undo, cleanUp] = await Promise.all([
         subsystem.service.view(),
@@ -151,4 +172,7 @@ export function packRoutes(subsystem: PackSubsystem, redaction: Redaction) {
       return jsonResponse(done);
     }) satisfies RouteHandler,
   };
+  return Object.fromEntries(
+    Object.entries(routes).map(([route, handler]) => [route, explained(log, route, handler)]),
+  ) as typeof routes;
 }

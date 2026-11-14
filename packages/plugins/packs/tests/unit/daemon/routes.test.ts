@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { BodyTooLargeError, MAX_REQUEST_BODY_BYTES, type Redaction } from '@ferretry/kernel/contract';
+import { BodyTooLargeError, type Log, MAX_REQUEST_BODY_BYTES, type Redaction } from '@ferretry/kernel/contract';
 import { packRoutes, type PackSubsystem } from '../../../daemon/lib/routes.ts';
+
+const silentLog: Log = { debug() {}, info() {}, warn() {}, error() {}, child: () => silentLog };
 
 /** Every body-taking route records what reached the subsystem, so a refusal can prove nothing did. */
 function stand() {
@@ -31,7 +33,7 @@ function stand() {
       return undefined;
     },
   } as unknown as PackSubsystem;
-  return { reached, routes: packRoutes(subsystem, {} as Redaction) };
+  return { reached, routes: packRoutes(subsystem, {} as Redaction, silentLog) };
 }
 
 /** A call carrying exactly `text`, read the way every arrival reads one: over the route's bound is a 413. */
@@ -148,7 +150,7 @@ describe('the routes that answer from the subsystem', () => {
     },
     result: async () => undefined,
   } as unknown as PackSubsystem;
-  const routes = packRoutes(subsystem, {} as Redaction);
+  const routes = packRoutes(subsystem, {} as Redaction, silentLog);
   const person = { request: { text: async () => '{}' }, params: new Map() } as never;
   const ferret = {
     request: { text: async () => '{}' },

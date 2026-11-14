@@ -86,6 +86,8 @@ import { SurfaceControl } from './lib/agent-tools/control.ts';
 import {
   type AgentToolResult,
   INPUT_SINGLE_FIELD_ID,
+  isAgentToolError,
+  TOOL_REFUSAL_STATUS,
   type TerminalToolCall,
   TerminalToolService,
 } from './lib/agent-tools/service.ts';
@@ -487,7 +489,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
         const result = await tools.call(caller, parsed);
         return { text: renderToolResult(result), data: JSON.parse(JSON.stringify(result)) };
       } catch (error) {
-        if (error instanceof Error && error.name === 'AgentToolError') return { text: error.message, isError: true };
+        if (isAgentToolError(error)) return { text: error.message, isError: true };
         throw error;
       }
     };
@@ -648,8 +650,15 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
           ...(decision.outcome === 'attributed' ? { openedBy: decision.openedBy } : {}),
         };
         // The same answer a ferret's MCP call gets: the rendered text, and the report as `data` (`matched` included).
-        const result = await tools.call(caller, parsed);
-        return jsonResponse({ text: renderToolResult(result), data: JSON.parse(JSON.stringify(result)) });
+        // A refusal (an unknown terminal, a tool only an agent may use) is answered in its own words with a status a
+        // client can branch on, as the MCP path answers it `isError`; it is never a bare 500.
+        try {
+          const result = await tools.call(caller, parsed);
+          return jsonResponse({ text: renderToolResult(result), data: JSON.parse(JSON.stringify(result)) });
+        } catch (error) {
+          if (isAgentToolError(error)) throw new ApiError(TOOL_REFUSAL_STATUS[error.code], error.message, error.code);
+          throw error;
+        }
       },
     },
     sockets: { 'GET /v1/ferrets/:ferretId/terminals/:terminalId/stream': terminalStreamAccept(subsystem) },

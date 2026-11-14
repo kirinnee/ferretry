@@ -17,6 +17,7 @@ import {
   LoginSignedIn,
   LoginChangesPort,
   LoginsPort,
+  LoginsBudget,
   LoginsUsedBy,
   MODELS_CONFIG,
   ModelsChanged,
@@ -223,7 +224,7 @@ export default definePlugin({
   hooks: {
     takes: LOGIN_KINDS.map(kind => ({ hook: Logins, key: kind })),
     // Which runtimes use a login: Runtimes answers, so a removal can be refused while one still does (`LoginsUsedBy`).
-    offers: [{ hook: LoginsUsedBy }],
+    offers: [{ hook: LoginsUsedBy }, { hook: LoginsBudget }],
   },
 
   onboarding: [{ id: 'login', title: 'Sign in', order: 30 }],

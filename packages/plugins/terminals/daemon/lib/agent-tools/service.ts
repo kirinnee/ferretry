@@ -36,7 +36,7 @@ const WAIT_TAIL_LINES = 40;
 /** The one field a single-value terminal card has (today's `INPUT_SINGLE_FIELD_ID`). */
 const INPUT_SINGLE_FIELD_ID = 'value';
 
-class AgentToolError extends Error {
+export class AgentToolError extends Error {
   constructor(
     readonly code:
       | 'bad_request'
@@ -53,6 +53,22 @@ class AgentToolError extends Error {
     this.name = 'AgentToolError';
   }
 }
+
+/** The HTTP status of each refusal. A takeover is a 409: the call was fine and the surface is busy. */
+export const TOOL_REFUSAL_STATUS: Readonly<Record<AgentToolError['code'], number>> = {
+  bad_request: 400,
+  not_found: 404,
+  conflict: 409,
+  forbidden: 403,
+  taken_over: 409,
+  capacity: 409,
+  unavailable: 503,
+  upstream_failed: 502,
+};
+
+/** Whether an error is a refusal of a tool call, in words (the MCP path answers it `isError`, the route by status). */
+export const isAgentToolError = (error: unknown): error is AgentToolError =>
+  error instanceof Error && error.name === 'AgentToolError';
 
 /** A call, as each tool's input schema parsed it (`contract/wire.ts`), with its tool named. */
 export type TerminalToolCall =

@@ -23,6 +23,7 @@
     "@ferretry/core-ferrets": "workspace:*",
     "@ferretry/core-gate": "workspace:*",
     "@ferretry/plugin-conversation": "workspace:*",
+    "@ferretry/plugin-logins": "workspace:*",
     "@ferretry/plugin-runtimes": "workspace:*",
     "react": "^19.0.0",
     "@ferretry/app": "workspace:*",
@@ -30,6 +31,7 @@
   },
   "sideEffects": false,
   "devDependencies": {
+    "@ferretry/plugin-usage": "workspace:*",
     "@happy-dom/global-registrator": "^20.11.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

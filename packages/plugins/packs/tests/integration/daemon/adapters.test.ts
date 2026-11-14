@@ -17,7 +17,7 @@ import {
   PACK_CLEAN_UP_PACK,
   type PackCredentialFacts,
   type RuntimeFactsApi,
-  type UsageQuotaApi,
+  type PackQuotaSource,
 } from '../../../contract/index.ts';
 import { PackFerrets } from '../../../daemon/adapters/ferrets.ts';
 import { FleetFacts } from '../../../daemon/adapters/fleet-facts.ts';
@@ -297,8 +297,8 @@ describe('the start check and the fleet facts, from the Runtimes provider', () =
     catalog: async () => rows as never,
     tools: async () => [{ name: 'claude', installed: true }] as never,
   });
-  const usage: UsageQuotaApi = {
-    logins: async () =>
+  const usage: PackQuotaSource = {
+    credentials: async () =>
       [
         { id: 'main', status: { word: 'ready' }, usage: { fiveHour: {}, weekly: {} } },
       ] as readonly PackCredentialFacts[],

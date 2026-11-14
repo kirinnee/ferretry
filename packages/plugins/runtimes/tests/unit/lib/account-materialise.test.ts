@@ -1349,3 +1349,34 @@ describe('materialiseFleet', () => {
     });
   });
 });
+
+describe('the variables a runtime publishes for a check to fill from', () => {
+  it('should publish the plain variables its login sets, and none that name a secret or look like a credential', () => {
+    // Arrange — one plain variable, one that names a stored secret, one literal that is a credential by name
+    const model = modelOf({
+      credentials: {
+        'claude-you': {
+          harness: 'claude',
+          store: 'environment',
+          env: {
+            ANTHROPIC_BASE_URL: 'https://gateway.example/anthropic',
+            ANTHROPIC_API_KEY: '${secret:WORK_KEY}',
+            ANTHROPIC_AUTH_TOKEN: 'loge-internal',
+          },
+        },
+        'codex-work': { harness: 'codex', store: 'ferretry' },
+      },
+    });
+
+    // Act
+    const result = plan(model);
+
+    // Assert
+    const account = result.manifest.accounts[0];
+    should(account?.launchEnv).containEql({ ANTHROPIC_BASE_URL: 'https://gateway.example/anthropic' });
+    should(Object.keys(account?.launchEnv ?? {})).not.containEql('ANTHROPIC_API_KEY');
+    should(Object.keys(account?.launchEnv ?? {})).not.containEql('ANTHROPIC_AUTH_TOKEN');
+    should(JSON.stringify(result.manifest)).not.containEql('loge-internal');
+    should(account?.secretEnv).containEql({ ANTHROPIC_API_KEY: '${secret:WORK_KEY}' });
+  });
+});

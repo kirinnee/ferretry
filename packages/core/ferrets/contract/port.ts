@@ -492,6 +492,14 @@ export interface FerretPrompt {
   readonly permissionRequest?: JsonValue;
   /** The harness's own dialog behind a `needs-input`, as data. */
   readonly dialog?: JsonValue;
+  /**
+   * The usage limit this ferret's login is read as spent on (additive, R1-D): present exactly while the session
+   * document says `rate_limited` AND carries the harness's own words for it (its quota's notice, or the usage-limit dialog
+   * it is parked on). It is the one place a reader outside Ferrets finds a spend limit only the pane announces, which no
+   * provider window shows. The notice is masked like every text here; `retryAt` is when the harness said the login is
+   * usable again, epoch milliseconds, absent when it gave none.
+   */
+  readonly limit?: { readonly notice: string; readonly spend: boolean; readonly retryAt?: number };
 }
 
 /** Why a move did not happen (today's `SessionMoveFailure` words and sentence). */

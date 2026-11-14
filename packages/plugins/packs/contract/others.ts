@@ -1,16 +1,13 @@
 /**
- * STAND-INS for the contracts Packs reads but does not own (§2.3: Packs `uses` Usage and Runtimes, both optional).
+ * The narrow views of what Packs reads but does not own (§2.3: Packs `uses` Logins and Runtimes, both optional).
  *
- * `@ferretry/plugin-usage/contract` is empty on this base (the skeleton slice has not filled it), so the usage facts
- * Packs reads are declared here, structurally, exactly as today's `FleetCredentialView` carried them. The generator
- * matches ports by name: when Usage's contract lands, replace this file's `UsagePort` with an import of it in the
- * manifest and keep these shapes as the narrow view Packs wants.
+ * The login facts Packs reads are declared here, structurally, exactly as today's `FleetCredentialView` carried them;
+ * Logins' own `LoginView` is assignable to them. They are views, never ports: the generator matches ports by name.
  *
  * Runtimes' real port is imported (`RuntimesPort`, `RuntimeId`); what it does not yet offer — the runtime CATALOG
  * (with each runtime's model list and wrapper) and the machine's tools — is read through {@link RuntimeFactsApi}, an
  * additive pair of methods the daemon half asks of the provider when it has them (see the port-packs report).
  */
-import { definePort } from '@ferretry/kernel/contract';
 import type { MachineTool, RuntimeView } from '@ferretry/plugin-runtimes/contract';
 
 // ─── usage facts ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -65,13 +62,17 @@ export interface PaneLimit {
   readonly retryAt?: number | undefined;
 }
 
-export interface UsageQuotaApi {
+/**
+ * What Packs reads of each login's sign-in, quota and budget. It is NOT a port: a port is matched by name, and a
+ * second shape under the name `usage` is handed the real Usage plugin's object, which has none of these methods. The
+ * facts come from the Logins port (`daemon/adapters/login-quota.ts`).
+ */
+export interface PackQuotaSource {
   /** Every login with its quota windows and budget, as the app shows them. */
-  logins(): Promise<readonly PackCredentialFacts[]>;
+  credentials(): Promise<readonly PackCredentialFacts[]>;
   /** Logins the panes say are out of quota, by login id. */
   paneLimits(): Promise<ReadonlyMap<string, PaneLimit>>;
 }
-export const UsagePort = definePort<UsageQuotaApi>('usage');
 
 // ─── runtime facts ───────────────────────────────────────────────────────────────────────────────────────────────
 

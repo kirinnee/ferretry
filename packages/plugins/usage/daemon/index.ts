@@ -481,6 +481,9 @@ export default implementDaemon(manifest, {
           }
           return { allow: true };
         },
+        // Logins' list and check show each login's standing against its budget; Logins cannot see Usage (Usage
+        // needs Logins), so it asks here, and gets the very standing `GET /v1/usage/budgets` answers.
+        'logins.budget:usage': { view: login => budget.view(login) },
         // A turn ended: its ferret may now be finished, so a pass is owed after the records settle.
         'turn.ended': payload => {
           outcomes.set(payload.ferret, payload.outcome);
