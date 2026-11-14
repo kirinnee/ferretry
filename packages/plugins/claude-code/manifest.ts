@@ -92,22 +92,105 @@ export default definePlugin({
     cli: [
       verb('harness claude-code status', {
         summary: 'where claude is, how it was installed, its version, and whether Ferretry verified it',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
       }),
-      verb('harness claude-code update', { summary: 'update claude, with the command for how it was installed' }),
-      verb('harness claude-code settings ls', { summary: 'the Claude Code settings items on this machine' }),
-      verb('harness claude-code settings show', { summary: 'one settings item and where it is used' }),
-      verb('harness claude-code settings add', { summary: 'add a settings item' }),
+      verb('harness claude-code update', {
+        summary: 'update claude, with the command for how it was installed',
+        args: [],
+        options: [
+          { flag: '--to <version>', help: 'install this version, or "verified" for the one Ferretry verified' },
+          { flag: '--yes', help: 'do not ask before updating' },
+          {
+            flag: '--allow-unverified',
+            help: 'install a version Ferretry has not verified yet (--yes never implies this)',
+          },
+        ],
+      }),
+      verb('harness claude-code settings ls', {
+        summary: 'the Claude Code settings items on this machine',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('harness claude-code settings show', {
+        summary: 'one settings item and where it is used',
+        args: [{ name: 'name', help: 'the settings item’s name' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('harness claude-code settings add', {
+        summary: 'add a settings item',
+        args: [{ name: 'name', help: 'the settings item’s name' }],
+        options: [
+          { flag: '--file <path>', help: "the item's text, from a local file" },
+          { flag: '--env <NAME=value>', help: 'MCP or settings: one environment variable; repeat it' },
+          { flag: '--flag <flag>', help: 'settings: one launch flag; repeat it' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
       verb('harness claude-code settings edit', {
         summary: 'change a settings item; every runtime that uses it changes too',
+        args: [{ name: 'name', help: 'the settings item’s name' }],
+        options: [
+          { flag: '--file <path>', help: "the item's text, from a local file" },
+          { flag: '--env <NAME=value>', help: 'MCP or settings: one environment variable; repeat it' },
+          { flag: '--flag <flag>', help: 'settings: one launch flag; repeat it' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
       }),
-      verb('harness claude-code settings rm', { summary: 'remove a settings item' }),
-      verb('harness claude-code hooks ls', { summary: 'the Claude Code hooks items on this machine' }),
-      verb('harness claude-code hooks show', { summary: 'one hooks item and where it is used' }),
-      verb('harness claude-code hooks add', { summary: 'add a hooks item' }),
+      verb('harness claude-code settings rm', {
+        summary: 'remove a settings item',
+        args: [{ name: 'name', help: 'the settings item’s name' }],
+        options: [
+          { flag: '--remove-from-profiles', help: 'take it out of every profile that has it first' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('harness claude-code hooks ls', {
+        summary: 'the Claude Code hooks items on this machine',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('harness claude-code hooks show', {
+        summary: 'one hooks item and where it is used',
+        args: [{ name: 'name', help: 'the hooks item’s name' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('harness claude-code hooks add', {
+        summary: 'add a hooks item',
+        args: [{ name: 'name', help: 'the hooks item’s name' }],
+        options: [
+          { flag: '--file <path>', help: "the item's text, from a local file" },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
       verb('harness claude-code hooks edit', {
         summary: 'change a hooks item; every runtime that uses it changes too',
+        args: [{ name: 'name', help: 'the hooks item’s name' }],
+        options: [
+          { flag: '--file <path>', help: "the item's text, from a local file" },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
       }),
-      verb('harness claude-code hooks rm', { summary: 'remove a hooks item' }),
+      verb('harness claude-code hooks rm', {
+        summary: 'remove a hooks item',
+        args: [{ name: 'name', help: 'the hooks item’s name' }],
+        options: [
+          { flag: '--remove-from-profiles', help: 'take it out of every profile that has it first' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
     ],
     app: [
       appAction('permission.answer', {

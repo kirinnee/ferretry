@@ -168,25 +168,133 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('login ls', { summary: 'the logins on this machine, with whether each works and its usage' }),
+      verb('login ls', {
+        summary: 'the logins on this machine, with whether each works and its usage',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
       verb('login add', {
         summary: 'add a sign-in: sign claude-code or codex in, or build one for a provider from its list',
+        args: [
+          {
+            name: 'tool-or-provider',
+            help: 'claude, codex, or a provider — e.g. glm, deepseek, bedrock',
+            optional: true,
+          },
+        ],
+        options: [
+          { flag: '--label <label>', help: 'a name to tell this login apart from another with the same email' },
+          { flag: '--id <id>', help: 'the id to give it (default: made from the tool and the label)' },
+          { flag: '--no-sign-in', help: 'add the login without signing in now' },
+          { flag: '--preset <id>', help: 'an environment login from a provider preset (see `fy login presets`)' },
+          {
+            flag: '--env <NAME=VALUE>',
+            help: 'an environment login variable: a plain value, or ${secret:NAME} for a secret (repeat it) (default: {})',
+          },
+          { flag: '--cloud-credential <reference>', help: 'aws-profile:<name>, gcloud-adc[:<path>] or azure-cli' },
+          {
+            flag: '--for <tool>',
+            help: 'which CLI a provider that drives both is listed under first (claude or codex)',
+          },
+          { flag: '--from-env', help: 'import from the variables already set in this shell, instead of typing one' },
+          { flag: '--test', help: 'test the login once it is added, the same as `login test`' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
+          { flag: '--json', help: 'print the change and its outcome as JSON' },
+        ],
       }),
-      verb('login check', { summary: 'check now whether a sign-in still works (a refresh for Codex)' }),
-      verb('login test', { summary: 'test an environment sign-in with one call, the cheapest its provider allows' }),
-      verb('login presets', { summary: 'the provider presets an environment sign-in can be made from' }),
-      verb('login signin', { summary: 'sign one in, or in again' }),
-      verb('login signout', { summary: 'sign one out; every runtime on it then needs sign-in' }),
+      verb('login check', {
+        summary: 'check now whether a sign-in still works (a refresh for Codex)',
+        args: [{ name: 'id', help: 'the login' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('login test', {
+        summary: 'test an environment sign-in with one call, the cheapest its provider allows',
+        args: [{ name: 'id', help: 'the login' }],
+        options: [
+          {
+            flag: '--allow-inference',
+            help: 'agree to one message capped at one token, for a provider with no free check',
+          },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('login presets', {
+        summary: 'the provider presets an environment sign-in can be made from',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('login signin', {
+        summary: 'sign one in, or in again',
+        args: [{ name: 'id', help: 'the login' }],
+        options: [
+          {
+            flag: '--force',
+            help: 'start over: end the sign-in already running for it, and clear a leftover Codex sign-in from its port',
+          },
+        ],
+      }),
+      verb('login signout', {
+        summary: 'sign one out; every runtime on it then needs sign-in',
+        args: [{ name: 'id', help: 'the login' }],
+        options: [
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
+          { flag: '--json', help: 'print the change and its outcome as JSON' },
+        ],
+      }),
       verb('login disable', {
         summary: 'switch a sign-in off without deleting it: nothing new starts on it; running ferrets keep going',
+        args: [{ name: 'id', help: 'the login' }],
+        options: [
+          { flag: '--until <when>', help: 'switch back on by itself: a date (2026-11-01), a time or a wait (3d, 12h)' },
+          { flag: '--reason <text>', help: 'why, shown beside the switch and in every refusal' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
+          { flag: '--json', help: 'print the change and its outcome as JSON' },
+        ],
       }),
-      verb('login enable', { summary: 'switch a disabled sign-in back on' }),
-      verb('login label', { summary: 'give a sign-in a label, or take it away with --clear' }),
-      verb('login rm', { summary: 'remove a sign-in (refused while a runtime uses it)' }),
+      verb('login enable', {
+        summary: 'switch a disabled sign-in back on',
+        args: [{ name: 'id', help: 'the login' }],
+        options: [
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
+          { flag: '--json', help: 'print the change and its outcome as JSON' },
+        ],
+      }),
+      verb('login label', {
+        summary: 'give a sign-in a label, or take it away with --clear',
+        args: [
+          { name: 'id', help: 'the login' },
+          { name: 'label', help: 'the label', optional: true },
+        ],
+        options: [
+          { flag: '--clear', help: 'remove the label' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
+          { flag: '--json', help: 'print the change and its outcome as JSON' },
+        ],
+      }),
+      verb('login rm', {
+        summary: 'remove a sign-in (refused while a runtime uses it)',
+        args: [{ name: 'id', help: 'the login' }],
+        options: [
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
+          { flag: '--json', help: 'print the change and its outcome as JSON' },
+        ],
+      }),
       verb('login models list', {
         summary: 'every model catalog in effect, where it came from, and its models by tier',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
       }),
-      verb('login models refresh', { summary: 'check now for a newer published model catalog' }),
+      verb('login models refresh', {
+        summary: 'check now for a newer published model catalog',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
     ],
     app: [
       appAction('login.sign-in', { on: 'daemon', label: 'Sign in', calls: 'POST /v1/logins/sign-in' }),

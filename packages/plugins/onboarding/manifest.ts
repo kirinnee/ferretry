@@ -58,9 +58,21 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('onboard', { summary: 'run the first run at a terminal: find what you have, ask only what is missing' }),
-      verb('onboard status', { summary: 'the first-run steps and where each stands' }),
-      verb('onboard reset', { summary: 'forget which steps were answered and start the first run again' }),
+      verb('onboard', {
+        summary: 'run the first run at a terminal: find what you have, ask only what is missing',
+        args: [],
+        options: [
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--check', help: 'say what is present and what is missing, and change nothing' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('onboard status', {
+        summary: 'the first-run steps and where each stands',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('onboard reset', { summary: 'forget which steps were answered and start the first run again', args: [] }),
     ],
   },
 

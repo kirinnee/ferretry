@@ -417,67 +417,413 @@ export default definePlugin({
       // V-0329: `fy migrate <id>` → `fy ferret move <id>` (§1.4).
       verb('ferret move <id>', {
         summary: 'continue a ferret on another runtime (another harness only with --convert)',
+        args: [{ name: 'id', help: 'session id or callsign' }],
+        options: [
+          { flag: '-a, --agent <agent>', help: 'the runtime to move the session onto' },
+          { flag: '--model <model>', help: "override the model; defaults to the target account's configured model" },
+          {
+            flag: '--allow-context-downgrade',
+            help: 'accept a target context window smaller than the current one (the daemon otherwise refuses)',
+          },
+          {
+            flag: '--force-inflight',
+            help: 'go ahead even though the daemon could not show that what the agent is running is safe to stop (the daemon otherwise refuses; the move is journalled)',
+          },
+          {
+            flag: '--conversation <choice>',
+            help: 'resume (default) continues the conversation the session is on; fresh starts a new one; previous goes back to the one an earlier Restart left behind; convert rewrites it for the other harness',
+          },
+          {
+            flag: '--convert',
+            help: 'move onto a runtime of the OTHER harness (Claude ↔ Codex) by converting the conversation; same as --conversation convert',
+          },
+          { flag: '--preview', help: 'with --convert: show what the conversion would carry and change nothing' },
+          { flag: '--request-id <id>', help: 'stable idempotency key for an explicit retry of this move' },
+          { flag: '--json', help: 'print the moved session as JSON' },
+        ],
       }),
-      verb('ps', { summary: 'list ferrets' }),
-      verb('status [id]', { summary: 'show one ferret in detail, or with --subtree a table of its helpers' }),
-      verb('start [prompt...]', {
-        summary: 'start a ferret on one of your agent runtimes',
+      verb('ps', {
+        summary: 'list ferrets',
+        args: [],
+        options: [
+          { flag: '-a, --all', help: 'include terminal sessions (completed/failed/stalled/stopped)' },
+          { flag: '-l, --label <label>', help: 'only sessions started with this ownership label' },
+          { flag: '--json', help: 'print the selected sessions as JSON' },
+        ],
+      }),
+      verb('status [id]', {
+        summary: 'show one ferret in detail, or with --subtree a table of its helpers',
+        args: [
+          {
+            name: 'id',
+            help: 'session id or callsign (with --subtree: defaults to the calling session)',
+            optional: true,
+          },
+        ],
         options: [
           {
+            flag: '--subtree',
+            help: 'one table of every live descendant (and those ended in the last 2h): model, state, card, PR and its last line',
+          },
+          { flag: '--json', help: 'print the session, or with --subtree its rows, as JSON' },
+        ],
+      }),
+      verb('start [prompt...]', {
+        summary: 'start a ferret on one of your agent runtimes',
+        args: [{ name: 'prompt', help: 'the task prompt; required for --mode auto', optional: true, variadic: true }],
+        options: [
+          {
+            flag: '-a, --agent <agent>',
+            help: 'the runtime to run it on, such as claude-default (--runtime also works); leave it out to use this machine’s default runtime for new agents',
+          },
+          {
+            flag: '--parent <id>',
+            help: 'start it under this ferret; one started inside a pane inherits that pane by default',
+          },
+          {
+            flag: '-f, --file <file>',
+            help: 'attach a supported image or document to the opening message; repeatable',
+          },
+          {
+            flag: '--request-id <id>',
+            help: 'idempotency key: running start again with the same id returns the same ferret',
+          },
+          {
+            flag: '--mode <mode>',
+            help: 'auto for an autonomous teammate (the default), interactive for a human terminal',
+          },
+          { flag: '--name <title>', help: 'task title shown in `ps` and the dashboard; free-form, kept verbatim' },
+          { flag: '--teammate <callsign>', help: 'use this callsign instead of auto-assigning one' },
+          {
+            flag: '--teammate-fallback',
+            help: 'with --teammate: auto-assign a free callsign instead of failing on a collision',
+          },
+          { flag: '--label <label>', help: 'ownership label; filter later with `ps --label`' },
+          {
+            flag: '--card <id>',
+            help: 'an existing card it takes over (assigned to it; no second card is made); needs a prompt',
+          },
+          { flag: '--prompt-file <file>', help: 'read the prompt from a file instead of the command line' },
+          { flag: '--model <model>', help: 'override the model (alias or full id)' },
+          { flag: '--effort <level>', help: 'the reasoning effort' },
+          {
+            flag: '--fast',
+            help: "launch in the harness's fast mode (faster output; the model must offer it, and it can cost more)",
+          },
+          { flag: '--no-fast', help: 'launch with fast mode off, even where the login would otherwise turn it on' },
+          {
             flag: '--compact-at <tokens|auto>',
-            // v4 4.291.9's sentence, ASCII apostrophes and all.
             help: "squeeze this ferret's conversation at this many tokens (e.g. 250k); auto leaves the harness's own trigger",
           },
+          { flag: '--rc', help: 'launch with remote control so the session is steerable from the web surface' },
+          { flag: '--no-rc', help: 'launch without remote control' },
+          { flag: '--harness <harness>', help: 'start on this harness (claude or codex) instead of the runtime’s own' },
+          { flag: '--login <id>', help: 'start on this login' },
+          { flag: '--pack <label>', help: 'put it in this pack' },
+          { flag: '--harness-flag <flag>', help: 'extra flag passed straight to the agent binary; repeatable' },
+          { flag: '--cwd <dir>', help: 'working directory for it (defaults to this one)' },
+          { flag: '--interval <seconds>', help: 'supervision interval' },
+          { flag: '--turn-timeout <seconds>', help: 'kill it when one turn runs longer than this' },
+          { flag: '--nudge-after <seconds>', help: 'zero life signs for this long earns a continue nudge' },
+          { flag: '--stall-kill-after <seconds>', help: 'zero life signs for this long is a stall kill' },
+          {
+            flag: '--direct-max <chars>',
+            help: 'short single-line payloads up to this length are typed verbatim (0 disables)',
+          },
+          { flag: '--max-snapshots <count>', help: 'pane snapshots to retain' },
+          { flag: '--json', help: 'print the session as JSON' },
         ],
       }),
       verb('new [words...]', {
-        summary: 'start a helper ferret (Pack mode)',
+        summary: 'start a helper ferret (Pack mode); needs --runtime <name> or --auto',
+        args: [{ name: 'words', help: 'the complete brief for the helper', optional: true, variadic: true }],
         options: [
+          {
+            flag: '--runtime <name>',
+            help: 'the runtime to run it on (`fy recommend` lists them); name one, or pass --auto',
+          },
+          {
+            flag: '--auto',
+            help: 'let Ferretry choose the runtime: the models the routing prompt names, in its order; do not name a runtime with it',
+          },
+          {
+            flag: '--mode <mode>',
+            help: 'auto for an autonomous teammate (the default), interactive for a human terminal',
+          },
+          { flag: '--name <title>', help: 'task title shown in `ps` and the dashboard; free-form, kept verbatim' },
+          { flag: '--teammate <callsign>', help: 'use this callsign instead of auto-assigning one' },
+          {
+            flag: '--teammate-fallback',
+            help: 'with --teammate: auto-assign a free callsign instead of failing on a collision',
+          },
+          { flag: '--label <label>', help: 'ownership label; filter later with `ps --label`' },
+          {
+            flag: '--card <id>',
+            help: 'an existing card it takes over (assigned to it; no second card is made); needs a prompt',
+          },
+          { flag: '--prompt-file <file>', help: 'read the prompt from a file instead of the command line' },
+          { flag: '--model <model>', help: 'override the model (alias or full id)' },
+          { flag: '--effort <level>', help: 'the reasoning effort' },
+          {
+            flag: '--fast',
+            help: "launch in the harness's fast mode (faster output; the model must offer it, and it can cost more)",
+          },
+          { flag: '--no-fast', help: 'launch with fast mode off, even where the login would otherwise turn it on' },
           {
             flag: '--compact-at <tokens|auto>',
             help: 'squeeze its conversation at this many tokens (e.g. 250k); auto leaves the default',
           },
+          { flag: '--rc', help: 'launch with remote control so the session is steerable from the web surface' },
+          { flag: '--no-rc', help: 'launch without remote control' },
+          { flag: '--harness <harness>', help: 'start on this harness (claude or codex) instead of the runtime’s own' },
+          { flag: '--login <id>', help: 'start on this login' },
+          { flag: '--pack <label>', help: 'put it in this pack' },
+          { flag: '--harness-flag <flag>', help: 'extra flag passed straight to the agent binary; repeatable' },
+          { flag: '--cwd <dir>', help: 'working directory for it (defaults to this one)' },
+          { flag: '--interval <seconds>', help: 'supervision interval' },
+          { flag: '--turn-timeout <seconds>', help: 'kill it when one turn runs longer than this' },
+          { flag: '--nudge-after <seconds>', help: 'zero life signs for this long earns a continue nudge' },
+          { flag: '--stall-kill-after <seconds>', help: 'zero life signs for this long is a stall kill' },
+          {
+            flag: '--direct-max <chars>',
+            help: 'short single-line payloads up to this length are typed verbatim (0 disables)',
+          },
+          { flag: '--max-snapshots <count>', help: 'pane snapshots to retain' },
+          { flag: '--json', help: 'print the session as JSON' },
         ],
       }),
-      verb('stop', { summary: 'stop ferrets in bulk, selected by lineage or pack' }),
-      verb('stop orphan <session>', { summary: 'stop one ferret and leave its helpers running' }),
-      verb('stop cascade <session>', { summary: 'stop a ferret and every transitive helper' }),
-      verb('stop children <session>', { summary: 'stop every transitive helper and keep the ferret running' }),
-      verb('stop label <label>', { summary: 'stop every ferret in a pack, independent of lineage' }),
-      verb('rename <session> [name]', { summary: 'give a ferret a new first name' }),
-      verb('name', { summary: 'print available callsigns so a name can be chosen before start' }),
-      verb('resume <id> [message...]', { summary: 'revive a stopped ferret with its conversation intact' }),
+      verb('stop', {
+        summary: 'stop ferrets in bulk, selected by lineage or pack',
+        args: [],
+        options: [{ flag: '-r, --reason <text>', help: 'reason recorded against every stopped session' }],
+      }),
+      verb('stop orphan <session>', {
+        summary: 'stop one ferret and leave its helpers running',
+        args: [{ name: 'session', help: 'session to stop' }],
+        options: [
+          { flag: '-r, --reason <text>', help: 'reason recorded against every stopped session' },
+          { flag: '-n, --dry-run', help: 'print the plan and stop nothing' },
+          { flag: '-y, --yes', help: 'skip the typed confirmation' },
+          { flag: '--include-caller', help: 'also stop the issuing session, last' },
+        ],
+      }),
+      verb('stop cascade <session>', {
+        summary: 'stop a ferret and every transitive helper',
+        args: [{ name: 'session', help: 'root of the subtree to stop' }],
+        options: [
+          { flag: '-r, --reason <text>', help: 'reason recorded against every stopped session' },
+          { flag: '-n, --dry-run', help: 'print the plan and stop nothing' },
+          { flag: '-y, --yes', help: 'skip the typed confirmation' },
+          { flag: '--include-caller', help: 'also stop the issuing session, last' },
+        ],
+      }),
+      verb('stop children <session>', {
+        summary: 'stop every transitive helper and keep the ferret running',
+        args: [{ name: 'session', help: 'root whose descendants are stopped' }],
+        options: [
+          { flag: '-r, --reason <text>', help: 'reason recorded against every stopped session' },
+          { flag: '-n, --dry-run', help: 'print the plan and stop nothing' },
+          { flag: '-y, --yes', help: 'skip the typed confirmation' },
+          { flag: '--include-caller', help: 'also stop the issuing session, last' },
+        ],
+      }),
+      verb('stop label <label>', {
+        summary: 'stop every ferret in a pack, independent of lineage',
+        args: [{ name: 'label', help: 'exact label to match' }],
+        options: [
+          { flag: '-r, --reason <text>', help: 'reason recorded against every stopped session' },
+          { flag: '-n, --dry-run', help: 'print the plan and stop nothing' },
+          { flag: '-y, --yes', help: 'skip the typed confirmation' },
+          { flag: '--include-caller', help: 'also stop the issuing session, last' },
+        ],
+      }),
+      verb('rename <session> [name]', {
+        summary: 'give a ferret a new first name',
+        args: [
+          { name: 'session', help: 'session id or current first name' },
+          {
+            name: 'name',
+            help: 'the new first name: letters, digits or hyphens, starting with a letter',
+            optional: true,
+          },
+        ],
+        options: [
+          { flag: '--title <title>', help: 'a new task title' },
+          { flag: '--json', help: 'print the renamed session as JSON' },
+        ],
+      }),
+      verb('name', {
+        summary: 'print available callsigns so a name can be chosen before start',
+        args: [],
+        options: [
+          { flag: '-n, --count <count>', help: 'print this many callsigns' },
+          { flag: '--json', help: 'print the callsigns as a JSON array' },
+        ],
+      }),
+      verb('resume <id> [message...]', {
+        summary: 'revive a stopped ferret with its conversation intact',
+        args: [
+          { name: 'id', help: 'session id or callsign' },
+          { name: 'message', help: 'optional message to deliver on revival', optional: true, variadic: true },
+        ],
+        options: [{ flag: '--json', help: 'print the session as JSON' }],
+      }),
       verb('restart [ids...]', {
         summary:
           'restart ferrets on the same runtime, keeping the conversation; a busy one waits for its next idle moment',
+        args: [
+          {
+            name: 'ids',
+            help: 'session ids or callsigns to restart (with none and no flag: show what is out of date)',
+            optional: true,
+            variadic: true,
+          },
+        ],
+        options: [
+          { flag: '--outdated', help: 'restart every ferret whose instructions are out of date' },
+          { flag: '--all', help: 'restart every running ferret' },
+          { flag: '--cancel', help: 'clear the restarts that are waiting for a ferret to go idle' },
+          { flag: '--request-id <id>', help: 'stable idempotency key for an explicit retry of this restart' },
+          { flag: '--json', help: 'print the result as JSON' },
+        ],
       }),
       // V-0452: today's `fy stream [id]`: the journal socket `GET /v1/events`, followed until interrupted.
-      verb('stream [id]', { summary: "follow one ferret or this daemon's whole fleet until interrupted" }),
+      verb('stream [id]', {
+        summary: "follow one ferret or this daemon's whole fleet until interrupted",
+        args: [{ name: 'id', help: 'optional session id; omitted follows the daemon-local fleet', optional: true }],
+        options: [
+          { flag: '--after <sequence>', help: 'start after this sequence' },
+          { flag: '--json', help: 'print one protocol event per line' },
+        ],
+      }),
       verb('wait <id>', {
         summary:
           'block until a ferret settles; exits 0 finished, 1 ended, 3 needs a human, 69 daemon lost, 124 timeout',
+        args: [{ name: 'id', help: 'session id' }],
+        options: [
+          { flag: '--json', help: 'print the session state as one line of JSON' },
+          { flag: '--timeout <seconds>', help: 'give up after this many seconds (exit 124)' },
+          {
+            flag: '--interval <seconds>',
+            help: 'how often to ask the daemon again (default: after 1 s, slowing to every 5 s while the session is still)',
+          },
+          { flag: '--until-marker <file>', help: 'wait for this file rather than trusting a completion claim' },
+          {
+            flag: '--keep',
+            help: 'leave the session running after its result is collected (a settled wait stops it otherwise)',
+          },
+        ],
       }),
-      verb('instructions', { summary: 'which of its own instruction sections this ferret launched with' }),
+      verb('instructions', {
+        summary: 'which of its own instruction sections this ferret launched with',
+        args: [],
+        options: [{ flag: '--json', help: 'print the report as JSON' }],
+      }),
       verb('signal <kind> [message...]', {
         summary: 'done | help | waiting | working — the teammate lifecycle signals',
+        args: [
+          { name: 'kind', help: 'done, help, waiting, or working' },
+          { name: 'message', help: 'optional signal detail; required for help', optional: true, variadic: true },
+        ],
+        options: [
+          { flag: '--session <id>', help: 'session id or callsign; defaults to FY_SESSION_ID' },
+          { flag: '--until <when>', help: 'waiting deadline as a duration (45m, 2h) or ISO timestamp' },
+          { flag: '--on <condition>', help: 'what external condition is being waited for' },
+          { flag: '--peer <id>', help: 'park until this teammate sends a reply' },
+          { flag: '--json', help: 'print the resulting session as JSON' },
+        ],
       }),
-      verb('session', { summary: "act on a ferret's own standing with this daemon" }),
+      verb('session', { summary: "act on a ferret's own standing with this daemon", args: [] }),
       verb('session revoke-credential <session>', {
         summary: 'cut a ferret off at once: its own credential stops working until a person resumes it',
+        args: [{ name: 'session', help: 'session id or first name' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
       }),
-      verb('session pin <session>', { summary: 'pin a ferret to the top of the sidebar' }),
-      verb('session unpin <session>', { summary: 'unpin a ferret from the top of the sidebar' }),
-      verb('worktree', { summary: 'inspect and remove the checkouts the daemon created for ferrets' }),
-      verb('worktrees', { summary: 'alias of fy worktree' }),
-      verb('worktree ls', { summary: 'every managed worktree, live ones first' }),
-      verb('worktree list', { summary: 'alias of fy worktree ls' }),
-      verb('worktree check <path>', { summary: 'say whether a worktree can be removed, and what stands in the way' }),
-      verb('worktree rm <path>', { summary: 'remove a worktree once every blocker is accounted for' }),
-      verb('worktree remove <path>', { summary: 'alias of fy worktree rm' }),
+      verb('session pin <session>', {
+        summary: 'pin a ferret to the top of the sidebar',
+        args: [{ name: 'session', help: 'session id or first name' }],
+        options: [{ flag: '--json', help: 'print the session as JSON' }],
+      }),
+      verb('session unpin <session>', {
+        summary: 'unpin a ferret from the top of the sidebar',
+        args: [{ name: 'session', help: 'session id or first name' }],
+        options: [{ flag: '--json', help: 'print the session as JSON' }],
+      }),
+      verb('worktree', {
+        summary: 'inspect and remove the checkouts the daemon created for ferrets',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('worktrees', {
+        summary: 'alias of fy worktree',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('worktree ls', {
+        summary: 'every managed worktree, live ones first',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('worktree list', {
+        summary: 'alias of fy worktree ls',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('worktree check <path>', {
+        summary: 'say whether a worktree can be removed, and what stands in the way',
+        args: [{ name: 'path', help: 'the worktree path' }],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+      }),
+      verb('worktree rm <path>', {
+        summary: 'remove a worktree once every blocker is accounted for',
+        args: [{ name: 'path', help: 'the worktree path' }],
+        options: [
+          { flag: '--discard-changes', help: 'accept losing uncommitted work in the worktree' },
+          { flag: '--accept-unpushed', help: 'accept losing commits that exist nowhere else' },
+          { flag: '--delete-unmerged', help: 'accept deleting a branch that was never merged' },
+          { flag: '--delete-branch', help: 'delete the branch too instead of leaving it behind' },
+          { flag: '--delete-preexisting', help: 'allow deleting a branch that existed before the worktree' },
+          { flag: '-y, --yes', help: 'skip the typed confirmation; required when not on a terminal' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('worktree remove <path>', {
+        summary: 'alias of fy worktree rm',
+        args: [{ name: 'path', help: 'the worktree path' }],
+        options: [
+          { flag: '--discard-changes', help: 'accept losing uncommitted work in the worktree' },
+          { flag: '--accept-unpushed', help: 'accept losing commits that exist nowhere else' },
+          { flag: '--delete-unmerged', help: 'accept deleting a branch that was never merged' },
+          { flag: '--delete-branch', help: 'delete the branch too instead of leaving it behind' },
+          { flag: '--delete-preexisting', help: 'allow deleting a branch that existed before the worktree' },
+          { flag: '-y, --yes', help: 'skip the typed confirmation; required when not on a terminal' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
       verb('worktree fork <branch>', {
         summary: 'fork a new checkout for a branch, and say where to start work in it',
+        args: [{ name: 'branch', help: 'the branch to check out; created when it does not exist yet' }],
+        options: [
+          { flag: '--base <ref>', help: 'start a new branch at this commit-ish' },
+          { flag: '--from-default', help: "start a new branch at the repository's default branch" },
+          { flag: '--from-head', help: "start a new branch at the source checkout's current commit" },
+          { flag: '--from <path>', help: 'the checkout to fork from; the current directory otherwise' },
+          { flag: '--session <id>', help: 'the session that will own the new checkout' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
       }),
-      verb('worktree add <branch>', { summary: 'alias of fy worktree fork' }),
+      verb('worktree add <branch>', {
+        summary: 'alias of fy worktree fork',
+        args: [{ name: 'branch', help: 'the branch to check out; created when it does not exist yet' }],
+        options: [
+          { flag: '--base <ref>', help: 'start a new branch at this commit-ish' },
+          { flag: '--from-default', help: "start a new branch at the repository's default branch" },
+          { flag: '--from-head', help: "start a new branch at the source checkout's current commit" },
+          { flag: '--from <path>', help: 'the checkout to fork from; the current directory otherwise' },
+          { flag: '--session <id>', help: 'the session that will own the new checkout' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
     ],
   },
   // The ferret's own pages and header (today's packages/pwa new-session page, migrate sheet, session top bar, Actions ▾,

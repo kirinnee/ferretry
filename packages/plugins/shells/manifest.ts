@@ -99,13 +99,51 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('shell ls', { summary: 'the shells on this machine, locked and built or not' }),
-      verb('shell show', { summary: 'one shell, its locked source and narHash' }),
-      verb('shell add', { summary: 'add a shell: resolve it, show what it resolved to, and pin it on your yes' }),
-      verb('shell relock', { summary: 'resolve a shell again; a different narHash needs your yes again' }),
-      verb('shell build', { summary: 'build a shell now and cache it by narHash' }),
-      verb('shell rm', { summary: 'remove a shell' }),
-      verb('shell nix', { summary: 'whether nix is on this machine, and what ferrets use without it' }),
+      verb('shell ls', {
+        summary: 'the shells on this machine, locked and built or not',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('shell show', {
+        summary: 'one shell, its locked source and narHash',
+        args: [{ name: 'name', help: 'the shell’s name' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('shell add', {
+        summary: 'add a shell: resolve it, show what it resolved to, and pin it on your yes',
+        args: [{ name: 'name', help: 'the shell’s name' }],
+        options: [
+          { flag: '--flake <address>', help: 'a flake address to resolve and pin (or --packages)' },
+          { flag: '--packages <a,b>', help: 'nixpkgs package names to put in the shell (or --flake)' },
+          { flag: '--floating', help: 'let it resolve again to newer versions when re-locked' },
+          { flag: '--description <text>', help: 'what the shell is for' },
+          { flag: '--yes', help: 'pin what it resolved to and allow the build; without it, only show' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('shell relock', {
+        summary: 'resolve a shell again; a different narHash needs your yes again',
+        args: [{ name: 'name', help: 'the shell’s name' }],
+        options: [
+          { flag: '--yes', help: 'accept a different narHash' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('shell build', {
+        summary: 'build a shell now and cache it by narHash',
+        args: [{ name: 'name', help: 'the shell’s name' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('shell rm', {
+        summary: 'remove a shell',
+        args: [{ name: 'name', help: 'the shell’s name' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('shell nix', {
+        summary: 'whether nix is on this machine, and what ferrets use without it',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
     ],
   },
 
