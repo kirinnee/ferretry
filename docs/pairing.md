@@ -369,7 +369,8 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
   replaced, past its two minutes (with no one asking) or out of direct guesses (a spent relay budget alone does not end
   it), and Catalogs keeps the same record for a **share invite** (its link and QR let a browser join without an existing
   member passkey, so it is a credential too: live from the mint until it is ended, used up or expired, and read back from
-  disk at start). Each is a `LiveWindowLedger` (`@ferretry/std/live-window`) that remembers every interval, offered through
+  disk at start; an ending closes the interval only once its write has **committed**, because a write that is pending or fails
+  puts the share back to joinable, so the interval stays open through it and until the share's own deadline). Each is a `LiveWindowLedger` (`@ferretry/std/live-window`) that remembers every interval, offered through
   a Browsers-facing contract port (`PairingWindowPort` from Access, `ShareWindowPort` from Catalogs) that answers only
   **yes or no** to "was a credential live at any instant since T" — never a code, an id or a boundary. A ledger that
   overflows its history, or a catalogs list not yet read, answers yes for what it can no longer prove; a provider that is
@@ -407,8 +408,9 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
   even with no code live and whichever pages the call touched, and only a fresh worker — a fresh, complete ledger — clears it.
   **`eval` is never run on a Ferretry app origin.** A script shares the document's DOM with the app, where the codes and the
   app's own hints sit, and discarding a result does not undo what a running script did, what it sent elsewhere or the callback
-  it leaves behind — so no state of the page makes it safe. `browser_eval` (the one tool that runs page script, for the MCP
-  tool and `fy browser eval` alike) on a page of any Ferretry app origin, or on one with a window that can reach one, is **always**
+  it leaves behind — so no state of the page makes it safe. `browser_eval` (the one tool that runs page script) through the agent
+  tools and `POST /v1/sessions/:id/browser` — the browsers CLI half is still a skeleton, so `fy browser eval` is not built yet and the rule is
+  not claimed for it — on a page of any Ferretry app origin, or on one with a window that can reach one, is **always**
   refused with the sentence `eval is not available on Ferretry's own app pages` (`APP_EVAL_REFUSAL`) — with no code live, no
   history and no marker — and the script never reaches the browser; a script that ends on the app has its answer and error
   discarded the same way. There is no hint-based path: nothing the page says is asked. On a page that is only possibly the app's
