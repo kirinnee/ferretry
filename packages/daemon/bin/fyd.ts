@@ -912,6 +912,7 @@ import {
   PageCopyRecords,
   PairedPushDevices,
   PairingDeviceRegistry,
+  PairingLiveWindow,
   type PairingService,
   type PaneLimit,
   PasskeysChangedSignal,
@@ -6900,6 +6901,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // this composition root so the attachment store can key state by daemon
   // without widening the public pairing route interface.
   let attachmentDaemonId: string | undefined;
+  // When a pairing code is live, kept apart from every page (docs/pairing.md, "Never show it to an agent"): pairing tells
+  // it as it mints and ends codes, and the browser guard reads it. Its clock is pairing's own once pairing opens.
+  const pairingLive = new PairingLiveWindow();
+  // The origins Ferretry's app is served from, which the browser guard treats as the app: the hosted one until the
+  // configuration is read, then every origin the daemon answers browsers on.
+  let appOrigins: () => readonly string[] = () => [HOSTED_APP_ORIGIN];
   // What a share link points at: read from the same advertisement pairing mints from, kept here for the same
   // reason as the id above. Unset until pairing opens, which no request can precede.
   let shareAdvertisement: Advertisement | undefined;
@@ -8601,6 +8608,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const repository = new StatePairingRepository(paths, stateFiles, cryptography);
       const state = await repository.open(hostname());
       attachmentDaemonId = state.daemonId;
+      pairingLive.useClock(pairingClock);
+      appOrigins = () => browserOrigins(config);
       shareAdvertisement = config.advertisement;
       shareDiscoveredRelayUrl = discoveredRelayUrl;
       memberFacts = {
@@ -8717,6 +8726,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           deviceState: [push, stepUp, signInRuleDevices],
           // Ended AFTER the grant is gone — see `LiveDeviceConnections` for why the order matters.
           connections: deviceConnections,
+          live: pairingLive,
           // A revocation somebody asked for lands in the owner's journal beside the grant changes.
           audit: grantAudit,
           idleExpiryDays: () => security.current().idleExpiryDays,
@@ -11366,6 +11376,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // Who a page is signing in, as the ferret typed it, is dropped by the runtime itself on every act that may have
           // changed it, whoever made it: the toolbar route, the live view, the agent tools, an act that failed partway.
           signIns: typedIdentities,
+          pairing: { live: pairingLive, appOrigins: () => appOrigins() },
           proxy: {
             saved: async () => (await declaredAccountModel())?.machine.browserProxy,
             secrets: async () => await secretVault.values(),

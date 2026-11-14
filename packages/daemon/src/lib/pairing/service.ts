@@ -34,6 +34,7 @@ import { DeviceKeySchema } from '@ferretry/relay';
 import { secretsMatch } from '../api/authentication.ts';
 import type { GrantAuditPort } from '../grants/types.ts';
 import type { DeviceConnectionRevoker } from './live-connections.ts';
+import type { PairingLiveSink } from './live-window.ts';
 
 const FERRETRY_PAIRING_APP_URL = `${HOSTED_APP_ORIGIN}/pair`;
 const PAIRING_RATE_LIMIT_ATTEMPTS = 10;
@@ -391,6 +392,11 @@ interface PairingServiceOptions {
    * expiry — which nobody asked for — is not written as though somebody had.
    */
   readonly audit?: Pick<GrantAuditPort, 'record'>;
+  /**
+   * Told when a code is minted and when it ends, any way it can (redeemed, spent, cancelled, replaced, expired): the memory
+   * the browser guard reads, beyond the reach of any page (`PairingLiveWindow`).
+   */
+  readonly live?: PairingLiveSink;
   readonly rateLimiter?: PairingRateLimiter;
   /**
    * The machine's idle period in days, read at every check so a shortened one applies at the next
@@ -485,6 +491,8 @@ export class PairingService {
     const expiresAtMs = this.options.clock.now() + PAIRING_CODE_TTL_SECONDS * 1_000;
     const expiresAt = instant(expiresAtMs);
     this.active = { pairingId, code, expiresAtMs, attempts: 0, relayAttempts: 0, relayClosed: false, grants };
+    // Told BEFORE the answer that carries the code goes anywhere, so no page can show it before the window says so.
+    this.options.live?.opened(expiresAtMs);
     this.observations.set(pairingId, { pairingId, status: 'pending', expiresAt });
 
     return PairingCodeMintResponseSchema.parse({
@@ -550,7 +558,10 @@ export class PairingService {
     if (active?.pairingId === pairingId && this.options.clock.now() < active.expiresAtMs) return observation;
     const expired = { pairingId, status: 'expired', expiresAt: observation.expiresAt } as const;
     this.observations.set(pairingId, expired);
-    if (active?.pairingId === pairingId) this.active = undefined;
+    if (active?.pairingId === pairingId) {
+      this.active = undefined;
+      this.options.live?.closed();
+    }
     return expired;
   }
 
@@ -875,6 +886,7 @@ export class PairingService {
     // The consume is the synchronous state change immediately before any persistence await. A
     // concurrent call therefore sees no active code and cannot enter the successful branch.
     this.active = undefined;
+    this.options.live?.closed();
     const createdAt = instant(now);
     const record: PairingDeviceRecord = {
       id: this.options.cryptography.deviceId(),
@@ -929,7 +941,10 @@ export class PairingService {
   }
 
   private expire(active: ActivePairing): void {
-    if (this.active?.pairingId === active.pairingId) this.active = undefined;
+    if (this.active?.pairingId === active.pairingId) {
+      this.active = undefined;
+      this.options.live?.closed();
+    }
     const current = this.observations.get(active.pairingId);
     this.observations.set(active.pairingId, {
       pairingId: active.pairingId,

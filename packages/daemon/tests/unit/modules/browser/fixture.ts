@@ -27,6 +27,7 @@ function browserNeedsForTest(): BrowserNeeds {
     launcher: { launch: async () => NOT_EXERCISED('a browser launch')() },
     login: new FakeBrowserLogin(),
     signIns: { cleared: () => undefined, forget: () => undefined },
+    pairing: { live: { look: () => ({ live: false, minted: 0 }) }, appOrigins: () => [] },
     proxy: { saved: async () => undefined, secrets: async () => new Map() },
     firewall: async () => undefined,
   };

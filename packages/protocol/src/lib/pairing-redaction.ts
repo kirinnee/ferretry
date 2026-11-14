@@ -98,3 +98,13 @@ export const PAIRING_EPOCH_META_NAME = 'ferretry-pairing-epoch';
 
 /** The CSS selector that finds {@link PAIRING_EPOCH_META_NAME}'s element. */
 export const PAIRING_EPOCH_SELECTOR = `meta[name="${PAIRING_EPOCH_META_NAME}"]`;
+
+/**
+ * Whether `text` (a page address, usually) carries a pairing-link fragment: the same grammar {@link hidePairingFragments}
+ * hides, so there is no second opinion about what one looks like. The browser worker asks it of every address a page
+ * commits (docs/pairing.md, "Never show it to an agent"): an address that carried one is the proof a pairing link was
+ * opened there.
+ */
+export function carriesPairingFragment(text: string): boolean {
+  return hidePairingFragments(text) !== text;
+}

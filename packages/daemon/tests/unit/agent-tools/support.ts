@@ -23,6 +23,7 @@ import {
   type BrowserFileAction,
   type BrowserFileResult,
   type BrowserLifecycleOutcome,
+  type BrowserPairingEvidence,
   type BrowserPairingState,
   type BrowserOpenOptions,
   type BrowserPageAction,
@@ -197,6 +198,8 @@ class FakeBrowserPages
   relatedPairingScreen = false;
   /** How many codes each page's document has shown (the counter the app leaves behind), by page id. */
   pairingEpochs: Record<string, number> = {};
+  /** What the daemon and the browser worker say outside every page: a code live, how many were minted, a link opened. */
+  pairingEvidence: BrowserPairingEvidence | undefined;
   /** Runs, oldest first, inside the browser's work of an act: the page changing while the act is being answered. */
   readonly whileWorking: (() => void | Promise<void>)[] = [];
   private readonly guardPage = {
@@ -204,6 +207,7 @@ class FakeBrowserPages
     pairing: async (): Promise<BrowserPairingState> => ({
       marked: this.pairingScreen || this.relatedPairingScreen,
       epochs: { ...this.pairingEpochs },
+      ...(this.pairingEvidence === undefined ? {} : { evidence: { ...this.pairingEvidence } }),
     }),
     host: async (): Promise<string | undefined> => this.host,
   };

@@ -82,6 +82,19 @@ export interface BrowserInputDocument {
    * never goes down while a document lives, so a number that moved says a code was shown in between two looks.
    */
   readonly pairingEpochs?: Readonly<Record<string, number>>;
+  /**
+   * The origins of those pages (the page asked about and every page that could reach it), `''` for one that cannot be told
+   * (`about:blank`): the daemon decides from them whether the group is the app's. Read from the browser, never the page.
+   */
+  readonly pairingOrigins?: readonly string[];
+  /**
+   * How many addresses carrying a pairing fragment any page of the browser has committed, by origin, since the worker
+   * started (`PairingNavigationLedger`). It never goes down, whatever the page does or however it navigates or closes, so
+   * a number that moved between two looks says a pairing link was opened in between.
+   */
+  readonly pairingCommits?: Readonly<Record<string, number>>;
+  /** Whether the document one of those pages shows now was entered by an address carrying a pairing fragment. */
+  readonly pairingLinked?: boolean;
 }
 
 /**

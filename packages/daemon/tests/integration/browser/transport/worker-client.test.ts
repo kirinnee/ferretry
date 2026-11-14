@@ -719,7 +719,22 @@ describe('browser worker client — the input bridge', () => {
     });
     // A worker that does not say what its pages show is read as showing a pairing code.
     should(await client.inputDocument('epochless')).deepEqual({ navigationId: 'loader-1', pairingScreen: true });
-    for (const garbled of ['epoch-list', 'epoch-text', 'epoch-many'])
+    // What the worker's own history says is carried through, and a worker that garbles any of it is read the same way.
+    should(await client.inputDocument('linked')).deepEqual({
+      navigationId: 'loader-1',
+      pairingOrigins: ['https://ferretry.pages.dev'],
+      pairingCommits: { 'https://ferretry.pages.dev': 2 },
+      pairingLinked: true,
+    });
+    for (const garbled of [
+      'epoch-list',
+      'epoch-text',
+      'epoch-many',
+      'commit-list',
+      'commit-text',
+      'origin-text',
+      'linkless',
+    ])
       should(await client.inputDocument(garbled)).deepEqual({ navigationId: 'loader-1', pairingScreen: true });
     should(text).equal('Welcome back');
     should(refound.ok && refound.facts.fields[0]?.backendNodeId).equal(9);

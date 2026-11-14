@@ -76,6 +76,29 @@ function parsePairingEpochs(raw: unknown): Record<string, number> | undefined {
   return epochs;
 }
 
+/** The most origins one answer may name: every page of the browser, at most. */
+const PAIRING_ORIGINS_MAX = 64 + 1;
+
+/** The origins of the pages a script on one page could reach; `undefined` when they are not exactly that shape. */
+function parsePairingOrigins(raw: unknown): readonly string[] | undefined {
+  if (!Array.isArray(raw) || raw.length > PAIRING_ORIGINS_MAX) return undefined;
+  return raw.every(origin => typeof origin === 'string' && origin.length <= 2_048) ? (raw as string[]) : undefined;
+}
+
+/** The count of pairing-link commits by origin; `undefined` when it is not exactly that shape (counts are whole, bounded). */
+function parsePairingCommits(raw: unknown): Record<string, number> | undefined {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const entries = Object.entries(raw);
+  if (entries.length > PAIRING_ORIGINS_MAX) return undefined;
+  const commits: Record<string, number> = {};
+  for (const [origin, count] of entries) {
+    if (origin.length > 2_048 || typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0)
+      return undefined;
+    commits[origin] = count;
+  }
+  return commits;
+}
+
 function parseObservation(raw: unknown): BrowserInputObservation {
   const observation = (raw as { observation?: unknown } | null)?.observation as Record<string, unknown> | undefined;
   if (observation?.ok === false && typeof observation.missing === 'string')
@@ -533,15 +556,35 @@ export class BrowserWorkerClient implements BrowserAutomation {
     if (typeof navigationId !== 'string' || navigationId === '' || navigationId.length > 128)
       throw new BrowserTransportError('upstream_failed', 'the browser did not say which document the page shows', 502);
     const host = (raw as { document?: { host?: unknown } } | null)?.document?.host;
-    const pairing = (raw as { document?: { pairingScreen?: unknown; pairingEpochs?: unknown } } | null)?.document;
+    const pairing = (
+      raw as {
+        document?: {
+          pairingScreen?: unknown;
+          pairingEpochs?: unknown;
+          pairingOrigins?: unknown;
+          pairingCommits?: unknown;
+          pairingLinked?: unknown;
+        };
+      } | null
+    )?.document;
     const epochs = parsePairingEpochs(pairing?.pairingEpochs);
-    // A marker, or a counter that cannot be believed, is a pairing screen: FAIL CLOSED.
-    const pairingScreen = pairing?.pairingScreen === true || epochs === undefined;
+    const origins = parsePairingOrigins(pairing?.pairingOrigins);
+    const commits = parsePairingCommits(pairing?.pairingCommits);
+    // A marker, or anything about pairing that cannot be believed, is a pairing screen: FAIL CLOSED.
+    const pairingScreen =
+      pairing?.pairingScreen === true ||
+      epochs === undefined ||
+      origins === undefined ||
+      commits === undefined ||
+      typeof pairing?.pairingLinked !== 'boolean';
     return {
       navigationId,
       ...(typeof host === 'string' && host !== '' && host.length <= 260 ? { host } : {}),
       ...(pairingScreen ? { pairingScreen } : {}),
       ...(epochs === undefined || Object.keys(epochs).length === 0 ? {} : { pairingEpochs: epochs }),
+      ...(origins === undefined || origins.length === 0 ? {} : { pairingOrigins: origins }),
+      ...(commits === undefined || Object.keys(commits).length === 0 ? {} : { pairingCommits: commits }),
+      ...(pairing?.pairingLinked === true ? { pairingLinked: true } : {}),
     };
   }
 

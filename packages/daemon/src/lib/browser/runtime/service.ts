@@ -30,7 +30,7 @@ import type { BrowserUploadMode } from '../transport/page-acts.ts';
 import type { PageScript } from '../transport/page-script.ts';
 import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '../transport/viewer-contracts.ts';
 import type { WorkerStagedFile } from '../transport/worker-protocol.ts';
-import { underGuard } from './pairing-guard.ts';
+import { appOriginSet, pairingEvidenceOf, underGuard } from './pairing-guard.ts';
 import { type BrowserSignInWatch, pageActLeavesSignIn, toolbarActLeavesSignIn } from './sign-in-watch.ts';
 
 export const DEFAULT_BROWSER_VIEWPORT: BrowserViewport = { width: 1280, height: 800 };
@@ -87,8 +87,40 @@ export interface BrowserGuardPage {
  * never goes down while a document lives, so one that moved says a code was shown between two looks.
  */
 export interface BrowserPairingState {
+  /** Whether a document the page's scripts could reach carries the app's marker. A HINT: the app's own DOM, so page script can write it. */
   readonly marked: boolean;
+  /** How many codes each of those documents has shown (the app's own counter), by page id. A hint too. */
   readonly epochs: Readonly<Record<string, number>>;
+  /**
+   * What the daemon and the browser worker know OUTSIDE every page (see {@link BrowserPairingEvidence}). Absent when the
+   * runtime was built with no pairing source, which is then only the hint above.
+   */
+  readonly evidence?: BrowserPairingEvidence;
+}
+
+/**
+ * THE EVIDENCE NO PAGE SCRIPT CAN TOUCH (docs/pairing.md, "Never show it to an agent"): kept in the daemon's memory and
+ * the browser worker's navigation history, so a page cannot write it, a navigation cannot reset it and closing a window
+ * cannot take it away.
+ */
+export interface BrowserPairingEvidence {
+  /** Whether the page, or a page its scripts could reach, is on a Ferretry app origin (or one that cannot be told). */
+  readonly app: boolean;
+  /** Whether the daemon has a pairing code live now: minted, and not yet redeemed, cancelled, replaced or expired. */
+  readonly live: boolean;
+  /** How many codes the daemon has minted since it started. Never goes down. */
+  readonly minted: number;
+  /** How many addresses carrying a pairing fragment an app origin has committed in the browser. Never goes down. */
+  readonly commits: number;
+  /** Whether the document one of those pages shows now was entered by an address carrying a pairing fragment. */
+  readonly linked: boolean;
+}
+
+/** What the browser runtime reads of the daemon: whether a pairing code is live, and which origins are Ferretry's app. */
+export interface BrowserPairingSource {
+  readonly live: { look(): { readonly live: boolean; readonly minted: number } };
+  /** The origins the app is served from: the hosted one, this daemon's own, and the others the build knows. */
+  appOrigins(): readonly string[];
 }
 
 /**
@@ -307,6 +339,8 @@ export class BrowserSessionService implements BrowserSubsystem {
     private readonly idle?: BrowserIdlePolicy,
     /** Told when an act may have changed who a page signs in, whoever made it (sign-in-watch.ts). */
     private readonly signIns?: BrowserSignInWatch,
+    /** What the daemon knows of pairing codes, beyond every page (see {@link BrowserPairingEvidence}). */
+    private readonly pairingSource?: BrowserPairingSource,
   ) {}
 
   async status(sessionId: string): Promise<BrowserStatus> {
@@ -882,11 +916,23 @@ export class BrowserSessionService implements BrowserSubsystem {
           .inputDocument(pageId)
           .then(found => found.host)
           .catch(() => undefined),
-      pairing: async () =>
-        await run.driver
+      pairing: async () => {
+        const source = this.pairingSource;
+        // The daemon's own memory is read first; whatever mints after it moves the count the check compares.
+        const live = source?.live.look();
+        return await run.driver
           .inputDocument(pageId)
-          .then(found => ({ marked: found.pairingScreen === true, epochs: found.pairingEpochs ?? {} }))
-          .catch(() => ({ marked: true, epochs: {} })),
+          .then(
+            (found): BrowserPairingState => ({
+              marked: found.pairingScreen === true,
+              epochs: found.pairingEpochs ?? {},
+              ...(source === undefined || live === undefined
+                ? {}
+                : { evidence: pairingEvidenceOf(found, live, appOriginSet(source.appOrigins())) }),
+            }),
+          )
+          .catch((): BrowserPairingState => ({ marked: true, epochs: {} }));
+      },
     };
   }
 

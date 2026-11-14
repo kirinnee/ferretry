@@ -1309,7 +1309,9 @@ export class AgentToolService {
       // Refused before the act, and again after it (see underGuard): a code that arrives while it runs is refused too.
       const after =
         caller.kind === 'agent' && reads && pairing
-          ? await holdPairingScreen(page, () => new AgentToolError('forbidden', PAIRING_SCREEN_REFUSAL))
+          ? await holdPairingScreen(page, () => new AgentToolError('forbidden', PAIRING_SCREEN_REFUSAL), {
+              script: tool === 'browser.eval',
+            })
           : undefined;
       if (gated) await this.guardPage(caller, tool, surface, async () => await page.document());
       if (reads && tool !== undefined) await this.sawPage(caller, tool, surface, page);

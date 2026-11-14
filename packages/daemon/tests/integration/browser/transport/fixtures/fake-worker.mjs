@@ -180,6 +180,9 @@ function pushNumberReply(id, params) {
   else reply(id, true, { read: { ...base, number: { value: '42', from: 'microsoft', frameOrigin: base.origin } } });
 }
 
+/** What a page that nothing about pairing has touched says: no counters, no origins, no link. */
+const quiet = { pairingEpochs: {}, pairingOrigins: [], pairingCommits: {}, pairingLinked: false };
+
 /** The input bridge's four calls; the page id picks the answer, so one fixture covers each path. */
 function inputReply(id, method, params) {
   const page = params?.pageId;
@@ -212,25 +215,50 @@ function inputReply(id, method, params) {
       page === 'garbled'
         ? { document: {} }
         : page === 'hostless'
-          ? { document: { navigationId: 'loader-1', pairingEpochs: {} } }
+          ? { document: { navigationId: 'loader-1', ...quiet } }
           : page === 'pairing'
-            ? { document: { navigationId: 'loader-1', pairingScreen: true, pairingEpochs: { pairing: 2 } } }
-            : page === 'epochless'
-              ? { document: { navigationId: 'loader-1' } }
-              : page === 'epoch-list'
-                ? { document: { navigationId: 'loader-1', pairingEpochs: [1] } }
-                : page === 'epoch-text'
-                  ? { document: { navigationId: 'loader-1', pairingEpochs: { p1: 'many' } } }
-                  : page === 'epoch-many'
-                    ? {
-                        document: {
-                          navigationId: 'loader-1',
-                          pairingEpochs: Object.fromEntries(
-                            Array.from({ length: 65 }, (_, at) => [`p${String(at)}`, 0]),
-                          ),
-                        },
-                      }
-                    : { document: { navigationId: 'loader-1', host: 'accounts.example.test', pairingEpochs: {} } },
+            ? { document: { navigationId: 'loader-1', pairingScreen: true, ...quiet, pairingEpochs: { pairing: 2 } } }
+            : page === 'linked'
+              ? {
+                  document: {
+                    navigationId: 'loader-1',
+                    ...quiet,
+                    pairingOrigins: ['https://ferretry.pages.dev'],
+                    pairingCommits: { 'https://ferretry.pages.dev': 2 },
+                    pairingLinked: true,
+                  },
+                }
+              : page === 'commit-list'
+                ? { document: { navigationId: 'loader-1', ...quiet, pairingCommits: [1] } }
+                : page === 'commit-text'
+                  ? { document: { navigationId: 'loader-1', ...quiet, pairingCommits: { a: 'two' } } }
+                  : page === 'origin-text'
+                    ? { document: { navigationId: 'loader-1', ...quiet, pairingOrigins: [7] } }
+                    : page === 'linkless'
+                      ? {
+                          document: {
+                            navigationId: 'loader-1',
+                            pairingEpochs: {},
+                            pairingOrigins: [],
+                            pairingCommits: {},
+                          },
+                        }
+                      : page === 'epochless'
+                        ? { document: { navigationId: 'loader-1' } }
+                        : page === 'epoch-list'
+                          ? { document: { navigationId: 'loader-1', ...quiet, pairingEpochs: [1] } }
+                          : page === 'epoch-text'
+                            ? { document: { navigationId: 'loader-1', ...quiet, pairingEpochs: { p1: 'many' } } }
+                            : page === 'epoch-many'
+                              ? {
+                                  document: {
+                                    navigationId: 'loader-1',
+                                    pairingEpochs: Object.fromEntries(
+                                      Array.from({ length: 65 }, (_, at) => [`p${String(at)}`, 0]),
+                                    ),
+                                  },
+                                }
+                              : { document: { navigationId: 'loader-1', host: 'accounts.example.test', ...quiet } },
     );
   else if (method === 'inputProbe')
     reply(id, true, { outcome: page === 'garbled' ? 'typed' : page === 'echoes' ? 'shown' : 'hidden' });

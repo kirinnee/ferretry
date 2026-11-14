@@ -12,6 +12,7 @@ import {
   type BrowserActGuard,
   type BrowserGuardPage,
   type BrowserIdlePolicy,
+  type BrowserPairingSource,
   type BrowserPairingState,
   type BrowserPageAction,
   BrowserSessionError,
@@ -42,6 +43,10 @@ class Tabs {
   /** What the browser says its pairing documents show, as a guard reads it from the live page. */
   documentPairing = false;
   documentEpochs: Record<string, number> | undefined;
+  /** What the worker says of the pages a script could reach: their origins, the pairing links committed, the link. */
+  documentOrigins: string[] | undefined;
+  documentCommits: Record<string, number> | undefined;
+  documentLinked = false;
   /** Runs inside the next read, picture, PDF, script or wait: the page changing while the browser works on it. */
   whileWorking: (() => void) | undefined;
   private working(): void {
@@ -140,6 +145,9 @@ class Tabs {
         ...(this.documentHost === undefined ? {} : { host: this.documentHost }),
         ...(this.documentPairing ? { pairingScreen: true } : {}),
         ...(this.documentEpochs === undefined ? {} : { pairingEpochs: this.documentEpochs }),
+        ...(this.documentOrigins === undefined ? {} : { pairingOrigins: this.documentOrigins }),
+        ...(this.documentCommits === undefined ? {} : { pairingCommits: this.documentCommits }),
+        ...(this.documentLinked ? { pairingLinked: true } : {}),
       };
     },
     inputObserve: async pageId => {
@@ -203,7 +211,12 @@ class Tabs {
 
 const known = new Set(['s1', 's2']);
 
-function harness(tabs = new Tabs(), idle?: BrowserIdlePolicy, signIns?: TypedIdentities) {
+function harness(
+  tabs = new Tabs(),
+  idle?: BrowserIdlePolicy,
+  signIns?: TypedIdentities,
+  pairing?: BrowserPairingSource,
+) {
   let launches = 0;
   const service = new BrowserSessionService(
     {
@@ -225,6 +238,7 @@ function harness(tabs = new Tabs(), idle?: BrowserIdlePolicy, signIns?: TypedIde
     () => Date.parse('2026-10-16T10:00:00.000Z'),
     idle,
     signIns,
+    pairing,
   );
   return { tabs, service, launches: () => launches };
 }
@@ -1017,6 +1031,37 @@ describe('the machine agent browser — a page’s lifecycle', () => {
     should(seen).eql([
       { marked: false, epochs: { p0: 2 } },
       { marked: true, epochs: { p0: 2 } },
+      { marked: true, epochs: {} },
+    ]);
+  });
+
+  it('should hand a guard the daemon’s own evidence beside the page’s hint, read from the daemon and the worker and never from the page', async () => {
+    // Arrange
+    const live = { live: true, minted: 3 };
+    const { tabs, service } = harness(new Tabs(), undefined, undefined, {
+      live: { look: () => live },
+      appOrigins: () => ['https://ferretry.pages.dev'],
+    });
+    await service.openPage('s1', 'app');
+    const seen: (BrowserPairingState | undefined)[] = [];
+    const guard = async (page: BrowserGuardPage) => void seen.push(await page.pairing?.());
+
+    // Act
+    tabs.documentOrigins = ['https://ferretry.pages.dev'];
+    tabs.documentCommits = { 'https://ferretry.pages.dev': 2, 'https://example.test': 5 };
+    tabs.documentLinked = true;
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+    tabs.documentOrigins = ['https://example.test'];
+    tabs.documentLinked = false;
+    live.live = false;
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+    tabs.documentFails = true;
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+
+    // Assert
+    should(seen).eql([
+      { marked: false, epochs: {}, evidence: { app: true, live: true, minted: 3, commits: 2, linked: true } },
+      { marked: false, epochs: {}, evidence: { app: false, live: false, minted: 3, commits: 2, linked: false } },
       { marked: true, epochs: {} },
     ]);
   });
