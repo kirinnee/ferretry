@@ -6,7 +6,7 @@ import {
   NEW_FERRET_ACCOUNT_SLOT,
 } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { type ComponentType, Suspense } from 'react';
+import { type ComponentType, Suspense, useState } from 'react';
 import half from '../../../app/index.ts';
 import manifest from '../../../manifest.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
@@ -283,5 +283,48 @@ describe('the move account slot', () => {
     mounted.push(view);
     await settle();
     expect(view.container.querySelector('[data-runtime-buttons]')).toBeNull();
+  });
+});
+
+describe('the move account slot on a page that keeps the chosen account in state', () => {
+  it('settles: the choice is proposed once for a runtime, not again on every re-render the proposal causes', async () => {
+    // Arrange: the move screen's shape — state set from onChosen with a fresh object, props rebuilt on every render.
+    const Panel = panelFor(MOVE_ACCOUNT_SLOT, { ...READS, 'GET /v1/usage': FEED }) as unknown as ComponentType<
+      Record<string, unknown>
+    >;
+    let renders = 0;
+    let proposals = 0;
+    function Page() {
+      const [value, setValue] = useState('claude-a');
+      const [, setChosen] = useState<ChosenFerretAccount | null>(null);
+      renders += 1;
+      return (
+        <Suspense fallback={null}>
+          <Panel
+            fallbackId="agent-fallback"
+            fallbackPlaceholder="runtime"
+            harness="claude-code"
+            labelId="agent-label"
+            noAccounts={<p />}
+            onChosen={(chosen: ChosenFerretAccount | null) => {
+              proposals += 1;
+              setChosen(chosen);
+            }}
+            onValueChange={setValue}
+            value={value}
+          />
+        </Suspense>
+      );
+    }
+
+    // Act: a render loop throws React's "maximum update depth" out of the act scope
+    const view = await mount(<Page />);
+    mounted.push(view);
+    await settle();
+
+    // Assert
+    expect(proposals).toBeGreaterThan(0);
+    expect(proposals).toBeLessThan(6);
+    expect(renders).toBeLessThan(20);
   });
 });
