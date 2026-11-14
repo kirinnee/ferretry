@@ -2019,28 +2019,66 @@ describe('readPairingGroup', () => {
 });
 
 describe('pairingRelatedPages', () => {
-  const at = (address: string) => ({ url: () => address });
+  interface Fake {
+    readonly id: string;
+    readonly opener?: string;
+    url(): string;
+  }
+  const at = (id: string, address: string, opener?: string): Fake => ({
+    id,
+    url: () => address,
+    ...(opener === undefined ? {} : { opener }),
+  });
+  const links = { key: (page: Fake) => page.id, openerKey: (page: Fake) => page.opener };
 
-  it('should name every other page of the same origin: a script on one reaches the documents of the rest', () => {
-    const asked = at('https://app.example.test/settings');
-    const popup = at('https://app.example.test/pair');
-    const elsewhere = at('https://docs.example.test/');
+  it('should name every other page of the opener group, whatever its origin: a script can send a window it holds anywhere', () => {
+    const asked = at('a', 'https://app.example.test/settings');
+    const popup = at('b', 'https://app.example.test/pair', 'a');
+    const crossOrigin = at('c', 'https://docs.example.test/', 'a');
+    const unrelated = at('d', 'https://app.example.test/elsewhere');
 
-    should(pairingRelatedPages(asked, [asked, popup, elsewhere])).eql([popup]);
+    should(pairingRelatedPages(asked, [asked, popup, crossOrigin, unrelated], links)).eql([popup, crossOrigin]);
   });
 
-  it('should count a page whose origin cannot be told as related, in either direction: a miss hands out a credential', () => {
-    const asked = at('https://app.example.test/');
-    const blank = at('about:blank');
-    const garbled = at('not an address');
+  it('should leave out pages nobody opened from the group: another agent’s tab and the startup blank page', () => {
+    // Arrange — the startup blank page, agent A's page, and agent B's pair popup opened by B's loopback page
+    const blank = at('blank', 'about:blank');
+    const agentA = at('a', 'https://app.example/x');
+    const agentBOpener = at('b1', 'http://127.0.0.1:9/');
+    const agentBPopup = at('b2', 'https://app.example/pair', 'b1');
+    const pages = [blank, agentA, agentBOpener, agentBPopup];
 
-    should(pairingRelatedPages(asked, [asked, blank, garbled])).eql([blank, garbled]);
-    should(pairingRelatedPages(blank, [blank, asked, at('https://docs.example.test/')]).length).equal(2);
+    // Assert
+    should(pairingRelatedPages(agentA, pages, links)).eql([]);
+    should(pairingRelatedPages(agentBPopup, pages, links)).eql([agentBOpener]);
+  });
+
+  it('should count a blank or unparsable page of the group as related, and leave out the same kind outside it', () => {
+    const asked = at('a', 'https://app.example.test/');
+    const blank = at('blank', 'about:blank', 'a');
+    const garbled = at('g', 'not an address', 'a');
+    const stranger = at('s', 'about:blank');
+
+    should(pairingRelatedPages(asked, [asked, blank, garbled, stranger], links)).eql([blank, garbled]);
+    should(pairingRelatedPages(blank, [blank, asked, stranger], links)).eql([asked]);
+  });
+
+  it('should follow openers both ways, and through an opener that has closed', () => {
+    // Arrange — one window opened two popups, and may since have closed: the popups can still find each other by window name
+    const opener = at('b', 'https://app.example.test/');
+    const first = at('p1', 'https://app.example.test/one', 'b');
+    const second = at('p2', 'https://app.example.test/two', 'b');
+    const unrelated = at('u', 'https://app.example.test/three');
+
+    // Assert
+    should(pairingRelatedPages(first, [opener, first, second, unrelated], links)).eql([opener, second]);
+    should(pairingRelatedPages(first, [first, second, unrelated], links)).eql([second]);
+    should(pairingRelatedPages(opener, [opener, first, second, unrelated], links)).eql([first, second]);
   });
 
   it('should name no page for a page alone', () => {
-    const only = at('https://app.example.test/');
+    const only = at('a', 'https://app.example.test/');
 
-    should(pairingRelatedPages(only, [only])).eql([]);
+    should(pairingRelatedPages(only, [only], links)).eql([]);
   });
 });

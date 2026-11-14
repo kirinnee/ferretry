@@ -39,6 +39,7 @@ const quiet: BrowserPairingEvidence = {
   commits: 0,
   lost: 0,
   linked: false,
+  blind: false,
 };
 const withEvidence = (evidence: Partial<BrowserPairingEvidence>, base = ordinary): BrowserPairingState => ({
   ...base,
@@ -123,17 +124,48 @@ describe('holdPairingScreen — the evidence outside the page', () => {
   });
 
   it('should leave a page that is not the app’s alone, whatever the daemon and the browser say of codes', async () => {
-    // Arrange — a live code, a code minted in between and a link opened elsewhere
+    // Arrange — a live code, a code minted in between and a history that lost its way
     const elsewhere = (evidence: Partial<BrowserPairingEvidence>) =>
       withEvidence({ app: false, ownApp: false, ...evidence });
     const check = await holdPairingScreen(
-      pageShowing([elsewhere({ live: true }), elsewhere({ live: true, minted: 5, linked: true })]),
+      pageShowing([elsewhere({ live: true }), elsewhere({ live: true, minted: 5, blind: true })]),
       refusal,
       { script: true },
     );
 
     // Assert
     should(await outcome(check())).be.undefined();
+  });
+
+  it('should refuse a page whose document a pairing link opened on ANY origin, one the daemon does not know too', async () => {
+    const elsewhere = withEvidence({ app: false, ownApp: false, linked: true });
+
+    should(await outcome(holdPairingScreen(pageShowing([elsewhere]), refusal))).be.instanceOf(Error);
+    // ...and one that was entered by a link only once the operation ran
+    const check = await holdPairingScreen(
+      pageShowing([withEvidence({ app: false, ownApp: false }), elsewhere]),
+      refusal,
+    );
+    should(await outcome(check())).be.instanceOf(Error);
+  });
+
+  it('should leave a page alone that no link opened, whatever its origin: a card, a dialog, a step-up sets nothing', async () => {
+    const cases = [
+      withEvidence({ app: false, ownApp: false }),
+      withEvidence({ app: true, ownApp: true }),
+      withEvidence({ app: false, ownApp: false, blind: true }),
+    ];
+
+    for (const state of cases) {
+      const check = await holdPairingScreen(pageShowing([state, state]), refusal);
+      should(await outcome(check())).be.undefined();
+    }
+  });
+
+  it('should refuse a blind history on an app page only: it cannot prove no link was opened, but only the app’s pages are at risk', async () => {
+    should(await outcome(holdPairingScreen(pageShowing([withEvidence({ blind: true })]), refusal))).be.instanceOf(
+      Error,
+    );
   });
 
   it('should refuse a page whose document a pairing link opened, with no code live', async () => {
@@ -291,6 +323,14 @@ describe('pairingEvidenceOf', () => {
     should(pairingEvidenceOf({}, live, apps).app).be.true();
   });
 
+  it('should keep a link and a blind history apart: a link says so on any origin, a blind history only on the app’s', () => {
+    const linked = pairingEvidenceOf({ pairingOrigins: ['https://example.test'], pairingLinked: true }, live, apps);
+    const blind = pairingEvidenceOf({ pairingOrigins: ['https://example.test'], pairingBlind: true }, live, apps);
+
+    should([linked.app, linked.linked, linked.blind]).eql([false, true, false]);
+    should([blind.app, blind.linked, blind.blind]).eql([false, false, true]);
+  });
+
   it('should add up only the pairing links opened on an app origin, and carry the daemon’s own count of codes', () => {
     const evidence = pairingEvidenceOf(
       {
@@ -310,6 +350,7 @@ describe('pairingEvidenceOf', () => {
       commits: 7,
       lost: 0,
       linked: true,
+      blind: false,
     });
   });
 });

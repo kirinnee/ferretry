@@ -342,6 +342,7 @@ describe("AgentToolService — the daemon's and the worker's evidence, outside t
     commits: 0,
     lost: 0,
     linked: false,
+    blind: false,
   };
   /** What an agent is told for a call: an eval on an app page is refused for what it is, everything else for the screen. */
   const refusalFor = (call: AgentToolCall): string =>
@@ -496,9 +497,9 @@ describe("AgentToolService — the daemon's and the worker's evidence, outside t
     should(world.browser.scripts).eql([]);
   });
 
-  it('should leave pages on other origins alone: a live code, a mint, a link and a navigation change nothing for them', async () => {
+  it('should leave pages on other origins alone: a live code, a mint, a blind history and a navigation change nothing for them', async () => {
     // Arrange
-    const world = await appPage({ app: false, ownApp: false, live: true, commits: 5, linked: true });
+    const world = await appPage({ app: false, ownApp: false, live: true, commits: 5, blind: true });
     world.browser.whileWorking.push(() => {
       world.browser.pairingEvidence = {
         ...QUIET,
@@ -507,7 +508,7 @@ describe("AgentToolService — the daemon's and the worker's evidence, outside t
         live: true,
         minted: 9,
         commits: 5,
-        linked: true,
+        blind: true,
       };
     });
 

@@ -568,6 +568,7 @@ export class BrowserWorkerClient implements BrowserAutomation {
           pairingOrigins?: unknown;
           pairingCommits?: unknown;
           pairingLinked?: unknown;
+          pairingBlind?: unknown;
           pairingLost?: unknown;
         };
       } | null
@@ -583,7 +584,8 @@ export class BrowserWorkerClient implements BrowserAutomation {
       epochs === undefined ||
       origins === undefined ||
       commits === undefined ||
-      typeof pairing?.pairingLinked !== 'boolean';
+      typeof pairing?.pairingLinked !== 'boolean' ||
+      typeof pairing.pairingBlind !== 'boolean';
     return {
       navigationId,
       ...(typeof host === 'string' && host !== '' && host.length <= 260 ? { host } : {}),
@@ -592,6 +594,7 @@ export class BrowserWorkerClient implements BrowserAutomation {
       ...(origins === undefined || origins.length === 0 ? {} : { pairingOrigins: origins }),
       ...(commits === undefined || Object.keys(commits).length === 0 ? {} : { pairingCommits: commits }),
       ...(pairing?.pairingLinked === true ? { pairingLinked: true } : {}),
+      ...(pairing?.pairingBlind === true ? { pairingBlind: true } : {}),
       ...(lost === undefined || lost === 0 ? {} : { pairingLost: lost }),
     };
   }

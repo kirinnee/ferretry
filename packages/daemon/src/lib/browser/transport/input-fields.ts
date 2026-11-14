@@ -1158,25 +1158,41 @@ export async function clearInputFields(
   }
 }
 
+/** How the pages of one browser context are tied together by the windows that opened them (`window.open`, a link's `_blank`). */
+export interface PairingOpenerLinks<T> {
+  /** A stable name for the page. */
+  key(page: T): string;
+  /** The name of the page that opened this one, kept even after that opener closed (it still bridges its popups), or none. */
+  openerKey(page: T): string | undefined;
+}
+
 /**
- * The pages a script on `page` could reach, among `pages` (docs/pairing.md, "Never show it to an agent"): every other one
- * on the same origin, because a same-origin window (an opener, a popup, a window it named) is a document that script can
- * read. A page whose origin cannot be told apart (`about:blank`, an address that will not parse) is counted too, on
- * either side: a miss would hand an agent a credential, an extra page only refuses one read.
+ * The pages a script on `page` could reach, among `pages` (docs/pairing.md, "Never show it to an agent"). `pages` are the
+ * pages of ONE browser context: a window can only script a window it opened or was opened by, and those never leave the
+ * context, so another agent's tab, in this context or another, and the browser's own startup `about:blank` are not in
+ * the answer. The answer is the whole opener group (transitive both ways: a popup of a popup, two popups of one opener,
+ * a bridge that has since closed), whatever each member's origin: a script can send a window it holds to another origin
+ * and back, a page that cannot be told apart (`about:blank`, an address that will not parse) is whatever its opener is,
+ * and a miss would hand an agent a credential where an extra page only refuses one read.
  */
-export function pairingRelatedPages<T extends { url(): string }>(page: T, pages: readonly T[]): readonly T[] {
-  const originOf = (candidate: T): string => {
-    try {
-      const origin = new URL(candidate.url()).origin;
-      return origin === 'null' ? '' : origin;
-    } catch {
-      return '';
-    }
+export function pairingRelatedPages<T>(page: T, pages: readonly T[], links: PairingOpenerLinks<T>): readonly T[] {
+  const parent = new Map<string, string>();
+  const root = (key: string): string => {
+    let top = key;
+    for (let next = parent.get(top); next !== undefined && next !== top; next = parent.get(top)) top = next;
+    return top;
   };
-  const mine = originOf(page);
-  return pages.filter(other => {
-    if (other === page) return false;
-    const theirs = originOf(other);
-    return mine === '' || theirs === '' || theirs === mine;
-  });
+  const join = (a: string, b: string): void => {
+    parent.set(root(a), root(b));
+  };
+  for (const member of [page, ...pages]) {
+    const key = links.key(member);
+    if (!parent.has(key)) parent.set(key, key);
+    const opener = links.openerKey(member);
+    if (opener === undefined) continue;
+    if (!parent.has(opener)) parent.set(opener, opener);
+    join(key, opener);
+  }
+  const group = root(links.key(page));
+  return pages.filter(other => other !== page && root(links.key(other)) === group);
 }

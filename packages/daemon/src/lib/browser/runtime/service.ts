@@ -116,8 +116,10 @@ export interface BrowserPairingEvidence {
   readonly commits: number;
   /** How many times the browser lost track of a page's navigation. Never goes down: an operation it overlapped is not to be believed. */
   readonly lost: number;
-  /** Whether the document one of those pages shows now was entered by an address carrying a pairing fragment, or the history is blind. */
+  /** Whether the document one of those pages shows now was entered by an address carrying a pairing fragment, on ANY origin. */
   readonly linked: boolean;
+  /** Whether the browser's history is blind: it lost track of a navigation, so it cannot prove no page was entered by a link. */
+  readonly blind: boolean;
 }
 
 /** What the browser runtime reads of the daemon: whether a pairing code is live, and which origins are Ferretry's app. */

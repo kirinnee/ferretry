@@ -181,7 +181,7 @@ function pushNumberReply(id, params) {
 }
 
 /** What a page that nothing about pairing has touched says: no counters, no origins, no link. */
-const quiet = { pairingEpochs: {}, pairingOrigins: [], pairingCommits: {}, pairingLinked: false };
+const quiet = { pairingEpochs: {}, pairingOrigins: [], pairingCommits: {}, pairingLinked: false, pairingBlind: false };
 
 /** The input bridge's four calls; the page id picks the answer, so one fixture covers each path. */
 function inputReply(id, method, params) {
@@ -228,37 +228,50 @@ function inputReply(id, method, params) {
                     pairingLinked: true,
                   },
                 }
-              : page === 'commit-list'
-                ? { document: { navigationId: 'loader-1', ...quiet, pairingCommits: [1] } }
-                : page === 'commit-text'
-                  ? { document: { navigationId: 'loader-1', ...quiet, pairingCommits: { a: 'two' } } }
-                  : page === 'origin-text'
-                    ? { document: { navigationId: 'loader-1', ...quiet, pairingOrigins: [7] } }
-                    : page === 'linkless'
-                      ? {
-                          document: {
-                            navigationId: 'loader-1',
-                            pairingEpochs: {},
-                            pairingOrigins: [],
-                            pairingCommits: {},
-                          },
-                        }
-                      : page === 'epochless'
-                        ? { document: { navigationId: 'loader-1' } }
-                        : page === 'epoch-list'
-                          ? { document: { navigationId: 'loader-1', ...quiet, pairingEpochs: [1] } }
-                          : page === 'epoch-text'
-                            ? { document: { navigationId: 'loader-1', ...quiet, pairingEpochs: { p1: 'many' } } }
-                            : page === 'epoch-many'
-                              ? {
-                                  document: {
-                                    navigationId: 'loader-1',
-                                    pairingEpochs: Object.fromEntries(
-                                      Array.from({ length: 65 }, (_, at) => [`p${String(at)}`, 0]),
-                                    ),
-                                  },
-                                }
-                              : { document: { navigationId: 'loader-1', host: 'accounts.example.test', ...quiet } },
+              : page === 'blind'
+                ? { document: { navigationId: 'loader-1', ...quiet, pairingBlind: true } }
+                : page === 'blindless'
+                  ? {
+                      document: {
+                        navigationId: 'loader-1',
+                        pairingEpochs: {},
+                        pairingOrigins: [],
+                        pairingCommits: {},
+                        pairingLinked: false,
+                      },
+                    }
+                  : page === 'commit-list'
+                    ? { document: { navigationId: 'loader-1', ...quiet, pairingCommits: [1] } }
+                    : page === 'commit-text'
+                      ? { document: { navigationId: 'loader-1', ...quiet, pairingCommits: { a: 'two' } } }
+                      : page === 'origin-text'
+                        ? { document: { navigationId: 'loader-1', ...quiet, pairingOrigins: [7] } }
+                        : page === 'linkless'
+                          ? {
+                              document: {
+                                navigationId: 'loader-1',
+                                pairingEpochs: {},
+                                pairingOrigins: [],
+                                pairingCommits: {},
+                                pairingBlind: false,
+                              },
+                            }
+                          : page === 'epochless'
+                            ? { document: { navigationId: 'loader-1' } }
+                            : page === 'epoch-list'
+                              ? { document: { navigationId: 'loader-1', ...quiet, pairingEpochs: [1] } }
+                              : page === 'epoch-text'
+                                ? { document: { navigationId: 'loader-1', ...quiet, pairingEpochs: { p1: 'many' } } }
+                                : page === 'epoch-many'
+                                  ? {
+                                      document: {
+                                        navigationId: 'loader-1',
+                                        pairingEpochs: Object.fromEntries(
+                                          Array.from({ length: 65 }, (_, at) => [`p${String(at)}`, 0]),
+                                        ),
+                                      },
+                                    }
+                                  : { document: { navigationId: 'loader-1', host: 'accounts.example.test', ...quiet } },
     );
   else if (method === 'inputProbe')
     reply(id, true, { outcome: page === 'garbled' ? 'typed' : page === 'echoes' ? 'shown' : 'hidden' });

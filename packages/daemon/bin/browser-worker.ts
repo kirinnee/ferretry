@@ -139,6 +139,8 @@ let frameSerial = 0;
 const pageIds = new WeakMap<Page, string>();
 const pageStates = new WeakMap<Page, PageState>();
 const openers = new WeakMap<Page, string>();
+/** Each page's lookup of who opened it: settled before a pairing group is drawn, so a popup just opened is not missed. */
+const openerLookups = new WeakMap<Page, Promise<void>>();
 const sessions = new WeakMap<Page, Promise<CDPSession>>();
 const targets = new WeakMap<Page, Promise<string>>();
 /** The context of each incognito page, closed with it. */
@@ -382,12 +384,15 @@ function registerPage(page: Page): void {
   watch(page, key);
   followNavigation(page, key);
   setPageState(page, 'ready');
-  void page
-    .opener()
-    .then(opener => {
-      if (opener) openers.set(page, pageId(opener));
-    })
-    .catch(() => undefined);
+  openerLookups.set(
+    page,
+    page
+      .opener()
+      .then(opener => {
+        if (opener) openers.set(page, pageId(opener));
+      })
+      .catch(() => undefined),
+  );
   page.on('download', download => downloads.accept(pageId(page), download));
   page.on('request', request => {
     try {
@@ -1060,7 +1065,21 @@ async function act(request: Request): Promise<Record<string, unknown>> {
       const page = targetPage(params.pageId);
       const document = await describeInputDocument(inputSubject(page));
       // Pairing screens (docs/pairing.md): the page asked about and every page that could reach it.
-      const group = [page, ...pairingRelatedPages(page, livePages())];
+      // Only the pages of this page's own browser context can be told apart by who opened whom: another agent's tab, and the
+      // browser's own startup blank page, are not a window this page's script could reach.
+      const siblings = page
+        .context()
+        .pages()
+        .filter(candidate => !candidate.isClosed());
+      for (const sibling of siblings) registerPage(sibling);
+      await Promise.all(siblings.map(async sibling => await openerLookups.get(sibling)));
+      const group = [
+        page,
+        ...pairingRelatedPages(page, siblings, {
+          key: pageId,
+          openerKey: candidate => openers.get(candidate),
+        }),
+      ];
       const pairing = await readPairingGroup(group.map(inputSubject));
       const history = pairingLedger.look(group.map(pageId));
       return {
@@ -1070,9 +1089,9 @@ async function act(request: Request): Promise<Record<string, unknown>> {
           // What the daemon needs to tell whether this group is the app's, and what the app was sent (never page script).
           pairingOrigins: [...new Set(group.map(member => originOfAddress(safeUrl(member))))],
           pairingCommits: history.commits,
-          // A ledger that lost a navigation cannot prove any page was not entered by a link: blind reads as linked.
-          pairingLinked:
-            history.linked || history.blind || group.some(member => carriesPairingFragment(safeUrl(member))),
+          pairingLinked: history.linked || group.some(member => carriesPairingFragment(safeUrl(member))),
+          // A ledger that lost a navigation cannot prove any page was not entered by a link.
+          pairingBlind: history.blind,
           pairingLost: history.lost,
         },
       };

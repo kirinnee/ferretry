@@ -726,7 +726,10 @@ describe('browser worker client — the input bridge', () => {
       pairingCommits: { 'https://ferretry.pages.dev': 2 },
       pairingLinked: true,
     });
+    // A blind history is its own word, so the daemon can leave it to the app's pages; one that is not said is a garbled look.
+    should(await client.inputDocument('blind')).deepEqual({ navigationId: 'loader-1', pairingBlind: true });
     for (const garbled of [
+      'blindless',
       'epoch-list',
       'epoch-text',
       'epoch-many',
