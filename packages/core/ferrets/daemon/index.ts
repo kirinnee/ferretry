@@ -1168,14 +1168,21 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   // idempotent revival, ancestors included). A revival that fails answers the failure; pinning again retries it, since
   // the pin is already saved and the ferret is still archived.
   const pinSubsystem = new AgentPinSubsystem(pinnedReader, agentPins);
-  const sidebarPins = sessionPinRoutes({
-    pin: async reference => {
-      const pinned = await pinSubsystem.pin(reference);
-      await reviveArchived(pinned.id);
-      return pinned;
+  const sidebarPins = sessionPinRoutes(
+    {
+      pin: async reference => {
+        const pinned = await pinSubsystem.pin(reference);
+        await reviveArchived(pinned.id);
+        return pinned;
+      },
+      unpin: async reference => await pinSubsystem.unpin(reference),
     },
-    unpin: async reference => await pinSubsystem.unpin(reference),
-  });
+    ferret => {
+      // A wake-up for views (the ferret list re-reads): a pin is not a registry change, so nothing else says it moved.
+      generation += 1;
+      kernel.events.publish(FerretsChanged, { ferret, generation });
+    },
+  );
   const noteBoard = pinRoutes({
     pins: new PinService(
       new RegistryPinSessionDirectory(ferret => registry.get(ferret as FerretId) !== undefined),
