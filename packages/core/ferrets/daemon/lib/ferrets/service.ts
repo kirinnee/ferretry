@@ -957,26 +957,46 @@ export class FerretsService implements FerretsApi {
       createdAt: at,
       stateAt: at,
     };
-    return await this.serial.run(id, async () => {
-      await this.write(record, undefined, 'started');
-      this.ports.started?.({
-        ferret: id,
-        name,
-        role,
-        ...(request.parent === undefined ? {} : { parent: request.parent }),
-        ...(request.pack === undefined ? {} : { pack: request.pack }),
-        folder: folder.value,
-        by: request.by,
-        ...(request.prompt === undefined || request.prompt === '' ? {} : { brief: request.prompt }),
-        ...(request.options?.label === undefined ? {} : { label: request.options.label }),
-        ...(request.options?.card === undefined ? {} : { card: request.options.card }),
-      });
+    // `--detach` answers when the ferret is recorded, not when it has launched: `recorded` settles at that point.
+    let recordedOk: () => void = () => undefined;
+    let recordedFailed: (error: unknown) => void = () => undefined;
+    const recorded = new Promise<void>((resolve, reject) => {
+      recordedOk = resolve;
+      recordedFailed = reject;
+    });
+    recorded.catch(() => undefined); // read below only when detached; otherwise the start's own result carries the failure
+    const launched = this.serial.run(id, async () => {
+      try {
+        await this.write(record, undefined, 'started');
+        this.ports.started?.({
+          ferret: id,
+          name,
+          role,
+          ...(request.parent === undefined ? {} : { parent: request.parent }),
+          ...(request.pack === undefined ? {} : { pack: request.pack }),
+          folder: folder.value,
+          by: request.by,
+          ...(request.prompt === undefined || request.prompt === '' ? {} : { brief: request.prompt }),
+          ...(request.options?.label === undefined ? {} : { label: request.options.label }),
+          ...(request.options?.card === undefined ? {} : { card: request.options.card }),
+        });
+      } catch (error) {
+        recordedFailed(error);
+        throw error;
+      }
+      recordedOk();
       return await this.launch(record, opening.value.prompt, record.harnessConversation, 'start', undefined, {
         attached: opening.value.files,
         bound: bound.value,
         ...(admission.notInWardenTree === true ? { notInWardenTree: true as const } : {}),
       });
     });
+    if (request.detach !== true) return await launched;
+    // A launch that fails settles the recorded ferret itself (`abandon`); a launch that throws leaves it `starting`, which
+    // the boot recovery settles. Neither has a caller left to tell, so the rejection is only kept from being unhandled.
+    launched.catch(() => undefined);
+    await recorded;
+    return ok(id);
   }
 
   /** `cause` is why it ended when that is not simply "stopped" (`signal done` says `completed`). */

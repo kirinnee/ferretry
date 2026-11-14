@@ -4,11 +4,11 @@ import { SessionCommandError } from './errors.ts';
 import type { SessionEnvironment, StartBody } from './ports.ts';
 
 /**
- * Today's `fy start` flags whose value has no field in Ferrets' start (§2.2): a detached start has no 5.0 meaning (a
- * start always waits for the launch). A typed one is refused by name rather than sent and dropped, because a flag that
- * was accepted and ignored is worse than a refusal.
+ * Today's `fy start` flags whose value has no field in Ferrets' start (§2.2). A typed one is refused by name rather than
+ * sent and dropped, because a flag that was accepted and ignored is worse than a refusal. `--detach` is NOT one: it is
+ * sent (v4's meaning: answer once the ferret is recorded, launch in the background).
  */
-export const START_FLAGS_ELSEWHERE: readonly string[] = ['detach'];
+export const START_FLAGS_ELSEWHERE: readonly string[] = [];
 
 /**
  * A value at or below this many seconds looks like someone reaching for a readiness wait ("give it
@@ -61,6 +61,8 @@ export interface StartFlags extends StartNumericFlags {
   readonly harness?: string;
   readonly login?: string;
   readonly pack?: string;
+  /** `--detach`: answer once the ferret is recorded; the launch carries on in the background. */
+  readonly detach?: boolean;
   readonly cwd?: string;
   /** `-f/--file`: files attached to the opening message, already read (base64) by the CLI half. */
   readonly initialAttachments?: readonly InitialAttachment[];
@@ -149,6 +151,7 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
     ...(flags.harness === undefined ? {} : { harness: flags.harness }),
     ...(flags.login === undefined ? {} : { login: flags.login }),
     ...(flags.pack === undefined ? {} : { pack: flags.pack }),
+    ...(flags.detach === true ? { detach: true } : {}),
     ...(prompt === '' ? {} : { prompt }),
     ...(flags.initialAttachments === undefined || flags.initialAttachments.length === 0
       ? {}

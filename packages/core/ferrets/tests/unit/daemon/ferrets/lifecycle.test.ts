@@ -358,3 +358,61 @@ test('ferret.started (D2 #12): a start tells its takers who started, where, the 
   ]);
   expect(order.slice(0, 2)).toEqual(['changed:started', 'started']);
 });
+
+/** Polls until the check holds (a detached launch settles on its own time), or fails after about a second. */
+async function eventually(check: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100 && !check(); attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+  expect(check()).toBe(true);
+}
+
+test('fy start --detach (v4): the answer comes once the ferret is recorded `starting`, before the harness launches; the launch then finishes on its own', async () => {
+  const f = fixture();
+  const child = ferretId('sprout');
+  f.ports.newId = () => child;
+  f.ports.newName = () => 'sprout';
+  let open: () => void = () => undefined;
+  const gate = new Promise<void>(resolve => {
+    open = resolve;
+  });
+  const prepare = f.harness.prepareHome.bind(f.harness);
+  f.harness.prepareHome = async spec => {
+    await gate;
+    return await prepare(spec);
+  };
+
+  const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'go', detach: true }, PERSON_ORIGIN);
+
+  expect(answer).toEqual(ok(child));
+  expect(f.registry.get(child)?.state).toBe('starting');
+  expect(f.harness.launched).toEqual([]);
+  open();
+  await eventually(() => f.harness.launched.length === 1);
+  await eventually(() => f.registry.get(child)?.state !== 'starting');
+});
+
+test('fy start --detach: a launch that fails after the answer still settles the recorded ferret (it is not left `starting`)', async () => {
+  const f = fixture();
+  const child = ferretId('sprout');
+  f.ports.newId = () => child;
+  f.ports.newName = () => 'sprout';
+  f.harness.prepareHome = async () => {
+    throw new Error('the harness home could not be made');
+  };
+
+  const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'go', detach: true }, PERSON_ORIGIN);
+
+  expect(answer).toEqual(ok(child));
+  await eventually(() => f.registry.get(child)?.state !== 'starting');
+  expect(f.harness.launched).toEqual([]);
+});
+
+test('a plain start still waits for the launch: the harness has launched when the answer comes', async () => {
+  const f = fixture();
+  f.ports.newId = () => ferretId('sprout');
+  f.ports.newName = () => 'sprout';
+
+  const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'go' }, PERSON_ORIGIN);
+
+  expect(answer.ok).toBe(true);
+  expect(f.harness.launched).toHaveLength(1);
+});
