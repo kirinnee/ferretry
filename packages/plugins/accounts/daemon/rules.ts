@@ -43,6 +43,7 @@ import {
   secureCopyTools,
 } from './lib/secure-copy/index.ts';
 import {
+  absentWhileUnbound,
   BrowsersCopyGuards,
   BrowsersCopyPages,
   TranscriptFileExposure,
@@ -98,7 +99,7 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
   // ── secure copy (docs/secure-copy.md) ───────────────────────────────────────────────────────────────────────────
   // Every port is looked up on use, never captured: a plugin that is off, or not bound yet, copies and pastes nothing.
   const vaultNow = () => ctx.needs.vault;
-  const browsersNow = () => ctx.uses.browsers.current();
+  const browsersNow = absentWhileUnbound(() => ctx.uses.browsers.current());
   const pageRecords = new PageCopyRecords(clock);
   const copies = new SecureCopyService({
     clock,
