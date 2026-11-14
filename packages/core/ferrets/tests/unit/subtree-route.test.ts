@@ -7,7 +7,8 @@ test('G24 the live subtree route masks whole excerpts before cutting and bounds 
   expect(response.status).toBe(200);
   const view = response.json<{ rows: { last?: { text: string } }[] }>();
   expect(view.rows).toHaveLength(70);
-  expect(looked).toHaveLength(64);
+  // 7354e3a6f1: every listed member is read once (card, lane, PR), but only 64 rows get an excerpt (asserted below).
+  expect(looked).toHaveLength(70);
   expect(peak()).toBe(4);
   expect((masker as FakeRedaction).opens).toBe(1);
   expect(view.rows.filter(row => row.last)).toHaveLength(64);

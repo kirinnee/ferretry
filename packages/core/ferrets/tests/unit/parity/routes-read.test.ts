@@ -172,12 +172,12 @@ describe('the managed worktrees read', () => {
   const registry = (...worktrees: ReturnType<typeof managed>[]) =>
     JSON.stringify({ format: 1, worktrees, intents: [] });
 
-  test('R-0210 GET /v1/worktrees answers the managed checkouts, none while the registry is empty', async () => {
+  test('R-0210 GET /v1/worktrees answers the managed checkouts (and the managed root), none while the registry is empty', async () => {
     const h = await host();
     const answer = await h.request('GET', '/v1/worktrees');
     expect(answer.status).toBe(200);
     expect(answer.headers.get('cache-control')).toContain('no-store');
-    expect(answer.json()).toEqual({ worktrees: [] });
+    expect(answer.json()).toEqual({ worktrees: [], managedRoot: expect.any(String) });
     await h.stop();
   });
 
@@ -186,9 +186,9 @@ describe('the managed worktrees read', () => {
     h.state('ferrets').plant(
       WorktreesFile,
       registry(
-        managed('/managed/repo/gone', '2026-08-01T00:00:00.000Z', '2026-08-02T00:00:00.000Z'),
-        managed('/managed/repo/older', '2026-08-03T00:00:00.000Z'),
-        managed('/managed/repo/newer', '2026-08-04T00:00:00.000Z'),
+        managed('/worktrees/repo/gone', '2026-08-01T00:00:00.000Z', '2026-08-02T00:00:00.000Z'),
+        managed('/worktrees/repo/older', '2026-08-03T00:00:00.000Z'),
+        managed('/worktrees/repo/newer', '2026-08-04T00:00:00.000Z'),
       ),
     );
     const listed = await h.request('GET', '/v1/worktrees');
@@ -197,9 +197,9 @@ describe('the managed worktrees read', () => {
       worktrees: { path: string; branch: string; removedAt?: string; sharedWith: string[] }[];
     }>();
     expect(rows.worktrees.map(row => row.path)).toEqual([
-      '/managed/repo/newer',
-      '/managed/repo/older',
-      '/managed/repo/gone',
+      '/worktrees/repo/newer',
+      '/worktrees/repo/older',
+      '/worktrees/repo/gone',
     ]);
     expect(rows.worktrees[0]).toMatchObject({ branch: 'feat/2026-08-04T00:00:00.000Z', sharedWith: [] });
     expect(rows.worktrees[2]?.removedAt).toBe('2026-08-02T00:00:00.000Z');
@@ -210,18 +210,22 @@ describe('the managed worktrees read', () => {
     await h.stop();
   });
 
-  test('the removal check needs a path, refuses a checkout the registry does not hold, and says why a recorded one cannot be judged here', async () => {
+  test('the removal check needs a path, refuses a checkout the registry does not hold, and gives a recorded one a verdict', async () => {
     const h = await host();
     const noPath = await h.request('GET', '/v1/worktrees/removal');
     expect(noPath.status).toBe(400);
     expect(noPath.json<{ code: string }>().code).toBe('invalid_path');
-    const unknown = await h.request('GET', '/v1/worktrees/removal', { query: { path: '/managed/repo/feat-one' } });
+    const unknown = await h.request('GET', '/v1/worktrees/removal', { query: { path: '/worktrees/repo/feat-one' } });
     expect(unknown.status).toBe(404);
     expect(unknown.json<{ code: string }>().code).toBe('unknown_worktree');
-    h.state('ferrets').plant(WorktreesFile, registry(managed('/managed/repo/feat-one', '2026-08-04T00:00:00.000Z')));
-    const recorded = await h.request('GET', '/v1/worktrees/removal', { query: { path: '/managed/repo/feat-one' } });
-    expect(recorded.status).toBe(409);
-    expect(recorded.json<{ code: string }>().code).toBe('no_managed_root');
+    h.state('ferrets').plant(WorktreesFile, registry(managed('/worktrees/repo/feat-one', '2026-08-04T00:00:00.000Z')));
+    const recorded = await h.request('GET', '/v1/worktrees/removal', { query: { path: '/worktrees/repo/feat-one' } });
+    // The daemon now hosts a managed root (a2444e8de2), so a recorded checkout gets a VERDICT instead of no_managed_root:
+    // this one is not in the test world, so it is not removable and the verdict says why.
+    expect(recorded.status).toBe(200);
+    const verdict = recorded.json<{ removable: boolean; blockers: { code: string }[] }>();
+    expect(verdict.removable).toBe(false);
+    expect(verdict.blockers.map(blocker => blocker.code)).toContain('missing_worktree');
     await h.stop();
   });
 });

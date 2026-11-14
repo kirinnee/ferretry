@@ -26,7 +26,11 @@ const CONFIG = {
 };
 
 /** A composed daemon whose fleet folder holds a FILE where the bin folder goes, so the provisioner fails mid-plan. */
-async function composeWithBlockedBin(config: Readonly<Record<string, unknown>> = CONFIG): Promise<TestHost> {
+async function composeWithBlockedBin(
+  config: Readonly<Record<string, unknown>> = CONFIG,
+  /** An owner whose confirmation of a loosening the file judge holds (a removal, B01) is given. */
+  ownerConfirms = false,
+): Promise<TestHost> {
   const world = await fleetWorld();
   await mkdir(world.fleet, { recursive: true });
   await writeFile(join(world.fleet, 'bin'), 'not a folder');
@@ -39,7 +43,9 @@ async function composeWithBlockedBin(config: Readonly<Record<string, unknown>> =
       logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
       loginChanges: fakeLoginChanges(),
     },
-    gate: new StandInAdmission(() => ownerStanding()),
+    gate: ownerConfirms
+      ? Object.assign(new StandInAdmission(() => ownerStanding()), { judgeConfigWrite: () => 'apply' as const })
+      : new StandInAdmission(() => ownerStanding()),
     config,
     ownerHome: world.person,
     executables: ['/fixture/bin/claude', '/fixture/bin/codex'],
@@ -98,8 +104,8 @@ const TWO_RUNTIMES = {
 };
 
 /** Stage and apply one change on a composed daemon that cannot publish, and answer the rolled-back outcome's words. */
-async function rolledBack(change: object): Promise<{ landed: readonly string[]; text: string }> {
-  const host = await composeWithBlockedBin(TWO_RUNTIMES);
+async function rolledBack(change: object, ownerConfirms = false): Promise<{ landed: readonly string[]; text: string }> {
+  const host = await composeWithBlockedBin(TWO_RUNTIMES, ownerConfirms);
   const staged = await host.request('POST', '/v1/runtimes/proposals', { body: { change } });
   expect(staged.status).toBe(200);
   const applied = await host.request('POST', `/v1/runtimes/proposals/${staged.json<{ id: string }>().id}/apply`, {
@@ -130,7 +136,9 @@ describe('the remedy after a rolled-back change is true whether the landed file 
   });
 
   it('BG-027 W2 a REMOVAL of a runtime never says to remove the file the change just removed', async () => {
-    const { landed, text } = await rolledBack({ kind: 'runtime.remove', name: 'claude-work' });
+    // B01 holds a removal for the owner (the file cannot see a login's budget); here the owner confirms it, so the file
+    // really is removed before the plan fails, which is the case this proves the remedy for.
+    const { landed, text } = await rolledBack({ kind: 'runtime.remove', name: 'claude-work' }, true);
     expect(landed.map(path => path.split('/').pop())).toEqual(['claude-work.yaml']);
     expect(text).toContain(undo);
     expect(text).not.toMatch(/remove (it|them)/u);
