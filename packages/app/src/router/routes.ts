@@ -58,6 +58,12 @@ const isParam = (part: string): boolean => part.startsWith(':');
 const isOptional = (part: string): boolean => isParam(part) && part.endsWith('?');
 const paramName = (part: string): string => part.slice(1, isOptional(part) ? -1 : undefined);
 
+/**
+ * Does this screen path need a subject the address must carry (`ferrets/:ferret/chat`, `card/:id`)? A trailing optional
+ * parameter (`board/:project?`, `sharing/:tab?`) does not: the screen is served without it, so it is a place on its own.
+ */
+export const needsSubject = (path: string): boolean => segments(path).some(part => isParam(part) && !isOptional(part));
+
 function matchParts(pattern: readonly string[], actual: readonly string[]): Record<string, string> | undefined {
   if (actual.length > pattern.length) return undefined;
   const params: Record<string, string> = {};

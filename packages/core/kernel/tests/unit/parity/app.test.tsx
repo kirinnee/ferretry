@@ -111,21 +111,24 @@ describe('the Kernel app half draws the surfaces today’s Settings had for conf
     const commands = (app as { shell?: { commands?: PluginCommandSource } }).shell?.commands;
     if (commands === undefined) throw new Error('the kernel half offers no command bar entries');
     const opened: string[] = [];
-    const source = commands({
-      client: daemon().client as never,
-      daemon: 'd 1',
-      navigate: href => opened.push(href),
-      screenHref: () => '',
-      changed: () => undefined,
-    });
+    // A plugin's entries come as one source or several (a plugin may answer more than one); the bar reads them as a list.
+    const sources = [
+      commands({
+        client: daemon().client as never,
+        daemon: 'd 1',
+        navigate: href => opened.push(href),
+        screenHref: () => '',
+        changed: () => undefined,
+      }),
+    ].flat();
     for (const query of ['yaml', 'config', 'warden.yaml', 'edit as yaml']) {
-      const found = commandBarResults([source], query).results.map(entry => entry.label);
+      const found = commandBarResults(sources, query).results.map(entry => entry.label);
       expect(found, `"${query}" finds it`).toContain('Configuration files');
     }
     // Nothing is offered before something is typed (it is not a resting entry), and an unrelated word finds nothing.
-    expect(commandBarResults([source], '').results).toEqual([]);
-    expect(commandBarResults([source], 'zzzz').results).toEqual([]);
-    const hit = commandBarResults([source], 'yaml').results.find(entry => entry.label === 'Configuration files');
+    expect(commandBarResults(sources, '').results).toEqual([]);
+    expect(commandBarResults(sources, 'zzzz').results).toEqual([]);
+    const hit = commandBarResults(sources, 'yaml').results.find(entry => entry.label === 'Configuration files');
     hit?.run();
     expect(opened).toEqual(['/d/d%201/settings/kernel/files']);
   });

@@ -1,6 +1,8 @@
 import type { AppComponent, ScreenProps } from '@ferretry/kernel/manifest';
+import { provideToShell } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { projectsCommands } from './command-bar.ts';
 import type { ProjectsClient } from './lib/client.ts';
 import { lazyComponent } from './lazy.ts';
 
@@ -19,11 +21,14 @@ const screen = (factory: 'createProjectsScreen' | 'createProjectScreen', client:
  * Projects' app half: the `projects` screen (the registry, the add form, the discoveries) and the `project` screen (one
  * project's provenance, board switch, ferrets and files). The lane editor draws Board's data and is Board's.
  */
-export default implementApp(manifest, {
-  build: ({ client }) => ({
-    screens: {
-      projects: screen('createProjectsScreen', client),
-      project: screen('createProjectScreen', client),
-    },
+export default provideToShell(
+  implementApp(manifest, {
+    build: ({ client }) => ({
+      screens: {
+        projects: screen('createProjectsScreen', client),
+        project: screen('createProjectScreen', client),
+      },
+    }),
   }),
-});
+  { commands: projectsCommands },
+);

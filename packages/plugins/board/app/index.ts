@@ -10,6 +10,7 @@ import { provideToShell } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { agendaHooks } from './agenda-hooks.ts';
+import { boardForFerretCommands, boardPlaces } from './command-bar.ts';
 import { lazyComponent } from './lazy.ts';
 
 type Surfaces = {
@@ -60,5 +61,5 @@ export default provideToShell(
       };
     },
   }),
-  { hooks: agendaHooks },
+  { commands: context => [boardPlaces(context), boardForFerretCommands(context)], hooks: agendaHooks },
 );

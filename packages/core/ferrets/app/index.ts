@@ -2,6 +2,7 @@ import { provideToShell, type ShellProvides } from '@ferretry/app';
 import type { AppComponent, PanelProps, ScreenProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { ferretsCommands } from './command-bar.ts';
 import { lazyComponent } from './lazy.ts';
 import type { LiveFerretsClient } from './lib/client.ts';
 
@@ -61,5 +62,5 @@ export default provideToShell(
       },
     }),
   }),
-  { deviceSettings: { 'needs-you': deviceSetting('needs-you') } },
+  { commands: ferretsCommands, deviceSettings: { 'needs-you': deviceSetting('needs-you') } },
 );

@@ -14,6 +14,7 @@ import { addToChatFor } from './composer/add-to-chat.ts';
 import { clearAttachmentCaches } from './composer/attachment-blob-cache.ts';
 import { documentDraftStore, documentRestoreStore } from './composer/drafts.ts';
 import { lazyComponent } from './lazy.ts';
+import { conversationPlaces } from './command-bar.ts';
 import { workSearchCommandSource } from './search/work-search-commands.ts';
 
 type Surfaces = {
@@ -99,7 +100,7 @@ export default provideToShell(
   }),
   // Lead decision Q10: the shell's command bar lists the cards and asks the daemon's work search finds.
   {
-    commands: context => workSearchCommandSource(context),
+    commands: context => [conversationPlaces(context), workSearchCommandSource(context)],
     // S15: the shared "Add to chat" any surface calls (Board's cards today), over this plugin's own daemon.
     hooks: { [CONVERSATION_ADD_TO_CHAT_HOOK]: ({ daemon }) => addToChatFor(daemon) },
     // S12: a later pairing that mints the same daemon id must not read this machine's unsent words back,

@@ -8,7 +8,7 @@ import { LayoutSchema, ThemeSchema } from './wire.ts';
 /** The built-in default (design §5.3). With Layouts off, the app shell uses its own copy of the same layout. */
 export const DEFAULT_LAYOUT = LayoutSchema.parse({
   id: 'default',
-  nav: { side: 'left', style: 'list', items: ['ferrets', 'agenda', 'board', 'insights', 'settings'] },
+  nav: { side: 'left', style: 'list', items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'] },
   side: { show: 'wide-only', holds: 'ferrets' },
   top: ['daemon-picker', 'search'],
   'composer.tools': ['attachments', 'dictation', 'runtime-picker', 'composer-quota'],
@@ -40,7 +40,7 @@ export const DEFAULT_LAYOUT = LayoutSchema.parse({
 /** A denser layout: `fy layout use compact`. */
 export const COMPACT_LAYOUT = LayoutSchema.parse({
   id: 'compact',
-  nav: { side: 'left', style: 'rail', items: ['ferrets', 'agenda', 'board', 'insights', 'settings'] },
+  nav: { side: 'left', style: 'rail', items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'] },
   side: { show: 'never', holds: 'panels' },
   top: ['daemon-picker', 'search'],
   'composer.tools': ['attachments', 'dictation', 'runtime-picker', 'composer-quota'],

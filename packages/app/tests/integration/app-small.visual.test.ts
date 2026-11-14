@@ -148,11 +148,11 @@ describe('the command bar', () => {
         const rows = await tab.locator('[role="dialog"][aria-label="Command bar"] [role="option"]').count();
         expect(rows, 'at rest the bar lists places').toBeGreaterThan(0);
         // The machine's name is said once, not as title and subtitle.
-        const first = await tab
-          .locator('[role="dialog"][aria-label="Command bar"] [role="option"]')
+        const machine = await tab
+          .locator('[role="dialog"][aria-label="Command bar"] [role="option"]', { hasText: 'workshop-host' })
           .first()
           .innerText();
-        expect(first.split('workshop-host').length - 1, 'the host name appears once').toBe(1);
+        expect(machine.split('workshop-host').length - 1, 'the host name appears once').toBe(1);
         const panel = await tab.locator('[role="dialog"][aria-label="Command bar"]').boundingBox();
         // A phone's rows are taller and fill the panel to its cap; a desktop's list is shorter than the cap.
         if (!variant.phone) expect(panel?.height ?? 9_999, 'the panel is no taller than its rows').toBeLessThan(420);

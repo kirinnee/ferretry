@@ -17,6 +17,11 @@ export interface CommandBarEntry {
   readonly keywords?: readonly string[];
   /** Shown with no query typed. */
   readonly resting?: boolean;
+  /**
+   * Where it sits among its group's entries when scores tie (and at rest, where every score ties): lower first, as the
+   * nav orders its places. An entry with none follows those with one, in source order.
+   */
+  readonly order?: number;
   /** A line under the description (a card's project, an ask's owner), drawn quieter than it (S11). */
   readonly detail?: string;
   /** Drawn faded, not hidden: closed work is still the answer to "did we already do this?" (S11). */
@@ -99,8 +104,10 @@ export interface CommandBarResults {
   readonly pending?: string;
 }
 
-/** Longest list a group shows; the bar is for jumping, not browsing. */
+/** Longest list a group shows while searching; the bar is for jumping, not browsing. At rest a group shows what its sources rest. */
 export const MAX_GROUP_RESULTS = 8;
+
+const UNORDERED = Number.MAX_SAFE_INTEGER;
 
 const fieldsOf = (entry: CommandBarEntry): FuzzyField[] => [
   { value: entry.label, weight: 1 },
@@ -120,7 +127,11 @@ export function commandBarResults(
   const searching = query.trim() !== '';
   const choices = resolveChoices(commandBarFilters(sources), chosen);
   let pending: string | undefined;
-  const byGroup = new Map<string, { entry: CommandBarEntry; score: number; order: number }[]>();
+  type Item = { entry: CommandBarEntry; score: number; order: number };
+  const byGroup = new Map<string, Item[]>();
+  // An id is one place: when two sources offer it (the shell's plain nav entry and the owning plugin's, which says
+  // more), the later source's entry replaces the earlier one where the earlier one stood.
+  const byId = new Map<string, Item>();
   let order = 0;
   for (const source of sources) {
     let entries: readonly CommandBarEntry[];
@@ -138,19 +149,28 @@ export function commandBarResults(
     for (const entry of entries) {
       const score = searching ? scoreFields(fieldsOf(entry), query) : entry.resting === true ? 1 : 0;
       order += 1;
-      if (score <= 0) continue;
+      const held = byId.get(entry.id);
+      if (held !== undefined) {
+        held.entry = entry;
+        held.score = score;
+        continue;
+      }
+      const item: Item = { entry, score, order };
+      byId.set(entry.id, item);
       const list = byGroup.get(entry.group) ?? [];
-      list.push({ entry, score, order });
+      list.push(item);
       byGroup.set(entry.group, list);
     }
   }
   const groups: CommandBarGroup[] = [];
   const results: CommandBarEntry[] = [];
-  for (const [heading, list] of byGroup) {
-    const ranked = list
-      .sort((a, b) => b.score - a.score || a.order - b.order)
-      .slice(0, MAX_GROUP_RESULTS)
-      .map(item => item.entry);
+  for (const [heading, all] of byGroup) {
+    const list = all.filter(item => item.score > 0);
+    if (list.length === 0) continue;
+    const sorted = list.sort(
+      (a, b) => b.score - a.score || (a.entry.order ?? UNORDERED) - (b.entry.order ?? UNORDERED) || a.order - b.order,
+    );
+    const ranked = (searching ? sorted.slice(0, MAX_GROUP_RESULTS) : sorted).map(item => item.entry);
     groups.push({ heading, entries: ranked, offset: results.length });
     results.push(...ranked);
   }

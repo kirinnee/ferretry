@@ -39,6 +39,8 @@ const surfaces = [
     screens: [{ id: 'board', path: 'board' }],
     panels: [{ id: 'cards-of-ferret', slot: 'ferret.side', order: 20 }],
   }),
+  // The Projects screen the default layout's nav lists (its real manifest: path 'projects', nav order 35).
+  plugin('projects', { screens: [{ id: 'projects', path: 'projects', nav: { label: 'Projects', order: 35 } }] }),
   plugin('usage', {
     screens: [{ id: 'insights', path: 'insights' }],
     panels: [
@@ -203,6 +205,7 @@ describe('the frame plan', () => {
       'ferrets.ferrets',
       'agenda.agenda',
       'board.board',
+      'projects.projects',
       'usage.insights',
       'settings',
     ]);
