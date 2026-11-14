@@ -79,9 +79,15 @@ export function parseDaemonRun(documentText: string | undefined): DaemonRun | un
 
 /**
  * An explicit `FY_URL` wins outright (P90); then the bind the daemon recorded, through the kernel's own
- * {@link recordedBindAddress} so client and daemon cannot disagree (P89); then the well-known default.
+ * {@link recordedBindAddress} so client and daemon cannot disagree (P89); then the port the home's own configuration
+ * names (`homePort`, from the kernel's `homePortOf`: where this home's daemon WILL bind, so a client looking before
+ * any record exists never lands on another home's daemon at 7457); then the well-known default.
  */
-export function resolveDaemonUrl(explicitUrl: string, run: DaemonRun | undefined): string {
+export function resolveDaemonUrl(explicitUrl: string, run: DaemonRun | undefined, homePort?: number): string {
   if (explicitUrl.trim() !== '') return explicitUrl.trim();
-  return run === undefined ? DEFAULT_DAEMON_URL : recordedBindAddress(run);
+  if (run !== undefined) return recordedBindAddress(run);
+  // A configured 0 asks the OS for a port: there is nothing to dial until the daemon records the one it got.
+  return homePort === undefined || homePort === 0
+    ? DEFAULT_DAEMON_URL
+    : recordedBindAddress({ host: LOOPBACK, port: homePort });
 }

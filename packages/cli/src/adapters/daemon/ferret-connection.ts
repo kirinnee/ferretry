@@ -14,7 +14,7 @@ import type { Connection } from '../../lib/world.ts';
 import { SessionCredentialGateway } from '../agent-tools/session-credential-gateway.ts';
 import type { DaemonTransport } from '../../lib/client.ts';
 import { type Fetcher, type RestartWaiting } from './http-transport.ts';
-import { readDaemonRunDocument } from './run-file.ts';
+import { readDaemonRunDocument, readHomePort } from './run-file.ts';
 import { sleepUnlessAborted } from './sleep.ts';
 
 /** Where the daemon is and which process answers there: the run record, read each time (a new daemon decides its own port). */
@@ -31,7 +31,12 @@ export function daemonAddressing(environment: Environment, home: string): Daemon
   const run = async () => parseDaemonRun(await readDaemonRunDocument(daemonRunPath(home)));
   return {
     pinned,
-    baseUrl: async () => resolveDaemonUrl(environment.FY_URL ?? '', pinned ? undefined : await run()),
+    baseUrl: async () =>
+      resolveDaemonUrl(
+        environment.FY_URL ?? '',
+        pinned ? undefined : await run(),
+        pinned ? undefined : await readHomePort(home),
+      ),
     instance: async () => {
       if (pinned) return undefined;
       const recorded = await run();

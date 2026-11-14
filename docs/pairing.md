@@ -308,7 +308,7 @@ sentence, and `fy pair`, the Add-a-device panel and `fyd --check` all render tho
 
 **The advertisement is decided at each mint, from the listener the kernel really bound.** The kernel binds after
 every plugin is built, so Access asks Connections for the advertisement on every `POST /v1/pair/code` (never once at
-build), and Connections takes the host and port from `kernel.bind` — whichever of `--host`, `--port`, `FY_PORT` or the
+build), and Connections takes the host and port from `kernel.bind` — whichever of `--host`, `--port`, `FY_PORT`, the home's `direct.port` or the
 default decided them — and falls back to `direct` in `config/connections.yaml` only while nothing is bound. A loopback
 bind with a relay source is therefore `local-only` with a link on its own port, and needs no `direct` block. Only the
 advertisement and the reachability check follow the bound listener. Connections' browser-origin allowlist remains
@@ -330,7 +330,12 @@ the browser:
 | `no-port`       | start the daemon so it binds a port (`--port` or `FY_PORT` chooses it), or write `port` under `direct` in `config/connections.yaml` (a new `direct` block also needs `host`). `direct` answers only while nothing is bound, and the listener you start wins. |
 
 `config/connections.yaml` has exactly one block for the direct carrier, `direct`, with a `host` and an optional `port`
-and nothing else; the listener itself is chosen by `fyd --host`, `--port` and `FY_PORT`.
+and nothing else. The listener's HOST is chosen by `fyd --host`. Its PORT is chosen by `fyd --port`, then `FY_PORT`, then
+the home's own `direct.port` in this file, then 7457 — `fyd --print-config` says which one won (`home config
+(config/connections.yaml direct.port)`). A port in this file that is not a whole number from 0 to 65535 refuses the start
+with a sentence, never clamped (a run that names `--port` or `FY_PORT` does not read it). That one key has one reader
+(`homePortOf` in `@ferretry/kernel/contract/home-port`), used by the daemon to bind and by `fy` to dial before any run record
+exists, so a migrated home's own port is never traded for 7457 — which a still-running v4 daemon may hold.
 
 Where a client on the machine **dials** the daemon is a different fact. The listener writes a run record,
 `run/daemon.json` (`DaemonRunSchema`: the Unix socket, the loopback bind's `host` and `port`, the pid and version), when

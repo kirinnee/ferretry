@@ -17,7 +17,7 @@ import { bootHost } from './host.ts';
 import { parseBackgroundDelay } from './jobs.ts';
 import { listenLocal } from './listener.ts';
 import { holdUntilStopped, startedByLaunchd } from './refusal-hold.ts';
-import { filterByLevel, renderSettings, resolveSettings } from './settings.ts';
+import { filterByLevel, renderSettings, settingsForRun } from './home-settings.ts';
 import { stopOnSignalReporting } from './stop-signals.ts';
 import { bootTimings } from './session/timings.ts';
 import { fileLogSink, realAdapters } from './wiring.ts';
@@ -48,13 +48,13 @@ async function main(): Promise<number> {
     );
     return EXIT_USAGE;
   }
-  const resolved = resolveSettings(process.env, answer.overrides, homedir());
+  const resolved = await settingsForRun(process.env, answer.overrides, homedir());
   if (resolved.kind === 'refused') {
     process.stderr.write(`${usage.daemonName}: ${resolved.sentence}\n`);
     return EXIT_USAGE;
   }
   if (answer.kind === 'print-config') {
-    for (const line of renderSettings(resolved.settings)) process.stdout.write(`${line}\n`);
+    process.stdout.write(`${renderSettings(resolved.settings).join('\n')}\n`);
     return 0;
   }
   const home = resolved.settings.home.value;
