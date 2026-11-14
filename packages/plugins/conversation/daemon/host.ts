@@ -74,6 +74,7 @@ import { StateDraftRepository } from './drafts/adapters/index.ts';
 import {
   buildQuestionAnswering,
   clearAskedQuestion,
+  QuestionAsks,
   writeAskedQuestion,
   writeProjectedQuestion,
 } from './questions/adapters/index.ts';
@@ -305,14 +306,17 @@ export interface ConversationAHalf {
 export function buildConversationA(deps: {
   readonly kernel: KernelPorts;
   readonly ferrets: FerretsApi;
-  readonly asks: Pick<AsksApi, 'get'>;
+  readonly asks: Pick<AsksApi, 'get' | 'raise' | 'open' | 'close'>;
   readonly hooks: Pick<HookInvoker, 'observe' | 'transform'>;
   /** Which of the harness seam's two actions are live (see {@link HarnessGate}). */
   readonly gate: HarnessGate;
   /** The stored originals a send may name (part b's store). Absent: a send that names a file is refused. */
   readonly attachments?: AttachmentSource;
   /** A Codex ferret's parsed transcript tail (part b's reader), for the question watch. Absent: Codex is not watched. */
-  readonly questionEvents?: (ferret: string) => Promise<readonly TranscriptEvent[] | 'unreadable' | undefined>;
+  readonly questionEvents?: (
+    ferret: string,
+    limit?: number,
+  ) => Promise<readonly TranscriptEvent[] | 'unreadable' | undefined>;
 }): ConversationAHalf {
   const { kernel, ferrets, asks, hooks, gate } = deps;
   const clock: ClockPort = { now: () => kernel.clock.now() };
@@ -320,6 +324,36 @@ export function buildConversationA(deps: {
   const draftSerial = new KeyedSerialExecutor();
   /** The one lane of each ferret's `question.json`: its writer, the exact-id clear and the withdrawal (r4 #2). */
   const questionSerial = new KeyedSerialExecutor();
+  /** The Agenda's card for each stored question (Asks' source `question`), for either harness: one path. */
+  const questionAsks = new QuestionAsks(asks);
+  /** Asks failing is never the question's failure: it is logged, owed and tried again on the watch's next look. */
+  const askFailure =
+    (what: string) =>
+    (error: unknown): void =>
+      kernel.log.warn(`conversation could not ${what} the agenda card of a question: ${String(error)}`);
+  /** The card of the exact question now stored, raised once (idempotent), after the question is durable. */
+  const raiseQuestionAsk = async (ferret: string, toolUseId: string): Promise<void> => {
+    const read = await kernel.state.read(QUESTION_STATE, ferret);
+    if (read.ok && read.value?.toolUseId === toolUseId)
+      await questionAsks.raise(ferret, read.value).catch(askFailure('raise'));
+  };
+  const closeQuestionAsk = async (ferret: string, toolUseId: string, reason: 'answered' | 'withdrawn'): Promise<void> =>
+    await questionAsks.close(ferret, toolUseId, reason).catch(askFailure('close'));
+  /**
+   * The Agenda says what the stored questions say, after a restart (the one-time event is gone): every stored question
+   * has its card, a card without a stored question is closed. An unreadable file or roster refuses the whole pass: it is
+   * missing evidence, never "no question".
+   */
+  const reconcileQuestionAsks = async (): Promise<void> => {
+    const stored = new Map<string, Question>();
+    for (const { id } of await ferrets.list()) {
+      const read = await kernel.state.read(QUESTION_STATE, id);
+      if (!read.ok) throw new Error(`the question of ${id} is unreadable`);
+      if (read.value !== undefined) stored.set(id, read.value);
+    }
+    await questionAsks.reconcile(stored);
+  };
+  let questionAsksReconciled = false;
 
   const queue = new SessionQueueService({
     store: new NotifyingSessionQueueStore(new StateQueueStore(kernel.state), {
@@ -1155,7 +1189,11 @@ export function buildConversationA(deps: {
       const summary = await ferrets.get(id);
       return summary === undefined ? undefined : statusOf(summary);
     },
-    publishAnswered: async (ferret, toolUseId) => await kernel.events.publish(QuestionAnswered, { ferret, toolUseId }),
+    publishAnswered: async (ferret, toolUseId) => {
+      await closeQuestionAsk(ferret, toolUseId, 'answered');
+      await kernel.events.publish(QuestionAnswered, { ferret, toolUseId });
+    },
+    released: async (ferret, toolUseId) => await closeQuestionAsk(ferret, toolUseId, 'withdrawn'),
     log: { info: (event, fields) => kernel.log.info(event, fields), warn: message => kernel.log.warn(message) },
     sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
   });
@@ -1196,9 +1234,11 @@ export function buildConversationA(deps: {
             ),
         }),
     asked: async (ferret, toolUseId) => {
+      await raiseQuestionAsk(ferret, toolUseId);
       await kernel.events.publish(QuestionAsked, { ferret: parseSessionId(ferret), toolUseId });
     },
     answered: async (ferret, toolUseId) => {
+      await closeQuestionAsk(ferret, toolUseId, 'answered');
       await kernel.events.publish(QuestionAnswered, { ferret: parseSessionId(ferret), toolUseId });
     },
   });
@@ -1206,8 +1246,15 @@ export function buildConversationA(deps: {
   const watchQuestions = (): void => {
     if (stopped) return;
     cancelQuestionWatch = kernel.clock.after(milliseconds(QUESTION_WATCH_MS), () => {
-      void questionWatch
-        .sweep()
+      void (async () => {
+        // The Agenda first (once after boot, then only what failed before is retried), so a card never waits on a look.
+        if (!questionAsksReconciled) {
+          await reconcileQuestionAsks().then(() => {
+            questionAsksReconciled = true;
+          }, askFailure('reconcile'));
+        } else await questionAsks.settle();
+        await questionWatch.sweep();
+      })()
         .catch(() => undefined)
         .finally(watchQuestions);
     });
@@ -1461,7 +1508,10 @@ export function buildConversationA(deps: {
     hypermediaRecorded: async ferret => await hypermediaSwitch.recorded(ferret),
     withdrawQuestion: async ferret => {
       questionWatch.forget(ferret);
+      const stored = await kernel.state.read(QUESTION_STATE, ferret);
       await clearAskedQuestion(kernel.state, questionSerial, ferret);
+      // Only the question that was stored when the withdrawal began: a newer one is its own.
+      if (stored.ok && stored.value !== undefined) await closeQuestionAsk(ferret, stored.value.toolUseId, 'withdrawn');
     },
     questions: {
       look: ferret => void questionWatch.look(ferret).catch(() => undefined),

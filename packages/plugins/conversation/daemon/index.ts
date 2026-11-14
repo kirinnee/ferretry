@@ -85,7 +85,7 @@ export const conversationDaemon = (gate: HarnessGate) =>
         // The stored originals a send hands to the agent (part b owns the store).
         attachments: { download: (ferret, id) => b.download(ferret, id) },
         // A Codex ferret's question is in its transcript (part b reads it).
-        questionEvents: ferret => b.questionEvents(ferret),
+        questionEvents: (ferret, limit) => b.questionEvents(ferret, limit),
       });
       ctx.kernel.lifecycle.onStop(() => {
         a.stop();
