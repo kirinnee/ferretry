@@ -26,16 +26,22 @@ const drawn = <P,>(component: AppComponent<P>) => component as (props: P) => Rea
 /** A module that arrives on a later turn of the event loop, as a chunk does. */
 const arriving = <T,>(value: T, ms = 20): Promise<T> => new Promise(resolve => setTimeout(() => resolve(value), ms));
 
+/** A promise the test settles by hand, so a load finishes exactly when the test says and never on a timer. */
+const deferred = <T,>(): { readonly promise: Promise<T>; readonly resolve: (value: T) => void } => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
+
 /** Lets the module arrive and the boundary retry, inside `act`. */
 const settle = async (): Promise<void> => await interact(() => arriving(undefined, 40));
 
 describe('lazyComponent', () => {
   it('suspends on the first draw, then draws the real component with its props once the module arrives', async () => {
-    const View = drawn(
-      lazyComponent<{ readonly name: string }>(() =>
-        arriving((props: { readonly name: string }) => <p>hello {props.name}</p>),
-      ),
-    );
+    const module = deferred<AppComponent<{ readonly name: string }>>();
+    const View = drawn(lazyComponent<{ readonly name: string }>(() => module.promise));
     const view = await mount(
       <Boundary>
         <View name="ferret" />
@@ -43,7 +49,7 @@ describe('lazyComponent', () => {
     );
     try {
       expect(view.container.textContent).toBe('loading');
-      await settle();
+      await interact(() => module.resolve((props: { readonly name: string }) => <p>hello {props.name}</p>));
       expect(view.container.textContent).toBe('hello ferret');
     } finally {
       await view.unmount();
