@@ -274,3 +274,51 @@ describe('a long why', () => {
     should(AgendaEditRequestSchema.safeParse(plan.request).success).be.true();
   });
 });
+
+describe('agenda patch compares document values by content', () => {
+  const withTerms: AgendaItem = agentItem('A6', 'Use the proposed wording?', {
+    terms: [{ term: 'OCI', meaning: 'Oracle Cloud Infrastructure' }],
+    kind: 'yesno',
+  });
+  const revision = agendaItemRevision(withTerms);
+
+  it('should treat an object that differs only in key order as unchanged, and a changed one as a change', () => {
+    // Act
+    const same = composeAgendaPatch(
+      withTerms,
+      parsed(`revision: ${revision}\nterms:\n  - meaning: Oracle Cloud Infrastructure\n    term: OCI`),
+      neededBy,
+    );
+    const changed = composeAgendaPatch(
+      withTerms,
+      parsed(`revision: ${revision}\nterms:\n  - term: OCI\n    meaning: Oracle Cloud`),
+      neededBy,
+    );
+
+    // Assert
+    should(same).deepEqual({ kind: 'unchanged' });
+    should(changed).deepEqual({
+      kind: 'edit',
+      request: {
+        action: 'edit',
+        id: 'A6',
+        revision,
+        terms: [{ term: 'OCI', meaning: 'Oracle Cloud' }],
+      },
+    });
+  });
+
+  it('should send the shape a replaced ask keeps again, even when it equals the item’s', () => {
+    // Arrange: the kind changes, so the daemon drops every shape field the edit does not give again
+    const patch = parsed(`revision: ${revision}\nkind: review\nsteps:\n  - Merge`);
+
+    // Act
+    const plan = composeAgendaPatch(withTerms, patch, neededBy);
+
+    // Assert
+    should(plan).deepEqual({
+      kind: 'edit',
+      request: { action: 'edit', id: 'A6', revision, kind: 'review', steps: ['Merge'] },
+    });
+  });
+});
