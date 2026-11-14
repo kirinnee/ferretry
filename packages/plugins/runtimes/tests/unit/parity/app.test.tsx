@@ -732,6 +732,7 @@ describe('the machine-setup views the half builds (the first run’s steps and E
       'the Export & copy tab drew the Copy source step',
     );
     expect(text(root, '[data-copy-no-sources]')).toContain('Pair another machine first');
-    expect(must(root.querySelector('[data-copy-read]'), 'the Review button').hasAttribute('disabled')).toBe(true);
+    // With nothing to copy from there is nothing to press: no Review button is drawn.
+    expect(root.querySelector('[data-copy-read]')).toBeNull();
   });
 });

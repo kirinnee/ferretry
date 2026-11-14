@@ -14,6 +14,7 @@
  * Pure: texts in, bytes out.
  */
 
+import { rawTextMayHold } from '@ferretry/std/credential-words';
 import type { ConfigFileView, ConfigStatusView } from '../../../lib/config-files.ts';
 
 /** One file in the export, by its path relative to the configuration directory. */
@@ -37,6 +38,9 @@ export const LEFT_OUT_INVALID =
 export const LEFT_OUT_NOT_WHOLE =
   'the machine does not show all of its text (a value in it is hidden), so it is left out rather than carried with a gap.';
 
+export const LEFT_OUT_NOT_PROVEN =
+  'it holds a value that may be a credential (a value under a key such as API_KEY), so it is left out: move that value into the secret store and write its ${secret:NAME} pointer in its place, then export again.';
+
 /** The placeholder a reference to a secret is written with: the name, never a value. */
 export const secretReference = (name: string): string => '${secret:' + name + '}';
 
@@ -48,13 +52,20 @@ export const exportPlan = (status: ConfigStatusView): ExportPlan => ({
     .map(file => ({ path: file.path, reason: LEFT_OUT_INVALID })),
 });
 
-/** A file as it was read: carried whole, or left out because the machine did not show all of it. */
+/**
+ * A file as it was read: carried whole, or left out. Two independent tests, both of which must pass (fail closed):
+ * the machine shows all of its text (no issue of any kind, so no value was cut), AND no word in the text is one a
+ * credential mask would cut — a value that looks like a credential under a credential-named key (`API_KEY: …`) is a
+ * value whatever its shape, so a file that holds one is never carried, even if the machine showed it whole.
+ */
 export const carriedFile = (
   file: Pick<ConfigFileView, 'path' | 'text' | 'issues'>,
 ): { readonly file: ExportFile } | { readonly leftOut: { readonly path: string; readonly reason: string } } =>
   (file.issues ?? []).length > 0
     ? { leftOut: { path: file.path, reason: LEFT_OUT_NOT_WHOLE } }
-    : { file: { path: file.path, text: file.text } };
+    : rawTextMayHold(file.text)
+      ? { leftOut: { path: file.path, reason: LEFT_OUT_NOT_PROVEN } }
+      : { file: { path: file.path, text: file.text } };
 
 /** `ferretry-settings-studio-mac-2026-10-16.zip`: the machine, and the day, in the name. */
 export const exportFileName = (machineName: string, when: Date): string => {

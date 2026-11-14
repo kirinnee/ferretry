@@ -796,3 +796,27 @@ export function secretNamed(name: string): boolean {
   if (words.some(word => SECRET_NAME_WORDS.has(word))) return true;
   return words.some((word, index) => SECRET_NAME_PAIRS.has(`${word}_${words[index + 1] ?? ''}`));
 }
+
+/** The shortest word the word cutter can cut anything in (`a://:p@h` holds a password). */
+const MIN_CUT_WORD = 7;
+
+/** What splits a text that does not parse into the words a mask would judge: blanks, a flow list's marks and quotes. */
+const RAW_WORD_BREAK = /[\s,[\]"']+/u;
+
+/**
+ * Whether a text that does not parse holds a word the word cutter would cut, or a value after a secret-named key
+ * (`DB_PASSWORD: v`) that looks like a credential: none of its values can be cut and rebuilt, so such a text is
+ * withheld (`unparsed`) rather than shown raw. A pointer (`apiKey: ${secret:NAME}`) is no credential. Linear.
+ */
+export function rawTextMayHold(text: string): boolean {
+  const words = text.split(RAW_WORD_BREAK).filter(word => word !== '' && word !== '-');
+  return words.some((word, index) => {
+    // No shorter word can be cut: a credential is at least 8 characters, a URL with a password at least 7.
+    if (word.length < MIN_CUT_WORD) return false;
+    const before = words[index - 1];
+    return (
+      shownWord(word, before).hidden ||
+      (before !== undefined && before.endsWith(':') && looksSecretShown(before.slice(0, -1), word))
+    );
+  });
+}

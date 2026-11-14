@@ -12,9 +12,12 @@
 import type {
   AccountChange,
   CloneBundle,
+  CloneChoice,
   CloneDecisions,
   CloneLoginChoices,
+  CloneOutcome,
   CloneReview,
+  CloneReviewItem,
   CloneReviewRequest,
   CloneSettingsDecisions,
   CloneSettingsText,
@@ -81,51 +84,66 @@ export const reviewRequest = (input: {
 export type CopyMode = 'alongside' | 'replace';
 
 export interface CopyChoices {
-  /** Components the person left out (`mcp/notes`): the ones a copy would RUN that they do not want. */
+  /** Items the person LEFT OUT (the ones a copy would run that they do not want): never written. */
   readonly skip: readonly string[];
   readonly mode: CopyMode;
+  /** A repeat copy: items the person ticked that the review does not take by default (both machines changed them). */
+  readonly take?: readonly string[];
 }
 
-/** The refs a first copy would run: every item the review shows a `runnable` for. */
+/** The refs a copy would run: every item the review shows a `runnable` for. */
 export const runnableRefs = (review: CloneReview): readonly string[] =>
   review.items.filter(item => item.runnable !== undefined).map(item => item.ref);
 
-/** What the review would leave undecided: an item or a key both machines changed has no default, and the person decides. */
-export const undecided = (review: CloneReview): readonly string[] => [
-  ...review.items.filter(item => item.choice === undefined && item.outcome === 'both').map(item => item.ref),
-  ...review.settings.flatMap(doc =>
-    doc.keys.filter(key => key.choice === undefined && key.outcome === 'both').map(key => `${doc.path}: ${key.key}`),
-  ),
-];
+/** What an item's choice does to this machine: it writes the source's version (or removes), or leaves things as they are. */
+const WRITES: ReadonlySet<CloneChoice> = new Set(['take', 'add', 'remove']);
 
-/** The per-item and per-key decisions a repeat copy takes by default (nothing it can take is invented). */
-export const defaultDecisions = (
+/** Whether the review would write this item by default. An item both machines changed has no default and writes nothing. */
+export const writesByDefault = (item: CloneReviewItem): boolean => item.choice !== undefined && WRITES.has(item.choice);
+
+/** The choice that leaves an item as it is here, for the outcome it stands at. */
+export const leaveOutChoice = (outcome: CloneOutcome): CloneChoice => (outcome === 'new' ? 'skip' : 'keep');
+
+/** The choice that writes the source's version of an item, for the outcome it stands at. */
+export const writeChoice = (outcome: CloneOutcome): CloneChoice =>
+  outcome === 'new' || outcome === 'removed-here' ? 'add' : outcome === 'gone' ? 'remove' : 'take';
+
+/**
+ * The per-item and per-key decisions a repeat copy sends. Nothing is invented in the direction of writing: a choice the
+ * review made is kept, an item or key both machines changed (no default) is KEPT as it is here unless the person ticked
+ * it, and an item they left out is kept or skipped.
+ */
+export const decisionsFor = (
   review: CloneReview,
+  choices: Pick<CopyChoices, 'skip' | 'take'>,
 ): {
   readonly decisions: CloneDecisions;
   readonly settingsDecisions: CloneSettingsDecisions;
   readonly logins: CloneLoginChoices;
-} => ({
-  decisions: Object.fromEntries(
-    review.items.flatMap(item => (item.choice === undefined ? [] : [[item.ref, item.choice]])),
-  ),
-  settingsDecisions: Object.fromEntries(
-    review.settings.map(doc => [
-      doc.path,
-      Object.fromEntries(doc.keys.flatMap(key => (key.choice === undefined ? [] : [[key.key, key.choice]]))),
-    ]),
-  ),
-  logins: Object.fromEntries(review.logins.map(login => [login.sourceId, login.target ?? 'slot'])),
-});
+} => {
+  const skipped = new Set(choices.skip);
+  const taken = new Set(choices.take ?? []);
+  const itemChoice = (item: CloneReviewItem): CloneChoice =>
+    skipped.has(item.ref)
+      ? leaveOutChoice(item.outcome)
+      : taken.has(item.ref)
+        ? writeChoice(item.outcome)
+        : (item.choice ?? leaveOutChoice(item.outcome));
+  return {
+    decisions: Object.fromEntries(review.items.map(item => [item.ref, itemChoice(item)])),
+    settingsDecisions: Object.fromEntries(
+      review.settings.map(doc => [doc.path, Object.fromEntries(doc.keys.map(key => [key.key, key.choice ?? 'keep']))]),
+    ),
+    logins: Object.fromEntries(review.logins.map(login => [login.sourceId, login.target ?? 'slot'])),
+  };
+};
 
-/** The one `clone.import` this review and these choices make, or what stops it. */
+/** The one `clone.import` this review and these choices make. */
 export const copyChange = (input: {
   readonly review: CloneReview;
   readonly request: CloneReviewRequest;
   readonly choices: CopyChoices;
-}):
-  | { readonly kind: 'change'; readonly change: AccountChange }
-  | { readonly kind: 'undecided'; readonly refs: readonly string[] } => {
+}): AccountChange => {
   const { review, request, choices } = input;
   const shared = {
     kind: 'clone.import' as const,
@@ -133,26 +151,17 @@ export const copyChange = (input: {
     ...(request.source === undefined ? {} : { source: request.source }),
     ...(request.names === undefined ? {} : { names: request.names }),
   };
-  if (review.mode === 'first') {
-    return {
-      kind: 'change',
-      change: { ...shared, mode: choices.mode, ...(choices.skip.length === 0 ? {} : { skip: [...choices.skip] }) },
-    };
-  }
-  const open = undecided(review);
-  if (open.length > 0) return { kind: 'undecided', refs: open };
-  const decided = defaultDecisions(review);
+  if (review.mode === 'first')
+    return { ...shared, mode: choices.mode, ...(choices.skip.length === 0 ? {} : { skip: [...choices.skip] }) };
+  const decided = decisionsFor(review, choices);
   return {
-    kind: 'change',
-    change: {
-      ...shared,
-      mode: 'update',
-      decisions: decided.decisions,
-      logins: decided.logins,
-      reviewed: review.fingerprint,
-      ...(request.settings === undefined ? {} : { settings: request.settings }),
-      settingsDecisions: decided.settingsDecisions,
-    },
+    ...shared,
+    mode: 'update',
+    decisions: decided.decisions,
+    logins: decided.logins,
+    reviewed: review.fingerprint,
+    ...(request.settings === undefined ? {} : { settings: request.settings }),
+    settingsDecisions: decided.settingsDecisions,
   };
 };
 

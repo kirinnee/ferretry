@@ -127,6 +127,8 @@ describe('the machine-setup steps', () => {
           await tab.screenshot({ path: join(shotsDir, `start-from-fresh-${viewport.name}-${mode}.png`) });
         await tab.getByText('Clone settings from another machine').click();
         await tab.waitForSelector('[data-copy-no-sources]');
+        // With no machine to copy from there is no Review button to look pressable.
+        expect(await tab.locator('[data-copy-read]').count()).toBe(0);
         await insideScreen(tab, '[data-onboarding-step-body="start"] *', viewport.width);
         if (shotsDir !== '')
           await tab.screenshot({ path: join(shotsDir, `start-from-copy-${viewport.name}-${mode}.png`) });
@@ -138,6 +140,10 @@ describe('the machine-setup steps', () => {
         const tab = await open(context, 'export', mode);
         await tab.locator('[data-export-run]').click();
         await tab.waitForSelector('[data-setup-section="export-manifest"]');
+        // The listing wraps inside its block: no line is cut at the right edge, and nothing scrolls sideways.
+        const listing = tab.locator('[data-setup-section="export-manifest"] pre');
+        expect(await listing.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        expect(await listing.evaluate(element => getComputedStyle(element).whiteSpace)).toBe('pre-wrap');
         expect(await tab.locator('[data-setup-section="export-manifest"]').innerText()).toContain('config/warden.yaml');
         expect(await tab.locator('[data-setup-section="export-manifest"]').innerText()).not.toContain(
           'logins/work.yaml',

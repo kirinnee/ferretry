@@ -123,7 +123,7 @@ export function ExportSettings({
             <span>{files(phase.files.length)}. Secrets: none.</span>
           </SetupNote>
           <SetupSection title="In the zip" name="export-manifest">
-            <pre className="m-0 overflow-x-auto rounded-control bg-surface p-3 font-mono text-meta">
+            <pre className="m-0 whitespace-pre-wrap rounded-control bg-surface p-3 font-mono text-meta [overflow-wrap:anywhere]">
               {exportManifest(phase.name, phase.files)}
             </pre>
           </SetupSection>

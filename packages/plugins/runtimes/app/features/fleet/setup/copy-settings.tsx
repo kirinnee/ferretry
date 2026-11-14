@@ -32,7 +32,9 @@ import {
   SETTINGS_FILES,
   settingsTexts,
   type SourceSettingsRead,
+  writesByDefault,
 } from './copy-model.ts';
+import { ConfirmDescription, LoginRows, ReviewItem, SettingsChanges } from './copy-review-parts.tsx';
 
 export interface CopySettingsProps {
   readonly client: RuntimesClient;
@@ -43,6 +45,8 @@ export interface CopySettingsProps {
   /** The copy landed: the step is set and setup continues. */
   readonly onDone?: () => void;
   readonly doneLabel?: string;
+  /** The machines to copy from, where the shell is not the one to say (a suite); absent: every paired machine the shell lists. */
+  readonly reaches?: readonly DaemonReach[];
 }
 
 type Phase =
@@ -77,15 +81,25 @@ const readSource = async (reach: DaemonReach) => {
   return { bundle, machine: machine as MachineView, files };
 };
 
-export function CopySettings({ client, machineName, hasSetup, changes, onDone, doneLabel }: CopySettingsProps) {
+export function CopySettings({
+  client,
+  machineName,
+  hasSetup,
+  changes,
+  onDone,
+  doneLabel,
+  reaches,
+}: CopySettingsProps) {
   const own = daemonOfClient(client);
-  const everyone = useEveryDaemon();
+  const live = useEveryDaemon();
+  const everyone = reaches ?? live;
   const sources = useMemo(() => everyone.filter(row => row.daemon !== own), [everyone, own]);
   const [phase, setPhase] = useState<Phase>({ kind: 'source' });
   const [picked, setPicked] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [mode, setMode] = useState<CopyMode>('alongside');
-  const [skipped, setSkipped] = useState<ReadonlySet<string>>(new Set());
+  /** The items that RUN something which the copy writes: ticked by what the review takes by default, changed by the person. */
+  const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
 
   const read = useCallback(
     async (reach: DaemonReach): Promise<void> => {
@@ -97,7 +111,13 @@ export function CopySettings({ client, machineName, hasSetup, changes, onDone, d
         const source = { daemonId: reach.daemon, name: reach.machine };
         const request = reviewRequest({ bundle, source, targetName: machineName, settings });
         const review = CloneReviewSchema.parse(await client.call('POST /v1/runtimes/clone/review', { body: request }));
-        setSkipped(new Set());
+        setTicked(
+          new Set(
+            review.items
+              .filter(item => item.runnable !== undefined && (review.mode === 'first' || writesByDefault(item)))
+              .map(item => item.ref),
+          ),
+        );
         setPhase({ kind: 'review', source, bundle, review, request, leftOut });
       } catch (error) {
         setProblem(changeRefusalSentence(error));
@@ -126,11 +146,7 @@ export function CopySettings({ client, machineName, hasSetup, changes, onDone, d
   if (phase.kind === 'confirm')
     return (
       <div className="flex min-w-0 flex-col gap-3" data-copy-confirm="">
-        <SetupNote tone="pend" name="copy-confirm" title={phase.staged.summary}>
-          {phase.staged.consequences.map(line => (
-            <span key={line}>{line}</span>
-          ))}
-        </SetupNote>
+        <ConfirmDescription staged={phase.staged} />
         <ChangeApplyPanel
           machineName={machineName}
           authority={changes.authority}
@@ -154,16 +170,16 @@ export function CopySettings({ client, machineName, hasSetup, changes, onDone, d
   if (phase.kind === 'review') {
     const { review, request, source, leftOut } = phase;
     const counts = outcomeCounts(review);
-    const runnable = new Set(runnableRefs(review));
+    const running = runnableRefs(review);
     const stage = (): void => {
-      const made = copyChange({ review, request, choices: { skip: [...skipped], mode } });
-      if (made.kind === 'undecided') {
-        changes.refuse(
-          `Something differs on both machines and needs a choice this screen can’t make yet: ${made.refs.join(', ')}. Copy from the command line (fy machine clone) to decide each one.`,
-        );
-        return;
-      }
-      void changes.stage(made.change).then(result => {
+      // What runs and is not ticked is left out; in a repeat copy, a ticked one the review does not take by default
+      // (both machines changed it) is taken. Everything else is the review's own choice.
+      const skip = running.filter(ref => !ticked.has(ref));
+      const take = review.items
+        .filter(item => item.runnable !== undefined && ticked.has(item.ref) && !writesByDefault(item))
+        .map(item => item.ref);
+      const change = copyChange({ review, request, choices: { skip, take, mode } });
+      void changes.stage(change).then(result => {
         if (result.kind === 'staged') setPhase({ kind: 'confirm', staged: result.staged, source: source.name });
       });
     };
@@ -188,6 +204,7 @@ export function CopySettings({ client, machineName, hasSetup, changes, onDone, d
             </span>
           </SetupNote>
         )}
+        <LoginRows logins={review.logins} />
         {review.keys.length === 0 ? null : (
           <SetupNote tone="pend" name="copy-keys" title="API keys are named, never carried">
             <span className="font-mono [overflow-wrap:anywhere]">{review.keys.map(key => key.name).join(', ')}</span>
@@ -201,45 +218,34 @@ export function CopySettings({ client, machineName, hasSetup, changes, onDone, d
             </span>
           </SetupNote>
         )}
-        {review.mode === 'first' && runnable.size > 0 ? (
-          <SetupSection title="What would run here" name="copy-runnable">
-            <p className="m-0 text-meta leading-base text-muted">
-              These start programs on {machineName}. Untick any you don’t want; the profiles that name it leave it out
-              too.
-            </p>
+        {review.items.length === 0 ? null : (
+          <SetupSection title={review.mode === 'first' ? 'What would be copied' : 'What changed'} name="copy-items">
+            {running.length === 0 ? null : (
+              <p className="m-0 text-meta leading-base text-muted">
+                What is marked “Copy this” starts or runs what is shown, in full, on {machineName}. Untick any you don’t
+                want; a profile that names it leaves it out too.
+              </p>
+            )}
             <ul className="m-0 flex list-none flex-col gap-2 p-0">
-              {review.items
-                .filter(item => item.runnable !== undefined)
-                .map(item => (
-                  <li key={item.ref} className="kt-panel flex min-w-0 flex-col gap-1 p-3" data-copy-runnable={item.ref}>
-                    <label className="flex min-w-0 items-center gap-2 text-cell font-semibold text-fg">
-                      <input
-                        type="checkbox"
-                        checked={!skipped.has(item.ref)}
-                        onChange={event =>
-                          setSkipped(current => {
-                            const next = new Set(current);
-                            if (event.target.checked) next.delete(item.ref);
-                            else next.add(item.ref);
-                            return next;
-                          })
-                        }
-                      />
-                      <span className="[overflow-wrap:anywhere]">{item.ref}</span>
-                    </label>
-                    {item.runnable?.entries.map(entry => (
-                      <p
-                        key={`${entry.label}:${entry.text}`}
-                        className="m-0 text-meta text-muted [overflow-wrap:anywhere]"
-                      >
-                        {entry.label}: <span className="font-mono">{entry.document ? '(document)' : entry.text}</span>
-                      </p>
-                    ))}
-                  </li>
-                ))}
+              {review.items.map(item => (
+                <ReviewItem
+                  key={item.ref}
+                  item={item}
+                  ticked={ticked.has(item.ref)}
+                  onTick={on =>
+                    setTicked(current => {
+                      const next = new Set(current);
+                      if (on) next.add(item.ref);
+                      else next.delete(item.ref);
+                      return next;
+                    })
+                  }
+                />
+              ))}
             </ul>
           </SetupSection>
-        ) : null}
+        )}
+        <SettingsChanges review={review} />
         {review.mode === 'first' && hasSetup ? (
           <SetupSection title="Existing setup" name="copy-existing">
             <RadioChoices
@@ -312,20 +318,22 @@ export function CopySettings({ client, machineName, hasSetup, changes, onDone, d
           <span>{problem}</span>
         </SetupNote>
       )}
-      <div>
-        <Button
-          type="button"
-          variant="primary"
-          data-copy-read=""
-          disabled={picked === null || phase.kind === 'reading'}
-          onClick={() => {
-            const row = sources.find(candidate => candidate.daemon === picked);
-            if (row !== undefined) void read(row);
-          }}
-        >
-          {phase.kind === 'reading' ? `Reading ${phase.source}…` : 'Review the copy'}
-        </Button>
-      </div>
+      {sources.length === 0 ? null : (
+        <div>
+          <Button
+            type="button"
+            variant="primary"
+            data-copy-read=""
+            disabled={picked === null || phase.kind === 'reading'}
+            onClick={() => {
+              const row = sources.find(candidate => candidate.daemon === picked);
+              if (row !== undefined) void read(row);
+            }}
+          >
+            {phase.kind === 'reading' ? `Reading ${phase.source}…` : 'Review the copy'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

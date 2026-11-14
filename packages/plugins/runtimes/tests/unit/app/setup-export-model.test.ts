@@ -4,12 +4,14 @@ import { AGENT_CONTROL_KINDS, AGENT_CONTROL_WORDS } from '../../../app/features/
 import {
   controlsText,
   copyChange,
-  defaultDecisions,
+  decisionsFor,
+  leaveOutChoice,
   outcomeCounts,
   reviewRequest,
   runnableRefs,
   settingsTexts,
-  undecided,
+  writeChoice,
+  writesByDefault,
 } from '../../../app/features/fleet/setup/copy-model.ts';
 import { readExport } from '../../../app/features/fleet/setup/export-settings.tsx';
 import {
@@ -20,6 +22,7 @@ import {
   exportManifest,
   exportPlan,
   LEFT_OUT_INVALID,
+  LEFT_OUT_NOT_PROVEN,
   LEFT_OUT_NOT_WHOLE,
   secretReference,
   zipFiles,
@@ -172,12 +175,9 @@ describe('copy settings: what is handed over', () => {
 describe('copy settings: the change a review makes', () => {
   it('a first copy is the chosen mode, with the components the person left out', () => {
     const made = copyChange({ review: review(), request, choices: { skip: ['mcp/notes'], mode: 'replace' } });
-    expect(made).toMatchObject({
-      kind: 'change',
-      change: { kind: 'clone.import', mode: 'replace', skip: ['mcp/notes'] },
-    });
+    expect(made).toMatchObject({ kind: 'clone.import', mode: 'replace', skip: ['mcp/notes'] });
     const plain = copyChange({ review: review(), request, choices: { skip: [], mode: 'alongside' } });
-    expect(plain.kind === 'change' && 'skip' in plain.change).toBe(false);
+    expect('skip' in plain).toBe(false);
   });
 
   it('a repeat copy takes the defaults the review chose, keeps the settings, and carries the review’s fingerprint', () => {
@@ -192,29 +192,40 @@ describe('copy settings: the change a review makes', () => {
       ],
       logins: [{ sourceId: 'work', outcome: 'ask' }],
     });
-    expect(defaultDecisions(repeat)).toEqual({
+    expect(decisionsFor(repeat, { skip: [] })).toEqual({
       decisions: { 'profile/a': 'take', 'mcp/n': 'add' },
       settingsDecisions: { 'warden.yaml': { mode: 'take' } },
       logins: { work: 'slot' },
     });
     const made = copyChange({ review: repeat, request, choices: { skip: [], mode: 'alongside' } });
-    expect(made).toMatchObject({
-      kind: 'change',
-      change: { mode: 'update', reviewed: 'fp', settings: [{ path: 'controls' }] },
-    });
+    expect(made).toMatchObject({ mode: 'update', reviewed: 'fp', settings: [{ path: 'controls' }] });
   });
 
-  it('refuses to invent a choice for something both machines changed', () => {
+  it('keeps what is here where both machines changed it, unless the person ticked it; a left-out item is kept or skipped', () => {
     const both = review({
       mode: 'update',
-      items: [{ ref: 'profile/a', kind: 'profile', outcome: 'both', match: 'key', files: [] }],
+      items: [
+        { ref: 'profile/a', kind: 'profile', outcome: 'both', match: 'key', files: [] },
+        { ref: 'mcp/n', kind: 'mcp', outcome: 'new', match: 'none', choice: 'add', files: [] },
+        { ref: 'mcp/t', kind: 'mcp', outcome: 'theirs', match: 'key', choice: 'take', files: [] },
+      ],
       settings: [{ path: 'voice.yaml', keys: [{ key: 'k', outcome: 'both', mine: '1', theirs: '2' }] }],
     });
-    expect(undecided(both)).toEqual(['profile/a', 'voice.yaml: k']);
-    expect(copyChange({ review: both, request, choices: { skip: [], mode: 'alongside' } })).toEqual({
-      kind: 'undecided',
-      refs: ['profile/a', 'voice.yaml: k'],
+    // Nothing is written that nobody chose: a changed-on-both item and key are kept.
+    expect(decisionsFor(both, { skip: [] })).toMatchObject({
+      decisions: { 'profile/a': 'keep', 'mcp/n': 'add', 'mcp/t': 'take' },
+      settingsDecisions: { 'voice.yaml': { k: 'keep' } },
     });
+    // The person ticks the both-changed one and leaves two out.
+    expect(decisionsFor(both, { skip: ['mcp/n', 'mcp/t'], take: ['profile/a'] }).decisions).toEqual({
+      'profile/a': 'take',
+      'mcp/n': 'skip',
+      'mcp/t': 'keep',
+    });
+    expect([leaveOutChoice('new'), leaveOutChoice('theirs'), leaveOutChoice('both')]).toEqual(['skip', 'keep', 'keep']);
+    expect([writeChoice('new'), writeChoice('theirs'), writeChoice('removed-here')]).toEqual(['add', 'take', 'add']);
+    expect(writesByDefault(both.items[0] as never)).toBe(false);
+    expect(writesByDefault(both.items[1] as never)).toBe(true);
   });
 
   it('lists what would run and counts the outcomes', () => {
@@ -233,5 +244,45 @@ describe('copy settings: the change a review makes', () => {
     });
     expect(runnableRefs(r)).toEqual(['mcp/n']);
     expect(outcomeCounts(r)).toEqual({ new: 2 });
+  });
+});
+
+describe('export settings: nothing that may hold a credential is carried', () => {
+  // A literal shaped like a secret NAME under a credential-named key is a value as far as any file can tell. The machine
+  // may show it whole (no issue reported), so the export decides for itself, and fails closed.
+  const LEAK = 'command: fixture-server\nenv:\n  API_KEY: FIXTUREKEY\n';
+
+  it('leaves out a file whose text may hold a credential even when the machine reported no issue with it', () => {
+    const answer = carriedFile({ path: 'mcp/fixture.yaml', text: LEAK, issues: [] });
+    expect(answer).toEqual({ leftOut: { path: 'mcp/fixture.yaml', reason: LEFT_OUT_NOT_PROVEN } });
+  });
+
+  it('never puts such a value in the zip, through the whole read: status, file, plan, zip', async () => {
+    const client = scripted({
+      'GET /v1/config/file': (call: { readonly query: Readonly<Record<string, string>> | undefined }) => ({
+        path: call.query?.['path'],
+        exists: true,
+        text: call.query?.['path'] === 'mcp/fixture.yaml' ? LEAK : 'enabled: true\n',
+        etag: 'e',
+        issues: [],
+      }),
+    });
+    const read = await readExport(client, {
+      files: [
+        { path: 'mcp/fixture.yaml', state: 'ok' },
+        { path: 'warden.yaml', state: 'ok' },
+      ],
+    });
+    expect(read.files.map(file => file.path)).toEqual(['warden.yaml']);
+    expect(read.plan.leftOut.map(entry => entry.path)).toEqual(['mcp/fixture.yaml']);
+    const zipped = new TextDecoder().decode(zipFiles(read.files, new Date('2026-11-14T00:00:00Z')));
+    expect(zipped).not.toContain('FIXTUREKEY');
+  });
+
+  it('still carries a file that holds only pointers and plain settings', () => {
+    const text = 'command: fixture-server\nenv:\n  API_KEY: ${secret:FIXTURE_KEY}\n  LOG_LEVEL: debug\n';
+    expect(carriedFile({ path: 'mcp/fixture.yaml', text, issues: [] })).toEqual({
+      file: { path: 'mcp/fixture.yaml', text },
+    });
   });
 });
