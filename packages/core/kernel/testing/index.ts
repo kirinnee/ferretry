@@ -71,3 +71,4 @@ export {
   diskSessionsRoot,
   diskSessionsRoots,
 } from './disk-root.ts';
+export { type ConfigDaemonCall, type FakeConfigDaemon, fakeConfigDaemon } from './config-daemon.ts';

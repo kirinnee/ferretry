@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { CliContext, PluginClient, TerminalIo, VerbInvocation } from '@ferretry/kernel/manifest';
+import { fakeConfigDaemon } from '@ferretry/kernel/testing';
 import { instantFromEpochMs } from '@ferretry/std';
 import cli from '../../../cli/index.ts';
 import type { VERB_BODIES } from '../../../cli/lib/verbs.ts';
@@ -10,7 +11,8 @@ import { fakeWorld, modelSet, profile, runtime, runVerb } from '../cli/fleet/acc
 /**
  * The runtimes verbs (rows V-0182 … V-0395) against v4's command lines. Two renames are by design, not breaks:
  * `--credential <id>` is `--login <id>` (the word table: a sign-in is a login), and v4's one `fy component` command
- * is one verb per kind, so a model set (the one kind Runtimes owns) is `fy model-set …`.
+ * is one verb per kind, so a model set and an instructions item (the two kinds Runtimes owns) are `fy model-set …` and
+ * `fy instruction …`, and `fy components [kind]` lists them all over the kernel's config routes.
  */
 type Verb = keyof typeof VERB_BODIES;
 type Options = VerbInvocation['options'];
@@ -273,14 +275,49 @@ describe('commands parity: profiles', () => {
   });
 });
 
-describe('commands parity: components (a model set is the kind Runtimes owns, `fy model-set …`)', () => {
+/** The cli half over the kernel's config routes (files in memory) and a local file reader: what `components` and `instruction` run on. */
+function filesHalf(files: Record<string, string>, local: Record<string, string> = {}) {
+  const daemon = fakeConfigDaemon(files);
+  const out: string[] = [];
+  const err: string[] = [];
+  const io: TerminalIo = { out: text => out.push(text), err: text => err.push(text), isTty: false };
+  const readText = async (path: string): Promise<string> => {
+    const text = local[path];
+    if (text === undefined) throw new Error('no such file');
+    return text;
+  };
+  const ctx = {
+    manifest,
+    client: { ...daemon.client, subscribe: () => () => undefined },
+    io,
+    readText,
+  } as unknown as CliContext<typeof manifest>;
+  const verbs = cli.build?.(ctx)?.verbs as Readonly<Record<string, (invocation: VerbInvocation) => Promise<number>>>;
+  return {
+    daemon,
+    run: async (verb: string, args: string[], options: Options = {}) => await verbs[verb]!({ args, options }),
+    say: () => out.join(''),
+    complain: () => err.join(''),
+  };
+}
+
+describe('commands parity: components (a model set is `fy model-set …`, instructions `fy instruction …`, all of them `fy components`)', () => {
   const heavy = { kind: 'modelSets', models: ['opus', 'sonnet'], default: 'opus' };
 
-  it('V-0182 fy component is one verb per kind: the model-set group (the kind Runtimes owns), each verb declared under that first word, and no `component` verb', () => {
+  it('V-0182 fy component is one verb per kind: the model-set and instruction groups (the kinds Runtimes owns), each verb declared under that first word, `components` lists them all, and no `component` verb', async () => {
     expect([...declared].filter(line => line.startsWith('model-set ')).sort()).toEqual(
       ['model-set add', 'model-set edit', 'model-set ls', 'model-set rm', 'model-set show'].sort(),
     );
+    expect([...declared].filter(line => line.startsWith('instruction ')).sort()).toEqual(
+      ['instruction add', 'instruction edit', 'instruction ls', 'instruction rm', 'instruction show'].sort(),
+    );
+    expect(declared.has('components')).toBe(true);
     expect(declared.has('component')).toBe(false);
+    // Each one is a real verb: none answers the "not served" sentence.
+    const { run, complain } = filesHalf({});
+    for (const verb of ['instruction ls', 'instruction show', 'instruction add', 'instruction edit', 'instruction rm'])
+      expect(await run(verb, [])).not.toBe(69);
+    expect(complain()).not.toMatch(/not served/);
   });
 
   it('V-0183 fy component add <kind/name> --model <id> --default <id> becomes `model-set add`, staging a new model set', async () => {
@@ -289,6 +326,10 @@ describe('commands parity: components (a model set is the kind Runtimes owns, `f
       { kind: 'component.put', name: 'heavy', component: heavy, create: true },
     ]);
     await expect(runVerb(fakeWorld(), 'model-set add', ['heavy'])).rejects.toThrow(/needs at least one --model <id>/);
+    // The instructions kind: `fy component add instructions/house --file <path>` is `fy instruction add house --file <path>`.
+    const added = filesHalf({}, { '/house.md': 'Be kind.\n' });
+    expect(await added.run('instruction add', ['house'], { file: '/house.md' })).toBe(0);
+    expect(Bun.YAML.parse(added.daemon.files.get('instructions/house.yaml')!)).toEqual({ text: 'Be kind.\n' });
   });
 
   it('V-0184 fy component edit <kind/name> becomes `model-set edit`, keeping what a flag leaves out, and refusing a model set that does not exist', async () => {
@@ -298,6 +339,17 @@ describe('commands parity: components (a model set is the kind Runtimes owns, `f
     ]);
     await expect(runVerb(fakeWorld(), 'model-set edit', ['heavy'], { model: 'opus' })).rejects.toThrow(
       /There is no model set heavy to change/,
+    );
+    const edited = filesHalf({ 'instructions/house.yaml': 'text: Be kind.\n' });
+    expect(await edited.run('instruction edit', ['house'], { description: 'rules', yes: true })).toBe(0);
+    expect(Bun.YAML.parse(edited.daemon.files.get('instructions/house.yaml')!)).toEqual({
+      description: 'rules',
+      text: 'Be kind.',
+    });
+    const missing = filesHalf({});
+    expect(await missing.run('instruction edit', ['house'], { text: 'x', yes: true })).toBe(1);
+    expect(missing.complain()).toBe(
+      'There is no instructions item house to change. Add it with `fy instruction add house`.\n',
     );
   });
 
@@ -309,6 +361,16 @@ describe('commands parity: components (a model set is the kind Runtimes owns, `f
     expect(await staged('model-set rm', ['heavy'], {})).toEqual([
       { kind: 'component.remove', componentKind: 'modelSets', name: 'heavy' },
     ]);
+    const used = {
+      'instructions/house.yaml': 'text: Be kind.\n',
+      'profiles/a.yaml': 'contents:\n  - instructions/house\n  - mcp/x\n',
+    };
+    const refused = filesHalf(used);
+    expect(await refused.run('instruction rm', ['house'], { yes: true })).toBe(1);
+    expect(refused.complain()).toMatch(/is a layer in a\. Remove it from those first, or add --remove-from-profiles\./);
+    const taken = filesHalf(used);
+    expect(await taken.run('instruction rm', ['house'], { yes: true, 'remove-from-profiles': true })).toBe(0);
+    expect(taken.daemon.files.has('instructions/house.yaml')).toBe(false);
   });
 
   it('V-0187 fy component show <kind/name> becomes `model-set show`: one model set and where it is used, --json', async () => {
@@ -323,5 +385,47 @@ describe('commands parity: components (a model set is the kind Runtimes owns, `f
     const { verbs, err } = half({ [ROUTES.components]: { format: 'present', kinds: [] } });
     expect(await verbs['model-set show']?.({ args: ['nope'], options: {} })).toBe(1);
     expect(err.join('')).toMatch(/There is no model set called "nope"\. See them all with `fy model-set ls`\./);
+    const shown = filesHalf({
+      'instructions/house.yaml': 'text: Be kind.\n',
+      'profiles/a.yaml': 'contents:\n  - instructions/house\n',
+    });
+    expect(await shown.run('instruction show', ['house'])).toBe(0);
+    expect(shown.say()).toMatch(/^instructions\/house\n {2}Text: 8 characters/);
+    expect(shown.say()).toMatch(/Used by profiles: a/);
+  });
+
+  it('V-0188 fy components [kind] lists the components of every kind, or one kind, with --json, and refuses a word that is no kind', async () => {
+    expect(declared.has('components')).toBe(true);
+    const files = {
+      'instructions/house.yaml': 'text: Be kind.\n',
+      'mcp/github.yaml': 'command: npx\n',
+      'skills/review.yaml': 'items:\n  - review\n',
+      'claude-code/settings/strict.yaml': 'settings:\n  model: opus\n',
+      'codex/hooks/guard.yaml': 'hooks:\n  Stop: []\n',
+      'model-sets/heavy.yaml': 'models:\n  - opus\ndefault: opus\n',
+      'profiles/work.yaml': 'contents:\n  - mcp/github\n',
+    };
+    const all = filesHalf(files);
+    expect(await all.run('components', [])).toBe(0);
+    for (const line of [
+      'Instructions — Guidance every session reads first.',
+      '  house  (Generic)  used by 0 profile(s)',
+      '  github  (Generic)  used by 1 profile(s)',
+      '  review  (Generic)  used by 0 profile(s)',
+      '  strict  (Claude only)  used by 0 profile(s)',
+      '  guard  (Codex only)  used by 0 profile(s)',
+      '  heavy  (Generic)  used by 0 profile(s)',
+    ])
+      expect(all.say()).toContain(line);
+    const one = filesHalf(files);
+    expect(await one.run('components', ['hooks'])).toBe(0);
+    expect(one.say()).toContain('Hooks — Commands that run at points in a session, for one tool.');
+    expect(one.say()).not.toContain('Skills');
+    const json = filesHalf(files);
+    expect(await json.run('components', ['mcp'], { json: true })).toBe(0);
+    expect(JSON.parse(json.say()).kinds.map((group: { kind: string }) => group.kind)).toEqual(['mcp']);
+    const bad = filesHalf(files);
+    expect(await bad.run('components', ['widgets'])).toBe(1);
+    expect(bad.complain()).toMatch(/^"widgets" is not a kind of component: use one of instructions, mcp, skills,/);
   });
 });

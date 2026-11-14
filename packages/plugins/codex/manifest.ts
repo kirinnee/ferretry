@@ -1,4 +1,14 @@
-import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import {
+  definePlugin,
+  ITEM_FILE_OPTIONS,
+  ITEM_READ_OPTIONS,
+  ITEM_REMOVE_OPTIONS,
+  ITEM_WRITE_OPTIONS,
+  panel,
+  route,
+  settingsTab,
+  verb,
+} from '@ferretry/kernel/manifest';
 import {
   CODEX,
   CODEX_AGENT_HOMES,
@@ -62,13 +72,34 @@ export default definePlugin({
         summary: 'where codex is, how it was installed, its version, and whether Ferretry verified it',
       }),
       verb('harness codex update', { summary: 'update codex, with the command for how it was installed' }),
-      verb('harness codex settings ls', { summary: 'the Codex settings items on this machine' }),
-      verb('harness codex settings show', { summary: 'one settings item and where it is used' }),
-      verb('harness codex settings add', { summary: 'add a settings item' }),
+      verb('harness codex settings ls', {
+        summary: 'the Codex settings items on this machine',
+        options: ITEM_READ_OPTIONS,
+      }),
+      verb('harness codex settings show', {
+        summary: 'one settings item and where it is used',
+        options: ITEM_READ_OPTIONS,
+      }),
+      verb('harness codex settings add', {
+        summary: 'add a settings item',
+        options: [...ITEM_FILE_OPTIONS, ...ITEM_WRITE_OPTIONS],
+      }),
       verb('harness codex settings edit', {
         summary: 'change a settings item; every runtime that uses it changes too',
+        options: [...ITEM_FILE_OPTIONS, ...ITEM_WRITE_OPTIONS],
       }),
-      verb('harness codex settings rm', { summary: 'remove a settings item' }),
+      verb('harness codex settings rm', { summary: 'remove a settings item', options: ITEM_REMOVE_OPTIONS }),
+      verb('harness codex hooks ls', { summary: 'the Codex hooks items on this machine', options: ITEM_READ_OPTIONS }),
+      verb('harness codex hooks show', { summary: 'one hooks item and where it is used', options: ITEM_READ_OPTIONS }),
+      verb('harness codex hooks add', {
+        summary: 'add a hooks item',
+        options: [...ITEM_FILE_OPTIONS, ...ITEM_WRITE_OPTIONS],
+      }),
+      verb('harness codex hooks edit', {
+        summary: 'change a hooks item; every runtime that uses it changes too',
+        options: [...ITEM_FILE_OPTIONS, ...ITEM_WRITE_OPTIONS],
+      }),
+      verb('harness codex hooks rm', { summary: 'remove a hooks item', options: ITEM_REMOVE_OPTIONS }),
     ],
   },
 

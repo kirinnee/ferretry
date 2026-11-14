@@ -1,4 +1,15 @@
-import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import {
+  appAction,
+  definePlugin,
+  ITEM_FILE_OPTIONS,
+  ITEM_READ_OPTIONS,
+  ITEM_REMOVE_OPTIONS,
+  ITEM_WRITE_OPTIONS,
+  panel,
+  route,
+  settingsTab,
+  verb,
+} from '@ferretry/kernel/manifest';
 import {
   CLAUDE_CODE,
   CLAUDE_CODE_AGENT_HOMES,
@@ -94,20 +105,40 @@ export default definePlugin({
         summary: 'where claude is, how it was installed, its version, and whether Ferretry verified it',
       }),
       verb('harness claude-code update', { summary: 'update claude, with the command for how it was installed' }),
-      verb('harness claude-code settings ls', { summary: 'the Claude Code settings items on this machine' }),
-      verb('harness claude-code settings show', { summary: 'one settings item and where it is used' }),
-      verb('harness claude-code settings add', { summary: 'add a settings item' }),
+      verb('harness claude-code settings ls', {
+        summary: 'the Claude Code settings items on this machine',
+        options: ITEM_READ_OPTIONS,
+      }),
+      verb('harness claude-code settings show', {
+        summary: 'one settings item and where it is used',
+        options: ITEM_READ_OPTIONS,
+      }),
+      verb('harness claude-code settings add', {
+        summary: 'add a settings item',
+        options: [...ITEM_FILE_OPTIONS, ...ITEM_WRITE_OPTIONS],
+      }),
       verb('harness claude-code settings edit', {
         summary: 'change a settings item; every runtime that uses it changes too',
+        options: [...ITEM_FILE_OPTIONS, ...ITEM_WRITE_OPTIONS],
       }),
-      verb('harness claude-code settings rm', { summary: 'remove a settings item' }),
-      verb('harness claude-code hooks ls', { summary: 'the Claude Code hooks items on this machine' }),
-      verb('harness claude-code hooks show', { summary: 'one hooks item and where it is used' }),
-      verb('harness claude-code hooks add', { summary: 'add a hooks item' }),
+      verb('harness claude-code settings rm', { summary: 'remove a settings item', options: ITEM_REMOVE_OPTIONS }),
+      verb('harness claude-code hooks ls', {
+        summary: 'the Claude Code hooks items on this machine',
+        options: ITEM_READ_OPTIONS,
+      }),
+      verb('harness claude-code hooks show', {
+        summary: 'one hooks item and where it is used',
+        options: ITEM_READ_OPTIONS,
+      }),
+      verb('harness claude-code hooks add', {
+        summary: 'add a hooks item',
+        options: [...ITEM_FILE_OPTIONS, ...ITEM_WRITE_OPTIONS],
+      }),
       verb('harness claude-code hooks edit', {
         summary: 'change a hooks item; every runtime that uses it changes too',
+        options: [...ITEM_FILE_OPTIONS, ...ITEM_WRITE_OPTIONS],
       }),
-      verb('harness claude-code hooks rm', { summary: 'remove a hooks item' }),
+      verb('harness claude-code hooks rm', { summary: 'remove a hooks item', options: ITEM_REMOVE_OPTIONS }),
     ],
     app: [
       appAction('permission.answer', {

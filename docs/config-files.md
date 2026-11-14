@@ -255,13 +255,14 @@ package's Document API: only the keys whose value changes are rewritten, a remov
 edited item by item, and the owner's comments and key order survive. A default the file leaves out stays
 left out.
 
-| Editor                           | How                                                                                   |
-| -------------------------------- | ------------------------------------------------------------------------------------- |
-| Any text editor                  | edit, then `fy config check`                                                          |
-| A script                         | `fy config show <file>` for the etag, then `fy config write <file> --if-match <etag>` |
-| The app                          | Settings › a machine › **Files**: status, issues, Open file path, **Edit as YAML**    |
-| `fy component\|profile\|login …` | reviewed fleet changes, written into the files                                        |
-| An agent                         | the `config_read`, `config_validate` and `config_write` Ferretry tools                |
+| Editor                          | How                                                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Any text editor                 | edit, then `fy config check`                                                                                  |
+| A script                        | `fy config show <file>` for the etag, then `fy config write <file> --if-match <etag>`                         |
+| The app                         | Settings › a machine › **Files**: status, issues, Open file path, **Edit as YAML**                            |
+| `fy profile\|login …`           | reviewed fleet changes, written into the files                                                                |
+| `fy mcp\|skill\|instruction\|…` | one component of its kind: edits only its own file, against the etag it read (`fy components` lists them all) |
+| An agent                        | the `config_read`, `config_validate` and `config_write` Ferretry tools                                        |
 
 ## Routes
 

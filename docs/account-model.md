@@ -83,17 +83,17 @@ Machine. The link is `#machines/<name>/<tab>`.
 
 **Terminal** (`fy`; the name is derived from `packages/cli/package.json`):
 
-| Verb                                                                                                                                                                       | Does                                                                       |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `fy daemon setup` / `fy daemon import claude\|codex [--name <runtime>]`                                                                                                    | the first run and "import again", asked; or one tool, unasked              |
-| `fy machine` / `fy machine set agent-permissions auto\|skip` / `fy machine install <tool>`                                                                                 | facts, Agent permissions, installing Claude Code or Codex                  |
-| `fy machine export` / `fy machine clone <file> [--dry-run] [--replace\|--alongside] [--theirs\|--mine\|--remove\|--skip <item...>]` / `fy machine clone --forget <source>` | copy a setup to another machine (a sign-in is never copied: an empty slot) |
-| `fy runtimes` / `fy runtime add\|show\|set\|rename\|disable\|enable\|rm`                                                                                                   | runtimes                                                                   |
-| `fy credentials` / `fy credential add\|check\|signin\|signout\|label\|disable\|enable\|rm`                                                                                 | logins, their status and usage (`fy logins` / `fy login …` too)            |
-| `fy profiles` / `fy profile ls\|show\|build\|edit\|rm`                                                                                                                     | profiles, each with its scope                                              |
-| `fy components [kind]` / `fy component show\|add\|edit\|rm <kind>/<name>`                                                                                                  | components                                                                 |
-| `fy start --agent <runtime>`                                                                                                                                               | launch an agent runtime                                                    |
-| `fy fleet recommend <task…>`                                                                                                                                               | which agent suits a piece of work (the only `fleet` verb)                  |
+| Verb                                                                                                                                                                        | Does                                                                       |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `fy daemon setup` / `fy daemon import claude\|codex [--name <runtime>]`                                                                                                     | the first run and "import again", asked; or one tool, unasked              |
+| `fy machine` / `fy machine set agent-permissions auto\|skip` / `fy machine install <tool>`                                                                                  | facts, Agent permissions, installing Claude Code or Codex                  |
+| `fy machine export` / `fy machine clone <file> [--dry-run] [--replace\|--alongside] [--theirs\|--mine\|--remove\|--skip <item...>]` / `fy machine clone --forget <source>`  | copy a setup to another machine (a sign-in is never copied: an empty slot) |
+| `fy runtimes` / `fy runtime add\|show\|set\|rename\|disable\|enable\|rm`                                                                                                    | runtimes                                                                   |
+| `fy credentials` / `fy credential add\|check\|signin\|signout\|label\|disable\|enable\|rm`                                                                                  | logins, their status and usage (`fy logins` / `fy login …` too)            |
+| `fy profiles` / `fy profile ls\|show\|build\|edit\|rm`                                                                                                                      | profiles, each with its scope                                              |
+| `fy components [kind]` / `fy mcp\|skill\|instruction\|model-set show\|add\|edit\|rm <name>`, `fy harness claude-code\|codex settings\|hooks ls\|show\|add\|edit\|rm <name>` | components                                                                 |
+| `fy start --agent <runtime>`                                                                                                                                                | launch an agent runtime                                                    |
+| `fy fleet recommend <task…>`                                                                                                                                                | which agent suits a piece of work (the only `fleet` verb)                  |
 
 ## Renaming and removing a runtime
 

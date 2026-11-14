@@ -1,4 +1,14 @@
-import { definePlugin, panel, renderer, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import {
+  definePlugin,
+  ITEM_READ_OPTIONS,
+  ITEM_REMOVE_OPTIONS,
+  ITEM_WRITE_OPTIONS,
+  panel,
+  renderer,
+  route,
+  settingsTab,
+  verb,
+} from '@ferretry/kernel/manifest';
 import { cap } from '@ferretry/core-gate/contract';
 import { FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
@@ -75,11 +85,32 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('skill ls', { summary: 'the skills a ferret or this machine has' }),
-      verb('skill show', { summary: 'one skill item and where it is used' }),
-      verb('skill add', { summary: 'add a skills item' }),
-      verb('skill edit', { summary: 'change a skills item; every profile and runtime that uses it changes too' }),
-      verb('skill rm', { summary: 'remove a skills item' }),
+      verb('skill ls', {
+        summary: 'the skills a ferret or this machine has',
+        options: [
+          { flag: '--session <id>', help: 'the ferret to read (inside a ferret, that one is the default)' },
+          { flag: '--machine', help: 'every runtime home and project on this machine, even inside a ferret' },
+          { flag: '--json', help: 'print JSON instead of words' },
+        ],
+      }),
+      verb('skill show', { summary: 'one skill item and where it is used', options: ITEM_READ_OPTIONS }),
+      verb('skill add', {
+        summary: 'add a skills item',
+        options: [
+          { flag: '--item <skill>', help: 'one skill of the skills store; repeat the flag' },
+          { flag: '--harness <tool>', help: 'claude or codex: the one tool it is for' },
+          ...ITEM_WRITE_OPTIONS,
+        ],
+      }),
+      verb('skill edit', {
+        summary: 'change a skills item; every profile and runtime that uses it changes too',
+        options: [
+          { flag: '--item <skill>', help: 'one skill of the skills store; repeat the flag (replaces the list)' },
+          { flag: '--harness <tool>', help: 'claude or codex: the one tool it is for' },
+          ...ITEM_WRITE_OPTIONS,
+        ],
+      }),
+      verb('skill rm', { summary: 'remove a skills item', options: ITEM_REMOVE_OPTIONS }),
     ],
   },
 

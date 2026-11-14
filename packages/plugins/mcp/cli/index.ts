@@ -1,6 +1,7 @@
-import { implementCli, type VerbHandler, type VerbInvocation } from '@ferretry/kernel/manifest';
+import { ConfigItems, implementCli, itemVerb, type VerbInvocation } from '@ferretry/kernel/manifest';
 import { TOOLS_SERVER_INSTRUCTIONS } from '@ferretry/plugin-runtimes/contract';
 import manifest from '../manifest.ts';
+import { mcpItemKind } from './lib/items.ts';
 import { serveTools } from './serve.ts';
 import { clientServersGateway, McpServersController } from './lib/servers.ts';
 
@@ -15,22 +16,17 @@ const text = (invocation: VerbInvocation, name: string): string | undefined => {
   return Array.isArray(value) ? (value[value.length - 1] as string | undefined) : undefined;
 };
 
-/**
- * The item verbs edit MCP server items, and the item service that serves them has no route in this build. Said plainly
- * rather than pretended (the claude-code `itemVerb` pattern).
- */
-const itemVerb =
-  (io: { err(text: string): void }): VerbHandler =>
-  async () => {
-    io.err(
-      'MCP server items are edited through the item service, which is not served by this daemon yet; nothing was changed.\n',
-    );
-    return 69;
-  };
+/** The binary's name every hint names (`CliContext` does not carry it; single-sourced in `packages/cli/package.json`). */
+const BINARY_NAME = 'fy';
 
 export default implementCli(manifest, {
-  build: ({ client, io, stdin, env }) => {
+  build: ({ client, io, stdin, env, confirm }) => {
     const servers = new McpServersController(clientServersGateway(client), io, env?.FY_SESSION_ID);
+    const items = new ConfigItems(
+      { client, io, binary: BINARY_NAME, ...(confirm === undefined ? {} : { confirm }) },
+      mcpItemKind,
+    );
+    const item = (body: () => Promise<number>): Promise<number> => itemVerb({ io }, body);
     return {
       verbs: {
         'mcp serve': async () =>
@@ -60,10 +56,11 @@ export default implementCli(manifest, {
             json: on(invocation, 'json'),
           });
         },
-        'mcp add': itemVerb(io),
-        'mcp show': itemVerb(io),
-        'mcp edit': itemVerb(io),
-        'mcp rm': itemVerb(io),
+        'mcp add': async invocation => await item(() => items.add(invocation)),
+        'mcp show': async invocation =>
+          await item(() => items.show(invocation.args[0], { json: on(invocation, 'json') })),
+        'mcp edit': async invocation => await item(() => items.edit(invocation)),
+        'mcp rm': async invocation => await item(() => items.remove(invocation)),
       },
     };
   },

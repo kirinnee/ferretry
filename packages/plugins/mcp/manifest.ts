@@ -1,4 +1,13 @@
-import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import {
+  definePlugin,
+  ITEM_READ_OPTIONS,
+  ITEM_REMOVE_OPTIONS,
+  ITEM_WRITE_OPTIONS,
+  panel,
+  route,
+  settingsTab,
+  verb,
+} from '@ferretry/kernel/manifest';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import { ACTIONS_ROW_SLOT, FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
@@ -177,10 +186,33 @@ export default definePlugin({
       }),
       verb('mcp ls', { summary: 'list the MCP servers a ferret sees, by scope, with approval and sign-in' }),
       verb('mcp check', { summary: 'connect to one MCP server and list its tools, by name or id' }),
-      verb('mcp add', { summary: 'add an MCP server item' }),
-      verb('mcp show', { summary: 'one MCP server item and where it is used' }),
-      verb('mcp edit', { summary: 'change an MCP server item; every profile and runtime that uses it changes too' }),
-      verb('mcp rm', { summary: 'remove an MCP server item' }),
+      verb('mcp add', {
+        summary: 'add an MCP server item',
+        options: [
+          { flag: '--command <command>', help: 'the program to start' },
+          { flag: '--arg <arg>', help: 'one argument for it; repeat the flag' },
+          { flag: '--url <url>', help: 'a server to reach, instead of a command' },
+          {
+            flag: '--env <NAME=value>',
+            help: 'one environment variable (a secret is ${secret:NAME}); repeat the flag',
+          },
+          { flag: '--harness <tool>', help: 'claude or codex: the one tool it is for' },
+          ...ITEM_WRITE_OPTIONS,
+        ],
+      }),
+      verb('mcp show', { summary: 'one MCP server item and where it is used', options: ITEM_READ_OPTIONS }),
+      verb('mcp edit', {
+        summary: 'change an MCP server item; every profile and runtime that uses it changes too',
+        options: [
+          { flag: '--command <command>', help: 'the program to start' },
+          { flag: '--arg <arg>', help: 'one argument for it; repeat the flag (replaces the arguments)' },
+          { flag: '--url <url>', help: 'a server to reach, instead of a command' },
+          { flag: '--env <NAME=value>', help: 'one environment variable, added or changed; repeat the flag' },
+          { flag: '--harness <tool>', help: 'claude or codex: the one tool it is for' },
+          ...ITEM_WRITE_OPTIONS,
+        ],
+      }),
+      verb('mcp rm', { summary: 'remove an MCP server item', options: ITEM_REMOVE_OPTIONS }),
     ],
   },
 

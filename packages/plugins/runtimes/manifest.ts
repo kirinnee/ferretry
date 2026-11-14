@@ -1,4 +1,15 @@
-import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import {
+  appAction,
+  definePlugin,
+  ITEM_READ_OPTIONS,
+  ITEM_REMOVE_OPTIONS,
+  ITEM_WRITE_OPTIONS,
+  panel,
+  route,
+  settingsTab,
+  verb,
+  type VerbOptionDecl,
+} from '@ferretry/kernel/manifest';
 import { LoginChanged, LoginChangesPort, LoginsPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
 import { LoginPaused, LoginResumed, UsagePort } from '@ferretry/plugin-usage/contract';
 import {
@@ -32,6 +43,14 @@ import {
   RuntimesLaunchFailed,
   RuntimesPort,
 } from './contract/index.ts';
+
+/** The flags of an instructions item: its text, from words or a file, and who it is for. */
+const INSTRUCTION_OPTIONS: readonly VerbOptionDecl[] = [
+  { flag: '--file <path>', help: 'the text, from a local file (- reads standard input)' },
+  { flag: '--text <words>', help: 'the text, as given' },
+  { flag: '--description <text>', help: 'one line about what it is for' },
+  { flag: '--harness <tool>', help: 'claude or codex: the one tool it is for' },
+];
 
 /**
  * Runtimes (§2.3): named ways to start a ferret (a login plus a profile), profiles, model sets, the first-run scan and
@@ -188,6 +207,21 @@ export default definePlugin({
       }),
     ],
     cli: [
+      verb('components', {
+        summary: 'the components on this machine: instructions, MCP, skills, settings, hooks and model sets',
+        options: ITEM_READ_OPTIONS,
+      }),
+      verb('instruction ls', { summary: 'the instructions items on this machine', options: ITEM_READ_OPTIONS }),
+      verb('instruction show', { summary: 'one instructions item and where it is used', options: ITEM_READ_OPTIONS }),
+      verb('instruction add', {
+        summary: 'add an instructions item',
+        options: [...INSTRUCTION_OPTIONS, ...ITEM_WRITE_OPTIONS],
+      }),
+      verb('instruction edit', {
+        summary: 'change an instructions item; every profile and runtime that uses it changes too',
+        options: [...INSTRUCTION_OPTIONS, ...ITEM_WRITE_OPTIONS],
+      }),
+      verb('instruction rm', { summary: 'remove an instructions item', options: ITEM_REMOVE_OPTIONS }),
       verb('runtimes', { summary: 'the runtimes on this machine: a sign-in plus a profile' }),
       verb('runtime ls', { summary: 'the runtimes on this machine: a sign-in plus a profile' }),
       verb('runtime add', {

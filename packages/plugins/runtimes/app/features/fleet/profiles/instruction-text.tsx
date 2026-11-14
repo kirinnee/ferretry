@@ -5,7 +5,7 @@
  * nowhere an owner could read it — v4's component form showed it as the component's `body`. The catalogue already
  * carries the text (`ComponentView.content`, with any secret-looking value cut out by the daemon), so this draws it;
  * it adds no route and no write. Changing the text stays where it already is: a change the daemon previews and applies
- * behind the passkey step-up (`fy component edit instructions/<name>`, or the file itself).
+ * behind the passkey step-up (`fy instruction edit <name>`, or the file itself).
  *
  * A profile also reaches instructions through the profiles it contains. THE ORDER IS THE RESOLVER'S, NOT A SECOND
  * ONE: the items come out of `expandStack` — the very function the daemon flattens a profile with — so a base is
@@ -96,8 +96,8 @@ export function InstructionTexts({
     <Section title="Instructions text" spot="instruction-text">
       <Hint>
         What a ferret on this profile is told, read only, in the order it reads them. To change it, edit the
-        instructions item (<code className="whitespace-nowrap font-mono">fy component edit instructions/‹name›</code>);
-        the change is previewed first, behind the same step-up as every other change.
+        instructions item (<code className="whitespace-nowrap font-mono">fy instruction edit ‹name›</code>); the change
+        is previewed first, behind the same step-up as every other change.
       </Hint>
       {held === undefined ? (
         <Hint>
