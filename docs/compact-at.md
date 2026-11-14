@@ -11,7 +11,7 @@ The value is `auto` (the harness's own trigger — the default, no change in beh
 
 | Where                                  | How                                                                                                    |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| One ferret, at start                   | `fy start --compact-at 250k …`, `fy new --compact-at 250k …`, or `compactAt` on `POST /v1/sessions`    |
+| One ferret, at start                   | `fy start --compact-at 250k …`, `fy new --compact-at 250k …`, or `compactAt` on `POST /v1/ferrets`     |
 | One ferret, later                      | `fy session compact-at <session> 250k` (`auto` for the harness's own, `inherit` to drop it)            |
 | One ferret, in the app                 | Actions › **Compact memory at**: Auto, 200k, 250k, 400k or a custom size                               |
 | Every ferret on a runtime or a profile | `compactAt:` in `runtimes/<name>.yaml` or `profiles/<name>.yaml` ([config-files.md](config-files.md))  |

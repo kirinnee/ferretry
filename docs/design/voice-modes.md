@@ -177,7 +177,7 @@ browser                                  daemon (voice stream)                  
 - **Kept words are narrow.** Words from a cancelled send are kept only for the **same device and the
   same ferret**, for **10 minutes**, and offered again — never sent — when that device reopens.
 - **The send is an ordinary send**: the same send service, ledger, audit and delivery path as
-  `POST /v1/sessions/:sessionId/send`, as the device that opened the stream, with `origin: 'voice-chat'`
+  `POST /v1/ferrets/:ferretId/send`, as the device that opened the stream, with `origin: 'voice-chat'`
   and a **stable send id** (`<streamId>:<turnId>`), so a lost acknowledgement or a retry can never
   deliver twice. At the moment of sending the daemon re-checks that the device is still paired and holds
   `voice.use`.
@@ -463,7 +463,7 @@ Added to `docs/relay-protocol.md` §10 by slice B3:
   being a grant caller; `caller: 'person'` refuses it `403 owner_only`. B1 tests the session and warden
   refusals. A `configure` act needs a passkey step-up from a governed device, as every `configure`
   demand does (`demandNeedsStepUp`).
-- **The voice-chat send is not a new power.** Today's `POST /v1/sessions/:sessionId/send` is
+- **The voice-chat send is not a new power.** Today's `POST /v1/ferrets/:ferretId/send` is
   `operator`, `caller: 'any'`, no capability. The daemon-side send goes through the same send service,
   as the device that opened the stream, re-checking at that moment that the device is still paired and
   holds `voice.use` (§1.5).

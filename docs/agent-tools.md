@@ -593,7 +593,7 @@ its own).
   A person's own agent-tool routes (`/v1/ferrets/:ferretId/surfaces/*`) are person routes too: an agent uses
   `POST /v1/agent/tools`.
 - **Every session a ferret starts is its own child.** On its own credential or the admin token naming its session, `POST /v1/ferrets` (`fy start`,
-  interactive included) and `POST /v1/pack/new` (`fy new`) take the parent from the credential: a body `parent`
+  interactive included, and `fy new`) takes the parent from the credential: a body `parent`
   naming another session is `403 parent_mismatch`, and an absent one is filled in. So a ferret can never start a
   top-level session, and its sub-ferret limits and depth (and, for `fy new`, the Pack switch) always apply to
   what it starts ([pack-mode.md](pack-mode.md#limits)). A ferret may not give its start the Warden's own label
@@ -696,7 +696,7 @@ session's files, a Warden session's included. A daemon that cannot resolve its s
 
 ### Starting a session
 
-A ferret's `POST /v1/ferrets` and `fy new --cwd` (`POST /v1/pack/new`) are refused `403 state_home` when the
+A ferret's `POST /v1/ferrets` and `fy new --cwd` (the same route) are refused `403 state_home` when the
 working folder is inside the home, named there or reached through a link — a session's folder is what its agent
 reads freely, so a child started in `~/.ferretry` would hold the tokens. This is asked before the terminal gate,
 which a caller on loopback skips, and asked AGAIN of the canonical folder the start records and spawns in — by

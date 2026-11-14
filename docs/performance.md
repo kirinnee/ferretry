@@ -23,7 +23,7 @@ Every number covers only the window it measured.
 - **Child processes** per minute, by program and subcommand (`tmux capture-pane`, `ps`).
 - **Timers and background work** (the turn watcher, the declared-wait watcher, analytics, …): how often
   each ran and how long it took.
-- **Routes**, by pattern (`GET /v1/sessions/:id`): count, latency, errors and bytes.
+- **Routes**, by pattern (`GET /v1/ferrets/:id`): count, latency, errors and bytes.
 - **File operations** through the daemon's state-home port, by path shape.
 - **Workers**: how many requests each worker thread held.
 - **System calls** (with `--trace-syscalls`): `strace` on Linux or `sudo fs_usage` on macOS, by call and
@@ -131,7 +131,7 @@ can take seconds. The daemon keeps that wait off its main thread, so it stays re
 - **Screenshots in a transcript** are not read into memory. A pasted image is one record of several
   megabytes, nearly all of it base64. The daemon remembers where those bytes are in the file instead of
   loading them; nothing it shows today displays them.
-  Asking for one (`GET /v1/sessions/:id/transcript-images/:handle`) reads only that record, proves it
+  Asking for one (`GET /v1/ferrets/:id/transcript-images/:handle`) reads only that record, proves it
   is a PNG, JPEG, GIF or WebP from its first bytes, and checks the base64 in slices that hand the event
   loop back between them. It remembers the proof (where the bytes are, never the bytes) for the last
   128 handles, and proves at most two at a time. Measured on a 100 MB transcript holding a 2.75 MB
@@ -175,7 +175,7 @@ is reduced to its shape:
 - a file: `~/.ferretry/state/sessions/<session>/state.json`, or `~/…/.mcp.json` for a file in one of your
   own folders;
 - a program: `tmux capture-pane`;
-- a route: `GET /v1/sessions/:id`;
+- a route: `GET /v1/ferrets/:id`;
 - a stack: function names and the workspace-relative file they are in.
 
 You can read the whole report before you send it.

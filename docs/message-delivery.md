@@ -56,7 +56,7 @@ this page, which is still how a message reaches the pane.
   tracker (`QueueTransport.recheck` → `SendTracker.check`), at most once per `recheckMs` per session, so a
   hand-over nothing else is watching cannot hold the queue ([below](#b153-a-send-that-gave-up-before-its-first-key)).
 - **Switch** — `"delivery": { "queue": false }` in `config/daemon.json` turns it off (on by default; read at
-  start). On, `POST /v1/sessions/:sessionId/send` ENQUEUES. The refusals only a person can lift (an open
+  start). On, `POST /v1/ferrets/:ferretId/send` ENQUEUES. The refusals only a person can lift (an open
   structured question, a quarantined harness, an unconfirmed kill) are said first, exactly as the direct
   path says them, and nothing is queued. The person's agenda context and the attachment paths are baked
   into the text, and nothing else is: no board news rides on it, on top or as a message of its own. The route then waits, up to
@@ -178,8 +178,8 @@ this page, which is still how a message reaches the pane.
   or delivered. A message that needs the person (failed, refused, unconfirmed, typed but not sent) is not
   waiting and stays in the chat.
 
-- **Read it** — `GET /v1/sessions/:sessionId/queue` (operator), `fy queue <ferret> [--json]`.
-- **Edit or cancel** — only while `queued`: `PATCH /v1/sessions/:sessionId/queue/:messageId` `{ "text" }` and
+- **Read it** — `GET /v1/ferrets/:ferretId/queue` (operator), `fy queue <ferret> [--json]`.
+- **Edit or cancel** — only while `queued`: `PATCH /v1/ferrets/:ferretId/queue/:messageId` `{ "text" }` and
   `DELETE …/queue/:messageId` (operator, audited as `agent.prompted` without the text), `fy queue edit
 <ferret> <id> <text…>` and `fy queue cancel <ferret> <id>`. Once a key has gone to the pane the words are
   the agent's, and either answers `409`.
@@ -662,7 +662,7 @@ turn bookkeeping) is started then, so the next send does not claim the same turn
 **Anything else is the person's, and is refused.** The send answers `409 composer_occupied` with the
 draft quoted in the message ("Press Enter on it or clear it first") and the whole draft in the body's
 `draft` field. The app shows that as a notice under its composer with **Send it** and **Clear it**; each
-calls `POST /v1/sessions/:id/composer` with `{ action: 'submit' | 'clear', draft }`, which acts only while
+calls `POST /v1/ferrets/:ferretId/composer` with `{ action: 'submit' | 'clear', draft }`, which acts only while
 the composer still holds exactly that draft (`changed` otherwise), and the app then re-sends the person's
 own message. The terminal makes the same occupied check again immediately before its first keystroke; a
 refusal there withdraws the just-accepted record, which is honest because nothing was typed.
@@ -985,7 +985,7 @@ acceptance order, written after the first was accepted.
 
 ### A row only moves when the ledger is read
 
-The app learns a fate from one thing: a successful `GET /v1/sessions/:id/sends`, polled every 3 s. So
+The app learns a fate from one thing: a successful `GET /v1/ferrets/:ferretId/sends`, polled every 3 s. So
 everything between the person and that answer must end, and must say so when it fails:
 
 - **The page is read by the app, not by the typed client.** `IFyApiClient.sends` validates the page
@@ -1013,7 +1013,7 @@ everything between the person and that answer must end, and must say so when it 
 
 Every undelivered row (sending, queued, typed-not-sent, unconfirmed, not delivered) offers:
 
-- **Cancel** — `POST /v1/sessions/:id/sends/:sendId/cancel`. The record becomes `cancelled` and is never
+- **Cancel** — `POST /v1/ferrets/:ferretId/sends/:sendId/cancel`. The record becomes `cancelled` and is never
   retyped or settled again. If the composer holds exactly that message it is erased with `C-u`, one key
   per verified read (two per line; `BSpace` is never sent, because after a join it deletes a real
   character); if the composer holds anything else as well, it is left alone (`left_in_composer`). A
@@ -1040,7 +1040,7 @@ are governed exactly as the send and its retry are. Each is journalled (`control
 text.
 
 When a send is refused because the composer holds the person's OWN text, the notice under the app's
-composer offers **Send it** and **Clear it** — `POST /v1/sessions/:id/composer` with the quoted draft.
+composer offers **Send it** and **Clear it** — `POST /v1/ferrets/:ferretId/composer` with the quoted draft.
 That route is not a send: no ledger row is behind it and the text is not Ferretry's, so it is governed
 as every other key into the agent's pane is, `terminal` / `use` ([grants.md](grants.md)), journalled
 `control.composer_submitted` / `control.composer_cleared` with the outcome only, and audited as

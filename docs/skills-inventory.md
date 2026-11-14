@@ -5,13 +5,13 @@ One answer to "which skills exist here, and which one does this ferret see?" —
 
 ## Routes
 
-| Route                                          | Governance                   | Answers                                                             |
-| ---------------------------------------------- | ---------------------------- | ------------------------------------------------------------------- |
-| `GET /v1/skills`                               | operator, `fleet` / use      | every runtime home and every registered project                     |
-| `GET /v1/sessions/:sessionId/skills/inventory` | operator (as `/skills`)      | exactly what that ferret sees                                       |
-| `GET /v1/skills/file?path=…[&sessionId=…]`     | operator, `filesystem` / use | the SKILL.md text, for a path an inventory lists — exact match only |
+| Route                                        | Governance                   | Answers                                                             |
+| -------------------------------------------- | ---------------------------- | ------------------------------------------------------------------- |
+| `GET /v1/skills`                             | operator, `fleet` / use      | every runtime home and every registered project                     |
+| `GET /v1/ferrets/:ferretId/skills/inventory` | operator (as `/skills`)      | exactly what that ferret sees                                       |
+| `GET /v1/skills/file?path=…[&sessionId=…]`   | operator, `filesystem` / use | the SKILL.md text, for a path an inventory lists — exact match only |
 
-`GET /v1/sessions/:sessionId/skills` (the composer's autocomplete list) is unchanged in shape. The Open route is
+`GET /v1/ferrets/:ferretId/skills` (the composer's autocomplete list) is unchanged in shape. The Open route is
 the **one exception** to "the daemon never returns SKILL.md contents": the file is the person's own, the path must
 be one the inventory itself lists (a path that merely resolves to a listed one is refused), and the body is capped
 at 256 KiB. `sessionId` widens the check to that session's listing, because a ferret's working directory need not be
