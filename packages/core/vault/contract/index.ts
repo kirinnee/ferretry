@@ -51,6 +51,7 @@ export * from './config.ts';
 export { envEntryRefused, firstRefusedWord, refusedLine } from './lib/command-line.ts';
 export * from './inputs.ts';
 export * from './masks.ts';
+export * from './profile-secrets.ts';
 export * from './phone.ts';
 export * from './port.ts';
 export * from './sealed.ts';

@@ -286,6 +286,9 @@ export default definePlugin({
     // The programs of the owner's own configured servers, and the one a check is starting (`mcp-commands`,
     // `daemon/lib/allowed-commands.ts`): data, never a wildcard.
     spawn: [{ resolver: 'mcp-commands' }],
+    // A check starts a command for a runtime: the secrets that runtime's profile references may go into that one child
+    // (`VaultApi.childEnvironmentForRuntime`), and nothing else beyond this plugin's own server entries.
+    profileSecrets: true,
     secrets: [],
     // The OAuth access tokens a sign-in files in the Vault (`mcpOAuthSecretNames`): today's exact names, and no others.
     mintedSecrets: [SIGN_IN_SECRET_NAME],

@@ -236,9 +236,13 @@ export default implementDaemon(manifest, {
       // The kernel's spawn already hands every child its own `PATH` and `HOME`; this is only what `${VAR}` in a command may
       // fill from. `kernel.hostFacts` is not declared by MCP, so `PATH` is not read here.
       baseEnvironment: () => mcpCheckBaseEnvironment({ HOME: kernel.paths.home() }),
-      sealEnvironment: async env => {
-        // The Vault ignores the ferret for a handle; a check has none, so it is minted under the plugin's own name.
-        const sealed = await vault.childEnvironment('mcp-check' as FerretId, env);
+      sealEnvironment: async (env, runtime) => {
+        // For the runtime being checked the Vault also allows the secrets its profile references (Runtimes answers which);
+        // otherwise only this plugin's own server entries' secrets. The Vault ignores the ferret for a handle.
+        const sealed =
+          runtime !== undefined && vault.childEnvironmentForRuntime !== undefined
+            ? await vault.childEnvironmentForRuntime(runtime, env)
+            : await vault.childEnvironment('mcp-check' as FerretId, env);
         return sealed.ok ? { ok: true, env: sealed.value } : { ok: false, unknown: sealed.error.unknown };
       },
       bearer: async () => undefined,

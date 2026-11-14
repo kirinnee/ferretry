@@ -99,6 +99,7 @@ export interface McpCheckDeps {
   allowCommand?(command: string): () => void;
   sealEnvironment?(
     env: Readonly<Record<string, string>>,
+    runtime: string | undefined,
   ): Promise<
     { readonly ok: true; readonly env: ChildEnvironment } | { readonly ok: false; readonly unknown: readonly string[] }
   >;
@@ -190,14 +191,17 @@ export class McpCheckService {
    * The command's environment, with every `${secret:NAME}` resolved for that one child by the Vault and never seen here
    * (use, never read). Plain values go as they are. A secret the Vault does not hold refuses the check, by NAME.
    */
-  async #sealed(env: Readonly<Record<string, string>>): Promise<Readonly<Record<string, string>> | ChildEnvironment> {
+  async #sealed(
+    env: Readonly<Record<string, string>>,
+    runtime: string | undefined,
+  ): Promise<Readonly<Record<string, string>> | ChildEnvironment> {
     const named = Object.values(env).flatMap(value => secretReferencesIn(value));
     if (named.length === 0) return env;
     if (this.deps.sealEnvironment === undefined)
       throw new SecretsNotAvailable(
         `This server's environment names a secret (${[...new Set(named)].sort().join(', ')}), and a check cannot open secrets on this machine.`,
       );
-    const sealed = await this.deps.sealEnvironment(env);
+    const sealed = await this.deps.sealEnvironment(env, runtime);
     if (!sealed.ok)
       throw new SecretsNotAvailable(
         `Not stored on this machine (or not one this server may use), so the command was not started: ${[...sealed.unknown].sort().join(', ')}. Store each with fy secret set NAME.`,
@@ -223,7 +227,7 @@ export class McpCheckService {
         transport: 'stdio',
         command: expandVariables(declaration.command, environment, missing),
         args: declaration.args.map(argument => expandVariables(argument, environment, missing)),
-        env: await this.#sealed(full),
+        env: await this.#sealed(full, runtime),
         ...(server.cwd === undefined ? {} : { cwd: server.cwd }),
       };
     }

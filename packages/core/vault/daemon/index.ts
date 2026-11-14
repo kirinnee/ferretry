@@ -11,6 +11,7 @@ import {
   OutboundHttpRequestSchema,
   HoldsChanged,
   RedactionSources,
+  ProfileSecrets,
   SecretsChanged,
   type SecretName,
   SecretUseRequestSchema,
@@ -280,6 +281,17 @@ export default implementDaemon(manifest, {
      * name ({@link mayUseSecret}), a program its manifest's `spawn` names. A request outside is refused the way
      * today's Vault refuses a host, secret or program it does not allow.
      */
+    /** The names a runtime's profile references, from Runtimes (the hook's one provider); none when it is off or fails. */
+    const profileReferences = async (runtime: string): Promise<ReadonlySet<string>> => {
+      try {
+        if (ctx.hooks.declaredProvider(ProfileSecrets, 'profiles') === undefined) return new Set();
+        const provider = ctx.hooks.provider(ProfileSecrets, 'profiles');
+        return provider === 'unavailable' ? new Set() : new Set(await provider.references(runtime));
+      } catch {
+        return new Set();
+      }
+    };
+
     const apiFor = (needer: Needer): VaultApi => {
       // Every needer's handles name it as their requester (`searchPathOf`), the core ones included.
       const ownChildEnvironment: VaultApi['childEnvironment'] = async (_ferret, env) =>
@@ -354,6 +366,21 @@ export default implementDaemon(manifest, {
           if (refused.length > 0) return err({ unknown: refused });
           return await ownChildEnvironment(ferret, env);
         },
+        ...(needer.permissions.profileSecrets === true
+          ? {
+              // One command for one runtime: what the needer may use, plus the names that runtime's profile references,
+              // asked of Runtimes AFRESH for this call and kept by nothing. No value is returned; the kernel opens the handle.
+              childEnvironmentForRuntime: async (runtime, asked) => {
+                const env = SecretUseRequestSchema.shape.env.parse({ ...asked });
+                const granted = await profileReferences(runtime);
+                const refused = secretsNamedBy({ secrets: [], env }).filter(
+                  name => !mayUseSecret(needer, name) && !granted.has(name),
+                );
+                if (refused.length > 0) return err({ unknown: refused });
+                return await ownChildEnvironment('runtime-check' as FerretId, env);
+              },
+            }
+          : {}),
       };
     };
 

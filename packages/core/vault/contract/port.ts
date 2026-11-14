@@ -83,6 +83,15 @@ export interface VaultApi {
     ferret: FerretId,
     env: Readonly<Record<string, string>>,
   ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>>;
+  /**
+   * {@link childEnvironment} for ONE command started for `runtime`: besides what the caller may use, the secrets that
+   * runtime's profile references (`ProfileSecrets`, Runtimes' answer) are allowed, for this call only; nothing is kept,
+   * so the next call is asked afresh. Present only for a plugin whose manifest declares `permissions.profileSecrets`.
+   */
+  childEnvironmentForRuntime?(
+    runtime: string,
+    env: Readonly<Record<string, string>>,
+  ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>>;
   /** Input requests: a ferret raises one, the owner answers on its card. */
   raiseInput(ferret: FerretId, raise: InputRaise): Promise<Result<InputRequestId, string>>;
   cancelInput(ferret: FerretId, id: InputRequestId): Promise<void>;
