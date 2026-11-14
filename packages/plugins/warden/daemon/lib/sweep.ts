@@ -945,7 +945,13 @@ export class WardenSweepService {
       ...(state.lastSpawnAt === undefined ? {} : { lastSpawnAt: state.lastSpawnAt }),
       // A report's head is the owner's: a ferret is never shown report text, so it is not even read for one.
       ...(scope === undefined ? await this.latestReportField() : {}),
-      failover: await this.failoverStatus(stored.config, resolved.accounts, state.failover ?? {}),
+      // A strike or a demotion is the record of some investigation's failure, whichever lineage it was: a scoped reader
+      // judges a login by its settings and the usage feed alone, so another lineage's failure cannot flip `eligible`.
+      failover: await this.failoverStatus(
+        stored.config,
+        resolved.accounts,
+        scope === undefined ? (state.failover ?? {}) : {},
+      ),
       login: resolved.login,
       triage: budget.status,
       spend: budget.spend,
