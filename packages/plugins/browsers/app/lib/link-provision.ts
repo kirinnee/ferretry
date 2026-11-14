@@ -26,9 +26,9 @@ type Activate = LinkProvision['activate'];
 /** How long the iOS hand-off has to take the reader to Safari before a plain new tab is opened instead. */
 export const SAFARI_HANDOFF_MS = 500;
 
-/** What a refused hand-off says: the link opened here instead, and why. */
+/** What a failed hand-off says: the link opened here instead. It names no cause, because any failure lands here. */
 export const COMPUTER_REFUSED_WORDS =
-  "That link could not open on this computer — this machine's daemon is not on it. It opened in this browser instead.";
+  'That link could not be opened on your computer, so it opened in this browser instead.';
 
 /** The browser, as a link needs it: a port, so a test proves the iOS hand-off without touching `window`. */
 export interface LinkOpener {

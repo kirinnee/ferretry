@@ -1,10 +1,11 @@
 /**
  * THE LINK SHEET, drawn once per machine by the frame (`ShellProvides.links` → `sheet`): the in-app preview a tap opens
- * while "Open links in" is the side panel, and the one polite line that says why a hand-off to this computer opened in
- * this browser instead. A tiny store carries both from the click handler, which is not React, to the sheet, which is.
+ * while "Open links in" is the side panel, and the one line that says why a hand-off to this computer opened in this
+ * browser instead — drawn where a sighted reader sees it, dismissible, and announced politely to a screen reader.
+ * A tiny store carries both from the click handler, which is not React, to the sheet, which is.
  */
 
-import type { ComponentType, ReactNode } from 'react';
+import type { ComponentType, CSSProperties, ReactNode } from 'react';
 import { useSyncExternalStore } from 'react';
 import type { BrowserDestination } from '../features/browser/in-app-browser-model.ts';
 
@@ -45,6 +46,21 @@ export class LinkSheetStore {
   }
 }
 
+/** Floats above the page, so it is seen wherever the tap happened and is not clipped by what the link sits in. */
+const NOTICE_STYLE: CSSProperties = {
+  position: 'fixed',
+  insetInline: 16,
+  bottom: 16,
+  zIndex: 60,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 12,
+  maxWidth: 560,
+  marginInline: 'auto',
+  padding: '10px 14px',
+};
+
 export interface LinkSheetHostProps {
   readonly store: LinkSheetStore;
   readonly Sheet: ComponentType<{ destination: BrowserDestination; open: boolean; onClose: () => void }>;
@@ -57,9 +73,21 @@ export function LinkSheetHost({ store, Sheet }: LinkSheetHostProps): ReactNode {
       {state.destination === null ? null : (
         <Sheet destination={state.destination} open={state.open} onClose={() => store.close()} />
       )}
-      <p aria-atomic="true" aria-live="polite" className="sr-only" data-link-notice="" role="status">
-        {state.notice}
-      </p>
+      <div aria-atomic="true" aria-live="polite" data-link-notice="" role="status">
+        {state.notice === '' ? null : (
+          <div className="kt-panel" data-link-notice-visible="" style={NOTICE_STYLE}>
+            <span>{state.notice}</span>
+            <button
+              className="kt-btn kt-btn--sm"
+              data-link-notice-dismiss=""
+              onClick={() => store.say('')}
+              type="button"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+      </div>
     </>
   );
 }
