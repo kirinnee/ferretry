@@ -429,7 +429,15 @@ export class ManagedWorktreeAdapter {
     let behind: number | undefined;
     let integrated: boolean | undefined;
     let ownershipMarkerMatches = false;
-    if ((await this.fileSystem.type(input.managed.path)) !== 'missing') {
+    // A record this daemon cannot even reach (a path outside every root it may open) is an inspection finding for
+    // THAT checkout, never a failure of the whole read: the list stays answerable and says why it could not look.
+    let present = false;
+    try {
+      present = (await this.fileSystem.type(input.managed.path)) !== 'missing';
+    } catch (error) {
+      gitErrors.push(`checkout path inspection failed: ${message(error)}`);
+    }
+    if (present) {
       try {
         resolvedPath = await this.fileSystem.realPath(input.managed.path);
       } catch (error) {
