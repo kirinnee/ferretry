@@ -486,9 +486,9 @@ export class FakeVault implements VaultApi {
     return this.terminalObserved;
   }
   /** The ferrets this fake holds an unanswered input card for (`inputOpen`'s yes or no). */
-  readonly openInputFerrets = new Set<string>();
+  readonly ferretsWithInputOpen = new Set<string>();
   inputOpen(ferret: FerretId): boolean {
-    return this.openInputFerrets.has(ferret);
+    return this.ferretsWithInputOpen.has(ferret);
   }
   tainted(ferret: FerretId, kind: 'browser' | 'terminal', since: number): boolean {
     this.taintedAsked.push({ ferret, kind, since });

@@ -705,7 +705,7 @@ describe('secure copy’s reach through the Vault is by name', () => {
     registry.retime('ferret_9' as never, '[sealed:nothing]', Date.now());
     registry.holdScrollback('ferret_1' as never, 'FAKE-SC-7f3a91', '[sealed:token]');
 
-    // Three members, and not one of them answers a value.
-    expect(Object.keys(registry).sort()).toEqual(['hold', 'holdScrollback', 'retime']);
+    // Four members, and not one of them answers a value (scrollbackFull answers only whether a mask is still in the scrollback).
+    expect(Object.keys(registry).sort()).toEqual(['hold', 'holdScrollback', 'retime', 'scrollbackFull']);
   });
 });
