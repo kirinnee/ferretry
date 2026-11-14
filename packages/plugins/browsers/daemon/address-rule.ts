@@ -23,6 +23,7 @@
  * - carries a `c=`, `code=` or `share=` part (`;`, `&` or `#` separated), however the version is spelled.
  * The classification never weakens the access codec: it only decides what to hide.
  *
+ * A run that already reads as a credential does not stop at a quote-like character (`'`, `"`, `<`, `>`, ```, `\`) either: an ignored field ahead of the code may hold one, so it goes through the next whitespace, minus the closing punctuation of the sentence around it (v4 4.291.16, #1596).
  * A run's END is conservative too. It continues across whitespace while the next word continues the fragment (the
  * previous word ends in, or the next word starts with, a `;`, `=`, `&` or `,`, or the next word contains one and is no
  * address or new `#`), so `code= FAKE;fp=00` leaves no credential suffix behind. The cost is deliberate: ordinary text
@@ -238,6 +239,25 @@ function credentialValueEnd(text: string, cursor: { at: number }, end: number): 
   return end;
 }
 
+/** What closes a sentence or a quotation around an address: given back, never part of a fragment's end. */
+const CLOSING_PUNCTUATION = /[)\]}>"'`.,:;!?]+$/u;
+
+/**
+ * A fragment that already reads as a credential and whose run stopped at a quote-like character (v4 4.291.16, #1596): a
+ * reader ignores a field it does not know and keeps no field order, so an ignored field may hold `'`, `"`, `<`, `>`,
+ * `` ` `` or `\` ahead of the code, and no field is parsed to find where the code is. The whole of it goes — through the
+ * next whitespace (or `&`, inside a query) — minus the closing punctuation of the sentence around it, which is given back.
+ * Returns `end` itself when this fragment is no credential, or has no such stop to cross.
+ */
+function stretchPastStop(text: string, start: number, end: number, stopAtAmpersand: boolean): number {
+  if (end >= text.length || !STOP.test(text.charAt(end))) return end;
+  if (!isCredentialFragment(text.slice(start, end))) return end;
+  let far = end;
+  while (far < text.length && !/\s/u.test(text.charAt(far)) && !(stopAtAmpersand && text.charAt(far) === '&')) far++;
+  const closing = CLOSING_PUNCTUATION.exec(text.slice(end, far));
+  return Math.max(end, closing === null ? far : far - closing[0].length);
+}
+
 /**
  * Where the fragment that starts at `start` ends: the end of its run, then on across whitespace while the next word
  * continues it (see the file header), and across a credential value the codec reads through whitespace
@@ -251,6 +271,11 @@ function spanEnd(text: string, start: number, stopAtAmpersand: boolean): number 
     const accepted = credentialValueEnd(text, cursor, end);
     if (accepted > end) {
       end = runEnd(text, accepted, stopAtAmpersand);
+      continue;
+    }
+    const stretched = stretchPastStop(text, start, end, stopAtAmpersand);
+    if (stretched > end) {
+      end = stretched;
       continue;
     }
     let next = end;
