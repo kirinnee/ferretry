@@ -298,34 +298,52 @@ async function navigationIdOf(session: InputCdpSession): Promise<string> {
 const FROZEN_POLL_MS = 250;
 
 /**
- * The pairing-screen HINT look. A page with a JavaScript dialog open is frozen: the DOM query hangs until the dialog is
- * answered, and the dialog's own event can arrive just after the act that opened it returned. So a look that has not
- * answered re-checks, every beat, whether a dialog is now open, and if so stands in the last look (none yet: marked).
+ * A look at a page that may have a JavaScript dialog open. Such a page is FROZEN: every query that reaches its renderer
+ * (the DOM, the frame tree) waits until the dialog is answered, and the dialog's own event can arrive just after the act
+ * that opened it returned. So a look that has not answered re-checks, every beat, whether a dialog is now open, and if
+ * so gives up (`undefined`) rather than hold the act that would answer it. No hint wired means no such check.
  */
-async function lookAtPairingScreen(subject: InputSubject): Promise<PairingScreenState> {
+async function unlessFrozen<T>(subject: InputSubject, look: () => Promise<T>): Promise<T | undefined> {
   const hint = subject.hint;
-  if (hint === undefined) return await readPairingScreen(await subject.cdp.page());
-  if (hint.frozen()) return hint.last() ?? PAIRING_SCREEN_UNKNOWN;
-  let answer: PairingScreenState | undefined;
-  const look = readPairingScreen(await subject.cdp.page()).then(
-    state => {
-      answer = state;
+  if (hint === undefined) return await look();
+  if (hint.frozen()) return undefined;
+  let answered: { readonly value: T } | { readonly failed: unknown } | undefined;
+  const pending = look().then(
+    value => {
+      answered = { value };
     },
-    () => {
-      answer = PAIRING_SCREEN_UNKNOWN;
+    (failed: unknown) => {
+      answered = { failed };
     },
   );
-  while (answer === undefined) {
-    await Promise.race([look, subject.wait(FROZEN_POLL_MS)]);
-    if (answer === undefined && hint.frozen()) return hint.last() ?? PAIRING_SCREEN_UNKNOWN;
+  while (answered === undefined) {
+    await Promise.race([pending, subject.wait(FROZEN_POLL_MS)]);
+    if (answered === undefined && hint.frozen()) return undefined;
   }
-  return answer;
+  if ('failed' in answered) throw answered.failed;
+  return answered.value;
+}
+
+/** What the document says of itself while a dialog holds the page: nothing new, and never the same id as a real one. */
+const FROZEN_NAVIGATION_ID = 'dialog-open';
+
+/** The pairing-screen HINT look: the last look stands in while the page is frozen (none yet: marked, fail closed). */
+async function lookAtPairingScreen(subject: InputSubject): Promise<PairingScreenState> {
+  const looked = await unlessFrozen(subject, async () => {
+    try {
+      return await readPairingScreen(await subject.cdp.page());
+    } catch {
+      return PAIRING_SCREEN_UNKNOWN;
+    }
+  });
+  return looked ?? subject.hint?.last() ?? PAIRING_SCREEN_UNKNOWN;
 }
 
 /** The page's current document, cheaply: no field is looked at. */
 export async function describeInputDocument(subject: InputSubject): Promise<BrowserInputDocument> {
   if (subject.page.isClosed()) throw new Error(REFUSALS.noDocument);
-  const navigationId = await navigationIdOf(await subject.cdp.page());
+  const navigationId =
+    (await unlessFrozen(subject, async () => await navigationIdOf(await subject.cdp.page()))) ?? FROZEN_NAVIGATION_ID;
   let host: string | undefined;
   try {
     host = new URL(subject.page.url()).host.toLowerCase() || undefined;

@@ -284,6 +284,23 @@ describe('P1-1: a navigation or a swapped frame during a call is seen', () => {
     should(answer).be.undefined();
     should(error?.message).equal(PAIRING_SCREEN_REFUSAL);
   });
+
+  it('should NOT refuse an act on a page away from the app whose click opened a window, even with a code live', async () => {
+    const { tabs, tools, browser, pairing, clock } = await pairingWorld();
+    const docs = await browser.openPage('s1', 'docs', {
+      openedBy: { by: 'agent', sessionId: 's1' },
+      url: 'https://docs.example.test/',
+    });
+    pairing.open('pairing-1', clock.at + 120 * SECOND);
+    tabs.whileActing = acted => {
+      if (acted.startsWith('read-')) tabs.pages = [...tabs.pages, { ...docs, id: 'popup-away', name: undefined }];
+    };
+
+    const { answer, error } = await attempt(tools, { tool: 'browser.read', name: 'docs' });
+
+    should(error).be.undefined();
+    should(answer).not.be.undefined();
+  });
 });
 
 describe('P1-1: a pairing link committed in any frame', () => {

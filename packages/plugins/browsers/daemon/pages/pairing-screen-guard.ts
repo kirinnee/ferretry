@@ -93,8 +93,12 @@ export function pairingScreenGuard(
     return async later => {
       const now = await later.pairingState?.();
       if (now === undefined || now.marked) throw refuse();
-      if (now.seen !== before.seen || now.pages !== before.pages) throw refuse();
+      if (now.seen !== before.seen) throw refuse();
       const apps = windows.appOrigins();
+      // A window that opened or closed meanwhile is a hint worth a refusal only where an app origin is in the group: the
+      // navigation history below covers every window that joined or left, and a group away from the app (a popup a click
+      // opened on some other site) has no credential to show.
+      if (now.pages !== before.pages && (anyOnApp(before, apps) || anyOnApp(now, apps))) throw refuse();
       const priors = new Map(before.targets.map(target => [target.id, target.nav] as const));
       let involved = anyOnApp(before, apps) || anyOnApp(now, apps);
       for (const { id, nav } of now.targets) {
