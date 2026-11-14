@@ -48,7 +48,6 @@ converter's summary print the same list from one file, `migration/v4-to-v5/left-
 - agents' browser sign-ins (the agent browser profile)
 - named agent terminals
 - the Warden machine agenda item
-- multi-line routing prompts beyond their last line (models-guide routing)
 - some security history (Gate kept-bucket and grant audit history)
 
 **Nothing is deleted.** v4's home is kept untouched at `<home>-before-<stamp>` (the backup; `preflight` prints the exact

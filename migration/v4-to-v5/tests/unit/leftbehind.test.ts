@@ -8,7 +8,7 @@ import { summarise } from '../../src/report.ts';
 import { advance, makeSandbox, type Sandbox } from './migrate-harness.ts';
 
 /**
- * Owner ruling !A516 ("Leave them"): six things are NOT carried to v5. The migration prompt (before the owner confirms)
+ * Owner ruling !A516 ("Leave them"): five things are NOT carried to v5. The migration prompt (before the owner confirms)
  * and the final report must say so in short plain lines, and say where v4's home stays. Text and report only: the
  * converter carries nothing new. Fake homes only.
  */
@@ -17,7 +17,6 @@ const SIX = [
   'browser sign-ins',
   'named agent terminals',
   'Warden machine agenda item',
-  'multi-line routing prompts beyond their last line',
   'Gate kept-bucket and grant audit history',
 ] as const;
 const lacks = (text: string, needle: string): boolean => !text.toLowerCase().includes(needle.toLowerCase());
@@ -25,8 +24,8 @@ const lacks = (text: string, needle: string): boolean => !text.toLowerCase().inc
 const CLAIMS_CARRIED = /\b(carried over|converted|moved|kept(?!-bucket))\b/i;
 
 describe('the shared list', () => {
-  test('names exactly the six owner-ruled items, in plain words', () => {
-    expect(LEFT_BEHIND).toHaveLength(6);
+  test('names exactly the five owner-ruled items, in plain words', () => {
+    expect(LEFT_BEHIND).toHaveLength(5);
     for (const needle of SIX)
       expect(LEFT_BEHIND.some(line => line.toLowerCase().includes(needle.toLowerCase()))).toBe(true);
   });
@@ -55,7 +54,6 @@ describe('the converter report', () => {
       dryRun: false,
       lock: { held: async () => false },
       now: () => new Date('2026-11-14T01:00:00.000Z'),
-      steps: [],
     });
     if (result.kind !== 'done') throw new Error('expected done');
     const printed = summarise(result.report);
@@ -65,8 +63,43 @@ describe('the converter report', () => {
     expect(result.report.leftBehind).toEqual([...LEFT_BEHIND]);
     // Every left-behind line is a "-" item; none of them says it was carried.
     const items = printed.split('\n').filter(line => line.startsWith('  - '));
-    expect(items).toHaveLength(6);
+    expect(items).toHaveLength(5);
     for (const line of items) expect(line).not.toMatch(CLAIMS_CARRIED);
+  });
+
+  test('the FULL summary, with the real steps, never says an excluded item was converted', async () => {
+    const result = await convert({
+      from: join(root, 'v4'),
+      to: join(root, 'v5'),
+      dryRun: false,
+      lock: { held: async () => false },
+      now: () => new Date('2026-11-14T01:00:00.000Z'),
+    });
+    if (result.kind !== 'done') throw new Error('expected done');
+    const printed = summarise(result.report);
+    const lines = printed.split('\n');
+    const stepLine = (id: string): string => {
+      const step = result.report.steps.find(item => item.id === id);
+      if (step === undefined) throw new Error(`no step ${id}`);
+      const line = lines.find(item => item.includes(step.title));
+      if (line === undefined) throw new Error(`no summary line for ${id}`);
+      return line;
+    };
+    // Chat history: the harness folders are opaque files, never "conversations, for resume".
+    expect(stepLine('harness-homes')).toContain('chat history is left behind');
+    expect(stepLine('harness-homes')).toContain('NOT usable in v5');
+    expect(printed).not.toMatch(/conversations, for resume/i);
+    // Security history: the Gate and Access lines name what is left out.
+    expect(stepLine('gate')).toContain('kept-bucket history is left behind');
+    expect(stepLine('access')).toContain('grant audit history is left behind');
+    // The JSON says it too, in each step's own not-carried list.
+    const notCarried = (id: string): string =>
+      (result.report.steps.find(step => step.id === id)?.notCarried ?? []).map(item => item.what).join(' | ');
+    expect(notCarried('harness-homes')).toContain('chat history');
+    expect(notCarried('gate')).toContain('kept-bucket audit history');
+    expect(notCarried('access')).toContain('grant audit history');
+    // No step report anywhere says the routing prompt is lost: it is carried whole (leftbehind-routing.test.ts).
+    expect(printed).not.toMatch(/routing prompts? beyond/i);
   });
 
   test('a dry run says it too (the owner reads the dry run first)', async () => {
@@ -76,7 +109,6 @@ describe('the converter report', () => {
       dryRun: true,
       lock: { held: async () => false },
       now: () => new Date('2026-11-14T01:00:00.000Z'),
-      steps: [],
     });
     if (result.kind !== 'done') throw new Error('expected done');
     for (const needle of SIX) expect(summarise(result.report)).toContain(needle);

@@ -365,8 +365,8 @@ not read).
 
 ## What is left behind
 
-By owner ruling (!A516) six things are **not** carried: chat history, agents' browser sign-ins, named agent terminals, the
-Warden machine agenda item, multi-line routing prompts beyond their last line, and some security history (Gate
+By owner ruling (!A516) five things are **not** carried: chat history, agents' browser sign-ins, named agent terminals, the
+Warden machine agenda item, and some security history (Gate
 kept-bucket and grant audit history). The list is one file, `left-behind.txt`: `migrate.sh` prints it (`preflight`,
 `backup` until the owner says yes, `verify`) and the converter prints and writes it (`leftBehind` in the report), each
 with the path where v4's home stays untouched.
