@@ -61,7 +61,7 @@ import {
 import type { SendCancel, SendRetry, SendSubmit } from './ledger-message.tsx';
 import { placeLedgerRows } from './ledger-placement.ts';
 import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse } from './send-ledger.ts';
-import { SessionChatPage } from './session-chat-page.tsx';
+import { type AskReply, SessionChatPage } from './session-chat-page.tsx';
 import type { SendDismiss, SendExpand } from './settled-send-note.tsx';
 import type { TranscriptEntry } from './transcript-entries.ts';
 import type { TranscriptHistoryStatus } from './transcript-history.ts';
@@ -95,7 +95,11 @@ const CHAT_STATE_MESSAGE: Readonly<Record<ChatState, string>> = {
   failed: 'This ferret’s conversation could not be opened.',
 };
 
-export function ChatScreen({ params, embedded = false }: ScreenProps & { readonly embedded?: boolean }): ReactNode {
+export function ChatScreen({
+  params,
+  embedded = false,
+  ask,
+}: ScreenProps & { readonly embedded?: boolean; readonly ask?: AskReply | undefined }): ReactNode {
   const client = useConversationClient();
   const daemonId = useConversationDaemon();
   const ferretId = params['ferret'];
@@ -115,6 +119,7 @@ export function ChatScreen({ params, embedded = false }: ScreenProps & { readonl
         embedded={embedded}
         ferretId={ferretId}
         key={`${daemonId}\u0000${ferretId}`}
+        {...(ask === undefined ? {} : { ask })}
       />
     </ConversationOutbox>
   );
@@ -126,9 +131,11 @@ interface ChatRouteProps {
   readonly ferretId: string;
   /** Drawn under an agenda item: the conversation alone (`SessionChatPageProps.embedded`). */
   readonly embedded: boolean;
+  /** Drawn under an agenda item's ask: the composer is that item's reply box. */
+  readonly ask?: AskReply;
 }
 
-function ChatRoute({ client, daemonId, embedded, ferretId }: ChatRouteProps) {
+function ChatRoute({ ask, client, daemonId, embedded, ferretId }: ChatRouteProps) {
   const router = useOptionalRouter();
   const navigate = router?.navigate;
   const { controls } = useDaemonControls(daemonId);
@@ -340,6 +347,7 @@ function ChatRoute({ client, daemonId, embedded, ferretId }: ChatRouteProps) {
             conversationSearch={conversationSearch}
             daemonId={daemonId}
             embedded={embedded}
+            {...(ask === undefined ? {} : { ask })}
             entries={placedEntries}
             history={history}
             onCancel={cancelSend}

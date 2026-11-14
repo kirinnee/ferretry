@@ -21,6 +21,7 @@ import {
 } from '../../contract/index.ts';
 import type { AgendaActor, AgendaService, RaiseAgendaRequest } from '../lib/agenda/index.ts';
 import { SerialQueue } from '../lib/agenda/serial-queue.ts';
+import { machineNoticeRef } from '../lib/agenda/service.ts';
 import { askedCardAsks, cardAskReference } from '../lib/protocol/agenda-card-asks.ts';
 import { askForKind } from '../lib/protocol/agenda-card.ts';
 import {
@@ -92,6 +93,15 @@ function boardOf(draft: Pick<AskDraft, 'ferret' | 'raisedBy'>): string {
  * the daemon, so every port raise is the daemon's. Who it is for is the draft's `ferret`.
  */
 const PORT_ACTOR: AgendaActor = { kind: 'daemon', cause: 'system' };
+
+/**
+ * The reference an item carries on the board it landed on: a notice about a ferret that lands on the machine agenda is
+ * a row of its own per ferret (`machineNoticeRef`), so a lookup there names that reference, not the one the port was given.
+ */
+const refOnBoard = (landed: string, ferret: string, sourceRef: string): string =>
+  landed === MACHINE_AGENDA_ID && ferret !== MACHINE_AGENDA_ID
+    ? machineNoticeRef(ferret, sourceRef, PORT_ACTOR)
+    : sourceRef;
 
 const kindOf = (item: Pick<AgendaItem, 'kind'>): AskKind =>
   item.kind === undefined ? 'task' : item.kind === 'info' ? 'notice' : item.kind;
@@ -333,7 +343,7 @@ export function asksPort(
     if (!mutation.ok) throw new AskRefusedError(mutation.error.message);
     // The mutation says where the ask landed: a daemon raise about a sub-ferret goes to its lineage's home, not to `ferret`.
     const landed = mutation.snapshot.sessionId;
-    const id = mutation.item?.id ?? (await agenda.raisedObligation(landed, sourceRef));
+    const id = mutation.item?.id ?? (await agenda.raisedObligation(landed, refOnBoard(landed, ferret, sourceRef)));
     if (id === undefined) throw new AskRefusedError('the board took the ask but named no item for it');
     const ref = { ferret: landed, id: id as AskId };
     held.set(sourceRef, ref);
@@ -413,7 +423,9 @@ export function asksPort(
         // The mutation says where the notice landed: a daemon notice about a sub-ferret goes to its lineage's home, so
         // both the unchanged-item lookup and the returned ref name that board, not `ferret` (as `raise` does).
         const landed = mutation.snapshot.sessionId;
-        const id = mutation.item?.id ?? (await snapshot(landed))?.items.find(item => item.sourceRef === sourceRef)?.id;
+        const id =
+          mutation.item?.id ??
+          (await snapshot(landed))?.items.find(item => item.sourceRef === refOnBoard(landed, ferret, sourceRef))?.id;
         if (id === undefined) throw new AskRefusedError('the board took the notice but named no item for it');
         return { ferret: landed, id: id as AskId };
       }),

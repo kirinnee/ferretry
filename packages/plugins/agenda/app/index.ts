@@ -1,4 +1,4 @@
-import { type DeviceViewProps, provideToShell, type ShellProvides } from '@ferretry/app';
+import { type BackgroundViewProps, type DeviceViewProps, provideToShell, type ShellProvides } from '@ferretry/app';
 import type { AppComponent, PanelProps, PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
@@ -75,10 +75,21 @@ const filterBootView = lazyComponent<DeviceViewProps>(
     (await import('./views/agenda-filter-boot-view.tsx')).AgendaFilterBootView as AppComponent<DeviceViewProps>,
 ) as NonNullable<ShellProvides['device']>[string];
 
+/**
+ * The in-app notification watch (shell contract S5): mounted once per paired daemon at the frame root, so a ferret that
+ * dies while the app is open is notified whichever page is showing. It draws nothing and never asks for permission.
+ */
+const notificationWatchView = lazyComponent<BackgroundViewProps>(
+  async () =>
+    (await import('./views/agenda-notification-watch-view.tsx'))
+      .AgendaNotificationWatchView as AppComponent<BackgroundViewProps>,
+) as NonNullable<ShellProvides['background']>[string];
+
 export default provideToShell(half, {
   commands: agendaCommands,
   fragments: [{ form: 'keyed', key: 'agenda' }],
   device: { 'deep-link': deepLinkView, 'notification-filter': filterBootView },
+  background: { 'notification-watch': notificationWatchView },
   // Ferrets' list gathers the ferrets that wait on the owner (`ferrets.needs-you`); which they are is this half's fact.
   hooks: { 'ferrets.needs-you': ({ client }) => createNeedsYou(client) },
 });

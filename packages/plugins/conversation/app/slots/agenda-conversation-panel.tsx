@@ -9,11 +9,19 @@
 import type { PanelProps } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
 import { ChatScreen } from '../chat/chat-screen.tsx';
+import type { AskReply } from '../chat/session-chat-page.tsx';
 
-/** What the slot's page hands its panels: the ferret whose conversation it is, and the ask open above it. */
+/**
+ * What the slot's page hands its panels: the ferret whose conversation it is, and the ask open above it — and, when the
+ * page keeps track of replies, what to tell it (a receipt when a message about the ask was accepted) and the words of a
+ * reply it took back.
+ */
 export interface AgendaConversationProps {
   readonly ferret: string;
   readonly ask: string;
+  readonly onReplied?: AskReply['onReplied'];
+  readonly restore?: string;
+  readonly onRestored?: () => void;
 }
 
 export function isAgendaConversationProps(props: unknown): props is AgendaConversationProps {
@@ -24,5 +32,17 @@ export function isAgendaConversationProps(props: unknown): props is AgendaConver
 
 export function AgendaConversationPanel(props: PanelProps): ReactNode {
   if (!isAgendaConversationProps(props) || props.ferret.trim() === '') return null;
-  return <ChatScreen embedded params={{ ferret: props.ferret }} />;
+  const { ask, onReplied, restore, onRestored } = props;
+  return (
+    <ChatScreen
+      ask={{
+        id: ask,
+        ...(typeof onReplied === 'function' ? { onReplied } : {}),
+        ...(typeof restore === 'string' ? { restore } : {}),
+        ...(typeof onRestored === 'function' ? { onRestored } : {}),
+      }}
+      embedded
+      params={{ ferret: props.ferret }}
+    />
+  );
 }

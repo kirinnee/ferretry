@@ -70,8 +70,8 @@ export default implementDaemon(manifest, {
       warn,
     });
     // Lineage and card context are Ferrets' and Board's (`agenda.context`), read at each call; an answer that cannot be had
-    // is the safe side of its question (see `agendaContext`). The machine agenda and the owner's chat are not on this
-    // base: a notice with no owner home stays on the sub-ferret.
+    // is the safe side of its question (see `agendaContext`). A notice with no owner home lands on the machine agenda
+    // (bound there); a gate item or a follow-up never does.
     const context = agendaContext(key => hooks.provider(AgendaContext, key), warn);
     const agenda = new AgendaService(
       repository,
