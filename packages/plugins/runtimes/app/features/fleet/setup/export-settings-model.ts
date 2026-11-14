@@ -14,7 +14,8 @@
  * Pure: texts in, bytes out.
  */
 
-import { rawTextMayHold } from '@ferretry/std/credential-words';
+import { rawTextMayHold, valueMayHoldCredential } from '@ferretry/std/credential-words';
+import { readConfigText } from '@ferretry/std/yaml';
 import type { ConfigFileView, ConfigStatusView } from '../../../lib/config-files.ts';
 
 /** One file in the export, by its path relative to the configuration directory. */
@@ -53,6 +54,16 @@ export const exportPlan = (status: ConfigStatusView): ExportPlan => ({
 });
 
 /**
+ * Whether a file's text may hold a credential. A text that parses is judged by its VALUES (each scalar with its nearest
+ * key), so a nested mapping under a credential-named key (`ANTHROPIC_AUTH_TOKEN:` then `secretName: GATEWAY_KEY`) is read
+ * as what it is; a text that does not parse is judged word by word, which can only over-withhold.
+ */
+const mayHoldCredential = (text: string): boolean => {
+  const read = readConfigText(text);
+  return read.ok ? valueMayHoldCredential(read.read.value) : rawTextMayHold(text);
+};
+
+/**
  * A file as it was read: carried whole, or left out. Two independent tests, both of which must pass (fail closed):
  * the machine shows all of its text (no issue of any kind, so no value was cut), AND no word in the text is one a
  * credential mask would cut — a value that looks like a credential under a credential-named key (`API_KEY: …`) is a
@@ -63,7 +74,7 @@ export const carriedFile = (
 ): { readonly file: ExportFile } | { readonly leftOut: { readonly path: string; readonly reason: string } } =>
   (file.issues ?? []).length > 0
     ? { leftOut: { path: file.path, reason: LEFT_OUT_NOT_WHOLE } }
-    : rawTextMayHold(file.text)
+    : mayHoldCredential(file.text)
       ? { leftOut: { path: file.path, reason: LEFT_OUT_NOT_PROVEN } }
       : { file: { path: file.path, text: file.text } };
 

@@ -820,3 +820,52 @@ export function rawTextMayHold(text: string): boolean {
     );
   });
 }
+
+/** A run of white space, kept by a split. */
+const VALUE_BLANK_RUN = /(\s+)/u;
+
+/** The one field that is DECLARED to hold a secret's name, never its value (a `${secret:NAME}` pointer in long form). */
+const SECRET_NAME_FIELD = 'secretName';
+
+/**
+ * One scalar as the read mask judges it: cut under a credential name (its own key, or any key above it — a literal
+ * nested under `ANTHROPIC_AUTH_TOKEN:` is that variable's value), or a word (or command line) the cutter would cut.
+ * The declared name field is the exception to the keys above it only: it names a secret and holds none.
+ */
+function scalarMayHold(text: string, keys: readonly string[], before: string | undefined): boolean {
+  const own = keys.at(-1);
+  const judged = own === SECRET_NAME_FIELD ? [] : keys;
+  if (judged.some(key => looksSecretShown(key, text))) return true;
+  if (shownWord(text, before).hidden) return true;
+  if (!/\s/u.test(text)) return false;
+  return shownWords(text.split(VALUE_BLANK_RUN).filter((_, index) => index % 2 === 0)).some(word => word.hidden);
+}
+
+/**
+ * Whether a PARSED document holds a scalar the read mask would cut: each string or number is judged with the keys above
+ * it (`env.API_KEY: v`), a list's words with the word before them. It reads the structure, not the words around it, so
+ * a key with a mapping under it (`ANTHROPIC_AUTH_TOKEN:` then `secretName: GATEWAY_KEY`) is read as the pointer it is;
+ * and a literal under a credential-named key is a value whatever its spelling or depth — no value is spared for
+ * looking like a secret's name. Linear.
+ */
+export function valueMayHoldCredential(value: unknown): boolean {
+  const isScalar = (node: unknown): node is string | number | bigint =>
+    typeof node === 'string' || typeof node === 'number' || typeof node === 'bigint';
+  const walk = (node: unknown, keys: readonly string[]): boolean => {
+    if (isScalar(node)) return scalarMayHold(String(node), keys, undefined);
+    if (Array.isArray(node))
+      return node.some((item: unknown, index) =>
+        isScalar(item)
+          ? scalarMayHold(
+              String(item),
+              keys,
+              typeof node[index - 1] === 'string' ? (node[index - 1] as string) : undefined,
+            )
+          : walk(item, keys),
+      );
+    if (node !== null && typeof node === 'object')
+      return Object.entries(node).some(([name, item]) => walk(item, [...keys, name]));
+    return false;
+  };
+  return walk(value, []);
+}

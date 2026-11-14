@@ -9,13 +9,15 @@
 
 import { daemonOfClient, type DaemonReach, useEveryDaemon } from '@ferretry/app';
 import { RadioChoices, SetupNote, SetupSection } from '@ferretry/app/ui';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   type AccountChangeView,
   type CloneBundle,
   CloneBundleSchema,
+  CLONE_REVIEW_STALE,
   type CloneReview,
   CloneReviewSchema,
+  type CloneSettingsDoc,
   type MachineView,
 } from '../../../../contract/index.ts';
 import type { RuntimesClient } from '../../../lib/client.ts';
@@ -26,15 +28,29 @@ import { changeRefusalSentence, readMachine } from '../shell/apply-change.ts';
 import {
   type CopyMode,
   copyChange,
+  defaultRuntimeCandidates,
   outcomeCounts,
   reviewRequest,
+  type CopyDoneReport,
+  doneReport,
+  followupChange,
+  hasWritableSettings,
+  initialPick,
+  undecidedKeys,
+  type SettingsPick,
+  type LeftOutSettings,
+  keyOutcomeSentence,
   runnableRefs,
   SETTINGS_FILES,
   settingsTexts,
   type SourceSettingsRead,
+  sourceStamps,
   writesByDefault,
 } from './copy-model.ts';
-import { ConfirmDescription, LoginRows, ReviewItem, SettingsChanges } from './copy-review-parts.tsx';
+import { ConfirmDescription, DoneReport, LoginRows, ReviewItem, SettingsPicker } from './copy-review-parts.tsx';
+
+const DEFAULT_LEAVE = '\u0000leave';
+const DEFAULT_NONE = '\u0000none';
 
 export interface CopySettingsProps {
   readonly client: RuntimesClient;
@@ -44,6 +60,8 @@ export interface CopySettingsProps {
   readonly changes: AccountChanges;
   /** The copy landed: the step is set and setup continues. */
   readonly onDone?: () => void;
+  /** The copy was applied (before the person continues): where a setup step marks itself done. */
+  readonly onCopied?: () => void;
   readonly doneLabel?: string;
   /** The machines to copy from, where the shell is not the one to say (a suite); absent: every paired machine the shell lists. */
   readonly reaches?: readonly DaemonReach[];
@@ -58,28 +76,63 @@ type Phase =
       readonly bundle: CloneBundle;
       readonly review: CloneReview;
       readonly request: ReturnType<typeof reviewRequest>;
-      readonly leftOut: readonly string[];
+      readonly leftOut: readonly LeftOutSettings[];
     }
-  | { readonly kind: 'confirm'; readonly staged: AccountChangeView; readonly source: string }
-  | { readonly kind: 'done'; readonly source: string; readonly summary: string };
+  | { readonly kind: 'followup'; readonly source: string }
+  | ({ readonly kind: 'confirm' } & Confirm)
+  | { readonly kind: 'done'; readonly source: string; readonly report: CopyDoneReport };
 
 const plural = (count: number, word: string): string => `${String(count)} ${word}${count === 1 ? '' : 's'}`;
 
 /** The source's settings files and controls: what a copy merges key by key. */
 const readSource = async (reach: DaemonReach) => {
   const client = reach.client as RuntimesClient;
-  const [bundle, machine, ...files] = await Promise.all([
+  const [bundle, machine, stamps, ...files] = await Promise.all([
     client.call('GET /v1/runtimes/export').then(answer => CloneBundleSchema.parse(answer)),
     readMachine(client),
+    // The names and instants of the keys the source holds (never a value); a listing that is refused names none.
+    client
+      .call('GET /v1/secrets')
+      .then(sourceStamps)
+      .catch(() => []),
     ...SETTINGS_FILES.map(async (path): Promise<SourceSettingsRead> => {
+      // A refused or failed read is NOT an absent file: it is left out and said so, never sent as the empty text.
       const file = await readConfigFile(client, path).catch(() => null);
       return file === null
-        ? { path, exists: false, text: '', issues: [] }
+        ? { path, exists: false, text: '', issues: [], failed: true }
         : { path, exists: file.exists, text: file.text, issues: file.issues ?? [] };
     }),
   ]);
-  return { bundle, machine: machine as MachineView, files };
+  return { bundle, machine: machine as MachineView, files, stamps };
 };
+
+/** A staged change waiting for its confirm, with what the Done view needs to say what was and was not brought. */
+interface Confirm {
+  readonly staged: AccountChangeView;
+  readonly source: string;
+  readonly review: CloneReview;
+  readonly request: ReturnType<typeof reviewRequest>;
+  readonly skipped: readonly string[];
+  readonly leftOut: readonly LeftOutSettings[];
+  readonly pick: SettingsPick;
+  /** The settings were sent with the fleet change (an update), not as a second step. */
+  readonly settingsWithFleet: boolean;
+  /** `fleet`: the setup itself (and, in a repeat copy, its settings). `settings`: a first copy's second step. */
+  readonly step: 'fleet' | 'settings';
+  /** What the first step said it did, carried to the second. */
+  readonly did?: string;
+}
+
+/** What a copy starts with ticked: an update, what the review writes by default; a full copy, every item. */
+const ticksFor = (review: CloneReview, updating: boolean): ReadonlySet<string> =>
+  new Set(review.items.filter(item => !updating || writesByDefault(item)).map(item => item.ref));
+
+/** The documents that differ and were not written: not ticked, refused, or (before the second step) all of them. */
+const unwritten = (review: CloneReview, pick: SettingsPick, wrote: boolean): readonly CloneSettingsDoc[] =>
+  review.settings
+    .filter(doc => doc.keys.length > 0 || doc.refused !== undefined)
+    .filter(doc => !wrote || !pick.docs.has(doc.path) || doc.refused !== undefined)
+    .map(doc => doc.path);
 
 export function CopySettings({
   client,
@@ -87,6 +140,7 @@ export function CopySettings({
   hasSetup,
   changes,
   onDone,
+  onCopied,
   doneLabel,
   reaches,
 }: CopySettingsProps) {
@@ -97,27 +151,43 @@ export function CopySettings({
   const [phase, setPhase] = useState<Phase>({ kind: 'source' });
   const [picked, setPicked] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [mode, setMode] = useState<CopyMode>('alongside');
+  /** A repeat copy updates (the default) or starts over with a full copy; a first copy is always a full copy. */
+  const [mode, setMode] = useState<CopyMode | 'update'>('alongside');
+  /** The items of an update both machines changed, once the person has decided each. */
+  const [decided, setDecided] = useState<ReadonlySet<string>>(new Set());
+  /** Which login here each sign-in uses, where the person chose. */
+  const [loginPick, setLoginPick] = useState<Readonly<Record<string, string>>>({});
+  /** A full copy: the source's runtime to make the default (`null`: none); `undefined`: the machine decides. */
+  const [defaultPick, setDefaultPick] = useState<string | null | undefined>(undefined);
+  const lastReach = useRef<DaemonReach | null>(null);
   /** The items that RUN something which the copy writes: ticked by what the review takes by default, changed by the person. */
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
+  /** The settings documents and keys the person includes. */
+  const [pick, setPick] = useState<SettingsPick>({ docs: new Set(), keys: {} });
 
   const read = useCallback(
     async (reach: DaemonReach): Promise<void> => {
       setProblem(null);
+      lastReach.current = reach;
       setPhase({ kind: 'reading', source: reach.machine });
       try {
-        const { bundle, machine, files } = await readSource(reach);
+        const { bundle, machine, files, stamps } = await readSource(reach);
         const { settings, leftOut } = settingsTexts(files, machine);
         const source = { daemonId: reach.daemon, name: reach.machine };
-        const request = reviewRequest({ bundle, source, targetName: machineName, settings });
+        const request = reviewRequest({
+          bundle,
+          source,
+          targetName: machineName,
+          settings,
+          sourceSecrets: stamps,
+        });
         const review = CloneReviewSchema.parse(await client.call('POST /v1/runtimes/clone/review', { body: request }));
-        setTicked(
-          new Set(
-            review.items
-              .filter(item => item.runnable !== undefined && (review.mode === 'first' || writesByDefault(item)))
-              .map(item => item.ref),
-          ),
-        );
+        setPick(initialPick(review));
+        setMode(review.mode === 'update' ? 'update' : 'alongside');
+        setTicked(ticksFor(review, review.mode === 'update'));
+        setDecided(new Set());
+        setLoginPick({});
+        setDefaultPick(undefined);
         setPhase({ kind: 'review', source, bundle, review, request, leftOut });
       } catch (error) {
         setProblem(changeRefusalSentence(error));
@@ -130,9 +200,7 @@ export function CopySettings({
   if (phase.kind === 'done')
     return (
       <div className="flex min-w-0 flex-col gap-3" data-copy-done="">
-        <SetupNote live tone="ok" name="copy-done" title={`Copied from ${phase.source}`}>
-          <span>{phase.summary}</span>
-        </SetupNote>
+        <DoneReport report={phase.report} source={phase.source} />
         {onDone === undefined ? null : (
           <div>
             <Button type="button" variant="primary" data-copy-continue="" onClick={onDone}>
@@ -143,20 +211,87 @@ export function CopySettings({
       </div>
     );
 
-  if (phase.kind === 'confirm')
+  if (phase.kind === 'followup')
     return (
-      <div className="flex min-w-0 flex-col gap-3" data-copy-confirm="">
-        <ConfirmDescription staged={phase.staged} />
+      <p role="status" className="m-0 text-cell text-muted" data-copy-followup="">
+        The setup landed. Reading the settings review from {phase.source}…
+      </p>
+    );
+
+  if (phase.kind === 'confirm') {
+    const here = phase;
+    const finish = (
+      did: string,
+      extra: { readonly notWritten?: readonly CloneSettingsDoc[]; readonly settingsProblem?: string },
+    ) => {
+      setPhase({
+        kind: 'done',
+        source: here.source,
+        report: doneReport({
+          review: here.review,
+          request: here.request,
+          skipped: here.skipped,
+          leftOut: here.leftOut,
+          did,
+          ...extra,
+        }),
+      });
+      onCopied?.();
+    };
+    /** A first copy's second step: re-review (the first copy has just recorded this source) and stage the settings. */
+    const settingsStep = async (did: string): Promise<void> => {
+      setPhase({ kind: 'followup', source: here.source });
+      const left = unwritten(here.review, here.pick, true);
+      try {
+        const second = CloneReviewSchema.parse(
+          await client.call('POST /v1/runtimes/clone/review', { body: here.request }),
+        );
+        if (second.mode !== 'update')
+          return finish(did, {
+            notWritten: unwritten(here.review, here.pick, false),
+            settingsProblem: `This machine did not record the copy, so ${here.source}'s settings could not be merged. Copy again from Settings › Export & copy.`,
+          });
+        if (!hasWritableSettings(second)) return finish(did, { notWritten: left });
+        const result = await changes.stage(followupChange({ review: second, request: here.request, pick: here.pick }));
+        if (result.kind !== 'staged')
+          return finish(did, {
+            notWritten: unwritten(here.review, here.pick, false),
+            settingsProblem: result.sentence,
+          });
+        setPhase({ ...here, kind: 'confirm', staged: result.staged, review: second, step: 'settings', did });
+      } catch (error) {
+        finish(did, {
+          notWritten: unwritten(here.review, here.pick, false),
+          settingsProblem: changeRefusalSentence(error),
+        });
+      }
+    };
+    return (
+      <div className="flex min-w-0 flex-col gap-3" data-copy-confirm="" data-copy-step={here.step}>
+        {here.step === 'settings' ? (
+          <p className="m-0 text-cell leading-base text-muted">
+            The setup landed. Second step: the settings you ticked, as the machine will write them.
+          </p>
+        ) : null}
+        <ConfirmDescription staged={here.staged} />
         <ChangeApplyPanel
           machineName={machineName}
           authority={changes.authority}
           busy={changes.busy}
           refusal={changes.refusal}
-          submitLabel={`Copy from ${phase.source}`}
+          submitLabel={here.step === 'settings' ? 'Write the settings' : `Copy from ${here.source}`}
           onSubmit={() => {
-            void changes.applyStaged(phase.staged).then(result => {
+            void changes.applyStaged(here.staged).then(result => {
               if (result.kind !== 'applied') return;
-              setPhase({ kind: 'done', source: phase.source, summary: phase.staged.summary });
+              // What the machine says it did, not what was previewed.
+              const said = result.outcome.outcome === 'executed' ? result.outcome.summary : here.staged.summary;
+              if (here.step === 'settings')
+                return finish(`${here.did ?? ''} ${said}`.trim(), {
+                  notWritten: unwritten(here.review, here.pick, true),
+                });
+              if (!here.settingsWithFleet && here.review.mode === 'first' && here.pick.docs.size > 0)
+                return void settingsStep(said);
+              finish(said, { notWritten: unwritten(here.review, here.pick, here.settingsWithFleet) });
             });
           }}
         >
@@ -166,21 +301,63 @@ export function CopySettings({
         </ChangeApplyPanel>
       </div>
     );
+  }
 
   if (phase.kind === 'review') {
     const { review, request, source, leftOut } = phase;
     const counts = outcomeCounts(review);
     const running = runnableRefs(review);
+    const updating = review.mode === 'update' && mode === 'update';
+    /** A first copy, or a repeat copy that starts over: everything is copied, and settings follow as a second step. */
+    const showSettings = updating || review.mode === 'first';
+    const undecided = [
+      ...(updating
+        ? review.items.filter(item => item.outcome === 'both' && !decided.has(item.ref)).map(item => item.ref)
+        : []),
+      ...(showSettings ? undecidedKeys(review, pick) : []),
+    ];
+    const nothing = updating && review.items.length === 0 && !hasWritableSettings(review);
+    const candidates = updating ? [] : defaultRuntimeCandidates(phase.bundle);
+    const chooseMode = (next: CopyMode | 'update'): void => {
+      setMode(next);
+      setTicked(ticksFor(review, next === 'update'));
+      setDecided(new Set());
+    };
     const stage = (): void => {
-      // What runs and is not ticked is left out; in a repeat copy, a ticked one the review does not take by default
-      // (both machines changed it) is taken. Everything else is the review's own choice.
-      const skip = running.filter(ref => !ticked.has(ref));
-      const take = review.items
-        .filter(item => item.runnable !== undefined && ticked.has(item.ref) && !writesByDefault(item))
-        .map(item => item.ref);
-      const change = copyChange({ review, request, choices: { skip, take, mode } });
+      // Every item the person unticked is left out (kept, or not brought); in an update, one they ticked that the
+      // review does not take by default (both machines changed it) is taken. Nothing else is the person's to infer.
+      const skip = review.items.map(item => item.ref).filter(ref => !ticked.has(ref));
+      const take = updating
+        ? review.items.filter(item => ticked.has(item.ref) && !writesByDefault(item)).map(item => item.ref)
+        : [];
+      const chosenPick = showSettings ? pick : { ...pick, docs: new Set<CloneSettingsDoc>() };
+      const change = copyChange({
+        review,
+        request,
+        choices: {
+          skip,
+          take,
+          mode: mode === 'update' ? 'alongside' : mode,
+          settings: chosenPick,
+          logins: loginPick,
+          full: !updating,
+          ...(defaultPick === undefined ? {} : { defaultRuntime: defaultPick }),
+        },
+      });
       void changes.stage(change).then(result => {
-        if (result.kind === 'staged') setPhase({ kind: 'confirm', staged: result.staged, source: source.name });
+        if (result.kind === 'staged')
+          setPhase({
+            kind: 'confirm',
+            staged: result.staged,
+            source: source.name,
+            review,
+            request,
+            skipped: skip,
+            leftOut,
+            pick: chosenPick,
+            settingsWithFleet: updating,
+            step: 'fleet',
+          });
       });
     };
     return (
@@ -204,17 +381,35 @@ export function CopySettings({
             </span>
           </SetupNote>
         )}
-        <LoginRows logins={review.logins} />
+        <LoginRows
+          logins={review.logins}
+          {...(updating
+            ? {
+                picks: loginPick,
+                onPick: (id: string, target: string) => setLoginPick(current => ({ ...current, [id]: target })),
+              }
+            : {})}
+        />
         {review.keys.length === 0 ? null : (
           <SetupNote tone="pend" name="copy-keys" title="API keys are named, never carried">
-            <span className="font-mono [overflow-wrap:anywhere]">{review.keys.map(key => key.name).join(', ')}</span>
+            {review.keys.map(key => (
+              <span key={key.name} className="block [overflow-wrap:anywhere]" data-copy-key={key.name}>
+                <span className="font-mono">{key.name}</span>: {keyOutcomeSentence(key.outcome, source.name)}
+              </span>
+            ))}
           </SetupNote>
         )}
         {leftOut.length === 0 ? null : (
           <SetupNote tone="warn" name="copy-left-out" title="Not copied">
             <span className="[overflow-wrap:anywhere]">
-              {leftOut.join(', ')}: {source.name} does not show the whole file, so it is left out rather than sent with
-              a gap.
+              {leftOut.map(entry => (
+                <span key={entry.path} className="block" data-copy-left-out={entry.path}>
+                  {entry.path}:{' '}
+                  {entry.why === 'unread'
+                    ? `reading it from ${source.name} failed, so it is left out — it is not the same as a file that is not there. Review again to retry.`
+                    : `${source.name} does not show the whole file, so it is left out rather than sent with a gap.`}
+                </span>
+              ))}
             </span>
           </SetupNote>
         )}
@@ -232,48 +427,120 @@ export function CopySettings({
                   key={item.ref}
                   item={item}
                   ticked={ticked.has(item.ref)}
-                  onTick={on =>
+                  updating={updating}
+                  decided={decided.has(item.ref)}
+                  onTick={on => {
+                    setDecided(current => new Set(current).add(item.ref));
                     setTicked(current => {
                       const next = new Set(current);
                       if (on) next.add(item.ref);
                       else next.delete(item.ref);
                       return next;
-                    })
-                  }
+                    });
+                  }}
                 />
               ))}
             </ul>
           </SetupSection>
         )}
-        <SettingsChanges review={review} />
-        {review.mode === 'first' && hasSetup ? (
+        {showSettings ? <SettingsPicker review={review} pick={pick} onPick={setPick} source={source.name} /> : null}
+        {review.mode === 'update' || hasSetup ? (
           <SetupSection title="Existing setup" name="copy-existing">
             <RadioChoices
               legend="Existing setup"
               legendHidden
               name="copy-mode"
               value={mode}
-              onChoose={setMode}
+              onChoose={chooseMode}
               options={[
+                ...(review.mode === 'update'
+                  ? [
+                      {
+                        id: 'update' as const,
+                        title: 'Update',
+                        detail: `Compare with ${source.name} and show only what is different. Nothing is written until you choose.`,
+                      },
+                    ]
+                  : []),
                 {
-                  id: 'alongside',
+                  id: 'alongside' as const,
                   title: 'Add alongside',
-                  detail: `Keep what ${machineName} has and add the copy next to it.`,
+                  detail: `Keep what ${machineName} has and add the copy next to it (a name that clashes gets -2).`,
                 },
-                { id: 'replace', title: 'Replace', detail: `Replace what ${machineName} has with the copy.` },
+                {
+                  id: 'replace' as const,
+                  title: review.mode === 'update' ? 'Start over (Replace)' : 'Replace',
+                  detail: `Replace what ${machineName} has with the copy. Its logins stay.`,
+                },
               ]}
             />
           </SetupSection>
+        ) : null}
+        {candidates.length === 0 ? null : (
+          <SetupSection title="Default runtime for new agents" name="copy-default-runtime">
+            <RadioChoices
+              legend="Default runtime for new agents"
+              legendHidden
+              name="copy-default-runtime"
+              value={defaultPick === undefined ? DEFAULT_LEAVE : defaultPick === null ? DEFAULT_NONE : defaultPick}
+              onChoose={value =>
+                setDefaultPick(value === DEFAULT_LEAVE ? undefined : value === DEFAULT_NONE ? null : value)
+              }
+              options={[
+                {
+                  id: DEFAULT_LEAVE,
+                  title: 'Let this machine decide',
+                  detail: 'It keeps its own default where it still stands.',
+                },
+                ...candidates.map(name => ({
+                  id: name,
+                  title: name,
+                  detail: `${source.name}’s runtime, by the name it has here.`,
+                })),
+                { id: DEFAULT_NONE, title: 'No default', detail: 'Leave the default unset.' },
+              ]}
+            />
+          </SetupSection>
+        )}
+        {nothing ? (
+          <SetupNote live tone="ok" name="copy-nothing" title="Nothing to copy">
+            <span>Everything from {source.name} is already here.</span>
+          </SetupNote>
         ) : null}
         {changes.refusal === null ? null : (
           <p role="alert" className="m-0 text-cell leading-base text-warn" data-copy-refusal="">
             {changes.refusal}
           </p>
         )}
+        {changes.refusal === CLONE_REVIEW_STALE && lastReach.current !== null ? (
+          <div>
+            <Button
+              type="button"
+              data-copy-review-again=""
+              onClick={() => {
+                changes.clear();
+                if (lastReach.current !== null) void read(lastReach.current);
+              }}
+            >
+              Review again
+            </Button>
+          </div>
+        ) : null}
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="primary" data-copy-stage="" disabled={changes.busy} onClick={stage}>
+          <Button
+            type="button"
+            variant="primary"
+            data-copy-stage=""
+            disabled={changes.busy || nothing || undecided.length > 0}
+            onClick={stage}
+          >
             {changes.busy ? 'Checking…' : 'Preview the copy'}
           </Button>
+          {undecided.length === 0 ? null : (
+            <p className="m-0 w-full text-meta leading-base text-warn" data-copy-undecided="">
+              Decide first: {undecided.join(', ')}
+            </p>
+          )}
           <Button type="button" data-copy-back="" onClick={() => setPhase({ kind: 'source' })}>
             Back
           </Button>

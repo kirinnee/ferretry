@@ -5,6 +5,10 @@ import {
   controlsText,
   copyChange,
   decisionsFor,
+  followupChange,
+  initialPick,
+  pickedSettings,
+  undecidedKeys,
   leaveOutChoice,
   outcomeCounts,
   reviewRequest,
@@ -162,8 +166,21 @@ describe('copy settings: what is handed over', () => {
     );
     expect(settings.map(doc => doc.path)).toEqual(['warden.yaml', 'learning.yaml', 'controls']);
     expect(settings.find(doc => doc.path === 'learning.yaml')?.text).toBe('');
-    expect(leftOut).toEqual(['voice.yaml']);
+    expect(leftOut).toEqual([{ path: 'voice.yaml', why: 'gap' }]);
     expect(JSON.parse(settings.find(doc => doc.path === 'controls')?.text ?? '{}')).toEqual(CONTROLS);
+  });
+
+  it('a file whose read FAILED is left out and named, never sent as the empty text of an absent file', () => {
+    const { settings, leftOut } = settingsTexts(
+      [
+        { path: 'warden.yaml', exists: false, text: '', issues: [], failed: true },
+        { path: 'learning.yaml', exists: false, text: '', issues: [] },
+        { path: 'voice.yaml', exists: true, text: 'a: 1\n', issues: [] },
+      ],
+      CONTROLS as never,
+    );
+    expect(settings.map(doc => doc.path)).toEqual(['learning.yaml', 'voice.yaml', 'controls']);
+    expect(leftOut).toEqual([{ path: 'warden.yaml', why: 'unread' }]);
   });
 
   it('names the two machines and the source daemon in the review request', () => {
@@ -194,11 +211,81 @@ describe('copy settings: the change a review makes', () => {
     });
     expect(decisionsFor(repeat, { skip: [] })).toEqual({
       decisions: { 'profile/a': 'take', 'mcp/n': 'add' },
-      settingsDecisions: { 'warden.yaml': { mode: 'take' } },
+      settingsDecisions: {},
       logins: { work: 'slot' },
     });
-    const made = copyChange({ review: repeat, request, choices: { skip: [], mode: 'alongside' } });
-    expect(made).toMatchObject({ mode: 'update', reviewed: 'fp', settings: [{ path: 'controls' }] });
+    // Nothing is included on the person's behalf in a repeat copy: no settings go until they tick a document.
+    const made = copyChange({
+      review: repeat,
+      request,
+      choices: { skip: [], mode: 'alongside', settings: initialPick(repeat) },
+    });
+    expect(made).toMatchObject({ mode: 'update', reviewed: 'fp' });
+    expect('settings' in made).toBe(false);
+    const ticked = copyChange({
+      review: repeat,
+      request: { ...request, settings: [{ path: 'warden.yaml', text: 'mode: b\n' }, ...(request.settings ?? [])] },
+      choices: {
+        skip: [],
+        mode: 'alongside',
+        settings: { ...initialPick(repeat), docs: new Set(['warden.yaml'] as const) },
+      },
+    });
+    expect(ticked).toMatchObject({
+      settings: [{ path: 'warden.yaml' }],
+      settingsDecisions: { 'warden.yaml': { mode: 'take' } },
+    });
+  });
+
+  it('a key both machines changed has no default and blocks the copy until it is decided; a first copy starts with documents ticked', () => {
+    const both = review({
+      mode: 'update',
+      settings: [
+        {
+          path: 'voice.yaml',
+          keys: [{ key: 'engine', outcome: 'both', mine: 'a', theirs: 'b' }],
+        },
+      ],
+    });
+    const pick = { ...initialPick(both), docs: new Set(['voice.yaml'] as const) };
+    expect(undecidedKeys(both, pick)).toEqual(['voice.yaml: engine']);
+    const decided = { ...pick, keys: { 'voice.yaml': { engine: 'keep' as const } } };
+    expect(undecidedKeys(both, decided)).toEqual([]);
+    expect(
+      pickedSettings(both, { ...request, settings: [{ path: 'voice.yaml', text: 'x' }] }, decided).settingsDecisions,
+    ).toEqual({
+      'voice.yaml': { engine: 'keep' },
+    });
+    const first = review({
+      mode: 'first',
+      settings: [
+        { path: 'warden.yaml', keys: [{ key: 'mode', outcome: 'theirs', choice: 'take', mine: 'a', theirs: 'b' }] },
+      ],
+    });
+    expect([...initialPick(first).docs]).toEqual(['warden.yaml']);
+  });
+
+  it('the second step of a first copy writes only the ticked documents, and leaves every item as it is', () => {
+    const second = review({
+      mode: 'update',
+      fingerprint: 'fp2',
+      items: [{ ref: 'mcp/n', kind: 'mcp', outcome: 'new', match: 'none', choice: 'add', files: [] }],
+      settings: [
+        { path: 'warden.yaml', keys: [{ key: 'mode', outcome: 'theirs', choice: 'take', mine: 'a', theirs: 'b' }] },
+      ],
+    });
+    const made = followupChange({
+      review: second,
+      request: { ...request, settings: [{ path: 'warden.yaml', text: 'mode: b\n' }] },
+      pick: { ...initialPick(second), docs: new Set(['warden.yaml'] as const) },
+    });
+    expect(made).toMatchObject({
+      mode: 'update',
+      reviewed: 'fp2',
+      decisions: { 'mcp/n': 'skip' },
+      settings: [{ path: 'warden.yaml' }],
+      settingsDecisions: { 'warden.yaml': { mode: 'take' } },
+    });
   });
 
   it('keeps what is here where both machines changed it, unless the person ticked it; a left-out item is kept or skipped', () => {
@@ -211,10 +298,10 @@ describe('copy settings: the change a review makes', () => {
       ],
       settings: [{ path: 'voice.yaml', keys: [{ key: 'k', outcome: 'both', mine: '1', theirs: '2' }] }],
     });
-    // Nothing is written that nobody chose: a changed-on-both item and key are kept.
+    // Nothing is written that nobody chose: a changed-on-both item is kept, and no settings key goes without a pick.
     expect(decisionsFor(both, { skip: [] })).toMatchObject({
       decisions: { 'profile/a': 'keep', 'mcp/n': 'add', 'mcp/t': 'take' },
-      settingsDecisions: { 'voice.yaml': { k: 'keep' } },
+      settingsDecisions: {},
     });
     // The person ticks the both-changed one and leaves two out.
     expect(decisionsFor(both, { skip: ['mcp/n', 'mcp/t'], take: ['profile/a'] }).decisions).toEqual({
@@ -277,6 +364,33 @@ describe('export settings: nothing that may hold a credential is carried', () =>
     expect(read.plan.leftOut.map(entry => entry.path)).toEqual(['mcp/fixture.yaml']);
     const zipped = new TextDecoder().decode(zipFiles(read.files, new Date('2026-11-14T00:00:00Z')));
     expect(zipped).not.toContain('FIXTUREKEY');
+  });
+
+  it('carries a valid endpoint file whose credential variable names its secret in a nested secretName field', () => {
+    const text = [
+      'label: Fixture',
+      'harness: claude-code',
+      'env:',
+      '  ANTHROPIC_AUTH_TOKEN:',
+      '    secretName: GATEWAY_KEY',
+      'test:',
+      '  kind: request',
+      '  keyVariable: ANTHROPIC_AUTH_TOKEN',
+      '',
+    ].join('\n');
+    expect(carriedFile({ path: 'endpoints/fixture.yaml', text, issues: [] })).toEqual({
+      file: { path: 'endpoints/fixture.yaml', text },
+    });
+  });
+
+  it('still leaves out an uppercase literal written directly under the credential variable, nested or not', () => {
+    for (const text of [
+      'env:\n  ANTHROPIC_AUTH_TOKEN: GATEWAYKEY\n',
+      'env:\n  ANTHROPIC_AUTH_TOKEN:\n    value: GATEWAYKEY\n',
+    ])
+      expect(carriedFile({ path: 'endpoints/fixture.yaml', text, issues: [] })).toEqual({
+        leftOut: { path: 'endpoints/fixture.yaml', reason: LEFT_OUT_NOT_PROVEN },
+      });
   });
 
   it('still carries a file that holds only pointers and plain settings', () => {

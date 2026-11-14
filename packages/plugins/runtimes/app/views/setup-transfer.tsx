@@ -36,6 +36,18 @@ function TransferTab({ client, machineName, machine }: MachineTabProps) {
 function StartStep({ client, machineName, machine }: MachineTabProps) {
   const changes = useAccountChanges({ client });
   const [start, setStart] = useState<'fresh' | 'clone'>('fresh');
+  const [unmarked, setUnmarked] = useState(false);
+  // A copy that landed completes this step through onboarding, the way the steps screen's Done does; if that answer is
+  // not saved the person is told, and can press Done on the step themselves.
+  const markDone = (): void => {
+    setUnmarked(false);
+    void client
+      .call('POST /v1/onboarding/steps/:plugin/:stepId', {
+        params: { plugin: 'runtimes', stepId: 'start' },
+        body: { state: 'done' },
+      })
+      .catch(() => setUnmarked(true));
+  };
   return (
     <div className="flex min-w-0 flex-col gap-4" data-onboarding-step-body="start">
       <RadioChoices
@@ -60,9 +72,15 @@ function StartStep({ client, machineName, machine }: MachineTabProps) {
           machineName={machineName}
           hasSetup={machine?.setUp === true}
           changes={changes}
+          onCopied={markDone}
           onDone={() => setStart('fresh')}
           doneLabel="Continue setup"
         />
+      ) : null}
+      {unmarked ? (
+        <p role="alert" className="m-0 text-cell leading-base text-warn" data-start-unmarked="">
+          The copy landed, but this step could not be marked done. Press Done on it below.
+        </p>
       ) : null}
     </div>
   );

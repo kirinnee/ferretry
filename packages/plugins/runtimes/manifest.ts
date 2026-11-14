@@ -230,6 +230,18 @@ export default definePlugin({
         label: 'Install Claude Code or Codex',
         calls: 'POST /v1/runtimes/machine/tools/install',
       }),
+      // A copy reads the NAMES and change times of the source's API keys (never a value) to say which a copied setup needs.
+      appAction('runtimes.copy-key-names', {
+        on: 'daemon',
+        label: 'Read a machine’s API key names for a copy',
+        calls: 'GET /v1/secrets',
+      }),
+      // A landed copy completes the first run's "Start from…" step, as the steps screen's Done does.
+      appAction('runtimes.start-done', {
+        on: 'daemon',
+        label: 'Mark Start from… done',
+        calls: 'POST /v1/onboarding/steps/:plugin/:stepId',
+      }),
     ],
   },
 
