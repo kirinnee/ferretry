@@ -112,10 +112,16 @@ function FerretPageScreen(): ReactNode {
       <PanelSlot daemon="ws" slot="ferret.toolbar" subject="zoe" />
       <FerretWorkspace
         chat={
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-chat="" style={{ padding: 16, overflowY: 'auto' }}>
-            <p>Fake conversation: the chat log would be here.</p>
-            <p>It keeps what is left of the row once the side pane has its column.</p>
-            {tallBlock('conversation')}
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-chat="">
+            <div data-transcript="" style={{ flex: '1 1 0', minHeight: 0, padding: 16, overflowY: 'auto' }}>
+              <p>Fake conversation: the chat log would be here.</p>
+              <p>It keeps what is left of the row once the side pane has its column.</p>
+              {tallBlock('conversation')}
+            </div>
+            {/* The composer is the real one's size: a text box, a model chip and the send button, about 170px. */}
+            <div data-composer="" style={{ flex: '0 0 170px', padding: 16, borderTop: '1px solid var(--border)' }}>
+              Fake composer
+            </div>
           </div>
         }
         daemon="ws"
@@ -157,7 +163,7 @@ const chip = (label: string, value?: string) => () => (
   </button>
 );
 const toggle = (label: string) => () => (
-  <label style={{ display: 'flex', gap: 8, alignItems: 'center', minHeight: 32 }}>
+  <label style={{ display: 'flex', gap: 8, alignItems: 'center', minHeight: 44 }}>
     <input defaultChecked type="checkbox" />
     {label} <span style={{ opacity: 0.7 }}>On</span>
   </label>
@@ -197,6 +203,12 @@ const panelStand = (id: string) =>
       >
         <h3 style={{ margin: 0, fontSize: 13 }}>{id}</h3>
         <p style={{ margin: '4px 0 0', fontSize: 12, opacity: 0.7 }}>Fake {OWNER[id] ?? 'plugin'} panel.</p>
+        {/* A panel with a row that is wider than the pane (the Terminals panel's toolbar was): it must not give the whole pane a sideways scroll. */}
+        {id === 'terminals' ? (
+          <pre style={{ margin: '4px 0 0', minWidth: 520 }}>
+            session cwd · terminals unavailable · a row wider than the pane
+          </pre>
+        ) : null}
         {id === 'instructions' ? (
           <button
             data-open-in-files=""
