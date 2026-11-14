@@ -99,6 +99,8 @@ export function composerApi(
         const answer = await client.call('POST /v1/ferrets/:ferretId/send', {
           params: { ferretId: requireValue(ferretId, 'ferretId') },
           body: { ...input, sendId: logical } satisfies SendRequest,
+          // The daemon refuses a send without it (`missing_request_id`) and one whose body names another id.
+          headers: { 'x-fy-request-id': logical },
         });
         failed.forget(key);
         return SendResultSchema.parse(answer);

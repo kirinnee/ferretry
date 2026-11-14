@@ -16,7 +16,7 @@ const build = (answers: Record<string, unknown | Error>) => {
       return answer;
     }) as unknown as PluginClient['call'],
   };
-  return { gateway: new ClientConversationGateway(client), calls };
+  return { gateway: new ClientConversationGateway(client, () => 'minted-1'), calls };
 };
 
 const record = {
@@ -37,7 +37,24 @@ describe('ClientConversationGateway', () => {
     });
     const result = await gateway.send('f1', { message: 'hello' } as never);
     expect([result.ferret, result.disposition, result.sendId]).toEqual(['f1', 'queued', 's1']);
-    expect(calls[0]?.init).toEqual({ params: { ferretId: 'f1' }, body: { message: 'hello' } });
+    // The daemon refuses a send without `x-fy-request-id`: the call carries the id, and the body names the same one.
+    expect(calls[0]?.init).toEqual({
+      params: { ferretId: 'f1' },
+      body: { message: 'hello', sendId: 'minted-1' },
+      headers: { 'x-fy-request-id': 'minted-1' },
+    });
+  });
+
+  it('keeps a sendId the caller already chose: the header and the body carry that one, so a retry reuses it', async () => {
+    const { gateway, calls } = build({
+      'POST /v1/ferrets/:ferretId/send': { ferret: 'f1', disposition: 'queued', sendId: 'chosen-7' },
+    });
+    await gateway.send('f1', { message: 'hello', sendId: 'chosen-7' } as never);
+    expect(calls[0]?.init).toEqual({
+      params: { ferretId: 'f1' },
+      body: { message: 'hello', sendId: 'chosen-7' },
+      headers: { 'x-fy-request-id': 'chosen-7' },
+    });
   });
 
   it('reads a send’s ledger row, and answers a 404 (a send the daemon does not know) as none rather than a failure', async () => {
@@ -92,8 +109,9 @@ describe('ClientConversationGateway', () => {
     });
     await gateway.answer('f1', { answers: [] } as never);
     await gateway.interrupt('f1');
+    // An answer is refused without `x-fy-request-id` too (`missing_request_id`): the same header rides the call.
     expect(calls.map(call => call.init)).toEqual([
-      { params: { ferretId: 'f1' }, body: { answers: [] } },
+      { params: { ferretId: 'f1' }, body: { answers: [] }, headers: { 'x-fy-request-id': 'minted-1' } },
       { params: { ferretId: 'f1' }, body: {} },
     ]);
   });
