@@ -62,6 +62,8 @@ export interface McpInventoryAccount {
   readonly home: string;
   /** The published executable of the runtime. */
   readonly wrapper: string;
+  /** The environment its profile binds to secrets, as `${secret:NAME}` references: never a value (`RuntimeHome.secretEnv`). */
+  readonly secretEnv?: Readonly<Record<string, string>>;
 }
 
 /** A fleet MCP component and the runtimes whose profile stack carries it. */

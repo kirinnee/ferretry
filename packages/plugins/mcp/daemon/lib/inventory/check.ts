@@ -91,6 +91,12 @@ export interface McpCheckDeps {
    * `${secret:NAME}`, the kernel opens it at exec time; use, never read). Absent: a secret reference cannot be
    * resolved here and the check says so rather than start the command with the literal text.
    */
+  /**
+   * A stdio command is about to be started by this check: its program is allowed (and only it) until the returned call
+   * is made. The kernel refuses every program a manifest does not declare, so a check could not start anything
+   * otherwise. Absent: nothing is allowed.
+   */
+  allowCommand?(command: string): () => void;
   sealEnvironment?(
     env: Readonly<Record<string, string>>,
   ): Promise<
@@ -152,6 +158,7 @@ export class McpCheckService {
       return finish({ outcome: 'error', message: clip(error.message) });
     }
     const deadline = AbortSignal.timeout(MCP_CHECK_TIMEOUT_MS);
+    const release = spec.transport === 'stdio' ? this.deps.allowCommand?.(spec.command) : undefined;
     try {
       const answer = await this.deps.probe.probe(spec, deadline);
       const note =
@@ -174,6 +181,8 @@ export class McpCheckService {
         outcome: error.kind === 'unauthorized' ? 'needs-sign-in' : 'error',
         message: clip(`${lead}${detail}${unset}`),
       });
+    } finally {
+      release?.();
     }
   }
 
@@ -202,7 +211,9 @@ export class McpCheckService {
     const runtime = server.runtimes[0]?.runtime;
     const launch = await this.deps.launchEnvironment(runtime);
     const base = this.deps.baseEnvironment();
-    const environment = { ...base, ...launch };
+    // A variable bound to a secret is a REFERENCE here: it fills no `${VAR}` (that would put the reference text in an
+    // argument); it only reaches the child, sealed, as its environment.
+    const environment = { ...base, ...plainOnly(launch) };
     if (declaration.transport === 'stdio') {
       const env = Object.fromEntries(
         Object.entries(declaration.env).map(([name, value]) => [name, expandVariables(value, environment, missing)]),
@@ -242,6 +253,10 @@ function blockedBy(server: ResolvedMcpServer): 'pending' | 'disabled' | undefine
   if (approvals.includes('pending')) return 'pending';
   return approvals.length === 0 ? 'pending' : 'disabled';
 }
+
+/** The variables of `env` whose value names no secret. */
+const plainOnly = (env: Readonly<Record<string, string>>): Readonly<Record<string, string>> =>
+  Object.fromEntries(Object.entries(env).filter(([, value]) => secretReferencesIn(value).length === 0));
 
 const clip = (text: string, max = 1000): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 

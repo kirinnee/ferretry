@@ -174,6 +174,38 @@ describe('McpCheckService', () => {
     should(probe.specs).deepEqual([]);
   });
 
+  it('should allow a stdio command only while its own check runs, and a reference never fills an argument', async () => {
+    // Arrange
+    const seen: string[] = [];
+    const probe = new FakeProbe({ tools: [] });
+    const inventory = new McpInventoryService(inventoryWorld().deps);
+    const service = new McpCheckService({
+      inventory,
+      probe: {
+        probe: async spec => (seen.push(spec.transport === 'stdio' ? 'probing' : 'remote'), await probe.probe(spec)),
+      },
+      launchEnvironment: async (runtime): Promise<Record<string, string>> =>
+        runtime === 'claude-work' ? { KEY: '${secret:WORK_KEY}' } : {},
+      baseEnvironment: () => ({}),
+      allowCommand: command => {
+        seen.push(`allow ${command}`);
+        return () => seen.push('release');
+      },
+      sealEnvironment: async () => ({ ok: true, env: { names: [] } as never }),
+      bearer: async () => undefined,
+      redactor: { redact: async text => text },
+      now: () => 0,
+    });
+
+    // Act
+    const result = await service.check(await idOf(inventory, 'scratch', 'user'), 's1');
+
+    // Assert — allowed before the probe, released after; the secret-bound variable filled nothing in the arguments.
+    should(result.outcome).equal('connected');
+    should(seen).deepEqual(['allow uvx', 'probing', 'release']);
+    should(JSON.stringify(probe.specs[0])).not.containEql('secret:');
+  });
+
   it('should read a 401 as needing a sign-in', async () => {
     // Arrange
     const { inventory, service } = checker(new FakeProbe(new McpProbeFailure('unauthorized', 'It answered 401.')));

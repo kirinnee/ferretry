@@ -13,6 +13,7 @@ import { StateMcpOAuthStateStore } from './adapters/oauth-state-store.ts';
 import { TransportMcpProbe } from './adapters/probe.ts';
 import { type FerretRoot, RootMcpProjectFiles } from './adapters/project-files.ts';
 import { PROJECT_MCP_FILE, projectRootMcpFile } from './adapters/project-root-files.ts';
+import { AllowedCommands } from './lib/allowed-commands.ts';
 import { McpCheckService, mcpCheckBaseEnvironment } from './lib/inventory/check.ts';
 import {
   KnownAndFerretFolders,
@@ -76,8 +77,12 @@ const NOT_YET = (what: string): never => {
  *   in its environment resolved for that one child through `vault.childEnvironment` (use, never read; a secret not held
  *   refuses by NAME). GAPS (declared): (1) a HELD sign-in token is not presented to a remote server, because the Vault
  *   has no value getter and `authorizeFetch` cannot carry a session or an event stream, so a signed-in remote server
- *   still reads as needing a sign-in; it needs a Vault operation that places a named secret on a streamed request.
- *   (2) a runtime profile's own environment is published by no Runtimes read model, so it is not filled into a check.
+ *   still reads as needing a sign-in; it waits for the Vault's `fetchMinted` (the wiring unit), then HTTP and SSE go through it.
+ *   (2) A runtime profile's secret bindings are published by Runtimes as references (`RuntimeHome.secretEnv`, the
+ *   manifest account's `secretEnv`, v4 `forWrapper`) and sealed for the checked child with the server's own. The Vault
+ *   lets a plugin use only the secrets its own records name, so a profile secret that MCP's records do not name refuses
+ *   by NAME until the Vault grants a check the references of the runtime it checks against (a lead decision).
+ *   The kernel starts a check's command only if `permissions.spawn` allows it: the `mcp-commands` resolver.
  * - GAP (declared): the narrowing of the `imports` grant to `<known root>/.mcp.json` is enforced by MCP's adapter
  *   (`adapters/project-root-files.ts`), not by the kernel, which would hand MCP's `imports` root any folder outside
  *   the fence. Closing it needs a kernel root scoped to one file.
@@ -217,20 +222,20 @@ export default implementDaemon(manifest, {
         },
       },
     });
+    const allowedCommands = new AllowedCommands(() =>
+      [...items().values()].flatMap(item => (item.command === undefined ? [] : [item.command])),
+    );
     const check = new McpCheckService({
       inventory,
       probe: new TransportMcpProbe(kernel),
-      // GAP (declared above): a runtime's profile environment is published by no read model, so its variables are not
-      // filled into a check; a `${secret:NAME}` in the SERVER's own env is (`sealEnvironment`).
-      launchEnvironment: async () => ({}),
-      // The same small base the kernel hands every child (`PATH`, `HOME`), so a command is found and `${PATH}` fills.
-      baseEnvironment: () => {
-        const searchPath = kernel.hostFacts.launchGuard().searchPath;
-        return mcpCheckBaseEnvironment({
-          ...(searchPath === undefined ? {} : { PATH: searchPath }),
-          HOME: kernel.paths.home(),
-        });
-      },
+      // What the runtime's profile binds to secrets, as REFERENCES (v4 `launchEnvironment.forWrapper`): they reach the checked
+      // child only through the Vault (`sealEnvironment`); no value is read here.
+      launchEnvironment: async runtime =>
+        runtime === undefined ? {} : ((await accounts()).find(account => account.runtime === runtime)?.secretEnv ?? {}),
+      allowCommand: command => allowedCommands.allow(command),
+      // The kernel's spawn already hands every child its own `PATH` and `HOME`; this is only what `${VAR}` in a command may
+      // fill from. `kernel.hostFacts` is not declared by MCP, so `PATH` is not read here.
+      baseEnvironment: () => mcpCheckBaseEnvironment({ HOME: kernel.paths.home() }),
       sealEnvironment: async env => {
         // The Vault ignores the ferret for a handle; a check has none, so it is minted under the plugin's own name.
         const sealed = await vault.childEnvironment('mcp-check' as FerretId, env);
@@ -304,7 +309,10 @@ export default implementDaemon(manifest, {
     const signInChanged = (component: string): void => kernel.events.publish(McpSignInChanged, { component });
 
     return {
-      resolvers: { 'mcp-sign-in': (): readonly string[] => reach.hosts() },
+      resolvers: {
+        'mcp-sign-in': (): readonly string[] => reach.hosts(),
+        'mcp-commands': (): readonly string[] => allowedCommands.programs(),
+      },
       routes: {
         ...inventoryRoutes({
           machine: () => inventory.machine(),
