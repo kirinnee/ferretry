@@ -558,6 +558,8 @@ export function credentialShaped(value: unknown): string[] {
     if (Array.isArray(node)) node.forEach((item, index) => visit(item, [...path, String(index)]));
     else if (node !== null && typeof node === 'object')
       for (const [key, item] of Object.entries(node)) {
+        // A credential-shaped key is already said, as `<parent>.<key>`, by `rawSecretPaths`; never format or walk it here.
+        if (stringHoldsCredential([...path, key], key, true)) continue;
         const lower = key.toLowerCase();
         if ((lower === 'authorization' || lower.includes('header')) && item !== undefined && item !== null)
           found.push([...path, key].map(pathSegment).join('.'));

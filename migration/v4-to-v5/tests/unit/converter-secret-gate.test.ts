@@ -69,6 +69,18 @@ describe('structured values: the shared secret rules apply to a parsed document'
     expect(JSON.stringify(below)).not.toContain(key);
   });
 
+  test.each([
+    ['a GitLab', 'glpat-FAKEFAKEFAKEFAKEFAKE'],
+    ['a Groq', 'gsk_FAKEFAKEFAKEFAKEFAKEFAKE'],
+    ['a Cerebras', 'csk-FAKEFAKEFAKEFAKEFAKEFAKE'],
+  ])('the component rule never prints %s credential key, over a Bearer value or an Authorization key', (_, key) => {
+    const bearer = documentCredentialPaths({ settings: { env: { [key]: 'Bearer FAKEFAKEFAKEFAKEFAKE' } } });
+    expect(bearer).toEqual(['settings.env.<key>']);
+    const header = documentCredentialPaths({ settings: { env: { [key]: { Authorization: 'x' } } } });
+    expect(header).toEqual(['settings.env.<key>']);
+    expect(JSON.stringify([bearer, header])).not.toContain('FAKEFAKEFAKE');
+  });
+
   test('the component rule (documentCredentialPaths) inherits all of it', () => {
     expect(documentCredentialPaths({ env: { API_TOKEN: `\${API_TOKEN:-${FAKE}}` } })).toContain('env.API_TOKEN');
   });
@@ -182,5 +194,17 @@ describe('the conversion report names each refused file and never its value', ()
     expect(report.note).toContain('env.<key>');
     expect(report.note).not.toContain(key);
     expect(report.note).not.toContain('FAKEFAKEFAKE');
+  });
+
+  test('a held settings component whose env key is a known provider credential says <key>, never the key', async () => {
+    const key = 'glpat-FAKEFAKEFAKEFAKEFAKE';
+    await put('components/settings/leaky.yaml', `harness: claude\nenv:\n  ${key}: Bearer FAKEFAKEFAKEFAKEFAKE\n`);
+    const report = await settingsStep.run(f.ctx());
+    // A held component is named in the report's not-carried list (its `why` carries the paths).
+    const said = JSON.stringify(report);
+    expect(report.notCarried.map(item => item.what)).toContain('config/components/settings/leaky.yaml');
+    expect(said).toContain('settings.env.<key>');
+    expect(said).not.toContain(key);
+    expect(said).not.toContain('FAKEFAKEFAKE');
   });
 });
