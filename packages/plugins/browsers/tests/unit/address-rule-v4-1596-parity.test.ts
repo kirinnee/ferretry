@@ -103,3 +103,19 @@ describe('v4 #1596 parity: closing punctuation around an address is given back',
     expect(hidden).toBe(`open "https://p.test/pair${HIDDEN_FRAGMENT}" now`);
   });
 });
+
+describe('v4 #1596 parity: the quote-stop stretch stays linear', () => {
+  test('hides a long run of quote characters after a fragment in under 2 s', () => {
+    const started = performance.now();
+    const hidden = hideCredentialFragments(`#v1;'${"'".repeat(200_000)}x`);
+    expect(hidden).toBe(HIDDEN_FRAGMENT);
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+
+  test('hides many short quote-bearing words after a fragment in under 2 s', () => {
+    const started = performance.now();
+    const hidden = hideCredentialFragments(`#v1;${";x'y ".repeat(40_000)}`);
+    expect(hidden).toContain(HIDDEN_FRAGMENT);
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+});
