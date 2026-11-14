@@ -59,6 +59,12 @@ export interface QuestionAnsweringDeps {
   readonly status: (ferret: SessionId) => Promise<SessionStatus | undefined>;
   /** `conversation.question-answered`, published once the answer is durable. */
   readonly publishAnswered: (ferret: SessionId, toolUseId: string) => Promise<void>;
+  /**
+   * The exact question's file was cleared WITHOUT an answer landing (its form was positively released after a failed
+   * drive, or an unconfirmed answer was quarantined): whatever else shows it as open is closed. A failure is the
+   * caller's own to handle; it never changes what the clear decided.
+   */
+  readonly released?: (ferret: SessionId, toolUseId: string) => Promise<void>;
   /** Ids and codes only: a pane, a question's text and an answer are never logged. */
   readonly log: {
     info(event: string, fields?: Readonly<Record<string, string | number | boolean>>): void;
@@ -311,6 +317,7 @@ export function buildQuestionAnswering(deps: QuestionAnsweringDeps) {
       failed: async (id, question, answers, context) => {
         // Only the exact tool id whose drive failed is released; a newer question owns itself.
         await clearAskedQuestion(state, questionLane, key(id), question.toolUseId);
+        await deps.released?.(id, question.toolUseId).catch(() => undefined);
         deps.log.info('question.answer_failed', {
           ferret: key(id),
           toolUseId: question.toolUseId,
@@ -358,6 +365,7 @@ export function buildQuestionAnswering(deps: QuestionAnsweringDeps) {
     // continue) and the unsettled receipt stays in the ledger as the durable warning.
     quarantine: async (id, record) => {
       await clearAskedQuestion(state, questionLane, key(id), record.toolUseId).catch(() => undefined);
+      await deps.released?.(id, record.toolUseId).catch(() => undefined);
       deps.log.info('question.answer_unconfirmed', { ferret: key(id), toolUseId: record.toolUseId });
     },
   });
