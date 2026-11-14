@@ -53,7 +53,11 @@ class Pane {
 
 class CompactingFerrets extends FakeFerrets {
   readonly pane = new Pane();
-  transcript: TranscriptEntry[] = [];
+  // A ferret that is compacting has a conversation behind it: an empty one reads as unbound (12f9d27c23), which the tracker
+  // answers with an "unconfirmed" note to the sender, a thing this rig is not about.
+  transcript: TranscriptEntry[] = [
+    { id: 'u-0', role: 'user', text: 'the work so far', at: '2026-11-10T21:00:00Z' as Instant },
+  ];
   stored: FerretTurnDocument[] = [];
 
   async harness(ferret: FerretId): Promise<FerretHarness | undefined> {

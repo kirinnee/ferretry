@@ -638,6 +638,15 @@ const CONFIG = {
   'model-sets': { heavy: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' } },
 };
 
+/**
+ * A configuration the files cannot publish yet: the runtime names a profile that is not there. (A runtime whose LOGIN
+ * is gone no longer does this: a2abd6585d sets that one aside as unavailable so it never takes the fleet load down.)
+ */
+const UNPUBLISHABLE = {
+  ...CONFIG,
+  runtimes: { 'claude-default': { login: 'claude-you', profile: 'nowhere', agent: true } },
+};
+
 async function compose(
   logins = [sampleLogin('claude-you', { store: 'ferretry' })],
   config: Readonly<Record<string, unknown>> = CONFIG,
@@ -788,7 +797,7 @@ describe('the composed daemon rebuilds an unreadable manifest after start', () =
   });
 
   it('says so, and FAILS the job (so the runner retries it), when the manifest is unreadable and the configuration cannot be published yet', async () => {
-    const { host, world } = await compose([]);
+    const { host, world } = await compose(undefined, UNPUBLISHABLE);
     await writeFile(manifestPathOf(world), withUnknownKey());
 
     await expect(host.runJob(REPAIR)).rejects.toThrow('could not be rebuilt yet');
@@ -879,7 +888,7 @@ describe('the start boundary says the manifest is being rebuilt', () => {
 
 // ── the real JobRunner over a driven clock ──────────────────────────────────────────────────────────────────────────
 
-async function scheduledCompose(failures = 0, missingLogins = false) {
+async function scheduledCompose(failures = 0, unpublishable = false) {
   const world = await fleetWorld();
   const clock = fixedClock();
   const silent = { debug() {}, info() {}, warn() {}, error() {}, child: () => silent };
@@ -915,11 +924,11 @@ async function scheduledCompose(failures = 0, missingLogins = false) {
     ],
     fakes: {
       ferrets: new FakeFerrets(),
-      logins: fakeLogins(missingLogins ? [] : [sampleLogin('claude-you', { store: 'ferretry' })]),
+      logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
       loginChanges: fakeLoginChanges(),
     },
     gate: new StandInAdmission(() => ownerStanding()),
-    config: CONFIG,
+    config: unpublishable ? UNPUBLISHABLE : CONFIG,
     ownerHome: world.person,
     executables: ['/fixture/bin/claude', '/fixture/bin/codex'],
     searchPath: '/fixture/bin',
