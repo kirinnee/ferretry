@@ -248,28 +248,15 @@
       "ignore": [
         "app/components/auto-read-chip.tsx",
         "app/hooks/use-auto-read.ts",
-        "app/lib/stt/parakeet-vocabulary.ts",
-        "app/lib/stt/pthread-workers.ts",
         "app/lib/stt/speed-bench-report.ts",
         "app/lib/voice-chat/auto-read.ts",
         "app/lib/voice-chat/reply-picker.ts",
         "app/lib/voice-chat/turn-endpointer-scoring.ts",
         "app/lib/voice-chat/turn-endpointer.ts",
-        "app/vite-voice.ts",
-        "app/worker/parakeet-worker.ts",
-        "app/worker/sherpa-worker.ts",
-        "app/worker/vosk-worker.ts",
-        "app/worker/whisper-worker.ts",
         "daemon/lib/speedups/index.ts",
         "daemon/lib/stt/index.ts"
       ],
-      "ignoreDependencies": [
-        "@huggingface/transformers",
-        "@lichess-org/vosk-browser",
-        "@sherpaw/asr",
-        "onnxruntime-web",
-        "parakeet.js"
-      ]
+      "ignoreDependencies": ["sherpa-glue", "sherpa-runtime-wasm"]
     },
     "packages/plugins/usage": {
       "entry": [],

@@ -22,6 +22,7 @@ import { getStartedPagePlugin } from './scripts/get-started-page.ts';
 import { textScalePostcss } from './scripts/text-scale-postcss.ts';
 import { entityDecoderTrustedTypes, leafletTrustedTypes } from './scripts/trusted-types-plugins.ts';
 import { HOSTED_RELAY_DIRECTORY_ORIGIN } from '../plugins/connections/contract/hosted-directory.ts';
+import { voiceBuild } from '../plugins/voice/app/vite-voice.ts';
 
 /** The release version this app is built from (`release.json`, §10.6), stamped into the HTML. */
 const release = JSON.parse(readFileSync(fileURLToPath(new URL('../../release.json', import.meta.url)), 'utf8')) as {
@@ -82,6 +83,10 @@ export default defineConfig({
     },
   },
   base: '/',
+  // ON-DEVICE DICTATION's workers and their resolutions belong to Voice (`plugins/voice/app/vite-voice.ts`): module
+  // workers with the Vosk glue made eval-free, and `onnxruntime-web` pinned to its WASM-only build.
+  worker: voiceBuild.worker,
+  resolve: { alias: voiceBuild.alias },
   build: {
     outDir: 'dist',
     assetsDir: 'assets',

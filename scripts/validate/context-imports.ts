@@ -2,7 +2,8 @@
  * `context-imports` (§2.1, §7.9, spine §4): a package imports another's non-contract files; a contract imports anything
  * but `zod`, `@ferretry/std`, `@ferretry/kernel/contract` and other contracts; a manifest imports anything but the
  * kernel's manifest SDK, the kernel contract and contracts. `./daemon`, `./app`, `./cli`, `./manifest` are imported
- * only by the generated registries. Type-only imports count: a type edge is still an edge.
+ * only by the generated registries, except the build seam: the shell's `vite.config.ts` imports a plugin's
+ * `app/vite-<name>.ts`. Type-only imports count: a type edge is still an edge.
  */
 import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
 import type { Area, ImportEdge } from '../gen/lib/imports.ts';
@@ -79,6 +80,17 @@ export function refusal(edge: ImportEdge): string | undefined {
       return `${edge.specifier} is not the app shell's public API: tests import @ferretry/app, /ui, /worker, /testing, /testing/browser and /testing/router only`;
     return `${edge.specifier} is imported only by app halves (and @ferretry/app/testing only by tests)`;
   }
+
+  // The build seam: a plugin's build needs (workers, aliases, a build-time transform) live in its `app/vite-<name>.ts`, and
+  // the shell's single `vite.config.ts` takes them from there. There is no per-plugin `build.ts` yet, and a config
+  // that cannot import them cannot apply them; nothing else of a plugin's half is reachable this way.
+  if (
+    edge.fromPkg.kind === 'shell' &&
+    edge.from.endsWith('/vite.config.ts') &&
+    to === 'app' &&
+    /\/app\/vite-[a-z][a-z-]*\.ts$/u.test(edge.specifier)
+  )
+    return undefined;
 
   // Another package.
   switch (to) {
