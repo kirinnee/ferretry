@@ -47,7 +47,15 @@ import {
   TURN_INTERRUPTED_AUDIT,
   TurnEnded,
 } from './contract/index.ts';
-import { ASK_DELIVERY_KEY, AskAnswered, AskDeliveries, AsksPort, AskSources } from '@ferretry/core-asks/contract';
+import {
+  ASK_DELIVERY_KEY,
+  ASK_OWNER_CHAT_KEY,
+  AskAnswered,
+  AskDeliveries,
+  AskOwnerChats,
+  AsksPort,
+  AskSources,
+} from '@ferretry/core-asks/contract';
 import {
   ACTIONS_ROW_SLOT,
   FerretChanged,
@@ -272,7 +280,7 @@ export default definePlugin({
       verb('reply', { summary: 'answer the ferret that last wrote to you' }),
       verb('answer', { summary: "answer a ferret's question" }),
       verb('interrupt', { summary: "stop a ferret's turn" }),
-      verb('queue', { summary: "a ferret's queued messages" }),
+      verb('queue <ferret>', { summary: "a ferret's queued messages" }),
       verb('queue edit', { summary: 'change a queued message before it is typed' }),
       verb('queue cancel', { summary: 'withdraw a queued message' }),
       verb('logs', { summary: "read a ferret's conversation log" }),
@@ -280,7 +288,7 @@ export default definePlugin({
       verb('search', { summary: 'find cards and asks by what they say' }),
       verb('render', { summary: 'save a picture a ferret can show in a message' }),
       verb('render guide', { summary: 'how to write a render' }),
-      verb('link', { summary: 'list conversations the harnesses hold, to keep as ferrets' }),
+      verb('link [query...]', { summary: 'list conversations the harnesses hold, to keep as ferrets' }),
       verb('link preview', { summary: 'the first words of a conversation' }),
       verb('link keep', { summary: 'keep conversations as ferrets, read from the harness file' }),
       verb('transcript', { summary: 'the conversation transcript every runtime of a harness shares' }),
@@ -365,6 +373,9 @@ export default definePlugin({
       // How an owner's agenda answer reaches a ferret: typed through this plugin's own send path (queue + ledger). The
       // one provider of this security-path hook (`takers: ['conversation']`).
       { hook: AskDeliveries, key: ASK_DELIVERY_KEY },
+      // The owner's chat as `fy agenda log` copies it onto an item: this plugin's own queue and send ledger. The one
+      // provider of this hook (`takers: ['conversation']`).
+      { hook: AskOwnerChats, key: ASK_OWNER_CHAT_KEY },
     ],
     offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
   },

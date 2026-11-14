@@ -12,15 +12,15 @@ interface Board {
 
 const build = (boards: Record<string, Board>, refuse: readonly string[] = []) => {
   const closed: Array<{ ferret: string; id: string; reason: string }> = [];
-  const asks: Pick<AsksApi, 'open' | 'close'> = {
+  const asks: Pick<AsksApi, 'open' | 'ownerDismiss'> = {
     open: async filter => {
       const board = boards[String(filter.ferret)];
       if (board === undefined || board.unreadable === true) throw new Error('unreadable');
       return board.asks ?? [];
     },
-    close: async (ref: AskRef, reason) => {
+    ownerDismiss: async (ref: AskRef, note?: string) => {
       if (refuse.includes(String(ref.id))) throw new Error('refused');
-      closed.push({ ferret: String(ref.ferret), id: String(ref.id), reason: String(reason) });
+      closed.push({ ferret: String(ref.ferret), id: String(ref.id), reason: String(note) });
     },
   };
   const agents = { agentFerrets: async () => Object.keys(boards) as FerretId[] };
@@ -46,8 +46,8 @@ describe('AgendaAgentClearer', () => {
     const { clearer, closed } = build(boards, ['A2']);
     expect(await clearer.clear()).toEqual({ cleared: 2, ferrets: 2 });
     expect(closed).toEqual([
-      { ferret: 'a', id: 'A1', reason: 'dismissed' },
-      { ferret: 'b', id: 'B1', reason: 'dismissed' },
+      { ferret: 'a', id: 'A1', reason: 'cleared by the owner (agenda clear --agents)' },
+      { ferret: 'b', id: 'B1', reason: 'cleared by the owner (agenda clear --agents)' },
     ]);
   });
 

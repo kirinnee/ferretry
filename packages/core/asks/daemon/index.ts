@@ -18,7 +18,14 @@
 import { randomUUID } from 'node:crypto';
 import { implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
-import { AgendaContext, AskDeliveries, AskSources, type SourceKey } from '../contract/index.ts';
+import {
+  AgendaContext,
+  ASK_OWNER_CHAT_KEY,
+  AskDeliveries,
+  AskOwnerChats,
+  AskSources,
+  type SourceKey,
+} from '../contract/index.ts';
 import { agendaContext } from './adapters/agenda-context.ts';
 import manifest from '../manifest.ts';
 import { askDelivery } from './adapters/ask-delivery.ts';
@@ -64,7 +71,7 @@ export default implementDaemon(manifest, {
     });
     // Lineage and card context are Ferrets' and Board's (`agenda.context`), read at each call; an answer that cannot be had
     // is the safe side of its question (see `agendaContext`). The machine agenda and the owner's chat are not on this
-    // base: a notice with no owner home stays on the sub-ferret, and `fy agenda log` finds nothing.
+    // base: a notice with no owner home stays on the sub-ferret.
     const context = agendaContext(key => hooks.provider(AgendaContext, key), warn);
     const agenda = new AgendaService(
       repository,
@@ -81,7 +88,15 @@ export default implementDaemon(manifest, {
       context.homes,
       context.gates,
       undefined,
-      undefined,
+      // The owner's chat is Conversation's (`ask.owner-chat:conversation`), read at each look so a Conversation that is
+      // turned on later is used from then on; with none, `fy agenda log` finds nothing, as it says.
+      {
+        find: async (session, messageId) => {
+          const found = hooks.provider(AskOwnerChats, ASK_OWNER_CHAT_KEY);
+          if (found === 'unavailable') return { ok: false, reason: messageId === undefined ? 'none' : 'unknown' };
+          return await found.find(session, messageId);
+        },
+      },
       versions,
       seen,
     );

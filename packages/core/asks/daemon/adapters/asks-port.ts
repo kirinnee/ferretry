@@ -351,6 +351,11 @@ export function asksPort(
       if (!mutation.ok) throw new AskOwnerActionError(mutation.error.code, mutation.error.message);
       return mutation.snapshot;
     },
+    ownerDismiss: async (ref, note) => {
+      const mutation = await agenda.dismiss(ref.ferret, ref.id, { kind: 'human' }, note);
+      if (!mutation.ok && mutation.error.code !== 'not-found')
+        throw new AskOwnerActionError(mutation.error.code, mutation.error.message);
+    },
     ...(tell === undefined ? {} : { tell }),
     raise: async draft => await raises.run(() => raise(draft, false)),
     notify: async notice => await raises.run(() => raise({ ...notice, kind: 'notice' }, true)),

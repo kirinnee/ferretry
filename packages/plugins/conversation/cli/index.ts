@@ -133,7 +133,7 @@ export default implementCli(manifest, {
       answer,
       interrupt,
       'compact-at': compactAt,
-      queue: queueVerb(queuePorts),
+      'queue <ferret>': queueVerb(queuePorts),
       'queue edit': queueEditVerb(queuePorts),
       'queue cancel': queueCancelVerb(queuePorts),
     };

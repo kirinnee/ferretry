@@ -64,7 +64,9 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('voice', { summary: 'clean up dictated text through the enhancement provider (same as voice enhance)' }),
+      verb('voice [text...]', {
+        summary: 'clean up dictated text through the enhancement provider (same as voice enhance)',
+      }),
       verb('voice enhance', { summary: 'clean up dictated text — punctuation, casing and proper nouns' }),
     ],
   },
