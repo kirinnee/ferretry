@@ -69,6 +69,41 @@ describe('the logins the Warden offers for an investigation', () => {
     should(resolved.login.available).deepEqual(['claude-default', 'claude-work-fast', 'codex-main-agent']);
   });
 
+  it('should offer no default when the catalog cannot be read, so no unattended investigator is started on it', async () => {
+    const agents = runtimesWardenAgents(() => ({
+      catalog: async () => {
+        throw new Error('the catalog was refused');
+      },
+      default: async () => 'claude-default' as Awaited<ReturnType<RuntimesApi['default']>>,
+    }));
+    should(await agents.defaultRuntime()).be.undefined();
+    await agents.installed().then(
+      () => {
+        throw new Error('an unreadable catalog must not answer');
+      },
+      () => undefined,
+    );
+    const resolved = resolveWardenLogin({ ...DEFAULT_WARDEN_CONFIG, accounts: [] }, [], await agents.defaultRuntime());
+    should(resolved.login.source).equal('not_set');
+    should(resolved.usable).be.false();
+  });
+
+  it('should offer no default that is a human runtime, switched off, or unknown to the catalog', async () => {
+    const human = [runtime('claude-default'), runtime('claude-human', { agent: false })];
+    should(await runtimesWardenAgents(() => api(human, 'claude-human')).defaultRuntime()).be.undefined();
+    const off = [runtime('claude-default'), runtime('claude-old', { disabled: true })];
+    should(await runtimesWardenAgents(() => api(off, 'claude-old')).defaultRuntime()).be.undefined();
+    should(await runtimesWardenAgents(() => api(CATALOG, 'not-on-this-machine')).defaultRuntime()).be.undefined();
+    should(await runtimesWardenAgents(() => api(CATALOG, undefined)).defaultRuntime()).be.undefined();
+    const unreadable = runtimesWardenAgents(() => ({
+      catalog: async () => CATALOG,
+      default: async () => {
+        throw new Error('the default could not be read');
+      },
+    }));
+    should(await unreadable.defaultRuntime()).be.undefined();
+  });
+
   it('should answer unreadable, condemning no account, when Runtimes is off', async () => {
     const agents = runtimesWardenAgents(() => undefined);
     should(await agents.installed()).deepEqual([]);

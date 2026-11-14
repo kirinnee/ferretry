@@ -31,5 +31,27 @@ export function runtimesWardenAgents(
         }));
     },
   };
-  return new FleetWardenAgents(inventory, async () => await runtimes()?.default());
+  // The default stands in for an owner who never chose a login, so it is offered only when it is one of the agent runtimes
+  // the catalog lists as eligible. An unreadable catalog, or a default that is not an eligible agent runtime (a human
+  // runtime, one switched off, one the catalog does not know), is NO default: the login stays not set rather than an
+  // unattended investigator being started on something a person uses.
+  const eligibleDefault = async (): Promise<string | undefined> => {
+    const api = runtimes();
+    if (api === undefined) return undefined;
+    const [catalog, fallback] = await Promise.all([
+      api.catalog().then(
+        rows => rows,
+        () => undefined,
+      ),
+      api.default().then(
+        name => name,
+        () => undefined,
+      ),
+    ]);
+    if (catalog === undefined || fallback === undefined) return undefined;
+    return catalog.some(runtime => runtime.agent && runtime.disabled === undefined && runtime.name === fallback)
+      ? fallback
+      : undefined;
+  };
+  return new FleetWardenAgents(inventory, eligibleDefault);
 }
