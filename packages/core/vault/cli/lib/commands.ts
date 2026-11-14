@@ -72,7 +72,6 @@ function readUseWords(words: readonly string[]): UseWords {
       if (given === 'cwd') cwd = value;
       else timeout = value;
     } else if (given === 'json') json = inline === undefined || inline === 'true';
-    else if (given === 'no-json') json = false;
   }
   const options = { ...(cwd === undefined ? {} : { cwd }), ...(timeout === undefined ? {} : { timeout }), json };
   const command = [...bare, ...tail];
