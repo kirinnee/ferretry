@@ -202,7 +202,7 @@ export default definePlugin({
         summary: 'add a runtime: which sign-in, which profile, and whether Ferretry launches it as an agent',
         args: [{ name: 'name', help: 'the runtime name' }],
         options: [
-          { flag: '--credential <id>', help: 'the login it uses' },
+          { flag: '--login <id>', help: 'the login it uses' },
           { flag: '--profile <name>', help: 'the profile it uses' },
           {
             flag: '--agent',
@@ -223,7 +223,7 @@ export default definePlugin({
         summary: 'change which sign-in or profile a runtime uses, or whether it is an agent',
         args: [{ name: 'name', help: 'the runtime' }],
         options: [
-          { flag: '--credential <id>', help: 'the login it uses' },
+          { flag: '--login <id>', help: 'the login it uses' },
           { flag: '--profile <name>', help: 'the profile it uses' },
           { flag: '--agent', help: 'Ferretry launches it as an agent' },
           { flag: '--no-agent', help: 'it is not launched as an agent' },

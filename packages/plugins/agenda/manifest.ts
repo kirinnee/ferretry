@@ -155,7 +155,7 @@ export default definePlugin({
         args: [{ name: 'summary', help: 'one line saying what the owner should know', optional: true, variadic: true }],
         options: [
           { flag: '--body <markdown>', help: 'the longer reading behind the summary, as Markdown' },
-          { flag: '--ping', help: "also buzz the owner's phone" },
+          { flag: '--buzz', help: "also buzz the owner's phone" },
           {
             flag: '-s, --session <id>',
             help: 'target another session; an agent may notify only for its own (defaults to the current session)',

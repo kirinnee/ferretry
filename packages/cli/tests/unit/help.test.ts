@@ -198,3 +198,94 @@ describe('help through the router', () => {
     should(result.out).containEql('Usage: fy toy open <name> [command...] [options]');
   });
 });
+
+/** Options a verb's handler reads, as its help must name them (the review of cli-help: help may not promise or hide a flag). */
+describe('help names the flags the handlers read', () => {
+  const table = buildVerbTable(registry);
+  const helpOf = (line: string): string => {
+    const entry = table.entries.find(candidate => candidate.line === line);
+    if (entry === undefined) throw new Error(`no verb ${line}`);
+    return renderVerbHelp('fy', entry, table);
+  };
+  const optionsSection = (line: string): string => helpOf(line).split('Options:')[1] ?? '';
+  const flagsOf = (line: string): readonly string[] =>
+    (table.entries.find(candidate => candidate.line === line)?.options ?? []).map(option => option.flag);
+
+  const SHARED = [
+    '--mode <mode>',
+    '--name <title>',
+    '--teammate <callsign>',
+    '--teammate-fallback',
+    '--label <label>',
+    '--card <id>',
+    '--prompt-file <file>',
+    '--model <model>',
+    '--effort <level>',
+    '--fast',
+    '--no-fast',
+    '--compact-at <tokens|auto>',
+    '--rc',
+    '--no-rc',
+    '--harness <harness>',
+    '--login <id>',
+    '--pack <label>',
+    '--harness-flag <flag>',
+    '--cwd <dir>',
+    '--interval <seconds>',
+    '--turn-timeout <seconds>',
+    '--nudge-after <seconds>',
+    '--stall-kill-after <seconds>',
+    '--direct-max <chars>',
+    '--max-snapshots <count>',
+    '--json',
+  ];
+
+  it('should list every option `start` reads, and keep --compact-at', () => {
+    const flags = flagsOf('start [prompt...]');
+    for (const flag of [...SHARED, '-a, --agent <agent>', '--parent <id>', '-f, --file <file>', '--request-id <id>'])
+      should(flags).containEql(flag);
+  });
+
+  it('should list every option `new` reads, say it needs --runtime or --auto, and offer none it refuses', () => {
+    const flags = flagsOf('new [words...]');
+    for (const flag of [...SHARED, '--runtime <name>', '--auto']) should(flags).containEql(flag);
+    for (const refused of ['--continue', '--since', '--allow-scratch', '--request-id', '--file', '--parent'])
+      should(flags.some(flag => flag.includes(refused))).be.false();
+    const text = helpOf('new [words...]');
+    should(text).containEql('--runtime <name>');
+    should(text).containEql('--auto');
+    should(text).not.containEql('--continue');
+    should(text).not.containEql('search words');
+  });
+
+  it('should call the login option --login <id> on runtime add and set, never --credential', () => {
+    for (const line of ['runtime add', 'runtime set']) {
+      should(optionsSection(line)).containEql('--login <id>');
+      should(optionsSection(line)).not.containEql('--credential');
+    }
+  });
+
+  it('should call the phone option of `notify` --buzz, never --ping', () => {
+    should(optionsSection('notify')).containEql('--buzz');
+    should(optionsSection('notify')).not.containEql('--ping');
+  });
+
+  it('should explain `machine clone --login <mapping>` as source=target or source=slot, repeatable', () => {
+    // The sentence wraps; read it as one line.
+    const section = optionsSection('machine clone').replace(/\s+/gu, ' ');
+    should(section).containEql('--login <mapping>');
+    should(section).containEql('<source login>=<login here>');
+    should(section).containEql('<source login>=slot');
+    should(section).containEql('repeat for each login');
+  });
+
+  it('should show no [harness] argument and no both/select prose on the harness update verbs', () => {
+    for (const line of ['harness claude-code update', 'harness codex update']) {
+      const text = helpOf(line);
+      should(text).startWith(`Usage: fy ${line} [options]`);
+      should(text).not.containEql('[harness]');
+      should(text).not.containEql('Arguments:');
+      should(text.toLowerCase()).not.containEql('both');
+    }
+  });
+});

@@ -147,7 +147,10 @@ const SHELL_VERB_LINES: readonly ShellVerbLine[] = [
       { flag: '--theirs <item>', help: 'on a difference, take the export’s version; repeat for more' },
       { flag: '--mine <item>', help: 'on a difference, keep this machine’s version; repeat for more' },
       { flag: '--remove <item>', help: 'remove one item this machine holds that the export does not; repeat for more' },
-      { flag: '--login <name>', help: 'use this machine’s login of that name for a runtime; repeat for more' },
+      {
+        flag: '--login <mapping>',
+        help: 'answer where a login of the export goes: <source login>=<login here> uses a login this machine has, <source login>=slot makes a new empty one; repeat for each login',
+      },
       { flag: '--forget <name>', help: 'forget a past clone from that source, then stop' },
     ],
   },

@@ -65,7 +65,7 @@ export default definePlugin({
       }),
       verb('harness codex update', {
         summary: 'update codex, with the command for how it was installed',
-        args: [{ name: 'harness', help: 'claude or codex; both when omitted', optional: true }],
+        args: [],
         options: [
           { flag: '--to <version>', help: 'install this version, or "verified" for the one Ferretry verified' },
           { flag: '--yes', help: 'do not ask before updating' },
