@@ -129,7 +129,7 @@ const harness = async (answer: (route: string) => unknown, clock = { now: T0 }):
 describe('the browser control hook', () => {
   it('reads the session’s control view by route key and shows who is driving', async () => {
     const h = await harness(() => view({ driving: [driving('p1', 5_000, { agentName: 'Hadi' })] }));
-    expect(h.calls[0]).toEqual({ route: READ, init: { params: { ferretId: 'session-a' } } });
+    expect(h.calls[0]).toEqual({ route: READ, init: { params: { ferretId: 'session-a' }, quiet: true } });
     expect(h.control().driverFor('p1')).toEqual({ name: 'Hadi' });
     expect(h.control().takenOver('p1')).toBe(false);
     // A re-render is scheduled for the instant the marker lapses.

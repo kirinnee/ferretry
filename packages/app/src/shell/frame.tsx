@@ -179,12 +179,20 @@ function Main({ route }: { readonly route: Route }) {
   }
 }
 
-function Side({ daemon }: { readonly daemon: string | undefined }) {
+function Side({ daemon, route }: { readonly daemon: string | undefined; readonly route: Route }) {
   const { plan, viewport } = useShell();
   const { show, holds } = plan.side;
   if (show === 'never' || (show === 'wide-only' && viewport === 'phone') || holds.kind === 'none') return null;
   if (daemon === undefined) return null;
   if (holds.kind === 'screen' && needsSubject(holds.screen.path)) return null; // needs a subject the route lacks
+  // The page IS the screen the column holds (the ferret list on /ferrets): draw it once, in the page, not again beside it.
+  if (
+    holds.kind === 'screen' &&
+    route.kind === 'screen' &&
+    route.screen.plugin === holds.screen.plugin &&
+    route.screen.id === holds.screen.id
+  )
+    return null;
   return (
     <aside className="fy-side" data-slot="side">
       {holds.kind === 'screen' ? <ScreenView daemon={daemon} screen={holds.screen} params={{}} /> : null}
@@ -336,7 +344,7 @@ export function Frame() {
                 {whole === undefined ? <Main route={route} /> : <WholeLine daemon={daemon} line={whole} />}
               </PageScrollRegion>
             </main>
-            {whole === undefined ? <Side daemon={daemon} /> : null}
+            {whole === undefined ? <Side daemon={daemon} route={route} /> : null}
           </div>
         </div>
         <ShellCommandBar

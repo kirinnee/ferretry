@@ -369,6 +369,13 @@ export interface PluginClient {
        * the answer it does nothing.
        */
       readonly signal?: AbortSignal;
+      /**
+       * A READ THE PAGE MAKES ON ITS OWN (a panel mounting, a poll), not one a person asked for. If the daemon answers
+       * that it wants a passkey STEP-UP for it, the refusal comes back as the answer and no prompt is raised: the
+       * person is asked when they act on the panel (a press is never quiet), not merely for opening the page. An
+       * UNLOCK (the owner's `unlockOnOpen`) still asks. Only a `GET`/`HEAD` can be quiet; any other call ignores it.
+       */
+      readonly quiet?: boolean;
     },
   ): Promise<Answer>;
   subscribe<Name extends string, Payload>(event: EventDef<Name, Payload>, listener: (payload: Payload) => void): Cancel;

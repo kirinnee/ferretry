@@ -54,7 +54,7 @@ export const listSessionProcesses = async (
   assertScopeDaemon(daemon, scope);
   signal?.throwIfAborted();
   const list = SessionProcessListSchema.parse(
-    settled(await client.call(PROCESS_ROUTES.list, { params: { ferretId: scope.sessionId } }), signal),
+    settled(await client.call(PROCESS_ROUTES.list, { params: { ferretId: scope.sessionId }, quiet: true }), signal),
   );
   if (list.sessionId !== scope.sessionId) throw mismatch('daemon listed another session');
   return list;

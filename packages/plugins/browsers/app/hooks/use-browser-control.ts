@@ -97,7 +97,7 @@ export function useBrowserControl(
     // Returned, so the feed-aware poll skips a tick while this read is parked (behind a locked machine's unlock).
     const read = (): Promise<void> =>
       daemon.client
-        .call(BROWSER_CONTROL_ROUTES.read, { params: { ferretId: scope.sessionId } })
+        .call(BROWSER_CONTROL_ROUTES.read, { params: { ferretId: scope.sessionId }, quiet: true })
         .then(answer => {
           const parsed = SurfaceControlViewSchema.parse(answer);
           if (epoch.current === mine) setView(current => withControlView(current, scope.sessionId, parsed));

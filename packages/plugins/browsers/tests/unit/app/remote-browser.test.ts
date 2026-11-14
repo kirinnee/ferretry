@@ -63,7 +63,7 @@ describe('remote browser transport', () => {
     const scope = daemonSessionScope(daemon, 'same/session');
     expect(await fetchRemoteBrowserStatus(daemon, scope)).toEqual(status);
     expect(await runRemoteBrowserAction(daemon, scope, { action: 'start' })).toEqual({ status });
-    expect(calls[0]).toEqual({ route: STATUS, init: { params: { ferretId: 'same/session' } } });
+    expect(calls[0]).toEqual({ route: STATUS, init: { params: { ferretId: 'same/session' }, quiet: true } });
     expect(calls[1]?.route).toBe(ACT);
     expect(calls[1]?.init?.params).toEqual({ ferretId: 'same/session' });
     expect(calls[1]?.init?.body).toEqual({ action: 'start' });

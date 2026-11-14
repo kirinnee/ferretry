@@ -185,7 +185,7 @@ const ferretsManifest = manifestOf('ferrets', {
   },
 });
 const agendaManifest = stub('agenda', [{ id: 'agenda', path: 'agenda', label: 'Agenda', order: 1 }]);
-const boardManifest = stub('board', [{ id: 'board', path: 'board', label: 'Board', order: 2 }]);
+const boardManifest = stub('board', [{ id: 'board', path: 'board/:project?', label: 'Board', order: 2 }]);
 const usageManifest = manifestOf('usage', {
   ui: {
     screens: [{ id: 'insights', path: 'insights', nav: { label: 'Insights', order: 3 } }],

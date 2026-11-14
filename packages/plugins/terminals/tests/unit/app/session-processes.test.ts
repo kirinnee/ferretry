@@ -41,6 +41,7 @@ interface Call {
     readonly query?: Record<string, string>;
     readonly headers?: Record<string, string>;
     readonly body?: unknown;
+    readonly quiet?: boolean;
   };
 }
 
@@ -157,7 +158,9 @@ describe('the client', () => {
   it('lists, addressing the session’s processes route by key and parsing the answer', async () => {
     const { calls, client } = answering(ALL_PROCESSES);
     const list = await listSessionProcesses(client, daemon, scope);
-    expect(calls).toEqual([{ route: PROCESS_ROUTES.list, init: { params: { ferretId: 'agent-session' } } }]);
+    expect(calls).toEqual([
+      { route: PROCESS_ROUTES.list, init: { params: { ferretId: 'agent-session' }, quiet: true } },
+    ]);
     expect(list.processes).toHaveLength(6);
   });
 

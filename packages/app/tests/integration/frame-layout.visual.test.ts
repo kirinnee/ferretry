@@ -69,9 +69,16 @@ const VIEWPORTS = [
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 
-const open = async (viewport: (typeof VIEWPORTS)[number], path: string, ready: string, query = '') => {
+const open = async (
+  viewport: (typeof VIEWPORTS)[number],
+  path: string,
+  ready: string,
+  query = '',
+  theme = 'studio-light',
+) => {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
+    colorScheme: theme.endsWith('dark') ? 'dark' : 'light',
     deviceScaleFactor: viewport.phone ? 2 : 1,
     hasTouch: viewport.phone,
     isMobile: viewport.phone,
@@ -84,7 +91,7 @@ const open = async (viewport: (typeof VIEWPORTS)[number], path: string, ready: s
   tab.setDefaultTimeout(8_000);
   const problems: string[] = [];
   tab.on('pageerror', error => problems.push(error.message));
-  await tab.goto(`${origin}${path}?theme=studio-light${query}`);
+  await tab.goto(`${origin}${path}?theme=${theme}${query}`);
   try {
     await tab.waitForSelector(ready, { timeout: 8_000 });
     if (shotsDir !== '')
@@ -152,6 +159,26 @@ describe('the agenda page with a status line drawn in flow', () => {
       await close();
     }
   });
+});
+
+describe('the ferrets page (the screen the side column holds)', () => {
+  for (const viewport of VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      it(`at ${viewport.name} in ${mode}: the list is drawn once, and Board in the nav is a real link`, async () => {
+        const { tab, close } = await open(viewport, '/d/ws/ferrets', '[data-ferret-list]', '', `studio-${mode}`);
+        try {
+          await shotOf(tab, `${viewport.name}-ferrets-list-${mode}`);
+          expect(
+            await tab.locator('[data-ferret-list]').count(),
+            'the list is drawn once, not in the page and the column',
+          ).toBe(1);
+          const board = tab.locator('.fy-nav__item', { hasText: 'Board' });
+          expect(await board.evaluate(node => node.tagName)).toBe('A');
+          expect(await board.getAttribute('href')).toBe('/d/ws/board');
+        } finally {
+          await close();
+        }
+      });
 });
 
 describe('the ferret page', () => {
