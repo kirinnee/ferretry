@@ -326,7 +326,6 @@ describe('ContextMenu', () => {
       // The containing block travels with the scroll; the menu is already clamped to the top margin, so its placed
       // point stops changing while the ancestor keeps moving: the measured frame must follow it anyway.
       let ancestorTop = 0;
-      const original = HTMLElement.prototype.getBoundingClientRect;
       HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
         const left = Number.parseFloat(this.style.left) || 0;
         const top = (Number.parseFloat(this.style.top) || 0) + ancestorTop;
@@ -361,7 +360,8 @@ describe('ContextMenu', () => {
         expect(scrim.style.top).toBe('60px');
         await view.cleanup();
       } finally {
-        HTMLElement.prototype.getBoundingClientRect = original;
+        // happy-dom defines it on Element.prototype only: assigning the inherited original back would leave an own property here that shadows every later file's Element.prototype stub in the shared process.
+        Reflect.deleteProperty(HTMLElement.prototype, 'getBoundingClientRect');
       }
     });
 
@@ -520,7 +520,6 @@ describe('ContextMenu', () => {
   it('opens at the viewport point even inside a transformed ancestor that offsets fixed boxes (#B152)', async () => {
     // The Inbox swipe-deck card is `will-change: transform`: a fixed box inside it lands where the CARD is, so the
     // same left/top draw 378px right and 96px down of the click. Simulate that containing block.
-    const original = HTMLElement.prototype.getBoundingClientRect;
     HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
       const left = (Number.parseFloat(this.style.left) || 0) + 378;
       const top = (Number.parseFloat(this.style.top) || 0) + 96;
@@ -548,7 +547,8 @@ describe('ContextMenu', () => {
       expect(scrim.style.top).toBe('-96px');
       await menu.unmount();
     } finally {
-      HTMLElement.prototype.getBoundingClientRect = original;
+      // happy-dom defines it on Element.prototype only: assigning the inherited original back would leave an own property here that shadows every later file's Element.prototype stub in the shared process.
+      Reflect.deleteProperty(HTMLElement.prototype, 'getBoundingClientRect');
     }
   });
 });
