@@ -155,7 +155,7 @@ export default definePlugin({
   },
 
   ui: {
-    settings: [settingsTab('layout', { label: 'Layout', order: 15 })],
+    settings: [settingsTab('layout', { group: 'behaviour', label: 'Layout', order: 15 })],
     layouts: [
       { id: 'default', file: 'layouts/default.yaml' },
       { id: 'compact', file: 'layouts/compact.yaml' },

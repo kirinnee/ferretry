@@ -15,7 +15,18 @@ import { parseReleaseRewrites, releasePathForRequest } from '../../../src/releas
 const redirects = readFileSync(join(import.meta.dir, '../../../public/_redirects'), 'utf8');
 const rules = redirects.trim().split('\n');
 
-const APP_ROUTES = ['/app/*', '/d/*', '/setup', '/pair', '/pair/*', '/join', '/shared', '/onboarding', '/onboarding/*'];
+const APP_ROUTES = [
+  '/app/*',
+  '/d/*',
+  '/setup',
+  '/pair',
+  '/pair/*',
+  '/join',
+  '/shared',
+  '/settings',
+  '/onboarding',
+  '/onboarding/*',
+];
 
 describe('public/_redirects app routes', () => {
   it.each(APP_ROUTES)('%s is a 200 rewrite to the directory /app/, not to /app/index.html', route => {
@@ -41,6 +52,7 @@ describe('public/_redirects app routes', () => {
       '/setup',
       '/join',
       '/shared',
+      '/settings',
       '/onboarding',
       '/onboarding/x',
       '/d/x',

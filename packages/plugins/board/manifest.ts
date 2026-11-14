@@ -728,7 +728,7 @@ export default definePlugin({
       panel('ferret.side', { id: 'cards-of-ferret', order: 20 }),
       panel('card.detail', { id: 'card-progress', order: 10 }),
     ],
-    settings: [settingsTab('board', { label: 'Board', order: 40 })],
+    settings: [settingsTab('board', { group: 'agent-settings', label: 'Board', order: 40 })],
     renderers: [renderer('ask', { source: 'card' }), renderer('reference', { prefix: '&' })],
   },
 

@@ -123,7 +123,7 @@ export default definePlugin({
   },
 
   ui: {
-    settings: [settingsTab('codex', { label: 'Codex', order: 21 })],
+    settings: [settingsTab('codex', { group: 'tools', label: 'Codex', order: 21 })],
     // The first-run step's body (Onboarding's steps screen offers this slot): the same view as the Settings tab.
     panels: [panel('onboarding.step', { id: 'onboarding-step', order: 21 })],
   },

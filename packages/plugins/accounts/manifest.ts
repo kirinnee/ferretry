@@ -1025,8 +1025,8 @@ export default definePlugin({
 
   ui: {
     settings: [
-      settingsTab('accounts', { label: 'Accounts', order: 40 }),
-      settingsTab('secure-copy', { label: 'Secure copy', order: 41 }),
+      settingsTab('accounts', { group: 'sites', label: 'Accounts', order: 40 }),
+      settingsTab('secure-copy', { group: 'sites', label: 'Secure copy', order: 41 }),
     ],
     renderers: [renderer('ask', { source: 'sign-in-approval' })],
   },

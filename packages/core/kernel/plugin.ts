@@ -224,9 +224,9 @@ export default definePlugin({
   // configuration files. After Access (20-23) and the plugins' own tabs, before the daemon-wide ones at 90 and above.
   ui: {
     settings: [
-      settingsTab('doctor', { label: 'Doctor', order: 80 }),
-      settingsTab('host-checks', { label: 'Host checks', order: 81 }),
-      settingsTab('files', { label: 'Files', order: 90 }),
+      settingsTab('doctor', { group: 'health', label: 'Doctor', order: 80 }),
+      settingsTab('host-checks', { group: 'health', label: 'Host checks', order: 81 }),
+      settingsTab('files', { group: 'advanced', label: 'Files', order: 90 }),
     ],
   },
   data: { publishes: [PluginsChanged, ConfigChanged], config: [PluginsConfig] },

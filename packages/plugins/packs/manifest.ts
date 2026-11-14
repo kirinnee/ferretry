@@ -204,7 +204,7 @@ export default definePlugin({
   ui: {
     screens: [],
     // Settings › Agents › Pack mode: the switch, who decides, the limits, the probe and the routing prompt.
-    settings: [settingsTab('pack', { label: 'Pack mode', order: 40 })],
+    settings: [settingsTab('pack', { group: 'agent-settings', label: 'Pack mode', order: 40 })],
     // A parent's view of the helpers it started, beside the ferret.
     panels: [
       panel('ferret.side', { id: 'helpers', order: 40 }),

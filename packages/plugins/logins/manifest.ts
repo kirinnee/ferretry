@@ -315,7 +315,7 @@ export default definePlugin({
       // The first-run step's body (Onboarding's steps screen offers this slot): the sign-ins view.
       panel('onboarding.step', { id: 'onboarding-step', order: 30 }),
     ],
-    settings: [settingsTab('logins', { label: 'Logins', order: 25 })],
+    settings: [settingsTab('logins', { group: 'agents', label: 'Logins', order: 25 })],
   },
 
   /** Never reached by a ferret, through any root: the sign-in material of every login (`PrivacyDecl`). */

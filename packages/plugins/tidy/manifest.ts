@@ -77,7 +77,7 @@ export default definePlugin({
   },
 
   ui: {
-    settings: [settingsTab('tidy', { label: 'Tidy', order: 70 })],
+    settings: [settingsTab('tidy', { group: 'advanced', label: 'Tidy', order: 70 })],
   },
 
   data: {

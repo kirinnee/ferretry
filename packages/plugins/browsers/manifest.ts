@@ -722,7 +722,7 @@ export default definePlugin({
       // Settings › This device › Open links in (S-0519): where a tap on an external link opens.
       panel('device.settings', { id: 'open-links-in', order: 25 }),
     ],
-    settings: [settingsTab('browser', { label: 'Browser', order: 55 })],
+    settings: [settingsTab('browser', { group: 'tools', label: 'Browser', order: 55 })],
     renderers: [renderer('reference', { prefix: '%browser' })],
   },
 

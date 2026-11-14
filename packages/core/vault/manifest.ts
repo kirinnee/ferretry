@@ -184,7 +184,7 @@ export default definePlugin({
     ],
   },
   ui: {
-    settings: [settingsTab('secrets', { label: 'Secrets', order: 42 })],
+    settings: [settingsTab('secrets', { group: 'sites', label: 'Secrets', order: 42 })],
     renderers: [renderer('ask', { source: 'input' })],
   },
   provides: {

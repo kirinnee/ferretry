@@ -248,7 +248,7 @@ export default definePlugin({
       // Ferrets' Actions ▾ menu: MCP's own row, "Add MCP server…".
       panel(ACTIONS_ROW_SLOT, { id: 'add-mcp-row', order: 10 }),
     ],
-    settings: [settingsTab('mcp', { label: 'MCP servers', order: 50 })],
+    settings: [settingsTab('mcp', { group: 'tools', label: 'MCP servers', order: 50 })],
   },
 
   /** Never reached by a ferret, through any root: the sealed OAuth refresh tokens and client secrets (`PrivacyDecl`). */

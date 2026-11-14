@@ -36,9 +36,25 @@ import { sceneTailwindConfig } from './scene-tailwind.ts';
 const packageRoot = resolve(import.meta.dir, '../../..');
 const workspace = resolve(packageRoot, '../..');
 
+/**
+ * Vite's asset queries (`x.wasm?url`, `worker.ts?worker&url`) are the bundler's own: Voice's `speech-assets.ts` names eight
+ * of them, and a scene that bundles the generated surfaces reaches that module through Voice's lazy import. A scene never
+ * runs an on-device engine, so each query resolves to an empty URL here (the real build emits the files; `vite.config.ts`).
+ */
+const viteAssetUrls: Bun.BunPlugin = {
+  name: 'vite-asset-urls',
+  setup(build) {
+    build.onResolve({ filter: /\?(worker&)?url$/u }, args => ({ path: args.path, namespace: 'vite-asset-url' }));
+    build.onLoad({ filter: /.*/u, namespace: 'vite-asset-url' }, () => ({
+      contents: "export default '';",
+      loader: 'js',
+    }));
+  },
+};
+
 /** What a Bun build made: the script and, when the entry's graph imports stylesheets, their CSS (in import order). */
 const bundleOf = async (entry: string, label: string): Promise<{ readonly js: string; readonly css: string }> => {
-  const result = await Bun.build({ entrypoints: [entry], target: 'browser', throw: false });
+  const result = await Bun.build({ entrypoints: [entry], target: 'browser', throw: false, plugins: [viteAssetUrls] });
   if (!result.success) throw new Error(`❌ ${label} did not build:\n${result.logs.join('\n')}`);
   const sheets = result.outputs.filter(output => output.path.endsWith('.css'));
   const script = result.outputs.find(output => output.path.endsWith('.js'));

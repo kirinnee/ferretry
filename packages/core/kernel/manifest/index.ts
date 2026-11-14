@@ -4,5 +4,6 @@ export * from './call-headers.ts';
 export * from './implement.ts';
 export * from './types.ts';
 export * from './reach.ts';
+export * from './settings-groups.ts';
 export * from './privacy.ts';
 export * from './project-files.ts';

@@ -321,6 +321,18 @@ export function WardenConfigSurface({
           </p>
         </section>
       );
+    // Settings and the setup step wait for the daemon's answer, which can be held for a passkey confirmation (the carrier asks
+    // for it at the request): say so, never draw an empty step. The step-up itself is not touched here.
+    if (unavailable === 'message')
+      return (
+        <section className="kt-panel p-panel" role="status" aria-label="Reading the Warden settings">
+          <h3 className="m-0 text-row font-semibold text-fg">Reading the Warden’s settings…</h3>
+          <p className="mb-0 mt-1 text-cell leading-base text-muted">
+            If this device asks you to confirm it’s you, confirm it to see them. The settings appear here as soon as the
+            daemon answers.
+          </p>
+        </section>
+      );
     return null;
   }
   return (

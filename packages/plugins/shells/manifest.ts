@@ -148,7 +148,7 @@ export default definePlugin({
   },
 
   ui: {
-    settings: [settingsTab('shells', { label: 'Shells', order: 70 })],
+    settings: [settingsTab('shells', { group: 'tools', label: 'Shells', order: 70 })],
     // The first-run step's body (Onboarding's steps screen offers this slot): the same view as the Settings tab.
     panels: [panel('onboarding.step', { id: 'onboarding-step', order: 80 })],
   },

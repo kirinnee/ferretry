@@ -89,7 +89,7 @@ export default definePlugin({
       screen('setup', { path: 'setup' }),
     ],
     // The way back to the steps screen for a machine that was paired but not set up: nothing else links to it.
-    settings: [settingsTab('setup', { label: 'Setup', order: 60 })],
+    settings: [settingsTab('setup', { group: 'agents', label: 'Setup', order: 60 })],
   },
 
   data: {
