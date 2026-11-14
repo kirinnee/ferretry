@@ -81,7 +81,8 @@ describe('the steps screen’s closing summary', () => {
         await tab.goto(`${origin}/?view=finished&theme=studio-${mode}`);
         await tab.waitForSelector('[data-onboarding-summary]');
         const set = await tab.locator('[data-onboarding-summary-set]').innerText();
-        expect(set).toContain('Start from…');
+        expect(set).toContain('Start from');
+        expect(set).not.toContain('…');
         expect(set).toContain('Sign in');
         expect(await tab.locator('[data-onboarding-later-link]').count()).toBe(3);
         expect(await tab.locator('[data-onboarding-later-link="voice.voice"]').getAttribute('href')).toBe(

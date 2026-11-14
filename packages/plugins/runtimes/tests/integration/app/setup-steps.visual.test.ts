@@ -188,6 +188,10 @@ describe('the machine-setup steps', () => {
         expect(text).toContain('node ./notes-server.js --port 4100');
         expect(text).toContain('AWS_PROFILE');
         expect(await tab.locator('[data-copy-runnable] input[type="checkbox"]').count()).toBe(2);
+        // The remedy's `secret set` is drawn as code, not as raw backticks.
+        const key = tab.locator('[data-copy-key="NOTES_KEY"]');
+        expect(await key.locator('code').count()).toBe(1);
+        expect(await key.innerText()).not.toContain('`');
         expect(await tab.locator('[data-copy-item-tick="profile/dev"]').count()).toBe(1);
         await insideScreen(tab, '[data-copy-review] *', viewport.width);
         if (viewport.phone) await tapTargetsAreBigEnough(tab);
@@ -203,9 +207,17 @@ describe('the machine-setup steps', () => {
         // Nothing is ticked for the person: the settings start unticked, and the changed command shows in full.
         expect(await tab.locator('[data-copy-settings-tick="voice.yaml"]').isChecked()).toBe(false);
         expect(await tab.locator('[data-copy-review]').innerText()).toContain('--port 4200 --verbose');
+        // A command breaks only at spaces: no word is split across two lines (each is one line tall).
+        for (const word of await tab.locator('[data-copy-command] > span').all())
+          expect((await word.boundingBox())?.height ?? 0).toBeLessThan(24);
         await tab.locator('[data-copy-settings-tick="voice.yaml"]').check();
         await tab.locator('[data-copy-undecided]').waitFor();
         expect(await tab.locator('[data-copy-stage]').isDisabled()).toBe(true);
+        // A blocked Preview reads as unavailable by its dashed outline, unlike the Back button beside it.
+        expect(await tab.locator('[data-copy-stage]').evaluate(el => getComputedStyle(el).borderStyle)).toBe('dashed');
+        expect(await tab.locator('[data-copy-back]').evaluate(el => getComputedStyle(el).borderStyle)).not.toBe(
+          'dashed',
+        );
         // The both-changed item is what blocks it, and the screen says so beside the disabled button.
         expect(await tab.locator('[data-copy-undecided]').innerText()).toContain('profile/dev');
         expect(await tab.locator('[data-copy-undecided]').innerText()).toContain('voice.yaml: engine');
@@ -259,6 +271,10 @@ describe('the machine-setup steps', () => {
         expect(await listing.evaluate(element => getComputedStyle(element).overflowX)).toBe('auto');
         expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         expect(await listing.innerText()).toContain('ferretry-settings-studio-mac-2026-11-14.zip');
+        // The comment under the listing wraps like any sentence: it is never cut at the block's edge.
+        const note = tab.locator('[data-export-note]');
+        expect(await note.innerText()).toContain('secrets: none');
+        expect(await note.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         expect(await tab.locator('[data-setup-section="export-manifest"]').innerText()).toContain('config/warden.yaml');
         expect(await tab.locator('[data-setup-section="export-manifest"]').innerText()).not.toContain(
           'logins/work.yaml',

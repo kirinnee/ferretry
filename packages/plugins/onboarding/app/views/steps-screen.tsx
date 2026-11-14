@@ -88,6 +88,9 @@ function RouterLink({
   );
 }
 
+/** A step's title as a list item reads it: the trailing ellipsis of "Start from…" means "pick" and has no place here. */
+const plainTitle = (title: string): string => title.replace(/…$/u, '');
+
 /**
  * The close of the setup, once no step waits for an answer: what was set up, and each step left for later or skipped,
  * with the way to its settings, so nothing left undone is lost.
@@ -113,9 +116,11 @@ export function SetupSummary({
       <div className="flex flex-col gap-1" data-onboarding-summary-set="">
         <p className="m-0 text-cell text-muted">{set.length === 0 ? 'No step was set up here.' : 'Set up:'}</p>
         {set.length === 0 ? null : (
-          <ul className="m-0 flex list-none flex-col gap-0.5 p-0 text-cell">
+          <ul className="m-0 flex list-none flex-col p-0 text-cell">
             {set.map(step => (
-              <li key={`${step.plugin}.${step.id}`}>{step.title}</li>
+              <li key={`${step.plugin}.${step.id}`} className="flex min-h-11 items-center">
+                {plainTitle(step.title)}
+              </li>
             ))}
           </ul>
         )}
@@ -123,15 +128,15 @@ export function SetupSummary({
       {later.length === 0 ? null : (
         <div className="flex flex-col gap-1" data-onboarding-summary-later="">
           <p className="m-0 text-cell text-muted">Set up later, from Settings:</p>
-          <ul className="m-0 flex list-none flex-col gap-1 p-0">
+          <ul className="m-0 flex list-none flex-col p-0">
             {later.map(step => (
-              <li key={`${step.plugin}.${step.id}`}>
+              <li key={`${step.plugin}.${step.id}`} className="flex min-h-11 items-center gap-2">
                 <RouterLink
                   href={daemonSettingsHref(daemon, step.plugin)}
                   data-onboarding-later-link={`${step.plugin}.${step.id}`}
                 >
-                  {step.title}
-                </RouterLink>{' '}
+                  {plainTitle(step.title)}
+                </RouterLink>
                 <span className="text-meta text-muted">({STATE_LABEL[step.state].toLowerCase()})</span>
               </li>
             ))}

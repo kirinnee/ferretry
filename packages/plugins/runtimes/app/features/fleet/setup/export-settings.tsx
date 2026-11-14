@@ -124,8 +124,11 @@ export function ExportSettings({
           </SetupNote>
           <SetupSection title="In the zip" name="export-manifest">
             <pre className="m-0 max-w-full overflow-x-auto whitespace-pre rounded-control bg-surface p-3 font-mono text-meta">
-              {exportManifest(phase.name, phase.files)}
+              {exportManifest(phase.name, phase.files).split('\n').slice(0, -1).join('\n')}
             </pre>
+            <p className="m-0 text-meta leading-base text-muted [overflow-wrap:anywhere]" data-export-note="">
+              {exportManifest(phase.name, phase.files).split('\n').at(-1)?.trim().replace(/^# /u, '')}
+            </p>
           </SetupSection>
           {phase.plan.leftOut.length === 0 ? null : (
             <SetupNote tone="warn" name="export-left-out" title={`${files(phase.plan.leftOut.length)} left out`}>

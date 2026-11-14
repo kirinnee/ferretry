@@ -47,7 +47,14 @@ import {
   sourceStamps,
   writesByDefault,
 } from './copy-model.ts';
-import { ConfirmDescription, DoneReport, LoginRows, ReviewItem, SettingsPicker } from './copy-review-parts.tsx';
+import {
+  ConfirmDescription,
+  DoneReport,
+  LoginRows,
+  ReviewItem,
+  SettingsPicker,
+  withCode,
+} from './copy-review-parts.tsx';
 
 const DEFAULT_LEAVE = '\u0000leave';
 const DEFAULT_NONE = '\u0000none';
@@ -394,7 +401,7 @@ export function CopySettings({
           <SetupNote tone="pend" name="copy-keys" title="API keys are named, never carried">
             {review.keys.map(key => (
               <span key={key.name} className="block [overflow-wrap:anywhere]" data-copy-key={key.name}>
-                <span className="font-mono">{key.name}</span>: {keyOutcomeSentence(key.outcome, source.name)}
+                <span className="font-mono">{key.name}</span>: {withCode(keyOutcomeSentence(key.outcome, source.name))}
               </span>
             ))}
           </SetupNote>
@@ -530,6 +537,7 @@ export function CopySettings({
           <Button
             type="button"
             variant="primary"
+            className="disabled:!border-dashed disabled:!opacity-60"
             data-copy-stage=""
             disabled={changes.busy || nothing || undecided.length > 0}
             onClick={stage}

@@ -30,6 +30,38 @@ const OUTCOME_WORDS: Readonly<Record<CloneReviewItem['outcome'], string>> = {
   'removed-here': 'copied before and removed here',
 };
 
+/**
+ * A command in words that break ONLY at spaces: each word is one unit that moves to the next line whole (a flag such as
+ * `--verbose` is never split at its hyphens), and a word longer than the line itself is still broken so nothing runs
+ * off the screen.
+ */
+function unbreakableWords(text: string): ReactNode {
+  return text.split(/( +)/u).map((part, index) =>
+    part.startsWith(' ') ? (
+      part
+    ) : (
+      // biome-ignore lint/suspicious/noArrayIndexKey: the words are positional, and the same word can repeat
+      <span key={index} className="inline-block max-w-full [overflow-wrap:anywhere]">
+        {part}
+      </span>
+    ),
+  );
+}
+
+/** A sentence in which each `quoted` stretch is code. */
+export function withCode(text: string): ReactNode {
+  return text.split('`').map((part, index) =>
+    index % 2 === 1 ? (
+      // biome-ignore lint/suspicious/noArrayIndexKey: the pieces are positional
+      <code key={index} className="font-mono">
+        {part}
+      </code>
+    ) : (
+      part
+    ),
+  );
+}
+
 /** Every command, variable and document, in full: a document's own text is shown, wrapped, never hidden. */
 export function RunnableEntries({ entries }: { readonly entries: readonly Entry[] }): ReactNode {
   return (
@@ -45,7 +77,9 @@ export function RunnableEntries({ entries }: { readonly entries: readonly Entry[
               {entry.text}
             </pre>
           ) : (
-            <span className="font-mono text-meta [overflow-wrap:anywhere]">{entry.text}</span>
+            <span className="font-mono text-meta" data-copy-command="">
+              {unbreakableWords(entry.text)}
+            </span>
           )}
         </li>
       ))}
