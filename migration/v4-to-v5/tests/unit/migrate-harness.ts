@@ -152,6 +152,7 @@ export async function makeSandbox(options: SandboxOptions = {}): Promise<Sandbox
   // The checkout: the script itself in a git repository at a released tag.
   await cp(SCRIPT, join(repo, 'migration', 'v4-to-v5', 'migrate.sh'));
   await cp(join(dirname(SCRIPT), 'left-behind.txt'), join(repo, 'migration', 'v4-to-v5', 'left-behind.txt'));
+  await cp(join(dirname(SCRIPT), 'bun-version'), join(repo, 'migration', 'v4-to-v5', 'bun-version'));
   await writeFile(join(repo, '.gitignore'), 'node_modules\n');
   await git(repo, 'init', '-q', '-b', 'main');
   await git(repo, 'add', '-A');
@@ -314,6 +315,7 @@ export async function makeSandbox(options: SandboxOptions = {}): Promise<Sandbox
   await sandbox.state('panes.activity', '%1 100\n');
   await sandbox.state('dry.code', '0');
   await sandbox.state('real.code', '0');
+  await sandbox.state('bun.version', '1.4.4\n');
   await installDefaults(sandbox);
   return sandbox;
 }
@@ -354,6 +356,7 @@ async function installDefaults(sb: Sandbox): Promise<void> {
   ]);
   await sb.fake('xattr', [{ match: '-p com.apple.quarantine *', code: 1 }, { match: '-d com.apple.quarantine *' }]);
   await sb.fake('bun', [
+    { match: '--version', run: `cat ${D}/bun.version` },
     { match: 'install --frozen-lockfile' },
     {
       match: 'src/main.ts*--dry-run*',
