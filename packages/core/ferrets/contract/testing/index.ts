@@ -14,7 +14,14 @@ import {
 } from '@ferretry/kernel/contract';
 import { err, type Instant, instantFromEpochMs, ok, type Result } from '@ferretry/std';
 import type { LoginStartResolution, RuntimeStartResolution, RuntimeStartSource } from '../hooks.ts';
-import type { FerretState, FerretSummary, HarnessKey, LoginKindKey, PackId } from '../ids.ts';
+import {
+  type FerretState,
+  type FerretSummary,
+  FerretSummarySchema,
+  type HarnessKey,
+  type LoginKindKey,
+  type PackId,
+} from '../ids.ts';
 import {
   type AttachRefusal,
   type DeliveryOutcome,
@@ -707,6 +714,23 @@ export function loginKindConformance(
 }
 
 // ─── the Ferrets port and work folders ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One ferret's summary, as `GET /v1/ferrets/:ferretId` serves it: every default is a valid one, and the result is
+ * parsed by the contract's own schema, so a test fixture a route could not serve fails here rather than hiding a drift.
+ */
+export const ferretSummary = (over: Readonly<Record<string, unknown>> & { readonly id: string }): FerretSummary =>
+  FerretSummarySchema.parse({
+    name: over.id,
+    role: 'lead',
+    harness: 'claude-code',
+    runner: 'tmux',
+    folder: '/work/project',
+    state: 'idle',
+    createdAt: '2026-11-01T00:00:00.000Z',
+    stateAt: '2026-11-01T00:00:00.000Z',
+    ...over,
+  });
 
 /** An in-memory Ferrets port: lineage, `mayTouch`, start through nothing (records only). */
 export class FakeFerrets implements FerretsApi {

@@ -10,6 +10,7 @@ import {
 } from '../../../../app/composer/send-outbox-wiring.ts';
 import { QueuePanel } from '../../../../app/queue/queue-page.tsx';
 import { type FakeClient, fakeClient, type RecordedCall } from '../../../support/app/fake-client.ts';
+import { ferretSummary } from '@ferretry/core-ferrets/contract/testing';
 import { withClient } from '../../../support/app/client.tsx';
 
 ensureDom();
@@ -44,7 +45,7 @@ const where = (call: RecordedCall): string => {
 const daemon = (answers: Answers, down = false): FakeClient =>
   fakeClient(
     {
-      [FERRET]: call => ({ id: call.params.ferretId, name: 'Casen', label: 'Queue clean-up' }),
+      [FERRET]: call => ferretSummary({ id: call.params.ferretId ?? '', name: 'Casen', label: 'Queue clean-up' }),
       [QUEUE]: async call => {
         if (down) throw new DaemonCallError(503, 'unreachable', 'The daemon cannot be reached.');
         const answer = answers[where(call)];

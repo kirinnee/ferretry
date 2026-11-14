@@ -11,6 +11,7 @@ import {
   VIEWER_CLOSE_TOO_LARGE,
   type ViewerAttachment,
   type ViewerDownstream,
+  ViewerInputRefused,
   type ViewerStreamOptions,
   type ViewerTerminalSignal,
 } from './viewer-contracts.ts';
@@ -171,8 +172,9 @@ export class BrowserViewerStream {
         if (this.closed) return;
         await this.host.dispatchHumanInput(this.sessionId, decoded);
       })
-      .catch(() => {
-        this.finish(VIEWER_CLOSE_INTERNAL, 'browser input failed');
+      .catch((error: unknown) => {
+        if (error instanceof ViewerInputRefused) this.finish(VIEWER_CLOSE_POLICY, 'browser input not permitted');
+        else this.finish(VIEWER_CLOSE_INTERNAL, 'browser input failed');
       })
       .finally(() => {
         this.queuedInputBytes = Math.max(0, this.queuedInputBytes - bytes.byteLength);
