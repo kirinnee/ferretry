@@ -1,7 +1,19 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { advance, DAEMON_DOWN_SH, DAEMON_UP_SH, makeSandbox, type Sandbox, writeV5Build } from './migrate-harness.ts';
+import {
+  advance,
+  configCheckJson,
+  DAEMON_DOWN_SH,
+  DAEMON_UP_SH,
+  makeSandbox,
+  RAW_SECRET_KEY_MESSAGE,
+  RAW_SECRET_MESSAGE,
+  RAW_TEXT_SECRET_MESSAGE,
+  rawSecretIssue,
+  type Sandbox,
+  writeV5Build,
+} from './migrate-harness.ts';
 
 setDefaultTimeout(60_000);
 
@@ -80,7 +92,7 @@ describe('start: a failed or interrupted start is not proof that no v5 daemon ra
     // The launcher spawns a detached fyd and then fails to hear from it: the process stays.
     await sb.fake('fy', [
       { match: '--version', run: 'cat "$D/fy.version"' },
-      { match: 'config check', out: 'ok' },
+      { match: 'config check --json', out: configCheckJson([]) },
       { match: 'daemon start', run: DAEMON_UP_SH, code: 1 },
       { match: 'daemon stop', run: DAEMON_DOWN_SH },
       { match: 'restart *' },
@@ -102,7 +114,7 @@ describe('start: a failed or interrupted start is not proof that no v5 daemon ra
     await failingStart(sb);
     await sb.fake('fy', [
       { match: '--version', run: 'cat "$D/fy.version"' },
-      { match: 'config check', out: 'ok' },
+      { match: 'config check --json', out: configCheckJson([]) },
       { match: 'daemon start', code: 1 },
     ]);
     const result = await sb.run('start');
@@ -148,21 +160,97 @@ describe('start: a failed or interrupted start is not proof that no v5 daemon ra
     await advance(sb, 'install');
     await sb.fake('fy', [
       { match: '--version', run: 'cat "$D/fy.version"' },
-      { match: 'config check', err: 'logins/a.yaml KEY X holds a literal credential: use fy secret set NAME', code: 1 },
+      { match: 'config check --json', out: configCheckJson([rawSecretIssue()]), code: 1 },
       { match: 'daemon start', run: DAEMON_UP_SH },
       { match: 'ps -a --json', run: 'cat "$D/ps.v5.json"' },
     ]);
     const result = await sb.run('start');
     expect(result.code).toBe(0);
     expect(result.out).toContain('literal credential');
+    expect(result.out).toContain(`logins/a.yaml:3 env.ANTHROPIC_API_KEY: ${RAW_SECRET_MESSAGE}`);
+    expect(result.out).not.toContain('fix');
+    const notes = await sb.notesText();
+    expect(notes).toContain('# credential-repair-pending');
+    expect(notes).toContain('# started-v5');
+  });
+
+  test('the secret-shaped NAME and raw-text messages, in several login files, are credential-only too', async () => {
+    const sb = await box();
+    await advance(sb, 'install');
+    await sb.fake('fy', [
+      { match: '--version', run: 'cat "$D/fy.version"' },
+      {
+        match: 'config check --json',
+        out: configCheckJson([
+          rawSecretIssue('logins/a.yaml'),
+          { path: 'logins/b.yaml', line: 5, severity: 'error', message: `env: ${RAW_SECRET_KEY_MESSAGE}` },
+          { path: 'logins/c.yaml', line: 7, column: 1, severity: 'error', message: RAW_TEXT_SECRET_MESSAGE },
+          { path: 'limits.yaml', severity: 'warning', message: 'a harmless warning' },
+        ]),
+        code: 1,
+      },
+      { match: 'daemon start', run: DAEMON_UP_SH },
+      { match: 'ps -a --json', run: 'cat "$D/ps.v5.json"' },
+    ]);
+    const result = await sb.run('start');
+    expect(result.code).toBe(0);
     expect(await sb.notesText()).toContain('# credential-repair-pending');
   });
 
-  test('any other config check failure stops the start; fyd --check exit 78 and 69 are named stops', async () => {
+  test('a raw secret outside logins/, a held change, or output that is not the JSON report is a stop with the daemon running', async () => {
+    const stops: [string, string][] = [
+      ['a raw secret outside logins/', configCheckJson([rawSecretIssue('limits.yaml')])],
+      [
+        'a held change next to the credential',
+        configCheckJson([rawSecretIssue()], [{ path: 'logins/a.yaml', changes: ['x'] }]),
+      ],
+      [
+        'a look-alike message in logins/',
+        configCheckJson([{ path: 'logins/a.yaml', line: 1, severity: 'error', message: 'env: not a secret at all' }]),
+      ],
+      ['text, not JSON', 'logins/a.yaml:3:3 error: env.K: this looks like a raw secret\n  fix: fy secret set NAME'],
+    ];
+    for (const [label, out] of stops) {
+      const sb = await box();
+      await advance(sb, 'install');
+      await sb.fake('fy', [
+        { match: '--version', run: 'cat "$D/fy.version"' },
+        { match: 'config check --json', out, code: 1 },
+        { match: 'daemon start', run: DAEMON_UP_SH },
+        { match: 'ps -a --json', run: 'cat "$D/ps.v5.json"' },
+      ]);
+      const result = await sb.run('start');
+      expect({ label, code: result.code }).toEqual({ label, code: 1 });
+      expect(result.err).toContain('IS running');
+      const notes = await sb.notesText();
+      expect(notes).not.toContain('# credential-repair-pending');
+      expect(notes).not.toContain('# started-v5');
+    }
+  });
+
+  test('migrate.sh words the three kernel raw-secret messages exactly as the kernel does', async () => {
+    const script = await readFile(join(import.meta.dir, '..', '..', 'migrate.sh'), 'utf8');
+    for (const message of [RAW_SECRET_MESSAGE, RAW_SECRET_KEY_MESSAGE, RAW_TEXT_SECRET_MESSAGE]) {
+      expect(script).toContain(message);
+    }
+  });
+
+  test('any other config check failure stops the start after the daemon is up; fyd --check exit 78 and 69 are named stops', async () => {
     const sb = await box();
     await advance(sb, 'install');
-    await sb.fake('fy', [{ match: 'config check', err: 'schema error', code: 1 }]);
-    expect((await sb.run('start')).code).toBe(1);
+    await sb.fake('fy', [
+      { match: '--version', run: 'cat "$D/fy.version"' },
+      { match: 'config check --json', err: 'schema error', code: 1 },
+      { match: 'daemon start', run: DAEMON_UP_SH },
+      { match: 'ps -a --json', run: 'cat "$D/ps.v5.json"' },
+    ]);
+    const failed = await sb.run('start');
+    expect(failed.code).toBe(1);
+    expect(failed.err).toContain('IS running');
+    expect(failed.err).toContain('other than only a literal credential');
+    const notes = await sb.notesText();
+    expect(notes).toContain('# starting-v5');
+    expect(notes).not.toContain('# started-v5');
     await sb.fake('fyd', [
       { match: '--version', run: 'cat "$D/fyd.version"' },
       { match: '--check', code: 78 },
@@ -173,7 +261,21 @@ describe('start: a failed or interrupted start is not proof that no v5 daemon ra
       { match: '--check', code: 69 },
     ]);
     expect((await sb.run('start')).err).toContain('exit 69');
-    expect((await sb.calls()).filter(line => line === 'fy daemon start')).toEqual([]);
+  });
+
+  test('config check runs only after daemon start and ps answer; the offline pinned form is never called', async () => {
+    const sb = await box();
+    await advance(sb, 'install');
+    expect((await sb.run('start')).code).toBe(0);
+    const calls = await sb.calls();
+    const start = calls.indexOf('fy daemon start');
+    expect(start).toBeGreaterThan(-1);
+    const ps = calls.indexOf('fy ps -a --json', start);
+    expect(ps).toBeGreaterThan(start);
+    const checks = calls.map((line, i) => (line === 'fy config check --json' ? i : -1)).filter(i => i >= 0);
+    expect(checks).toHaveLength(1);
+    expect(checks[0]).toBeGreaterThan(ps);
+    expect(await sb.notesText()).toContain('# started-v5');
   });
 });
 
@@ -437,9 +539,10 @@ describe('rollback restores the ORIGINAL environment, not the shell it is run fr
     expect(env.filter(line => line.startsWith('fy|daemon start')).every(line => line.includes('FY_URL=<unset>'))).toBe(
       true,
     );
-    expect(
-      env.filter(line => line.startsWith('fy|config check')).every(line => line.includes('FY_URL=http://127.0.0.1:9')),
-    ).toBe(true);
+    expect(env.filter(line => line.startsWith('fy|config check')).every(line => line.includes('FY_URL=<unset>'))).toBe(
+      true,
+    );
+    expect(env.some(line => line.startsWith('fy|config check') && line.includes('127.0.0.1:9'))).toBe(false);
   });
 });
 

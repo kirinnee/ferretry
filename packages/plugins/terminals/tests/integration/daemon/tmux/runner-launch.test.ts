@@ -150,7 +150,7 @@ describe('TmuxRunner launch', () => {
     should(resumed.ok).equal(true);
     const killed = world.sent.findIndex(args => args[0] === 'kill-session');
     should(killed).be.greaterThan(-1);
-    should(world.sent[killed]).deepEqual(['kill-session', '-t', 'fy-f1']);
+    should(world.sent[killed]).deepEqual(['kill-session', '-t', '=fy-f1']);
     should(world.spawned).have.length(1);
     should(String(world.spawned[0]?.stdin)).containEql('new-session');
   });
@@ -170,6 +170,38 @@ describe('TmuxRunner launch', () => {
     should(alive.sent.some(args => args[0] === 'kill-session')).equal(false);
     should(mixed.sent.some(args => args[0] === 'kill-session')).equal(false);
     should(alive.spawned).deepEqual([]);
+  });
+
+  it('should name the session by its exact name in every command, so a longer session sharing the prefix is never touched', async () => {
+    // Arrange: tmux treats a bare name as a prefix match; the exact form is `=name`
+    const world = launching({ sessionExists: true, paneDeadFlags: '1\n' });
+
+    // Act
+    await world.runner.start(world.spec);
+
+    // Assert
+    const targets = world.sent
+      .filter(args => ['has-session', 'list-panes', 'kill-session'].includes(args[0] ?? ''))
+      .map(args => [args[0], args[args.indexOf('-t') + 1]]);
+    should(targets).deepEqual([
+      ['has-session', '=fy-f1'],
+      ['list-panes', '=fy-f1'],
+      ['kill-session', '=fy-f1'],
+    ]);
+  });
+
+  it('should read the panes of EVERY window and keep a session whose other window still lives', async () => {
+    // Arrange: `list-panes -s` answers one line per pane of the whole session; the second window's pane is alive
+    const world = launching({ sessionExists: true, paneDeadFlags: '1\n0\n' });
+
+    // Act
+    const started = await world.runner.start(world.spec);
+
+    // Assert
+    const listed = world.sent.find(args => args[0] === 'list-panes');
+    should(listed?.slice(0, 2)).deepEqual(['list-panes', '-s']);
+    should(started.ok ? undefined : started.error).equal('failed');
+    should(world.sent.some(args => args[0] === 'kill-session')).equal(false);
   });
 
   it('should put the server option back from a client holding no values when the new session was not made', async () => {

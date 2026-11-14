@@ -14,9 +14,12 @@
  *
  * ## A REFUSAL IS EXPLAINED
  *
- * A machine whose owner switched pairing off for other devices refuses this read. That is said in
- * words, with the machine's own sentence and the one place the log is always readable — the machine
- * itself — rather than as an empty list, which would read as "nothing has happened".
+ * A refused read is said in words, with the machine's own sentence and the one place the log is always
+ * readable — the machine itself — rather than as an empty list, which would read as "nothing has
+ * happened". The WORDS FOLLOW THE REFUSAL'S OWN CODE: a machine whose owner switched pairing off for
+ * other devices, one that has not granted THIS device, and one that wants a passkey this device did not
+ * confirm are three different situations with three different remedies, and saying "pairing is switched
+ * off" to a person who merely cancelled the passkey card sends them to change a setting that is fine.
  *
  * ## SECURITY CHANGES COME FIRST, AND NOTHING CAN PUSH THEM OFF THE PAGE
  *
@@ -49,6 +52,7 @@ import {
 } from '../../lib/security-log.ts';
 import { announceDevicesLooked } from '../device-notice/devices-looked.ts';
 import type { DaemonConnection } from '../../shell-grants.ts';
+import { grantRefusalNotice } from '../../lib/grants.ts';
 import { readSecurityLog, type SecurityLogClient } from './security-api.ts';
 
 type AuditRecord = AuditView['records'][number];
@@ -58,7 +62,7 @@ export type SecurityLogClientFactory = (connection: DaemonConnection) => Promise
 type LoadState =
   | { readonly status: 'loading' }
   | { readonly status: 'loaded'; readonly view: AuditView; readonly older: OlderState }
-  | { readonly status: 'refused'; readonly reason: string }
+  | { readonly status: 'refused'; readonly why: RefusalKind; readonly reason: string }
   | { readonly status: 'failed'; readonly reason: string };
 
 /** The security changes paged in past the first page, and whether a page is being read. */
@@ -70,12 +74,61 @@ interface OlderState {
 
 const NO_OLDER: OlderState = { kept: [], reading: false, failure: null };
 
+/** Which refusal the machine gave: its own code decides the words, never the status alone. */
+export type RefusalKind = 'pairing-off' | 'this-device' | 'passkey' | 'other';
+
+/** What the daemon's refusal code names; a 403 with no grant code is 'other' and is not guessed at. */
+export function refusalKindOf(cause: unknown): RefusalKind {
+  switch (grantRefusalNotice(cause)?.refusal) {
+    case 'not-granted':
+      return 'pairing-off';
+    case 'device-not-granted':
+      return 'this-device';
+    case 'step-up-required':
+      return 'passkey';
+    default:
+      return 'other';
+  }
+}
+
 const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause)).trim();
 
-export const SECURITY_REFUSED_INTRO =
-  'This machine does not let other devices read its security log, because its owner has switched pairing off for them.';
 export const SECURITY_REFUSED_REMEDY =
   'The log is always readable on the machine itself: open Ferretry there, or run fy daemon audit in its terminal.';
+export const SECURITY_REFUSED_INTRO =
+  'This machine does not let other devices read its security log, because its owner has switched pairing off for them.';
+export const SECURITY_PASSKEY_INTRO =
+  "Reading this machine's security log from this device needs your passkey, and it was not confirmed. Pairing is still on.";
+export const SECURITY_PASSKEY_REMEDY =
+  'Reload this page to be asked for your passkey again, or read the log on the machine itself: open Ferretry there, or run fy daemon audit in its terminal.';
+export const SECURITY_THIS_DEVICE_INTRO = 'This machine has not given this device permission to read its security log.';
+const SECURITY_OTHER_INTRO = "This machine refused this device's read of its security log.";
+
+/** The heading, first sentence and closing line for each kind of refusal. */
+export const REFUSAL_WORDS: Readonly<
+  Record<RefusalKind, { readonly heading: string; readonly intro: string; readonly remedy: string }>
+> = {
+  'pairing-off': {
+    heading: 'The security log is not shown on other devices',
+    intro: SECURITY_REFUSED_INTRO,
+    remedy: SECURITY_REFUSED_REMEDY,
+  },
+  'this-device': {
+    heading: 'This device may not read the security log',
+    intro: SECURITY_THIS_DEVICE_INTRO,
+    remedy: SECURITY_REFUSED_REMEDY,
+  },
+  passkey: {
+    heading: 'Confirm with your passkey to read the security log',
+    intro: SECURITY_PASSKEY_INTRO,
+    remedy: SECURITY_PASSKEY_REMEDY,
+  },
+  other: {
+    heading: 'The security log is not shown on this device',
+    intro: SECURITY_OTHER_INTRO,
+    remedy: SECURITY_REFUSED_REMEDY,
+  },
+};
 
 function SecurityRow({ record, nowMs }: { readonly record: AuditRecord; readonly nowMs: number }) {
   const badge = auditOutcomeBadge(record.outcome);
@@ -247,7 +300,7 @@ export function SecurityLogSurface({
           daemonId: connection.daemonId,
           load:
             status === 403
-              ? { status: 'refused', reason: reasonOf(cause) }
+              ? { status: 'refused', why: refusalKindOf(cause), reason: reasonOf(cause) }
               : { status: 'failed', reason: reasonOf(cause) },
         });
       });
@@ -292,10 +345,10 @@ export function SecurityLogSurface({
         aria-label="Security log unavailable"
         data-security-log-refused=""
       >
-        <h3 className="m-0 text-row font-semibold text-fg">The security log is not shown on other devices</h3>
-        <p className="mb-0 mt-1 text-cell leading-base text-muted">{SECURITY_REFUSED_INTRO}</p>
+        <h3 className="m-0 text-row font-semibold text-fg">{REFUSAL_WORDS[load.why].heading}</h3>
+        <p className="mb-0 mt-1 text-cell leading-base text-muted">{REFUSAL_WORDS[load.why].intro}</p>
         {load.reason === '' ? null : <p className="mb-0 mt-1 text-cell leading-base text-muted">{load.reason}</p>}
-        <p className="mb-0 mt-1 text-cell leading-base text-fg">{SECURITY_REFUSED_REMEDY}</p>
+        <p className="mb-0 mt-1 text-cell leading-base text-fg">{REFUSAL_WORDS[load.why].remedy}</p>
       </section>
     );
   if (load.status === 'failed')
