@@ -159,6 +159,12 @@ export interface StartRequest {
   /** Start bound to an existing harness conversation (§6.2). */
   readonly harnessConversation?: string;
   readonly by: 'owner' | 'ferret' | 'pack' | 'board' | 'warden';
+  /**
+   * `fy start --detach` (v4's meaning): answer as soon as the ferret is recorded (`starting`); the launch carries on in the
+   * background and a launch that fails settles the ferret as a failed start, as any other does. A request-only fact: it is
+   * never written into the ferret's `details.json`.
+   */
+  readonly detach?: boolean;
   /** How to start it beyond who and where ({@link StartOptionsSchema}). */
   readonly options?: StartOptions;
 }

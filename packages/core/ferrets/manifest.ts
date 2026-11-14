@@ -531,6 +531,10 @@ export default definePlugin({
             help: 'short single-line payloads up to this length are typed verbatim (0 disables)',
           },
           { flag: '--max-snapshots <count>', help: 'pane snapshots to retain' },
+          {
+            flag: '--detach',
+            help: 'return as soon as the ferret is recorded; the launch carries on in the background',
+          },
           { flag: '--json', help: 'print the session as JSON' },
         ],
       }),
