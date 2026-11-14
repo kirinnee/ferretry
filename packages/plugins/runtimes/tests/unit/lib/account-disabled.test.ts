@@ -182,6 +182,12 @@ describe('materialiseFleet with a switch off', () => {
       fyCommand: '/opt/ferretry/bin/fy',
       hostCodexHome: '/home/person/.codex',
       acceptsAutoPermissionMode: true,
+      // cifix-runtime-held: a Ferretry login with no store from Logins is unreachable, so its runtimes publish unavailable
+      // on that ground alone; Logins names both stores here so only the SWITCH decides availability in these cases.
+      loginStores: [
+        { id: 'claude-work', variables: { CLAUDE_SECURESTORAGE_CONFIG_DIR: '/logins/claude-work' } },
+        { id: 'codex-work', variables: {}, signInFile: '/logins/codex-work/auth.json' },
+      ],
     });
 
   it('should publish the runtimes on a disabled login unavailable and the rest available', () => {
