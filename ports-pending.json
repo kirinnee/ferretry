@@ -206,7 +206,6 @@
       "[cross: asks] GAP(asks): `fy agenda log` copies nothing, because no owner-chat source is bound (V-0040) (&F1787)"
     ],
     "skills": [
-      "[cross: catalogs] GAP(skills): nothing writes Skills' installed/* yet: SkillStore.install (the home of today's <fleet>/assets/skills/<name>/ written by a catalog install) is built and tested, but the Catalogs install path reaches no skills provider (CatalogItems 'skill' is offered by nobody), so no skill is installed, no launch has a skill to share, and a ferret home's skills/ stays empty until it does. Not yet ported from today's writer (applySkillFolder): the expected-hash check (install over a folder that changed since the person's review must be refused, SkillFolderChanged; install now overwrites it, and a ferret that edits its linked skill makes that likelier), so whoever wires Catalogs ports it and gates install with step-up: daemon/lib/skill-store.ts",
       "[cross: catalogs] Skill rows in the ferret panel: Publish / Uninstall / “installed from” in a skill row’s ⋯ are Catalogs’ rows; they need a per-row contribution on Skills’ panel (Skills offers only the header slot `skills.add`, where Catalogs draws “+ Add skills”)",
       "[cross: ferrets] a /name or $name reference links to Settings › Skills on the daemon it names; opening the Skills tab of the ferret’s context needs Ferrets to offer a way to select a side panel (no screen or address for it yet)",
       "[kernel: imports scoped folder link] AFTER-MERGE(kernel; after-merge item ffi-descriptor-verify) GAP(kernel): the `imports` root reaches its scoped folder by descriptor (opened from the anchor, each folder from its parent's, `O_NOFOLLOW`) except on a host that reaches an open folder by neither `/proc/self/fd` nor the C library's descriptor calls (the library could not be loaded): there a folder swapped for a link after the `within` lstat walk and before the look, inside ONE call, lets one listing, stat or identity answer the outside folder's names and metadata (a file's bytes are still refused: the folder must be its spelling below the anchor and the opened file must be the one its real path names); a host with the calls but not the working-directory bracket lists by path the same way (reads and stats still go by descriptor); a swap between two calls is refused at the next call, and the doctor says so once at boot; it closes when such a host loads the calls: packages/core/kernel/host/roots.ts"
@@ -330,16 +329,6 @@
       "seam": "hook:message.before-send",
       "card": "&F1787",
       "why": "Extension point: no plugin can change or refuse a message before it is sent."
-    },
-    {
-      "seam": "hook:catalog.items:skill",
-      "card": "&F1787",
-      "why": "Publishing or installing a shared skill answers 503 catalog_kind_unavailable."
-    },
-    {
-      "seam": "hook:catalog.items:mcp",
-      "card": "&F1787",
-      "why": "Publishing or installing a shared MCP setup answers 503 catalog_kind_unavailable."
     },
     {
       "seam": "hook:catalog.items:artifact",

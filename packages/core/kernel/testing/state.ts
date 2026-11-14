@@ -239,6 +239,27 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
         return { kind: 'file', modifiedMs: folder.modified.get(path) ?? 0 };
       return undefined;
     },
+    async entries(file, name) {
+      const path = treePath(file, name);
+      if (folder.symlinks.has(path) || !directory(path)) return [];
+      const found = new Map<string, 'file' | 'directory' | 'symlink'>();
+      for (const key of entries()) {
+        if (!key.startsWith(`${path}/`)) continue;
+        const [first, ...rest] = key.slice(path.length + 1).split('/');
+        if (first === undefined) continue;
+        found.set(
+          first,
+          rest.length > 0
+            ? 'directory'
+            : folder.symlinks.has(key)
+              ? 'symlink'
+              : folder.directories.has(key)
+                ? 'directory'
+                : 'file',
+        );
+      }
+      return [...found].map(([entryName, kind]) => ({ name: entryName, kind }));
+    },
     async createPrivateDirectory(file, name) {
       const path = treePath(file, name);
       if (entries().includes(path) || directory(path)) throw new Error('directory entry already exists');

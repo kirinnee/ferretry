@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { CliContext } from '@ferretry/kernel/manifest';
 import should from 'should';
+import { FileCatalogWriter } from '../../../cli/adapters/export-file.ts';
 import { catalogTerminal } from '../../../cli/adapters/terminal.ts';
 
 interface Stand {
@@ -123,7 +124,7 @@ describe('the catalogs CLI terminal', () => {
     should(reads).eql([]);
   });
 
-  it('should write through the shell files, and refuse before anything is signed when the shell has none', async () => {
+  it('should write through the shell files, and use the file system writer when the shell has none', async () => {
     // Arrange
     const written: string[] = [];
     const files = {
@@ -133,7 +134,7 @@ describe('the catalogs CLI terminal', () => {
       },
     };
     const given = catalogTerminal(shell({ files }).ctx).writer;
-    const refusing = catalogTerminal(shell().ctx).writer;
+    const fallback = catalogTerminal(shell().ctx).writer;
 
     // Act
     const exists = await given.exists('./there.json');
@@ -142,10 +143,8 @@ describe('the catalogs CLI terminal', () => {
     // Assert
     should(exists).be.true();
     should(written).eql(['./out.json|{}|true']);
-    await should(refusing.exists('./x')).be.rejectedWith(
-      /cannot write a file for Catalogs yet, so nothing was signed/u,
-    );
-    await should(refusing.write('./x', '{}', false)).be.rejectedWith(/nothing was signed/u);
+    should(fallback).be.instanceOf(FileCatalogWriter);
+    should(await fallback.exists('./this-file-is-not-there.catalog.json')).be.false();
   });
 
   it('should report the terminal width the shell gives, and none when it gives none', () => {

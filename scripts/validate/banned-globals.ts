@@ -207,6 +207,12 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
         'fy at the person terminal writes the screenshot to the file the person named, a path outside every declared root; the file holds only the picture bytes the daemon sent (owner-ruled gap: the CLI half has no file-write port)',
     },
     {
+      pkg: 'catalogs',
+      folder: 'cli/adapters/export-file.ts',
+      reason:
+        'fy at the person terminal writes the signed catalog file to the path the person named, outside every declared root: create-exclusive, or a temp file renamed over, a symbolic link refused; the file holds only what the daemon signed (v4 FileCatalogWriter; same owner-ruled gap as the Browsers screenshot: the CLI half has no file-write port)',
+    },
+    {
       pkg: 'terminals',
       folder: 'cli/adapters/attach/tmux-attacher.ts',
       reason: 'fy itself attaches the person terminal to tmux (lead ruling)',
