@@ -4,7 +4,8 @@ import type { ScreenRef } from '../layout/engine.ts';
  * THE SHELL'S ROUTES, pure. The shell owns only the frame's own pages; every other route is a plugin's screen, from
  * its manifest's `ScreenDecl.path`:
  *
- * - a RELATIVE path (`board/:card`) is a per-daemon screen, served at `/d/<daemon>/board/<card>`. A daemon enters a
+ * - a RELATIVE path (`board/:card`) is a per-daemon screen, served at `/d/<daemon>/board/<card>` (a trailing `:card?`
+ *   makes that segment optional: `board/:project?` is served at both `/d/<daemon>/board` and `.../board/<project>`). A daemon enters a
  *   route only through its durable paired id, never through an address or an ambient "selected daemon";
  * - an ABSOLUTE path (`/join`) is a daemon-less screen (a share link's landing page, first-run setup).
  *
@@ -52,14 +53,23 @@ function decode(segment: string): string | undefined {
   }
 }
 
+/** A parameter segment: `:name`, or `:name?` when the address may stop before it (only ever trailing). */
+const isParam = (part: string): boolean => part.startsWith(':');
+const isOptional = (part: string): boolean => isParam(part) && part.endsWith('?');
+const paramName = (part: string): string => part.slice(1, isOptional(part) ? -1 : undefined);
+
 function matchParts(pattern: readonly string[], actual: readonly string[]): Record<string, string> | undefined {
-  if (pattern.length !== actual.length) return undefined;
+  if (actual.length > pattern.length) return undefined;
   const params: Record<string, string> = {};
   for (let i = 0; i < pattern.length; i += 1) {
     const want = pattern[i] as string;
+    if (i >= actual.length) {
+      if (isOptional(want)) continue;
+      return undefined;
+    }
     const got = decode(actual[i] as string);
     if (got === undefined) return undefined;
-    if (want.startsWith(':')) params[want.slice(1)] = got;
+    if (isParam(want)) params[paramName(want)] = got;
     else if (want !== got) return undefined;
   }
   return params;
@@ -86,7 +96,7 @@ export function routeTable(screens: Iterable<ScreenRef>): RouteTable {
     const root = parts[0];
     if (root !== undefined && (absolute ? RESERVED_ROOTS : RESERVED_DAEMON_ROOTS).has(root)) continue;
     if (!absolute && parts.length === 0) continue;
-    compiled.push({ screen, absolute, parts, score: parts.filter(p => !p.startsWith(':')).length });
+    compiled.push({ screen, absolute, parts, score: parts.filter(p => !isParam(p)).length });
   }
   compiled.sort((a, b) => b.score - a.score || b.parts.length - a.parts.length);
 
@@ -128,11 +138,14 @@ export function routeTable(screens: Iterable<ScreenRef>): RouteTable {
       return found === undefined ? { kind: 'not-found', path: pathname } : { kind: 'screen', ...found };
     },
     href(screen, params, daemon) {
-      const filled = segments(screen.path).map(part => {
-        if (!part.startsWith(':')) return part;
-        const value = params[part.slice(1)];
-        if (value === undefined) throw new TypeError(`screen ${screen.plugin}.${screen.id} needs "${part.slice(1)}"`);
-        return encodeURIComponent(value);
+      const filled = segments(screen.path).flatMap(part => {
+        if (!isParam(part)) return [part];
+        const value = params[paramName(part)];
+        if (value === undefined) {
+          if (isOptional(part)) return [];
+          throw new TypeError(`screen ${screen.plugin}.${screen.id} needs "${paramName(part)}"`);
+        }
+        return [encodeURIComponent(value)];
       });
       if (screen.path.startsWith('/')) return `/${filled.join('/')}`;
       if (daemon === undefined) throw new TypeError(`screen ${screen.plugin}.${screen.id} is per daemon`);

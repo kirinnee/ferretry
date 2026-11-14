@@ -38,6 +38,8 @@
     "packages/plugins/conversation/tests/integration/app",
     "packages/plugins/conversation/tests/realworld/app",
     // Claude Code's card screenshots (the same browser harness): they need playwright-core, which only the app package has.
-    "packages/plugins/claude-code/tests/integration/app"
+    "packages/plugins/claude-code/tests/integration/app",
+    // Board's card screenshots (the same browser harness): playwright-core is the app package's alone.
+    "packages/plugins/board/tests/integration/app"
   ]
 }

@@ -495,3 +495,21 @@ fieldset.fy-board-detail__chiprow {
   font-size: var(--text-sm);
   font-weight: var(--weight-strong);
 }
+.fy-board-detail__askrow {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.fy-board-detail__askrow:hover {
+  color: var(--accent);
+}
+.fy-board-detail__askrow:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--accent);
+  outline-offset: 2px;
+}

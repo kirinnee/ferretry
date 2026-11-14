@@ -23,6 +23,7 @@
  * abandons its reads in flight, so nothing read under a replaced credential is shown or kept.
  */
 
+import type { AskListSnapshot } from '@ferretry/core-asks/contract';
 import {
   BoardChangedSchema,
   type BoardCounts,
@@ -294,6 +295,11 @@ export class DaemonBoardStore {
 
   #generation(daemonId: DaemonId): number {
     return this.#generations.get(daemonId) ?? 0;
+  }
+
+  /** One ferret's agenda as the machine last answered it, or `null`: where a card's asks are read from. */
+  agendaOf(machine: DaemonConnection, ferret: string): Promise<AskListSnapshot | null> {
+    return this.#port.agenda(machine, ferret);
   }
 
   /** The whole board of one machine, with its lane sets and version. */
