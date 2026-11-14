@@ -31,7 +31,20 @@ describe('runtimeControlApi', () => {
         params: { id: 's-1' },
         query: undefined,
         body: { action: 'model', model: 'gpt-6', effort: 'high' },
+        // The route refuses a control without the click's key (`missing_request_id`): it rides as the one header.
+        headers: { 'x-fy-request-id': 'req-1' },
       },
+    ]);
+  });
+
+  it('forwards the id each click supplies, whichever control it is', async () => {
+    const calls: Call[] = [];
+    const api = runtimeControlApi(scripted({ [RUNTIME_SWITCH_ROUTE]: {} }, calls));
+    await api.runtime('s-1', { action: 'effort', effort: 'low' }, 'req-effort');
+    await api.runtime('s-1', { action: 'fast', fast: false }, 'req-fast');
+    expect(calls.map(call => call.headers)).toEqual([
+      { 'x-fy-request-id': 'req-effort' },
+      { 'x-fy-request-id': 'req-fast' },
     ]);
   });
 

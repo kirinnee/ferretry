@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
   type AnswerRequest,
@@ -38,12 +39,31 @@ const at = (ferret: string, extra: Readonly<Record<string, string>> = {}) => ({
 export const NO_FILE_ACCESS =
   'this verb cannot read local files yet: the shell gives a plugin no file access. Put the words in the message itself';
 
-/** Speaks the conversation routes through the plugin client; replies are parsed against the contract. */
+/** The one header a half may set (PluginCallHeaders); the shell forwards it. */
+const requestIdHeader = (id: string) => ({ 'x-fy-request-id': id });
+
+/**
+ * Speaks the conversation routes through the plugin client; replies are parsed against the contract.
+ *
+ * A send and an answer are each refused (`missing_request_id`) without `x-fy-request-id`: a retried POST without it
+ * would reach the agent twice. The send's key is also its body `sendId` (the daemon refuses two different ones), so a
+ * caller that already chose one keeps it and a retry under that id is the same message.
+ */
 export class ClientConversationGateway implements SendGateway, AnswerGateway, CompactAtGateway {
-  constructor(private readonly client: Pick<PluginClient, 'call'>) {}
+  constructor(
+    private readonly client: Pick<PluginClient, 'call'>,
+    private readonly mintRequestId: () => string = randomUUID,
+  ) {}
 
   async send(ferret: string, request: SendRequest): Promise<SendResult> {
-    return SendResultSchema.parse(await this.client.call(ROUTES.send, { ...at(ferret), body: request }));
+    const sendId = request.sendId ?? this.mintRequestId();
+    return SendResultSchema.parse(
+      await this.client.call(ROUTES.send, {
+        ...at(ferret),
+        body: { ...request, sendId },
+        headers: requestIdHeader(sendId),
+      }),
+    );
   }
 
   async sendStatus(ferret: string, sendId: string, waitMs?: number): Promise<SendRecord | undefined> {
@@ -77,7 +97,11 @@ export class ClientConversationGateway implements SendGateway, AnswerGateway, Co
   }
 
   async answer(ferret: string, request: AnswerRequest): Promise<void> {
-    await this.client.call(ROUTES.answer, { ...at(ferret), body: request });
+    await this.client.call(ROUTES.answer, {
+      ...at(ferret),
+      body: request,
+      headers: requestIdHeader(this.mintRequestId()),
+    });
   }
 
   async interrupt(ferret: string): Promise<void> {

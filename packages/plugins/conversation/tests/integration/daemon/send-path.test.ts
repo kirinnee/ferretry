@@ -15,15 +15,18 @@ import type {
 } from '@ferretry/core-ferrets/contract';
 import { AGENT_ORIGIN, PERSON_ORIGIN } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
-import type { StatePort } from '@ferretry/kernel/contract';
+import type { RouteHandler, StatePort } from '@ferretry/kernel/contract';
+import type { PluginClient } from '@ferretry/kernel/manifest';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import type { Instant, Result } from '@ferretry/std';
 import { err, ok } from '@ferretry/std';
 import { CONVERSATION_STATE, ConversationPort } from '../../../contract/index.ts';
+import { ClientConversationGateway } from '../../../cli/lib/gateway.ts';
 import daemon from '../../../daemon/index.ts';
 import { StateSendLedger } from '../../../daemon/delivery/adapters/index.ts';
 import { queuedPayloadInstruction, turnInstruction } from '../../../daemon/delivery/lib/index.ts';
 import { parseSessionId } from '../../../daemon/seams/ferret-id.ts';
+import { callOf } from '../../support/mount-call.ts';
 import { memoryStatePort } from '../../support/state.ts';
 import { wardenStandIn } from '../../support/warden-plugin.ts';
 
@@ -1269,6 +1272,51 @@ describe('ask.delivery:ferret answers an agenda ask through this same send path'
 
     expect((failure as Error).name).toBe('AskNotTypedError');
     expect(ferrets.typed).toEqual([]);
+    await host.stop();
+  });
+});
+
+/**
+ * `fy send` / `fy reply` through the real route: the CLI gateway's own call is handed to the daemon half's mounted
+ * handler (the shell's header forwarding and routing stand-in is the only fake), so what the route requires and what the
+ * CLI sends meet here. The 5.0 preview refused every `fy send` with "a send must carry x-fy-request-id".
+ */
+describe('a CLI send crosses the real send route', () => {
+  /** The plugin client the CLI holds, answered by the half's own handler: params, body and the one header a half may set. */
+  const cliClient = (half: ReturnType<NonNullable<typeof daemon.build>>): Pick<PluginClient, 'call'> => ({
+    call: (async (
+      key: string,
+      init?: { params?: Record<string, string>; body?: unknown; headers?: Record<string, string> },
+    ) => {
+      const handler = (half.routes as Readonly<Record<string, RouteHandler | undefined>>)[key];
+      if (handler === undefined) throw new Error(`the half serves no ${key}`);
+      const response = await handler(
+        callOf({ params: init?.params ?? {}, body: init?.body, headers: init?.headers ?? {} }),
+      );
+      return response.body === '' ? undefined : JSON.parse(response.body);
+    }) as unknown as PluginClient['call'],
+  });
+
+  test('fy send is accepted, and a retry under the same id is the same message, not a second one', async () => {
+    const { host, ferrets, built, row } = await conversation();
+    const half = built.half;
+    if (half === undefined) throw new Error('the conversation half was not built');
+    const client = cliClient(half);
+
+    const first = await new ClientConversationGateway(client, () => 'cli-send-1').send('f1', {
+      message: 'FIXTURE hello',
+    });
+    expect(first).toMatchObject({ ferret: 'f1', sendId: 'cli-send-1' });
+    expect(ferrets.typed).toEqual(['FIXTURE hello']);
+
+    // The answer was lost, so the CLI goes again with the id it chose: the daemon finds the first message.
+    const again = await new ClientConversationGateway(client, () => 'unused').send('f1', {
+      message: 'FIXTURE hello',
+      sendId: 'cli-send-1',
+    });
+    expect(again).toMatchObject({ ferret: 'f1', sendId: 'cli-send-1' });
+    expect(ferrets.typed).toEqual(['FIXTURE hello']);
+    expect(await row('cli-send-1')).toMatchObject({ message: 'FIXTURE hello' });
     await host.stop();
   });
 });
