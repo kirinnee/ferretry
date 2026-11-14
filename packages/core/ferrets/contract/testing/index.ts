@@ -65,6 +65,7 @@ import {
 } from '../kinds.ts';
 import type {
   AutoResumeReport,
+  FerretIngestEvidence,
   FerretPaneLimit,
   FerretPrompt,
   FerretsApi,
@@ -898,6 +899,21 @@ export class FakeFerrets implements FerretsApi {
     this.#unreadable.add(ferret);
   }
   readonly #unreadable = new Set<FerretId>();
+  readonly #evidence = new Map<FerretId, FerretIngestEvidence>();
+  /** TEST ONLY: what one ferret's own documents say for the insights index (its selected model, its send counter). */
+  setIngestEvidence(ferret: FerretId, evidence: Partial<FerretIngestEvidence>): void {
+    this.#evidence.set(ferret, {
+      selectedModel: null,
+      turns: null,
+      startedAt: null,
+      contextWindow: null,
+      contextEndPercent: null,
+      ...evidence,
+    });
+  }
+  async ingestEvidence(ferret: FerretId): Promise<FerretIngestEvidence | undefined> {
+    return this.#evidence.get(ferret);
+  }
   async turnUsage(ferret: FerretId, since?: Instant): Promise<readonly TurnUsage[] | undefined> {
     if (!this.#ferrets.has(ferret) || this.#unreadable.has(ferret)) return undefined;
     const turns = this.#turns.get(ferret) ?? [];

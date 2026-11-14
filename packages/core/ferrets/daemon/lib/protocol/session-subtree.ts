@@ -11,6 +11,7 @@
  * from the registry's `parent` links, never from a request.
  */
 import { z } from 'zod';
+import type { FerretIngestEvidence } from '../../../contract/index.ts';
 import { PrChecksSchema, PrStateSchema } from './board.ts';
 import { InstantSchema, PositiveIntegerSchema } from './common.ts';
 import type { SessionConfig, SessionState, SessionView } from './session.ts';
@@ -127,4 +128,22 @@ export function displayModel(
   state: Pick<SessionState, 'observedModel'>,
 ): string {
   return state.observedModel?.trim() || config.model?.trim() || config.modelHint.trim() || 'default';
+}
+
+/**
+ * What a session's documents say for the insights index, as v4 passed it to analytics ingestion: the model the operator
+ * SELECTED (`config.model`; `observedModel` is transcript evidence and never stands in for it) and the send counter
+ * (`state.turn`), with the readings the state recorded. A value the document does not carry is `null`.
+ */
+export function ingestEvidence(
+  config: Pick<SessionConfig, 'model'>,
+  state: Pick<SessionState, 'turn' | 'startedAt' | 'contextWindow' | 'contextPercent'>,
+): FerretIngestEvidence {
+  return {
+    selectedModel: config.model ?? null,
+    turns: state.turn,
+    startedAt: state.startedAt ?? null,
+    contextWindow: state.contextWindow ?? null,
+    contextEndPercent: state.contextPercent ?? null,
+  };
 }
