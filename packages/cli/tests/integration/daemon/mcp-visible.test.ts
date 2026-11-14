@@ -107,3 +107,28 @@ describe('MCP servers an owner wrote into config/ are visible with no config wri
     expect(listedServer(daemon, listed, 'acme').name).toBe('acme');
   }, 60_000);
 });
+
+describe('a component file an owner adds late still wakes the publication (v4 republished on every tree change)', () => {
+  test('after a boot that was refused for the missing item, adding ONLY config/mcp/acme.yaml publishes it', async () => {
+    const { 'mcp/acme.yaml': acme, ...withoutItem } = OWNER_CONFIG;
+    daemon = await startDaemon({ name: 'A', daemon: registry } as never, {
+      version: '5.0.0',
+      seed: async home => await write(home, withoutItem),
+    });
+    const refused = await until(
+      async () => daemon?.diagnose() ?? '',
+      log => log.includes('could not be published from its configuration files'),
+    );
+    expect(refused).toContain('could not be published from its configuration files');
+    expect(namesOf(await inventory(daemon))).not.toContain('acme');
+
+    // No runtime, profile or login file is touched: the one missing component arrives.
+    await write(daemon.home, { 'mcp/acme.yaml': acme });
+
+    const listed = await until(
+      async () => await inventory(daemon as StartedDaemon),
+      value => namesOf(value).includes('acme'),
+    );
+    expect(listedServer(daemon, listed, 'acme').runtimes).toHaveLength(1);
+  }, 60_000);
+});

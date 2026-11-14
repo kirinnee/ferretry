@@ -143,11 +143,13 @@ export default implementDaemon(manifest, {
         'harnesses:claude-code': harness,
         // Runtimes' read of the `settings` and `hooks` components a profile names for Claude: this plugin's own items,
         // live, no cache.
-        'runtimes.components.settings.claude:components': claudeSettingsSource(() =>
-          kernel.config.collection(CLAUDE_CODE_SETTINGS as ConfigCollectionDef<SettingsItem>),
+        'runtimes.components.settings.claude:components': claudeSettingsSource(
+          () => kernel.config.collection(CLAUDE_CODE_SETTINGS as ConfigCollectionDef<SettingsItem>),
+          listener => kernel.config.watch(CLAUDE_CODE_SETTINGS, listener),
         ),
-        'runtimes.components.hooks.claude:components': claudeHooksSource(() =>
-          kernel.config.collection(CLAUDE_CODE_HOOKS as ConfigCollectionDef<HooksItem>),
+        'runtimes.components.hooks.claude:components': claudeHooksSource(
+          () => kernel.config.collection(CLAUDE_CODE_HOOKS as ConfigCollectionDef<HooksItem>),
+          listener => kernel.config.watch(CLAUDE_CODE_HOOKS, listener),
         ),
         // A fast start on a model without fast mode is refused before anything is written (today's fyd start refusal).
         'start.decide': fastStartDecision,

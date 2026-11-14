@@ -326,7 +326,9 @@ export default implementDaemon(manifest, {
       hooks: {
         'launch.parts': () => [{ id: 'mcp', item: launch }],
         // Runtimes' read of the `mcp` components a profile names: this plugin's own items, live, no cache.
-        'runtimes.components.mcp:components': mcpComponentSource(items),
+        'runtimes.components.mcp:components': mcpComponentSource(items, listener =>
+          kernel.config.watch(MCP_CONFIG, listener),
+        ),
       },
     };
   },

@@ -149,11 +149,13 @@ export default implementDaemon(manifest, {
       provides: { codex: { view, discovery, approvedProjectServers: codexProjectApprovals } },
       hooks: {
         // Runtimes' read of the `settings` components a profile names for Codex: this plugin's own items, live, no cache.
-        'runtimes.components.settings.codex:components': codexSettingsSource(() =>
-          kernel.config.collection(CODEX_SETTINGS as ConfigCollectionDef<SettingsItem>),
+        'runtimes.components.settings.codex:components': codexSettingsSource(
+          () => kernel.config.collection(CODEX_SETTINGS as ConfigCollectionDef<SettingsItem>),
+          listener => kernel.config.watch(CODEX_SETTINGS, listener),
         ),
-        'runtimes.components.hooks.codex:components': codexHooksSource(() =>
-          kernel.config.collection(CODEX_HOOKS as ConfigCollectionDef<HooksItem>),
+        'runtimes.components.hooks.codex:components': codexHooksSource(
+          () => kernel.config.collection(CODEX_HOOKS as ConfigCollectionDef<HooksItem>),
+          listener => kernel.config.watch(CODEX_HOOKS, listener),
         ),
         'start.decide': async input => {
           // Only a fast Codex start looks at the catalog; any other start is answered without touching it.

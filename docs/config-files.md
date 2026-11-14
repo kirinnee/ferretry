@@ -917,7 +917,10 @@ did after each configuration load. A machine whose files an owner wrote by hand,
 runtimes — and with them the MCP inventory, `fy mcp ls`, Settings › MCP and a ferret's launch facts — the moment the
 daemon is up, with no write through a route first. A fleet that would publish identically is left exactly as it is, a
 machine with no fleet files publishes nothing, and a refusal (a file that does not parse, a login that stands in) is
-said in the log once and keeps the last published fleet in effect.
+said in the log once and keeps the last published fleet in effect. A COMPONENT file a profile names wakes it too: Runtimes
+watches its own instruction files, and each owner (MCP, Skills, Claude Code and Codex settings and hooks) offers a `watch`
+on its component source that it answers from its own configuration, so adding only the missing `config/mcp/<name>.yaml`
+after a refused start publishes with no other edit — no plugin reads another's files and nothing polls.
 
 **In the 5.0 kernel** a plugin that must pin an edit to what a caller read asks `ConfigPort.etag(def, name?)` for the
 disk etag of one of its OWN files (the one `write` and `writeAll` compare an `ifMatch` with, or `absent`): the etag only,

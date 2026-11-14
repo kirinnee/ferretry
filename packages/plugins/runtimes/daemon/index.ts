@@ -19,7 +19,9 @@ import { implementDaemon, type DaemonContext } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
 import {
+  INSTRUCTION_ITEMS,
   MODEL_SET_ITEMS,
+  PROFILE_COMPONENTS_KEY,
   PROFILE_ITEMS,
   RUNTIME_ITEMS,
   RUNTIMES_CONFIG,
@@ -35,6 +37,7 @@ import {
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { fleetHomes } from './adapters/fleet-home-reader.ts';
+import { PROFILE_COMPONENT_SOURCE_HOOKS } from './adapters/profile-components.ts';
 import {
   endedSeams,
   fileAssembly,
@@ -395,13 +398,42 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
       // every change to them, as v4 did after each configuration load. A hand edit, a conversion or a copied home
       // therefore has its homes, wrappers and manifest (the runtime accounts MCP's inventory and Settings read) with no
       // write through a route first. An unchanged fleet is left exactly as it is; a refusal is said and never thrown.
+      //
+      // Whatever a profile names is read too, so a change to a COMPONENT file wakes it as well: Runtimes' own instruction
+      // files directly, and each owner's (MCP, Skills, Claude Code and Codex settings and hooks) through the `watch` its
+      // component source offers, which the owner answers from its OWN configuration (no other plugin's file is read here,
+      // and nothing polls). The owners are looked at again before every publish, so one that starts late is heard from
+      // the next change on.
+      const heard = new WeakSet<object>();
+      const stopOwners: (() => void)[] = [];
+      const watchOwners = (): void => {
+        for (const hook of PROFILE_COMPONENT_SOURCE_HOOKS) {
+          try {
+            const source = ctx.hooks.provider(hook, PROFILE_COMPONENTS_KEY);
+            if (source === 'unavailable' || heard.has(source)) continue;
+            heard.add(source);
+            const stop = source.watch?.(() => {
+              fromFiles.soon();
+            });
+            if (stop !== undefined) stopOwners.push(stop);
+          } catch {
+            // An owner that cannot be looked up now is looked at again at the next publish.
+          }
+        }
+      };
+      ctx.kernel.lifecycle.onStop(() => {
+        for (const stop of stopOwners.splice(0)) stop();
+      });
       const fromFiles = fleetFromFiles({
-        republish: async () => await assembly.catalog.publishFromFiles?.(),
+        republish: async () => {
+          watchOwners();
+          return await assembly.catalog.publishFromFiles?.();
+        },
         warn: message => {
           ctx.kernel.log.warn(message);
         },
       });
-      for (const def of [RUNTIME_ITEMS, PROFILE_ITEMS, MODEL_SET_ITEMS, RUNTIMES_CONFIG])
+      for (const def of [RUNTIME_ITEMS, PROFILE_ITEMS, MODEL_SET_ITEMS, RUNTIMES_CONFIG, INSTRUCTION_ITEMS])
         config.watch(def, fromFiles.soon);
       // A manifest the previous version wrote in a shape this one does not read is derived data: rebuilt (the apply keeps
       // the old file aside and says so), never left to refuse every start. It runs once after start AND whenever a launch
