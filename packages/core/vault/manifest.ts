@@ -173,12 +173,42 @@ export default definePlugin({
           'wait for the owner to answer your input card, or approve a sign-in on their phone (a pa_ id): where it stands, never the value or the number',
       }),
     ],
-    /** `fy secret set <name>` takes the value from stdin only, never from an argument (S1, S33). */
+    /**
+     * `fy secret set <name>` takes the value from stdin only, never from an argument (S1, S33). `ls` prints names and
+     * instants, `rm` deletes one, and `use` runs a command with secrets in ITS environment: no verb prints a value.
+     */
     cli: [
+      verb('secret', {
+        summary: 'daemon secrets agents can use without ever holding one (bare: `secret ls`)',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol document instead of the human listing' }],
+      }),
       verb('secret set', {
         summary: 'save or replace a secret, reading its VALUE from stdin',
         args: [
           { name: 'name', help: 'the secret’s name (the value is read from stdin, never typed on the command line)' },
+        ],
+      }),
+      verb('secret ls', {
+        summary: 'list the secrets this daemon holds — names and when they changed, never values',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol document instead of the human listing' }],
+      }),
+      verb('secret rm', {
+        summary: 'delete a secret',
+        args: [{ name: 'name', help: 'the secret to delete' }],
+      }),
+      verb('secret use', {
+        summary: 'run a command with secrets in ITS environment; output comes back masked',
+        args: [{ name: 'command', help: 'the command to run, after `--`', variadic: true }],
+        options: [
+          {
+            flag: '-w, --with <name...>',
+            help: 'a secret to put in the command environment, by name (several names, or repeat the option; end the list with --)',
+          },
+          { flag: '--cwd <path>', help: 'where to run (defaults to the current directory)' },
+          { flag: '--timeout <ms>', help: 'how long the command may take' },
+          { flag: '--json', help: 'print the protocol result instead of relaying the streams' },
         ],
       }),
     ],

@@ -923,7 +923,13 @@ export function SessionTerminalDeck({
             <span className="kt-webterm__cwd" title={cwd ?? 'Session working directory'}>
               {cwd ?? 'session cwd'}
             </span>
-            <span>{list === null ? 'loading terminals…' : terminalLimitLabel(list)}</span>
+            <span>
+              {list === null
+                ? error === null
+                  ? 'loading terminals…'
+                  : 'terminals unavailable'
+                : terminalLimitLabel(list)}
+            </span>
           </div>
         </div>
       )}
@@ -952,8 +958,26 @@ export function SessionTerminalDeck({
             <SquareTerminal size={24} />
           </span>
           <div>
-            <strong>No shell terminals open</strong>
-            <p>Start one here; it opens in this session’s working directory and survives page reloads.</p>
+            {list === null ? (
+              // Not known yet, or the listing failed (the error above says why): "none open" would be a claim
+              // nobody has checked. Starting one stays possible — the daemon enforces the caps.
+              <>
+                <strong>
+                  {error === null ? 'Asking the daemon for this session’s terminals…' : 'Terminals not read'}
+                </strong>
+                {error === null ? null : (
+                  <p>
+                    The list of open terminals could not be read, so one may already be open. Retry above, or start a
+                    new one.
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <strong>No shell terminals open</strong>
+                <p>Start one here; it opens in this session’s working directory and survives page reloads.</p>
+              </>
+            )}
           </div>
           <Button
             disabled={busy || atSessionCap || atGlobalCap}

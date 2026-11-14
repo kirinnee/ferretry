@@ -19,73 +19,6 @@ const registered = globalThis as typeof globalThis & {
   __ferretryMutationObserverPatched?: boolean;
   __ferretryNodeInspectPatched?: boolean;
 };
-if (!registered.__ferretryDomRegistered) {
-  GlobalRegistrator.register({ url: 'https://pwa.example.test/' });
-  registered.__ferretryDomRegistered = true;
-}
-// DOM units assert app-side click and embedding contracts. They do not own a
-// browser page loader, so keep happy-dom from resolving iframe, anchor, or
-// popup navigation against the network after those contracts have been read.
-const happyDOM = (
-  window as typeof window & {
-    happyDOM: {
-      settings: {
-        navigation: Record<
-          'disableMainFrameNavigation' | 'disableChildFrameNavigation' | 'disableChildPageNavigation',
-          boolean
-        >;
-      };
-    };
-  }
-).happyDOM;
-happyDOM.settings.navigation.disableMainFrameNavigation = true;
-happyDOM.settings.navigation.disableChildFrameNavigation = true;
-happyDOM.settings.navigation.disableChildPageNavigation = true;
-
-/**
- * happy-dom 20.11.1 keeps its internal MutationObserver delivery closure only
- * through a WeakRef, so an ordinary GC pass can permanently silence a still
- * connected observer. Pin just that orphaned closure while `observe()` builds
- * it; every other WeakRef in the test environment retains its real semantics.
- *
- * TODO: remove after https://github.com/capricorn86/happy-dom/issues/2264 is
- * fixed and the dependency is updated.
- */
-if (!registered.__ferretryMutationObserverPatched) {
-  class StrongWeakRef<T extends WeakKey> {
-    readonly #target: T;
-
-    constructor(target: T) {
-      this.#target = target;
-    }
-
-    deref(): T {
-      return this.#target;
-    }
-  }
-
-  const originalObserve = MutationObserver.prototype.observe;
-  MutationObserver.prototype.observe = function (target: Node, options: MutationObserverInit): void {
-    const originalWeakRef = globalThis.WeakRef;
-    try {
-      globalThis.WeakRef = StrongWeakRef as unknown as typeof WeakRef;
-      originalObserve.call(this, target, options);
-    } finally {
-      globalThis.WeakRef = originalWeakRef;
-    }
-  };
-  registered.__ferretryMutationObserverPatched = true;
-}
-
-/**
- * A failed `expect(node).toBeNull()` prints the node it received, and Bun's
- * printer walks every own property: a connected happy-dom node reaches its
- * parent, the document, the window and React's fibers, so one failed assertion
- * printed for minutes, held the event loop past every test timeout, and grew
- * past 2.8 GB until CI's 4 GB runner killed the whole group with no report.
- * Every node prints as its text and then its markup instead, each capped,
- * which is also what a reader of the failure wants to see.
- */
 const INSPECTED_NODE_LIMIT = 600;
 
 const capped = (shown: string): string =>
@@ -93,20 +26,106 @@ const capped = (shown: string): string =>
     ? `${shown.slice(0, INSPECTED_NODE_LIMIT)}… (${shown.length - INSPECTED_NODE_LIMIT} more characters)`
     : shown;
 
-if (!registered.__ferretryNodeInspectPatched) {
-  Object.defineProperty(Node.prototype, Symbol.for('nodejs.util.inspect.custom'), {
-    configurable: true,
-    value(this: Node): string {
-      const text = JSON.stringify(capped(this.textContent ?? ''));
-      return this instanceof Element
-        ? `${this.constructor.name} ${text} ${capped(this.outerHTML)}`
-        : `${this.constructor.name} ${text}`;
-    },
-  });
-  registered.__ferretryNodeInspectPatched = true;
-}
+/**
+ * Registers happy-dom and everything this suite lays on it, ONCE: a second call while a DOM is live does nothing.
+ * Importing this module registers (the unit tier never unregisters), but an ES module evaluates once per process:
+ * an integration file that unregisters in its `afterAll` would leave the NEXT file that imports this module a
+ * cached module and no DOM. So every file that needs a DOM calls `registerDom()` in its `beforeAll` and
+ * `unregisterDom()` in its `afterAll`, and the one process hands each a fresh, registered window.
+ */
+export const registerDom = (): void => {
+  if (registered.__ferretryDomRegistered) return;
+  GlobalRegistrator.register({ url: 'https://pwa.example.test/' });
+  registered.__ferretryDomRegistered = true;
+  // DOM units assert app-side click and embedding contracts. They do not own a
+  // browser page loader, so keep happy-dom from resolving iframe, anchor, or
+  // popup navigation against the network after those contracts have been read.
+  const happyDOM = (
+    window as typeof window & {
+      happyDOM: {
+        settings: {
+          navigation: Record<
+            'disableMainFrameNavigation' | 'disableChildFrameNavigation' | 'disableChildPageNavigation',
+            boolean
+          >;
+        };
+      };
+    }
+  ).happyDOM;
+  happyDOM.settings.navigation.disableMainFrameNavigation = true;
+  happyDOM.settings.navigation.disableChildFrameNavigation = true;
+  happyDOM.settings.navigation.disableChildPageNavigation = true;
 
-(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  /**
+   * happy-dom 20.11.1 keeps its internal MutationObserver delivery closure only
+   * through a WeakRef, so an ordinary GC pass can permanently silence a still
+   * connected observer. Pin just that orphaned closure while `observe()` builds
+   * it; every other WeakRef in the test environment retains its real semantics.
+   *
+   * TODO: remove after https://github.com/capricorn86/happy-dom/issues/2264 is
+   * fixed and the dependency is updated.
+   */
+  if (!registered.__ferretryMutationObserverPatched) {
+    class StrongWeakRef<T extends WeakKey> {
+      readonly #target: T;
+
+      constructor(target: T) {
+        this.#target = target;
+      }
+
+      deref(): T {
+        return this.#target;
+      }
+    }
+
+    const originalObserve = MutationObserver.prototype.observe;
+    MutationObserver.prototype.observe = function (target: Node, options: MutationObserverInit): void {
+      const originalWeakRef = globalThis.WeakRef;
+      try {
+        globalThis.WeakRef = StrongWeakRef as unknown as typeof WeakRef;
+        originalObserve.call(this, target, options);
+      } finally {
+        globalThis.WeakRef = originalWeakRef;
+      }
+    };
+    registered.__ferretryMutationObserverPatched = true;
+  }
+
+  /**
+   * A failed `expect(node).toBeNull()` prints the node it received, and Bun's
+   * printer walks every own property: a connected happy-dom node reaches its
+   * parent, the document, the window and React's fibers, so one failed assertion
+   * printed for minutes, held the event loop past every test timeout, and grew
+   * past 2.8 GB until CI's 4 GB runner killed the whole group with no report.
+   * Every node prints as its text and then its markup instead, each capped,
+   * which is also what a reader of the failure wants to see.
+   */
+  if (!registered.__ferretryNodeInspectPatched) {
+    Object.defineProperty(Node.prototype, Symbol.for('nodejs.util.inspect.custom'), {
+      configurable: true,
+      value(this: Node): string {
+        const text = JSON.stringify(capped(this.textContent ?? ''));
+        return this instanceof Element
+          ? `${this.constructor.name} ${text} ${capped(this.outerHTML)}`
+          : `${this.constructor.name} ${text}`;
+      },
+    });
+    registered.__ferretryNodeInspectPatched = true;
+  }
+
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+};
+
+/** Takes the DOM down (idempotent: with none registered it does nothing); the next `registerDom()` builds a new one. */
+export const unregisterDom = async (): Promise<void> => {
+  if (!registered.__ferretryDomRegistered) return;
+  await GlobalRegistrator.unregister();
+  registered.__ferretryDomRegistered = false;
+  registered.__ferretryMutationObserverPatched = false;
+  registered.__ferretryNodeInspectPatched = false;
+};
+
+registerDom();
 
 const { createRoot } = await import('react-dom/client');
 
