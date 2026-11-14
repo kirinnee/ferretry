@@ -40,7 +40,9 @@ describe('fy lesson suggest', () => {
     const { subject, gateway } = harness();
 
     // Act + Assert
-    await should(subject.suggest('a rule', 'project', {})).be.rejectedWith(/scope: /u);
+    await should(subject.suggest('a rule', 'project', {})).be.rejectedWith(
+      /--scope is "global" or "repo", not "project"/u,
+    );
     should(gateway.suggested).be.empty();
   });
 

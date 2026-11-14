@@ -114,12 +114,16 @@ export function renderRootHelp(binary: string, table: VerbTable, titles: Readonl
   return lines.join('\n');
 }
 
+/** `Usage: fy lesson suggest <rule> [options]`: the first line of a verb's help, and of the refusal of a missing option. */
+export function usageLine(binary: string, entry: VerbEntry): string {
+  return `Usage: ${[binary, ...entry.words, ...argsOf(entry).map(argUsage), '[options]'].join(' ')}`;
+}
+
 /** One verb: usage, summary, its arguments and options, and the verbs below it when it is also a group. */
 export function renderVerbHelp(binary: string, entry: VerbEntry, table: VerbTable): string {
   const args = argsOf(entry);
   const below = verbsUnder(table, entry.words);
-  const usage = [binary, ...entry.words, ...args.map(argUsage), '[options]'];
-  const lines = [`Usage: ${usage.join(' ')}`];
+  const lines = [usageLine(binary, entry)];
   if (entry.summary !== undefined) lines.push('', ...wrap(entry.summary, WIDTH));
   if (args.length > 0) lines.push('', 'Arguments:', ...columns(args.map(arg => [arg.name, arg.help] as const)));
   lines.push(

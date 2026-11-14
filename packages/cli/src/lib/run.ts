@@ -35,7 +35,7 @@ import { lazyClient } from './lazy-client.ts';
 import { pluginEnvironment } from './plugin-env.ts';
 import { buildPluginGraph } from './plugin-graph.ts';
 import type { ShellContext, ShellVerb } from './shell-context.ts';
-import { renderGroupHelp, renderRootHelp, renderVerbHelp, verbsUnder } from './help.ts';
+import { renderGroupHelp, renderRootHelp, renderVerbHelp, usageLine, verbsUnder } from './help.ts';
 import { buildVerbTable, expandAlias, resolveVerb, type VerbEntry, type VerbTable } from './verbs.ts';
 import type { CliWorld } from './world.ts';
 
@@ -130,6 +130,13 @@ function helpRequest(table: VerbTable, tokens: readonly string[]): HelpRequest |
   }
   if (leading.length === 0) return viaHelp ? { kind: 'root' } : undefined;
   const resolution = resolveVerb(table, leading);
+  // A bare group that declares a default resolves to that sub-verb, but its help is the group's: the list of its verbs.
+  if (
+    resolution.kind === 'verb' &&
+    resolution.entry.words.length > leading.length &&
+    verbsUnder(table, leading).length > 0
+  )
+    return { kind: 'text', text: binary => renderGroupHelp(binary, leading, table) };
   if (resolution.kind === 'verb') {
     // A verb's own `--help` is answered after alias expansion, below; `fy help <verb>` answers it here.
     if (!viaHelp) return undefined;
@@ -138,7 +145,11 @@ function helpRequest(table: VerbTable, tokens: readonly string[]): HelpRequest |
   }
   if (verbsUnder(table, leading).length > 0)
     return { kind: 'text', text: binary => renderGroupHelp(binary, leading, table) };
-  return viaHelp ? { kind: 'unknown', resolution } : undefined;
+  if (!viaHelp) return undefined;
+  // A run that leads into a group but names nothing in it (`help agenda bogus`) is as unknown as a first word nothing owns.
+  const nearby = table.entries.filter(entry => entry.words[0] === leading[0]);
+  const unknown: Unknown = resolution.kind === 'unknown' ? resolution : { kind: 'unknown', typed: leading, nearby };
+  return { kind: 'unknown', resolution: unknown };
 }
 
 /** A known verb with sub-verbs and a word where its sub-verb belongs that is none of them (or no word at all). */
@@ -224,6 +235,11 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
     return EXIT.ok;
   }
   const invocation = parseArgs(resolved.rest);
+  const lacking = missingRequiredOption(entry, invocation);
+  if (lacking !== undefined) {
+    io.err(`error: required option '${lacking.flag}' not specified\n${usageLine(identity.binary, entry)}\n`);
+    return EXIT.failure;
+  }
 
   let opened: Promise<ClientDeps> | undefined;
   const deps = (): Promise<ClientDeps> => {
@@ -256,6 +272,21 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
     return await handler(context);
   }
   return await runPluginVerb(world, entry, invocation, deps, surfaces);
+}
+
+/** The first option the verb declares required that the words do not carry, by any of its spellings (`-s, --scope <scope>`). */
+function missingRequiredOption(
+  entry: VerbEntry,
+  invocation: ReturnType<typeof parseArgs>,
+): { readonly flag: string } | undefined {
+  return (entry.options ?? []).find(option => {
+    if (option.required !== true) return false;
+    const names = option.flag
+      .split(/[|,]/u)
+      .map(part => (part.trim().split(/\s+/u)[0] ?? '').replace(/^-{1,2}/u, ''))
+      .filter(name => name !== '');
+    return !names.some(name => invocation.options[name] !== undefined);
+  });
 }
 
 async function runPluginVerb(

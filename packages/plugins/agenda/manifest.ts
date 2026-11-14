@@ -332,8 +332,8 @@ export default definePlugin({
           { flag: '--now', help: 'it is urgent: an item the owner snoozed wakes too (at most once an hour)' },
         ],
       }),
-      verb('agenda ls', { summary: 'list open items, oldest first', options: SESSION }),
-      verb('agenda history', { summary: 'show the resolution audit, newest first', options: SESSION }),
+      verb('agenda ls', { summary: 'list open items, oldest first', args: [], options: SESSION }),
+      verb('agenda history', { summary: 'show the resolution audit, newest first', args: [], options: SESSION }),
       verb('agenda needs-info <id>', {
         summary: 'ask the ferret that raised an item for more information; the item stays open',
         args: [ITEM_ID],
@@ -372,6 +372,7 @@ export default definePlugin({
         options: SESSION,
       }),
       verb('agenda send-now', {
+        args: [],
         summary: 'deliver the answers held for the ferret now, instead of after the quiet window',
         options: SESSION,
       }),

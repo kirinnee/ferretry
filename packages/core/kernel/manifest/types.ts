@@ -67,6 +67,8 @@ export interface ToolDecl<Name extends string = string> extends ToolDescriptor {
 export interface VerbOptionDecl {
   readonly flag: string;
   readonly help: string;
+  /** The verb refuses to run without it (`error: required option '--scope <scope>' not specified`), before any handler. */
+  readonly required?: boolean;
 }
 
 /** One positional argument a verb takes, as `fy <verb> --help` lists it under Arguments. */
@@ -91,6 +93,11 @@ export interface VerbDecl<Verb extends string = string> {
   readonly options?: readonly VerbOptionDecl[];
   /** Data plugins only: the verb line this alias runs (`card move --to done`). */
   readonly alias?: string;
+  /**
+   * Declares this verb the default of its group: the bare group (`fy catalog`, `fy catalog --json`) runs it, flags passed
+   * through, where a group without one refuses with "needs a sub-verb". At most one per group, and only a direct child.
+   */
+  readonly default?: boolean;
 }
 
 /** A button or menu item on a thing, naming the route it calls; hidden when Gate would refuse this device. */
