@@ -1,5 +1,5 @@
 import { ApiError, type ConfigPort } from '@ferretry/kernel/contract';
-import { PACKS_CONFIG, type RoutingFile } from '../../contract/index.ts';
+import { PACKS_CONFIG, type PacksFile, type RoutingFile } from '../../contract/index.ts';
 import type { GuideWrite } from '../lib/cleanup/file.ts';
 
 /**
@@ -10,11 +10,18 @@ import type { GuideWrite } from '../lib/cleanup/file.ts';
  * (`routing`), whole, and answers what the writer did.
  */
 export class ConfigGuideWriter {
-  constructor(private readonly config: Pick<ConfigPort, 'write' | 'etag'>) {}
+  constructor(private readonly config: Pick<ConfigPort, 'write' | 'etag' | 'file'>) {}
 
-  /** The etag of `packs.yaml` on disk right now (`'absent'` when there is no file): what a write is checked against. */
-  async etag(): Promise<string> {
-    return await this.config.etag(PACKS_CONFIG);
+  /**
+   * `packs.yaml` as in effect, with the etag a write is checked against. The etag is read FIRST: it is read from the
+   * disk, and when the disk moved since the last reload it brings the reload with it, so the file read after it is the
+   * one that etag names. The other order pairs a cached older file with a newer etag, and an accept would then keep
+   * (and an undo restore) a prompt the owner had already saved over. A save that lands between the two reads makes the
+   * write's `ifMatch` stale, and the write is refused, never applied.
+   */
+  async read(): Promise<{ readonly file: PacksFile; readonly etag: string }> {
+    const etag = await this.config.etag(PACKS_CONFIG);
+    return { file: this.config.file(PACKS_CONFIG) ?? {}, etag };
   }
 
   /** Writes the `routing` section (`undefined` takes it out), against `etag`; every other key is left as it is. */

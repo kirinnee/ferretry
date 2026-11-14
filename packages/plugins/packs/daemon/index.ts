@@ -142,7 +142,7 @@ export default implementDaemon(manifest, {
     // against the etag read with the file; an edit the writer holds for the owner is reported held.
     const guideWriter = new ConfigGuideWriter(kernel.config);
     const guideFile = new GuideFileService({
-      read: async () => ({ file: file(), etag: await guideWriter.etag() }),
+      read: async () => await guideWriter.read(),
       write: async (routing, etag) => await guideWriter.write(routing, etag),
       replaced: new StateReplacedRouting(kernel.state),
       now: () => kernel.clock.now(),

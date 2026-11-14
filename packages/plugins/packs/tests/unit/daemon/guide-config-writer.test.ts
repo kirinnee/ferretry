@@ -37,7 +37,7 @@ async function world(config?: Record<string, unknown>) {
 describe('ConfigGuideWriter', () => {
   test('writes the routing section through the kernel writer against the etag it was read at', async () => {
     const { host, config, writer } = await world({ 'packs.yaml': { enabled: false } });
-    const etag = await writer.etag();
+    const { etag } = await writer.read();
 
     const written = await writer.write({ prompt: 'Opus for planning.' }, etag);
 
@@ -66,7 +66,7 @@ describe('ConfigGuideWriter', () => {
   test('a prompt the writer does not accept is refused with its reason, never half written', async () => {
     const { host, config, writer } = await world();
 
-    const refused = await writer.write({ prompt: '' }, await writer.etag()).catch((error: unknown) => error);
+    const refused = await writer.write({ prompt: '' }, (await writer.read()).etag).catch((error: unknown) => error);
 
     expect(refused).toBeInstanceOf(ApiError);
     expect((refused as ApiError).status).toBe(400);
@@ -78,7 +78,7 @@ describe('ConfigGuideWriter', () => {
   test('a write the owner must confirm is answered held, with what waits, and stays out of effect', async () => {
     const { host, config, writer } = await world({ 'packs.yaml': { routing: { prompt: 'Opus.' } } });
 
-    const held = await writer.write({ prompt: 'Use ${secret:ROUTING_NOTE}.' }, await writer.etag());
+    const held = await writer.write({ prompt: 'Use ${secret:ROUTING_NOTE}.' }, (await writer.read()).etag);
 
     expect(held.kind).toBe('held');
     expect(config.file(PACKS_CONFIG)).toEqual({ routing: { prompt: 'Opus.' } });
