@@ -9,7 +9,7 @@
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { AutoResumeDecide, FerretsChanged } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
@@ -60,6 +60,15 @@ async function compose(
   const world = await fleetWorld();
   const composedLogins = fakeLogins(options.logins ?? [sampleLogin('claude-you', { store: 'ferretry' })]);
   if (options.sources !== undefined) composedLogins.setModelSources(options.sources);
+  // Logins keeps the Ferretry-kept login under state/logins/credentials: the store a wrapper is signed in through.
+  composedLogins.setLaunchStores([
+    {
+      id: 'claude-you',
+      variables: {
+        CLAUDE_SECURESTORAGE_CONFIG_DIR: join(dirname(world.fleet), 'state', 'logins', 'credentials', 'claude-you'),
+      },
+    },
+  ]);
   const stubbed: string[] = [];
   const real: RuntimesAssembler = ctx =>
     (options.assemble ?? hostAssembly)({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never);
@@ -229,8 +238,9 @@ describe('a real apply through the composed daemon', () => {
 
   it('S144 a real apply links a login’s sign-in folder and never copies or reads it: its bytes are in no home, no wrapper and no manifest', async () => {
     const { host, world } = await compose();
-    await mkdir(join(world.fleet, 'credentials', 'claude-you'), { recursive: true });
-    await writeFile(join(world.fleet, 'credentials', 'claude-you', '.credentials.json'), INERT);
+    const store = join(dirname(world.fleet), 'state', 'logins', 'credentials', 'claude-you');
+    await mkdir(store, { recursive: true });
+    await writeFile(join(store, '.credentials.json'), INERT);
 
     const applied = await stageAndApply(host, put('claude-work'));
 

@@ -77,6 +77,14 @@ export interface LoginsApi {
    * kept between calls.
    */
   environmentTemplates(): Promise<readonly EnvironmentLoginTemplate[]>;
+  /**
+   * Where each Ferretry-kept login is stored, for a runtime wrapper a PERSON runs (a ferret gets the same through its
+   * launch hook). Names a store, never a credential value. Read live, kept nowhere. Only a Ferretry-kept login is listed:
+   * a Claude login by its secure-storage variable, a Codex login by the sign-in FILE its runtime home links its `auth.json` to
+   * (`signInFile`); a host-kept or environment login has no store of Ferretry's to name. A ferret gets its Codex sign-in through
+   * the kernel (`RootHandle.linkCredential`, single use); a runtime wrapper a person runs links the file itself.
+   */
+  launchStores(): Promise<readonly LoginLaunchStore[]>;
   /** The login's rate-limit windows and provider quota, as last read. Never reads on an idle timer. */
   quota(id: z.output<typeof LoginIdSchema>): Promise<LoginUsage | undefined>;
   /** The provider presets this machine offers (`endpoints/*.yaml` and the built-in catalogue). */
@@ -107,6 +115,20 @@ export interface LoginsApi {
     request: OutboundHttpRequest,
     placement?: CredentialPlacement,
   ): Promise<AuthorizedOutcome>;
+}
+/**
+ * How one login's store takes part in a runtime's launch (`LoginsApi.launchStores`). A path here names a store, never a
+ * credential; Logins is the only plugin that spells it.
+ */
+export interface LoginLaunchStore {
+  readonly id: string;
+  /** The variables a runtime on this login exports: a Claude login's one secure-storage variable (empty for a host-kept one). */
+  readonly variables: Readonly<Record<string, string>>;
+  /**
+   * A Codex login's sign-in file: where Logins keeps its `auth.json`. A runtime wrapper links the runtime home's `auth.json` to
+   * it (never reading or copying it), so Codex signs in and renews through the one file. Absent for a Claude login.
+   */
+  readonly signInFile?: string;
 }
 export const LoginsPort = definePort<LoginsApi>('logins');
 

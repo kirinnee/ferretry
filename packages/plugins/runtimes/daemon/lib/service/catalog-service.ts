@@ -31,6 +31,7 @@
  * live passkey step-up. The order is: read the change, consume synchronously, check it is still current,
  * then act — restoring it only while it is certain nothing was attempted.
  */
+import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
 import type { AccountModel } from '../account/schema.ts';
 import { standInsNamedBy, type StoodInLogin, stoodInLoginSentence } from '../account/runtimes-model.ts';
 import { type ClaudeStatuslineCommand, skillFrontmatterKeys, skillSourceReference } from '../account/adapt.ts';
@@ -296,6 +297,8 @@ export interface FleetCatalogServiceDeps {
   presets?(): Promise<readonly ProviderPreset[]>;
   /** The model catalogs and presets in effect (docs/model-catalog.md): what each runtime offers and pins. */
   modelCatalogs?(): Promise<ModelCatalogSources>;
+  /** Where Logins keeps each Ferretry-kept login (`LoginsApi.launchStores`): how a wrapper and a home reach its sign-in. */
+  loginStores?(): Promise<readonly LoginLaunchStore[]>;
   /** The fleet manifest as it is published now, unparsed; `undefined` when there is none. */
   publishedManifest?(): Promise<unknown>;
   /** The last auto-resume pass after a restart, for the Machine view; `null` when none has run. */
@@ -608,6 +611,7 @@ export class FleetCatalogService {
         acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
         ...this.#budgetHolds(),
         ...sources,
+        ...(await this.#loginStores()),
       });
     } catch (error) {
       throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));
@@ -867,6 +871,12 @@ export class FleetCatalogService {
     return sources === undefined ? {} : { modelCatalogs: sources };
   }
 
+  /** Where Logins keeps each Ferretry-kept login, read live for an apply; nothing on a machine wired without it. */
+  async #loginStores(): Promise<{ readonly loginStores?: readonly LoginLaunchStore[] }> {
+    const stores = await this.deps.loginStores?.();
+    return stores === undefined ? {} : { loginStores: stores };
+  }
+
   /** Each runtime's id by name, from `ids.json`. A machine with none yet has no ids to report. */
   async #runtimeIds(): Promise<Readonly<Record<string, string>>> {
     const ids = await this.deps.ids();
@@ -968,6 +978,7 @@ export class FleetCatalogService {
         harnessCommands: harnessCommandsOf(this.deps.locate),
         ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
         ...(await this.#modelCatalogs()),
+        ...(await this.#loginStores()),
         acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
         ...held,
       });
