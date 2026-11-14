@@ -291,7 +291,7 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
     };
     return await handler(context);
   }
-  return await runPluginVerb(world, entry, invocation, deps, surfaces);
+  return await runPluginVerb(world, entry, { ...invocation, words: resolved.rest }, deps, surfaces);
 }
 
 /** The first option the verb declares required that the words do not carry, by any of its spellings (`-s, --scope <scope>`). */
@@ -336,6 +336,7 @@ async function runPluginVerb(
     readBytes: path => world.host.readBytes(path),
     exists: path => world.host.exists(path),
     stdin: () => world.host.stdin(),
+    ...(world.promptHidden === undefined ? {} : { promptHidden: world.promptHidden }),
     env: pluginEnvironment(world.environment, world.host.cwd()),
     ownState: world.host.ownState(plugin.manifest),
   });

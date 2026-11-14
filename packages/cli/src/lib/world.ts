@@ -76,6 +76,11 @@ export interface CliWorld {
   daemon?(reads: DaemonControlReads): { readonly controller: DaemonController; exitCode(): number };
   /** Asks a person one question on the terminal and reads the line they type. Never used off a terminal. */
   readonly prompt?: IDaemonPrompt;
+  /**
+   * Reads one line typed at the terminal without echoing it (`fy secret set`): `undefined` when standard input is not a
+   * terminal. The value goes to the caller and nowhere else.
+   */
+  readonly promptHidden?: (question: string) => Promise<string | undefined>;
   /** A local file's text; throws when it cannot be read. */
   readText?(path: string): Promise<string>;
   /** `fy statusline`'s two effects: the passive usage file and the person's own command. Absent: nothing is recorded. */

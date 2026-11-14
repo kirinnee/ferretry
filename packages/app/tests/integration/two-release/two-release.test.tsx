@@ -58,6 +58,7 @@ const interact: typeof import('../../support/dom.ts').interact = callback => dom
 
 beforeAll(async () => {
   dom = await import('../../support/dom.ts');
+  dom.registerDom();
   // The daemon in this process answers through the global `Response`, and `Bun.serve` accepts only Bun's own.
   globalThis.Response = NativeResponse;
   [A, Bb, Bc, Bd] = await buildReleases();
@@ -65,9 +66,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   for (const release of [A, Bb, Bc, Bd]) release?.dispose();
-  const { GlobalRegistrator } = await import('@happy-dom/global-registrator');
-  await GlobalRegistrator.unregister();
-  (globalThis as { __ferretryDomRegistered?: boolean }).__ferretryDomRegistered = false;
+  await dom.unregisterDom();
 });
 
 const browser = (): ShellWindow => ({

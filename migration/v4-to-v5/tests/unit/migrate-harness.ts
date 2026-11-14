@@ -1,6 +1,38 @@
 import { appendFile, chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import {
+  RAW_SECRET_KEY_MESSAGE,
+  RAW_SECRET_MESSAGE,
+  RAW_TEXT_SECRET_MESSAGE,
+  rawSecretFix,
+} from '../../../../packages/core/kernel/host/config/secrets.ts';
+
+export { RAW_SECRET_KEY_MESSAGE, RAW_SECRET_MESSAGE, RAW_TEXT_SECRET_MESSAGE };
+
+/** One issue in the shape 5.0's `fy config check --json` prints (packages/cli/src/lib/commands/config.ts). */
+export interface FakeIssue {
+  readonly path: string;
+  readonly line?: number;
+  readonly column?: number;
+  readonly severity: 'error' | 'warning';
+  readonly message: string;
+  readonly fix?: string;
+}
+
+/** A raw-secret finding exactly as the kernel words it: `<where>: <RAW_SECRET_MESSAGE>`, never the value. */
+export const rawSecretIssue = (path = 'logins/a.yaml', where = 'env.ANTHROPIC_API_KEY'): FakeIssue => ({
+  path,
+  line: 3,
+  column: 3,
+  severity: 'error',
+  message: `${where}: ${RAW_SECRET_MESSAGE}`,
+  fix: rawSecretFix('fy'),
+});
+
+/** The whole `fy config check --json` document, as a string for a fake's `out`. */
+export const configCheckJson = (issues: readonly FakeIssue[], pending: readonly object[] = []): string =>
+  JSON.stringify({ files: 12, issues, pending }, null, 2);
 
 /**
  * A sandbox for `migrate.sh`: a temp HOME, a fake v4 home, a throwaway git checkout holding a copy of the script at a
@@ -334,7 +366,7 @@ async function installDefaults(sb: Sandbox): Promise<void> {
     { match: 'daemon stop', run: DAEMON_DOWN_SH },
     { match: 'daemon start', run: DAEMON_UP_SH },
     { match: 'daemon update --major --yes --to *', run: `echo 5.0.0 > ${D}/fy.version; echo 5.0.0 > ${D}/fyd.version` },
-    { match: 'config check', out: 'config ok' },
+    { match: 'config check --json', out: configCheckJson([]) },
     { match: 'doctor', out: 'doctor clean' },
     { match: 'ask', out: 'no asks are waiting' },
     { match: 'restart *', out: 'restarted' },

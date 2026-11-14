@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { advance, DAEMON_UP_SH, makeSandbox, SECRET_VALUE, type Sandbox } from './migrate-harness.ts';
+import {
+  advance,
+  configCheckJson,
+  DAEMON_UP_SH,
+  makeSandbox,
+  rawSecretIssue,
+  SECRET_VALUE,
+  type Sandbox,
+} from './migrate-harness.ts';
 
 /**
  * Round-1 review of migrate.sh, one named test per finding (P1 #1 to #8, then the P2s that were fixed). Every test here
@@ -143,24 +151,31 @@ describe('P1-2: every phase runs fy and fyd with the RECORDED home and port, wha
   });
 });
 
-describe('P1-3: any config-check error other than the one credential diagnostic stops before the daemon starts', () => {
-  test('P1-3: a credential error AND a schema error in one report: exit 1, no daemon start', async () => {
+describe('P1-3: any config-check error other than the one credential diagnostic stops the start (after the daemon is up)', () => {
+  test('P1-3: a credential error AND a schema error in one report: exit 1, daemon up, not marked started', async () => {
     const sb = await box();
     await advance(sb, 'install');
     await sb.fake('fy', [
       { match: '--version', run: 'cat "$D/fy.version"' },
       {
-        match: 'config check',
-        err: 'logins/a.yaml KEY X holds a literal credential: use fy secret set NAME\nlimits.yaml: invalid schema',
+        match: 'config check --json',
+        out: configCheckJson([
+          rawSecretIssue(),
+          { path: 'limits.yaml', line: 2, severity: 'error', message: 'invalid schema' },
+        ]),
         code: 1,
       },
       { match: 'daemon start', run: DAEMON_UP_SH },
+      { match: 'ps -a --json', run: 'cat "$D/ps.v5.json"' },
     ]);
     const result = await sb.run('start');
     expect(result.code).toBe(1);
     expect(result.err).toContain('other than only a literal credential');
-    expect((await sb.calls()).filter(line => line === 'fy daemon start')).toEqual([]);
-    expect(await sb.notesText()).not.toContain('# starting-v5');
+    expect(result.err).toContain('IS running');
+    expect((await sb.calls()).filter(line => line === 'fy daemon start')).toHaveLength(1);
+    const notes = await sb.notesText();
+    expect(notes).toContain('# starting-v5');
+    expect(notes).not.toContain('# started-v5');
   });
 });
 

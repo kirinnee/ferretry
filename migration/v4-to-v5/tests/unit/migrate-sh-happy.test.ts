@@ -150,8 +150,9 @@ describe('migrate.sh happy path (Homebrew v4 cask, released v5.0.0)', () => {
     expect(result.code).toBe(0);
     const calls = await sb.calls();
     expect(calls.indexOf('fyd --check')).toBeLessThan(calls.indexOf('fy daemon start'));
-    expect(calls.indexOf('fy config check')).toBeLessThan(calls.indexOf('fy daemon start'));
-    // The checks that must not start a daemon ran with the dummy address pinned; the start did not.
+    // 5.0's config check asks the daemon: it runs only after the start, never before.
+    expect(calls.indexOf('fy config check --json')).toBeGreaterThan(calls.indexOf('fy daemon start'));
+    // The check that must not start a daemon ran with the dummy address pinned; the start did not.
     const env = await sb.envLog();
     expect(env.find(line => line.startsWith('fyd|--check'))).toContain('FY_URL=http://127.0.0.1:9');
     expect(env.find(line => line.startsWith('fy|daemon start'))).toContain('FY_URL=<unset>');
