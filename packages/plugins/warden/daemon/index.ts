@@ -27,6 +27,11 @@ import { createWardenSubsystem } from './subsystem.ts';
  *   failover through the auto-move service, which is not built (it needs fleet facts, the owner hold and the ferret's
  *   background jobs, none of which Ferrets offers). Investigator wardens refuse: Ferrets takes a work folder, but the
  *   Warden has no folder of its own to give it, so nothing is spent.
+ * - Usage is an optional use bound through Usage's OWN contract (`UsagePort`): the sweep's account health (a login at its
+ *   limit, rejected credentials, a provider unavailable) is read from `UsageApi.feed` (`daemon/usage-health.ts`) for
+ *   the failover selector and the status, and reads as unknown (no row) when Usage is off or its read fails. The
+ *   headroom floor of auto-move (`autoMove.minHeadroomPercent`) belongs to the auto-move service above and stays
+ *   unread until that service is built; it will read Logins' list and Usage's feed as Packs does.
  * - The Jev guard is the real one, and the KERNEL places its key (`kernel.secrets.send`): the Warden never holds it.
  *   It is spent only once the owner wrote `jev.key: ${secret:JEV_API_KEY}` into warden.yaml (an agent's write that
  *   adds it is held) and the Vault holds the key; until then it answers `not_set` and no request leaves the machine.

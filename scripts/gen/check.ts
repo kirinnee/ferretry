@@ -35,6 +35,7 @@ import { check as noMacros } from '../validate/no-macros.ts';
 import { check as oneFormat } from '../validate/one-format.ts';
 import { check as parityTicks } from '../validate/parity-ticks.ts';
 import { check as pins } from '../validate/pins.ts';
+import { check as portOwner } from '../validate/port-owner.ts';
 import { check as privateFiles } from '../validate/private-files.ts';
 import { check as pluginGraph } from '../validate/plugin-graph.ts';
 import { check as portsPending } from '../validate/ports-pending.ts';
@@ -52,6 +53,7 @@ export const CHECKS: readonly Check[] = [
   contextImports,
   contractConsumes,
   contractGraph,
+  portOwner,
   pluginGraph,
   appHooks,
   shellProvides,

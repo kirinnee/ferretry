@@ -3,7 +3,7 @@ import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type { AgendaId, AskSummary } from '@ferretry/core-asks/contract';
 import { instantFromEpochMs } from '@ferretry/std';
 import { askBuzzPath, type BuzzRecord } from '../../../contract/index.ts';
-import type { AccessBuzzApi } from '../../../contract/others.ts';
+import type { AccessBuzzApi } from '../../../daemon/lib/access-buzz.ts';
 import {
   askBuzzKey,
   askBuzzKind,

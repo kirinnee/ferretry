@@ -1,5 +1,5 @@
 import type { Instant } from '@ferretry/std';
-import type { AccessBuzzApi } from '../../contract/others.ts';
+import type { AccessBuzzApi } from './access-buzz.ts';
 import type { BuzzKind, BuzzRecord } from '../../contract/index.ts';
 import type { BuzzWords } from './buzz-policy.ts';
 

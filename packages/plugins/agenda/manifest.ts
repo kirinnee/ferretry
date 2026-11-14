@@ -14,7 +14,7 @@ import {
 } from './contract/index.ts';
 import { AskAnswered, AsksChanged, AsksPort } from '@ferretry/core-asks/contract';
 import { ArchiveKeeps, FerretChanged, FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
-import { AccessPort } from './contract/others.ts';
+import { AccessPort } from '@ferretry/plugin-access/contract';
 import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
 
 /**

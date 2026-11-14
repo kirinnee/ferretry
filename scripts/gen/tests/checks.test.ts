@@ -32,6 +32,7 @@ import { compatIn } from '../../validate/no-compat.ts';
 import { formatsIn } from '../../validate/one-format.ts';
 import { pinFindings } from '../../validate/pins.ts';
 import { check as pluginGraph } from '../../validate/plugin-graph.ts';
+import { check as portOwner, declaredPorts } from '../../validate/port-owner.ts';
 import { check as portsPending } from '../../validate/ports-pending.ts';
 import { readScopedIn } from '../../validate/read-scoped.ts';
 import { check as registriesFresh } from '../../validate/registries-fresh.ts';
@@ -436,6 +437,57 @@ describe('contract-consumes', () => {
       { pending: ['alpha', 'beta'] },
     );
     expect(messages(await run(contractConsumes, f))).toBe('');
+  });
+});
+
+describe('port-owner', () => {
+  test("planted: a plugin declares its own port under the provider's name and binds it", async () => {
+    const f = ws(
+      [
+        {
+          id: 'alpha',
+          contract: portContract('beta'),
+          manifestImports: `import { betaPort } from './contract/index.ts';`,
+          manifest: '  uses: { beta: betaPort },',
+        },
+        {
+          id: 'beta',
+          contract: portContract('beta'),
+          manifestImports: `import { betaPort } from './contract/index.ts';`,
+          manifest: '  provides: { beta: betaPort },',
+        },
+      ],
+      { pending: ['alpha', 'beta'] },
+    );
+    const found = messages(await run(portOwner, f));
+    expect(found).toContain('declares port "beta", which is also declared at');
+    expect(found).toContain('port "beta" is bound through 2 different tokens');
+  });
+  test("a uses binding that imports the provider's own token passes", async () => {
+    const f = ws(
+      [
+        {
+          id: 'alpha',
+          manifestImports: `import { betaPort } from '../beta/contract/index.ts';`,
+          manifest: '  uses: { beta: betaPort },',
+        },
+        {
+          id: 'beta',
+          contract: portContract('beta'),
+          manifestImports: `import { betaPort } from './contract/index.ts';`,
+          manifest: '  provides: { beta: betaPort },',
+        },
+      ],
+      { pending: ['alpha', 'beta'] },
+    );
+    expect(messages(await run(portOwner, f))).toBe('');
+  });
+  test('reads the name of a port from its declaration, with a nested generic', () => {
+    const source = 'export const A = definePort<Api<{ x: number }>>(\'a\');\nexport const B = definePort<B>("b");';
+    expect(declaredPorts(source)).toEqual([
+      { name: 'a', line: 1 },
+      { name: 'b', line: 2 },
+    ]);
   });
 });
 

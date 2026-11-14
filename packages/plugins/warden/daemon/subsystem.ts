@@ -7,7 +7,7 @@ import type { BoardApi } from '@ferretry/plugin-board/contract';
 import type { BrowsersApi } from '@ferretry/plugin-browsers/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import type { TerminalsApi } from '@ferretry/plugin-terminals/contract';
-import type { UsageHeadroomApi } from '../contract/others.ts';
+import { type WardenUsageSource, usageHealth } from './usage-health.ts';
 import { WARDEN_CONFIG, WardenActed, WardenConfigChanged, WardenFlagged } from '../contract/index.ts';
 import { AsksWardenAgenda, NoticeEntries } from './asks.ts';
 import { boardReader } from './board.ts';
@@ -68,7 +68,7 @@ export interface WardenHost {
   readonly ferrets: FerretsApi;
   readonly conversation: ConversationApi;
   readonly asks: AsksApi;
-  readonly usage: () => UsageHeadroomApi | undefined;
+  readonly usage: () => WardenUsageSource | undefined;
   /** Board, when it is on: read at each sweep, never during build. */
   readonly board: () => BoardApi | undefined;
   /** Terminals, when it is on: the liveness look at each ferret's own pane. Off, the liveness checks do not run. */
@@ -271,7 +271,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       state: new StateWardenStateStore(kernel.state),
       config: configStore,
       agents,
-      usage: { accounts: async () => [] },
+      usage: usageHealth(host.usage),
       verdicts: { recent: async scope => await reader.readVerdicts(undefined, scope).catch(() => undefined) },
       attention: agenda,
       journal: { record: (type, data) => kernel.log.info(type, scalars(data)) },

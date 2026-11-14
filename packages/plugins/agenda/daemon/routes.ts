@@ -22,7 +22,7 @@ import {
   PushSeenRequestSchema,
   PushSeenResponseSchema,
 } from '../contract/index.ts';
-import type { AccessBuzzApi } from '../contract/others.ts';
+import type { AccessBuzzApi } from './lib/access-buzz.ts';
 import { parseBody } from './lib/body.ts';
 import type { BuzzLedger } from './lib/buzz-service.ts';
 import { waitingOnOwner } from './lib/buzz-policy.ts';

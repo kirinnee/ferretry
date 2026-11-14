@@ -6,7 +6,7 @@ import { owner, type TestCaller, testHost } from '@ferretry/kernel/testing';
 import { as, gateLikeAdmission } from '../../support/gate.ts';
 import { type AgendaApi, AgendaPort } from '../../../contract/index.ts';
 import { agendaConformance } from '../../../contract/testing/index.ts';
-import type { AccessBuzzApi } from '../../../contract/others.ts';
+import type { AccessBuzzApi } from '../../../daemon/lib/access-buzz.ts';
 import agenda from '../../../daemon/index.ts';
 import manifest from '../../../manifest.ts';
 import { raiseAsk } from '../../unit/daemon/support.ts';

@@ -3,12 +3,12 @@ import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
 import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
 import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
 import { TerminalsPort } from '@ferretry/plugin-terminals/contract';
+import { UsagePort } from '@ferretry/plugin-usage/contract';
 import { VoicePort } from '@ferretry/plugin-voice/contract';
 import { appAction, definePlugin, panel, route, screen, settingsTab } from '@ferretry/kernel/manifest';
 import { AsksPort } from '@ferretry/core-asks/contract';
 import { ACTIONS_ROW_SLOT, FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { GatePort } from '@ferretry/core-gate/contract';
-import { UsagePort } from './contract/others.ts';
 import {
   cap,
   WARDEN_CONFIGURED_AUDIT,

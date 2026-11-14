@@ -31,6 +31,7 @@
     "@ferretry/plugin-terminals": "workspace:*",
     "@ferretry/plugin-browsers": "workspace:*",
     "@ferretry/plugin-runtimes": "workspace:*",
+    "@ferretry/plugin-usage": "workspace:*",
     "@ferretry/plugin-voice": "workspace:*"
   },
   "sideEffects": false,
