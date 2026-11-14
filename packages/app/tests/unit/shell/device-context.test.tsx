@@ -139,9 +139,12 @@ describe('the device context', () => {
         scroll={new ScrollMemory(null)}
       />,
     );
-    const selects = [...view.container.querySelectorAll('select')].map(select => select.value);
-    expect(selects).toContain('mission');
-    expect(selects).toContain('dark');
+    // The page draws the theme as a radio per family and the colour mode as a segmented radio group (not selects).
+    const checkedIn = (label: string): string | undefined =>
+      view?.container.querySelector<HTMLInputElement>(`[role="radiogroup"][aria-label="${label}"] input:checked`)
+        ?.value;
+    expect(checkedIn('Theme family')).toBe('mission');
+    expect(checkedIn('Colour mode')).toBe('dark');
   });
 
   test('every daemon-less safe hook built so far answers under WithoutShell; the device context holds no client', async () => {
