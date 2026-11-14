@@ -240,6 +240,8 @@ export default definePlugin({
       settingsTab('runtimes', { label: 'Runtimes', order: 10 }),
       settingsTab('profiles', { label: 'Profiles', order: 11 }),
       settingsTab('model-sets', { label: 'Model sets', order: 12 }),
+      // Export this machine's settings as a zip, or copy another machine's here (v4's Setup › Export / Copy settings).
+      settingsTab('transfer', { label: 'Export & copy', order: 13 }),
     ],
     // The model and effort switches above the composer, and the account picker (with its health and quota) that
     // Ferrets' new-ferret and move pages OFFER as slots: Runtimes contributes, Ferrets imports nothing of it.
@@ -249,6 +251,9 @@ export default definePlugin({
       panel(MOVE_ACCOUNT_SLOT, { id: 'move-account', order: 10 }),
       // The first-run step's body (Onboarding's steps screen offers this slot): the runtimes view.
       panel('onboarding.step', { id: 'onboarding-step', order: 40 }),
+      // v4's "Start from…" and "Agent controls" steps.
+      panel('onboarding.step', { id: 'onboarding-start', order: 10 }),
+      panel('onboarding.step', { id: 'onboarding-controls', order: 75 }),
     ],
   },
 
@@ -288,7 +293,11 @@ export default definePlugin({
     ],
   },
 
-  onboarding: [{ id: 'runtimes', title: 'Name your runtimes', order: 40 }],
+  onboarding: [
+    { id: 'start', title: 'Start from…', order: 10 },
+    { id: 'runtimes', title: 'Name your runtimes', order: 40 },
+    { id: 'controls', title: 'Agent controls', order: 75 },
+  ],
   doctor: ['runtimes-config'],
 
   permissions: {

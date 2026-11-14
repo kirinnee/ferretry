@@ -231,12 +231,14 @@ describe('app half: the screen and the Settings tab', () => {
       { slot: 'daemon.status', id: 'warden-verdicts', order: 61 },
       { slot: 'ferret.side', id: 'ferret-warden', order: 30 },
       { slot: 'ferrets.actions-row', id: 'ask-warden-row', order: 90 },
+      { slot: 'onboarding.step', id: 'onboarding-step', order: 60 },
     ]);
     expect(Object.keys(half.panels)).toEqual(manifest.ui.panels.map(panel => panel.id));
     for (const panel of Object.values(half.panels)) {
       let thrown: unknown;
       try {
-        panel({});
+        // The first-run step draws only for its own subject, so every panel is asked as that step.
+        panel({ subject: 'warden.warden' });
       } catch (reason) {
         thrown = reason;
       }

@@ -38,12 +38,15 @@ const daemonlessPlaceholder = (): null => null;
  */
 export default provideToShell(
   implementApp(manifest, {
-    build: ({ client }) => ({
-      screens: { onboarding: daemonlessPlaceholder, steps: stepsScreen(client) },
-      panels: {},
-      settings: { setup: setupTab(client) },
-      renderers: {},
-    }),
+    build: ({ client }) => {
+      const steps = stepsScreen(client);
+      return {
+        screens: { onboarding: daemonlessPlaceholder, steps, setup: steps },
+        panels: {},
+        settings: { setup: setupTab(client) },
+        renderers: {},
+      };
+    },
   }),
   {
     // A just-paired machine with steps not looked at yet opens its steps page by itself (shell contract S3 device view).

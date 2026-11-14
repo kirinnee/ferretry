@@ -25,6 +25,7 @@ import {
   HIDDEN_VALUE_TEXT,
   looksSecretShown,
   rawTextHoldsSecret,
+  rawTextMayHold,
   shownWord,
   shownWords,
 } from '@ferretry/std/credential-words';
@@ -87,9 +88,6 @@ export function hiddenValueIssues(
   return hidden.length > listed.length ? [...listed, moreIssues(path, hidden.length - listed.length)] : listed;
 }
 
-/** A value whose name is the name of a secret (`GITHUB_TOKEN` names one; it does not hold one). */
-const SECRET_NAME_GRAMMAR = /^[A-Z][A-Z0-9_]{0,63}$/u;
-
 /** A string that holds white space. */
 const HAS_BLANK = /\s/u;
 
@@ -121,9 +119,13 @@ function shownItem(value: string, before: string | undefined): string {
   return parts.map((part, index) => (index % 2 === 0 ? (words[index / 2]?.text ?? part) : part)).join('');
 }
 
-/** A string outside a list: cut whole under a secret name, else read as a word and, with blanks in it, as a command line. */
+/**
+ * A string outside a list: cut whole under a secret name, else read as a word and, with blanks in it, as a command line.
+ * No value is spared for LOOKING like a secret's name (`API_KEY: FIXTUREKEY`): nothing in a file says a literal is a
+ * name and not a value, and a pointer is already spared by its own shape (`${secret:NAME}`).
+ */
 function shownString(value: string, key: string | undefined): string {
-  if (key !== undefined && !SECRET_NAME_GRAMMAR.test(value) && looksSecretShown(key, value)) return HIDDEN_VALUE_TEXT;
+  if (key !== undefined && looksSecretShown(key, value)) return HIDDEN_VALUE_TEXT;
   return shownItem(value, undefined);
 }
 
@@ -151,7 +153,7 @@ function maskedValue(value: unknown): { readonly value: unknown; readonly cuts: 
         const here = [...path, index];
         const word = scalarText(item);
         if (word === undefined) return walk(item, here);
-        const secretKey = key !== undefined && !SECRET_NAME_GRAMMAR.test(word) && looksSecretShown(key, word);
+        const secretKey = key !== undefined && looksSecretShown(key, word);
         const shown = secretKey ? HIDDEN_VALUE_TEXT : shownItem(word, scalarText(node[index - 1]));
         return shown === word ? item : record(here, word, shown);
       });
@@ -182,30 +184,6 @@ function removedParts(original: string, shown: string): readonly string[] {
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
-
-/** What splits a text that does not parse into the words a mask would judge: blanks, a flow list's marks and quotes. */
-const RAW_WORD_BREAK = /[\s,[\]"']+/u;
-
-/**
- * Whether a text that does not parse holds a word the word cutter would cut, or a value after a secret-named key
- * (`DB_PASSWORD: v`) that looks like a credential: none of its values can be cut and rebuilt, so such a text is
- * withheld (`unparsed`) rather than shown raw. A pointer (`apiKey: ${secret:NAME}`) is no credential. Linear.
- */
-function rawTextMayHold(text: string): boolean {
-  const words = text.split(RAW_WORD_BREAK).filter(word => word !== '' && word !== '-');
-  return words.some((word, index) => {
-    // No shorter word can be cut: a credential is at least 8 characters, a URL with a password at least 7.
-    if (word.length < MIN_CUT_WORD) return false;
-    const before = words[index - 1];
-    return (
-      shownWord(word, before).hidden ||
-      (before !== undefined && before.endsWith(':') && looksSecretShown(before.slice(0, -1), word))
-    );
-  });
-}
-
-/** The shortest word the word cutter can cut anything in (`a://:p@h` holds a password). */
-const MIN_CUT_WORD = 7;
 
 /**
  * The text as a read of it may show it.

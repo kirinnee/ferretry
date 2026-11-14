@@ -13,6 +13,7 @@ import {
   HIDDEN_VALUE_TEXT,
   looksSecret,
   looksSecretShown,
+  rawTextMayHold,
   shownWord,
   shownWords,
 } from '../../src/credential-words/index.ts';
@@ -153,5 +154,15 @@ describe('the name and value tests', () => {
   test('looksSecretShown is never narrower than looksSecret on a secret name', () => {
     expect(looksSecretShown('API_KEY', VALUE)).toBe(true);
     expect(looksSecretShown('API_KEY', '${secret:X}')).toBe(false);
+  });
+});
+
+describe('rawTextMayHold (a text that does not parse, and an export: nothing that may hold a credential is shown)', () => {
+  test('an ALL-UPPERCASE literal under a credential-named key may be a credential', () => {
+    expect(rawTextMayHold('env:\n  API_KEY: FIXTUREKEY\n')).toBe(true);
+  });
+
+  test('a pointer and plain settings may not', () => {
+    expect(rawTextMayHold('env:\n  API_KEY: ${secret:FIXTURE_KEY}\n  LOG_LEVEL: debug\n')).toBe(false);
   });
 });
