@@ -1,6 +1,5 @@
-import { homePortOf } from '@ferretry/kernel/contract/home-port';
+import { homePortAccepted, homePortAcceptedPath } from '@ferretry/kernel/contract/home-port';
 import { readFile } from 'node:fs/promises';
-import { homePortPath } from '../../lib/home.ts';
 
 /**
  * Reads the daemon's run record (`<home>/run/daemon.json`), or `undefined` when it is absent or unreadable.
@@ -16,10 +15,11 @@ export async function readDaemonRunDocument(path: string): Promise<string | unde
 }
 
 /**
- * The port this home's own configuration names for its daemon, or `undefined` when it names none (or the file cannot be
- * read or its port is malformed: the daemon refuses to start on that by sentence, and a client has nothing to dial).
+ * The port this home's configuration has IN EFFECT, from the record the daemon keeps of what it put into effect: never
+ * the text on disk, which may be an edit still held for the owner. `undefined` when it names none (or nothing is
+ * accepted yet): a client with nothing to dial falls back to the well-known address.
  */
 export async function readHomePort(home: string): Promise<number | undefined> {
-  const outcome = homePortOf(await readDaemonRunDocument(homePortPath(home)));
+  const outcome = homePortAccepted(await readDaemonRunDocument(homePortAcceptedPath(home)));
   return outcome.kind === 'port' ? outcome.port : undefined;
 }

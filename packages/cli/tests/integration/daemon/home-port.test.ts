@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -101,7 +102,20 @@ beforeAll(async () => {
   };
   port = await portTheOsChose(wrapper, env);
   expect(port).not.toBe(DEFAULT_PORT);
-  await writeFile(join(home, 'config/connections.yaml'), `direct:\n  host: 127.0.0.1\n  port: ${String(port)}\n`);
+  // The configuration is IN EFFECT only when the service has accepted it (an unaccepted `direct` block is a loosening, held
+  // for the owner): a migrated or owner-confirmed home carries the accepted record beside the file, as written here.
+  const written = `direct:\n  host: 127.0.0.1\n  port: ${String(port)}\n`;
+  await writeFile(join(home, 'config/connections.yaml'), written);
+  await mkdir(join(home, 'state/kernel/accepted-config'), { recursive: true });
+  await writeFile(
+    join(home, 'state/kernel/accepted-config/connections.yaml.json'),
+    JSON.stringify({
+      format: 1,
+      etag: createHash('sha256').update(written, 'utf8').digest('hex'),
+      text: written,
+      plugin: 'connections',
+    }),
+  );
 });
 
 afterAll(async () => {

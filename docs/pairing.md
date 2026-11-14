@@ -332,10 +332,15 @@ the browser:
 `config/connections.yaml` has exactly one block for the direct carrier, `direct`, with a `host` and an optional `port`
 and nothing else. The listener's HOST is chosen by `fyd --host`. Its PORT is chosen by `fyd --port`, then `FY_PORT`, then
 the home's own `direct.port` in this file, then 7457 — `fyd --print-config` says which one won (`home config
-(config/connections.yaml direct.port)`). A port in this file that is not a whole number from 0 to 65535 refuses the start
-with a sentence, never clamped (a run that names `--port` or `FY_PORT` does not read it). That one key has one reader
-(`homePortOf` in `@ferretry/kernel/contract/home-port`), used by the daemon to bind and by `fy` to dial before any run record
-exists, so a migrated home's own port is never traded for 7457 — which a still-running v4 daemon may hold.
+(config/connections.yaml direct.port)`). **The home's port is the version in effect, never the text on disk**: a changed `direct` block
+is a loosening, so an edit to it is held on disk until the owner confirms it and the accepted port keeps binding across
+restarts. The daemon asks the configuration service's own read-only decision before it binds; `fy`, which must not run the
+service, reads the service's record of it (`state/kernel/accepted-config/connections.yaml.json`) while no run record exists,
+so neither ever adopts a held edit. A home whose `direct` block was never accepted binds 7457 until the owner confirms it.
+A port that is not a whole number from 0 to 65535, with nothing in effect, refuses the start with one fixed sentence that
+names the key and the range and never the value (a run that names `--port` or `FY_PORT` does not read the file). That one
+key has one reader (`homePortOf` in `@ferretry/kernel/contract/home-port`), so a migrated home's own port is never traded
+for 7457 — which a still-running v4 daemon may hold.
 
 Where a client on the machine **dials** the daemon is a different fact. The listener writes a run record,
 `run/daemon.json` (`DaemonRunSchema`: the Unix socket, the loopback bind's `host` and `port`, the pid and version), when
