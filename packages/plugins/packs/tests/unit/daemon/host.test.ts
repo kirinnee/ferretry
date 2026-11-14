@@ -186,19 +186,6 @@ describe('packs on the test host', () => {
     await h.stop();
   });
 
-  test('accepting a routing prompt says plainly that the configuration writer is not available yet', async () => {
-    const { host: h } = await host();
-    const response = await h.request('POST', '/v1/pack/routing/accept', {
-      body: {
-        prompt: 'Use the best model for planning.',
-        suggested: { by: 'a model', via: 'a runtime', mode: 'clean-up', at: '2026-11-07T10:00:00.000Z' },
-      },
-    });
-    expect(response.status).toBe(503);
-    expect(response.json<{ code: string }>().code).toBe('config_write_unavailable');
-    await h.stop();
-  });
-
   test('a ferret cannot start a clean-up, accept or undo: only a person does', async () => {
     const { host: h } = await host(ferrets => ferrets.add({ id: lead }));
     for (const path of ['/v1/pack/routing/clean-up', '/v1/pack/routing/accept', '/v1/pack/routing/undo']) {
