@@ -293,6 +293,9 @@ describe('the app shell', () => {
       ['/d/d1/settings/multi/first', 'The first tab'],
       ['/d/d1/settings/multi/second', 'The second tab'],
       ['/d/d1/settings/multi/third', 'The third tab'],
+      // Row 60: a bare tab id names that tab (v4's settings/<tab> addresses), whichever plugin owns it.
+      ['/d/d1/settings/second', 'The second tab'],
+      ['/d/d1/settings/third', 'The third tab'],
     ] as const) {
       go(path);
       const { runtime, storage } = setup({});
@@ -316,6 +319,24 @@ describe('the app shell', () => {
       ]);
       await view.unmount();
     }
+  });
+
+  test('a settings address nothing answers to says so, and never opens the first tab in its place', async () => {
+    go('/d/d1/settings/nonesuch');
+    const { runtime, storage } = setup({});
+    const view = await mount(
+      <App
+        runtime={runtime}
+        themes={new ThemePreferenceStore(storage)}
+        layouts={new DeviceLayoutStore(storage)}
+        browser={browser}
+        scroll={new ScrollMemory(null)}
+      />,
+    );
+    await settle();
+    expect(view.container.querySelector('[data-testid="tab"]')).toBeNull();
+    expect(view.container.querySelector('main')?.textContent).toContain('There is no settings tab called "nonesuch"');
+    await view.unmount();
   });
 
   test('a slot a plugin screen offers draws the panels others contribute, with the props the screen hands it', async () => {

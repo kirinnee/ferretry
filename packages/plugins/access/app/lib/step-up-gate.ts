@@ -16,6 +16,11 @@
  * `waitingDaemons()` — which the machine list shows as locked — and its prompt opens when that machine
  * comes on screen (`focus`). A request a person started (`explicit`) still asks wherever it came from.
  *
+ * A CANCEL STAYS CANCELLED. A dismissed prompt would otherwise be raised again by the very next background read of
+ * the machine on screen (a page that polls), covering the page and blocking its clicks. So a dismissed machine
+ * answers its further BACKGROUND requests `false` at once, raising nothing, until a person presses something that asks
+ * (`explicit`), the machine leaves the screen and comes back, or a confirmation succeeds.
+ *
  * NOTHING HERE HOLDS A CREDENTIAL. A verified step-up is a fact the DAEMON remembers about this copy of
  * the app; the browser holds nothing it could lose, replay or leak.
  */
@@ -113,6 +118,8 @@ export class StepUpGate {
   /** The machine on screen, whose background requests may ask. `null` until the shell says. */
   #focus: DaemonId | null = null;
   #waitingIds: readonly DaemonId[] = NOTHING_WAITING;
+  /** Machines whose prompt the person cancelled: their background asks are refused quietly until one of the ways out above. */
+  readonly #dismissed = new Set<DaemonId>();
 
   constructor(private readonly deps: StepUpGateDependencies) {}
 
@@ -158,6 +165,11 @@ export class StepUpGate {
   ): Promise<boolean> {
     return new Promise(resolve => {
       const explicit = origin === 'explicit';
+      if (explicit) this.#dismissed.delete(daemon.daemonId);
+      else if (this.#dismissed.has(daemon.daemonId)) {
+        resolve(false);
+        return;
+      }
       const waiting = this.#waiting.get(daemon.daemonId);
       if (waiting !== undefined) {
         waiting.resolvers.push(resolve);
@@ -199,6 +211,7 @@ export class StepUpGate {
   focus(daemonId: DaemonId | null): void {
     if (daemonId === this.#focus) return;
     this.#focus = daemonId;
+    if (daemonId !== null) this.#dismissed.delete(daemonId);
     const prompt = this.#prompt;
     const shown = prompt === null ? undefined : this.#waiting.get(prompt.daemon.daemonId);
     if (prompt !== null && !prompt.busy && shown !== undefined && !this.#mayShow(shown)) this.#prompt = null;
@@ -251,6 +264,8 @@ export class StepUpGate {
   #settle(daemonId: DaemonId, stepped: boolean): void {
     const waiting = this.#waiting.get(daemonId);
     this.#waiting.delete(daemonId);
+    if (stepped) this.#dismissed.delete(daemonId);
+    else this.#dismissed.add(daemonId);
     for (const resolve of waiting?.resolvers ?? []) resolve(stepped);
     this.#prompt = null;
     this.#showNext();

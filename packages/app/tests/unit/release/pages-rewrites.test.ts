@@ -15,7 +15,7 @@ import { parseReleaseRewrites, releasePathForRequest } from '../../../src/releas
 const redirects = readFileSync(join(import.meta.dir, '../../../public/_redirects'), 'utf8');
 const rules = redirects.trim().split('\n');
 
-const APP_ROUTES = ['/app/*', '/d/*', '/setup', '/pair', '/pair/*', '/join', '/shared'];
+const APP_ROUTES = ['/app/*', '/d/*', '/setup', '/pair', '/pair/*', '/join', '/shared', '/onboarding', '/onboarding/*'];
 
 describe('public/_redirects app routes', () => {
   it.each(APP_ROUTES)('%s is a 200 rewrite to the directory /app/, not to /app/index.html', route => {
@@ -35,7 +35,18 @@ describe('public/_redirects app routes', () => {
   it('is answered by the service worker, too, with the same shell for each route', () => {
     const files = { 'index.html': 'landing', 'app/index.html': 'shell' };
     const rewrites = parseReleaseRewrites(redirects);
-    for (const pathname of ['/pair', '/pair/x', '/setup', '/join', '/shared', '/d/x', '/app/foo', '/app/']) {
+    for (const pathname of [
+      '/pair',
+      '/pair/x',
+      '/setup',
+      '/join',
+      '/shared',
+      '/onboarding',
+      '/onboarding/x',
+      '/d/x',
+      '/app/foo',
+      '/app/',
+    ]) {
       expect(releasePathForRequest({ pathname, navigate: true }, files, rewrites)).toBe('app/index.html');
     }
     expect(releasePathForRequest({ pathname: '/', navigate: true }, files, rewrites)).toBe('index.html');

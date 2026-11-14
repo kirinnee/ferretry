@@ -57,3 +57,21 @@ export function refusalSentence(code: string | undefined, fallback: string): str
       return fallback;
   }
 }
+
+/**
+ * The sentence under "Running …": behind, up to date, or — honestly — that nobody could say. "Up to date" is a claim
+ * about the newest release, so it is made only when a check (this one or the last good one) actually knew the latest;
+ * a daemon that has never checked, or whose only check failed, says that instead.
+ */
+export function headlineSentence(view: DaemonUpdateView): string {
+  const behind = behindSentence(view);
+  if (behind !== undefined) return behind;
+  const { check } = view;
+  if (check.state === 'never') return 'This daemon has not checked for a newer release yet.';
+  if (check.state === 'failed') {
+    return check.lastKnown === undefined
+      ? `The last check for a newer release failed (${check.reason}), so this daemon may not be up to date.`
+      : `This daemon is up to date as of the last good check; the newest check failed (${check.reason}).`;
+  }
+  return 'This daemon is up to date.';
+}

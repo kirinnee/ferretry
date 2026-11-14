@@ -13,7 +13,7 @@ import { ProjectSkillFiles } from './adapters/project-skill-files.ts';
 import { SkillFilesRouter } from './adapters/skill-files-router.ts';
 import { RootSkillFiles } from './adapters/skill-files.ts';
 import { composerSkills } from './lib/composer.ts';
-import { MAX_SKILL_MANIFEST_BYTES, MAX_SKILLS_PER_ROOT, SkillsInventoryService } from './lib/inventory.ts';
+import { MAX_SKILL_MANIFEST_BYTES, SkillsInventoryService } from './lib/inventory.ts';
 import { inventoryRoutes } from './routes.ts';
 import { skillParts } from './lib/launch-parts.ts';
 import { skillsComponentSource } from './lib/profile-component-source.ts';
@@ -26,9 +26,8 @@ import { skillReferenceProvider } from './lib/reference-catalog.ts';
  * Where the skills come from (S1):
  * - an ACCOUNT HOME's skills through Runtimes' bounded reader (`homes`, `home(id)`): a plain folder is `user`, a link the
  *   reader says is Ferretry's own is `ferretry`. A home is never a path Skills opens;
- * - the v4-installed skills straight from the fleet's `assets/skills/<name>` (Runtimes' `assetSkills`, source
- *   `ferretry`), so a link from a home into `assets/` is the same skill listed once, never followed. Unbound while the
- *   Runtimes provider offers no asset tree;
+ * - the v4-installed skills an account LAYERS: its home's link into the fleet's `assets/skills/<name>` is listed by the
+ *   home's reader as `ferretry`. The shared asset tree itself is never listed under an account that does not link it;
  * - the skill items a runtime's profile selects (`layers(runtime).skills`), resolved to Skills' own installed store;
  * - a REGISTERED PROJECT's `.claude/skills` and `.agents/skills`, through the kernel's read-only `imports` root scoped to
  *   that one folder, and a ferret's own folder through its `work` root.
@@ -95,11 +94,6 @@ export default implementDaemon(manifest, {
           name: project.name,
           path: project.path,
         })),
-      ferretry: async () => {
-        const assets = runtimes.current()?.assetSkills?.();
-        const listed = (await assets?.skills(MAX_SKILLS_PER_ROOT).catch(() => undefined)) ?? [];
-        return listed.map(entry => ({ manifest: entry.manifest, managed: true }));
-      },
       selected: selectedEntries,
     });
 
