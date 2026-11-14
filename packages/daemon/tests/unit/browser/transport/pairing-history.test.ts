@@ -58,7 +58,7 @@ describe('PairingNavigationLedger', () => {
 
     ledger.watch('p1', FAKE_LINK);
 
-    should(ledger.look(['p1'])).eql({ commits: { [APP]: 1 }, linked: true, lost: 0, blind: false });
+    should(ledger.look(['p1'])).eql({ commits: { [APP]: 1 }, linked: true, links: 1, lost: 0, blind: false });
   });
 
   it('should keep the document linked when the fragment is only dropped, and free it when a new document replaces it', () => {
@@ -78,7 +78,7 @@ describe('PairingNavigationLedger', () => {
     // Assert — the count never goes down
     should(dropped).be.true();
     should(frame).be.true();
-    should(replaced).eql({ commits: { [APP]: 1 }, linked: false, lost: 0, blind: false });
+    should(replaced).eql({ commits: { [APP]: 1 }, linked: false, links: 1, lost: 0, blind: false });
   });
 
   it('should answer for the pages it is asked about, and keep a closed page’s commits', () => {
@@ -97,7 +97,7 @@ describe('PairingNavigationLedger', () => {
     // Assert
     should(mine.linked).be.false();
     should(theirs.linked).be.true();
-    should(gone).eql({ commits: { [APP]: 1 }, linked: false, lost: 0, blind: false });
+    should(gone).eql({ commits: { [APP]: 1 }, linked: false, links: 1, lost: 0, blind: false });
   });
 
   it('should count every loss on a counter that never goes down, whatever the page does or however it ends', () => {
@@ -150,5 +150,49 @@ describe('PairingNavigationLedger', () => {
     const { commits } = ledger.look(['p1']);
     should(Object.keys(commits)).have.length(PAIRING_HISTORY_ORIGINS_MAX + 1);
     should(commits[PAIRING_HISTORY_OVERFLOW]).equal(3);
+  });
+});
+
+describe('PairingNavigationLedger — pairing links on any origin', () => {
+  const ELSEWHERE_LINK = 'https://other.example.test/pair#v1;url=http%3A%2F%2F127.0.0.1%3A9;code=FAKE-FAKE;fp=fake';
+  const ELSEWHERE = 'https://other.example.test/';
+
+  it('should count the links a set of pages entered, on whatever origin, even when the document is replaced at once', () => {
+    // Arrange — the reviewer's third probe: a link-entered document that commits only briefly
+    const ledger = new PairingNavigationLedger();
+    ledger.watch('p', ELSEWHERE);
+    should(ledger.look(['p']).links).equal(0);
+
+    // Act
+    ledger.committed('p', { address: ELSEWHERE_LINK, ...document });
+    ledger.committed('p', { address: ELSEWHERE, ...document });
+
+    // Assert — the document is no longer linked, and the count still says it was
+    const look = ledger.look(['p']);
+    should(look.linked).be.false();
+    should(look.links).equal(1);
+  });
+
+  it('should count by page, so a page outside the set does not move the set’s count, and a closed page keeps its links', () => {
+    const ledger = new PairingNavigationLedger();
+    ledger.watch('p', ELSEWHERE);
+    ledger.watch('q', ELSEWHERE);
+
+    ledger.committed('q', { address: ELSEWHERE_LINK, ...document });
+    should(ledger.look(['p']).links).equal(0);
+
+    ledger.closed('q');
+    should(ledger.look(['p', 'q']).links).equal(1);
+    should(JSON.stringify(ledger.look(['q']))).not.containEql('FAKE');
+  });
+
+  it('should count a fragment that only moved inside the document, and one in a frame', () => {
+    const ledger = new PairingNavigationLedger();
+    ledger.watch('p', ELSEWHERE);
+
+    ledger.committed('p', { address: ELSEWHERE_LINK, ...within });
+    ledger.committed('p', { address: ELSEWHERE_LINK, mainFrame: false, sameDocument: false });
+
+    should(ledger.look(['p']).links).equal(2);
   });
 });

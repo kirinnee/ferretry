@@ -29,7 +29,6 @@ import {
   PROBE_SECOND_LOOK_MS,
   probeInputFields,
   readPairingGroup,
-  pairingRelatedPages,
   readInputText,
   shootInputFields,
   typeInputFields,
@@ -2015,32 +2014,5 @@ describe('readPairingGroup', () => {
     gone.closed = true;
 
     should((await readPairingGroup([subjectOf(asked, 'pg-1'), subjectOf(gone, 'pg-2')])).pairingScreen).equal(true);
-  });
-});
-
-describe('pairingRelatedPages', () => {
-  const at = (address: string) => ({ url: () => address });
-
-  it('should name every other page of the same origin: a script on one reaches the documents of the rest', () => {
-    const asked = at('https://app.example.test/settings');
-    const popup = at('https://app.example.test/pair');
-    const elsewhere = at('https://docs.example.test/');
-
-    should(pairingRelatedPages(asked, [asked, popup, elsewhere])).eql([popup]);
-  });
-
-  it('should count a page whose origin cannot be told as related, in either direction: a miss hands out a credential', () => {
-    const asked = at('https://app.example.test/');
-    const blank = at('about:blank');
-    const garbled = at('not an address');
-
-    should(pairingRelatedPages(asked, [asked, blank, garbled])).eql([blank, garbled]);
-    should(pairingRelatedPages(blank, [blank, asked, at('https://docs.example.test/')]).length).equal(2);
-  });
-
-  it('should name no page for a page alone', () => {
-    const only = at('https://app.example.test/');
-
-    should(pairingRelatedPages(only, [only])).eql([]);
   });
 });

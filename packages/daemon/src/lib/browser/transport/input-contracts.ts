@@ -94,10 +94,18 @@ export interface BrowserInputDocument {
    */
   readonly pairingCommits?: Readonly<Record<string, number>>;
   /**
-   * Whether the document one of those pages shows now was entered by an address carrying a pairing fragment, or the
-   * ledger is blind (it has lost track of a navigation and cannot prove its history complete: sticky until a fresh one).
+   * Whether the document one of those pages shows now was entered by an address carrying a pairing fragment. On ANY
+   * origin: a deployment the daemon does not know is as much a pairing screen as the one it does.
    */
   readonly pairingLinked?: boolean;
+  /**
+   * How many addresses carrying a pairing fragment those pages (and the closed members of their opener group) entered, on
+   * ANY origin, even ones a later document replaced. Never goes down while the group lasts: a number that moved between
+   * two looks says a link-entered document came in between. Absent is none.
+   */
+  readonly pairingLinkCommits?: number;
+  /** Whether the ledger has lost track of a navigation and cannot prove its history complete (sticky until a fresh one). */
+  readonly pairingBlind?: boolean;
   /** How many times the ledger lost track of a navigation since the worker started. Never goes down; absent is none. */
   readonly pairingLost?: number;
 }

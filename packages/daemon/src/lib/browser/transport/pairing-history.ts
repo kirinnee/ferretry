@@ -44,6 +44,12 @@ export interface PairingHistoryLook {
   readonly commits: Readonly<Record<string, number>>;
   /** Whether the document one of those pages shows now was entered by such a commit. */
   readonly linked: boolean;
+  /**
+   * How many addresses carrying a pairing fragment these pages committed, on ANY origin, even ones a later document
+   * replaced. For the pages asked about only, and never down while they are asked about: a link that came and went
+   * during an operation is told even where the daemon knows no origin of the deployment.
+   */
+  readonly links: number;
   /** How many times the ledger lost track of a page's navigation, since the worker started. Never goes down. */
   readonly lost: number;
   /**
@@ -57,6 +63,8 @@ export class PairingNavigationLedger {
   private readonly commits = new Map<string, number>();
   /** Pages whose current document was entered, or later moved, by an address carrying a pairing fragment. */
   private readonly linked = new Set<string>();
+  /** How many addresses carrying a pairing fragment each page committed, on ANY origin; kept after the page closes. */
+  private readonly links = new Map<string, number>();
   /** How many times a page's navigation could not be followed: a count that only goes up, so an operation it overlapped is told. */
   private lostCount = 0;
 
@@ -77,6 +85,7 @@ export class PairingNavigationLedger {
   committed(pageKey: string, commit: PairingCommit): void {
     if (carriesPairingFragment(commit.address)) {
       this.count(originOfAddress(commit.address));
+      this.links.set(pageKey, (this.links.get(pageKey) ?? 0) + 1);
       this.linked.add(pageKey);
       return;
     }
@@ -94,6 +103,7 @@ export class PairingNavigationLedger {
     return {
       commits: Object.fromEntries(this.commits),
       linked: pageKeys.some(key => this.linked.has(key)),
+      links: pageKeys.reduce((total, key) => total + (this.links.get(key) ?? 0), 0),
       lost: this.lostCount,
       blind: this.lostCount > 0,
     };

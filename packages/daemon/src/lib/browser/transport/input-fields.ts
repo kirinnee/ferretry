@@ -1157,26 +1157,3 @@ export async function clearInputFields(
     return 'unknown';
   }
 }
-
-/**
- * The pages a script on `page` could reach, among `pages` (docs/pairing.md, "Never show it to an agent"): every other one
- * on the same origin, because a same-origin window (an opener, a popup, a window it named) is a document that script can
- * read. A page whose origin cannot be told apart (`about:blank`, an address that will not parse) is counted too, on
- * either side: a miss would hand an agent a credential, an extra page only refuses one read.
- */
-export function pairingRelatedPages<T extends { url(): string }>(page: T, pages: readonly T[]): readonly T[] {
-  const originOf = (candidate: T): string => {
-    try {
-      const origin = new URL(candidate.url()).origin;
-      return origin === 'null' ? '' : origin;
-    } catch {
-      return '';
-    }
-  };
-  const mine = originOf(page);
-  return pages.filter(other => {
-    if (other === page) return false;
-    const theirs = originOf(other);
-    return mine === '' || theirs === '' || theirs === mine;
-  });
-}

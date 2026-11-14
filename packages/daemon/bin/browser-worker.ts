@@ -68,7 +68,6 @@ import {
   type InputLocator,
   type InputSubject,
   observeInputFields,
-  pairingRelatedPages,
   playwrightNodeOf,
   readPairingGroup,
   probeInputFields,
@@ -97,6 +96,7 @@ import {
 } from '../src/lib/browser/transport/page-lifecycle.ts';
 import { runPageScript } from '../src/lib/browser/transport/page-script.ts';
 import { originOfAddress, PairingNavigationLedger } from '../src/lib/browser/transport/pairing-history.ts';
+import { lookUpOpener, PairingOpenerGraph } from '../src/lib/browser/transport/pairing-opener-graph.ts';
 import { disablePasskeys } from '../src/lib/browser/transport/passkeys.ts';
 import { type PointerPosition, pointerAfter, pointerSequence } from '../src/lib/browser/transport/pointer.ts';
 import { type PointerPage, performPointerAct, pointerActParam } from '../src/lib/browser/transport/pointer-acts.ts';
@@ -139,6 +139,10 @@ let frameSerial = 0;
 const pageIds = new WeakMap<Page, string>();
 const pageStates = new WeakMap<Page, PageState>();
 const openers = new WeakMap<Page, string>();
+/** Each page's lookup of who opened it: settled before a pairing group is drawn, so a popup just opened is not missed. */
+const openerLookups = new WeakMap<Page, Promise<void>>();
+/** Who opened whom in each browser context, kept after the window that did has closed (a pairing group is drawn from it). */
+const openerGraphs = new WeakMap<BrowserContext, PairingOpenerGraph>();
 const sessions = new WeakMap<Page, Promise<CDPSession>>();
 const targets = new WeakMap<Page, Promise<string>>();
 /** The context of each incognito page, closed with it. */
@@ -368,6 +372,30 @@ function followNavigation(page: Page, key: string): void {
     .catch(() => pairingLedger.lost(key));
 }
 
+function openerGraphOf(context: BrowserContext): PairingOpenerGraph {
+  const known = openerGraphs.get(context);
+  if (known) return known;
+  const made = new PairingOpenerGraph();
+  openerGraphs.set(context, made);
+  return made;
+}
+
+/**
+ * Finds out who opened `page` (settled before a pairing group is drawn, so a popup just opened is not missed). A lookup that
+ * fails is UNKNOWN parentage and reads as reachable from every page of the context, never as a page nobody opened.
+ */
+function lookOpener(page: Page): void {
+  openerLookups.set(
+    page,
+    lookUpOpener(openerGraphOf(page.context()), pageId(page), async () => {
+      const opener = await page.opener();
+      if (opener === null) return undefined;
+      openers.set(page, pageId(opener));
+      return pageId(opener);
+    }),
+  );
+}
+
 function registerPage(page: Page): void {
   if (pageIds.has(page)) return;
   const key = pageId(page);
@@ -382,12 +410,7 @@ function registerPage(page: Page): void {
   watch(page, key);
   followNavigation(page, key);
   setPageState(page, 'ready');
-  void page
-    .opener()
-    .then(opener => {
-      if (opener) openers.set(page, pageId(opener));
-    })
-    .catch(() => undefined);
+  lookOpener(page);
   page.on('download', download => downloads.accept(pageId(page), download));
   page.on('request', request => {
     try {
@@ -1060,9 +1083,23 @@ async function act(request: Request): Promise<Record<string, unknown>> {
       const page = targetPage(params.pageId);
       const document = await describeInputDocument(inputSubject(page));
       // Pairing screens (docs/pairing.md): the page asked about and every page that could reach it.
-      const group = [page, ...pairingRelatedPages(page, livePages())];
+      // Only the pages of this page's own browser context can be told apart by who opened whom: another agent's tab, and the
+      // browser's own startup blank page, are not a window this page's script could reach.
+      const siblings = page
+        .context()
+        .pages()
+        .filter(candidate => !candidate.isClosed());
+      const graph = openerGraphOf(page.context());
+      for (const sibling of siblings) {
+        registerPage(sibling);
+        // A lookup that failed is tried again: it stays unknown, and so reaches every page, until one finds the opener.
+        if (graph.isUnknown(pageId(sibling))) lookOpener(sibling);
+      }
+      await Promise.all(siblings.map(async sibling => await openerLookups.get(sibling)));
+      const reach = graph.group(pageId(page), siblings.map(pageId));
+      const group = [page, ...siblings.filter(sibling => sibling !== page && reach.live.includes(pageId(sibling)))];
       const pairing = await readPairingGroup(group.map(inputSubject));
-      const history = pairingLedger.look(group.map(pageId));
+      const history = pairingLedger.look(reach.keys);
       return {
         document: {
           ...document,
@@ -1070,10 +1107,11 @@ async function act(request: Request): Promise<Record<string, unknown>> {
           // What the daemon needs to tell whether this group is the app's, and what the app was sent (never page script).
           pairingOrigins: [...new Set(group.map(member => originOfAddress(safeUrl(member))))],
           pairingCommits: history.commits,
-          // A ledger that lost a navigation cannot prove any page was not entered by a link: blind reads as linked.
-          pairingLinked:
-            history.linked || history.blind || group.some(member => carriesPairingFragment(safeUrl(member))),
+          pairingLinked: history.linked || group.some(member => carriesPairingFragment(safeUrl(member))),
+          // A ledger that lost a navigation cannot prove any page was not entered by a link.
+          pairingBlind: history.blind,
           pairingLost: history.lost,
+          pairingLinkCommits: history.links,
         },
       };
     }

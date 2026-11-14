@@ -81,7 +81,10 @@ export function appOriginSet(origins: readonly string[]): ReadonlySet<string> {
  * blank page) or that overflowed its bound counts as the app's: a page that cannot be told apart may be anyone's.
  */
 export function pairingEvidenceOf(
-  document: Pick<BrowserInputDocument, 'pairingOrigins' | 'pairingCommits' | 'pairingLinked' | 'pairingLost'>,
+  document: Pick<
+    BrowserInputDocument,
+    'pairingOrigins' | 'pairingCommits' | 'pairingLinked' | 'pairingBlind' | 'pairingLost' | 'pairingLinkCommits'
+  >,
   live: { readonly live: boolean; readonly minted: number },
   apps: ReadonlySet<string>,
 ): BrowserPairingEvidence {
@@ -98,8 +101,10 @@ export function pairingEvidenceOf(
       (total, [origin, count]) => (isApp(origin) ? total + count : total),
       0,
     ),
+    linkCommits: document.pairingLinkCommits ?? 0,
     lost: document.pairingLost ?? 0,
     linked: document.pairingLinked === true,
+    blind: document.pairingBlind === true,
   };
 }
 
@@ -119,6 +124,8 @@ function evidenceMoved(before: BrowserPairingState, now: BrowserPairingState): b
   const first = before.evidence;
   const second = now.evidence;
   if (first === undefined || second === undefined) return false;
+  // A link-entered document that came and went in between, on ANY origin: the bytes it showed outlive it.
+  if (second.linkCommits !== first.linkCommits) return true;
   if (second.commits !== first.commits || second.lost !== first.lost) return true;
   return (first.app || second.app) && second.minted !== first.minted;
 }
@@ -134,8 +141,11 @@ function evidenceMoved(before: BrowserPairingState, now: BrowserPairingState): b
 function refused(state: BrowserPairingState, script: boolean): boolean {
   if (state.marked) return true;
   const evidence = state.evidence;
-  if (evidence === undefined || !evidence.app) return false;
-  return evidence.live || evidence.linked || (script && evidence.commits > 0);
+  if (evidence === undefined) return false;
+  // A document a pairing link opened is a pairing screen wherever it is served: the daemon cannot know every deployment's origin.
+  if (evidence.linked) return true;
+  if (!evidence.app) return false;
+  return evidence.live || evidence.blind || (script && evidence.commits > 0);
 }
 
 /** Whether an agent's script was asked to run where Ferretry's own app is, or ended there: the rule has no exception. */
