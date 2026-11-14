@@ -344,15 +344,29 @@ describe('rollback: by recorded state', () => {
     expect((await sb.calls()).filter(line => line.startsWith('fy restart'))).toEqual([]);
   });
 
-  test('a live fyd when the notes record NO v5 launch is the v4 daemon: left alone, after the quiet check', async () => {
+  test('a live daemon when the notes record NO v5 launch is NOT left alone: stopped the documented way (after the quiet check), then the home moves', async () => {
     const sb = await box();
     await advance(sb, 'backup');
     await sb.daemonUp();
     const result = await sb.run('rollback', ['--owner-yes']);
     expect(result.code).toBe(0);
-    expect(result.out).toContain('it is the v4 daemon, left alone');
+    expect(result.out).not.toContain('left alone');
     expect(result.out).toContain('quiet before');
-    expect((await sb.calls()).filter(line => line === 'fy daemon stop').length).toBe(1); // only the quiet phase's own stop
+    expect(result.out).toContain('proven: no daemon is running');
+    expect((await sb.calls()).filter(line => line === 'fy daemon stop').length).toBe(2); // the quiet phase's own stop, and the rollback's
+  });
+
+  test('the same with a stop that fails: refused before any move (the old bypass is gone)', async () => {
+    const sb = await box();
+    await advance(sb, 'backup');
+    await sb.daemonUp();
+    await sb.fake('fy', [
+      { match: '--version', run: 'cat "$D/fy.version"' },
+      { match: 'daemon stop', err: 'cannot stop', code: 1 },
+    ]);
+    const result = await sb.run('rollback', ['--owner-yes']);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain('nothing was moved');
   });
 });
 

@@ -527,6 +527,9 @@ backup)
   fi
   [ -d "${H}" ] || fail "no home at ${H}"
   [ ! -e "${B}" ] || fail "${B} already exists: refusing to overwrite a backup"
+  # The quiet phase stopped the daemon; a daemon that is live or UNKNOWN now (restarted since, or never stopped) would keep running on a
+  # home that moves under it. Nothing is moved: the quiet window no longer holds, so it is rebuilt from the start.
+  if daemon_live; then fail "a daemon is running or may be (${DAEMON_WHY}): the quiet window no longer holds. Nothing was moved and nothing was written: stop that daemon yourself, run quiet again, then run backup again"; fi
   mark backing-up
   mv "${H}" "${B}" || fail "mv ${H} ${B} failed"
   chmod 700 "${B}" || fail "chmod 700 ${B} failed"
@@ -911,8 +914,25 @@ rollback)
       say "📝 proven: no daemon is running (${DAEMON_WHY})"
       ;;
     *)
-      say "📝 a daemon is running (${DAEMON_WHY}), and the notes record no v5 daemon launch after the last v4 start: it is the v4 daemon, left alone"
+      # The notes record no v5 launch, but a live or UNKNOWN daemon is never "left alone": a missing marker cannot show which
+      # version runs or that it has let go of ${H}. Stop it the documented way with the fy that matches an installed version,
+      # or refuse BEFORE any move. v4 programs first (the notes say the last daemon launched was v4), else v5 programs.
+      stop_with=""
+      stop_fy="$(resolve "$(note_get ORIG_PATH)" fy)" || stop_fy=""
+      if [ -n "${stop_fy}" ] && out="$(v4_version_of "${stop_fy}")" && [[ ${out} =~ ^4\.291\. ]]; then
+        stop_with=v4
+      elif stop_fy="$(v5_fy)" && out="$(v5_version "${stop_fy}")" && [[ ${out} =~ ^5\. ]]; then
+        stop_with=v5
+      fi
+      [ -n "${stop_with}" ] || fail "a daemon is running or may be (${DAEMON_WHY}), and fy here is neither v4 (4.291.x) nor v5, so the right way to stop it cannot be chosen. Nothing was moved and nothing was written: stop that daemon yourself, then run rollback again"
+      say "⚙️ a daemon is running or may be (${DAEMON_WHY}); the notes record no v5 launch, but that does not show it is v4: reaching a quiet point, then stopping it with the ${stop_with} fy (panes keep running)"
       rb_quiet before
+      stop_ok=0
+      if [ "${stop_with}" = v4 ]; then fy4 daemon stop || stop_ok=$?; else fy5 daemon stop || stop_ok=$?; fi
+      [ "${stop_ok}" -eq 0 ] || fail "'fy daemon stop' failed for the daemon that is running or may be (${DAEMON_WHY}): nothing was moved and nothing was written; stop it yourself, then run rollback again"
+      rb_quiet after
+      if daemon_live; then fail "a daemon is still running or may be after 'fy daemon stop' (${DAEMON_WHY}): it cannot be proven that none owns ${H}. Nothing was moved and nothing was written: stop it yourself, tell the owner, then run rollback again"; fi
+      say "📝 proven: no daemon is running (${DAEMON_WHY})"
       ;;
     esac
   else
