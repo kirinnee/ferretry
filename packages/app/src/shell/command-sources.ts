@@ -33,8 +33,10 @@ export function placeSource(input: PlaceSourceInput): CommandBarSource {
       entries.push({ id, group: 'Go to', label, run: () => input.navigate(href), ...extra });
     };
     for (const paired of input.daemons) {
-      go(`daemon-${paired.daemon}`, daemonTitle(paired), daemonHomeHref(paired.daemon), {
-        description: paired.machine,
+      const title = daemonTitle(paired);
+      go(`daemon-${paired.daemon}`, title, daemonHomeHref(paired.daemon), {
+        // The host name is the title when the machine has no name of its own: say it once.
+        ...(paired.machine === title ? {} : { description: paired.machine }),
         keywords: ['daemon', paired.machine],
         resting: true,
       });

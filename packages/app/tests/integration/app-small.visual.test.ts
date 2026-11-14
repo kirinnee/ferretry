@@ -111,6 +111,23 @@ describe('Settings › This device', () => {
         expect(await tab.locator('[data-theme-tiles] [data-family-card]').count()).toBe(11);
         const swatch = await tab.locator('[data-theme-tiles] [data-swatch]').first().boundingBox();
         expect(swatch?.width ?? 0, 'a swatch has a real size').toBeGreaterThan(20);
+        // The three segmented controls share one width and one left edge at 1280, and fill the row at 390.
+        const boxes = await tab.evaluate(() =>
+          ['Colour mode', 'Text size', 'Motion'].map(name => {
+            const box = document.querySelector(`[role="radiogroup"][aria-label="${name}"]`)?.getBoundingClientRect();
+            return { width: Math.round(box?.width ?? -1), left: Math.round(box?.left ?? -1) };
+          }),
+        );
+        expect(new Set(boxes.map(box => box.width)).size, 'one width for all three').toBe(1);
+        expect(new Set(boxes.map(box => box.left)).size, 'one left edge for all three').toBe(1);
+        if (variant.phone) expect(boxes[0]?.width ?? 0, 'full width on a phone').toBeGreaterThan(variant.width - 80);
+        // A theme's own panel shadow never spills out of its swatch over the label.
+        const shadows = await tab.evaluate(() =>
+          [...document.querySelectorAll('[data-theme-tiles] .kt-swatch')].map(node => getComputedStyle(node).boxShadow),
+        );
+        expect(shadows.filter(shadow => shadow !== 'none')).toEqual([]);
+        // The page scrolls inside the app shell, so a "full page" shot of a phone is a tall window: Text size and Motion show.
+        if (variant.phone) await tab.setViewportSize({ width: variant.width, height: 1_900 });
         await shotOf(tab, variant, 'this-device');
         await tab.locator('[role="radiogroup"][aria-label="Motion"] label', { hasText: 'Reduced' }).click();
         expect(await tab.evaluate(() => document.documentElement.dataset.motion)).toBe('reduced');
@@ -130,6 +147,12 @@ describe('the command bar', () => {
         await tab.waitForSelector('[role="dialog"][aria-label="Command bar"]');
         const rows = await tab.locator('[role="dialog"][aria-label="Command bar"] [role="option"]').count();
         expect(rows, 'at rest the bar lists places').toBeGreaterThan(0);
+        // The machine's name is said once, not as title and subtitle.
+        const first = await tab
+          .locator('[role="dialog"][aria-label="Command bar"] [role="option"]')
+          .first()
+          .innerText();
+        expect(first.split('workshop-host').length - 1, 'the host name appears once').toBe(1);
         const panel = await tab.locator('[role="dialog"][aria-label="Command bar"]').boundingBox();
         // A phone's rows are taller and fill the panel to its cap; a desktop's list is shorter than the cap.
         if (!variant.phone) expect(panel?.height ?? 9_999, 'the panel is no taller than its rows').toBeLessThan(420);

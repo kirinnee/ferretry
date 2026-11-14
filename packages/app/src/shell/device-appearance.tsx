@@ -3,7 +3,7 @@
  * (never a raw id), the theme as a grid of tiles each previewing its family in its own light and dark theme, and the
  * Motion switch that stills every animation. All four are saved in this browser, never on a daemon.
  */
-import { type KeyboardEvent, useCallback, useId, useRef } from 'react';
+import { type KeyboardEvent, type ReactNode, useCallback, useId, useRef } from 'react';
 import { Segmented, SettingGroup, SettingRow } from '../compose/setting-row.tsx';
 import type { MotionPreference } from '../compose/controls.ts';
 import { useDeviceControls } from '../compose/device-controls.ts';
@@ -27,6 +27,11 @@ const MOTION_HINT: Readonly<Record<MotionPreference, string>> = {
   system: 'Follows this device’s reduced-motion setting',
   reduced: 'Spinners and transitions stay still here',
 };
+
+/** One width for every control in the Look group, so the three sit in one aligned column at 1280; a phone gives each the full row. */
+function EqualWidth({ children }: { readonly children: ReactNode }) {
+  return <div className="w-full md:w-72">{children}</div>;
+}
 
 /** The theme families as a tile grid: two across on a phone, four on a desktop. Roving radios, like `Segmented`. */
 function ThemeTiles({ theme }: { readonly theme: DeviceTheme }) {
@@ -124,12 +129,15 @@ export function DeviceAppearance() {
         hint={preference.mode === 'system' ? `Auto follows the system (now ${resolved})` : `Always ${preference.mode}`}
         wide
         control={() => (
-          <Segmented
-            label="Colour mode"
-            value={preference.mode}
-            options={MODE_OPTIONS.map(({ id, label, hint }) => ({ id, label, title: hint }))}
-            onChange={theme.setMode}
-          />
+          <EqualWidth>
+            <Segmented
+              fill
+              label="Colour mode"
+              value={preference.mode}
+              options={MODE_OPTIONS.map(({ id, label, hint }) => ({ id, label, title: hint }))}
+              onChange={theme.setMode}
+            />
+          </EqualWidth>
         )}
       />
       <SettingRow name="Theme" hint={family === undefined ? undefined : `${family.label} — ${family.blurb}`}>
@@ -141,12 +149,15 @@ export function DeviceAppearance() {
         hint="Touch targets never shrink"
         wide
         control={() => (
-          <Segmented
-            label="Text size"
-            value={preference.textScale}
-            options={TEXT_SCALE_OPTIONS}
-            onChange={theme.setTextScale}
-          />
+          <EqualWidth>
+            <Segmented
+              fill
+              label="Text size"
+              value={preference.textScale}
+              options={TEXT_SCALE_OPTIONS}
+              onChange={theme.setTextScale}
+            />
+          </EqualWidth>
         )}
       />
       <SettingRow
@@ -155,12 +166,15 @@ export function DeviceAppearance() {
         hint={MOTION_HINT[device.motion]}
         wide
         control={() => (
-          <Segmented
-            label="Motion"
-            value={device.motion}
-            options={MOTION_OPTIONS}
-            onChange={motion => void set({ motion })}
-          />
+          <EqualWidth>
+            <Segmented
+              fill
+              label="Motion"
+              value={device.motion}
+              options={MOTION_OPTIONS}
+              onChange={motion => void set({ motion })}
+            />
+          </EqualWidth>
         )}
       />
     </SettingGroup>
