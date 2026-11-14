@@ -13,7 +13,7 @@ describe('skills contract', () => {
     expect((await skillsConformance(fakeSkills)).ok).toBe(true);
   });
 
-  test('the manifest declares 4 routes, 5 verbs, 2 reference renderers and takes launch.parts and reference.catalog for / and $', () => {
+  test('the manifest declares 4 routes, 5 verbs, 2 reference renderers and takes launch.parts, reference.catalog for / and $ and catalog.items for the skill kind', () => {
     expect(manifest.actions.routes.length).toBe(4);
     expect(manifest.actions.cli.length).toBe(5);
     expect(manifest.ui.renderers.map(entry => entry.key)).toEqual(['reference:/', 'reference:$']);
@@ -22,6 +22,7 @@ describe('skills contract', () => {
       'reference.catalog',
       'reference.catalog',
       'runtimes.components.skills',
+      'catalog.items',
     ]);
   });
 

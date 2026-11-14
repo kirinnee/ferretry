@@ -744,9 +744,18 @@ Installing is two steps and every route has exactly one capability. A project wr
   through the `catalog.items` hook's `runtime.installCatalogItem`. It is Catalogs' own shape, not a Runtimes change:
   Runtimes' change kinds (`component.put`, `profile.put` and the rest of `POST /v1/runtimes/proposals`) do not
   include it, so no route can submit one; only the installer produces it. The owner must resolve every
-  file path and refuse any write outside the skill's own folder in the assets directory. While no owner offers
-  that hook, an install into a runtime answers `503 catalog_kind_unavailable` and writes nothing (a declared GAP
-  in `ports-pending.json`). Anything already at the destination that B's install record did not write is
+  file path and refuse any write outside the skill's own folder in the assets directory. **Skills and MCP each
+  take this hook for the kind they own** (`catalog.items:skill`, `catalog.items:mcp`), so a catalog lists, adds,
+  exports and installs both: Skills reads a skill through Runtimes' bounded home reader or the `imports` root scoped
+  to one project skills folder (never through a link), writes a project skill folder through the kernel's `project-files`
+  root (`.claude/skills/<name>/**`, `.agents/skills/<name>/**`, declared in its manifest) and keeps a runtime install in its
+  own `installed/<name>/` tree beside `config/skills/<name>.yaml` and one `skills/<name>` profile layer; MCP reads every
+  declaration the machine has, writes a project's `.mcp.json` (`project-files`, `.mcp.json` only) and keeps a runtime
+  install as `config/mcp/<name>.yaml` and one `mcp/<name>` layer. Both write the item through the kernel's config
+  writer as the caller and the layer through Runtimes' `changeProfileLayers`, which judges the caller; a refusal after the
+  first write takes back what that call wrote. While the owner of a kind is off, publishing or installing that kind
+  answers `503 catalog_kind_unavailable` and writes nothing (the artifact kind has no owner yet: a declared GAP in
+  `ports-pending.json`). Anything already at the destination that B's install record did not write is
   `catalog_install_conflict`. An update replaces an install only when every file it wrote still has the
   hash B recorded (files are compared by exact relative path); a file edited by hand is refused as
   `catalog_install_edited` (see [Updating an install](#updating-an-install-catalogs-3d-3)). A runtime component is compared by a hash of what it holds, recorded at install, so a hand

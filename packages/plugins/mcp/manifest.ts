@@ -2,6 +2,7 @@ import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/
 import { audit, cap } from '@ferretry/core-gate/contract';
 import { ACTIONS_ROW_SLOT, FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
+import { CatalogItems } from '@ferretry/plugin-catalogs/contract';
 import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import { PROFILE_COMPONENTS_KEY, ProfileMcpSource, RuntimesPort } from '@ferretry/plugin-runtimes/contract';
@@ -271,7 +272,12 @@ export default definePlugin({
 
   hooks: {
     // Runtimes reads the `mcp` components a profile names through this plugin, which alone owns them (its `takers` list).
-    takes: [{ hook: LaunchParts }, { hook: ProfileMcpSource, key: PROFILE_COMPONENTS_KEY }],
+    takes: [
+      { hook: LaunchParts },
+      { hook: ProfileMcpSource, key: PROFILE_COMPONENTS_KEY },
+      // Catalogs shares this plugin's servers and installs a catalog's servers through it (the kind it owns).
+      { hook: CatalogItems, key: 'mcp' },
+    ],
   },
 
   doctor: ['mcp-inventory'],
@@ -279,7 +285,9 @@ export default definePlugin({
   permissions: {
     // `work`: a ferret's own folder. `imports`: ONLY the `.mcp.json` of a registered project root or a live managed
     // worktree, read-only (lead ruling (B); `daemon/adapters/project-root-files.ts`).
-    roots: ['work', 'imports'],
+    roots: ['work', 'imports', 'project-files'],
+    // A catalog install adds a server to a project's `.mcp.json` (the root of a project or worktree the daemon knows) and nothing else there.
+    projectFiles: ['.mcp.json'],
     // Sign-in: the servers being signed in to, and the issuer and endpoints their metadata named, answered by the
     // `mcp-sign-in` resolver (`daemon/lib/reach.ts`). A check reaches the same hosts.
     network: [{ resolver: 'mcp-sign-in' }],

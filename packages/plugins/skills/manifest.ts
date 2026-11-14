@@ -1,6 +1,7 @@
 import { definePlugin, panel, renderer, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { cap } from '@ferretry/core-gate/contract';
 import { FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
+import { CatalogItems } from '@ferretry/plugin-catalogs/contract';
 import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import { PROFILE_COMPONENTS_KEY, ProfileSkillsSource, RuntimesPort } from '@ferretry/plugin-runtimes/contract';
@@ -141,6 +142,8 @@ export default definePlugin({
       { hook: ReferenceCatalog, key: '/' },
       { hook: ReferenceCatalog, key: '$' },
       { hook: ProfileSkillsSource, key: PROFILE_COMPONENTS_KEY },
+      // Catalogs shares this plugin's skills and installs a catalog's skills through it (the kind it owns).
+      { hook: CatalogItems, key: 'skill' },
     ],
   },
 
@@ -148,7 +151,9 @@ export default definePlugin({
     // `work`: a ferret's own folder. `imports`: read-only, and ONLY the skills folders (`.claude/skills`,
     // `.agents/skills`) of a registered project root, each scoped one folder at a time (`adapters/project-skill-files.ts`
     // narrows the kernel's grant, which would take any folder outside the fence, as MCP's `.mcp.json` reader does).
-    roots: ['work', 'imports'],
+    roots: ['work', 'imports', 'project-files'],
+    // A catalog install writes a skill folder into a project (`<root>/.claude/skills/<name>/**`, `<root>/.agents/skills/<name>/**`) and nothing else there.
+    projectFiles: ['.claude/skills/*/**', '.agents/skills/*/**'],
     // Mints a shared folder of its own installed skills for the harness that links them into a ferret home (kernel batch #10).
     shareTrees: true,
     network: [],

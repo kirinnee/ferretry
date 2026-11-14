@@ -1,5 +1,6 @@
 import type { ConfigCollectionDef, FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
+import type { CatalogMcpProvider, McpComponentRecord } from '@ferretry/plugin-catalogs/contract';
 import type { SecretName, SecretSummary } from '@ferretry/core-vault/contract';
 import type { RuntimeId } from '@ferretry/plugin-runtimes/contract';
 import {
@@ -11,6 +12,7 @@ import {
   type McpItem,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { CatalogMcpProjectFile } from './adapters/catalog-project-file.ts';
 import { ConfigMcpServers } from './adapters/config-servers.ts';
 import { harnessProjectApprovals } from './adapters/harness-approvals.ts';
 import { RootMcpHarnessDocuments } from './adapters/harness-documents.ts';
@@ -35,6 +37,7 @@ import { combinedMcpOAuthServers, ProjectMcpLaunch, ProjectMcpOAuthServers } fro
 import { PublishedHomeDocuments, type PublishedHomes } from './lib/inventory/home-documents.ts';
 import { parseHarnessDocument } from './lib/inventory/parse-document.ts';
 import { accountsOf, componentsOf, layeredMcp } from './lib/inventory/runtime-wiring.ts';
+import { mcpCatalogRuntime } from './lib/catalog-runtime.ts';
 import { McpLaunchParts } from './lib/launch-parts.ts';
 import { mcpComponentSource } from './lib/profile-component-source.ts';
 import { McpOAuthService } from './lib/oauth/service.ts';
@@ -359,6 +362,52 @@ export default implementDaemon(manifest, {
           };
     }
 
+    // ── what Catalogs asks of the MCP kind (`catalog.items:mcp`) ────────────────────────────────────────────────────
+    // A catalog reads every declaration on the machine with what a conversion needs (v4's `inventory.servers()`), writes a
+    // project's `.mcp.json` through the kernel's `project-files` root, and installs into a runtime through the item
+    // file and the profile layer. The component of a component-scope server is the item as this machine stores it.
+    const componentOf = (name: string): McpComponentRecord | undefined => {
+      const item = items().get(name);
+      return item === undefined
+        ? undefined
+        : { ...item, harness: item.harness === undefined ? undefined : item.harness === 'codex' ? 'codex' : 'claude' };
+    };
+    const catalogItems: CatalogMcpProvider = {
+      kind: 'mcp',
+      sources: async () =>
+        (await inventory.servers()).map(server => {
+          const name = server.declaration?.name ?? '';
+          return {
+            id: server.id,
+            name,
+            scope: server.scope,
+            harness: server.harness === 'codex' ? ('codex' as const) : ('claude' as const),
+            source: server.source,
+            declaration: server.declaration,
+            component: server.scope === 'component' ? componentOf(name) : undefined,
+          };
+        }),
+      projectRoots: async () => (await known()).map(folder => folder.root),
+      project: new CatalogMcpProjectFile(
+        async () => (await known()).map(folder => folder.root),
+        root => kernel.roots.root('project-files', { subfolder: root, within: root }),
+      ),
+      runtime: mcpCatalogRuntime({
+        runtimes: () => runtimes.current(),
+        items,
+        // The person's own install: the kernel decides from the ambient call (host, or a governed device holding
+        // fleet.configure); a ferret's credential never reaches the install route.
+        writeItem: async (name, patch, ifMatch) =>
+          await kernel.config.writeAsCaller(
+            MCP_CONFIG,
+            name,
+            { patch },
+            ifMatch === undefined ? undefined : { ifMatch },
+          ),
+        removeItem: async name => await kernel.config.remove(MCP_CONFIG, name),
+      }),
+    };
+
     const api: McpApi = {
       inventory: async ferret => (ferret === undefined ? await inventory.machine() : await inventory.ferret(ferret)),
       check: async (id, ferret) => await check.check(id, ferret),
@@ -411,6 +460,8 @@ export default implementDaemon(manifest, {
       },
       provides: { mcp: api },
       hooks: {
+        // Catalogs shares and installs MCP servers through this one provider (its `catalog.items` hook, key `mcp`).
+        'catalog.items:mcp': catalogItems,
         'launch.parts': () => [{ id: 'mcp', item: launch }],
         // Runtimes' read of the `mcp` components a profile names: this plugin's own items, live, no cache.
         'runtimes.components.mcp:components': mcpComponentSource(items, listener =>

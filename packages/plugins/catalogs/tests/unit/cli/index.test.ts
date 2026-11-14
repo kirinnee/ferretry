@@ -1,10 +1,13 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { PluginClient, VerbInvocation } from '@ferretry/kernel/manifest';
 import qrcode from 'qrcode-generator';
 import { BlockQrEncoder } from '../../../cli/adapters/qr.ts';
 import cli from '../../../cli/index.ts';
 import manifest from '../../../manifest.ts';
-import { CATALOG_ID, catalog, catalogList } from './catalog/fixtures.ts';
+import { CATALOG_ID, catalog, catalogFile, catalogList, skillItem } from './catalog/fixtures.ts';
 import { mintResponse } from './catalog-share/fixtures.ts';
 
 interface Sent {
@@ -93,11 +96,22 @@ describe('fy catalog / fy member', () => {
     expect(sent.at(-1)?.route).toBe('DELETE /v1/catalogs/:id');
   });
 
-  test('export refuses before anything is signed while the shell hands this half no file writer', async () => {
-    const { run, sent, err } = harness({ 'GET /v1/catalogs': catalogList() });
-    expect(await run('catalog export', [CATALOG_ID], { yes: true })).toBe(1);
-    expect(err[0]).toContain('cannot write a file');
-    expect(sent.some(call => call.route === 'POST /v1/catalogs/:id/export')).toBe(false);
+  test('export writes the signed file itself when the shell hands this half no file writer (v4 parity)', async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'fy-catalog-index-'));
+    try {
+      const out = join(folder, 'team.catalog.json');
+      const { run, sent, err } = harness({
+        'GET /v1/catalogs': catalogList([catalog({ items: [skillItem()] })]),
+        'POST /v1/catalogs/:id/export': catalogFile(),
+      });
+      expect(await run('catalog export', [CATALOG_ID], { yes: true, out })).toBe(0);
+      expect(err).toEqual([]);
+      expect(sent.some(call => call.route === 'POST /v1/catalogs/:id/export')).toBe(true);
+      const written = JSON.parse(await readFile(out, 'utf8')) as { format: string };
+      expect(written.format).toBe('ferretry-catalog-file');
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
   });
 
   test('install refuses before any preview while the shell hands this half no file reader', async () => {
