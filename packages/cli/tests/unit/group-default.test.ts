@@ -154,6 +154,7 @@ const DECLARED: Readonly<Record<string, string>> = {
   'account site': 'account site ls',
   'account site recipe': 'account site recipe show',
   'account factor': 'account factor ls',
+  config: 'config check',
 };
 
 describe('the real registry', () => {
@@ -178,6 +179,7 @@ describe('the real registry', () => {
     const resolved = resolveVerb(real, group.split(' '));
     should(resolved.kind === 'verb' && resolved.entry.words.join(' ')).equal(line);
   };
+  it('V-0189 a bare `fy config` checks the configuration files, as v4 did', () => bare('config', 'config check'));
   it('V-0252 a bare `fy device` lists the paired devices, as v4 did', () => bare('device', 'device ls'));
   it('V-0002 a bare `fy account` lists the accounts', () => bare('account', 'account ls'));
   it('V-0019 a bare `fy account site` lists the sign-ins', () => bare('account site', 'account site ls'));
