@@ -49,24 +49,12 @@ export const ALLOWED_PUBLIC: ReadonlyMap<string, string> = new Map([]);
  */
 export const ALLOWED_KNIP: ReadonlyMap<string, string> = new Map([
   [
-    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:@huggingface/transformers',
-    'only the STT workers ported but unwired (voice GAP line in ports-pending.json naming app/worker/*-worker.ts) import it; the workers leave with the GAP (ruling #26).',
+    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:sherpa-glue',
+    'sherpa-glue is a bundler alias, not a package (the shell vite.config.ts takes it from app/vite-voice.ts voiceBuild), so the import of it in the sherpa worker is unlisted to knip by nature.',
   ],
   [
-    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:@lichess-org/vosk-browser',
-    'only the STT workers ported but unwired (voice GAP line in ports-pending.json naming app/worker/*-worker.ts) import it; the workers leave with the GAP (ruling #26).',
-  ],
-  [
-    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:@sherpaw/asr',
-    'only the STT workers ported but unwired (voice GAP line in ports-pending.json naming app/worker/*-worker.ts) import it; the workers leave with the GAP (ruling #26).',
-  ],
-  [
-    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:onnxruntime-web',
-    'only the STT workers ported but unwired (voice GAP line in ports-pending.json naming app/worker/*-worker.ts) import it; the workers leave with the GAP (ruling #26).',
-  ],
-  [
-    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:parakeet.js',
-    'only the STT workers ported but unwired (voice GAP line in ports-pending.json naming app/worker/*-worker.ts) import it; the workers leave with the GAP (ruling #26).',
+    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:sherpa-runtime-wasm',
+    'sherpa-runtime-wasm is a bundler alias, not a package (the shell vite.config.ts takes it from app/vite-voice.ts voiceBuild), so the import of it in the speech assets module is unlisted to knip by nature.',
   ],
   [
     'knip.production.json#workspaces["packages/plugins/logins"].entry:scripts/built-ins.ts',

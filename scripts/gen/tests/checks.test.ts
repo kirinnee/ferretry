@@ -353,6 +353,21 @@ describe('context-imports', () => {
     expect(found).toContain('alpha/daemon/shell.ts');
   });
 
+  test("the shell's vite.config.ts may import a plugin's app/vite-<name>.ts build module and nothing else of its half", async () => {
+    const f = ws([
+      { id: 'alpha', files: { 'app/vite-alpha.ts': 'export const build = 1;\n', 'app/view.tsx': 'export {};\n' } },
+    ]);
+    f.write('packages/app/package.json', JSON.stringify({ name: '@ferretry/app', exports: { '.': './src/index.ts' } }));
+    f.write('packages/app/src/index.ts', 'export {};\n');
+    f.write(
+      'packages/app/vite.config.ts',
+      `import { build } from '../plugins/alpha/app/vite-alpha.ts';\nimport '../plugins/alpha/app/view.tsx';\nexport default build;\n`,
+    );
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('vite-alpha.ts');
+    expect(found).toContain('packages/app/vite.config.ts:2: ../plugins/alpha/app/view.tsx');
+  });
+
   test('planted: a half reaches another package past its contract; a contract imports node:fs; a manifest imports a half', async () => {
     const f = ws(
       [
