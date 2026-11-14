@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { displayCallsign } from '../../../app/lib/callsign.ts';
 import { type DaemonId, THIS_MACHINE, pairingKey } from '../../../app/lib/machine.ts';
 import { navigateTo } from '../../../app/lib/navigate.ts';
-import { ferretPath } from '../../../app/lib/paths.ts';
+import { agendaAskPath, boardCardPath, cardPagePath, ferretPath, projectLanesPath } from '../../../app/lib/paths.ts';
 import { plainPreview } from '../../../app/lib/plain-label.ts';
 import { compareReleaseVersions } from '../../../app/lib/release-order.ts';
 
@@ -74,6 +74,25 @@ describe('ferretPath', () => {
   it('is the chat of a ferret under the daemon the address bar is under', () => {
     setBrowser('location', { pathname: '/d/box/board' });
     expect(ferretPath(undefined, 'ms 98')).toBe('/d/box/ferrets/ms%2098/chat');
+  });
+});
+
+describe('agendaAskPath', () => {
+  it('opens one ask at its ferret agenda, under the named machine or else the one the address bar is under', () => {
+    setBrowser('location', { pathname: '/d/box/board' });
+    expect(agendaAskPath('ms 98', 'A 1')).toBe('/d/box/agenda/ms%2098/A%201');
+    expect(agendaAskPath('ms98', 'A1', 'other')).toBe('/d/other/agenda/ms98/A1');
+  });
+});
+
+describe('card and lanes paths', () => {
+  it('open a card on the board, a card on its own page, and a project lanes editor', () => {
+    setBrowser('location', { pathname: '/d/box/board' });
+    expect(boardCardPath(undefined, 'F 12')).toBe('/d/box/board/F%2012');
+    expect(cardPagePath('F 12')).toBe('/d/box/card/F%2012');
+    expect(cardPagePath('F12', 'other')).toBe('/d/other/card/F12');
+    expect(projectLanesPath('p 1')).toBe('/d/box/board/p%201?lanes=1');
+    expect(projectLanesPath('p1', 'other')).toBe('/d/other/board/p1?lanes=1');
   });
 });
 
