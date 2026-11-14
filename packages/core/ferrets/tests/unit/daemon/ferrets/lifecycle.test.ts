@@ -483,3 +483,29 @@ test('fy start --detach: a created pane that cannot be stopped keeps its handle,
   expect(JSON.stringify(said)).not.toContain('pane could not be stopped');
   expect(JSON.stringify(said)).not.toContain('harness failed after spawn');
 });
+
+test('fy start --detach: when the very first record write fails the caller gets the error and nothing is left unhandled or launched', async () => {
+  const f = fixture();
+  const child = ferretId('sprout');
+  f.ports.newId = () => child;
+  f.ports.newName = () => 'sprout';
+  f.ports.save = async () => {
+    throw new Error('initial record write failed');
+  };
+  const unhandled: unknown[] = [];
+  const watch = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  process.on('unhandledRejection', watch);
+  try {
+    await expect(
+      f.service.start({ folder: '/work', by: 'owner', prompt: 'go', detach: true }, PERSON_ORIGIN),
+    ).rejects.toThrow('initial record write failed');
+    // Let the event loop turn so a rejection nobody observed would surface.
+    await new Promise(resolve => setTimeout(resolve, 50));
+  } finally {
+    process.off('unhandledRejection', watch);
+  }
+  expect(unhandled).toEqual([]);
+  expect(f.harness.launched).toEqual([]);
+});

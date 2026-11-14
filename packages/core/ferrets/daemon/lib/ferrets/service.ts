@@ -997,6 +997,9 @@ export class FerretsService implements FerretsApi {
     if (request.detach !== true) return await launched;
     // The ferret is recorded and acknowledged; the launch is no caller's to await any more, so its END is handled here:
     // a failed Result and a rejection alike are settled and said (a plain start hands both to its caller).
+    // Observed BEFORE any await: when the record cannot be saved, `launched` rejects with the error `recorded` hands the
+    // caller below, and a rejection nobody had attached to yet would be unhandled (it can end the daemon).
+    launched.catch(() => undefined);
     await recorded;
     void this.finishDetached(id, launched);
     return ok(id);
