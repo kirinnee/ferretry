@@ -790,7 +790,18 @@ export class TmuxRunner implements Runner {
       });
       return err('real_harness');
     }
-    if ((await this.options.tmux.execute(['has-session', '-t', session])).code === 0) return err('failed');
+    // A session that is still there is refused (it is somebody's ferret), EXCEPT the corpse of this ferret's last run: a
+    // polite stop only sends the interrupt and `remain-on-exit` keeps the dead pane, so a Resume / Restart would otherwise
+    // meet its own old session and fail "duplicate session" for ever. Only a session whose every pane is dead is cleared.
+    if ((await this.options.tmux.execute(['has-session', '-t', session])).code === 0) {
+      const panes = await this.options.tmux.execute(['list-panes', '-t', session, '-F', '#{pane_dead}']);
+      const flags = panes.stdout
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line !== '');
+      if (panes.code !== 0 || flags.length === 0 || !flags.every(flag => flag === '1')) return err('failed');
+      await this.options.tmux.execute(killSessionArguments(session));
+    }
     // Started without the handle, so the server never holds a ferret's values in its own environment. ONE client does
     // all of it: a server with no session exits at once (`exit-empty`), so a bare `start-server` does not outlive the
     // call that made it, and the read that follows would find no server on a machine that had none (every reboot).
