@@ -41,7 +41,7 @@
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/core/ferrets": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}"],
       "ignore": [
         "daemon/lib/session/events/service.ts",
@@ -154,7 +154,7 @@
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/onboarding": {
-      "entry": ["tests/**/*.test.{ts,tsx}"],
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}"],
       "project": ["**/*.{ts,tsx}"],
       "ignore": ["app/landing-geometry.ts"]
     }

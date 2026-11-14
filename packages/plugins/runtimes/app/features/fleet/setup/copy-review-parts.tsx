@@ -23,7 +23,7 @@ const OUTCOME_WORDS: Readonly<Record<CloneReviewItem['outcome'], string>> = {
 };
 
 /** Every command, variable and document, in full: a document's own text is shown, wrapped, never hidden. */
-export function RunnableEntries({ entries }: { readonly entries: readonly Entry[] }): ReactNode {
+function RunnableEntries({ entries }: { readonly entries: readonly Entry[] }): ReactNode {
   return (
     <ul className="m-0 flex min-w-0 list-none flex-col gap-2 p-0" data-copy-entries="">
       {entries.map(entry => (

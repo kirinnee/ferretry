@@ -95,6 +95,7 @@ function openPluginStream(
 const ROUTE_OF: Readonly<Record<string, string>> = {
   '/v1/terminals': TERMINAL_ROUTES.holders,
   '/v1/terminals/close-finished': TERMINAL_ROUTES.closeFinished,
+  '/v1/cgroups/config': 'GET /v1/cgroups/config',
 };
 
 /** The Settings › Terminals client (`readTerminalHolders`, `closeFinishedTerminals`) over the shell client. */

@@ -42,6 +42,9 @@ export function placeSource(input: PlaceSourceInput): CommandBarSource {
       });
     }
     const seen = new Set<string>();
+    // Two daemon-less addresses of one plugin that read as the same place (Onboarding's `/onboarding` and the `/setup` link's)
+    // are one entry: the bar lists destinations, not addresses.
+    const daemonLessPlaces = new Set<string>();
     for (const screen of screens) {
       const key = `${screen.plugin}.${screen.id}`;
       // A screen that needs a subject is not a destination on its own; a bare id also listed qualified is one place.
@@ -49,6 +52,8 @@ export function placeSource(input: PlaceSourceInput): CommandBarSource {
       seen.add(key);
       const daemonLess = screen.path.startsWith('/');
       if (!daemonLess && input.daemon === undefined) continue;
+      if (daemonLess && daemonLessPlaces.has(`${screen.plugin}|${screen.label}`)) continue;
+      if (daemonLess) daemonLessPlaces.add(`${screen.plugin}|${screen.label}`);
       const href = daemonLess ? input.routes.href(screen, {}) : input.routes.href(screen, {}, input.daemon as string);
       go(`screen-${key}`, screen.label, href, { keywords: [screen.id, screen.plugin], resting: true });
     }

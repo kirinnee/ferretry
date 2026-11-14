@@ -19,8 +19,8 @@ import { useEffect, useRef } from 'react';
 import { onboardingScreen } from '../onboarding-screen.ts';
 import { stepsHref } from './steps-screen.tsx';
 
-/** The first run's screen id (the manifest's `onboarding` screen): the journey that owns the address while it is open. */
-const FIRST_RUN_SCREEN = 'onboarding';
+/** The first run's screen ids (the manifest's `onboarding` screen and its `/setup` hand-off address): the journey that owns the address while it is open. */
+const FIRST_RUN_SCREENS: ReadonlySet<string> = new Set(['onboarding', 'handoff']);
 
 export function createStepsOpener() {
   return function StepsOpener({ navigate }: DeviceViewProps): null {
@@ -28,7 +28,7 @@ export function createStepsOpener() {
     const rows = useEveryDaemon();
     const route = useOptionalRouter()?.route;
     const onFirstRun =
-      route?.kind === 'screen' && route.screen.plugin === 'onboarding' && route.screen.id === FIRST_RUN_SCREEN;
+      route?.kind === 'screen' && route.screen.plugin === 'onboarding' && FIRST_RUN_SCREENS.has(route.screen.id);
     // The machines paired before this view first drew, then the ones it has decided about.
     const before = useRef<ReadonlySet<string> | null>(null);
     before.current ??= new Set(paired.map(machine => machine.daemon));

@@ -68,6 +68,9 @@ export default definePlugin({
     // Daemon-less on purpose: the first run happens before any daemon is paired.
     screens: [
       screen('onboarding', { path: '/onboarding', daemonless: true }),
+      // The address a hand-off link carries to the OTHER device (`/setup#fy-setup=…`, v4's `setupPath`): the SAME first-run page,
+      // drawn by the same view, with the place the link carries read from its fragment. One page, two addresses.
+      screen('handoff', { path: '/setup', daemonless: true }),
       // The steps every plugin declared, on one machine: it OFFERS the `onboarding.step` slot (contract/slots.ts).
       screen('steps', { path: 'onboarding/steps' }),
       // v4's address for the same first run (`/d/<machine>/setup`): a bookmark or an old link still lands on the steps.

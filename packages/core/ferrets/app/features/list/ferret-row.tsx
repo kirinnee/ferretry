@@ -15,6 +15,7 @@ import { ferretTitles } from '../../lib/ferret-title.ts';
 import { StatusMark } from '../../lib/status-mark.tsx';
 import { RouteLink } from '../../ui.ts';
 import { ferretChatHref } from '../new-ferret/hrefs.ts';
+import { OutdatedMark } from '../restart-outdated/outdated-mark.tsx';
 import { ferretDirectory, isPinned, isStopped } from './list-model.ts';
 import { useRowContextGesture } from './row-context-gesture.ts';
 import { RowMenuContext, type RowMenuTrigger } from './row-menu-context.ts';
@@ -70,6 +71,7 @@ export function FerretRow({ ferret, daemon, active, onNavigate }: FerretRowProps
         <StatusMark ferret={ferret} />
         <span className="fy-sbar__title">
           <span className="fy-sbar__name">{title}</span>
+          <OutdatedMark ferret={ferret} />
         </span>
         <span className="fy-sbar__detail" data-sbar-detail="">
           {callsign === null ? null : (
