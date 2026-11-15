@@ -15,6 +15,7 @@
  */
 
 import type { FerretContext, FerretSummary, FerretView } from '@ferretry/core-ferrets/contract';
+import type { ChatPrompt } from './chat-prompt.ts';
 
 type ViewState = FerretView['state'];
 
@@ -79,19 +80,38 @@ export const unreadChatSession = (ferretId: string): ChatSession => ({
  * Ferrets' four states, in the chat's words. `working` and `idle` are a LIVE ferret whose turn the daemon's turn watch
  * decided, so they carry `turnState`; a stopped ferret that said `signal done` (`finishedAt`) finished its work.
  */
-const stateOf = (summary: FerretSummary): Pick<ChatSessionState, 'status' | 'turnState' | 'turnStateAt'> => {
+const stateOf = (summary: FerretSummary): Pick<ChatSessionState, 'status' | 'turnState'> => {
   switch (summary.state) {
     case 'starting':
       return { status: 'starting' };
-    // The summary's `stateAt` is the instant the daemon last changed the ferret's state, so for a live ferret it is when
-    // the current turn state (`working` or `your-turn`) began: the daemon's own dating of the turn, never a browser clock.
     case 'working':
-      return { status: 'running', turnState: 'working', turnStateAt: summary.stateAt };
+      return { status: 'running', turnState: 'working' };
     case 'idle':
-      return { status: 'running', turnState: 'your-turn', turnStateAt: summary.stateAt };
+      return { status: 'running', turnState: 'your-turn' };
     case 'stopped':
       return { status: summary.finishedAt === undefined ? 'stopped' : 'completed' };
   }
+};
+
+/**
+ * What the observer recorded about a LIVE ferret's turn (the prompt read, `chat-prompt.ts`), in the chat's names. The
+ * summary's `stateAt` is never used for this: the registry stamps it later from its own clock and folds `needs-input` into
+ * `idle`, so it is not the instant the turn changed. The observer's own state wins over the summary's coarser one (which
+ * stays as the fallback for every other reader); its date, the words and the permission request or dialog ride with it.
+ * A ferret that is not live (starting, stopped) is stopped on nothing, and a read that is absent claims nothing.
+ */
+const turnOf = (
+  summary: FerretSummary,
+  prompt: ChatPrompt | undefined,
+): Pick<ChatSessionState, 'turnState' | 'turnStateAt' | 'turnPrompt' | 'permissionRequest' | 'harnessDialog'> => {
+  if (prompt === undefined || (summary.state !== 'working' && summary.state !== 'idle')) return {};
+  return {
+    ...(prompt.turnState === undefined ? {} : { turnState: prompt.turnState }),
+    ...(prompt.turnStateAt === undefined ? {} : { turnStateAt: prompt.turnStateAt }),
+    ...(prompt.turnPrompt === undefined ? {} : { turnPrompt: prompt.turnPrompt }),
+    ...(prompt.permissionRequest === undefined ? {} : { permissionRequest: prompt.permissionRequest }),
+    ...(prompt.harnessDialog === undefined ? {} : { harnessDialog: prompt.harnessDialog }),
+  };
 };
 
 /** The usage the ferret's runtime monitor stamped (Ferrets' `quota`), in the names the composer reads. */
@@ -108,8 +128,8 @@ const usageOf = (quota: FerretSummary['quota']): ChatSessionState => {
   };
 };
 
-/** Ferrets' summary of one ferret, as the chat draws it. */
-export const chatSessionOf = (summary: FerretSummary): ChatSession => ({
+/** Ferrets' summary of one ferret, with what the observer recorded about its turn (when that was read), as the chat draws it. */
+export const chatSessionOf = (summary: FerretSummary, prompt?: ChatPrompt): ChatSession => ({
   config: {
     id: summary.id,
     teammate: summary.name,
@@ -120,6 +140,7 @@ export const chatSessionOf = (summary: FerretSummary): ChatSession => ({
   state: {
     ...usageOf(summary.quota),
     ...stateOf(summary),
+    ...turnOf(summary, prompt),
     ...(summary.waiting === undefined ? {} : { waiting: summary.waiting }),
   },
 });

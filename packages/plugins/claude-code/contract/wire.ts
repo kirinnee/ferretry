@@ -74,6 +74,8 @@ export type PermissionAnswerResult = z.infer<typeof PermissionAnswerResultSchema
  */
 export const FerretPromptReadSchema = z.looseObject({
   turnState: z.enum(['working', 'your-turn', 'needs-input']).optional(),
+  /** The observer's stored instant for `turnState` (ISO); the cards ignore it, the chat's readers date a turn by it. */
+  turnStateAt: z.string().optional(),
   prompt: z.string().optional(),
   permissionRequest: z.unknown().optional(),
   dialog: z.unknown().optional(),
