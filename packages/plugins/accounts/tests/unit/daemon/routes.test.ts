@@ -3,7 +3,15 @@ import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
 import { ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
-import type { ApiRequest, ApiResponse, CallContext, CallStanding, FerretId } from '@ferretry/kernel/contract';
+import {
+  agentControlRefusal,
+  ApiError,
+  type ApiRequest,
+  type ApiResponse,
+  type CallContext,
+  type CallStanding,
+  type FerretId,
+} from '@ferretry/kernel/contract';
 import { device, ferret, owner, testArrival, testHost } from '@ferretry/kernel/testing';
 import should from 'should';
 import { addTwoFactorKeySubject, padInputValue, TotpParametersSchema } from '../../../contract/routes/index.ts';
@@ -101,18 +109,13 @@ describe('the account routes through the kernel', () => {
   });
 
   it('S13 I131 should read a page by name for its address, from the pages the calling ferret holds', async () => {
-    // TODO(contract): `url` on `BrowserPageRef` (DECISIONS-1 item 12); the fake carries it as the porter will.
-    const pagesOf = async (ferretId: string) =>
-      ferretId === 'F1'
-        ? [
-            { id: 'p1', name: 'app', url: 'https://github.com/login' },
-            { id: 'p2', name: 'bare' },
-          ]
-        : [];
+    // Browsers' gated read: the address of a page the calling ferret holds, in ITS own listing only.
+    const pageAddressOf = async (ferretId: string, name: string) =>
+      ferretId === 'F1' && name === 'app' ? 'https://github.com' : undefined;
     // Gate's stand-in carries the ferret's credential, as the real Gate does (the kernel's carries only the caller).
     let who: 'owner' | FerretId = 'owner';
     const gate = new StandInAdmission(() => (who === 'owner' ? ownerStanding() : ferretStanding(who)));
-    const h = await host({ browsers: { state: async () => ({}), pagesOf } }, gate);
+    const h = await host({ browsers: { state: async () => ({}), pagesOf: async () => [], pageAddressOf } }, gate);
     await h.request('PUT', '/v1/accounts/GITHUB', { body: { label: 'GitHub', username: 'kirin' } });
     await h.request('POST', '/v1/accounts/GITHUB/sign-ins', {
       body: { place: { kind: 'site', domains: ['github.com'], match: ['github.com'] } },
@@ -125,6 +128,44 @@ describe('the account routes through the kernel', () => {
     should((await h.tool('account_hint', { name: 'bare' }, { as: ferret('F1') })).isError).be.true();
     who = 'F2' as FerretId;
     should((await h.tool('account_hint', { name: 'app' }, { as: ferret('F2') })).isError).be.true();
+  });
+
+  it('S13 I131 should pass Browsers’ own refusal through account_hint while the Browsers switch is off, and ask nothing else', async () => {
+    const refusal = agentControlRefusal('browser');
+    let sitesRead = 0;
+    // Gate's stand-in carries the ferret's credential, as the real Gate does.
+    let who: 'owner' | FerretId = 'owner';
+    const gate = new StandInAdmission(() => (who === 'owner' ? ownerStanding() : ferretStanding(who)));
+    const h = await host(
+      {
+        browsers: {
+          state: async () => ({}),
+          // `pagesOf` carries ids and names only, so a refusing Browsers leaves nothing to read an address from.
+          pagesOf: async () => [{ id: 'p1', name: 'app' }],
+          pageAddressOf: async () => {
+            sitesRead += 1;
+            throw new ApiError(403, refusal, 'forbidden');
+          },
+        },
+      },
+      gate,
+    );
+    await h.request('PUT', '/v1/accounts/GITHUB', { body: { label: 'GitHub', username: 'kirin' } });
+    await h.request('POST', '/v1/accounts/GITHUB/sign-ins', {
+      body: { place: { kind: 'site', domains: ['github.com'], match: ['github.com'] } },
+    });
+
+    who = F1;
+    const refused = await h.tool('account_hint', { name: 'app' }, { as: ferret('F1') });
+
+    should(refused.isError).be.true();
+    should(refused.text).equal(refusal);
+    should(refused.text).not.containEql('GITHUB');
+    should(sitesRead).equal(1);
+    // A site the ferret names itself needs no page, so no Browsers read and no refusal.
+    const named = await h.tool('account_hint', { site: 'github.com' }, { as: ferret('F1') });
+    should(named.isError ?? false).be.false();
+    should(sitesRead).equal(1);
   });
 
   it('S80 should refuse a ferret choosing a default before the body, and a line no sign-in could use', async () => {
@@ -166,7 +207,7 @@ describe('the account routes through the kernel', () => {
     should(removed.json<{ defaults: { sites?: unknown } }>().defaults.sites ?? {}).eql({});
   });
 
-  it('S92 should refuse a seed while no device holds a passkey, and offer the secure-copy tools now built but not the two unbuilt (M2)', async () => {
+  it('S92 should refuse a seed while no device holds a passkey, and answer every agent tool as built, the asking tools saying what is wrong with a call', async () => {
     const h = await host(
       undefined,
       new StandInAdmission(request =>
@@ -180,12 +221,12 @@ describe('the account routes through the kernel', () => {
     should(seed.status).equal(409);
     should(seed.json<{ code: string }>().code).equal('passkey_required');
     should((await h.request('GET', '/v1/accounts/look-alike')).json()).match({ v: 1, groups: [] });
-    // The secure-copy tools are built (a ferret with no copies is told so); a tool that is not built is not offered at all (M2).
+    // The secure-copy tools are built (a ferret with no copies is told so), and so are the two asking tools.
     should(await h.tool('secure_list', {}, { as: ferret('F1') })).match({ text: 'This session holds no copies.' });
-    await h.tool('task_plan', {}, { as: ferret('F1') }).then(
-      () => should.fail(undefined, undefined, 'task_plan is offered'),
-      error => should(String(error)).containEql('no agent tool task_plan'),
-    );
+    should(await h.tool('task_plan', {}, { as: ferret('F1') })).match({
+      isError: true,
+      text: 'the plan is not usable: Invalid input: expected array, received undefined',
+    });
   });
 
   it('S99 should add, relabel and remove a 2FA key with no value and no passkey', async () => {

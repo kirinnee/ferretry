@@ -80,9 +80,18 @@ describe('the transcript row slots', () => {
     expect(offered?.props.slot).toBe(slot);
     expect(offered?.props.subject).toBe('shared');
     expect(offered?.props.props).toEqual({
-      entry: { id: 'row-1', kind: 'user', text: 'a daemon-read message', at: 200, label: 'You' },
+      entry: {
+        id: 'row-1',
+        kind: 'user',
+        text: 'a daemon-read message',
+        at: 200,
+        label: 'You',
+        send: { sendId: 'delivered-1' },
+        peer: true,
+      },
     });
     expect(JSON.stringify(offered?.props.props)).not.toContain(SECRET);
+    expect(JSON.stringify(offered?.props.props)).not.toContain('another-ferret');
   });
 
   test('a row with no time or label offers neither key', () => {

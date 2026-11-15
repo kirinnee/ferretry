@@ -125,6 +125,7 @@ import { SessionFiles, type SessionFilesDeps } from './modules/session-files.ts'
 import { buildMoves, MOVE_ROUTE_KEYS } from './moves.ts';
 import { movesDeps } from './moves-deps.ts';
 import { fleetEventsAccept, followableFerret, HistoryEventSource } from './modules/fleet-events.ts';
+import { folderLister } from './lib/ferrets/folder-listing.ts';
 import { ferretsPort } from './lib/ferrets/port.ts';
 import { ferretsMoveResume, movedTarget } from './lib/ferrets/move-resume.ts';
 import { callerIsAgent, launchOriginOf } from './lib/ferrets/launch-origin.ts';
@@ -887,13 +888,14 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     }),
     new KernelDiffScratch(kernel.scratch),
   );
+  const sessionFilesystemOf = (ferret: string): SessionFilesystem =>
+    new SessionFilesystem(
+      new KernelSessionRootPinner(kernel.roots.root('work', { ferret: ferret as FerretId })),
+      sessionGit,
+      () => kernel.clock.nowMs(),
+    );
   const fileBrowser = sessionFilesystemRoutes({
-    filesystem: ferret =>
-      new SessionFilesystem(
-        new KernelSessionRootPinner(kernel.roots.root('work', { ferret: ferret as FerretId })),
-        sessionGit,
-        () => kernel.clock.nowMs(),
-      ),
+    filesystem: sessionFilesystemOf,
     redaction: kernel.redaction,
     reach: async call => {
       const id = await pathFerret(call);
@@ -1348,6 +1350,12 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         ...ferretsPort(service, needer.id),
         lastAutoResume: async () => await autoResume.summary.read(),
         displayModel: displayModelOf,
+        // One folder of a ferret's tree for the composer's `@` menu, through the file browser's own service and fence.
+        listFolder: folderLister({
+          folderOf: id => registry.get(id)?.folder,
+          filesystem: sessionFilesystemOf,
+          mayTouch: (caller, target) => registry.mayTouch(caller, target),
+        }),
         ingestEvidence: ingestEvidenceOf,
         // What live panes prove about their logins, read from the session documents each time and kept nowhere.
         paneLimits: async () =>

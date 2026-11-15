@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { ensureDom, mount, type Mounted, runAsync } from '@ferretry/app/testing';
+import { ensureDom, mount, type Mounted, runAsync, WithSlotPanels } from '@ferretry/app/testing';
 import type { EventDef } from '@ferretry/kernel/contract';
 import { ChatScreen } from '../../../../app/chat/chat-screen.tsx';
 import { ConversationClientProvider } from '../../../../app/client.ts';
@@ -197,5 +197,59 @@ describe('a question read that failed once', () => {
     await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 50)));
 
     expect(client.callsTo(QUESTION)).toHaveLength(1);
+  });
+});
+
+describe('the slot above the composer, as the screen feeds it', () => {
+  test('hands a panel the rows, a live turn and the daemon’s send ids from the screen’s own reads, never a send’s words', async () => {
+    const SECRET = 'sk-live-typed-secret';
+    const seen: Record<string, unknown>[] = [];
+    const client = daemon(() => '[10:11:12] assistant/message: The daemon answered.');
+    client.on(SENDS, () => ({
+      sends: [
+        {
+          v: 1,
+          sendId: 'send-1',
+          acceptedAt: '2026-11-04T11:00:00.000Z',
+          acceptedTurn: 1,
+          path: 'direct',
+          message: SECRET,
+          attachmentIds: [],
+          fate: 'queued',
+        },
+      ],
+    }));
+    const view = await mount(
+      <ConversationClientProvider client={client}>
+        <WithSlotPanels
+          slots={{
+            'conversation.above-composer': [
+              {
+                plugin: 'probe',
+                id: 'above',
+                view: props => {
+                  seen.push(props);
+                  return null;
+                },
+              },
+            ],
+          }}
+        >
+          <ChatScreen params={{ ferret: 'shared' }} />
+        </WithSlotPanels>
+      </ConversationClientProvider>,
+    );
+    views.push(view);
+    await waitFor(
+      () => seen.some(props => (props['sends'] as unknown[] | undefined)?.length === 1),
+      'the send ledger to reach the slot',
+      () => JSON.stringify(seen),
+    );
+
+    const last = seen.at(-1) as Record<string, unknown>;
+    expect(last['sends']).toEqual([{ sendId: 'send-1', acceptedAt: '2026-11-04T11:00:00.000Z' }]);
+    expect((last['rows'] as { text: string }[]).map(row => row.text)).toContain('The daemon answered.');
+    expect((last['turn'] as { live: boolean }).live).toBe(true);
+    expect(JSON.stringify(seen)).not.toContain(SECRET);
   });
 });

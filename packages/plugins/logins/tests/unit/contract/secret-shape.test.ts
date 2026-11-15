@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   hasTokenShape,
+  nameLooksLikeKey,
   namesACredential,
   plainPaste,
   storedEnvironmentIssue,
@@ -234,5 +235,46 @@ describe('R6: the stored rule is linear and reads headers and addresses under an
       kind: 'take',
       value: '${GATEWAY_TOKEN}',
     });
+  });
+});
+
+describe('nameLooksLikeKey', () => {
+  // Names that loaded before the name check existed: a VALUE prefix test read every one of them as a key.
+  it.each([
+    'npm_config_registry',
+    'npm_config_strict_ssl',
+    'ASIA_REGION',
+    'hf_home',
+    'my_npm_cache_dir',
+    'GITHUB_TOKEN',
+    'ghp_style_name',
+    'sk_live_mode',
+  ])('does not read the ordinary name %s as a key', name => {
+    expect(nameLooksLikeKey(name)).toBe(false);
+  });
+
+  // Fake bodies, assembled at runtime so no source line holds a key.
+  const alnum = 'a1B2c3D4e5F6a1B2c3D4e5F6';
+  it.each([
+    ['ghp', alnum].join('_'),
+    ['github', 'pat', alnum].join('_'),
+    ['sk', 'live', alnum].join('_'),
+    ['npm', alnum].join('_'),
+    ['hf', alnum].join('_'),
+    ['AKIA', 'A1B2C3D4E5F6A7B8'].join(''),
+    ['ASIA', 'A1B2C3D4E5F6A7B8'].join(''),
+    ['sk', 'ant', alnum].join('-'),
+    ['glpat', alnum].join('-'),
+    ['xoxb', alnum].join('-'),
+    ['AIza', alnum, alnum].join(''),
+    ['ya29', alnum].join('.'),
+    ['eyJ', alnum, '.'].join(''),
+    ['-----BEGIN RSA PRIVATE KEY', '-----'].join(''),
+  ])('reads a key typed as the name (%#) as one', name => {
+    expect(nameLooksLikeKey(name)).toBe(true);
+  });
+
+  it('reads an AWS id as a whole word only', () => {
+    expect(nameLooksLikeKey(['ASIA', 'A1B2C3D4E5F6A7B8', 'X'].join(''))).toBe(false);
   });
 });

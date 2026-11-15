@@ -18,6 +18,7 @@ import { gateAuditSink } from './adapters/gate-audit.ts';
 import { workFolderOf } from './adapters/pending-reads.ts';
 import { machineName } from './adapters/host.ts';
 import { PhoneApprovalAuditAdapter } from './adapters/phone-approval/audit.ts';
+import { AsksPhoneApprovalNotifier } from './adapters/phone-approval/notifier.ts';
 import { AccessPhoneApprovalPush } from './adapters/phone-approval/push.ts';
 import { VaultPhoneLooks } from './adapters/phone-approval/vault-reach.ts';
 import { accountSecurity } from './adapters/access-security.ts';
@@ -34,6 +35,7 @@ import { LoginEntryError } from './lib/accounts.ts';
 import { holdsOwner } from './lib/owner-hold.ts';
 import type { AuditSink } from './lib/local-ports.ts';
 import { PhoneApprovalService } from './lib/phone-approval/service.ts';
+import { proposalTools } from './lib/proposal-tools.ts';
 import { LoginRecipeService } from './lib/secrets/login-recipes.ts';
 import {
   PageCopyRecords,
@@ -194,6 +196,8 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     observer: looks,
     asks: new PhoneApprovalAsksAdapter(ctx.needs.asks),
     push: new AccessPhoneApprovalPush(ctx.uses.access),
+    // "Not me" reaches the ferret's terminal through Asks' `tell`, which the view handed to Accounts carries.
+    notifier: new AsksPhoneApprovalNotifier(ctx.needs.asks),
     audit: new PhoneApprovalAuditAdapter(audit),
     clock,
     timers: { after: async ms => await kernel.clock.sleep(milliseconds(ms)) },
@@ -236,6 +240,7 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     copies,
     secureCopyHook,
     secureCopyTools: tools,
+    proposalTools: proposalTools({ recipes, suggestions, plans, redact }),
     sessionEnded: ferret => {
       copies.drop(ferret);
       pageRecords.drop(ferret);

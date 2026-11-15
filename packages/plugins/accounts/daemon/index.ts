@@ -1,8 +1,8 @@
 /**
  * Accounts' daemon half (§2.3): half a (accounts, sign-ins, saved logins, 2FA keys; `./accounts.ts`) and half b
  * (rules, plans, recipes, phone approval, secure copy; built in `./rules.ts`, keyed by accounts-b's `./half-b.ts`),
- * composed here. Every declared route or tool neither half answers yet is `503 plugin_unavailable` with the skeleton
- * sentence, as a skeleton half's would be.
+ * composed here. Every declared route neither half answers yet is `503 plugin_unavailable` with the skeleton sentence, as a
+ * skeleton half's would be; every declared agent tool is answered (a tool the half does not build is not declared).
 
  * Access's four `step-up.stages` acts are Accounts' (G83): half b's three (approve-task-plan, approve-sign-in-rule,
  * approve-paste-rule) and half a's `add-2fa-key` (`TwoFactorSeedStages.boundSubjectOf`) are provided below, so Access
@@ -27,7 +27,6 @@ const SIGN_IN_APPROVAL_HOOK: keyof Half['hooks'] = `ask.sources:${'sign-in-appro
 const NOT_BUILT = skeletonSentence(manifest.title);
 const notBuiltRoute = async () =>
   errorResponse(KERNEL_REFUSALS.pluginUnavailable.status, NOT_BUILT, KERNEL_REFUSALS.pluginUnavailable.code);
-const notBuiltTool: ToolHandler = async () => ({ text: NOT_BUILT, isError: true });
 
 /**
  * Half a's `add-2fa-key` stage: the digest the passkey challenge is stamped with, never the stage id (S90), or nothing
@@ -52,7 +51,7 @@ export default implementDaemon(manifest, {
         manifest.actions.routes.map(route => [route.key, answered[route.key] ?? notBuiltRoute]),
       ) as Routes,
       tools: Object.fromEntries(
-        manifest.actions.agentTools.map(tool => [tool.name, tools[tool.name] ?? notBuiltTool]),
+        manifest.actions.agentTools.map(tool => [tool.name, tools[tool.name] as ToolHandler]),
       ) as Tools,
       provides: { accounts: { ...a.provides.accounts, ownerHold: b.ownerHold } },
       subscribers: b.subscribers,
