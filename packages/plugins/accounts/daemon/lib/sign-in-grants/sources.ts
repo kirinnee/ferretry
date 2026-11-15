@@ -65,6 +65,16 @@ export class CombinedSignInGrants implements SignInGrantSource {
     return this.rules.scriptedOrigins();
   }
 
+  /** An agent script is about to run: only a standing rule has anything to stop (see {@link RuleSignInGrants.running}). */
+  running(): () => void {
+    return this.rules.running?.() ?? (() => undefined);
+  }
+
+  /** A page script ran: only a standing rule has anything to stop (see {@link RuleSignInGrants.scriptedOn}). */
+  scriptedOn(host: string | undefined): void {
+    this.rules.scriptedOn?.(host);
+  }
+
   #sourceOf(grant: SignInGrant): SignInGrantSource {
     return grant.source === 'rule' ? this.rules : this.plans;
   }

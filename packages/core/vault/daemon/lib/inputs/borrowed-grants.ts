@@ -404,6 +404,28 @@ export interface SignInGrantSource {
   projectOf(sessionId: string): Promise<string | undefined>;
   /** Where page scripts ran across the machine (a rule's check 15b). */
   scriptedOrigins(): ScriptedOriginsView;
+  /**
+   * AN AGENT SCRIPT IS ABOUT TO RUN (Browsers, via the Vault): until the returned function is called, no standing rule
+   * fills anywhere. A source with no standing rule has nothing to stop and omits it.
+   */
+  running?(): () => void;
+  /**
+   * A PAGE SCRIPT RAN on `host`, or somewhere unreadable (`undefined`): every standing rule pinned there is stopped, in
+   * RAM at once and on disk after. A source with no standing rule omits it.
+   */
+  scriptedOn?(host: string | undefined): void;
+  /**
+   * The source in effect NOW, held fixed: a fill reserves, types and settles on one instance, so a source that is
+   * replaced mid-fill (a plugin-graph restart) cannot leave a reservation on one ledger and the settle on another. A
+   * source that is already one fixed instance omits it.
+   */
+  bound?(): SignInGrantSource;
+  /**
+   * Whether this is still the source in effect now. A bound instance says no once Accounts was turned off, restarted or
+   * replaced since it was bound: the last check before typing then refuses (fail closed). A source that is not a bound
+   * instance omits it and is always current.
+   */
+  current?(): boolean;
 }
 
 // ─── from sign-in-grants/clear.ts ───
@@ -424,9 +446,32 @@ export function clearJobOf(facts: InputTargetFacts, secretFields: readonly strin
  * somewhere unreadable): ferret A's script on github.com can arm storage that github.com's own code reads when ferret
  * B's fill types, weeks later, in the one shared browser profile.
  */
-function scriptedSince(view: ScriptedOriginsView, keys: readonly PlaceKey[], approvedAt: number | undefined): boolean {
+export function scriptedSince(
+  view: ScriptedOriginsView,
+  keys: readonly PlaceKey[],
+  approvedAt: number | undefined,
+): boolean {
   const since = (at: number | undefined): boolean => at !== undefined && (approvedAt === undefined || at >= approvedAt);
   return since(view.everywhere) || keys.some(key => since(view.hosts.get(key)));
+}
+
+/**
+ * Two accounts of where page scripts ran, read as one: the LATEST time per host, the latest unreadable origin, and a
+ * script is running when either says so. The Vault's own record (Browsers tells it of every script, and it survives
+ * a plugin restart) and the grant source's (Accounts' RAM) each miss what happened while the other was the only one
+ * listening, so a standing rule is held to both.
+ */
+export function mergeScriptedOrigins(...views: readonly (ScriptedOriginsView | undefined)[]): ScriptedOriginsView {
+  const hosts = new Map<string, number>();
+  let everywhere: number | undefined;
+  let running = false;
+  for (const view of views) {
+    if (view === undefined) continue;
+    for (const [host, at] of view.hosts) hosts.set(host, Math.max(at, hosts.get(host) ?? at));
+    if (view.everywhere !== undefined) everywhere = Math.max(view.everywhere, everywhere ?? view.everywhere);
+    if (view.running === true) running = true;
+  }
+  return { hosts, ...(everywhere === undefined ? {} : { everywhere }), ...(running ? { running: true } : {}) };
 }
 
 /**

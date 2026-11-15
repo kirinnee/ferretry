@@ -177,6 +177,7 @@ export const conversationDaemon = (gate: HarnessGate) =>
             release: ferret => b.release(ferret),
             look: (ferret, phase) => a.turns.look(ferret, phase),
             lookQuestion: ferret => a.questions.look(ferret),
+            lookPrompt: ferret => a.promptChanged(ferret),
             forget: ferret => a.turns.forget(ferret),
             withdrawQuestion: ferret =>
               void a

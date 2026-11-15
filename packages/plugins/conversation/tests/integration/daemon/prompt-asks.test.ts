@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { AskDraft, AskRef } from '@ferretry/core-asks/contract';
+import type { AskDraft, AskRef, AskSummary } from '@ferretry/core-asks/contract';
 import type { PromptWaitRecord } from '../../../contract/index.ts';
 import {
   PromptAsks,
@@ -26,6 +26,7 @@ function board(
   const homeOf = options.homeOf ?? ((ferret: string) => ferret);
   const cards = new Map<string, { ref: AskRef; open: boolean; draft: AskDraft }>();
   const raises: AskDraft[] = [];
+  const opens: string[] = [];
   const closes: { ref: AskRef; reason: string; entry: string | undefined }[] = [];
   let next = 0;
   const port: PromptAsksPort = {
@@ -44,8 +45,14 @@ function board(
       for (const card of cards.values())
         if (card.ref.id === ref.id && card.ref.ferret === ref.ferret) card.open = false;
     },
+    open: async filter => {
+      opens.push(String(filter.entry));
+      return [...cards.values()]
+        .filter(card => card.open && (filter.entry === undefined || String(card.draft.entry) === String(filter.entry)))
+        .map(card => ({ ferret: card.ref.ferret, id: card.ref.id }) as AskSummary);
+    },
   };
-  return { port, raises, closes, open: () => [...cards.values()].filter(card => card.open) };
+  return { port, raises, closes, opens, open: () => [...cards.values()].filter(card => card.open) };
 }
 
 /** The records in memory, the way the plugin's state dir keeps them: they outlive any one `PromptAsks`. */
@@ -126,6 +133,7 @@ describe('a ferret parked on a prompt', () => {
     await prompts.sweep(idle('f1'));
     expect(asks.open()).toHaveLength(0);
     state.read = () => parked();
+    prompts.changed('f1');
     await prompts.sweep(idle('f1'));
 
     expect(asks.open()).toHaveLength(1);
@@ -301,10 +309,13 @@ describe('the work a look does', () => {
     expect(store.files.get('f1')?.occurrence).toBe(3);
   });
 
-  test('never asks Asks which cards are open: it closes by the refs it holds', async () => {
-    const { prompts, asks } = harness();
+  test('never asks Asks which cards are open while it holds their refs: it closes by them', async () => {
+    const { prompts, asks, state } = harness();
     await prompts.sweep(idle('f1'));
-    expect(Object.keys(asks.port).sort()).toEqual(['close', 'raise']);
+    state.read = () => working;
+    await prompts.sweep(idle('f1'));
+    expect(asks.closes).toHaveLength(1);
+    expect(asks.opens).toEqual([]);
   });
 });
 
@@ -351,6 +362,7 @@ describe('a failing Asks or state', () => {
     state.read = () => undefined;
     await prompts.sweep(idle('f1'));
     state.read = () => new Error('pane unreadable');
+    prompts.changed('f1');
     await prompts.sweep(idle('f1'));
 
     expect(said).toHaveLength(2);
@@ -362,6 +374,7 @@ describe('a failing Asks or state', () => {
 
     await prompts.sweep(idle('f1'));
     await prompts.sweep([{ id: 'f1', state: 'working' }]);
+    prompts.changed('f1');
     await prompts.sweep(idle('f1'));
 
     expect(said).toHaveLength(2);
@@ -388,5 +401,260 @@ describe('a failing Asks or state', () => {
     await prompts.sweep(idle('f1'));
     expect(asks.open()).toHaveLength(1);
     expect(store.files.get('f1')?.occurrence).toBe(2);
+  });
+});
+
+describe('what a tick reads', () => {
+  const twenty = Array.from({ length: 20 }, (_, i) => `f${i}`);
+
+  test('twenty idle your-turn ferrets with no events cost one reconciliation, then no read per tick', async () => {
+    const { prompts, reads, state } = harness();
+    state.read = () => ({ turnState: 'your-turn' });
+
+    await prompts.sweep(idle(...twenty));
+    expect(reads).toHaveLength(20);
+    await prompts.sweep(idle(...twenty));
+    await prompts.sweep(idle(...twenty));
+    expect(reads).toHaveLength(20);
+  });
+
+  test('an event for one ferret is exactly one read, and only on the next sweep', async () => {
+    const { prompts, reads, state } = harness();
+    state.read = () => ({ turnState: 'your-turn' });
+    await prompts.sweep(idle(...twenty));
+    reads.length = 0;
+
+    prompts.changed('f7');
+    expect(reads).toEqual([]);
+    await prompts.sweep(idle(...twenty));
+    expect(reads).toEqual(['f7']);
+    await prompts.sweep(idle(...twenty));
+    expect(reads).toEqual(['f7']);
+  });
+
+  test('an event for a ferret that is working, stopped or unknown reads nothing', async () => {
+    const { prompts, reads, state } = harness();
+    state.read = () => ({ turnState: 'your-turn' });
+    await prompts.sweep(idle('f1'));
+    reads.length = 0;
+
+    prompts.changed('f1');
+    prompts.changed('gone');
+    await prompts.sweep([
+      { id: 'f1', state: 'working' },
+      { id: 'f2', state: 'stopped' },
+    ]);
+    expect(reads).toEqual([]);
+  });
+
+  test('a ferret owed a card is read on every tick until the wait ends, and no other is', async () => {
+    const { prompts, reads, state } = harness();
+    state.read = () => ({ turnState: 'your-turn' });
+    await prompts.sweep(idle('f1', 'f2'));
+    state.read = ferret => (ferret === 'f1' ? parked() : { turnState: 'your-turn' });
+    prompts.changed('f1');
+    await prompts.sweep(idle('f1', 'f2'));
+    reads.length = 0;
+
+    await prompts.sweep(idle('f1', 'f2'));
+    await prompts.sweep(idle('f1', 'f2'));
+    expect(reads).toEqual(['f1', 'f1']);
+  });
+
+  test('an event that arrives while a sweep is looking is kept for the next sweep', async () => {
+    const { prompts, reads, state } = harness();
+    state.read = () => ({ turnState: 'your-turn' });
+    await prompts.sweep(idle('f1', 'f2'));
+    reads.length = 0;
+    state.read = ferret => {
+      if (ferret === 'f1') prompts.changed('f2');
+      return { turnState: 'your-turn' };
+    };
+
+    prompts.changed('f1');
+    await prompts.sweep(idle('f1', 'f2'));
+    expect(reads).toEqual(['f1']);
+    await prompts.sweep(idle('f1', 'f2'));
+    expect(reads).toEqual(['f1', 'f2']);
+  });
+
+  test('a look that failed is asked again by the next tick without a new event', async () => {
+    const { prompts, reads, state } = harness();
+    await prompts.sweep(idle('f1'));
+    reads.length = 0;
+    state.read = () => new Error('pane unreadable');
+    prompts.changed('f1');
+
+    await prompts.sweep(idle('f1'));
+    await prompts.sweep(idle('f1'));
+    expect(reads).toEqual(['f1', 'f1']);
+  });
+});
+
+describe('a card whose ref was never saved', () => {
+  /** Asks raised, then the ref could not be saved: the record says waiting, with no card. */
+  async function unsaved(options: Parameters<typeof board>[0] = {}) {
+    const store = records();
+    const write = store.write;
+    let lose = true;
+    store.write = async (ferret, record) => {
+      if (lose && record.ask !== undefined) {
+        lose = false;
+        throw new Error('disk full');
+      }
+      await write(ferret, record);
+    };
+    const made = harness(options, store);
+    made.prompts.changed('f1');
+    await made.prompts.sweep(idle('f1'));
+    expect(made.asks.open()).toHaveLength(1);
+    expect(store.files.get('f1')).toMatchObject({ waiting: true, occurrence: 1 });
+    expect(store.files.get('f1')?.ask).toBeUndefined();
+    return made;
+  }
+
+  test('is found by its entry and closed where it landed, when the wait ends', async () => {
+    const made = await unsaved({ homeOf: () => 'lead' });
+    made.state.read = () => working;
+    await made.prompts.sweep(idle('f1'));
+
+    expect(made.asks.open()).toHaveLength(0);
+    expect(made.asks.opens).toEqual([String(made.asks.raises[0]!.entry)]);
+    expect(made.asks.closes.map(close => `${close.ref.ferret} ${close.ref.id} ${close.reason} ${close.entry}`)).toEqual(
+      [`lead A1 withdrawn ${made.asks.raises[0]!.entry}`],
+    );
+    expect(made.store.files.get('f1')).toMatchObject({ waiting: false, occurrence: 1 });
+  });
+
+  test('a wait that never raised anything closes nothing', async () => {
+    const made = harness({ failRaise: () => true });
+    made.prompts.changed('f1');
+    await made.prompts.sweep(idle('f1'));
+    expect(made.store.files.get('f1')).toMatchObject({ waiting: true });
+    made.state.read = () => working;
+    await made.prompts.sweep(idle('f1'));
+
+    expect(made.asks.closes).toEqual([]);
+    expect(made.store.files.get('f1')).toMatchObject({ waiting: false });
+  });
+
+  test('is found again when a failed lookup is retried', async () => {
+    let down = true;
+    const made = await unsaved();
+    const open = made.asks.port.open;
+    made.asks.port.open = async filter => {
+      if (down) throw new Error('asks is down');
+      return await open(filter);
+    };
+    made.state.read = () => working;
+    await made.prompts.sweep(idle('f1'));
+    expect(made.asks.open()).toHaveLength(1);
+    expect(made.said).toHaveLength(1);
+
+    down = false;
+    await made.prompts.sweep(idle('f1'));
+    expect(made.asks.open()).toHaveLength(0);
+  });
+
+  test('a steady tick never looks for it: only a record that is cleared does', async () => {
+    const made = await unsaved();
+    expect(made.asks.opens).toEqual([]);
+    await made.prompts.sweep(idle('f1'));
+    expect(made.asks.opens).toEqual([]);
+  });
+
+  test('a record whose key names no wait is cleared without a lookup', async () => {
+    const store = records();
+    store.files.set('f1', { format: 1, key: 'nonsense', occurrence: 1, waiting: true });
+    const made = harness({}, store);
+    made.state.read = () => working;
+    await made.prompts.sweep(idle('f1'));
+
+    expect(made.asks.opens).toEqual([]);
+    expect(store.files.get('f1')).toMatchObject({ waiting: false });
+  });
+});
+
+describe('a raise that succeeded but whose ref was never saved, on its own board and redirected to a lead', () => {
+  /** Asks raised and kept the card; the process lost the write that would have saved its ref. */
+  const losingFirstRefSave = (store: ReturnType<typeof records>): ReturnType<typeof records> => {
+    const write = store.write;
+    let armed = true;
+    store.write = async (ferret, record) => {
+      if (armed && record.ask !== undefined) {
+        armed = false;
+        throw new Error('lost before the ref was saved');
+      }
+      await write(ferret, record);
+    };
+    return store;
+  };
+  const homeOf = (ferret: string): string => (ferret === 'child' ? 'lead' : ferret);
+
+  for (const [name, ferret, roster, home] of [
+    ['on its own board', 'f1', idle('f1'), undefined],
+    [
+      'redirected from a child to its lead',
+      'child',
+      [
+        { id: 'lead', state: 'working' },
+        { id: 'child', state: 'idle' },
+      ] satisfies PromptRoster[],
+      homeOf,
+    ],
+  ] as const) {
+    test(`is closed when the wait ends: zero open, then one open on the next occurrence (${name})`, async () => {
+      const { prompts, asks, state } = harness(
+        home === undefined ? {} : { homeOf: home },
+        losingFirstRefSave(records()),
+      );
+      prompts.changed(ferret);
+      await prompts.sweep(roster);
+      expect(asks.open()).toHaveLength(1);
+
+      state.read = () => working;
+      await prompts.sweep(roster);
+      expect(asks.open()).toHaveLength(0);
+
+      state.read = () => parked();
+      prompts.changed(ferret);
+      await prompts.sweep(roster);
+      expect(asks.open()).toHaveLength(1);
+    });
+
+    test(`is closed when the wait ends after a daemon restart (${name})`, async () => {
+      const made = harness(home === undefined ? {} : { homeOf: home }, losingFirstRefSave(records()));
+      made.prompts.changed(ferret);
+      await made.prompts.sweep(roster);
+      expect(made.asks.open()).toHaveLength(1);
+
+      const restarted = made.make();
+      made.state.read = () => working;
+      await restarted.sweep(roster);
+      expect(made.asks.open()).toHaveLength(0);
+      expect(made.asks.closes.map(close => close.ref.ferret)).toEqual([home?.(ferret) ?? ferret]);
+    });
+  }
+
+  test('is closed when its ferret goes away', async () => {
+    const { prompts, asks, store } = harness({}, losingFirstRefSave(records()));
+    prompts.changed('f1');
+    await prompts.sweep(idle('f1'));
+    expect(asks.open()).toHaveLength(1);
+
+    await prompts.sweep([]);
+    expect(asks.open()).toHaveLength(0);
+    expect(store.files.has('f1')).toBe(false);
+  });
+
+  test('is closed when another prompt replaces its wait, and the new one is its own card', async () => {
+    const { prompts, asks, state } = harness({}, losingFirstRefSave(records()));
+    prompts.changed('f1');
+    await prompts.sweep(idle('f1'));
+
+    state.read = () => parked('aaaaaaaaaaaaaaaa');
+    await prompts.sweep(idle('f1'));
+    expect(asks.open()).toHaveLength(1);
+    expect(asks.open()[0]?.draft.ref).toEqual({ kind: 'permission', prompt: 'aaaaaaaaaaaaaaaa' });
   });
 });
