@@ -394,6 +394,7 @@ export function SessionChatPage({
                 ferretId={ferretId}
                 {...(account === undefined ? {} : { account })}
                 {...(askApi === undefined ? {} : { api: askApi })}
+                {...(session.config.harness === undefined ? {} : { harness: session.config.harness })}
                 {...(askId === undefined ? {} : { draftSlot: askId })}
                 {...(forForm
                   ? {
