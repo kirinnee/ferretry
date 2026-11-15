@@ -4,6 +4,7 @@ import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { agendaCommands } from './command-bar.ts';
 import { lazyComponent } from './lazy.ts';
+import { machineMute } from './lib/machine-mute.ts';
 import { createNeedsYou } from './lib/needs-you-hook.ts';
 
 type Surfaces = {
@@ -91,5 +92,9 @@ export default provideToShell(half, {
   device: { 'deep-link': deepLinkView, 'notification-filter': filterBootView },
   background: { 'notification-watch': notificationWatchView },
   // Ferrets' list gathers the ferrets that wait on the owner (`ferrets.needs-you`); which they are is this half's fact.
-  hooks: { 'ferrets.needs-you': ({ client }) => createNeedsYou(client) },
+  hooks: {
+    'ferrets.needs-you': ({ client }) => createNeedsYou(client),
+    // Access's per-machine Mute row (`access.machine-mute`): which machines this browser silences is this half's filter.
+    'access.machine-mute': ({ daemon }) => machineMute(daemon),
+  },
 });

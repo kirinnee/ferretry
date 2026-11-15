@@ -10,6 +10,7 @@ import { AgendaBoardProviders, laneEditorOf, useAgendaBoardHooks } from '../feat
 import { AgendaCardConversation } from '../features/agenda/agenda-conversation-slot.tsx';
 import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
 import { AgendaInboxContext, useRuntimeInbox } from '../hooks/use-agenda-inbox.ts';
+import { useItemOpened } from '../hooks/use-item-opened.ts';
 import { AgendaClientContext } from '../lib/agenda-client-context.tsx';
 import { useAgendaLinks } from '../lib/agenda-links.ts';
 import type { AgendaFleet } from '../lib/agenda-fleet.ts';
@@ -24,6 +25,7 @@ export function createAgendaAskScreen(runtime: AgendaRuntime, fleet?: AgendaFlee
     const links = useAgendaLinks();
     // Board's hooks for this machine: Done · closes, a notice's Start and Close, Edit's lane editor and `&F12` proof.
     const board = useAgendaBoardHooks(daemon);
+    const itemOpened = useItemOpened(daemon, runtime.client);
     const inbox = useRuntimeInbox(runtime, laneEditorOf(board), fleet);
     const phone = useLayoutMode() === 'drawer';
     const ferret = params.ferret;
@@ -48,7 +50,7 @@ export function createAgendaAskScreen(runtime: AgendaRuntime, fleet?: AgendaFlee
                 })
               }
               onNavigate={to => navigate(to)}
-              onItemOpened={card => void runtime.itemOpened(card.view.config.id, card.item.id)}
+              onItemOpened={card => itemOpened(card.view.config.id, card.item.id)}
               renderComposer={(card, answerForm) => (
                 <AgendaCardConversation answerForm={answerForm} card={card} daemon={daemon} inbox={inbox} />
               )}
