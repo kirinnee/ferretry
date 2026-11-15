@@ -73,8 +73,20 @@ export class SignInGrantsThroughHook implements SignInGrantSource {
     return await this.#source()?.keyOf(account);
   }
 
+  /**
+   * A bound hook is current only while the source it was bound to is still the one in effect (a hook that is not bound
+   * always is). The service's last check before typing reads it, so a swap mid-fill types nothing.
+   */
+  current(): boolean {
+    return this.fixed === undefined || this.#resolve() === this.fixed.source;
+  }
+
+  /**
+   * A use is recorded on the source in effect now when there is one, so the instance that serves the next fill knows
+   * of it even when the fill began on an earlier one; else on the one the fill reserved on.
+   */
   used(grant: SignInGrant, at: number, sessionId: string): void {
-    this.#source()?.used(grant, at, sessionId);
+    (this.#resolve() ?? this.fixed?.source)?.used(grant, at, sessionId);
   }
 
   async stopped(grant: SignInGrant, because: GrantMissReason): Promise<void> {
@@ -109,7 +121,11 @@ export class SignInGrantsThroughHook implements SignInGrantSource {
 
   /** The source in effect now, or nothing: a provider that throws or offers something else is no source. */
   #source(): SignInGrantSource | undefined {
-    if (this.fixed !== undefined) return this.fixed.source;
+    return this.fixed === undefined ? this.#resolve() : this.fixed.source;
+  }
+
+  /** The source Accounts offers now, whatever this hook was bound to. */
+  #resolve(): SignInGrantSource | undefined {
     try {
       const offered = this.provider()?.grants?.();
       return isGrantSource(offered) ? offered : undefined;

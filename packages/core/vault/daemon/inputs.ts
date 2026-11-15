@@ -22,6 +22,7 @@ import { INPUT_ASK_SOURCE, InputAgentNotifierAdapter, InputAsksAdapter } from '.
 import { InputGateAudit } from './adapters/inputs/audit.ts';
 import { PhoneApprovalReach } from './adapters/inputs/phone-reach.ts';
 import { SignInGrantsThroughHook } from './adapters/inputs/grants.ts';
+import { ScriptRecordOnState } from './adapters/inputs/script-record.ts';
 import { SavedLoginsThroughHook } from './adapters/inputs/saved-logins.ts';
 import { SecureCopiesThroughHook } from './adapters/inputs/secure-copy.ts';
 import { type BoundInputHolds, HeardActs, InputHoldsOverService } from './adapters/inputs/holds.ts';
@@ -113,13 +114,13 @@ const INPUT_ASK_SOURCE_SPEC: AskSourceSpec = {
 
 /** The part of `build(ctx)` the input bridge reads. */
 export interface InputsContext {
-  readonly kernel: Pick<KernelPorts, 'clock' | 'state' | 'jobs' | 'identity'>;
+  readonly kernel: Pick<KernelPorts, 'clock' | 'state' | 'jobs' | 'identity' | 'log'>;
   readonly needs: { readonly asks: AsksApi; readonly gate: Pick<GateApi, 'audit'> };
   readonly hooks: Pick<HookInvoker, 'provider'>;
 }
 
 export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
-  const { clock, state, jobs } = ctx.kernel;
+  const { clock, state, jobs, log } = ctx.kernel;
   const provider = (kind: 'terminal' | 'page'): InputTargetAdapter | undefined => {
     const found = ctx.hooks.provider(InputTargets, kind);
     return found === 'unavailable' ? undefined : found;
@@ -175,7 +176,12 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     sleep: async ms => await clock.sleep(milliseconds(ms)),
   });
   // Where page scripts ran across the machine, as Browsers tells it (VaultApi.scriptRunning / scriptedOn).
-  const scripts = new MachineScripts(() => clock.nowMs());
+  // Kept in the Vault's own state, so a standing rule is held to a script that ran before a daemon restart too; read by the restore job.
+  const scripts = new MachineScripts(
+    () => clock.nowMs(),
+    new ScriptRecordOnState(state),
+    sentence => log.warn(sentence),
+  );
   const acts = new HeardActs(observer, () => [...service.openSessions(), ...deps.quarantine.sessions()]);
   const service: InputRequestService = new InputRequestService({
     observer: acts.view(observer),
@@ -211,7 +217,14 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     hostName: deps.hostName ?? ctx.kernel.identity.daemonName,
   });
   // Every hold comes back before any request does (I82); then the sweep runs on its own interval.
-  jobs.add({ id: 'inputs-restore', schedule: { onceAfterStart: true }, run: async () => await service.restore() });
+  jobs.add({
+    id: 'inputs-restore',
+    schedule: { onceAfterStart: true },
+    run: async () => {
+      await scripts.load();
+      await service.restore();
+    },
+  });
   jobs.add({
     id: 'inputs-sweep',
     schedule: { every: milliseconds(INPUT_REQUEST_SWEEP_MS) },

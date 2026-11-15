@@ -1,7 +1,9 @@
 import { describe, it } from 'bun:test';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import type { SavedLoginsProvider } from '../../../../contract/index.ts';
+import { type SavedLoginsProvider, ScriptRecordFile } from '../../../../contract/index.ts';
 import { SignInGrantsThroughHook } from '../../../../daemon/adapters/inputs/grants.ts';
+import { ScriptRecordOnState } from '../../../../daemon/adapters/inputs/script-record.ts';
 import {
   type ScriptedOriginsView,
   type SignInGrant,
@@ -300,6 +302,113 @@ describe('a standing rule and the page scripts the Vault saw while Accounts was 
     should(request.preapproval).match({ by: 'rule', outcome: 'did-not-apply', reason: 'scripted-origin' });
   });
 
+  /** A daemon restart: a new MachineScripts and a new hook over the same state folder (RAM is gone, the file is not). */
+  const restarted = async (folder: MemoryStateFolder, now = NOW) => {
+    const scripts = new MachineScripts(() => now, new ScriptRecordOnState(folder.port([ScriptRecordFile])));
+    await scripts.load();
+    return scripts;
+  };
+
+  it('should not fill after a daemon restart when a script was reported with no source, and a source appeared after', async () => {
+    const folder = new MemoryStateFolder();
+    // Accounts is off: the report reaches the hook (dropped, nobody listens) and the Vault's own record.
+    const first = await restarted(folder);
+    new SignInGrantsThroughHook(() => undefined).scriptedOn('github.com');
+    first.scriptedOn('github.com');
+    await first.settled();
+    // The daemon restarts and Accounts comes back as a new instance that knows nothing of the script.
+    const scripts = await restarted(folder, NOW + 60_000);
+    const offered = offering({ grants: [rule()] });
+    const w = world({
+      facts: page(),
+      grantPort: new SignInGrantsThroughHook(over(offered)),
+      scripts,
+      accounts: github(),
+    });
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+    const request = await w.pending();
+
+    should(view.state).equal('pending');
+    should(w.writes).eql([]);
+    should(offered.used).eql([]);
+    should(request.preapproval).match({ by: 'rule', outcome: 'did-not-apply', reason: 'scripted-origin' });
+  });
+
+  it('should fill after a restart when nothing was ever reported (the control for the restart cases)', async () => {
+    const offered = offering({ grants: [rule()] });
+    const w = world({
+      facts: page(),
+      grantPort: new SignInGrantsThroughHook(over(offered)),
+      scripts: await restarted(new MemoryStateFolder()),
+      accounts: github(),
+    });
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(view.state).equal('delivered');
+  });
+
+  it('should fill after a restart for a rule approved after the script ran', async () => {
+    const folder = new MemoryStateFolder();
+    const first = await restarted(folder, NOW - 2 * 3_600_000);
+    first.scriptedOn('github.com');
+    await first.settled();
+    const offered = offering({ grants: [rule()] });
+    const w = world({
+      facts: page(),
+      grantPort: new SignInGrantsThroughHook(over(offered)),
+      scripts: await restarted(folder),
+      accounts: github(),
+    });
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(view.state).equal('delivered');
+  });
+
+  it('should not fill when the record is damaged, and warn without naming a host', async () => {
+    const folder = new MemoryStateFolder();
+    folder.plant(ScriptRecordFile, '{not json');
+    const warned: string[] = [];
+    const scripts = new MachineScripts(
+      () => NOW,
+      new ScriptRecordOnState(folder.port([ScriptRecordFile])),
+      sentence => void warned.push(sentence),
+    );
+    await scripts.load();
+    const offered = offering({ grants: [rule()] });
+    const w = world({
+      facts: page(),
+      grantPort: new SignInGrantsThroughHook(over(offered)),
+      scripts,
+      accounts: github(),
+    });
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(view.state).equal('pending');
+    should(w.writes).eql([]);
+    should(offered.used).eql([]);
+    should(warned).have.length(1);
+    should(warned[0]).not.match(/github/u);
+  });
+
+  it('should not fill before the record has been read', async () => {
+    const offered = offering({ grants: [rule()] });
+    const w = world({
+      facts: page(),
+      grantPort: new SignInGrantsThroughHook(over(offered)),
+      scripts: new MachineScripts(() => NOW, new ScriptRecordOnState(new MemoryStateFolder().port([ScriptRecordFile]))),
+      accounts: github(),
+    });
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(view.state).equal('pending');
+    should(w.writes).eql([]);
+  });
+
   it('should not fill while a script runs across a source swap, and fill once it has ended', async () => {
     const scripts = new MachineScripts(() => NOW);
     const before = offering({ grants: [rule()] });
@@ -324,34 +433,75 @@ describe('a standing rule and the page scripts the Vault saw while Accounts was 
     should(after.used).eql([`${rule().id}@${SESSION}`]);
   });
 
-  it('should settle a fill on the source it reserved on, so a one-use rule cannot fill again after a swap', async () => {
+  it('should settle a fill on the source it reserved on and tell the live one, so a one-use rule cannot fill again after a swap', async () => {
     const oneUse = rule({ remaining: 1 });
     const first = offering({ grants: [oneUse] });
     const second = offering({ grants: [oneUse] });
     const firstLedger = new SignInGrantLedger();
     // Once a use is recorded the rule is used up, as Accounts reports it.
-    const firstSource: SignInGrantSource = {
-      ...source(first, firstLedger),
-      of: () => (first.used.length > 0 ? [{ ...oneUse, state: 'used-up', remaining: 0 }] : first.grants),
-    };
+    const usedUp =
+      (offered: Offered): SignInGrantSource['of'] =>
+      () =>
+        offered.used.length > 0 ? [{ ...oneUse, state: 'used-up', remaining: 0 }] : offered.grants;
+    const firstSource: SignInGrantSource = { ...source(first, firstLedger), of: usedUp(first) };
+    const secondSource: SignInGrantSource = { ...source(second), of: usedUp(second) };
     let live = firstSource;
     const hook = new SignInGrantsThroughHook(() => provider(() => live));
     const w = world({ facts: page(), grantPort: hook, accounts: github() });
     // The graph restarts while the value is being typed: the second instance has its own, empty ledger.
     w.state.onType = () => {
-      live = source(second);
+      live = secondSource;
     };
 
     const view = await w.service.raise(SESSION, PAGE_LOGIN);
     w.state.onType = undefined;
-    live = firstSource;
+    // The next fill is served by the LIVE (new) instance, which has been told of the use.
     const again = await w.service.raise(SESSION, PAGE_LOGIN);
 
     should(view.state).equal('delivered');
-    should(first.used).eql([`${oneUse.id}@${SESSION}`]);
-    should(second.used).eql([]);
+    should(second.used).eql([`${oneUse.id}@${SESSION}`]);
+    should(first.used).eql([]);
     should(again.state).equal('pending');
     should(w.writes.map(write => write.values)).eql([[USERNAME, PASSWORD]]);
+    should(second.used).eql([`${oneUse.id}@${SESSION}`]);
+  });
+
+  it('should type nothing and record no use when Accounts is turned off between the last look and the write', async () => {
+    const oneUse = rule({ remaining: 1 });
+    const offered = offering({ grants: [oneUse] });
+    const ledger = new SignInGrantLedger();
+    let live: SignInGrantSource | undefined = source(offered, ledger);
+    const hook = new SignInGrantsThroughHook(() => (live === undefined ? undefined : provider(() => live)));
+    const w = world({ facts: page(), grantPort: hook, accounts: github() });
+    w.state.onDelivering = () => {
+      live = undefined;
+    };
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(view.state).equal('pending');
+    should(w.writes).eql([]);
+    should(offered.used).eql([]);
+    // The reservation was given back on the ledger it was made on: the rule still has its use.
+    should(ledger.reserve(oneUse, SESSION, ['password'], 'form', NOW)).be.an.Object();
+  });
+
+  it('should type nothing when Accounts restarts (a new source) between the last look and the write', async () => {
+    const before = offering({ grants: [rule()] });
+    const after = offering({ grants: [rule()] });
+    let live = source(before);
+    const hook = new SignInGrantsThroughHook(() => provider(() => live));
+    const w = world({ facts: page(), grantPort: hook, accounts: github() });
+    w.state.onDelivering = () => {
+      live = source(after);
+    };
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(view.state).equal('pending');
+    should(w.writes).eql([]);
+    should(before.used).eql([]);
+    should(after.used).eql([]);
   });
 });
 
@@ -372,5 +522,44 @@ describe('the hook held fixed for one fill', () => {
     should(bound.bound?.().ledger).equal(first.ledger);
     should(offAfter.enabled()).equal(false);
     should(offAfter.ledger).be.instanceOf(SignInGrantLedger);
+  });
+
+  it('should say a bound hook is current only while its source is the one in effect', async () => {
+    const first = source(offering());
+    let live: SignInGrantSource | undefined = first;
+    const hook = new SignInGrantsThroughHook(() => (live === undefined ? undefined : provider(() => live)));
+
+    const bound = hook.bound();
+    should(hook.current()).equal(true);
+    should(bound.current?.()).equal(true);
+    live = source(offering());
+    should(bound.current?.()).equal(false);
+    live = undefined;
+    should(bound.current?.()).equal(false);
+    should(hook.current()).equal(true);
+    // Bound while Accounts was off: current until a source appears.
+    const none = hook.bound();
+    should(none.current?.()).equal(true);
+    live = first;
+    should(none.current?.()).equal(false);
+  });
+
+  it('should record a use on the source in effect now, else on the one the hook was bound to', async () => {
+    const reserved = offering();
+    const later = offering();
+    let live: SignInGrantSource | undefined = source(reserved);
+    const hook = new SignInGrantsThroughHook(() => (live === undefined ? undefined : provider(() => live)));
+    const line = reserved.grants[0] as SignInGrant;
+
+    const bound = hook.bound();
+    bound.used(line, NOW, SESSION);
+    live = source(later);
+    bound.used(line, NOW, SESSION);
+    live = undefined;
+    bound.used(line, NOW, SESSION);
+    new SignInGrantsThroughHook(() => undefined).used(line, NOW, SESSION);
+
+    should(reserved.used).eql([`${line.id}@${SESSION}`, `${line.id}@${SESSION}`]);
+    should(later.used).eql([`${line.id}@${SESSION}`]);
   });
 });

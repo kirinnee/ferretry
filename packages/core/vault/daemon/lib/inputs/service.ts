@@ -811,6 +811,8 @@ export class InputRequestService {
               const at = this.deps.clock.now();
               const now = grants.of(sessionId).find(each => each.id === grant.id);
               return (
+                // Accounts was turned off, restarted or replaced since the source was bound: it is not asked again.
+                grants.current?.() !== false &&
                 now !== undefined &&
                 now.state !== 'stopped' &&
                 now.expiresAt > at &&

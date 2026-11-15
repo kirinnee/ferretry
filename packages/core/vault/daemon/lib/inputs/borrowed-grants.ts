@@ -420,6 +420,12 @@ export interface SignInGrantSource {
    * source that is already one fixed instance omits it.
    */
   bound?(): SignInGrantSource;
+  /**
+   * Whether this is still the source in effect now. A bound instance says no once Accounts was turned off, restarted or
+   * replaced since it was bound: the last check before typing then refuses (fail closed). A source that is not a bound
+   * instance omits it and is always current.
+   */
+  current?(): boolean;
 }
 
 // ─── from sign-in-grants/clear.ts ───
