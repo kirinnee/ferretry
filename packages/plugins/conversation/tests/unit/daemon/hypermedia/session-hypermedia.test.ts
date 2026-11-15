@@ -27,7 +27,11 @@ async function world() {
   const host = await testHost({
     plugins: [implementation],
     fakes: {
-      ferrets: { get: async (id: string) => summaries[id], list: async () => [] },
+      ferrets: {
+        get: async (id: string) => summaries[id],
+        list: async () => [],
+        resolve: async () => ({ kind: 'unknown' as const }),
+      },
       asks: { get: async () => undefined },
     },
     clock: fixedClock('2026-11-06T09:00:00Z'),

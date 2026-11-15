@@ -628,6 +628,19 @@ export interface ServiceResumeOptions extends Omit<ResumeOptions, 'actor'> {
 /** Why a resume that found the ferret no longer in the state its caller expected was refused (W2-a). */
 const NO_LONGER_OWED = 'it is no longer owed this resume: it was stopped, resumed or ended by something else first';
 
+/**
+ * What a relaunch typed ahead of its turn when the conversation it was to resume is not in the ferret's home (the
+ * harness proved it absent), so it started a new one: the agent is told it remembers nothing from before. Fixed text.
+ */
+export const CONVERSATION_NOT_FOUND =
+  'Your earlier conversation could not be resumed: it is not on this machine (a ferret moved from Ferretry 4, for one, leaves its old chats behind), so this is a NEW conversation and you remember nothing from before it. Your assigned task is turn-001.md in the same folder as the turn file below: read it and the turns after it before you go on.';
+
+/** What one launch attempt found that its caller must say (filled in by `launchAttempt`). */
+interface LaunchSaid {
+  /** The conversation the launch was to resume, which the harness proved it does not have: a new one was started. */
+  conversationNotFound?: string;
+}
+
 class ResumeRefusal extends Error {
   constructor(readonly failure: StartFailure) {
     super(failure.reason);
@@ -1893,10 +1906,24 @@ export class FerretsService implements FerretsApi {
           return typeof value === 'function' ? value.bind(target) : value;
         },
       });
-      const result = await this.launchAttempt(record, prompt, conversation, tracked, bound);
+      const said: LaunchSaid = {};
+      const result = await this.launchAttempt(record, prompt, conversation, tracked, bound, said);
+      if (result.ok && said.conversationNotFound !== undefined)
+        // A history that cannot be written never undoes a launch that started (this is inside the launch's cleanup).
+        await this.ports
+          .history?.(record.id, 'session.conversation_not_found', { conversation: said.conversationNotFound })
+          .catch(() => undefined);
       if (!result.ok) failure = result.error;
       else if (turn === undefined) return result;
-      else if (turn.kind === 'revive') return await this.deliverTurn(record.id, runner, turn.turn, carried);
+      else if (turn.kind === 'revive')
+        return await this.deliverTurn(
+          record.id,
+          runner,
+          said.conversationNotFound === undefined
+            ? turn.turn
+            : { ...turn.turn, instruction: `${CONVERSATION_NOT_FOUND} ${turn.turn.instruction}` },
+          carried,
+        );
       else {
         // Today's `deliverFirstTurn`: a start whose task never arrives is an agent sitting at an idle prompt, so a
         // first turn that does not land fails the start (the pane is stopped and the credential revoked below).
@@ -1966,6 +1993,7 @@ export class FerretsService implements FerretsApi {
     conversation: string | undefined,
     runner: Runner,
     bound: BoundLaunchFolder | undefined,
+    said: LaunchSaid = {},
   ): Promise<Result<FerretId, StartFailure>> {
     this.requireTokens();
     if (this.tokens.isCutOff(record.id))
@@ -2032,6 +2060,16 @@ export class FerretsService implements FerretsApi {
     if (!env.ok) return failed('login_unavailable', env.error);
     // The LAST step before the harness: the folder is still the one that was checked. Anything else (a swap, a doubt)
     // starts nothing. (Remaining window: the instant between this check and the child's own chdir; docs/secrets.md.)
+    // A conversation the harness PROVES it does not have is not resumed: a real harness asked to would fail the launch
+    // ("No conversation found…"). A ferret converted from v4 names one whose transcript was left behind (!A516). It
+    // starts a new conversation instead, and the caller says so; any doubt resumes as asked.
+    const resumable =
+      conversation === undefined || harness.hasConversation === undefined
+        ? conversation
+        : (await harness.hasConversation(spec, conversation).catch(() => undefined)) === false
+          ? undefined
+          : conversation;
+    if (conversation !== undefined && resumable === undefined) said.conversationNotFound = conversation;
     if (bound !== undefined) {
       const held = await bound.verify().catch(() => err('the launch folder could not be checked again'));
       if (!held.ok) return failed('refused', held.error);
@@ -2039,9 +2077,9 @@ export class FerretsService implements FerretsApi {
     let started: Awaited<ReturnType<Harness['start']>>;
     try {
       started =
-        conversation === undefined
+        resumable === undefined
           ? await harness.start(spec, runner, env.value)
-          : await harness.resume(spec, runner, env.value, conversation);
+          : await harness.resume(spec, runner, env.value, resumable);
     } catch (error) {
       if (error instanceof LaunchRefusal) return failed('failed', error.message);
       throw error;
@@ -2059,8 +2097,11 @@ export class FerretsService implements FerretsApi {
       ?.write(record.id, sectionDigests(base.instructions))
       .catch(async () => await told.forget(record.id))
       .catch(() => undefined);
+    // A new conversation in place of a missing one: the old conversation id and the transcript it pointed at are no
+    // longer this ferret's, so neither is kept (a later resume would name the missing one again).
+    const { harnessConversation: _missing, transcript: _gone, ...unbound } = record;
     const working: FerretRecord = {
-      ...record,
+      ...(said.conversationNotFound === undefined ? record : unbound),
       state: 'working',
       handle: started.value.running.handle,
       ...(started.value.harnessConversation === undefined
