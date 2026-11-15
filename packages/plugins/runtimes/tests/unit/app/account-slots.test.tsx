@@ -273,6 +273,23 @@ describe('the move account slot', () => {
     expect(view.container.querySelector('[data-runtime-option="codex-b"]')?.textContent).not.toContain('needs sign-in');
   });
 
+  it('tells the page which runtimes of that harness can run, once the roster is read, and says nothing if the page did not ask', async () => {
+    const told: (readonly string[] | null)[] = [];
+    await draw(
+      panelFor(MOVE_ACCOUNT_SLOT, READS),
+      { value: '', chosen: undefined },
+      { harness: 'claude-code', onOffered: (wrappers: readonly string[] | null) => told.push(wrappers) },
+    );
+    expect(told.at(-1)).toEqual(['claude-a']);
+    expect(told.filter(wrappers => wrappers?.length === 1)).toHaveLength(1);
+    const quiet = await draw(
+      panelFor(MOVE_ACCOUNT_SLOT, READS),
+      { value: '', chosen: undefined },
+      { harness: 'codex' },
+    );
+    expect(quiet.container.querySelectorAll('[data-runtime-option]')).toHaveLength(1);
+  });
+
   it('draws nothing without the harness the move page owes it', async () => {
     const Panel = panelFor(MOVE_ACCOUNT_SLOT, READS) as unknown as ComponentType<Record<string, unknown>>;
     const view = await mount(

@@ -87,6 +87,22 @@ describe('RuntimeButtons', () => {
     await view.unmount();
   });
 
+  it('tells the form which runtimes can run a session: nothing decided before the roster is read, then the list once', async () => {
+    const state: Harness = { value: '', chosen: null };
+    const told: (readonly string[] | null)[] = [];
+    const store = storeOf('claude-a', 'codex-b');
+    const onOffered = (wrappers: readonly string[] | null): void => void told.push(wrappers);
+    const element = () => <RuntimeButtons {...host(store, state).props} onOffered={onOffered} />;
+    const view = await mount(element());
+    await settle();
+    await view.render(element());
+    await settle();
+    expect(told[0]).toBeNull();
+    expect(told.at(-1)).toEqual(['claude-a', 'codex-b']);
+    expect(told.filter(wrappers => wrappers !== null)).toHaveLength(1);
+    await view.unmount();
+  });
+
   it('shows health only for a login whose status was read, and quota only when the feed has a row', async () => {
     const state: Harness = { value: 'claude-a', chosen: null };
     const store = storeOf('claude-a', 'codex-b');
