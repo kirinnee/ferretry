@@ -11,6 +11,8 @@ import {
   CONVERSATION_ABOVE_COMPOSER_SLOT,
   CONVERSATION_SLOTS,
 } from '../../../../plugins/conversation/contract/slots.ts';
+import { LOGINS_CONTRIBUTED_SLOTS } from '../../../../plugins/logins/contract/slots.ts';
+import { ADD_RUNTIME_LOGIN_SLOT, RUNTIMES_SLOTS } from '../../../../plugins/runtimes/contract/slots.ts';
 import { generated } from '../../../src/generated/surfaces.ts';
 import { viewsOf } from '../../../src/layout/engine.ts';
 import { isSlotName } from '../../../src/layout/slots.ts';
@@ -98,6 +100,35 @@ describe('the slot Agenda offers and Conversation fills', () => {
     expect(AGENDA_CONVERSATION_SLOT).toBe(AGENDA_OFFERS);
     const contributors = (viewsOf(entries).panels.get(AGENDA_OFFERS) ?? []).map(panel => `${panel.plugin}.${panel.id}`);
     expect(contributors).toEqual(['conversation.agenda-conversation']);
+  });
+});
+
+describe('the slots Runtimes’ Add runtime page offers and Logins fills', () => {
+  test('Logins writes the two names Runtimes owns, and puts one panel in each', () => {
+    expect([...LOGINS_CONTRIBUTED_SLOTS]).toEqual([...RUNTIMES_SLOTS]);
+    for (const slot of RUNTIMES_SLOTS) {
+      expect(isSlotName(slot)).toBe(true);
+      expect(slot.startsWith('runtimes.')).toBe(true);
+      const contributors = (viewsOf(entries).panels.get(slot) ?? []).map(panel => `${panel.plugin}.${panel.id}`);
+      expect(contributors).toEqual([
+        `logins.${slot === ADD_RUNTIME_LOGIN_SLOT ? 'add-runtime-login' : 'add-runtime-sign-in'}`,
+      ]);
+    }
+  });
+
+  test('every panel contributed to a runtimes.* slot is one of the slots Runtimes’ contract names', () => {
+    const named: readonly string[] = RUNTIMES_SLOTS;
+    const contributed = entries.flatMap(entry =>
+      (entry.manifest.ui?.panels ?? []).map(panel => panel.slot as string).filter(slot => slot.startsWith('runtimes.')),
+    );
+    expect(contributed.length).toBe(2);
+    for (const slot of contributed) expect(named).toContain(slot);
+  });
+
+  test('Logins imports nothing of Runtimes: Runtimes needs Logins, so the two agree by name and this test pairs them', () => {
+    expect(Object.keys(entryOf('logins')?.manifest.needs ?? {})).not.toContain('runtimes');
+    expect(Object.keys(entryOf('logins')?.manifest.uses ?? {})).not.toContain('runtimes');
+    expect(Object.keys(entryOf('runtimes')?.manifest.needs ?? {})).toContain('logins');
   });
 });
 
