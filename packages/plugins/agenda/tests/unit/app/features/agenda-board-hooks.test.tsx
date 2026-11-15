@@ -7,22 +7,42 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaCardRow, AgendaItem } from '@ferretry/core-asks/contract';
-import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { interact, type Mounted, mount, must, WithAppHooks } from '@ferretry/app/testing';
 import type { ReactNode } from 'react';
+import {
+  AGENDA_CARD_ANSWER_HOOK,
+  AGENDA_CARD_REFERENCE_HOOK,
+  AGENDA_LANE_PROPOSAL_HOOK,
+  type AgendaLaneEditor,
+} from '../../../../contract/app-hooks.ts';
 import { fakeAnswer, fakeReference } from '../../../support/app/board-hooks.ts';
 import {
   AgendaBoardProviders,
+  AgendaCardBoard,
   agendaBoardHooks,
+  laneEditorBook,
   laneEditorOf,
   useAgendaBoardHooks,
+  useCardBoards,
 } from '../../../../app/features/agenda/agenda-board-hooks.tsx';
+import { AgendaInboxPage } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
+import type { AgendaInbox } from '../../../../app/hooks/use-agenda-inbox.ts';
+import type { InboxCard } from '../../../../app/lib/agenda-inbox.ts';
 import { AgendaCardsHost } from '../../../../app/features/agenda/agenda-cards-host.tsx';
 import type { BoardTaskId } from '../../../../app/features/agenda/agenda-cards-list.tsx';
 import { AgendaItemView } from '../../../../app/features/agenda/agenda-item-view.tsx';
 import { agendaProse } from '../../../../app/features/agenda/agenda-prose.tsx';
 import type { InboxAction } from '../../../../app/lib/agenda-inbox.ts';
-import { daemonConnection, ReferenceSurfaceProvider } from '../../../../app/shell.ts';
-import { agendaItem, testLaneEditor } from '../../../support/app/agenda-inbox.tsx';
+import { daemonConnection, daemonId, ReferenceSurfaceProvider } from '../../../../app/shell.ts';
+import {
+  agendaItem,
+  choices,
+  fakeInbox,
+  InboxHarness,
+  inboxCard,
+  LANE_PROPOSAL_ANSWERS,
+  testLaneEditor,
+} from '../../../support/app/agenda-inbox.tsx';
 import { click, settle, typeInto } from '../../../support/app/dom-form.ts';
 import { flush, laptop } from '../board-support.ts';
 
@@ -230,5 +250,164 @@ describe('agenda.lane-proposal and the hooks outside a shell', () => {
       laneProposal: undefined,
       cardReference: undefined,
     });
+  });
+});
+
+describe('the Inbox is every machine’s: Board’s hooks are read per card’s machine', () => {
+  const desk = daemonId('daemon/desk');
+  const there = daemonId('daemon/laptop');
+
+  describe('the lane editors of the machines on screen', () => {
+    const upon =
+      (tag: string): AgendaLaneEditor =>
+      ask =>
+        `/${tag}/${ask.sourceRef}`;
+    const ask = { sourceRef: 'lanes:P1:3' };
+    const edit = { kind: 'respond', response: { kind: 'multiple-choice', choice: 'Edit' } } as unknown as InboxAction;
+
+    test('answers each machine from its own editor, and nothing for a machine that registered none', () => {
+      const book = laneEditorBook();
+      book.register(desk, upon('desk'));
+      book.register(there, upon('laptop'));
+      book.register(daemonId('daemon/none'), undefined);
+      expect([desk, there, daemonId('daemon/none')].map(id => book.editorFor(id, ask, edit as never))).toEqual([
+        '/desk/lanes:P1:3',
+        '/laptop/lanes:P1:3',
+        undefined,
+      ]);
+    });
+
+    test('keeps a machine’s editor until its last card goes, then forgets it', () => {
+      const book = laneEditorBook();
+      const first = book.register(desk, upon('first'));
+      const second = book.register(desk, upon('second'));
+      expect(book.editorFor(desk, ask, edit as never)).toBe('/second/lanes:P1:3');
+      second();
+      expect(book.editorFor(desk, ask, edit as never)).toBe('/first/lanes:P1:3');
+      first();
+      expect(book.editorFor(desk, ask, edit as never)).toBeUndefined();
+    });
+  });
+
+  /** An open card of `daemon`, with the Inbox page binding Board per card exactly as the screens do. */
+  const Page = ({ cards, open, navigated }: { cards: InboxCard[]; open: string; navigated: string[] }) => (
+    <InboxHarness
+      cards={cards}
+      fake={fakeInbox()}
+      render={inbox => <BoundPage inbox={inbox} navigated={navigated} open={open} />}
+    />
+  );
+  function BoundPage({ inbox, open, navigated }: { inbox: AgendaInbox; open: string; navigated: string[] }) {
+    const { laneEditor, cardBoard } = useCardBoards(to => navigated.push(to));
+    return (
+      <AgendaInboxPage
+        cardBoard={cardBoard}
+        inbox={{ ...inbox, laneEditor }}
+        initialOpen={open}
+        now={NOW}
+        onNavigate={to => navigated.push(to)}
+        phone
+      />
+    );
+  }
+  const onDesk = inboxCard(
+    agendaItem('A9', {
+      why: 'Try &F12 on the desk.',
+      ask: choices('Ship', 'Hold'),
+      task: { id: 'F1' },
+      offerClose: true,
+    } as Partial<AgendaItem>),
+    undefined,
+    'Desk',
+    desk,
+  );
+  const proposal = inboxCard(
+    agendaItem('A7', {
+      sourceRef: 'lanes:P1:3',
+      ask: choices(LANE_PROPOSAL_ANSWERS.accept, LANE_PROPOSAL_ANSWERS.edit),
+    } as Partial<AgendaItem>),
+    undefined,
+    'Desk',
+    desk,
+  );
+  const shell = (provided: Record<string, Record<string, unknown>>, children: ReactNode) => (
+    <WithAppHooks onDaemon={provided} provided={{}}>
+      {children}
+    </WithAppHooks>
+  );
+
+  test('Done · closes on another machine’s card goes to that machine’s Board, not the page’s', async () => {
+    const mine = fakeAnswer();
+    const theirs = fakeAnswer();
+    view = await mount(
+      shell(
+        { [there]: { [AGENDA_CARD_ANSWER_HOOK]: mine.answer }, [desk]: { [AGENDA_CARD_ANSWER_HOOK]: theirs.answer } },
+        <Page cards={[onDesk]} navigated={[]} open={onDesk.key} />,
+      ),
+    );
+    await interact(() => flush());
+    await interact(() => must(chip(), 'the Done · closes button').click());
+    await interact(() => flush());
+
+    expect(theirs.calls).toContain('done:F1');
+    expect(mine.calls).toEqual([]);
+  });
+
+  test('`&F12` in another machine’s card proves against that machine’s Board only', async () => {
+    const mine = fakeReference();
+    const theirs = fakeReference();
+    const unproved = { ...mine, proves: () => () => false };
+    view = await mount(
+      shell(
+        { [there]: { [AGENDA_CARD_REFERENCE_HOOK]: unproved }, [desk]: { [AGENDA_CARD_REFERENCE_HOOK]: theirs } },
+        <Page cards={[onDesk]} navigated={[]} open={onDesk.key} />,
+      ),
+    );
+    await interact(() => flush());
+
+    expect(theirs.watched).toEqual(['ids']);
+    expect(mine.watched).toEqual([]);
+    expect([...root().querySelectorAll('a')].map(link => link.textContent)).toContain('&F12');
+  });
+
+  test('Edit on another machine’s lane proposal opens that machine’s lane editor', async () => {
+    const navigated: string[] = [];
+    view = await mount(
+      shell(
+        {
+          [desk]: {
+            [AGENDA_LANE_PROPOSAL_HOOK]: {
+              editorFor: (ask: { sourceRef?: string | null }) => `/desk-lanes/${ask.sourceRef}`,
+            },
+          },
+        },
+        <Page cards={[proposal]} navigated={navigated} open={proposal.key} />,
+      ),
+    );
+    await interact(() => flush());
+    await interact(() =>
+      must(root().querySelector<HTMLButtonElement>('[data-agenda-option="Edit"]'), 'the Edit button').click(),
+    );
+
+    expect(navigated).toContain('/desk-lanes/lanes:P1:3');
+  });
+
+  test('a notice’s Start on another machine goes to that machine’s Board, not refused', async () => {
+    const theirs = fakeAnswer();
+    const cards: readonly AgendaCardRow[] = [{ task: { id: 'B1' as BoardTaskId }, line: '&B1 is waiting.' }];
+    view = await mount(
+      shell(
+        { [desk]: { [AGENDA_CARD_ANSWER_HOOK]: theirs.answer } },
+        <AgendaCardBoard daemonId={desk} editors={laneEditorBook()} onNavigate={() => undefined}>
+          <AgendaCardsHost cards={cards} connection={daemonConnection({ daemonId: desk })} />
+        </AgendaCardBoard>,
+      ),
+    );
+
+    await click(must(root().querySelector<HTMLElement>('[data-agenda-card-start]'), 'Start'));
+    await settle();
+
+    expect(theirs.calls).toEqual(['start:B1:key']);
+    expect(root().textContent).not.toContain('on another machine');
   });
 });

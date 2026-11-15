@@ -6,7 +6,7 @@
 
 import type { ScreenProps } from '@ferretry/kernel/manifest';
 import { MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
-import { AgendaBoardProviders, laneEditorOf, useAgendaBoardHooks } from '../features/agenda/agenda-board-hooks.tsx';
+import { useCardBoards } from '../features/agenda/agenda-board-hooks.tsx';
 import { AgendaCardConversation } from '../features/agenda/agenda-conversation-slot.tsx';
 import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
 import { useAskFocus } from '../features/agenda/use-ask-focus.ts';
@@ -24,48 +24,48 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
   return function AgendaScreen(_props: ScreenProps) {
     const { navigate } = useRouter();
     const links = useAgendaLinks();
-    // Board's hooks for this machine: Done · closes, a notice's Start and Close, Edit's lane editor and `&F12` proof.
-    const board = useAgendaBoardHooks(daemon);
+    // Board's hooks per OPEN CARD's machine (the Inbox is every machine's): Done · closes, a notice's Start and Close,
+    // Edit's lane editor and `&F12` proof.
+    const { laneEditor, cardBoard } = useCardBoards(to => navigate(to));
     // Told on the OPENED CARD's machine (it may be another machine's, from the fleet Inbox), never the page's.
     const itemOpened = useItemOpened({ daemon, client: runtime.client }, fleet);
-    const inbox = useRuntimeInbox(runtime, laneEditorOf(board), fleet);
+    const inbox = useRuntimeInbox(runtime, laneEditor, fleet);
     const phone = useLayoutMode() === 'drawer';
     // A machine ask's push opens `/agenda?ask=A3`: the page opens that ask's card once it is among the open ones.
     const asked = useAskFocus();
     return (
-      <AgendaBoardProviders hooks={board} onNavigate={to => navigate(to)}>
-        <AgendaClientContext.Provider value={runtime.client}>
-          <AgendaInboxContext.Provider value={inbox}>
-            {itemOpened.host}
-            <AgendaInboxPage
-              inbox={inbox}
-              phone={phone}
-              clearPort={runtime.clearPort}
-              onNavigate={to => navigate(to)}
-              open={
-                asked?.target == null
-                  ? null
-                  : {
-                      daemonId: daemon,
-                      sessionId: MACHINE_AGENDA_ID,
-                      id: asked.target,
-                      settled: inbox.settled === true,
-                    }
-              }
-              // An ask that is no longer open ends the request: the address drops `?ask=` and the page stays on the list.
-              onOpenSettled={opened => {
-                if (!opened) navigate(links.agenda(daemon), { replace: true });
-              }}
-              from={inboxSourceFromSearch(window.location.search)}
-              onClearFrom={() => navigate(links.agenda(daemon), { replace: true })}
-              onItemOpened={card => itemOpened.onOpened(card.daemonId, card.view.config.id, card.item.id)}
-              renderComposer={(card, answerForm) => (
-                <AgendaCardConversation answerForm={answerForm} card={card} daemon={daemon} inbox={inbox} />
-              )}
-            />
-          </AgendaInboxContext.Provider>
-        </AgendaClientContext.Provider>
-      </AgendaBoardProviders>
+      <AgendaClientContext.Provider value={runtime.client}>
+        <AgendaInboxContext.Provider value={inbox}>
+          {itemOpened.host}
+          <AgendaInboxPage
+            cardBoard={cardBoard}
+            inbox={inbox}
+            phone={phone}
+            clearPort={runtime.clearPort}
+            onNavigate={to => navigate(to)}
+            open={
+              asked?.target == null
+                ? null
+                : {
+                    daemonId: daemon,
+                    sessionId: MACHINE_AGENDA_ID,
+                    id: asked.target,
+                    settled: inbox.settled === true,
+                  }
+            }
+            // An ask that is no longer open ends the request: the address drops `?ask=` and the page stays on the list.
+            onOpenSettled={opened => {
+              if (!opened) navigate(links.agenda(daemon), { replace: true });
+            }}
+            from={inboxSourceFromSearch(window.location.search)}
+            onClearFrom={() => navigate(links.agenda(daemon), { replace: true })}
+            onItemOpened={card => itemOpened.onOpened(card.daemonId, card.view.config.id, card.item.id)}
+            renderComposer={(card, answerForm) => (
+              <AgendaCardConversation answerForm={answerForm} card={card} daemon={daemon} inbox={inbox} />
+            )}
+          />
+        </AgendaInboxContext.Provider>
+      </AgendaClientContext.Provider>
     );
   };
 }
