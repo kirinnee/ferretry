@@ -148,6 +148,15 @@ const activeCount = (existing: readonly NotificationDataLike[]): number =>
   );
 
 /**
+ * Whether a push's `eventKey` can be trusted to name ONE event, so that a match with a line already showing is a twin.
+ * It can only when the push is tagged and its key is not that tag: older daemons copied the notification TAG into the
+ * key, and a tag names the line a notification replaces, which distinct events share. An untagged push has no tag to
+ * compare against, so its key is not trusted either. The cost of distrust is a duplicate line, never a lost alert.
+ */
+const namesOneEvent = (shown: ShownPush): boolean =>
+  shown.eventKey !== undefined && shown.daemonTag !== undefined && shown.eventKey !== shown.daemonTag;
+
+/**
  * Merges one incoming push with whatever is already showing under the same tag. A genuinely newer line replaces the
  * entry silently and carries the latest words plus a "+N more" tail. The count merge applies to every kind but the
  * paired-device notice ({@link UNMERGED_KIND}), as v4's did for every push that carried a `sessionId`; a push with no
@@ -171,8 +180,7 @@ export const planNotificationPresentation = (
     if (existing.some(item => item.latestBody === shown.body)) return { action: 'skip' };
     return { action: 'show', body: shown.body, count: 1, data: data(1) };
   }
-  if (shown.eventKey !== undefined && existing.some(item => item.eventKey === shown.eventKey))
-    return { action: 'skip' };
+  if (namesOneEvent(shown) && existing.some(item => item.eventKey === shown.eventKey)) return { action: 'skip' };
   const merges = shown.kind !== undefined && shown.kind !== UNMERGED_KIND;
   const active = merges ? activeCount(existing) : 0;
   const count = active > 0 ? Math.max(shown.count, Math.min(MAX_GROUP_COUNT, active + 1)) : shown.count;

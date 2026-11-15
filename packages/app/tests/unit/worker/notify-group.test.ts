@@ -143,6 +143,14 @@ describe('S6 grouping', () => {
     expect((planNotificationPresentation(twin, [{ count: 2 }]) as { count: number }).count).toBe(3);
   });
 
+  test('S6 a key equal to the daemon tag names the line, not an event (an older daemon), so it never skips; nor does an untagged push', () => {
+    // older daemons copied the notification tag into the key: a distinct event under the same tag must still show
+    const older = shown({ eventKey: 'agenda-A3' });
+    expect(planNotificationPresentation(older, [{ count: 2, eventKey: 'agenda-A3' }]).action).toBe('show');
+    const untagged = shown({ tag: undefined, daemonTag: undefined, eventKey: 'k1' });
+    expect(planNotificationPresentation(untagged, [{ count: 2, eventKey: 'k1' }]).action).toBe('show');
+  });
+
   test('S6 the event key travels in the notification’s data, so the next push can be compared to it', () => {
     const plan = planNotificationPresentation(shown({ eventKey: 'k1' }), []) as { data: object };
     expect(plan.data).toEqual({ url: 'u', count: 1, latestBody: 'Latest', tag: 'agenda-A3', eventKey: 'k1' });

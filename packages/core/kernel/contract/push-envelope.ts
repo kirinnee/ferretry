@@ -91,7 +91,8 @@ function PushHintSchema(max: number) {
  * a kind-less show is never hidden by kind, no count is no grouping, no urgency is an ordinary push, a push with no
  * `eventKey` is never skipped as a twin, and one with no `sessionId` taps to its machine's home when its page is refused).
  *
- * `eventKey` names the EVENT (a repeat of the same event, such as a push service's re-delivery, carries the same key);
+ * `eventKey` names the EVENT (a repeat of the same event, such as a push service's re-delivery, carries the same key; it
+ * is never the `tag`, which names the line a notification replaces and which distinct events share);
  * `sessionId` names the conversation the push is about, so a tap whose page the shell refuses still lands there.
  */
 export const PushShowFields = {
