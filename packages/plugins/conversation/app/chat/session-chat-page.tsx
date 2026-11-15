@@ -42,7 +42,9 @@ import {
 import { ChatSearch, type ChatSearchPort } from '../search/chat-search.tsx';
 import { displayCallsign } from '../transcript/callsign.ts';
 import { sessionTurn, UNREAD_PANE } from '../transcript/session-activity.ts';
+import { aboveComposerProps } from './above-composer-props.ts';
 import { readHandoff } from './chat-reads.ts';
+import type { LedgerSendRecord } from './send-ledger.ts';
 import type { ChatWidthPreference } from '@ferretry/app';
 import { CompactionChip } from './compaction-card.tsx';
 import { HandoffSourceProvider } from './handoff-message.tsx';
@@ -89,6 +91,11 @@ export interface SessionChatPageProps {
    * null when it asks none. Absent: the chat has not read it yet, and the status alone decides the notice.
    */
   readonly question?: PendingQuestion | null;
+  /**
+   * The ferret's send ledger as the daemon answered it. Only each send's id and acceptance instant reach the
+   * `conversation.above-composer` slot (`ConversationAboveComposerProps.sends`), never its words. Absent: no sends.
+   */
+  readonly sends?: readonly LedgerSendRecord[];
   readonly canControl?: boolean;
   /**
    * A ready-to-read sentence, or null. Rendered VERBATIM and NOT as a live region: the chat screen owns the one
@@ -172,12 +179,16 @@ function CompactIssue({ sentence }: { readonly sentence: string }) {
   );
 }
 
+/** One shared empty ledger, so a page given none does not rebuild the slot's props on every render. */
+const NO_SENDS: readonly LedgerSendRecord[] = [];
+
 export function SessionChatPage({
   daemonId,
   session,
   entries,
   client,
   question: asked,
+  sends = NO_SENDS,
   canControl = true,
   refreshError = null,
   transcriptUnbound = false,
@@ -254,6 +265,21 @@ export function SessionChatPage({
   const busy = turn === 'working' || (turn === null && statusLive);
   const question = TERMINAL_STATUSES.has(session.state.status) ? null : (asked ?? null);
   const awaitingAnswer = question !== null || session.state.status === 'awaiting_question';
+  // What the slot above the composer is handed. `live`: this page's ferret was read from the daemon and the latest
+  // refresh did not fail, so a contributor never acts on an unread or stale turn.
+  const ended = TERMINAL_STATUSES.has(session.state.status);
+  const aboveComposer = useMemo(
+    () =>
+      aboveComposerProps({
+        session,
+        entries: shownEntries,
+        sends,
+        question,
+        ended,
+        live: !isUnread(session) && refreshError === null,
+      }),
+    [session, shownEntries, sends, question, ended, refreshError],
+  );
   // The ferret's own chat box gives way to the question's form (a typed message would not answer it). An agenda item's
   // reply box is not that box: it answers THE ITEM, through the Agenda's answer route, so a question the ferret is
   // waiting on never takes it away (the item is a card of that very question as often as not).
@@ -351,7 +377,12 @@ export function SessionChatPage({
       <div className="fy-chat-input" data-safe-bottom="" data-session-input="">
         <div className="fy-chat-input__column">
           {/* What the ferret is stopped on (Claude Code's permission and dialog cards): drawn by their plugin, above the composer. */}
-          <PanelSlot daemon={daemonId} slot={CONVERSATION_ABOVE_COMPOSER_SLOT} subject={ferretId} />
+          <PanelSlot
+            daemon={daemonId}
+            props={{ ...aboveComposer }}
+            slot={CONVERSATION_ABOVE_COMPOSER_SLOT}
+            subject={ferretId}
+          />
           {question !== null && canControl ? (
             <QuestionForm
               api={questionApi}
