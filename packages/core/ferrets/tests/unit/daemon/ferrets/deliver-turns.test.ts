@@ -17,7 +17,12 @@ import {
 } from '../../../../contract/index.ts';
 import { emptyChildEnvironment, FakeHarness, FakeRunner, fenced, T0 } from '../../../../contract/testing/index.ts';
 import { ferretsPort } from '../../../../daemon/lib/ferrets/port.ts';
-import { CONVERSATION_NOT_FOUND, FerretsService, type FerretsPorts } from '../../../../daemon/lib/ferrets/service.ts';
+import {
+  CONVERSATION_NOT_FOUND,
+  CONVERSATION_UNKNOWN,
+  FerretsService,
+  type FerretsPorts,
+} from '../../../../daemon/lib/ferrets/service.ts';
 import { FerretRegistry } from '../../../../daemon/lib/registry/registry.ts';
 import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
 import { SessionFiles } from '../../../../daemon/modules/session-files.ts';
@@ -1687,5 +1692,71 @@ describe('mig-harness-home a relaunch whose conversation the harness proves abse
     expect('hasConversation' in w.harness).toBe(false);
     expect((await revive(w, id)).ok).toBe(true);
     expect(w.harness.launched.at(-1)?.harnessConversation).toBe(`conv-${id}`);
+  });
+});
+
+describe('run 8: a relaunch with NO conversation to resume starts a new one and says so', () => {
+  /** A harness that, as Codex does, mints its conversation after launch and names none: the record never gets one. */
+  const codexLike = (w: World): string[] => {
+    const calls: string[] = [];
+    const start = w.harness.start.bind(w.harness);
+    w.harness.start = async (spec, runner, env) => {
+      calls.push('start');
+      const started = await start(spec, runner, env);
+      if (!started.ok) return started;
+      const { harnessConversation: _minted, ...unnamed } = started.value;
+      return ok(unnamed);
+    };
+    const resume = w.harness.resume.bind(w.harness);
+    w.harness.resume = async (spec, runner, env, conversation) => {
+      calls.push(`resume ${conversation}`);
+      return await resume(spec, runner, env, conversation);
+    };
+    return calls;
+  };
+
+  test('an autonomous ferret is told in its revive turn, and its history says the conversation was unknown', async () => {
+    // Proof run 8: akari (Codex, converted with no conversation id: v4 never found its rollout) was restarted with no
+    // conversation_not_found and no notice, so an autonomous agent silently forgot everything.
+    const w = await world();
+    const calls = codexLike(w);
+    const id = await started(w);
+    expect(w.registry.get(id as never)?.harnessConversation).toBeUndefined();
+    await w.service.stop(id as never, 'now');
+    const typed = w.runner.deliveries.length;
+
+    expect((await revive(w, id)).ok).toBe(true);
+
+    expect(calls).toEqual(['start', 'start']);
+    const text = w.runner.deliveries.slice(typed).map(delivery => delivery.delivery.text);
+    expect(text).toEqual([`${CONVERSATION_UNKNOWN} ${turnFileInstruction(turnFile(w, id, 1))}`]);
+    expect(w.history.filter(event => event.type === 'session.conversation_not_found')).toEqual([
+      { ferret: id, type: 'session.conversation_not_found', data: { unknown: true } },
+    ]);
+  });
+
+  test('an interactive ferret types nothing, but its history still says so; a first start says nothing', async () => {
+    const w = await world();
+    codexLike(w);
+    const id = await started(w, undefined, { options: { mode: 'interactive' } });
+    expect(w.history.some(event => event.type === 'session.conversation_not_found')).toBe(false);
+    await w.service.stop(id as never, 'now');
+
+    expect((await revive(w, id)).ok).toBe(true);
+
+    expect(w.runner.deliveries).toEqual([]);
+    expect(w.history.map(event => event.type)).toContain('session.conversation_not_found');
+  });
+
+  test('a ferret whose conversation is known and resumable is resumed with nothing extra said', async () => {
+    const w = await world();
+    const id = await started(w);
+    await w.service.stop(id as never, 'now');
+    const typed = w.runner.deliveries.length;
+    expect((await revive(w, id)).ok).toBe(true);
+    expect(w.runner.deliveries.slice(typed).map(delivery => delivery.delivery.text)).toEqual([
+      turnFileInstruction(turnFile(w, id, 1)),
+    ]);
+    expect(w.history.some(event => event.type === 'session.conversation_not_found')).toBe(false);
   });
 });
