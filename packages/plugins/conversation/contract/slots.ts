@@ -7,15 +7,17 @@
  *                                 are a tool row's shell calls whose WHOLE script is one plain command of a program named `fy`
  *                                 (no pipe, list, redirect, subshell or expansion), and their text answers; never another script or tool.
  *   - `conversation.row-actions`  in an assistant message's footer: Voice offers "Read aloud" on the message.
- *   - `conversation.above-composer` directly above the composer: Claude Code's permission and harness-dialog cards.
+ *   - `conversation.above-composer` directly above the composer: Claude Code's permission and harness-dialog cards, and
+ *                                 Voice's auto-read chip (it sees the rows, the turn, what the ferret waits on and the send ledger).
  */
 
 export const CONVERSATION_ROW_SLOT = 'conversation.row' as const;
 export const CONVERSATION_ROW_ACTIONS_SLOT = 'conversation.row-actions' as const;
 /**
  * Directly above the composer, in the chat: the cards of what the ferret is stopped on (Claude Code's permission prompt
- * and harness dialog). The chat mounts every panel contributed here once, with the ferret as its `subject` and no other
- * prop; a panel draws nothing when the ferret is stopped on nothing.
+ * and harness dialog), and what a chat-level reader needs (Voice's auto-read). The chat mounts every panel contributed
+ * here once, with the ferret as its `subject` and {@link ConversationAboveComposerProps} as its props; a panel draws
+ * nothing when the ferret is stopped on nothing.
  */
 export const CONVERSATION_ABOVE_COMPOSER_SLOT = 'conversation.above-composer' as const;
 
@@ -40,6 +42,14 @@ export interface ConversationRowEntry {
   /** Epoch milliseconds of the row's first record, when known. */
   readonly at?: number;
   readonly label?: string;
+  /**
+   * The delivered send a `user` row IS (the transcript's own join to the daemon's send ledger): the exact proof of which
+   * row a send became, for a contributor that follows a send's reply. Only the id; the ledger record stays inside
+   * Conversation. Absent on a row that is no delivered send.
+   */
+  readonly send?: { readonly sendId: string };
+  /** True on a `user` row another ferret sent (a peer), not the person: it is never the person's own message. */
+  readonly peer?: true;
   /**
    * A `tool` row's shell calls whose whole script is exactly one plain command of a program named `fy`, and what they
    * printed, for a contributor that reads what a ferret asked of it (Packs draws the helpers a ferret started). Only a
@@ -74,6 +84,71 @@ export const ROW_TOOL_TEXT_LIMIT = 100_000;
 /** The props every panel in a Conversation slot receives, beside its `subject` (the ferret). */
 export interface ConversationRowProps {
   readonly entry: ConversationRowEntry;
+}
+
+/** What a ferret is stopped on, as one choice offered it: only its words. */
+export interface ConversationPromptOption {
+  readonly label?: string;
+}
+
+/**
+ * What parks a turn on the person, as plain READ-ONLY data (nothing here can answer or choose anything), for a
+ * contributor that says it aloud. Each part is absent when the ferret is stopped on no such thing, and every part is
+ * absent once the ferret has ended. The words are the daemon's redacted reading.
+ */
+export interface ConversationNeedsInput {
+  /** The question the ferret asked. */
+  readonly question?: {
+    readonly questions?: readonly {
+      readonly question?: string;
+      readonly multiSelect?: boolean;
+      readonly options?: readonly ConversationPromptOption[];
+    }[];
+  };
+  /** The tool-permission prompt its pane is parked on. */
+  readonly permissionRequest?: {
+    readonly tool?: string;
+    readonly question?: string;
+    readonly options?: readonly ConversationPromptOption[];
+  };
+  /** The harness's own dialog (hooks to review, a sign-in). */
+  readonly harnessDialog?: { readonly title?: string; readonly options?: readonly ConversationPromptOption[] };
+  /** The daemon's one-line reason, when it has nothing richer. */
+  readonly turnPrompt?: string;
+}
+
+/** A send as far as a contributor may rely on it: its id and when the DAEMON accepted it. Never the message's words. */
+export interface ConversationSendAcceptance {
+  readonly sendId: string;
+  /** ISO instant on the daemon's clock. */
+  readonly acceptedAt: string;
+}
+
+/**
+ * The props every panel in `conversation.above-composer` receives, beside its `subject` (the ferret). Additive: a panel
+ * that reads none of them (Claude Code's permission and dialog cards) is untouched.
+ *
+ * Nothing leaves Conversation beyond these: no outbox or device-only row (the row rule of `ConversationRowEntry`), no
+ * message text of a send (a row's words are the daemon's redacted reading; a send is only its id and instant), no
+ * attachment, no pack or sent-message record.
+ */
+export interface ConversationAboveComposerProps {
+  /** The transcript rows on screen, in the same redacted shape the row slots get. */
+  readonly rows: readonly ConversationRowEntry[];
+  /**
+   * Whose turn it is. `state` is the daemon's `turnState` and `at` its `turnStateAt`; `state` is null for a ferret whose
+   * daemon names none. `live` is true ONLY while the chat's last read of the ferret came back from the daemon and
+   * nothing has failed since: a ferret not yet read, or whose latest refresh failed, is not live, so a contributor
+   * never acts on a cached or unread turn.
+   */
+  readonly turn: {
+    readonly state: 'working' | 'your-turn' | 'needs-input' | null;
+    readonly at?: string;
+    readonly live: boolean;
+  };
+  readonly needsInput: ConversationNeedsInput;
+  /** The daemon's send ledger for this ferret, oldest accepted first. */
+  readonly sends: readonly ConversationSendAcceptance[];
 }
 
 /** The slot the composer's context row offers (Voice's dictation, Conversation's attachments, Usage's quota). */

@@ -18,6 +18,7 @@ import { gateAuditSink } from './adapters/gate-audit.ts';
 import { workFolderOf } from './adapters/pending-reads.ts';
 import { machineName } from './adapters/host.ts';
 import { PhoneApprovalAuditAdapter } from './adapters/phone-approval/audit.ts';
+import { AsksPhoneApprovalNotifier } from './adapters/phone-approval/notifier.ts';
 import { AccessPhoneApprovalPush } from './adapters/phone-approval/push.ts';
 import { VaultPhoneLooks } from './adapters/phone-approval/vault-reach.ts';
 import { accountSecurity } from './adapters/access-security.ts';
@@ -195,6 +196,8 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     observer: looks,
     asks: new PhoneApprovalAsksAdapter(ctx.needs.asks),
     push: new AccessPhoneApprovalPush(ctx.uses.access),
+    // "Not me" reaches the ferret's terminal through Asks' `tell`, which the view handed to Accounts carries.
+    notifier: new AsksPhoneApprovalNotifier(ctx.needs.asks),
     audit: new PhoneApprovalAuditAdapter(audit),
     clock,
     timers: { after: async ms => await kernel.clock.sleep(milliseconds(ms)) },

@@ -13,11 +13,14 @@ import { fakeLoginChanges, fakeLogins } from '@ferretry/plugin-logins/contract/t
 import should from 'should';
 import { RuntimesLaunchFailed } from '../../../contract/index.ts';
 import { type RuntimesAssembly, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
-import { CODEX_OFFLINE_LAUNCH_ERROR } from '../../../contract/codex-launch.ts';
+import { CODEX_OFFLINE_LAUNCH_ERROR, codexLaunchFailure } from '../../../contract/codex-launch.ts';
 import type { CodexAppServerOutcome } from '../../../daemon/lib/service/codex-runtime.ts';
 import { RuntimeEndSupervision, type RuntimeEndSeams } from '../../../daemon/lib/service/runtime-end-supervision.ts';
 
-const OFFLINE_PANE = 'Error: JSON-RPC error: workspace routing discovery failed (connect ENETUNREACH)';
+// The sentence the Codex harness hands Ferrets for a pane showing this, which Ferrets records on the stopped ferret.
+const EXPLAINED = codexLaunchFailure(
+  'Error: JSON-RPC error: workspace routing discovery failed (connect ENETUNREACH)',
+) as string;
 const stopped: CodexAppServerOutcome = { kind: 'stopped', home: '/fy/fleet/homes/codex-work', pids: [11, 12] };
 
 interface Calls {
@@ -25,7 +28,7 @@ interface Calls {
   readonly told: { ferret: string; runtime: string; message: string }[];
 }
 
-function seams(calls: Calls, pane: string | undefined = OFFLINE_PANE): RuntimeEndSeams {
+function seams(calls: Calls): RuntimeEndSeams {
   return {
     supervisor: {
       afterSessionEnded: async wrapper => {
@@ -34,15 +37,14 @@ function seams(calls: Calls, pane: string | undefined = OFFLINE_PANE): RuntimeEn
       },
     },
     wrapperOf: async runtime => (runtime === 'codex-work' ? '/fy/fleet/bin/codex-work' : undefined),
-    ...(pane === undefined ? {} : { paneText: async () => pane }),
   };
 }
 
-function reactor(ferrets: FakeFerrets, options: { readonly pane?: string; readonly none?: boolean } = {}) {
+function reactor(ferrets: FakeFerrets, options: { readonly none?: boolean } = {}) {
   const calls: Calls = { ended: [], told: [] };
   const supervision = new RuntimeEndSupervision({
     ferrets,
-    seams: options.none === true ? undefined : seams(calls, options.pane),
+    seams: options.none === true ? undefined : seams(calls),
     launchFailed: failure => calls.told.push({ ...failure }),
   });
   return { calls, supervision };
@@ -125,7 +127,7 @@ describe('Runtimes follows an ended ferret', () => {
       harness: 'codex',
       runtime: 'codex-work',
       state: 'stopped',
-      cause: { kind: 'start_failed' },
+      cause: { kind: 'start_failed', explained: EXPLAINED },
     });
     const { calls, supervision } = reactor(ferrets);
 
@@ -139,8 +141,8 @@ describe('Runtimes follows an ended ferret', () => {
     should(calls.told[0]?.message).not.containEql('ENETUNREACH');
   });
 
-  it('should say nothing about a failed launch whose pane does not show the offline failure', async () => {
-    // Arrange
+  it('should say nothing about a failed launch the harness had no sentence for', async () => {
+    // Arrange: Ferrets recorded the failure, but the harness did not recognise the screen (no `explained`).
     const ferrets = new FakeFerrets();
     add(ferrets, {
       id: 'c1',
@@ -149,21 +151,14 @@ describe('Runtimes follows an ended ferret', () => {
       state: 'stopped',
       cause: { kind: 'start_failed' },
     });
-    const other = reactor(ferrets, { pane: 'error: unrecognised option' });
-    const blind = reactor(ferrets, {});
-    const unreadable = new RuntimeEndSupervision({
-      ferrets,
-      seams: { ...seams(blind.calls), paneText: async () => Promise.reject(new Error('pane gone')) },
-      launchFailed: failure => blind.calls.told.push({ ...failure }),
-    });
+    const { calls, supervision } = reactor(ferrets);
 
     // Act
-    await other.supervision.onChanged({ ferret: 'c1', state: 'stopped' });
-    await unreadable.onChanged({ ferret: 'c1', state: 'stopped' });
+    await supervision.onChanged({ ferret: 'c1', state: 'stopped' });
 
-    // Assert
-    should(other.calls.told).deepEqual([]);
-    should(blind.calls.told).deepEqual([]);
+    // Assert — the pair is still stopped, and nobody is told.
+    should(calls.ended).deepEqual(['/fy/fleet/bin/codex-work']);
+    should(calls.told).deepEqual([]);
   });
 
   it('should not fail the ending when the supervisor throws or the host offers no seams', async () => {
@@ -211,7 +206,7 @@ describe('the Runtimes daemon, booted with Ferrets and no other plugin', () => {
       harness: 'codex',
       runtime: 'codex-work',
       state: 'stopped',
-      cause: { kind: 'start_failed' },
+      cause: { kind: 'start_failed', explained: EXPLAINED },
     });
     add(ferrets, {
       id: 'a1',
