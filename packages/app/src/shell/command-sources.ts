@@ -191,6 +191,13 @@ export interface PluginCommandContext {
   readonly ferret?: string;
   /** Asks the bar to list again: an answer the source was waiting for has arrived. */
   readonly changed: () => void;
+  /**
+   * The value the one provider of app hook `name` gives on this daemon (`useAppHook`'s answer, for a source that is not
+   * a React component), or `undefined`: no provider, two, or one not allowed there yet. Asked at listing time, so a
+   * provider that becomes allowed later is read on the next listing. The source narrows what it gets before it reads it.
+   * Absent in a harness that has no shell.
+   */
+  readonly appHook?: (name: string) => unknown;
 }
 
 /**
@@ -229,6 +236,7 @@ export function buildPluginCommandSources(input: {
   readonly screenHref: ScreenHrefOf;
   readonly changed: () => void;
   readonly ferret?: string | undefined;
+  readonly appHook?: ((name: string) => unknown) | undefined;
 }): readonly CommandBarSource[] {
   return pluginCommandSources(input.surfaces).flatMap(({ plugin, source }) => {
     const client = input.clientOf(plugin);
@@ -241,6 +249,7 @@ export function buildPluginCommandSources(input: {
         screenHref: input.screenHref,
         changed: input.changed,
         ...(input.ferret === undefined ? {} : { ferret: input.ferret }),
+        ...(input.appHook === undefined ? {} : { appHook: input.appHook }),
       });
       return isSourceList(built) ? built : [built];
     } catch {

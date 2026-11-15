@@ -1,11 +1,13 @@
 /** mcp#1 — the Actions ▾ row "Add MCP server…", offered through Ferrets' `ferrets.actions-row` slot, and the panel's Add… link. */
 import type { FC } from 'react';
 import { afterEach, describe, expect, it } from 'bun:test';
+import { FerretWorkspaceActionsProvider } from '@ferretry/app';
 import type { ActionsRowOffer } from '@ferretry/core-ferrets/contract';
 import { type Mounted, must } from '@ferretry/app/testing';
 import { AddMcpDialog } from '../../../app/views/add-mcp-dialog.tsx';
 import { createAddMcpRowPanel } from '../../../app/views/add-mcp-row.tsx';
 import { McpServersPanel } from '../../../app/views/servers-panel.tsx';
+import { createSurfaces } from '../../../app/views/surfaces.tsx';
 import { MCP, NOW, scriptedClient } from './mcp-fixtures.ts';
 import { click, mountSettled, settle, type } from './mcp-view-support.tsx';
 
@@ -85,6 +87,39 @@ describe('mcp#0 the panel’s Add… link', () => {
     await click(document.body, '[data-add-mcp-dialog] header button');
     expect(document.body.querySelector('[data-add-mcp-dialog]')).toBeNull();
     expect(reads()).toBe(before + 1);
+  });
+});
+
+describe('mcp#0 the panel hides Add… from a caller who may not control the ferret', () => {
+  it('offers no Add… and opens no form when canControl is false', async () => {
+    const client = scriptedClient({ 'GET /v1/ferrets/:ferretId/mcp/servers': MCP, [LISTING]: { project: null } });
+    mounted = await mountSettled(
+      <McpServersPanel canControl={false} client={client} ferretId="f1" now={() => NOW} searchDebounceMs={0} />,
+    );
+    expect(mounted.container.querySelector('[data-mcp-panel]')).not.toBeNull();
+    expect(mounted.container.querySelector('[data-mcp-add]')).toBeNull();
+    expect(document.body.querySelector('[data-add-mcp-dialog]')).toBeNull();
+  });
+
+  it('reads canControl from the ferret workspace the panel sits in, and offers Add… outside one', async () => {
+    const surfaces = createSurfaces(scriptedClient({ 'GET /v1/ferrets/:ferretId/mcp/servers': MCP }) as never);
+    const Panel = surfaces.panels['mcp-servers'] as unknown as FC<{ subject?: string }>;
+    const inside = (canControl: boolean) => (
+      <FerretWorkspaceActionsProvider canControl={canControl} daemon="d1" ferret="f1" showPanel={() => undefined}>
+        <Panel subject="f1" />
+      </FerretWorkspaceActionsProvider>
+    );
+    mounted = await mountSettled(inside(false));
+    expect(mounted.container.querySelector('[data-mcp-add]')).toBeNull();
+    await unmount();
+    mounted = await mountSettled(inside(true));
+    expect(mounted.container.querySelector('[data-mcp-add]')).not.toBeNull();
+    await unmount();
+    mounted = await mountSettled(<Panel subject="f1" />);
+    expect(mounted.container.querySelector('[data-mcp-add]')).not.toBeNull();
+    await unmount();
+    mounted = await mountSettled(<Panel />);
+    expect(mounted.container.textContent).toContain('Pick a ferret');
   });
 });
 

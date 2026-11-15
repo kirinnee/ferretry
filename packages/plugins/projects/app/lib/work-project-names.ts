@@ -19,3 +19,54 @@ export const workProjectNames = (
 
 export const readWorkProjectNames = async (client: ProjectsClient): Promise<ReadonlyMap<string, string>> =>
   workProjectNames(BoardProjectNamesSchema.parse(await client.call(BOARD_PROJECTS_ROUTE)).projects);
+
+/**
+ * `conversation.work-project-names` (Conversation's app hook): the project names, read ONCE and kept. The first ask for
+ * the names starts the one read, so a machine whose work search is never opened is never asked; a listing after that
+ * fetches nothing. A read that fails (Board off, refused) leaves the map empty and is not repeated: the search then
+ * shows what it shows without a name, never a guess.
+ */
+export const workProjectNamesList = (
+  client: ProjectsClient,
+): {
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly settled: () => boolean;
+  readonly names: () => ReadonlyMap<string, string>;
+} => {
+  let known: ReadonlyMap<string, string> = new Map();
+  let started = false;
+  let settled = false;
+  const listeners = new Set<() => void>();
+  /** The read is over: nobody is kept, since it never speaks again. Returns whoever was waiting. */
+  const settle = (): readonly (() => void)[] => {
+    settled = true;
+    const waiting = [...listeners];
+    listeners.clear();
+    return waiting;
+  };
+  return {
+    // A listener added once the read is over would wait for nothing, so it is not kept.
+    subscribe: listener => {
+      if (settled) return () => undefined;
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    settled: () => settled,
+    names: () => {
+      if (!started) {
+        started = true;
+        readWorkProjectNames(client).then(
+          read => {
+            known = read;
+            for (const listener of settle()) listener();
+          },
+          // A failed read is not repeated and says nothing: the waiting are let go without being told.
+          () => void settle(),
+        );
+      }
+      return known;
+    },
+  };
+};

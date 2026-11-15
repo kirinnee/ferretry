@@ -430,7 +430,11 @@ export function SessionChatPage({
             >
               {header}
               {/* The chat and the `ferret.side` panels: side by side wide; on a phone one at a time behind chips and "+". */}
-              {embedded ? chat : <FerretWorkspace chat={chat} daemon={daemonId} subject={ferretId} />}
+              {embedded ? (
+                chat
+              ) : (
+                <FerretWorkspace canControl={canControl} chat={chat} daemon={daemonId} subject={ferretId} />
+              )}
             </main>
           </RowSlotProvider>
         </AttachmentGalleryProvider>

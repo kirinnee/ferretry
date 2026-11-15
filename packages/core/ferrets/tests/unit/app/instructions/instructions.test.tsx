@@ -167,6 +167,7 @@ describe('S-0075 an Instructions row also brings Files on screen (a phone shows 
     const Instructions = createInstructionsPanel(client) as FunctionComponent<PanelProps>;
     mounted = await mount(
       <FerretWorkspaceActionsProvider
+        canControl
         daemon={workspace.daemon}
         ferret={workspace.ferret}
         showPanel={id => asked.push(id)}
