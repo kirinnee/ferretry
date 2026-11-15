@@ -11,6 +11,7 @@ import type { SessionCutOffMark } from '../tokens/cut-off-mark.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../protocol/agent-address.ts';
 import {
   type FerretBirth,
+  DAEMON_ORIGIN,
   LaunchRefusal,
   type LaunchOrigin,
   birthOf,
@@ -330,14 +331,8 @@ const loginEnvAllowed = (name: string): boolean => !LOGIN_ENV_RESERVED.has(name)
  * delivery's own wait, because typing into an idle prompt as if it were a queue is the worse mistake.
  */
 function midTurn(look: RunnerLook | undefined): boolean {
-  return (
-    look !== undefined &&
-    look.working &&
-    !look.atPrompt &&
-    !look.permission &&
-    look.prompt === undefined &&
-    look.dialog === undefined
-  );
+  if (look === undefined) return false;
+  return look.working && !look.atPrompt && !look.permission && look.prompt === undefined && look.dialog === undefined;
 }
 
 /**
@@ -639,6 +634,11 @@ export interface ServiceResumeOptions extends Omit<ResumeOptions, 'actor'> {
    * through the ordinary launch (new token, harness home, environment). Only a move sets it.
    */
   readonly replaceLiveTerminal?: boolean;
+  /**
+   * The caller delivers the ferret's turn itself (the lifecycle's first turn): the relaunch invents none, writes no
+   * revive document and records no `session.resumed` (the lifecycle journals its own events).
+   */
+  readonly noTurn?: true;
   /**
    * The runtime, login and harness the relaunch is on, written onto the ferret's record before it launches (the record is
    * their one owner), so the start gate and the launch both see the target and never the previous runtime.
@@ -1142,7 +1142,11 @@ export class FerretsService implements FerretsApi {
     return await this.serial.run(ferret, () => this.stopHeld(ferret, how, reason, cause));
   }
 
-  private async stopHeld(
+  /**
+   * A stop for a caller that ALREADY HOLDS this ferret's key on the shared queue (the lifecycle's stop does): the same
+   * stop {@link stop} makes, minus acquiring the key it would otherwise wait on forever.
+   */
+  async stopHeld(
     ferret: FerretId,
     how: 'polite' | 'now',
     reason: string | undefined,
@@ -1284,6 +1288,20 @@ export class FerretsService implements FerretsApi {
     });
   }
 
+  /**
+   * A launch for a caller that ALREADY HOLDS this ferret's key on the shared queue (the lifecycle's start does): the
+   * relaunch {@link resume} makes with NO turn (the lifecycle types its own), as the DAEMON (so the fence follows the
+   * record's own birth), and with NO restore authority. A ferret the owner cut off is refused here, whatever else says it may launch; only a confirmed
+   * owner {@link resume} clears a cut-off. A ferret the registry does not hold is refused, never made.
+   */
+  async launchHeld(ferret: FerretId): Promise<Result<FerretId, StartFailure>> {
+    await this.ports.ready?.();
+    this.requireTokens();
+    if (await this.isCutOff(ferret))
+      return failed('refused', 'the owner cut off this ferret; a confirmed owner resume is required');
+    return await this.resumeHeld(ferret, undefined, { origin: DAEMON_ORIGIN, noTurn: true });
+  }
+
   private async resumeHeld(
     ferret: FerretId,
     message: string | undefined,
@@ -1364,14 +1382,16 @@ export class FerretsService implements FerretsApi {
       undefined,
       record.harnessConversation,
       'resume',
-      {
-        ...(message === undefined ? {} : { message }),
-        mode: starting.mode ?? 'auto',
-        ...(author === undefined ? {} : { by: author }),
-      },
+      options.noTurn === true
+        ? undefined
+        : {
+            ...(message === undefined ? {} : { message }),
+            mode: starting.mode ?? 'auto',
+            ...(author === undefined ? {} : { by: author }),
+          },
       { carried: options.onCarried, bound: bound.value },
     );
-    if (resumed.ok) {
+    if (resumed.ok && options.noTurn !== true) {
       const text = message?.trim();
       await this.ports.history?.(ferret, 'session.resumed', {
         ...(text === undefined || text === '' ? {} : { message: text }),

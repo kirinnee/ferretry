@@ -75,6 +75,18 @@ describe('the saved logins Accounts offers the Vault’s input card', () => {
     should(w.asked).eql(['s1']);
   });
 
+  it('should hand the Vault the grants it was built with, and none when it was built with none', () => {
+    const grants = { enabled: () => true } as never;
+    const index = new MemoryLoginIndex();
+    const sealed = new CountingSealed();
+    const cipher = new FakeSecretCipher();
+    const logins = new LoginDirectory(index, sealed, cipher, CLOCK);
+    const choice = { of: async () => ({}) };
+
+    should(new AccountsSavedLogins({ logins, choice, grants }).grants()).equal(grants);
+    should(new AccountsSavedLogins({ logins, choice }).grants()).equal(undefined);
+  });
+
   it('should refuse a value when it keeps none, and an id or role that is not one, naming no value', async () => {
     const none = world({ vault: false });
     const w = world();
