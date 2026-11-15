@@ -3,8 +3,9 @@ import { join } from 'node:path';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type { FerretId, FerretTurns } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
-import type { StatePort } from '@ferretry/kernel/contract';
-import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
+import { ferretStanding } from '@ferretry/core-gate/contract/testing';
+import type { CallStanding, RouteHandler, StatePort } from '@ferretry/kernel/contract';
+import { ferret as ferretCaller, fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import type { Instant } from '@ferretry/std';
 import { CONVERSATION_STATE, ConversationPort } from '../../../contract/index.ts';
 import daemon from '../../../daemon/index.ts';
@@ -65,6 +66,11 @@ async function world(setup: (ferrets: TurnsFerrets) => void = () => undefined) {
   const inner = memoryStatePort(CONVERSATION_STATE);
   const { port: state, broken } = breakable(inner);
   const built: { half?: ReturnType<NonNullable<typeof daemon.build>> } = {};
+  /**
+   * The standing Gate stamps on a compact-at call. The test host's stand-in admission stamps no credential or actor, so the
+   * two routes are wrapped to carry Gate's own (`ferretStanding`) and the mount reads who is calling as it does in production.
+   */
+  const caller: { standing?: CallStanding } = {};
   const implementation = {
     ...daemon,
     build: (ctx: Parameters<NonNullable<typeof daemon.build>>[0]) => {
@@ -72,7 +78,17 @@ async function world(setup: (ferrets: TurnsFerrets) => void = () => undefined) {
       if (build === undefined) throw new Error('the conversation daemon half has no build');
       const half = build({ ...ctx, kernel: { ...ctx.kernel, state } });
       built.half = half;
-      return half;
+      const routes = half.routes as Readonly<Record<string, RouteHandler | undefined>>;
+      const stamped = Object.fromEntries(
+        ['GET', 'PATCH'].map(method => {
+          const key = `${method} /v1/ferrets/:ferretId/compact-at`;
+          const handler = routes[key];
+          if (handler === undefined) throw new Error(`the conversation daemon half serves no ${key} route`);
+          const wrapped: RouteHandler = async call => await handler({ ...call, ...caller.standing } as typeof call);
+          return [key, wrapped];
+        }),
+      );
+      return { ...half, routes: { ...routes, ...stamped } } as typeof half;
     },
   } as typeof daemon;
   const host = await testHost({
@@ -100,7 +116,7 @@ async function world(setup: (ferrets: TurnsFerrets) => void = () => undefined) {
         revision: 1,
       },
     });
-  return { host, ferrets, api, warden, state: inner, broken, built, waiting };
+  return { host, ferrets, api, warden, state: inner, broken, built, waiting, caller };
 }
 
 const route = (
@@ -185,13 +201,148 @@ describe('the queue, through the port and its routes', () => {
   });
 });
 
-describe('what needs the ferret’s terminal and has none says so', () => {
-  test('a retry and a compact-at change are refused with the sentence for a terminal that is not connected', async () => {
-    const { host, api } = await world();
+describe('c58-16 the compact-at setting is read and written through Ferrets', () => {
+  const PATH = '/v1/ferrets/f1/compact-at';
 
-    for (const refused of [await api().retrySend(F1, 's-1'), await api().setCompactAt(F1, {} as never)])
-      expect(refused).toMatchObject({ ok: false, error: { code: 'conversation_terminal_unavailable' } });
-    expect(await api().compactAt(F1)).toBeUndefined();
+  test('a change is recorded by Ferrets, worded for a running ferret, and read back as the ferret’s own value', async () => {
+    const { host, ferrets, api } = await world();
+
+    expect(await api().compactAt(F1)).toEqual({
+      effective: 'auto',
+      restartRequired: false,
+      note: 'Memory is compacted at the harness’s own trigger (Auto).',
+    });
+    const set = await api().setCompactAt(F1, { compactAt: 250_000 });
+
+    expect(set).toMatchObject({ ok: true, value: { effective: 250_000, restartRequired: true } });
+    expect(await ferrets.compactAt(F1)).toBe(250_000);
+    expect(await api().compactAt(F1)).toMatchObject({ own: 250_000, effective: 250_000 });
+
+    const inherited = await api().setCompactAt(F1, { compactAt: 'inherit' });
+    expect(inherited).toMatchObject({ ok: true, value: { effective: 'auto' } });
+    expect(await ferrets.compactAt(F1)).toBeUndefined();
+    await host.stop();
+  });
+
+  test('the routes answer the same: GET reads it, PATCH sets it and says a running ferret restarts for it', async () => {
+    const { host, ferrets } = await world();
+
+    const patched = await host.request('PATCH', PATH, { as: owner(), body: { compactAt: 400_000 } });
+    const read = await host.request('GET', PATH, { as: owner() });
+
+    expect(patched.status).toBe(200);
+    expect(patched.json()).toMatchObject({ effective: 400_000, restartRequired: true });
+    expect(read.json()).toMatchObject({ own: 400_000, effective: 400_000 });
+    expect(await ferrets.compactAt(F1)).toBe(400_000);
+    await host.stop();
+  });
+
+  test('a ferret nobody knows has no setting; a value under the floor and a stopped ferret are answered in their own words', async () => {
+    const { host, ferrets, api } = await world();
+    ferrets.add({ id: ferretId('f2'), state: 'stopped' });
+
+    expect(await api().compactAt(ferretId('nobody'))).toBeUndefined();
+    expect(await api().setCompactAt(ferretId('nobody'), { compactAt: 200_000 })).toMatchObject({
+      ok: false,
+      error: { code: 'not-found' },
+    });
+    expect(await api().setCompactAt(F1, { compactAt: 99_999 })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_compact_at' },
+    });
+    expect(await ferrets.compactAt(F1)).toBeUndefined();
+    const stopped = await api().setCompactAt(ferretId('f2'), { compactAt: 300_000 });
+    expect(stopped).toMatchObject({ ok: true, value: { restartRequired: false } });
+    expect(stopped.ok && stopped.value.note).toContain('not running');
+    const route = await host.request('PATCH', '/v1/ferrets/nobody/compact-at', {
+      as: owner(),
+      body: { compactAt: 200_000 },
+    });
+    expect(route.status).toBe(404);
+    await host.stop();
+  });
+
+  test('a Ferrets that cannot record one is 503 and its refusal is carried; a failure nobody worded is not made into a refusal', async () => {
+    const bare = await world(ferrets => {
+      (ferrets as { setCompactAt?: unknown }).setCompactAt = undefined;
+    });
+
+    expect(await bare.api().setCompactAt(F1, { compactAt: 200_000 })).toMatchObject({
+      ok: false,
+      error: { code: 'plugin_unavailable' },
+    });
+    const route = await bare.host.request('PATCH', PATH, { as: owner(), body: { compactAt: 200_000 } });
+    expect(route.status).toBe(503);
+    await bare.host.stop();
+
+    const broken = await world(ferrets => {
+      ferrets.setCompactAt = async () => {
+        throw new TypeError('FIXTURE_SECRET the disk is gone');
+      };
+    });
+    await expect(broken.api().setCompactAt(F1, { compactAt: 200_000 })).rejects.toThrow('FIXTURE_SECRET');
+    await broken.host.stop();
+
+    const unreadable = await world(ferrets => {
+      ferrets.compactAt = async () => {
+        throw new TypeError('FIXTURE_SECRET the document is gone');
+      };
+    });
+    await expect(unreadable.api().compactAt(F1)).rejects.toThrow('FIXTURE_SECRET');
+    await unreadable.host.stop();
+  });
+
+  test('a ferret outside the target’s tree is refused on GET and PATCH and the setting is never read or written; the ferret itself, its lead and a person keep their standing', async () => {
+    const reads: (FerretId | undefined)[] = [];
+    const writes: (FerretId | undefined)[] = [];
+    const { host, ferrets, caller } = await world(f => {
+      f.add({ id: ferretId('h1'), parent: F1, state: 'idle' });
+      f.add({ id: ferretId('s9'), state: 'idle' });
+      const read = f.compactAt.bind(f);
+      const write = f.setCompactAt.bind(f);
+      f.compactAt = async (ferret, by) => {
+        reads.push(by);
+        return await read(ferret, by);
+      };
+      f.setCompactAt = async (ferret, value, by) => {
+        writes.push(by);
+        return await write(ferret, value, by);
+      };
+    });
+    /** A call as that ferret: Gate's standing for the mount, the test host's admission for the route's minimum. */
+    const as = (id: string) => {
+      caller.standing = ferretStanding(ferretId(id));
+      return ferretCaller(id);
+    };
+    const asOwner = () => {
+      caller.standing = undefined;
+      return owner();
+    };
+
+    // A stranger (no lineage to f1) is refused both ways, and the value it tried to set is not recorded.
+    const strangerPatch = await host.request('PATCH', PATH, { as: as('s9'), body: { compactAt: 111_000 } });
+    const strangerGet = await host.request('GET', PATH, { as: as('s9') });
+    expect([strangerPatch.status, strangerGet.status]).toEqual([403, 403]);
+    expect(writes).toEqual([]);
+    expect(await ferrets.compactAt(F1)).toBeUndefined();
+    // The helper of f1 reaches only itself and ITS helpers, never its lead.
+    expect((await host.request('PATCH', PATH, { as: as('h1'), body: { compactAt: 111_000 } })).status).toBe(403);
+    expect(writes).toEqual([]);
+
+    // The ferret itself, its lead (of the helper), and an owner call succeed; the owner's reaches Ferrets with no caller.
+    const self = await host.request('PATCH', PATH, { as: as('f1'), body: { compactAt: 200_000 } });
+    expect(self.status).toBe(200);
+    expect((await host.request('GET', PATH, { as: as('f1') })).json()).toMatchObject({ own: 200_000 });
+    const lead = await host.request('PATCH', '/v1/ferrets/h1/compact-at', {
+      as: as('f1'),
+      body: { compactAt: 300_000 },
+    });
+    expect(lead.status).toBe(200);
+    const person = await host.request('PATCH', PATH, { as: asOwner(), body: { compactAt: 400_000 } });
+    expect(person.status).toBe(200);
+    expect((await host.request('GET', PATH, { as: asOwner() })).json()).toMatchObject({ own: 400_000 });
+    expect(writes).toEqual([F1, F1, undefined]);
+    expect(reads.at(-1)).toBeUndefined();
     await host.stop();
   });
 

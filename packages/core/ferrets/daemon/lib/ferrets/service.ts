@@ -76,6 +76,7 @@ import type {
   StartOptions,
   StartRequest,
 } from '../../../contract/index.ts';
+import { type CompactAt, CompactAtSchema } from '../../../contract/view/compact-at.ts';
 import { claimStartName, displayAgentName, type SessionNameClaims } from '../names/session-names.ts';
 import { normalizeCallsign } from '../names/policy.ts';
 import type { NameAllocationErrorCode } from '../names/types.ts';
@@ -405,6 +406,11 @@ export interface FerretSessionPort {
    * when it recorded none or the document is unreadable (the launch then follows the start options, then the login).
    */
   compactAt?(ferret: FerretId): Promise<'auto' | number | undefined>;
+  /**
+   * Records (or, for `undefined`, drops) the ferret's own compaction choice in its session config, keeping every other field
+   * and writing atomically. The value reaching it has already been parsed by the service.
+   */
+  setCompactAt?(ferret: FerretId, value: 'auto' | number | undefined): Promise<void>;
   /**
    * Additive (U4): where Claude Code's question hook records the question it is asking, inside THIS ferret's own session
    * folder (`question-asked.json`, today's `SessionPaths.questionAsked`), handed to the pane as `FY_QUESTION_FILE`.
@@ -1902,6 +1908,49 @@ export class FerretsService implements FerretsApi {
     if (this.registry.get(ferret) === undefined) return undefined;
     this.requireMayTouch(caller, ferret);
     return (await this.ports.promptState?.(ferret).catch(() => undefined)) ?? {};
+  }
+
+  /**
+   * A ferret's OWN compaction trigger (`FerretsApi.compactAt`): its session config's, else the one its start asked.
+   * `undefined` for a ferret this daemon does not know or one that follows its login. The same `mayTouch` rule as `harness`.
+   */
+  async compactAt(ferret: FerretId, caller?: FerretId): Promise<CompactAt | undefined> {
+    await this.ports.ready?.();
+    if (this.registry.get(ferret) === undefined) return undefined;
+    this.requireMayTouch(caller, ferret);
+    return (
+      (await this.ports.session?.compactAt?.(ferret).catch(() => undefined)) ??
+      this.registry.detailsOf(ferret)?.options?.compactAt
+    );
+  }
+
+  /**
+   * Records a ferret's own compaction trigger (`FerretsApi.setCompactAt`). Fails closed: a value the schema cannot parse
+   * (below the floor, not `auto`, not an integer) is refused before anything is written, an unknown ferret is 404, a
+   * caller that may not touch it is 403, and a Ferrets with no session files cannot record one (503). A clear (`undefined`)
+   * also drops the start's own value, so the login's default applies again.
+   */
+  async setCompactAt(ferret: FerretId, value: unknown, caller?: FerretId): Promise<void> {
+    await this.ports.ready?.();
+    if (this.registry.get(ferret) === undefined) throw new ApiError(404, `no ferret ${ferret}`, 'not-found');
+    this.requireMayTouch(caller, ferret);
+    const parsed = value === undefined ? undefined : CompactAtSchema.safeParse(value);
+    if (parsed !== undefined && !parsed.success)
+      throw new ApiError(400, parsed.error.issues[0]?.message ?? 'not a compact-at value', 'invalid_compact_at');
+    const write = this.ports.session?.setCompactAt?.bind(this.ports.session);
+    if (write === undefined)
+      throw new ApiError(503, "this ferret's session files are unavailable", 'plugin_unavailable');
+    await write(ferret, parsed?.data);
+    // A clear is the person's deliberate "follow the login again": the start's own value (`options.compactAt`) is what
+    // `compactAt` and every launch fall back to when the session config says none, so it goes too, or the start value
+    // would come back after a clear. Every other option and detail keeps its value.
+    if (parsed === undefined) {
+      const before = this.registry.detailsOf(ferret);
+      if (before?.options?.compactAt !== undefined) {
+        const { compactAt: _start, ...options } = before.options;
+        await this.saveDetails(ferret, { ...before, options });
+      }
+    }
   }
 
   /**
