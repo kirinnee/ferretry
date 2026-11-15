@@ -3,6 +3,7 @@ import type { Runner, RunSpec, LaunchSpec } from '@ferretry/core-ferrets/contrac
 import type { FencedPath, FerretId, KernelPorts, RootHandle } from '@ferretry/kernel/contract';
 import { ok } from '@ferretry/std';
 import should from 'should';
+import { CODEX_OFFLINE_LAUNCH_ERROR, codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { realClock } from '../support/ports.ts';
 import { tomlString, tomlTables } from '../../daemon/lib/index.ts';
@@ -254,6 +255,17 @@ describe('the Codex harness', () => {
     const { harness } = harnessOver(LOCATED);
     const delivery = await harness.deliver(FERRET, '%1' as never, { id: 'm1', text: 'hi' });
     should(delivery).containDeep({ status: 'refused', id: 'm1' });
+  });
+
+  it('explains a start that died offline in its own fixed words (what Ferrets keeps as start_failed.explained), and the screen is never quoted', () => {
+    const { harness } = harnessOver(LOCATED);
+
+    const sentence = harness.startFailure?.('Error: FIXTURE_SECRET workspace routing discovery failed (ENETUNREACH)');
+
+    should(sentence).equal(codexLaunchFailure('workspace routing discovery failed'));
+    should(sentence?.startsWith(CODEX_OFFLINE_LAUNCH_ERROR)).be.true();
+    should(sentence).not.containEql('FIXTURE_SECRET');
+    should(harness.startFailure?.('error: unrecognised option')).be.undefined();
   });
 });
 

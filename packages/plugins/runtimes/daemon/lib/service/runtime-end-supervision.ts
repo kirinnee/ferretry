@@ -8,8 +8,9 @@
  *
  * - **A Codex ferret that stopped** — whatever the cause — has its runtime's app-server pair stopped when nothing else
  *   uses that runtime ({@link CodexAppServerSupervisor.afterSessionEnded} owns that rule).
- * - **A Codex ferret whose launch failed** (`cause: start_failed`) is looked at once more: when the pane it died in
- *   showed the offline failure, the owner is told in words ({@link codexLaunchFailure}).
+ * - **A Codex ferret whose launch failed** (`cause: start_failed`) is told in words when Ferrets recorded the harness's
+ *   own sentence for it (`cause.explained`, which the Codex harness answers with {@link codexLaunchFailure}). Ferrets
+ *   reads the pane BEFORE its failed-launch cleanup stops it, so Runtimes never reads a dead pane.
  * - **Anything else** — a Claude ferret, a ferret that has not stopped, one that ran no runtime, one Ferrets no longer
  *   knows — is not Runtimes' business and changes nothing.
  *
@@ -17,7 +18,6 @@
  */
 import type { FerretsApi } from '@ferretry/core-ferrets/contract';
 import type { FerretId } from '@ferretry/kernel/contract';
-import { codexLaunchFailure } from '../../../contract/codex-launch.ts';
 import type { CodexAppServerOutcome } from './codex-runtime.ts';
 
 /** The host seams an ended ferret's follow-up stands on. Absent until the host offers them (see `RuntimesAssembly`). */
@@ -26,8 +26,6 @@ export interface RuntimeEndSeams {
   readonly supervisor: { afterSessionEnded(wrapper: string): Promise<CodexAppServerOutcome> };
   /** The published wrapper of a runtime by its name, or `undefined` when none is published under it. */
   wrapperOf(runtime: string): Promise<string | undefined>;
-  /** What the dead pane of this ferret last showed, when the host can still say. */
-  paneText?(ferret: string): Promise<string>;
 }
 
 /** What `ferrets.changed` says of one ferret. */
@@ -74,8 +72,7 @@ export class RuntimeEndSupervision {
     if (summary?.state !== 'stopped' || summary.harness !== 'codex' || summary.runtime === undefined) return;
     const wrapper = await seams.wrapperOf(summary.runtime);
     if (wrapper !== undefined) await seams.supervisor.afterSessionEnded(wrapper);
-    if (summary.cause?.kind !== 'start_failed' || seams.paneText === undefined) return;
-    const message = codexLaunchFailure(await seams.paneText(ferret).catch(() => ''));
-    if (message !== undefined) this.deps.launchFailed({ ferret, runtime: summary.runtime, message });
+    if (summary.cause?.kind !== 'start_failed' || summary.cause.explained === undefined) return;
+    this.deps.launchFailed({ ferret, runtime: summary.runtime, message: summary.cause.explained });
   }
 }
