@@ -132,12 +132,39 @@ describe('saved logins on an input card, through the hook', () => {
       down.w.service.deliver(SESSION, down.request.id, down.w.send(down.request, { entry: 'GITHUB' }), OWNER),
     );
     const ok = await card(() => provider());
-    await ok.w.service.deliver(SESSION, ok.request.id, ok.w.send(ok.request, { entry: 'GITHUB' }), OWNER);
+    const delivered = await ok.w.service.deliver(
+      SESSION,
+      ok.request.id,
+      ok.w.send(ok.request, { entry: 'GITHUB' }),
+      OWNER,
+    );
+    const agentView = await ok.w.service.agentView(SESSION, ok.request.agendaItemId, 0);
+    const owned = await ok.w.service.list(OWNER, SESSION);
 
     should(failed.message).not.containEql(PASSWORD);
+    // The value WAS typed, so the checks below mean something: it is in the target and in no answer, view or listing.
+    should(ok.w.writes.map(write => write.values)).eql([[USERNAME, PASSWORD]]);
+    for (const surface of [delivered, agentView, owned]) should(JSON.stringify(surface)).not.containEql(PASSWORD);
     for (const each of [down.w, ok.w])
       should(JSON.stringify([each.events, each.audits, each.notes, each.told, each.cards])).not.containEql(PASSWORD);
   });
+
+  for (const [name, answer] of [
+    ['a number', 123456],
+    ['an object', { value: 'x' }],
+    ['nothing', undefined],
+    ['an empty string', ''],
+  ] as const)
+    it(`should type nothing and say a fixed sentence when the provider answers ${name} for a value`, async () => {
+      const { w, request } = await card(() => provider({ fill: async () => answer as never }));
+
+      const refused = await refusal(
+        w.service.deliver(SESSION, request.id, w.send(request, { entry: 'GITHUB' }), OWNER),
+      );
+
+      should(refused.message).equal('Ferretry could not open the account, so nothing was typed');
+      should(w.writes).eql([]);
+    });
 });
 
 describe('the hook’s adapter', () => {
@@ -170,6 +197,19 @@ describe('the hook’s adapter', () => {
     await should(smuggling.listing()).rejected();
     should(await smuggling.of(SESSION)).eql({});
     should(await throwing.of(SESSION)).eql({});
+  });
+
+  it('should refuse a value that is not one non-empty string, in a sentence that names none', async () => {
+    for (const answer of [123456, { value: PASSWORD }, undefined, '']) {
+      const hook = new SavedLoginsThroughHook(() => provider({ fill: async () => answer as never }));
+
+      const error = await hook.fill('GITHUB' as never, 'password', 0).then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+
+      should((error as Error).message).equal('Accounts answered a value Ferretry cannot read.');
+    }
   });
 
   it('should hand the provider exactly what the card asked and tell it what the daemon saw', async () => {

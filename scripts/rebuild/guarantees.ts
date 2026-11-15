@@ -278,6 +278,31 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
     reason:
       'enforced by the Vault login observer (`rootPromptProved` and `observerByOf` write `tapped`); Accounts only reads the fact',
   },
+  I34: {
+    owner: 'vault',
+    reason:
+      'enforced by the Vault input service (a made code is typed only into the sign-in’s observed field and returned by no tool, result or route); Accounts only makes the code',
+  },
+  I163: {
+    owner: 'vault',
+    reason:
+      'enforced by the Vault input service (it draws the offers and refuses a hand pick the card did not offer); Accounts keeps the saved logins',
+  },
+  I164: {
+    owner: 'vault',
+    reason:
+      'enforced by the Vault input service (it draws the offers, with an account for another site last and saying where, in `elsewhere`); Accounts keeps the saved logins',
+  },
+  I168: {
+    owner: 'vault',
+    reason:
+      'enforced by the Vault input service (`codeTargetProblem`, checked at the card and at the write); Accounts only makes the code',
+  },
+  I170: {
+    owner: 'vault',
+    reason:
+      'enforced by the Vault input service (it asks Accounts to `fill` a code only when writing it and hands it only to the write, so no result, wait or journal holds it); Accounts only makes the code',
+  },
   I98: {
     owner: 'vault',
     reason:

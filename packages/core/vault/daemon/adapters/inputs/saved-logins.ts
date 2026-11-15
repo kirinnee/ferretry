@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { SavedLoginsProvider } from '../../../contract/index.ts';
 import {
   AccountListSchema,
@@ -23,6 +24,10 @@ const NO_ACCOUNTS = 'Accounts is not available, so there are no saved logins.';
 
 const ListingSchema = AccountListSchema.pick({ accounts: true, signIns: true });
 
+/** What `fill` may answer: one non-empty string. Anything else is refused whole, and said without naming a value. */
+const FilledSchema = z.string().min(1);
+const UNREADABLE_FILL = 'Accounts answered a value Ferretry cannot read.';
+
 /**
  * THE VAULT'S VIEW OF ACCOUNTS' SAVED LOGINS, looked up on every call: an Accounts that was turned off since a card was
  * raised answers "cannot tell", so nothing is offered, nothing is saved and every value is typed (fail closed).
@@ -46,7 +51,9 @@ export class SavedLoginsThroughHook implements InputLoginPort, InputChoicePort, 
     nowMs: number,
     options: { readonly factor?: TwoFactorId } = {},
   ): Promise<string> {
-    return await this.asked(provider => provider.fill(id, role, nowMs, options));
+    const parsed = FilledSchema.safeParse(await this.asked(provider => provider.fill(id, role, nowMs, options)));
+    if (!parsed.success) throw new Error(UNREADABLE_FILL);
+    return parsed.data;
   }
 
   async save(
