@@ -598,6 +598,8 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       act: kernel.act.bind(kernel),
       redaction: kernel.redaction,
       digest: text => createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16),
+      // A big screen is masked in slices: the loop gets the thread back between the masker's readings.
+      yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
     },
   });
 

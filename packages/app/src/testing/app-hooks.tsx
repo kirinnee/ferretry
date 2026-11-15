@@ -9,14 +9,18 @@ import { ShellContext, type ShellModel } from '../shell/context.tsx';
  */
 export function WithAppHooks({
   provided,
+  onDaemon = {},
   children,
 }: {
   readonly provided: Readonly<Record<string, unknown>>;
+  /** What the provider gives on ONE daemon (id → name → value), over `provided`, for a suite of two machines. */
+  readonly onDaemon?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   readonly children: ReactNode;
 }) {
   const shell = {
     runtime: {
-      appHook: (_daemon: string, name: string): unknown => provided[name],
+      appHook: (daemon: string, name: string): unknown =>
+        onDaemon[daemon] !== undefined && name in onDaemon[daemon] ? onDaemon[daemon][name] : provided[name],
       subscribe: () => () => undefined,
       version: () => 0,
     },
