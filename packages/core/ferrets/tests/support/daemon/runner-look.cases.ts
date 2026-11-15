@@ -79,6 +79,19 @@ export function runnerLookCases(): void {
       should(promptOf({}, mask)).deepEqual({});
     });
 
+    it('should carry the instant the observer stored for the turn state, unchanged, and none when none is stored', () => {
+      // Arrange
+      const at = '2026-11-05T00:00:10.000Z';
+
+      // Act
+      const prompt = promptOf({ turnState: 'needs-input', turnStateAt: at }, text => text);
+
+      // Assert
+      should(prompt.turnState).equal('needs-input');
+      should(prompt.turnStateAt).equal(at);
+      should(promptOf({ turnState: 'your-turn' }, text => text).turnStateAt).be.undefined();
+    });
+
     it('should mask every string of a harness dialog the pane is asking, keys and nested options included', () => {
       // Arrange
       const mask = (text: string) => text.replaceAll('example.com', '***********');

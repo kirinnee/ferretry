@@ -24,6 +24,7 @@
     "@ferretry/core-asks": "workspace:*",
     "@ferretry/core-ferrets": "workspace:*",
     "@ferretry/core-gate": "workspace:*",
+    "@ferretry/plugin-claude-code": "workspace:*",
     "@ferretry/app": "workspace:*",
     "chart.js": "4.6.1",
     "chartjs-plugin-zoom": "2.2.0",

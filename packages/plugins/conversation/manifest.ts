@@ -68,6 +68,7 @@ import {
   OpeningAttachments,
   SitrepLines,
 } from '@ferretry/core-ferrets/contract';
+import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
 
 // Shared descriptor pieces. The fields answer independent questions (§7.1); only what repeats is shared.
 const FERRET = { minimum: 'operator', caller: 'any', noStore: true } as const;
@@ -105,6 +106,9 @@ export default definePlugin({
   ],
 
   needs: { ferrets: FerretsPort, asks: AsksPort },
+  // Optional: the chat reads the observer's stored turn state and its instant, and what the pane is stopped on, from Claude
+  // Code's redacted prompt route (`GET /v1/ferrets/:ferretId/prompt`). Without it the chat claims no dated turn.
+  uses: { claudeCode: ClaudeCodePort },
   provides: { conversation: ConversationPort },
 
   actions: {
