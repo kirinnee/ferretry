@@ -37,6 +37,8 @@ const worldWith = (presets: unknown[]) =>
       presets: () => ({ presets }) as never,
       stage: view,
       apply: () => ({ outcome: 'applied' }),
+      // The preset's key is already in the Vault, so these tests are about the environment, not the prompt.
+      secretNames: () => new Set(['ZAI_API_KEY']),
     },
   });
 

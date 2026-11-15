@@ -43,7 +43,7 @@ import { wordsVerb } from './commands/words.ts';
 import { updateVerb } from './commands/update.ts';
 import { EXIT, reportFailure, ShellError } from './errors.ts';
 import { lazyClient } from './lazy-client.ts';
-import { pluginEnvironment } from './plugin-env.ts';
+import { declaredEnvironment, pluginEnvironment } from './plugin-env.ts';
 import { buildPluginGraph } from './plugin-graph.ts';
 import type { ShellContext, ShellVerb } from './shell-context.ts';
 import { renderGroupHelp, renderRootHelp, renderVerbHelp, usageLine, verbsUnder } from './help.ts';
@@ -333,6 +333,7 @@ async function runPluginVerb(
     stdin: () => world.host.stdin(),
     ...(world.promptHidden === undefined ? {} : { promptHidden: world.promptHidden }),
     env: pluginEnvironment(world.environment, world.host.cwd()),
+    readEnvironment: names => declaredEnvironment(world.environment, plugin.manifest.permissions?.cliEnvReads, names),
     ownState: world.host.ownState(plugin.manifest),
   });
   const handler = (built.verbs as Readonly<Record<string, VerbHandler | undefined>>)[entry.line];
