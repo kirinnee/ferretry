@@ -2656,6 +2656,12 @@ scoped handle:
     `permissions.whichOverrides` (`^FY_[A-Z0-9_]{1,60}$`; `'*'` matches none); no other variable is read. A set
     override must be absolute, plain, executable and named `name`, else it is `override_unusable` and `PATH` is NOT
     searched; unset or blank, it is `which`.
+  - A `fy` half may read the caller's shell variables only through `CliContext.readEnvironment(names)`, and only the
+    names its own manifest lists, by exact name, in `permissions.cliEnvReads` (Logins: the variable names its presets
+    declare, written to `contract/preset-env-names.json` from the shipped YAML, for `fy login add --from-env`). An
+    undeclared name, `'*'` or a pattern answers nothing whatever the shell holds, another plugin's names are not
+    readable, and `CliContext.env` (the fixed `FY_*` and `PWD` names) is unchanged. A value read this way goes to the
+    Vault (`POST /v1/secrets`) and is never printed, logged or written to a login file.
   - `kernel.paths.whichFor(name, env)` resolves one command on the `PATH` a Vault `ChildEnvironment` handle WILL set,
     without spending it (Terminals' test-mode launch guard). The Vault's kernel-only opener answers `searchPathOf`
     with the handle's `PATH` and nothing else, only for a handle minted for the caller or for a plugin offering a hook
