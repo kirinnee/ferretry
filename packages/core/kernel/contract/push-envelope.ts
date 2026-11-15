@@ -68,9 +68,31 @@ export const PUSH_COUNT_MAX = 999;
 /** The most tags one clear may name. A sender may bound itself tighter (Access sends at most 8). */
 export const PUSH_CLEAR_MAX_TAGS = 32;
 
+/** The most an event key may hold (Access's clear caps its own at the same length). */
+export const PUSH_EVENT_KEY_MAX = 400;
+/** The most a session id may hold (Access's clear caps its own at the same length). */
+export const PUSH_SESSION_ID_MAX = 200;
+
+/**
+ * A HINT a show may carry beyond its words: a non-empty string within `max`, or NOTHING. A hint that is missing, not a
+ * string or over its cap is dropped and the push is still read — unlike the fields above, a hint only refines a show (a
+ * twin is skipped, a tap lands closer), so refusing the push for it would lose an alert to save a nicety. Access's own
+ * payload leaves both unbounded, which is why this must never make the message unreadable.
+ */
+function PushHintSchema(max: number) {
+  return z
+    .unknown()
+    .transform(value => (typeof value === 'string' && value.length >= 1 && value.length <= max ? value : undefined))
+    .optional();
+}
+
 /**
  * The fields a SHOW may carry beyond the three. All optional: absent is today's behaviour (an untagged show gets no tag,
- * a kind-less show is never hidden by kind, no count is no grouping, no urgency is an ordinary push).
+ * a kind-less show is never hidden by kind, no count is no grouping, no urgency is an ordinary push, a push with no
+ * `eventKey` is never skipped as a twin, and one with no `sessionId` taps to its machine's home when its page is refused).
+ *
+ * `eventKey` names the EVENT (a repeat of the same event, such as a push service's re-delivery, carries the same key);
+ * `sessionId` names the conversation the push is about, so a tap whose page the shell refuses still lands there.
  */
 export const PushShowFields = {
   ...PushEnvelopeFields,
@@ -78,6 +100,8 @@ export const PushShowFields = {
   kind: PushKindSchema.optional(),
   count: z.number().int().min(1).max(PUSH_COUNT_MAX).optional(),
   urgency: z.literal('high').optional(),
+  eventKey: PushHintSchema(PUSH_EVENT_KEY_MAX),
+  sessionId: PushHintSchema(PUSH_SESSION_ID_MAX),
 };
 export const PushShowSchema = z.strictObject(PushShowFields);
 
@@ -96,7 +120,7 @@ export type PushMessage =
   | { readonly type: 'show'; readonly show: PushShow }
   | { readonly type: 'clear'; readonly clear: PushClear };
 
-const SHOW_KEYS = ['title', 'body', 'url', 'tag', 'kind', 'count', 'urgency'] as const;
+const SHOW_KEYS = ['title', 'body', 'url', 'tag', 'kind', 'count', 'urgency', 'eventKey', 'sessionId'] as const;
 const CLEAR_KEYS = ['kind', 'tags'] as const;
 
 /** The named keys the record itself holds (never its prototype's), each present key copied, each absent one omitted. */
@@ -113,14 +137,16 @@ const pick = (record: object, keys: readonly string[]): Record<string, unknown> 
 /**
  * WHAT THE WORKER READS FROM ONE PUSH. Total: it never throws, whatever the JSON (a throwing getter or a proxy included).
  *
- * The payload also carries the plugin's own fields (`version`, `eventKey`, `sessionId`), which are the plugin's and not
- * the worker's, so the worker's fields are PICKED BY NAME, then parsed strictly:
+ * The payload also carries the plugin's own field (`version`), which is the plugin's and not the worker's, so the
+ * worker's fields are PICKED BY NAME, then parsed strictly:
  * - `kind === 'clear'` → only `kind` and `tags` are picked → {@link PushClearSchema}. Any `title` or `body` beside them
  *   is never read, so a clear's value holds no text.
- * - anything else → `title`, `body`, `url`, `tag`, `kind`, `count`, `urgency` (absent keys omitted) →
- *   {@link PushShowSchema}. A three-field push from an older daemon reads as a show with none of the optional fields.
+ * - anything else → `title`, `body`, `url`, `tag`, `kind`, `count`, `urgency`, `eventKey`, `sessionId` (absent keys
+ *   omitted) → {@link PushShowSchema}. A three-field push from an older daemon reads as a show with none of the
+ *   optional fields.
  *
- * `null` is UNREADABLE: one field out of bounds fails the whole message, and the worker shows its plain fallback line,
+ * `null` is UNREADABLE: one field out of bounds (other than the `eventKey` and `sessionId` hints, which are dropped
+ * instead) fails the whole message, and the worker shows its plain fallback line,
  * as it does today.
  */
 export function readPushMessage(json: unknown): PushMessage | null {

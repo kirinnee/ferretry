@@ -94,7 +94,12 @@ export interface ShownPush {
   readonly kind?: string;
   readonly count: number;
   readonly urgency?: 'high';
-  /** The page a tap opens: the shell's route parse accepted it under this machine, else the app. */
+  /** The daemon's name for the event: a push that repeats it is a transport twin of the line showing (S6). */
+  readonly eventKey?: string;
+  /**
+   * The page a tap opens: the shell's route parse accepted it under this machine; else the conversation the push is about
+   * (its `sessionId`); else the machine's home, or the app.
+   */
   readonly url: string;
 }
 
@@ -109,13 +114,15 @@ export const machineShow = (show: PushShow, machine: PushMachine | null, origin:
   ...(show.kind === undefined ? {} : { kind: show.kind }),
   count: show.count ?? 1,
   ...(show.urgency === undefined ? {} : { urgency: show.urgency }),
-  url: notificationUrl(show.url, origin, machine),
+  ...(show.eventKey === undefined ? {} : { eventKey: show.eventKey }),
+  url: notificationUrl(show.url, origin, machine, show.sessionId),
 });
 
 /** The slice of an existing notification's `data` a merge reads. */
 interface NotificationDataLike {
   readonly count?: unknown;
   readonly latestBody?: unknown;
+  readonly eventKey?: unknown;
 }
 
 export type NotificationPresentation =
@@ -129,6 +136,7 @@ export type NotificationPresentation =
         readonly count: number;
         readonly latestBody: string;
         readonly tag?: string;
+        readonly eventKey?: string;
       };
     };
 
@@ -143,9 +151,9 @@ const activeCount = (existing: readonly NotificationDataLike[]): number =>
  * Merges one incoming push with whatever is already showing under the same tag. A genuinely newer line replaces the
  * entry silently and carries the latest words plus a "+N more" tail. The count merge applies to every kind but the
  * paired-device notice ({@link UNMERGED_KIND}), as v4's did for every push that carried a `sessionId`; a push with no
- * kind shows its own count, and an approval is never merged. v4 also skipped an exact `eventKey`
- * twin; the kernel's envelope has no event key, so a push service's re-delivery of a session push bumps the count
- * (declared in `ports-pending.json`).
+ * kind shows its own count, and an approval is never merged. An exact `eventKey` twin of a line already showing (a push
+ * service's re-delivery of the same push, or the page's own line for the same event) is skipped, as v4's was; a push
+ * that carries no `eventKey` is never skipped on that account.
  */
 export const planNotificationPresentation = (
   shown: ShownPush,
@@ -156,12 +164,15 @@ export const planNotificationPresentation = (
     count,
     latestBody: shown.body,
     ...(shown.daemonTag === undefined ? {} : { tag: shown.daemonTag }),
+    ...(shown.eventKey === undefined ? {} : { eventKey: shown.eventKey }),
   });
   if (shown.tag !== undefined && isPhoneApprovalTag(shown.tag)) {
     // Only the same words are a twin; a re-read number is a new push and sounds again.
     if (existing.some(item => item.latestBody === shown.body)) return { action: 'skip' };
     return { action: 'show', body: shown.body, count: 1, data: data(1) };
   }
+  if (shown.eventKey !== undefined && existing.some(item => item.eventKey === shown.eventKey))
+    return { action: 'skip' };
   const merges = shown.kind !== undefined && shown.kind !== UNMERGED_KIND;
   const active = merges ? activeCount(existing) : 0;
   const count = active > 0 ? Math.max(shown.count, Math.min(MAX_GROUP_COUNT, active + 1)) : shown.count;

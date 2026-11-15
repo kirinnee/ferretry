@@ -343,6 +343,19 @@ describe('notificationUrl (a push’s url is NOT trusted: only an accepted route
     expect(notificationUrl(`${HOME.slice(ORIGIN.length)}/`, ORIGIN, WORK)).toBe(HOME);
   });
 
+  it('S6 a page the shell refuses taps to the conversation the push is about, else to the machine home', () => {
+    const chat = `${HOME}/ferrets/f1/chat`;
+    for (const refused of ['https://evil.test/x', '/no/such/page', '//evil.test', 42, undefined])
+      expect([refused, notificationUrl(refused, ORIGIN, WORK, 'f1')]).toEqual([refused, chat]);
+    // a page the shell accepts still wins over the session
+    expect(notificationUrl('/agenda?ask=A3', ORIGIN, WORK, 'f1')).toBe(`${HOME}/agenda?ask=A3`);
+    // no session, or one that is no ferret's id, names nothing: the machine home, as before
+    for (const session of [undefined, '', '..', 'a/b', 'a b', 'x'.repeat(129), 7, null])
+      expect([session, notificationUrl('/no/such/page', ORIGIN, WORK, session)]).toEqual([session, HOME]);
+    // the app-wide registration has no machine to put a conversation under
+    expect(notificationUrl('/no/such/page', ORIGIN, null, 'f1')).toBe(APP);
+  });
+
   it('places a machine ask’s Agenda link under its machine, ask kept', () => {
     expect(notificationUrl('/agenda?ask=A3', ORIGIN, WORK)).toBe(`${HOME}/agenda?ask=A3`);
   });

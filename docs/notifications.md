@@ -399,8 +399,10 @@ Every push names a page, and the worker opens a page even when one does not:
   today); this happens when the owner is present, as today.
 - **A push with no item** opens the chat it came from: `/ferrets/<id>/chat`
   (`sessionNotificationPath`).
-- **A push that names no page it may open** (`/`, an enrolment confirmation, a new-device alert) opens the app. There is no
-  `sessionId` fallback.
+- **A push that names no page it may open** (`/`, an enrolment confirmation, a new-device alert) opens the machine's home,
+  or the conversation the push is about when it carries a `sessionId` (`/ferrets/<sessionId>/chat`, read through the same
+  closed grammar as any page). The show envelope carries `eventKey` and `sessionId` as optional hints (dropped, never
+  refused, when malformed); a push whose `eventKey` a line already showing carries is a re-delivery and is skipped.
 - **Which window.** An app window wins over the landing page, which has no router. Among app windows,
   the one the reader is looking at wins.
 - **How the window gets there.** The worker brings the window forward and asks the app to route there

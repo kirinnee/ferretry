@@ -34,14 +34,46 @@ describe('readPushMessage: a show', () => {
     expect(readPushMessage(three)).toEqual({ type: 'show', show: three });
   });
 
-  test('a real Access payload reads as a show; the plugin fields are not in the result', () => {
+  test('a real Access payload reads as a show with its event key and session; the plugin’s `version` is not in the result', () => {
     const message = readPushMessage(access);
     expect(message).toEqual({
       type: 'show',
-      show: { ...three, tag: 'attention-session-1:A3', kind: 'agenda', count: 1, urgency: 'high' },
+      show: {
+        ...three,
+        tag: 'attention-session-1:A3',
+        kind: 'agenda',
+        count: 1,
+        urgency: 'high',
+        eventKey: 'session-1:agenda:7',
+        sessionId: 'session-1',
+      },
     });
     const show = message?.type === 'show' ? message.show : {};
-    for (const field of ['version', 'eventKey', 'sessionId']) expect(Object.keys(show)).not.toContain(field);
+    expect(Object.keys(show)).not.toContain('version');
+  });
+
+  test('S6 an envelope WITHOUT the new hints stays valid, and a field the worker does not know is ignored, not refused', () => {
+    expect(PushShowSchema.safeParse(three).success).toBe(true);
+    expect(readPushMessage({ ...three, tag: 'a', count: 2 })).toEqual({
+      type: 'show',
+      show: { ...three, tag: 'a', count: 2 },
+    });
+    // a field a newer daemon adds is not picked, so it can neither break an older worker nor reach a notification
+    expect(readPushMessage({ ...three, eventKey: 'k', futureField: { deep: 1 } })).toEqual({
+      type: 'show',
+      show: { ...three, eventKey: 'k' },
+    });
+  });
+
+  test('eventKey and sessionId are hints: an empty, over-cap or non-string one is dropped and the push still reads', () => {
+    for (const bad of ['', 'x'.repeat(401), 42, null, {}])
+      expect(readPushMessage({ ...three, eventKey: bad })).toEqual({ type: 'show', show: three });
+    for (const bad of ['', 'x'.repeat(201), 42, null, {}])
+      expect(readPushMessage({ ...three, sessionId: bad })).toEqual({ type: 'show', show: three });
+    expect(readPushMessage({ ...three, eventKey: 'x'.repeat(400), sessionId: 'y'.repeat(200) })).toEqual({
+      type: 'show',
+      show: { ...three, eventKey: 'x'.repeat(400), sessionId: 'y'.repeat(200) },
+    });
   });
 
   test('a key on the prototype, or an own key holding undefined, is not picked', () => {
