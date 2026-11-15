@@ -106,7 +106,11 @@ import {
 } from '../../../contract/index.ts';
 import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../tokens/tokens.ts';
 import type { SessionSpawnRequest } from '../session/provenance/types.ts';
-import { type LaunchEnvironmentRecord, recordedSwitches } from '../agent-control/launch-environment.ts';
+import {
+  type LaunchEnvironmentRecord,
+  modeSwitchDefaults,
+  recordedSwitches,
+} from '../agent-control/launch-environment.ts';
 import { STATE_HOME_UNRESOLVED, stateHomeSentence } from '../route-security/state-home.ts';
 
 /**
@@ -2153,7 +2157,7 @@ export class FerretsService implements FerretsApi {
           : `the ${record.harness} harness could not prepare this ferret's home, so it was not started`,
       );
     }
-    const env = await this.environment(record.id, issued.token, parts, login.value, signedIn.value);
+    const env = await this.environment(record.id, record.mode, issued.token, parts, login.value, signedIn.value);
     if (!env.ok) return failed('login_unavailable', env.error);
     // The LAST step before the harness: the folder is still the one that was checked. Anything else (a swap, a doubt)
     // starts nothing. (Remaining window: the instant between this check and the child's own chdir; docs/secrets.md.)
@@ -2601,13 +2605,15 @@ export class FerretsService implements FerretsApi {
 
   private async environment(
     ferret: FerretId,
+    mode: FerretRecord['mode'],
     token: string,
     parts: readonly LaunchPart[],
     login: Readonly<Record<string, string>>,
     signedIn: Readonly<Record<string, string>>,
   ): Promise<Result<ChildEnvironment, string>> {
     // The login's environment goes in first, so every part (MCP, shells) and the FY_* switches below keep precedence.
-    const env: Record<string, string> = { ...login };
+    // The mode's own defaults come next and BEFORE the parts, so an owner's switch (a part) still overrides them.
+    const env: Record<string, string> = { ...login, ...modeSwitchDefaults(mode) };
     for (const part of parts) if (part.kind === 'env' || part.kind === 'shell') Object.assign(env, part.env);
     // Ferretry's own sign-in variable goes in AFTER the parts: nothing a part or a login file says can move the store
     // a ferret reads its credential from. (The kernel's spawn base is PATH and HOME only, so no inherited value is here.)
