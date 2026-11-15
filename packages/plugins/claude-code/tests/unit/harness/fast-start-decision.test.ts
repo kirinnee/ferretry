@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { StartDecide, type StartDecideInput } from '@ferretry/core-ferrets/contract';
-import type { RuntimeId, RuntimeView } from '@ferretry/plugin-runtimes/contract';
+import type { RuntimeView } from '@ferretry/plugin-runtimes/contract';
 import { fastStartDecision, runtimeDefaultModel, type RuntimeDefaults } from '../../../daemon/lib/harness/fast-mode.ts';
 import manifest from '../../../manifest.ts';
 
@@ -19,10 +19,15 @@ const input = (more: Partial<StartDecideInput> = {}): StartDecideInput => ({
   ...more,
 });
 
-/** A runtime as Runtimes' catalogue shows it: only the fields the decision reads (`models` is the login catalog's default, `set` the model set's; `null` is a set whose login can use none). */
-const view = (id: string, has: { models?: string; set?: string | null }): RuntimeView =>
+/**
+ * A runtime as Runtimes' catalogue shows it: only the fields the decision reads (`models` is the login catalog's default, `set` the
+ * model set's; `null` is a set whose login can use none). Its persistent `id` is NOT its name, as in the real catalogue: a start names the NAME.
+ */
+const view = (name: string, has: { models?: string; set?: string | null }): RuntimeView =>
   ({
-    id,
+    id: `rt-${name}`,
+    name,
+    wrapper: name,
     models: has.models === undefined ? undefined : { default: has.models },
     modelSet:
       has.set === undefined
@@ -30,14 +35,10 @@ const view = (id: string, has: { models?: string; set?: string | null }): Runtim
         : { source: 'model-set', default: has.set === null ? undefined : has.set },
   }) as unknown as RuntimeView;
 
-/** The two Runtimes reads a start makes, with a count of how often they were asked. */
-const runtimes = (held: { default?: string; views?: readonly RuntimeView[] }) => {
+/** The one Runtimes read a start makes, with a count of how often it was asked. */
+const runtimes = (held: { views?: readonly RuntimeView[] }) => {
   let asked = 0;
   const api: RuntimeDefaults = {
-    default: async () => {
-      asked += 1;
-      return held.default as RuntimeId | undefined;
-    },
     catalog: async () => {
       asked += 1;
       return held.views ?? [];
@@ -81,7 +82,7 @@ describe('claude-code takes start.decide', () => {
   });
 
   test('(no guarantees row) a start that NAMED a model is judged on it, and Runtimes is not read', async () => {
-    const reads = runtimes({ default: 'work', views: [view('work', { models: 'claude-opus-5-5' })] });
+    const reads = runtimes({ views: [view('work', { models: 'claude-opus-5-5' })] });
     expect(await fastStartDecision(input({ model: 'claude-haiku-5-5', fast: true }), () => reads.api)).toEqual({
       allow: false,
       reason: 'claude-haiku-5-5 has no fast mode',
@@ -99,16 +100,24 @@ describe('claude-code takes start.decide', () => {
     });
   });
 
-  test("(no guarantees row) a fast start naming no model and no runtime is judged on the machine's default runtime", async () => {
+  test("(no guarantees row) a fast start on the machine's default runtime is judged on it: Ferrets names that runtime (its NAME) in the input", async () => {
     const reads = runtimes({
-      default: 'home',
       views: [view('work', { models: 'claude-opus-5-5' }), view('home', { models: 'claude-haiku-5-5' })],
     });
-    expect(await fastStartDecision(input({ fast: true }), () => reads.api)).toEqual({
+    expect(await fastStartDecision(input({ fast: true, runtime: 'home' }), () => reads.api)).toEqual({
       allow: false,
       reason: 'claude-haiku-5-5 has no fast mode',
       code: 'unservable_model',
     });
+  });
+
+  test('(no guarantees row) a start that names no runtime (a direct harness or login start) is never judged on the machine default', async () => {
+    const reads = runtimes({ views: [view('work', { models: 'claude-sonnet-5-5' })] });
+    expect(await fastStartDecision(input({ fast: true }), () => reads.api)).toEqual({ allow: true });
+    expect(await fastStartDecision(input({ fast: true, login: 'direct-opus' }), () => reads.api)).toEqual({
+      allow: true,
+    });
+    expect(reads.calls()).toBe(0);
   });
 
   test("(no guarantees row) a fast start naming no model is allowed when the runtime's default model has fast mode", async () => {
