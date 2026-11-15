@@ -238,10 +238,7 @@ export const hostAssembly: RuntimesAssembler = ctx => {
   let said = false;
   const assembled = once(() => {
     try {
-      return {
-        ...fileAssembly(ctx, publication),
-        ended: endedSeams(ctx.kernel, publication, () => ctx.uses?.terminals.current()),
-      };
+      return { ...fileAssembly(ctx, publication), ended: endedSeams(ctx.kernel, publication) };
     } catch (error) {
       // The build no longer fails when the fleet folder cannot be opened, so say so here, once, and in `fy doctor`.
       if (!said) {

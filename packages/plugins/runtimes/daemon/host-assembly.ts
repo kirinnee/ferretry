@@ -18,8 +18,7 @@
  * GAP in `ports-pending.json`. The machine's name and id are the kernel's `identity`.
  */
 import type { FerretsApi, FerretState } from '@ferretry/core-ferrets/contract';
-import type { ConfigPort, FerretId, KernelPorts, RootHandle, RootsPort } from '@ferretry/kernel/contract';
-import type { TerminalsApi } from '@ferretry/plugin-terminals/contract';
+import type { ConfigPort, KernelPorts, RootHandle, RootsPort } from '@ferretry/kernel/contract';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { UsageApi } from '@ferretry/plugin-usage/contract';
 import { InstantSchema, milliseconds } from '@ferretry/std';
@@ -156,7 +155,6 @@ export function manifestUnreadableProbe(
 export function endedSeams(
   kernel: Pick<KernelPorts, 'roots' | 'processes' | 'clock'>,
   publication: FleetPublication = new FleetPublication(),
-  terminals: () => Pick<TerminalsApi, 'deadPaneText'> | undefined = () => undefined,
 ): RuntimeEndSeams {
   const fleet = kernel.roots.root('fleet');
   const supervisor = new CodexAppServerSupervisor({
@@ -176,8 +174,6 @@ export function endedSeams(
       (await publishedFleet(kernel.roots, fleet, publication)).manifest?.runtimes.find(
         published => published.name === runtime,
       )?.wrapper,
-    // What the ferret's dead pane last showed: Terminals', read through its port. Terminals off: no sentence.
-    paneText: async ferret => (await terminals()?.deadPaneText(ferret as FerretId)) ?? '',
   };
 }
 

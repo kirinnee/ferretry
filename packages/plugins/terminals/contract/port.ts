@@ -79,13 +79,6 @@ export interface TerminalsApi {
    * Read only. Browsers signals a pid only on `{ still: true }`.
    */
   paneBrowserStill(ferret: FerretId, browser: PaneBrowser): Promise<PaneBrowserStill>;
-  /**
-   * What the ferret's pane last showed, dead or alive: its visible screen, masked. Read only, and for a plugin that
-   * must say why a start failed (Runtimes' offline-failure sentence). Total: it never throws, and answers `''` for a
-   * ferret with no pane, a pane that is not a ferret's own, or a read that a hold refused. A port read only: no route,
-   * command or tool returns it.
-   */
-  deadPaneText(ferret: FerretId): Promise<string>;
 }
 
 export const TerminalsPort = definePort<TerminalsApi>('terminals');

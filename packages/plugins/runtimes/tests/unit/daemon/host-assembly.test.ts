@@ -54,10 +54,7 @@ afterEach(async () => {
   for (const stop of stoppers.splice(0)) await stop();
 });
 
-async function world(
-  published: boolean,
-  terminals?: () => { deadPaneText(ferret: never): Promise<string> } | undefined,
-) {
+async function world(published: boolean) {
   const seen: { kernel?: KernelPorts } = {};
   const table = testProcessTable({
     processes: [{ pid: 100, commandLine: SERVER, environment: { CODEX_HOME: HOME } }],
@@ -95,7 +92,7 @@ async function world(
   if (published) await fleet.writeText(at('manifest.json'), JSON.stringify(manifest));
   await fleet.writeText(at(`homes/${ID}/packages/app-server-daemon/releases/1/codex`), '#!/bin/sh');
   await fleet.writeText(at(`homes/${ID}/app-server-daemon/daemon.pid`), '{"pid":100}');
-  return { seams: endedSeams(kernel, new FleetPublication(), terminals), signals: table.signals };
+  return { seams: endedSeams(kernel), signals: table.signals };
 }
 
 describe('endedSeams', () => {
@@ -121,25 +118,6 @@ describe('endedSeams', () => {
     should(await seams.wrapperOf('codex-work')).be.undefined();
     should(await seams.supervisor.afterSessionEnded(WRAPPER)).deepEqual({ kind: 'not-a-codex-runtime' });
     should(signals).deepEqual([]);
-  });
-
-  it('should read what a ferret’s dead pane last showed through Terminals’ port', async () => {
-    const asked: unknown[] = [];
-    const { seams } = await world(true, () => ({
-      deadPaneText: async ferret => {
-        asked.push(ferret);
-        return 'workspace routing discovery failed';
-      },
-    }));
-
-    should(await seams.paneText?.('c1')).equal('workspace routing discovery failed');
-    should(asked).deepEqual(['c1']);
-  });
-
-  it('should say nothing of a dead pane while Terminals is off', async () => {
-    const { seams } = await world(true);
-
-    should(await seams.paneText?.('c1')).equal('');
   });
 });
 

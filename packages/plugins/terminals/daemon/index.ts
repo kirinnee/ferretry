@@ -13,8 +13,7 @@
  */
 import { createHash } from 'node:crypto';
 import { ferretOf } from '@ferretry/core-gate/contract';
-import type { FerretsApi, RunnerHandle } from '@ferretry/core-ferrets/contract';
-import { deadPaneText } from './lib/session/dead-pane.ts';
+import type { FerretsApi } from '@ferretry/core-ferrets/contract';
 import {
   type InputFieldValue,
   type InputTarget,
@@ -625,22 +624,6 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     // The Warden's looks at a ferret's own pane: read only, through the attach proof (`lib/session/pane-look.ts`).
     liveness: async ferret => await processes.look.liveness(ferret).catch(() => ({})),
     paneBrowsers: async ferret => await processes.look.browsers(ferret),
-    // What a dead pane last showed (Runtimes' offline-failure sentence): a plugin-port read, on no route and no tool.
-    deadPaneText: async ferret =>
-      await deadPaneText(
-        {
-          paneOf: async id => await panes.of(id),
-          // The runner's own read answers only for a ferret's own session; masked inside an act on the pane (a hold refuses it).
-          screen: async paneId => {
-            const answer = await kernel.act(targetRef('terminal', paneId), 'read', async () => {
-              const screen = await runner.lastScreen(paneId as RunnerHandle);
-              return await kernel.redaction.read(scope => ({ kind: 'content' as const, text: scope.text(screen) }));
-            });
-            return answer.ok ? answer.value.text : undefined;
-          },
-        },
-        ferret,
-      ),
     // Re-proved fresh just before Browsers signals one: anything it cannot prove is not that browser.
     paneBrowserStill: async (ferret, browser) =>
       await processes.look.still(ferret, browser).catch(() => ({ still: false as const, why: 'not-proved' as const })),
