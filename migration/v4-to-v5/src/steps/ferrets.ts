@@ -6,7 +6,11 @@ import {
   FerretRecordSchema,
   FerretTokensFile,
   FerretTokensSchema,
+  DAEMON_ORIGIN,
+  RestartQueueEntrySchema,
+  RestartsFile,
 } from '@ferretry/core-ferrets/contract';
+import { z } from 'zod';
 import { isScalar } from 'yaml';
 import { join } from 'node:path';
 import type { NotCarried, StepReport } from '../report.ts';
@@ -26,6 +30,55 @@ import { prepareLedgers } from './ferret-ledgers.ts';
 export const v5FerretName = (config: { id: string; name: string; teammate?: string }): string =>
   [config.teammate, config.name].find(name => name !== undefined && FerretNameSchema.safeParse(name).success) ??
   config.id;
+
+/**
+ * The registry state of a ferret v4 left running (its harness is still in its pane): what its carried `state.json` says
+ * of the turn when it says anything, so the two agree. v5's turn watch moves the registry ONLY when it writes a turn
+ * change; a record left `working` beside a carried `your-turn` (v4 status `running`, an idle harness) would therefore
+ * stay `working` for good, and nothing waiting for its idle moment (the restart that makes it a v5 harness) would run.
+ * With no recorded turn, the v4 status decides, as before.
+ */
+export function liveState(state: { status?: string; turnState?: string } | undefined): 'starting' | 'idle' | 'working' {
+  const status = state?.status;
+  if (status === 'created' || status === 'starting') return 'starting';
+  if (state?.turnState === 'your-turn' || state?.turnState === 'needs-input') return 'idle';
+  if (state?.turnState === 'working') return 'working';
+  return ['awaiting_user', 'awaiting_question', 'waiting', 'rate_limited'].includes(status ?? '') ? 'idle' : 'working';
+}
+
+/** Ferrets' `restarts.json` body (the kernel stamps `format`): the daemon reads it back with the same entry schema. */
+const RestartsBody = z.strictObject({ queued: z.array(RestartQueueEntrySchema) });
+
+/**
+ * One waiting restart for every ferret whose v4 harness is still in its pane (not stopped, with a pane handle). It is
+ * not tied to the out-of-date check (`onlyIfOutdated: false`): the harness is restarted because it is a v4 one, whatever
+ * its instructions say. It is the daemon's own recovery (`DAEMON_ORIGIN`, so a ferret another ferret started stays
+ * fenced as on any relaunch), asked for by the owner who confirmed the switch, and `mid-turn` until the drain sees the
+ * ferret idle.
+ */
+export function queuedRestarts(
+  records: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly state: string;
+    readonly handle?: string | undefined;
+  }[],
+  since: string,
+): z.infer<typeof RestartQueueEntrySchema>[] {
+  return records
+    .filter(record => record.state !== 'stopped' && record.handle !== undefined)
+    .map(record =>
+      RestartQueueEntrySchema.parse({
+        id: record.id,
+        name: record.name,
+        since,
+        reason: 'mid-turn',
+        onlyIfOutdated: false,
+        requestedBy: 'owner',
+        origin: DAEMON_ORIGIN,
+      }),
+    );
+}
 
 /**
  * Who first started a v4 ferret, for the v5 record's `birth`. A ferret with a parent (started by another ferret) is an
@@ -114,7 +167,11 @@ export const ferretsStep: Step = {
       what: 'per-session transfer-plan.json → moves/',
       why: 'MoveFiles still declares no v5 schema',
     },
-    { what: 'auto-resume.json and restarts/queue.json', why: 'AutoResumeFile and RestartsFile declare no v5 schemas' },
+    { what: 'auto-resume.json', why: 'AutoResumeFile declares no v5 schema' },
+    {
+      what: "v4's own waiting restarts (restarts/queue.json)",
+      why: 'superseded: every ferret whose v4 harness is still in its pane is queued for a v5 restart at its next idle moment instead',
+    },
     {
       what: 'transcript pointers outside fleet/homes or with no runtime UUID mapping',
       why: 'cannot point at a copied agent home safely; resume id is still kept in harnessConversation, and config.json drops the pointer as ferret.json does',
@@ -211,14 +268,7 @@ export const ferretsStep: Step = {
           runtime,
           login: preview ? undefined : loginOf.get(runtime),
           folder: previewFolder(ctx, config.cwd, ledgers.worktreeFolders),
-          state:
-            stopped || preview
-              ? 'stopped'
-              : status === 'created' || status === 'starting'
-                ? 'starting'
-                : ['awaiting_user', 'awaiting_question', 'waiting', 'rate_limited'].includes(status ?? '')
-                  ? 'idle'
-                  : 'working',
+          state: stopped || preview ? 'stopped' : liveState(state),
           harnessConversation: preview ? undefined : config.transcript?.harnessSessionId,
           transcript:
             config.transcript === undefined || preview
@@ -264,6 +314,16 @@ export const ferretsStep: Step = {
         await ctx.v5.json(
           { ...FerretTokensFile, path: join('state/ferrets', FerretTokensFile.path), schema: FerretTokensSchema },
           tokenDocument,
+        );
+      // M3: a ferret whose v4 harness is still in its pane runs v4's hooks, MCP server and folders (its CLAUDE_CONFIG_DIR /
+      // CODEX_HOME is `<home>/fleet/homes/<uuid>`, which the new home does not have). Each is queued for v5's own
+      // restart, which runs it again as a v5 harness at its next idle moment and never cuts a turn short (the drain waits
+      // for `idle`); a restart that fails is journalled on the ferret (`session.restart_gave_up`), never dropped silently.
+      const attached = queuedRestarts(records, new Date().toISOString());
+      if (attached.length > 0)
+        await ctx.v5.stamped(
+          { path: join('state/ferrets', RestartsFile.path), format: RestartsFile.format, schema: RestartsBody },
+          { queued: attached },
         );
       await ledgers.write();
       await documents.write();

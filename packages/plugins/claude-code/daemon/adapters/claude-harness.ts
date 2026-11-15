@@ -209,6 +209,25 @@ export class ClaudeHarness implements Harness {
     return await this.launch(spec, runner, env, { kind: 'resume', id: harnessConversation });
   }
 
+  /**
+   * Whether `claude --resume <id>` would find its conversation: the transcript Claude keeps for it in THIS ferret's home
+   * (`<home>/projects/<encoded folder>/<id>.jsonl`, the file a start with `--session-id` writes). `false` only when the
+   * home answers that nothing is there; a path the root refuses, a link or any other doubt is `undefined`, so a resume
+   * is never given up on a guess. A ferret converted from v4 names a conversation whose transcript was left behind.
+   */
+  async hasConversation(spec: LaunchSpec, harnessConversation: string): Promise<boolean | undefined> {
+    if (!isConversationId(harnessConversation) || !isConversationId(spec.ferret)) return undefined;
+    try {
+      const home = this.home(spec.ferret);
+      const path = home.resolve(claudeTranscriptPath(spec.folder, harnessConversation));
+      if (!path.ok) return undefined;
+      const found = await home.lstat(path.value);
+      return found !== undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   async stop(ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void> {
     this.deps.panes.remember(ferret, handle);
     await runner.stop(handle, how);

@@ -310,6 +310,8 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
 
     start: async (spec, runner, env) => await launch(spec, runner, env),
     resume: async (spec, runner, env, harnessConversation) => await launch(spec, runner, env, harnessConversation),
+    // A ferret converted from v4 names a conversation whose rollout was left behind: proved absent, Ferrets starts anew.
+    hasConversation: async (spec, harnessConversation) => await rollouts.has(spec.ferret, harnessConversation),
 
     async stop(ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void> {
       try {

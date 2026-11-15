@@ -92,7 +92,11 @@ state was decided from. `pins.json` becomes `{format: 1, pins}`, `state/agent-pi
 schemas are private to the Ferrets daemon, so `tests/unit/ferret-details.test.ts` reads every file back with v5's
 real schemas in a subprocess.
 
-Declared files without a v5 schema are **not written**: moves, auto-resume, restarts and terminals.json. Runtime
+Declared files without a v5 schema are **not written**: moves, auto-resume and terminals.json. v4's own restart queue
+is not carried either; instead `state/ferrets/restarts.json` queues a v5 restart for every ferret still in its v4 pane
+(not stopped, with a pane handle), so v5 relaunches it as a v5 harness at its next idle moment (M3). Such a ferret's
+registry state is taken from the turn its carried `state.json` records (`your-turn`/`needs-input` is `idle`), because
+v5's turn watch moves the registry only when it writes a turn change. Runtime
 `formerNames` belongs to the pending Runtimes/Logins conversion, not the Ferrets callsign ledger. The card a session
 was anchored to is shown through `details.json`;
 name counters, extra history artifacts and pin/option leftovers are listed in `notCarried`. Frozen

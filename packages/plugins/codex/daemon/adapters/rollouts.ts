@@ -93,14 +93,33 @@ function metadata(text: string): { id: string; cwd: string } | undefined {
  * folder link back up the home — is skipped and never opened. Every path is checked again by the root port on read.
  */
 async function rollouts(root: RootHandle, directory: string): Promise<readonly Rollout[]> {
+  return (await walkRollouts(root, directory)).found;
+}
+
+/**
+ * The walk itself, and whether it SAW EVERYTHING: `complete` is false when a cap stopped it, a folder could not be
+ * listed, or a `.jsonl` file's head could not be read as a rollout. Only a complete walk can prove a rollout absent.
+ */
+async function walkRollouts(
+  root: RootHandle,
+  directory: string,
+): Promise<{ readonly found: readonly Rollout[]; readonly complete: boolean }> {
   const pending = [directory];
   const found: Rollout[] = [];
   let visited = 0;
+  let complete = true;
   while (pending.length > 0 && found.length < MAX_ROLLOUTS && visited++ < MAX_DIRECTORIES) {
     const relative = pending.shift() as string;
     const path = root.resolve(relative);
-    if (!path.ok) continue;
-    const entries = await root.entries(path.value).catch(() => []);
+    if (!path.ok) {
+      complete = false;
+      continue;
+    }
+    const entries = await root.entries(path.value).catch(() => {
+      // A folder that does not exist hides nothing; one that cannot be listed might.
+      if (relative !== directory) complete = false;
+      return [];
+    });
     for (const entry of entries) {
       const name = entry.name;
       if (name.includes('/') || name === '.' || name === '..') continue;
@@ -112,16 +131,20 @@ async function rollouts(root: RootHandle, directory: string): Promise<readonly R
       // A link, a device or anything else is not a rollout: only a plain file is ever opened.
       if (entry.kind !== 'file' || !name.endsWith('.jsonl')) continue;
       const child = root.resolve(childRelative);
-      if (!child.ok) continue;
+      if (!child.ok) {
+        complete = false;
+        continue;
+      }
       const head = await window(root, child.value, 0, HEAD_BYTES);
       const meta = head === undefined ? undefined : metadata(head);
-      if (meta !== undefined) {
+      if (meta === undefined) complete = false;
+      else {
         found.push({ id: meta.id, folder: meta.cwd, file: child.value, modified: entry.modified, size: entry.size });
         if (found.length >= MAX_ROLLOUTS) break;
       }
     }
   }
-  return found;
+  return { found, complete: complete && pending.length === 0 && found.length < MAX_ROLLOUTS };
 }
 
 export class CodexRollouts {
@@ -162,6 +185,22 @@ export class CodexRollouts {
       },
       spec.ferret,
     );
+  }
+
+  /**
+   * Whether `codex resume <native>` would find its conversation in THIS ferret's home (`<home>/sessions/**`): `true` when
+   * a rollout there names it, `false` only when a COMPLETE walk found none, `undefined` on any doubt (a cap, a folder or
+   * a file that could not be read), so a resume is never given up on a guess.
+   */
+  async has(ferret: FerretId, native: string): Promise<boolean | undefined> {
+    try {
+      const root = this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` });
+      const walked = await walkRollouts(root, '');
+      if (walked.found.some(rollout => rollout.id === native)) return true;
+      return walked.complete ? false : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /** The rollout proved to be the ferret's, found once and remembered: a stamp asked every half second must not walk the home. */

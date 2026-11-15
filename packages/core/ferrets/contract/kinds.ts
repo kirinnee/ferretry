@@ -811,6 +811,14 @@ export interface Harness {
     env: ChildEnvironment,
     harnessConversation: string,
   ): Promise<Result<Started, StartRefusal>>;
+  /**
+   * Additive (mig-harness-home): whether the conversation a resume would name is in the ferret's home for this launch,
+   * asked before `resume`. `false` ONLY when its absence is proved (the harness looked where it keeps that conversation
+   * and nothing is there); `undefined` when it cannot tell. A real harness asked to resume a conversation it does not
+   * have fails the launch ("No conversation found…"), so on `false` Ferrets starts a NEW conversation instead and says
+   * so; on `true` or `undefined` it resumes as before. Absent: every resume is attempted as asked.
+   */
+  hasConversation?(spec: LaunchSpec, harnessConversation: string): Promise<boolean | undefined>;
   fork?(from: FerretId, at?: TurnRef): Promise<ForkPlan>;
   stop(ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void>;
   deliver(ferret: FerretId, handle: RunnerHandle, message: OutboundMessage): Promise<Delivery>;

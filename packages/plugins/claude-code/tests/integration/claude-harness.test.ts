@@ -757,6 +757,22 @@ describe('ClaudeHarness', () => {
     expect(started.command).not.toContain('--session-id');
   });
 
+  test('hasConversation: true only when the transcript Claude would resume is in this ferret home, false when it is proved absent', async () => {
+    // A ferret converted from v4 names a conversation whose transcript was left behind: `claude --resume` would fail.
+    const { harness, writeHome } = build();
+    expect(await harness.hasConversation(spec({ folder: '/work/repo.a' }), 'older')).toBe(false);
+    await writeHome('projects/-work-repo-a/older.jsonl', '{}\n');
+    expect(await harness.hasConversation(spec({ folder: '/work/repo.a' }), 'older')).toBe(true);
+    // The folder is part of where Claude keeps it: the same id under another folder is not this conversation.
+    expect(await harness.hasConversation(spec({ folder: '/work/other' }), 'older')).toBe(false);
+    // A link where the transcript would be is never followed to decide, and never proves an absence: resumed as asked.
+    await mkdir(join(HOME, 'projects/-work-linked'), { recursive: true });
+    await symlink(join(fixture, 'nowhere.jsonl'), join(HOME, 'projects/-work-linked/older.jsonl'));
+    expect(await harness.hasConversation(spec({ folder: '/work/linked' }), 'older')).not.toBe(false);
+    // An id that is not one plain name proves nothing.
+    expect(await harness.hasConversation(spec(), '../x')).toBeUndefined();
+  });
+
   test('start says unavailable, and starts nothing, when claude is not there', async () => {
     const started: { command?: readonly string[] } = {};
 
