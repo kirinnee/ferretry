@@ -914,6 +914,31 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
     await host.stop();
   });
 
+  test('Agenda’s send is typed bare, ledgered as the daemon’s own shown as Ferretry’s Agenda (never the owner’s, never a ferret’s)', async () => {
+    const { host, ferrets, api, apiFor } = await conversation(
+      new HarnessFerrets(),
+      OPEN,
+      {},
+      { consumers: ['agenda'] },
+    );
+
+    // The Warden's view is refused the Agenda's voice; the Agenda's own view is not.
+    expect((await api().send(F1, { kind: 'agenda' }, { message: 'x', sendId: 's-x' })).ok).toBe(false);
+    const sent = await apiFor('agenda').send(
+      F1,
+      { kind: 'agenda' },
+      { message: '[attention check] raise it', sendId: 's-a' },
+    );
+
+    expect(sent.ok).toBe(true);
+    expect(ferrets.delivered).toEqual([{ text: '[attention check] raise it' }]);
+    expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
+      ['s-a', 'daemon', undefined],
+    ]);
+    expect((await api().sends(F1)).sends.map(row => row.by)).toEqual([{ kind: 'ferretry', feature: 'Agenda' }]);
+    await host.stop();
+  });
+
   test('D2 #19 a Warden send to a stopped ferret revives it rather than typing at a pane; a relaunch that carries nothing types nothing and its record is taken back', async () => {
     const ferrets = new HarnessFerrets();
     const { host, api } = await conversation(ferrets, OPEN, { state: 'stopped' });

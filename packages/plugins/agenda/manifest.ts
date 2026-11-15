@@ -15,7 +15,7 @@ import {
 import { AskAnswered, AsksChanged, AsksPort } from '@ferretry/core-asks/contract';
 import { ArchiveKeeps, FerretChanged, FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { AccessPort } from './contract/others.ts';
-import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
+import { ConversationPort, ReferenceCatalog, TurnEnded } from '@ferretry/plugin-conversation/contract';
 
 import type { VerbArgDecl, VerbOptionDecl } from '@ferretry/kernel/manifest';
 
@@ -438,6 +438,8 @@ export default definePlugin({
   hooks: {
     takes: [
       { hook: FerretChanged },
+      // A ferret's round ended: the turn-end check reads its last reply (Conversation's `turn.ended`).
+      { hook: TurnEnded },
       { hook: ReferenceCatalog, key: '!' },
       { hook: ArchiveKeeps },
       { hook: LaunchParts },

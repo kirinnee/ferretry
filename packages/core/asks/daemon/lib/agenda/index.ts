@@ -3,7 +3,6 @@ export * from './closest.ts';
 export * from './config-confirms.ts';
 export * from './duplicates.ts';
 export * from './home.ts';
-export * from './owner-asks.ts';
 export * from './versions.ts';
 export * from './reply-batch.ts';
 export * from './service.ts';

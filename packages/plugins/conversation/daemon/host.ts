@@ -873,6 +873,8 @@ export function buildConversationA(deps: {
     readonly senderSessionId?: string | undefined;
     /** The Warden is speaking (`ConversationCaller` `warden`): typed bare, recorded as the daemon's own. */
     readonly warden?: true;
+    /** Agenda's turn-end check is speaking (`ConversationCaller` `agenda`): typed bare, recorded as the daemon's own. */
+    readonly agenda?: true;
     /**
      * The daemon itself is the sender (a failed-send notice): recorded as the daemon's own under the Delivery feature,
      * with no sender session, so nothing retries it and a notice that cannot be delivered never notifies anybody.
@@ -977,13 +979,14 @@ export function buildConversationA(deps: {
       attempt: 1,
       attemptAt: at,
       senderKind:
-        request.warden === true || request.notice === true
+        request.warden === true || request.notice === true || request.agenda === true
           ? 'daemon'
           : request.senderSessionId === undefined
             ? 'human'
             : 'agent',
       // The Warden's words are Ferretry's own, shown as such (the sender chip reads `by`), as today's remedies were.
       ...(request.warden === true ? { by: { kind: 'ferretry' as const, feature: 'Warden' } } : {}),
+      ...(request.agenda === true ? { by: { kind: 'ferretry' as const, feature: 'Agenda' } } : {}),
       ...(request.notice === true ? { by: { kind: 'ferretry' as const, feature: 'Delivery' } } : {}),
       ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
       ...(fromName === undefined ? {} : { fromName }),
@@ -1056,11 +1059,13 @@ export function buildConversationA(deps: {
       text,
       request.warden === true
         ? { kind: 'ferretry', feature: 'Warden' }
-        : request.notice === true
-          ? { kind: 'ferretry', feature: 'Delivery' }
-          : request.senderSessionId === undefined
-            ? undefined
-            : { kind: 'ferret', ...(fromName === undefined ? {} : { name: fromName }) },
+        : request.agenda === true
+          ? { kind: 'ferretry', feature: 'Agenda' }
+          : request.notice === true
+            ? { kind: 'ferretry', feature: 'Delivery' }
+            : request.senderSessionId === undefined
+              ? undefined
+              : { kind: 'ferret', ...(fromName === undefined ? {} : { name: fromName }) },
     );
     // What the transcript will hold is the message, or the pointer typed for it.
     const accepted = await accepting(ferret, request, text, fromName, {
@@ -1508,6 +1513,7 @@ export function buildConversationA(deps: {
             // The route and the port follow one rule: a ferret is the message's SENDER, never a different target's rule.
             ...(caller.kind === 'ferret' ? { senderSessionId: caller.ferret } : {}),
             ...(caller.kind === 'warden' ? { warden: true as const } : {}),
+            ...(caller.kind === 'agenda' ? { agenda: true as const } : {}),
           }),
         );
       } catch (error) {

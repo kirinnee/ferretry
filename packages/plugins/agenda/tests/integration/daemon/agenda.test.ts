@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { AsksChanged } from '@ferretry/core-asks/contract';
+import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { owner, type TestCaller, testHost } from '@ferretry/kernel/testing';
 import { as, gateLikeAdmission } from '../../support/gate.ts';
@@ -31,20 +32,39 @@ function access() {
   return { api, buzzed, cleared };
 }
 
-async function world(options: { access?: ReturnType<typeof access> | 'off' } = {}) {
+async function world(
+  options: { access?: ReturnType<typeof access> | 'off'; conversation?: ReturnType<typeof fakeConversation> } = {},
+) {
   const asks = new FakeAsks();
   const ferrets = new FakeFerrets();
   ferrets.add({ id: ferretId('f1') });
   ferrets.add({ id: ferretId('f2') });
   ferrets.add({ id: ferretId('h1'), parent: ferretId('f1') });
+  // The daemon half is kept so a test can hand it a hook the test host has no offerer for (`turn.ended` is Conversation's).
+  const built: { half?: ReturnType<NonNullable<typeof agenda.build>> } = {};
+  const implementation = {
+    ...agenda,
+    build: (ctx: Parameters<NonNullable<typeof agenda.build>>[0]) => {
+      built.half = agenda.build?.(ctx);
+      return built.half as NonNullable<typeof built.half>;
+    },
+  } as typeof agenda;
   const acc = options.access === 'off' ? undefined : (options.access ?? access());
   const host = await testHost({
-    plugins: [agenda],
+    plugins: [implementation],
     gate: gateLikeAdmission(),
     fakes: { asks, ferrets },
-    ...(acc === undefined ? {} : { uses: { access: acc.api } }),
+    uses: {
+      ...(acc === undefined ? {} : { access: acc.api }),
+      ...(options.conversation === undefined ? {} : { conversation: options.conversation }),
+    },
   });
-  return { host, asks, ferrets, acc };
+  /** A ferret's round ended: the hook's taker run, and what it started given the turns to finish. */
+  const turnEnded = async (payload: unknown): Promise<void> => {
+    built.half?.hooks?.['turn.ended']?.(payload as never);
+    for (let i = 0; i < 20; i += 1) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  return { host, asks, ferrets, acc, turnEnded };
 }
 
 describe('POST /v1/push/seen', () => {
@@ -282,3 +302,48 @@ function lazyAgenda(): AgendaApi {
 }
 
 agendaConformance('daemon half', lazyAgenda);
+
+describe('the turn-end check', () => {
+  const ASKING = [
+    { kind: 'message', role: 'user', text: 'ship it' },
+    { kind: 'message', role: 'assistant', text: 'Shipped.\n\n## Waiting on you\n- Approve the release\n' },
+  ] as never;
+  const ended = (ferret: string, outcome: 'completed' | 'interrupted' | 'failed' = 'completed') => ({
+    ferret: ferretId(ferret),
+    turn: 't1',
+    outcome,
+    endedAt: '2026-11-15T00:00:00.000Z' as never,
+  });
+  async function checked() {
+    const conversation = fakeConversation();
+    for (const ferret of ['f1', 'f2', 'h1']) conversation.setEvents(ferretId(ferret), ASKING);
+    return { ...(await world({ conversation })), conversation };
+  }
+  const sentTo = async (conversation: ReturnType<typeof fakeConversation>, ferret: string) =>
+    (await conversation.sends(ferretId(ferret))).sends;
+
+  test('a ferret whose finished reply asks the owner for something it did not raise gets ONE nudge, as the daemon’s own words', async () => {
+    const { turnEnded, conversation } = await checked();
+    await turnEnded(ended('f1'));
+    await turnEnded(ended('f1'));
+    const sends = await sentTo(conversation, 'f1');
+    expect(sends.map(send => [send.sendId, send.senderKind])).toEqual([['attention-nudge-f1-t1', 'daemon']]);
+    expect(sends[0]?.message).toContain('[attention check]');
+    expect(sends[0]?.message).toContain('- Approve the release');
+  });
+
+  test('an interrupted or failed round, a helper and a stopped ferret are not nudged', async () => {
+    const { turnEnded, conversation, ferrets } = await checked();
+    ferrets.add({ id: ferretId('f2'), state: 'stopped' });
+    await turnEnded(ended('f1', 'interrupted'));
+    await turnEnded(ended('f1', 'failed'));
+    await turnEnded(ended('h1'));
+    await turnEnded(ended('f2'));
+    for (const ferret of ['f1', 'f2', 'h1']) expect(await sentTo(conversation, ferret)).toEqual([]);
+  });
+
+  test('says nothing, and breaks nothing, when Conversation is off', async () => {
+    const { turnEnded } = await world();
+    await turnEnded(ended('f1'));
+  });
+});

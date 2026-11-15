@@ -28,12 +28,16 @@ import { BuzzService } from './lib/buzz-service.ts';
 import { AgendaAgentClearer } from './lib/clear-agents.ts';
 import { MachineAgendaView } from './lib/machine-agenda.ts';
 import { AgendaReferenceMenu } from './lib/reference-menu.ts';
+import { AgendaTurnNudge } from './lib/turn-nudge.ts';
 import { AgendaRollup } from './lib/rollup.ts';
 import { markSeen } from './lib/seen.ts';
 import { buzzBody, buzzTitle } from './lib/words.ts';
 import { agendaRoutes } from './routes.ts';
 
 const REFERENCE_MENU_HOOK = 'reference.catalog:!' as const;
+
+/** The command the nudge's words name (the product's one binary). */
+const BINARY_NAME = 'fy';
 
 /** The agenda's own defaults when `config/agenda.yaml` is absent: every switch on. */
 const DEFAULT_CONFIG: AgendaConfig = { agendaMode: true, agendaNudge: true, deadlineWarnHours: 3 };
@@ -50,8 +54,8 @@ const DEFAULT_CONFIG: AgendaConfig = { agendaMode: true, agendaNudge: true, dead
  * - **Agent ferrets.** Ferrets records a role, not "interactive or not": a helper ferret counts as an agent ferret.
  * - **Taking a buzz down on other devices.** Access's port has no clear; opening an ask records it as seen and answers
  *   the tags, and clears only when Access offers `clear`.
- * - **The turn-end and rest nudges.** The turn-end check reads a ferret's transcript and types into it; the rest nudge
- *   needs Asks to expose resting items and their nudge counts. Both stay unported. (A ferret parked on a permission
+ * - **The rest nudge.** It needs Asks to expose resting items and their nudge counts. Unported. (The turn-end check is
+ *   `lib/turn-nudge.ts`, taken on `turn.ended`.) (A ferret parked on a permission
  *   prompt or a dialog is Conversation's `prompt` Asks source, not Agenda's.)
  */
 export default implementDaemon(manifest, {
@@ -127,6 +131,37 @@ export default implementDaemon(manifest, {
       );
     };
 
+    /**
+     * THE TURN-END CHECK: a ferret that ends a turn asking the owner for something it did not raise gets one nudge, typed
+     * through Conversation as Agenda's own words (`{ kind: 'agenda' }`, fixed text; only the ferret's own asks are quoted back
+     * to it). A ferret that is stopped or gone is never nudged: the nudge must not revive it.
+     */
+    const turnNudge = new AgendaTurnNudge(
+      {
+        enabled: () => config().agendaNudge,
+        subject: async ferret => {
+          const summary = await ferrets.get(ferret as FerretId);
+          if (summary === undefined || summary.state === 'stopped') return undefined;
+          return {
+            parent: summary.parent !== undefined,
+            mode: summary.mode === 'auto' ? 'auto' : 'interactive',
+            agenda: (await modeStore.recorded(ferret)) ?? config().agendaMode,
+          };
+        },
+        tail: async (ferret, limit) => {
+          const read = await uses.conversation.current()?.transcriptEvents(ferret as FerretId, { limit });
+          return read?.ok === true ? read.value.events : [];
+        },
+        send: async (ferret, sendId, message) => {
+          const sent = await uses.conversation
+            .current()
+            ?.send(ferret as FerretId, { kind: 'agenda' }, { message, sendId, label: 'action' });
+          if (sent?.ok === false) throw new Error(sent.error.message);
+        },
+      },
+      BINARY_NAME,
+    );
+
     const api: AgendaApi = {
       open: async query => await rollup.page(query),
       daemonAgenda: async () => await machine.list(),
@@ -194,6 +229,13 @@ export default implementDaemon(manifest, {
             item: agendaLaunchPart(async ferret => (await modeStore.recorded(ferret)) ?? config().agendaMode),
           },
         ],
+        // A ferret's round ended: only one that finished its work is checked (an interrupted or failed round said nothing).
+        'turn.ended': ({ ferret, turn, outcome }) => {
+          if (outcome !== 'completed') return;
+          void turnNudge
+            .check(ferret, turn)
+            .catch(error => warn(`agenda could not check the end of a turn of ${ferret}: ${String(error)}`));
+        },
         'ferret.changed': ({ ferret, state: now, previous, change }) => {
           const work =
             change === 'started'
