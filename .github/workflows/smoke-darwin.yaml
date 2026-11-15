@@ -17,6 +17,9 @@ name: Smoke darwin-arm64 (reusable)
 #     fail, and its message says the runner was unavailable.
 #     A smoke that ran and failed is never retried: a flake there is a bug, fixed at the root.
 #
+# Each attempt also runs the kernel's darwin-only tests (.github/actions/kernel-darwin): the same runner policy covers
+# them, which is why they are a step of the attempt and not a macOS job of their own.
+#
 # Called from ci.yaml (needs `compile`) and cd.yaml (needs its own `compile`); both leave the
 # `cli-binaries` artifact for the attempts to download.
 on:
@@ -30,7 +33,7 @@ on:
 jobs:
   attempt-1:
     name: Attempt 1
-    timeout-minutes: 10
+    timeout-minutes: 25
     permissions:
       contents: read
     runs-on: macos-15
@@ -45,6 +48,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/smoke-darwin
+      # The kernel's darwin-only tests (c58-01): the same job, so a missing runner is read by this one policy.
+      - uses: ./.github/actions/kernel-darwin
 
   backoff-1:
     name: Backoff before attempt 2
@@ -61,7 +66,7 @@ jobs:
 
   attempt-2:
     name: Attempt 2
-    timeout-minutes: 10
+    timeout-minutes: 25
     needs: backoff-1
     if: ${{ !cancelled() && needs.backoff-1.result == 'success' }}
     permissions:
@@ -76,6 +81,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/smoke-darwin
+      # The kernel's darwin-only tests (c58-01): the same job, so a missing runner is read by this one policy.
+      - uses: ./.github/actions/kernel-darwin
 
   backoff-2:
     name: Backoff before attempt 3
@@ -92,7 +99,7 @@ jobs:
 
   attempt-3:
     name: Attempt 3
-    timeout-minutes: 10
+    timeout-minutes: 25
     needs: backoff-2
     if: ${{ !cancelled() && needs.backoff-2.result == 'success' }}
     permissions:
@@ -107,6 +114,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/smoke-darwin
+      # The kernel's darwin-only tests (c58-01): the same job, so a missing runner is read by this one policy.
+      - uses: ./.github/actions/kernel-darwin
 
   # The one check that stands for the smoke: green when an attempt passed, red when one ran and failed
   # (or, off a pull request, when no runner ever came), a warning when a pull request had no runner.
