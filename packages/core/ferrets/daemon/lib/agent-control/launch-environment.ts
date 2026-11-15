@@ -1,5 +1,6 @@
 import type { FerretId, FerretRecord } from '../../../contract/index.ts';
 import { LAUNCH_SWITCH_VARIABLES } from '../../../contract/index.ts';
+import { HYPERMEDIA_ENV } from '../session/peers/fleet.ts';
 
 /** What a ferret's launch environment is kept in: the switches it was launched with, per ferret. */
 export interface LaunchEnvironmentRecord {
@@ -53,6 +54,16 @@ export function switchesOfRecord(record: FerretRecord | undefined): Readonly<Rec
  */
 export function sessionModeSwitch(mode: FerretRecord['mode']): Readonly<Record<string, string>> {
   return mode === undefined ? {} : { FY_SESSION_MODE: mode };
+}
+
+/**
+ * The per-ferret switch a LAUNCH decides itself, from the ferret's mode: Hypermedia is ON for an interactive ferret and
+ * OFF for an auto one (a worker, a warden, a miner; docs/hypermedia.md). It goes into the launch environment FIRST, so
+ * an owner's switch (Conversation's `conversation-hypermedia` part) still wins, and the pane is handed it and
+ * `instructions` reads it back from the record. A ferret with no mode is an auto one (the start's own default).
+ */
+export function modeSwitchDefaults(mode: FerretRecord['mode']): Readonly<Record<string, string>> {
+  return { [HYPERMEDIA_ENV]: mode === 'interactive' ? '1' : '0' };
 }
 
 /** The launch variables a launch records: the section switches and the mode, as the launch put them in its environment. */

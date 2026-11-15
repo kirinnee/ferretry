@@ -23,6 +23,7 @@ import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
 import {
   type LaunchEnvironmentRecord,
   LaunchEnvironmentStore,
+  modeSwitchDefaults,
   recordedSwitches,
   sessionModeSwitch,
   switchesOfRecord,
@@ -256,6 +257,32 @@ describe('the launch environment instructions reads is PERSISTED, through one re
     const f = launching(state, {}, 'interactive');
     expect(await f.store.read(f.id)).toEqual({ FY_SESSION_MODE: 'interactive' });
     expect((await instructionsAnswer(f.id, id => f.store.read(id), 'fy')).text).toContain('was not handed');
+  });
+
+  test('c58-18 the mode default is part of what a launch records: Hypermedia on for an interactive ferret, off otherwise', async () => {
+    expect(modeSwitchDefaults('interactive')).toEqual({ FY_HYPERMEDIA: '1' });
+    expect(modeSwitchDefaults('auto')).toEqual({ FY_HYPERMEDIA: '0' });
+    expect(modeSwitchDefaults(undefined)).toEqual({ FY_HYPERMEDIA: '0' });
+
+    // No owner switch says anything (Conversation's part is silent): the launch itself records the mode's default.
+    const state = persisted();
+    const interactive = launching(state, {}, 'interactive');
+    await interactive.service.resume(interactive.id, undefined, { origin: PERSON_ORIGIN });
+    expect(state.held.get(interactive.id)).toEqual({ FY_HYPERMEDIA: '1' });
+    const answer = (await instructionsAnswer(interactive.id, id => interactive.store.read(id), 'fy')).text;
+    expect(answer).toContain('✓ Hypermedia: on');
+
+    const autoState = persisted();
+    const auto = launching(autoState, {}, 'auto');
+    await auto.service.resume(auto.id, undefined, { origin: PERSON_ORIGIN });
+    expect(autoState.held.get(auto.id)).toEqual({ FY_HYPERMEDIA: '0' });
+  });
+
+  test('c58-18 an owner’s Hypermedia switch (a launch part) wins over the mode default', async () => {
+    const state = persisted();
+    const f = launching(state, { FY_HYPERMEDIA: '0' }, 'interactive');
+    await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
+    expect(state.held.get(f.id)).toEqual({ FY_HYPERMEDIA: '0' });
   });
 
   test('T-0036 a launch that is refused records nothing, and a store that fails never fails the launch', async () => {

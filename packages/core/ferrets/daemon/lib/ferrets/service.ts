@@ -108,6 +108,7 @@ import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../token
 import type { SessionSpawnRequest } from '../session/provenance/types.ts';
 import {
   type LaunchEnvironmentRecord,
+  modeSwitchDefaults,
   recordedSwitches,
   sessionModeSwitch,
 } from '../agent-control/launch-environment.ts';
@@ -2630,7 +2631,8 @@ export class FerretsService implements FerretsApi {
     signedIn: Readonly<Record<string, string>>,
   ): Promise<Result<ChildEnvironment, string>> {
     // The login's environment goes in first, so every part (MCP, shells) and the FY_* switches below keep precedence.
-    const env: Record<string, string> = { ...login };
+    // The mode's own defaults come next and BEFORE the parts, so an owner's switch (a part) still overrides them.
+    const env: Record<string, string> = { ...login, ...modeSwitchDefaults(mode) };
     for (const part of parts) if (part.kind === 'env' || part.kind === 'shell') Object.assign(env, part.env);
     // The ferret's mode (v4 parity: the pane is handed FY_SESSION_MODE, which the wrappers and `instructions` read) goes
     // in AFTER the parts: it is the record's own fact, the same one the harness decided its question tool from

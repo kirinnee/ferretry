@@ -225,13 +225,22 @@ keeps its unmasked result inside the advisory Realworld workflow.
 - **Smoke is one reusable workflow, `smoke-darwin.yaml`.** `ci.yaml` (needs `compile`) and `cd.yaml`
   (needs its own `compile`, so a release proves the darwin binary on a Mac before GoReleaser publishes) call it
   with `advisory: ${{ github.event_name == 'pull_request' }}` and `advisory: false`. It has three `macos-15`
-  attempts (`timeout-minutes: 10` each), a Linux backoff between them (120 s, then 300 s), and a `Verdict` job
+  attempts (`timeout-minutes: 25` each), a Linux backoff between them (120 s, then 300 s), and a `Verdict` job
   on Linux: the check that stands for the smoke. Each attempt's first step writes `started=true` to its job
   outputs, and **`started` is the source of truth, never the attempt's `result`**: GitHub shows a job it never
   gave a runner as "cancelled" but hands the workflow `result: abandoned` for it. An attempt that is not a
   success and has no `started` is **"no runner"**; one with `started` that did not succeed is **"ran and
   failed"** (`result: failure`) or **"cut off"** (anything else). Only "no runner" re-queues, and only off a
   pull request.
+- **The kernel's darwin-only tests are a step of each attempt, not a macOS job of their own.** Each attempt also
+  runs `.github/actions/kernel-darwin` (the pinned toolchain through `install-nix`, `bun install --frozen-lockfile`, then
+  `root-rename-ffi`, `root-remove-bracket` and `node-fs-held-folder` — the real `mkdirat` — each one `bun test
+--config=bunfig.int.toml <file>` in its own step, so a red step names the file). Those files hold the cases only a Mac
+  can prove (the `libSystem.B.dylib` name, `__error`, the darwin constants, the real `fchdir`, and Apple arm64's
+  handling of `openat`'s variadic `mode`); no other job runs them. Being part of the attempt, they get the same
+  policy: advisory on a pull request, required and re-queued on `main` and a release tag, and the job inventory stays
+  `smoke-darwin.yaml` with three attempts (`scripts/validate/macos-policy.sh` holds the action, the three files and
+  the one-per-step shape). A test that ran and failed is red, never retried.
 - **A smoke that ran and failed is never retried**, on a pull request or off one: the flake rule below
   (fix the root, never retry) still holds. `scripts/ci/macos-smoke-verdict.sh` judges the attempts: any pass is green; any failure that ran is
   red; no attempt having run is `macOS runner not available; advisory on PRs` (green, warning) on a pull request and
