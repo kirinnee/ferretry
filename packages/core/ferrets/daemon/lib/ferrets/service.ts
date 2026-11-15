@@ -95,7 +95,7 @@ import {
   TranscriptProvenanceSchema,
   type FerretDetails,
 } from '../../../contract/index.ts';
-import type { FerretRegistry, FerretFilter } from '../registry/registry.ts';
+import { effectiveMode, type FerretRegistry, type FerretFilter } from '../registry/registry.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import { resumeTurnAuthor } from '../session/resume/policy.ts';
 import type { ResumeActor } from '../session/resume/types.ts';
@@ -113,6 +113,7 @@ import {
   type LaunchEnvironmentRecord,
   modeSwitchDefaults,
   recordedSwitches,
+  sessionModeSwitch,
 } from '../agent-control/launch-environment.ts';
 import { STATE_HOME_UNRESOLVED, stateHomeSentence } from '../route-security/state-home.ts';
 
@@ -2219,6 +2220,9 @@ export class FerretsService implements FerretsApi {
     const ownCompactAt =
       (await this.ports.session?.compactAt?.(record.id).catch(() => undefined)) ??
       this.registry.detailsOf(record.id)?.options?.compactAt;
+    // Resolved ONCE (the record's own, else a converted ferret's persisted start option): the harness's question tool,
+    // the pane's FY_SESSION_MODE and the derived launch switches all read this one fact.
+    const mode = effectiveMode(record, this.registry.detailsOf(record.id));
     const base: Omit<LaunchSpec, 'parts'> = {
       ferret: record.id,
       name: record.name,
@@ -2231,6 +2235,7 @@ export class FerretsService implements FerretsApi {
       // Set from the login only, never by a launch part: the spec field has no other writer.
       ...(credential.value === undefined ? {} : { credential: credential.value }),
       ...launchOptions(this.registry.detailsOf(record.id)?.options),
+      ...(mode === undefined ? {} : { mode }),
       ...(ownCompactAt === undefined ? {} : { compactAt: ownCompactAt }),
       folder: record.folder as FencedPath,
       home: home.value,
@@ -2256,7 +2261,7 @@ export class FerretsService implements FerretsApi {
           : `the ${record.harness} harness could not prepare this ferret's home, so it was not started`,
       );
     }
-    const env = await this.environment(record.id, record.mode, issued.token, parts, login.value, signedIn.value);
+    const env = await this.environment(record.id, mode, issued.token, parts, login.value, signedIn.value);
     if (!env.ok) return failed('login_unavailable', env.error);
     // The LAST step before the harness: the folder is still the one that was checked. Anything else (a swap, a doubt)
     // starts nothing. (Remaining window: the instant between this check and the child's own chdir; docs/secrets.md.)
@@ -2714,6 +2719,10 @@ export class FerretsService implements FerretsApi {
     // The mode's own defaults come next and BEFORE the parts, so an owner's switch (a part) still overrides them.
     const env: Record<string, string> = { ...login, ...modeSwitchDefaults(mode) };
     for (const part of parts) if (part.kind === 'env' || part.kind === 'shell') Object.assign(env, part.env);
+    // The ferret's mode (v4 parity: the pane is handed FY_SESSION_MODE, which the wrappers and `instructions` read) goes
+    // in AFTER the parts: it is the record's own fact, the same one the harness decided its question tool from
+    // (`LaunchSpec.mode`), so no part or login file can make the pane say something else.
+    Object.assign(env, sessionModeSwitch(mode));
     // Ferretry's own sign-in variable goes in AFTER the parts: nothing a part or a login file says can move the store
     // a ferret reads its credential from. (The kernel's spawn base is PATH and HOME only, so no inherited value is here.)
     Object.assign(env, signedIn);

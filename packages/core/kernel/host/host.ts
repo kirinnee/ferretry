@@ -993,6 +993,8 @@ async function bootLocked(
           mayReach: (hostname, host) => hostPermitted(declaredNetwork, items, hostname, resolversOf(manifest.id), host),
           transport: outboundSecretTransport(fetchPort, clock),
           log: scopedLog(adapters.logSink, manifest.id),
+          // Gate writes it into the security log (`secrets.used`): the name and host, never the value.
+          sent: note => bound.admission?.secretSent?.({ plugin: manifest.id, ...note }),
         },
       ),
       signer: signerFor(manifest.id, sessionSigner),

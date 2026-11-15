@@ -15,6 +15,7 @@ import { type CatalogClient, catalogClientOf } from '../lib/catalog-client.ts';
 import { CatalogClientProvider } from '../lib/client-context.tsx';
 import { daemonConnection } from '../lib/machine.ts';
 import { sharedMembers } from '../lib/members.ts';
+import { useRuntimeChoices } from '../lib/runtime-choices.ts';
 import type { SharedController } from '../features/shared/shared-controller.ts';
 import { daemonSharingPath } from '../lib/routes.ts';
 import { useInstallHost } from './catalogs-views.tsx';
@@ -58,6 +59,7 @@ export function createAddSkillsScreen(
     const machineName = paired === undefined ? 'This machine' : daemonTitle(paired);
     const connection = useMemo(() => daemonConnection({ daemonId: id, daemonName: machineName }), [id, machineName]);
     const installHost = useInstallHost(own, id, client);
+    const runtimes = useRuntimeChoices(client);
     const href = useScreenHref();
     const { navigate } = useRouter();
     const ferret = params.ferret ?? '';
@@ -72,6 +74,7 @@ export function createAddSkillsScreen(
           place={place}
           members={members()}
           install={installHost}
+          runtimes={runtimes}
           onBack={() => navigate(chat ?? daemonHomeHref(id))}
           onSubscribe={() => navigate(daemonSharingPath(connection.daemonId, 'shared'))}
         />
