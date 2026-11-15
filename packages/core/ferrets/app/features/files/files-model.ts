@@ -1,3 +1,4 @@
+import { isOpenableName } from '../../../contract/file-reference.ts';
 import type { FsEntry } from './wire.ts';
 
 type StatusTone = 'ok' | 'warn' | 'err' | 'accent' | 'neutral';
@@ -21,21 +22,8 @@ export const normalizeRel = (input: string | null | undefined): string => {
 export const joinRel = (dir: string, name: string): string =>
   normalizeRel(`${normalizeRel(dir)}${dir && name ? '/' : ''}${name ?? ''}`);
 
-const hasUnsupportedNameChar = (value: string): boolean => {
-  for (const char of value) {
-    const code = char.codePointAt(0) ?? 0;
-    if (char === '\\' || code <= 0x1f || code === 0x7f) return true;
-  }
-  return false;
-};
 export const UNOPENABLE_NAME_REASON =
   'name cannot be opened by this viewer — it uses a character the daemon’s path grammar refuses';
-const isOpenableName = (name: string | null | undefined): boolean => {
-  const value = name ?? '';
-  return value !== '' && value !== '.' && value !== '..' && !value.includes('/') && !hasUnsupportedNameChar(value);
-};
-export const isOpenablePath = (rel: string | null | undefined): boolean =>
-  !!rel && rel.split('/').every(isOpenableName);
 export const entryRefusal = (entry: FsEntry): string | null => {
   if (entry.denied) return 'not served — denylisted (secrets policy)';
   if (!isOpenableName(entry.name)) return UNOPENABLE_NAME_REASON;

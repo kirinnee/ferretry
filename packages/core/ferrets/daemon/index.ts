@@ -74,7 +74,7 @@ import type { NameClaim } from './lib/names/types.ts';
 import { archivedNameClaims } from './lib/names/session-names.ts';
 import { LedgerNameClaimStore, stateClaimLedger } from './adapters/names/name-claim-store.ts';
 import { StateCallsignCounters } from './adapters/names/state-callsign-counters.ts';
-import { ambiguousAgentAddressMessage, resolveAgentAddress } from './lib/protocol/agent-address.ts';
+import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../contract/agent-address.ts';
 import { FerretRegistry } from './lib/registry/registry.ts';
 import { FerretTokenDirectory, type TokenEntry } from './lib/tokens/tokens.ts';
 import type { TokenCutOff } from './lib/tokens/cut-off-mark.ts';

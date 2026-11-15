@@ -6,6 +6,8 @@
 
 import type { ScreenProps } from '@ferretry/kernel/manifest';
 import { MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
+import { useCallback } from 'react';
+import { useAgendaReferenceFacts } from '../hooks/use-agenda-reference-facts.ts';
 import { AgendaBoardProviders, laneEditorOf, useAgendaBoardHooks } from '../features/agenda/agenda-board-hooks.tsx';
 import { AgendaCardConversation } from '../features/agenda/agenda-conversation-slot.tsx';
 import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
@@ -26,6 +28,9 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
     const links = useAgendaLinks();
     // Board's hooks for this machine: Done · closes, a notice's Start and Close, Edit's lane editor and `&F12` proof.
     const board = useAgendaBoardHooks(daemon);
+    // The machine-wide page mixes ferrets, so it proves `:agent` only (`!A3` and `@file` need one ferret's own page).
+    const go = useCallback((to: string) => navigate(to), [navigate]);
+    const references = useAgendaReferenceFacts(runtime, go);
     // Told on the OPENED CARD's machine (it may be another machine's, from the fleet Inbox), never the page's.
     const itemOpened = useItemOpened({ daemon, client: runtime.client }, fleet);
     const inbox = useRuntimeInbox(runtime, laneEditorOf(board), fleet);
@@ -33,7 +38,7 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
     // A machine ask's push opens `/agenda?ask=A3`: the page opens that ask's card once it is among the open ones.
     const asked = useAskFocus();
     return (
-      <AgendaBoardProviders hooks={board} onNavigate={to => navigate(to)}>
+      <AgendaBoardProviders hooks={board} onNavigate={go} references={references}>
         <AgendaClientContext.Provider value={runtime.client}>
           <AgendaInboxContext.Provider value={inbox}>
             {itemOpened.host}

@@ -12,6 +12,8 @@ import { daemonSessionScope } from '../lib/machine.ts';
 
 export interface FerretAgenda {
   readonly model: AgendaTabModel;
+  /** Every item id on this ferret's agenda, open and resolved: what `!A3` is proved against. */
+  readonly ledger: readonly string[];
   /** The read was refused or never answered: the model is empty because nothing was read, not because nothing is asked. */
   readonly failed: boolean;
   /** The lead whose agenda this sub-ferret's items are on. */
@@ -50,6 +52,7 @@ export const useFerretAgenda = (runtime: AgendaRuntime, ferret: string | undefin
     const parent = view?.config.parent === undefined ? undefined : views.find(v => v.config.id === view.config.parent);
     return {
       model,
+      ledger: [...(board?.items ?? []), ...(board?.resolved ?? [])].map(item => item.id),
       failed,
       ...(parent === undefined
         ? {}

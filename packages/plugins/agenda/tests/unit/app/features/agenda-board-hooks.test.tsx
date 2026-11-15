@@ -7,6 +7,7 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaCardRow, AgendaItem } from '@ferretry/core-asks/contract';
+import { ScreenHrefProvider } from '@ferretry/app';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import type { ReactNode } from 'react';
 import { fakeAnswer, fakeReference } from '../../../support/app/board-hooks.ts';
@@ -20,6 +21,7 @@ import { AgendaCardsHost } from '../../../../app/features/agenda/agenda-cards-ho
 import type { BoardTaskId } from '../../../../app/features/agenda/agenda-cards-list.tsx';
 import { AgendaItemView } from '../../../../app/features/agenda/agenda-item-view.tsx';
 import { agendaProse } from '../../../../app/features/agenda/agenda-prose.tsx';
+import type { AgendaFerretReferences, AgendaReferenceFacts } from '../../../../app/lib/agenda-references.ts';
 import type { InboxAction } from '../../../../app/lib/agenda-inbox.ts';
 import { daemonConnection, ReferenceSurfaceProvider } from '../../../../app/shell.ts';
 import { agendaItem, testLaneEditor } from '../../../support/app/agenda-inbox.tsx';
@@ -38,6 +40,7 @@ const bound = (
   provided: { cardAnswer?: unknown; laneProposal?: unknown; cardReference?: unknown },
   children: ReactNode,
   onNavigate: (to: string) => void = () => undefined,
+  references?: AgendaReferenceFacts,
 ) => (
   <AgendaBoardProviders
     hooks={agendaBoardHooks(laptop.daemonId, {
@@ -46,6 +49,7 @@ const bound = (
       cardReference: provided.cardReference,
     })}
     onNavigate={onNavigate}
+    {...(references === undefined ? {} : { references })}
   >
     {children}
   </AgendaBoardProviders>
@@ -201,6 +205,80 @@ describe('agenda.card-reference: `&F12` in an ask’s words', () => {
 
     expect(reference.watched).toEqual([]);
     expect(links().map(link => link.textContent)).toEqual(['&F13']);
+  });
+});
+
+describe('Agenda’s own references: `!A3`, `:agent` and `@file` in an ask’s words', () => {
+  const prose = agendaProse()('See !A3 and !A8, ask :aniya or :nobody, read @src/a.ts and @missing.ts.');
+  const links = (): readonly HTMLAnchorElement[] => [...root().querySelectorAll<HTMLAnchorElement>('a')];
+  const texts = () => links().map(link => link.textContent);
+  const opened: Array<[string, string]> = [];
+  const page = (over: Partial<AgendaFerretReferences> = {}): AgendaFerretReferences => ({
+    id: 'f1',
+    ledger: ['A3'],
+    openAsk: () => undefined,
+    showFiles: () => undefined,
+    ...over,
+  });
+  const facts = (over: Partial<AgendaReferenceFacts> = {}): AgendaReferenceFacts => ({
+    daemonId: laptop.daemonId,
+    fleet: [{ config: { id: 'f2', teammate: 'aniya', cwd: '/repo' }, state: { status: 'working' } }],
+    client: {
+      call: async (_route: string, request?: { query?: Record<string, string> }) =>
+        request?.query?.path === 'src' ? { entries: [{ name: 'a.ts', type: 'file' }] } : { entries: [] },
+    } as never,
+    fileOpen: { open: (ferret, path) => (opened.push([ferret, path]), true) },
+    onNavigate: () => undefined,
+    ...over,
+  });
+  const draw = async (
+    references: AgendaReferenceFacts | undefined,
+    navigate: (to: string) => void = () => undefined,
+  ) => {
+    view = await mount(
+      <ScreenHrefProvider href={(daemon, _plugin, _screen, params) => `/${daemon}/chat/${params?.ferret ?? ''}`}>
+        {bound({}, prose, navigate, references === undefined ? undefined : { ...references, onNavigate: navigate })}
+      </ScreenHrefProvider>,
+    );
+    await interact(() => flush());
+    await interact(() => flush());
+  };
+
+  afterEach(() => {
+    opened.length = 0;
+  });
+
+  test('proves an item on the ferret’s ledger, an agent of the fleet and a listed file — and only those', async () => {
+    const asks: string[] = [];
+    const navigated: string[] = [];
+    await draw(facts({ ferret: page({ openAsk: id => asks.push(id) }) }), to => navigated.push(to));
+
+    expect(texts()).toEqual(['!A3', ':aniya', '@src/a.ts']);
+    await interact(() => must(links()[0], 'the !A3 link').click());
+    await interact(() => must(links()[1], 'the :aniya link').click());
+    await interact(() => must(links()[2], 'the @src/a.ts link').click());
+    expect(asks).toEqual(['A3']);
+    expect(navigated).toEqual([`/${laptop.daemonId}/chat/f2`]);
+    expect(opened).toEqual([['f1', 'src/a.ts']]);
+  });
+
+  test('proves only :agent where no ferret has a page of its own (the machine-wide Inbox)', async () => {
+    await draw(facts());
+
+    expect(texts()).toEqual([':aniya']);
+  });
+
+  test('proves no file without Ferrets’ opener, and no agent before the fleet is read', async () => {
+    await draw(facts({ ferret: page(), fileOpen: undefined, fleet: null }));
+
+    expect(texts()).toEqual(['!A3']);
+  });
+
+  test('stays prose with no facts at all', async () => {
+    await draw(undefined);
+
+    expect(links()).toEqual([]);
+    expect(root().textContent).toContain('See !A3 and !A8');
   });
 });
 

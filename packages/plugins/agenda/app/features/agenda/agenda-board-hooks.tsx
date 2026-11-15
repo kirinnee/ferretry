@@ -26,6 +26,7 @@ import {
 } from '../../../contract/app-hooks.ts';
 import { type DoneCloseBoard, DoneCloseBoardProvider } from '../../hooks/use-done-close.ts';
 import { type AgendaCardsBoard, boardErr, boardOk } from '../../lib/agenda-cards-actions.ts';
+import { type AgendaReferenceFacts, agendaReferenceSurface } from '../../lib/agenda-references.ts';
 import type { DaemonId } from '../../lib/machine.ts';
 import { ReferenceSurfaceProvider, useAppHook, useReferenceSurface } from '../../shell.ts';
 import { AgendaCardsBoardProvider } from './agenda-cards-host.tsx';
@@ -112,14 +113,34 @@ function CardReferences({
   return <ReferenceSurfaceProvider surface={surface}>{children}</ReferenceSurfaceProvider>;
 }
 
+/**
+ * What Agenda itself proves on top of the surface above it (`!A3`, `:agent`, `@file`): with no facts the surface is
+ * left exactly as it was, so a reader outside a ferret's page or a machine proves none of them.
+ */
+function OwnReferences({
+  facts,
+  children,
+}: {
+  readonly facts: AgendaReferenceFacts | undefined;
+  readonly children: ReactNode;
+}) {
+  const outer = useReferenceSurface();
+  const surface = useMemo(() => (facts === undefined ? outer : agendaReferenceSurface(outer, facts)), [outer, facts]);
+  if (facts === undefined) return <>{children}</>;
+  return <ReferenceSurfaceProvider surface={surface}>{children}</ReferenceSurfaceProvider>;
+}
+
 /** Hands the ask surfaces below the provided Done · closes board, the notices' card board and the `&` proof. */
 export function AgendaBoardProviders({
   hooks,
   onNavigate,
+  references,
   children,
 }: {
   readonly hooks: AgendaBoardHooks;
   readonly onNavigate: (to: string) => void;
+  /** The facts `!A3`, `:agent` and `@file` are proved from; none leaves those kinds as prose. */
+  readonly references?: AgendaReferenceFacts;
   readonly children: ReactNode;
 }) {
   const { daemonId, cardAnswer } = hooks;
@@ -134,7 +155,7 @@ export function AgendaBoardProviders({
   const drawn = (
     <DoneCloseBoardProvider board={doneClose}>
       <CardReferences onNavigate={onNavigate} reference={hooks.cardReference}>
-        {children}
+        <OwnReferences facts={references}>{children}</OwnReferences>
       </CardReferences>
     </DoneCloseBoardProvider>
   );

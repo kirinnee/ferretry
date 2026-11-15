@@ -8,7 +8,7 @@ import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { KeyedSerialExecutor } from './serial.ts';
 import type { SerialExecutor } from '../ports.ts';
 import type { SessionCutOffMark } from '../tokens/cut-off-mark.ts';
-import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../protocol/agent-address.ts';
+import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../../../contract/agent-address.ts';
 import {
   type FerretBirth,
   LaunchRefusal,
