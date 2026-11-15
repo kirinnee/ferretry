@@ -1,0 +1,48 @@
+# The kernel's darwin tests, on a real Mac. Each of these files holds what Linux cannot prove: the `libSystem.B.dylib`
+# name, the `__error` symbol, the darwin constant values, the real `fchdir`, the real `mkdirat`, and Apple arm64's
+# handling of openat's variadic `mode`. Until this ran, nothing ran them (the smoke only runs scripts/release/smoke.sh):
+# ports-pending "[kernel: macOS descriptor calls]". One file per step, so a red step names the file; each is one `bun test`
+# process. A Mac has no `/proc/self/fd`, so the cases spelled over it are `skipIf(process.platform !== 'linux')` and the
+# same files run only what a Mac can prove (the `libc` provider, the real-library cases, the no-descriptor-reach cases).
+#
+# Two bounds, because a composite step has no `timeout-minutes` of its own:
+#   - `--timeout 120000` is the per-test budget the int tier sets on its command line (scripts/ci/test.sh; a bunfig
+#     `[test] timeout` is ignored by Bun), or the step would run on Bun's 5 s default;
+#   - coreutils `timeout` around each `bun test` ends a HUNG process (a synchronous FFI call that blocks is not stopped by
+#     Bun's per-test timeout) as a FAILED step. Left to the job's own limit, GitHub would cancel the whole job and the
+#     verdict would read a cut-short run, which is green with a warning on a pull request.
+# Called from each attempt of smoke-darwin.yaml, so a macOS runner that never starts is read by the one policy in
+# docs/standards/ci-cd ("macOS runner shortage").
+name: Kernel darwin tests
+description: Install the pinned toolchain and run the kernel's darwin test files, one per step, each bounded.
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/install-nix
+    - name: Install dependencies
+      shell: bash
+      run: ./scripts/ci/in-devshell.sh bun install --frozen-lockfile
+    - name: Kernel darwin tests (root-rename-ffi)
+      shell: bash
+      env:
+        FY_MODEL_CATALOG: 'off'
+        FY_LOCAL_MODELS: 'off'
+        FY_RELAY_DIRECTORY_ORIGIN: 'off'
+        FY_UPDATE_CHECK: 'off'
+      run: ./scripts/ci/in-devshell.sh timeout --kill-after=15 300 bun test --config=bunfig.int.toml --timeout 120000 packages/core/kernel/tests/integration/host/root-rename-ffi.test.ts
+    - name: Kernel darwin tests (root-remove-bracket)
+      shell: bash
+      env:
+        FY_MODEL_CATALOG: 'off'
+        FY_LOCAL_MODELS: 'off'
+        FY_RELAY_DIRECTORY_ORIGIN: 'off'
+        FY_UPDATE_CHECK: 'off'
+      run: ./scripts/ci/in-devshell.sh timeout --kill-after=15 300 bun test --config=bunfig.int.toml --timeout 120000 packages/core/kernel/tests/integration/host/root-remove-bracket.test.ts
+    - name: Kernel darwin tests (node-fs-held-folder, the real mkdirat)
+      shell: bash
+      env:
+        FY_MODEL_CATALOG: 'off'
+        FY_LOCAL_MODELS: 'off'
+        FY_RELAY_DIRECTORY_ORIGIN: 'off'
+        FY_UPDATE_CHECK: 'off'
+      run: ./scripts/ci/in-devshell.sh timeout --kill-after=15 300 bun test --config=bunfig.int.toml --timeout 120000 packages/core/kernel/tests/integration/host/node-fs-held-folder.test.ts
