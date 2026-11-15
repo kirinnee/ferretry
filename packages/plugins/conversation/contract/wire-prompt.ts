@@ -14,3 +14,28 @@ export const PromptAskRefSchema = z.strictObject({
   prompt: z.string().min(1).max(128),
 });
 export type PromptAskRef = z.infer<typeof PromptAskRefSchema>;
+
+/**
+ * What Conversation remembers of one ferret's waits on the owner (`state/conversation/<ferret>/prompt-wait.json`): the
+ * wait it is in (or was last in), WHICH occurrence of waiting that is, and the card it holds for it. The occurrence is
+ * what makes the same prompt a second time a new card (Asks keeps `(source, entry)` for life), and what lets a tick, a
+ * race or a restart find the card it already raised instead of raising another.
+ */
+export const PromptWaitRecordSchema = z.strictObject({
+  format: z.literal(1),
+  /** The wait now or last: its kind and the prompt's id (`permission:<id>`), never its words. */
+  key: z.string().min(1).max(256),
+  /** 1 for the first wait; bumped only when a NEW wait starts after the wait was positively seen to end. */
+  occurrence: z.number().int().min(1),
+  /** Whether the pane was last read as parked on this wait. */
+  waiting: z.boolean(),
+  /** The card raised for this occurrence: exactly the ref Asks returned (the board it LANDED on) and the entry. */
+  ask: z
+    .strictObject({
+      ferret: z.string().min(1).max(128),
+      id: z.string().min(1).max(64),
+      entry: z.string().min(1).max(128),
+    })
+    .optional(),
+});
+export type PromptWaitRecord = z.infer<typeof PromptWaitRecordSchema>;

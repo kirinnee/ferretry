@@ -531,11 +531,13 @@ const published = (d: { published: string[] }): string[] => d.published;
 
 describe('a ferret parked on a permission prompt reaches the Agenda on the same watch tick', () => {
   const parkedOn = { current: undefined as unknown };
+  const listing = { current: async (): Promise<unknown[]> => [{ id: 'cody', harness: 'claude', state: 'idle' }] };
   const withPrompt = () => {
+    listing.current = async () => [{ id: 'cody', harness: 'claude', state: 'idle' }];
     const w = world();
     const ferrets = {
       get: async () => ({ id: 'cody', state: 'working' }),
-      list: async () => [{ id: 'cody', harness: 'claude', state: 'working' }],
+      list: async () => listing.current(),
       prompt: async () => parkedOn.current,
     };
     return { w, d: daemon({ files: w.files, asks: w.asks, events: w.events, ferrets }) };
@@ -554,7 +556,8 @@ describe('a ferret parked on a permission prompt reaches the Agenda on the same 
       source: 'prompt',
       kind: 'task',
       ferret: 'cody',
-      subject: 'Permission: Bash ls',
+      subject: 'cody needs a permission answer',
+      context: 'Permission: Bash ls. Proceed?',
       blocking: true,
     });
 
@@ -564,12 +567,34 @@ describe('a ferret parked on a permission prompt reaches the Agenda on the same 
     expect(w.asks.items[0]).toMatchObject({ state: 'closed', reason: 'withdrawn' });
   });
 
-  test('an Asks that cannot be read is said and the watch goes on', async () => {
+  test('an Asks that cannot take the card is said once, not on every tick, and the watch goes on', async () => {
     const { w, d } = withPrompt();
-    w.asks.api.open = async () => {
+    parkedOn.current = {
+      turnState: 'needs-input',
+      permissionRequest: { id: '0123456789abcdef', tool: 'Bash', what: 'ls', question: 'Proceed?' },
+    };
+    w.asks.api.raise = async () => {
       throw new Error('asks is unavailable');
     };
     await d.tick();
-    expect(d.warned.some(line => line.includes('could not follow the prompts'))).toBe(true);
+    await d.tick();
+    expect(d.warned.filter(line => line.includes('could not follow the prompt of cody'))).toHaveLength(1);
+  });
+
+  test('a ferret list that cannot be read is said once, not on every tick, and the watch goes on', async () => {
+    const { d } = withPrompt();
+    listing.current = async () => {
+      throw new Error('ferrets is unavailable');
+    };
+    await d.tick();
+    await d.tick();
+    expect(d.warned.filter(line => line.includes('could not list the ferrets for their prompts'))).toHaveLength(1);
+    listing.current = async () => [];
+    await d.tick();
+    listing.current = async () => {
+      throw new Error('ferrets is unavailable');
+    };
+    await d.tick();
+    expect(d.warned.filter(line => line.includes('could not list the ferrets for their prompts'))).toHaveLength(2);
   });
 });
