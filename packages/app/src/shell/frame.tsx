@@ -231,12 +231,20 @@ function ShellCommandBar(props: {
   const screenHrefOf = useScreenHref();
   const screenHrefRef = useRef(screenHrefOf);
   screenHrefRef.current = screenHrefOf;
+  // The bar follows which plugins the machine allows: opened right after a page loads, it is open BEFORE the machine has
+  // said which plugins are on, and sources built then would have no plugin to ask and never be built again.
+  useRuntimeVersion(runtime);
+  const allowed =
+    props.daemon === undefined
+      ? ''
+      : runtime.surfaces.map(entry => runtime.standing(props.daemon as string, entry.id).state).join(',');
   const daemons = runtime.daemons.snapshot().daemons;
   // A plugin source that was waiting on its daemon asks for a new listing by bumping this.
   const [answers, setAnswers] = useState(0);
   const changed = useCallback(() => setAnswers(current => current + 1), []);
   const daemon = props.daemon;
-  // Built once per daemon (a source holds what its daemon last answered), and only while the bar is open.
+  // Built once per daemon and plugin set (a source holds what its daemon last answered), and only while the bar is open.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `allowed` rebuilds the sources when a plugin becomes allowed.
   const pluginSources = useMemo(
     () =>
       daemon === undefined || !props.open
@@ -250,7 +258,7 @@ function ShellCommandBar(props: {
             changed,
             ferret,
           }),
-    [daemon, props.open, runtime, router, changed, ferret],
+    [daemon, props.open, runtime, router, changed, ferret, allowed],
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: `answers` re-lists when a plugin source's answer arrives.
   const sources = useMemo(

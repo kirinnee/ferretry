@@ -17,6 +17,7 @@ import { buildConversationA } from './host.ts';
 import { type HarnessGate, HARNESS_OPEN } from './harness-seam.ts';
 import { hypermediaLaunchEnvironment } from './hypermedia/lib/launch.ts';
 import { buildReading } from './reading.ts';
+import { addressedByCallsign } from './seams/ferret-address.ts';
 import { maskedBody } from './seams/masked-body.ts';
 import { referenceCatalogRoute } from './references/catalog.ts';
 
@@ -104,8 +105,12 @@ export const conversationDaemon = (gate: HarnessGate) =>
         manifest.actions.routes.map(route => route.key),
         Object.fromEntries(
           manifest.actions.routes.flatMap(route => {
-            const handler = served[route.key];
-            if (handler === undefined) return [];
+            const declaredHandler = served[route.key];
+            if (declaredHandler === undefined) return [];
+            // A path that names a ferret takes its callsign as well as its id.
+            const handler = route.key.includes(':ferretId')
+              ? addressedByCallsign(ctx.needs.ferrets, declaredHandler)
+              : declaredHandler;
             const masks = route.guard === 'secrets' && !SCRUBS_ITS_OWN_BODY.has(route.key);
             return [
               [route.key, masks ? maskedBody(ctx.kernel.redaction, handler, VERBATIM_FIELDS[route.key]) : handler],
@@ -132,7 +137,13 @@ export const conversationDaemon = (gate: HarnessGate) =>
         },
         provides: { conversation: perNeeder(needer => conversationFor(needer.id, api)) },
         hooks: {
-          'ask.sources:question': { schema: QuestionSchema, title: 'Question', form: true },
+          // The owner's answer on the Agenda is typed into the ferret's own question form BEFORE the card counts as answered.
+          'ask.sources:question': {
+            schema: QuestionSchema,
+            title: 'Question',
+            form: true,
+            apply: answer => a.applyQuestionAnswer(answer),
+          },
           // What a launch says about hypermedia: only a switch the owner set, so a ferret with none keeps its mode default.
           'launch.parts': () => [
             {
@@ -171,6 +182,10 @@ export const conversationDaemon = (gate: HarnessGate) =>
           // An ask was answered: the draft of its item goes with it (a chat reply keeps the draft).
           'asks.answered': async payload => {
             await a.onAskAnswered(payload);
+          },
+          // The board changed: a question card it refused for now (it was full) is asked for again.
+          'asks.changed': async () => {
+            await a.onAsksChanged();
           },
         },
       };

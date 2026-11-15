@@ -71,7 +71,9 @@ const VARIANTS = [
   { name: '390-dark', width: 390, height: 844, phone: true, scheme: 'dark' },
 ] as const;
 
-const open = async (variant: (typeof VARIANTS)[number], path: string, ready: string) => {
+type Variant = { name: string; width: number; height: number; phone: boolean; scheme: 'light' | 'dark' };
+
+const open = async (variant: Variant, path: string, ready: string) => {
   const context = await browser.newContext({
     viewport: { width: variant.width, height: variant.height },
     deviceScaleFactor: variant.phone ? 2 : 1,
@@ -103,7 +105,7 @@ const open = async (variant: (typeof VARIANTS)[number], path: string, ready: str
   return { tab, close: async () => await context.close() };
 };
 
-const shotOf = async (tab: Page, variant: (typeof VARIANTS)[number], name: string): Promise<void> => {
+const shotOf = async (tab: Page, variant: Variant, name: string): Promise<void> => {
   if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${variant.name}-${name}.png`) });
 };
 
@@ -142,4 +144,69 @@ describe('Settings shell', () => {
       }
     });
   }
+});
+
+/**
+ * PICKING A SETTINGS TAB SHOWS IT (p2 settings-nav). The list of every tab sits above the page: at 390x844 it is about three
+ * screens tall and at 1280x713 it fills the window, so the chosen page used to stay below the fold and a click looked like
+ * nothing. Now the page is scrolled up to the head of its scroller and takes focus, and a wide window keeps its layout.
+ */
+const PICKED: readonly Variant[] = [
+  { name: '390x844', width: 390, height: 844, phone: true, scheme: 'light' },
+  { name: '1280x713', width: 1_280, height: 713, phone: false, scheme: 'light' },
+  { name: '1920x1080', width: 1_920, height: 1_080, phone: false, scheme: 'light' },
+];
+
+/** How far down the window a picked page may start: the upper half of a small one, 200px of room above the end of a tall one. */
+const reach = (variant: Variant): number => (variant.height < 1_000 ? variant.height / 2 : variant.height - 200);
+
+describe('Settings shell: a picked tab is on screen', () => {
+  for (const variant of PICKED) {
+    it(`${variant.name}: clicking Budgets scrolls its page into sight and focuses it; reading it is not blocked`, async () => {
+      const { tab, close } = await open(variant, '/d/ws/settings', 'nav[aria-label="Plugin settings"] .fy-tab-group');
+      try {
+        const page = tab.locator('.fy-settings-page');
+        await shotOf(tab, variant, 'picked-0-before');
+        await tab.getByRole('link', { name: 'Budgets', exact: true }).click();
+        await tab.waitForSelector('text=Budgets settings (fake data)');
+        await tab.waitForFunction(() => document.activeElement?.classList.contains('fy-settings-page') === true);
+        expect(await page.getAttribute('aria-label')).toBe('Budgets');
+        const box = await page.boundingBox();
+        expect(box).not.toBeNull();
+        // The page's first line is in the upper half of a small window; a tall one (already showing it) is left as it was.
+        expect(box?.y ?? 9_999).toBeLessThan(reach(variant));
+        expect(await tab.getByText('Budgets settings (fake data)').isVisible()).toBe(true);
+        // A tall window already showed the page, so the list above it has not moved (the layout it had before).
+        if (variant.height >= 1_000) {
+          const heading = await tab.getByRole('heading', { name: 'Behaviour', exact: true }).boundingBox();
+          expect(heading?.y ?? -1).toBeGreaterThan(0);
+        }
+        const sideways = await tab.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(sideways).toBeLessThanOrEqual(0);
+        await shotOf(tab, variant, 'picked-1-budgets');
+        // And the list is still one scroll up, so another tab can be picked.
+        await tab.getByRole('link', { name: 'Logins', exact: true }).click();
+        await tab.waitForSelector('text=Logins settings (fake data)');
+        expect(await page.getAttribute('aria-label')).toBe('Logins');
+        expect((await page.boundingBox())?.y ?? 9_999).toBeLessThan(reach(variant));
+        await shotOf(tab, variant, 'picked-2-logins');
+      } finally {
+        await close();
+      }
+    });
+  }
+
+  it('390x844: a deep link to a tab opens with the page in sight', async () => {
+    const variant = PICKED[0] as Variant;
+    const { tab, close } = await open(variant, '/d/ws/settings/logins', '.fy-settings-page');
+    try {
+      await tab.waitForSelector('text=Logins settings (fake data)');
+      expect((await tab.locator('.fy-settings-page').boundingBox())?.y ?? 9_999).toBeLessThan(variant.height / 2);
+      await shotOf(tab, variant, 'picked-deep-link');
+    } finally {
+      await close();
+    }
+  });
 });

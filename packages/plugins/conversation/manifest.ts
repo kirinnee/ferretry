@@ -53,6 +53,7 @@ import {
   AskAnswered,
   AskDeliveries,
   AskOwnerChats,
+  AsksChanged,
   AsksPort,
   AskSources,
 } from '@ferretry/core-asks/contract';
@@ -511,7 +512,7 @@ export default definePlugin({
     config: [CONVERSATION_CONFIG],
     readModels: ['transcript', 'queue', 'sends', 'logs', 'search', 'links'],
     publishes: [QueueChanged, MessageSent, QuestionAsked, QuestionAnswered, DraftChanged, LinkKept],
-    subscribes: [AskAnswered],
+    subscribes: [AskAnswered, AsksChanged],
   },
 
   hooks: {

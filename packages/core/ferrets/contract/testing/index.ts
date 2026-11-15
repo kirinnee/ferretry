@@ -68,6 +68,7 @@ import type {
   FerretIngestEvidence,
   FerretPaneLimit,
   FerretPrompt,
+  FerretAddress,
   FerretsApi,
   ManagedWorktreeSummary,
   ResumeOptions,
@@ -773,6 +774,20 @@ export class FakeFerrets implements FerretsApi {
   }
   async get(ferret: FerretId) {
     return this.#ferrets.get(ferret);
+  }
+  /** An exact id, else the one ferret holding the name (case-insensitive, a leading `:` dropped); two holders are ambiguous. */
+  async resolve(reference: string): Promise<FerretAddress> {
+    const exact = reference.trim();
+    if (this.#ferrets.has(exact as FerretId)) return { kind: 'ferret', id: exact as FerretId };
+    const name = exact.replace(/^:/u, '').toLowerCase();
+    const holders = [...this.#ferrets.values()].filter(f => name !== '' && f.name.toLowerCase() === name);
+    const [only] = holders;
+    if (only === undefined) return { kind: 'unknown' };
+    if (holders.length === 1) return { kind: 'ferret', id: only.id };
+    return {
+      kind: 'ambiguous',
+      message: `the name ${name} is held by ${holders.length} sessions: ${holders.map(h => h.id).join(', ')}`,
+    };
   }
   async list(filter: { readonly state?: FerretState; readonly parent?: FerretId; readonly pack?: PackId } = {}) {
     return [...this.#ferrets.values()].filter(

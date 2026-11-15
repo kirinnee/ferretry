@@ -509,3 +509,64 @@ test('fy start --detach: when the very first record write fails the caller gets 
   expect(unhandled).toEqual([]);
   expect(f.harness.launched).toEqual([]);
 });
+
+test('fy start --detach: when no stopped record can be written at all the ferret stays `starting`, and the failure is said as not settled', async () => {
+  const f = fixture();
+  const child = ferretId('sprout');
+  f.ports.newId = () => child;
+  f.ports.newName = () => 'sprout';
+  f.ports.save = async record => {
+    if (record.state === 'stopped') throw new Error('the disk is full');
+  };
+  const said: { type: string; data: Readonly<Record<string, unknown>> }[] = [];
+  f.ports.history = async (_ferret, type, data) => {
+    said.push({ type, data });
+  };
+  f.harness.prepareHome = async () => {
+    throw new Error('home unavailable');
+  };
+
+  const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'go', detach: true }, PERSON_ORIGIN);
+
+  expect(answer).toEqual(ok(child));
+  await eventually(() => said.some(entry => entry.type === 'start.failed'));
+  expect(f.registry.get(child)?.state).toBe('starting');
+  expect(said.find(entry => entry.type === 'start.failed')?.data).toEqual({
+    code: 'failed',
+    reason: 'the launch failed after the start was answered',
+    settled: false,
+  });
+  expect(JSON.stringify(said)).not.toContain('disk is full');
+});
+
+test('fy start --detach: a history that cannot be written is no unhandled rejection, and the ferret is still settled', async () => {
+  const f = fixture();
+  const child = ferretId('sprout');
+  f.ports.newId = () => child;
+  f.ports.newName = () => 'sprout';
+  let tried = 0;
+  f.ports.history = async () => {
+    tried += 1;
+    throw new Error('the journal is unwritable');
+  };
+  f.harness.prepareHome = async () => {
+    throw new Error('home unavailable');
+  };
+  const unhandled: unknown[] = [];
+  const watch = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  process.on('unhandledRejection', watch);
+  try {
+    const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'go', detach: true }, PERSON_ORIGIN);
+
+    expect(answer).toEqual(ok(child));
+    await eventually(() => tried > 0);
+    await new Promise(resolve => setTimeout(resolve, 20));
+  } finally {
+    process.off('unhandledRejection', watch);
+  }
+
+  expect(unhandled).toEqual([]);
+  expect(f.registry.get(child)?.state).toBe('stopped');
+});

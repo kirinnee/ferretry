@@ -1,5 +1,5 @@
 import { afterAll, describe, it } from 'bun:test';
-import { lstat, mkdir } from 'node:fs/promises';
+import { lstat, mkdir, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
 import type { FencedPath, FerretId, SpawnBytesResult } from '@ferretry/kernel/contract';
@@ -165,5 +165,29 @@ describe('createKernelWorktreeHostIo', () => {
     );
 
     should(String(thrown)).containEql('may not reach');
+  });
+
+  it('should read the kind of a root’s own folder with stat, and of anything inside it without following a link', async () => {
+    const { repository, io } = await compose('type-kinds');
+    if (io === undefined) throw new Error('the worktrees root named no folder');
+    const inside = path.join(io.managedRoot, 'inside');
+    await mkdir(inside);
+    await symlink(inside, path.join(io.managedRoot, 'link'));
+
+    should(await io.fileSystem.type(io.managedRoot)).equal('directory');
+    should(await io.fileSystem.type(repository.root)).equal('directory');
+    should(await io.fileSystem.type(inside)).equal('directory');
+    should(await io.fileSystem.type(path.join(io.managedRoot, 'link'))).equal('symlink');
+    should(await io.fileSystem.type(path.join(io.managedRoot, 'nothing-here'))).equal('missing');
+  });
+
+  it('should read back text written under the managed root, through that root', async () => {
+    const { io } = await compose('read-text');
+    if (io === undefined) throw new Error('the worktrees root named no folder');
+    const target = path.join(io.managedRoot, 'owner');
+
+    await io.fileSystem.writeText(target, 'ownership-token-0001\n', 0o600);
+
+    should(await io.fileSystem.readText(target)).equal('ownership-token-0001\n');
   });
 });

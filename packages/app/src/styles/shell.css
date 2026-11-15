@@ -373,3 +373,9 @@
   margin: 0 0 12px;
   padding: 0;
 }
+
+/* The chosen Settings page takes focus when a tab is picked (so a screen reader names it); a ring on the whole page
+   would only be noise, and the page is not a control. */
+.fy-settings-page:focus {
+  outline: none;
+}

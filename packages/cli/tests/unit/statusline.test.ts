@@ -13,7 +13,9 @@ const PAYLOAD = JSON.stringify({
   },
 });
 
-function harness(options: { stdin?: string; environment?: Record<string, string>; chainExit?: number } = {}) {
+function harness(
+  options: { stdin?: string; environment?: Record<string, string>; chainExit?: number; stdinFails?: boolean } = {},
+) {
   const written: { id: string; record: StatuslineUsageRecord }[] = [];
   const chained: { command: string; stdin: string }[] = [];
   const ports: StatuslinePorts = {
@@ -36,6 +38,7 @@ function harness(options: { stdin?: string; environment?: Record<string, string>
       stdin: () =>
         (async function* () {
           yield encoder.encode(options.stdin ?? PAYLOAD);
+          if (options.stdinFails === true) throw new Error('the pipe broke');
         })(),
     },
   };
@@ -105,5 +108,33 @@ describe('fy statusline', () => {
 
     should(code).equal(0);
     should(h.chained.length).equal(1);
+  });
+
+  it('should read ISO-8601 reset times, and leave a reset time it cannot read unrecorded', async () => {
+    const iso = harness({
+      stdin: JSON.stringify({
+        rate_limits: {
+          five_hour: { used_percentage: 20, resets_at: '2027-01-15T08:00:00.000Z' },
+          seven_day: { used_percentage: 30, resets_at: 'next tuesday' },
+        },
+      }),
+    });
+
+    should(await runFy(['statusline'], iso.world)).equal(0);
+
+    should(iso.written.length).equal(1);
+    should(iso.written[0]?.record.fiveHour).eql({ usedPercent: 20, resetAt: Date.parse('2027-01-15T08:00:00.000Z') });
+    should(iso.written[0]?.record.weekly?.usedPercent).equal(30);
+    should(iso.written[0]?.record.weekly?.resetAt).equal(undefined);
+  });
+
+  it('should keep what it read when the input stream breaks part-way, and still record and chain it', async () => {
+    const h = harness({ stdinFails: true });
+
+    should(await runFy(['statusline', '--then', 'my-line'], h.world)).equal(0);
+
+    should(h.chained).eql([{ command: 'my-line', stdin: PAYLOAD }]);
+    should(h.written.length).equal(1);
+    should(h.written[0]?.record.fiveHour?.usedPercent).equal(41.5);
   });
 });

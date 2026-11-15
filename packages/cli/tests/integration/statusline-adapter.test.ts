@@ -1,5 +1,5 @@
 import { afterAll, describe, it } from 'bun:test';
-import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -42,5 +42,24 @@ describe('the statusline ports over the real disk', () => {
     const code = await createStatuslinePorts('/unused').chain('cat >/dev/null; exit 7', '{"a":1}');
 
     should(code).equal(7);
+  });
+
+  it('should fail loudly and leave no half-written file when the usage file cannot be replaced', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'fy-statusline-'));
+    made.push(home);
+    const path = passiveUsagePath(home, 'claude-main');
+    // A folder with something in it stands where the file belongs: a rename onto it is refused.
+    await mkdir(join(path, 'occupied'), { recursive: true });
+    await writeFile(join(path, 'occupied', 'x'), 'x');
+
+    const failed = await createStatuslinePorts(home)
+      .writeUsage('claude-main', { version: 1, source: 'claude-statusline', at: 1 })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    should(failed).be.instanceOf(Error);
+    should(await readdir(join(home, 'state', 'logins', 'credentials', 'claude-main'))).eql(['usage.json']);
   });
 });

@@ -135,11 +135,6 @@ export function FerretListBody({
         {empty ? (
           <div className="fy-sbar__empty">
             <p className="m-0">{emptyMessage(filter, view.hiddenStopped)}</p>
-            {filter.mode === 'all' && view.hiddenStopped === 0 ? (
-              <a className="kt-btn mt-2" data-ferret-new="" href={newFerretHref(daemon)}>
-                + New ferret
-              </a>
-            ) : null}
           </div>
         ) : (
           <>
@@ -182,6 +177,13 @@ export function FerretListBody({
           {STALE_LIST}
         </p>
       ) : null}
+      {/* v4's sessions bar ended in a primary "New session" button whatever the list held: the door to start one is
+          never only a command-bar entry or an empty-list message. */}
+      <div className="fy-sbar__footer">
+        <a className="kt-btn" data-ferret-new="" data-variant="primary" href={newFerretHref(daemon)}>
+          + New ferret
+        </a>
+      </div>
     </div>
   );
 }

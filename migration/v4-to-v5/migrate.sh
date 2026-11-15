@@ -279,9 +279,13 @@ case "${phase}" in
 # ================================================================ preflight
 preflight)
   say "📝 preflight: tools, v4 version, released v5, disk, home"
-  for tool in bash jq tmux bun git; do
-    command -v "${tool}" >/dev/null || fail "${tool} is not on PATH; install it and run preflight again"
+  # EVERY external tool a later phase calls, so a missing one stops here and not at verify, after the backup. (nix, brew, curl and
+  # xattr are optional and each checked where it is used.)
+  missing_tools=""
+  for tool in bash jq tmux bun git awk basename cat chmod cmp comm cp date df dirname du env find grep ls mkdir mktemp mv rm sed sleep sort tail tr uname wc; do
+    command -v "${tool}" >/dev/null || missing_tools="${missing_tools:+${missing_tools}, }${tool}"
   done
+  [ -z "${missing_tools}" ] || fail "not on PATH: ${missing_tools}; install them and run preflight again"
   H="${FY_HOME:-$HOME/.ferretry}"
   # A rehearsal never touches the default home: refused here, before anything is read, stopped, moved or converted.
   if [ "${MIGRATE_REHEARSAL:-}" = 1 ]; then rehearsal_refuse "${H}"; fi
@@ -751,7 +755,26 @@ start)
 
   entries="$(ls -A "${H}")" || unreadable "cannot list ${H}"
   while read -r entry; do
-    case "${entry}" in home.json | config | state | run | logs | "") ;; *) fail "unexpected entry '${entry}' in the new home ${H}" ;; esac
+    case "${entry}" in
+    home.json | config | state | run | logs | "") ;;
+    fleet)
+      # The converter writes v5 Runtimes' asset root, fleet/assets/**, in the new home: the installed skills (assets/skills/<name>/)
+      # and the component assets a carried hook or setting names (assets/components/hooks/...). That is the ONLY thing allowed
+      # under fleet/: anything else is named and stops, as any other entry does. Nothing is followed (find -P); fleet and assets
+      # must be real folders, and every entry below must be a regular file or a folder (a link, FIFO, socket or device is never
+      # written by the converter and v5 would read it as part of an asset). Relative patterns: the home path is never a glob.
+      for d in fleet fleet/assets; do
+        if [ -e "${H}/${d}" ] || [ -L "${H}/${d}" ]; then
+          { [ -d "${H}/${d}" ] && [ ! -L "${H}/${d}" ]; } || fail "unexpected entry '${d}' in the new home ${H}: it is not a plain folder"
+        fi
+      done
+      stray="$(cd "${H}" && find -P fleet -mindepth 1 ! -path fleet/assets ! -path 'fleet/assets/*' -print -quit)" || unreadable "cannot list ${H}/fleet"
+      [ -z "${stray}" ] || fail "unexpected entry '${stray}' in the new home ${H}: only fleet/assets may be there"
+      odd="$(cd "${H}" && find -P fleet -mindepth 1 ! -type f ! -type d -print -quit)" || unreadable "cannot list ${H}/fleet"
+      [ -z "${odd}" ] || fail "unexpected entry '${odd}' in the new home ${H}: not a regular file or folder (a link, pipe, socket or device)"
+      ;;
+    *) fail "unexpected entry '${entry}' in the new home ${H}" ;;
+    esac
   done <<<"${entries}"
 
   mark starting-v5
@@ -790,6 +813,8 @@ start)
         say "⚠️ fy config check names a literal credential in a login file (expected, repaired by the OWNER; path, line and message below)"
         jq -r '.issues[] | select(.severity == "error") | "\(.path):\(.line // 1) \(.message)"' "${NOTES}.config-check.out"
         mark credential-repair-pending
+      else
+        say "✅ fy config check ran against the v5 daemon and passed (no errors, nothing waiting for confirmation)"
       fi
       mark started-v5
       say "✅ v5 daemon started and answering"

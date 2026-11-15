@@ -350,6 +350,13 @@ describe('fy secret use, the words as typed', () => {
     expect(json.body).toMatchObject({ command: ['true'], secrets: [] });
   });
 
+  it('V-0429 refuses --no-json as an unknown option before it reads any word, so no call is made', async () => {
+    const { code, r } = await run(['--json', '--no-json', 'true']);
+    expect(code).toBe(1);
+    expect(r.calls).toEqual([]);
+    expect(r.err.join('')).toContain("unknown option '--no-json'");
+  });
+
   it('V-0429 refuses, rather than guesses, a names list that swallowed the command or a command that was never given', async () => {
     for (const tokens of [
       ['--with', 'ALPHA_KEY', 'BETA_KEY', 'sh'],

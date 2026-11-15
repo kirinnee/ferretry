@@ -26,9 +26,21 @@ export interface SendGateway {
   ): Promise<void>;
 }
 
-/** Reads a local file the caller named. The shell hands a verb no file access of its own, so a port says so. */
+/** Reads the local text file the caller named (`--message-file`). */
 export interface SendFiles {
   readText(path: string): Promise<string>;
+}
+
+/** A local file read and ready to upload (`-f`). */
+export interface StagedAttachment {
+  readonly filename: string;
+  readonly mime: string;
+  readonly base64: string;
+}
+
+/** Reads the local files the caller attached (`-f`). */
+export interface AttachmentSource {
+  readAttachment(path: string): Promise<StagedAttachment>;
 }
 
 /** Presentation: results and answers on stdout, advisory notes on stderr. */

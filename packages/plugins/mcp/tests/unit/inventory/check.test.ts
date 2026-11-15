@@ -11,7 +11,7 @@ import {
   mcpCheckBaseEnvironment,
 } from '../../../daemon/lib/inventory/check.ts';
 import { type McpInventoryRefusal, McpInventoryService } from '../../../daemon/lib/inventory/service.ts';
-import { inventoryWorld, PROJECT, PROJECT_KEY, session } from './support.ts';
+import { documents, inventoryWorld, PROJECT, PROJECT_KEY, session } from './support.ts';
 
 const TOKEN = 'project-access-token-value';
 const ACCESS_SECRET = 'MCP_DOCS_0123456789ABCDEF_ACCESS';
@@ -361,6 +361,118 @@ describe('McpCheckService', () => {
     // Assert
     should(result.outcome).equal('connected');
     should(probe.specs[0]).containEql({ cwd: PROJECT, env: { HOME: '/home/me', LINT_HOME: '/home/me' } });
+  });
+});
+
+describe('where a held sign-in is placed in the headers a project server declares', () => {
+  const HELD = 'FY_MCP_DOCS_0123456789ABCDEF_TOKEN';
+  const placeholder = (name: string, scheme?: string): string =>
+    `${scheme === undefined ? '' : `${scheme} `}\${${name}}`;
+
+  /** The world with the project's `.mcp.json` and Codex project document replaced, and one held sign-in for `docs`. */
+  function declared(mcpJson: unknown, codexProject?: unknown, answer?: McpProbeFailure) {
+    const files = documents();
+    files.set(`${PROJECT}/.mcp.json`, mcpJson);
+    if (codexProject !== undefined) files.set(`${PROJECT}/.codex/config.toml`, codexProject);
+    const world = inventoryWorld(files);
+    const inventory = new McpInventoryService({
+      ...world.deps,
+      ferrets: {
+        get: async id =>
+          id === 's1' ? session() : id === 'c1' ? session(PROJECT, '/fy/fleet/bin/codex-work') : undefined,
+      },
+    });
+    const probe = new FakeProbe(answer);
+    const service = new McpCheckService({
+      inventory,
+      probe,
+      launchEnvironment: async () => ({}),
+      baseEnvironment: () => ({}),
+      credential: async subject =>
+        subject === mcpProjectSubject('docs', PROJECT_KEY) ? { secret: ACCESS_SECRET, variable: HELD } : undefined,
+      redactor: { redact: async text => text },
+      now: () => 0,
+    });
+    const idOfDocs = async (ferret: string) => {
+      const found = (await inventory.ferret(ferret)).servers.find(
+        server => server.name === 'docs' && server.scope === 'project',
+      );
+      if (found === undefined) throw new Error('no docs');
+      return found.id;
+    };
+    return { service, probe, idOfDocs };
+  }
+
+  const docs = (headers: Record<string, string>) => ({
+    mcpServers: { docs: { type: 'http', url: 'https://docs.example.com/mcp', headers } },
+  });
+
+  it('should hand the Vault the header the harness fills with the token, and keep the other headers', async () => {
+    // Arrange
+    const w = declared(docs({ Authorization: placeholder(HELD, 'Token'), 'X-Team': 'acme' }));
+
+    // Act
+    const result = await w.service.check(await w.idOfDocs('s1'), 's1');
+
+    // Assert — the scheme is the one the harness spells; no token is filled in here.
+    should(result.outcome).equal('connected');
+    should(w.probe.specs[0]).deepEqual({
+      transport: 'http',
+      url: 'https://docs.example.com/mcp',
+      headers: { 'X-Team': 'acme' },
+      credential: { secret: ACCESS_SECRET, header: 'Authorization', scheme: 'Token' },
+    });
+  });
+
+  it('should place a token that is a header’s whole value with no scheme', async () => {
+    // Arrange
+    const w = declared(docs({ 'X-Api-Key': placeholder(HELD) }));
+
+    // Act
+    await w.service.check(await w.idOfDocs('s1'), 's1');
+
+    // Assert
+    should(w.probe.specs[0]).deepEqual({
+      transport: 'http',
+      url: 'https://docs.example.com/mcp',
+      headers: {},
+      credential: { secret: ACCESS_SECRET, header: 'X-Api-Key' },
+    });
+  });
+
+  it('should not place the token in a header that names another variable', async () => {
+    // Arrange
+    const w = declared(
+      docs({ Authorization: placeholder('SOMETHING_ELSE', 'Bearer') }),
+      undefined,
+      new McpProbeFailure('unreachable', 'It could not be reached.'),
+    );
+
+    // Act
+    const result = await w.service.check(await w.idOfDocs('s1'), 's1');
+
+    // Assert — the other variable is the check's to fill and it is not set; it is not taken for the held token.
+    should(result.message).containEql('Not set for this check: SOMETHING_ELSE.');
+    should(w.probe.specs[0]).not.have.property('credential');
+  });
+
+  it('should present the held token for a Codex bearer variable that is the held one', async () => {
+    // Arrange
+    const w = declared(docs({}), {
+      mcp_servers: { docs: { url: 'https://docs.example.com/mcp', bearer_token_env_var: HELD } },
+    });
+
+    // Act
+    const result = await w.service.check(await w.idOfDocs('c1'), 'c1');
+
+    // Assert
+    should(result.outcome).equal('connected');
+    should(w.probe.specs[0]).deepEqual({
+      transport: 'http',
+      url: 'https://docs.example.com/mcp',
+      headers: {},
+      credential: { secret: ACCESS_SECRET, header: 'Authorization', scheme: 'Bearer' },
+    });
   });
 });
 

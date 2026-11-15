@@ -200,6 +200,22 @@ describe('fy ask', () => {
     ]);
   });
 
+  it('should still say how to answer a multiple-choice ask when its choices cannot be read', async () => {
+    const { world: w, io } = world({
+      'POST /v1/ferrets/f1/agenda': {
+        status: 400,
+        body: { error: 'A3 asks for a multiple-choice response', code: 'invalid' },
+      },
+      'GET /v1/ferrets/f1/agenda/A3': new Error('daemon went away'),
+    });
+    should(await runFy(['ask', 'answer', 'f1/A3', 'maybe'], w)).equal(2);
+    const said = io.stderr();
+    should(said).containEql('A3 asks for a multiple-choice response');
+    should(said).containEql('usage: ');
+    should(said).containEql('ask answer f1/A3 --choice <label>');
+    should(said).not.containEql('choices:');
+  });
+
   it('should leave any other refusal of an answer as the daemon said it', async () => {
     const { world: w, io } = world({
       'POST /v1/ferrets/f1/agenda': { status: 403, body: { error: 'only the owner answers A3', code: 'forbidden' } },

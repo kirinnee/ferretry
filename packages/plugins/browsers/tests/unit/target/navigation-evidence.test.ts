@@ -98,6 +98,47 @@ describe('the navigation ledger', () => {
     expect(ledger.evidence().origins.map(entry => entry.origin)).toEqual(['?']);
   });
 
+  test('a frame event it cannot read is counted as lost for the whole worker, and noted as an unreadable origin', async () => {
+    const ledger = new NavigationLedger(() => 5);
+    const { session, emit } = source({ frame: frame('main', 'https://docs.example.test/') });
+    await ledger.attach(session);
+    const before = ledger.evidence().seq;
+
+    emit('Page.frameNavigated', { frame: { id: 'kid' } });
+    emit('Page.frameNavigated', {});
+    const evidence = ledger.evidence();
+
+    expect(evidence.totals.lost).toBe(2);
+    expect(evidence.seq).toBe(before + 2);
+    expect(evidence.origins.map(entry => entry.origin)).toEqual(['https://docs.example.test', '?']);
+    expect(evidence.frames).toContain('?');
+  });
+
+  test('a frame tree it cannot read, at the top or in a child, is lost rather than skipped', async () => {
+    const top = new NavigationLedger(() => 5);
+    await top.attach(source({ frame: { url: 'https://docs.example.test/' } }).session);
+    expect(top.evidence().totals.lost).toBe(1);
+    expect(top.evidence().origins.map(entry => entry.origin)).toEqual(['?']);
+
+    const child = new NavigationLedger(() => 5);
+    await child.attach(
+      source({
+        frame: frame('main', 'https://docs.example.test/'),
+        childFrames: [
+          { frame: { id: 'kid' } },
+          { frame: frame('ok', 'https://app.example.test/', { parentId: 'main' }) },
+        ],
+      }).session,
+    );
+    const evidence = child.evidence();
+    expect(evidence.totals.lost).toBe(1);
+    expect(evidence.origins.map(entry => entry.origin)).toEqual([
+      'https://docs.example.test',
+      '?',
+      'https://app.example.test',
+    ]);
+  });
+
   test('it forgets nothing silently: more origins than it keeps is an overflow, and the first are still there', () => {
     const ledger = new NavigationLedger(() => 5);
     for (let index = 0; index <= MAX_COMMITTED_ORIGINS; index++)

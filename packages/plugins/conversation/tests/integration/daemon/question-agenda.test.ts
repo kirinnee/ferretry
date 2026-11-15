@@ -1,7 +1,16 @@
 import { describe, expect, test } from 'bun:test';
-import type { AskDraft, AskRef, AskSummary, AsksApi, CloseReason } from '@ferretry/core-asks/contract';
+import {
+  type AskDraft,
+  AskDraftSchema,
+  AskRefusedError,
+  type AskRef,
+  type AskSummary,
+  type AsksApi,
+  type CloseReason,
+} from '@ferretry/core-asks/contract';
 import type { Instant } from '@ferretry/std';
-import { QuestionSchema } from '../../../contract/index.ts';
+import { CONVERSATION_STATE, QuestionSchema } from '../../../contract/index.ts';
+import { memoryStatePort } from '../../support/state.ts';
 import type { HarnessGate } from '../../../daemon/harness-seam.ts';
 import { buildConversationA } from '../../../daemon/host.ts';
 import { QUESTION_WATCH_MS } from '../../../daemon/questions/lib/watch.ts';
@@ -42,10 +51,14 @@ interface Item {
 /** The Asks port's contract as far as this source uses it: idempotent raise, open by source/entry, close by ref. */
 function fakeAsks() {
   const items: Item[] = [];
-  const fail = { raise: 0, close: 0 };
+  const fail = { raise: 0, close: 0, attempts: 0, refuse: undefined as { message: string; code?: string } | undefined };
   const api: Pick<AsksApi, 'get' | 'raise' | 'open' | 'close'> = {
     get: async () => undefined,
     raise: async draft => {
+      fail.attempts += 1;
+      // The real port reads the draft first, and the board may read it and say no.
+      AskDraftSchema.parse(draft);
+      if (fail.refuse !== undefined) throw new AskRefusedError(fail.refuse.message, fail.refuse.code);
       if (fail.raise > 0) {
         fail.raise -= 1;
         throw new Error('asks is unavailable');
@@ -93,21 +106,27 @@ function daemon(options: {
   files: Map<string, unknown>;
   asks: ReturnType<typeof fakeAsks>;
   events: { current: readonly TranscriptEvent[] };
+  /** Another Ferrets (a live form to type into, more than one ferret): the default has one Codex ferret. */
+  ferrets?: unknown;
 }) {
   const { files, asks } = options;
   const key = (file: { path: string }, name?: string) => file.path.replace('*', name ?? '');
   const state = {
+    // The answer ledger's lines and the rest of the state port are the real in-memory ones; the files are this map.
+    ...memoryStatePort(CONVERSATION_STATE),
     read: async (file: { path: string }, name?: string) => ({ ok: true, value: files.get(key(file, name)) }),
     write: async (file: { path: string }, value: unknown, name?: string) => void files.set(key(file, name), value),
     remove: async (file: { path: string }, name?: string) => void files.delete(key(file, name)),
   };
   const timers: (() => void)[] = [];
   const published: string[] = [];
+  const warned: string[] = [];
   const kernel = {
     state,
     clock: {
       now: () => '2026-11-14T01:00:10.000Z',
       nowMs: () => 0,
+      sleep: async () => undefined,
       every: () => () => undefined,
       after: (ms: number, run: () => void) => {
         // Only the question watch's own cadence: the send tracker and others keep their timers to themselves.
@@ -118,14 +137,14 @@ function daemon(options: {
     },
     events: { publish: async (event: { name?: string }) => void published.push(String(event.name)) },
     ids: { mint: () => 'id' },
-    log: { info: () => undefined, warn: () => undefined },
+    log: { info: () => undefined, warn: (line: string) => void warned.push(line) },
   } as never;
   const half = buildConversationA({
     kernel,
-    ferrets: {
+    ferrets: (options.ferrets ?? {
       get: async () => ({ id: 'cody', state: 'working' }),
       list: async () => [{ id: 'cody', harness: 'codex', state: 'working' }],
-    } as never,
+    }) as never,
     asks: asks.api,
     hooks: {
       observe: () => undefined,
@@ -140,7 +159,7 @@ function daemon(options: {
     run?.();
     for (let i = 0; i < 10; i += 1) await new Promise(resolve => setTimeout(resolve, 0));
   };
-  return { half, tick, published, stored: () => files.get('cody/question.json') };
+  return { half, tick, published, warned, stored: () => files.get('cody/question.json') };
 }
 
 const world = () => {
@@ -171,6 +190,88 @@ describe('a stored question reaches the Agenda as one Asks obligation', () => {
     // The renderer's value: the stored question, the daemon's proof of its transcript left out.
     expect(QuestionSchema.parse(item?.draft.ref)).toMatchObject({ toolUseId: 'call_1', text: 'Which mode?' });
     expect(published(d)).toContain('conversation.question-asked');
+  });
+
+  test("the card is a form of the question's own fields, which the board takes", async () => {
+    const w = world();
+    const d = w.boot();
+    w.events.current = [callEvent('call_1')];
+    await d.tick();
+    const [item] = w.asks.open();
+    expect(item?.draft).toMatchObject({
+      kind: 'form',
+      fields: [
+        {
+          id: '1',
+          type: 'one',
+          name: 'Mode',
+          label: 'Which mode?',
+          options: [{ label: 'Fast' }, { label: 'Slow' }],
+        },
+      ],
+    });
+  });
+
+  test('a question the board refuses is said once and never tried again, not every two seconds', async () => {
+    const w = world();
+    const d = w.boot();
+    w.asks.fail.refuse = { message: 'a form needs at least one field (--field)', code: 'invalid' };
+    w.events.current = [callEvent('call_1')];
+    for (let i = 0; i < 6; i += 1) await d.tick();
+    const attempts = w.asks.fail.attempts;
+    for (let i = 0; i < 6; i += 1) await d.tick();
+    expect(w.asks.fail.attempts).toBe(attempts);
+    expect(attempts).toBeLessThanOrEqual(2);
+    expect(d.warned.filter(line => line.includes('will not try again'))).toHaveLength(1);
+    expect(d.warned.some(line => line.includes('could not reconcile'))).toBe(false);
+  });
+
+  test('a full agenda is said once and asked again when the board changes, not dropped and not every two seconds', async () => {
+    const w = world();
+    const d = w.boot();
+    w.asks.fail.refuse = { message: 'this session already has 20 unresolved items', code: 'full' };
+    w.events.current = [callEvent('call_1')];
+    for (let i = 0; i < 6; i += 1) await d.tick();
+    const attempts = w.asks.fail.attempts;
+    for (let i = 0; i < 6; i += 1) await d.tick();
+    expect(w.asks.fail.attempts).toBe(attempts);
+    expect(w.asks.open()).toHaveLength(0);
+    expect(d.warned.filter(line => line.includes('when the agenda has room'))).toHaveLength(1);
+    // The board changes but is still full: asked again, and no second line.
+    await d.half.onAsksChanged();
+    expect(d.warned.filter(line => line.includes('when the agenda has room'))).toHaveLength(1);
+    // A slot frees: the next change raises the card, and nothing asks again after that.
+    w.asks.fail.refuse = undefined;
+    await d.half.onAsksChanged();
+    expect(w.asks.open().map(item => item.draft.entry)).toEqual(['cody:call_1']);
+    const raised = w.asks.fail.attempts;
+    await d.half.onAsksChanged();
+    await d.tick();
+    expect(w.asks.fail.attempts).toBe(raised);
+    expect(w.asks.items).toHaveLength(1);
+  });
+
+  test('a question with no option to pick is an open question, still a card (a form has one reply box)', async () => {
+    const w = world();
+    const d = w.boot();
+    w.events.current = [
+      {
+        kind: 'tool-call',
+        timestamp: ASKED,
+        call: {
+          id: 'call_9',
+          name: 'request_user_input',
+          input: {},
+          questions: [
+            { header: 'A', question: 'Why?', multiple: false, options: [] },
+            { header: 'B', question: 'And why not?', multiple: false, options: [] },
+          ],
+        },
+      } as unknown as TranscriptEvent,
+    ];
+    await d.tick();
+    expect(w.asks.open().map(item => item.draft.kind)).toEqual(['reply']);
+    expect(w.asks.open()[0]?.draft).not.toHaveProperty('fields');
   });
 
   test('its answer (the transcript carries the result) resolves that exact item as answered', async () => {
@@ -282,6 +383,146 @@ describe('a stored question reaches the Agenda as one Asks obligation', () => {
     expect(w.asks.open()).toHaveLength(1);
     await d.tick();
     expect(w.asks.open()).toHaveLength(0);
+  });
+});
+
+/**
+ * The owner's answer on the Agenda reaches the ferret (`ask.sources:question` `apply`): typed into the ferret's own
+ * question form through the real answer path, over a scripted pane. The card is the Agenda's to resolve afterwards.
+ */
+const RULE = '─'.repeat(40);
+const FORM = {
+  format: 1,
+  toolUseId: 't1',
+  text: 'Deploy?',
+  options: [{ label: 'Yes' }, { label: 'No' }, { label: 'Other' }],
+  multiple: false,
+  askedAt: '2026-11-14T00:59:00.000Z',
+  transcript: '/transcripts/cody.jsonl',
+};
+
+/** One ferret's pane: the form redraws as keys land, and Enter finishes it. */
+class Pane {
+  readonly keys: string[] = [];
+  readonly pastes: string[] = [];
+  private mode: 'form' | 'ready' = 'form';
+  private cursor = 0;
+  private frame() {
+    const visible =
+      this.mode === 'ready'
+        ? '> '
+        : [
+            RULE,
+            'Deploy?',
+            '',
+            ...['Yes', 'No', 'Other'].map((row, index) => `${index === this.cursor ? '❯' : ' '} ${index + 1}. ${row}`),
+            RULE,
+            '  4. Chat about this',
+          ].join('\n');
+    return {
+      alive: true,
+      dead: false,
+      promptReady: this.mode === 'ready',
+      activeWork: false,
+      visible,
+      history: visible,
+    };
+  }
+  readonly harness = {
+    form: {
+      capture: async () => ({ ok: true, value: this.frame() }),
+      key: async (key: string) => {
+        this.keys.push(key);
+        if (key === 'Down') this.cursor += 1;
+        if (key === 'Up') this.cursor -= 1;
+        if (key === 'Enter') this.mode = 'ready';
+        return { ok: true, value: undefined };
+      },
+      paste: async (text: string) => {
+        this.pastes.push(text);
+        return { ok: true, value: undefined };
+      },
+    },
+    transcript: { read: async () => [{ tools: { results: [] } }] },
+  };
+}
+
+const ferretsOf = (panes: Record<string, Pane | undefined>) => ({
+  get: async (id: string) => ({ id, state: 'idle', harness: 'claude-code' }),
+  list: async () => Object.keys(panes).map(id => ({ id, harness: 'claude-code', state: 'idle' })),
+  harness: async (id: string) => panes[id]?.harness,
+});
+
+const answerOn = (ferret: string, entry: string, values: Record<string, string>, text?: string) =>
+  ({
+    id: 'an_0123456789abcdef01234567',
+    ferret,
+    ask: 'A1',
+    source: 'question',
+    entry,
+    effect: 'clarify',
+    ...(text === undefined ? {} : { text }),
+    values,
+    by: { kind: 'host' },
+    at: ASKED,
+  }) as never;
+
+describe("an answer on the Agenda is typed into the ferret's own question form", () => {
+  test('the chosen option reaches the waiting form, and the card is left for the Agenda to resolve', async () => {
+    const pane = new Pane();
+    const w = world();
+    const d = daemon({ ...w, ferrets: ferretsOf({ cody: pane }) });
+    w.files.set('cody/question.json', FORM);
+    await d.tick();
+    expect(w.asks.open().map(item => item.draft.entry)).toEqual(['cody:t1']);
+
+    const applied = await d.half.applyQuestionAnswer(answerOn('cody', 'cody:t1', { '1': 'No' }));
+
+    expect(applied).toBe('applied');
+    expect(pane.keys).toEqual(['Down', 'Enter']);
+    expect(d.stored()).toBeUndefined();
+    // The drive did not close the card: the Agenda records the answer and resolves it.
+    expect(w.asks.open()).toHaveLength(1);
+  });
+
+  test("an answer to another ferret's question with the same tool id reaches that ferret only", async () => {
+    const cody = new Pane();
+    const rex = new Pane();
+    const w = world();
+    const d = daemon({ ...w, ferrets: ferretsOf({ cody, rex }) });
+    w.files.set('cody/question.json', FORM);
+    w.files.set('rex/question.json', FORM);
+
+    const applied = await d.half.applyQuestionAnswer(answerOn('rex', 'rex:t1', { '1': 'Other' }));
+
+    expect(applied).toBe('applied');
+    expect(rex.keys).toEqual(['Down', 'Down', 'Enter']);
+    expect(cody.keys).toEqual([]);
+    expect(w.files.get('cody/question.json')).toBeDefined();
+  });
+
+  test('a failed delivery refuses in words, types nothing wrong and leaves the question to answer again', async () => {
+    const w = world();
+    // A ferret whose harness has no form to type into.
+    const d = daemon({ ...w, ferrets: ferretsOf({ cody: undefined }) });
+    w.files.set('cody/question.json', FORM);
+
+    const applied = await d.half.applyQuestionAnswer(answerOn('cody', 'cody:t1', { '1': 'No' }));
+
+    expect(applied).toEqual({ refused: expect.stringContaining('the question stays open') });
+    expect(d.stored()).toBeDefined();
+  });
+
+  test('a question that no longer waits is refused, and nothing is typed', async () => {
+    const pane = new Pane();
+    const w = world();
+    const d = daemon({ ...w, ferrets: ferretsOf({ cody: pane }) });
+    w.files.set('cody/question.json', { ...FORM, toolUseId: 't2' });
+
+    const applied = await d.half.applyQuestionAnswer(answerOn('cody', 'cody:t1', { '1': 'No' }));
+
+    expect(applied).toEqual({ refused: expect.stringContaining('not waiting any more') });
+    expect(pane.keys).toEqual([]);
   });
 });
 

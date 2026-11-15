@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { SETTINGS_GROUPS } from '@ferretry/kernel/manifest';
 import { generated } from '../../../src/generated/surfaces.ts';
 import { groupSettingsTabs } from '../../../src/shell/settings-tab.ts';
-import type { Mounted } from '../../support/dom.ts';
+import { interact, type Mounted } from '../../support/dom.ts';
 import { bootApp, entryOf, manifestOf, settle } from './frame-fixtures.tsx';
 
 /**
@@ -109,5 +109,36 @@ describe('the daemon Settings page', () => {
     await settle();
     const hrefs = [...view.container.querySelectorAll('a')].map(a => a.getAttribute('href'));
     expect(hrefs).toContain('/d/d1/settings');
+  });
+});
+
+describe('picking a Settings tab shows it', () => {
+  test('a tab the address names is a labelled region that takes focus; bare /settings steals none', async () => {
+    const named = await bootApp({ surfaces: [demoEntry], machines: ['d1'], path: '/d/d1/settings/demo/two' });
+    view = named.view;
+    await settle();
+    const page = view.container.querySelector('.fy-settings-page') as HTMLElement;
+    expect(page.tagName).toBe('SECTION');
+    expect(page.getAttribute('aria-label')).toBe('Tab two');
+    expect(document.activeElement).toBe(page);
+    await view.unmount();
+
+    const bare = await bootApp({ surfaces: [demoEntry], machines: ['d1'], path: '/d/d1/settings' });
+    view = bare.view;
+    await settle();
+    expect(view.container.querySelector('.fy-settings-page')?.getAttribute('aria-label')).toBe('Tab one');
+    expect(document.activeElement).not.toBe(view.container.querySelector('.fy-settings-page'));
+  });
+
+  test('clicking another tab moves focus to its page', async () => {
+    const app = await bootApp({ surfaces: [demoEntry], machines: ['d1'], path: '/d/d1/settings' });
+    view = app.view;
+    await settle();
+    const link = [...view.container.querySelectorAll('a')].find(a => a.textContent === 'Tab two') as HTMLElement;
+    await interact(() => link.click());
+    await settle();
+    const page = view.container.querySelector('.fy-settings-page') as HTMLElement;
+    expect(page.getAttribute('aria-label')).toBe('Tab two');
+    expect(document.activeElement).toBe(page);
   });
 });

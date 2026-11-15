@@ -191,6 +191,29 @@ describe('readPackTable', () => {
     should(modelOf('k')).equal('glm-5.3');
   });
 
+  it('should fall back to the model a ferret was started with when reading its model fails, and still list the row', async () => {
+    // Arrange: the reader cannot speak for `w` (it throws); `k` answers.
+    const ferrets = [
+      ferret('w', { parent: 'lead' as FerretSummary['id'], model: 'opus-5.5' }),
+      ferret('u', { parent: 'lead' as FerretSummary['id'] }),
+      ferret('k', { parent: 'lead' as FerretSummary['id'], model: 'glm-5.3' }),
+    ];
+    const model = async (id: string): Promise<string | undefined> => {
+      if (id === 'k') return 'sonnet-5.5';
+      throw new Error(`no model for ${id}`);
+    };
+
+    // Act
+    const table = await build(ferrets, {}, {}, { model });
+
+    // Assert
+    const modelOf = (id: string) => table.rows.find(row => row.id === id)?.model;
+    should(table.rows.map(row => row.id)).deepEqual(['k', 'u', 'w']);
+    should(modelOf('w')).equal('opus-5.5');
+    should(modelOf('u')).equal('default');
+    should(modelOf('k')).equal('sonnet-5.5');
+  });
+
   it('should keep the newer of two lines, and a note over a message that is as new', async () => {
     // Arrange
     const ferrets = [

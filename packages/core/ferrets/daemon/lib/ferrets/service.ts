@@ -6,6 +6,7 @@ import { ApiError } from '@ferretry/kernel/contract';
 import { applicableInstructions, sectionDigests } from './launch-sections.ts';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { KeyedSerialExecutor } from './serial.ts';
+import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../protocol/agent-address.ts';
 import {
   type FerretBirth,
   LaunchRefusal,
@@ -48,6 +49,7 @@ import type {
   FerretStartedPayload,
   FerretId,
   FerretRecord,
+  FerretAddress,
   FerretsApi,
   FerretState,
   FerretSummary,
@@ -679,6 +681,19 @@ export class FerretsService implements FerretsApi {
   async get(ferret: FerretId): Promise<FerretSummary | undefined> {
     const summary = this.registry.summary(ferret);
     return summary === undefined ? undefined : this.mark(summary, await this.pins());
+  }
+
+  /** The ferret an id or a callsign addresses (the protocol's one rule: `resolveAgentAddress`). */
+  async resolve(reference: string): Promise<FerretAddress> {
+    await this.ports.ready?.();
+    const resolution = resolveAgentAddress(
+      reference,
+      this.registry.list().map(ferret => ({ id: ferret.id, name: ferret.name, status: ferret.state })),
+    );
+    if (resolution.kind === 'session') return { kind: 'ferret', id: resolution.id as FerretId };
+    if (resolution.kind === 'ambiguous')
+      return { kind: 'ambiguous', message: ambiguousAgentAddressMessage(resolution.name, resolution.candidates) };
+    return { kind: 'unknown' };
   }
 
   async list(filter?: FerretFilter): Promise<readonly FerretSummary[]> {

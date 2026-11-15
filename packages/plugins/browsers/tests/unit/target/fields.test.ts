@@ -426,6 +426,42 @@ describe('describeInputDocument', () => {
     should(await describeInputDocument(subject)).match({ pairingScreen: true, pairingSeen: -1 });
   });
 
+  it('says marked when the page’s own session cannot be reached for the pairing-screen look (FAILS CLOSED)', async () => {
+    const { world } = loginWorld();
+    let reached = 0;
+    const subject = {
+      ...world.subject,
+      cdp: {
+        ...world.subject.cdp,
+        page: async () => {
+          reached += 1;
+          if (reached > 1) throw new Error('the session is gone');
+          return await world.subject.cdp.page();
+        },
+      },
+    };
+    should(await describeInputDocument(subject)).match({ pairingScreen: true, pairingSeen: -1 });
+    should(reached).equal(2);
+  });
+
+  it('refuses when the document cannot be read while no dialog is open, instead of reading a frozen page', async () => {
+    const { world } = loginWorld();
+    const subject = {
+      ...world.subject,
+      cdp: {
+        ...world.subject.cdp,
+        page: async () => {
+          throw new Error('the session is gone');
+        },
+      },
+      hint: { frozen: () => false, last: () => undefined, keep: () => undefined },
+    };
+    await describeInputDocument(subject).then(
+      () => should.fail(undefined, undefined, 'it should reject'),
+      (error: unknown) => should((error as Error).message).equal('the session is gone'),
+    );
+  });
+
   it('says the host the page is on, so a login’s facts can watch it leave the sign-in hosts', async () => {
     const { world } = loginWorld();
     world.pageUrl = 'https://Vercel.com/dashboard';
