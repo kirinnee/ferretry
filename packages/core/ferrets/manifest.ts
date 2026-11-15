@@ -52,6 +52,7 @@ import {
   StartRequestsFile,
   FerretSummaryFiles,
   FerretWaitFiles,
+  MonitorTickFile,
 } from './contract/index.ts';
 
 /**
@@ -884,6 +885,7 @@ export default definePlugin({
       TransferPlanFiles,
       MoveInflightFiles,
       FerretWaitFiles,
+      MonitorTickFile,
       FerretLaunchEnvironmentFiles,
       FerretLaunchSectionsFiles,
     ],
