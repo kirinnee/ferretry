@@ -1,3 +1,4 @@
+import { ScriptRecordSchema } from '../../../contract/index.ts';
 import type { ScriptedOriginsView } from './borrowed-grants.ts';
 
 /** What the Vault keeps of where page scripts ran: the latest time per host, and when one ran on an unreadable page. */
@@ -110,7 +111,9 @@ export class MachineScripts {
   /** A PAGE SCRIPT RAN on `host` (any session's `browser_eval`), or on a page whose origin couldn't be read. */
   scriptedOn(host: string | undefined): void {
     const now = this.now();
-    if (host === undefined) this.#everywhere(now);
+    // A host the record's own schema would refuse (too long, empty, ...) would freeze every later write: it is kept as
+    // "somewhere unreadable", which only ever refuses more.
+    if (host === undefined || !keptAsHost(host)) this.#everywhere(now);
     else this.#scripted.set(host, now);
     this.#fold();
     this.#persist();
@@ -135,20 +138,35 @@ export class MachineScripts {
     }
   }
 
+  async #write(): Promise<boolean> {
+    try {
+      await this.store?.save({
+        hosts: new Map(this.#scripted),
+        ...(this.#scriptedEverywhere === undefined ? {} : { everywhere: this.#scriptedEverywhere }),
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Writes what is known after the earlier write and after the load, so the file is never overwritten unread. */
   #persist(): void {
     const { store } = this;
     if (store === undefined) return;
     this.#saving = this.#saving.then(async () => {
       await this.#ready.promise;
-      try {
-        await store.save({
-          hosts: new Map(this.#scripted),
-          ...(this.#scriptedEverywhere === undefined ? {} : { everywhere: this.#scriptedEverywhere }),
-        });
-      } catch {
+      if (await this.#write()) return;
+      // A write that failed leaves the older file in place, which may not know of this script. Say "somewhere unreadable
+      // now" instead, so a restart fails closed; a file that cannot be written at all fails this too, and says so.
+      this.#everywhere(this.now());
+      if (!(await this.#write()))
         this.warn?.('The page-script record could not be written: a restart may forget where a page script ran.');
-      }
     });
   }
+}
+
+/** Whether the record's own schema keeps `host` as a host key (checked with the schema, not a copy of its rule). */
+function keptAsHost(host: string): boolean {
+  return ScriptRecordSchema.safeParse({ format: 1, hosts: { [host]: 0 } }).success;
 }

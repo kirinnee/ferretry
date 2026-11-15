@@ -3,6 +3,8 @@ import { err, ok } from '@ferretry/std';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { ScriptRecordFile, ScriptRecordSchema } from '../../../../contract/index.ts';
 import { ScriptRecordOnState } from '../../../../daemon/adapters/inputs/script-record.ts';
+import { scriptedSince } from '../../../../daemon/lib/inputs/borrowed-grants.ts';
+import { MachineScripts } from '../../../../daemon/lib/inputs/machine-scripts.ts';
 
 const fixture = () => {
   const folder = new MemoryStateFolder();
@@ -55,6 +57,27 @@ describe('the page-script record on the Vault’s own state', () => {
     expect(await present.load()).toBe('damaged');
     expect(await absent.load()).toBeUndefined();
     expect(await failing.load()).toBe('damaged');
+  });
+
+  test('one over-long host never freezes the record: a later script is kept, and a restart still refuses the rule', async () => {
+    const { record } = fixture();
+    const warned: string[] = [];
+    const first = new MachineScripts(
+      () => 1_000,
+      record,
+      sentence => void warned.push(sentence),
+    );
+    await first.load();
+
+    first.scriptedOn(`${'a'.repeat(240)}.localhost:8080`);
+    first.scriptedOn('github.com');
+    await first.settled();
+
+    const restarted = new MachineScripts(() => 2_000, record);
+    await restarted.load();
+    expect(warned).toEqual([]);
+    expect(restarted.scriptedOrigins().hosts.get('github.com')).toBe(1_000);
+    expect(scriptedSince(restarted.scriptedOrigins(), ['github.com'], 500)).toBe(true);
   });
 
   test('the file is declared owner-only', () => {

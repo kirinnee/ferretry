@@ -14,6 +14,7 @@ function store(initial: ScriptRecordSnapshot | 'damaged' | undefined = undefined
     loads: 0,
     failLoad: false,
     failSave: false,
+    failSavesLeft: 0,
     initial,
     async load() {
       fake.loads += 1;
@@ -22,6 +23,10 @@ function store(initial: ScriptRecordSnapshot | 'damaged' | undefined = undefined
     },
     async save(record: ScriptRecordSnapshot) {
       if (fake.failSave) throw new Error('io');
+      if (fake.failSavesLeft > 0) {
+        fake.failSavesLeft -= 1;
+        throw new Error('io');
+      }
       saved.push(record);
       fake.initial = record;
     },
@@ -151,6 +156,51 @@ describe('the page-script record', () => {
     expect(warned).toHaveLength(1);
     expect(warned[0]).not.toContain('github');
     expect(scripts.scriptedOrigins().hosts.get('github.com')).toBe(10);
+  });
+
+  test.each([
+    ['one over the schema’s length', `${'a'.repeat(240)}.localhost:8080`.padEnd(254, 'x')],
+    ['an empty one', ''],
+  ])('a host the record would refuse (%s) is recorded as everywhere, never as a host', async (_name, host) => {
+    const kept = store();
+    const scripts = new MachineScripts(() => 10, kept);
+    await scripts.load();
+
+    scripts.scriptedOn(host);
+    await scripts.settled();
+
+    expect(scripts.scriptedOrigins()).toEqual({ hosts: new Map(), everywhere: 10 });
+    expect(kept.saved).toEqual([{ hosts: new Map(), everywhere: 10 }]);
+  });
+
+  test('a host at the schema’s limit is still kept as a host', async () => {
+    const scripts = new MachineScripts(() => 10, store());
+    await scripts.load();
+    scripts.scriptedOn('a'.repeat(253));
+
+    expect(scripts.scriptedOrigins().hosts.size).toBe(1);
+    expect(scripts.scriptedOrigins().everywhere).toBeUndefined();
+  });
+
+  test('a write that failed is tried again as "somewhere unreadable now", so a restart fails closed', async () => {
+    const kept = store();
+    kept.failSavesLeft = 1;
+    const warned: string[] = [];
+    const scripts = new MachineScripts(
+      () => 10,
+      kept,
+      sentence => void warned.push(sentence),
+    );
+    await scripts.load();
+
+    scripts.scriptedOn('github.com');
+    await scripts.settled();
+
+    expect(kept.saved).toEqual([{ hosts: new Map([['github.com', 10]]), everywhere: 10 }]);
+    expect(warned).toEqual([]);
+    const restarted = new MachineScripts(() => 20, kept);
+    await restarted.load();
+    expect(restarted.scriptedOrigins().everywhere).toBe(10);
   });
 
   test('it keeps the newest hosts and folds an older one into "somewhere unreadable then"', async () => {
