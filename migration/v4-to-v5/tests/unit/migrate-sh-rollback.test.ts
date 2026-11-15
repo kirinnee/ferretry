@@ -429,12 +429,12 @@ describe('rollback: by recorded state', () => {
     expect(await readFile(join(sb.v4home, 'layout-version'), 'utf8')).toBe('2\n');
   });
 
-  test('R2.5: restart names the recorded ferret ids, never bare `fy restart`; without --restart it only prints the command', async () => {
+  test('R2.5: a ferret v5 did not relaunch is never touched, and bare `fy restart` is never run', async () => {
     const sb = await box();
     await advance(sb, 'start');
     const result = await sb.run('rollback', ['--owner-yes']);
     expect(result.code).toBe(0);
-    expect(result.out).toContain('fy restart f1');
+    expect(result.out).toContain('relaunched none of the 1 recorded ferret(s)');
     expect((await sb.calls()).filter(line => line.startsWith('fy restart'))).toEqual([]);
   });
 

@@ -275,13 +275,21 @@ bash "$S" rollback --notes "$NOTES" --owner-yes            # add --restart once 
 `rollback` reads the notes, so it acts only on what happened: it reaches a quiet point and stops any v5 daemon (proved
 by the process list, not by a marker), closes only the tmux sessions it can prove v5 started (the real v5 socket, `fy-<id>` of a ferret in v5's registry, not named by the baseline; with no readable, non-empty baseline it closes nothing, and it names what it left alone), moves the v5 home aside only if the backup exists, restores the backup, puts the
 v4 programs back from the recorded state (including "neither installed"), restores the recorded `PATH` and `FY_URL`
-exactly, starts v4, and restarts **only the recorded ferrets by id**: v5 may have relaunched their harnesses with its own
-hooks, so `--restart` runs `fy restart <id>...` (bare `fy restart` only reports status) and then names only the ferrets that really restarted, with the counts of those queued, left alone and failed. If it exits non-zero, read what
-it printed and tell the owner; it is safe to run again. It proves the panes quiet before it moves anything, whether or not
+exactly, starts v4, and hands back to v4 **only the ferrets v5 relaunched**. Those are the recorded ferrets whose v5 history
+holds a `session.restarted` or `session.resumed` written by v5 (events after the carried v4 journal; a ferret whose history
+cannot be read is not proven). A ferret v5 relaunched keeps running a **v5-launched harness** (its own config folder, which is not
+in the restored v4 home), and v4's `fy restart` refuses it ("can't see what it is running"), so `fy restart` cannot undo it. Without
+`--restart` the script only names those ferrets. With `--restart` (the owner's yes: for each one it **stops the ferret, which interrupts what it is doing and closes
+its own web-terminal panes**, then resumes it; the conversation is kept) it runs, with v4's `fy`, `fy stop orphan <id> --yes` and then
+`fy resume <id>`: the ferret comes back as a v4 launch. (v4's `fy restart` has no `--force` and `fy migrate` was never proven
+here; the stop + resume pair was proven on a real rollback of 15 ferrets.) It says how many it handed back and names every one it could
+not, with v4's reason ("stop refused" or "stopped, not resumed"); then it exits non-zero, and running `rollback --restart` again retries
+only those (a ferret already stopped is only resumed). A recorded ferret v5 did not relaunch is never touched, and neither is any other ferret.
+If it exits non-zero, read what it printed and tell the owner; it is safe to run again. It proves the panes quiet before it moves anything, whether or not
 a daemon is running, and it decides what a live `fyd` is from the notes, not from the `fy` now on the PATH: if that
 `fyd` is the v5 one and no v5 `fy` is left to stop it, it refuses and moves nothing. For an install kind `manual` it
 restores the homes, then stops and asks the owner to put the v4 programs back by hand; **run `rollback` again after
-that** and it checks that `fy` and `fyd` print 4.291.x and finishes (starts v4, restarts the recorded ferrets).
+that** and it checks that `fy` and `fyd` print 4.291.x and finishes (starts v4, hands back the ferrets v5 relaunched).
 
 ## Afterwards
 

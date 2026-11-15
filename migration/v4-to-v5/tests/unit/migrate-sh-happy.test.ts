@@ -179,7 +179,7 @@ describe('migrate.sh happy path (Homebrew v4 cask, released v5.0.0)', () => {
     expect(result.out).not.toMatch(/ {2,}FAIL {2,}/);
   });
 
-  test('rollback after a complete run restores v4: homes, cask, daemon, ids restarted by name', async () => {
+  test('rollback after a complete run restores v4: homes, cask, daemon; no ferret v5 did not relaunch is touched', async () => {
     await advance(sb, 'verify');
     const result = await sb.run('rollback', ['--owner-yes', '--restart']);
     expect(result.code).toBe(0);
@@ -188,7 +188,7 @@ describe('migrate.sh happy path (Homebrew v4 cask, released v5.0.0)', () => {
     const calls = await sb.calls();
     expect(calls).toContain('brew uninstall --cask ferretry');
     expect(calls).toContain('brew install --cask kirinnee/ferretry/ferretry@4');
-    expect(calls).toContain('fy restart f1');
+    expect(calls.filter(line => line.startsWith('fy migrate'))).toEqual([]);
     expect(calls).not.toContain('fy restart');
   });
 });
