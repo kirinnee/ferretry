@@ -8,8 +8,8 @@
  * The stream carries the same raw text as the two owner-only shared-draft routes (`OWN_DRAFT`); nothing
  * here masks or copies it.
  *
- * GAP(app-shell), see `./seam-drafts.ts`: the client's socket carries no query, so the stream opens for the
- * ferret's chat draft only and always starts from the whole draft; `position` is accepted and not sent.
+ * An Agenda item's own draft is named in the query (`?item=`), which the client's socket carries. GAP(app-shell), see
+ * `./seam-drafts.ts`: `position` is accepted and not sent, so every stream starts from the whole draft.
  */
 import { type DraftClientFrame, type DraftServerFrame, DraftServerFrameSchema } from '../../contract/index.ts';
 import type { DraftPosition } from './shared-draft-sync.ts';
@@ -37,9 +37,6 @@ export const openSharedDraftStream = async (
   handlers: SharedDraftStreamHandlers,
 ): Promise<SharedDraftStreamLink> => {
   if (client.socket === undefined) throw new Error('this client opens no live stream');
-  // An item's own draft is named only in the query, which the client's socket cannot carry: opening the bare
-  // route would stream the CHAT's draft into an item's composer. Refused, never guessed.
-  if (scope.item !== undefined) throw new Error('an item draft has no live stream yet');
   let ended = false;
   const end = (code: number, reason: string): void => {
     if (ended) return;
@@ -96,8 +93,11 @@ export const openSharedDraftStream = async (
         }
         if (whole !== 'wait') handlers.onFrame(whole);
       },
-      onClose: reason => end(closeCodeOf(reason), reason),
+      // The close code the daemon ended with; a shell that reports none leaves it spelled in the reason.
+      onClose: (reason, code) => end(code ?? closeCodeOf(reason), reason),
     },
+    // An item's own draft is named only in the query: the bare route would stream the CHAT's draft into its composer.
+    scope.item === undefined ? undefined : { item: scope.item },
   );
   refuse = () => {
     socket.close();

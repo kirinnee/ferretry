@@ -71,4 +71,41 @@ describe('the background outbox host', () => {
     expect(saved.outcome.kind).toBe('waiting');
     expect(calls.filter(call => call.route === 'POST /v1/ferrets/:ferretId/send')).toHaveLength(0);
   });
+
+  test('a send that waited on a down machine goes out when the client’s feed says the machine is back', async () => {
+    const daemonId = 'bg-host-3';
+    const held = documentOutbox(daemonId);
+    const listeners = new Set<(live: boolean) => void>();
+    let down = true;
+    const calls: string[] = [];
+    const client = {
+      call: async <Answer,>(route: string): Promise<Answer> => {
+        calls.push(route);
+        if (down) throw new TypeError('Failed to fetch');
+        return sent('f1') as Answer;
+      },
+      feed: {
+        isLive: () => !down,
+        subscribeLive: (listener: (live: boolean) => void) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      },
+    };
+    const view = render(<OutboxHost daemon={daemonId} client={client as never} />);
+    expect(listeners.size).toBe(1);
+    const saved = await held.outbox.submit({ daemonId, ferretId: 'f1', message: 'saved while the machine was down' });
+    expect(saved.outcome.kind).toBe('waiting');
+
+    // Only the feed can wake it now: the retry timer is 20 s away and the browser never went offline.
+    down = false;
+    await runAsync(async () => {
+      for (const listener of [...listeners]) listener(true);
+      await settleUntil(() => held.outbox.snapshot().length === 0, 'the waiting message to be sent', runAsync);
+    });
+
+    expect(calls.filter(route => route === 'POST /v1/ferrets/:ferretId/send').length).toBeGreaterThanOrEqual(2);
+    run(() => view.unmount());
+    expect(listeners.size).toBe(0);
+  });
 });

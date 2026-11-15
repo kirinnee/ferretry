@@ -428,9 +428,8 @@ interface Scope {
    * working-directory bracket), WHETHER OR NOT the lstat walk found every folder (the base must be exactly its spelling
    * below the anchor). A host with the calls but not the bracket lists by path once the folder is proven: there a swap
    * inside ONE call can let a listing answer the outside folder's names. A host that reaches an open folder by neither
-   * a descriptor path nor the C library's calls keeps the by-path read: there a swap inside ONE call can let a listing,
-   * a stat or an identity answer the outside folder's names and metadata, while a file's bytes stay refused by the
-   * spelling and identity proofs; it never refuses a read that works today. Unlike `descent`, nothing is made or
+   * a descriptor path nor the C library's calls REFUSES the read `no_descriptor_reach` (it fails closed: it never
+   * opens a folder by a path a link could redirect). Unlike `descent`, nothing is made or
    * written through it.
    */
   readonly heldFrom?: string;
@@ -458,10 +457,7 @@ async function openCheckedFolder(
   tolerateUnsupported = false,
 ): Promise<OpenedDirectory | undefined> {
   if (!within(scope.base.real, real)) refuse('link_escape');
-  if (scope.heldFrom !== undefined && !tolerateUnsupported) {
-    const held = await openHeldFolder(scope, scope.heldFrom, real);
-    if (held !== undefined) return held;
-  }
+  if (scope.heldFrom !== undefined && !tolerateUnsupported) return await openHeldFolder(scope, scope.heldFrom, real);
   const folder = await scope.fs.openDirectory(real).catch((error: unknown) => {
     // Today's `fsync*Directory` tolerated EINVAL/ENOTSUP/EPERM at the OPEN too: only the sync asks for this.
     if (tolerateUnsupported && ['EINVAL', 'ENOTSUP', 'EPERM'].includes(errnoOf(error) ?? '')) return undefined;
@@ -479,16 +475,11 @@ async function openCheckedFolder(
 /**
  * A READ of an `imports` scope with an anchor (`Scope.heldFrom`): the folder at `real` opened from the anchor's
  * descriptor down, through `openFolderBelow` (the walk `project-files` writes through), so a link swapped in at any
- * level is `link_escape`. `undefined` only on a host that reaches an open folder by neither a descriptor path nor the C
- * library's calls: the caller then opens it by path, as that host always did.
+ * level is `link_escape`. A host that reaches an open folder by neither a descriptor path nor the C
+ * library's calls: the read is refused `no_descriptor_reach` (fail closed), never made by a path a link could redirect.
  */
-async function openHeldFolder(scope: Scope, anchor: string, real: string): Promise<OpenedDirectory | undefined> {
-  try {
-    return (await openFolderBelow(scope, anchor, real, 0o700, false)).folder;
-  } catch (error) {
-    if (error instanceof RootError && error.refusal === 'no_descriptor_reach') return undefined;
-    throw error;
-  }
+async function openHeldFolder(scope: Scope, anchor: string, real: string): Promise<OpenedDirectory> {
+  return (await openFolderBelow(scope, anchor, real, 0o700, false)).folder;
 }
 
 async function folderProblem(scope: Scope, real: string, opened: FileIdentity): Promise<RootRefusal | undefined> {
@@ -544,7 +535,7 @@ async function fileProblem(scope: Scope, real: string, opened: FileIdentity): Pr
  * folder's descriptor, the folder itself reached from the anchor (`openHeldFolder`); the folder is let go as soon as the
  * file is open. What an open that failed means is the errno alone (a path is never in the answer): a link or a file where
  * a folder should be is `link_escape`, anything else `changed`. A folder that reaches nothing by descriptor (`ENOSYS`)
- * opens the file by path.
+ * refuses `no_descriptor_reach`: the file is never opened by a path a link could redirect.
  */
 async function openLeaf(scope: Scope, real: string): Promise<OpenedFile> {
   if (scope.heldFrom === undefined) return await scope.fs.openRead(real).catch(() => refuse('changed'));
@@ -554,7 +545,7 @@ async function openLeaf(scope: Scope, real: string): Promise<OpenedFile> {
   } catch (error) {
     switch (errnoOf(error)) {
       case 'ENOSYS':
-        return await scope.fs.openRead(real).catch(() => refuse('changed'));
+        return refuse('no_descriptor_reach');
       case 'ELOOP':
       case 'ENOTDIR':
         return refuse('link_escape');
