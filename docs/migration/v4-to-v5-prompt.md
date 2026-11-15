@@ -285,9 +285,10 @@ not proof), and the baseline decides what each one was:
   that v4's `fy restart` refuses ("can't see what it is running"; it has no `--force`). With `--restart` (the owner's yes: it
   **stops the ferret, interrupting what it is doing and closing its own web-terminal panes**) the script runs v4's `fy stop orphan <id> --yes`
   then `fy resume <id>`: it comes back as a v4 launch with its conversation. (This pair was proven on real rollbacks of 15 ferrets.)
-- **Stopped, completed or failed at the baseline**, and the owner resumed it in v5: it is **never resumed by v4**. Its v5 session is closed
-  (the script closes the tmux session only v5 had; if v4 still shows it running it also runs `fy stop orphan <id> --yes`) and it stays
-  stopped, exactly as at the backup.
+- **Stopped, completed, failed, stalled or interrupted at the baseline**, and the owner resumed it in v5: it is **never resumed by v4**. Its v5
+  session is closed (the script closes the tmux session only v5 had: a live pane that is not the pane the backup's own record names) and it
+  stays stopped, exactly as at the backup. The script **never stops it on v4's word**: if v4 shows it running afterwards, that is a v4 launch
+  (the owner resumed it, or v4 revived it), so it is only named, with the command, and the owner decides.
 - **Anything it cannot place** (running at the baseline but no live pane then, or no status): left alone and named.
 
 Without `--restart` it only names the three groups. With it, it prints one counts line (`handed back N, stopped as at the baseline N,

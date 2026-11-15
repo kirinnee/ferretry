@@ -92,12 +92,73 @@ describe("a stopped ferret's stale pane record does not protect the session v5 c
       ]),
     );
     await advance(sb, 'start');
-    await v5Server(sb, 'fy-f1 %1\nfy-f2 %2\n', ['f1', 'f2']);
+    await v5Server(sb, 'fy-f1 %1\nfy-f2 %7\n', ['f1', 'f2']);
     const result = await sb.run('rollback', ['--owner-yes']);
     expect(result.code).toBe(0);
     expect(await kills(sb)).toEqual(['=fy-f2']);
     expect(result.out).toContain('closed 1 tmux session(s) only v5 had');
     expect(result.out).toContain('the ferrets v5 relaunched among them are handed back below');
+  });
+
+  /** f1 running; f2 at the baseline in `status` with a stale record naming pane %2; v5's server holds `livePanes`. */
+  const stoppedBox = async (status: string, livePanes: string, backupPane?: string): Promise<Sandbox> => {
+    const sb = await box();
+    await mkdir(join(sb.v4home, 'state', 'sessions', 'f2'), { recursive: true });
+    await writeFile(
+      join(sb.v4home, 'state', 'sessions', 'f2', 'terminal-pane.json'),
+      JSON.stringify({ sessionId: 'f2', tmuxSession: 'fy-f2', paneId: '%2' }),
+    );
+    await sb.state(
+      'ps.v4.json',
+      JSON.stringify([
+        { config: { id: 'f1' }, state: { status: 'working' } },
+        { config: { id: 'f2' }, state: { status } },
+      ]),
+    );
+    await advance(sb, 'start');
+    if (backupPane !== undefined) {
+      const backup =
+        (await sb.notesText())
+          .split('\n')
+          .find(each => each.startsWith('B='))
+          ?.slice(2) ?? '';
+      await writeFile(
+        join(backup, 'state', 'sessions', 'f2', 'terminal-pane.json'),
+        JSON.stringify({ sessionId: 'f2', tmuxSession: 'fy-f2', paneId: backupPane }),
+      );
+    }
+    await v5Server(sb, livePanes, ['f1', 'f2']);
+    return sb;
+  };
+
+  test("a ferret stopped/failed at the baseline that v4 relaunched BEFORE the switch (its live pane is the backup record's pane) is never closed", async () => {
+    const sb = await stoppedBox('failed', 'fy-f1 %1\nfy-f2 %7\n', '%7');
+    const result = await sb.run('rollback', ['--owner-yes']);
+    expect(result.code).toBe(0);
+    expect(await kills(sb)).toEqual([]);
+    expect(result.out).toContain('closed 0 tmux session(s) only v5 had');
+  });
+
+  for (const status of ['stalled', 'interrupted']) {
+    test(`a ferret ${status} at the baseline counts as stopped: the session v5 resumed is closed`, async () => {
+      const sb = await stoppedBox(status, 'fy-f1 %1\nfy-f2 %7\n');
+      const result = await sb.run('rollback', ['--owner-yes']);
+      expect(result.code).toBe(0);
+      expect(await kills(sb)).toEqual(['=fy-f2']);
+    });
+  }
+
+  test('an unreadable backup record closes nothing (unknown is never permission to kill)', async () => {
+    const sb = await stoppedBox('stopped', 'fy-f1 %1\nfy-f2 %7\n');
+    const backup =
+      (await sb.notesText())
+        .split('\n')
+        .find(each => each.startsWith('B='))
+        ?.slice(2) ?? '';
+    await writeFile(join(backup, 'state', 'sessions', 'f2', 'terminal-pane.json'), 'not json');
+    const result = await sb.run('rollback', ['--owner-yes']);
+    expect(result.code).toBe(0);
+    expect(await kills(sb)).toEqual([]);
   });
 });
 
@@ -268,8 +329,46 @@ describe('rollback hands back to v4 the ferrets v5 relaunched, and only those', 
     expect(result.out).toContain('stopped at the baseline, v5 had run them, v4 has them stopped: f2');
   });
 
-  test('a stopped-at-baseline ferret that v4 shows RUNNING after the rollback is stopped again, never resumed', async () => {
+  const runningAfter = async (sb: Sandbox, state: unknown): Promise<void> => {
+    await sb.state(
+      'ps.v4.json',
+      JSON.stringify([
+        { config: { id: 'f1' }, state: { status: 'working' } },
+        { config: { id: 'f2' }, ...(state === undefined ? {} : { state }) },
+      ]),
+    );
+  };
+
+  test('a stopped-at-baseline ferret that v4 shows RUNNING after the rollback is only REPORTED: never stopped, never resumed', async () => {
     const sb = await relaunchBox({ f2: ['session.resumed'] }, { f2Status: 'stopped', f2Live: false });
+    await runningAfter(sb, { status: 'running' });
+    await withFy(sb);
+    const result = await sb.run('rollback', ['--owner-yes', '--restart']);
+    expect(result.code).toBe(0);
+    expect(await handBack(sb)).toEqual([]);
+    expect(result.out).toContain("f2 (v4 shows 'running')");
+    expect(result.out).toContain('the owner decides');
+    expect(result.out).toContain('handed back 0, stopped as at the baseline 0, left alone 2, failed 0');
+  });
+
+  test('an unreadable v4 status for a stopped-at-baseline ferret does nothing and says so', async () => {
+    const sb = await relaunchBox({ f2: ['session.resumed'] }, { f2Status: 'stopped', f2Live: false });
+    await runningAfter(sb, undefined);
+    await withFy(sb);
+    const result = await sb.run('rollback', ['--owner-yes', '--restart']);
+    expect(result.code).toBe(0);
+    expect(await handBack(sb)).toEqual([]);
+    expect(result.out).toContain("f2 (v4 shows 'no status')");
+  });
+
+  test('the two-step flow: the owner resumes the stopped ferret under v4 between rollback and the --restart rerun, and it is not stopped', async () => {
+    const sb = await relaunchBox(
+      { f1: ['session.restarted'], f2: ['session.resumed'] },
+      { f2Status: 'stopped', f2Live: false },
+    );
+    await withFy(sb);
+    const first = await sb.run('rollback', ['--owner-yes']);
+    expect(first.code).toBe(0);
     await sb.state(
       'ps.v4.json',
       JSON.stringify([
@@ -277,10 +376,18 @@ describe('rollback hands back to v4 the ferrets v5 relaunched, and only those', 
         { config: { id: 'f2' }, state: { status: 'running' } },
       ]),
     );
+    const second = await sb.run('rollback', ['--owner-yes', '--restart']);
+    expect(second.code).toBe(0);
+    expect(await handBack(sb)).toEqual(['fy stop orphan f1 --yes', 'fy resume f1']);
+    expect(second.out).toContain("f2 (v4 shows 'running')");
+  });
+
+  test('a ferret that was interrupted at the baseline and that v5 resumed is classed stopped: it stays stopped and is counted', async () => {
+    const sb = await relaunchBox({ f2: ['session.resumed'] }, { f2Status: 'interrupted', f2Live: false });
     await withFy(sb);
     const result = await sb.run('rollback', ['--owner-yes', '--restart']);
     expect(result.code).toBe(0);
-    expect(await handBack(sb)).toEqual(['fy stop orphan f2 --yes']);
+    expect(await handBack(sb)).toEqual([]);
     expect(result.out).toContain('stopped as at the baseline 1');
   });
 

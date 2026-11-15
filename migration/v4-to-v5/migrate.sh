@@ -1100,6 +1100,12 @@ rollback)
     rb_quiet before
   fi
 
+  # The states the converter treats as "not running" (steps/ferrets.ts). One list for every rule below.
+  stopped_state() {
+    case "$1" in stopped | completed | failed | stalled | interrupted) return 0 ;; esac
+    return 1
+  }
+
   # 1b. Close the panes v5 started, and ONLY those it provably started. The daemon's stop leaves every pane running, so
   # without this they outlive the rollback as orphans. Closing is destructive (a harness and its unsaved work), so it fails
   # CLOSED: any doubt means nothing is closed, it is said out loud, and the rollback goes on (v4 coming back matters more).
@@ -1144,7 +1150,28 @@ rollback)
             owned=1
           elif [ -n "${oid}" ]; then
             ost="$(jq -r --arg id "${oid}" '[.[] | select(.id == $id) | .status // ""][0] // ""' "${base}/ferrets.json")" || ost="?"
-            case "${ost}" in stopped | completed | failed) ;; *) owned=1 ;; esac
+            stopped_state "${ost}" || owned=1
+          fi
+        fi
+        # A stopped-class (or unrecorded) session is still v4's when a live pane in it IS the pane the backup's own record
+        # names for it: that ferret was relaunched under v4 after the baseline, and a reused name with a NEW pane is v5's.
+        # A backup that cannot be read counts as "owned".
+        if [ "${owned}" = 0 ]; then
+          if [ ! -d "${B}/state/sessions" ]; then
+            owned=1
+          else
+            for rec in "${B}"/state/sessions/*/terminal-pane.json; do
+              [ -e "${rec}" ] || continue
+              bpane="$(jq -r --arg s "${session}" 'select(.tmuxSession == $s) | .paneId // empty' "${rec}")" || {
+                owned=1
+                break
+              }
+              [ -n "${bpane}" ] || continue
+              if awk -v s="${session}" -v p="${bpane}" '$1 == s && $2 == p {f = 1} END {exit !f}' <<<"${v5_panes}"; then
+                owned=1
+                break
+              fi
+            done
           fi
         fi
         fid="${session#fy-}"
@@ -1214,11 +1241,14 @@ rollback)
         bstatus="$(jq -r --arg id "${rid}" '[.[] | select(.id == $id) | .status // ""][0] // ""' "${base}/ferrets.json")" || bstatus="?"
         cls=unknown
         case "${bstatus}" in
-        stopped | completed | failed) cls=stoponly ;;
         "" | "?") ;;
         *)
-          owner_row="$(awk -F'\t' -v i="${rid}" '$1 == i {print $2 " " $3; exit}' "${base}/pane-owners.tsv")" || owner_row=""
-          if [ -n "${owner_row}" ] && grep -qxF "${owner_row}" "${base}/panes.txt"; then cls=handback; fi
+          if stopped_state "${bstatus}"; then
+            cls=stoponly
+          else
+            owner_row="$(awk -F'\t' -v i="${rid}" '$1 == i {print $2 " " $3; exit}' "${base}/pane-owners.tsv")" || owner_row=""
+            if [ -n "${owner_row}" ] && grep -qxF "${owner_row}" "${base}/panes.txt"; then cls=handback; fi
+          fi
           ;;
         esac
         echo "${rid} ${cls}" >>"${relaunch_file}.tmp"
@@ -1329,24 +1359,22 @@ rollback)
         n_fail=$((n_fail + 1))
       fi
     done
+    # A ferret stopped at the baseline is NEVER stopped here on v4's word: step 1b already closed the v5 session it had, so a
+    # "running" now is a v4 launch (the owner resumed it, or v4 revived it) and is the owner's. It is only reported.
+    so_running=""
     for rid in ${so_ids}; do
       vstatus="$(jq -r --arg id "${rid}" '[.[] | select(.config.id == $id) | .state.status // ""][0] // ""' <<<"${ps_json}")" || vstatus="?"
-      case "${vstatus}" in
-      stopped | completed | failed) n_so=$((n_so + 1)) done_so="${done_so} ${rid}" ;; # v4 already shows it as it was at the backup
-      *)
-        if move_out="$(fy4 stop orphan "${rid}" --yes --reason "rollback: this ferret was stopped at the backup; v5 had resumed it" 2>&1)"; then
-          n_so=$((n_so + 1)) done_so="${done_so} ${rid}"
-        else
-          relaunch_failed="${relaunch_failed}${relaunch_failed:+; }${rid} (was stopped at the baseline, v4 shows '${vstatus}', stop refused: $(head -n 1 <<<"${move_out}" | cut -c1-160))"
-          n_fail=$((n_fail + 1))
-        fi
-        ;;
-      esac
+      if stopped_state "${vstatus}"; then
+        n_so=$((n_so + 1)) done_so="${done_so} ${rid}"
+      else
+        so_running="${so_running}${so_running:+; }${rid} (v4 shows '${vstatus:-no status}')"
+      fi
     done
     n_left=$((nfer - n_hb - n_so - n_fail))
     say "📝 rollback --restart: handed back ${n_hb}, stopped as at the baseline ${n_so}, left alone ${n_left}, failed ${n_fail} (of ${nfer} baseline ferrets)"
     [ -z "${done_hb}" ] || say "📝 handed back to v4 (running at the baseline):${done_hb}"
     [ -z "${done_so}" ] || say "📝 stopped at the baseline, v5 had run them, v4 has them stopped:${done_so}"
+    [ -z "${so_running}" ] || say "⚠️ stopped at the baseline, but v4 does not show them stopped now: ${so_running}. Left alone: v4 or the owner may have started them again, so the owner decides (to stop one: fy stop orphan <id> --yes)"
     [ -z "${un_ids}" ] || say "⚠️ left alone, the baseline cannot say whether they were running: ${un_ids}"
     if [ -z "${relaunch_failed}" ] && [ -n "${done_hb}" ]; then say "✅ every ferret that was running at the baseline and v5 relaunched now runs a v4 launch again. Ask the owner to send one of them a message and see it answer"; fi
   fi
