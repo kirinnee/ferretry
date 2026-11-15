@@ -121,6 +121,12 @@ export class AskOwnerActionError extends Error {
  */
 export class AskRefusedError extends Error {
   override readonly name = 'AskRefusedError';
+  /** The engine's reason (`invalid`, `full`, …) when it gave one: what tells a draft that is wrong from a board that is full. */
+  readonly code: string | undefined;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.code = code;
+  }
 }
 
 /** An answer's own id: each answer is applied once, by this id (§7.4 rule 4). */

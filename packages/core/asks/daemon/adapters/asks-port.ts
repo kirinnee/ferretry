@@ -337,7 +337,7 @@ export function asksPort(
       ...(!notice && parsed.blocking === true ? { blockingNow: true as const } : {}),
     };
     const mutation = await agenda.raise(ferret, request, PORT_ACTOR);
-    if (!mutation.ok) throw new AskRefusedError(mutation.error.message);
+    if (!mutation.ok) throw new AskRefusedError(mutation.error.message, mutation.error.code);
     // The mutation says where the ask landed: a daemon raise about a sub-ferret goes to its lineage's home, not to `ferret`.
     const landed = mutation.snapshot.sessionId;
     const id = mutation.item?.id ?? (await agenda.raisedObligation(landed, refOnBoard(landed, ferret, sourceRef)));
@@ -416,7 +416,7 @@ export function asksPort(
           },
           PORT_ACTOR,
         );
-        if (!mutation.ok) throw new AskRefusedError(mutation.error.message);
+        if (!mutation.ok) throw new AskRefusedError(mutation.error.message, mutation.error.code);
         // The mutation says where the notice landed: a daemon notice about a sub-ferret goes to its lineage's home, so
         // both the unchanged-item lookup and the returned ref name that board, not `ferret` (as `raise` does).
         const landed = mutation.snapshot.sessionId;
