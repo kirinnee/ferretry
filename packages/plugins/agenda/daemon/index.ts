@@ -115,10 +115,11 @@ export default implementDaemon(manifest, {
       const [first, ...rest] = waiting;
       if (first === undefined) return;
       const name = (await ferrets.get(ferret))?.name ?? ferret;
+      const stoppedAt = String(clock.now());
       await buzzes.buzz(
-        stopBuzzKey(ferret, String(clock.now())),
+        stopBuzzKey(ferret, stoppedAt),
         'stopped',
-        stopBuzzWords(ferret, name, [first, ...rest]),
+        stopBuzzWords(ferret, name, [first, ...rest], stoppedAt),
         {
           ferret,
         },

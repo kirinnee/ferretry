@@ -165,13 +165,27 @@ describe('buzz policy', () => {
   test('words a stop with the count in the title and opens the first ask', () => {
     const first = { id: 'A1', subject: 'Approve the plan' } as BuzzableAsk;
     const second = { id: 'A2', subject: 'Pick a colour' } as BuzzableAsk;
-    expect(stopBuzzWords('f1', 'build-bot', [first, second])).toEqual({
+    expect(stopBuzzWords('f1', 'build-bot', [first, second], '1700000000000')).toEqual({
       tag: 'agenda-f1',
       title: 'build-bot is stopped · 2 need you',
       body: 'Approve the plan',
       url: '/ferrets/f1/chat?ask=A1',
+      eventKey: 'stop:f1:1700000000000',
     });
-    expect(stopBuzzWords('f1', 'x'.repeat(60), [first]).title).toMatch(/is stopped · 1 needs you$/u);
+    expect(stopBuzzWords('f1', 'x'.repeat(60), [first], '1').title).toMatch(/is stopped · 1 needs you$/u);
+  });
+
+  test('S6 a stop names ONE event: later stops of the same ferret share its tag but not its key, a repeat shares both', () => {
+    const first = stopBuzzWords('f1', 'Review', [{ id: 'A1', subject: 'One' } as BuzzableAsk], '1');
+    const later = stopBuzzWords('f1', 'Review', [{ id: 'A2', subject: 'Two' } as BuzzableAsk], '2');
+    const again = stopBuzzWords('f1', 'Review', [{ id: 'A1', subject: 'One' } as BuzzableAsk], '1');
+    expect(later.tag).toBe(first.tag);
+    expect(later.eventKey).not.toBe(first.eventKey);
+    expect(again.eventKey).toBe(first.eventKey);
+    // the key is the moment's, never the tag, and an ask's own buzz names none
+    expect(first.eventKey).toBe(stopBuzzKey('f1', '1'));
+    expect(first.eventKey).not.toBe(first.tag);
+    expect(askBuzzWords({ id: 'A3', subject: 'S', ferret: 'f1' } as BuzzableAsk).eventKey).toBeUndefined();
   });
 
   test('keys an ask by ferret and id, and a stop by the instant it began', () => {

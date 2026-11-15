@@ -51,12 +51,13 @@ describe('accounts manifest', () => {
     ]);
     for (const entry of manifest.actions.agentTools) expect(entry.guard).not.toBe('secrets');
   });
-  test('needs the Vault, its sealed documents and Asks, and takes the phone-approval, secure-copy, sign-in-approval and four step-up stage hooks', () => {
+  test('needs the Vault, its sealed documents and Asks, and takes the phone-approval, secure-copy, saved-login, sign-in-approval and four step-up stage hooks', () => {
     expect(Object.keys(manifest.needs ?? {}).sort()).toEqual(['asks', 'gate', 'sealed', 'vault']);
     expect(manifest.hooks.takes.map(take => `${take.hook.name}:${take.key}`)).toEqual([
       'redaction.sources:source',
       'input.phone-approval:phone',
       'input.secure-copy:copy',
+      'input.saved:saved',
       'ask.sources:sign-in-approval',
       'step-up.stages:add-2fa-key',
       'step-up.stages:approve-task-plan',

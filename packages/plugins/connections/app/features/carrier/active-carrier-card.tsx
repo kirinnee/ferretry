@@ -38,7 +38,14 @@
 import { type ConnectionChoice, type ConnectionMethod, describeConnectionMethod } from '../../lib/connection.ts';
 import type { CarrierSetting } from '../../lib/carrier-preference.ts';
 import type { ConnectionHealthState } from '../../lib/connection-health.ts';
-import { carrierLines, RECONNECTING_LABEL, stallCopy } from '../connection/connection-copy.ts';
+import { Button } from '../../shell/primitives.tsx';
+import {
+  carrierLines,
+  OUTAGE_COPY,
+  outageDuration,
+  RECONNECTING_LABEL,
+  stallCopy,
+} from '../connection/connection-copy.ts';
 import { type CarrierPreferenceAvailability, CarrierPreferenceSelector } from './carrier-preference-selector.tsx';
 import { RelayFallbackNotice, useConnectionCardOnScreen } from './relay-fallback-notice.tsx';
 
@@ -56,6 +63,10 @@ export interface ActiveCarrierCardProps {
   readonly relayAdvertised: boolean;
   /** The reconnect loop's state for this daemon; absent reads as nothing measured yet. */
   readonly health?: ConnectionHealthState;
+  /** The instant it is now, for how long the outage has lasted; the caller ticks it while the outage is on screen. */
+  readonly now?: number;
+  /** Retries THIS machine at once (its health model's `retryNow`); absent where nothing can. */
+  readonly onRetry?: () => void;
   /** The machine's display name, for the reconnecting advice. */
   readonly machine?: string;
   /** The connection preference selector; absent where nothing can change it. */
@@ -159,6 +170,8 @@ export function ActiveCarrierCard({
   choice,
   relayAdvertised,
   health,
+  now = Date.now(),
+  onRetry,
   machine = 'this machine',
   preference,
   relayFallback,
@@ -208,6 +221,16 @@ export function ActiveCarrierCard({
         <div className="mt-2" data-connection-outage="">
           <p className="mb-0 text-cell leading-base text-warn">{advice?.heading}.</p>
           <p className="mb-0 mt-1 text-cell leading-base text-muted">{advice?.advice}</p>
+          <p className="mb-0 mt-1 text-meta leading-base text-muted" data-connection-meta="">
+            {OUTAGE_COPY.lostFor(outageDuration(outage.since, now))} · {OUTAGE_COPY.attempts(outage.attempt)}
+          </p>
+          {onRetry === undefined ? null : (
+            <div className="mt-2">
+              <Button type="button" size="sm" className="min-h-[44px]" onClick={onRetry} data-connection-retry="">
+                {OUTAGE_COPY.retryNow}
+              </Button>
+            </div>
+          )}
           {outage.failures.length === 0 ? null : (
             <ul className="mb-0 mt-2 flex list-disc flex-col gap-1 pl-5 text-meta leading-base text-muted">
               {carrierLines(outage.failures).map(failure => (

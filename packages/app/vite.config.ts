@@ -55,8 +55,21 @@ const hostedAppOrigin = (() => {
   return (result.stdout ?? '').trim();
 })();
 
+/**
+ * THE NEWEST RELEASE NOTES, stamped in at build time for Updates' "What's new" (`plugins/updates/app/lib/changelog.ts`).
+ * The repository's `Changelog.md` is part of every checkout; only the first `RECENT_RELEASES` sections ship, so the
+ * bundle carries a screenful of history and not four hundred releases. The app never fetches these at run time.
+ */
+const RECENT_RELEASES = 40;
+const recentChangelog = readFileSync(fileURLToPath(new URL('../../Changelog.md', import.meta.url)), 'utf8')
+  .split(/^(?=## )/mu)
+  .filter(section => section.startsWith('## '))
+  .slice(0, RECENT_RELEASES)
+  .join('');
+
 export default defineConfig({
   define: {
+    __FY_CHANGELOG__: JSON.stringify(recentChangelog),
     __FY_HOSTED_APP_ORIGIN__: JSON.stringify(hostedAppOrigin),
     __FY_RELAY_DIRECTORY__: JSON.stringify(
       overriddenDirectory === '' ? HOSTED_RELAY_DIRECTORY_ORIGIN : overriddenDirectory,

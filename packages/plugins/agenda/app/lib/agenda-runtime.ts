@@ -7,15 +7,13 @@
  */
 
 import { AsksChanged } from '@ferretry/core-asks/contract';
-import { PushSeenRequestSchema } from '../../contract/wire.ts';
 import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { daemonOfClient } from '../shell.ts';
-import { type AgendaCall, agendaCall, requestIdHeaders } from './agenda-call.ts';
+import type { AgendaCall } from './agenda-call.ts';
 import type { ClearPort } from './agenda-clear-agents.ts';
 import { DaemonAgendaClient } from './agenda-client.ts';
 import { DaemonAgendaStore } from './agenda-store.ts';
-import { PUSH_SEEN } from './agenda-wire.ts';
 import { AgendaFerretStore } from './ferret-store.ts';
 import { type DaemonConnection, daemonConnection, THIS_MACHINE } from './machine.ts';
 
@@ -29,8 +27,6 @@ export interface AgendaRuntime {
   readonly agenda: DaemonAgendaClient;
   readonly ferrets: AgendaFerretStore;
   readonly clearPort: ClearPort;
-  /** The owner opened an ask here: its buzz is spent on every device (`POST /v1/push/seen`). Best effort. */
-  readonly itemOpened: (ferret: string, ask: string) => Promise<void>;
 }
 
 export type RuntimeClient = AgendaCall & Partial<Pick<PluginClient, 'subscribe'>>;
@@ -58,15 +54,5 @@ export const createAgendaRuntime = (
     agenda,
     ferrets,
     clearPort: { clientFor: target => (target.daemonId === connection.daemonId ? client : undefined) },
-    itemOpened: async (ferret, ask) => {
-      try {
-        await agendaCall(client, PUSH_SEEN, {
-          body: PushSeenRequestSchema.parse({ sessionId: ferret, agendaId: ask }),
-          headers: requestIdHeaders(),
-        });
-      } catch {
-        // A seen mark that did not land only leaves a buzz on another device; nothing here waits on it.
-      }
-    },
   };
 };
