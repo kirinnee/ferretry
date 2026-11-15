@@ -64,11 +64,18 @@ export type FerretState = z.infer<typeof FerretStateSchema>;
 export const FerretRoleSchema = z.enum(['lead', 'helper']);
 export type FerretRole = z.infer<typeof FerretRoleSchema>;
 
+/** The longest harness sentence a `start_failed` cause keeps (`explained`). */
+export const START_EXPLAINED_MAX = 300;
+
 /**
  * Why a ferret ended, in today's words (the Warden's `ReviveCause` and `ReviveLeaveReason` names, unchanged). The
  * first four are an END NOBODY CHOSE (the terminal vanished, a signal killed the agent, it exited non-zero); the rest
  * are an end somebody decided or a launch that never ran: `stopped` (anyone stopped it), `completed` (it said
  * `signal done`), `start_failed` (it never started, or a launch failed) and `clean_exit` (exit 0).
+ *
+ * `start_failed.explained` is the harness's own fixed sentence for a start that failed at its first turn
+ * (`Harness.startFailure`), kept so a plugin that hears the ferret stop can say why. Only that sentence is ever kept,
+ * never what the pane showed, and only when it fits {@link START_EXPLAINED_MAX}.
  */
 export const FerretEndCauseSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('tmux_crashed') }),
@@ -77,7 +84,7 @@ export const FerretEndCauseSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('agent_crashed'), exitCode: z.number().int() }),
   z.strictObject({ kind: z.literal('stopped') }),
   z.strictObject({ kind: z.literal('completed') }),
-  z.strictObject({ kind: z.literal('start_failed') }),
+  z.strictObject({ kind: z.literal('start_failed'), explained: z.string().min(1).max(START_EXPLAINED_MAX).optional() }),
   z.strictObject({ kind: z.literal('clean_exit') }),
 ]);
 export type FerretEndCause = z.infer<typeof FerretEndCauseSchema>;

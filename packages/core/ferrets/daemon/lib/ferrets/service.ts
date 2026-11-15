@@ -17,6 +17,7 @@ import {
   launchIsFenced,
   originIsAgent,
   RUNTIME_START_DEADLINE_MS,
+  START_EXPLAINED_MAX,
 } from '../../../contract/index.ts';
 import type {
   DeliveryOutcome,
@@ -681,6 +682,8 @@ interface LaunchSaid {
   conversationNotFound?: string;
   /** A resume that had no conversation to resume at all (none was ever recorded): a new one was started. */
   conversationUnknown?: true;
+  /** The harness's own sentence for a first turn that failed to start ({@link Harness.startFailure}), when it fits the cause. */
+  explained?: string;
 }
 
 class ResumeRefusal extends Error {
@@ -2080,6 +2083,7 @@ export class FerretsService implements FerretsApi {
     let runner: Runner | undefined;
     let failure: StartFailure;
     let turn: PendingTurn | undefined;
+    const said: LaunchSaid = {};
     try {
       const session = await this.sessionStep(record, kind, prompt, revive, attached, notInWardenTree);
       if (!session.ok) return await this.abandon(record, session.error.code, session.error.reason);
@@ -2098,7 +2102,6 @@ export class FerretsService implements FerretsApi {
           return typeof value === 'function' ? value.bind(target) : value;
         },
       });
-      const said: LaunchSaid = {};
       const result = await this.launchAttempt(record, prompt, conversation, tracked, bound, said);
       // A RESUME with no conversation to resume starts a new one just as a missing one does, and is said the same way: a
       // ferret that silently forgot everything (proof run 8, a converted Codex ferret) is the defect this names.
@@ -2128,7 +2131,7 @@ export class FerretsService implements FerretsApi {
       else {
         // Today's `deliverFirstTurn`: a start whose task never arrives is an agent sitting at an idle prompt, so a
         // first turn that does not land fails the start (the pane is stopped and the credential revoked below).
-        const first = await this.deliverFirstTurn(record.id, runner, turn);
+        const first = await this.deliverFirstTurn(record.id, runner, turn, said);
         if (first.ok) return first;
         failure = first.error;
       }
@@ -2157,7 +2160,7 @@ export class FerretsService implements FerretsApi {
         return failed('runner_unavailable', 'the failed launch still has a process that could not be stopped');
       }
     }
-    return await this.abandon(record, failure.code, failure.reason);
+    return await this.abandon(record, failure.code, failure.reason, said.explained);
   }
 
   /**
@@ -2451,6 +2454,7 @@ export class FerretsService implements FerretsApi {
     ferret: FerretId,
     runner: Runner,
     turn: Extract<PendingTurn, { kind: 'first' }>,
+    said: LaunchSaid,
   ): Promise<Result<FerretId, StartFailure>> {
     const session = this.ports.session;
     const admit = session?.admitFirstTurn;
@@ -2484,9 +2488,9 @@ export class FerretsService implements FerretsApi {
             ? "the ferret's first-turn record is held for a different task, so it was not started"
             : "the ferret's first turn began but never settled; it was not typed again, so the ferret was not started",
         );
-      return failed('failed', (await this.startExplained(ferret, runner, handle)) ?? untyped);
+      return failed('failed', (await this.startExplained(ferret, runner, handle, said)) ?? untyped);
     }
-    return await this.settleStartup(ferret, runner, handle);
+    return await this.settleStartup(ferret, runner, handle, said);
   }
 
   /**
@@ -2503,13 +2507,14 @@ export class FerretsService implements FerretsApi {
     ferret: FerretId,
     runner: Runner,
     handle: RunnerHandle,
+    said: LaunchSaid,
   ): Promise<Result<FerretId, StartFailure>> {
     if (runner.settled === undefined) return ok(ferret);
     try {
       await runner.settled(handle);
     } catch (error) {
       const ran = diedParked(error) ? FIRST_TURN_NEVER_RAN : FIRST_TURN_MAYBE_RAN;
-      const why = (await this.startExplained(ferret, runner, handle)) ?? STARTUP_EXITED;
+      const why = (await this.startExplained(ferret, runner, handle, said)) ?? STARTUP_EXITED;
       return failed('failed', `${why}${ran}`);
     }
     return ok(ferret);
@@ -2518,15 +2523,23 @@ export class FerretsService implements FerretsApi {
   /**
    * The harness's own sentence for a start that failed at its first turn (today's `RuntimeSupervisedLauncher`), read
    * off what the pane last showed; `undefined` when the harness has none, cannot be asked or does not recognise the
-   * screen. The screen goes to the harness only and is dropped here: only the harness's fixed sentence is kept.
+   * screen. The screen goes to the harness only and is dropped here: only the harness's fixed sentence is kept, and
+   * it is also put on `said` (when it fits the cause) so the stopped record can say it.
    */
-  private async startExplained(ferret: FerretId, runner: Runner, handle: RunnerHandle): Promise<string | undefined> {
+  private async startExplained(
+    ferret: FerretId,
+    runner: Runner,
+    handle: RunnerHandle,
+    said: LaunchSaid,
+  ): Promise<string | undefined> {
     const key = this.registry.get(ferret)?.harness;
     const harness = key === undefined ? undefined : this.ports.harness(key);
     if (harness?.startFailure === undefined || runner.lastScreen === undefined) return undefined;
     try {
       const sentence = harness.startFailure(await runner.lastScreen(handle));
-      return typeof sentence === 'string' && sentence !== '' ? sentence : undefined;
+      if (typeof sentence !== 'string' || sentence === '') return undefined;
+      if (sentence.length <= START_EXPLAINED_MAX) said.explained = sentence;
+      return sentence;
     } catch {
       return undefined;
     }
@@ -2743,8 +2756,12 @@ export class FerretsService implements FerretsApi {
     record: FerretRecord,
     code: StartFailure['code'],
     reason: string,
+    explained?: string,
   ): Promise<Result<FerretId, StartFailure>> {
-    await this.settle(record, 'stopped', 'stopped', { kind: 'start_failed' });
+    await this.settle(record, 'stopped', 'stopped', {
+      kind: 'start_failed',
+      ...(explained === undefined ? {} : { explained }),
+    });
     return failed(code, reason);
   }
 
