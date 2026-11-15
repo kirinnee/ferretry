@@ -140,7 +140,6 @@
     ],
     "accounts": [
       "[cross: vault] GAP(shells): the \"Don't ask again\" offer on the input card is not drawn: Vault's 5.0 input card draws no saved-login offers (no `request.saved` read, no \"Use saved\" tap), so there is no hand-tapped sign-in for the offer to follow; once Vault draws them it offers a slot after the settled card and Accounts fills it with its sign-in rule offer (SignInRuleSheetHost, origin `offer`). Dropping it removes no protection",
-      "[cross: board] GAP(board): a standing rule scoped to a project fills for no session, because Board answers a ferret's board resolved from its folder when it was not stamped and a rule may only read the STAMPED one (daemon/rules.ts stampedProject); the suggestion sheet offers the project scope anyway (read from the ferret's record), so a rule limited to it stays valid but is not used until the stamped project is readable",
       "[own] GAP(accounts): Accounts still carries stopgap copies of the Vault's InputSavedSchema (contract/routes/login-entries.ts) and codeTargetProblem (daemon/lib/vault-inputs.ts), pinned to the Vault's by tests/unit/daemon/sign-in-grants/vault-parity.test.ts; rows I34 I163 I164 I168 I170 are now owned and proved by Vault: delete the copies in favour of Vault contract exports once the Vault contract exports them"
     ],
     "agenda": [
