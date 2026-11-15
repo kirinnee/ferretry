@@ -699,6 +699,15 @@ fields exist. The sealed document is not the main vault: `fy secret use` cannot 
 `${secret:…}` cannot name one. Saved values are masked wherever the daemon scrubs text, as
 `[redacted:login:<ID>:password]`.
 
+**How the card reaches them in 5.0.** The Vault owns the card; Accounts owns the entries. So the Vault declares the
+`input.saved` hook (key `saved`, taken by Accounts alone) and Accounts provides it: the listing the offers are drawn
+from, the one value a field types (`fill`), "Save as", the card's order, and the facts the daemon saw after a submit.
+The Vault looks the provider up **on every call** and parses what it answers against its own strict schemas. **Fail
+closed:** with Accounts off or unreadable nothing is offered or saved, the lock reads the facts as unreadable (the long
+lock), a value typed by hand still goes in, and a client that sends a saved entry is told "Ferretry could not read the
+saved accounts, so nothing was typed". `fill` is the only member that answers a value, and it goes only to the target's
+write. No route, command or agent tool can reach the hook: only the Vault's input path asks it.
+
 ### How it signs in, and where
 
 Each entry says **how** it signs in (`method`) and **where** the sign-in happens (`domains`), apart from what it
