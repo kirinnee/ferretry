@@ -319,6 +319,18 @@ describe('login add --from-env', () => {
       should(JSON.stringify([made.out.lines, made.gateway.calls])).not.containEql('other-host');
     });
 
+    it('should keep the preset’s address when the shell’s base URL is not an address at all, and say so by name', async () => {
+      const made = await staging([zai], 'zai-glm', { ANTHROPIC_BASE_URL: 'other-host.example.test/v1' }, [
+        'ZAI_API_KEY',
+      ]);
+
+      should(stagedEnv(made)).eql({ ANTHROPIC_BASE_URL: BASE_URL, ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}' });
+      should(made.out.text('warn')).equal(
+        "ANTHROPIC_BASE_URL in this shell points elsewhere; kept the preset's. Pass --env to change it.",
+      );
+      should(JSON.stringify([made.out.lines, made.gateway.calls])).not.containEql('other-host');
+    });
+
     it('should say nothing, and never print the address, for a shell base URL the stored rule refuses', async () => {
       const made = await staging(
         [zai],
