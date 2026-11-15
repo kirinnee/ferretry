@@ -457,9 +457,19 @@ describe('R-0198 a host that reaches no folder by descriptor path', () => {
       expect(await observe(w.rootFor(), w.scoped, verb)).toMatchObject({ kind: 'answer', leak: false, inside: true });
   });
 
-  test('R-0198 a host with neither (the C library unloadable) still reads, stats and lists every verb', async () => {
+  test('R-0198 a host with neither (the C library unloadable) fails closed: every verb is refused no_descriptor_reach, never read by path', async () => {
     const w = await world(disks.noReach());
     for (const verb of VERBS)
-      expect(await observe(w.rootFor(), w.scoped, verb)).toMatchObject({ kind: 'answer', leak: false, inside: true });
+      expect(await observe(w.rootFor(), w.scoped, verb)).toEqual({ kind: 'refused', refusal: 'no_descriptor_reach' });
+  });
+
+  test('R-0198 a host with neither refuses even when a folder is swapped for a link to a same-shaped outside tree: nothing outside is answered', async () => {
+    for (const verb of VERBS) {
+      const w = await world(disks.noReach());
+      w.swap('c');
+      const seen = await observe(w.rootFor(), w.scoped, verb);
+      expect(seen.kind).toBe('refused');
+      expect(seen).not.toMatchObject({ leak: true });
+    }
   });
 });

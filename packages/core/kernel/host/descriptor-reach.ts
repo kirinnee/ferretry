@@ -3,10 +3,10 @@ import type { DoctorLine } from './host.ts';
 
 /**
  * The ONE doctor line for a host that cannot hold every folder it reads by descriptor (boot asks once, never per call):
- * the `imports` root (a project's skills folder and `.mcp.json`) reads by descriptor where it can, and where it cannot it
- * keeps the by-path read behind the link walk, because refusing would stop a read that works today. The line names what
- * the host lacks and the consequence; `undefined` when the host reaches everything (or is not the real disk, which does
- * not say).
+ * the `imports` root (a project's skills folder and `.mcp.json`) reads by descriptor where it can, and where it cannot
+ * at all it refuses (`no_descriptor_reach`, fail closed); a host with the C calls but not the bracket lists by path
+ * once the folder is proven. The line names what the host lacks and the consequence; `undefined` when the host
+ * reaches everything (or is not the real disk, which does not say).
  */
 export async function descriptorReachNote(fs: HostFs): Promise<DoctorLine | undefined> {
   const reach = await fs.descriptorReach?.().catch(() => undefined);
@@ -18,10 +18,9 @@ export async function descriptorReachNote(fs: HostFs): Promise<DoctorLine | unde
       state: 'warn',
       detail:
         "This host reaches an open folder by neither /proc/self/fd nor the C library's descriptor calls (they could not " +
-        "be loaded), so a project's skills folder and .mcp.json are read by path after the link check: a folder swapped " +
-        'for a link in the instant between the link check and the look can let one listing, stat or file-identity answer ' +
-        `show the outside folder's names, sizes and inodes (no file's text is read through it, ${safe}).`,
-      fix: 'Nothing is needed for ordinary use; run the daemon where the C library loads to read them by descriptor.',
+        "be loaded), so a project's skills folder and .mcp.json are refused (no_descriptor_reach) rather than read by a " +
+        'path a link could redirect.',
+      fix: 'Run the daemon where the C library loads, so they are read by descriptor.',
     };
   if (!reach.bracket)
     return {

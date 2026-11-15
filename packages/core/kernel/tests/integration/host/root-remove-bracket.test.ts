@@ -955,7 +955,7 @@ describe('BG-002 an owner root (project-files) removes a tree through the held f
 });
 
 // The same key cases against the real macOS library: libSystem.B.dylib, `__error`, and the real `fchdir` of the C
-// library. This box is Linux, so it never runs here (a declared GAP: verified only by this copy on a Mac).
+// library. A Linux box skips it; the `kernel-darwin` step of the smoke-darwin attempts runs it on macos-15.
 describe.skipIf(process.platform !== 'darwin')('BG-002 on macOS with the real libSystem calls and fchdir', () => {
   const real = (before: Before): Layer => {
     const syscalls = loadDirectorySyscalls();

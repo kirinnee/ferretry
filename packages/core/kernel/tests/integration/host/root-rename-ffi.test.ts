@@ -812,7 +812,7 @@ describe('BG-001 the host without descriptor calls, and the host with /proc, are
 });
 
 // The same cases against the real macOS library: libSystem.B.dylib, `__error`, and Apple's arm64 handling of the
-// variadic `mode`. This box is Linux, so it never runs here (a declared GAP: verified only by this copy on a Mac).
+// variadic `mode`. A Linux box skips it; the `kernel-darwin` step of the smoke-darwin attempts runs it on macos-15.
 describe.skipIf(process.platform !== 'darwin')('BG-001 BG-003 on macOS with the real libSystem calls', () => {
   test('BG-001 BG-003 a parent swap after the check moves and writes inside the held folders only', async () => {
     let swapped = false;
@@ -840,6 +840,24 @@ describe.skipIf(process.platform !== 'darwin')('BG-001 BG-003 on macOS with the 
     await f.fleet.writeText(at(f.fleet, 'homes/claude-a/dest/c.json'), 'NEW', { mode: 0o640 });
     expect(((await lstat(`${f.dir}/dest/c.json`)).mode & 0o7777).toString(8)).toBe('640');
   });
+
+  // Apple's arm64 ABI passes openat's variadic `mode` on the stack, where the binding puts it in a register, so the
+  // kernel may read ANY mode for a file this binding creates. The guard is the owner-only umask around the create plus the
+  // fchmod before any content: whatever the library read, no other user's bit exists while the name does, and the file ends
+  // with exactly the asked bits. Swept over modes that would be harmless, narrow and wide if the library read them as given.
+  for (const asked of [0o000, 0o600, 0o640, 0o777]) {
+    test(`BG-003 on the real library a create asked for mode ${asked.toString(8)} is owner-only at the create and exact after the fchmod`, async () => {
+      const seen: Seen = { umasks: [], modes: [] };
+      const f = await fresh(() => recording(loadDescriptorCalls(), {}, seen));
+      await withUmask(0o000, () =>
+        f.fleet.writeText(at(f.fleet, 'homes/claude-a/variadic.json'), 'V', { mode: asked }),
+      );
+      expect(seen.umasks).toEqual([0o077]);
+      expect(seen.modes.length).toBe(1);
+      for (const mode of seen.modes) expect(mode & 0o077).toBe(0);
+      expect(((await lstat(`${f.dir}/variadic.json`)).mode & 0o7777).toString(8)).toBe(asked.toString(8));
+    });
+  }
 
   test('BG-001 an existing destination and a link at the leaf are refused on the real library', async () => {
     const f = await fresh(() => loadDescriptorCalls());
