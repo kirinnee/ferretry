@@ -357,7 +357,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       },
       write: async (ferret, environment) => await kernel.state.write(FerretLaunchEnvironmentFiles, environment, ferret),
     },
-    async ferret => switchesOfRecord(registry.get(ferret)),
+    async ferret => switchesOfRecord(registry.get(ferret), registry.detailsOf(ferret)),
   );
 
   // The state document's LIFECYCLE status follows the registry (U4): made `starting`, it moves to `running` once the

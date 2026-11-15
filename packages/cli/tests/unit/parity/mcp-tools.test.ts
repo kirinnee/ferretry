@@ -16,13 +16,6 @@ const everyManifest = [registry.kernel, ...registry.plugins];
 const declared = everyManifest.flatMap(entry => entry.manifest.actions?.agentTools ?? []);
 
 /**
- * Tools whose owner has not built them (M2 ruling, lizzette 2026-11-11: they move after merge). Their owner no longer declares
- * them in its manifest (they are declared again once built), and the CLI lists none of them: an agent is not told to call a
- * tool that answers `is not built yet`.
- */
-const UNBUILT = ['account_propose', 'task_plan'];
-
-/**
  * Tools whose manifest declaration carries no zod `input` (their owner parses the call itself), so their row's property
  * names cannot be compared here. GAP: a manifest `input` on each would make this test cover them; until then the list is
  * pinned, so a tool that gains an `input` is held to its row, and a new tool without one is noticed.
@@ -30,6 +23,8 @@ const UNBUILT = ['account_propose', 'task_plan'];
 const NO_MANIFEST_INPUT = [
   'input_wait',
   'account_hint',
+  'account_propose',
+  'task_plan',
   'secure_copy',
   'secure_list',
   'secure_discard',
@@ -73,30 +68,25 @@ const namesOf = (schema: z.ZodType): string[] =>
 describe('the MCP tool rows against the manifests’ agent tools', async () => {
   const rows = await listedRows();
 
-  it('should list exactly the tools the manifests declare, less the ones whose owner has not built them', () => {
-    should(rows.map(row => row.name).sort()).eql(
-      declared
-        .map(tool => tool.name)
-        .filter(name => !UNBUILT.includes(name))
-        .sort(),
-    );
+  it('should list exactly the tools the manifests declare', () => {
+    should(rows.map(row => row.name).sort()).eql(declared.map(tool => tool.name).sort());
   });
 
-  it('should neither declare nor list a tool its owner has not built (the M2 shape: out of the manifests, out of the list)', () => {
+  it('should declare and list the two asking tools Accounts answers (account_propose, task_plan)', () => {
     const names = declared.map(tool => tool.name);
     const listed = rows.map(row => row.name);
-    for (const name of UNBUILT) {
-      should(names).not.containEql(name);
-      should(listed).not.containEql(name);
+    for (const name of ['account_propose', 'task_plan']) {
+      should(names).containEql(name);
+      should(listed).containEql(name);
     }
   });
 
   it('should pin the tools that declare no zod input, so the gap is the whole of it', () => {
     const without = declared.filter(tool => tool.input === undefined).map(tool => tool.name);
-    should(without.filter(name => !UNBUILT.includes(name)).sort()).eql([...NO_MANIFEST_INPUT].sort());
+    should(without.sort()).eql([...NO_MANIFEST_INPUT].sort());
   });
 
-  for (const tool of declared.filter(candidate => candidate.input !== undefined && !UNBUILT.includes(candidate.name)))
+  for (const tool of declared.filter(candidate => candidate.input !== undefined))
     it(`should give ${tool.name} the input names its zod input has`, () => {
       const row = rows.find(candidate => candidate.name === tool.name);
       should(Object.keys(row?.inputSchema.properties ?? {}).sort()).eql(namesOf(tool.input as z.ZodType));

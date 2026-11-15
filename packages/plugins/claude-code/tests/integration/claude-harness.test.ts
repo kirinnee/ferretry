@@ -1699,6 +1699,43 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
     expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
   });
 
+  describe('the question tool, per ferret (v4: only an interactive Claude keeps AskUserQuestion)', () => {
+    const NO_QUESTIONS = '--disallowed-tools=AskUserQuestion';
+    const launched = async (call: 'start' | 'resume', mode: 'interactive' | 'auto' | undefined) => {
+      const { harness } = build();
+      const started: { command?: readonly string[] } = {};
+      const more = mode === undefined ? {} : { mode };
+      const result =
+        call === 'start'
+          ? await harness.start(spec(more), runner(started), {} as never)
+          : await harness.resume(spec(more), runner(started), {} as never, 'a-conversation-1');
+      expect(result.ok).toBe(true);
+      return started.command ?? [];
+    };
+
+    for (const call of ['start', 'resume'] as const) {
+      test(`a ${call} of an interactive ferret keeps the question tool`, async () => {
+        expect(await launched(call, 'interactive')).not.toContain(NO_QUESTIONS);
+      });
+
+      test(`a ${call} of an auto ferret, or one with no mode, withholds it exactly once`, async () => {
+        for (const mode of ['auto', undefined] as const)
+          expect((await launched(call, mode)).filter(argument => argument === NO_QUESTIONS)).toEqual([NO_QUESTIONS]);
+      });
+    }
+
+    test('the mode never makes a launched ferret read as outdated: the recorded launch is current for either', async () => {
+      for (const mode of ['interactive', 'auto'] as const) {
+        const state = new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]);
+        const { harness } = build({ state });
+        await harness.start(spec({ mode }), runner({}), {} as never);
+        expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
+        await harness.resume(spec({ mode }), runner({}), {} as never, 'a-conversation-1');
+        expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
+      }
+    });
+  });
+
   test('F-0422 each change since the launch names its section, and only its section', async () => {
     const config = configured();
     const { harness } = await launchOf(config);

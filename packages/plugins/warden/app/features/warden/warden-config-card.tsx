@@ -29,13 +29,18 @@ import {
   wardenFormErrors,
 } from './warden-settings-model.ts';
 
-/** What the Speed-ups read says about the Jev key. A read that failed is `unknown`, never "missing". */
-export const jevKeyStatus = (view: SpeedupsView | 'off' | null): JevKeyStatus => {
+/**
+ * What the Speed-ups read says about the Jev key, and whether `warden.yaml` names it (`named`, from the settings
+ * view). A read that failed is `unknown`, never "missing". A key that is stored but not named is `not_named`: the
+ * kernel spends it only once `warden.yaml` names it. A daemon that does not say (`undefined`) is taken as it was.
+ */
+export const jevKeyStatus = (view: SpeedupsView | 'off' | null, named?: WardenConfigView['jevKey']): JevKeyStatus => {
   if (view === 'off') return { state: 'off' };
   const jev = view?.providers.find((provider: { readonly provider: string }) => provider.provider === 'jev');
   if (view === null || jev === undefined) return { state: 'unknown' };
   const keyUrl = { keyUrl: jev.keyUrl };
   if (view.vault === 'damaged') return { state: 'unknown', ...keyUrl };
+  if (jev.set && named === 'not_named') return { state: 'not_named', ...keyUrl };
   return { state: jev.set ? 'set' : 'missing', ...keyUrl };
 };
 
@@ -50,6 +55,9 @@ export interface WardenConfigCardProps {
   readonly speedupsHref?: string;
   readonly browserHref?: string;
   readonly onNavigate?: (to: string) => void;
+  /** "Use stored key": names the Jev key in warden.yaml. Offered only when the key is stored but not named. */
+  readonly onUseStoredKey?: () => void;
+  readonly namingKey?: boolean;
   readonly saving?: boolean;
   readonly error?: string | null;
   readonly saved?: boolean;
@@ -66,6 +74,8 @@ export function WardenConfigCard({
   speedupsHref,
   browserHref,
   onNavigate,
+  onUseStoredKey,
+  namingKey = false,
   saving = false,
   error = null,
   saved = false,
@@ -88,6 +98,8 @@ export function WardenConfigCard({
         {...(speedupsHref === undefined ? {} : { speedupsHref })}
         {...(browserHref === undefined ? {} : { browserHref })}
         {...(onNavigate === undefined ? {} : { onNavigate })}
+        {...(onUseStoredKey === undefined ? {} : { onUseStoredKey })}
+        namingKey={namingKey}
       />
       <div className="flex flex-wrap items-center gap-3">
         <button
@@ -234,7 +246,7 @@ export function WardenConfigSurface({
           client,
           view,
           draft: view.config,
-          jevKey: jevKeyStatus(speedups),
+          jevKey: jevKeyStatus(speedups, view.jevKey),
           // Every login this machine has, so a Warden with none chosen yet can be given one; without the list,
           // the ones in its failover order.
           loginOptions: loginOptionsOf(view, status),
@@ -273,7 +285,7 @@ export function WardenConfigSurface({
             ...current,
             view,
             draft: untouched ? view.config : current.draft,
-            jevKey: jevKeyStatus(speedups),
+            jevKey: jevKeyStatus(speedups, view.jevKey),
             loginOptions: loginOptionsOf(view, null),
             runtimes: runtimes ?? current.runtimes,
           };
@@ -307,6 +319,32 @@ export function WardenConfigSurface({
       if (showing.current === state.daemonId) setError(reasonOf(cause));
     } finally {
       setSaving(false);
+    }
+  }, []);
+
+  // "Use stored key": names the Jev key in warden.yaml. It sends nothing and reads no value; the daemon either puts the
+  // line into effect (the owner) or holds it for the owner and says so in `held`, which is shown, never hidden.
+  const [naming, setNaming] = useState(false);
+  const nameStoredKey = useCallback(async (state: Loaded) => {
+    setNaming(true);
+    setError(null);
+    try {
+      const answer = await state.client.nameJevKey();
+      if (showing.current !== state.daemonId) return;
+      const warnings = [...answer.warnings, ...(answer.held ?? []).map(held => `Waiting for your approval: ${held}`)];
+      setLoaded(current => {
+        if (current === null || current.daemonId !== state.daemonId) return current;
+        const named = answer.jevKey === 'named' && current.jevKey.state === 'not_named';
+        return {
+          ...current,
+          view: { ...current.view, warnings },
+          jevKey: named ? { ...current.jevKey, state: 'set' } : current.jevKey,
+        };
+      });
+    } catch (cause) {
+      if (showing.current === state.daemonId) setError(reasonOf(cause));
+    } finally {
+      setNaming(false);
     }
   }, []);
 
@@ -349,6 +387,8 @@ export function WardenConfigSurface({
       speedupsHref={daemonSettingsHref(connection.daemonId, 'voice', 'speedups')}
       browserHref={daemonSettingsHref(connection.daemonId, 'browsers', 'browser')}
       {...(onNavigate === undefined ? {} : { onNavigate })}
+      onUseStoredKey={() => void nameStoredKey(loaded)}
+      namingKey={naming}
       saving={saving}
       error={error}
       saved={saved}

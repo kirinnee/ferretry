@@ -93,7 +93,7 @@ describe('McpServer — the tools', () => {
     ])
       should(names).containEql(name);
     for (const name of ['secure_copy', 'secure_list', 'secure_discard', 'secure_paste']) should(names).containEql(name);
-    for (const name of ['account_propose', 'task_plan']) should(names).not.containEql(name);
+    for (const name of ['account_propose', 'task_plan']) should(names).containEql(name);
     should(new Set(names).size).equal(names.length);
     should(answer.result.tools).have.length(MCP_TOOLS.length);
     for (const tool of answer.result.tools) should(tool.inputSchema).have.property('type', 'object');
@@ -204,12 +204,9 @@ describe('McpServer — the tools', () => {
     });
   });
 
-  it('should refuse a tool it does not list, including one that is not built, as invalid params', async () => {
+  it('should refuse a tool it does not list as invalid params', async () => {
     const { request, calls } = harness();
     should(await request('tools/call', toolCall('nonsense'))).match({ error: { code: -32_602 } });
-    should(await request('tools/call', toolCall('task_plan', { lines: [] }))).match({
-      error: { code: -32_602, message: 'there is no tool task_plan' },
-    });
     should(await request('tools/call', { arguments: {} })).match({ error: { code: -32_602 } });
     should(calls).have.length(0);
   });

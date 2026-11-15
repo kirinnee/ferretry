@@ -34,6 +34,7 @@ import { LoginEntryError } from './lib/accounts.ts';
 import { holdsOwner } from './lib/owner-hold.ts';
 import type { AuditSink } from './lib/local-ports.ts';
 import { PhoneApprovalService } from './lib/phone-approval/service.ts';
+import { proposalTools } from './lib/proposal-tools.ts';
 import { LoginRecipeService } from './lib/secrets/login-recipes.ts';
 import {
   PageCopyRecords,
@@ -236,6 +237,7 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     copies,
     secureCopyHook,
     secureCopyTools: tools,
+    proposalTools: proposalTools({ recipes, suggestions, plans, redact }),
     sessionEnded: ferret => {
       copies.drop(ferret);
       pageRecords.drop(ferret);
