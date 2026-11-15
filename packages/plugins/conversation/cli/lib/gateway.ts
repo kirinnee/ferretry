@@ -3,6 +3,7 @@ import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
   type AnswerRequest,
   AskedQuestionViewSchema,
+  AttachmentViewSchema,
   type Question,
   type CompactAtPatch,
   CompactAtPatchResultSchema,
@@ -17,10 +18,11 @@ import {
 import { CommandError } from './errors.ts';
 import type { AnswerGateway } from './answer/controller.ts';
 import type { CompactAtGateway } from './compact-at/controller.ts';
-import type { SendGateway, UploadedAttachment } from './send/ports.ts';
+import type { AttachmentSource, SendGateway, UploadedAttachment } from './send/ports.ts';
 
 const ROUTES = {
   send: 'POST /v1/ferrets/:ferretId/send',
+  upload: 'POST /v1/ferrets/:ferretId/attachments',
   sendStatus: 'GET /v1/ferrets/:ferretId/sends/:sendId',
   interrupt: 'POST /v1/ferrets/:ferretId/interrupt',
   question: 'GET /v1/ferrets/:ferretId/question',
@@ -35,9 +37,8 @@ const at = (ferret: string, extra: Readonly<Record<string, string>> = {}) => ({
   params: { ferretId: ferret, ...extra },
 });
 
-/** Why a verb that needs a local file cannot have one: the shell hands a verb no file access. */
-export const NO_FILE_ACCESS =
-  'this verb cannot read local files yet: the shell gives a plugin no file access. Put the words in the message itself';
+/** Why a gateway built without a file source cannot upload (a host that offers no reader). */
+export const NO_FILE_ACCESS = 'this terminal cannot read a file; put the words in the message itself';
 
 /** The one header a half may set (PluginCallHeaders); the shell forwards it. */
 const requestIdHeader = (id: string) => ({ 'x-fy-request-id': id });
@@ -53,6 +54,7 @@ export class ClientConversationGateway implements SendGateway, AnswerGateway, Co
   constructor(
     private readonly client: Pick<PluginClient, 'call'>,
     private readonly mintRequestId: () => string = randomUUID,
+    private readonly attachments?: AttachmentSource,
   ) {}
 
   async send(ferret: string, request: SendRequest): Promise<SendResult> {
@@ -81,8 +83,10 @@ export class ClientConversationGateway implements SendGateway, AnswerGateway, Co
     }
   }
 
-  async upload(_ferret: string, _file: string): Promise<UploadedAttachment> {
-    throw new CommandError(NO_FILE_ACCESS);
+  async upload(ferret: string, file: string): Promise<UploadedAttachment> {
+    if (this.attachments === undefined) throw new CommandError(NO_FILE_ACCESS);
+    const staged = await this.attachments.readAttachment(file);
+    return AttachmentViewSchema.parse(await this.client.call(ROUTES.upload, { ...at(ferret), body: staged }));
   }
 
   async parkUntilReply(
