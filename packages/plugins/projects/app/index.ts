@@ -5,6 +5,10 @@ import manifest from '../manifest.ts';
 import { projectsCommands } from './command-bar.ts';
 import type { ProjectsClient } from './lib/client.ts';
 import { lazyComponent } from './lazy.ts';
+import { workProjectNamesList } from './lib/work-project-names.ts';
+
+/** Conversation's hook (`CONVERSATION_WORK_PROJECT_NAMES_HOOK`), given by name: the name and the shape are the whole agreement. */
+const WORK_PROJECT_NAMES_HOOK = 'conversation.work-project-names';
 
 /**
  * A view module (React), loaded on first use. The specifier is a Vite dynamic-import variable, which is also why the
@@ -30,5 +34,9 @@ export default provideToShell(
       },
     }),
   }),
-  { commands: projectsCommands },
+  {
+    commands: projectsCommands,
+    // Conversation's work search names a card's project: the one list of project names, read once per daemon.
+    hooks: { [WORK_PROJECT_NAMES_HOOK]: ({ client }) => workProjectNamesList(client) },
+  },
 );
