@@ -1387,21 +1387,27 @@ export function buildConversationA(deps: {
   // Conversation judges the value, words what it means for a running ferret and asks Ferrets to write it. The model's
   // window and the login's default are not reachable from here: a value the model cannot honour is dropped at launch.
   const compactAtSetting = new SessionCompactAtService({
-    facts: async ferret => {
+    // The caller is the ferret behind the call, when it is one: Ferrets applies its `mayTouch` rule to the read and the
+    // write, and the read comes first, so a refused caller never reaches the store.
+    facts: async (ferret, caller) => {
       const id = tryParseSessionId(ferret);
       const summary = id === undefined ? undefined : await ferrets.get(id);
       if (summary === undefined) return undefined;
       return {
-        own: await ferrets.compactAt?.(summary.id),
+        own: await ferrets.compactAt?.(summary.id, caller === undefined ? undefined : parseSessionId(caller)),
         accountDefault: undefined,
         window: undefined,
         running: summary.state !== 'stopped',
       };
     },
-    write: async (ferret, value) => {
+    write: async (ferret, value, _at, caller) => {
       if (ferrets.setCompactAt === undefined)
         throw new ApiError(503, 'Ferrets cannot record the compact-at setting right now.', 'plugin_unavailable');
-      await ferrets.setCompactAt(parseSessionId(ferret), value);
+      await ferrets.setCompactAt(
+        parseSessionId(ferret),
+        value,
+        caller === undefined ? undefined : parseSessionId(caller),
+      );
     },
     now: () => kernel.clock.now(),
   });
@@ -1452,8 +1458,8 @@ export function buildConversationA(deps: {
     ),
     ...sessionAnswerRoutes({ question: askedQuestion, answer: answerQuestion }),
     ...sessionCompactAtRoutes({
-      get: async ferret => await compactAtSetting.get(ferret),
-      set: async (ferret, wanted) => await compactAtSetting.set(ferret, wanted),
+      get: async (ferret, caller) => await compactAtSetting.get(ferret, caller),
+      set: async (ferret, wanted, caller) => await compactAtSetting.set(ferret, wanted, caller),
     }),
     ...sessionHypermediaRoutes({
       read: async ferret => await hypermedia.read(ferret),

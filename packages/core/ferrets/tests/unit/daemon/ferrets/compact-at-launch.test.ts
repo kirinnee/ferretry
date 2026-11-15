@@ -41,3 +41,30 @@ test('a value set through the port is the compactAt of the ferret’s next launc
 
   await expect(ferrets.setCompactAt?.(ferretId('nobody'), 300_000)).rejects.toMatchObject({ status: 404 });
 });
+
+test('a clear after an explicit start value puts the ferret back on its login: neither the read nor the next launch brings the start value back', async () => {
+  const harness = new FakeHarness();
+  const h = await host([], { harness, runner: new FakeRunner() });
+  const started = await h.request('POST', '/v1/ferrets', {
+    headers: { 'x-fy-request-id': 'two' },
+    body: { folder: '/work/two', compactAt: 200_000 },
+  });
+  expect(started.status).toBeLessThan(300);
+  const ferret = harness.launched[0]!.ferret;
+  const ferrets = h.provided(FerretsPort);
+  expect(harness.launched[0]?.compactAt).toBe(200_000);
+
+  await ferrets.setCompactAt?.(ferret, 300_000);
+  expect(await ferrets.compactAt?.(ferret)).toBe(300_000);
+
+  await ferrets.setCompactAt?.(ferret, undefined);
+  expect(await ferrets.compactAt?.(ferret)).toBeUndefined();
+  await ferrets.stop(ferret, 'now');
+  expect((await ferrets.resume(ferret, 'again', { origin: PERSON_ORIGIN })).ok).toBe(true);
+  expect(harness.launched.at(-1)?.compactAt).toBeUndefined();
+  expect(await ferrets.compactAt?.(ferret)).toBeUndefined();
+
+  // A clear on a ferret that never had a start value leaves its other start options alone and is repeatable.
+  await ferrets.setCompactAt?.(ferret, undefined);
+  expect(await ferrets.compactAt?.(ferret)).toBeUndefined();
+});

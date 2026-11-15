@@ -1918,7 +1918,8 @@ export class FerretsService implements FerretsApi {
   /**
    * Records a ferret's own compaction trigger (`FerretsApi.setCompactAt`). Fails closed: a value the schema cannot parse
    * (below the floor, not `auto`, not an integer) is refused before anything is written, an unknown ferret is 404, a
-   * caller that may not touch it is 403, and a Ferrets with no session files cannot record one (503).
+   * caller that may not touch it is 403, and a Ferrets with no session files cannot record one (503). A clear (`undefined`)
+   * also drops the start's own value, so the login's default applies again.
    */
   async setCompactAt(ferret: FerretId, value: unknown, caller?: FerretId): Promise<void> {
     await this.ports.ready?.();
@@ -1931,6 +1932,16 @@ export class FerretsService implements FerretsApi {
     if (write === undefined)
       throw new ApiError(503, "this ferret's session files are unavailable", 'plugin_unavailable');
     await write(ferret, parsed?.data);
+    // A clear is the person's deliberate "follow the login again": the start's own value (`options.compactAt`) is what
+    // `compactAt` and every launch fall back to when the session config says none, so it goes too, or the start value
+    // would come back after a clear. Every other option and detail keeps its value.
+    if (parsed === undefined) {
+      const before = this.registry.detailsOf(ferret);
+      if (before?.options?.compactAt !== undefined) {
+        const { compactAt: _start, ...options } = before.options;
+        await this.saveDetails(ferret, { ...before, options });
+      }
+    }
   }
 
   /**

@@ -4,6 +4,8 @@ import {
   type SessionCompactAtSubsystem,
   sessionCompactAtRoutes,
 } from '../../../../daemon/turns/lib/mounts/session-compact-at.ts';
+import { ferretStanding } from '@ferretry/core-gate/contract/testing';
+import { ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { answerOf, refusalOf } from '../../../support/mount-call.ts';
 
 const PATH = '/v1/ferrets/:ferretId/compact-at';
@@ -33,7 +35,7 @@ describe('GET compact-at', () => {
       status: 200,
       json: { effective: 'auto', restartRequired: false, note: 'default' },
     });
-    expect(calls).toEqual([['get', 'f1']]);
+    expect(calls).toEqual([['get', 'f1', undefined]]);
   });
 
   it('refuses a path that is not a usable ferret id', async () => {
@@ -48,7 +50,7 @@ describe('PATCH compact-at', () => {
     const { routes, calls } = build();
     const answer = await answerOf(routes, 'PATCH', PATH, { params: ID, body: { compactAt: 200_000 } });
     expect(answer).toEqual({ status: 200, json: { effective: 200_000, restartRequired: true, note: 'on restart' } });
-    expect(calls).toEqual([['set', 'f1', 200_000]]);
+    expect(calls).toEqual([['set', 'f1', 200_000, undefined]]);
   });
 
   it('answers 404 for a ferret it does not know, 400 for a value it refuses, and lets any other failure through', async () => {
@@ -64,5 +66,18 @@ describe('PATCH compact-at', () => {
     expect([invalid.status, invalid.code]).toEqual([400, 'invalid_compact_at']);
     const broken = await refusalOf(build(new TypeError('boom')).routes, 'GET', PATH, { params: ID });
     expect(broken.message).toBe('boom');
+  });
+});
+
+describe('the caller a route hands on', () => {
+  it('is the ferret behind the call on GET and PATCH, and absent for a person', async () => {
+    const { routes, calls } = build();
+    const standing = ferretStanding(ferretId('f9'));
+    await answerOf(routes, 'GET', PATH, { params: ID, standing });
+    await answerOf(routes, 'PATCH', PATH, { params: ID, standing, body: { compactAt: 200_000 } });
+    expect(calls).toEqual([
+      ['get', 'f1', 'f9'],
+      ['set', 'f1', 200_000, 'f9'],
+    ]);
   });
 });

@@ -3,8 +3,9 @@ import { join } from 'node:path';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type { FerretId, FerretTurns } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
-import type { StatePort } from '@ferretry/kernel/contract';
-import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
+import { ferretStanding } from '@ferretry/core-gate/contract/testing';
+import type { CallStanding, RouteHandler, StatePort } from '@ferretry/kernel/contract';
+import { ferret as ferretCaller, fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import type { Instant } from '@ferretry/std';
 import { CONVERSATION_STATE, ConversationPort } from '../../../contract/index.ts';
 import daemon from '../../../daemon/index.ts';
@@ -65,6 +66,11 @@ async function world(setup: (ferrets: TurnsFerrets) => void = () => undefined) {
   const inner = memoryStatePort(CONVERSATION_STATE);
   const { port: state, broken } = breakable(inner);
   const built: { half?: ReturnType<NonNullable<typeof daemon.build>> } = {};
+  /**
+   * The standing Gate stamps on a compact-at call. The test host's stand-in admission stamps no credential or actor, so the
+   * two routes are wrapped to carry Gate's own (`ferretStanding`) and the mount reads who is calling as it does in production.
+   */
+  const caller: { standing?: CallStanding } = {};
   const implementation = {
     ...daemon,
     build: (ctx: Parameters<NonNullable<typeof daemon.build>>[0]) => {
@@ -72,7 +78,17 @@ async function world(setup: (ferrets: TurnsFerrets) => void = () => undefined) {
       if (build === undefined) throw new Error('the conversation daemon half has no build');
       const half = build({ ...ctx, kernel: { ...ctx.kernel, state } });
       built.half = half;
-      return half;
+      const routes = half.routes as Readonly<Record<string, RouteHandler | undefined>>;
+      const stamped = Object.fromEntries(
+        ['GET', 'PATCH'].map(method => {
+          const key = `${method} /v1/ferrets/:ferretId/compact-at`;
+          const handler = routes[key];
+          if (handler === undefined) throw new Error(`the conversation daemon half serves no ${key} route`);
+          const wrapped: RouteHandler = async call => await handler({ ...call, ...caller.standing } as typeof call);
+          return [key, wrapped];
+        }),
+      );
+      return { ...half, routes: { ...routes, ...stamped } } as typeof half;
     },
   } as typeof daemon;
   const host = await testHost({
@@ -100,7 +116,7 @@ async function world(setup: (ferrets: TurnsFerrets) => void = () => undefined) {
         revision: 1,
       },
     });
-  return { host, ferrets, api, warden, state: inner, broken, built, waiting };
+  return { host, ferrets, api, warden, state: inner, broken, built, waiting, caller };
 }
 
 const route = (
@@ -274,6 +290,60 @@ describe('c58-16 the compact-at setting is read and written through Ferrets', ()
     });
     await expect(unreadable.api().compactAt(F1)).rejects.toThrow('FIXTURE_SECRET');
     await unreadable.host.stop();
+  });
+
+  test('a ferret outside the target’s tree is refused on GET and PATCH and the setting is never read or written; the ferret itself, its lead and a person keep their standing', async () => {
+    const reads: (FerretId | undefined)[] = [];
+    const writes: (FerretId | undefined)[] = [];
+    const { host, ferrets, caller } = await world(f => {
+      f.add({ id: ferretId('h1'), parent: F1, state: 'idle' });
+      f.add({ id: ferretId('s9'), state: 'idle' });
+      const read = f.compactAt.bind(f);
+      const write = f.setCompactAt.bind(f);
+      f.compactAt = async (ferret, by) => {
+        reads.push(by);
+        return await read(ferret, by);
+      };
+      f.setCompactAt = async (ferret, value, by) => {
+        writes.push(by);
+        return await write(ferret, value, by);
+      };
+    });
+    /** A call as that ferret: Gate's standing for the mount, the test host's admission for the route's minimum. */
+    const as = (id: string) => {
+      caller.standing = ferretStanding(ferretId(id));
+      return ferretCaller(id);
+    };
+    const asOwner = () => {
+      caller.standing = undefined;
+      return owner();
+    };
+
+    // A stranger (no lineage to f1) is refused both ways, and the value it tried to set is not recorded.
+    const strangerPatch = await host.request('PATCH', PATH, { as: as('s9'), body: { compactAt: 111_000 } });
+    const strangerGet = await host.request('GET', PATH, { as: as('s9') });
+    expect([strangerPatch.status, strangerGet.status]).toEqual([403, 403]);
+    expect(writes).toEqual([]);
+    expect(await ferrets.compactAt(F1)).toBeUndefined();
+    // The helper of f1 reaches only itself and ITS helpers, never its lead.
+    expect((await host.request('PATCH', PATH, { as: as('h1'), body: { compactAt: 111_000 } })).status).toBe(403);
+    expect(writes).toEqual([]);
+
+    // The ferret itself, its lead (of the helper), and an owner call succeed; the owner's reaches Ferrets with no caller.
+    const self = await host.request('PATCH', PATH, { as: as('f1'), body: { compactAt: 200_000 } });
+    expect(self.status).toBe(200);
+    expect((await host.request('GET', PATH, { as: as('f1') })).json()).toMatchObject({ own: 200_000 });
+    const lead = await host.request('PATCH', '/v1/ferrets/h1/compact-at', {
+      as: as('f1'),
+      body: { compactAt: 300_000 },
+    });
+    expect(lead.status).toBe(200);
+    const person = await host.request('PATCH', PATH, { as: asOwner(), body: { compactAt: 400_000 } });
+    expect(person.status).toBe(200);
+    expect((await host.request('GET', PATH, { as: asOwner() })).json()).toMatchObject({ own: 400_000 });
+    expect(writes).toEqual([F1, F1, undefined]);
+    expect(reads.at(-1)).toBeUndefined();
+    await host.stop();
   });
 
   test('an answer is refused with the form-seam sentence, not the terminal one, when Ferrets offers no form acts', async () => {

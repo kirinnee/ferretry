@@ -9,6 +9,7 @@ import { ApiError } from '../../../seams/api.ts';
 import { type ApiResponse, decodeParameter } from '../../../seams/api.ts';
 import { jsonResponse } from '../../../seams/api.ts';
 import type { MountRoute, RouteContext } from '../../../seams/api.ts';
+import { ferretOf } from '@ferretry/core-gate/contract';
 import { type CompactAtOutcome, SessionCompactAtError } from '../../compact-at/lib/service.ts';
 
 /**
@@ -20,8 +21,9 @@ import { type CompactAtOutcome, SessionCompactAtError } from '../../compact-at/l
  * configuration, grants nothing, and changes only what its harness is launched with.
  */
 export interface SessionCompactAtSubsystem {
-  get(sessionId: string): Promise<SessionCompactAt>;
-  set(sessionId: string, wanted: CompactAt | 'inherit'): Promise<CompactAtOutcome>;
+  /** `caller` is the ferret behind the call (Gate's standing), absent for an owner or a device: Ferrets' `mayTouch` rule. */
+  get(sessionId: string, caller?: string): Promise<SessionCompactAt>;
+  set(sessionId: string, wanted: CompactAt | 'inherit', caller?: string): Promise<CompactAtOutcome>;
 }
 
 function refuse(error: unknown): never {
@@ -44,7 +46,7 @@ function sessionOf(context: RouteContext): string {
 async function patch(subsystem: SessionCompactAtSubsystem, context: RouteContext): Promise<ApiResponse> {
   const sessionId = sessionOf(context);
   const request = await parseBody(context.request, SessionCompactAtPatchSchema);
-  const outcome = await subsystem.set(sessionId, request.compactAt).catch(refuse);
+  const outcome = await subsystem.set(sessionId, request.compactAt, ferretOf(context)).catch(refuse);
   return jsonResponse({ ...outcome } satisfies SessionCompactAtPatchResult);
 }
 
@@ -54,7 +56,7 @@ export function sessionCompactAtRoutes(subsystem: SessionCompactAtSubsystem): re
     {
       method: 'GET',
       path: '/v1/ferrets/:ferretId/compact-at',
-      handle: async context => jsonResponse(await subsystem.get(sessionOf(context)).catch(refuse)),
+      handle: async context => jsonResponse(await subsystem.get(sessionOf(context), ferretOf(context)).catch(refuse)),
     },
     {
       method: 'PATCH',
