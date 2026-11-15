@@ -314,6 +314,8 @@ export interface ConversationAHalf {
   readonly turns: { look(ferret: string, phase: TurnPhase): void; forget(ferret: string): void };
   /** The question watch: one look at a ferret (a state change), and what is forgotten about a ferret that stopped. */
   readonly questions: { look(ferret: string): void; forget(ferret: string): void };
+  /** Ferrets said a ferret changed state: its pane is read for a prompt on the next 2 s sweep, and no other ferret's is. */
+  promptChanged(ferret: string): void;
   stop(): void;
 }
 
@@ -1372,7 +1374,7 @@ export function buildConversationA(deps: {
             questionAsksReconciled = true;
           }, askFailure('reconcile'));
         } else await questionAsks.settle();
-        // A pane parked on a permission prompt or a dialog moves no ferret state, so it is looked at on this tick.
+        // A pane is read only for a ferret Ferrets reported changed, one owed a card, or once after boot: never every tick.
         await ferrets.list().then(
           async roster => {
             promptRosterFailing = false;
@@ -1701,6 +1703,7 @@ export function buildConversationA(deps: {
       // Only the question that was stored when the withdrawal began: a newer one is its own.
       if (stored.ok && stored.value !== undefined) await closeQuestionAsk(ferret, stored.value.toolUseId, 'withdrawn');
     },
+    promptChanged: ferret => promptAsks.changed(ferret),
     questions: {
       look: ferret => void questionWatch.look(ferret).catch(() => undefined),
       forget: ferret => questionWatch.forget(ferret),

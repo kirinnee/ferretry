@@ -1,6 +1,13 @@
 import { type AskRef, type AsksApi, AskIdSchema, EntryIdSchema, type SourceKey } from '@ferretry/core-asks/contract';
 import type { PromptWaitRecord } from '../../../contract/wire-prompt.ts';
-import { promptEntry, promptSubject, readPrompt, promptKey, type PromptRead } from '../lib/prompt-wait.ts';
+import {
+  promptEntry,
+  promptKey,
+  promptRefOfKey,
+  promptSubject,
+  readPrompt,
+  type PromptRead,
+} from '../lib/prompt-wait.ts';
 
 /** The ask source Conversation registers (`ask.sources:prompt`). */
 const PROMPT_SOURCE = 'prompt' as SourceKey;
@@ -8,8 +15,11 @@ const PROMPT_SOURCE = 'prompt' as SourceKey;
 /** The most words a card carries as context (Asks' own bound is far larger; a prompt is never near it). */
 const MAX_CONTEXT = 8_000;
 
-/** What the prompt obligations need of Asks: raise (idempotent by source and entry) and close. Never a scan of the boards. */
-export type PromptAsksPort = Pick<AsksApi, 'raise' | 'close'>;
+/**
+ * What the prompt obligations need of Asks: raise (idempotent by source and entry) and close. `open` (by source and
+ * entry) is asked only to find a card whose ref was never saved: never on a steady tick.
+ */
+export type PromptAsksPort = Pick<AsksApi, 'raise' | 'close' | 'open'>;
 
 /** Conversation's own memory of each ferret's waits, one record per ferret, replaced whole (`PROMPT_WAIT_STATE`). */
 export interface PromptRecords {
@@ -32,12 +42,15 @@ export interface PromptRoster {
  * an ask does, so it IS an Agenda card (Asks' source `prompt`), raised once per wait and closed the moment the wait
  * ends (answered in the console, the pane moved on, the ferret stopped or went away). Nothing here answers the prompt.
  *
- * It is a sweep, not an event: a pane that moves to `needs-input` changes no ferret state beyond `idle`, so the question
- * watch's own tick looks. WHAT it looks at is bounded: a pane is read only for a ferret that could be parked (`idle`: a
- * turn that is not working) or that is owed a card, and a card is closed by the ref this sweep was handed when it raised
- * it, kept in {@link PromptRecords}, never by scanning the boards (a child's card lands on its lead's board, so the
- * board a card is on says nothing about whose it is). A raise or a close that failed is asked again by the next sweep,
- * and said once until it works.
+ * The question watch's tick drives it, but a tick reads nothing on its own: a pane is read only for a ferret that was
+ * REPORTED CHANGED since the last sweep ({@link changed}: Ferrets said its state moved), that is owed a card (its record
+ * says it is waiting) or whose last look failed, plus ONE reconciliation of every ferret that could be parked (`idle`) on
+ * the first sweep after boot. Twenty idle ferrets nobody touched cost no read. A card is closed by the ref this sweep
+ * was handed when it raised it, kept in {@link PromptRecords}; a raise that succeeded but whose ref was not saved (the
+ * save failed, the daemon died) is found again by its durable `(source, entry)` before its record is cleared, replaced
+ * or removed, so no card is stranded and none is doubled (a child's card lands on its lead's board: the board a card is
+ * on says nothing about whose it is). A raise or a close that failed is asked again by the next sweep, and said once
+ * until it works.
  *
  * Each wait is an OCCURRENCE: the same prompt asked again after the wait was positively seen to end is a new card,
  * because Asks keeps `(source, entry)` for life. Only a positive reading ends a wait: an empty or failed read is no
@@ -45,6 +58,9 @@ export interface PromptRoster {
  */
 export class PromptAsks {
   readonly #failing = new Set<string>();
+  /** The ferrets reported changed since the last sweep took them. */
+  #changed = new Set<string>();
+  #reconciled = false;
   #records: Map<string, PromptWaitRecord> | undefined;
 
   constructor(
@@ -54,13 +70,27 @@ export class PromptAsks {
     private readonly warn: (message: string) => void,
   ) {}
 
+  /** Ferrets said this ferret changed (its state, its stop, its removal): the next sweep reads its pane. */
+  changed(ferret: string): void {
+    this.#changed.add(ferret);
+  }
+
   /** Makes the Agenda say what the panes that could be parked say. Never throws: a failure is said once and retried. */
   async sweep(roster: readonly PromptRoster[]): Promise<void> {
     const records = await this.#loaded();
     if (records === undefined) return;
     const live = new Map(roster.map(ferret => [ferret.id, ferret.state]));
     const owed = [...records].filter(([, record]) => record.waiting || record.ask !== undefined).map(([id]) => id);
-    const candidates = new Set([...roster.filter(ferret => ferret.state === 'idle').map(ferret => ferret.id), ...owed]);
+    const reported = [...this.#changed];
+    this.#changed = new Set();
+    const first = !this.#reconciled;
+    this.#reconciled = true;
+    const candidates = new Set([
+      ...(first ? roster.filter(ferret => ferret.state === 'idle').map(ferret => ferret.id) : []),
+      ...reported.filter(id => live.get(id) === 'idle'),
+      ...owed,
+      ...[...this.#failing].filter(id => live.get(id) === 'idle'),
+    ]);
     for (const id of this.#failing) if (!candidates.has(id)) this.#failing.delete(id);
     for (const id of candidates) {
       try {
@@ -106,7 +136,7 @@ export class PromptAsks {
     let record = this.#records?.get(id);
     if (record?.waiting !== true || record.key !== key) {
       // A new wait: another prompt than the one held, or the same one again after the wait was seen to end.
-      if (record?.ask !== undefined) await this.#close(record.ask);
+      if (record !== undefined) await this.#withdraw(id, record);
       record = { format: 1, key, occurrence: (record?.occurrence ?? 0) + 1, waiting: true };
       await this.#save(id, record);
     }
@@ -132,7 +162,7 @@ export class PromptAsks {
   async #ended(id: string, gone: boolean): Promise<void> {
     const record = this.#records?.get(id);
     if (record === undefined) return;
-    if (record.ask !== undefined) await this.#close(record.ask);
+    await this.#withdraw(id, record);
     if (gone) {
       await this.store.remove(id);
       this.#records?.delete(id);
@@ -140,6 +170,21 @@ export class PromptAsks {
       const { ask: _ask, ...rest } = record;
       await this.#save(id, { ...rest, waiting: false });
     }
+  }
+
+  /**
+   * Closes the card of a record's occurrence before the record is cleared, replaced or removed. The saved ref names it;
+   * with none saved but the wait recorded, a raise may have succeeded whose ref was never written, so the card is found
+   * by its durable `(source, entry)` (the entry is deterministic) wherever Asks put it, and every one open is closed.
+   */
+  async #withdraw(id: string, record: PromptWaitRecord): Promise<void> {
+    if (record.ask !== undefined) return await this.#close(record.ask);
+    if (!record.waiting) return;
+    const ref = promptRefOfKey(record.key);
+    if (ref === undefined) return;
+    const entry = EntryIdSchema.parse(promptEntry(id, ref, record.occurrence));
+    for (const card of await this.asks.open({ source: PROMPT_SOURCE, entry }))
+      await this.asks.close({ ferret: card.ferret ?? id, id: card.id }, 'withdrawn', entry);
   }
 
   async #close(ask: NonNullable<PromptWaitRecord['ask']>): Promise<void> {

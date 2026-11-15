@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import type { PromptAskRef } from '../../../contract/wire-prompt.ts';
+import { type PromptAskRef, PromptAskRefSchema } from '../../../contract/wire-prompt.ts';
 
 /** What Ferrets says a pane is asking (`FerretsApi.prompt`), as far as a wait on the owner is read from it. */
 export interface PromptRead {
@@ -73,6 +73,13 @@ export function readPrompt(read: PromptRead | undefined): PromptReading {
 
 /** The wait's kind and the prompt's own id: what makes a different prompt a different wait. */
 export const promptKey = (ref: PromptAskRef): string => `${ref.kind}:${ref.prompt}`;
+
+/** The wait a key names (the inverse of {@link promptKey}), or `undefined` for a key that names none. Total. */
+export function promptRefOfKey(key: string): PromptAskRef | undefined {
+  const colon = key.indexOf(':');
+  const parsed = PromptAskRefSchema.safeParse({ kind: key.slice(0, colon), prompt: key.slice(colon + 1) });
+  return parsed.success ? parsed.data : undefined;
+}
 
 const SUBJECT_KIND: Readonly<Record<PromptAskRef['kind'], string>> = {
   permission: 'a permission answer',

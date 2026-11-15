@@ -5,6 +5,7 @@ import {
   promptWait,
   readPrompt,
   promptKey,
+  promptRefOfKey,
 } from '../../../../daemon/prompts/lib/prompt-wait.ts';
 
 const permission = { id: '0123456789abcdef', tool: 'Bash', what: 'rm -rf build', question: 'Do you want to proceed?' };
@@ -102,5 +103,20 @@ describe('the card’s subject and the entry it is kept under on the Agenda', ()
     expect(promptEntry('lead', ref, 2)).not.toBe(promptEntry('lead', ref, 1));
     expect(promptEntry('other', ref, 1)).not.toBe(promptEntry('lead', ref, 1));
     expect(promptEntry('lead', { kind: 'dialog', prompt: permission.id }, 1)).not.toBe(promptEntry('lead', ref, 1));
+  });
+});
+
+describe('promptRefOfKey', () => {
+  test('is the inverse of promptKey, whatever the prompt id holds', () => {
+    for (const ref of [
+      { kind: 'permission', prompt: '0123456789abcdef' },
+      { kind: 'dialog', prompt: 'a:b:c' },
+      { kind: 'prompt', prompt: 'ff00' },
+    ] as const)
+      expect(promptRefOfKey(promptKey(ref))).toEqual(ref);
+  });
+
+  test('is nothing for a key that names no wait', () => {
+    for (const key of ['nonsense', 'unknown:x', 'permission:', ':x', '']) expect(promptRefOfKey(key)).toBeUndefined();
   });
 });
