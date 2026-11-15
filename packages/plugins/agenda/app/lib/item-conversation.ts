@@ -185,17 +185,34 @@ const ledgerOf = async (client: ItemConversationClient, sessionId: string): Prom
   }
 };
 
-/** Each owner row takes the ledger's record of the send whose words it is, the newest first, each record once. */
+/** A row is stamped when the agent took the message, which is never before the ledger accepted it; this much clock skew is allowed. */
+const RECEIPT_SKEW_MS = 5_000;
+
+/**
+ * Each owner row takes the ledger's record of the send whose words it is — only when that is PROVABLE. A transcript
+ * row carries no send id, so the words are the join, and the same words are sent more than once: a send can only be a
+ * row's if the ledger accepted it no later than the row was written, and the match must be the only one both ways
+ * (one send fits the row, and no other row claims that send). Any doubt leaves the row with its plain transcript Read:
+ * a wrong receipt (a Cancelled on a message the agent did receive) is worse than none.
+ */
 const withSends = (
   entries: readonly TranscriptEntry[],
   ledger: readonly LedgerSendRecord[],
 ): readonly TranscriptEntry[] => {
-  const unused = [...ledger].sort((a, b) => Date.parse(b.acceptedAt ?? '') - Date.parse(a.acceptedAt ?? ''));
-  return entries.map(entry => {
-    if (entry.kind !== 'user') return entry;
-    const at = unused.findIndex(send => send.message?.trim() === entry.text.trim());
-    if (at < 0) return entry;
-    const [send] = unused.splice(at, 1);
-    return send === undefined ? entry : { ...entry, send };
-  });
+  const candidatesOf = (entry: TranscriptEntry): readonly LedgerSendRecord[] => {
+    if (entry.kind !== 'user' || entry.at === undefined) return [];
+    const row = entry.at;
+    return ledger.filter(send => {
+      const accepted = send.acceptedAt === undefined ? Number.NaN : Date.parse(send.acceptedAt);
+      return send.message?.trim() === entry.text.trim() && accepted <= row + RECEIPT_SKEW_MS;
+    });
+  };
+  const matched = entries.map(entry => ({ entry, found: candidatesOf(entry) }));
+  const claims = new Map<string, number>();
+  for (const send of matched.flatMap(({ found }) => (found.length === 1 ? found : []))) {
+    claims.set(send.sendId, (claims.get(send.sendId) ?? 0) + 1);
+  }
+  return matched.map(({ entry, found: [send, ...others] }) =>
+    send === undefined || others.length > 0 || claims.get(send.sendId) !== 1 ? entry : { ...entry, send },
+  );
 };

@@ -188,26 +188,82 @@ describe('the receipts of the owner’s rows', () => {
     ]);
   });
 
-  it('spends a record once: two rows with the same words take the newest two sends, not one twice', async () => {
-    const twice = [
-      row(1, 'user', '!A4 again', '2026-08-01T10:05:00.000Z'),
-      row(2, 'user', '!A4 again', '2026-08-01T10:06:00.000Z'),
-    ];
-    const client = {
-      ...daemonOf(twice),
-      sends: async () => [
-        { sendId: 'old', fate: 'delivered', message: '!A4 again', acceptedAt: '2026-08-01T10:05:00.000Z' },
-        { sendId: 'new', fate: 'queued', message: '!A4 again', acceptedAt: '2026-08-01T10:06:00.000Z' },
-      ],
-    };
-    const entries = await readItemConversation(client, 'sess', 'A4');
-    expect(entries.map(entry => entry.send?.sendId)).toEqual(['new', 'old']);
+  const sent = (sendId: string, fate: string, acceptedAt: string, message = '!A4 ship it') => ({
+    sendId,
+    fate,
+    message,
+    acceptedAt,
+  });
+  const receiptsOf = async (rows: readonly Row[], sends: readonly ReturnType<typeof sent>[]) =>
+    (await readItemConversation({ ...daemonOf(rows), sends: async () => sends }, 'sess', 'A4')).map(
+      entry => entry.send?.sendId,
+    );
+
+  it('never puts a newer cancelled send on the older row that was delivered: the old row is Delivered', async () => {
+    const rows = [row(1, 'user', '!A4 ship it', '2026-08-01T10:00:00.000Z')];
+    for (const later of ['cancelled', 'held', 'queued']) {
+      const sends = [
+        sent('old', 'delivered', '2026-08-01T10:00:00.000Z'),
+        sent('new', later, '2026-08-01T11:00:00.000Z'),
+      ];
+      expect(await receiptsOf(rows, sends)).toEqual(['old']);
+    }
   });
 
-  it('takes a record that carries no instant of its own, as long as its words match', async () => {
-    const client = withLedger(async () => [{ sendId: 'x', fate: 'queued', message: 'reply !A4: ship it' }]);
-    const entries = await readItemConversation(client, 'sess', 'A4');
-    expect(entries[0]?.send?.sendId).toBe('x');
+  it('gives no receipt when two sends could both be the row’s, rather than guessing', async () => {
+    const rows = [row(1, 'user', '!A4 ship it', '2026-08-01T10:00:00.000Z')];
+    const sends = [
+      sent('early', 'cancelled', '2026-08-01T09:00:00.000Z'),
+      sent('old', 'delivered', '2026-08-01T10:00:00.000Z'),
+    ];
+    expect(await receiptsOf(rows, sends)).toEqual([undefined]);
+  });
+
+  it('gives two rows with the same words a receipt only where one send alone fits, and never one send twice', async () => {
+    const twice = [
+      row(1, 'user', '!A4 ship it', '2026-08-01T10:00:00.000Z'),
+      row(2, 'user', '!A4 ship it', '2026-08-01T10:30:00.000Z'),
+    ];
+    expect(await receiptsOf(twice, [sent('only', 'delivered', '2026-08-01T10:00:00.000Z')])).toEqual([
+      undefined,
+      undefined,
+    ]);
+    const both = [
+      sent('a', 'delivered', '2026-08-01T10:00:00.000Z'),
+      sent('b', 'delivered', '2026-08-01T10:30:00.000Z'),
+    ];
+    expect(await receiptsOf(twice, both)).toEqual(['a', undefined]);
+  });
+
+  it('takes a send the ledger accepted a few seconds after the row’s stamp, but not minutes after', async () => {
+    const rows = [row(1, 'user', '!A4 ship it', '2026-08-01T10:00:00.000Z')];
+    expect(await receiptsOf(rows, [sent('skew', 'delivered', '2026-08-01T10:00:04.000Z')])).toEqual(['skew']);
+    expect(await receiptsOf(rows, [sent('late', 'cancelled', '2026-08-01T10:00:06.000Z')])).toEqual([undefined]);
+  });
+
+  it('gives no receipt to a row or a record without an instant, which cannot be ordered', async () => {
+    const stamped = [row(1, 'user', '!A4 ship it', '2026-08-01T10:00:00.000Z')];
+    const bare = [row(1, 'user', '!A4 ship it')];
+    expect(await receiptsOf(stamped, [{ sendId: 'x', fate: 'queued', message: '!A4 ship it' } as never])).toEqual([
+      undefined,
+    ]);
+    expect(await receiptsOf(bare, [sent('x', 'delivered', '2026-08-01T10:00:00.000Z')])).toEqual([undefined]);
+  });
+
+  it('gives an edited or redacted row no receipt: its words are no longer the send’s', async () => {
+    const rows = [row(1, 'user', '!A4 ship [redacted]', '2026-08-01T10:00:00.000Z')];
+    expect(await receiptsOf(rows, [sent('old', 'delivered', '2026-08-01T10:00:00.000Z', '!A4 ship secret')])).toEqual([
+      undefined,
+    ]);
+  });
+
+  it('matches a long row by all its words, and not a long row that was cut short', async () => {
+    const long = `!A4 ${'word '.repeat(2_000)}`;
+    const rows = [row(1, 'user', long, '2026-08-01T10:00:00.000Z')];
+    expect(await receiptsOf(rows, [sent('whole', 'delivered', '2026-08-01T10:00:00.000Z', long)])).toEqual(['whole']);
+    expect(await receiptsOf(rows, [sent('whole', 'delivered', '2026-08-01T10:00:00.000Z', `${long}and more`)])).toEqual(
+      [undefined],
+    );
   });
 
   it('keeps the History when the ledger cannot be read, and when the host has no ledger', async () => {
