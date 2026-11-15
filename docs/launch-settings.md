@@ -59,6 +59,10 @@ ferret is bound to — as if only the process had restarted:
   is typed after a fixed sentence telling it so and pointing at its assigned task (`turn-001.md`). The old id and
   transcript pointer are dropped from the record. Any doubt (a link, an unreadable file, a capped walk) resumes as
   asked. The case this exists for is a ferret converted from Ferretry 4, whose chats were left behind.
+- A relaunch with **no conversation to resume at all** starts a NEW one and says so the same way: history
+  `session.conversation_not_found` with `{ unknown: true }`, and a fixed sentence before an autonomous ferret's revive
+  turn. Codex mints its conversation id after launch and v5 does not record it, and a v4 ferret whose rollout v4 never
+  found is converted without one, so such a ferret would otherwise forget everything in silence.
 - **Go back to the earlier conversation** (Actions, or `--conversation previous`) repairs a ferret an earlier
   Restart moved onto a new, empty conversation: it rebinds to the newest other transcript in the same
   harness home that names the ferret's own directory — every turn Ferretry hands an agent does — and

@@ -635,10 +635,20 @@ const NO_LONGER_OWED = 'it is no longer owed this resume: it was stopped, resume
 export const CONVERSATION_NOT_FOUND =
   'Your earlier conversation could not be resumed: it is not on this machine (a ferret moved from Ferretry 4, for one, leaves its old chats behind), so this is a NEW conversation and you remember nothing from before it. Your assigned task is turn-001.md in the same folder as the turn file below: read it and the turns after it before you go on.';
 
+/**
+ * What a relaunch typed ahead of its turn when it had NO conversation to resume: the machine never recorded which one was
+ * the ferret's (Codex mints its id after launch and v5 does not record it; a v4 ferret whose rollout v4 never found was
+ * converted without one), so a new one was started and the agent is told it remembers nothing. Fixed text.
+ */
+export const CONVERSATION_UNKNOWN =
+  'Your earlier conversation was not resumed: this machine never recorded which conversation was yours (a Codex ferret, or one moved from Ferretry 4, can be without one), so this is a NEW conversation and you remember nothing from before it. Your assigned task is turn-001.md in the same folder as the turn file below: read it and the turns after it before you go on.';
+
 /** What one launch attempt found that its caller must say (filled in by `launchAttempt`). */
 interface LaunchSaid {
   /** The conversation the launch was to resume, which the harness proved it does not have: a new one was started. */
   conversationNotFound?: string;
+  /** A resume that had no conversation to resume at all (none was ever recorded): a new one was started. */
+  conversationUnknown?: true;
 }
 
 class ResumeRefusal extends Error {
@@ -1942,10 +1952,17 @@ export class FerretsService implements FerretsApi {
       });
       const said: LaunchSaid = {};
       const result = await this.launchAttempt(record, prompt, conversation, tracked, bound, said);
+      // A RESUME with no conversation to resume starts a new one just as a missing one does, and is said the same way: a
+      // ferret that silently forgot everything (proof run 8, a converted Codex ferret) is the defect this names.
+      if (kind === 'resume' && conversation === undefined) said.conversationUnknown = true;
       if (result.ok && said.conversationNotFound !== undefined)
         // A history that cannot be written never undoes a launch that started (this is inside the launch's cleanup).
         await this.ports
           .history?.(record.id, 'session.conversation_not_found', { conversation: said.conversationNotFound })
+          .catch(() => undefined);
+      if (result.ok && said.conversationUnknown === true)
+        await this.ports
+          .history?.(record.id, 'session.conversation_not_found', { unknown: true })
           .catch(() => undefined);
       if (!result.ok) failure = result.error;
       else if (turn === undefined) return result;
@@ -1953,9 +1970,11 @@ export class FerretsService implements FerretsApi {
         return await this.deliverTurn(
           record.id,
           runner,
-          said.conversationNotFound === undefined
-            ? turn.turn
-            : { ...turn.turn, instruction: `${CONVERSATION_NOT_FOUND} ${turn.turn.instruction}` },
+          said.conversationNotFound !== undefined
+            ? { ...turn.turn, instruction: `${CONVERSATION_NOT_FOUND} ${turn.turn.instruction}` }
+            : said.conversationUnknown === true
+              ? { ...turn.turn, instruction: `${CONVERSATION_UNKNOWN} ${turn.turn.instruction}` }
+              : turn.turn,
           carried,
         );
       else {

@@ -248,7 +248,8 @@ for a fake home, never a real one) and is never used on the owner's machine.
    `fy login signin <login>` that `verify` printed, then check again in about 2 minutes for `session.restarted`. Then send
    one running ferret a short message (owner's yes) and see it answer. It is a NEW conversation (old chats are left
    behind): an autonomous ferret was told so, and pointed at its assigned task, in its first turn after the restart, and
-   the history of every one has `session.conversation_not_found`.
+   the history of every one has `session.conversation_not_found` (naming the old conversation, or `unknown: true` for one
+   whose id v4 never recorded, as a Codex ferret can be).
 2. Resume one stopped ferret with the owner. It starts a NEW conversation, never a failed launch: its old chat was left
    behind (!A516), so its first line says it remembers nothing from before, and its history has
    `session.conversation_not_found`.
