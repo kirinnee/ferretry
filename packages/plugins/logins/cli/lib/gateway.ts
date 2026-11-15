@@ -1,4 +1,5 @@
 import type { PluginClient } from '@ferretry/kernel/manifest';
+import { PutSecretBodySchema, SecretListSchema, SecretSummarySchema } from '@ferretry/core-vault/contract';
 import { z } from 'zod';
 import {
   type HarnessLoginCodexMethod,
@@ -49,6 +50,10 @@ export const ROUTES = {
   stage: 'POST /v1/logins/changes',
   apply: 'POST /v1/logins/changes/:changeId/apply',
 } as const;
+
+/** The Vault's own secret routes: names in, a value in and never back. The Vault governs who may call them. */
+const SECRETS_LIST_ROUTE = 'GET /v1/secrets' as const;
+const SECRETS_PUT_ROUTE = 'POST /v1/secrets' as const;
 
 /**
  * Usage's budgets read. Logins cannot import Usage (Usage imports Logins), so the standing a login's row shows is
@@ -140,6 +145,18 @@ export class ClientLoginsGateway implements ILoginsGateway {
   /** An answer this build cannot read is the stricter reading (`undetermined`); a failed read is the caller's to see. */
   async authority(): Promise<ChangeAuthority> {
     return authorityOf(await this.client.call(GRANTS_ROUTE));
+  }
+
+  async secretNames(): Promise<ReadonlySet<string>> {
+    return new Set(
+      SecretListSchema.parse(await this.client.call(SECRETS_LIST_ROUTE)).secrets.map(secret => secret.name),
+    );
+  }
+
+  async putSecret(name: string, value: string): Promise<void> {
+    SecretSummarySchema.parse(
+      await this.client.call(SECRETS_PUT_ROUTE, { body: PutSecretBodySchema.parse({ name, value }) }),
+    );
   }
 
   async stage(change: LoginChange): Promise<LoginChangeView> {
