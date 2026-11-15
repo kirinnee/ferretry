@@ -107,7 +107,7 @@
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/connections": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "worker/src/adapters/worker.ts"],
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "worker/src/adapters/worker.ts"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/catalogs": {

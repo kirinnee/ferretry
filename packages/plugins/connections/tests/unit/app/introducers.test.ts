@@ -66,12 +66,27 @@ describe('the clients the router asks through', () => {
     const registry = new IntroducerRegistry();
     const fake = clientAnswering({ carriers: [] });
 
-    await registry.read('daemon-a');
+    // No client held: nothing was asked, and that is NOT an answer.
+    expect(await registry.read('daemon-a')).toBe(false);
     expect(fake.calls).toEqual([]);
     registry.attach('daemon-a', fake.client);
-    await registry.read('daemon-a');
+    expect(await registry.read('daemon-a')).toBe(true);
 
     expect(fake.calls.map(call => call.route)).toEqual(['GET /v1/carriers']);
+  });
+
+  test('R88 a refusal from the daemon is an answer to the read; a call that got none rejects', async () => {
+    const registry = new IntroducerRegistry();
+    registry.attach('refusing', clientAnswering(new DaemonCallError(403, 'forbidden', 'not allowed')).client);
+    registry.attach(
+      'lost',
+      clientAnswering(new DaemonCallError(0, 'carrier_lost', 'carrier ended', undefined, true)).client,
+    );
+    registry.attach('broken', clientAnswering(new Error('deadline')).client);
+
+    expect(await registry.read('refusing')).toBe(true);
+    await expect(registry.read('lost')).rejects.toThrow('carrier ended');
+    await expect(registry.read('broken')).rejects.toThrow('deadline');
   });
 
   test('R636 a refusal is the daemon’s answer with its status and sentence; a call that got no answer rejects', async () => {

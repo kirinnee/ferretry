@@ -416,8 +416,9 @@ describe('a reconnecting machine and its outage sheet', () => {
       wired.signal(signal);
       await settle();
 
-      expect(wired.connect.health.state(DAEMON)).toMatchObject({ kind: 'reconnecting', attempt: 1 });
+      // One real read, and the machine's answer to it ends the outage (it is no longer waiting on a backoff).
       expect(carrierReads(fake.calls)).toBe(before + 1);
+      expect(wired.connect.health.state(DAEMON)).toEqual({ kind: 'connected' });
       unmount();
     }
   });
@@ -489,6 +490,7 @@ describe('a reconnecting machine and its outage sheet', () => {
       webrtc: undefined,
       tunnelSwitch: wired.connect.tunnelSwitch,
       health: wired.connect.health,
+      now: () => 0,
     }).panels.carrier;
 
     const drawn = render(createElement(Panel));
@@ -498,6 +500,13 @@ describe('a reconnecting machine and its outage sheet', () => {
     run(() => wired.connect.health.outage(DAEMON, OUTAGE));
     expect(JSON.stringify(drawn.toJSON())).toContain('data-connection-outage');
     expect(JSON.stringify(drawn.toJSON())).toContain('"data-connection-status":"reconnecting"');
+    // The lost-for time and the attempt count, and a Retry now wired to THIS machine's health (not another's).
+    expect(JSON.stringify(drawn.toJSON())).toContain('Lost 0 seconds ago');
+    expect(JSON.stringify(drawn.toJSON())).toContain('0 automatic attempts');
+    const retry = drawn.root.findByProps({ 'data-connection-retry': '' });
+    run(() => retry.props.onClick());
+    expect(wired.connect.health.state(DAEMON)).toMatchObject({ kind: 'reconnecting', attempt: 1 });
+    expect(JSON.stringify(drawn.toJSON())).toContain('1 automatic attempt');
 
     run(() => wired.connect.health.answered(DAEMON));
     expect(JSON.stringify(drawn.toJSON())).not.toContain('data-connection-outage');

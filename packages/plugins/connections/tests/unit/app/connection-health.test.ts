@@ -39,7 +39,8 @@ interface Timer {
 
 interface Call {
   readonly daemonId: DaemonId;
-  readonly resolve: () => void;
+  /** Ends the attempt; `true` is "the machine answered it". */
+  readonly resolve: (answered?: boolean) => void;
   readonly reject: () => void;
 }
 
@@ -89,7 +90,7 @@ const world = () => {
   };
   const attempt: ReconnectAttempt = daemonId => {
     const promise = new Promise<unknown>((resolve, reject) => {
-      calls.push({ daemonId, resolve: () => resolve(undefined), reject: () => reject(new Error('still down')) });
+      calls.push({ daemonId, resolve: answered => resolve(answered), reject: () => reject(new Error('still down')) });
     });
     fake.onCall?.(daemonId);
     return promise;
@@ -445,6 +446,44 @@ describe('DaemonConnectionHealth recovery', () => {
     health.answered(laptop);
     expect(heard).toEqual(['a', 'b']);
     expect(health.state(laptop)).toEqual({ kind: 'connected' });
+  });
+
+  it('R88 a reconnect read the machine ANSWERED ends the outage, though nothing reported a new session', async () => {
+    const w = world();
+    const health = new DaemonConnectionHealth(w.environment, w.attempt);
+    let recovered = 0;
+    health.onRecovered(laptop, () => {
+      recovered += 1;
+    });
+    health.outage(laptop, outage());
+    health.retryNow(laptop);
+    must(w.calls[0], 'the attempt').resolve(true);
+    await settle();
+    expect(health.state(laptop)).toEqual({ kind: 'connected' });
+    expect(recovered).toBe(1);
+    expect(w.pending()).toEqual([]);
+  });
+
+  it('R88 a reconnect read that ended without an answer leaves the outage and schedules the next attempt', async () => {
+    const w = world();
+    const health = new DaemonConnectionHealth(w.environment, w.attempt);
+    health.outage(laptop, outage());
+    health.retryNow(laptop);
+    must(w.calls[0], 'the attempt').resolve(false);
+    await settle();
+    expect(reconnectingOf(health, laptop).attempt).toBe(1);
+    expect(w.retryTimers()).toHaveLength(1);
+  });
+
+  it('R88 an answer that lands after the machine was unpaired does not make it connected', async () => {
+    const w = world();
+    const health = new DaemonConnectionHealth(w.environment, w.attempt);
+    health.outage(laptop, outage());
+    health.retryNow(laptop);
+    health.clearDaemon(laptop);
+    must(w.calls[0], 'the attempt').resolve(true);
+    await settle();
+    expect(health.state(laptop)).toEqual({ kind: 'unknown' });
   });
 
   it('cancels the retry and the stall timer on recovery', () => {

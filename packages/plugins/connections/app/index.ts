@@ -1,6 +1,6 @@
 import { type BackgroundViewProps, type ConnectPorts, daemonOfClient, provideToShell } from '@ferretry/app';
 import { implementApp, type AppContext } from '@ferretry/kernel/manifest';
-import { createElement, useCallback, useEffect, useSyncExternalStore } from 'react';
+import { createElement, useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { PublishedCarriers } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { memberCarriers } from './carriers/member-carriers.ts';
@@ -109,6 +109,7 @@ export function buildConnect(
         };
       },
     }),
+    // Resolves true when the machine ANSWERED the read: it ends the outage even over a session already accepted.
     daemonId => introducers.read(daemonId),
   );
   const router = new CarrierRouter({
@@ -165,6 +166,8 @@ export function buildConnect(
     tunnelSwitch,
     webrtc,
     health,
+    /** The clock `health.since` was read from: the outage view measures how long ago against the same one. */
+    now: ports.now,
     daemons: ports.daemons,
   };
 }
@@ -174,12 +177,13 @@ export function buildConnectionsApp(
   measurements: ConnectionMeasurements = connect?.router ?? unmeasured,
   preferences: CarrierPreferenceStore = connect?.preferences ?? new CarrierPreferenceStore(),
   /** The machine's tunnel switch and the WebRTC dialer: what the preference screen and the panel read (R635, R677). */
-  live: (Pick<Connect, 'tunnelSwitch' | 'webrtc'> & Partial<Pick<Connect, 'health'>>) | undefined = connect,
+  live: (Pick<Connect, 'tunnelSwitch' | 'webrtc'> & Partial<Pick<Connect, 'health' | 'now'>>) | undefined = connect,
 ) {
   const daemonId = daemonOfClient(ctx.client);
   const tunnelSwitch = live?.tunnelSwitch;
   const webrtc = live?.webrtc;
   const health = live?.health;
+  const clock = live?.now ?? Date.now;
   /**
    * The published set as the daemon last answered it, for the screens of this half. It watches the daemon only while a
    * screen is subscribed to it, and stops with the last one, so a half rebuilt on every reconnect leaves no listener
@@ -264,9 +268,21 @@ export function buildConnectionsApp(
         health === undefined || daemonId === undefined ? () => undefined : health.subscribe(daemonId, listener),
       () => (health === undefined || daemonId === undefined ? UNMEASURED_HEALTH : health.state(daemonId)),
     );
+    // "Lost 2 minutes ago" keeps counting while the outage is on screen, and the clock stops with it.
+    const down = outage.kind === 'reconnecting';
+    const [now, setNow] = useState(clock);
+    useEffect(() => {
+      if (!down) return;
+      setNow(clock());
+      const handle = globalThis.setInterval(() => setNow(clock()), 1000);
+      return () => globalThis.clearInterval(handle);
+    }, [down]);
     return createElement(ActiveCarrierCard, {
       choice,
       health: outage,
+      now,
+      // Retry THIS machine's loop at once (the same call a back-online signal makes).
+      ...(health === undefined || daemonId === undefined ? {} : { onRetry: () => health.retryNow(daemonId) }),
       relayAdvertised: carriers.some(c => c.kind === 'relay'),
       ...(daemonId === undefined ? {} : { daemon: daemonId }),
       ...(relayFallback === undefined ? {} : { relayFallback }),

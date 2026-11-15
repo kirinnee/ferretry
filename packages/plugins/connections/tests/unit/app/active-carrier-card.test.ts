@@ -51,10 +51,10 @@ test('R121 the direct carrier discloses only the parties actually on its path', 
   for (const observer of describeConnectionMethod(direct).observers) expect(html).toContain(observer);
   expect(html).not.toContain('fy_daemon_');
 });
-test('S-0145 one machine’s outage shows its lost-for cause and the carriers tried, only while it is reconnecting', () => {
+test('S-0145 one machine’s outage shows its lost-for time, attempt count, cause, carriers tried and Retry, only while it is reconnecting', () => {
   const outage = {
     kind: 'reconnecting',
-    since: 0,
+    since: 1_000,
     attempt: 2,
     nextAttemptAt: null,
     failures: [{ label: 'Direct', detail: 'refused' }],
@@ -62,17 +62,33 @@ test('S-0145 one machine’s outage shows its lost-for cause and the carriers tr
     stalled: false,
   } as const;
   const choice = chooseConnection([{ method: direct, reachable: true }]);
-  const drawn = (health: Parameters<typeof ActiveCarrierCard>[0]['health']) =>
+  const drawn = (
+    health: Parameters<typeof ActiveCarrierCard>[0]['health'],
+    over: Partial<Parameters<typeof ActiveCarrierCard>[0]> = {},
+  ) =>
     renderToStaticMarkup(
-      createElement(ActiveCarrierCard, { choice, relayAdvertised: true, health, machine: 'studio' }),
+      createElement(ActiveCarrierCard, { choice, relayAdvertised: true, health, machine: 'studio', ...over }),
     );
 
-  const down = drawn(outage);
+  const down = drawn(outage, { now: 1_000 + 125_000, onRetry: () => undefined });
   expect(down).toContain('data-connection-outage');
   expect(down).toContain('data-connection-status="reconnecting"');
   expect(down).toContain('Direct: refused');
   expect(down).toContain('Last connected over');
+  // The lost-for time and the automatic attempt count, said once in one line.
+  expect(down).toContain('Lost 2 minutes ago · 2 automatic attempts');
+  expect(drawn({ ...outage, attempt: 1 }, { now: 1_000 + 12_000 })).toContain(
+    'Lost 12 seconds ago · 1 automatic attempt<',
+  );
+  expect(drawn({ ...outage, attempt: 0 }, { now: 1_000 + 3_700_000 })).toContain(
+    'Lost 1 hour ago · 0 automatic attempts',
+  );
+  // Retry now is offered only where something can retry this machine.
+  expect(down).toContain('data-connection-retry');
+  expect(down).toContain('Retry now');
+  expect(drawn(outage, { now: 2_000 })).not.toContain('Retry now');
   expect(drawn({ kind: 'connected' })).not.toContain('data-connection-outage');
+  expect(drawn({ kind: 'connected' })).not.toContain('Retry now');
   expect(drawn(undefined)).not.toContain('data-connection-outage');
 });
 test('R15 the card links the self-hosting runbook and offers no relay setting of its own', () => {

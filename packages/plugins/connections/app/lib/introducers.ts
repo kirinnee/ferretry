@@ -68,12 +68,22 @@ export class IntroducerRegistry {
   }
 
   /**
-   * ONE REAL READ OF THIS MACHINE, THROUGH THE ROUTER'S OWN WALK: the reconnect loop's attempt. It is an ordinary `GET
-   * /v1/carriers` through the held client, so it dials like any request and its outcome reaches the health model
-   * through the router like any other; nothing here reads it back. With no client held there is nothing to ask.
+   * ONE REAL READ OF THIS MACHINE: the reconnect loop's attempt. It is an ordinary `GET /v1/carriers` through the held
+   * client, so it dials like any request. It says whether the machine ANSWERED — a 200 or the daemon's own refusal —
+   * because a session that is already accepted carries the read with no new commit for the router to report, so the
+   * answer itself is the one proof the machine is back. A call that never got an answer rejects, and with no client
+   * held there is nothing to ask: neither is an answer.
    */
-  async read(daemonId: string): Promise<void> {
-    await this.#clients.get(daemonId)?.call('GET /v1/carriers');
+  async read(daemonId: string): Promise<boolean> {
+    const client = this.#clients.get(daemonId);
+    if (client === undefined) return false;
+    try {
+      await client.call('GET /v1/carriers');
+    } catch (error) {
+      if (error instanceof DaemonCallError && error.carrier !== true) return true;
+      throw error;
+    }
+    return true;
   }
 
   /** The request for this daemon, or `undefined` while no half of Connections holds a client for it. */
