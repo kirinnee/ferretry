@@ -1,5 +1,6 @@
 import { provideToShell } from '@ferretry/app';
 import { implementApp, type PanelProps } from '@ferretry/kernel/manifest';
+import type { FerretListRowMarkSlotProps } from '@ferretry/core-ferrets/contract';
 import type { ComposerToolsProps } from '@ferretry/plugin-conversation/contract';
 import { createElement } from 'react';
 import manifest from '../manifest.ts';
@@ -23,7 +24,7 @@ import {
 } from './views.tsx';
 
 /**
- * The Usage app half (§2.3): the Insights screens, the quota readout in the top bar, a ferret's own insights beside
+ * The Usage app half (§2.3): the Insights screens, the quota on a ferret's row in the list, a ferret's own insights beside
  * it, and Settings › Budgets, Model pricing and Performance. Each view is today's component, given the daemon's
  * client the shell built this half with (§9.6). The shell builds one half per daemon, so the feed store and the
  * performance recorder below belong to one daemon each.
@@ -42,8 +43,12 @@ const half = implementApp(manifest, {
         'insights-query': () => createElement(InsightsScreen, { client, view: 'query' }),
       },
       panels: {
-        quota: ({ subject }) =>
-          createElement(QuotaPanel, { store: usage, ...(subject === undefined ? {} : { subject }) }),
+        // `props` are Ferrets' (`ferrets.list-row-mark`): narrowed here, a row that hands none draws nothing.
+        quota: (props: PanelProps & Partial<FerretListRowMarkSlotProps>) =>
+          createElement(QuotaPanel, {
+            store: usage,
+            ...(typeof props.runtime === 'string' ? { runtime: props.runtime } : {}),
+          }),
         'composer-quota': (props: PanelProps & Partial<ComposerToolsProps>) =>
           createElement(ComposerQuotaPanel, {
             store: usage,

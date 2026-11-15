@@ -186,8 +186,8 @@ export default definePlugin({
       screen('insights-query', { path: 'insights/query' }),
     ],
     panels: [
-      // The quota readout in the top bar, and a ferret's own insights next to it.
-      panel('top', { id: 'quota', order: 70 }),
+      // The account's quota on a ferret's row in the list (v4 shows no quota in a top bar), and a ferret's own insights.
+      panel('ferrets.list-row-mark', { id: 'quota', order: 70 }),
       panel('ferret.side', { id: 'insights', order: 70 }),
       // Info › Usage (context, turns, tokens, cost and the login's quota), and the machine home's "Spend today" tile.
       panel('ferret.side', { id: 'usage', order: 65 }),

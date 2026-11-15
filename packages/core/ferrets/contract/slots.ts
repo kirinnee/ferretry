@@ -23,6 +23,9 @@ export const FILES_SEARCH_SLOT = 'ferrets.files-search' as const;
 /** The new-ferret page's registered-projects picker: Projects contributes it; a pick fills the folder field. */
 export const NEW_FERRET_PROJECT_SLOT = 'ferrets.new-ferret-project' as const;
 
+/** A ferret row in the list: plugins draw a small mark on it (Usage: the account's quota). */
+export const FERRET_LIST_ROW_MARK_SLOT = 'ferrets.list-row-mark' as const;
+
 /** The two account slots Runtimes contributes its runtime picker to, in one list a test can pair against its panels. */
 export const FERRET_ACCOUNT_SLOTS = [NEW_FERRET_ACCOUNT_SLOT, MOVE_ACCOUNT_SLOT] as const;
 
@@ -32,6 +35,7 @@ export const FERRET_SLOTS = [
   ACTIONS_ROW_SLOT,
   FILES_SEARCH_SLOT,
   NEW_FERRET_PROJECT_SLOT,
+  FERRET_LIST_ROW_MARK_SLOT,
 ] as const;
 export type FerretSlot = (typeof FERRET_SLOTS)[number];
 
@@ -169,6 +173,19 @@ export interface NewFerretProjectSlotProps {
   readonly value: string;
   /** Fills the folder field with a registered project's folder. */
   readonly onPick: (folder: string) => void;
+}
+
+/** What a list row hands a mark panel: the ferret, and the runtime (the account) it runs on. */
+export interface FerretListRowMarkSlotProps {
+  readonly ferret: string;
+  /** The runtime's wrapper id: what an account feed names its rows by. */
+  readonly runtime: string;
+}
+
+export function isFerretListRowMarkSlotProps(props: unknown): props is FerretListRowMarkSlotProps {
+  if (typeof props !== 'object' || props === null) return false;
+  const candidate = props as Record<string, unknown>;
+  return typeof candidate.ferret === 'string' && typeof candidate.runtime === 'string';
 }
 
 export function isActionsRowSlotProps(props: unknown): props is ActionsRowSlotProps {

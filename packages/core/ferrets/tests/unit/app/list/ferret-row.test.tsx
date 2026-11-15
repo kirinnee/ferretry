@@ -7,7 +7,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { FerretRow } from '../../../../app/features/list/ferret-row.tsx';
 import { RowMenuContext, type RowMenuRequest } from '../../../../app/features/list/row-menu-context.ts';
-import type { FerretSummary } from '../../../../contract/index.ts';
+import { WithSlotPanels } from '@ferretry/app/testing';
+import { FERRET_LIST_ROW_MARK_SLOT, type FerretSummary } from '../../../../contract/index.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { summary as ferretSummary } from './support.ts';
 
@@ -86,5 +87,38 @@ describe('the row menu seam', () => {
     expect(document.activeElement).toBe(row);
     await mounted?.unmount();
     expect(requests[0]?.focusRow()).toBe(false);
+  });
+});
+
+describe('the marks other plugins draw on a row', () => {
+  const place = (ferret: FerretSummary) => (
+    <WithSlotPanels
+      slots={{
+        [FERRET_LIST_ROW_MARK_SLOT]: [
+          {
+            plugin: 'usage',
+            id: 'quota',
+            view: props => <b data-test-mark={`${String(props.ferret)}:${String(props.runtime)}`}>quota</b>,
+          },
+        ],
+      }}
+    >
+      <ul>
+        <FerretRow active={false} daemon="alpha" ferret={ferret} />
+      </ul>
+    </WithSlotPanels>
+  );
+
+  it('hands the ferret and its runtime to what a plugin contributes to the row-mark slot', async () => {
+    mounted = await mount(place(ferretSummary('a', { runtime: 'claude-main' })));
+    const marks = must(mounted.container.querySelector('[data-sbar-marks]'), 'the marks line');
+    expect(marks.querySelector('[data-test-mark]')?.getAttribute('data-test-mark')).toBe('a:claude-main');
+    expect(marks.textContent).toBe('quota');
+  });
+
+  it('draws no marks line for a ferret that names no runtime, so nothing is asked for an unknown account', async () => {
+    mounted = await mount(place({ ...ferretSummary('a'), runtime: undefined }));
+    expect(mounted.container.querySelector('[data-sbar-marks]')).toBeNull();
+    expect(mounted.container.querySelector('[data-test-mark]')).toBeNull();
   });
 });

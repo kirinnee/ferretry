@@ -20,12 +20,22 @@
  * they stay in their folders, still marked. Nothing else puts a ferret there: a ferret parked on the owner is a status.
  *
  * PINNED ferrets lift into "Pinned" above everything, oldest pin first, and are not repeated below. The rest group by
- * folder (Ferrets cannot read the Projects list, so the group key is the normalised folder and its name the folder's
- * base name), newest activity first inside a group, the busiest group first.
+ * folder, newest activity first inside a group, the busiest group first. Ferrets cannot read the Projects registry, so
+ * which registered project a folder belongs to is Projects' answer (`ferrets.list-scope`): its key and name when it
+ * covers the folder, else the normalised folder named by its base name.
+ *
+ * FOLDER MODE. While the focus names a group, only that group's ferrets are drawn (Pinned and Needs you included: a
+ * focus is the reader's word that nothing else matters now). A focus on a folder no project covers and no ferret is in
+ * is STALE (`scopeIsStale`) and the list asks Projects to drop it.
  */
 
 import type { ModeFilter } from '@ferretry/app';
-import type { FerretNeedsYou, FerretSummary } from '../../../contract/index.ts';
+import type {
+  FerretListGroupKey,
+  FerretListScopeSnapshot,
+  FerretNeedsYou,
+  FerretSummary,
+} from '../../../contract/index.ts';
 import { statusMark } from '../../lib/status-mark.tsx';
 import { folderBaseName, normalizeFolder } from '../new-ferret/recent-folders.ts';
 
@@ -135,17 +145,25 @@ const activityAt = (ferret: FerretSummary): number => {
 
 const byActivity = (left: FerretSummary, right: FerretSummary): number => activityAt(right) - activityAt(left);
 
-/** The group a ferret belongs to: its normalised folder, named by the folder's base name. */
-const groupOf = (ferret: FerretSummary): { readonly key: string; readonly name: string } => {
+/** Which group a folder files under, as the project provider says ("no say": the list's own folder grouping). */
+export type GroupOf = (folder: string) => FerretListGroupKey | null;
+
+/**
+ * The group a ferret belongs to: the registered project that covers its folder, as the provider (`ferrets.list-scope`)
+ * names it, else its normalised folder named by the folder's base name.
+ */
+export const groupOf = (ferret: FerretSummary, provided?: GroupOf): FerretListGroupKey => {
+  const registered = provided?.(ferret.folder);
+  if (registered !== null && registered !== undefined) return registered;
   const key = normalizeFolder(ferret.folder);
   return { key, name: key === '' ? 'ungrouped' : folderBaseName(key) };
 };
 
-/** Groups by folder; rows newest first, the busiest group first and ties by name. */
-export const groupByFolder = (ferrets: readonly FerretSummary[]): readonly FerretGroup[] => {
+/** Groups by folder (or by registered project); rows newest first, the busiest group first and ties by name. */
+export const groupByFolder = (ferrets: readonly FerretSummary[], provided?: GroupOf): readonly FerretGroup[] => {
   const groups = new Map<string, { name: string; path: string; rows: FerretSummary[] }>();
   for (const ferret of ferrets) {
-    const { key, name } = groupOf(ferret);
+    const { key, name } = groupOf(ferret, provided);
     const existing = groups.get(key);
     if (existing) existing.rows.push(ferret);
     else groups.set(key, { name, path: key, rows: [ferret] });
@@ -169,10 +187,13 @@ export const ferretListView = (
   filter: FerretListFilter,
   keep?: (ferret: FerretSummary) => boolean,
   waiting?: NeedsYouRead,
+  scoped?: FerretListScopeSnapshot,
 ): FerretListView => {
   const needing = waiting?.needing;
+  const inScope = (ferret: FerretSummary): boolean =>
+    scoped?.scope == null || groupOf(ferret, scoped.groupOf).key === scoped.scope;
   const drawn = ferrets.filter(
-    ferret => listedBeforeMode(ferret, filter, keep, needing) && matchesMode(ferret, filter.mode),
+    ferret => listedBeforeMode(ferret, filter, keep, needing) && matchesMode(ferret, filter.mode) && inScope(ferret),
   );
   const unpinned = drawn.filter(ferret => !isPinned(ferret));
   const gathered =
@@ -180,7 +201,10 @@ export const ferretListView = (
   return {
     pinned: drawn.filter(isPinned).sort(byPinOrder),
     needsYou: waiting === undefined ? [] : [...gathered].sort(byNeedsYouOrder(waiting.needing)),
-    groups: groupByFolder(unpinned.filter(ferret => !gathered.includes(ferret))),
+    groups: groupByFolder(
+      unpinned.filter(ferret => !gathered.includes(ferret)),
+      scoped?.groupOf,
+    ),
     ...listTallies(ferrets, filter, keep, needing),
   };
 };
@@ -207,3 +231,12 @@ const HOME_PREFIX = /^\/(?:home|Users)\/[^/]+(?=\/|$)/u;
  * it from the LEFT, so the worktree's own name — the part that differs — stays.
  */
 export const ferretDirectory = (ferret: FerretSummary): string => ferret.folder.replace(HOME_PREFIX, '~');
+
+/**
+ * The focus names a folder this daemon does not know: no registered project covers it and no ferret files under it. A
+ * folder that is known but has no ferrets right now is NOT stale (the list says it is empty); a deleted one is.
+ */
+export const scopeIsStale = (ferrets: readonly FerretSummary[], scoped: FerretListScopeSnapshot): boolean =>
+  scoped.scope !== null &&
+  scoped.groupOf(scoped.scope) === null &&
+  !ferrets.some(ferret => groupOf(ferret, scoped.groupOf).key === scoped.scope);

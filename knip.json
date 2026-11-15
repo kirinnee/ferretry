@@ -86,8 +86,7 @@
     },
     "packages/plugins/projects": {
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}"],
-      "ignore": ["app/hooks/use-project-scope.ts"]
+      "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/runtimes": {
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx", "tests/**/fixtures/**/*.{ts,tsx}"],

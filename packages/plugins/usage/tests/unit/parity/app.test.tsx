@@ -227,6 +227,39 @@ describe('usage parity · Model pricing and the session surface', () => {
     await view.unmount();
   });
 
+  it('the quota is drawn on a ferret’s row in the list, never in a top bar, for the account the row’s runtime names', async () => {
+    expect(manifest.ui.panels.find(entry => entry.id === 'quota')).toMatchObject({ slot: 'ferrets.list-row-mark' });
+    expect(manifest.ui.panels.some(entry => entry.slot === 'top')).toBe(false);
+    const feedOf = () => ({
+      at: '2026-08-01T09:00:00.000Z',
+      stale: false,
+      accounts: [
+        { agent: 'claude-auto-work', fiveHourPercent: 42, weeklyPercent: 10, atLimit: false, authOk: true },
+        { agent: 'codex-tight', fiveHourPercent: 95, weeklyPercent: 80, atLimit: false, authOk: true },
+      ],
+    });
+    const { half } = halfOver({ 'GET /v1/usage': feedOf });
+    const named = await mount(
+      asElement(half.panels.quota({ subject: 'ferret-7', ferret: 'ferret-7', runtime: 'claude-auto-work' } as never)),
+    );
+    await settle();
+    expect(named.container.textContent).toContain('5h 42%');
+    expect(named.container.textContent).not.toContain('95%');
+    await named.unmount();
+    // A runtime the feed does not name draws nothing: not the account nearest its limit, not a dash, not 0%.
+    const other = await mount(
+      asElement(half.panels.quota({ subject: 'ferret-8', ferret: 'ferret-8', runtime: 'some-other-login' } as never)),
+    );
+    await settle();
+    expect(other.container.textContent).toBe('');
+    await other.unmount();
+    // A row that hands no runtime draws nothing either.
+    const bare = await mount(asElement(half.panels.quota({ subject: 'ferret-9' })));
+    await settle();
+    expect(bare.container.textContent).toBe('');
+    await bare.unmount();
+  });
+
   it('the composer quota is a composer.tools panel that shows the account its ferret runs on, and says unknown otherwise', async () => {
     expect(manifest.ui.panels.find(entry => entry.id === 'composer-quota')).toMatchObject({ slot: 'composer.tools' });
     const feedOf = () => ({

@@ -1,6 +1,6 @@
 /**
  * THE VIEWS THE MANIFEST DECLARES, composed from today's components: the Insights screens (`insights`,
- * `insights-query`), the top-bar quota readout (`top:quota`), a ferret's own insights (`ferret.side:insights`) and the
+ * `insights-query`), the list-row quota (`ferrets.list-row-mark:quota`), a ferret's own insights (`ferret.side:insights`) and the
  * three Settings tabs (`budgets`, `model-pricing`, `performance`). Each takes the daemon's client the shell built the
  * half with; none reaches a daemon any other way.
  */
@@ -49,24 +49,17 @@ export function FerretInsightsPanel({ client, subject }: { readonly client: Usag
 }
 
 /**
- * `top:quota`: the quota readout in the top bar, from the daemon's cached account feed (`GET /v1/usage`). The login
- * of the ferret in view is Ferrets' to name, so the readout shows that account when `subject` names one the feed
- * carries and otherwise the account closest to its limit; unknown stays "quota —", never 0%.
+ * `ferrets.list-row-mark:quota`: the quota of the account a listed ferret runs on, on its row, from the daemon's cached
+ * account feed (`GET /v1/usage`). Ferrets names the runtime (`runtime`); a runtime the feed does not carry draws
+ * nothing, never the account nearest its limit and never a confident 0% (unknown is not zero, and a "quota —" on every
+ * API-key row would be noise).
  */
-export function QuotaPanel({ store, subject }: { readonly store: DaemonUsageStore; readonly subject?: string }) {
+export function QuotaPanel({ store, runtime }: { readonly store: DaemonUsageStore; readonly runtime?: string }) {
   const connection = useDaemonConnection();
-  const slice = useUsage(store, connection);
-  const accounts = slice.feed?.accounts ?? [];
-  const named = accounts.find(account => account.agent === subject);
-  const tightest = [...accounts].sort(
-    (left, right) =>
-      Math.max(right.fiveHourPercent ?? 0, right.weeklyPercent ?? 0) -
-      Math.max(left.fiveHourPercent ?? 0, left.weeklyPercent ?? 0),
-  )[0];
-  const account = named ?? tightest;
+  useUsage(store, connection);
   const quota =
-    account === undefined ? null : store.quotaFor(connection.daemonId, { state: {}, config: { agent: account.agent } });
-  return createElement(QuotaReadout, { quota, showUnknown: true, className: 'text-meta' });
+    runtime === undefined ? null : store.quotaFor(connection.daemonId, { state: {}, config: { agent: runtime } });
+  return createElement(QuotaReadout, { quota, className: 'text-meta' });
 }
 
 /**
