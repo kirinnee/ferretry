@@ -293,6 +293,7 @@
         "@ferretry/plugin-access": "workspace:*",
         "@ferretry/plugin-connections": "workspace:*",
         "@ferretry/plugin-projects": "workspace:*",
+        "@ferretry/plugin-runtimes": "workspace:*",
         "@ferretry/plugin-skills": "workspace:*",
         "@ferretry/std": "workspace:*",
         "lucide-react": "^0.468.0",

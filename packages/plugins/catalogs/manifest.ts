@@ -7,6 +7,7 @@ import { definePlugin, memberRoute, panel, route, screen, verb } from '@ferretry
 import { AccessPort } from '@ferretry/plugin-access/contract';
 import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
+import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
 import { SKILLS_ADD_SLOT, SkillsPort } from '@ferretry/plugin-skills/contract';
 import {
   AUDIT,
@@ -68,7 +69,7 @@ export default definePlugin({
   needs: { access: AccessPort, gate: GatePort, vault: VaultPort, sealed: SealedDocumentsPort },
   /** Projects is optional: off, an install can only target the project folders the item providers name. */
   // Skills: the app half reads the skills.add slot's props shape (add-skills page) and Skills' machine inventory (`GET /v1/skills`).
-  uses: { connections: ConnectionsPort, projects: ProjectsPort, skills: SkillsPort },
+  uses: { connections: ConnectionsPort, projects: ProjectsPort, skills: SkillsPort, runtimes: RuntimesPort },
   provides: { catalogs: CatalogsPort, shareWindow: ShareWindowPort },
 
   // The install mapping offers the person the NAMES of their secrets for a `${secret:NAME}` placeholder (never a value),
