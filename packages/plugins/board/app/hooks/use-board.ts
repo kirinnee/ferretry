@@ -4,7 +4,7 @@
  *   useBoard(store, machines, filters)   every paired machine's cards, grouped project → lane, with the
  *                                        header's counts; live (`board.changed`) and re-derived every 30s
  *   useBoardCard(store, machine, id)     one card in full, by `(machine, id)`
- *   useBoardTasks(store, machine, ids)   several cards in full, in the order asked for
+ *   useBoardCards(store, machine, ids)   several cards in full, in the order asked for
  *   useBoardProjects(store, machines)    each machine's projects with their lane sets
  *   useBoardActions(store, ms)           move / reopen / depend / note / link / drop / editField
  *   useBoardFilters(...)                 the filter set read from, and written to, the URL query
@@ -149,6 +149,28 @@ export const useBoardCard = (
     () => (daemonId === undefined ? IDLE_BOARD_TASK : store.taskState(daemonId, id)),
     () => IDLE_BOARD_TASK,
   );
+};
+
+/** Several cards in full, in the order asked for; each is watched while the caller is mounted. */
+export const useBoardCards = (
+  store: DaemonBoardStore,
+  machine: DaemonConnection,
+  ids: readonly CardId[],
+  options: { readonly beat?: boolean } = {},
+): readonly BoardCardState[] => {
+  const beat = options.beat !== false;
+  const [, bump] = useReducer((count: number) => count + 1, 0);
+  const wanted = ids.join('\u0000');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the joined ids are the deliberate key
+  useEffect(() => {
+    const releases = ids.map(id => store.watchTask(machine, id, { beat }));
+    const stop = store.subscribe(bump);
+    return () => {
+      stop();
+      for (const release of releases) release();
+    };
+  }, [store, machine.daemonId, wanted, beat]);
+  return ids.map(id => store.taskState(machine.daemonId, id));
 };
 
 /** Each machine's projects and lane sets;  */
