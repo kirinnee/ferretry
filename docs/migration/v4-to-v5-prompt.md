@@ -273,7 +273,7 @@ bash "$S" rollback --notes "$NOTES" --owner-yes            # add --restart once 
 ```
 
 `rollback` reads the notes, so it acts only on what happened: it reaches a quiet point and stops any v5 daemon (proved
-by the process list, not by a marker), closes the tmux sessions v5 started that the baseline does not name (it says how many it closed and how many v4-owned ones it left alone; a v4-owned pane is never touched), moves the v5 home aside only if the backup exists, restores the backup, puts the
+by the process list, not by a marker), closes only the tmux sessions it can prove v5 started (the real v5 socket, `fy-<id>` of a ferret in v5's registry, not named by the baseline; with no readable, non-empty baseline it closes nothing, and it names what it left alone), moves the v5 home aside only if the backup exists, restores the backup, puts the
 v4 programs back from the recorded state (including "neither installed"), restores the recorded `PATH` and `FY_URL`
 exactly, starts v4, and restarts **only the recorded ferrets by id**: v5 may have relaunched their harnesses with its own
 hooks, so `--restart` runs `fy restart <id>...` (bare `fy restart` only reports status) and then names only the ferrets that really restarted, with the counts of those queued, left alone and failed. If it exits non-zero, read what
