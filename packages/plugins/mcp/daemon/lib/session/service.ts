@@ -99,13 +99,22 @@ export interface McpLoginTarget {
   layerProfile(profile: McpLoginProfile, layer: string, governance: unknown): Promise<void>;
 }
 
+/** A folder a project write may land in, and the registered project's name when one owns it. */
+interface McpProjectFolder {
+  readonly root: string;
+  readonly name?: string;
+}
+
 export interface SessionMcpServiceDeps {
   readonly ferrets: {
     get(ferretId: string): Promise<McpFerretView | undefined>;
     list(): Promise<readonly McpFerretView[]>;
   };
-  /** Every folder a project write may land in: registered projects and live managed worktrees. */
-  projectRoots(): Promise<readonly string[]>;
+  /**
+   * Every folder a project write may land in: registered projects and live managed worktrees, each with the name of the
+   * project registered for it when there is one (Projects owns that name).
+   */
+  projectFolders(): Promise<readonly McpProjectFolder[]>;
   readonly files: McpProjectFiles;
   readonly login: McpLoginTarget;
 }
@@ -142,7 +151,7 @@ export const projectRootFor = (cwd: string, roots: readonly string[]): string | 
     .sort((left, right) => right.length - left.length)[0];
 };
 
-type ProjectTarget = { readonly path: string } | { readonly unavailable: string };
+type ProjectTarget = { readonly path: string; readonly name?: string } | { readonly unavailable: string };
 
 interface ProjectState {
   readonly path: string;
@@ -167,7 +176,14 @@ export class SessionMcpService {
     try {
       const reading = await this.deps.files.read(session.id, target.path);
       const servers = projectServers(parseMcpProjectFile(reading.text));
-      return { project: { path: target.path, etag: reading.etag, servers } };
+      return {
+        project: {
+          path: target.path,
+          ...(target.name === undefined ? {} : { name: target.name }),
+          etag: reading.etag,
+          servers,
+        },
+      };
     } catch (error) {
       if (error instanceof McpProjectFileError) return { project: null, projectUnavailable: error.message };
       throw error;
@@ -266,12 +282,17 @@ export class SessionMcpService {
 
   async #projectTarget(session: McpFerretView): Promise<ProjectTarget> {
     if (session.harness === 'codex') return { unavailable: CODEX_PROJECT };
-    const root = projectRootFor(session.folder, await this.deps.projectRoots());
+    const folders = await this.deps.projectFolders();
+    const root = projectRootFor(
+      session.folder,
+      folders.map(folder => folder.root),
+    );
     if (root === undefined)
       return {
         unavailable: `This ferret's folder, ${session.folder}, is not inside a registered project or a Ferretry worktree, so there is no project file to write. Register the project, or add the server to This login.`,
       };
-    return { path: posix.join(root, SESSION_MCP_PROJECT_FILE) };
+    const name = folders.find(folder => withoutTrailingSlash(folder.root) === root)?.name;
+    return { path: posix.join(root, SESSION_MCP_PROJECT_FILE), ...(name === undefined ? {} : { name }) };
   }
 
   async #projectState(session: McpFerretView): Promise<ProjectState> {

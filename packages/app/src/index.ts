@@ -25,6 +25,7 @@ export {
   type BackgroundViewProps,
   type DeviceViewProps,
   type DirectoryFetch,
+  type HostedRelayState,
   type PairedOver,
   type PairingAttempt,
   type PairingCarriers,

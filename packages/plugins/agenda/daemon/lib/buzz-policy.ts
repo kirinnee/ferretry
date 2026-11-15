@@ -11,6 +11,8 @@ export interface BuzzWords {
   readonly title: string;
   readonly body: string;
   readonly url: string;
+  /** Names the ONE event the buzz is about (never the `tag`, which a later event of the same ferret shares); absent: never skipped as a twin. */
+  readonly eventKey?: string;
 }
 
 /** The ledger key of an ask's own buzz: at most one per ask (a notice's `--buzz`, a card's ask). */
@@ -46,12 +48,14 @@ export function askBuzzWords(ask: BuzzableAsk): BuzzWords {
 /**
  * What the ONE buzz a stop makes says: "<ferret> is stopped · 3 need you". The count is in the title, never clipped away
  * by a long ferret name; the body is the ask the owner most likely wants first (the one blocking now, else the oldest),
- * and a tap opens it.
+ * and a tap opens it. Its event key is the stop's own moment ({@link stopBuzzKey}), so a LATER stop of the same ferret
+ * (same tag, another ask) is a new event on the phone and a re-delivery of this one is not.
  */
 export function stopBuzzWords(
   ferret: string,
   name: string,
   waiting: readonly [BuzzableAsk, ...BuzzableAsk[]],
+  stoppedAt: string,
 ): BuzzWords {
   const [first] = waiting;
   const count = waiting.length;
@@ -61,5 +65,6 @@ export function stopBuzzWords(
     title: `${shown} is stopped · ${count === 1 ? '1 needs you' : `${count} need you`}`,
     body: buzzBody(first.subject),
     url: askBuzzPath(ferret, first.id),
+    eventKey: stopBuzzKey(ferret, stoppedAt),
   };
 }

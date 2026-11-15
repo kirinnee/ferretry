@@ -11,6 +11,7 @@ import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
+import { arriveAtList } from '../../support/arrive-at-list.ts';
 import { interact, mount } from '../../support/dom.ts';
 import { CORE, FakeTransport, inventoryOf, json } from '../client/fixtures.ts';
 
@@ -197,7 +198,7 @@ afterEach(() => go('/'));
 
 describe('the app shell', () => {
   test('the home lists daemons grouped by machine', async () => {
-    go('/app/');
+    arriveAtList('/app/');
     const { runtime, storage } = setup({});
     const view = await mount(
       <App

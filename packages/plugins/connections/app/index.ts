@@ -300,6 +300,8 @@ export default provideToShell(implementApp(manifest, { build: ctx => buildConnec
   },
   carriers: ports => [connectFor(ports).router.dialer()],
   pairing: ports => connectFor(ports).pairing,
+  // What the one advertisement read said, for a screen with no daemon (first run): the same read the walks use.
+  hostedRelay: ports => connectFor(ports).discovery.fallback,
   member: ports =>
     memberCarriers({
       openSocket: ports.openSocket,

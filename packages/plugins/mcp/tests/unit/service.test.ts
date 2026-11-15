@@ -101,7 +101,13 @@ function login(
 }
 
 function service(
-  options: { views?: McpFerretView[]; roots?: string[]; files?: McpProjectFiles; login?: McpLoginTarget } = {},
+  options: {
+    views?: McpFerretView[];
+    roots?: string[];
+    folders?: { root: string; name?: string }[];
+    files?: McpProjectFiles;
+    login?: McpLoginTarget;
+  } = {},
 ): SessionMcpService {
   const views = options.views ?? [ferret('s1')];
   return new SessionMcpService({
@@ -109,7 +115,7 @@ function service(
       get: async id => views.find(view => view.id === id),
       list: async () => views,
     },
-    projectRoots: async () => options.roots ?? ['/work', '/work/repo/'],
+    projectFolders: async () => options.folders ?? (options.roots ?? ['/work', '/work/repo/']).map(root => ({ root })),
     files: options.files ?? new FakeFiles(),
     login: options.login ?? login().login,
   });
@@ -150,6 +156,18 @@ describe('listing a ferret project servers', () => {
         ],
       },
     });
+  });
+
+  it('should name the registered project that owns the folder, matching a root written with a trailing slash', async () => {
+    const files = new FakeFiles({ text: '{}', etag: ETAG });
+
+    const listing = await service({
+      files,
+      folders: [{ root: '/work' }, { root: '/work/repo/', name: 'Repo' }],
+    }).list('s1');
+
+    should(listing.project?.name).equal('Repo');
+    should(listing.project?.path).equal('/work/repo/.mcp.json');
   });
 
   it('should say why there is no project scope: Codex, an unknown folder, a file it will not read', async () => {

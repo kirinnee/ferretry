@@ -89,6 +89,34 @@ describe('buildPluginCommandSources', () => {
     await expect(seen[0]?.client.call('GET /v1/x')).resolves.toBe('conversation');
   });
 
+  it('hands a source the app hook reader the shell gave, and none when the shell gave none', () => {
+    const seen: PluginCommandContext[] = [];
+    const surfaces = [
+      entryOf(
+        'conversation',
+        contributing('conversation', context => {
+          seen.push(context);
+          return () => [];
+        }),
+      ),
+    ];
+    const common = { surfaces, daemon: 'd1', clientOf: clientFor, navigate, screenHref, changed };
+    const asked: string[] = [];
+    buildPluginCommandSources({
+      ...common,
+      appHook: name => {
+        asked.push(name);
+        return { name };
+      },
+    });
+    buildPluginCommandSources(common);
+
+    expect(seen[0]?.appHook?.('conversation.x')).toEqual({ name: 'conversation.x' });
+    expect(asked).toEqual(['conversation.x']);
+    expect(seen[1]).toBeDefined();
+    expect('appHook' in (seen[1] as PluginCommandContext)).toBe(false);
+  });
+
   it('builds nothing for a plugin with no client on that daemon', () => {
     let builds = 0;
     const built = buildPluginCommandSources({

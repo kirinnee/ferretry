@@ -323,7 +323,11 @@ export default implementDaemon(manifest, {
         },
       },
       // G177: a project add lands only at a known root: a registered project or a live managed worktree.
-      projectRoots: async () => (await known()).map(folder => folder.root),
+      projectFolders: async () =>
+        (await known()).map(folder => ({
+          root: folder.root,
+          ...(folder.name === undefined ? {} : { name: folder.name }),
+        })),
       files: new RootMcpProjectFiles(async ferret => {
         const summary = await ferrets.get(ferret as FerretId);
         if (summary === undefined) throw new McpDocumentUnreadable(`no ferret ${ferret}`);
