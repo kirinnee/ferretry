@@ -13,6 +13,7 @@ import {
   type GrantSighting,
   grantStops,
   matchSignInGrant,
+  mergeScriptedOrigins,
   type SignInGrant,
 } from '../../../../daemon/lib/inputs/borrowed-grants.ts';
 import type { InputRequestField } from '../../../../daemon/lib/inputs/wire.ts';
@@ -626,5 +627,42 @@ describe('which misses stop a grant', () => {
 
   it('should word the line a plan miss leaves on the card the same whatever the reason', () => {
     should(GRANT_MISS_CONTEXT_LINE).equal("A task plan line didn't apply here, so you're asked as usual.");
+  });
+});
+
+describe('two accounts of where page scripts ran, read as one', () => {
+  it('should keep the latest time per host, the latest unreadable origin, and a running script from either', () => {
+    const merged = mergeScriptedOrigins(
+      {
+        hosts: new Map([
+          ['github.com', 5],
+          ['a.test', 9],
+        ]),
+        everywhere: 3,
+      },
+      undefined,
+      {
+        hosts: new Map([
+          ['github.com', 8],
+          ['b.test', 1],
+        ]),
+        everywhere: 7,
+        running: true,
+      },
+      { hosts: new Map([['github.com', 2]]), everywhere: 4 },
+    );
+
+    should([...merged.hosts]).eql([
+      ['github.com', 8],
+      ['a.test', 9],
+      ['b.test', 1],
+    ]);
+    should(merged.everywhere).equal(7);
+    should(merged.running).equal(true);
+  });
+
+  it('should say nothing ran, and nothing is running, when neither does', () => {
+    should(mergeScriptedOrigins({ hosts: new Map() }, undefined)).eql({ hosts: new Map() });
+    should(mergeScriptedOrigins()).eql({ hosts: new Map() });
   });
 });

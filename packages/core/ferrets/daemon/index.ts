@@ -15,6 +15,8 @@ import { type DaemonContext, type DaemonHalf, implementDaemon, perNeeder } from 
 import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import {
   type FerretId,
+  type Runner,
+  type RunnerHandle,
   FerretChanged,
   FerretStopping,
   FerretStarted,
@@ -63,7 +65,7 @@ import { SubtreeService } from './lib/session/pack/subtree.ts';
 import manifest from '../manifest.ts';
 import { ConditionalFleetList } from './lib/fleet-list/conditional.ts';
 import { outdatedMark } from './lib/fleet-list/outdated-mark.ts';
-import { FerretsService, RENAME_HTTP } from './lib/ferrets/service.ts';
+import { FerretsService, type FerretsPorts, RENAME_HTTP } from './lib/ferrets/service.ts';
 import { helperDecision, noHelperAdmission } from './lib/ferrets/helper-admission.ts';
 import { boundedReason } from './lib/ferrets/auto-resume.ts';
 import { parseRenameBody, parseResumeBody, parseStartBody, parseStopBody } from './lib/ferrets/wire.ts';
@@ -76,8 +78,9 @@ import { LedgerNameClaimStore, stateClaimLedger } from './adapters/names/name-cl
 import { StateCallsignCounters } from './adapters/names/state-callsign-counters.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from './lib/protocol/agent-address.ts';
 import { FerretRegistry } from './lib/registry/registry.ts';
+import { FerretSessionLifecycleLauncher } from './adapters/session/lifecycle/ferret-session-lifecycle-launcher.ts';
 import { FerretTokenDirectory, type TokenEntry } from './lib/tokens/tokens.ts';
-import type { TokenCutOff } from './lib/tokens/cut-off-mark.ts';
+import { DirectoryCutOff } from './lib/tokens/cut-off-mark.ts';
 import { instructionsAnswer } from './lib/agent-control/instructions.ts';
 import { LaunchEnvironmentStore, switchesOfRecord } from './lib/agent-control/launch-environment.ts';
 import { agentControlReader } from './lib/agent-control/reader.ts';
@@ -118,7 +121,7 @@ import { FerretMonitorSend, MonitorFiles, StorageMonitorWaits } from './adapters
 import { defaultSessionMonitorSettings } from './lib/session/monitor/index.ts';
 import { buildMonitor, MONITOR_RECORD_NAME, MONITOR_TICK_JOB } from './modules/monitor.ts';
 import { DaemonStorage } from './adapters/storage/session-storage.ts';
-import { SessionFiles } from './modules/session-files.ts';
+import { SessionFiles, type SessionFilesDeps } from './modules/session-files.ts';
 import { buildMoves, MOVE_ROUTE_KEYS } from './moves.ts';
 import { movesDeps } from './moves-deps.ts';
 import { fleetEventsAccept, followableFerret, HistoryEventSource } from './modules/fleet-events.ts';
@@ -315,24 +318,26 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     });
   // The token directory's half of an owner's cut-off, as the lifecycle's hash store reaches it: after the held tokens
   // load (an unloaded directory would read "not cut off"), and each write persists `tokens.json`.
-  const tokenCutOff: TokenCutOff = {
-    isCutOff: async ferret => {
-      await ready();
-      return tokens.isCutOff(ferret as FerretId);
-    },
-    cutOff: async ferret => {
-      await ready();
-      tokens.cutOff(ferret as FerretId, kernel.clock.now());
-      await saveTokens(tokens.snapshot());
-    },
-    restore: async ferret => {
-      await ready();
-      tokens.restore(ferret as FerretId);
-      await saveTokens(tokens.snapshot());
-    },
+  const tokenCutOff = new DirectoryCutOff({ ready, tokens, save: saveTokens, now: () => kernel.clock.now() });
+  const runnerOf = (): Runner | undefined => {
+    const found = hooks.provider(Runners, 'tmux');
+    return found === 'unavailable' ? undefined : found;
   };
-  const sessionFiles = new SessionFiles({
+  const sessionFilesDeps = {
+    // The members marked `satisfies` at the end are REQUIRED here (a daemon without them runs a second cut-off fact or no
+    // pane launcher), though a unit fixture may leave them off.
     tokenCutOff,
+    // The lifecycle's pane launcher: a thin adapter over Ferrets' own launch and stop (the held variants, the lifecycle
+    // holds the ferret's key on the shared queue), so a lifecycle opens a pane through the ONE launch path. `service` is
+    // built below; every call here is made after it exists.
+    launcher: new FerretSessionLifecycleLauncher({
+      launch: async ferret => await service.launchHeld(ferret),
+      stop: async (ferret, how, reason, cause) => await service.stopHeld(ferret, how, reason, cause),
+      handleOf: ferret => registry.get(ferret)?.handle as RunnerHandle | undefined,
+      runner: runnerOf,
+      sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
+      nowMs: () => kernel.clock.nowMs(),
+    }),
     roots: kernel.roots,
     storage: sessionStore,
     clock: { now: () => kernel.clock.now() },
@@ -354,7 +359,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       return record === undefined ? undefined : { record, details: registry.detailsOf(record.id) };
     },
     log,
-  });
+  } satisfies SessionFilesDeps & Required<Pick<SessionFilesDeps, 'tokenCutOff' | 'launcher'>>;
+  const sessionFiles = new SessionFiles(sessionFilesDeps);
   // Every held ferret gets its session document once the records and the store's archive are loaded, before any start
   // or resume reads the fleet's lineage (which refuses while an indexed ferret has none). Each stamp waits for it.
   void sessionFiles
@@ -467,7 +473,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       return err(`the login ${login} could not be read, so the ferret was not started`);
     }
   };
-  const service = new FerretsService(registry, tokens, {
+  const servicePorts = {
     launchEnvironment,
     launchSections: {
       write: async (ferret, sections) => await kernel.state.write(FerretLaunchSectionsFiles, { sections }, ferret),
@@ -492,10 +498,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       return found === 'unavailable' ? undefined : found;
     },
     harnessKeys: () => [...hooks.providers(Harnesses).keys()] as HarnessKey[],
-    runner: () => {
-      const found = hooks.provider(Runners, 'tmux');
-      return found === 'unavailable' ? undefined : found;
-    },
+    runner: runnerOf,
     decide: async input => {
       // RULING #43: today's pack.admit was mandatory for a child start, and Packs owns that answer on start.decide. A
       // child start or resume is admitted only when Packs ITSELF answered (its yes, or its no with its reason); no
@@ -662,7 +665,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     storedLastSnapshot: async ferret => await lastSnapshotReading.read(ferret),
     vault: needs.vault,
     asks: needs.asks,
-  });
+  } satisfies FerretsPorts & Required<Pick<FerretsPorts, 'serial' | 'cutOffMark'>>;
+  const service = new FerretsService(registry, tokens, servicePorts);
 
   // The turn watch (U4, RULING #44): the session observer's turn part on the main thread, every live ferret's pane looked
   // at through `Runner.look` at today's 2 s tick (a quiet pane backing off to 10 s), one pane per turn of the loop.

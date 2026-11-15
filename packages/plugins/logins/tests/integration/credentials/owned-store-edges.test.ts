@@ -4,7 +4,7 @@
  * throws during an active read, and a Check now whose folder is not there.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RootName, RootsPort } from '@ferretry/kernel/contract';
@@ -183,5 +183,154 @@ describe('the status ports', () => {
     const read = await ports.passiveUsage({ resolution: resolution(f.base) } as never);
 
     expect(read).toEqual(record);
+  });
+
+  test('a Codex rollout reading is recorded where the reader finds it: private, one JSON line, replaced whole', async () => {
+    const f = await fixture();
+    await mkdir(join(f.base, 'codex'));
+    const store = new OwnedLoginStore(f.root, () => NOW);
+    const subject = {
+      id: 'codex',
+      resolution: {
+        harness: 'codex',
+        store: 'ferretry',
+        ownedDirectory: join(f.base, 'codex'),
+        canonicalFile: join(f.base, 'codex', 'auth.json'),
+      },
+    } as never;
+    const ports = store.statusPorts({
+      anthropic: {} as never,
+      codex: {} as never,
+      refresh: { refresh: async () => ({ outcome: 'ran' }) },
+      usageIntervalMs: 60_000,
+    });
+    const first = { version: 1, source: 'codex-rollout', at: NOW - 60_000, fiveHour: { usedPercent: 10 } } as const;
+    const second = {
+      version: 1,
+      source: 'codex-rollout',
+      at: NOW,
+      fiveHour: { usedPercent: 25 },
+      weekly: { usedPercent: 4 },
+    } as const;
+
+    await store.recordPassiveUsage(subject, first);
+    await store.recordPassiveUsage(subject, second);
+
+    const file = join(f.base, 'codex', 'usage.json');
+    expect(await readFile(file, 'utf8')).toBe(`${JSON.stringify(second)}\n`);
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect(await ports.passiveUsage(subject)).toEqual(second);
+  });
+
+  describe('an older passive reading never replaces a newer persisted one', () => {
+    const codexSubject = (base: string) =>
+      ({
+        id: 'codex',
+        resolution: {
+          harness: 'codex',
+          store: 'ferretry',
+          ownedDirectory: join(base, 'codex'),
+          canonicalFile: join(base, 'codex', 'auth.json'),
+        },
+      }) as never;
+    const reading = (at: number, usedPercent: number) =>
+      ({ version: 1, source: 'codex-rollout', at, fiveHour: { usedPercent } }) as const;
+    const AT_0801 = Date.parse('2026-10-16T08:01:00Z');
+    const AT_0800 = Date.parse('2026-10-16T08:00:00Z');
+
+    test('08:01 at 99% survives a later write of 08:00 at 1%, from the same store and from a fresh one', async () => {
+      const f = await fixture();
+      await mkdir(join(f.base, 'codex'));
+      const subject = codexSubject(f.base);
+      const file = join(f.base, 'codex', 'usage.json');
+
+      const store = new OwnedLoginStore(f.root, () => NOW);
+      await store.recordPassiveUsage(subject, reading(AT_0801, 99));
+      await store.recordPassiveUsage(subject, reading(AT_0800, 1));
+      expect(await readFile(file, 'utf8')).toBe(`${JSON.stringify(reading(AT_0801, 99))}\n`);
+
+      // A daemon restart: no memory of what was recorded, only the file.
+      const restarted = new OwnedLoginStore(f.root, () => NOW);
+      await restarted.recordPassiveUsage(subject, reading(AT_0800, 1));
+      await restarted.recordPassiveUsage(subject, reading(AT_0801, 5));
+      expect(await readFile(file, 'utf8')).toBe(`${JSON.stringify(reading(AT_0801, 99))}\n`);
+      expect((await stat(file)).mode & 0o777).toBe(0o600);
+
+      await restarted.recordPassiveUsage(subject, reading(AT_0801 + 1, 7));
+      expect(await readFile(file, 'utf8')).toBe(`${JSON.stringify(reading(AT_0801 + 1, 7))}\n`);
+    });
+
+    test('two writers at once leave the newer reading, whichever order they arrive in', async () => {
+      const f = await fixture();
+      await mkdir(join(f.base, 'codex'));
+      const subject = codexSubject(f.base);
+      const file = join(f.base, 'codex', 'usage.json');
+
+      const store = new OwnedLoginStore(f.root, () => NOW);
+      await Promise.all([
+        store.recordPassiveUsage(subject, reading(AT_0801, 99)),
+        store.recordPassiveUsage(subject, reading(AT_0800, 1)),
+        store.recordPassiveUsage(subject, reading(AT_0800 - 1, 2)),
+      ]);
+      expect(await readFile(file, 'utf8')).toBe(`${JSON.stringify(reading(AT_0801, 99))}\n`);
+
+      const other = new OwnedLoginStore(f.root, () => NOW);
+      await rm(file);
+      await Promise.all([
+        other.recordPassiveUsage(subject, reading(AT_0800, 1)),
+        other.recordPassiveUsage(subject, reading(AT_0801, 99)),
+      ]);
+      expect(await readFile(file, 'utf8')).toBe(`${JSON.stringify(reading(AT_0801, 99))}\n`);
+    });
+
+    test('a write that fails is said to its caller and does not stop the next one', async () => {
+      const f = await fixture();
+      await mkdir(join(f.base, 'codex'));
+      const subject = codexSubject(f.base);
+      let failing = true;
+      const flaky = new OwnedLoginStore(
+        {
+          resolve: path => f.root.resolve(path),
+          readText: async path => await f.root.readText(path),
+          writeText: async (path, text, options) => {
+            if (failing) throw new Error('disk full');
+            await f.root.writeText(path, text, options);
+          },
+          stat: async path => await f.root.stat(path),
+          lstat: async path => await f.root.lstat(path),
+          ensurePrivateDirectory: async path => await f.root.ensurePrivateDirectory(path),
+        },
+        () => NOW,
+      );
+
+      const lost = flaky.recordPassiveUsage(subject, reading(AT_0800, 1));
+      const next = flaky.recordPassiveUsage(subject, reading(AT_0801, 2));
+      await expect(lost).rejects.toThrow('disk full');
+      await expect(next).rejects.toThrow('disk full');
+
+      failing = false;
+      await flaky.recordPassiveUsage(subject, reading(AT_0801, 2));
+      expect(await readFile(join(f.base, 'codex', 'usage.json'), 'utf8')).toBe(
+        `${JSON.stringify(reading(AT_0801, 2))}\n`,
+      );
+    });
+  });
+
+  test('a login this daemon does not own, or one with no sign-in directory, has no reading file to write', async () => {
+    const f = await fixture();
+    const store = new OwnedLoginStore(f.root, () => NOW);
+    const record = { version: 1, source: 'codex-rollout', at: NOW, fiveHour: { usedPercent: 1 } } as const;
+    const refused = [
+      { id: 'host', resolution: { harness: 'codex', store: 'host', unavailable: 'not in 5.0 yet' } },
+      { id: 'env', resolution: { harness: 'codex', store: 'environment' } },
+      {
+        id: 'bare',
+        resolution: { harness: 'codex', store: 'ferretry', canonicalFile: join(f.base, 'bare', 'auth.json') },
+      },
+    ] as never[];
+
+    for (const subject of refused) await store.recordPassiveUsage(subject, record);
+
+    expect(await readdir(f.base)).toEqual([]);
   });
 });

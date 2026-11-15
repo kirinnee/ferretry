@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { CoupledCapabilityHashStore, type TokenCutOff } from '../../../../daemon/lib/tokens/cut-off-mark.ts';
+import {
+  CoupledCapabilityHashStore,
+  DirectoryCutOff,
+  type TokenCutOff,
+} from '../../../../daemon/lib/tokens/cut-off-mark.ts';
+import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
+import { T0 } from '../../../../contract/testing/index.ts';
 import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 
 const ID = parseSessionId('mw7bp88g-50e00159');
@@ -116,5 +122,103 @@ describe('the lifecycle hash store kept in step with the token directory', () =>
     await expect(restoring).rejects.toThrow('document locked');
     expect(directory.has(ID)).toBe(true);
     expect(await subject.isCutOff(ID)).toBe(true);
+  });
+});
+
+describe('the token directory’s half of a cut-off', () => {
+  const FERRET = 'mw7bp88g-50e00159';
+
+  function directory(options: { readonly failSave?: () => boolean } = {}) {
+    const tokens = new FerretTokenDirectory();
+    const order: string[] = [];
+    const saves: number[] = [];
+    let ready: () => void = () => {};
+    const loaded = new Promise<void>(resolve => (ready = resolve));
+    const subject = new DirectoryCutOff({
+      ready: async () => {
+        await loaded;
+        order.push('ready');
+      },
+      tokens,
+      save: async entries => {
+        if (options.failSave?.() === true) throw new Error('disk full');
+        order.push('save');
+        saves.push(entries.length);
+      },
+      now: () => T0,
+    });
+    return { subject, tokens, order, saves, load: () => ready() };
+  }
+
+  test('should wait for the held tokens to load before it answers, so an unloaded directory never reads not cut off', async () => {
+    // Arrange
+    const f = directory();
+    f.tokens.cutOff(FERRET as never, T0);
+
+    // Act
+    let answer: boolean | undefined;
+    const asking = f.subject.isCutOff(FERRET).then(value => (answer = value));
+    await Bun.sleep(10);
+    const early = answer;
+    f.load();
+    await asking;
+
+    // Assert
+    expect(early).toBeUndefined();
+    expect(answer).toBe(true);
+  });
+
+  test('should say not cut off for a ferret the directory has no mark for', async () => {
+    // Arrange
+    const f = directory();
+    f.load();
+
+    // Act / Assert
+    expect(await f.subject.isCutOff(FERRET)).toBe(false);
+  });
+
+  test('should mark the directory and persist it when a ferret is cut off, after the load', async () => {
+    // Arrange
+    const f = directory();
+    f.load();
+
+    // Act
+    await f.subject.cutOff(FERRET);
+
+    // Assert
+    expect(f.tokens.isCutOff(FERRET as never)).toBe(true);
+    expect(f.order).toEqual(['ready', 'save']);
+    expect(f.saves).toEqual([1]);
+  });
+
+  test('should clear the mark and persist it when a person restores the ferret', async () => {
+    // Arrange
+    const f = directory();
+    f.load();
+    await f.subject.cutOff(FERRET);
+
+    // Act
+    await f.subject.restore(FERRET);
+
+    // Assert
+    expect(f.tokens.isCutOff(FERRET as never)).toBe(false);
+    expect(f.saves).toHaveLength(2);
+  });
+
+  test('should put the cut-off back in memory, and rethrow, when a restore cannot be saved', async () => {
+    // Arrange — the cut-off saved, then the restore's save fails
+    let failing = false;
+    const f = directory({ failSave: () => failing });
+    f.load();
+    await f.subject.cutOff(FERRET);
+    failing = true;
+
+    // Act
+    const restoring = f.subject.restore(FERRET);
+
+    // Assert — the process never runs less cut off than the file says
+    await expect(restoring).rejects.toThrow('disk full');
+    expect(f.tokens.isCutOff(FERRET as never)).toBe(true);
+    expect(await f.subject.isCutOff(FERRET)).toBe(true);
   });
 });

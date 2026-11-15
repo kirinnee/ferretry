@@ -65,6 +65,7 @@ export default implementDaemon(manifest, {
         'input.saved:saved': new AccountsSavedLogins({
           logins: a.core.logins,
           choice: a.core.choice,
+          grants: b.grants,
           ...(a.core.vault === undefined ? {} : { vault: a.core.vault }),
         }),
         'redaction.sources:source': a.masks,
