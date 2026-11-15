@@ -508,7 +508,9 @@ export class StepUpService {
     });
     const record = await this.deps.devices.device(device.deviceId);
     if (this.deps.announce !== undefined && record !== undefined)
-      await this.deps.announce(passkeyAddedNotice(record.name)).catch(() => undefined);
+      await this.deps
+        .announce(passkeyAddedNotice(record.name, device.deviceId, stored.createdAt))
+        .catch(() => undefined);
     return { ok: true, value: passkeyView(stored) };
   }
 
@@ -842,11 +844,15 @@ export class StepUpService {
  * What the owner's devices are told when a passkey is added, naming the device it was added to. Never
  * an id, a key or an origin: the person needs "was that me?", and a stranger reading a lock screen
  * needs nothing more.
+ *
+ * The TAG is shared by every passkey addition (one line a stranger's alert replaces); the EVENT KEY names ONE addition,
+ * the device and the instant, so a second passkey while the first notice shows is a new alert and a re-delivery of the
+ * same one is not.
  */
-export function passkeyAddedNotice(deviceName: string): PushNotificationPayload {
+export function passkeyAddedNotice(deviceName: string, deviceId: string, addedAt: string): PushNotificationPayload {
   return PushNotificationPayloadSchema.parse({
     version: 1,
-    eventKey: 'passkey-added',
+    eventKey: `passkey-added:${deviceId}:${addedAt}`,
     title: 'A passkey was added',
     body: `${deviceName} has a new passkey for this machine. If that was not you, revoke the device at the machine.`,
     tag: 'passkey-added',

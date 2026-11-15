@@ -12,7 +12,7 @@
  */
 
 import type { ReactNode } from 'react';
-import type { HostedRelayFallback } from './pending-connections.ts';
+import type { HostedRelayFallback } from './hosted-relay-state.ts';
 
 import {
   HOSTED_RELAY_DISABLED_NOTE,

@@ -13,6 +13,12 @@ export interface FerretWorkspaceActions {
   readonly daemon: string;
   /** The ferret this workspace is the page of. */
   readonly ferret: string;
+  /**
+   * Whether this connection may control that ferret. `ferret.side` panels are handed the ferret's id only
+   * (`PanelProps.subject`), so a panel that offers a write (MCP's "Add…") reads it here, as the actions-row slot reads
+   * `canControl` from its props. It only decides what is OFFERED: the daemon refuses the write all the same.
+   */
+  readonly canControl: boolean;
   /** Brings the panel with this id (`files`) on screen. A panel the layout does not place is ignored. */
   readonly showPanel: (panelId: string) => void;
 }
@@ -22,10 +28,11 @@ const WorkspaceActions = createContext<FerretWorkspaceActions | null>(null);
 export function FerretWorkspaceActionsProvider({
   daemon,
   ferret,
+  canControl,
   showPanel,
   children,
 }: FerretWorkspaceActions & { readonly children: ReactNode }) {
-  const value = useMemo(() => ({ daemon, ferret, showPanel }), [daemon, ferret, showPanel]);
+  const value = useMemo(() => ({ daemon, ferret, canControl, showPanel }), [daemon, ferret, canControl, showPanel]);
   return <WorkspaceActions.Provider value={value}>{children}</WorkspaceActions.Provider>;
 }
 
