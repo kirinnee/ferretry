@@ -676,6 +676,7 @@
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
+        "lucide-react": "^0.468.0",
         "react": "^19.0.0",
         "zod": "4.4.3",
       },

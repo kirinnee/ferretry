@@ -129,6 +129,7 @@ import { buildTurnWatch, turnWatchFailureFields } from './modules/turn-watch.ts'
 import { buildLiveEvents } from './modules/live-events.ts';
 import { FileLastSnapshotStore } from './adapters/session/snapshot/file-last-snapshot-store.ts';
 import { LastSnapshotCapture } from './lib/session/snapshot/capture.ts';
+import { LastSnapshotReading } from './lib/session/snapshot/read.ts';
 import { HarnessTranscript } from './adapters/session/live/harness-transcript.ts';
 import { applicableInstructions, outdatedSectionIds, sectionDigests } from './lib/ferrets/launch-sections.ts';
 import type { LaunchInstructionSectionId } from './lib/protocol/session.ts';
@@ -340,8 +341,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   // The launch environment: ONE store, written by every launch and read by `instructions` (stored over what the record
   // implies; RULING #30). Each section's flag is its OWNER's launch part: Pack's `FY_PACK`, Agenda's `FY_AGENDA` and
   // Conversation's `conversation-hypermedia` (FY_HYPERMEDIA, only when the owner set the ferret's switch) are registered.
-  // Lessons' `FY_LEARNING_PASSIVE` is registered too.
-  // GAP(ports-pending: Ferrets): with no hypermedia switch set, the mode default the pane is handed is not recorded.
+  // Lessons' `FY_LEARNING_PASSIVE` is registered too. With no hypermedia switch set, the launch itself hands the pane
+  // (and records) the mode's default (`modeSwitchDefaults`: on for an interactive ferret, off for an auto one).
   // Until each lands its section is not recorded, and `instructions` reads it as off: no stand-in. Each is one line in
   // ports-pending.json under its owner (ferrets).
   const launchEnvironment = new LaunchEnvironmentStore(
@@ -406,6 +407,14 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     redaction: kernel.redaction,
     sleep: async (delay, signal) => await kernel.clock.sleep(delay, signal),
     log,
+    yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
+  });
+  // The ferret's stored last screen, read back (`FerretsApi.lastSnapshot`): masked AGAIN on every read.
+  const lastSnapshotReading = new LastSnapshotReading({
+    // read-scoped: none — a factory typed LastSnapshotReader (read only); the text it returns is masked inside Redaction.read in LastSnapshotReading.read before it leaves
+    store: id => new FileLastSnapshotStore(sessionFiles.root(id), id),
+    redaction: kernel.redaction,
+    yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
   });
 
   // Bound once the turn watch is built below: a delivery into a ferret's pane brings its next look forward.
@@ -619,6 +628,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       if (!state.success) return {};
       return await kernel.redaction.read(scope => promptOf(state.data, text => scope.text(text)));
     },
+    // The stored last screen (`FerretsApi.lastSnapshot`): masked again with the Vault's values now; no frame on any failure.
+    storedLastSnapshot: async ferret => await lastSnapshotReading.read(ferret),
     vault: needs.vault,
     asks: needs.asks,
   });

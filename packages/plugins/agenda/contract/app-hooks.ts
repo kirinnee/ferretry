@@ -4,7 +4,7 @@
  * An ask about a card is Agenda's to draw and Board's to act on: "Done · closes &F12" sits in the ask's own answer
  * row, a notice's cards carry Start and Close, an Edit on a lane proposal opens the lane editor, and `&F12` in an
  * ask's words links to the card. Those writes, reads and pages are Board's, and neither half imports the other: Agenda
- * OFFERS the three hooks below and the plugin that holds the cards PROVIDES them, each over its own client on one
+ * OFFERS the three card hooks below and the plugin that holds the cards PROVIDES them, each over its own client on one
  * daemon. The names and the shapes are the whole agreement; Agenda narrows what it is given before it reads it.
  *
  * FAIL CLOSED. With no provider (Board not installed, not allowed on that daemon, or two plugins providing one name),
@@ -20,6 +20,23 @@ export const AGENDA_CARD_ANSWER_HOOK = 'agenda.card-answer' as const;
 export const AGENDA_LANE_PROPOSAL_HOOK = 'agenda.lane-proposal' as const;
 /** Whether `&F12` in an ask's words is a card, and where it opens. */
 export const AGENDA_CARD_REFERENCE_HOOK = 'agenda.card-reference' as const;
+
+/**
+ * The owner opened an ask here: its alerts come down on this device and, through the daemon, on the others. The alert
+ * lines on this device are Access's, so Agenda says WHEN and Access provides the hook; the machine's seen mark
+ * (`POST /v1/push/seen`) is Agenda's route, so Agenda hands Access the call to make and Access decides where in
+ * closing its lines to make it (its own lines first, then the tags the machine's answer names).
+ */
+export const AGENDA_ITEM_OPENED_HOOK = 'agenda.item-opened' as const;
+
+/** Tells the machine the ask was opened; answers the tags it names. Rejects when the machine could not be told. */
+export type AgendaSeenMark = () => Promise<{ readonly cleared: boolean; readonly tags: readonly string[] }>;
+
+/**
+ * `agenda.item-opened`: told the ferret (board id), the ask (`A3`) that was opened and the machine's seen mark. Best
+ * effort: it never rejects.
+ */
+export type AgendaItemOpened = (ferret: string, ask: string, seen: AgendaSeenMark) => Promise<unknown>;
 
 /** A card write's answer: done, or the refusal in words (`status` 0 when the request got no answer). */
 export type AgendaCardWrite<Value = undefined> =
@@ -95,6 +112,8 @@ export const isAgendaLaneProposal = (value: unknown): value is AgendaLaneProposa
 export const isAgendaCardReference = (value: unknown): value is AgendaCardReference =>
   functions(value, ['subscribe', 'watch', 'proves', 'href']);
 
+export const isAgendaItemOpened = (value: unknown): value is AgendaItemOpened => typeof value === 'function';
+
 /**
  * THE DECLARATION: every app hook Agenda offers, each with the narrowing that says a provided value has its shape. The
  * `app-hooks` check (`scripts/validate/app-hooks.ts`) pairs this record with what the compiled-in halves provide, and
@@ -106,5 +125,6 @@ export const AGENDA_APP_HOOKS = {
   [AGENDA_CARD_ANSWER_HOOK]: isAgendaCardAnswer,
   [AGENDA_LANE_PROPOSAL_HOOK]: isAgendaLaneProposal,
   [AGENDA_CARD_REFERENCE_HOOK]: isAgendaCardReference,
+  [AGENDA_ITEM_OPENED_HOOK]: isAgendaItemOpened,
 } as const;
 export type AgendaAppHook = keyof typeof AGENDA_APP_HOOKS;
