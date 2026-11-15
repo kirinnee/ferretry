@@ -3,3 +3,5 @@ export * from './file-wait-heartbeat.ts';
 export * from './monitor-tick-runner.ts';
 export * from './send-monitor-nudge.ts';
 export * from './storage-monitor-waits.ts';
+export * from './ferret-monitor-send.ts';
+export * from './monitor-files.ts';
