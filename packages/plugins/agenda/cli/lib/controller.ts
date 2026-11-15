@@ -325,10 +325,11 @@ export class AgendaController {
         'open agendas could take this; nothing was opened. Join one with agenda edit, or pass --new "<why none fits>"',
       );
     }
-    if (this.prompt?.interactive() !== true) throw new Error(`${listing}\n\nNothing was opened.`);
+    const prompt = this.prompt;
+    if (prompt?.interactive() !== true) throw new Error(`${listing}\n\nNothing was opened.`);
     this.out.diagnostic(listing);
     const plan = joinPlan(binary, closest, request, card);
-    if (await this.#confirmed(`Should this join ${agendaReference(closest.id)}?`)) {
+    if (await confirmed(prompt, `Should this join ${agendaReference(closest.id)}?`)) {
       this.out.success(joinAdvice(binary, closest, plan));
       return false;
     }
@@ -634,14 +635,6 @@ export class AgendaController {
     this.#report(snapshot, options, () => renderAgendaMutation('back on the list', agendaReference(id), snapshot));
   }
 
-  async #confirmed(question: string): Promise<boolean> {
-    if (this.prompt?.interactive() !== true) {
-      throw new Error('this needs a yes and nobody can be asked here: re-run with --yes to go ahead');
-    }
-    const answer = (await this.prompt.ask(`${question} [y/N]`)).trim().toLowerCase();
-    return answer === 'y' || answer === 'yes';
-  }
-
   async dismiss(reference: string, options: AgendaResolveOptions): Promise<void> {
     const id = parseAgendaReference(reference);
     const note = text(options.note);
@@ -737,3 +730,9 @@ function onlyNewId(before: AgendaListSnapshot, after: AgendaListSnapshot): Agend
 /** How many of a command's `--json-file` and `--body-file` read standard input: the tab files may take one more. */
 const stdinCount = (options: { readonly jsonFile?: string; readonly bodyFile?: string }): number =>
   [options.jsonFile, options.bodyFile].filter(path => path?.trim() === '-').length;
+
+/** Whether the person at the terminal said yes: only `y` or `yes`, any case; Enter and anything else is no. */
+async function confirmed(prompt: IAgendaPrompt, question: string): Promise<boolean> {
+  const answer = (await prompt.ask(`${question} [y/N]`)).trim().toLowerCase();
+  return answer === 'y' || answer === 'yes';
+}

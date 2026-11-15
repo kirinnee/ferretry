@@ -887,3 +887,241 @@ describe('agenda controller tabs (agenda.tabs.1)', () => {
     should(out.messages[0]).containEql('tabs: Where we are now · Risks (one in full: agenda show !A2 --tab <name>)');
   });
 });
+
+describe('agenda controller add — what it refuses before anything is raised', () => {
+  const mine = snapshot([agentItem('A3', 'pick a relay', { title: 'Pick a relay' })]);
+  const withBoard = (board = mine) => {
+    const gateway = new RecordingAgendaGateway(board);
+    const out = new CapturingOutput();
+    return { gateway, out, controller: new AgendaController(gateway, out, SESSION) };
+  };
+
+  it('should say which of --premise and --context an add without a brief is missing, and send nothing', async () => {
+    // Arrange
+    const { controller, gateway } = withBoard();
+
+    // Act
+    const failure = await controller
+      .add(['pick', 'a', 'relay'], { title: 'Pick a relay' })
+      .catch((error: unknown) => error);
+
+    // Assert
+    should((failure as Error).message).match(/^agenda add needs --premise and --context: /u);
+    should((failure as Error).message).containEql(
+      'say --premise "<what is going on>" --context "<the facts around it>"',
+    );
+    should(gateway.applied).be.empty();
+  });
+
+  it('should refuse a blank --new, which is a reason that gives none', async () => {
+    // Arrange
+    const { controller, gateway } = withBoard();
+
+    // Act
+    const failure = await controller
+      .add(['pick', 'a', 'relay'], { ...BRIEF, title: 'Pick a relay', new: '   ' })
+      .catch((e: unknown) => e);
+
+    // Assert
+    should((failure as Error).message).equal('--new needs the reason no open agenda fits: --new "<why none fits>"');
+    should(gateway.applied).be.empty();
+  });
+
+  it('should refuse --new together with --related, since one says "none fits" and the other names what does', async () => {
+    // Arrange
+    const { controller, gateway } = withBoard();
+
+    // Act
+    const failure = await controller
+      .add(['pick', 'a', 'relay'], { ...BRIEF, title: 'Pick a relay', new: 'its own decision', related: 'A3' })
+      .catch((error: unknown) => error);
+
+    // Assert
+    should((failure as Error).message).equal('pass --new or --related <id>, not both');
+    should(gateway.applied).be.empty();
+  });
+
+  it('should refuse --task together with --related when --related names a card', async () => {
+    // Arrange
+    const { controller, gateway } = withBoard();
+
+    // Act
+    const failure = await controller
+      .add(['pick', 'a', 'relay'], { ...BRIEF, title: 'Pick a relay', task: 'F12', related: 'F13' })
+      .catch((error: unknown) => error);
+
+    // Assert
+    should((failure as Error).message).equal('pass --task <card> or --related <card>, not both');
+    should(gateway.applied).be.empty();
+  });
+
+  it('should answer --related with your own item by pointing at the edit that rewords it, raising nothing', async () => {
+    // Arrange
+    const { controller, gateway, out } = withBoard();
+
+    // Act
+    await controller.add(['choose', 'a', 'relay'], { ...BRIEF, title: 'Pick a relay', related: 'A3' });
+
+    // Assert
+    should(gateway.applied).be.empty();
+    should(out.messages[0]).equal(
+      "!A3 is already yours, so nothing was raised. Reword it instead:\nfy agenda edit A3 --title 'Pick a relay' --summary 'choose a relay'",
+    );
+  });
+
+  it('should treat --related naming a card as tying the new item to that card, and open it', async () => {
+    // Arrange
+    const { controller, gateway } = withBoard(snapshot([]));
+
+    // Act
+    await controller.add(['pick', 'a', 'relay'], { ...BRIEF, title: 'Pick a relay', related: 'F13' });
+
+    // Assert
+    should(gateway.applied).have.length(1);
+    should(gateway.applied[0]?.request).containDeep({ action: 'add', subject: 'pick a relay', task: { id: 'F13' } });
+  });
+
+  it('should refuse --related with an item that is not in your agenda: it is another ferret’s to change', async () => {
+    // Arrange
+    const { controller, gateway } = withBoard();
+
+    // Act
+    const failure = await controller
+      .add(['choose', 'a', 'relay'], { ...BRIEF, title: 'Pick a relay', related: 'A7' })
+      .catch((e: unknown) => e);
+
+    // Assert
+    should((failure as Error).message).equal('no agenda item !A7 in your agenda; nothing was raised');
+    should(gateway.applied).be.empty();
+  });
+});
+
+describe('agenda controller show --json', () => {
+  it('should print the item as JSON, whole', async () => {
+    // Arrange
+    const item = humanItem('A1', 'approve the deploy');
+    const gateway = new RecordingAgendaGateway(snapshot([item]));
+    const out = new CapturingOutput();
+    const controller = new AgendaController(gateway, out, SESSION);
+
+    // Act
+    await controller.show('A1', { json: true });
+
+    // Assert
+    should(JSON.parse(out.messages[0] ?? '')).deepEqual(item);
+  });
+});
+
+describe('agenda controller answer and rest', () => {
+  const build2 = () => {
+    const gateway = new RecordingAgendaGateway(snapshot([agentItem('A4', 'pick a relay')]));
+    const out = new CapturingOutput();
+    return { gateway, out, controller: new AgendaController(gateway, out, SESSION) };
+  };
+
+  it('should send the words as the ferret’s answer on the item', async () => {
+    // Arrange
+    const { controller, gateway, out } = build2();
+
+    // Act
+    await controller.answer('A4', ['Relay', 'B', 'is', 'cheaper'], {});
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'edit', id: 'A4', questionAnswer: 'Relay B is cheaper' });
+    should(out.messages[0]).containEql('answered !A4');
+  });
+
+  it('should refuse an answer of only blanks, and a bad reference, before the daemon is asked', async () => {
+    // Arrange
+    const { controller, gateway } = build2();
+
+    // Act / Assert
+    await should(controller.answer('A4', ['  ', ''], {})).be.rejectedWith(
+      'say the answer: `agenda answer A4 "<text>"`',
+    );
+    await should(controller.answer('nope', ['x'], {})).be.rejected();
+    should(gateway.applied).be.empty();
+  });
+
+  it('should take an item on as working with a trimmed why', async () => {
+    // Arrange
+    const { controller, gateway, out } = build2();
+
+    // Act
+    await controller.rest('A4', { why: '  Reading the logs ' });
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'rest', id: 'A4', why: 'Reading the logs' });
+    should(out.messages[0]).containEql('resting (working) !A4');
+  });
+
+  it('should refuse resting without saying what is being done', async () => {
+    // Arrange
+    const { controller, gateway } = build2();
+
+    // Act / Assert
+    await should(controller.rest('A4', { why: ' ' })).be.rejectedWith(
+      'say what you are doing: `agenda rest A4 --why "<what>"`',
+    );
+    should(gateway.applied).be.empty();
+  });
+});
+
+describe('agenda controller snooze and unsnooze', () => {
+  const NOW = Date.parse('2026-11-04T12:00:00.000Z');
+  const build3 = () => {
+    const gateway = new RecordingAgendaGateway(snapshot([humanItem('A1', 'approve the deploy')]));
+    const out = new CapturingOutput();
+    const controller = new AgendaController(gateway, out, SESSION, undefined, () => NOW);
+    return { gateway, out, controller };
+  };
+
+  it('should snooze for a span: until now plus that span', async () => {
+    // Arrange
+    const { controller, gateway, out } = build3();
+
+    // Act
+    await controller.snooze('A1', { for: '4h' });
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'snooze', id: 'A1', until: '2026-11-04T16:00:00.000Z' });
+    should(out.messages[0]).containEql('snoozed until 2026-11-04T16:00:00.000Z !A1');
+  });
+
+  it('should snooze until a time given, naming --until when it is not a time', async () => {
+    // Arrange
+    const { controller, gateway } = build3();
+
+    // Act
+    await controller.snooze('A1', { until: '2026-11-05T09:00:00Z' });
+    const failure = await controller.snooze('A1', { until: 'soon' }).catch((error: unknown) => error);
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'snooze', id: 'A1', until: '2026-11-05T09:00:00.000Z' });
+    should((failure as Error).message).startWith('--until "soon" is not a time');
+    await should(controller.snooze('A1', { for: 'a while' })).be.rejectedWith(/^--for "in a while" is not a time/u);
+  });
+
+  it('should refuse both or neither of --for and --until', async () => {
+    // Arrange
+    const { controller, gateway } = build3();
+    const say = 'say how long or until when: --for <time> (like 4h) or --until <time> (like 17:00), not both';
+
+    // Act / Assert
+    await should(controller.snooze('A1', {})).be.rejectedWith(say);
+    await should(controller.snooze('A1', { for: '1h', until: '17:00' })).be.rejectedWith(say);
+    should(gateway.applied).be.empty();
+  });
+
+  it('should bring a parked item back to the list', async () => {
+    // Arrange
+    const { controller, gateway, out } = build3();
+
+    // Act
+    await controller.unsnooze('A1', {});
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'unsnooze', id: 'A1' });
+    should(out.messages[0]).containEql('back on the list !A1');
+  });
+});

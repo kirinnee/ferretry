@@ -68,13 +68,21 @@ class FakeMachine implements MachineAgendaPort {
 const machineHome: AgendaHomeResolver = { of: async () => MACHINE_AGENDA_ID };
 
 const worldWith = (
-  options: { machine?: FakeMachine; homes?: AgendaHomeResolver; repository?: MemoryRepository } = {},
+  options: {
+    machine?: FakeMachine;
+    homes?: AgendaHomeResolver;
+    repository?: MemoryRepository;
+    /** The session directory knows the machine's own board, though no separate machine service answers for it. */
+    ownBoard?: boolean;
+  } = {},
 ) => {
   const repository = options.repository ?? new MemoryRepository();
   const service = new AgendaService(
     repository,
     { now: () => NOW },
-    { has: async sessionId => SESSIONS.has(sessionId) },
+    {
+      has: async sessionId => SESSIONS.has(sessionId) || (options.ownBoard === true && sessionId === MACHINE_AGENDA_ID),
+    },
     { raised: async () => undefined },
     undefined,
     undefined,
@@ -418,5 +426,40 @@ describe('a lineage that is readable once and unreadable on the next read', () =
     // Assert
     should(mutation).containDeep({ ok: false, error: { code: 'forbidden' } });
     should(repository.ledgers.size).equal(0);
+  });
+});
+
+describe('a notice on the machine agenda’s own ledger, with no separate machine service', () => {
+  const rows = (repository: MemoryRepository) =>
+    (repository.ledgers.get(MACHINE_AGENDA_ID)?.entries ?? []).map(entry => entry.item);
+
+  it('is a row of its own, named by the ferret it is about', async () => {
+    // Arrange
+    const { service, repository } = worldWith({ homes: machineHome, ownBoard: true });
+
+    // Act
+    const raised = await service.raise('child', notice({ title: 'Sandbox stopped' }), SYSTEM);
+    await service.raise('child', notice({ sourceRef: 'warden:stuck' }), WARDEN);
+
+    // Assert
+    should(raised.ok && raised.snapshot.sessionId).equal(MACHINE_AGENDA_ID);
+    should(rows(repository).map(item => item.sourceRef)).eql(['notice:system:child', 'warden:stuck:child']);
+  });
+
+  it('is cleared by the daemon resolving the source of the ferret it is about, and no other row', async () => {
+    // Arrange
+    const { service, repository } = worldWith({ homes: machineHome, ownBoard: true });
+    await service.raise('child', notice({ sourceRef: 'warden:stuck' }), WARDEN);
+    await service.raise('child', notice({ sourceRef: 'warden:slow' }), WARDEN);
+
+    // Act
+    const resolved = await service.resolveSource('child', 'task', 'warden:stuck', WARDEN, 'it recovered');
+
+    // Assert
+    should(resolved.ok && resolved.changed).be.true();
+    const open = (repository.ledgers.get(MACHINE_AGENDA_ID)?.entries ?? []).filter(
+      entry => entry.lifecycle === 'active',
+    );
+    should(open.map(entry => entry.item.sourceRef)).eql(['warden:slow:child']);
   });
 });
