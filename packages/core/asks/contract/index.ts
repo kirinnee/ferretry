@@ -9,7 +9,7 @@ import {
 } from '@ferretry/kernel/contract';
 import { type Brand, InstantSchema, KEBAB_NAME } from '@ferretry/std';
 import { z } from 'zod';
-import type { AgendaSnapshot } from './snapshot/agenda.ts';
+import { AgendaFormFieldSchema, type AgendaSnapshot } from './snapshot/agenda.ts';
 
 /**
  * The agenda wire shapes the Agenda app and the daemon share: schemas, types and the pure helpers around them
@@ -115,6 +115,20 @@ export class AskOwnerActionError extends Error {
   }
 }
 
+/**
+ * The engine's own refusal of a raise or a close: the board READ the request and said no, in its own sentence. It is a
+ * verdict, not a failure to reach the board, so asking again with the same request is refused again.
+ */
+export class AskRefusedError extends Error {
+  override readonly name = 'AskRefusedError';
+  /** The engine's reason (`invalid`, `full`, …) when it gave one: what tells a draft that is wrong from a board that is full. */
+  readonly code: string | undefined;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
 /** An answer's own id: each answer is applied once, by this id (§7.4 rule 4). */
 export type AnswerId = Brand<string, 'AnswerId'>;
 export const AnswerIdSchema = z
@@ -209,8 +223,12 @@ export const AskDraftSchema = z
     ferret: z.string().min(1).max(128).optional(),
     /** Pings the owner. */
     blocking: z.boolean().optional(),
+    /** The fields of a form: what the owner fills in before one Send. */
+    fields: z.array(AgendaFormFieldSchema).min(1).optional(),
   })
   .superRefine((draft, context) => {
+    if ((draft.kind === 'form') !== (draft.fields !== undefined))
+      context.addIssue({ code: 'custom', path: ['fields'], message: 'a form names its fields, and only a form' });
     if ((draft.kind === 'choice') !== (draft.options !== undefined))
       context.addIssue({ code: 'custom', path: ['options'], message: 'a choice names its options, and only a choice' });
     const labels = (draft.options ?? []).map(option => option.label);

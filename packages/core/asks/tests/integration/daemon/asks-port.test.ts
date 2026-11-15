@@ -69,6 +69,29 @@ describe('raising through the Asks port', () => {
     });
   });
 
+  it('should put a form on the board with the fields a source gave, and refuse a form without any', async () => {
+    // Arrange
+    const half = await world();
+
+    // Act
+    const ref = await half.asks.raise(
+      draft('e1', 'f1', {
+        kind: 'form',
+        fields: [{ id: '1', type: 'one', label: 'Which mode?', options: [{ label: 'Fast' }, { label: 'Slow' }] }],
+      }),
+    );
+    const [snapshot] = await half.asks.snapshots({ ferret: 'f1' });
+    const bare = half.asks.raise(draft('e2', 'f1', { kind: 'form' }));
+
+    // Assert
+    expect(snapshot?.items[0]).toMatchObject({
+      id: ref.id,
+      kind: 'form',
+      fields: [{ id: '1', type: 'one', label: 'Which mode?' }],
+    });
+    await expect(bare).rejects.toThrow('a form names its fields');
+  });
+
   it('should use the reason as the way to resolve when the source gave none', async () => {
     // Arrange
     const half = await world();
