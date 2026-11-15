@@ -15,6 +15,7 @@ import { type DaemonHalf, implementDaemon, type ToolHandler } from '@ferretry/ke
 import manifest from '../manifest.ts';
 import { buildAccounts } from './accounts.ts';
 import type { TwoFactorStageId } from '../contract/routes/index.ts';
+import { AccountsSavedLogins } from './lib/saved-logins-hook.ts';
 import { buildRules } from './rules.ts';
 
 type Half = DaemonHalf<typeof manifest>;
@@ -61,6 +62,12 @@ export default implementDaemon(manifest, {
         [SIGN_IN_APPROVAL_HOOK]: b.hooks['ask.sources:sign-in-approval'],
         'input.phone-approval:phone': b.hooks['input.phone-approval:phone'],
         'input.secure-copy:copy': b.hooks['input.secure-copy:copy'],
+        // The Vault's input card reads saved logins from the account store only through this hook (no route, no tool).
+        'input.saved:saved': new AccountsSavedLogins({
+          logins: a.core.logins,
+          choice: a.core.choice,
+          ...(a.core.vault === undefined ? {} : { vault: a.core.vault }),
+        }),
         'redaction.sources:source': a.masks,
         'step-up.stages:add-2fa-key': addTwoFactorKeyStage(a.seeds),
         'step-up.stages:approve-task-plan': b.stepUpStages['approve-task-plan'],

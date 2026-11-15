@@ -2,6 +2,7 @@ const window = (globalThis as unknown as { window: EventTarget }).window;
 import '../../support/browser-events.ts';
 import { describe, expect, it } from 'bun:test';
 
+import { DaemonConnectionHealth } from '../../../app/lib/connection-health.ts';
 import {
   browserConnectionSignals,
   type ConnectionSignal,
@@ -96,6 +97,31 @@ describe('watchConnectionSignals', () => {
     watchConnectionSignals(h.environment, h.targets);
     h.emit('visible');
     expect(h.events).toEqual(['liveness']);
+  });
+
+  it('R88 retries a reconnecting machine of the real health model at once, on online and on visible', () => {
+    for (const signal of ['online', 'visible'] as const) {
+      const h = harness([]);
+      const asked: DaemonId[] = [];
+      const health = new DaemonConnectionHealth(
+        { now: () => 0, schedule: () => () => undefined, random: () => 0, isOnline: () => true },
+        daemonId => {
+          asked.push(daemonId);
+          return Promise.resolve();
+        },
+      );
+      health.outage(laptop, { failures: [], daemonAbsent: false, relaysNeverOpened: false });
+      watchConnectionSignals(h.environment, {
+        ...h.targets,
+        reconnecting: () => health.reconnecting(),
+        retryNow: daemonId => health.retryNow(daemonId),
+      });
+      expect(asked).toEqual([]);
+
+      h.emit(signal);
+
+      expect(asked).toEqual([laptop]);
+    }
   });
 
   it('returns how to stop listening', () => {

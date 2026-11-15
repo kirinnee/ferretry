@@ -66,6 +66,41 @@ describe('typing a code Ferretry makes', () => {
     should(view.state).equal('pending');
   });
 
+  const MADE = 'MADE-CODE-7731-NEVER-LEAKS';
+
+  it('I34 should type a code it made only into the sign-in’s code field, and return it to no result, event or note', async () => {
+    const w = world(withKey());
+    w.state.fillValue = () => MADE;
+
+    await w.service.raise(SESSION, CODE_RAISE);
+    const request = await w.pending();
+    const result = await w.service.deliver(SESSION, request.id, w.send(request, useCode()), OWNER);
+
+    should(w.writes.map(write => write.values)).eql([[MADE]]);
+    should(JSON.stringify(result)).not.containEql(MADE);
+    should(JSON.stringify([w.events, w.audits, w.notes, w.told, w.cards])).not.containEql(MADE);
+    // Its text is masked from every read for the redaction window.
+    should(w.values.scrubAll(`the page shows ${MADE}`)).not.containEql(MADE);
+  });
+
+  it('I170 should make the code only when asked to write it, from the key the card named, and keep it out of the journal and the agent’s waits', async () => {
+    const w = world(withKey());
+    w.state.fillValue = () => MADE;
+
+    const view = await w.service.raise(SESSION, CODE_RAISE);
+    const request = await w.pending();
+    should(w.fills).eql([]);
+    const result = await w.service.deliver(SESSION, request.id, w.send(request, useCode()), OWNER);
+    // What the agent can read once the code exists: its wait on the card, and what the owner's listing still shows.
+    const waiting = await w.service.agentView(SESSION, request.agendaItemId, 0);
+    const listed = await w.service.list(OWNER, SESSION);
+
+    should(w.fills).eql([{ id: 'GITHUB', role: 'totp', factor: SEEDED.id }]);
+    should(w.writes.map(write => write.values)).eql([[MADE]]);
+    for (const surface of [view, result, waiting, listed]) should(JSON.stringify(surface)).not.containEql(MADE);
+    should(JSON.stringify([w.events, w.audits, w.rebuzzed])).not.containEql(MADE);
+  });
+
   it('should name only the place on the card a ferret can read when no account signs in here', async () => {
     const w = world(withKey({ accounts: { accounts: [], signIns: [] } }));
 

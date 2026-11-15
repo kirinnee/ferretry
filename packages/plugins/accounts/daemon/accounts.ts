@@ -42,6 +42,8 @@ export interface AccountsCore {
   /** The plaintext side: handed only to the Vault's redactor and input service, never to a route (S10). */
   readonly vault?: AccountVault;
   readonly lock: LoginStoreLock;
+  /** Who is asking, for the order of a sign-in card (`input.saved`). */
+  readonly choice: SessionSignInContext;
 }
 
 /** The input an `account_hint` call takes (today's `account.hint` arm): a page by name, or a site. */
@@ -192,7 +194,7 @@ export function buildAccounts(
     },
   };
 
-  const core: AccountsCore = { logins, lock, ...(vault === undefined ? {} : { vault }) };
+  const core: AccountsCore = { logins, lock, choice, ...(vault === undefined ? {} : { vault }) };
   return {
     routes,
     tools: { account_hint: accountHintTool },
